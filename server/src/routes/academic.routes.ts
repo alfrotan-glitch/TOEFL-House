@@ -10,6 +10,7 @@ import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id } from '../utils/ids.js';
 import { ACADEMIC_DEFAULTS, PLACEMENT_DEFAULTS } from '../core/configuration/policy-catalog.js';
+import { validatePolicyComponents, validateDecisionRules } from '../core/placement/policy-engine.js';
 
 export const academicRouter = Router();
 academicRouter.use(authenticate);
@@ -447,7 +448,7 @@ academicRouter.get(
 
 // ── Placement Assessment Profiles ───────────────────────────────────────────
 const stmtGetPlacementProfiles = db.prepare(`SELECT pap.*, pv.program_id, pv.version_label, p.name AS program_name FROM placement_assessment_profiles pap JOIN program_versions pv ON pv.id = pap.program_version_id JOIN programs p ON p.id = pv.program_id WHERE pap.program_version_id = ? AND (pap.branch_id = ? OR pap.branch_id IS NULL) ORDER BY pap.branch_id IS NOT NULL DESC`);
-const stmtUpsertPlacementProfile = db.prepare(`INSERT INTO placement_assessment_profiles (id, program_version_id, branch_id, enabled, required, method, sections_json, components_json, scoring_model, allow_retake, max_score, pass_score, instructions, version, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now')) ON CONFLICT(program_version_id, branch_id) DO UPDATE SET enabled=excluded.enabled, required=excluded.required, method=excluded.method, sections_json=excluded.sections_json, components_json=excluded.components_json, scoring_model=excluded.scoring_model, allow_retake=excluded.allow_retake, max_score=excluded.max_score, pass_score=excluded.pass_score, instructions=excluded.instructions, version=placement_assessment_profiles.version+1, updated_at=datetime('now')`);
+const stmtUpsertPlacementProfile = db.prepare(`INSERT INTO placement_assessment_profiles (id, program_version_id, branch_id, enabled, required, method, sections_json, components_json, scoring_model, allow_retake, max_score, pass_score, instructions, requirement_mode, first_level_exempt, expires_minutes, decision_rules_json, version, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now')) ON CONFLICT(program_version_id, branch_id) DO UPDATE SET enabled=excluded.enabled, required=excluded.required, method=excluded.method, sections_json=excluded.sections_json, components_json=excluded.components_json, scoring_model=excluded.scoring_model, allow_retake=excluded.allow_retake, max_score=excluded.max_score, pass_score=excluded.pass_score, instructions=excluded.instructions, requirement_mode=excluded.requirement_mode, first_level_exempt=excluded.first_level_exempt, expires_minutes=excluded.expires_minutes, decision_rules_json=excluded.decision_rules_json, version=placement_assessment_profiles.version+1, updated_at=datetime('now')`);
 
 academicRouter.get('/program-versions/:id/placement-profile', ah(async (req, res) => {
   const version = db.prepare(`SELECT pv.id, pv.status, pv.program_id, p.branch_id, p.name AS program_name, pv.version_label FROM program_versions pv JOIN programs p ON p.id = pv.program_id WHERE pv.id = ?`).get(req.params.id) as any;
@@ -486,55 +487,27 @@ academicRouter.put('/program-versions/:id/placement-profile', authorize('owner',
   if (!version) throw new HttpError(404, 'Program version not found.');
   requireAcademicBranchAccess(req, version.branch_id);
   const body = req.body ?? {};
-  const enabled = body.enabled !== false;
-  const required = body.required === true;
-  if (required && !enabled) throw new HttpError(400, 'A required placement assessment must be enabled.');
+  const requirementMode = String(body.requirementMode || (body.required === true ? 'required' : body.enabled === false ? 'not_required' : 'optional'));
+  if (!['required', 'optional', 'not_required'].includes(requirementMode)) throw new HttpError(400, 'Invalid requirementMode (required/optional/not_required).');
+  const enabled = body.enabled !== false && requirementMode !== 'not_required';
+  const required = requirementMode === 'required';
+  if (requirementMode === 'required' && !enabled) throw new HttpError(400, 'A required placement assessment must be enabled.');
   const components = Array.isArray(body.components) ? body.components : [];
   if (enabled && components.length === 0) throw new HttpError(400, 'At least one assessment component is required when placement is enabled.');
   if (required && enabled && components.length > 0 && !components.some((c: any) => c?.required !== false)) throw new HttpError(400, 'A required placement profile must contain at least one required assessment section.');
-  const seen = new Set<string>();
-  let totalWeight = 0;
-  const normalized = components.map((raw: any) => {
-    const c = {
-      key: String(raw.key || '').trim(),
-      type: String(raw.type || 'custom_score'),
-      label: String(raw.label || '').trim(),
-      required: raw.required !== false,
-      weight: Number(raw.weight),
-      maxScore: Number(raw.maxScore),
-      durationMinutes: raw.durationMinutes == null ? null : Number(raw.durationMinutes),
-      skills: Array.isArray(raw.skills) ? raw.skills.map(String) : undefined,
-      instructions: raw.instructions ? String(raw.instructions) : null,
-      testId: raw.testId == null ? null : String(raw.testId),
-    };
-    if (!c.key || !c.label || seen.has(c.key)) throw new HttpError(400, 'Assessment component keys must be unique and labels are required.');
-    seen.add(c.key);
-    if (!['skill_scores','written_test','interview','level_assessment','custom_score','content_test'].includes(c.type)) throw new HttpError(400, `Unsupported assessment component type: ${c.type}.`);
-    if (c.type === 'content_test') {
-      if (!c.testId) throw new HttpError(400, `Content component ${c.label} requires a testId from the placement test bank.`);
-      const test = db.prepare('SELECT id, status, branch_id FROM placement_tests WHERE id = ?').get(c.testId) as { id: string; status: string; branch_id: string | null } | undefined;
-      if (!test) throw new HttpError(400, `Content component ${c.label} references a test that does not exist.`);
-      if (test.status !== 'active') throw new HttpError(400, `Content component ${c.label} references test "${c.testId}" which is not active.`);
-      if (test.branch_id !== null && test.branch_id !== version.branch_id) throw new HttpError(400, `Content component ${c.label} references a test from another branch.`);
-    }
-    if (!Number.isFinite(c.weight) || c.weight < 0) throw new HttpError(400, `Invalid weight for ${c.label}.`);
-    if (!Number.isFinite(c.maxScore) || c.maxScore <= 0) throw new HttpError(400, `Invalid maximum score for ${c.label}.`);
-    totalWeight += c.weight;
-    return c;
-  });
-  if (enabled && Math.abs(totalWeight - 100) > 0.01) throw new HttpError(400, `Assessment component weights must total 100%. Current total: ${totalWeight}%.`);
-  const types = new Set(normalized.map((c: any) => c.type));
-  const method = types.size > 1 ? 'hybrid' : (normalized[0]?.type || 'skill_scores');
-  const allowedDerived = new Set(['skill_scores','level_assessment','written_test','interview','hybrid']);
-  if (!allowedDerived.has(method)) throw new HttpError(400, `Unsupported placement method derived from components: ${method}.`);
-  const sections = Array.from(new Set(normalized.flatMap((c: any) => c.skills || [])));
+  const { components: normalized, method, sections } = validatePolicyComponents(components, version.branch_id);
+  const decisionRules = validateDecisionRules(body.decisionRules ?? null, normalized);
   const scoringModel = String(body.scoringModel || 'weighted_average');
-  if (!['weighted_average','average'].includes(scoringModel)) throw new HttpError(400, 'Unsupported placement scoring model.');
+  if (!['weighted_average', 'average'].includes(scoringModel)) throw new HttpError(400, 'Unsupported placement scoring model.');
   const maxScore = Number(body.maxScore ?? 100);
   const passScore = Number(body.passScore ?? 60);
   if (!Number.isFinite(maxScore) || maxScore <= 0 || !Number.isFinite(passScore) || passScore < 0 || passScore > maxScore) throw new HttpError(400, 'Invalid placement score thresholds.');
+  const expiresMinutes = body.expiresMinutes == null || body.expiresMinutes === '' ? null : Number(body.expiresMinutes);
+  if (expiresMinutes != null && (!Number.isFinite(expiresMinutes) || expiresMinutes <= 0)) throw new HttpError(400, 'Invalid expiresMinutes.');
+  const firstLevelExempt = body.firstLevelExempt === true || body.firstLevelExempt === 1 ? 1 : 0;
+
   const existing = db.prepare(`SELECT * FROM placement_assessment_profiles WHERE program_version_id=? AND branch_id=?`).get(req.params.id, version.branch_id) as any;
-  const args=[existing?.id || id('pap'), req.params.id, version.branch_id, enabled?1:0, required?1:0, method, JSON.stringify(sections), JSON.stringify(normalized), scoringModel, body.allowRetake === false ? 0 : 1, maxScore, passScore, body.instructions ? String(body.instructions).trim() : null];
+  const args=[existing?.id || id('pap'), req.params.id, version.branch_id, enabled?1:0, required?1:0, method, JSON.stringify(sections), JSON.stringify(normalized), scoringModel, body.allowRetake === false ? 0 : 1, maxScore, passScore, body.instructions ? String(body.instructions).trim() : null, requirementMode, firstLevelExempt, expiresMinutes, decisionRules.length ? JSON.stringify(decisionRules) : null];
   stmtUpsertPlacementProfile.run(...args);
   writeAudit(req, `Updated placement assessment configuration for ${version.program_name} ${version.version_label}`);
   const row=stmtGetPlacementProfiles.get(req.params.id, version.branch_id) as any;

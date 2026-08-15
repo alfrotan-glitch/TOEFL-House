@@ -29,6 +29,7 @@ export type AppTabId =
   | 'books'
   | 'workflows'
   | 'rules'
+  | 'test-bank'
   | 'audit'
   | 'settings'
   | 'academic-setup'

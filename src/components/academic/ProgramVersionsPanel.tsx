@@ -44,19 +44,21 @@ export default function ProgramVersionsPanel() {
   // the placement profile). `const [setPlacementProfile] = ...` would bind the
   // state VALUE to this name and calling it throws 'not a function'.
   const [, setPlacementProfile] = useState<any>(null);
-  const [placementConfig, setPlacementConfig] = useState<any>({ enabled: true, required: false, method: 'skill_scores', components: [{ key:'skill_scores', type:'skill_scores', label:'Skills Assessment', required:true, weight:100, maxScore:100, durationMinutes:30, skills:['grammar','vocabulary','reading','listening','writing','speaking'], instructions:'Score each skill using the examiner rubric.' }], scoringModel:'weighted_average', allowRetake:true, maxScore:100, passScore:60, instructions:'' });
+  const [testBankTests, setTestBankTests] = useState<any[]>([]);
+  const [placementConfig, setPlacementConfig] = useState<any>({ enabled: true, required: false, requirementMode: 'not_required', firstLevelExempt: false, expiresMinutes: null, decisionRules: [], components: [{ key:'skill_scores', type:'skill_scores', label:'Skills Assessment', required:true, weight:100, maxScore:100, durationMinutes:30, skills:['grammar','vocabulary','reading','listening','writing','speaking'], instructions:'Score each skill using the examiner rubric.' }], scoringModel:'weighted_average', allowRetake:true, maxScore:100, passScore:60, instructions:'' });
 
   const loadInitialData = useCallback(async () => {
     setLoadingInit(true);
     setError(null);
     try {
-      const [progs, vers] = await Promise.all([
+      const [progs, vers, bankTests] = await Promise.all([
         api.get<Program[]>('/academic/programs'),
         api.get<ProgramVersion[]>('/catalog/program-versions'),
+        api.get<any[]>('/placement/test-bank').catch(() => []),
       ]);
       setPrograms(progs || []);
       setVersions(vers || []);
-      setNewProgramId((prev) => prev || progs?.[0]?.id || '');
+      setTestBankTests(bankTests || []);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to load versions');
     } finally {
@@ -69,7 +71,7 @@ export default function ProgramVersionsPanel() {
     try {
       const t = await api.get<VersionTree>(`/catalog/program-versions/${id}`);
       setTree(t); setSelectedId(id);
-      try { const pp = await api.get<any>(`/academic/program-versions/${id}/placement-profile`); setPlacementProfile(pp); setPlacementConfig({ enabled: pp.enabled !== false, required: !!pp.required, method: pp.method || 'skill_scores', components: pp.components || [], scoringModel: pp.scoringModel || 'weighted_average', allowRetake: pp.allowRetake !== false, maxScore: pp.maxScore || 100, passScore: pp.passScore || 60, instructions: pp.instructions || '' }); } catch { setPlacementProfile(null); }
+      try { const pp = await api.get<any>(`/academic/program-versions/${id}/placement-profile`); setPlacementProfile(pp); setPlacementConfig({ enabled: pp.enabled !== false, required: !!pp.required, requirementMode: pp.requirementMode || (pp.required ? 'required' : 'not_required'), firstLevelExempt: !!pp.firstLevelExempt, expiresMinutes: pp.expiresMinutes ?? null, decisionRules: pp.decisionRules || [], method: pp.method || 'skill_scores', components: pp.components || [], scoringModel: pp.scoringModel || 'weighted_average', allowRetake: pp.allowRetake !== false, maxScore: pp.maxScore || 100, passScore: pp.passScore || 60, instructions: pp.instructions || '' }); } catch { setPlacementProfile(null); }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to load version tree'); 
       setTree(null);
@@ -139,6 +141,7 @@ export default function ProgramVersionsPanel() {
 
   const componentTypes = [
     { value: 'skill_scores', label: 'Skill assessment' },
+    { value: 'content_test', label: 'Content test (test-bank)' },
     { value: 'written_test', label: 'Written test' },
     { value: 'interview', label: 'Interview' },
     { value: 'level_assessment', label: 'Level assessment' },
@@ -304,7 +307,13 @@ export default function ProgramVersionsPanel() {
                     <label className="flex items-center gap-2 text-xs font-bold whitespace-nowrap"><input type="checkbox" checked={placementConfig.enabled} onChange={e=>setPlacementConfig((c:any)=>({...c,enabled:e.target.checked}))}/> Enabled</label>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mb-5">
-                    <label className="flex items-center gap-2 text-xs font-bold rounded-xl border border-slate-200 bg-white px-3 py-3 min-w-0"><input type="checkbox" checked={placementConfig.required} onChange={e=>setPlacementConfig((c:any)=>({...c,required:e.target.checked}))}/> <span>Required before enrollment</span></label>
+                    <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 min-w-0"><label className={labelCls}>Placement requirement</label><select value={placementConfig.requirementMode} onChange={e=>setPlacementConfig((c:any)=>({...c,requirementMode:e.target.value, required: e.target.value==='required', enabled: e.target.value!=='not_required'}))} className={`${inputCls} min-w-0`}>
+                      <option value="required">Required</option>
+                      <option value="optional">Optional (may skip)</option>
+                      <option value="not_required">Not required</option>
+                    </select></div>
+                    <label className="flex items-center gap-2 text-xs font-bold rounded-xl border border-slate-200 bg-white px-3 py-3 min-w-0 cursor-pointer"><input type="checkbox" checked={placementConfig.firstLevelExempt} onChange={e=>setPlacementConfig((c:any)=>({...c,firstLevelExempt:e.target.checked}))}/> <span>Exempt first level</span></label>
+                    <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 min-w-0"><label className={labelCls}>Attempt expiry (min)</label><input type="number" min="1" value={placementConfig.expiresMinutes ?? ''} onChange={e=>setPlacementConfig((c:any)=>({...c,expiresMinutes: e.target.value === '' ? null : Number(e.target.value)}))} className={`${inputCls} min-w-[5rem]`} placeholder="none"/></div>
                     <label className="flex items-center gap-2 text-xs font-bold rounded-xl border border-slate-200 bg-white px-3 py-3 min-w-0"><input type="checkbox" checked={placementConfig.allowRetake} onChange={e=>setPlacementConfig((c:any)=>({...c,allowRetake:e.target.checked}))}/> <span>Allow retakes</span></label>
                     <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 min-w-0"><label className={labelCls}>Scoring Model</label><select value={placementConfig.scoringModel} onChange={e=>setPlacementConfig((c:any)=>({...c,scoringModel:e.target.value}))} className={inputCls}>
                       <option value="weighted_average">Weighted component score</option><option value="average">Simple average</option>
@@ -330,9 +339,20 @@ export default function ProgramVersionsPanel() {
                         </div>
                         <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-12 gap-3 items-end">
                           <label className="xl:col-span-2 flex items-center gap-2 text-[11px] font-bold text-slate-600 rounded-xl bg-slate-50 border border-slate-100 px-3 py-3"><input type="checkbox" checked={c.required !== false} onChange={e=>updatePlacementComponent(index,{required:e.target.checked})}/> Required</label>
-                          <div className="xl:col-span-2 min-w-0"><label className={labelCls}>Duration (min)</label><input type="number" min="1" value={c.durationMinutes ?? 30} onChange={e=>updatePlacementComponent(index,{durationMinutes:Number(e.target.value)})} className={`${inputCls} min-w-[5rem]`}/></div>
-                          <div className="xl:col-span-8 min-w-0"><label className={labelCls}>Examiner instructions</label><input value={c.instructions || ''} onChange={e=>updatePlacementComponent(index,{instructions:e.target.value})} className={`${inputCls} min-w-0`} placeholder="What should the examiner do in this section?"/></div>
+                          <div className="xl:col-span-2 min-w-0"><label className={labelCls}>Time limit (s)</label><input type="number" min="0" value={c.timeLimitSeconds ?? (c.durationMinutes ? c.durationMinutes*60 : '')} onChange={e=>updatePlacementComponent(index,{timeLimitSeconds: e.target.value === '' ? null : Number(e.target.value), durationMinutes: undefined})} className={`${inputCls} min-w-[5rem]`} placeholder="no timer"/></div>
+                          <div className="xl:col-span-2 min-w-0"><label className={labelCls}>Min score</label><input type="number" min="0" value={c.minScore ?? ''} onChange={e=>updatePlacementComponent(index,{minScore: e.target.value === '' ? null : Number(e.target.value)})} className={`${inputCls} min-w-[5rem]`} placeholder="none"/></div>
+                          <div className="xl:col-span-3 min-w-0"><label className={labelCls}>Scoring</label><select value={c.scoringMethod || (c.type==='content_test' ? 'hybrid' : 'manual')} onChange={e=>updatePlacementComponent(index,{scoringMethod:e.target.value})} className={`${inputCls} min-w-0`}><option value="auto">Auto</option><option value="manual">Manual</option><option value="hybrid">Hybrid</option></select></div>
+                          <div className="xl:col-span-3 min-w-0"><label className={labelCls}>Instructions</label><input value={c.instructions || ''} onChange={e=>updatePlacementComponent(index,{instructions:e.target.value})} className={`${inputCls} min-w-0`} placeholder="Examiner guidance…"/></div>
                         </div>
+                        {c.type === 'content_test' && (
+                          <div className="mt-3 rounded-xl bg-indigo-50/50 border border-indigo-100 p-3">
+                            <label className={labelCls}>Test-bank content</label>
+                            <select value={c.testId || ''} onChange={e=>updatePlacementComponent(index,{testId:e.target.value || undefined})} className={`${inputCls} min-w-0`}>
+                              <option value="">Select an active test…</option>
+                              {(testBankTests || []).filter((t:any)=>t.status==='active').map((t:any)=><option key={t.id} value={t.id}>{t.testType} · {t.title} (v{t.version})</option>)}
+                            </select>
+                          </div>
+                        )}
                         {c.type === 'skill_scores' && <div className="mt-3 flex flex-wrap gap-2">{['grammar','vocabulary','reading','listening','writing','speaking'].map((skill:string)=><label key={skill} className="px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-[10px] font-bold"><input type="checkbox" className="mr-1.5" checked={(c.skills || []).includes(skill)} onChange={e=>updatePlacementComponent(index,{skills:e.target.checked ? [...new Set([...(c.skills || []),skill])] : (c.skills || []).filter((x:string)=>x!==skill)})}/>{skill}</label>)}</div>}
                       </div>
                     ))}
@@ -340,8 +360,41 @@ export default function ProgramVersionsPanel() {
                     <div className="text-[11px] text-slate-500">Weights must total exactly 100%. All sections are saved into a candidate snapshot when the assessment starts.</div>
                   </div>
 
+                  {/* Conditional decision rules */}
+                  <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="text-[11px] font-black text-slate-600 uppercase tracking-wide">Conditional placement rules (IF component score THEN level)</div>
+                      <button type="button" onClick={()=>setPlacementConfig((c:any)=>({...c,decisionRules:[...(c.decisionRules||[]),{levelId:'',label:'rule '+( (c.decisionRules||[]).length+1),when:[{componentKey:(c.components||[])[0]?.key||'',field:'score',op:'gte',value:60}]}]}))} className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-[10px] font-black"><Plus className="w-3 h-3 inline mr-1"/>Add rule</button>
+                    </div>
+                    {(!placementConfig.decisionRules || placementConfig.decisionRules.length === 0) && <p className="text-[11px] text-slate-400">No conditional rules — score bands (below) apply.</p>}
+                    <div className="space-y-3">
+                      {(placementConfig.decisionRules || []).map((rule:any, ri:number)=>(
+                        <div key={ri} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-black text-slate-400">IF</span>
+                            <div className="flex items-center gap-1 flex-1 flex-wrap">
+                              {rule.when.map((cond:any, ci:number)=>(
+                                <span key={ci} className="flex items-center gap-1">
+                                  <select value={cond.componentKey} onChange={e=>{const w=[...(rule.when)]; w[ci]={...w[ci],componentKey:e.target.value}; setPlacementConfig((c:any)=>({...c,decisionRules:c.decisionRules.map((r:any,i:number)=>i===ri?{...r,when:w}:r)}));}} className="text-[10px] rounded-lg border border-slate-200 px-2 py-1 bg-white">{placementConfig.components.map((comp:any)=><option key={comp.key} value={comp.key}>{comp.label}</option>)}</select>
+                                  <select value={cond.field} onChange={e=>{const w=[...(rule.when)]; w[ci]={...w[ci],field:e.target.value}; setPlacementConfig((c:any)=>({...c,decisionRules:c.decisionRules.map((r:any,i:number)=>i===ri?{...r,when:w}:r)}));}} className="text-[10px] rounded-lg border border-slate-200 px-2 py-1 bg-white"><option value="score">score</option><option value="percentage">%</option></select>
+                                  <select value={cond.op} onChange={e=>{const w=[...(rule.when)]; w[ci]={...w[ci],op:e.target.value}; setPlacementConfig((c:any)=>({...c,decisionRules:c.decisionRules.map((r:any,i:number)=>i===ri?{...r,when:w}:r)}));}} className="text-[10px] rounded-lg border border-slate-200 px-2 py-1 bg-white"><option value="gte">≥</option><option value="lte">≤</option><option value="eq">=</option></select>
+                                  <input type="number" value={cond.value} onChange={e=>{const w=[...(rule.when)]; w[ci]={...w[ci],value:Number(e.target.value)}; setPlacementConfig((c:any)=>({...c,decisionRules:c.decisionRules.map((r:any,i:number)=>i===ri?{...r,when:w}:r)}));}} className="text-[10px] rounded-lg border border-slate-200 px-2 py-1 w-16 bg-white"/>
+                                  <button type="button" onClick={()=>{const w=rule.when.filter((_:any,x:number)=>x!==ci); setPlacementConfig((c:any)=>({...c,decisionRules:c.decisionRules.map((r:any,i:number)=>i===ri?{...r,when:w}:r)}));}} className="text-rose-400 hover:text-rose-600"><X className="w-3 h-3"/></button>
+                                </span>
+                              ))}
+                              <button type="button" onClick={()=>setPlacementConfig((c:any)=>({...c,decisionRules:c.decisionRules.map((r:any,i:number)=>i===ri?{...r,when:[...r.when,{componentKey:(c.components||[])[0]?.key||'',field:'score',op:'gte',value:60}]}:r)}))} className="text-[10px] font-black text-indigo-600">+ condition</button>
+                            </div>
+                            <span className="text-[10px] font-black text-slate-400">THEN</span>
+                            <select value={rule.levelId} onChange={e=>setPlacementConfig((c:any)=>({...c,decisionRules:c.decisionRules.map((r:any,i:number)=>i===ri?{...r,levelId:e.target.value}:r)}))} className="text-[10px] rounded-lg border border-slate-200 px-2 py-1 bg-white"><option value="">Level…</option>{levels.map((l:any)=><option key={l.id} value={l.id}>{l.code?`${l.code} — `:''}{l.name}</option>)}</select>
+                            <button type="button" onClick={()=>setPlacementConfig((c:any)=>({...c,decisionRules:c.decisionRules.filter((_:any,i:number)=>i!==ri)}))} className="text-rose-400 hover:text-rose-600"><Trash2 className="w-3 h-3"/></button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
                   <textarea value={placementConfig.instructions} onChange={e=>setPlacementConfig((c:any)=>({...c,instructions:e.target.value}))} className={`${inputCls} mt-4`} rows={3} placeholder="Overall examiner guidance…"/>
-                  <div className="flex justify-end mt-3"><button type="button" disabled={busy || !selectedId} onClick={()=>handleApiCall(async()=>{ await api.put(`/academic/program-versions/${selectedId}/placement-profile`, placementConfig); }, 'Placement blueprint saved.')} className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold">Save Assessment Blueprint</button></div>
+                  <div className="flex justify-end mt-3"><button type="button" disabled={busy || !selectedId} onClick={()=>handleApiCall(async()=>{ await api.put(`/academic/program-versions/${selectedId}/placement-profile`, { ...placementConfig, requirementMode: placementConfig.requirementMode, firstLevelExempt: placementConfig.firstLevelExempt, expiresMinutes: placementConfig.expiresMinutes, decisionRules: placementConfig.decisionRules || [] }); }, 'Placement policy saved.')} className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold">Save Assessment Blueprint</button></div>
                 </div>
 
                 {/* Promotion Rules */}

@@ -8,6 +8,7 @@ import { authenticate, requirePermission, resolveBranchScope, canAccessBranchRes
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
+import { resolvePlacementRequirement } from '../core/placement/policy-engine.js';
 import { addNotification } from '../utils/notifications.js';
 import { recordIncome } from '../utils/income.js';
 import { getNumberSetting } from '../utils/settings.js';
@@ -351,8 +352,17 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
     const pv = stmtGetProgramVersionById.get(effectiveProgramVersionId) as any;
     if (!pv) throw new HttpError(409, 'The visitor program version no longer exists.');
     if (pv.branch_id !== requestedStudentBranchId) throw new HttpError(400, 'Visitor program does not belong to the target branch.');
-    const profile = stmtGetPlacementProfile.get(effectiveProgramVersionId, requestedStudentBranchId) as any;
-    if (profile?.required && profile.enabled && visitor.placement_status !== 'completed') throw new HttpError(400, 'Placement assessment is required for the selected program before enrollment.');
+    // Placement policy gate (configuration-driven: required / optional /
+    // not_required + first-level exemption). The visitor's target level comes
+    // from the selected class's level when available.
+    const requirement = resolvePlacementRequirement(effectiveProgramVersionId, requestedStudentBranchId, classItem.level_id || null);
+    db.prepare(`UPDATE visitors SET placement_requirement_mode=? WHERE id=?`).run(requirement.mode, visitor.id);
+    if (requirement.mode === 'required' && visitor.placement_status !== 'completed') {
+      throw new HttpError(400, 'Placement assessment is required for the selected program before enrollment.');
+    }
+    if (requirement.mode === 'optional' && !['completed', 'exempt'].includes(visitor.placement_status)) {
+      throw new HttpError(400, 'Placement is optional for this program: complete it or record an exemption before enrollment.');
+    }
     if (classItem.program_version_id && String(classItem.program_version_id) !== String(effectiveProgramVersionId)) throw new HttpError(400, 'Selected class belongs to a different program version.');
   }
   if (classItem.status && classItem.status !== 'active') throw new HttpError(400, 'Cannot enroll into an inactive class.');

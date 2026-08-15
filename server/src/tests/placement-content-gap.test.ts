@@ -42,9 +42,10 @@ describe('Placement content-driven gap (closed-state regression)', () => {
   });
 
   it('FACT 3 (closed): candidate-response and test-bank paths exist in the routes', () => {
-    const src = readFileSync('src/routes/placement.routes.ts', 'utf8');
-    const hasResponsesRoute = src.includes('/responses');
-    const hasTestBank = src.includes('/test-bank');
+    const attemptSrc = readFileSync('src/routes/placement-attempt.routes.ts', 'utf8');
+    const bankSrc = readFileSync('src/routes/placement-test-bank.routes.ts', 'utf8');
+    const hasResponsesRoute = attemptSrc.includes('/responses');
+    const hasTestBank = bankSrc.includes('/test-bank');
     console.log('[EVIDENCE] responses route:', hasResponsesRoute, '| test-bank routes:', hasTestBank);
     expect(hasResponsesRoute).toBe(true);
     expect(hasTestBank).toBe(true);

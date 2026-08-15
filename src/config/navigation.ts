@@ -187,6 +187,14 @@ export const NAVIGATION_SECTIONS: NavSectionConfig[] = [
         keywords: ['academic', 'program', 'level', 'room', 'timeslot', 'fee', 'configuration', 'setup'],
       },
       {
+        id: 'test-bank',
+        label: 'Placement Test Bank',
+        icon: 'FileText',
+        roles: ['owner', 'manager', 'head_of_department'],
+        description: 'Placement content authoring: tests, sections, questions, rubrics, audio',
+        keywords: ['placement', 'test', 'content', 'listening', 'reading', 'writing', 'speaking', 'rubric', 'audio', 'test-bank'],
+      },
+      {
         id: 'settings',
         label: 'System Administration',
         icon: 'Settings',

@@ -210,6 +210,9 @@ CREATE TABLE IF NOT EXISTS visitors (
   program_version_id      TEXT REFERENCES program_versions(id) ON DELETE SET NULL,
   placement_method        TEXT,
   placement_status        TEXT NOT NULL DEFAULT 'not_started' CHECK (placement_status IN ('not_started','scheduled','in_progress','completed','waived')),
+  placement_requirement_mode TEXT,
+  placement_status_at     TEXT,
+  current_placement_attempt_id TEXT REFERENCES placement_assessment_attempts(id) ON DELETE SET NULL,
   created_at              TEXT NOT NULL DEFAULT (datetime('now')) 
 ); 
 
@@ -237,12 +240,16 @@ CREATE TABLE IF NOT EXISTS placement_assessment_profiles (
   branch_id TEXT REFERENCES branches(id) ON DELETE CASCADE,
   enabled INTEGER NOT NULL DEFAULT 1,
   required INTEGER NOT NULL DEFAULT 0,
-  method TEXT NOT NULL DEFAULT 'skill_scores' CHECK (method IN ('skill_scores','level_assessment','written_test','interview','hybrid')),
+  method TEXT NOT NULL DEFAULT 'skill_scores' CHECK (method IN ('skill_scores','level_assessment','written_test','interview','hybrid','content_test')),
   sections_json TEXT NOT NULL DEFAULT '[\"grammar\",\"writing\",\"listening\",\"speaking\"]',
   max_score REAL NOT NULL DEFAULT 100,
   pass_score REAL NOT NULL DEFAULT 60,
   instructions TEXT,
   version INTEGER NOT NULL DEFAULT 1,
+  requirement_mode TEXT NOT NULL DEFAULT 'required' CHECK (requirement_mode IN ('required','optional','not_required')),
+  first_level_exempt INTEGER NOT NULL DEFAULT 0,
+  expires_minutes INTEGER,
+  decision_rules_json TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(program_version_id, branch_id)
@@ -256,7 +263,7 @@ CREATE TABLE IF NOT EXISTS placement_assessment_attempts (
   profile_id TEXT NOT NULL REFERENCES placement_assessment_profiles(id) ON DELETE RESTRICT,
   branch_id TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
   attempt_number INTEGER NOT NULL,
-  status TEXT NOT NULL DEFAULT 'in_progress' CHECK (status IN ('in_progress','completed','cancelled')),
+  status TEXT NOT NULL DEFAULT 'in_progress' CHECK (status IN ('in_progress','paused','completed','expired','cancelled')),
   started_at TEXT NOT NULL DEFAULT (datetime('now')),
   completed_at TEXT,
   total_score REAL,
@@ -267,6 +274,15 @@ CREATE TABLE IF NOT EXISTS placement_assessment_attempts (
   examiner_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   snapshot_json TEXT NOT NULL,
   notes TEXT,
+  expires_at TEXT,
+  paused_at TEXT,
+  resumed_at TEXT,
+  policy_version INTEGER NOT NULL DEFAULT 1,
+  decision_rule_id TEXT,
+  override_level_id TEXT REFERENCES levels(id) ON DELETE SET NULL,
+  override_reason TEXT,
+  override_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+  override_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(visitor_id, attempt_number)
@@ -278,7 +294,7 @@ CREATE TABLE IF NOT EXISTS placement_assessment_results (
   component_key TEXT NOT NULL,
   component_type TEXT NOT NULL CHECK (component_type IN ('skill_scores','written_test','interview','level_assessment','custom_score','content_test')),
   label TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','in_progress','completed','waived')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','in_progress','completed','waived','timed_out')),
   score REAL,
   max_score REAL NOT NULL DEFAULT 100,
   weight REAL NOT NULL DEFAULT 0,
@@ -289,6 +305,18 @@ CREATE TABLE IF NOT EXISTS placement_assessment_results (
   evaluator_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   completed_at TEXT,
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  raw_score REAL,
+  percentage REAL,
+  weighted_score REAL,
+  score_version INTEGER NOT NULL DEFAULT 1,
+  correction_reason TEXT,
+  corrected_at TEXT,
+  started_at TEXT,
+  deadline_at TEXT,
+  submitted_at TEXT,
+  elapsed_seconds INTEGER,
+  timeout_flag INTEGER NOT NULL DEFAULT 0,
+  paused_at TEXT,
   UNIQUE(attempt_id, component_key)
 );
 
@@ -307,6 +335,12 @@ CREATE TABLE IF NOT EXISTS placement_tests (
   status        TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','active','archived')),
   branch_id     TEXT REFERENCES branches(id) ON DELETE SET NULL, -- NULL = global
   created_by    TEXT REFERENCES users(id) ON DELETE SET NULL,
+  difficulty    TEXT,
+  duration_seconds INTEGER,
+  version       INTEGER NOT NULL DEFAULT 1,
+  rubric_id     TEXT REFERENCES placement_rubrics(id) ON DELETE SET NULL,
+  word_target   INTEGER,
+  content_json  TEXT,
   created_at    TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -322,6 +356,8 @@ CREATE TABLE IF NOT EXISTS placement_test_questions (
   answer_key   TEXT,
   points       REAL NOT NULL DEFAULT 1,
   order_index  INTEGER NOT NULL DEFAULT 0,
+  difficulty   TEXT,
+  section_key  TEXT,
   UNIQUE(test_id, question_key)
 );
 CREATE INDEX IF NOT EXISTS idx_placement_questions_test ON placement_test_questions(test_id, order_index);
@@ -340,6 +376,46 @@ CREATE TABLE IF NOT EXISTS placement_assessment_responses (
   UNIQUE(attempt_id, question_id)
 );
 CREATE INDEX IF NOT EXISTS idx_placement_responses_attempt ON placement_assessment_responses(attempt_id, question_id);
+
+CREATE TABLE IF NOT EXISTS placement_rubrics (
+  id            TEXT PRIMARY KEY,
+  title         TEXT NOT NULL,
+  kind          TEXT NOT NULL CHECK (kind IN ('writing','speaking','interview')),
+  criteria_json TEXT NOT NULL DEFAULT '[]',
+  branch_id     TEXT REFERENCES branches(id) ON DELETE SET NULL,
+  created_by    TEXT REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS placement_test_sections (
+  id               TEXT PRIMARY KEY,
+  test_id          TEXT NOT NULL REFERENCES placement_tests(id) ON DELETE CASCADE,
+  section_key      TEXT NOT NULL,
+  title            TEXT,
+  kind             TEXT NOT NULL CHECK (kind IN ('audio_track','passage','prompt_block','instructions')),
+  audio_url        TEXT,
+  transcript       TEXT,
+  body             TEXT,
+  duration_seconds INTEGER,
+  order_index      INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(test_id, section_key)
+);
+CREATE INDEX IF NOT EXISTS idx_placement_sections_test ON placement_test_sections(test_id, order_index);
+
+CREATE TABLE IF NOT EXISTS placement_media (
+  id            TEXT PRIMARY KEY,
+  filename      TEXT NOT NULL,
+  mime          TEXT NOT NULL,
+  size_bytes    INTEGER NOT NULL,
+  sha256        TEXT NOT NULL,
+  storage_path  TEXT NOT NULL,
+  kind          TEXT NOT NULL DEFAULT 'audio' CHECK (kind IN ('audio','document','image','other')),
+  branch_id     TEXT REFERENCES branches(id) ON DELETE SET NULL,
+  created_by    TEXT REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_placement_media_branch ON placement_media(branch_id, kind);
  
 CREATE INDEX IF NOT EXISTS idx_campaigns_branch      ON campaigns(branch_id); 
 
