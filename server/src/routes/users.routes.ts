@@ -1,0 +1,144 @@
+import { Router } from 'express';
+import { db } from '../db/connection.js';
+import { authenticate, authorize, canAccessBranchResource } from '../middleware/auth.js';
+import { writeAudit } from '../middleware/audit.js';
+import { ah, HttpError } from '../middleware/errorHandler.js';
+import { id } from '../utils/ids.js';
+import { hashPassword, type UserRole } from '../utils/auth.js';
+import { syncPrimaryUserRole } from '../core/rbac/rbac-service.js';
+
+export const usersRouter = Router();
+usersRouter.use(authenticate);
+
+const ALLOWED_ROLES: UserRole[] = ['owner', 'manager', 'finance', 'registrar', 'teacher', 'head_of_department', 'counselor', 'donor_manager', 'student'];
+
+const stmtGetAllUsers = db.prepare(
+  `SELECT id, username, full_name, email, role, branch_id, is_active, must_change_password, created_at, last_login_at FROM users ORDER BY created_at DESC`
+);
+
+const stmtGetUserById = db.prepare('SELECT id, full_name, role, branch_id, is_active FROM users WHERE id = ?');
+const stmtCheckUsernameExists = db.prepare('SELECT id FROM users WHERE username = ?');
+
+const stmtInsertUser = db.prepare(
+  `INSERT INTO users (id, username, password_hash, full_name, email, role, branch_id, campus_id, linked_teacher_id, linked_employee_id, linked_partner_id, linked_student_id, is_active, must_change_password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`
+);
+
+const stmtUpdateUser = db.prepare(
+  `UPDATE users SET full_name = COALESCE(?, full_name), email = COALESCE(?, email), role = COALESCE(?, role), branch_id = COALESCE(?, branch_id), is_active = COALESCE(?, is_active) WHERE id = ?`
+);
+// campus_id follows the branch whenever it changes (set inside the PATCH handler).
+
+const stmtResetPassword = db.prepare(
+  'UPDATE users SET password_hash = ?, must_change_password = 1, session_version = session_version + 1 WHERE id = ?'
+);
+
+usersRouter.get(
+  '/',
+  authorize('owner'),
+  ah(async (req, res) => {
+    res.json(stmtGetAllUsers.all());
+  })
+);
+
+usersRouter.post(
+  '/',
+  authorize('owner'),
+  ah(async (req, res) => {
+    const { username, tempPassword, fullName, email, role, branchId, linkedTeacherId, linkedEmployeeId, linkedPartnerId, linkedStudentId } = req.body;
+    
+    if (!username || !tempPassword || !fullName || !role || !branchId) {
+      throw new HttpError(400, 'Username, temporary password, full name, role, and branch are required.');
+    }
+    
+    if (!ALLOWED_ROLES.includes(role)) {
+      throw new HttpError(400, 'Invalid role specified.');
+    }
+    if (String(tempPassword).length < 12) throw new HttpError(400, 'Temporary password must be at least 12 characters.');
+    if (!canAccessBranchResource(req, String(branchId))) throw new HttpError(403, 'Target branch is outside your authorized scope.');
+
+    const exists = stmtCheckUsernameExists.get(username);
+    if (exists) throw new HttpError(409, 'This username is already in use.');
+
+    const passwordHash = await hashPassword(tempPassword);
+
+    const campusId = (db.prepare('SELECT campus_id FROM branches WHERE id = ?').get(String(branchId)) as { campus_id?: string | null } | undefined)?.campus_id ?? null;
+    if (role === 'student' && linkedStudentId) {
+      const st = db.prepare('SELECT id, branch_id FROM students WHERE id = ?').get(String(linkedStudentId)) as { id: string; branch_id: string } | undefined;
+      if (!st) throw new HttpError(404, 'Linked student not found.');
+      if (String(st.branch_id) !== String(branchId)) throw new HttpError(400, 'Linked student must belong to the same branch.');
+      if (db.prepare('SELECT id FROM users WHERE linked_student_id = ?').get(st.id)) throw new HttpError(409, 'This student already has a portal account.');
+    }
+    const newId = id('usr');
+    // Student portal accounts authenticate with code + name (no password
+    // login), so the password-change quarantine must not apply to them.
+    const mustChangePassword = role === 'student' ? 0 : 1;
+    const createTx = db.transaction(() => {
+      stmtInsertUser.run(newId, username, passwordHash, fullName, email || null, role, branchId, campusId, linkedTeacherId || null, linkedEmployeeId || null, linkedPartnerId || null, linkedStudentId || null, mustChangePassword);
+      syncPrimaryUserRole(db, newId, role as UserRole, String(branchId), req.user!.userId);
+    });
+    createTx();
+    
+    writeAudit(req, `Created new user account: ${fullName} (${username})`);
+    res.status(201).json({ id: newId });
+  })
+);
+
+usersRouter.patch(
+  '/:id',
+  authorize('owner'),
+  ah(async (req, res) => {
+    const target = stmtGetUserById.get(req.params.id) as { id: string; full_name: string; role: UserRole; branch_id: string; is_active: number } | undefined;
+    if (!target) throw new HttpError(404, 'User not found.');
+
+    const { fullName, email, role, branchId, isActive } = req.body;
+    if (target.id === req.user!.userId && ((role && role !== 'owner') || isActive === false)) throw new HttpError(409, 'You cannot deactivate or demote your own administrative account.');
+    
+    if (role && !ALLOWED_ROLES.includes(role)) {
+      throw new HttpError(400, 'Invalid role specified.');
+    }
+    if (branchId != null && !canAccessBranchResource(req, String(branchId))) throw new HttpError(403, 'Target branch is outside your authorized scope.');
+
+    const nextRole = (role ?? target.role) as UserRole;
+    const nextBranchId = String(branchId ?? target.branch_id);
+    if (!canAccessBranchResource(req, nextBranchId)) throw new HttpError(403, 'Target branch is outside your authorized scope.');
+    const updateTx = db.transaction(() => {
+      const result = stmtUpdateUser.run(fullName ?? null, email ?? null, role ?? null, branchId ?? null, typeof isActive === 'boolean' ? (isActive ? 1 : 0) : null, req.params.id);
+      if (result.changes !== 1) throw new HttpError(409, 'User update was not applied.');
+      // Keep campus_id in sync with the branch.
+      if (branchId != null) {
+        const campus = (db.prepare('SELECT campus_id FROM branches WHERE id = ?').get(String(branchId)) as { campus_id?: string | null } | undefined)?.campus_id ?? null;
+        db.prepare('UPDATE users SET campus_id = ? WHERE id = ?').run(campus, req.params.id);
+      }
+      if (role || branchId) syncPrimaryUserRole(db, req.params.id, nextRole, nextBranchId, req.user!.userId);
+      // Student accounts have no password flow — never quarantine them.
+      if (nextRole === 'student') db.prepare('UPDATE users SET must_change_password = 0 WHERE id = ?').run(req.params.id);
+      if (role || branchId || isActive === false) db.prepare('UPDATE users SET session_version = session_version + 1 WHERE id = ?').run(req.params.id);
+    });
+    updateTx();
+    
+    writeAudit(req, `Updated user account: ${target.full_name}`);
+    res.json({ ok: true });
+  })
+);
+
+usersRouter.post(
+  '/:id/reset-password',
+  authorize('owner'),
+  ah(async (req, res) => {
+    const { tempPassword } = req.body;
+    if (!tempPassword || tempPassword.length < 12) {
+      throw new HttpError(400, 'Temporary password must be at least 12 characters.');
+    }
+    
+    const target = stmtGetUserById.get(req.params.id) as { id: string; full_name: string } | undefined;
+    if (!target) throw new HttpError(404, 'User not found.');
+    
+    const passwordHash = await hashPassword(tempPassword);
+    stmtResetPassword.run(passwordHash, req.params.id);
+    
+    writeAudit(req, `Reset password for: ${target.full_name}`);
+    res.json({ ok: true });
+  })
+);
+
+export default usersRouter;

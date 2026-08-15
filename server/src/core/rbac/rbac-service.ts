@@ -1,0 +1,382 @@
+/**
+ * TOEFL House ERP — RBAC Resolution Engine
+ */
+import { randomUUID } from 'node:crypto';
+import type Database from 'better-sqlite3';
+import {
+  PERMISSION_CATALOG, 
+  ROLE_DEFINITIONS, 
+  LEGACY_ROLE_MAP, 
+  type PermissionScope,
+} from './permission-catalog.js';
+import type { UserRole } from '../../utils/auth.js';
+
+export interface EffectivePermission {
+  code: string; 
+  scope: PermissionScope; 
+  source: 'role' | 'override' | 'delegation' | 'legacy';
+  scopeId: string | null;
+}
+
+export interface RbacUserContext {
+  userId: string; 
+  username: string; 
+  fullName: string; 
+  legacyRole: string; 
+  branchId: string;
+  permissions: EffectivePermission[];
+  permissionCodes: Set<string>; // O(1) lookup performance
+  roles: { 
+    roleId: string; 
+    roleCode: string; 
+    roleName: string; 
+    scopeType: PermissionScope; 
+    scopeId: string | null 
+  }[];
+}
+
+// ── Performance: Schema Existence Memoization ──────────────────────────────
+// Checking sqlite_master on every API request is a massive performance killer.
+// Cache schema detection per database connection. A process can own multiple
+// SQLite connections in tests, workers, migrations, or tooling; a single global
+// boolean would let a failed check on one DB poison every later DB.
+const rbacSchemaCache = new WeakMap<Database.Database, boolean>();
+
+function rbacSchemaExists(db: Database.Database): boolean {
+  const cached = rbacSchemaCache.get(db);
+  if (cached !== undefined) return cached;
+
+  const tableCount = db.prepare(
+    `SELECT COUNT(*) as c FROM sqlite_master 
+     WHERE type='table' AND name IN ('roles', 'permissions', 'user_roles', 'role_permissions', 'role_delegations', 'permission_overrides')`
+  ).get() as { c: number };
+  
+  const exists = tableCount.c === 6;
+  rbacSchemaCache.set(db, exists);
+  return exists;
+}
+
+// ── Performance: Prepared Statement Cache (WeakMap) ────────────────────────
+interface RbacStatements {
+  insertRole: Database.Statement;
+  insertPerm: Database.Statement;
+  insertRolePerm: Database.Statement;
+  getRoleId: Database.Statement;
+  getRolePerms: Database.Statement;
+  deleteRolePerm: Database.Statement;
+  getPermId: Database.Statement;
+  getLegacyUsers: Database.Statement;
+  insertUserRole: Database.Statement;
+  hasUserRole: Database.Statement;
+  getPrimaryUserRole: Database.Statement;
+  getUserRbacPerms: Database.Statement;
+  getDelegations: Database.Statement;
+  getOverrides: Database.Statement;
+  getUserRoles: Database.Statement;
+  getLegacyUser: Database.Statement;
+}
+
+const stmtCache = new WeakMap<Database.Database, RbacStatements>();
+
+function getStmts(db: Database.Database): RbacStatements {
+  if (stmtCache.has(db)) return stmtCache.get(db)!;
+  
+  const stmts: RbacStatements = {
+    insertRole: db.prepare(`INSERT INTO roles (id, code, name, description, is_system, is_active, sort_order, created_at) VALUES (?, ?, ?, ?, 1, 1, ?, datetime('now')) ON CONFLICT(code) DO UPDATE SET name=excluded.name, description=excluded.description, is_system=1, sort_order=excluded.sort_order, updated_at=datetime('now')`),
+    insertPerm: db.prepare(`INSERT INTO permissions (id, code, resource, action, description, category, is_system, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, datetime('now')) ON CONFLICT(code) DO UPDATE SET resource=excluded.resource, action=excluded.action, description=excluded.description, category=excluded.category, is_system=1`),
+    insertRolePerm: db.prepare(`INSERT INTO role_permissions (id, role_id, permission_id, default_scope) VALUES (?, ?, ?, ?) ON CONFLICT(role_id, permission_id) DO UPDATE SET default_scope=excluded.default_scope`),
+    getRoleId: db.prepare('SELECT id FROM roles WHERE code = ?'),
+    getRolePerms: db.prepare(`SELECT rp.id AS id, p.code AS code FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id WHERE rp.role_id = ?`),
+    deleteRolePerm: db.prepare('DELETE FROM role_permissions WHERE id = ?'),
+    getPermId: db.prepare('SELECT id FROM permissions WHERE code = ?'),
+    
+    getLegacyUsers: db.prepare('SELECT id, role, branch_id FROM users WHERE is_active = 1'),
+    insertUserRole: db.prepare(`INSERT OR IGNORE INTO user_roles (id, user_id, role_id, scope_type, scope_id, is_primary, assigned_by, assigned_at) VALUES (?, ?, ?, ?, ?, 1, ?, datetime('now'))`),
+    hasUserRole: db.prepare('SELECT id FROM user_roles WHERE user_id = ? LIMIT 1'),
+    getPrimaryUserRole: db.prepare(`SELECT ur.id, r.code AS roleCode, ur.scope_type AS scopeType, ur.scope_id AS scopeId FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = ? AND ur.is_primary = 1 LIMIT 1`),
+    
+    getUserRbacPerms: db.prepare(`
+      SELECT p.code AS code, rp.default_scope AS scope, ur.scope_type AS user_scope, ur.scope_id AS user_scope_id
+      FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+      JOIN role_permissions rp ON rp.role_id = ur.role_id
+      JOIN permissions p ON p.id = rp.permission_id
+      WHERE ur.user_id = ? AND r.is_active = 1
+        AND (ur.expires_at IS NULL OR ur.expires_at > datetime('now'))
+    `),
+    getDelegations: db.prepare(`
+      SELECT p.code AS code, rp.default_scope AS scope, d.scope_type AS delegation_scope, d.scope_id AS delegation_scope_id FROM role_delegations d
+      JOIN role_permissions rp ON rp.role_id = d.role_id JOIN permissions p ON p.id = rp.permission_id
+      WHERE d.to_user_id = ? AND d.is_active = 1 AND d.starts_at <= datetime('now') AND d.ends_at >= datetime('now')
+    `),
+    getOverrides: db.prepare(`
+      SELECT p.code AS code, o.effect AS effect, o.scope_type AS scope, o.scope_id AS scope_id FROM permission_overrides o
+      JOIN permissions p ON p.id = o.permission_id
+      WHERE o.user_id = ? AND (o.expires_at IS NULL OR o.expires_at > datetime('now'))
+    `),
+    getUserRoles: db.prepare(`
+      SELECT ur.role_id AS roleId, r.code AS roleCode, r.name AS roleName, ur.scope_type AS scopeType, ur.scope_id AS scopeId
+      FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+      WHERE ur.user_id = ? AND r.is_active = 1
+        AND (ur.expires_at IS NULL OR ur.expires_at > datetime('now'))
+    `),
+    getLegacyUser: db.prepare('SELECT role FROM users WHERE id = ?'),
+  };
+  
+  stmtCache.set(db, stmts);
+  return stmts;
+}
+
+// ============================================================================
+// §1 — BOOTSTRAP & SYNC
+// ============================================================================
+
+export function bootstrapRbacCatalog(db: Database.Database): void {
+  if (!rbacSchemaExists(db)) return;
+  const stmts = getStmts(db);
+  
+  const tx = db.transaction(() => {
+    for (const p of PERMISSION_CATALOG) {
+      stmts.insertPerm.run(randomUUID(), p.code, p.resource, p.action, p.description, p.category);
+    }
+    
+    for (const r of ROLE_DEFINITIONS) {
+      stmts.insertRole.run(randomUUID(), r.code, r.name, r.description, r.sortOrder);
+      const roleRow = stmts.getRoleId.get(r.code) as { id: string } | undefined;
+      if (!roleRow) continue;
+      
+      const allowed = new Set(Object.keys(r.permissions).filter((c) => !!r.permissions[c]));
+      const existing = stmts.getRolePerms.all(roleRow.id) as { id: string; code: string }[];
+      
+      // Prune permissions that are no longer in the definition
+      for (const row of existing) {
+        if (!allowed.has(row.code)) stmts.deleteRolePerm.run(row.id);
+      }
+      
+      // Insert current permissions
+      for (const [permCode, scope] of Object.entries(r.permissions)) {
+        if (!scope) continue;
+        const permRow = stmts.getPermId.get(permCode) as { id: string } | undefined;
+        if (!permRow) continue;
+        stmts.insertRolePerm.run(randomUUID(), roleRow.id, permRow.id, scope);
+      }
+    }
+  });
+  
+  tx();
+}
+
+/** Synchronize users.role with exactly one primary RBAC role; preserve secondary grants. */
+export function syncPrimaryUserRole(db: Database.Database, userId: string, legacyRole: UserRole, branchId: string, assignedBy = 'system'): void {
+  if (!rbacSchemaExists(db)) return;
+  const stmts = getStmts(db);
+  const roleCode = LEGACY_ROLE_MAP[legacyRole] || legacyRole;
+  const role = stmts.getRoleId.get(roleCode) as { id: string } | undefined;
+  if (!role) throw new Error(`RBAC role '${roleCode}' is not configured.`);
+  const tx = db.transaction(() => {
+    db.prepare('UPDATE user_roles SET is_primary = 0 WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM user_roles WHERE user_id = ? AND role_id = ? AND is_primary = 0').run(userId, role.id);
+    stmts.insertUserRole.run(randomUUID(), userId, role.id, roleCode === 'owner' ? 'organization' : 'branch', roleCode === 'owner' ? null : branchId, assignedBy);
+    db.prepare('UPDATE user_roles SET is_primary = 1 WHERE user_id = ? AND role_id = ?').run(userId, role.id);
+  });
+  tx();
+}
+
+export function syncLegacyUserRoles(db: Database.Database): void {
+  if (!rbacSchemaExists(db)) return;
+  const stmts = getStmts(db);
+  const users = stmts.getLegacyUsers.all() as { id: string; role: string; branch_id: string }[];
+
+  const tx = db.transaction(() => {
+    for (const u of users) {
+      const roleCode = LEGACY_ROLE_MAP[u.role as UserRole] || u.role;
+      const role = stmts.getRoleId.get(roleCode) as { id: string } | undefined;
+      if (!role) continue;
+
+      const desiredScopeType: PermissionScope = roleCode === 'owner' ? 'organization' : 'branch';
+      const desiredScopeId = roleCode === 'owner' ? null : u.branch_id;
+      const primary = stmts.getPrimaryUserRole.get(u.id) as { id: string; roleCode: string; scopeType: string; scopeId: string | null } | undefined;
+
+      if (!primary) {
+        stmts.insertUserRole.run(randomUUID(), u.id, role.id, desiredScopeType, desiredScopeId, 'system');
+        continue;
+      }
+
+      // Converge the canonical primary RBAC identity with users.role and branch scope.
+      // Secondary roles/delegations remain intact.
+      if (primary.roleCode !== roleCode || primary.scopeType !== desiredScopeType || (primary.scopeId ?? null) !== (desiredScopeId ?? null)) {
+        db.prepare('UPDATE user_roles SET is_primary = 0 WHERE user_id = ?').run(u.id);
+        db.prepare('DELETE FROM user_roles WHERE user_id = ? AND role_id = ? AND is_primary = 0').run(u.id, role.id);
+        stmts.insertUserRole.run(randomUUID(), u.id, role.id, desiredScopeType, desiredScopeId, 'system');
+      }
+    }
+  });
+
+  tx();
+}
+
+// ============================================================================
+// §2 — PERMISSION RESOLUTION
+// ============================================================================
+
+const SCOPE_RANK: Record<PermissionScope, number> = {
+  organization: 6, campus: 5, branch: 4, department: 3, program: 2, class: 1, own: 0,
+};
+
+function narrowerScope(a: PermissionScope, b: PermissionScope): PermissionScope {
+  return SCOPE_RANK[a] <= SCOPE_RANK[b] ? a : b;
+}
+
+export function resolveUserPermissions(db: Database.Database, userId: string): EffectivePermission[] {
+  const grants: EffectivePermission[] = [];
+  const stmts = getStmts(db);
+  const schemaExists = rbacSchemaExists(db);
+
+  if (schemaExists) {
+    const rows = stmts.getUserRbacPerms.all(userId) as {
+      code: string; scope: PermissionScope; user_scope: PermissionScope; user_scope_id: string | null;
+    }[];
+    for (const row of rows) {
+      grants.push({ code: row.code, scope: narrowerScope(row.scope, row.user_scope), source: 'role', scopeId: row.user_scope_id });
+    }
+
+    // Compatibility safeguard: a legacy user may authenticate before the RBAC
+    // synchronization pass has materialized user_roles. In that transient state
+    // the effective role must still carry its defined permissions; an empty
+    // user_roles join must never silently turn an entitled user into a deny-all
+    // principal. Explicit RBAC assignments remain authoritative once present.
+    // If the user HAS assignments but every one is inactive/deactivated, the
+    // principal is intentionally permissionless (deactivation is meaningful).
+    const hasAnyAssignment = !!stmts.hasUserRole.get(userId);
+    if (rows.length === 0 && !hasAnyAssignment) {
+      const user = stmts.getLegacyUser.get(userId) as { role: string } | undefined;
+      if (user) {
+        const roleCode = LEGACY_ROLE_MAP[user.role as UserRole] || user.role;
+        const def = ROLE_DEFINITIONS.find((r) => r.code === roleCode);
+        if (def) {
+          for (const [code, scope] of Object.entries(def.permissions)) {
+            if (scope) grants.push({ code, scope, source: 'legacy', scopeId: null });
+          }
+        }
+      }
+    }
+
+    const dels = stmts.getDelegations.all(userId) as {
+      code: string; scope: PermissionScope; delegation_scope: PermissionScope; delegation_scope_id: string | null;
+    }[];
+    for (const d of dels) {
+      grants.push({ code: d.code, scope: narrowerScope(d.scope, d.delegation_scope), source: 'delegation', scopeId: d.delegation_scope_id });
+    }
+
+    const overs = stmts.getOverrides.all(userId) as {
+      code: string; effect: 'grant' | 'deny'; scope: PermissionScope; scope_id?: string | null;
+    }[];
+    for (const o of overs) {
+      if (o.effect === 'deny') {
+        for (let i = grants.length - 1; i >= 0; i--) if (grants[i].code === o.code) grants.splice(i, 1);
+      } else {
+        grants.push({ code: o.code, scope: o.scope, source: 'override', scopeId: o.scope_id ?? null });
+      }
+    }
+    return grants;
+  }
+
+  const user = stmts.getLegacyUser.get(userId) as { role: string } | undefined;
+  if (user) {
+    const roleCode = LEGACY_ROLE_MAP[user.role as UserRole] || user.role;
+    const def = ROLE_DEFINITIONS.find((r) => r.code === roleCode);
+    if (def) for (const [code, scope] of Object.entries(def.permissions)) {
+      if (scope) grants.push({ code, scope, source: 'legacy', scopeId: null });
+    }
+  }
+  return grants;
+}
+
+export function buildRbacContext(db: Database.Database, user: {
+  id: string; username: string; full_name: string; role: string; branch_id: string;
+}): RbacUserContext {
+  const stmts = getStmts(db);
+  const permissions = resolveUserPermissions(db, user.id);
+  let roles: RbacUserContext['roles'] = [];
+  
+  if (rbacSchemaExists(db)) {
+    roles = stmts.getUserRoles.all(user.id) as RbacUserContext['roles'];
+  }
+  
+  if (roles.length === 0) {
+    const roleCode = LEGACY_ROLE_MAP[user.role as UserRole] || user.role;
+    const def = ROLE_DEFINITIONS.find((r) => r.code === roleCode);
+    roles = [{ 
+      roleId: 'legacy', 
+      roleCode, 
+      roleName: def?.name || user.role,
+      scopeType: roleCode === 'owner' ? 'organization' : 'branch',
+      scopeId: roleCode === 'owner' ? null : user.branch_id 
+    }];
+  }
+  
+  return {
+    userId: user.id, 
+    username: user.username, 
+    fullName: user.full_name, 
+    legacyRole: user.role,
+    branchId: user.branch_id, 
+    permissions, 
+    permissionCodes: new Set(permissions.map((p) => p.code)), 
+    roles,
+  };
+}
+
+// ============================================================================
+// §3 — HELPER METHODS
+// ============================================================================
+
+
+export function hasRole(ctx: RbacUserContext, roleCode: string): boolean {
+  return ctx.roles.some((r) => r.roleCode === roleCode);
+}
+
+export function hasAnyRole(ctx: RbacUserContext, roleCodes: string[]): boolean {
+  return roleCodes.some((role) => hasRole(ctx, role));
+}
+
+export function hasPermission(ctx: RbacUserContext, code: string): boolean {
+  return ctx.permissionCodes.has(code);
+}
+
+export function hasAnyPermission(ctx: RbacUserContext, codes: string[]): boolean {
+  return codes.some((c) => ctx.permissionCodes.has(c));
+}
+
+export function getPermissionScope(ctx: RbacUserContext, code: string): PermissionScope | null {
+  const matches = ctx.permissions.filter((p) => p.code === code);
+  if (matches.length === 0) return null;
+  // Effective authorization is deny-by-default. When several grants exist for
+  // the same permission, resolve to the narrowest scope instead of depending
+  // on database row order. Resource-specific scope IDs are enforced by the
+  // caller's branch/resource checks.
+  return matches.reduce((effective, grant) => narrowerScope(effective, grant.scope), matches[0].scope);
+}
+/**
+ * Central branch-resource authorization. A role name never grants cross-branch
+ * access by itself. Access is derived from the user's actual RBAC assignment.
+ */
+export function canAccessBranch(db: Database.Database, ctx: RbacUserContext, branchId: string): boolean {
+  if (hasRole(ctx, 'owner')) return true;
+
+  const branch = db.prepare('SELECT campus_id AS campusId FROM branches WHERE id = ?').get(branchId) as
+    | { campusId: string | null }
+    | undefined;
+  if (!branch) return false;
+
+  for (const role of ctx.roles) {
+    if (role.scopeType === 'organization') return true;
+    if (role.scopeType === 'branch' && role.scopeId === branchId) return true;
+    if (role.scopeType === 'campus' && role.scopeId && role.scopeId === branch.campusId) return true;
+  }
+
+  return ctx.branchId === branchId;
+}
+
+export function canAccessAllBranches(ctx: RbacUserContext): boolean {
+  return hasRole(ctx, 'owner') || ctx.roles.some((r) => r.scopeType === 'organization');
+}

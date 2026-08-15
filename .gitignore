@@ -1,0 +1,16 @@
+
+.env
+
+.env
+node_modules/
+dist/
+server/dist/
+server/data/
+*.log
+server/.env
+coverage/
+server/BOOTSTRAP_CREDENTIALS.txt
+
+# Test/runtime databases
+server/src/tests/test.sqlite*
+server/data/
