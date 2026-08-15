@@ -172,6 +172,13 @@ booksRouter.post(
       const student = db.prepare('SELECT branch_id FROM students WHERE id = ?').get(studentId) as { branch_id?: string } | undefined;
       if (!student) throw new HttpError(404, 'Student not found.');
       if (student.branch_id && student.branch_id !== book.branch_id) throw new HttpError(403, 'Student belongs to another branch.');
+      // Financial integrity: a book is charged once per student. If the
+      // payment desk already recorded a book/chapter payment for this
+      // student+book, the sale desk must not charge it again.
+      const alreadyPaid = db.prepare(
+        `SELECT 1 FROM payments WHERE student_id = ? AND book_id = ? AND category IN ('book','chapter') AND status = 'completed' LIMIT 1`
+      ).get(studentId, book.id);
+      if (alreadyPaid) throw new HttpError(409, 'This book was already paid for by this student via the payment desk.');
     }
 
     // The sale decrements the stock of the book's own branch and records

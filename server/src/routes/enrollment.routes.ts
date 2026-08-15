@@ -203,7 +203,7 @@ enrollmentRouter.post('/:id/freeze-requests/resume', requirePermission('Enrollme
 
 /** GET /api/enrollments/:id/freeze-requests — full freeze history, the
  *  "why and for how long" record the blueprint asks for. */
-enrollmentRouter.get('/:id/freeze-requests', ah(async (req, res) => {
+enrollmentRouter.get('/:id/freeze-requests', requirePermission('Student.View', 'Enrollment.FreezeRequest', 'Enrollment.TransferRequest'), ah(async (req, res) => {
   requireEnrollment(req, req.params.id);
   res.json((stmtListFreezesForEnrollment.all(req.params.id) as any[]).map(mapFreeze));
 }));
@@ -317,7 +317,7 @@ enrollmentRouter.post('/:id/transfer-requests/:requestId/reject', authorize('man
 }));
 
 /** GET /api/enrollments/:id/transfer-requests — full transfer request history. */
-enrollmentRouter.get('/:id/transfer-requests', ah(async (req, res) => {
+enrollmentRouter.get('/:id/transfer-requests', requirePermission('Student.View', 'Enrollment.FreezeRequest', 'Enrollment.TransferRequest'), ah(async (req, res) => {
   requireEnrollment(req, req.params.id);
   res.json((stmtListTransferRequestsForEnrollment.all(req.params.id) as any[]).map(mapTransferRequest));
 }));

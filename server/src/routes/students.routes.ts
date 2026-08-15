@@ -511,6 +511,18 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
     if (book.stock <= 0) throw new HttpError(409, 'Book is out of stock.');
     resolvedAmount = Number(book.price || 0);
     if (requestedAmount !== null && requestedAmount !== resolvedAmount) throw new HttpError(400, 'Book payment must match the listed book price.');
+    // Financial integrity: a book is charged once per student. The book-sale
+    // desk (POST /books/:id/sell) and the payment desk are two writers for the
+    // same business event; the manual payment must not duplicate a completed
+    // sale (or an earlier payment) for this student+book.
+    const alreadySold = db.prepare(
+      `SELECT 1 FROM book_sales WHERE student_id = ? AND book_id = ? AND status = 'completed' LIMIT 1`
+    ).get(student.id, bookId);
+    if (alreadySold) throw new HttpError(409, 'This book was already sold to this student. No additional book payment is due.');
+    const alreadyPaidBook = db.prepare(
+      `SELECT 1 FROM payments WHERE student_id = ? AND book_id = ? AND category IN ('book','chapter') AND status = 'completed' LIMIT 1`
+    ).get(student.id, bookId);
+    if (alreadyPaidBook) throw new HttpError(409, 'This book was already paid for by this student.');
     bookRefId = bookId;
   }
   else if (['chapter', 'exam', 'other'].includes(category)) {

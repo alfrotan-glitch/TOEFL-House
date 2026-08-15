@@ -215,6 +215,11 @@ authRouter.post(
         syncPrimaryUserRole(db, newId, 'student', student.branch_id, 'system');
       })();
       user = db.prepare('SELECT * FROM users WHERE id = ?').get(newId) as typeof user;
+      // Account auto-provisioning is an identity/security mutation: record it
+      // with the student as the operator (portal principals hold no staff
+      // position, so operator_role is 'student').
+      req.user = { userId: user!.id, username: user!.username, role: 'student' as UserRow['role'], branchId: user!.branch_id, fullName: user!.full_name, sessionVersion: 1 };
+      writeAudit(req, `Auto-provisioned student portal account for ${student.full_name} (${code})`, { newValue: JSON.stringify({ userId: user!.id, studentId: student.id, branchId: student.branch_id }) });
     }
 
     const token = signToken({

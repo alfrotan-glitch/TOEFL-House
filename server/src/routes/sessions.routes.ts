@@ -17,7 +17,7 @@ Access control:
 */
 import { Router } from 'express';
 import { db } from '../db/connection.js';
-import { authenticate, authorize, resolveBranchScope, canAccessBranchResource, hasLegacyRole, hasAnyLegacyRole } from '../middleware/auth.js';
+import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource, hasLegacyRole, hasAnyLegacyRole } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
@@ -310,6 +310,7 @@ sessionsRouter.get(
 
 sessionsRouter.get(
   '/:id',
+  requirePermission('Session.View'),
   ah(async (req, res) => {
     const session = stmtGetSessionDetail.get(req.params.id) as any;
     if (!session) throw new HttpError(404, 'Session not found.');
@@ -726,6 +727,7 @@ sessionsRouter.post(
 
 sessionsRouter.get(
   '/:id/roster',
+  requirePermission('Session.View', 'Attendance.View'),
   ah(async (req, res) => {
     requireSession(req, req.params.id);
     const rows = stmtGetRosterFull.all(req.params.id) as any[];
@@ -893,6 +895,7 @@ sessionsRouter.post(
 
 sessionsRouter.get(
   '/:id/homework',
+  requirePermission('Session.View'),
   ah(async (req, res) => {
     requireSession(req, req.params.id);
     const rows = stmtGetHomework.all(req.params.id) as any[];
@@ -942,6 +945,7 @@ sessionsRouter.delete(
 
 sessionsRouter.get(
   '/:id/quizzes',
+  requirePermission('Session.View'),
   ah(async (req, res) => {
     requireSession(req, req.params.id);
     const rows = stmtGetQuizzes.all(req.params.id) as any[];
@@ -994,6 +998,7 @@ const ATTENDED_STATUS_PLACEHOLDERS = ATTENDED_EQUIVALENT_STATUSES.map(() => '?')
 
 sessionsRouter.get(
   '/analytics/attendance-rate',
+  requirePermission('Session.View', 'Attendance.View'),
   ah(async (req, res) => {
     const { classId, from, to } = req.query as Record<string, string>;
     if (!classId) throw new HttpError(400, 'classId is required.');
@@ -1019,6 +1024,7 @@ sessionsRouter.get(
 
 sessionsRouter.get(
   '/analytics/student-attendance',
+  requirePermission('Session.View', 'Attendance.View'),
   ah(async (req, res) => {
     const { classId, from, to } = req.query as Record<string, string>;
     if (!classId) throw new HttpError(400, 'classId is required.');
