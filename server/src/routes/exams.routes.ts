@@ -270,7 +270,18 @@ examsRouter.patch(
     if (certIssued) {
       if (result.student_id) {
         const priorCertCount = (stmtCountCertificatesByStudent.get(result.student_id) as { c: number }).c;
-        diplomaFee = priorCertCount === 0 ? Number(resolveFee(db, exam.branch_id, 'diplomaFee') || 0) : 0;
+        // Financial integrity: the diploma fee is charged once per student,
+        // whether it was paid via the certificate issuance or the payment
+        // desk. If a payment/income row for this student+category already
+        // exists, the certificate is issued without an additional charge.
+        const alreadyPaid = db.prepare(`
+          SELECT 1 FROM (
+            SELECT 1 FROM payments WHERE student_id = ? AND category = 'diploma' AND status = 'completed'
+            UNION ALL
+            SELECT 1 FROM financial_transactions WHERE type = 'income' AND category = 'diploma' AND reference_id = ? AND amount > 0
+          ) LIMIT 1
+        `).get(result.student_id, result.student_id);
+        diplomaFee = priorCertCount === 0 && !alreadyPaid ? Number(resolveFee(db, exam.branch_id, 'diplomaFee') || 0) : 0;
       } else {
         diplomaFee = resolveFee(db, exam.branch_id, 'diplomaFee');
       }

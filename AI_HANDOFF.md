@@ -282,6 +282,34 @@ Suite: 43 files / 462 tests; typecheck/lint(0/0)/build green; fresh-schema
 preflight green; live E2E green (enroll-semester 409, audited profile edit
 with before/after, audited payment with receipt, branch isolation 403).
 
+## Pass 12 — Complete ERP forensic audit (cross-system)
+
+New suite `erp-forensic.test.ts` traced the full cross-system lifecycle
+(visitor → placement → conversion → student → payment → exam → certificate →
+report → audit) and attacked the seams between subsystems.
+
+**Defect reproduced and FIXED (HIGH — cross-system financial duplication)**:
+the certificate path (exams.routes) books `diploma` income directly with NO
+payments row, while the pass-11 once-per-student diploma guard checked only
+the payments table. Result: a manual `diploma` payment after a certificate
+was allowed → 1000 AFN diploma income for one student; and the reverse order
+(manual payment then certificate) also double-charged. Fix: the fixed-fee
+guard now checks BOTH the payments table AND the authoritative ledger
+(financial_transactions income, reference_id = student), and the certificate
+path skips the fee when the student already paid it via the desk. Verified
+both directions live + concurrency (10 parallel → exactly 1×201 + 9×409, one
+income row).
+
+**Verified (no change)**: full lifecycle E2E preserves identity/branch/
+placement/finance/audit; teacher cannot score exams or create students;
+report income total exactly equals the ledger (reconciliation); notification
+endpoint denies permissionless (student) principals; 10k-student search 8ms
+and report 11ms; conversion income is invoice-referenced (test corrected —
+not a defect).
+
+Suite: 45 files / 476 tests; typecheck/lint(0/0)/build green; fresh-schema
+preflight green; live E2E green.
+
 ## Suggested next high-value tasks (in order)
 
 1. **Frontend runtime verification of role workspaces** — log in as each role
