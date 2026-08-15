@@ -22,6 +22,13 @@
  */
 import type Database from 'better-sqlite3';
 import { evaluateRules } from '../configuration/rule-engine.js';
+import {
+  jalaliMonthToGregorianRange,
+  isoToJalaliPeriodKey,
+  AFGHAN_MONTHS_FA,
+  AFGHAN_MONTHS_EN,
+  toLatinDigits,
+} from '../../utils/jalali.js';
 
 export interface ClassPayrollLine {
   classId: string;
@@ -119,8 +126,12 @@ function getStmts(db: Database.Database) {
        GROUP BY class_id`
     ),
     countCompletedSessions: db.prepare(
+      // Bounded by the Gregorian span of the Shamsi payroll month. A
+      // `date LIKE 'YYYY-MM%'` prefix match cannot work here: the period key
+      // is Shamsi ('1405-05') while `sessions.date` is Gregorian, so the
+      // prefix would never match and per-session teachers would be paid 0.
       `SELECT COUNT(*) as c FROM sessions s
-       WHERE s.teacher_id = ? AND s.status = 'completed' AND s.date LIKE ?
+       WHERE s.teacher_id = ? AND s.status = 'completed' AND s.date BETWEEN ? AND ?
          AND s.branch_id = COALESCE((
            SELECT h.to_branch_id
            FROM teacher_branch_history h
@@ -298,9 +309,18 @@ export function computeTeacherDueAmount(
 } {
   const stmts = getStmts(db);
   const ruleCache = createRuleEngineCache();
-  const targetPeriod = periodKey && /^\d{4}-(0[1-9]|1[0-2])$/.test(periodKey) ? periodKey : gregorianToday().slice(0, 7);
-  const periodStart = `${targetPeriod}-01`;
-  const periodEnd = new Date(Date.UTC(Number(targetPeriod.slice(0, 4)), Number(targetPeriod.slice(5, 7)), 0)).toISOString().slice(0, 10);
+  // ── PERIOD RESOLUTION (Hijri Shamsi) ─────────────────────────────────────
+  // Payroll periods are SHAMSI months, matching how Afghan payroll is
+  // actually run. `periodKey` is a Shamsi key such as '1405-05' (اسد ۱۴۰۵).
+  // Dates in the database remain Gregorian, so the Shamsi month is resolved
+  // to its exact Gregorian span and every query below is unchanged.
+  const targetPeriod = periodKey && /^\d{4}-(0[1-9]|1[0-2])$/.test(periodKey)
+    ? periodKey
+    : currentJalaliPeriodKey();
+  const { start: periodStart, end: periodEnd } = jalaliMonthToGregorianRange(
+    Number(targetPeriod.slice(0, 4)),
+    Number(targetPeriod.slice(5, 7)),
+  );
   const branchAsOf = teacherBranchAsOf(db, teacher.id, periodEnd, teacher.branch_id);
   const compensation = stmts.getCompensationAsOf.get(teacher.id, periodStart) as { base_salary?: number; salary_type?: string; contract_type?: string | null; default_skill_rate?: number } | undefined;
   const evaluation = stmts.getEvaluationAsOf.get(teacher.id, periodEnd) as { score?: number } | undefined;
@@ -345,7 +365,7 @@ export function computeTeacherDueAmount(
   // Model: PER_SESSION — paid per completed session, not per Skill; the
   // Skill workload is still reported.
   if (model === 'per_session') {
-    const sessions = stmts.countCompletedSessions.get(teacher.id, `${targetPeriod}%`, teacher.id, teacher.id, teacher.id) as { c: number };
+    const sessions = stmts.countCompletedSessions.get(teacher.id, periodStart, periodEnd, teacher.id, teacher.id, teacher.id) as { c: number };
     const sessionRate = defaultRate > 0 ? defaultRate : (baseSalary > 0 ? Math.round(baseSalary / 20) : 0);
     const total = sessions.c * sessionRate * perfMultiplier;
     
@@ -431,17 +451,54 @@ export function computeTeacherDueAmount(
 
 // ── Period & Ledger Helpers ────────────────────────────────────────────────
 
+/** The Shamsi period key for the current local date, e.g. '1405-05'. */
+export function currentJalaliPeriodKey(): string {
+  return isoToJalaliPeriodKey(gregorianToday()) ?? '';
+}
+
+/**
+ * Normalises a month label into a SHAMSI period key ('1405-05').
+ *
+ * Accepts, in order:
+ *   - a Shamsi key already:            '1405-05', '1405/5'
+ *   - an Afghan month name:            'اسد ۱۴۰۵', 'Asad 1405'
+ *   - a Gregorian month key/name:      '2026-08', 'August 2026'
+ *
+ * Gregorian input is CONVERTED to the Shamsi period that contains its first
+ * day, so links, bookmarks and API clients that still send '2026-08' keep
+ * working instead of silently computing an empty period.
+ */
 export function toPeriodKey(monthName: string): string {
-  const s = String(monthName || '').trim();
-  const m1 = s.match(/^(\d{4})-(0[1-9]|1[0-2])$/);
-  if (m1) return `${m1[1]}-${m1[2]}`;
-  const m2 = s.match(/^(\d{4})\s*[/-]\s*(\d{1,2})$/);
-  if (m2 && Number(m2[2]) >= 1 && Number(m2[2]) <= 12) return `${m2[1]}-${m2[2].padStart(2, '0')}`;
-  const m3 = s.match(/^(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})$/i);
-  if (m3) {
-    const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-    return `${m3[2]}-${String(months.findIndex(m => m.toLowerCase() === m3[1].toLowerCase()) + 1).padStart(2, '0')}`;
+  const s = toLatinDigits(String(monthName || '').trim());
+
+  // Afghan month name + year (Dari or Latin transliteration).
+  const nameMatch = s.match(/^(\S+)\s+(\d{4})$/);
+  if (nameMatch) {
+    const label = nameMatch[1];
+    const idxFa = (AFGHAN_MONTHS_FA as readonly string[]).indexOf(label);
+    const idxEn = (AFGHAN_MONTHS_EN as readonly string[]).findIndex((m) => m.toLowerCase() === label.toLowerCase());
+    const idx = idxFa >= 0 ? idxFa : idxEn;
+    if (idx >= 0) return `${nameMatch[2]}-${String(idx + 1).padStart(2, '0')}`;
   }
+
+  // Numeric 'YYYY-MM' / 'YYYY/M'.
+  const numeric = s.match(/^(\d{4})\s*[/-]\s*(\d{1,2})$/);
+  if (numeric && Number(numeric[2]) >= 1 && Number(numeric[2]) <= 12) {
+    const year = Number(numeric[1]);
+    const month = String(numeric[2]).padStart(2, '0');
+    // A four-digit year in the Gregorian range is legacy input: convert it.
+    if (year >= 1800) return isoToJalaliPeriodKey(`${year}-${month}-01`) ?? '';
+    return `${year}-${month}`;
+  }
+
+  // Legacy Gregorian month name.
+  const gregorian = s.match(/^(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})$/i);
+  if (gregorian) {
+    const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    const gm = months.findIndex((m) => m.toLowerCase() === gregorian[1].toLowerCase()) + 1;
+    return isoToJalaliPeriodKey(`${gregorian[2]}-${String(gm).padStart(2, '0')}-01`) ?? '';
+  }
+
   return '';
 }
 

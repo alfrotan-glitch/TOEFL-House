@@ -353,3 +353,81 @@ date maths (including leap years) verified correct.
 New regression file `system-integrity-guards.test.ts` locks in all three
 structural invariants; each guard was verified to **fail** when its defect was
 temporarily re-introduced.
+
+---
+
+# ADDENDUM 2 — Hijri Shamsi (Afghan Solar) Calendar
+
+Afghanistan's official calendar is **Hijri Shamsi**. The ERP had **no** support
+for it: dates were Gregorian everywhere and payroll periods were Gregorian
+months.
+
+## Architecture (agreed with the product owner)
+
+| Decision | Choice |
+|---|---|
+| Storage | **Gregorian `YYYY-MM-DD` retained**; conversion happens only at the edges |
+| Payroll periods | **Shamsi months** (e.g. `1405-05` = اسد ۱۴۰۵) |
+| Display | **Shamsi primary, Gregorian shown alongside** during the transition |
+
+**Why keep Gregorian in the database:** 77+ SQL queries depend on `YYYY-MM-DD`
+sorting chronologically and on SQLite's own `date()`/`datetime()` functions.
+Storing Shamsi would require rewriting all of them, migrating every existing
+row, and replacing SQLite's date functions — high risk for zero functional
+gain. Converting at the edge is the standard approach and leaves the financial
+core untouched.
+
+**Afghan, not Iranian:** Afghanistan uses the same solar calendar as Iran but
+**different month names** (حمل/ثور/جوزا/سرطان/اسد/سنبله/میزان/عقرب/قوس/جدی/دلو/حوت).
+The month names are therefore explicit in the module rather than delegated to
+`Intl`, which would emit Iranian names (مرداد instead of اسد) for `fa-IR`.
+
+## What was built
+
+- **`src/utils/jalali.ts`** (mirrored to `server/src/utils/jalali.ts`) —
+  conversion, formatting, Persian/Latin digits, Shamsi period helpers.
+  A test asserts the two copies stay byte-identical, so they cannot drift.
+- **`ShamsiDate` / `ShamsiDateCompact`** — display components (Shamsi + Gregorian).
+- **`ShamsiDateInput`** — day/month/year picker in Shamsi that emits the
+  Gregorian ISO string the API expects. Day count respects the real month
+  length (Hut = 29 or 30 depending on the leap year).
+- **Payroll engine** — periods are Shamsi months resolved to their exact
+  Gregorian span via `jalaliMonthToGregorianRange()`.
+- **`toPeriodKey()`** — accepts `1405-05`, `اسد ۱۴۰۵`, `Asad 1405` **and**
+  legacy `2026-08` / `August 2026`, converting the latter rather than failing.
+
+### A subtle break caught during implementation
+The per-session query used `date LIKE 'YYYY-MM%'`. With a Shamsi period key
+(`1405-05`) matched against Gregorian `sessions.date`, that prefix can never
+match — **every per-session teacher would silently be paid 0**. Replaced with
+a `BETWEEN periodStart AND periodEnd` range over the converted span.
+
+## Verification
+
+- Conversion checked against Node's **ICU Persian calendar for all 20,454 days
+  from 1990 to 2045 — zero mismatches**, plus a clean round trip.
+- Shamsi month spans verified **contiguous with no gaps or overlaps** across a
+  full year; leap years cross-checked against real 365/366-day year lengths.
+- Nawroz boundary verified: `1 حمل 1405` = `2026-03-21`.
+- **608 backend tests pass** (56 files; +17 calendar tests).
+- Typecheck, lint, builds, fresh-schema preflight: all PASS.
+
+### Live E2E
+```
+month=1405-05    -> periodKey=1405-05  label=اسد ۱۴۰۵  due=30000
+month=اسد 1405   -> periodKey=1405-05  label=اسد ۱۴۰۵  due=30000
+month=Asad 1405  -> periodKey=1405-05  label=اسد ۱۴۰۵  due=30000
+month=2026-08    -> periodKey=1405-05  label=اسد ۱۴۰۵  due=30000   (legacy input converted)
+month=rubbish    -> HTTP 400 rejected
+ledger : {period_key: '1405-05', period_label: 'اسد ۱۴۰۵', paid_amount: 30000}
+tx desc: Paid full salary for اسد ۱۴۰۵ to teacher معلم تقویم شمسی
+```
+
+## Remaining work (not yet done)
+
+Display conversion was applied to the **payroll/payslip flow** and the student
+profile date. Roughly **20 other `toLocaleDateString` call sites** across
+dashboards, sessions, workflows and reports still render Gregorian. They are
+harmless (correct dates, wrong calendar) and can be migrated incrementally by
+swapping in `<ShamsiDate />`. `ShamsiDateInput` is built and tested but not yet
+substituted for the remaining `<input type="date">` fields.

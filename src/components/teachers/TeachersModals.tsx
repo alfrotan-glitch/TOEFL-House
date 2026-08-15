@@ -6,6 +6,8 @@ import {ShieldAlert, Award, Sparkles, Check, Plus, X, ClipboardCheck} from 'luci
 import {Teacher, Employee, BudgetLine, Skill, ClassTeacherSkill, Class as ClassType} from '../../types';
 import type {TeacherSalaryStatus} from '../../apiStore';
 import {formatAFN} from '../../utils/format';
+import {recentJalaliPeriods, jalaliPeriodLabel} from '../../utils/jalali';
+import {ShamsiDate} from '../common/ShamsiDate';
 
 /** Labels for the five contract types. A contract type describes how the
  *  teacher is PAID; it never affects whether Skills are recorded. */
@@ -20,14 +22,10 @@ function salaryModelLabel(model?: string): string {
   }
 }
 
+/** Payroll periods are Hijri Shamsi months (e.g. '1405-05' = اسد ۱۴۰۵),
+ *  matching how Afghan payroll is actually run. */
 function getPayrollMonthOptions(): string[] {
-  const months: string[] = [];
-  const now = new Date();
-  for (let offset = -6; offset <= 1; offset++) {
-    const d = new Date(now.getFullYear(), now.getMonth() + offset, 1);
-    months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
-  }
-  return months;
+  return recentJalaliPeriods(8).reverse();
 }
 
 export interface PayslipData {
@@ -303,7 +301,7 @@ export default function TeachersModals(props: TeachersModalsProps) {
             <div>
               <label className="block text-slate-600 font-medium mb-1">For Work Month:</label>
               <select value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 cursor-pointer">
-                {monthOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+                {monthOptions.map((m) => <option key={m} value={m}>{jalaliPeriodLabel(m)}</option>)}
               </select>
             </div>
 
@@ -343,7 +341,7 @@ export default function TeachersModals(props: TeachersModalsProps) {
             <div>
               <label className="block text-slate-600 font-medium mb-1">For Work Month:</label>
               <select value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 cursor-pointer">
-                {monthOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+                {monthOptions.map((m) => <option key={m} value={m}>{jalaliPeriodLabel(m)}</option>)}
               </select>
             </div>
             <div className="flex gap-2 justify-end pt-3 border-t border-slate-100">
@@ -412,14 +410,14 @@ export default function TeachersModals(props: TeachersModalsProps) {
             <div id="printed-staff-payslip-area" className="bg-white border-2 border-dashed border-slate-300 rounded-2xl p-6 space-y-6 text-slate-800 relative select-text" dir="ltr">
               <div className="flex flex-col sm:flex-row justify-between items-center pb-4 border-b-2 border-slate-200 gap-4">
                 <div className="text-center sm:text-left space-y-1"><h3 className="font-black text-slate-950 text-base">The TOEFL House Higher Education</h3><p className="text-[10px] text-slate-400 font-bold">Finance calculation, salary payment, and central treasury</p></div>
-                <div className="text-center sm:text-left space-y-1 font-mono text-[10px] text-slate-500"><p className="font-bold text-slate-900 text-xs">Receipt No: {printedPayslip.serialNo}</p><p>Date: {printedPayslip.date}</p></div>
+                <div className="text-center sm:text-left space-y-1 font-mono text-[10px] text-slate-500"><p className="font-bold text-slate-900 text-xs">Receipt No: {printedPayslip.serialNo}</p><p>Date: <ShamsiDate value={printedPayslip.date} format="long" /></p></div>
               </div>
               <div className="bg-slate-50 border border-slate-100 rounded-xl p-2.5 text-center font-black text-slate-900 text-xs tracking-wider">Official monthly salary settlement slip</div>
               <div className="grid grid-cols-2 gap-4 text-[11px]">
                 <div className="space-y-2 bg-slate-50/50 p-3 rounded-xl border border-slate-100">
                   <p className="flex justify-between"><span className="text-slate-500 font-bold">Employee Name:</span><strong className="text-slate-950 font-black">{printedPayslip.fullName}</strong></p>
                   <p className="flex justify-between"><span className="text-slate-500 font-bold">Role:</span><strong className="text-indigo-600 font-bold">{printedPayslip.role}</strong></p>
-                  <p className="flex justify-between"><span className="text-slate-500 font-bold">Work Month:</span><strong className="text-slate-800 font-bold">{new Date(`${printedPayslip.month}-01T00:00:00Z`).toLocaleString('en-US', { month: 'long', year: 'numeric' })}</strong></p>
+                  <p className="flex justify-between"><span className="text-slate-500 font-bold">Work Month:</span><strong className="text-slate-800 font-bold">{jalaliPeriodLabel(printedPayslip.month)}</strong></p>
                 </div>
                 <div className="space-y-2 bg-slate-50/50 p-3 rounded-xl border border-slate-100">
                   <p className="flex justify-between"><span className="text-slate-500 font-bold">Base Amount:</span><strong className="text-slate-950 font-mono font-bold">{formatAFN(printedPayslip.baseSalary)}</strong></p>

@@ -15,10 +15,11 @@ import { id, today } from '../utils/ids.js';
 import { addNotification } from '../utils/notifications.js';
 import { evaluateRules } from '../core/configuration/rule-engine.js';
 import {
-  computeTeacherDueAmount, toPeriodKey,
+  computeTeacherDueAmount, toPeriodKey, currentJalaliPeriodKey,
   sumPaidForPeriod, hasFullPayForPeriod, teacherBranchAsOf,
   CONTRACT_TYPES,
 } from '../core/payroll/class-payroll.js';
+import { jalaliPeriodLabel } from '../utils/jalali.js';
 
 export const teachersRouter = Router();
 teachersRouter.use(authenticate);
@@ -359,16 +360,18 @@ teachersRouter.get('/:id/evaluations', requirePermission('Teacher.View'), ah(asy
 
 teachersRouter.get('/:id/salary-status', requirePermission('Payroll.Edit', 'Payroll.View', 'Teacher.View'), ah(async (req, res) => {
   const teacher = requireTeacher(req, req.params.id);
-  const monthName = String((req.query as any).month || new Date().toISOString().slice(0, 7));
+  // Periods are Hijri Shamsi months (e.g. '1405-05' = اسد ۱۴۰۵). Legacy
+  // Gregorian input is converted by toPeriodKey, so old clients keep working.
+  const monthName = String((req.query as any).month || currentJalaliPeriodKey());
   const periodKey = toPeriodKey(monthName);
-  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(periodKey)) throw new HttpError(400, 'Month must use YYYY-MM or Month YYYY format.');
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(periodKey)) throw new HttpError(400, 'Month must be a Shamsi period such as 1405-05 or "اسد 1405".');
   const dueInfo = computeTeacherDueAmount(db, teacher, periodKey);
   const paid = sumPaidForPeriod(db, teacher.id, periodKey);
   const fullPaid = hasFullPayForPeriod(db, teacher.id, periodKey);
   
   if (!Number.isFinite(dueInfo.due) || dueInfo.due < 0) throw new HttpError(500, 'Payroll calculation returned an invalid amount.');
   res.json({ 
-    teacherId: teacher.id, periodKey, periodLabel: monthName, model: dueInfo.model, 
+    teacherId: teacher.id, periodKey, periodLabel: jalaliPeriodLabel(periodKey), model: dueInfo.model, 
     due: dueInfo.due, paid, remaining: Math.max(0, dueInfo.due - paid), fullPaid, 
     breakdown: dueInfo.breakdown, canPayFull: !fullPaid && dueInfo.due - paid > 0,
     // Fixed and Skill components stay separately identifiable, and the Skill
@@ -389,7 +392,7 @@ teachersRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(asy
   const { monthName, amountPaid, paymentType } = req.body as { monthName: string; amountPaid?: number; paymentType?: 'full' | 'partial' | 'advance' };
   if (!monthName) throw new HttpError(400, 'Month is required.');
   const periodKey = toPeriodKey(monthName);
-  if (!/^\d{4}-\d{2}$/.test(periodKey)) throw new HttpError(400, 'Month must use YYYY-MM format.');
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(periodKey)) throw new HttpError(400, 'Month must be a Shamsi period such as 1405-05 or "اسد 1405".');
   const type = paymentType || 'full';
   if (!['full','partial','advance'].includes(type)) throw new HttpError(400, 'Invalid payment type.');
 
@@ -435,8 +438,12 @@ teachersRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(asy
       const ledgerId = id('tsl');
       const finalPaymentType = type === 'full' ? 'full' : type;
       const date = today();
-      stmtInsertFinTx.run(txId, resolvedAmount, date, `Paid ${finalPaymentType} salary for ${monthName} to teacher ${freshTeacher.full_name}`, freshTeacher.id, user.fullName, payrollBranchId);
-      stmtInsertSalaryLedgerWithIdempotency.run(ledgerId, freshTeacher.id, periodKey, monthName, adjustedDue, resolvedAmount, finalPaymentType, txId, JSON.stringify(dueInfo.breakdown), payrollBranchId, user.fullName, idempotencyKey || null);
+      // Persist the canonical Shamsi label (e.g. 'اسد ۱۴۰۵') rather than the
+      // raw client string, so the ledger reads consistently regardless of
+      // whether the caller sent '1405-05', 'Asad 1405' or a legacy '2026-08'.
+      const periodLabel = jalaliPeriodLabel(periodKey);
+      stmtInsertFinTx.run(txId, resolvedAmount, date, `Paid ${finalPaymentType} salary for ${periodLabel} to teacher ${freshTeacher.full_name}`, freshTeacher.id, user.fullName, payrollBranchId);
+      stmtInsertSalaryLedgerWithIdempotency.run(ledgerId, freshTeacher.id, periodKey, periodLabel, adjustedDue, resolvedAmount, finalPaymentType, txId, JSON.stringify(dueInfo.breakdown), payrollBranchId, user.fullName, idempotencyKey || null);
 
       db.exec('COMMIT');
       return { amountPaid: resolvedAmount, due: adjustedDue, previouslyPaid: alreadyPaid, remainingAfter: Math.max(0, remaining - resolvedAmount), periodKey, teacher: freshTeacher };

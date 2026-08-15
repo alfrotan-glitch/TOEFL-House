@@ -3,6 +3,7 @@
  */
 
 import React, { useState } from 'react';
+import { ShamsiDate } from '../common/ShamsiDate';
 import {CheckCircle2, Award, QrCode, CreditCard, Calendar, AlertCircle, Palette, CheckSquare, Printer, Plus, RotateCcw, X, Pencil, Save, Ban, Camera} from 'lucide-react';
 import {Student, Class, Payment, Exam, ExamResult, Attendance} from '../../types';
 import {formatAFN} from '../../utils/format';
@@ -358,7 +359,7 @@ export default function StudentProfileDrawer({
               <div className="flex-1 min-w-0 space-y-1 text-[10px] text-slate-700">
                 <div><span className="text-rose-600 font-bold uppercase tracking-wide">Name:</span> <span className="font-extrabold text-slate-900">{student.fullName}</span></div>
                 <div><span className="text-rose-600 font-bold uppercase tracking-wide">Code:</span> <span className="font-mono font-bold text-slate-900">{student.studentCode}</span></div>
-                <div><span className="text-rose-600 font-bold uppercase tracking-wide">Date:</span> <span className="font-bold text-slate-900">{student.registrationDate}</span></div>
+                <div><span className="text-rose-600 font-bold uppercase tracking-wide">Date:</span> <ShamsiDate value={student.registrationDate} format="long" className="font-bold text-slate-900" /></div>
                 {customMotto && <div className="italic text-rose-800 pt-1">{customMotto}</div>}
               </div>
               {showQrCode && (

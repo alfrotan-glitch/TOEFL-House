@@ -39,6 +39,11 @@ import {
   CONTRACT_TYPES,
   type TeacherSalaryModel,
 } from '../core/payroll/class-payroll.js';
+import { jalaliMonthToGregorianRange } from '../utils/jalali.js';
+
+/** Payroll periods are Hijri Shamsi months. Asad 1405 spans
+ *  2026-07-23..2026-08-22, inside every seeded class window below. */
+const PERIOD = '1405-05';
 
 const BRANCH = 'tskill_branch';
 const OTHER_BRANCH = 'tskill_branch_other';
@@ -263,7 +268,7 @@ describe('Phase 6/9 — compensation rule per contract type', () => {
     }
     void cid;
     const teacher = db.prepare('SELECT * FROM teachers WHERE id = ?').get(tid) as any;
-    const r = computeTeacherDueAmount(db, teacher, '2026-03');
+    const r = computeTeacherDueAmount(db, teacher, PERIOD);
 
     expect(r.model).toBe('fixed');
     expect(r.due).toBe(30000); // NOT 30000 + 15*1000
@@ -280,7 +285,7 @@ describe('Phase 6/9 — compensation rule per contract type', () => {
       recordSkillRow(`cts_fx_${n}_${i}`, c, tid, 'sk_read', 1000);
     }
     const teacher = db.prepare('SELECT * FROM teachers WHERE id = ?').get(tid) as any;
-    const r = computeTeacherDueAmount(db, teacher, '2026-03');
+    const r = computeTeacherDueAmount(db, teacher, PERIOD);
     expect(r.due).toBe(30000);
     expect(r.skillCount).toBe(n);
   });
@@ -293,7 +298,7 @@ describe('Phase 6/9 — compensation rule per contract type', () => {
       recordSkillRow(`cts_ps_${n}_${i}`, c, tid, 'sk_read', 1000);
     }
     const teacher = db.prepare('SELECT * FROM teachers WHERE id = ?').get(tid) as any;
-    const r = computeTeacherDueAmount(db, teacher, '2026-03');
+    const r = computeTeacherDueAmount(db, teacher, PERIOD);
     expect(r.due).toBe(n * 1000);
     expect(r.skillsTotal).toBe(n * 1000);
     expect(r.skillCount).toBe(n);
@@ -307,7 +312,7 @@ describe('Phase 6/9 — compensation rule per contract type', () => {
       recordSkillRow(`cts_hy_${n}_${i}`, c, tid, 'sk_read', 1000);
     }
     const teacher = db.prepare('SELECT * FROM teachers WHERE id = ?').get(tid) as any;
-    const r = computeTeacherDueAmount(db, teacher, '2026-03');
+    const r = computeTeacherDueAmount(db, teacher, PERIOD);
     expect(r.model).toBe('hybrid');
     expect(r.base).toBe(30000); // fixed component
     expect(r.skillsTotal).toBe(n * 1000); // skill component
@@ -324,7 +329,7 @@ describe('Phase 6/9 — compensation rule per contract type', () => {
        VALUES ('tlr_pl', ?, 'B1', 'sk_write', 2500, ?)`
     ).run(tid, BRANCH);
     const teacher = db.prepare('SELECT * FROM teachers WHERE id = ?').get(tid) as any;
-    const r = computeTeacherDueAmount(db, teacher, '2026-03');
+    const r = computeTeacherDueAmount(db, teacher, PERIOD);
     expect(r.due).toBe(2500);
     expect(r.skillCount).toBe(1);
   });
@@ -336,11 +341,11 @@ describe('Phase 6/9 — compensation rule per contract type', () => {
     recordSkillRow('cts_pses', c, tid, 'sk_read', 0);
     db.prepare(
       `INSERT OR REPLACE INTO sessions (id,class_id,date,start_time,end_time,status,session_type,teacher_id,branch_id,skill_id)
-       VALUES ('ses_p1',?,'2026-03-04','09:00','10:00','completed','regular',?,?,'sk_read'),
-              ('ses_p2',?,'2026-03-11','09:00','10:00','completed','regular',?,?,'sk_read')`
+       VALUES ('ses_p1',?,'2026-08-04','09:00','10:00','completed','regular',?,?,'sk_read'),
+              ('ses_p2',?,'2026-08-11','09:00','10:00','completed','regular',?,?,'sk_read')`
     ).run(c, tid, BRANCH, c, tid, BRANCH);
     const teacher = db.prepare('SELECT * FROM teachers WHERE id = ?').get(tid) as any;
-    const r = computeTeacherDueAmount(db, teacher, '2026-03');
+    const r = computeTeacherDueAmount(db, teacher, PERIOD);
     expect(r.due).toBe(1000); // 2 sessions × 500
     expect(r.skillCount).toBe(1); // workload still recorded and visible
   });
@@ -356,7 +361,7 @@ describe('Phase 10 — reporting surfaces Skills for every contract type', () =>
     const c = seedClass(`cls_rep_${salaryType}`);
     recordSkillRow(`cts_rep_${salaryType}`, c, tid, 'sk_read', 1000);
 
-    const res = await supertest(app).get(`/api/teachers/${tid}/computed-salary?month=2026-03`).set(auth(manager));
+    const res = await supertest(app).get(`/api/teachers/${tid}/computed-salary?month=${PERIOD}`).set(auth(manager));
     expect(res.status).toBe(200);
     expect(res.body.skillCount, `Skills must be visible for ${salaryType}`).toBe(1);
     expect(res.body.model).toBe(salaryType);
@@ -372,7 +377,7 @@ describe('Phase 10 — reporting surfaces Skills for every contract type', () =>
       const c = seedClass(`cls_rep_sep_${i}`);
       recordSkillRow(`cts_rep_sep_${i}`, c, tid, 'sk_read', 0);
     }
-    const res = await supertest(app).get(`/api/teachers/${tid}/computed-salary?month=2026-03`).set(auth(manager));
+    const res = await supertest(app).get(`/api/teachers/${tid}/computed-salary?month=${PERIOD}`).set(auth(manager));
     expect(res.status).toBe(200);
     expect(res.body.due).toBe(30000);
     expect(res.body.skillsTotal).toBe(0);
@@ -393,7 +398,7 @@ describe('Phase 7 — configurable monthly Skill target', () => {
       const c = seedClass(`cls_tg_${i}`);
       recordSkillRow(`cts_tg_${i}`, c, tid, 'sk_read', 0);
     }
-    const res = await supertest(app).get(`/api/teachers/${tid}/computed-salary?month=2026-03`).set(auth(manager));
+    const res = await supertest(app).get(`/api/teachers/${tid}/computed-salary?month=${PERIOD}`).set(auth(manager));
     expect(res.status).toBe(200);
     expect(res.body.targetSkills).toBe(15);
     expect(res.body.skillCount).toBe(12);
@@ -410,7 +415,7 @@ describe('Phase 7 — configurable monthly Skill target', () => {
       const c = seedClass(`cls_tx_${i}`);
       recordSkillRow(`cts_tx_${i}`, c, tid, 'sk_read', 0);
     }
-    const res = await supertest(app).get(`/api/teachers/${tid}/computed-salary?month=2026-03`).set(auth(manager));
+    const res = await supertest(app).get(`/api/teachers/${tid}/computed-salary?month=${PERIOD}`).set(auth(manager));
     expect(res.body.shortfall).toBe(0);
     expect(res.body.excess).toBe(3);
     expect(res.body.due).toBe(30000);
@@ -506,18 +511,19 @@ describe('Phase 12 — historical integrity', () => {
     // A later switch to fixed, effective September.
     db.prepare(
       `INSERT OR REPLACE INTO teacher_compensation_history (id, teacher_id, effective_from, base_salary, salary_type, contract_type, default_skill_rate, reason)
-       VALUES ('tch_hist_period_2', ?, '2026-09-01', 30000, 'fixed', NULL, 0, 'switch')`
+       VALUES ('tch_hist_period_2', ?, '2026-08-23', 30000, 'fixed', NULL, 0, 'switch')`
     ).run(tid);
     db.prepare(`UPDATE teachers SET salary_type='fixed', base_salary=30000 WHERE id = ?`).run(tid);
 
     const teacher = db.prepare('SELECT * FROM teachers WHERE id = ?').get(tid) as any;
-    const august = computeTeacherDueAmount(db, teacher, '2026-08');
-    const september = computeTeacherDueAmount(db, teacher, '2026-09');
+    // Asad 1405 ends 2026-08-22, before the switch; Sunbula 1405 starts after it.
+    const asad = computeTeacherDueAmount(db, teacher, '1405-05');
+    const sunbula = computeTeacherDueAmount(db, teacher, '1405-06');
 
-    expect(august.model).toBe('per_skill'); // history respected
-    expect(august.due).toBe(1000);
-    expect(september.model).toBe('fixed');
-    expect(september.due).toBe(30000);
+    expect(asad.model).toBe('per_skill'); // history respected
+    expect(asad.due).toBe(1000);
+    expect(sunbula.model).toBe('fixed');
+    expect(sunbula.due).toBe(30000);
   });
 
   it('a Skill recorded for August does not leak into July payroll', () => {
@@ -526,10 +532,12 @@ describe('Phase 12 — historical integrity', () => {
     const c = seedClass('cls_period');
     db.prepare(
       `INSERT OR REPLACE INTO class_teacher_skills (id, class_id, teacher_id, skill_id, monthly_rate, branch_id, assignment_type, start_date)
-       VALUES ('cts_period', ?, ?, 'sk_read', 1000, ?, 'primary', '2026-08-01')`
-    ).run(c, tid, BRANCH);
+       VALUES ('cts_period', ?, ?, 'sk_read', 1000, ?, 'primary', ?)`
+    ).run(c, tid, BRANCH, jalaliMonthToGregorianRange(1405, 5).start);
     const teacher = db.prepare('SELECT * FROM teachers WHERE id = ?').get(tid) as any;
-    expect(computeTeacherDueAmount(db, teacher, '2026-07').due).toBe(0);
-    expect(computeTeacherDueAmount(db, teacher, '2026-08').due).toBe(1000);
+    // The Skill starts on the first day of Asad 1405, so the previous Shamsi
+    // month (Saratan 1405) must not see it.
+    expect(computeTeacherDueAmount(db, teacher, '1405-04').due).toBe(0);
+    expect(computeTeacherDueAmount(db, teacher, '1405-05').due).toBe(1000);
   });
 });

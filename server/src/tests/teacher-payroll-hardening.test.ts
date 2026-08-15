@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { db, initSchema } from '../db/connection.js';
-import { computeTeacherDueAmount } from '../core/payroll/class-payroll.js';
+import { computeTeacherDueAmount, toPeriodKey } from '../core/payroll/class-payroll.js';
 import { today } from '../utils/ids.js';
 
 describe('Teacher payroll hardening', () => {
@@ -14,8 +14,12 @@ describe('Teacher payroll hardening', () => {
     db.prepare(`INSERT OR IGNORE INTO classes (id,name,level,branch_id,status,lifecycle_stage) VALUES ('tp_class','Payroll Class','A1','tp_branch','active','in_progress')`).run();
     db.prepare(`INSERT OR IGNORE INTO sessions (id,class_id,date,start_time,end_time,status,session_type,teacher_id,branch_id) VALUES ('tp_s1','tp_class','2026-01-05','09:00','10:00','completed','regular','tp_teacher','tp_branch'),('tp_s2','tp_class','2026-01-12','09:00','10:00','completed','regular','tp_teacher','tp_branch')`).run();
     const teacher = db.prepare('SELECT * FROM teachers WHERE id = ?').get('tp_teacher') as any;
-    const result = computeTeacherDueAmount(db, teacher, '2026-01');
+    // Payroll periods are Hijri Shamsi months. Both sessions (2026-01-05 and
+    // 2026-01-12) fall inside Jadi 1404, which spans 2025-12-22..2026-01-20.
+    const result = computeTeacherDueAmount(db, teacher, '1404-10');
     expect(result.due).toBe(2000);
+    // A legacy Gregorian key must still resolve to the same Shamsi period.
+    expect(computeTeacherDueAmount(db, teacher, toPeriodKey('2026-01')).due).toBe(2000);
   });
 
   it('uses teacher-specific level/skill rate before generic rule fallback', () => {

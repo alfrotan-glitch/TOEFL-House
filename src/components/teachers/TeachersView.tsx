@@ -4,6 +4,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {Award, Plus, Wallet, Users, Search, X, Sparkles} from 'lucide-react';
 import {Teacher, Employee, Class, BudgetLine, UserRole, Skill, ClassTeacherSkill, Branch, Campus, TeacherContractType} from '../../types';
+import {todayJalali, jalaliPeriodKey} from '../../utils/jalali';
+
+/** Current Shamsi payroll period key, e.g. '1405-05'. */
+function currentJalaliPeriod(): string {
+  const t = todayJalali();
+  return jalaliPeriodKey(t.jy, t.jm);
+}
 import type {TeacherSalaryStatus} from '../../apiStore';
 import TeachersModals, { TeacherSkillAssignmentModal } from './TeachersModals';
 import {TeacherDirectoryPanel} from './TeacherDirectoryPanel';
@@ -84,7 +91,8 @@ export default function TeachersView({
   // Salary & Eval states
   const [salaryTeacher, setSalaryTeacher] = useState<Teacher | null>(null);
   const [salaryEmployee, setSalaryEmployee] = useState<Employee | null>(null);
-  const [selectedMonth, setSelectedMonth] = useState<string>(() => new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' }));
+  // Payroll periods are Hijri Shamsi months, e.g. '1405-05' (اسد ۱۴۰۵).
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => currentJalaliPeriod());
   const [paymentType, setPaymentType] = useState<'full' | 'partial' | 'advance'>('full');
   const [amountPaid, setAmountPaid] = useState<number>(0);
   const [printedPayslip, setPrintedPayslip] = useState<any | null>(null);
