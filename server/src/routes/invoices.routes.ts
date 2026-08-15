@@ -17,6 +17,7 @@ import { nextReceiptNumber } from '../utils/receipt.js';
 import { nextInvoiceNumber } from '../utils/invoice.js';
 import { SYSTEM_DEFAULTS } from '../core/configuration/policy-catalog.js';
 import { assertMoney } from '../utils/money.js';
+import { resolveIdempotency, isUniqueViolation } from '../utils/idempotency.js';
 
 export const invoicesRouter = Router();
 invoicesRouter.use(authenticate, authorize('owner', 'finance', 'manager', 'registrar'));
@@ -276,22 +277,46 @@ invoicesRouter.post(
     }
 
     const { amount, paymentMethod, notes } = req.body as { amount?: number; paymentMethod?: string; notes?: string };
-    const idempotencyKey = String(req.get('Idempotency-Key') || req.body?.idempotencyKey || '').trim();
-    if (idempotencyKey) {
-      const existing = stmtGetPaymentByIdempotency.get(idempotencyKey) as any;
-      if (existing) {
-        const existingInvoice = stmtGetInvoiceById.get(row.id) as any;
-        return res.status(200).json({ invoice: mapInvoice(existingInvoice, loadItems(row.id)), paymentId: existing.id, receiptNumber: existing.receipt_number, idempotentReplay: true });
-      }
-    }
     const VALID_METHODS = ['cash', 'card', 'bank_transfer'] as const;
     const resolvedMethod = VALID_METHODS.includes(paymentMethod as any) ? paymentMethod : 'cash';
     const payAmount = Number(amount);
     if (!(payAmount > 0)) throw new HttpError(400, 'Payment amount must be positive.');
 
-    const payId = id('pay');
-    const rc = nextReceiptNumber();
     const date = today();
+
+    // Duplicate protection. Previously this only ran when the CLIENT supplied a
+    // key, so an unkeyed double-click / retry storm recorded one payment and one
+    // income row per request. An explicit key still wins; otherwise a fingerprint
+    // of the payment intent within a short window collapses retries. A genuinely
+    // distinct later instalment (or one sent with its own key) still succeeds.
+    const replayPayment = (existing: any) => {
+      const existingInvoice = stmtGetInvoiceById.get(row.id) as any;
+      return res.status(200).json({
+        invoice: mapInvoice(existingInvoice, loadItems(row.id)),
+        paymentId: existing.id,
+        receiptNumber: existing.receipt_number,
+        idempotentReplay: true,
+      });
+    };
+
+    const { candidates: payIdemCandidates } = resolveIdempotency(req, {
+      route: 'invoice-pay',
+      invoiceId: row.id,
+      studentId: row.student_id,
+      amount: payAmount,
+      date,
+      method: resolvedMethod,
+      actorUserId: user.userId ?? null,
+    });
+    const priorPayment = db.prepare(
+      `SELECT * FROM payments WHERE idempotency_key IN (${payIdemCandidates.map(() => '?').join(',')}) LIMIT 1`
+    ).get(...payIdemCandidates) as any;
+    if (priorPayment?.id) return replayPayment(priorPayment);
+    const idempotencyKey = payIdemCandidates[0];
+
+    const payId = id('pay');
+    // Allocated only after the replay check so retries do not burn receipt numbers.
+    const rc = nextReceiptNumber();
     const student = stmtGetStudentById.get(row.student_id) as any;
 
     const tx = db.transaction(() => {
@@ -317,7 +342,17 @@ invoicesRouter.post(
       const newStatus = newPaid >= row.net_amount - 0.001 ? 'paid' : 'partial';
       stmtUpdateInvoiceStatus.run(newStatus, row.id);
     });
-    tx();
+    try {
+      tx();
+    } catch (err) {
+      // Two concurrent requests raced past the pre-check; the unique index on
+      // payments.idempotency_key is the authoritative guard. Serve the winner.
+      if (isUniqueViolation(err)) {
+        const winner = stmtGetPaymentByIdempotency.get(idempotencyKey) as any;
+        if (winner?.id) return replayPayment(winner);
+      }
+      throw err;
+    }
 
     writeAudit(req, `Payment ${payAmount} AFN on invoice ${row.invoice_number || row.id}`);
     addNotification('Invoice payment recorded', `${payAmount} AFN received for invoice ${row.invoice_number || row.id}.`, 'success', row.branch_id);

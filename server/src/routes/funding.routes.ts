@@ -26,6 +26,7 @@ import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
 import { addNotification } from '../utils/notifications.js';
 import { recordIncome } from '../utils/income.js';
+import { resolveIdempotency } from '../utils/idempotency.js';
 import { eventBus } from '../core/events/event-bus.js';
 
 export const fundingRouter = Router();
@@ -65,7 +66,7 @@ const stmtGetDonationsByBranch = db.prepare(
   `SELECT d.*, dn.full_name as donor_name, fc.name as campaign_name FROM donations d LEFT JOIN donors dn ON dn.id = d.donor_id LEFT JOIN funding_campaigns fc ON fc.id = d.campaign_id WHERE d.branch_id = ? ORDER BY d.date DESC`
 );
 const stmtInsertDonation = db.prepare(
-  `INSERT INTO donations (id, campaign_id, donor_id, amount, date, restricted, restriction_note, receipt_no, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  `INSERT INTO donations (id, campaign_id, donor_id, amount, date, restricted, restriction_note, receipt_no, branch_id, idempotency_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
 
 // Scholarships
@@ -303,12 +304,32 @@ fundingRouter.post(
 
     const donationDate = date || today();
     const newId = id('dn');
+
+    // Duplicate protection: a double-click / retry previously recorded one
+    // donation and one income row per click. Explicit client key wins;
+    // otherwise a fingerprint of the donation intent within a short window
+    // collapses retries. A genuinely repeated gift (later, or explicitly
+    // keyed) still succeeds.
+    const { candidates: donationIdemCandidates } = resolveIdempotency(req, {
+      route: 'donation',
+      donorId,
+      campaignId: campaignId || null,
+      amount: Number(amount),
+      date: donationDate,
+      actorUserId: user.userId ?? null,
+    });
+    const priorDonation = db.prepare(
+      `SELECT id, receipt_no FROM donations WHERE idempotency_key IN (${donationIdemCandidates.map(() => '?').join(',')}) LIMIT 1`
+    ).get(...donationIdemCandidates) as { id?: string; receipt_no?: string } | undefined;
+    if (priorDonation?.id) return res.status(200).json({ id: priorDonation.id, receiptNo: priorDonation.receipt_no, idempotentReplay: true });
+    const donationIdemKey = donationIdemCandidates[0];
+
     const receiptNo = nextScopedDocumentNumber('donation_receipt', user.branchId, 'DON');
 
     const tx = db.transaction(() => {
       stmtInsertDonation.run(
         newId, campaignId || null, donorId, amount, donationDate, 
-        restricted ? 1 : 0, restrictionNote || null, receiptNo, user.branchId
+        restricted ? 1 : 0, restrictionNote || null, receiptNo, user.branchId, donationIdemKey
       );
 
       if (campaignId) {
@@ -325,7 +346,19 @@ fundingRouter.post(
       { operatorId: user.userId, branchId: user.branchId }
       );
     });
-    const event = tx();
+    let event;
+    try {
+      event = tx();
+    } catch (err) {
+      // Atomic backstop: several concurrent requests can pass the check
+      // above, but only one wins the unique index. Losers replay the
+      // winner's donation instead of recording the gift twice.
+      if (String((err as { message?: string })?.message ?? '').includes('UNIQUE constraint failed')) {
+        const winner = db.prepare('SELECT id, receipt_no FROM donations WHERE idempotency_key = ?').get(donationIdemKey) as { id?: string; receipt_no?: string } | undefined;
+        if (winner?.id) return res.status(200).json({ id: winner.id, receiptNo: winner.receipt_no, idempotentReplay: true });
+      }
+      throw err;
+    }
     void eventBus.dispatch(event);
 
     addNotification('Donation Received', `A donation of ${amount.toLocaleString()} AFN was received from ${donor.full_name}. Receipt: ${receiptNo}`, 'success', user.branchId);

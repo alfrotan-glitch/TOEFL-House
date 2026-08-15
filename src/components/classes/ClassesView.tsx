@@ -14,6 +14,7 @@ import { formatAFN } from '../../utils/format';
 import { ClassDirectoryPanel } from './ClassDirectoryPanel';
 import { ClassDetailDrawer } from './ClassDetailDrawer'; // NEW: LMS Drawer
 import { api } from '../../api/client';
+import { ShamsiDateInput } from '../common/ShamsiDateInput';
 
 interface ClassesViewProps {
   classes: Class[];
@@ -591,34 +592,19 @@ export default function ClassesView({
             </div>
 
             <div>
-              <label className="block text-slate-600 mb-1 font-medium">Start date (Gregorian):</label>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono"
-              />
+              <label className="block text-slate-600 mb-1 font-medium">Start date:</label>
+              <ShamsiDateInput value={startDate} onChange={(v) => setStartDate(v)} />
             </div>
 
             <div>
-              <label className="block text-slate-600 mb-1 font-medium">Activation date (Gregorian):</label>
-              <input
-                type="date"
-                value={activationDate}
-                onChange={(e) => setActivationDate(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono"
-              />
+              <label className="block text-slate-600 mb-1 font-medium">Activation date:</label>
+              <ShamsiDateInput value={activationDate} onChange={(v) => setActivationDate(v)} />
               <p className="text-[10px] text-slate-400 mt-0.5">Class becomes operational on this date. Payroll only counts after activation.</p>
             </div>
 
             <div>
-              <label className="block text-slate-600 mb-1 font-medium">End date (Gregorian):</label>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono"
-              />
+              <label className="block text-slate-600 mb-1 font-medium">End date:</label>
+              <ShamsiDateInput value={endDate} onChange={(v) => setEndDate(v)} />
             </div>
 
             <div className="sm:col-span-2">
@@ -888,21 +874,11 @@ export default function ClassesView({
 
               <div>
                 <label className="block text-slate-600 mb-1 font-medium">Start date:</label>
-                <input
-                  type="date"
-                  value={editStartDate}
-                  onChange={(e) => setEditStartDate(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono"
-                />
+                <ShamsiDateInput value={editStartDate} onChange={(v) => setEditStartDate(v)} />
               </div>
               <div>
                 <label className="block text-slate-600 mb-1 font-medium">End date:</label>
-                <input
-                  type="date"
-                  value={editEndDate}
-                  onChange={(e) => setEditEndDate(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono"
-                />
+                <ShamsiDateInput value={editEndDate} onChange={(v) => setEditEndDate(v)} />
               </div>
               <p className="sm:col-span-2 text-[10px] text-slate-400">
                 Level, fee, hours, and capacity are Academic Setup rules. Change them in Academic Setup, not here.

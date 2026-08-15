@@ -17,6 +17,7 @@ import React, { useState, useMemo } from 'react';
 import {HandCoins, Users, Target, ReceiptText, GraduationCap, HeartHandshake, Plus, Search, Landmark, Building2, Globe2, User, Lock, Unlock, Calendar, Edit, X, Info, BadgeCheck} from 'lucide-react';
 import {Donor, FundingCampaign, Donation, Scholarship, ScholarshipAward, SponsorshipAgreement, Student, UserRole} from '../../types';
 import Toast from '../common/Toast';
+import { ShamsiDateInput } from '../common/ShamsiDateInput';
 
 // ============================================================================
 // Props
@@ -738,8 +739,8 @@ export default function FundingView({
             <div><label className={labelCls}>Target Amount (AFN) *</label>
               <input type="number" min={1} className={inputCls} value={campaignForm.targetAmount || ''} onChange={(e) => setCampaignForm({ ...campaignForm, targetAmount: Number(e.target.value) })} required /></div>
             <div className="grid grid-cols-2 gap-3">
-              <div><label className={labelCls}>Start Date</label><input type="date" className={inputCls} value={campaignForm.startDate} onChange={(e) => setCampaignForm({ ...campaignForm, startDate: e.target.value })} /></div>
-              <div><label className={labelCls}>End Date</label><input type="date" className={inputCls} value={campaignForm.endDate} onChange={(e) => setCampaignForm({ ...campaignForm, endDate: e.target.value })} /></div>
+              <ShamsiDateInput label="Start Date" value={campaignForm.startDate} onChange={(v) => setCampaignForm({ ...campaignForm, startDate: v })} />
+              <ShamsiDateInput label="End Date" value={campaignForm.endDate} onChange={(v) => setCampaignForm({ ...campaignForm, endDate: v })} />
             </div>
             <div><label className={labelCls}>Description</label><textarea className={inputCls} rows={2} value={campaignForm.description} onChange={(e) => setCampaignForm({ ...campaignForm, description: e.target.value })} /></div>
             <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-lg cursor-pointer transition-colors shadow-sm">Create Campaign</button>
@@ -763,7 +764,7 @@ export default function FundingView({
             <div className="grid grid-cols-2 gap-3">
               <div><label className={labelCls}>Amount (AFN) *</label>
                 <input type="number" min={1} className={inputCls} value={donationForm.amount || ''} onChange={(e) => setDonationForm({ ...donationForm, amount: Number(e.target.value) })} required /></div>
-              <div><label className={labelCls}>Date</label><input type="date" className={inputCls} value={donationForm.date} onChange={(e) => setDonationForm({ ...donationForm, date: e.target.value })} /></div>
+              <ShamsiDateInput label="Date" value={donationForm.date} onChange={(v) => setDonationForm({ ...donationForm, date: v })} />
             </div>
             <label className="flex items-center gap-2 cursor-pointer">
               <input type="checkbox" checked={donationForm.restricted} onChange={(e) => setDonationForm({ ...donationForm, restricted: e.target.checked })} className="w-4 h-4 accent-emerald-600 rounded" />
@@ -838,8 +839,8 @@ export default function FundingView({
             <div><label className={labelCls}>Monthly Amount (AFN) *</label>
               <input type="number" min={1} className={inputCls} value={sponsorshipForm.monthlyAmount || ''} onChange={(e) => setSponsorshipForm({ ...sponsorshipForm, monthlyAmount: Number(e.target.value) })} required /></div>
             <div className="grid grid-cols-2 gap-3">
-              <div><label className={labelCls}>Start Date</label><input type="date" className={inputCls} value={sponsorshipForm.startDate} onChange={(e) => setSponsorshipForm({ ...sponsorshipForm, startDate: e.target.value })} /></div>
-              <div><label className={labelCls}>End Date</label><input type="date" className={inputCls} value={sponsorshipForm.endDate} onChange={(e) => setSponsorshipForm({ ...sponsorshipForm, endDate: e.target.value })} /></div>
+              <ShamsiDateInput label="Start Date" value={sponsorshipForm.startDate} onChange={(v) => setSponsorshipForm({ ...sponsorshipForm, startDate: v })} />
+              <ShamsiDateInput label="End Date" value={sponsorshipForm.endDate} onChange={(v) => setSponsorshipForm({ ...sponsorshipForm, endDate: v })} />
             </div>
             <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-lg cursor-pointer transition-colors shadow-sm">Create Agreement</button>
           </form>

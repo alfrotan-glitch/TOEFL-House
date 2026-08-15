@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
+import { formatJalaliAxis, formatJalali } from '../../utils/jalali';
 import {TrendingUp, TrendingDown, Users, School, Wallet, PiggyBank, Eye, EyeOff, UserCheck, Clock, Zap, AlertTriangle, BookOpen, Activity, GraduationCap, Loader2, CheckCircle2, CalendarDays, BarChart3, Sparkles} from 'lucide-react';
 import {AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend, RadialBarChart, RadialBar} from 'recharts';
 import {Student, Teacher, Class, Visitor, Invoice, FinancialTransaction, AuditLog, BudgetLine, UserRole} from '../../types';
@@ -122,7 +123,7 @@ export default function DashboardView({
       const d = new Date();
       d.setDate(d.getDate() - (6 - idx));
       const iso = d.toISOString().split('T')[0];
-      const label = d.toLocaleDateString('en-US', { month: 'short', day: '2-digit' });
+      const label = formatJalaliAxis(d.toLocaleDateString('en-CA'));
       return {
         name: label,
         Income: transactions.filter((t) => t.type === 'income' && t.date === iso).reduce((s, t) => s + t.amount, 0),
@@ -264,7 +265,7 @@ export default function DashboardView({
             </h1>
             <p className="mt-1.5 text-sm text-slate-500 flex items-center gap-2 font-medium">
               <CalendarDays className="w-4 h-4 text-slate-400" />
-              {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+              {formatJalali(new Date().toLocaleDateString('en-CA'), 'long')}
             </p>
           </div>
           <div className="flex items-center gap-3">

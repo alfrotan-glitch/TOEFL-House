@@ -14,6 +14,7 @@ import {
   AlertTriangle, Ban, History,
 } from 'lucide-react';
 import type { WorkflowInstance, Automation, WorkflowStatus } from '../../types';
+import { formatJalaliDateTime } from '../../utils/jalali';
 
 interface WorkflowStepDef {
   order: number;
@@ -200,8 +201,8 @@ export default function WorkflowsView({
                 <div>
                   <h3 className="font-bold text-slate-900">{detail.definitionName}</h3>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Started {new Date(detail.startedAt).toLocaleString('en-US')}
-                    {detail.completedAt && ` — Ended ${new Date(detail.completedAt).toLocaleString('en-US')}`}
+                    Started {formatJalaliDateTime(detail.startedAt)}
+                    {detail.completedAt && ` — Ended ${formatJalaliDateTime(detail.completedAt)}`}
                   </p>
                 </div>
 
@@ -298,7 +299,7 @@ export default function WorkflowsView({
                             <strong>{h.actor}</strong> — {h.action === 'approve' ? 'approved' : h.action === 'reject' ? 'rejected' : h.action}
                             {h.notes && ` («${h.notes}»)`}
                           </span>
-                          <span className="text-[10px] font-mono text-slate-400 shrink-0">{new Date(h.timestamp).toLocaleString('en-US')}</span>
+                          <span className="text-[10px] font-mono text-slate-400 shrink-0">{formatJalaliDateTime(h.timestamp)}</span>
                         </div>
                       ))
                     )}

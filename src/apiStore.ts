@@ -1070,9 +1070,13 @@ export function useApiStore() {
   };
 
   const payInvoice = async (invoiceId: string, amount: number, paymentMethod: 'cash' | 'card' | 'bank_transfer' = 'cash', notes?: string) => {
+    // Explicit per-submission key so a retry is replayed by the server rather
+    // than charged twice. The backend also derives one when absent.
     const result = await api.post<{ invoice: Invoice; paymentId: string; receiptNumber: string }>(
       `/invoices/${invoiceId}/pay`,
-      { amount, paymentMethod, notes }
+      { amount, paymentMethod, notes },
+      undefined,
+      { 'Idempotency-Key': crypto.randomUUID() }
     );
     await Promise.all([reloadInvoices(), reloadPayments(), reloadTransactions(), reloadFinanceOverview(), reloadFinanceConfig()]);
     return result;

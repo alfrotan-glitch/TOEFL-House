@@ -1276,7 +1276,9 @@ CREATE TABLE IF NOT EXISTS donations (
   restriction_note TEXT, 
   receipt_no       TEXT NOT NULL, 
   branch_id        TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT, 
-  created_at       TEXT NOT NULL DEFAULT (datetime('now')) 
+  created_at       TEXT NOT NULL DEFAULT (datetime('now')), 
+  -- Duplicate-click protection for the donation desk (migration 061).
+  idempotency_key  TEXT 
 ); 
 
 CREATE TABLE IF NOT EXISTS scholarships ( 

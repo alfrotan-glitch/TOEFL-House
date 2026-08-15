@@ -12,6 +12,7 @@ import { formatAFN } from '../../utils/format';
 import ProgramVersionsPanel from './ProgramVersionsPanel';
 import ClassGenerationWizard from './ClassGenerationWizard';
 import OfferingsPanel from './OfferingsPanel';
+import { ShamsiDateInput } from '../common/ShamsiDateInput';
 
 type Tab = 'catalog' | 'versions' | 'offerings' | 'generate' | 'slots' | 'rooms' | 'terms';
 
@@ -187,7 +188,7 @@ export default function AcademicSetupView({ branchId }: { branchId?: string } = 
                 <input type="number" required value={termForm.year} onChange={(e) => setTermForm({ ...termForm, year: Number(e.target.value) })} className="border border-slate-200 rounded-lg px-2 py-1.5" placeholder="Year" />
                 <input required value={termForm.code} onChange={(e) => setTermForm({ ...termForm, code: e.target.value })} placeholder="Code" className="border border-slate-200 rounded-lg px-2 py-1.5 font-mono" />
                 <input required value={termForm.name} onChange={(e) => setTermForm({ ...termForm, name: e.target.value })} placeholder="Name" className="border border-slate-200 rounded-lg px-2 py-1.5" />
-                <input type="date" value={termForm.startDate} onChange={(e) => setTermForm({ ...termForm, startDate: e.target.value })} className="border border-slate-200 rounded-lg px-2 py-1.5" />
+                <ShamsiDateInput value={termForm.startDate} onChange={(v) => setTermForm({ ...termForm, startDate: v })} />
                 <button type="submit" disabled={busy} className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-bold disabled:opacity-50 flex items-center justify-center gap-1">{busy && <Loader2 className="w-3 h-3 animate-spin" />} Create</button>
               </form>
               <div className="space-y-2">

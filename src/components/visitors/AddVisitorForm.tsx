@@ -6,6 +6,7 @@ import React, { useState } from 'react';
 import { UserPlus, X, CheckCircle2, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 import { Branch, Visitor } from '../../types';
 import { validatePhone } from '../../utils/erpHelpers';
+import { ShamsiDateInput } from '../common/ShamsiDateInput';
 
 interface AddVisitorFormProps {
   branches: Branch[];
@@ -141,8 +142,7 @@ export default function AddVisitorForm({
         
         {}
         <div>
-          <label className={labelCls}>Next contact date</label>
-          <input type="date" value={nextContactDate} onChange={(e) => setNextContactDate(e.target.value)} className={inputCls} />
+          <ShamsiDateInput label="Next contact date" value={nextContactDate} onChange={setNextContactDate} />
         </div>
         <div>
           <label className={labelCls}>Branch</label>

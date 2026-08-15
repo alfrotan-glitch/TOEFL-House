@@ -4,6 +4,7 @@
 import React, { useEffect, useState } from 'react';
 import { X, RotateCcw, AlertTriangle, History, Loader2, Filter } from 'lucide-react';
 import type { BusinessRule, BusinessRuleVersion } from '../../types';
+import { formatJalaliDateTime } from '../../utils/jalali';
 
 interface Props {
   rule: BusinessRule;
@@ -100,7 +101,7 @@ export default function RuleVersionHistoryModal({ rule, getBusinessRuleVersions,
                         )}
                       </div>
                       
-                      <p className="text-[11px] text-slate-500 mb-3">Edited by <span className="font-semibold text-slate-700">{v.modifiedBy}</span> on {new Date(v.modifiedAt).toLocaleString('en-US')}</p>
+                      <p className="text-[11px] text-slate-500 mb-3">Edited by <span className="font-semibold text-slate-700">{v.modifiedBy}</span> on {formatJalaliDateTime(v.modifiedAt)}</p>
 
                       <div className="mt-2 pt-2 border-t border-slate-200">
                         <p className="flex items-center gap-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5"><Filter className="w-3 h-3" /> Conditions</p>

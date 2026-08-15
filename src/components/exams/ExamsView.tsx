@@ -5,6 +5,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Award, Plus, Check, Sparkles, AlertCircle, Bookmark, User, UserPlus, CreditCard, ClipboardList, CalendarDays, Trash2, Edit3, X, History, CalendarCheck, Printer, Edit } from 'lucide-react';
 import { Exam, ExamResult, Student, Visitor, UserRole } from '../../types';
 import { formatAFN } from '../../utils/format';
+import { ShamsiDateInput } from '../common/ShamsiDateInput';
 
 interface ExamsViewProps {
   exams: Exam[];
@@ -307,8 +308,7 @@ export default function ExamsView({
               <input type="text" placeholder="e.g. TOEFL Simulation July - 2026" value={examTitle} onChange={(e) => setExamTitle(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500/30 focus:outline-none" required disabled={isProcessing} />
             </div>
             <div>
-              <label className="block text-slate-600 mb-1 font-medium">Exam date:</label>
-              <input type="date" value={examDate} onChange={(e) => setExamDate(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono text-left focus:ring-2 focus:ring-indigo-500/30 focus:outline-none" disabled={isProcessing} />
+              <ShamsiDateInput label="Exam date" value={examDate} onChange={setExamDate} disabled={isProcessing} />
             </div>
             <div>
               <label className="block text-slate-600 mb-1 font-medium">Registration fee (AFN):</label>

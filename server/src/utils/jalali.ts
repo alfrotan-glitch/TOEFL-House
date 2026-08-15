@@ -272,3 +272,25 @@ export function recentJalaliPeriods(count = 8, offsetFuture = 1): string[] {
   }
   return keys;
 }
+
+/**
+ * Formats a stored Gregorian DATETIME (ISO string) as Shamsi date + local
+ * time, e.g. "۲۴ اسد ۱۴۰۵ ۱۴:۳۰". Used for audit/journey/workflow timelines
+ * where the clock time matters as much as the day.
+ */
+export function formatJalaliDateTime(value: string | null | undefined, latinDigits = false): string {
+  if (!value) return '—';
+  const datePart = formatJalali(value, 'long', true);
+  if (datePart === '—') return '—';
+  const d = new Date(value);
+  const time = Number.isNaN(d.getTime())
+    ? ''
+    : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const out = time ? `${datePart} ${time}` : datePart;
+  return latinDigits ? out : toPersianDigits(out);
+}
+
+/** Short Shamsi label for chart axes, e.g. "۲۴ اسد". */
+export function formatJalaliAxis(value: string | null | undefined): string {
+  return formatJalali(value, 'short');
+}

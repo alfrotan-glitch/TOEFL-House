@@ -8,6 +8,7 @@ import {BookOpen, ShoppingBag, Plus, Sparkles, ClipboardList, TrendingUp, Calend
 import {Book, BookSale, Student, UserRole} from '../../types';
 import BooksModals from './BooksModals';
 import {formatAFN} from '../../utils/format';
+import { ShamsiDateInput } from '../common/ShamsiDateInput';
 
 interface BooksViewProps {
   books: Book[];
@@ -1045,13 +1046,7 @@ export default function BooksView({
               {/* Entry Date Picker */}
               <div className="space-y-1">
                 <label className="block text-slate-600 font-semibold">Warehouse entry date:</label>
-                <input
-                  type="date"
-                  value={newEntryDate}
-                  onChange={(e) => setNewEntryDate(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500/10 font-mono"
-                  required
-                />
+                <ShamsiDateInput value={newEntryDate} onChange={(v) => setNewEntryDate(v)} required />
               </div>
             </div>
 

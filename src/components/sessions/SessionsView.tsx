@@ -7,6 +7,8 @@ import {CalendarDays, Plus, CheckCircle2, Ban, BookOpenCheck, Users, ClipboardCh
 import {api} from '../../api/client';
 import {Class, Student, Teacher, Session, UserRole, Skill, ClassTeacherSkill} from '../../types';
 import Toast from '../common/Toast';
+import { formatJalali } from '../../utils/jalali';
+import { ShamsiDateInput } from '../common/ShamsiDateInput';
 
 type AttendanceStatus = 'present' | 'absent' | 'sick' | 'leave' | 'not_marked';
 
@@ -96,8 +98,8 @@ function iso(d: Date): string {
 }
 
 function formatDay(isoDate: string): string {
-  const d = new Date(`${isoDate}T00:00:00`);
-  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  // Sessions are scheduled and read in the Afghan calendar.
+  return formatJalali(isoDate, 'short');
 }
 
 export default function SessionsView({
@@ -827,12 +829,7 @@ export default function SessionsView({
                         placeholder="Homework title"
                         className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
                       />
-                      <input
-                        type="date"
-                        value={hwDue}
-                        onChange={(e) => setHwDue(e.target.value)}
-                        className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
-                      />
+                      <ShamsiDateInput value={hwDue} onChange={(v) => setHwDue(v)} />
                       <button
                         type="submit"
                         className="w-full rounded-lg bg-indigo-600 py-1.5 text-[11px] font-bold text-white"
@@ -957,13 +954,7 @@ export default function SessionsView({
             <form onSubmit={handleCreate} className="mt-4 space-y-3 text-xs">
               <div>
                 <label className="font-bold text-slate-500">Date</label>
-                <input
-                  type="date"
-                  required
-                  value={createDate}
-                  onChange={(e) => setCreateDate(e.target.value)}
-                  className="mt-0.5 w-full rounded-xl border border-slate-200 px-3 py-2"
-                />
+                <ShamsiDateInput value={createDate} onChange={(v) => setCreateDate(v)} required />
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>

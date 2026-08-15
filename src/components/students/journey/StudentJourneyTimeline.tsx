@@ -6,6 +6,7 @@ import React, { useEffect, useState , useCallback} from 'react';
 import {Route, Wallet, Loader2, RefreshCw, UserPlus, CreditCard, GraduationCap, BookOpen, AlertCircle, CheckCircle2, ArrowRightCircle, XCircle, PauseCircle, PlayCircle} from 'lucide-react';
 import {api} from '../../../api/client';
 import {formatAFN} from '../../../utils/format';
+import { formatJalaliDateTime } from '../../../utils/jalali';
 
 export interface JourneyTimelineItem {
   id: string;
@@ -209,7 +210,7 @@ export default function StudentJourneyTimeline({ studentId }: Props) {
           {timeline.map((item) => {
             const { Icon, color, bg } = getEventVisuals(item.eventType);
             const chips = payloadChips(item);
-            const dateStr = item.occurredAt ? new Date(item.occurredAt).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Unknown date';
+            const dateStr = item.occurredAt ? formatJalaliDateTime(item.occurredAt) : 'Unknown date';
 
             return (
               <li key={item.id} className="mb-6 ms-6">

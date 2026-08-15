@@ -7,6 +7,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Search, RefreshCw } from 'lucide-react';
 import { api } from '../../api/client';
+import { ShamsiDateInput } from '../common/ShamsiDateInput';
 
 interface AuditLogRow {
   id: string;
@@ -80,11 +81,11 @@ export default function AuditLogView() {
         </div>
         <div className="space-y-1">
           <label className="text-[10px] font-bold text-slate-400 uppercase">From</label>
-          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none" />
+          <ShamsiDateInput value={dateFrom} onChange={setDateFrom} />
         </div>
         <div className="space-y-1">
           <label className="text-[10px] font-bold text-slate-400 uppercase">To</label>
-          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none" />
+          <ShamsiDateInput value={dateTo} onChange={setDateTo} />
         </div>
       </div>
 
