@@ -59,10 +59,10 @@ export function TeacherDirectoryPanel({
                 </div>
                 <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-[9px] font-bold">
                   {teacher.salaryType === 'per_skill' ? 'Per Skill'
-                    : teacher.salaryType === 'hybrid_skill' ? 'Hybrid Skill'
+                    : teacher.salaryType === 'hybrid' ? 'Hybrid (Base + Skill)'
                     : teacher.salaryType === 'per_level' ? 'Per Level'
-                    : teacher.salaryType === 'hybrid_level' ? 'Hybrid Level'
                     : teacher.salaryType === 'per_session' ? 'Per Session'
+                    : teacher.salaryType === 'hybrid_skill' || teacher.salaryType === 'hybrid_level' ? 'Hybrid'
                     : 'Fixed'}
                 </span>
               </div>

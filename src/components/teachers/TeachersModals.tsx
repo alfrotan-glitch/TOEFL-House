@@ -53,7 +53,7 @@ interface TeachersModalsProps {
   editTQualification: string; setEditTQualification: (v: string) => void;
   editTContractType: 'monthly' | 'hourly' | 'per_session'; setEditTContractType: (v: 'monthly' | 'hourly' | 'per_session') => void;
   editTStatus: 'active' | 'inactive' | 'on_leave'; setEditTStatus: (v: 'active' | 'inactive' | 'on_leave') => void;
-  editTDefaultSkillRate: number; setEditTDefaultSkillRate: (v: number) => void;
+  editTDefaultSkillRate: number; setEditTDefaultSkillRate: (v: number) => void; editTTargetSkills: number | ''; setEditTTargetSkills: (v: number | '') => void;
   handleEditTeacherSubmit: (e: React.FormEvent) => void;
 
   // Edit employee
@@ -101,7 +101,7 @@ export default function TeachersModals(props: TeachersModalsProps) {
     editingTeacher, setEditingTeacher, editTFullName, setEditTFullName, editTPhone, setEditTPhone,
     editTEmail, setEditTEmail, editTBaseSalary, setEditTBaseSalary, editTSalaryType, setEditTSalaryType,
     editTSpecialization, setEditTSpecialization, editTQualification, setEditTQualification, 
-    editTContractType, setEditTContractType, editTStatus, setEditTStatus, editTDefaultSkillRate, setEditTDefaultSkillRate,
+    editTContractType, setEditTContractType, editTStatus, setEditTStatus, editTDefaultSkillRate, setEditTDefaultSkillRate, editTTargetSkills, setEditTTargetSkills,
     handleEditTeacherSubmit,
     editingEmployee, setEditingEmployee, editEFullName, setEditEFullName, editEPhone, setEditEPhone,
     editEEmail, setEditEEmail, editERole, setEditERole, editEBaseSalary, setEditEBaseSalary, editEStatus, setEditEStatus,
@@ -164,8 +164,7 @@ export default function TeachersModals(props: TeachersModalsProps) {
                   <option value="per_skill">Per Skill (Count × Default Rate)</option>
                   <option value="per_level">Per Level (Rule Engine Rate)</option>
                   <option value="per_session">Per Session (Completed Sessions)</option>
-                  <option value="hybrid_skill">Hybrid Skill (Base + Per Skill)</option>
-                  <option value="hybrid_level">Hybrid Level (Base + Per Level)</option>
+                  <option value="hybrid">Hybrid (Base + Per Skill)</option>
                 </select>
               </div>
               <div>
@@ -175,6 +174,12 @@ export default function TeachersModals(props: TeachersModalsProps) {
               <div>
                 <label className="block text-slate-600 font-semibold mb-1">Default Skill Rate (AFN):</label>
                 <input type="number" value={editTDefaultSkillRate} onChange={(e) => setEditTDefaultSkillRate(Number(e.target.value))} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono" min={0} />
+                <p className="text-[9px] text-slate-400 mt-1">Used in 'Per Skill' or 'Per Session' if specific class rate is not set.</p>
+              </div>
+              <div>
+                <label className="block text-slate-600 font-semibold mb-1">Target Skills / Month (workload):</label>
+                <input type="number" min={0} value={editTTargetSkills} onChange={(e) => setEditTTargetSkills(e.target.value === '' ? '' : Number(e.target.value))} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono" placeholder="optional" />
+                <p className="text-[9px] text-slate-400 mt-1">Workload KPI only — never changes salary.</p>
                 <p className="text-[9px] text-slate-400 mt-1">Used in 'Per Skill' or 'Per Session' if specific class rate is not set.</p>
               </div>
               <div>

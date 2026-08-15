@@ -529,8 +529,9 @@ export interface Teacher {
   phone: string;
   email: string;
   baseSalary: number;
-  salaryType: 'fixed' | 'per_skill' | 'per_level' | 'per_session' | 'hybrid_skill' | 'hybrid_level';
+  salaryType: 'fixed' | 'per_skill' | 'per_level' | 'per_session' | 'hybrid' | 'hybrid_skill' | 'hybrid_level';
   defaultSkillRate?: number;
+  targetSkillsPerMonth?: number | null;
   performanceScore: number;
   status: 'active' | 'inactive' | 'on_leave';
   branchId: string;

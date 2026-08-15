@@ -35,7 +35,7 @@ export interface TeacherSalaryStatus {
   teacherId: string;
   periodKey: string;
   periodLabel: string;
-  model: 'fixed' | 'per_skill' | 'per_level' | 'per_session' | 'hybrid_skill' | 'hybrid_level';
+  model: 'fixed' | 'per_skill' | 'per_level' | 'per_session' | 'hybrid' | 'hybrid_skill' | 'hybrid_level';
   due: number;
   paid: number;
   remaining: number;
@@ -697,9 +697,9 @@ export function useApiStore() {
   };
 
   const addTeacher = async (fullName: string, phone: string, email: string, baseSalary: number,
-    salaryType: 'fixed' | 'per_skill' | 'per_level' | 'per_session' | 'hybrid_skill' | 'hybrid_level' = 'fixed', specialization?: string, qualification?: string, contractType?: 'monthly' | 'hourly' | 'per_session', branchId?: string, defaultSkillRate?: number) => {
+    salaryType: 'fixed' | 'per_skill' | 'per_level' | 'per_session' | 'hybrid' | 'hybrid_skill' | 'hybrid_level' = 'fixed', specialization?: string, qualification?: string, contractType?: 'monthly' | 'hourly' | 'per_session', branchId?: string, defaultSkillRate?: number, targetSkillsPerMonth?: number) => {
     await api.post('/teachers', {
-      fullName, phone, email, baseSalary, salaryType, specialization, qualification, contractType, defaultSkillRate,
+      fullName, phone, email, baseSalary, salaryType, specialization, qualification, contractType, defaultSkillRate, targetSkillsPerMonth,
       branchId: branchId || currentBranchId,
     });
     await reloadTeachers();
@@ -715,9 +715,9 @@ export function useApiStore() {
   };
 
   const editTeacher = async (id: string, fullName: string, phone: string, email: string, baseSalary: number,
-    salaryType?: 'fixed' | 'per_skill' | 'per_level' | 'per_session' | 'hybrid_skill' | 'hybrid_level', specialization?: string, qualification?: string,
-    contractType?: 'monthly' | 'hourly' | 'per_session', status?: 'active' | 'inactive' | 'on_leave') => {
-    await api.put(`/teachers/${id}`, { fullName, phone, email, baseSalary, salaryType, specialization, qualification, contractType, status });
+    salaryType?: 'fixed' | 'per_skill' | 'per_level' | 'per_session' | 'hybrid' | 'hybrid_skill' | 'hybrid_level', specialization?: string, qualification?: string,
+    contractType?: 'monthly' | 'hourly' | 'per_session', status?: 'active' | 'inactive' | 'on_leave', defaultSkillRate?: number, targetSkillsPerMonth?: number) => {
+    await api.put(`/teachers/${id}`, { fullName, phone, email, baseSalary, salaryType, specialization, qualification, contractType, status, defaultSkillRate, targetSkillsPerMonth });
     await reloadTeachers();
   };
 

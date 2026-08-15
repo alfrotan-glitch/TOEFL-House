@@ -27,7 +27,7 @@ interface TeacherRow {
   base_salary: number; salary_type: string; performance_score: number;
   status: string; branch_id: string; joined_date: string;
   specialization: string | null; qualification: string | null;
-  contract_type: string | null; default_skill_rate: number; user_id: string | null;
+  contract_type: string | null; default_skill_rate: number; user_id: string | null; target_skills_per_month: number | null;
 }
 
 interface EmployeeRow {
@@ -60,10 +60,10 @@ const stmtGetActiveTeacherAssignments = db.prepare(`SELECT cts.id, cts.class_id,
 const stmtGetTeacherSalaryLedger = db.prepare("SELECT COALESCE(SUM(paid_amount),0) AS paid FROM teacher_salary_ledger WHERE teacher_id = ? AND period_key = ?");
 
 const stmtInsertTeacher = db.prepare(
-  `INSERT INTO teachers (id, full_name, phone, email, base_salary, salary_type, performance_score, status, branch_id, joined_date, specialization, qualification, contract_type, default_skill_rate) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)`
+  `INSERT INTO teachers (id, full_name, phone, email, base_salary, salary_type, performance_score, status, branch_id, joined_date, specialization, qualification, contract_type, default_skill_rate, target_skills_per_month) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)`
 );
 const stmtUpdateTeacher = db.prepare(
-  `UPDATE teachers SET full_name=?, phone=?, email=?, base_salary=?, salary_type=?, specialization=?, qualification=?, contract_type=?, status=?, default_skill_rate=COALESCE(?, default_skill_rate), performance_score=? WHERE id=?`
+  `UPDATE teachers SET full_name=?, phone=?, email=?, base_salary=?, salary_type=?, specialization=?, qualification=?, contract_type=?, status=?, default_skill_rate=COALESCE(?, default_skill_rate), performance_score=?, target_skills_per_month=? WHERE id=?`
 );
 
 const stmtGetBranchById = db.prepare('SELECT id, name, is_active, campus_id FROM branches WHERE id = ?');
@@ -95,7 +95,17 @@ const stmtUpdateUserBranchById = db.prepare('UPDATE users SET branch_id = ? WHER
 const stmtSoftDeleteEmployee = db.prepare("UPDATE employees SET status = 'inactive' WHERE id = ?");
 const stmtCheckDuplicateEmployeePay = db.prepare(`SELECT id FROM financial_transactions WHERE reference_id = ? AND category = 'salary' AND description LIKE ? LIMIT 1`);
 
-const ALLOWED_SALARY_TYPES = ['fixed', 'per_skill', 'per_level', 'per_session', 'hybrid_skill', 'hybrid_level'];
+// The DB (teachers.salary_type CHECK) defines EXACTLY FIVE contract types:
+// fixed | per_skill | per_session | hybrid | per_level. The legacy
+// 'hybrid_skill'/'hybrid_level' values from an earlier draft were never
+// storable; they are normalized to the DB's 'hybrid' for backward
+// compatibility with any historical compensation rows.
+const ALLOWED_SALARY_TYPES = ['fixed', 'per_skill', 'per_session', 'hybrid', 'per_level'] as const;
+function normalizeSalaryType(raw: unknown): string {
+  const v = String(raw ?? '');
+  if (v === 'hybrid_skill' || v === 'hybrid_level') return 'hybrid';
+  return ALLOWED_SALARY_TYPES.includes(v as any) ? v : '';
+}
 
 /** Safely extract user context */
 function getUserContext(req: import('express').Request) {
@@ -110,7 +120,8 @@ function mapTeacher(row: TeacherRow | undefined) {
     id: row.id, fullName: row.full_name, phone: row.phone, email: row.email, baseSalary: row.base_salary, 
     salaryType: row.salary_type, performanceScore: row.performance_score, status: row.status, branchId: row.branch_id, 
     joinedDate: row.joined_date, specialization: row.specialization, qualification: row.qualification, 
-    contractType: row.contract_type, defaultSkillRate: row.default_skill_rate ?? 0, userId: row.user_id 
+    contractType: row.contract_type, defaultSkillRate: row.default_skill_rate ?? 0, userId: row.user_id, 
+    targetSkillsPerMonth: row.target_skills_per_month ?? null 
   };
 }
 
@@ -158,7 +169,7 @@ teachersRouter.get('/', requirePermission('Teacher.View'), ah(async (req, res) =
 
 teachersRouter.post('/', requirePermission('Teacher.Create'), ah(async (req, res) => {
   const user = getUserContext(req);
-  const { fullName, phone, email, baseSalary, salaryType, specialization, qualification, contractType, branchId, defaultSkillRate: bodyDefaultSkillRate } = req.body;
+  const { fullName, phone, email, baseSalary, salaryType, specialization, qualification, contractType, branchId, defaultSkillRate: bodyDefaultSkillRate, targetSkillsPerMonth } = req.body;
   const numericBaseSalary = Number(baseSalary);
   if (!fullName || !String(fullName).trim() || !Number.isFinite(numericBaseSalary) || numericBaseSalary < 0) throw new HttpError(400, 'Full name and a valid non-negative base salary are required.');
 
@@ -168,13 +179,17 @@ teachersRouter.post('/', requirePermission('Teacher.Create'), ah(async (req, res
   if (!branch) throw new HttpError(400, 'Target branch not found.');
   if (!branch.is_active) throw new HttpError(400, 'Cannot assign a teacher to an inactive branch.');
 
-  const resolvedType = salaryType ? (ALLOWED_SALARY_TYPES.includes(salaryType) ? salaryType : (() => { throw new HttpError(400, 'Invalid salary type.'); })()) : 'fixed';
+  const normalizedSalaryType = salaryType ? normalizeSalaryType(salaryType) : 'fixed';
+  if (!normalizedSalaryType) throw new HttpError(400, `Invalid salary type. Allowed: ${ALLOWED_SALARY_TYPES.join(', ')}.`);
+  const resolvedType = normalizedSalaryType;
   const allowedContractTypes = ['monthly','hourly','per_session'];
   if (contractType && !allowedContractTypes.includes(contractType)) throw new HttpError(400, 'Invalid contract type.');
   if ((resolvedType === 'per_session') && contractType && contractType !== 'per_session') throw new HttpError(400, 'A per-session salary model requires a per-session contract type.');
   const defaultSkillRate = bodyDefaultSkillRate == null ? 0 : Number(bodyDefaultSkillRate);
   if (!Number.isFinite(defaultSkillRate) || defaultSkillRate < 0) throw new HttpError(400, 'Default skill rate must be a non-negative number.');
-  if ((resolvedType === 'per_skill' || resolvedType === 'hybrid_skill') && defaultSkillRate <= 0 && Number(baseSalary) <= 0) {
+  const resolvedTarget = targetSkillsPerMonth == null ? null : Number(targetSkillsPerMonth);
+  if (resolvedTarget != null && (!Number.isInteger(resolvedTarget) || resolvedTarget < 0)) throw new HttpError(400, 'Target skills per month must be a non-negative integer.');
+  if ((resolvedType === 'per_skill' || resolvedType === 'hybrid') && defaultSkillRate <= 0 && Number(baseSalary) <= 0) {
     throw new HttpError(400, 'A skill-based salary requires a positive base salary or default skill rate.');
   }
 
@@ -183,7 +198,7 @@ teachersRouter.post('/', requirePermission('Teacher.Create'), ah(async (req, res
     // New teachers start with NO evaluation (performance_score 0) — a 50/100
     // default silently fabricated a half-appraisal. The score is set only by
     // the evaluation endpoint (POST /:id/evaluation).
-    stmtInsertTeacher.run(newId, String(fullName).trim(), phone || null, email || null, numericBaseSalary, resolvedType, 0, resolvedBranchId, today(), specialization || null, qualification || null, contractType || null, defaultSkillRate);
+    stmtInsertTeacher.run(newId, String(fullName).trim(), phone || null, email || null, numericBaseSalary, resolvedType, 0, resolvedBranchId, today(), specialization || null, qualification || null, contractType || null, defaultSkillRate, resolvedTarget);
     stmtInsertCompensationHistory.run(id('tch'), newId, today(), numericBaseSalary, resolvedType, contractType || null, defaultSkillRate, 'Initial contract', user.userId);
   });
   tx();
@@ -194,12 +209,12 @@ teachersRouter.post('/', requirePermission('Teacher.Create'), ah(async (req, res
 
 teachersRouter.put('/:id', requirePermission('Teacher.Edit'), ah(async (req, res) => {
   const existing = requireTeacher(req, req.params.id);
-  const { fullName, phone, email, baseSalary, salaryType, specialization, qualification, contractType, status, performanceScore } = req.body;
+  const { fullName, phone, email, baseSalary, salaryType, specialization, qualification, contractType, status, performanceScore, targetSkillsPerMonth } = req.body;
   if (status && !['active','inactive','on_leave'].includes(status)) throw new HttpError(400, 'Invalid teacher status.');
   const nextBaseSalary = baseSalary != null ? Number(baseSalary) : Number(existing.base_salary);
   if (!Number.isFinite(nextBaseSalary) || nextBaseSalary < 0) throw new HttpError(400, 'Base salary must be a non-negative number.');
   if (req.body.defaultSkillRate != null && (!Number.isFinite(Number(req.body.defaultSkillRate)) || Number(req.body.defaultSkillRate) < 0)) throw new HttpError(400, 'Default skill rate must be a non-negative number.');
-  const resolvedType = salaryType ? (ALLOWED_SALARY_TYPES.includes(salaryType) ? salaryType : (() => { throw new HttpError(400, 'Invalid salary type.'); })()) : existing.salary_type;
+  const resolvedType = salaryType ? (normalizeSalaryType(salaryType) || (() => { throw new HttpError(400, `Invalid salary type. Allowed: ${ALLOWED_SALARY_TYPES.join(', ')}.`); })()) : existing.salary_type;
   const nextContractType = contractType ?? existing.contract_type;
   if (nextContractType && !['monthly','hourly','per_session'].includes(nextContractType)) throw new HttpError(400, 'Invalid contract type.');
   if (resolvedType === 'per_session' && nextContractType && nextContractType !== 'per_session') throw new HttpError(400, 'A per-session salary model requires a per-session contract type.');
@@ -209,6 +224,8 @@ teachersRouter.put('/:id', requirePermission('Teacher.Edit'), ah(async (req, res
 
   const nextDefaultSkillRate = req.body.defaultSkillRate != null ? Number(req.body.defaultSkillRate) : Number(existing.default_skill_rate);
   if (!Number.isFinite(nextDefaultSkillRate) || nextDefaultSkillRate < 0) throw new HttpError(400, 'Default skill rate must be a non-negative number.');
+  const nextTarget: number | null = targetSkillsPerMonth != null ? Number(targetSkillsPerMonth) : (existing.target_skills_per_month == null ? null : Number(existing.target_skills_per_month));
+  if (targetSkillsPerMonth != null && (!Number.isInteger(nextTarget) || nextTarget! < 0)) throw new HttpError(400, 'Target skills per month must be a non-negative integer.');
   const compensationChanged = nextBaseSalary !== Number(existing.base_salary) || resolvedType !== existing.salary_type || nextContractType !== existing.contract_type || nextDefaultSkillRate !== Number(existing.default_skill_rate);
   const effectiveFrom = typeof req.body.effectiveFrom === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.body.effectiveFrom) ? req.body.effectiveFrom : today();
   const joinedDate = (db.prepare('SELECT joined_date FROM teachers WHERE id = ?').get(existing.id) as { joined_date?: string } | undefined)?.joined_date;
@@ -220,6 +237,7 @@ teachersRouter.put('/:id', requirePermission('Teacher.Edit'), ah(async (req, res
       nextContractType, status ?? existing.status,
       nextDefaultSkillRate,
       resolvedScore, 
+      nextTarget,
       req.params.id
     );
     if (compensationChanged) {
@@ -270,7 +288,7 @@ teachersRouter.delete('/:id', requirePermission('Teacher.Delete', 'Teacher.Edit'
   const activeAssignments = stmtGetActiveTeacherAssignments.all(teacher.id) as any[];
   if (activeClasses.length || activeAssignments.length) throw new HttpError(409, `Teacher cannot be deactivated while active teaching assignments exist. Reassign or close them first. Active classes: ${activeClasses.map((c: any) => c.name).join(', ') || 'none'}.`);
   const tx = db.transaction(() => {
-    stmtUpdateTeacher.run(teacher.full_name, teacher.phone, teacher.email, teacher.base_salary, teacher.salary_type, teacher.specialization, teacher.qualification, teacher.contract_type, 'inactive', teacher.default_skill_rate, teacher.performance_score, teacher.id);
+    stmtUpdateTeacher.run(teacher.full_name, teacher.phone, teacher.email, teacher.base_salary, teacher.salary_type, teacher.specialization, teacher.qualification, teacher.contract_type, 'inactive', teacher.default_skill_rate, teacher.performance_score, teacher.target_skills_per_month ?? null, teacher.id);
     stmtDeactivateLinkedTeacherUser.run(teacher.id);
   });
   tx();
@@ -283,7 +301,57 @@ teachersRouter.get('/:id/computed-salary', requirePermission('Payroll.View'), ah
   const skillCount = (stmtCountSkillsForTeacher.get(teacher.id) as { c: number }).c;
   const periodKey = typeof (req.query as any).month === 'string' ? toPeriodKey(String((req.query as any).month)) : undefined;
   const dueInfo = computeTeacherDueAmount(db, teacher, periodKey); // Delegates complex math to payroll engine
-  res.json({ ...dueInfo, skillCount });
+  // Workload target (configurable; never changes salary by itself).
+  const target = teacher.target_skills_per_month == null ? null : Number(teacher.target_skills_per_month);
+  const actual = Number(skillCount);
+  res.json({
+    ...dueInfo, skillCount,
+    contractType: teacher.salary_type,
+    fixedSalary: Number(teacher.base_salary) || 0,
+    skillRate: Number(teacher.default_skill_rate) || 0,
+    targetSkills: target,
+    actualSkills: actual,
+    shortfall: target != null ? Math.max(0, target - actual) : null,
+    excess: target != null ? Math.max(0, actual - target) : null,
+  });
+}));
+
+// ============================================================================ 
+// §1b — SKILLS WORKLOAD REPORT (period-correct, contract-type-independent)
+// ============================================================================ 
+teachersRouter.get('/skills-report', requirePermission('Payroll.View', 'Teacher.View'), ah(async (req, res) => {
+  const { branchId, isAll } = resolveBranchScope(req);
+  const month = typeof (req.query as any).month === 'string' ? String((req.query as any).month) : '';
+  const periodKey = toPeriodKey(month);
+  if (!/^\d{4}-\d{2}$/.test(periodKey)) throw new HttpError(400, 'month must use YYYY-MM format.');
+  const monthStart = `${periodKey}-01`;
+  const monthEnd = new Date(Date.UTC(Number(periodKey.slice(0, 4)), Number(periodKey.slice(5, 7)), 0)).toISOString().slice(0, 10);
+
+  const rows = (isAll
+    ? db.prepare(`SELECT t.*, b.name AS branch_name FROM teachers t JOIN branches b ON b.id = t.branch_id ORDER BY t.full_name`).all()
+    : db.prepare(`SELECT t.*, b.name AS branch_name FROM teachers t JOIN branches b ON b.id = t.branch_id WHERE t.branch_id = ? ORDER BY t.full_name`).all(branchId)) as any[];
+
+  const report = rows.map((t) => {
+    // Skills active in the period (period-correct via assignment dates).
+    const actualSkills = (db.prepare(`SELECT COUNT(*) AS c FROM class_teacher_skills
+      WHERE teacher_id = ? AND assignment_type IN ('primary','assistant')
+        AND (start_date IS NULL OR start_date <= ?) AND (end_date IS NULL OR end_date >= ?)`).get(t.id, monthEnd, monthStart) as any).c;
+    const target = t.target_skills_per_month == null ? null : Number(t.target_skills_per_month);
+    const dueInfo = computeTeacherDueAmount(db, t, periodKey);
+    return {
+      teacherId: t.id, teacherName: t.full_name, branchId: t.branch_id, branchName: t.branch_name,
+      contractType: t.salary_type, fixedSalary: Number(t.base_salary) || 0,
+      skillRate: Number(t.default_skill_rate) || 0,
+      targetSkills: target, actualSkills: Number(actualSkills),
+      shortfall: target != null ? Math.max(0, target - Number(actualSkills)) : null,
+      excess: target != null ? Math.max(0, Number(actualSkills) - target) : null,
+      skillEarnings: Number(dueInfo.skillsTotal) || 0,
+      fixedComponent: Number(dueInfo.base) || 0,
+      totalPayroll: Number(dueInfo.due) || 0,
+      status: t.status,
+    };
+  });
+  res.json({ period: periodKey, rows: report });
 }));
 
 // ============================================================================ 
@@ -310,7 +378,7 @@ teachersRouter.post('/:id/evaluation', authorize('manager', 'head_of_department'
     stmtUpdateTeacher.run(
       teacher.full_name, teacher.phone, teacher.email, teacher.base_salary, teacher.salary_type,
       teacher.specialization, teacher.qualification, teacher.contract_type, teacher.status,
-      teacher.default_skill_rate, Number(score), teacher.id
+      teacher.default_skill_rate, Number(score), teacher.target_skills_per_month ?? null, teacher.id
     );
   });
   tx();

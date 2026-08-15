@@ -20,8 +20,8 @@ interface TeachersViewProps {
   activeRole: UserRole;
   skills: Skill[];
   classTeacherSkills: ClassTeacherSkill[];
-  addTeacher: (fullName: string, phone: string, email: string, baseSalary: number, salaryType?: 'fixed' | 'per_skill' | 'per_level' | 'per_session' | 'hybrid_skill' | 'hybrid_level', specialization?: string, qualification?: string, contractType?: 'monthly' | 'hourly' | 'per_session', branchId?: string, defaultSkillRate?: number) => void;
-  editTeacher: (id: string, fullName: string, phone: string, email: string, baseSalary: number, salaryType?: 'fixed' | 'per_skill' | 'per_level' | 'per_session' | 'hybrid_skill' | 'hybrid_level', specialization?: string, qualification?: string, contractType?: 'monthly' | 'hourly' | 'per_session', status?: 'active' | 'inactive' | 'on_leave', defaultSkillRate?: number) => Promise<void>;
+  addTeacher: (fullName: string, phone: string, email: string, baseSalary: number, salaryType?: 'fixed' | 'per_skill' | 'per_level' | 'per_session' | 'hybrid', specialization?: string, qualification?: string, contractType?: 'monthly' | 'hourly' | 'per_session', branchId?: string, defaultSkillRate?: number, targetSkillsPerMonth?: number) => void;
+  editTeacher: (id: string, fullName: string, phone: string, email: string, baseSalary: number, salaryType?: 'fixed' | 'per_skill' | 'per_level' | 'per_session' | 'hybrid', specialization?: string, qualification?: string, contractType?: 'monthly' | 'hourly' | 'per_session', status?: 'active' | 'inactive' | 'on_leave', defaultSkillRate?: number, targetSkillsPerMonth?: number) => Promise<void>;
   deleteTeacher: (id: string) => Promise<void>;
   transferTeacher: (teacherId: string, targetBranchId: string) => Promise<{ ok: boolean; unassignedActiveClasses?: string[] }>;
   getTeacherSalaryStatus: (teacherId: string, monthName: string) => Promise<TeacherSalaryStatus>;
@@ -60,7 +60,7 @@ export default function TeachersView({
   // Form states (Teacher)
   const [fullName, setFullName] = useState(''); const [phone, setPhone] = useState(''); const [email, setEmail] = useState('');
   const [baseSalary, setBaseSalary] = useState(0); const [salaryType, setSalaryType] = useState('fixed');
-  const [defaultSkillRate, setDefaultSkillRate] = useState(0); const [specialization, setSpecialization] = useState('');
+  const [defaultSkillRate, setDefaultSkillRate] = useState(0); const [targetSkills, setTargetSkills] = useState<number | ''>(''); const [specialization, setSpecialization] = useState('');
   const [qualification, setQualification] = useState(''); const [contractType, setContractType] = useState<'monthly' | 'hourly' | 'per_session'>('monthly');
 
   // Form states (Employee)
@@ -73,7 +73,7 @@ export default function TeachersView({
   const [editTEmail, setEditTEmail] = useState(''); const [editTBaseSalary, setEditTBaseSalary] = useState(0);
   const [editTSalaryType, setEditTSalaryType] = useState('fixed'); const [editTSpecialization, setEditTSpecialization] = useState('');
   const [editTQualification, setEditTQualification] = useState(''); const [editTContractType, setEditTContractType] = useState<'monthly' | 'hourly' | 'per_session'>('monthly');
-  const [editTStatus, setEditTStatus] = useState<'active' | 'inactive' | 'on_leave'>('active'); const [editTDefaultSkillRate, setEditTDefaultSkillRate] = useState(0);
+  const [editTStatus, setEditTStatus] = useState<'active' | 'inactive' | 'on_leave'>('active'); const [editTDefaultSkillRate, setEditTDefaultSkillRate] = useState(0); const [editTTargetSkills, setEditTTargetSkills] = useState<number | ''>('');
 
   // Edit states (Employee)
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
@@ -99,8 +99,8 @@ export default function TeachersView({
     e.preventDefault();
     if (!fullName || !phone) return triggerToast('Full name and phone number are required.', 'error');
     try {
-      await addTeacher(fullName, phone, email, baseSalary, salaryType as 'fixed' | 'per_skill' | 'per_level' | 'per_session' | 'hybrid_skill' | 'hybrid_level', specialization || undefined, qualification || undefined, contractType, currentBranchId, defaultSkillRate > 0 ? defaultSkillRate : undefined);
-      setFullName(''); setPhone(''); setEmail(''); setBaseSalary(0); setSalaryType('fixed'); setDefaultSkillRate(0); setSpecialization(''); setQualification(''); setContractType('monthly');
+      await addTeacher(fullName, phone, email, baseSalary, salaryType as 'fixed' | 'per_skill' | 'per_level' | 'per_session' | 'hybrid', specialization || undefined, qualification || undefined, contractType, currentBranchId, defaultSkillRate > 0 ? defaultSkillRate : undefined, targetSkills === '' ? undefined : Number(targetSkills));
+      setFullName(''); setPhone(''); setEmail(''); setBaseSalary(0); setSalaryType('fixed'); setDefaultSkillRate(0); setTargetSkills(''); setSpecialization(''); setQualification(''); setContractType('monthly');
       setShowAddForm(false); triggerToast(`Teacher created with contract: ${salaryType}`, 'success');
     } catch (err) { triggerToast(err instanceof Error ? err.message : 'Could not create teacher.', 'error'); }
   };
@@ -118,13 +118,13 @@ export default function TeachersView({
   const handleStartEditTeacher = (t: Teacher) => {
     setEditingTeacher(t); setEditTFullName(t.fullName); setEditTPhone(t.phone); setEditTEmail(t.email || '');
     setEditTBaseSalary(t.baseSalary); setEditTSalaryType(t.salaryType || 'fixed'); setEditTSpecialization(t.specialization || '');
-    setEditTQualification(t.qualification || ''); setEditTContractType(t.contractType || 'monthly'); setEditTStatus(t.status || 'active'); setEditTDefaultSkillRate(t.defaultSkillRate || 0);
+    setEditTQualification(t.qualification || ''); setEditTContractType(t.contractType || 'monthly'); setEditTStatus(t.status || 'active'); setEditTDefaultSkillRate(t.defaultSkillRate || 0); setEditTTargetSkills(t.targetSkillsPerMonth == null ? '' : t.targetSkillsPerMonth);
   };
 
   const handleEditTeacherSubmit = async (e: React.FormEvent) => {
     e.preventDefault(); if (!editingTeacher) return;
     try {
-      await editTeacher(editingTeacher.id, editTFullName, editTPhone, editTEmail, editTBaseSalary, editTSalaryType as 'fixed' | 'per_skill' | 'per_level' | 'per_session' | 'hybrid_skill' | 'hybrid_level', editTSpecialization || undefined, editTQualification || undefined, editTContractType, editTStatus, editTDefaultSkillRate);
+      await editTeacher(editingTeacher.id, editTFullName, editTPhone, editTEmail, editTBaseSalary, editTSalaryType as 'fixed' | 'per_skill' | 'per_level' | 'per_session' | 'hybrid', editTSpecialization || undefined, editTQualification || undefined, editTContractType, editTStatus, editTDefaultSkillRate, editTTargetSkills === '' ? undefined : Number(editTTargetSkills));
       setEditingTeacher(null); triggerToast('Teacher details updated.', 'success');
     } catch (err) { triggerToast(err instanceof Error ? err.message : 'Could not update teacher.', 'error'); }
   };
@@ -319,9 +319,10 @@ export default function TeachersView({
               <div><label className="block text-slate-600 mb-1 font-medium">Full Name:</label><input type="text" value={fullName} onChange={(e) => setFullName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5" required /></div>
               <div><label className="block text-slate-600 mb-1 font-medium">Phone:</label><input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 font-mono text-left" required /></div>
               <div><label className="block text-slate-600 mb-1 font-medium">Email:</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 font-mono text-left" /></div>
-              <div><label className="block text-slate-600 mb-1 font-medium">Contract Type:</label><select value={salaryType} onChange={(e) => setSalaryType(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 cursor-pointer font-semibold"><option value="fixed">Fixed Monthly</option><option value="per_skill">Per Skill</option><option value="per_level">Per Level</option><option value="per_session">Per Session</option><option value="hybrid_skill">Hybrid Skill</option><option value="hybrid_level">Hybrid Level</option></select></div>
+              <div><label className="block text-slate-600 mb-1 font-medium">Contract Type:</label><select value={salaryType} onChange={(e) => setSalaryType(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 cursor-pointer font-semibold"><option value="fixed">Fixed Monthly</option><option value="per_skill">Per Skill</option><option value="per_level">Per Level</option><option value="per_session">Per Session</option><option value="hybrid">Hybrid (Base + Skill)</option></select></div>
               <div><label className="block text-slate-600 mb-1 font-medium">Base Salary (AFN):</label><input type="number" value={baseSalary} onChange={(e) => setBaseSalary(Number(e.target.value))} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 font-mono" required /></div>
               <div><label className="block text-slate-600 mb-1 font-medium">Default Skill Rate (AFN):</label><input type="number" value={defaultSkillRate} onChange={(e) => setDefaultSkillRate(Number(e.target.value))} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 font-mono" /></div>
+              <div><label className="block text-slate-600 mb-1 font-medium">Target Skills / Month (workload):</label><input type="number" min={0} value={targetSkills} onChange={(e) => setTargetSkills(e.target.value === '' ? '' : Number(e.target.value))} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 font-mono" placeholder="optional" /><p className="text-[9px] text-slate-400 mt-0.5">Workload KPI only — never changes salary.</p></div>
               <div className="sm:col-span-2 flex justify-end gap-2 pt-2 border-t border-slate-100 mt-2"><button type="button" onClick={() => setShowAddForm(false)} className="px-4 py-2 bg-slate-100 text-slate-600 rounded-lg font-bold hover:bg-slate-200 cursor-pointer">Cancel</button><button type="submit" className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-bold hover:bg-indigo-700 cursor-pointer shadow-sm">Save Teacher</button></div>
             </form>
           ) : (
@@ -381,7 +382,7 @@ export default function TeachersView({
       )}
 
       <TeachersModals
-        editingTeacher={editingTeacher} setEditingTeacher={setEditingTeacher} editTFullName={editTFullName} setEditTFullName={setEditTFullName} editTPhone={editTPhone} setEditTPhone={setEditTPhone} editTEmail={editTEmail} setEditTEmail={setEditTEmail} editTBaseSalary={editTBaseSalary} setEditTBaseSalary={setEditTBaseSalary} editTSalaryType={editTSalaryType} setEditTSalaryType={setEditTSalaryType} editTSpecialization={editTSpecialization} setEditTSpecialization={setEditTSpecialization} editTQualification={editTQualification} setEditTQualification={setEditTQualification} editTContractType={editTContractType} setEditTContractType={setEditTContractType} editTStatus={editTStatus} setEditTStatus={setEditTStatus} editTDefaultSkillRate={editTDefaultSkillRate} setEditTDefaultSkillRate={setEditTDefaultSkillRate} handleEditTeacherSubmit={handleEditTeacherSubmit}
+        editingTeacher={editingTeacher} setEditingTeacher={setEditingTeacher} editTFullName={editTFullName} setEditTFullName={setEditTFullName} editTPhone={editTPhone} setEditTPhone={setEditTPhone} editTEmail={editTEmail} setEditTEmail={setEditTEmail} editTBaseSalary={editTBaseSalary} setEditTBaseSalary={setEditTBaseSalary} editTSalaryType={editTSalaryType} setEditTSalaryType={setEditTSalaryType} editTSpecialization={editTSpecialization} setEditTSpecialization={setEditTSpecialization} editTQualification={editTQualification} setEditTQualification={setEditTQualification} editTContractType={editTContractType} setEditTContractType={setEditTContractType} editTStatus={editTStatus} setEditTStatus={setEditTStatus} editTDefaultSkillRate={editTDefaultSkillRate} setEditTDefaultSkillRate={setEditTDefaultSkillRate} editTTargetSkills={editTTargetSkills} setEditTTargetSkills={setEditTTargetSkills} handleEditTeacherSubmit={handleEditTeacherSubmit}
         editingEmployee={editingEmployee} setEditingEmployee={setEditingEmployee} editEFullName={editEFullName} setEditEFullName={setEditEFullName} editEPhone={editEPhone} setEditEPhone={setEditEPhone} editEEmail={editEEmail} setEditEEmail={setEditEEmail} editERole={editERole} setEditERole={setEditERole} editEBaseSalary={editEBaseSalary} setEditEBaseSalary={setEditEBaseSalary} editEStatus={editEStatus} setEditEStatus={setEditEStatus} handleEditEmployeeSubmit={handleEditEmployeeSubmit}
         salaryTeacher={salaryTeacher} setSalaryTeacher={setSalaryTeacher} teacherSalaryStatus={teacherSalaryStatus} salaryStatusLoading={salaryStatusLoading} salaryEmployee={salaryEmployee} setSalaryEmployee={setSalaryEmployee} teacherBudget={teacherBudget} employeeBudget={employeeBudget} paymentType={paymentType} handleTeacherPaymentTypeChange={handleTeacherPaymentTypeChange} handleEmployeePaymentTypeChange={handleEmployeePaymentTypeChange} amountPaid={amountPaid} setAmountPaid={setAmountPaid} selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth} handlePayTeacherSalaryConfirm={handlePayTeacherSalaryConfirm} handlePayEmployeeSalaryConfirm={handlePayEmployeeSalaryConfirm}
         evaluatingTeacher={evaluatingTeacher} setEvaluatingTeacher={setEvaluatingTeacher} handleEvaluateSubmit={handleEvaluateSubmit}

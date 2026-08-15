@@ -270,9 +270,12 @@ export default function ClassesView({
 
   const skillCapReached = assignedSkillIds.size >= 3 && !assignedSkillIds.has(newAssignSkillId);
 
+  // Contract type NEVER gates skill recording: every teacher (fixed, per_skill,
+  // per_session, hybrid, per_level) can hold skills. A fixed contract only
+  // affects how payroll treats the assignment (fixed pay ignores skill rates).
   const eligibleTeachers = useMemo(() => 
     teachers.filter(
-      (t) => t.salaryType !== 'fixed' &&
+      (t) => t.status === 'active' &&
       !classSkillTeachers.some((cts) => cts.teacherId === t.id && cts.skillId === newAssignSkillId)
     ),
     [teachers, classSkillTeachers, newAssignSkillId]
@@ -1103,8 +1106,8 @@ export default function ClassesView({
                 </form>
                 {eligibleTeachers.length === 0 && newAssignSkillId && (
                   <p className="text-[10px] text-slate-400 italic">
-                    No eligible teachers for this skill (teachers on a fixed monthly contract can't take skill
-                    rates, and everyone else is already assigned to it here).
+                    No eligible teachers for this skill (every active teacher can take skills — a fixed
+                    contract only affects salary calculation, not skill recording).
                   </p>
                 )}
               </div>

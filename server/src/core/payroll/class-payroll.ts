@@ -20,7 +20,12 @@ export interface ClassPayrollLine {
   adjustedAmount: number;
 }
 
-export type TeacherSalaryModel = 'fixed' | 'per_skill' | 'per_level' | 'per_session' | 'hybrid_skill' | 'hybrid_level';
+// The DB defines EXACTLY FIVE contract types (teachers.salary_type CHECK):
+// fixed | per_skill | per_session | hybrid | per_level. 'hybrid_skill' and
+// 'hybrid_level' are legacy aliases that can only exist in compensation
+// history (the teachers table CHECK never admitted them); they are treated
+// as 'hybrid' for calculation.
+export type TeacherSalaryModel = 'fixed' | 'per_skill' | 'per_level' | 'per_session' | 'hybrid' | 'hybrid_skill' | 'hybrid_level';
 
 export interface TeacherPayrollInput {
   id: string;
@@ -221,7 +226,9 @@ export function computeTeacherDueAmount(
   const branchAsOf = teacherBranchAsOf(db, teacher.id, periodEnd, teacher.branch_id);
   const compensation = stmts.getCompensationAsOf.get(teacher.id, periodStart) as { base_salary?: number; salary_type?: string; contract_type?: string | null; default_skill_rate?: number } | undefined;
   const evaluation = stmts.getEvaluationAsOf.get(teacher.id, periodEnd) as { score?: number } | undefined;
-  const model = ((compensation?.salary_type || teacher.salary_type || 'fixed') as TeacherSalaryModel);
+  const rawModel = (compensation?.salary_type || teacher.salary_type || 'fixed') as TeacherSalaryModel;
+  // Normalize legacy aliases to the DB's 'hybrid' (see type comment above).
+  const model: TeacherSalaryModel = rawModel === 'hybrid_skill' || rawModel === 'hybrid_level' ? 'hybrid' : rawModel;
   const baseSalary = Number(compensation?.base_salary ?? teacher.base_salary) || 0;
   const defaultRate = Number(compensation?.default_skill_rate ?? teacher.default_skill_rate) || 0;
   const perfScore = Number(evaluation?.score ?? teacher.performance_score) || 0;
@@ -281,9 +288,9 @@ export function computeTeacherDueAmount(
 
     let baseRate = 0;
 
-    if (model === 'per_skill' || model === 'hybrid_skill') {
+    if (model === 'per_skill' || model === 'hybrid') {
       baseRate = Number(row.monthly_rate) > 0 ? Number(row.monthly_rate) : defaultRate;
-    } else if (model === 'per_level' || model === 'hybrid_level') {
+    } else if (model === 'per_level') {
       const specificRate = stmts.getLevelSkillRate.get(teacher.id, teacher.id, row.level, row.skill_id, row.skill_id) as { rate_per_skill?: number } | undefined;
       if (specificRate && Number(specificRate.rate_per_skill) > 0) {
         baseRate = Number(specificRate.rate_per_skill);
@@ -311,11 +318,11 @@ export function computeTeacherDueAmount(
   }
 
   // Calculate final due based on hybrid (base + skills) or pure skill/level
-  const finalBase = (model === 'hybrid_skill' || model === 'hybrid_level') ? Math.round(baseSalary * perfMultiplier) : 0;
+  const finalBase = model === 'hybrid' ? Math.round(baseSalary * perfMultiplier) : 0;
   const finalDue = finalBase + skillsTotal;
 
   return {
-    model,
+    model: model === 'hybrid' ? 'hybrid' : model,
     due: finalDue,
     base: finalBase,
     skillsTotal,
