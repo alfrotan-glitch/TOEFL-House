@@ -84,6 +84,12 @@ const stmtHasBookedPlacementFee = db.prepare(`
   WHERE a.visitor_id = ? AND a.status = 'completed' AND p.category = 'placement'
   LIMIT 1
 `);
+// Fixed-fee categories (ID card, diploma) are charged once per student:
+// issue-card already books the card fee on first issuance, so a manual
+// 'card' payment must not charge it a second time. Same for 'diploma'.
+const stmtHasPaidFixedFee = db.prepare(
+  `SELECT 1 FROM payments WHERE student_id = ? AND category = ? AND status = 'completed' LIMIT 1`
+);
 const stmtInsertSimplePayment = db.prepare(
   `INSERT INTO payments (id, student_id, amount, date, payment_method, status, category, notes, receipt_number, branch_id, idempotency_key) VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?)`
 );
@@ -507,13 +513,18 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
     const feeKey = category === 'card' ? 'cardIssuanceFee' : category === 'diploma' ? 'diplomaFee' : 'placementTestFee';
     resolvedAmount = Number(resolveFee(db, student.branch_id, feeKey) || 0);
     if (requestedAmount !== null && requestedAmount !== resolvedAmount) throw new HttpError(400, 'This fee must be paid at its configured amount.');
-    // Financial integrity: the placement fee is collected automatically at
-    // assessment completion. If this student originates from a visitor whose
-    // completed placement attempt already booked the fee, a manual 'placement'
-    // payment would duplicate income — reject it.
+    // Financial integrity: fixed fees are charged once per student.
+    //  - placement: auto-booked at assessment completion (see below).
+    //  - card: auto-booked on first ID-card issuance.
+    //  - diploma: one diploma per student.
+    // A manual/API payment of the same category would duplicate income.
     if (category === 'placement' && student.lead_id) {
       const booked = stmtHasBookedPlacementFee.get(student.lead_id);
       if (booked) throw new HttpError(409, 'The placement fee was already recorded for this candidate at assessment completion. No additional placement payment is due.');
+    }
+    if (category !== 'placement') {
+      const paid = stmtHasPaidFixedFee.get(student.id, category);
+      if (paid) throw new HttpError(409, `The ${category === 'card' ? 'ID card' : 'diploma'} fee was already recorded for this student. No additional ${category} payment is due.`);
     }
   }
 
@@ -667,7 +678,11 @@ studentsRouter.post('/:id/issue-card', requirePermission('Student.Print', 'Payme
   const isFirstIssuance = !student.card_design;
   const date = today();
 
-  const cardFee = isFirstIssuance ? Number(resolveFee(db, student.branch_id, 'cardIssuanceFee') || 0) : 0;
+  // Financial integrity: the card fee is charged once per student. If the
+  // fee was already paid through the payment desk, issuing the card must not
+  // charge it again — the student still gets their card (feeCharged = 0).
+  const cardFeeAlreadyPaid = isFirstIssuance ? !!stmtHasPaidFixedFee.get(student.id, 'card') : false;
+  const cardFee = isFirstIssuance && !cardFeeAlreadyPaid ? Number(resolveFee(db, student.branch_id, 'cardIssuanceFee') || 0) : 0;
 
   const tx = db.transaction(() => {
     stmtUpdateStudentCard.run(JSON.stringify(cardDesign), notes ?? student.notes, student.id);

@@ -54,6 +54,7 @@ export default function StudentsView({
   const [payInstallmentId, setPayInstallmentId] = useState('');
   const [payBookId, setPayBookId] = useState('');
   const [payMethod, setPayMethod] = useState<'cash' | 'card' | 'bank_transfer'>('cash');
+  const [paymentBusy, setPaymentBusy] = useState(false);
 
   // Extra Class Modal State
   const [showExtraClassModal, setShowExtraClassModal] = useState(false);
@@ -176,8 +177,12 @@ export default function StudentsView({
   const handleSmartPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!paymentStudent || payAmount <= 0) return triggerToast('Invalid amount.', 'error');
-    
+    if (paymentBusy) return; // double-click guard
+    setPaymentBusy(true);
     try {
+      // Idempotency key per submission: a double-click / network retry is
+      // replayed by the backend (200 + same receipt) instead of charging twice.
+      const idem = crypto.randomUUID();
       await api.post(`/students/${paymentStudent.id}/payments`, {
         amount: payAmount,
         category: payCategory,
@@ -185,12 +190,14 @@ export default function StudentsView({
         semesterId: payCategory === 'fee' ? paySemesterId : undefined,
         installmentId: payCategory === 'installment' ? payInstallmentId : undefined,
         bookId: payCategory === 'book' ? payBookId : undefined,
-      });
+      }, undefined, { 'Idempotency-Key': idem });
       triggerToast('Payment recorded successfully.', 'success');
       setPaymentStudent(null);
       window.dispatchEvent(new Event('erp-students-refresh'));
     } catch (err: any) {
       triggerToast(err.response?.data?.error || 'Payment failed.', 'error');
+    } finally {
+      setPaymentBusy(false);
     }
   };
 
@@ -419,7 +426,7 @@ export default function StudentsView({
 
               <div className="flex gap-2 justify-end pt-3 border-t">
                 <button type="button" onClick={() => setPaymentStudent(null)} className={btnSecondary}>Cancel</button>
-                <button type="submit" className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-semibold hover:bg-emerald-700 cursor-pointer shadow-sm text-xs">Confirm Payment</button>
+                <button type="submit" disabled={paymentBusy} className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-semibold hover:bg-emerald-700 cursor-pointer shadow-sm text-xs disabled:opacity-50">{paymentBusy ? 'Recording…' : 'Confirm Payment'}</button>
               </div>
             </form>
           </div>
