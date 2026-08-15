@@ -62,6 +62,7 @@ const RulesManagementView = lazy(() => import('./components/rules/RulesManagemen
 
 // ── Academic Control Center ─────────────────────────────────────────────────
 const AcademicSetupView = lazy(() => import('./components/academic/AcademicSetupView'));
+const TestBankAdminView = lazy(() => import('./components/academic/TestBankAdminView'));
 
 // ── BC #14: Event Bus ───────────────────────────────────────────────────────
 
@@ -332,6 +333,8 @@ function AuthenticatedApp() {
         return <AuditLogView />;
       case 'academic-setup':
         return <AcademicSetupView branchId={activeBranchId} />;
+      case 'test-bank':
+        return <TestBankAdminView triggerToast={triggerToast} />;
       case 'settings':
         return (
           <SettingsView

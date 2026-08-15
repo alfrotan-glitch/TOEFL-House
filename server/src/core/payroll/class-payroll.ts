@@ -213,8 +213,17 @@ export function teacherBranchAsOf(
   return row?.branch_id || fallbackBranchId;
 }
 
+/** Today's date in the SERVER'S LOCAL calendar.
+ *
+ *  This must agree with utils/ids.ts `today()`, which is what every route
+ *  writes into date columns. Using UTC here instead caused a real off-by-one:
+ *  in Kabul (UTC+04:30) between 19:30 and midnight local, `today()` already
+ *  returns tomorrow while UTC still returns today, so a class starting
+ *  "today" was judged not yet operational and dropped from payroll. Dates in
+ *  this system are calendar days, not instants, so the local calendar is the
+ *  correct basis. */
 export function gregorianToday(): string {
-  return new Date().toISOString().slice(0, 10);
+  return new Date().toLocaleDateString('en-CA');
 }
 
 /** Checks if a class is operational for payroll purposes */

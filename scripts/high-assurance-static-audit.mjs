@@ -53,8 +53,30 @@ for (const file of sourceFiles) {
 }
 
 // Detect imports from auth middleware that ask for symbols not exported there.
+// The export list is PARSED FROM THE MIDDLEWARE ITSELF rather than hard-coded:
+// a manual list silently rots as the middleware grows and then reports real,
+// correctly-exported symbols as failures (which is exactly what happened with
+// denyPermissionless/readSessionCookie).
 if (sourceFiles.length) {
-  const middlewareExports = new Set(['authenticate','hasLegacyRole','hasAnyLegacyRole','authorize','requirePermission','canAccessBranchResource','resolveBranchScope']);
+  const authMiddlewarePath = path.join(root, 'server/src/middleware/auth.ts');
+  const middlewareExports = new Set();
+  if (fs.existsSync(authMiddlewarePath)) {
+    const authSf = ts.createSourceFile(authMiddlewarePath, fs.readFileSync(authMiddlewarePath, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    authSf.forEachChild((node) => {
+      const isExported = ts.canHaveModifiers(node) && ts.getModifiers(node)?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
+      if (!isExported) return;
+      if ((ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) && node.name) {
+        middlewareExports.add(node.name.text);
+      } else if (ts.isVariableStatement(node)) {
+        for (const decl of node.declarationList.declarations) {
+          if (ts.isIdentifier(decl.name)) middlewareExports.add(decl.name.text);
+        }
+      } else if ((ts.isTypeAliasDeclaration(node) || ts.isInterfaceDeclaration(node)) && node.name) {
+        middlewareExports.add(node.name.text);
+      }
+    });
+  }
+  if (!middlewareExports.size) failures.push('Could not parse any exports from server/src/middleware/auth.ts.');
   for (const file of sourceFiles) {
     const sf = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true, file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
     sf.forEachChild(node => {

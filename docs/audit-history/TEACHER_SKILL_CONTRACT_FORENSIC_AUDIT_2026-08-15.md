@@ -279,3 +279,77 @@ both confirmed present before my changes and unrelated to this subsystem.
 3. Legacy databases containing `hybrid_skill`/`hybrid_level` are normalised by
    migration 059; any external integration writing those raw strings must be
    updated to the five-value vocabulary.
+
+---
+
+# ADDENDUM — General System-Wide Audit (same day)
+
+A second, **system-wide** pass was run across the whole ERP (not just the
+Teacher subsystem). Four further defects were found, proven and fixed.
+
+| # | Defect | Severity | Status |
+|---|---|---|---|
+| S1 | `schema.sql` drifted from the migrated schema — **11 columns** existed only after migrations, so a **fresh install would crash** on payroll/finance/placement queries | **CRITICAL** | FIXED |
+| S2 | Payroll used **UTC** for "today" while the rest of the system writes **local** dates — off-by-one every evening in Kabul (UTC+04:30) | **HIGH** | FIXED |
+| S3 | `Placement Test Bank` menu item had **no route** — users landed on "under development" although the full UI and API existed | **HIGH** | FIXED |
+| S4 | Two **quality gates were themselves broken** (stale hard-coded list; drift-blind preflight), so they could not protect the codebase | MEDIUM | FIXED |
+
+### S1 — schema.sql drift (fresh-install breaker)
+**Evidence:** querying a `schema.sql`-only database failed on 4 tables:
+```
+BROKEN teacher_salary_ledger: no such column: idempotency_key
+BROKEN expense_requests:      no such column: requester_user_id
+BROKEN placement_assessment_profiles: no such column: components_json
+BROKEN placement_rules:       no such column: conditions_json
+```
+All 11 columns are actively used by route code (10 usages of
+`idempotency_key` alone). **Fix:** `schema.sql` synchronised with migrations
+044/045/048/038/058, and `verify-fresh-schema.mjs` rewritten to *diff*
+schema.sql against the fully-migrated shape — the old gate could never
+detect this. Now: `Fresh schema preflight passed (58 migrations, no drift)`.
+
+### S2 — UTC/local date split
+**Evidence (time-independent):** at `2026-08-15T21:45Z` → Kabul local
+`2026-08-16`, UTC `2026-08-15`. `gregorianToday()` (UTC) disagreed with
+`today()` (local), so a class starting "today" was judged not yet
+operational and silently dropped from payroll.
+**Fix:** `gregorianToday()` now uses the local calendar, matching
+`utils/ids.ts today()`. Regression test freezes the clock at 21:45 UTC and
+**was verified to fail before the fix** (`expected '2026-08-15' to be '2026-08-16'`).
+
+### S3 — orphaned navigation route
+`TestBankAdminView.tsx` (297 lines, complete) was never imported by `App.tsx`.
+The backend routers were mounted and working. **Fix:** lazy-imported and
+routed. Live check: `/placement/test-bank`, `/placement/rubrics`,
+`/placement/media` all return HTTP 200.
+
+### S4 — broken quality gates
+`high-assurance-static-audit.mjs` compared imports against a **hand-maintained**
+export list that had rotted, so it flagged three *correct* exports
+(`denyPermissionless`, `readSessionCookie`) as failures. **Fix:** the list is
+now parsed from `middleware/auth.ts` via the TypeScript AST, so it cannot rot.
+
+### Areas audited and found SOUND (no change made)
+Authentication/authorisation on every endpoint (34 without an explicit authz
+guard were verified — all authenticated, `/login` correctly public, profit
+withdrawal owner-only); no SQL injection (all interpolation is on fixed
+identifiers/placeholders); no hard-coded secrets; no `password_hash` leakage;
+atomic transactions on multi-write operations; all async handlers wrapped in
+`ah()`; branch isolation via `resolveBranchScope`; `addDays`/`periodEnd`
+date maths (including leap years) verified correct.
+
+### Final verification (addendum)
+| Gate | Result |
+|---|---|
+| Backend tests | **591 passed / 55 files** (+6 new guards) |
+| Frontend + backend typecheck | PASS |
+| Frontend + backend build | PASS |
+| ESLint | PASS |
+| `audit:product` | **PASS** (was FAIL) |
+| `audit:static` | **PASS** (was FAIL) |
+| Fresh-schema preflight | **PASS, no drift** (gate strengthened) |
+| Live E2E | Test Bank + payroll endpoints healthy |
+
+New regression file `system-integrity-guards.test.ts` locks in all three
+structural invariants; each guard was verified to **fail** when its defect was
+temporarily re-introduced.

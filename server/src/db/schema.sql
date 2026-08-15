@@ -250,6 +250,10 @@ CREATE TABLE IF NOT EXISTS placement_assessment_profiles (
   first_level_exempt INTEGER NOT NULL DEFAULT 0,
   expires_minutes INTEGER,
   decision_rules_json TEXT,
+  -- Placement workspace (migration 038): component-based profiles.
+  components_json TEXT NOT NULL DEFAULT '[]',
+  scoring_model TEXT NOT NULL DEFAULT 'weighted_average',
+  allow_retake INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(program_version_id, branch_id)
@@ -621,7 +625,15 @@ CREATE TABLE IF NOT EXISTS teacher_salary_ledger (
   notes           TEXT, 
   branch_id       TEXT NOT NULL, 
   paid_at         TEXT NOT NULL DEFAULT (datetime('now')), 
-  operator_name   TEXT 
+  operator_name   TEXT, 
+  -- Payment idempotency (migration 044): a replayed request with the same key
+  -- returns the original result instead of paying twice.
+  idempotency_key TEXT, 
+  -- Non-destructive payroll correction (migration 045).
+  status          TEXT NOT NULL DEFAULT 'posted' CHECK (status IN ('posted','voided')), 
+  voided_at       TEXT, 
+  voided_by       TEXT, 
+  void_reason     TEXT 
 ); 
 
 CREATE TABLE IF NOT EXISTS teacher_evaluations ( 
@@ -1099,7 +1111,11 @@ CREATE TABLE IF NOT EXISTS expense_requests (
   bill_period          TEXT, 
   payment_method       TEXT DEFAULT 'cash' CHECK (payment_method IN ('cash','card','bank_transfer')), 
   notes                TEXT, 
-  auto_approved        INTEGER NOT NULL DEFAULT 0
+  auto_approved        INTEGER NOT NULL DEFAULT 0, 
+  -- Accountable identities for the approval chain (migration 048). The legacy
+  -- `requester`/`approved_by` columns hold display names; these hold user ids.
+  requester_user_id    TEXT, 
+  approved_by_user_id  TEXT
 ); 
 
 -- LEGACY_COMPAT_ONLY: runtime Finance uses finance_accounts; this table remains for migration compatibility.
@@ -1606,6 +1622,8 @@ CREATE TABLE IF NOT EXISTS placement_rules (
   sort_order          INTEGER NOT NULL DEFAULT 0, 
   is_active           INTEGER NOT NULL DEFAULT 1, 
   version             INTEGER NOT NULL DEFAULT 1, 
+  -- Structured rule conditions for the placement decision engine (migration 058). 
+  conditions_json     TEXT, 
   created_at          TEXT NOT NULL DEFAULT (datetime('now')) 
 ); 
 
