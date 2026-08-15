@@ -505,10 +505,18 @@ academicRouter.put('/program-versions/:id/placement-profile', authorize('owner',
       durationMinutes: raw.durationMinutes == null ? null : Number(raw.durationMinutes),
       skills: Array.isArray(raw.skills) ? raw.skills.map(String) : undefined,
       instructions: raw.instructions ? String(raw.instructions) : null,
+      testId: raw.testId == null ? null : String(raw.testId),
     };
     if (!c.key || !c.label || seen.has(c.key)) throw new HttpError(400, 'Assessment component keys must be unique and labels are required.');
     seen.add(c.key);
-    if (!['skill_scores','written_test','interview','level_assessment','custom_score'].includes(c.type)) throw new HttpError(400, `Unsupported assessment component type: ${c.type}.`);
+    if (!['skill_scores','written_test','interview','level_assessment','custom_score','content_test'].includes(c.type)) throw new HttpError(400, `Unsupported assessment component type: ${c.type}.`);
+    if (c.type === 'content_test') {
+      if (!c.testId) throw new HttpError(400, `Content component ${c.label} requires a testId from the placement test bank.`);
+      const test = db.prepare('SELECT id, status, branch_id FROM placement_tests WHERE id = ?').get(c.testId) as { id: string; status: string; branch_id: string | null } | undefined;
+      if (!test) throw new HttpError(400, `Content component ${c.label} references a test that does not exist.`);
+      if (test.status !== 'active') throw new HttpError(400, `Content component ${c.label} references test "${c.testId}" which is not active.`);
+      if (test.branch_id !== null && test.branch_id !== version.branch_id) throw new HttpError(400, `Content component ${c.label} references a test from another branch.`);
+    }
     if (!Number.isFinite(c.weight) || c.weight < 0) throw new HttpError(400, `Invalid weight for ${c.label}.`);
     if (!Number.isFinite(c.maxScore) || c.maxScore <= 0) throw new HttpError(400, `Invalid maximum score for ${c.label}.`);
     totalWeight += c.weight;

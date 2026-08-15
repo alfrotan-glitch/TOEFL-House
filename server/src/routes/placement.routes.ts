@@ -16,7 +16,7 @@ import { recordIncome } from '../utils/income.js';
 import { resolveFee } from '../core/configuration/policy-resolver.js';
 import { PLACEMENT_DEFAULTS } from '../core/configuration/policy-catalog.js';
 
-export type PlacementComponentType = 'skill_scores' | 'written_test' | 'interview' | 'level_assessment' | 'custom_score';
+export type PlacementComponentType = 'skill_scores' | 'written_test' | 'interview' | 'level_assessment' | 'custom_score' | 'content_test';
 
 interface PlacementComponentConfig {
   key: string;
@@ -28,6 +28,8 @@ interface PlacementComponentConfig {
   durationMinutes?: number;
   instructions?: string | null;
   skills?: readonly ('grammar' | 'vocabulary' | 'reading' | 'listening' | 'writing' | 'speaking')[];
+  /** For content_test components: the reusable test-bank entry id. */
+  testId?: string;
 }
 
 const router = Router();
@@ -104,6 +106,34 @@ const stmtUpdateVisitorPlacement = db.prepare(`
 `);
 const stmtVisitorCompletedCount = db.prepare(`SELECT COUNT(*) AS c FROM placement_assessment_attempts WHERE visitor_id = ? AND status='completed'`);
 
+// ── Content test bank (reusable content-driven assessments) ──
+const stmtTestById = db.prepare('SELECT * FROM placement_tests WHERE id = ?');
+const stmtInsertTest = db.prepare(`INSERT INTO placement_tests (id, title, test_type, instructions, audio_url, transcript, passage, status, branch_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+const stmtUpdateTest = db.prepare(`UPDATE placement_tests SET title=?, test_type=?, instructions=?, audio_url=?, transcript=?, passage=?, status=?, updated_at=datetime('now') WHERE id=?`);
+const stmtQuestionsByTest = db.prepare('SELECT * FROM placement_test_questions WHERE test_id = ? ORDER BY order_index, rowid');
+const stmtDeleteQuestion = db.prepare('DELETE FROM placement_test_questions WHERE id = ?');
+const stmtUpdateQuestion = db.prepare('UPDATE placement_test_questions SET qtype=?, prompt=?, options_json=?, answer_key=?, points=?, order_index=? WHERE id=?');
+const stmtInsertQuestion = db.prepare(`INSERT INTO placement_test_questions (id, test_id, question_key, qtype, prompt, options_json, answer_key, points, order_index) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+const stmtUpsertResponse = db.prepare(`INSERT INTO placement_assessment_responses (id, attempt_id, test_id, question_id, question_key, response_json, auto_score, max_points, feedback, answered_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+  ON CONFLICT(attempt_id, question_id) DO UPDATE SET
+    response_json=excluded.response_json, auto_score=excluded.auto_score, max_points=excluded.max_points,
+    feedback=excluded.feedback, answered_at=datetime('now')`);
+
+function serializeTest(test: any) {
+  return {
+    id: test.id, title: test.title, testType: test.test_type, instructions: test.instructions,
+    audioUrl: test.audio_url, transcript: test.transcript, passage: test.passage, status: test.status,
+    branchId: test.branch_id, createdBy: test.created_by, createdAt: test.created_at, updatedAt: test.updated_at,
+    questions: (stmtQuestionsByTest.all(test.id) as any[]).map((q) => ({
+      id: q.id, key: q.question_key, qtype: q.qtype, prompt: q.prompt,
+      options: q.options_json ? JSON.parse(q.options_json) : null,
+      answerKey: q.answer_key, points: q.points, orderIndex: q.order_index,
+    })),
+  };
+}
+const stmtResponsesByAttemptTest = db.prepare('SELECT * FROM placement_assessment_responses WHERE attempt_id = ? AND test_id = ? ORDER BY rowid');
+
 function parseComponents(profile: any): PlacementComponentConfig[] {
   let parsed: unknown;
   try { parsed = JSON.parse(profile.components_json || '[]'); } catch { parsed = []; }
@@ -118,8 +148,9 @@ function parseComponents(profile: any): PlacementComponentConfig[] {
     durationMinutes: raw.durationMinutes == null ? undefined : Number(raw.durationMinutes),
     instructions: raw.instructions == null ? null : String(raw.instructions),
     skills: Array.isArray(raw.skills) ? raw.skills.map(String) : undefined,
+    testId: raw.testId == null ? undefined : String(raw.testId),
   }));
-  const validTypes = new Set<PlacementComponentType>(['skill_scores','written_test','interview','level_assessment','custom_score']);
+  const validTypes = new Set<PlacementComponentType>(['skill_scores','written_test','interview','level_assessment','custom_score','content_test']);
   const keys = new Set<string>();
   let total = 0;
   for (const c of components) {
@@ -145,6 +176,17 @@ function assertVisitorBranchAccess(req: import('express').Request, visitor: any)
 function mapProfile(profile: any, version: any, levels: any[], rules: any[]) {
   const components = parseComponents(profile);
   return {
+    contentTests: components.filter((c) => c.type === 'content_test' && c.testId).map((c) => {
+      const test = stmtTestById.get(c.testId!) as any;
+      if (!test) return null;
+      // Answer keys never leave the server in the read view; they are only in
+      // the immutable attempt snapshot used by the auto-scorer.
+      return {
+        id: test.id, title: test.title, testType: test.test_type, instructions: test.instructions,
+        audioUrl: test.audio_url, transcript: test.transcript, passage: test.passage, status: test.status,
+        questions: (stmtQuestionsByTest.all(test.id) as any[]).map((q) => ({ id: q.id, questionKey: q.question_key, qtype: q.qtype, prompt: q.prompt, options: q.options_json ? JSON.parse(q.options_json) : null, points: q.points, orderIndex: q.order_index })),
+      };
+    }).filter(Boolean),
     configured: true,
     enabled: Boolean(profile.enabled),
     required: Boolean(profile.required),
@@ -214,6 +256,198 @@ function getRequiredMissing(components: PlacementComponentConfig[], results: any
   return components.filter((c) => c.required && !done.has(c.key)).map((c) => c.key);
 }
 
+// ============================================================================
+// §TEST-BANK — reusable content-driven placement tests (owner/manager/academic)
+// ============================================================================
+router.get('/test-bank', authorize('owner', 'manager', 'head_of_department', 'registrar', 'counselor'), ah(async (req, res) => {
+  const user = getUserContext(req);
+  // Branch isolation: branch-scoped tests are visible only inside their branch;
+  // global tests (branch_id NULL) are shared across branches.
+  const rows = db.prepare(`SELECT * FROM placement_tests WHERE branch_id IS NULL OR branch_id = ? ORDER BY updated_at DESC`).all(user.branchId) as any[];
+  res.json(rows.map((t) => serializeTest(t)));
+}));
+
+router.post('/test-bank', authorize('owner', 'manager', 'head_of_department'), ah(async (req, res) => {
+  const user = getUserContext(req);
+  const { title, testType, instructions, audioUrl, transcript, passage, branchId, questions } = req.body ?? {};
+  if (!title || !String(title).trim()) throw new HttpError(400, 'Test title is required.');
+  if (!['listening', 'reading', 'writing', 'speaking'].includes(testType)) throw new HttpError(400, 'Invalid test type.');
+  const qs = Array.isArray(questions) ? questions : [];
+  for (const q of qs) {
+    if (!q.key || !q.prompt || !['mcq', 'short_answer', 'essay', 'speaking'].includes(q.qtype)) throw new HttpError(400, 'Each question needs a key, prompt and valid type.');
+    if (q.qtype === 'mcq' && (!Array.isArray(q.options) || q.options.length < 2)) throw new HttpError(400, `MCQ ${q.key} needs at least two options.`);
+    if (q.qtype !== 'essay' && q.qtype !== 'speaking' && !q.answerKey) throw new HttpError(400, `Question ${q.key} needs an answer key.`);
+    if (!Number.isFinite(Number(q.points)) || Number(q.points) <= 0) throw new HttpError(400, `Question ${q.key} needs positive points.`);
+  }
+  const testId = id('ptst');
+  // Default to the caller's branch for isolation; a test becomes global only
+  // when the caller explicitly passes branchId: null (e.g. a shared baseline).
+  const resolvedBranch = branchId === null || branchId === undefined ? user.branchId : String(branchId);
+  const tx = db.transaction(() => {
+    stmtInsertTest.run(testId, String(title).trim(), testType, instructions || null, audioUrl || null, transcript || null, passage || null, 'draft', resolvedBranch, user.userId);
+    let idx = 0;
+    for (const q of qs) {
+      stmtInsertQuestion.run(id('ptq'), testId, String(q.key), String(q.qtype), String(q.prompt),
+        q.qtype === 'mcq' ? JSON.stringify(q.options) : null, q.answerKey || null, Number(q.points), idx++);
+    }
+  });
+  tx();
+  writeAudit(req, `Created placement test-bank entry "${String(title).trim()}" (${testType}) with ${qs.length} questions`);
+  res.status(201).json(serializeTest(stmtTestById.get(testId)));
+}));
+
+router.put('/test-bank/:id', authorize('owner', 'manager', 'head_of_department'), ah(async (req, res) => {
+  const existing = stmtTestById.get(req.params.id) as any;
+  if (!existing) throw new HttpError(404, 'Test not found.');
+  const { title, testType, instructions, audioUrl, transcript, passage, status, questions } = req.body ?? {};
+  if (title !== undefined && !String(title).trim()) throw new HttpError(400, 'Test title is required.');
+  if (testType !== undefined && !['listening', 'reading', 'writing', 'speaking'].includes(testType)) throw new HttpError(400, 'Invalid test type.');
+  if (status !== undefined && !['draft', 'active', 'archived'].includes(status)) throw new HttpError(400, 'Invalid status.');
+  const tx = db.transaction(() => {
+    stmtUpdateTest.run(
+      title !== undefined ? String(title).trim() : existing.title,
+      testType !== undefined ? testType : existing.test_type,
+      instructions !== undefined ? instructions : existing.instructions,
+      audioUrl !== undefined ? audioUrl : existing.audio_url,
+      transcript !== undefined ? transcript : existing.transcript,
+      passage !== undefined ? passage : existing.passage,
+      status !== undefined ? status : existing.status,
+      existing.id
+    );
+    if (Array.isArray(questions)) {
+      // Upsert by question key: existing question rows keep their id so any
+      // answered question stays linked to its stored responses (FK RESTRICT
+      // protects them from deletion — historical attempts are immutable).
+      const existingQs = stmtQuestionsByTest.all(existing.id) as any[];
+      const existingByKey = new Map(existingQs.map((q) => [String(q.question_key), q]));
+      const newKeys = new Set(questions.map((q) => String(q.key)));
+      let idx = 0;
+      for (const q of questions) {
+        if (!q.key || !q.prompt || !['mcq', 'short_answer', 'essay', 'speaking'].includes(q.qtype)) throw new HttpError(400, 'Invalid question in update.');
+        const prior = existingByKey.get(String(q.key));
+        const qid = prior ? prior.id : id('ptq');
+        const payload = [String(q.qtype), String(q.prompt), q.qtype === 'mcq' ? JSON.stringify(q.options || []) : null, q.answerKey || null, Number(q.points || 1), idx++];
+        if (prior) stmtUpdateQuestion.run(...payload, qid);
+        else stmtInsertQuestion.run(qid, existing.id, String(q.key), ...payload);
+      }
+      for (const prior of existingQs) {
+        if (!newKeys.has(String(prior.question_key))) {
+          try { stmtDeleteQuestion.run(prior.id); } catch { /* referenced by responses → kept (immutability) */ }
+        }
+      }
+    }
+  });
+  tx();
+  writeAudit(req, `Updated placement test-bank entry "${existing.title}"`);
+  res.json(serializeTest(stmtTestById.get(existing.id)));
+}));
+
+router.post('/test-bank/:id/activate', authorize('owner', 'manager', 'head_of_department'), ah(async (req, res) => {
+  const existing = stmtTestById.get(req.params.id) as any;
+  if (!existing) throw new HttpError(404, 'Test not found.');
+  const qCount = (stmtQuestionsByTest.all(existing.id) as any[]).length;
+  if (qCount === 0) throw new HttpError(400, 'Cannot activate a test with no questions.');
+  stmtUpdateTest.run(existing.title, existing.test_type, existing.instructions, existing.audio_url, existing.transcript, existing.passage, 'active', existing.id);
+  writeAudit(req, `Activated placement test-bank entry "${existing.title}"`);
+  res.json({ ok: true });
+}));
+
+router.post('/test-bank/:id/archive', authorize('owner', 'manager', 'head_of_department'), ah(async (req, res) => {
+  const existing = stmtTestById.get(req.params.id) as any;
+  if (!existing) throw new HttpError(404, 'Test not found.');
+  stmtUpdateTest.run(existing.title, existing.test_type, existing.instructions, existing.audio_url, existing.transcript, existing.passage, 'archived', existing.id);
+  writeAudit(req, `Archived placement test-bank entry "${existing.title}"`);
+  res.json({ ok: true });
+}));
+
+// ============================================================================
+// §CONTENT ATTEMPT — candidate responses + server-side auto-scoring
+// ============================================================================
+router.put(
+  '/visitors/:visitorId/placement/attempts/:attemptId/tests/:componentKey/responses',
+  authorize('owner', 'registrar', 'manager', 'counselor'),
+  ah(async (req, res) => {
+    const user = getUserContext(req);
+    const visitor = getVisitorOr404(req.params.visitorId);
+    assertVisitorBranchAccess(req, visitor);
+    const attempt = stmtAttempt.get(req.params.attemptId) as any;
+    if (!attempt || attempt.visitor_id !== visitor.id) throw new HttpError(404, 'Placement attempt not found.');
+    if (attempt.status !== 'in_progress') throw new HttpError(409, 'This placement attempt is no longer editable.');
+    const snapshot = (() => { try { return JSON.parse(attempt.snapshot_json || '{}'); } catch { throw new HttpError(409, 'Placement attempt snapshot is corrupted.'); } })();
+    const component = (snapshot.profile?.components || []).find((c: PlacementComponentConfig) => c.key === req.params.componentKey);
+    if (!component || component.type !== 'content_test' || !component.testId) throw new HttpError(404, 'Content assessment component not found.');
+    const test = (snapshot.tests || []).find((t: any) => t.id === component.testId);
+    if (!test) throw new HttpError(404, 'Test content not found in the attempt snapshot.');
+
+    const answers = Array.isArray(req.body?.answers) ? req.body.answers : [];
+    // Every submission is a delta: score the provided answers, store them, then
+    // derive the component state from ALL stored responses so partial or
+    // repeated submissions never clobber previously auto-graded questions.
+    const feedbacks: Record<string, string> = {};
+    for (const a of answers) {
+      const q = test.questions.find((tq: any) => String(tq.question_key) === String(a?.questionKey));
+      if (!q) throw new HttpError(400, `Unknown question key "${a?.questionKey}" in test "${test.title}".`);
+      const response = a?.response;
+      if (response === undefined || response === null || response === '') continue;
+      let score = 0;
+      let fb = '';
+      if (q.qtype === 'mcq' || q.qtype === 'short_answer') {
+        const expected = String(q.answer_key || '').trim().toLowerCase();
+        const given = String(response).trim().toLowerCase();
+        score = expected && given === expected ? Number(q.points) : 0;
+        fb = score > 0 ? 'Correct' : `Expected: ${q.answer_key}`;
+      }
+      feedbacks[String(q.question_key)] = fb;
+      stmtUpsertResponse.run(id('pr'), attempt.id, test.id, q.id, q.question_key, JSON.stringify(response), score, Number(q.points), fb);
+    }
+
+    // Recompute the whole component from the stored response rows (server truth).
+    const stored = stmtResponsesByAttemptTest.all(attempt.id, test.id) as any[];
+    const storedByKey = new Map(stored.map((r) => [String(r.question_key), r]));
+    let earned = 0;
+    let max = 0;
+    let answered = 0;
+    for (const q of test.questions) {
+      const pts = Number(q.points || 0);
+      max += pts;
+      const row = storedByKey.get(String(q.question_key));
+      if (row) {
+        answered += 1;
+        earned += Number(row.auto_score || 0);
+      }
+    }
+    const allAnswered = answered === test.questions.length;
+    // Auto-scored components can be marked complete only when every question
+    // has an answer AND every question is auto-gradeable; essay/speaking stay
+    // pending for manual scoring by staff.
+    const hasManual = test.questions.some((q: any) => q.qtype === 'essay' || q.qtype === 'speaking');
+    const autoComplete = allAnswered && !hasManual;
+    const rawMax = max || component.maxScore;
+    const autoResult = Math.round((earned / rawMax) * component.maxScore * 100) / 100;
+
+    if (autoComplete) {
+      stmtUpsertResult.run(id('par'), attempt.id, component.key, component.type, component.label, 'completed', autoResult, component.maxScore, component.weight, null, null, null, JSON.stringify({ mode: 'auto', earned, max }), user.userId, 'completed');
+    } else {
+      // Partial or manual: keep the component pending but store the auto-earned
+      // progress in the result payload so staff can see what was auto-graded.
+      stmtUpsertResult.run(id('par'), attempt.id, component.key, component.type, component.label, allAnswered ? 'in_progress' : 'pending', null, component.maxScore, component.weight, null, null, null, JSON.stringify({ mode: 'auto', earned, max, answered, total: test.questions.length }), user.userId, 'pending');
+    }
+
+    const responses = stmtResponsesByAttemptTest.all(attempt.id, test.id) as any[];
+    writeAudit(req, `Recorded content responses for ${visitor.full_name} on test "${test.title}" (${answered}/${test.questions.length} answered, ${earned}/${max} auto points)`);
+    res.json({
+      componentKey: component.key,
+      answered,
+      total: test.questions.length,
+      autoScore: earned,
+      maxScore: max,
+      complete: autoComplete,
+      feedback: feedbacks,
+      responses: responses.map((r) => ({ questionKey: r.question_key, response: JSON.parse(r.response_json || 'null'), autoScore: r.auto_score, feedback: r.feedback })),
+    });
+  })
+);
+
 router.get('/visitors/:visitorId/placement', authorize('owner', 'registrar', 'manager', 'counselor'), ah(async (req, res) => {
   const visitor = getVisitorOr404(req.params.visitorId);
   assertVisitorBranchAccess(req, visitor);
@@ -231,10 +465,22 @@ function getUserContext(req: import('express').Request) {
 }
 
 function mapAttempt(attempt: any) {
-  const snapshot: Record<string, unknown> = (() => {
+  const snapshot = (() => {
     try { return JSON.parse(attempt.snapshot_json || '{}') as Record<string, unknown>; }
     catch { return {}; }
   })();
+  // Answer keys never leave the server through the read views: strip them from
+  // the attempt snapshot before it reaches the client (auto-scoring reads the
+  // raw snapshot_json internally, so stripping here is safe).
+  if (Array.isArray((snapshot as any).tests)) {
+    (snapshot as any).tests = ((snapshot as any).tests as any[]).map((t: any) => ({
+      ...t,
+      questions: (t.questions || []).map((q: any) => {
+        const { answer_key: _ak, ...rest } = q;
+        return rest;
+      }),
+    }));
+  }
   return { ...attempt, snapshot, results: stmtResults.all(attempt.id) };
 }
 
@@ -250,7 +496,17 @@ router.post('/visitors/:visitorId/placement/attempts', authorize('owner', 'regis
   if (completedCount > 0 && !profile.allow_retake) throw new HttpError(409, 'This program allows only one placement attempt for this visitor.');
   const lastAttemptNumber = Number((stmtLastAttemptNumber.get(visitor.id) as any).n || 0);
   const attemptNumber = lastAttemptNumber + 1;
-  const snapshot = JSON.stringify({ profile: mapProfile(profile, version, levels, rules), capturedAt: new Date().toISOString() });
+  // Immutable content snapshot: for content_test components, capture the
+  // full test + questions + answer keys at attempt creation so historical
+  // scoring never changes when the test bank is edited later.
+  const contentTests: any[] = [];
+  for (const c of parseComponents(profile)) {
+    if (c.type === 'content_test' && c.testId) {
+      const test = stmtTestById.get(c.testId) as any;
+      if (test) contentTests.push({ ...test, questions: stmtQuestionsByTest.all(test.id) });
+    }
+  }
+  const snapshot = JSON.stringify({ profile: mapProfile(profile, version, levels, rules), tests: contentTests, capturedAt: new Date().toISOString() });
   const attemptId = id('pat');
   const tx = db.transaction(() => {
     stmtInsertAttempt.run(attemptId, visitor.id, visitor.program_version_id, profile.id, visitor.branch_id, attemptNumber, snapshot, user.userId, null);
@@ -286,15 +542,40 @@ router.put('/visitors/:visitorId/placement/attempts/:attemptId/components/:compo
   const selectedLevelId = req.body?.selectedLevelId || null;
   if (selectedLevelId && !(snapshot.profile.levels || []).some((l: any) => l.id === selectedLevelId)) throw new HttpError(400, 'Selected level is not part of this program.');
   const status = req.body?.status === 'waived' ? 'waived' : 'completed';
-  const result = status === 'waived'
-    ? { score: null, payload: { waived: true } }
-    : componentScore(component, req.body ?? {});
   if (status === 'waived') {
     const role = String(req.user?.role || '');
     if (component.required && !['owner', 'manager'].includes(role)) throw new HttpError(403, 'Only management can waive a required assessment section.');
     if (!String(req.body?.notes || '').trim()) throw new HttpError(400, 'A reason is required when waiving an assessment section.');
+    stmtUpsertResult.run(id('par'), attempt.id, component.key, component.type, component.label, 'waived', null, component.maxScore, component.weight, selectedLevelId, req.body?.notes || null, req.body?.resultText || null, JSON.stringify({ waived: true }), user.userId, 'waived');
+    res.json(stmtResults.all(attempt.id));
+    return;
   }
-  stmtUpsertResult.run(id('par'), attempt.id, component.key, component.type, component.label, status, status === 'waived' ? null : result.score, component.maxScore, component.weight, selectedLevelId, req.body?.notes || null, req.body?.resultText || null, JSON.stringify(result.payload), user.userId, status);
+  if (component.type === 'content_test') {
+    // Content components are scored from the immutable attempt snapshot and the
+    // stored candidate responses. The auto-graded portion (mcq / short_answer)
+    // is computed server-side at submission time; staff may only supply the
+    // MANUAL portion (essay / speaking) bounded by the manual question points,
+    // so a staff PUT cannot rewrite the auto-scored part.
+    const test = (snapshot.tests || []).find((t: any) => t.id === component.testId);
+    if (!test) throw new HttpError(409, 'Test content missing from the attempt snapshot.');
+    const manualQuestions = test.questions.filter((q: any) => q.qtype === 'essay' || q.qtype === 'speaking');
+    const autoEarned = (db.prepare('SELECT COALESCE(SUM(auto_score), 0) AS s FROM placement_assessment_responses WHERE attempt_id = ? AND test_id = ?').get(attempt.id, test.id) as any).s;
+    if (manualQuestions.length === 0) {
+      throw new HttpError(409, 'This content component is fully auto-graded; override its score through the responses endpoint only.');
+    }
+    const answeredCount = (db.prepare('SELECT COUNT(*) AS c FROM placement_assessment_responses WHERE attempt_id = ? AND test_id = ?').get(attempt.id, test.id) as any).c;
+    if (answeredCount < test.questions.length) throw new HttpError(400, `Record answers for all ${test.questions.length} questions before manual scoring (${answeredCount} answered).`);
+    const manualMax = manualQuestions.reduce((sum: number, q: any) => sum + Number(q.points || 0), 0);
+    const manualScore = normalizeScore(req.body?.manualScore, manualMax);
+    const rawCombined = autoEarned + manualScore;
+    const rawMax = test.questions.reduce((sum: number, q: any) => sum + Number(q.points || 0), 0) || component.maxScore;
+    const score = Math.round((rawCombined / rawMax) * component.maxScore * 100) / 100;
+    stmtUpsertResult.run(id('par'), attempt.id, component.key, component.type, component.label, 'completed', score, component.maxScore, component.weight, selectedLevelId, req.body?.notes || null, req.body?.resultText || null, JSON.stringify({ mode: 'manual', autoEarned, manualScore, manualMax, combinedRaw: rawCombined, rawMax, feedback: req.body?.resultText || null }), user.userId, 'completed');
+    res.json(stmtResults.all(attempt.id));
+    return;
+  }
+  const result = componentScore(component, req.body ?? {});
+  stmtUpsertResult.run(id('par'), attempt.id, component.key, component.type, component.label, status, result.score, component.maxScore, component.weight, selectedLevelId, req.body?.notes || null, req.body?.resultText || null, JSON.stringify(result.payload), user.userId, status);
   res.json(stmtResults.all(attempt.id));
 }));
 

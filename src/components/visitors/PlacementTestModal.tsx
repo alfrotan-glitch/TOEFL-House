@@ -5,9 +5,11 @@ import {
 import { api } from '../../api/client';
 import type { Visitor } from '../../types';
 
-type ComponentType = 'skill_scores' | 'written_test' | 'interview' | 'level_assessment' | 'custom_score';
-interface ComponentConfig { key:string; type:ComponentType; label:string; required:boolean; weight:number; maxScore:number; durationMinutes?:number|null; instructions?:string|null; skills?:string[]; }
-interface PlacementProfile { configured:boolean; enabled:boolean; required:boolean; method:string; programName:string; versionLabel?:string; instructions?:string|null; components:ComponentConfig[]; levels:Array<{id:string;name:string;code?:string|null}>; allowRetake:boolean; passScore:number; }
+type ComponentType = 'skill_scores' | 'written_test' | 'interview' | 'level_assessment' | 'custom_score' | 'content_test';
+interface ComponentConfig { key:string; type:ComponentType; label:string; required:boolean; weight:number; maxScore:number; durationMinutes?:number|null; instructions?:string|null; skills?:string[]; testId?:string; }
+interface TestQuestion { id:string; questionKey:string; qtype:string; prompt:string; options:Array<{key:string; text:string}>|null; points:number; }
+interface ContentTest { id:string; title:string; testType:string; instructions?:string|null; audioUrl?:string|null; transcript?:string|null; passage?:string|null; questions:TestQuestion[]; }
+interface PlacementProfile { configured:boolean; enabled:boolean; required:boolean; method:string; programName:string; versionLabel?:string; instructions?:string|null; components:ComponentConfig[]; levels:Array<{id:string;name:string;code?:string|null}>; allowRetake:boolean; passScore:number; contentTests?:ContentTest[]; }
 interface AttemptResult { component_key:string; component_type:string; label:string; status:string; score:number|null; max_score:number; weight:number; selected_level_id?:string|null; notes?:string|null; result_text?:string|null; payload_json?:string|null; }
 interface Attempt { id:string; attempt_number:number; status:string; percentage?:number|null; recommendation_text?:string|null; results:AttemptResult[]; }
 
@@ -15,7 +17,7 @@ interface Props { visitor: Visitor; onClose:()=>void; onCompleted:()=>Promise<vo
 
 const skillLabels: Record<string,string> = { grammar:'Grammar', vocabulary:'Vocabulary', reading:'Reading', listening:'Listening', writing:'Writing', speaking:'Speaking' };
 const componentIcon: Record<ComponentType, React.ReactNode> = {
-  skill_scores:<Sparkles className="w-4 h-4"/>, written_test:<FileText className="w-4 h-4"/>, interview:<MessageSquareText className="w-4 h-4"/>, level_assessment:<BookOpen className="w-4 h-4"/>, custom_score:<Award className="w-4 h-4"/>
+  skill_scores:<Sparkles className="w-4 h-4"/>, written_test:<FileText className="w-4 h-4"/>, interview:<MessageSquareText className="w-4 h-4"/>, level_assessment:<BookOpen className="w-4 h-4"/>, custom_score:<Award className="w-4 h-4"/>, content_test:<FileText className="w-4 h-4"/>
 };
 
 export default function PlacementTestModal({ visitor, onClose, onCompleted, triggerToast }: Props) {
@@ -28,6 +30,10 @@ export default function PlacementTestModal({ visitor, onClose, onCompleted, trig
   const [completing,setCompleting]=useState(false);
   const [activeKey,setActiveKey]=useState<string>('');
   const [drafts,setDrafts]=useState<Record<string,any>>({});
+  const [contentAnswers,setContentAnswers]=useState<Record<string,Record<string,string>>>({});
+  const [contentFeedback,setContentFeedback]=useState<Record<string,Record<string,string>>>({});
+  const [contentAutoScore,setContentAutoScore]=useState<Record<string,{earned:number;max:number;complete:boolean}>>({});
+  const [submittingContent,setSubmittingContent]=useState<string|null>(null);
 
   useEffect(()=>{ let cancelled=false; (async()=>{
     setLoading(true);
@@ -62,6 +68,24 @@ export default function PlacementTestModal({ visitor, onClose, onCompleted, trig
   const progress=totalCount?Math.round((completedCount/totalCount)*100):0;
 
   const patchDraft=(key:string,patch:any)=>setDrafts(prev=>({...prev,[key]:{...(prev[key]||{}),...patch}}));
+
+  const contentTestFor=(component:ComponentConfig)=>profile?.contentTests?.find(t=>t.id===component.testId)||null;
+  const patchAnswer=(compKey:string,qKey:string,val:string)=>setContentAnswers(prev=>({...prev,[compKey]:{...(prev[compKey]||{}),[qKey]:val}}));
+
+  const submitContent=async(component:ComponentConfig)=>{
+    const test=contentTestFor(component);
+    if(!test||!attempt) return;
+    const answers=Object.entries(contentAnswers[component.key]||{}).map(([questionKey,response])=>({questionKey,response}));
+    setSubmittingContent(component.key);
+    try{
+      const res=await api.put<any>(`/placement/visitors/${visitor.id}/placement/attempts/${attempt.id}/tests/${component.key}/responses`,{answers});
+      setContentAutoScore(prev=>({...prev,[component.key]:{earned:res.autoScore,max:res.maxScore,complete:res.complete}}));
+      setContentFeedback(prev=>({...prev,[component.key]:res.feedback||{}}));
+      setAttempt(prev=>prev?{...prev,results:prev.results.map(r=>r.component_key===component.key?{...r,status:res.complete?'completed':r.status}:r)}:prev);
+      triggerToast(res.complete?`${component.label} auto-scored ${res.autoScore}/${res.maxScore}.`:`${component.label}: ${res.answered}/${res.total} answered. Auto points: ${res.autoScore}.`,'success');
+    }catch(err:any){triggerToast(err?.message||'Could not submit responses.','error');}
+    finally{setSubmittingContent(null);}
+  };
   const saveComponent=async(component:ComponentConfig)=>{
     if(!attempt) return;
     const draft=drafts[component.key]||{};
@@ -69,6 +93,13 @@ export default function PlacementTestModal({ visitor, onClose, onCompleted, trig
     try{
       const payload:any={status:'completed',notes:draft.notes||null,resultText:draft.resultText||null,selectedLevelId:draft.selectedLevelId||null};
       if(component.type==='skill_scores') payload.skills=draft.skills||{};
+      else if(component.type==='content_test'){
+        // Submit auto-gradeable answers first (mcq / short answer), then the
+        // staff-entered score covers the manual (essay / speaking) section.
+        await submitContent(component);
+        if(draft.score==null||draft.score===''){triggerToast('Enter a score for the manual section.','error');return;}
+        payload.score=Number(draft.score);
+      }
       else payload.score=Number(draft.score);
       const results=await api.put<AttemptResult[]>(`/placement/visitors/${visitor.id}/placement/attempts/${attempt.id}/components/${component.key}`,payload);
       setAttempt(prev=>prev?({...prev,results}):prev);
@@ -112,6 +143,49 @@ export default function PlacementTestModal({ visitor, onClose, onCompleted, trig
       return <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{skills.map(skill=><div key={skill} className="rounded-2xl border border-slate-200 bg-slate-50 p-3"><div className="flex justify-between text-[11px] font-bold text-slate-600 mb-2"><span>{skillLabels[skill]||skill}</span><span className="font-mono">{d.skills?.[skill] ?? 0}/25</span></div><input type="range" min={0} max={25} value={Number(d.skills?.[skill]??0)} onChange={e=>patchDraft(activeComponent.key,{skills:{...(d.skills||{}),[skill]:Number(e.target.value)}})} className="w-full"/><div className="mt-2 text-right text-xs font-black text-indigo-700">{Number(d.skills?.[skill]??0)}</div></div>)}</div>;
     }
     if(activeComponent.type==='level_assessment') return <div className="space-y-4"><div><label className="block text-[11px] font-black text-slate-500 uppercase tracking-wide mb-2">Recommended level</label><select value={d.selectedLevelId||''} onChange={e=>patchDraft(activeComponent.key,{selectedLevelId:e.target.value})} className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm font-semibold"><option value="">Select level…</option>{(profile?.levels||[]).map(l=><option key={l.id} value={l.id}>{l.code ? `${l.code} — `:''}{l.name}</option>)}</select></div><div><label className="block text-[11px] font-black text-slate-500 uppercase tracking-wide mb-2">Assessment score (optional)</label><input type="number" min={0} max={activeComponent.maxScore} value={d.score??''} onChange={e=>patchDraft(activeComponent.key,{score:e.target.value})} className="w-full rounded-xl border border-slate-200 px-3 py-3 font-mono font-bold"/></div></div>;
+    if(activeComponent.type==='content_test'){
+      const test=contentTestFor(activeComponent);
+      if(!test) return <p className="text-sm text-slate-400">Test content is unavailable in this profile view. (Content is attached at attempt start.)</p>;
+      const auto=contentAutoScore[activeComponent.key];
+      const hasManual=test.questions.some(q=>q.qtype==='essay'||q.qtype==='speaking');
+      return <div className="space-y-5">
+        <div className="rounded-2xl border border-indigo-100 bg-indigo-50/40 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div><div className="text-[11px] font-black text-indigo-700 uppercase tracking-wide">{test.testType} · {test.title}</div>
+            <div className="text-[10px] text-slate-500 mt-0.5">{test.instructions||activeComponent.instructions||'Answer each question. MCQ and short answers are auto-scored.'}</div></div>
+            {auto && <div className={`text-xs font-black px-3 py-1.5 rounded-xl ${auto.complete?'bg-emerald-100 text-emerald-700':'bg-amber-100 text-amber-700'}`}>Auto: {auto.earned}/{auto.max}</div>}
+          </div>
+          {test.audioUrl && <audio controls src={test.audioUrl} className="mt-3 w-full" />}
+          {test.transcript && <details className="mt-2"><summary className="text-[10px] font-bold text-indigo-600 cursor-pointer">Show transcript</summary><p className="text-xs text-slate-600 mt-1 whitespace-pre-wrap">{test.transcript}</p></details>}
+          {test.passage && <div className="mt-3 rounded-xl bg-white border border-slate-100 p-3 text-xs text-slate-700 whitespace-pre-wrap max-h-48 overflow-y-auto">{test.passage}</div>}
+        </div>
+        <div className="space-y-3">
+          {test.questions.map((q:TestQuestion)=>{
+            const ans=contentAnswers[activeComponent.key]?.[q.questionKey]||'';
+            const fb=contentFeedback[activeComponent.key]?.[q.questionKey];
+            return <div key={q.id} className="rounded-xl border border-slate-200 p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="text-xs font-bold text-slate-800">{q.prompt}</div>
+                <span className="text-[10px] text-slate-400 font-mono shrink-0">{q.points} pts</span>
+              </div>
+              {q.qtype==='mcq' && q.options && <div className="mt-2 space-y-1">{q.options.map((o:{key:string;text:string})=>(
+                <label key={o.key} className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer"><input type="radio" name={`${activeComponent.key}-${q.questionKey}`} checked={ans===o.key} onChange={()=>patchAnswer(activeComponent.key,q.questionKey,o.key)} className="accent-indigo-600"/>{o.text}</label>
+              ))}</div>}
+              {(q.qtype==='short_answer') && <input value={ans} onChange={e=>patchAnswer(activeComponent.key,q.questionKey,e.target.value)} placeholder="Type answer…" className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-xs" />}
+              {(q.qtype==='essay'||q.qtype==='speaking') && <textarea value={ans} onChange={e=>patchAnswer(activeComponent.key,q.questionKey,e.target.value)} rows={q.qtype==='essay'?4:2} placeholder={q.qtype==='essay'?'Write the essay here…':'Record speaking notes / response…'} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-xs" />}
+              {fb && <div className={`mt-1.5 text-[10px] font-bold ${fb==='Correct'?'text-emerald-600':'text-slate-500'}`}>{fb}</div>}
+            </div>;
+          })}
+        </div>
+        <button type="button" onClick={()=>submitContent(activeComponent)} disabled={submittingContent===activeComponent.key||attempt?.status==='completed'} className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black disabled:opacity-50 cursor-pointer flex items-center gap-2">{submittingContent===activeComponent.key?<Loader2 className="w-4 h-4 animate-spin"/>:<FileText className="w-4 h-4"/>} Submit & auto-score</button>
+        {hasManual && <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-2">
+          <div className="text-[10px] font-black text-amber-700 uppercase tracking-wide">Manual score (essay / speaking)</div>
+          <input type="number" min={0} max={activeComponent.maxScore} value={d.score??''} onChange={e=>patchDraft(activeComponent.key,{score:e.target.value})} className="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono font-bold text-xs" placeholder={`0–${activeComponent.maxScore}`} />
+          <textarea value={d.resultText||''} onChange={e=>patchDraft(activeComponent.key,{resultText:e.target.value})} rows={3} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs" placeholder="Rubric-based feedback…" />
+          <p className="text-[10px] text-amber-600">Save the section to record the manual score after auto-grading.</p>
+        </div>}
+      </div>;
+    }
     return <div className="space-y-4"><div><label className="block text-[11px] font-black text-slate-500 uppercase tracking-wide mb-2">Score</label><input type="number" min={0} max={activeComponent.maxScore} value={d.score??''} onChange={e=>patchDraft(activeComponent.key,{score:e.target.value})} className="w-full rounded-xl border border-slate-200 px-3 py-3 text-lg font-mono font-black" placeholder={`0–${activeComponent.maxScore}`}/></div><div><label className="block text-[11px] font-black text-slate-500 uppercase tracking-wide mb-2">Evaluator notes</label><textarea value={d.resultText||''} onChange={e=>patchDraft(activeComponent.key,{resultText:e.target.value})} rows={5} className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm" placeholder={activeComponent.type==='interview'?'Record fluency, pronunciation, grammar, confidence, comprehension…':'Summarize the written/assessment outcome…'}/></div></div>;
   };
 

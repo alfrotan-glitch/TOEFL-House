@@ -276,7 +276,7 @@ CREATE TABLE IF NOT EXISTS placement_assessment_results (
   id TEXT PRIMARY KEY,
   attempt_id TEXT NOT NULL REFERENCES placement_assessment_attempts(id) ON DELETE CASCADE,
   component_key TEXT NOT NULL,
-  component_type TEXT NOT NULL CHECK (component_type IN ('skill_scores','written_test','interview','level_assessment','custom_score')),
+  component_type TEXT NOT NULL CHECK (component_type IN ('skill_scores','written_test','interview','level_assessment','custom_score','content_test')),
   label TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','in_progress','completed','waived')),
   score REAL,
@@ -295,6 +295,51 @@ CREATE TABLE IF NOT EXISTS placement_assessment_results (
 CREATE INDEX IF NOT EXISTS idx_placement_attempts_visitor ON placement_assessment_attempts(visitor_id, status, attempt_number);
 CREATE INDEX IF NOT EXISTS idx_placement_attempts_branch ON placement_assessment_attempts(branch_id, status, started_at);
 CREATE INDEX IF NOT EXISTS idx_placement_results_attempt ON placement_assessment_results(attempt_id, status);
+
+CREATE TABLE IF NOT EXISTS placement_tests (
+  id            TEXT PRIMARY KEY,
+  title         TEXT NOT NULL,
+  test_type     TEXT NOT NULL CHECK (test_type IN ('listening','reading','writing','speaking')),
+  instructions  TEXT,
+  audio_url     TEXT,
+  transcript    TEXT,
+  passage       TEXT,
+  status        TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','active','archived')),
+  branch_id     TEXT REFERENCES branches(id) ON DELETE SET NULL, -- NULL = global
+  created_by    TEXT REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_placement_tests_active ON placement_tests(status, branch_id, test_type);
+
+CREATE TABLE IF NOT EXISTS placement_test_questions (
+  id           TEXT PRIMARY KEY,
+  test_id      TEXT NOT NULL REFERENCES placement_tests(id) ON DELETE CASCADE,
+  question_key TEXT NOT NULL,
+  qtype        TEXT NOT NULL CHECK (qtype IN ('mcq','short_answer','essay','speaking')),
+  prompt       TEXT NOT NULL,
+  options_json TEXT,
+  answer_key   TEXT,
+  points       REAL NOT NULL DEFAULT 1,
+  order_index  INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(test_id, question_key)
+);
+CREATE INDEX IF NOT EXISTS idx_placement_questions_test ON placement_test_questions(test_id, order_index);
+
+CREATE TABLE IF NOT EXISTS placement_assessment_responses (
+  id            TEXT PRIMARY KEY,
+  attempt_id    TEXT NOT NULL REFERENCES placement_assessment_attempts(id) ON DELETE CASCADE,
+  test_id       TEXT NOT NULL REFERENCES placement_tests(id) ON DELETE RESTRICT,
+  question_id   TEXT NOT NULL REFERENCES placement_test_questions(id) ON DELETE RESTRICT,
+  question_key  TEXT NOT NULL,
+  response_json TEXT,
+  auto_score    REAL,
+  max_points    REAL NOT NULL DEFAULT 1,
+  feedback      TEXT,
+  answered_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(attempt_id, question_id)
+);
+CREATE INDEX IF NOT EXISTS idx_placement_responses_attempt ON placement_assessment_responses(attempt_id, question_id);
  
 CREATE INDEX IF NOT EXISTS idx_campaigns_branch      ON campaigns(branch_id); 
 
