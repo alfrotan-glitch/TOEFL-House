@@ -5,7 +5,7 @@
  */
 import { Router } from 'express';
 import { db } from '../db/connection.js';
-import { authorize, requirePermission } from '../middleware/auth.js';
+import { authorize, requirePermission, canAccessBranchResource } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
@@ -185,6 +185,15 @@ placementAttemptRouter.put('/visitors/:visitorId/placement/attempts/:attemptId/t
     if (!q) throw new HttpError(400, `Unknown question key "${a?.questionKey}" in test "${test.title}".`);
     const response = a?.response;
     if (response === undefined || response === null || response === '') continue;
+    // Speaking answers may attach a recorded-audio media reference (validated
+    // server-side: the media must exist and be in scope — branch or global).
+    if (q.qtype === 'speaking' && response && typeof response === 'object' && (response as any).audioMediaId) {
+      const media = db.prepare('SELECT id, branch_id FROM placement_media WHERE id = ?').get((response as any).audioMediaId) as { id: string; branch_id: string | null } | undefined;
+      if (!media) throw new HttpError(400, `Unknown audio media id "${(response as any).audioMediaId}" for speaking question "${q.question_key}".`);
+      if (media.branch_id && media.branch_id !== visitor.branch_id && !canAccessBranchResource(req, media.branch_id)) {
+        throw new HttpError(403, 'Audio media belongs to another branch.');
+      }
+    }
     const graded = autoScoreQuestion(q, response);
     feedbacks[String(q.question_key)] = graded.feedback;
     stmtUpsertResponse.run(id('pr'), attempt.id, test.id, q.id, q.question_key, JSON.stringify(response), graded.score, Number(q.points || 0), graded.feedback);
@@ -461,6 +470,28 @@ placementAttemptRouter.get('/visitors/:visitorId/placement/attempts', authorize(
   const visitor = getVisitorOr404(req.params.visitorId);
   assertVisitorBranchAccess(req, visitor);
   res.json((stmtAttempts.all(visitor.id) as any[]).map((a) => mapAttempt(a)));
+}));
+
+// ============================================================================
+// §MAINTENANCE — on-demand expiry sweep (owner/manager)
+// ============================================================================
+placementAttemptRouter.post('/maintenance/expire', authorize('owner', 'manager'), ah(async (req, res) => {
+  const user = getUserContext(req);
+  const now = nowIso();
+  let expiredCount = 0;
+  db.transaction(() => {
+    // Expire both in-progress AND paused attempts that are past their expiry
+    // (pause freezes component timers; it does not exempt the attempt from its
+    // overall deadline).
+    const due = db.prepare(`SELECT id, visitor_id FROM placement_assessment_attempts WHERE status IN ('in_progress','paused') AND expires_at IS NOT NULL AND expires_at < ?`).all(now) as Array<{ id: string; visitor_id: string }>;
+    expiredCount = due.length;
+    for (const a of due) {
+      db.prepare(`UPDATE placement_assessment_attempts SET status='expired', completed_at=datetime('now'), updated_at=datetime('now') WHERE id=? AND status IN ('in_progress','paused')`).run(a.id);
+      db.prepare(`UPDATE visitors SET placement_status='not_started', placement_status_at=datetime('now'), current_placement_attempt_id=NULL WHERE id=? AND current_placement_attempt_id=?`).run(a.visitor_id, a.id);
+    }
+  })();
+  writeAudit(req, `Placement expiry sweep: ${expiredCount} attempt(s) marked expired`, { newValue: JSON.stringify({ count: expiredCount, operatorId: user.userId }) });
+  res.json({ ok: true, expired: expiredCount });
 }));
 
 // ============================================================================

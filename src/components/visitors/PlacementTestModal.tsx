@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Award, CheckCircle2, Clock3, FileText, Loader2, MessageSquareText, Save, Sparkles, X, BookOpen, ShieldCheck, Pause, Play, SkipForward, Timer, AlertTriangle
+  Award, CheckCircle2, Clock3, FileText, Loader2, MessageSquareText, Save, Sparkles, X, BookOpen, ShieldCheck, Pause, Play, SkipForward, Timer, AlertTriangle, Mic, Square
 } from 'lucide-react';
 import { api } from '../../api/client';
 import type { Visitor } from '../../types';
@@ -9,7 +9,7 @@ type ComponentType = 'skill_scores' | 'written_test' | 'interview' | 'level_asse
 interface ComponentConfig { key:string; type:ComponentType; label:string; required:boolean; weight:number; maxScore:number; durationMinutes?:number|null; timeLimitSeconds?:number|null; minScore?:number|null; scoringMethod?:string; enabled?:boolean; instructions?:string|null; skills?:string[]; testId?:string; }
 interface TestQuestion { id:string; questionKey:string; qtype:string; prompt:string; options:Array<{key:string; text:string}>|null; points:number; sectionKey?:string|null; }
 interface TestSection { key:string; title?:string|null; kind:string; audioUrl?:string|null; transcript?:string|null; body?:string|null; durationSeconds?:number|null; }
-interface ContentTest { id:string; title:string; testType:string; instructions?:string|null; audioUrl?:string|null; transcript?:string|null; passage?:string|null; difficulty?:string|null; durationSeconds?:number|null; version?:number; sections?:TestSection[]; questions:TestQuestion[]; }
+interface ContentTest { id:string; title:string; testType:string; instructions?:string|null; audioUrl?:string|null; transcript?:string|null; passage?:string|null; difficulty?:string|null; durationSeconds?:number|null; version?:number; rubric?:{id:string; title?:string; criteria:Array<{key:string;label:string;weight:number;maxScore:number}>}|null; sections?:TestSection[]; questions:TestQuestion[]; }
 interface PlacementProfile { configured:boolean; enabled:boolean; required:boolean; requirementMode?:string; firstLevelExempt?:boolean; expiresMinutes?:number|null; policyVersion?:number; method:string; programName:string; versionLabel?:string; instructions?:string|null; components:ComponentConfig[]; levels:Array<{id:string;name:string;code?:string|null}>; allowRetake:boolean; passScore:number; contentTests?:ContentTest[]; }
 interface AttemptResult { component_key:string; component_type:string; label:string; status:string; score:number|null; max_score:number; weight:number; selected_level_id?:string|null; notes?:string|null; result_text?:string|null; payload_json?:string|null; started_at?:string|null; deadline_at?:string|null; elapsed_seconds?:number|null; timeout_flag?:number|null; raw_score?:number|null; percentage?:number|null; score_version?:number|null; }
 interface Attempt { id:string; attempt_number:number; status:string; percentage?:number|null; recommendation_text?:string|null; expires_at?:string|null; results:AttemptResult[]; }
@@ -42,7 +42,8 @@ export default function PlacementTestModal({ visitor, onClose, onCompleted, trig
   const [pausing,setPausing]=useState(false);
   const [activeKey,setActiveKey]=useState<string>('');
   const [drafts,setDrafts]=useState<Record<string,any>>({});
-  const [contentAnswers,setContentAnswers]=useState<Record<string,Record<string,string>>>({});
+  const [contentAnswers,setContentAnswers]=useState<Record<string,Record<string,string|{audioMediaId:string}>>>({});
+  const [contentAudio,setContentAudio]=useState<Record<string,Record<string,{mediaId:string;url:string}>>>({});
   const [contentFeedback,setContentFeedback]=useState<Record<string,Record<string,string>>>({});
   const [contentAutoScore,setContentAutoScore]=useState<Record<string,{earned:number;max:number;complete:boolean;answered:number}>>({});
   const [submittingContent,setSubmittingContent]=useState<string|null>(null);
@@ -105,7 +106,19 @@ export default function PlacementTestModal({ visitor, onClose, onCompleted, trig
   };
 
   const patchDraft=(key:string,patch:any)=>setDrafts(prev=>({...prev,[key]:{...(prev[key]||{}),...patch}}));
-  const patchAnswer=(compKey:string,qKey:string,val:string)=>setContentAnswers(prev=>({...prev,[compKey]:{...(prev[compKey]||{}),[qKey]:val}}));
+  const patchAnswer=(compKey:string,qKey:string,val:string|{audioMediaId:string})=>setContentAnswers(prev=>({...prev,[compKey]:{...(prev[compKey]||{}),[qKey]:val}}));
+
+  const uploadAudio = async (blob: Blob): Promise<{ mediaId: string; url: string }> => {
+    const res = await fetch('/api/placement/media/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': blob.type || 'audio/webm' },
+      body: blob,
+      credentials: 'include',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Upload failed (HTTP ${res.status})`);
+    return { mediaId: data.id, url: data.url };
+  };
 
   const submitContent=async(component:ComponentConfig)=>{
     const test=contentTestFor(component);
@@ -150,8 +163,15 @@ export default function PlacementTestModal({ visitor, onClose, onCompleted, trig
       if(component.type==='skill_scores') payload.skills=draft.skills||{};
       else if(component.type==='content_test'){
         await submitContent(component);
-        if(draft.score==null||draft.score===''){triggerToast('Enter a score for the manual section.','error');return;}
-        payload.score=Number(draft.score);
+        const test=contentTestFor(component);
+        if(test?.rubric?.criteria?.length){
+          const criteriaScores:Record<string,number>={};
+          for(const c of test.rubric.criteria){ const v=Number(draft.criteriaScores?.[c.key]); if(!Number.isFinite(v)){triggerToast(`Enter a score for criterion "${c.label}".`,'error');return;} criteriaScores[c.key]=v; }
+          payload.criteriaScores=criteriaScores;
+        } else {
+          if(draft.score==null||draft.score===''){triggerToast('Enter a score for the manual section.','error');return;}
+          payload.score=Number(draft.score);
+        }
       }
       else payload.score=Number(draft.score);
       const results=await api.put<AttemptResult[]>(`/placement/visitors/${visitor.id}/placement/attempts/${attempt!.id}/components/${component.key}`,payload);
@@ -288,10 +308,11 @@ export default function PlacementTestModal({ visitor, onClose, onCompleted, trig
           {attempt && profile?.components?.length ? (
             <ActiveEditor
               profile={profile} attempt={attempt} activeKey={activeKey} drafts={drafts}
-              contentAnswers={contentAnswers} contentFeedback={contentFeedback} contentAutoScore={contentAutoScore}
+              contentAnswers={contentAnswers} contentAudio={contentAudio} setContentAudio={setContentAudio}
+              contentFeedback={contentFeedback} contentAutoScore={contentAutoScore}
               submittingContent={submittingContent} timedOutFor={timedOutFor} remainingFor={remainingFor}
               onStartTimer={startComponentTimer} onPatchDraft={patchDraft} onPatchAnswer={patchAnswer}
-              onSubmitContent={submitContent} onSave={saveComponent} savingKey={savingKey}
+              onSubmitContent={submitContent} onSave={saveComponent} savingKey={savingKey} uploadAudio={uploadAudio}
             />
           ) : null}
         </div>
@@ -301,7 +322,7 @@ export default function PlacementTestModal({ visitor, onClose, onCompleted, trig
 }
 
 function ActiveEditor(props:any){
-  const { profile, attempt, activeKey, drafts, contentAnswers, contentFeedback, contentAutoScore, submittingContent, timedOutFor, remainingFor, onStartTimer, onPatchDraft, onPatchAnswer, onSubmitContent, onSave, savingKey } = props;
+  const { profile, attempt, activeKey, drafts, contentAnswers, contentAudio, setContentAudio, contentFeedback, contentAutoScore, submittingContent, timedOutFor, remainingFor, onStartTimer, onPatchDraft, onPatchAnswer, onSubmitContent, onSave, savingKey, uploadAudio } = props;
   const component = profile.components.find((c:any)=>c.key===activeKey) as any;
   if(!component) return null;
   const d = drafts[component.key]||{};
@@ -363,7 +384,8 @@ function ActiveEditor(props:any){
                 <label key={o.key} className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer"><input type="radio" name={`${component.key}-${q.questionKey}`} checked={ans===o.key} onChange={()=>onPatchAnswer(component.key,q.questionKey,o.key)} className="accent-indigo-600"/>{o.text}</label>
               ))}</div>}
               {(q.qtype==='short_answer') && <input value={ans} onChange={e=>onPatchAnswer(component.key,q.questionKey,e.target.value)} placeholder="Type answer…" className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-xs" />}
-              {(q.qtype==='essay'||q.qtype==='speaking') && <textarea value={ans} onChange={e=>onPatchAnswer(component.key,q.questionKey,e.target.value)} rows={q.qtype==='essay'?4:2} placeholder={q.qtype==='essay'?'Write the essay here…':'Record speaking notes / response…'} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-xs" />}
+              {(q.qtype==='essay'||q.qtype==='speaking') && <textarea value={typeof ans==='string'?ans:''} onChange={e=>onPatchAnswer(component.key,q.questionKey,e.target.value)} rows={q.qtype==='essay'?4:2} placeholder={q.qtype==='essay'?'Write the essay here…':'Speaking notes (optional)…'} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-xs" />}
+              {q.qtype==='speaking' && <RecordAudioButton questionKey={q.questionKey} compKey={component.key} onPatchAnswer={onPatchAnswer} contentAudio={contentAudio} setContentAudio={setContentAudio} uploadAudio={uploadAudio} />}
               {fb && <div className={`mt-1.5 text-[10px] font-bold ${fb==='Correct'?'text-emerald-600':'text-slate-500'}`}>{fb}</div>}
             </div>;
           })}
@@ -374,8 +396,14 @@ function ActiveEditor(props:any){
           <button type="button" onClick={()=>onSubmitContent(component)} disabled={submittingContent===component.key||attempt.status==='completed'||attempt.status==='paused'} className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black disabled:opacity-50 cursor-pointer flex items-center gap-2">{submittingContent===component.key?<Loader2 className="w-4 h-4 animate-spin"/>:<FileText className="w-4 h-4"/>} Submit & auto-score</button>
         )}
         {hasManual && !timedOut && <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-2">
-          <div className="text-[10px] font-black text-amber-700 uppercase tracking-wide">Manual score (essay / speaking)</div>
-          <input type="number" min={0} max={component.maxScore} value={d.score??''} onChange={e=>onPatchDraft(component.key,{score:e.target.value})} className="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono font-bold text-xs" placeholder={`0–${component.maxScore}`} />
+          <div className="text-[10px] font-black text-amber-700 uppercase tracking-wide">Manual score{test?.rubric ? ` — rubric: ${test.rubric.title || 'linked rubric'}` : ' (essay / speaking)'}</div>
+          {(test?.rubric?.criteria || []).map((c:any)=>(
+            <div key={c.key} className="flex items-center gap-2">
+              <span className="text-[10px] font-bold text-slate-600 w-32 shrink-0">{c.label} ({c.weight}%)</span>
+              <input type="number" min={0} max={c.maxScore} value={d.criteriaScores?.[c.key] ?? ''} onChange={e=>onPatchDraft(component.key,{criteriaScores:{...(d.criteriaScores||{}),[c.key]:Number(e.target.value)}})} className="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono font-bold text-xs" placeholder={`0–${c.maxScore}`} />
+            </div>
+          ))}
+          {!test?.rubric?.criteria?.length && <input type="number" min={0} max={component.maxScore} value={d.score??''} onChange={e=>onPatchDraft(component.key,{score:e.target.value})} className="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono font-bold text-xs" placeholder={`0–${component.maxScore}`} />}
           <textarea value={d.resultText||''} onChange={e=>onPatchDraft(component.key,{resultText:e.target.value})} rows={3} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs" placeholder="Rubric-based feedback…" />
           <p className="text-[10px] text-amber-600">Save the section to record the manual score after auto-grading.</p>
         </div>}
@@ -394,6 +422,55 @@ function ActiveEditor(props:any){
       <div className="mt-4 flex justify-end">
         <button onClick={()=>onSave(component)} disabled={savingKey===component.key || attempt.status==='completed' || attempt.status==='paused' || timedOut} className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-black disabled:opacity-40 flex items-center gap-2">{savingKey===component.key?<Loader2 className="w-4 h-4 animate-spin"/>:<Save className="w-4 h-4"/>} Save section</button>
       </div>
+    </div>
+  );
+}
+
+
+function RecordAudioButton({ questionKey, compKey, onPatchAnswer, contentAudio, setContentAudio, uploadAudio }: any) {
+  const [recording, setRecording] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const recorderRef = React.useRef<MediaRecorder | null>(null);
+  const chunksRef = React.useRef<Blob[]>([]);
+
+  const start = async () => {
+    setError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+        if (blob.size === 0) { setError('No audio captured.'); return; }
+        setBusy(true);
+        try {
+          const { mediaId, url } = await uploadAudio(blob);
+          onPatchAnswer(compKey, questionKey, { audioMediaId: mediaId });
+          setContentAudio((prev: any) => ({ ...prev, [compKey]: { ...(prev[compKey] || {}), [questionKey]: { mediaId, url } } }));
+        } catch (e: any) { setError(e?.message || 'Upload failed.'); }
+        finally { setBusy(false); }
+      };
+      recorderRef.current = recorder;
+      recorder.start();
+      setRecording(true);
+    } catch {
+      setError('Microphone unavailable — record with an external device or upload audio in the media library.');
+    }
+  };
+
+  const stop = () => { try { recorderRef.current?.stop(); } catch { /* noop */ } setRecording(false); };
+  const audio = contentAudio?.[compKey]?.[questionKey];
+
+  return (
+    <div className="mt-2 flex items-center gap-2 flex-wrap">
+      {!recording && <button type="button" onClick={start} disabled={busy} className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-black flex items-center gap-1.5"><Mic className="w-3 h-3" />{busy ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Record answer'}</button>}
+      {recording && <button type="button" onClick={stop} className="px-3 py-1.5 rounded-lg bg-slate-800 text-white text-[10px] font-black flex items-center gap-1.5 animate-pulse"><Square className="w-3 h-3" /> Stop recording</button>}
+      {recording && <span className="text-[10px] font-black text-rose-500 animate-pulse">● REC</span>}
+      {audio && <audio controls src={audio.url} className="h-8 w-48" />}
+      {error && <span className="text-[10px] font-bold text-rose-500">{error}</span>}
     </div>
   );
 }

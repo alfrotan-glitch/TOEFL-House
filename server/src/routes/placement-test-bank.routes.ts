@@ -217,7 +217,7 @@ placementTestBankRouter.put('/rubrics/:id', authorize('owner', 'manager', 'head_
 const MEDIA_DIR = path.resolve(process.cwd(), 'data', 'placement-media');
 const MAX_MEDIA_BYTES = 25 * 1024 * 1024;
 const ALLOWED_MIME: Record<string, string> = {
-  'audio/mpeg': 'mp3', 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/ogg': 'ogg', 'audio/mp4': 'm4a', 'audio/aac': 'aac',
+  'audio/mpeg': 'mp3', 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/ogg': 'ogg', 'audio/mp4': 'm4a', 'audio/aac': 'aac', 'audio/webm': 'webm',
   'image/png': 'png', 'image/jpeg': 'jpg', 'application/pdf': 'pdf',
 };
 

@@ -273,6 +273,7 @@ export function mapProfile(profile: any, version: any, levels: any[], rules: any
         id: test.id, title: test.title, testType: test.test_type, instructions: test.instructions,
         audioUrl: test.audio_url, transcript: test.transcript, passage: test.passage, status: test.status,
         difficulty: test.difficulty ?? null, durationSeconds: test.duration_seconds ?? null, version: Number(test.version ?? 1),
+        rubric: test.rubric_id ? (() => { try { const r = stmtRubricById.get(test.rubric_id) as any; return r ? { id: r.id, title: r.title, criteria: JSON.parse(r.criteria_json || '[]') } : null; } catch { return null; } })() : null,
         sections: (stmtSectionsByTest.all(test.id) as any[]).map((s: any) => ({ key: s.section_key, title: s.title, kind: s.kind, audioUrl: s.audio_url, transcript: s.transcript, body: s.body, durationSeconds: s.duration_seconds, orderIndex: s.order_index })),
         questions: (stmtQuestionsByTest.all(test.id) as any[]).map((q) => ({ id: q.id, questionKey: q.question_key, qtype: q.qtype, prompt: q.prompt, options: q.options_json ? JSON.parse(q.options_json) : null, points: q.points, orderIndex: q.order_index, difficulty: q.difficulty ?? null, sectionKey: q.section_key ?? null })),
       };

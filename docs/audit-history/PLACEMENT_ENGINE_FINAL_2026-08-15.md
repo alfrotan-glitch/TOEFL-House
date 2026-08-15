@@ -165,7 +165,7 @@ See §A. Key design decisions (all reuse existing structures; no parallel models
 | 6 | Listening supports real audio content | **PASS** (URL + sections + media upload; playback via browser `<audio>`) |
 | 7 | Reading supports multiple passages | **PASS** (sections; 2-passage test) |
 | 8 | Writing: prompts + rubric + manual scoring | **PASS** |
-| 9 | Speaking/interview structured assessment | **PARTIAL** — speaking prompt blocks + ordered questions + manual scoring + rubric work; **recorded-audio capture pipeline is NOT implemented** (no microphone/upload-from-device flow) → **INCOMPLETE** |
+| 9 | Speaking/interview structured assessment | **PASS** — speaking prompt blocks + ordered questions + manual scoring + rubric work; **recorded-audio capture is implemented** (MediaRecorder → `POST /placement/media/upload` with mime/size/sha256 validation → audio response attachment with server-side media validation) |
 | 10 | Historical attempts preserve exact test versions | **PASS** (snapshot + content version counter) |
 | 11 | Scores cannot be manipulated from the client | **PASS** |
 | 12 | Placement rules configurable | **PASS** (bands + conditions + policy rules) |
@@ -178,11 +178,17 @@ See §A. Key design decisions (all reuse existing structures; no parallel models
 | 19 | Daily/monthly/quarterly/yearly reporting distinguishes actual activities | **PASS** (range-based report + overview) |
 | 20 | Full regression, build, migration, security, concurrency, live E2E | **PASS** |
 
-## P. Remaining Risks
-1. **Speaking audio capture (INCOMPLETE, acceptance #9 partial):** speaking *content and manual scoring* are implemented and tested, but there is no device-audio recording/upload pipeline. Adding it requires a recorder UI + secure upload (reuse `placement_media` storage) + playback in the staff view.
-2. **Rubric enforcement is advisory:** rubrics are stored and linked, but criterion-level scoring entry in the UI is not wired to a per-criterion input (staff enter one manual score + free-text feedback). A rubric-driven scoring form is the next increment.
-3. **Owner is org-wide by design** (existing RBAC): cross-branch attempt access by `owner` is intentional; any future tightening must be global policy.
-4. **Preview keys surface:** `/test-bank/:id/preview` and `GET /test-bank` include answer keys — deliberate for authoring, but keep those routes staff-role-gated (they are).
-5. **Visual E2E not browser-automated:** the new UI (modal timers, admin panel) is typechecked and built but not exercised by a headless-browser test; behavior is covered at the API level.
-6. **Timer drift vs. wall clock:** deadlines are stored in SQLite UTC text; `remaining` uses client clock for display only — enforcement uses server comparisons at submission time (safe).
-7. **Lazy expiry only:** attempts are marked `expired` on next access; a periodic sweeper would tidy reporting latency (not a correctness issue).
+## P. Remaining Risks (updated after continuation pass)
+1. **Rubric-driven scoring is implemented and tested; per-criterion UI is wired** (criteria inputs in the modal, weighted manual score computed server-side, validated against rubric criteria). Remaining: criterion-level *reporting* per rubric (raw criteria scores are stored in `payload_json`; a rubric report view is future work).
+2. **Owner is org-wide by design** (existing RBAC): cross-branch attempt access by `owner` is intentional; any future tightening must be global policy.
+3. **Preview keys surface:** `/test-bank/:id/preview` and `GET /test-bank` include answer keys — deliberate for authoring, but keep those routes staff-role-gated (they are).
+4. **Visual E2E not browser-automated:** the new UI (modal timers, recording button, admin panel) is typechecked and built but not exercised by a headless-browser test; behavior is covered at the API level. The in-browser MediaRecorder path itself requires a human/browser to record.
+5. **Timer drift vs. wall clock:** deadlines are stored in SQLite UTC text; `remaining` uses client clock for display only — enforcement uses server comparisons at submission time (safe).
+6. **Expiry is lazy + on-demand sweep:** attempts are marked `expired` on next access or via `POST /placement/maintenance/expire` (owner/manager, audited, covers in_progress + paused); a scheduled job is optional future work.
+
+---
+### Continuation pass (same session, after the A–P report)
+- **Speaking audio capture** (acceptance #9 → PASS): MediaRecorder in the placement modal records → uploads (`audio/webm` added to the media whitelist) → answer attaches the validated media id (branch-scoped, 400/403 on invalid/foreign media); playback in the modal. Tests: `placement-engine-extensions.test.ts` + live E2E (webm upload, speaking-only attempt, audio response pending → rubric manual score 75 → completion).
+- **Rubric-driven manual scoring** (acceptance #8 hardened): `criteriaScores` validated against the linked rubric's criteria (weighted, bounded); `manualScore` fallback retained; profile view exposes the rubric for the UI; modal renders per-criterion inputs. Tested (8/10 + 7/10 → 75/100) live and in vitest.
+- **Expiry maintenance sweep** (risk #7 closed): `POST /placement/maintenance/expire` (owner/manager, audited) marks overdue in_progress **and paused** attempts expired and resets visitors; report now distinguishes `expired`.
+- Suite: **53 files / 545 tests PASS**; live E2E #2 extended to **31/31 PASS** (29 original + speaking/rubric/sweep); original content E2E 29/29 unchanged.

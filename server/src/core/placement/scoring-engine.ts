@@ -62,13 +62,37 @@ export function scoreComponentBody(component: PolicyComponent, body: any, snapsh
     const answeredCount = Number((dbPreparedAnsweredCount.get(attemptId, test.id) as any)?.c || 0);
     if (answeredCount < test.questions.length) throw new HttpError(400, `Record answers for all ${test.questions.length} questions before manual scoring (${answeredCount} answered).`);
     const manualMax = manualQuestions.reduce((sum: number, q: any) => sum + Number(q.points || 0), 0);
-    const manualScore = normalizeScore(body?.manualScore, manualMax);
+    // Rubric-driven manual scoring: criteriaScores [{ key, score }] are
+    // validated against the linked rubric's criteria (weighted by weight and
+    // bounded by each criterion's maxScore); the weighted total is normalized
+    // to the manual point budget. A plain manualScore remains supported.
+    let manualScore: number;
+    let criteria: Record<string, number> | null = null;
+    if (body?.criteriaScores && typeof body.criteriaScores === 'object') {
+      if (!test.rubric_id) throw new HttpError(400, 'criteriaScores were provided but the test has no linked rubric.');
+      const rubric = db.prepare('SELECT criteria_json FROM placement_rubrics WHERE id = ?').get(test.rubric_id) as { criteria_json: string } | undefined;
+      if (!rubric) throw new HttpError(409, 'The linked rubric no longer exists.');
+      const rubricCriteria = JSON.parse(rubric.criteria_json || '[]') as Array<{ key: string; weight: number; maxScore: number }>;
+      if (!Array.isArray(rubricCriteria) || rubricCriteria.length === 0) throw new HttpError(409, 'The linked rubric has no criteria.');
+      criteria = {};
+      let weightedSum = 0;
+      for (const c of rubricCriteria) {
+        const given = Number(body.criteriaScores[c.key]);
+        if (!Number.isFinite(given)) throw new HttpError(400, `Missing numeric score for rubric criterion "${c.key}".`);
+        if (given < 0 || given > Number(c.maxScore)) throw new HttpError(400, `Criterion "${c.key}" score must be between 0 and ${c.maxScore}.`);
+        criteria[c.key] = given;
+        weightedSum += (given / Number(c.maxScore || 1)) * Number(c.weight || 0);
+      }
+      manualScore = Math.round((weightedSum / 100) * manualMax * 100) / 100;
+    } else {
+      manualScore = normalizeScore(body?.manualScore, manualMax);
+    }
     const rawCombined = autoEarned + manualScore;
     const rawMax = test.questions.reduce((sum: number, q: any) => sum + Number(q.points || 0), 0) || component.maxScore;
     const score = Math.round((rawCombined / rawMax) * component.maxScore * 100) / 100;
     return {
       score,
-      payload: { mode: 'manual', autoEarned, manualScore, manualMax, combinedRaw: rawCombined, rawMax, feedback: body?.resultText || null },
+      payload: { mode: 'manual', autoEarned, manualScore, manualMax, criteriaScores: criteria, combinedRaw: rawCombined, rawMax, feedback: body?.resultText || null },
       rawScore: rawCombined,
       rawMax,
     };
