@@ -570,7 +570,11 @@ export function useApiStore() {
 
   const recordFeePayment = async (studentId: string, amount: number,
     category: 'fee' | 'book' | 'chapter' | 'exam' | 'card' | 'placement' | 'diploma' | 'other', notes?: string) => {
-    await api.post(`/students/${studentId}/payments`, { amount, category, notes });
+    // Explicit per-submission key so a retry is replayed by the server rather
+    // than charged twice. The backend also derives one when absent, but an
+    // explicit key is the precise signal that this is ONE intent.
+    await api.post(`/students/${studentId}/payments`, { amount, category, notes },
+      undefined, { 'Idempotency-Key': crypto.randomUUID() });
     await Promise.all([reloadPayments(), reloadTransactions(), reloadFinanceOverview(), reloadNotifications()]);
   };
 

@@ -431,3 +431,85 @@ dashboards, sessions, workflows and reports still render Gregorian. They are
 harmless (correct dates, wrong calendar) and can be migrated incrementally by
 swapping in `<ShamsiDate />`. `ShamsiDateInput` is built and tested but not yet
 substituted for the remaining `<input type="date">` fields.
+
+---
+
+# ADDENDUM 3 — Student Subsystem & Global Dashboard Forensic Audit
+
+Audited against the **running API and live database**, not prior reports.
+Method: discover → map → attack → prove → fix → regression → live-verify.
+
+## Q. Defects reproduced (before any code change)
+
+| # | Defect | Severity | Evidence |
+|---|---|---|---|
+| S1 | **Un-keyed payment requests duplicate money.** 10 concurrent `POST /students/:id/payments` → **10 payments, 10 income rows, 10,000 AFN** from a single 1,000 AFN intent | **CRITICAL** | `codes={201:10}`, `payments rows=10 sum=10000` |
+| S2 | **Refunds duplicate.** 5 concurrent refunds → 5 rows, **−5,000 AFN** | **CRITICAL** | `refund rows=5 sum=-5000` |
+| S3 | **Dashboard JOIN multiplication.** One 9,999 AFN payment reported as **19,998** when the student held 2 active semesters | **HIGH** | `Dup Class A 9999 + Dup Class B 9999` |
+| S4 | **Outstanding ignores discounts.** Net fee 7,000, paid 4,000 → reported **6,000** instead of 3,000 (used gross `fee_amount`); also ignored `installment` payments | **HIGH** | `reported=6000 expected=3000` |
+
+### Root causes
+- **S1/S2:** `Idempotency-Key` was **opt-in**. Only ONE frontend call site sent one; `apiStore.recordFeePayment` sent none. `disabled={loading}` cannot survive refresh, retry, a second tab, or a direct API client.
+- **S3:** `payments JOIN student_semesters ON student_id AND status='active'` fanned each payment across every active semester.
+- **S4:** aggregate used `SUM(fee_amount)` (gross) and counted only `category='fee'`.
+
+## Attacks that PASSED before any change (no false alarms raised)
+Fixed-fee guards (`card`/`diploma`/`placement`), the two-writer card case (`issue-card` + manual), concurrent `issue-card` ×6, concurrent `enroll-semester` ×6, concurrent `enroll-class` ×5, and book-sale stock consistency were **already correct**. Only the genuinely broken paths were changed.
+
+## S. Exact fixes
+
+**`server/src/utils/idempotency.ts` (new).** Idempotency is now **always applied**. An explicit client key wins; otherwise a fingerprint is derived from the business intent (`route + student + category + amount + refs + method + actor`) within a **90-second window**, with the previous window also checked so a boundary-straddling retry still matches.
+
+Two concepts kept deliberately separate:
+- **Request idempotency** — collapses retries.
+- **Business-event uniqueness** — "this fee is charged once", enforced by domain guards.
+
+**Race safety:** the pre-check is only a fast path. The authoritative guarantee is the DB unique index `uq_payments_idempotency`; on `UNIQUE` violation the loser **replays the winner's receipt** instead of 500-ing or double-charging.
+
+**Critical ordering correction found during regression:** a derived key must NOT short-circuit categories that own a business guard (`fee/installment/book/card/diploma/placement`) — replaying a stale success would mask actionable errors ("already fully paid", "diploma fee already recorded") and tell the operator a charge succeeded when it did not. Those categories rely on their guards + the unique index; derived keys are not persisted for them so a later legitimate charge cannot collide.
+
+**Actor is part of the intent:** two different cashiers each recording the same amount are two real events, not a retry. Found because it broke `final-hardening`'s finance-then-manager refund test — a legitimate case my first design would have wrongly blocked.
+
+**Dashboard (`bos.routes.ts`):** each payment is attributed to **exactly one** semester/class via a correlated subquery (matched on `payments.semester`); outstanding now uses `COALESCE(net_fee_amount, fee_amount)` and counts `('fee','installment')` with `status='completed'`.
+
+**Frontend:** `apiStore.recordFeePayment` now sends a per-submission `Idempotency-Key`.
+
+## T. Regression evidence — after fix
+
+| Attack | Before | After |
+|---|---|---|
+| 10 concurrent un-keyed payments | 10 rows / 10,000 AFN | **1 row / 1,000 AFN** (`{201:1, 200:9}`) |
+| **100** concurrent payments | (would be 100) | **1 row / 250 AFN** (`{201:1, 200:99}`) |
+| 5 concurrent refunds | 5 rows / −5,000 | **1 row / −1,000** |
+| Sequential double-click | 2 charges | 1 charge, same receipt |
+| Dashboard revenue-by-class | 19,998 | **9,999 (= truth)** |
+| Outstanding with discount | 6,000 | **3,000** |
+| Audit rows for 5 clicks | 5 | **1** |
+
+**Counter-invariants verified (no over-blocking):** two explicitly keyed identical payments both succeed; different amount/category are separate events; the derived key changes after the window; diploma double-charge still returns an actionable **409**.
+
+**Tests genuinely catch the bugs** — reverting the fix produced `expected [ …(10) ] to have a length of 1 but got 10`.
+
+## Full gate results
+
+| Gate | Result |
+|---|---|
+| Backend tests | **622 passed / 57 files** (+14 new) |
+| Frontend typecheck / lint / build | PASS |
+| Backend typecheck / build | PASS |
+| `audit:product` / `audit:static` | PASS |
+| Fresh-schema preflight | PASS (58 migrations, no drift) |
+
+**Financial reconciliation (live DB):** every category matches exactly between `payments` and `financial_transactions` (card 800, chapter 1500, diploma 500, exam 4750, fee 5000, other 29800); **0 payments without a ledger row**.
+
+## U. PASS / FAIL / UNVERIFIED
+
+**PASS:** duplicate-click protection; concurrent-request invariants; legitimate repeats preserved; business-event uniqueness; dashboard reconciliation for the two proven defects; audit trail (1 event per business action); payments↔ledger reconciliation; fresh-schema/migration agreement.
+
+**UNVERIFIED (stated honestly):** exhaustive per-metric reconciliation of *every* dashboard tile (executive dashboard, marketing funnel, student analytics) — only the two proven-defective aggregates plus the finance dashboard's ledger-backed totals were mathematically verified; dashboard performance under production-scale data (no load test run); date/period boundary matrix beyond the Shamsi month spans already covered; multi-branch dashboard isolation (single-branch dataset in this environment).
+
+## V. Remaining risks
+
+1. **90-second window is a heuristic.** Two genuinely distinct, identical, un-keyed payments by the *same* operator for the *same* student within 90s collapse into one. Mitigation: the UI sends explicit keys, which always create distinct events. Tune `IDEMPOTENCY_WINDOW_SECONDS` if a real workflow needs faster repeats.
+2. **Other money writers** (`books/:id/sell`, exam enrolment, teacher/employee payroll) were attacked and behaved correctly, but do **not** yet use the shared derived-key helper; they rely on their own guards. Extending the helper to them would make protection uniform.
+3. Book sales write to `book_sales`, not `payments` — any reconciliation query must union both.

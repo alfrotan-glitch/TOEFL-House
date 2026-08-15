@@ -65,11 +65,16 @@ const stmtMarketingCost = db.prepare(
    AND date BETWEEN ? AND ?`
 );
 
+// Outstanding = what the student actually OWES. Two corrections:
+//  - use net_fee_amount (post-discount); the gross fee_amount overstated the
+//    debt of every discounted student (proven: 6,000 reported vs 3,000 real).
+//  - count 'installment' payments as well as 'fee'; an installment pays down
+//    exactly the same tuition debt.
 const stmtOutstandingPayments = db.prepare(`
   SELECT COALESCE(SUM(sem_total.total - COALESCE(paid.total, 0)), 0) as outstanding
-  FROM (SELECT student_id, SUM(fee_amount) as total FROM student_semesters GROUP BY student_id) sem_total
+  FROM (SELECT student_id, SUM(COALESCE(net_fee_amount, fee_amount)) as total FROM student_semesters GROUP BY student_id) sem_total
   JOIN students st ON st.id = sem_total.student_id AND st.branch_id = ?
-  LEFT JOIN (SELECT student_id, SUM(amount) as total FROM payments WHERE category = 'fee' AND branch_id = ? GROUP BY student_id) paid ON paid.student_id = sem_total.student_id
+  LEFT JOIN (SELECT student_id, SUM(amount) as total FROM payments WHERE category IN ('fee','installment') AND status = 'completed' AND branch_id = ? GROUP BY student_id) paid ON paid.student_id = sem_total.student_id
   WHERE sem_total.total > COALESCE(paid.total, 0)
 `);
 
@@ -129,10 +134,21 @@ const stmtInsertFinTx = db.prepare(
 );
 
 // NEW: Profitability Analytics Statements
+// Each payment is attributed to EXACTLY ONE class. Joining payments to every
+// active semester multiplied revenue by the number of semesters a student
+// held (proven: one 9,999 payment reported as 19,998 across two classes).
+// The correlated subquery picks a single owning semester — matched by name
+// when the payment records one, else the student's most recent active one.
 const stmtRevenueByClass = db.prepare(`
   SELECT c.name, SUM(p.amount) as revenue
   FROM payments p
-  JOIN student_semesters ss ON ss.student_id = p.student_id AND ss.status = 'active'
+  JOIN student_semesters ss ON ss.id = (
+    SELECT s2.id FROM student_semesters s2
+    WHERE s2.student_id = p.student_id
+      AND (p.semester IS NULL OR s2.semester_name = p.semester)
+    ORDER BY (s2.status = 'active') DESC, s2.enroll_date DESC
+    LIMIT 1
+  )
   JOIN classes c ON c.id = ss.class_id
   WHERE p.category IN ('fee', 'installment') AND p.status = 'completed' 
   AND c.branch_id = ? AND p.date BETWEEN ? AND ?
@@ -141,10 +157,17 @@ const stmtRevenueByClass = db.prepare(`
   LIMIT 5
 `);
 
+// Same single-attribution rule as stmtRevenueByClass above.
 const stmtRevenueByTimeSlot = db.prepare(`
   SELECT COALESCE(c.schedule_time, 'Unknown') as slot, SUM(p.amount) as revenue
   FROM payments p
-  JOIN student_semesters ss ON ss.student_id = p.student_id AND ss.status = 'active'
+  JOIN student_semesters ss ON ss.id = (
+    SELECT s2.id FROM student_semesters s2
+    WHERE s2.student_id = p.student_id
+      AND (p.semester IS NULL OR s2.semester_name = p.semester)
+    ORDER BY (s2.status = 'active') DESC, s2.enroll_date DESC
+    LIMIT 1
+  )
   JOIN classes c ON c.id = ss.class_id
   WHERE p.category IN ('fee', 'installment') AND p.status = 'completed' 
   AND c.branch_id = ? AND p.date BETWEEN ? AND ?

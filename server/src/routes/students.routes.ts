@@ -21,6 +21,7 @@ import { countActiveStudentsInClass } from '../core/academic/class-capacity.js';
 import { assertClassGenderAllowsStudent } from './classes.routes.js';
 import { JourneyEventType } from '../core/journey/event-types.js';
 import { SYSTEM_DEFAULTS } from '../core/configuration/policy-catalog.js';
+import { resolveIdempotency, isUniqueViolation } from '../utils/idempotency.js';
 
 export const studentsRouter = Router();
 studentsRouter.use(authenticate);
@@ -471,10 +472,40 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
   if (!category || !['fee', 'book', 'chapter', 'exam', 'card', 'placement', 'diploma', 'installment', 'other'].includes(category)) throw new HttpError(400, 'Invalid category.');
   const resolvedMethod = ['cash', 'card', 'bank_transfer'].includes(paymentMethod) ? paymentMethod : 'cash';
   const date = today();
-  const idempotencyKey = String(req.get('Idempotency-Key') || req.body?.idempotencyKey || '').trim();
-  if (idempotencyKey) {
-    const existing = stmtGetPaymentByIdempotency.get(idempotencyKey) as any;
-    if (existing) return res.status(200).json({ receiptNumber: existing.receipt_number, amountCharged: existing.amount, idempotentReplay: true });
+  // Idempotency is ALWAYS applied, never only when the client remembers to
+  // send a key: an un-keyed double-click previously created one payment per
+  // click. When no key is supplied a fingerprint of the business intent is
+  // derived, so retries collapse while a genuinely new later charge (a
+  // different time bucket, or an explicit client key) still goes through.
+  const { key: idempotencyKey, candidates: idempotencyCandidates, clientSupplied: clientSuppliedKey } = resolveIdempotency(req, {
+    route: 'student-payment',
+    studentId: student.id,
+    category,
+    amount: amount === undefined || amount === null || amount === '' ? null : Number(amount),
+    semesterId: semesterId ?? null,
+    installmentId: installmentId ?? null,
+    bookId: bookId ?? null,
+    method: resolvedMethod,
+    actorUserId: user.userId,
+  });
+  // An EXPLICIT client key always replays immediately — the caller has stated
+  // that this is one intent.
+  //
+  // A DERIVED key must not short-circuit here for categories that carry their
+  // own business-event guard (fee/installment/book/card/diploma/placement).
+  // Those guards return a precise, actionable error ("already fully paid",
+  // "diploma fee already recorded"); replaying a stale success would hide it
+  // and tell the operator the charge succeeded when it did not. For those
+  // categories the guards run first and the unique index below is the
+  // duplicate backstop. Free-amount categories have no such guard, so the
+  // derived key is what protects them.
+  const GUARDED_CATEGORIES = ['fee', 'installment', 'book', 'card', 'diploma', 'placement'];
+  const replayEligible = clientSuppliedKey || !GUARDED_CATEGORIES.includes(category);
+  if (replayEligible) {
+    for (const candidate of idempotencyCandidates) {
+      const existing = stmtGetPaymentByIdempotency.get(candidate) as any;
+      if (existing) return res.status(200).json({ receiptNumber: existing.receipt_number, amountCharged: existing.amount, idempotentReplay: true });
+    }
   }
   const rc = nextReceiptNumber();
   const payId = id('pay');
@@ -571,14 +602,26 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
       currentInst.status = 'paid';
       stmtUpdateStudentInstallments.run(JSON.stringify(currentPlan), student.id);
     }
-    stmtInsertPayment.run(payId, student.id, resolvedAmount, date, resolvedMethod, category, notes || 'Smart Payment', rc, student.branch_id, semName, null, bookRefId, idempotencyKey || null);
+    stmtInsertPayment.run(payId, student.id, resolvedAmount, date, resolvedMethod, category, notes || 'Smart Payment', rc, student.branch_id, semName, null, bookRefId, replayEligible ? (idempotencyKey || null) : null);
     if (category === 'book') {
       const updated = stmtUpdateBookStock.run(bookRefId, student.branch_id);
       if (updated.changes !== 1) throw new HttpError(409, 'Book stock changed. Please retry.');
     }
     recordIncome({ category, amount: resolvedAmount, date, description: `Received ${category} payment from ${student.full_name}`, referenceId: student.id, paymentId: payId, operatorName: user.fullName, operatorRole: user.role ?? null, branchId: student.branch_id });
   });
-  tx();
+  try {
+    tx();
+  } catch (err) {
+    // Atomic backstop. The pre-check above is a fast path; under true
+    // concurrency several requests can pass it simultaneously. Only one can
+    // win the unique index on payments.idempotency_key — the losers replay
+    // the winner's result instead of surfacing a 500 or double-charging.
+    if (isUniqueViolation(err)) {
+      const winner = stmtGetPaymentByIdempotency.get(idempotencyKey) as any;
+      if (winner) return res.status(200).json({ receiptNumber: winner.receipt_number, amountCharged: winner.amount, idempotentReplay: true });
+    }
+    throw err;
+  }
 
   try {
     getJourneyEngine(db).appendEvent({ studentId: student.id, eventType: JourneyEventType.PAYMENT_RECORDED, occurredAt: date, branchId: student.branch_id, actorUserId: user.userId, actorName: user.fullName, payload: { amount: resolvedAmount, category, receiptNumber: rc } });
@@ -596,9 +639,18 @@ studentsRouter.post('/:id/refund', requirePermission('Refund.Approve'), ah(async
   if (!Number.isFinite(refundAmount) || refundAmount <= 0) throw new HttpError(400, 'Refund amount must be positive.');
   if (!reason || !String(reason).trim()) throw new HttpError(400, 'Refund reason is required.');
   const date = today();
-  const idempotencyKey = String(req.get('Idempotency-Key') || req.body?.idempotencyKey || '').trim();
-  if (idempotencyKey) {
-    const existing = stmtGetPaymentByIdempotency.get(idempotencyKey) as any;
+  // Refunds move real money out; the same mandatory idempotency applies.
+  const { key: idempotencyKey, candidates: idempotencyCandidates } = resolveIdempotency(req, {
+    route: 'student-refund',
+    studentId: student.id,
+    amount: refundAmount,
+    reason: String(reason).trim(),
+    // Two different operators each issuing a refund of the same amount are
+    // two distinct business events, not a retry of one.
+    actorUserId: user.userId,
+  });
+  for (const candidate of idempotencyCandidates) {
+    const existing = stmtGetPaymentByIdempotency.get(candidate) as any;
     if (existing) return res.status(200).json({ receiptNumber: existing.receipt_number, idempotentReplay: true });
   }
   const rc = `REF-${nextReceiptNumber()}`;
@@ -616,7 +668,15 @@ studentsRouter.post('/:id/refund', requirePermission('Refund.Approve'), ah(async
     stmtInsertSimplePayment.run(payId, student.id, -refundAmount, date, 'cash', 'refund', String(reason).trim(), rc, student.branch_id, idempotencyKey || null);
     recordIncome({ category: 'refund', amount: -refundAmount, date, description: `Refund issued to ${student.full_name}`, referenceId: student.id, paymentId: payId, operatorName: user.fullName, operatorRole: user.role ?? null, branchId: student.branch_id });
   });
-  tx();
+  try {
+    tx();
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      const winner = stmtGetPaymentByIdempotency.get(idempotencyKey) as any;
+      if (winner) return res.status(200).json({ receiptNumber: winner.receipt_number, idempotentReplay: true });
+    }
+    throw err;
+  }
 
   try {
     getJourneyEngine(db).appendEvent({ studentId: student.id, eventType: JourneyEventType.PAYMENT_RECORDED, occurredAt: date, branchId: student.branch_id, actorUserId: user.userId, actorName: user.fullName, payload: { amount: -refundAmount, category: 'refund', receiptNumber: rc } });
