@@ -202,6 +202,39 @@ export default function OperationsReportView() {
             </div>
           </div>
 
+          {/* Discounts, outstanding balances, previous-period comparison (server-computed) */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+              <div className="text-[10px] uppercase font-bold text-slate-400">Discounts granted</div>
+              <div className="text-xl font-extrabold font-mono text-slate-900 mt-1">{formatAFN(report.financial.discounts.invoiceDiscounts + report.financial.discounts.registrationDiscounts)}</div>
+              <div className="text-[10px] text-slate-400 mt-0.5">Invoices {formatAFN(report.financial.discounts.invoiceDiscounts)} · Registrations {formatAFN(report.financial.discounts.registrationDiscounts)}</div>
+            </div>
+            <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+              <div className="text-[10px] uppercase font-bold text-slate-400">Outstanding balances</div>
+              <div className="text-xl font-extrabold font-mono text-amber-700 mt-1">{formatAFN(report.financial.outstanding.remaining)}</div>
+              <div className="text-[10px] text-slate-400 mt-0.5">{report.financial.outstanding.openInvoices} open invoices · {formatAFN(report.financial.outstanding.gross)} gross</div>
+            </div>
+            <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
+              <div className="text-[10px] uppercase font-bold text-slate-400">vs previous period ({report.financial.previous.from} → {report.financial.previous.to})</div>
+              {(() => {
+                const prev = report.financial.previous;
+                const dIncome = report.financial.income.total - prev.income;
+                const dExpense = report.financial.expense.total - prev.expense;
+                const pct = (n: number) => (prev.income !== 0 || prev.expense !== 0) ? `${n >= 0 ? '+' : ''}${n.toFixed(1)}%` : '—';
+                const pctIncome = prev.income !== 0 ? ((report.financial.income.total - prev.income) / Math.abs(prev.income)) * 100 : 0;
+                const pctExpense = prev.expense !== 0 ? ((report.financial.expense.total - prev.expense) / Math.abs(prev.expense)) * 100 : 0;
+                void pct; void dIncome; void dExpense;
+                return (
+                  <div className="space-y-1 text-[11px]">
+                    <div className="flex justify-between"><span className="text-slate-500">Income</span><span className={`font-mono font-bold ${dIncome >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatAFN(dIncome)} ({pctIncome >= 0 ? '+' : ''}{pctIncome.toFixed(1)}%)</span></div>
+                    <div className="flex justify-between"><span className="text-slate-500">Expense</span><span className={`font-mono font-bold ${dExpense <= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatAFN(dExpense)} ({pctExpense >= 0 ? '+' : ''}{pctExpense.toFixed(1)}%)</span></div>
+                    <div className="flex justify-between border-t border-slate-100 pt-1"><span className="text-slate-500 font-bold">Net</span><span className="font-mono font-extrabold">{formatAFN(report.financial.net - prev.net)}</span></div>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
               <h3 className="text-xs font-extrabold text-slate-900 mb-2">Income by category</h3>
@@ -264,6 +297,19 @@ export default function OperationsReportView() {
                 <div className="text-[10px] text-slate-500">{formatAFN(report.operational.booksSold.total)}</div>
               </div>
             </div>
+            {report.operational.booksByTitle?.length > 0 && (
+              <div className="mt-3 border-t border-slate-100 pt-3">
+                <h4 className="text-[11px] font-extrabold text-slate-700 mb-2">Books by title</h4>
+                <div className="space-y-1.5">
+                  {report.operational.booksByTitle.map((b) => (
+                    <div key={b.title} className="flex justify-between text-[11px] border-b border-slate-50 pb-1">
+                      <span className="text-slate-600 font-semibold">{b.title} <span className="text-slate-400">× {b.quantity}</span></span>
+                      <span className="font-mono font-bold text-emerald-700">{formatAFN(b.net)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Balances */}

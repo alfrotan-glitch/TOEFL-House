@@ -310,6 +310,35 @@ not a defect).
 Suite: 45 files / 476 tests; typecheck/lint(0/0)/build green; fresh-schema
 preflight green; live E2E green.
 
+## Pass 14 — Reporting / financial / operational forensic audit
+
+Reproduction suite `reporting-forensic.test.ts` (8 tests) + live E2E.
+
+**Defect reproduced and FIXED (CRITICAL — period correctness)**: the report
+period resolver capped the `to` bound at TODAY for every month/year request,
+so a historical report (?month=2026-06, ?year=2025) silently included
+later-period transactions (June reported 1700 incl. July; 2025 reported 1700
+incl. all 2026). Fix: calendar periods now span the FULL period
+(month → last day of month; year → Dec 31; added quarter → Q1..Q4); invalid
+months/years rejected. Verified: June = 1200 exactly, 2025 = 0, Q2 bounds
+correct, live org-scope June = 1000.
+
+**Metrics added (explicitly required, authoritative sources)**: discounts
+(invoices.discount_amount + registrations.discount_applied), outstanding
+balances (open-invoice net − paid), books sold by title (book_sales JOIN
+books), and a server-computed previous-period comparison (income/expense/net
+deltas) with an inclusive-day same-length window. Frontend renders all of
+them (discounts, outstanding, books-by-title, %-change vs previous period).
+
+**Verified (no change)**: income/expense reconciliation (report == SUM
+fin_tx for the period); refunds reduce income; ledger endpoint honors
+explicit from/to; branch isolation (finance(rfb2) sees 0 for other branch's
+data even with branchId=all); gender splits (placement income via visitor);
+expense categories aggregate from the authoritative ledger.
+
+Suite: 47 files / 488 tests; typecheck/lint(0/0)/build green; fresh-schema
+preflight green; live E2E green.
+
 ## Suggested next high-value tasks (in order)
 
 1. **Frontend runtime verification of role workspaces** — log in as each role

@@ -15,7 +15,7 @@ Historical audit notes (2026-08-13/14) are preserved under `docs/audit-history/`
 | Frontend typecheck / build | PASS | 0 errors; main JS chunk **87 kB** (was 790 kB) |
 | Frontend lint | **PASS (0 errors, 0 warnings)** | verified 2026-08-15 |
 | Server typecheck / build | PASS | `tsc` + dist asset copy |
-| Server tests | PASS | **45 files, 476/476 tests** |
+| Server tests | PASS | **47 files, 488/488 tests** |
 | Fresh-schema preflight | PASS | migrations 001–051 clean on fresh DB |
 | Product / static / forensic audits | PASS | all three scripts |
 | Runtime boot (production) | PASS | `npm start` → :4000 healthy |

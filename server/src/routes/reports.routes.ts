@@ -35,15 +35,36 @@ function resolvePeriod(query: Record<string, string | undefined>) {
   let to: string;
   let periodLabel: string;
 
+  // Period correctness: a calendar period ALWAYS spans the full period (the
+  // label is the period name, so the bounds must match it). Historically the
+  // `to` bound was capped at TODAY even for a past month/year, which silently
+  // pulled later-period transactions into a historical report.
+  const lastDayOfMonth = (ym: string) => {
+    const [y, m] = ym.split('-').map(Number);
+    const d = new Date(Date.UTC(y, m, 0)); // day 0 of next month = last day
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+  };
+
   switch (period) {
     case 'today':
       from = to = iso(today);
       periodLabel = from;
       break;
+    case 'quarter': {
+      const y = query.year || String(today.getFullYear());
+      const q = query.quarter || String(Math.floor(today.getMonth() / 3) + 1);
+      if (!/^\d{4}$/.test(y) || !/^[1-4]$/.test(q)) throw new HttpError(400, 'Invalid year or quarter.');
+      const startMonth = (Number(q) - 1) * 3 + 1;
+      from = `${y}-${String(startMonth).padStart(2, '0')}-01`;
+      to = lastDayOfMonth(`${y}-${String(startMonth + 2).padStart(2, '0')}`);
+      periodLabel = `${y} Q${q}`;
+      break;
+    }
     case 'year': {
       const y = query.year || String(today.getFullYear());
+      if (!/^\d{4}$/.test(y)) throw new HttpError(400, 'Invalid year.');
       from = `${y}-01-01`;
-      to = iso(today);
+      to = `${y}-12-31`;
       periodLabel = y;
       break;
     }
@@ -60,8 +81,9 @@ function resolvePeriod(query: Record<string, string | undefined>) {
     case 'month':
     default: {
       const ym = query.month || iso(today).slice(0, 7);
+      if (!/^\d{4}-\d{2}$/.test(ym)) throw new HttpError(400, 'Invalid month (YYYY-MM).');
       from = `${ym}-01`;
-      to = iso(today);
+      to = lastDayOfMonth(ym);
       periodLabel = ym;
       break;
     }
@@ -292,6 +314,80 @@ reportsRouter.get(
       levelDistribution: levelDist.map((r) => ({ level: r.level_code, count: Number(r.c) })),
     };
 
+    // ── Financial: discounts granted in the period (authoritative: invoices
+    //    and registrations carry the discount amounts; income is net of these) ──
+    const discQ = isAll
+      ? db.prepare(`SELECT COALESCE(SUM(discount_amount),0) AS d FROM invoices WHERE status != 'draft' AND issue_date >= ? AND issue_date <= ?`).get(from, to)
+      : db.prepare(`SELECT COALESCE(SUM(discount_amount),0) AS d FROM invoices WHERE status != 'draft' AND branch_id = ? AND issue_date >= ? AND issue_date <= ?`).get(branchId, from, to);
+    const registrationDiscount = (isAll
+      ? db.prepare(`SELECT COALESCE(SUM(discount_applied),0) AS d FROM registrations WHERE date >= ? AND date <= ?`).get(from, to)
+      : db.prepare(`SELECT COALESCE(SUM(discount_applied),0) AS d FROM registrations WHERE branch_id = ? AND date >= ? AND date <= ?`).get(branchId, from, to)) as { d: number };
+    const discounts = {
+      invoiceDiscounts: Number((discQ as { d: number }).d || 0),
+      registrationDiscounts: Number(registrationDiscount.d || 0),
+    };
+
+    // ── Financial: outstanding student balances at period end (open invoices
+    //    net minus completed payments; refunds reduce the paid side) ──
+    const outstandingQ = (isAll
+      ? db.prepare(`SELECT
+          COALESCE(SUM(CASE WHEN i.status IN ('issued','partial','overdue') THEN i.net_amount ELSE 0 END),0) AS gross,
+          COALESCE(SUM(CASE WHEN i.status IN ('issued','partial','overdue') THEN
+            (SELECT COALESCE(SUM(p.amount),0) FROM payments p WHERE p.invoice_id = i.id AND p.status = 'completed') END),0) AS paid
+        FROM invoices i WHERE i.status != 'draft' AND i.status != 'cancelled' AND i.status != 'paid'`).get()
+      : db.prepare(`SELECT
+          COALESCE(SUM(CASE WHEN i.status IN ('issued','partial','overdue') THEN i.net_amount ELSE 0 END),0) AS gross,
+          COALESCE(SUM(CASE WHEN i.status IN ('issued','partial','overdue') THEN
+            (SELECT COALESCE(SUM(p.amount),0) FROM payments p WHERE p.invoice_id = i.id AND p.status = 'completed') END),0) AS paid
+        FROM invoices i WHERE i.branch_id = ? AND i.status != 'draft' AND i.status != 'cancelled' AND i.status != 'paid'`).get(branchId)) as { gross: number; paid: number };
+    const outstandingCountRow = (isAll
+      ? db.prepare(`SELECT COUNT(*) AS c FROM invoices WHERE status IN ('issued','partial','overdue')`).get()
+      : db.prepare(`SELECT COUNT(*) AS c FROM invoices WHERE branch_id = ? AND status IN ('issued','partial','overdue')`).get(branchId)) as { c: number };
+    const outstanding = {
+      openInvoices: Number(outstandingCountRow.c || 0),
+      gross: Number(outstandingQ.gross || 0),
+      paid: Number(outstandingQ.paid || 0),
+      remaining: Math.max(0, Number(outstandingQ.gross || 0) - Number(outstandingQ.paid || 0)),
+    };
+
+    // ── Operational: books sold by title (authoritative: book_sales JOIN books) ──
+    const booksByTitle = (isAll
+      ? db.prepare(`SELECT b.title, COALESCE(SUM(s.quantity),0) AS quantity, COALESCE(SUM(s.net_amount),0) AS net
+          FROM book_sales s JOIN books b ON b.id = s.book_id
+          WHERE s.status = 'completed' AND s.date >= ? AND s.date <= ?
+          GROUP BY b.title ORDER BY net DESC`).all(from, to)
+      : db.prepare(`SELECT b.title, COALESCE(SUM(s.quantity),0) AS quantity, COALESCE(SUM(s.net_amount),0) AS net
+          FROM book_sales s JOIN books b ON b.id = s.book_id
+          WHERE s.status = 'completed' AND s.branch_id = ? AND s.date >= ? AND s.date <= ?
+          GROUP BY b.title ORDER BY net DESC`).all(branchId, from, to)) as Array<{ title: string; quantity: number; net: number }>;
+
+    // ── Previous-period comparison (server-computed, same span length) ──
+    // Inclusive-day span (June 1-30 = 30 days) so the comparison window has
+    // exactly the same length as the reported period.
+    const spanDays = Math.max(1, Math.round((new Date(to + 'T00:00:00').getTime() - new Date(from + 'T00:00:00').getTime()) / 86400000) + 1);
+    const prevTo = new Date(from + 'T00:00:00');
+    prevTo.setDate(prevTo.getDate() - 1);
+    const prevFrom = new Date(prevTo);
+    prevFrom.setDate(prevFrom.getDate() - (spanDays - 1));
+    const prevFromIso = prevFrom.toISOString().slice(0, 10);
+    const prevToIso = prevTo.toISOString().slice(0, 10);
+    const prevTotals = (isAll
+      ? db.prepare(`SELECT
+          COALESCE(SUM(CASE WHEN type='income' AND category != 'capital_injection' THEN amount ELSE 0 END),0) AS income,
+          COALESCE(SUM(CASE WHEN type='expense' AND category != 'profit_distribution' THEN amount ELSE 0 END),0) AS expense
+        FROM financial_transactions WHERE date >= ? AND date <= ?`).get(prevFromIso, prevToIso)
+      : db.prepare(`SELECT
+          COALESCE(SUM(CASE WHEN type='income' AND category != 'capital_injection' THEN amount ELSE 0 END),0) AS income,
+          COALESCE(SUM(CASE WHEN type='expense' AND category != 'profit_distribution' THEN amount ELSE 0 END),0) AS expense
+        FROM financial_transactions WHERE branch_id = ? AND date >= ? AND date <= ?`).get(branchId, prevFromIso, prevToIso)) as { income: number; expense: number };
+    const previous = {
+      from: prevFromIso,
+      to: prevToIso,
+      income: Number(prevTotals.income || 0),
+      expense: Number(prevTotals.expense || 0),
+      net: Number(prevTotals.income || 0) - Number(prevTotals.expense || 0),
+    };
+
     // ── Report header / metadata ──
     const seq = incrementNumberSetting('report_sequence', 1, 0);
     const reportId = `REP-${from.replace(/-/g, '').slice(0, 6)}-${String(seq).padStart(6, '0')}`;
@@ -333,6 +429,7 @@ reportsRouter.get(
         income,
         expense,
         net: income.total - expense.total,
+        previous,
         transfers,
         balances: {
           main: account.mainBalance,
@@ -346,6 +443,8 @@ reportsRouter.get(
           male: Number(paymentRows.male || 0),
           female: Number(paymentRows.female || 0),
         },
+        discounts,
+        outstanding,
       },
       operational: {
         newStudents,
@@ -356,6 +455,7 @@ reportsRouter.get(
         examsConducted,
         certificatesIssued,
         booksSold,
+        booksByTitle,
         placement,
       },
     });

@@ -1311,7 +1311,7 @@ export interface OperationsReport {
   meta: {
     reportId: string;
     type: string;
-    period: 'today' | 'month' | 'year' | 'range';
+    period: 'today' | 'month' | 'year' | 'quarter' | 'range';
     periodLabel: string;
     from: string;
     to: string;
@@ -1331,9 +1331,12 @@ export interface OperationsReport {
     income: { total: number; byCategory: ReportIncomeCategory[] };
     expense: { total: number; byCategory: { category: string; total: number }[] };
     net: number;
+    previous: { from: string; to: string; income: number; expense: number; net: number };
     transfers: { capitalInjection: number; profitDistribution: number; budgetCharged: number; savingTransferred: number };
     balances: { main: number; saving: number; budgetAllocated: number; budgetRemaining: number };
     collectedPayments: { count: number; total: number; male: number; female: number };
+    discounts: { invoiceDiscounts: number; registrationDiscounts: number };
+    outstanding: { openInvoices: number; gross: number; paid: number; remaining: number };
   };
   operational: {
     newStudents: ReportGenderCount;
@@ -1344,5 +1347,15 @@ export interface OperationsReport {
     examsConducted: number;
     certificatesIssued: ReportGenderCount;
     booksSold: { count: number; total: number };
+    booksByTitle: { title: string; quantity: number; net: number }[];
+    placement: {
+      attempts: number;
+      completed: number;
+      inProgress: number;
+      cancelled: number;
+      avgScore: number;
+      convertedToStudent: number;
+      levelDistribution: { level: string; count: number }[];
+    };
   };
 }
