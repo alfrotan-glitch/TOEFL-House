@@ -1061,7 +1061,9 @@ CREATE TABLE IF NOT EXISTS book_sales (
   customer_name   TEXT, 
   student_id      TEXT REFERENCES students(id) ON DELETE SET NULL, 
   branch_id       TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT, 
-  created_at      TEXT NOT NULL DEFAULT (datetime('now')) 
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')) , 
+  -- Duplicate-click protection for the sale desk (migration 060).
+  idempotency_key  TEXT 
 ); 
 
 CREATE INDEX IF NOT EXISTS idx_books_branch          ON books(branch_id); 

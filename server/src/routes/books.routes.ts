@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { authenticate, authorize, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
+import { resolveIdempotency } from '../utils/idempotency.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
 import { addNotification } from '../utils/notifications.js';
@@ -26,7 +27,7 @@ const stmtGetSalesByBranch = db.prepare('SELECT * FROM book_sales WHERE branch_i
 const stmtGetAllSales = db.prepare('SELECT * FROM book_sales ORDER BY date DESC');
 const stmtUpdateBookStockSub = db.prepare('UPDATE books SET stock = stock - ? WHERE id = ? AND branch_id = ? AND stock >= ?');
 const stmtInsertBookSale = db.prepare(
-  `INSERT INTO book_sales (id, book_id, quantity, total_amount, discount_amount, net_amount, payment_method, status, date, customer_name, student_id, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?)`
+  `INSERT INTO book_sales (id, book_id, quantity, total_amount, discount_amount, net_amount, payment_method, status, date, customer_name, student_id, branch_id, idempotency_key) VALUES (?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?)`
 );
 const stmtGetSaleById = db.prepare('SELECT * FROM book_sales WHERE id = ?');
 const stmtUpdateSaleStatus = db.prepare("UPDATE book_sales SET status = 'refunded' WHERE id = ?");
@@ -196,12 +197,33 @@ booksRouter.post(
     const date = today();
     const newSaleId = id('sale');
 
-    db.transaction(() => {
+    // Duplicate protection for the sale desk. A double-click / retry created
+    // one sale, one stock decrement and one income row PER CLICK. Same model
+    // as the student payment desk: an explicit client key wins, otherwise a
+    // fingerprint of the sale intent within a short window collapses retries.
+    // A genuinely repeated sale (later, or explicitly keyed) still succeeds.
+    const { candidates: saleIdemCandidates } = resolveIdempotency(req, {
+      route: 'book-sale',
+      bookId: book.id,
+      studentId: studentId || null,
+      customerName: customerName || null,
+      quantity: Number(quantity),
+      discount: finalDiscount,
+      method,
+      actorUserId: user.userId ?? null,
+    });
+    const priorSale = db.prepare(
+      `SELECT id FROM book_sales WHERE idempotency_key IN (${saleIdemCandidates.map(() => '?').join(',')}) LIMIT 1`
+    ).get(...saleIdemCandidates) as { id?: string } | undefined;
+    if (priorSale?.id) return res.status(200).json({ id: priorSale.id, idempotentReplay: true });
+    const saleIdempotencyKey = saleIdemCandidates[0];
+
+    const saleTx = db.transaction(() => {
       const stockUpdate = stmtUpdateBookStockSub.run(quantity, book.id, saleBranchId, quantity);
       if (stockUpdate.changes !== 1) throw new HttpError(409, 'Book stock changed or is insufficient. Please retry.');
       stmtInsertBookSale.run(
         newSaleId, book.id, quantity, totalAmount, finalDiscount, netAmount, method, date, 
-        customerName || 'Walk-in customer', studentId || null, saleBranchId
+        customerName || 'Walk-in customer', studentId || null, saleBranchId, saleIdempotencyKey
       );
       recordIncome({
         category: categoryType,
@@ -212,7 +234,20 @@ booksRouter.post(
         operatorName: user.fullName, operatorRole: user.role ?? null,
         branchId: saleBranchId,
       });
-    })();
+    });
+
+    try {
+      saleTx();
+    } catch (err) {
+      // Atomic backstop: under concurrency several requests pass the check
+      // above, but only one can win the unique index. Losers replay the
+      // winner's sale instead of double-selling.
+      if (String((err as { message?: string })?.message ?? '').includes('UNIQUE constraint failed')) {
+        const winner = db.prepare('SELECT id FROM book_sales WHERE idempotency_key = ?').get(saleIdempotencyKey) as { id?: string } | undefined;
+        if (winner?.id) return res.status(200).json({ id: winner.id, idempotentReplay: true });
+      }
+      throw err;
+    }
 
     addNotification('Book sale successful', `A total of ${quantity} book copies were sold for a net amount of ${netAmount} AFN and recorded in the main account.`, 'success', saleBranchId);
     writeAudit(req, `Recorded book sale: ${quantity} copies of ${book.title} for a total of ${totalAmount} AFN (net: ${netAmount} AFN, method: ${methodLabel})`);
