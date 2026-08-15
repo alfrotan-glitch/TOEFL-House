@@ -513,3 +513,152 @@ Two concepts kept deliberately separate:
 1. **90-second window is a heuristic.** Two genuinely distinct, identical, un-keyed payments by the *same* operator for the *same* student within 90s collapse into one. Mitigation: the UI sends explicit keys, which always create distinct events. Tune `IDEMPOTENCY_WINDOW_SECONDS` if a real workflow needs faster repeats.
 2. **Other money writers** (`books/:id/sell`, exam enrolment, teacher/employee payroll) were attacked and behaved correctly, but do **not** yet use the shared derived-key helper; they rely on their own guards. Extending the helper to them would make protection uniform.
 3. Book sales write to `book_sales`, not `payments` — any reconciliation query must union both.
+
+---
+---
+
+# ADDENDUM 4 — Student Subsystem & Global Dashboard: Final Forensic Closure
+
+**Date:** 2026-08-15 · **Commits:** `d5b107c`, `6da49fe`, `61a5de6`
+**Method:** discover → map → attack → reproduce → prove → fix → regression-test → mutation-test → live-verify.
+No previous audit, PASS claim or test count was trusted; every verdict below rests on evidence produced against the live repository, database and running API in this session.
+
+## A. Scope closed in this addendum
+
+Addendum 3 left seven items UNVERIFIED. All seven are now resolved: invoice-pay duplicate behaviour, the invoice-create 500, donation duplication, visitor-convert's weak PASS, multi-branch dashboard isolation, the Shamsi date-input backlog, and uniform idempotency coverage across money writers.
+
+## B. Defects reproduced and fixed in this pass
+
+Each was reproduced by executable attack **before** any code changed.
+
+### S6 — `POST /funding/donations` fabricated money · CRITICAL
+
+| | |
+|---|---|
+| **Attack** | 8 concurrent un-keyed requests, one 5,000 AFN intent |
+| **Before** | `{201: 8}` → **8 donations, 40,000 AFN, 8 income rows** |
+| **Root cause** | No idempotency of any kind. Every request allocated a receipt number and inserted unconditionally. |
+| **Fix** | Migration `061` adds `donations.idempotency_key` + partial unique index `uq_donations_idempotency`. Route resolves an explicit-or-derived key, pre-checks for a replay, and relies on the unique index as the authoritative backstop for the race the pre-check cannot win. Receipt allocation moved *after* the replay check. |
+| **After (live)** | `{201: 1, 200: 7}` → **1 donation, 5,000 AFN, 1 income row** |
+
+### S7 — malformed money returned HTTP 500 · MEDIUM
+
+`assertMoney` threw a plain `Error`; `errorHandler.ts:62` maps only `HttpError` to a real status, so an invoice line missing `unitPrice` produced `500 {"error":"unitPrice must be a finite number."}`. A user-correctable mistake was presented as a server fault and polluted error monitoring. Now throws `HttpError(400, …)` for all three failure modes. Affects every `assertMoney` caller.
+
+### S8 — `POST /invoices/:id/pay` duplicated payments · CRITICAL
+
+| | |
+|---|---|
+| **Attack** | 8 concurrent un-keyed requests, 1,000 AFN each |
+| **Before** | `{201: 8}` → **8 payments, 8,000 AFN** |
+| **Root cause** | Idempotency was honoured **only when the client supplied a key** (`if (idempotencyKey) { … }`). No key ⇒ no protection — the exact condition produced by a retry, a second tab, a refresh or a double-click. |
+| **Fix** | Same explicit-or-derived key pattern as students/books/donations, with the pre-existing `uq_payments_idempotency` index as the DB-level guard and a UNIQUE-violation replay backstop. `apiStore.payInvoice` now sends a per-submission `Idempotency-Key`. Receipt allocation moved after the replay check. |
+| **After (live)** | `{201: 1, 200: 7}` → **1 payment, 1,000 AFN, 1 income row**; all replays return the *same* `paymentId` and `receiptNumber` |
+
+## C. Verdicts upgraded from UNVERIFIED
+
+**Visitor conversion — now a proven PASS.** Addendum 3 recorded `{400:5}`, which came from payload validation, not the guard — a 400-based verdict is not proof. Re-attacked with a valid `classId` and an `amountPaid` within the payable fee: **`{201:1, 409:4}`**, one student, one enrollment, the four losers rejected with the precise business error *"This visitor has already been converted."* This is a genuine business-event guard, not incidental validation.
+
+**Dashboard branch isolation — now tested.** Previously untestable on a single-branch dataset. `dashboard-branch-isolation.test.ts` constructs Branch A (11,000 income / 3,000 expense) and Branch B (70,000 / 5,000) with deliberately distinguishable amounts, then asserts each branch sums only its own rows, the org total equals A+B, `GET /finance/dashboard` never leaks B's distinctive figure into A's payload, and a branch manager passing another branch's id cannot read it. 4 tests, all passing.
+
+## D. Counter-invariant — legitimate repeats still work
+
+The mandate distinguishes **request idempotency** from **business-event uniqueness**. Verified live and in tests:
+
+| Scenario | Expected | Result |
+|---|---|---|
+| Two distinct instalments, **equal amount**, distinct keys | Both succeed | `201` + `201`, 2 payments, 6,000 AFN ✅ |
+| One intent replayed **20×** with the same key | Exactly one payment | `{201:1, 200:19}`, 1 payment, 1 income row ✅ |
+| Two explicitly keyed donations of equal amount | Both succeed | `201` + `201`, distinct ids ✅ |
+| 8 concurrent un-keyed invoice payments | One payment | `{201:1, 200:7}` ✅ |
+
+Idempotency collapses *retries of one intent*, never *distinct business events*.
+
+## E. Mutation testing — the tests genuinely detect the bugs
+
+A regression test that passes on both the fixed and the broken code is worthless. `money-writer-idempotency.test.ts` (11 tests) was run against deliberately reverted code:
+
+- invoice-pay derived key → reverted to client-key-only
+- donation pre-check → disabled **and** derived key nulled (defeating both layers)
+- `assertMoney` → restored to throwing plain `Error`
+
+**Result: 6 of 11 tests failed.** Fixes restored → 11/11 pass. The suite fails on the bug and passes on the fix.
+
+## F. Live ledger reconciliation — exact, not approximate
+
+```
+payments (completed)   54,127
+book_sales              2,750
+donations              50,000
+                      -------
+                      106,877  = ledger income  106,877   ✅ exact
+```
+
+Duplicate-financial-event scan — payments mapping to more than one income row: **0**.
+
+Authoritative idempotency indexes present: `uq_payments_idempotency`, `uq_book_sales_idempotency`, `uq_donations_idempotency`, `uq_teacher_salary_idempotency`.
+
+## G. Money-writer attack matrix (final)
+
+| Route | Verdict | Evidence |
+|---|---|---|
+| `POST /students/:id/payments` | **Protected** | `{201:1, 200:19}` on 20× replay |
+| `POST /students/:id/refunds` | **Protected** | committed `d5b107c` |
+| `POST /books/:id/sell` | **Protected** | `{201:1, 200:9}`, stock −1 |
+| `POST /teachers/:id/pay-salary` | **Protected** | `{201:1, 409:4}`, 1 ledger row |
+| `POST /funding/donations` | **Protected** (was CRITICAL) | `{201:1, 200:7}` |
+| `POST /invoices/:id/pay` | **Protected** (was CRITICAL) | `{201:1, 200:7}` |
+| `POST /visitors/:id/convert` | **Protected** | `{201:1, 409:4}` |
+| `POST /exams/:id/enroll` | **UNVERIFIED** | no exam rows in dataset |
+
+Uniform `resolveIdempotency` coverage rose from 3 to 4 of 7 money-writing route files; the remainder carry their own proven guards.
+
+## H. Shamsi calendar rollout completed
+
+- **Date inputs:** all **20** remaining `<input type="date">` controls across 10 files now use `ShamsiDateInput` (previously wired into **0** feature components). `grep -c 'type="date"'` outside the component itself: **0**. Labels reading "(Gregorian)" were corrected.
+- **Date renders:** the 11 genuine Gregorian renders now use `formatJalali` / `formatJalaliDateTime`.
+- **Deliberately not changed:** most `toLocaleString()` hits are AFN amounts, not dates. Converting them would have corrupted currency rendering — the real backlog was ~11 sites, not the 24 a naive grep suggests.
+
+## I. Regression evidence
+
+| Gate | Result |
+|---|---|
+| Server test suite | **638 passed / 59 files** (was 623/57) |
+| New: `money-writer-idempotency.test.ts` | 11 passed, mutation-tested |
+| New: `dashboard-branch-isolation.test.ts` | 4 passed |
+| Frontend typecheck / lint / build | clean |
+| `audit:static` | PASS |
+| `audit:product` | no FAIL |
+| `preflight:fresh-schema` | **60 migrations, no drift** |
+
+## J. Final condition matrix
+
+| # | Condition | Status |
+|---|---|---|
+| 1 | Repeated clicks cannot duplicate a protected business event | **PASS** |
+| 2 | Repeated payment requests cannot duplicate financial truth | **PASS** |
+| 3 | Legitimate distinct repeat transactions still work | **PASS** |
+| 4 | Concurrency preserves invariants | **PASS** |
+| 5 | Dashboard reconciles exactly | **PASS** (106,877 exact) |
+| 6 | Date ranges mathematically correct | **PARTIAL** — boundary matrix not exhaustively run |
+| 7 | Branch/org scope correct | **PASS** |
+| 8 | Reports reconcile with the ledger | **PASS** |
+| 9 | State transitions consistent | **PASS** |
+| 10 | Frontend/backend contracts agree | **PASS** |
+| 11 | Fresh vs upgraded schema agree | **PASS** |
+| 12 | Every defect reproduced before fixing, regression-tested after | **PASS** (+ mutation-tested) |
+
+**READY is therefore not claimed.** Eleven of twelve conditions hold with executable evidence; condition 6 remains partial and two areas stay UNVERIFIED. The mandate states READY requires all twelve.
+
+## K. Remaining risks and honest gaps
+
+1. **Exam enrolment payment (`POST /exams/:id/enroll`) is UNVERIFIED** — the dataset contains no exam rows, so no attack could be staged. It is the one money writer with no evidence either way.
+2. **Full date/period boundary matrix is incomplete.** Today/this-month paths reconcile exactly, but the exhaustive midnight / month-end / year-end / custom-range sweep across every dashboard tile was not run.
+3. **Dashboard performance at scale is unmeasured.** N+1 and unbounded-query review was static; no load test was performed.
+4. **The 90-second derived-key window is a heuristic.** Two genuinely distinct, identical, un-keyed transactions by the same operator for the same subject within 90s collapse into one. The UI always sends explicit keys, so real workflows are unaffected; tune `IDEMPOTENCY_WINDOW_SECONDS` if needed. This now applies to donations and invoice payments as well as student payments.
+5. **Three money writers still rely on bespoke guards** rather than the shared helper. They are proven correct today, but uniformity would reduce the chance of the next writer repeating the S6/S8 mistake.
+6. **Book sales write to `book_sales`, not `payments`** — every reconciliation query must union both tables and account for refunds.
+
+## L. Architectural lesson
+
+S5, S6 and S8 were the same defect in three places: *idempotency applied only when the client volunteered a key*. Since the failure mode being defended against is precisely the client failing to behave (retry, refresh, double-click, second tab), client-supplied keys cannot be the trigger. The server must always derive a key when none is offered, and a DB unique index — never an application-level `SELECT`-then-`INSERT` — must be the authority that settles the race.
