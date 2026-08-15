@@ -1,6 +1,6 @@
 # AI Handoff — TOEFL House ERP
 
-Last updated: 2026-08-15 (pass 9 — placement exam final hardening audit)
+Last updated: 2026-08-15 (pass 10 — student subsystem deep audit & hardening)
 
 ## How to pick up where this session left off
 
@@ -245,6 +245,42 @@ concurrent completion (10 parallel → exactly 1 success + 9 conflicts, 1 paymen
 
 Suite: 42 files / 455 tests; frontend typecheck/lint(0/0)/build green;
 fresh-schema preflight green; live E2E green.
+
+## Pass 10 — Student subsystem deep audit (evidence-based)
+
+Reproduction suite `student-deep-audit.test.ts` proved two defects, then the
+fixes were locked in:
+
+**FIXED (HIGH — financial integrity)**: `enroll-semester` had NO duplicate
+guard — a double-click / retry created multiple ACTIVE `student_semesters`
+rows with the same name and charged the tuition once per row (reproduced:
+4 concurrent submits → 4 semester rows + 4 income rows; even 2 sequential
+submits duplicated). Fix: friendly in-transaction 409
+("Student is already enrolled in <semester>") + partial unique index
+`uq_student_semester_active (student_id, semester_name) WHERE status='active'`
+(migration 056, canonical in schema.sql). Legitimate repeats of a COMPLETED
+semester remain allowed. Verified: 4 submits → exactly 1×201 + 3×409, 1
+semester row, 1 income row; repeat-after-completion works.
+
+**FIXED (MEDIUM — audit traceability)**: 8 Student operations wrote NO
+`audit_logs` entry (student creation, payments, refunds, semester enrollment,
+extra-class enrollment, ID-card issuance, profile PATCH, transfer) — identity
+/ gender / discount / placement-result edits were completely untraceable.
+Added `writeAudit` to all 8 with operator, action, and a JSON payload
+(receipt/paymentId for financial ops; before/after identity snapshot for
+profile edits). Verified live + in tests.
+
+**NOT defects (evidence):** concurrent issue-card charges the card fee once
+(single-process synchronous — no race); concurrent same-key payments replay
+200/201 without 500 or duplication; `enroll-class` already guards duplicate
+active enrollment; student list/search/detail are branch-scoped and
+`requireStudent` blocks cross-branch reads (403); phone/email/tazkira unique
+indexes prevent identity collisions; PATCH cannot change branch; student-role
+cannot list/read other students (verified in prior passes and re-run here).
+
+Suite: 43 files / 462 tests; typecheck/lint(0/0)/build green; fresh-schema
+preflight green; live E2E green (enroll-semester 409, audited profile edit
+with before/after, audited payment with receipt, branch isolation 403).
 
 ## Suggested next high-value tasks (in order)
 

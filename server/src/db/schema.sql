@@ -628,6 +628,7 @@ CREATE TABLE IF NOT EXISTS student_semesters (
   final_percentage REAL, 
   letter_grade     TEXT 
 ); 
+CREATE UNIQUE INDEX IF NOT EXISTS uq_student_semester_active ON student_semesters(student_id, semester_name) WHERE status = 'active'; 
 
 CREATE TABLE IF NOT EXISTS registrations ( 
   id               TEXT PRIMARY KEY, 

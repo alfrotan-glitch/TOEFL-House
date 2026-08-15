@@ -368,6 +368,7 @@ studentsRouter.post('/manual', requirePermission('Student.Create'), ah(async (re
     journey.appendEvent({ studentId: newId, eventType: JourneyEventType.STUDENT_REGISTERED, occurredAt: regDate, branchId: studentBranchId, actorUserId: user.userId, actorName: user.fullName, payload: { studentCode, fullName } });
   } catch (err) { console.warn('[journey] failed', err); }
 
+  writeAudit(req, `Registered student ${fullName} (${studentCode})`, { newValue: JSON.stringify({ studentId: newId, branchId: studentBranchId, gender, discountPercent: effDiscount, receipt: receiptNumber }) });
   res.status(201).json({ id: newId, studentCode, receiptNumber });
 }));
 
@@ -440,6 +441,7 @@ studentsRouter.post('/:id/enroll-class', requirePermission('Class.Assign', 'Stud
     getJourneyEngine(db).appendEvent({ studentId: student.id, eventType: JourneyEventType.ENROLLMENT_CREATED, occurredAt: date, branchId: student.branch_id, actorUserId: user.userId, actorName: user.fullName, payload: { classId, className: cls.name, type: 'extra_class', fee: netFee } });
   } catch (err) { console.warn('[journey] failed', err); }
 
+  writeAudit(req, `Enrolled ${student.full_name} in extra class ${cls.name}`, { newValue: JSON.stringify({ classId, netFee, paidNow }) });
   res.status(201).json({ ok: true, message: 'Successfully enrolled in extra class.' });
 }));
 
@@ -551,6 +553,7 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
     getJourneyEngine(db).appendEvent({ studentId: student.id, eventType: JourneyEventType.PAYMENT_RECORDED, occurredAt: date, branchId: student.branch_id, actorUserId: user.userId, actorName: user.fullName, payload: { amount: resolvedAmount, category, receiptNumber: rc } });
   } catch (err) { console.warn('[journey] failed', err); }
 
+  writeAudit(req, `Recorded ${category} payment ${resolvedAmount} AFN from ${student.full_name}`, { newValue: JSON.stringify({ receipt: rc, amount: resolvedAmount, category, paymentId: payId, semester: semName, bookId: bookRefId }) });
   res.status(201).json({ receiptNumber: rc, amountCharged: resolvedAmount });
 }));
 
@@ -588,6 +591,7 @@ studentsRouter.post('/:id/refund', requirePermission('Refund.Approve'), ah(async
     getJourneyEngine(db).appendEvent({ studentId: student.id, eventType: JourneyEventType.PAYMENT_RECORDED, occurredAt: date, branchId: student.branch_id, actorUserId: user.userId, actorName: user.fullName, payload: { amount: -refundAmount, category: 'refund', receiptNumber: rc } });
   } catch (err) { console.warn('[journey] failed', err); }
 
+  writeAudit(req, `Refunded ${refundAmount} AFN to ${student.full_name}`, { oldValue: JSON.stringify({ reason: String(reason) }), newValue: JSON.stringify({ receipt: rc, amount: refundAmount, paymentId: payId }) });
   res.status(201).json({ receiptNumber: rc });
 }));
 
@@ -631,6 +635,14 @@ studentsRouter.post('/:id/enroll-semester', requirePermission('Class.Assign', 'S
   const newSemId = id('sem');
 
   const tx = db.transaction(() => {
+    // Idempotency guard (also enforced by uq_student_semester_active): a
+    // double-click / retry must not create a second ACTIVE semester with the
+    // same name and charge the tuition twice. Legitimate repeats of a
+    // COMPLETED semester are unaffected (the guard only blocks active rows).
+    const existingActiveSem = db.prepare(
+      `SELECT 1 FROM student_semesters WHERE student_id = ? AND semester_name = ? AND status = 'active' LIMIT 1`
+    ).get(student.id, semesterName);
+    if (existingActiveSem) throw new HttpError(409, `Student is already enrolled in ${semesterName}.`);
     stmtInsertSemester.run(newSemId, student.id, semesterName, classId || null, date, resolvedTuition, netTuition);
     if (paidNow > 0) {
       const semPayId = id('pay');
@@ -644,6 +656,7 @@ studentsRouter.post('/:id/enroll-semester', requirePermission('Class.Assign', 'S
   });
   tx();
 
+  writeAudit(req, `Enrolled ${student.full_name} in semester ${semesterName}`, { newValue: JSON.stringify({ semesterId: newSemId, classId: classId || null, netTuition, paidNow, receipt: paidNow > 0 ? rc : null }) });
   res.status(201).json({ ok: true, semesterId: newSemId, receiptNumber: paidNow > 0 ? rc : null });
 }));
 
@@ -666,6 +679,7 @@ studentsRouter.post('/:id/issue-card', requirePermission('Student.Print', 'Payme
   });
   tx();
 
+  writeAudit(req, `${isFirstIssuance ? 'Issued' : 'Reissued'} ID card for ${student.full_name}`, { newValue: JSON.stringify({ feeCharged: isFirstIssuance ? cardFee : 0 }) });
   res.status(201).json({ ok: true, feeCharged: isFirstIssuance ? cardFee : 0 });
 }));
 
@@ -699,6 +713,15 @@ studentsRouter.patch('/:id', requirePermission('Student.Edit'), ah(async (req, r
     f.installmentPlan !== undefined ? JSON.stringify(f.installmentPlan) : existing.installment_plan,
     f.cardDesign !== undefined ? JSON.stringify(f.cardDesign) : existing.card_design, req.params.id
   );
+
+  // Identity / financial-relevant changes must be traceable: record the
+  // before/after subset (name, contacts, gender, discount, placement result).
+  const identitySnapshot = (r: any) => JSON.stringify({
+    fullName: r.full_name, phone: r.phone, email: r.email, gender: r.gender,
+    discountPercent: r.discount_percent, tazkiraNo: r.tazkira_no, dob: r.dob,
+    placementScore: r.placement_score != null ? '(set)' : null, installmentPlan: r.installment_plan != null ? '(set)' : null,
+  });
+  writeAudit(req, `Updated student profile ${existing.full_name}`, { oldValue: identitySnapshot(existing), newValue: identitySnapshot({ ...existing, full_name: merge('fullName', 'full_name'), phone: merge('phone', 'phone'), email: merge('email', 'email'), gender: merge('gender', 'gender'), discount_percent: effDiscount, tazkira_no: merge('tazkiraNo', 'tazkira_no'), dob: merge('dob', 'dob'), placement_score: f.placementScore !== undefined ? JSON.stringify(f.placementScore) : existing.placement_score, installment_plan: f.installmentPlan !== undefined ? JSON.stringify(f.installmentPlan) : existing.installment_plan }) });
   res.json({ ok: true });
 }));
 
@@ -722,7 +745,9 @@ studentsRouter.post('/:id/transfer', authorize('registrar', 'manager', 'head_of_
   if (targetClass.status !== 'active') throw new HttpError(400, 'Target class is not active.');
   assertClassGenderAllowsStudent(toClassId, student.gender);
   try {
-    res.json({ ok: true, ...getEnrollmentService(db).transfer({ studentId: req.params.id, toClassId, notes: notes || null, actorUserId: user.userId }) });
+    const result = getEnrollmentService(db).transfer({ studentId: req.params.id, toClassId, notes: notes || null, actorUserId: user.userId });
+    writeAudit(req, `Transferred student ${student.full_name} to class ${targetClass.name}`, { newValue: JSON.stringify({ toClassId, notes: notes || null }) });
+    res.json({ ok: true, ...result });
   } catch (err: any) { throw new HttpError(400, err?.message || 'Transfer failed.'); }
 }));
 
