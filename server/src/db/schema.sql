@@ -457,7 +457,15 @@ CREATE TABLE IF NOT EXISTS teachers (
   phone              TEXT, 
   email              TEXT, 
   base_salary        REAL NOT NULL DEFAULT 0, 
-  salary_type        TEXT NOT NULL DEFAULT 'fixed' CHECK (salary_type IN ('fixed','per_skill','per_session','hybrid_skill','hybrid_level','per_level')),
+  -- THE FIVE TEACHER CONTRACT TYPES (authoritative vocabulary — see
+  -- migrations 029 and 059). Contract type decides HOW a teacher is PAID;
+  -- it never decides whether a SKILL (teaching workload) can be recorded.
+  --   fixed       — fixed monthly salary; Skills recorded, add no pay
+  --   per_skill   — salary = sum of Skill rates
+  --   per_session — salary = completed sessions x session rate
+  --   hybrid      — salary = fixed base + sum of Skill rates
+  --   per_level   — salary = sum of level/skill-specific rates
+  salary_type        TEXT NOT NULL DEFAULT 'fixed' CHECK (salary_type IN ('fixed','per_skill','per_session','hybrid','per_level')),
   performance_score  REAL NOT NULL DEFAULT 0, 
   status             TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','inactive','on_leave')), 
   branch_id          TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT, 
@@ -466,7 +474,10 @@ CREATE TABLE IF NOT EXISTS teachers (
   qualification      TEXT, 
   contract_type      TEXT CHECK (contract_type IN ('monthly','hourly','per_session')), 
   user_id            TEXT REFERENCES users(id) ON DELETE SET NULL, 
-  default_skill_rate REAL NOT NULL DEFAULT 0 
+  default_skill_rate REAL NOT NULL DEFAULT 0, 
+  -- Monthly teaching workload target (Skills/month). Configuration only:
+  -- drives Target/Actual/Shortfall/Excess reporting and NEVER alters pay.
+  target_skills_per_month INTEGER NOT NULL DEFAULT 0 
 ); 
 
 CREATE TABLE IF NOT EXISTS skills ( 

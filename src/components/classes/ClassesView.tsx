@@ -270,9 +270,13 @@ export default function ClassesView({
 
   const skillCapReached = assignedSkillIds.size >= 3 && !assignedSkillIds.has(newAssignSkillId);
 
+  // SKILL != CONTRACT TYPE. A Skill records real teaching workload, so every
+  // contract type — fixed included — is eligible. Only employment status and
+  // an existing identical assignment can exclude a teacher. (The backend
+  // enforces the same rule; this list must not disagree with it.)
   const eligibleTeachers = useMemo(() => 
     teachers.filter(
-      (t) => t.salaryType !== 'fixed' &&
+      (t) => t.status === 'active' &&
       !classSkillTeachers.some((cts) => cts.teacherId === t.id && cts.skillId === newAssignSkillId)
     ),
     [teachers, classSkillTeachers, newAssignSkillId]

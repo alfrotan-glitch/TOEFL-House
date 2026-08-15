@@ -27,7 +27,7 @@ import {
   ImpactReport, ImpactMetric, WorkflowInstance, Automation, Session,
   // Rule Engine types
   BusinessRule, RuleCategory, RuleEngineResult, BusinessRuleVersion, PipelineStage,
-  Branch, Campus, Organization,
+  Branch, Campus, Organization, TeacherContractType,
 } from './types';
 
 /** Real due/paid/remaining figures for one teacher/month, mirroring GET /teachers/:id/salary-status. */
@@ -35,13 +35,22 @@ export interface TeacherSalaryStatus {
   teacherId: string;
   periodKey: string;
   periodLabel: string;
-  model: 'fixed' | 'per_skill' | 'per_level' | 'per_session' | 'hybrid_skill' | 'hybrid_level';
+  model: TeacherContractType;
   due: number;
   paid: number;
   remaining: number;
   fullPaid: boolean;
   breakdown: { label: string; amount: number }[];
   canPayFull: boolean;
+  /** Fixed component of pay (0 for purely Skill-based contracts). */
+  base: number;
+  /** Skill-derived component of pay (0 on a fixed contract). */
+  skillsTotal: number;
+  /** Actual recorded Skill workload — reported for EVERY contract type. */
+  skillCount: number;
+  targetSkills: number;
+  shortfall: number;
+  excess: number;
 }
 
 /** Safe GET — returns fallback on 404/500 so missing backend endpoints don't crash the UI */
@@ -697,7 +706,7 @@ export function useApiStore() {
   };
 
   const addTeacher = async (fullName: string, phone: string, email: string, baseSalary: number,
-    salaryType: 'fixed' | 'per_skill' | 'per_level' | 'per_session' | 'hybrid_skill' | 'hybrid_level' = 'fixed', specialization?: string, qualification?: string, contractType?: 'monthly' | 'hourly' | 'per_session', branchId?: string, defaultSkillRate?: number) => {
+    salaryType: TeacherContractType = 'fixed', specialization?: string, qualification?: string, contractType?: 'monthly' | 'hourly' | 'per_session', branchId?: string, defaultSkillRate?: number) => {
     await api.post('/teachers', {
       fullName, phone, email, baseSalary, salaryType, specialization, qualification, contractType, defaultSkillRate,
       branchId: branchId || currentBranchId,
@@ -715,7 +724,7 @@ export function useApiStore() {
   };
 
   const editTeacher = async (id: string, fullName: string, phone: string, email: string, baseSalary: number,
-    salaryType?: 'fixed' | 'per_skill' | 'per_level' | 'per_session' | 'hybrid_skill' | 'hybrid_level', specialization?: string, qualification?: string,
+    salaryType?: TeacherContractType, specialization?: string, qualification?: string,
     contractType?: 'monthly' | 'hourly' | 'per_session', status?: 'active' | 'inactive' | 'on_leave') => {
     await api.put(`/teachers/${id}`, { fullName, phone, email, baseSalary, salaryType, specialization, qualification, contractType, status });
     await reloadTeachers();
@@ -727,7 +736,7 @@ export function useApiStore() {
   };
 
   const getTeacherComputedSalary = async (teacherId: string) => {
-    return api.get<{ model: string; due: number; base: number; skillsTotal: number; breakdown: any[]; warnings: string[]; isBlocked: boolean; blockReason?: string }>(`/teachers/${teacherId}/computed-salary`);
+    return api.get<{ model: string; due: number; base: number; skillsTotal: number; skillCount: number; targetSkills: number; shortfall: number; excess: number; breakdown: any[]; warnings: string[]; isBlocked: boolean; blockReason?: string }>(`/teachers/${teacherId}/computed-salary`);
   };
 
   const getTeacherSalaryStatus = async (teacherId: string, monthName: string) => {

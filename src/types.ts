@@ -522,6 +522,18 @@ export interface Certificate {
 // BC #7: TEACHER — Teacher Pipeline (hr schema)
 // ============================================================================
 
+/**
+ * THE FIVE TEACHER CONTRACT TYPES — must stay identical to the backend
+ * `CONTRACT_TYPES` (server/src/core/payroll/class-payroll.ts) and the
+ * `teachers.salary_type` database CHECK.
+ *
+ * A contract type decides only HOW a teacher is PAID. It never decides
+ * whether a SKILL (teaching workload) can be recorded, shown or reported —
+ * every contract type records Skills.
+ */
+export const TEACHER_CONTRACT_TYPES = ['fixed', 'per_skill', 'per_session', 'hybrid', 'per_level'] as const;
+export type TeacherContractType = (typeof TEACHER_CONTRACT_TYPES)[number];
+
 export interface Teacher {
   id: string;
   activeClassCount?: number;
@@ -529,7 +541,7 @@ export interface Teacher {
   phone: string;
   email: string;
   baseSalary: number;
-  salaryType: 'fixed' | 'per_skill' | 'per_level' | 'per_session' | 'hybrid_skill' | 'hybrid_level';
+  salaryType: TeacherContractType;
   defaultSkillRate?: number;
   performanceScore: number;
   status: 'active' | 'inactive' | 'on_leave';
@@ -539,6 +551,9 @@ export interface Teacher {
   qualification?: string;
   contractType?: 'monthly' | 'hourly' | 'per_session';
   userId?: string;
+  /** Monthly teaching workload target in Skills. Reporting only — it never
+   *  changes salary by itself. 0 = no target configured. */
+  targetSkillsPerMonth?: number;
 }
 
 export interface TeacherEvaluation {

@@ -4,6 +4,7 @@ import { authenticate, authorize, requirePermission, resolveBranchScope } from '
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id } from '../utils/ids.js';
+import { contractPaysPerSkill, normalizeContractType } from '../core/payroll/class-payroll.js';
 
 export const skillsRouter = Router();
 skillsRouter.use(authenticate);
@@ -133,8 +134,14 @@ classTeacherSkillsRouter.get(
 
 /**
 POST /api/class-teacher-skills
-Assign a teacher to a skill in a class.
-Business Rule: Max 3 distinct skills per class. Teachers with 'fixed' contracts cannot have skill rates.
+Record a SKILL — assign a teacher to a skill in a class (their teaching
+workload for that class).
+
+Business Rules:
+  - Max 3 distinct ongoing skill teachers per class.
+  - EVERY contract type can record Skills. Contract type governs pay only.
+  - A monthly rate is required only where the contract actually pays per
+    Skill (per_skill / hybrid / per_level).
 */
 classTeacherSkillsRouter.post(
   '/',
@@ -167,21 +174,31 @@ classTeacherSkillsRouter.post(
       if (session.class_id !== classId) throw new HttpError(400, 'sessionId does not belong to the specified class.');
       if (session.branch_id !== user.branchId) throw new HttpError(403, 'Session belongs to another branch.');
     }
-    if (teacher.salary_type === 'fixed' && resolvedType !== 'substitute' && resolvedType !== 'guest' && resolvedType !== 'examiner') {
-      throw new HttpError(
-        409,
-        'This teacher has a fixed monthly contract. Change salary model to per_skill, hybrid, or per_level to assign ongoing skill rates.'
-      );
+    // A teacher must be employable to receive new teaching work. This is an
+    // employment-status rule, NOT a contract-type rule.
+    if (teacher.status !== 'active') {
+      throw new HttpError(400, 'Only an active teacher can be assigned new teaching work.');
     }
 
-    // Resolve Monthly Rate — one-off roles (substitute/guest/examiner) may
-    // legitimately be unpaid or compensated outside the monthly-rate
-    // mechanism (e.g. a one-time stipend handled elsewhere), so a rate of
-    // 0 is allowed for them; ongoing roles still require a real rate.
+    // ── SKILL != CONTRACT TYPE ───────────────────────────────────────────
+    // A Skill records the teacher's ACTUAL TEACHING WORKLOAD. The contract
+    // type decides only how the teacher is PAID. All five contract types
+    // (fixed, per_skill, per_session, hybrid, per_level) therefore record
+    // Skills identically; a fixed-contract teacher must never lose, skip or
+    // become ineligible for Skills. Compensation is resolved later and
+    // independently by core/payroll/class-payroll.ts.
+
+    // Resolve Monthly Rate — the rate is a COMPENSATION attribute, so it is
+    // only meaningful for contracts whose rule actually pays per Skill.
+    // Contracts with no per-Skill component (fixed, per_session) legitimately
+    // carry rate 0: the workload is recorded, the salary comes from elsewhere.
+    // One-off roles (substitute/guest/examiner) may also be unpaid or
+    // compensated outside the monthly-rate mechanism.
+    const paysPerSkill = contractPaysPerSkill(normalizeContractType(teacher.salary_type));
     let resolvedRate = monthlyRate != null ? Number(monthlyRate) : Number(teacher.default_skill_rate) || 0;
     if (!Number.isFinite(resolvedRate) || resolvedRate < 0) throw new HttpError(400, 'monthlyRate must be a non-negative number.');
-    if (resolvedRate <= 0 && PAYROLL_ELIGIBLE_TYPES.includes(resolvedType)) {
-      throw new HttpError(400, 'monthlyRate is required for a primary/assistant assignment (or set defaultSkillRate on the teacher contract).');
+    if (resolvedRate <= 0 && paysPerSkill && PAYROLL_ELIGIBLE_TYPES.includes(resolvedType)) {
+      throw new HttpError(400, 'monthlyRate is required for a primary/assistant assignment on a Skill-paid contract (or set defaultSkillRate on the teacher contract).');
     }
 
     // Business Rule: Max 3 distinct ongoing (primary/assistant) skill
@@ -239,8 +256,13 @@ classTeacherSkillsRouter.put(
     }
     const nextType = assignmentType ?? existing.assignment_type;
     const nextRate = monthlyRate != null ? Number(monthlyRate) : Number(existing.monthly_rate) || 0;
-    if (PAYROLL_ELIGIBLE_TYPES.includes(nextType) && nextRate <= 0) {
-      throw new HttpError(400, 'Primary/assistant assignments require a positive monthly rate.');
+    // Same rule as creation: a rate is only required where the contract's
+    // compensation rule actually pays per Skill. A fixed/per_session teacher
+    // keeps a legitimate rate of 0 — the Skill is workload, not pay.
+    const assignmentTeacher = stmtGetTeacherById.get(existing.teacher_id) as any;
+    const editPaysPerSkill = contractPaysPerSkill(normalizeContractType(assignmentTeacher?.salary_type));
+    if (editPaysPerSkill && PAYROLL_ELIGIBLE_TYPES.includes(nextType) && nextRate <= 0) {
+      throw new HttpError(400, 'Primary/assistant assignments on a Skill-paid contract require a positive monthly rate.');
     }
     const nextStart = startDate !== undefined ? startDate : existing.start_date;
     const nextEnd = endDate !== undefined ? endDate : existing.end_date;

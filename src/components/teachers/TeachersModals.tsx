@@ -7,14 +7,15 @@ import {Teacher, Employee, BudgetLine, Skill, ClassTeacherSkill, Class as ClassT
 import type {TeacherSalaryStatus} from '../../apiStore';
 import {formatAFN} from '../../utils/format';
 
+/** Labels for the five contract types. A contract type describes how the
+ *  teacher is PAID; it never affects whether Skills are recorded. */
 function salaryModelLabel(model?: string): string {
   switch (model) {
     case 'fixed': return 'Fixed Monthly';
     case 'per_skill': return 'Per Skill';
     case 'per_level': return 'Per Level';
     case 'per_session': return 'Per Session';
-    case 'hybrid_skill': return 'Hybrid (Base + Skill)';
-    case 'hybrid_level': return 'Hybrid (Base + Level)';
+    case 'hybrid': return 'Hybrid (Base + Skill)';
     default: return model || 'Unknown';
   }
 }
@@ -164,8 +165,7 @@ export default function TeachersModals(props: TeachersModalsProps) {
                   <option value="per_skill">Per Skill (Count × Default Rate)</option>
                   <option value="per_level">Per Level (Rule Engine Rate)</option>
                   <option value="per_session">Per Session (Completed Sessions)</option>
-                  <option value="hybrid_skill">Hybrid Skill (Base + Per Skill)</option>
-                  <option value="hybrid_level">Hybrid Level (Base + Per Level)</option>
+                  <option value="hybrid">Hybrid (Base + Per Skill)</option>
                 </select>
               </div>
               <div>
@@ -255,6 +255,31 @@ export default function TeachersModals(props: TeachersModalsProps) {
               {teacherSalaryStatus && <div className="flex justify-between border-t border-indigo-100 pt-1.5"><span className="text-slate-500">Remaining:</span><span className="font-mono font-bold text-emerald-700">{formatAFN(teacherSalaryStatus.remaining)}</span></div>}
               <div className="flex justify-between border-t border-indigo-100 pt-1.5"><span className="text-slate-500">Salary Budget Balance:</span><span className={`font-mono font-semibold ${teacherBudget && teacherBudget.currentAmount < amountPaid ? 'text-rose-600' : 'text-emerald-600'}`}>{teacherBudget ? formatAFN(teacherBudget.currentAmount) : 'Not found'}</span></div>
             </div>
+
+            {/* SKILL WORKLOAD — shown for EVERY contract type. On a fixed
+                contract the Skills are real teaching workload that do not
+                add to pay, so they are displayed separately from the money. */}
+            {teacherSalaryStatus && (
+              <div className="bg-violet-50/60 border border-violet-100 rounded-xl p-3.5 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wide text-violet-700">Skill Workload</span>
+                  <span className="text-[9px] text-slate-400">{salaryModelLabel(salaryTeacher.salaryType)}</span>
+                </div>
+                <div className="flex justify-between"><span className="text-slate-500">Actual Skills:</span><span className="font-mono font-bold text-violet-700">{teacherSalaryStatus.skillCount ?? 0}</span></div>
+                {(teacherSalaryStatus.targetSkills ?? 0) > 0 && (
+                  <>
+                    <div className="flex justify-between"><span className="text-slate-500">Target Skills:</span><span className="font-mono font-semibold text-slate-700">{teacherSalaryStatus.targetSkills}</span></div>
+                    {(teacherSalaryStatus.shortfall ?? 0) > 0 && <div className="flex justify-between"><span className="text-slate-500">Shortfall:</span><span className="font-mono font-bold text-amber-600">{teacherSalaryStatus.shortfall}</span></div>}
+                    {(teacherSalaryStatus.excess ?? 0) > 0 && <div className="flex justify-between"><span className="text-slate-500">Excess:</span><span className="font-mono font-bold text-emerald-600">{teacherSalaryStatus.excess}</span></div>}
+                  </>
+                )}
+                <div className="flex justify-between border-t border-violet-100 pt-1.5"><span className="text-slate-500">Fixed component:</span><span className="font-mono font-semibold text-slate-700">{formatAFN(teacherSalaryStatus.base ?? 0)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-500">Skill component:</span><span className="font-mono font-semibold text-slate-700">{formatAFN(teacherSalaryStatus.skillsTotal ?? 0)}</span></div>
+                {salaryTeacher.salaryType === 'fixed' && (teacherSalaryStatus.skillCount ?? 0) > 0 && (
+                  <p className="text-[9px] text-slate-500 leading-snug pt-0.5">Fixed contract: these Skills are recorded as teaching workload and do not change the fixed salary.</p>
+                )}
+              </div>
+            )}
 
             {(teacherSalaryStatus as typeof teacherSalaryStatus & { isBlocked?: boolean })?.isBlocked && (
               <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-rose-700 flex items-center gap-2">
