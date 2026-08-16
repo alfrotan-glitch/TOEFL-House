@@ -29,6 +29,7 @@ import {
   BusinessRule, RuleCategory, RuleEngineResult, BusinessRuleVersion, PipelineStage,
   Branch, Campus, Organization, TeacherContractType,
   StudentBalanceRow,
+  AttendanceSummaryRow,
 } from './types';
 
 /** Real due/paid/remaining figures for one teacher/month, mirroring GET /teachers/:id/salary-status. */
@@ -155,6 +156,7 @@ export function useApiStore() {
   // and clears this flag; a lite roster can therefore never masquerade as one.
   const [studentsAreLite, setStudentsAreLite] = useState(false);
   const [studentBalances, setStudentBalances] = useState<StudentBalanceRow[]>([]);
+  const [attendanceSummary, setAttendanceSummary] = useState<AttendanceSummaryRow[]>([]);
 
   const reloadStudents = useCallback(
     () => api.get<Student[]>('/students', { ...bq, limit: '2000' })
@@ -230,6 +232,16 @@ export function useApiStore() {
     [bq, canSeeVisitors]
   );
   const reloadAttendance = useCallback(() => api.get<Attendance[]>('/attendance', bq).then(setAttendance), [bq]);
+
+  /**
+   * Attendance rates aggregated server-side over the full history.
+   * The raw /attendance list is now bounded, so a percentage derived from it
+   * would be wrong for any student with records beyond the page.
+   */
+  const reloadAttendanceSummary = useCallback(
+    () => api.get<AttendanceSummaryRow[]>('/attendance/summary', bq).then(setAttendanceSummary),
+    [bq],
+  );
   const reloadPayments = useCallback(() => api.get<Payment[]>('/payments', bq).then(setPayments), [bq]);
   const reloadBooks = useCallback(() => api.get<Book[]>('/books', bq).then(setBooks), [bq]);
   const reloadBookSales = useCallback(() => api.get<BookSale[]>('/books/sales/list', bq).then(setBookSales), [bq]);
@@ -419,7 +431,7 @@ export function useApiStore() {
           ...(canSeeFinance ? [reloadFinanceOverview()] : []),
         ]);
       case 'students':
-        return Promise.all([reloadStudents(), reloadStudentBalances(), reloadClasses(), reloadProgramVersions()]);
+        return Promise.all([reloadStudents(), reloadStudentBalances(), reloadAttendanceSummary(), reloadClasses(), reloadProgramVersions()]);
       case 'teachers':
         return Promise.all([reloadTeachers(), reloadEmployees(), reloadSkills(), reloadClassTeacherSkills()]);
       case 'classes':
@@ -433,7 +445,7 @@ export function useApiStore() {
       case 'exams':
         return Promise.all([reloadExams(), reloadExamResults(), reloadStudentsLite(), reloadClasses()]);
       case 'attendance':
-        return Promise.all([reloadAttendance(), reloadSessions(), reloadStudentsLite(), reloadClasses()]);
+        return Promise.all([reloadAttendance(), reloadAttendanceSummary(), reloadSessions(), reloadStudentsLite(), reloadClasses()]);
       case 'academic-setup':
         return Promise.all([reloadBranches(), reloadCampuses(), reloadOrganization(), reloadSkills(), reloadProgramVersions()]);
       case 'settings':
@@ -454,7 +466,7 @@ export function useApiStore() {
         return Promise.resolve();
     }
   }, [
-    canSeeFinance, reloadAuditLogs, reloadAttendance, reloadBookSales, reloadBooks, reloadBranches, reloadBudgetLines, reloadCampuses,
+    canSeeFinance, reloadAuditLogs, reloadAttendance, reloadAttendanceSummary, reloadBookSales, reloadBooks, reloadBranches, reloadBudgetLines, reloadCampuses,
     reloadClasses, reloadClassTeacherSkills, reloadDonations, reloadDonors, reloadEmployees, reloadExamResults, reloadExams,
     reloadFinanceOverview, reloadFundingCampaigns, reloadImpactMetrics, reloadImpactReports,
     reloadNotifications, reloadOrganization, reloadPartners, reloadProgramVersions,
@@ -1184,6 +1196,7 @@ export function useApiStore() {
     // Utils
     changeBranch, reloadAll, ensureTabData, ensureFinanceSection, isTabLoading, reloadNotifications, reloadVisitors, reloadFinanceDashboard,
     studentsAreLite, ensureFullStudents, studentBalances, reloadStudentBalances,
+    attendanceSummary, reloadAttendanceSummary,
     // Existing business operations
     addVisitor, updateVisitorCRM, addVisitorFollowUp, updateVisitor, advanceVisitorStage, registerVisitorToStudent,
     addStudentManual, updateStudentStatus, updateStudent, recordFeePayment, enrollStudentSemester, issueStudentCard,

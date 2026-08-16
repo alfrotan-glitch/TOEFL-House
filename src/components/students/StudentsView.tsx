@@ -6,7 +6,7 @@
 import {api} from '../../api/client';
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {GraduationCap, Search, Filter, Eye, CreditCard, UserPlus, Users, RotateCcw, X, Download} from 'lucide-react';
-import {Student, Class, Payment, UserRole, Exam, ExamResult, Attendance, Branch, Visitor, StudentBalanceRow } from '../../types';
+import {Student, Class, Payment, UserRole, Exam, ExamResult, Attendance, Branch, Visitor, StudentBalanceRow, AttendanceSummaryRow } from '../../types';
 import AddStudentForm from './AddStudentForm';
 import StudentProfileDrawer from './StudentProfileDrawer';
 import {formatAFN} from '../../utils/format';
@@ -14,6 +14,8 @@ import Toast from '../common/Toast';
 import {useAcademicOptions} from '../../hooks/useAcademicOptions';
 
 interface StudentsViewProps {
+  /** Server-aggregated attendance rates (GET /attendance/summary). */
+  attendanceSummary?: AttendanceSummaryRow[];
   /** Server-aggregated tuition balances (GET /payments/balances). */
   studentBalances: StudentBalanceRow[];
   students: Student[];
@@ -36,6 +38,7 @@ interface StudentsViewProps {
 }
 
 export default function StudentsView({
+  attendanceSummary,
   studentBalances,
   students, visitors = [], classes, payments, exams, examResults, attendance, activeRole, branches, activeBranchId,
   addStudentManual, updateStudentStatus, updateStudent, enrollStudentSemester, issueStudentCard, books = []
@@ -347,7 +350,7 @@ export default function StudentsView({
             </div>
             <div className="flex-1 overflow-y-auto p-6">
               <StudentProfileDrawer
-                key={activeStudentInfo.id} student={activeStudentInfo} payments={payments} attendance={attendance} exams={exams} examResults={examResults} classes={classes}
+                key={activeStudentInfo.id} student={activeStudentInfo} payments={payments} attendance={attendance} attendanceSummary={attendanceSummary} exams={exams} examResults={examResults} classes={classes}
                 isOwnerOrManager={isOwnerOrManager} isRegistrar={isRegistrar} updateStudent={updateStudent} updateStudentStatus={updateStudentStatus}
                 issueStudentCard={issueStudentCard} triggerToast={triggerToast} onClose={() => setSelectedStudent(null)}
                 onOpenEnroll={() => { setEnrollSemesterName(''); setEnrollClassId(''); setEnrollTuitionAmount(0); setEnrollAmountPaidNow(0); setShowEnrollModal(true); }}

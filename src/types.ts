@@ -1387,3 +1387,19 @@ export interface StudentBalanceRow {
   outstanding: number;
   creditBalance: number;
 }
+
+/**
+ * Per-student attendance summary, aggregated server-side over the COMPLETE
+ * history. Mirrors GET /api/attendance/summary. Used instead of deriving a
+ * percentage from the paginated attendance list, which would skew the rate for
+ * any student whose records fall outside the returned page.
+ */
+export interface AttendanceSummaryRow {
+  targetId: string;
+  total: number;
+  present: number;
+  onLeave: number;
+  absent: number;
+  sick: number;
+  rate: number | null;
+}

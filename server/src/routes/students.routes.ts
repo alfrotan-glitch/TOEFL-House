@@ -251,6 +251,13 @@ paymentsRouter.get('/balances', requirePermission('Payment.View'), ah(async (req
   const { branchId, isAll } = resolveBranchScope(req);
   const where = isAll ? '' : 'WHERE st.branch_id = ?';
   const params = isAll ? [] : [branchId];
+  // Bounded to the same window as the roster it accompanies: returning a row
+  // per student for the whole academy (8,000 rows / 782 KB) to annotate a
+  // 2,000-row page is wasted transfer. Ordered to match the roster's default.
+  const { limit, offset } = parsePaginationShared(req as { query: Record<string, unknown> }, {
+    defaultPageSize: DEFAULT_PAGE_SIZE,
+    maxPageSize: MAX_PAGE_SIZE,
+  });
   const rows = db.prepare(`
     SELECT st.id AS student_id,
            COALESCE(sem.total, 0) AS tuition_due,
@@ -267,7 +274,9 @@ paymentsRouter.get('/balances', requirePermission('Payment.View'), ah(async (req
       GROUP BY student_id
     ) paid ON paid.student_id = st.id
     ${where}
-  `).all(...params) as Array<{ student_id: string; tuition_due: number; tuition_paid: number }>;
+    ORDER BY st.registration_date DESC
+    LIMIT ? OFFSET ?
+  `).all(...params, limit, offset) as Array<{ student_id: string; tuition_due: number; tuition_paid: number }>;
 
   res.json(rows.map((r) => {
     const due = Number(r.tuition_due) || 0;

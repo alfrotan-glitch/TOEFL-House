@@ -5,13 +5,15 @@
 import React, { useState } from 'react';
 import { ShamsiDate } from '../common/ShamsiDate';
 import {CheckCircle2, Award, QrCode, CreditCard, Calendar, AlertCircle, Palette, CheckSquare, Printer, Plus, RotateCcw, X, Pencil, Save, Ban, Camera} from 'lucide-react';
-import {Student, Class, Payment, Exam, ExamResult, Attendance} from '../../types';
+import {Student, Class, Payment, Exam, ExamResult, Attendance, AttendanceSummaryRow } from '../../types';
 import {formatAFN} from '../../utils/format';
 import { computeStudentBalance, isRefundPayment } from '../../utils/studentBalance';
 import {printStudentIdCard} from '../../utils/certificateTemplates';
 import StudentJourneyTimeline from './journey/StudentJourneyTimeline';
 
 interface StudentProfileDrawerProps {
+  /** Server-aggregated attendance rates (GET /attendance/summary). */
+  attendanceSummary?: AttendanceSummaryRow[];
   student: Student;
   payments: Payment[];
   attendance: Attendance[];
@@ -41,6 +43,7 @@ interface StudentProfileDrawerProps {
 }
 
 export default function StudentProfileDrawer({
+  attendanceSummary,
   student, payments, attendance, exams, examResults, classes,
   isOwnerOrManager, isRegistrar, updateStudent, updateStudentStatus, issueStudentCard,
   triggerToast, onOpenEnroll, onOpenExtraClass, onOpenRefund, onPayInstallment
@@ -95,12 +98,18 @@ export default function StudentProfileDrawer({
   const remainingDebt = balance.outstanding;
   const paidPercentage = balance.paidPercentage;
 
-  // Attendance Calculations
+  // Attendance. The recent-days strip below is drawn from the loaded page, but
+  // the RATE comes from the server, which aggregates the complete history:
+  // /attendance is bounded, so a percentage derived from it would understate
+  // any student whose records fall outside the page.
   const studentAttendance = attendance ? attendance.filter(a => a.targetId === student.id && a.targetType === 'student') : [];
-  const totalDays = studentAttendance.length;
-  const presentCount = studentAttendance.filter(a => a.status === 'present').length;
-  const leaveCount = studentAttendance.filter(a => a.status === 'leave').length;
-  const attendanceRate = totalDays > 0 ? Math.round(((presentCount + leaveCount) / totalDays) * 100) : null;
+  const summary = attendanceSummary?.find(a => a.targetId === student.id);
+  const totalDays = summary ? summary.total : studentAttendance.length;
+  const attendanceRate = summary
+    ? summary.rate
+    : (studentAttendance.length > 0
+        ? Math.round((studentAttendance.filter(a => a.status === 'present' || a.status === 'leave').length / studentAttendance.length) * 100)
+        : null);
 
   // Exam Results Mapping
   const studentExamResults = examResults ? examResults.filter(er => er.studentId === student.id) : [];

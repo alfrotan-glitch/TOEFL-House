@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
+import { parsePagination as parsePaginationShared } from '../utils/pagination.js';
 import { assertTextLengths, TEXT_LIMITS } from '../utils/textInput.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
@@ -25,7 +26,10 @@ const enrollmentServiceForPromotion = getEnrollmentService(db);
 
 const classLifecycle = getClassLifecycleService(db);
 
-export const classesRouter = Router();
+export const ATTENDANCE_PAGE_SIZE = 2000;
+const ATTENDANCE_MAX_PAGE_SIZE = 5000;
+
+const classesRouter = Router();
 classesRouter.use(authenticate);
 
 // ── Type Definitions for DB Rows ───────────────────────────────────────────
@@ -1207,11 +1211,79 @@ attendanceRouter.get(
       params.push(from, to);
     }
 
-    query += ' ORDER BY date DESC';
-    
-    const rows = db.prepare(query).all(...params);
+    // BOUNDED. This route had no LIMIT: it returned every attendance record the
+    // branch had ever recorded. At 16,001 rows that is already 2.4 MB, and a
+    // 500-student academy over three years (~390,000 rows) would be ~58 MB in a
+    // single response, re-fetched every time the Attendance tab opens.
+    //
+    // Callers that need a specific student or day already pass targetId/date/
+    // from+to and are unaffected. An unfiltered call now returns the most
+    // recent page instead of the entire history.
+    const { limit, offset } = parsePaginationShared(req as { query: Record<string, unknown> }, {
+      defaultPageSize: ATTENDANCE_PAGE_SIZE,
+      maxPageSize: ATTENDANCE_MAX_PAGE_SIZE,
+    });
+    query += ' ORDER BY date DESC LIMIT ? OFFSET ?';
+
+    const rows = db.prepare(query).all(...params, limit, offset);
 
     res.json(rows);
+  })
+);
+
+/**
+ * Attendance summary per student, aggregated in SQL.
+ *
+ * The profile drawer derives an attendance PERCENTAGE from the rows it holds.
+ * Bounding the list above would silently skew that number for any student whose
+ * history falls outside the page — the same trap as S19 — so the rate is now
+ * computed over the complete history server-side.
+ */
+attendanceRouter.get(
+  '/summary',
+  requirePermission('Attendance.View'),
+  ah(async (req, res) => {
+    const { branchId, isAll } = resolveBranchScope(req);
+    const targetId = typeof req.query.targetId === 'string' ? req.query.targetId.trim() : '';
+
+    // Bounded like the roster it annotates; a single-student lookup passes
+    // targetId and is unaffected by the page size.
+    const { limit, offset } = parsePaginationShared(req as { query: Record<string, unknown> }, {
+      defaultPageSize: ATTENDANCE_PAGE_SIZE,
+      maxPageSize: ATTENDANCE_MAX_PAGE_SIZE,
+    });
+    const clauses: string[] = ["target_type = 'student'"];
+    const params: unknown[] = [];
+    if (!isAll && branchId) { clauses.push('branch_id = ?'); params.push(branchId); }
+    if (targetId) { clauses.push('target_id = ?'); params.push(targetId); }
+
+    const rows = db.prepare(`
+      SELECT target_id,
+             COUNT(*) AS total,
+             SUM(CASE WHEN status = 'present' THEN 1 ELSE 0 END) AS present,
+             SUM(CASE WHEN status = 'leave'   THEN 1 ELSE 0 END) AS onLeave,
+             SUM(CASE WHEN status = 'absent'  THEN 1 ELSE 0 END) AS absent,
+             SUM(CASE WHEN status = 'sick'    THEN 1 ELSE 0 END) AS sick
+      FROM attendance
+      WHERE ${clauses.join(' AND ')}
+      GROUP BY target_id
+      LIMIT ? OFFSET ?
+    `).all(...params, limit, offset) as Array<{ target_id: string; total: number; present: number; onLeave: number; absent: number; sick: number }>;
+
+    res.json(rows.map((r) => {
+      const total = Number(r.total) || 0;
+      const credited = (Number(r.present) || 0) + (Number(r.onLeave) || 0);
+      return {
+        targetId: r.target_id,
+        total,
+        present: Number(r.present) || 0,
+        onLeave: Number(r.onLeave) || 0,
+        absent: Number(r.absent) || 0,
+        sick: Number(r.sick) || 0,
+        // Present + leave counts as attended, matching the existing UI rule.
+        rate: total > 0 ? Math.round((credited / total) * 100) : null,
+      };
+    }));
   })
 );
 

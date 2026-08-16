@@ -241,7 +241,7 @@ function AuthenticatedApp() {
         return (
           <StudentsView
             students={store.students} visitors={store.visitors} classes={store.classes} payments={store.payments}
-            studentBalances={store.studentBalances}
+            studentBalances={store.studentBalances} attendanceSummary={store.attendanceSummary}
             exams={store.exams} examResults={store.examResults} attendance={store.attendance} activeRole={activeRole}
             branches={store.settings.branches} activeBranchId={activeBranchId}
             books={store.books} 
