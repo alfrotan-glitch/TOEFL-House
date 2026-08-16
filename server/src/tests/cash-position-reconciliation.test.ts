@@ -49,6 +49,7 @@ beforeEach(() => {
   db.prepare(`INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, 'Loc')`).run(BRANCH, BRANCH);
   db.prepare(`DELETE FROM financial_transactions WHERE branch_id = ?`).run(BRANCH);
   db.prepare(`DELETE FROM finance_accounts WHERE scope_type='branch' AND scope_id = ?`).run(BRANCH);
+  db.prepare(`DELETE FROM budget_lines WHERE branch_id = ?`).run(BRANCH);
   setSetting('daily_saving_percent', '5');
 });
 
@@ -126,6 +127,51 @@ describe('cash-position reconciliation', () => {
 
     const r = computeReconciliation({ branchId: BRANCH, isAll: false });
     expect(r.savingVariance).toBe(40);
+    expect(r.healthy).toBe(false);
+  });
+
+  it('DETECTS budget drift: an expense paid without decrementing the line', () => {
+    // Budget lines are the third store of money (after branch cash and the
+    // organization treasury) and nothing reconciled them until now. Payroll and
+    // operational expenses are paid FROM a line, so an expense row written
+    // without decrementing it overstates what the institute can still spend.
+    db.prepare(
+      `INSERT OR REPLACE INTO budget_lines (id, name, purpose, allocated_amount, current_amount, branch_id, cost_type)
+       VALUES ('br_line', 'Test Line', 'rent', 0, 10000, ?, 'fixed')`,
+    ).run(BRANCH);
+    db.prepare(
+      `INSERT INTO financial_transactions (id, type, category, amount, date, description, reference_id, operator_name, branch_id)
+       VALUES (?, 'budget_charge', 'rent', 10000, '2026-06-01', 'fund the line', 'br_line', 'Test', ?)`,
+    ).run(id('tx'), BRANCH);
+
+    const clean = computeReconciliation({ branchId: BRANCH, isAll: false });
+    expect(clean.budgetVariance).toBe(0);
+
+    // Spend from the line in the ledger only — the line itself is untouched.
+    db.prepare(
+      `INSERT INTO financial_transactions (id, type, category, amount, date, description, operator_name, branch_id)
+       VALUES (?, 'expense', 'rent', 4000, '2026-06-02', 'rent paid, line not decremented', 'Test', ?)`,
+    ).run(id('tx'), BRANCH);
+
+    const after = computeReconciliation({ branchId: BRANCH, isAll: false });
+    expect(after.budgetVariance).toBe(4000);
+    expect(after.healthy).toBe(false);
+    // The cash dimensions cannot see this — budget spend never touches branch cash.
+    expect(after.cashVariance).toBe(0);
+  });
+
+  it('DETECTS the inverse: a line decremented with no expense recorded', () => {
+    db.prepare(
+      `INSERT OR REPLACE INTO budget_lines (id, name, purpose, allocated_amount, current_amount, branch_id, cost_type)
+       VALUES ('br_line2', 'Test Line 2', 'rent', 0, 3000, ?, 'fixed')`,
+    ).run(BRANCH);
+    db.prepare(
+      `INSERT INTO financial_transactions (id, type, category, amount, date, description, reference_id, operator_name, branch_id)
+       VALUES (?, 'budget_charge', 'rent', 10000, '2026-06-01', 'fund the line', 'br_line2', 'Test', ?)`,
+    ).run(id('tx'), BRANCH);
+
+    const r = computeReconciliation({ branchId: BRANCH, isAll: false });
+    expect(r.budgetVariance).toBe(-7000);
     expect(r.healthy).toBe(false);
   });
 

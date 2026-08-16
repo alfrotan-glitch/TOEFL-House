@@ -29,6 +29,8 @@ export interface ReconciliationResult {
   /** Cash-position check: do finance_accounts agree with the ledger? */
   cashVariance: number;
   savingVariance: number;
+  /** Budget-position check: do budget_lines agree with charges minus spend? */
+  budgetVariance: number;
   healthy: boolean;
 }
 
@@ -128,6 +130,28 @@ export function computeReconciliation(opts: { branchId: string | null; isAll: bo
   const cashVariance = Math.round((Number(acctRow.main || 0) - expectedMain) * 100) / 100;
   const savingVariance = Math.round((Number(acctRow.saving || 0) - expectedSaving) * 100) / 100;
 
+  // ── Budget position ──────────────────────────────────────────────────────
+  // Budget lines are the THIRD store of money in this system (after branch cash
+  // and the organization treasury), and nothing reconciled them. Payroll and
+  // operational expenses are paid from a budget line, so a route that writes an
+  // expense row without decrementing the line — or decrements without writing
+  // the row — silently misstates what the institute can still spend.
+  //
+  // Invariant, per branch:
+  //     SUM(current_amount) = SUM(budget_charge) - SUM(expense)
+  //
+  // budget_charge rows carry the funded line in reference_id; expense rows are
+  // matched by branch, which is the same granularity the lines are held at.
+  const budgetChargedSql = `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type='budget_charge'`;
+  const budgetSpentSql = `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type='expense'`;
+  const budgetCharged = scalarValue(budgetChargedSql, 'AND branch_id = ?', boundBranchId);
+  const budgetSpent = scalarValue(budgetSpentSql, 'AND branch_id = ?', boundBranchId);
+  const expectedBudget = Math.round((budgetCharged - budgetSpent) * 100) / 100;
+
+  const lineSql = `SELECT COALESCE(SUM(current_amount),0) AS v FROM budget_lines WHERE 1=1`;
+  const actualBudget = scalarValue(lineSql, 'AND branch_id = ?', boundBranchId);
+  const budgetVariance = Math.round((actualBudget - expectedBudget) * 100) / 100;
+
   return {
     scope: isAll ? 'organization' : 'branch',
     branchId: branchId || null,
@@ -146,7 +170,8 @@ export function computeReconciliation(opts: { branchId: string | null; isAll: bo
     })),
     cashVariance,
     savingVariance,
+    budgetVariance,
     healthy: Math.abs(paymentBacked - ledgerBacked) < 0.01 && unmatchedPayments === 0 && orphanLedgerRows === 0 && mismatchRows.length === 0
-      && Math.abs(cashVariance) < 0.01 && Math.abs(savingVariance) < 0.01,
+      && Math.abs(cashVariance) < 0.01 && Math.abs(savingVariance) < 0.01 && Math.abs(budgetVariance) < 0.01,
   };
 }

@@ -131,11 +131,17 @@ Expect `healthy: true`. The response reports two independent dimensions:
 | `amountVariance` | payments vs their ledger rows | a payment and its ledger row disagree |
 | `cashVariance` | `finance_accounts.main_balance` vs `income − expense − saving_transfer` | a money path moved the ledger but not cash (or vice versa) |
 | `savingVariance` | `saving_balance` vs the `saving_transfer` ledger | the savings sweep drifted |
+| `budgetVariance` | `budget_lines.current_amount` vs `budget_charge − expense` | an expense was paid without decrementing its line (or vice versa) |
 | `unmatchedPayments` / `orphanLedgerRows` | rows with no counterpart | a write path is only half-complete |
 
 `cashVariance` exists because the payment↔ledger check compares two views of
 the same table family and cannot see a path that updates one and not the
 other — the blind spot that hid a phantom-cash defect (F-10) during the audit.
+
+`budgetVariance` covers the third store of money. Branch cash, the organization
+treasury and budget lines each hold value independently; payroll and
+operational expenses are paid from a LINE, not from branch cash, so neither of
+the other two checks can see a line that drifts from its ledger.
 
 ## 6. Known operational limits
 
