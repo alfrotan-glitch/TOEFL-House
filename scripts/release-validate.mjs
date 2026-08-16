@@ -108,6 +108,38 @@ check('fresh install + migrations', () => {
   return `${r.migrations} migrations, ${r.tables} tables, integrity ok`;
 });
 
+check('financial invariants reconcile', () => {
+  // Runs the real reconciliation against a freshly bootstrapped database, so
+  // the gate proves the invariants hold on a clean install rather than trusting
+  // whatever state a developer's DB happens to be in.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'th-recon-'));
+  const dbPath = path.join(tmp, 'recon.sqlite');
+  const probe = path.join(tmp, 'probe.mjs');
+  fs.writeFileSync(probe, `
+    import { db, initSchema } from ${JSON.stringify(path.join(root, 'server', 'src', 'db', 'connection.ts'))};
+    import { computeReconciliation } from ${JSON.stringify(path.join(root, 'server', 'src', 'utils', 'reconciliation.ts'))};
+    initSchema();
+    db.prepare("INSERT OR IGNORE INTO branches (id,name,location) VALUES ('rg','rg','L')").run();
+    const r = computeReconciliation({ branchId: null, isAll: true });
+    console.log('RESULT ' + JSON.stringify({
+      amount: r.amountVariance, cash: r.cashVariance,
+      saving: r.savingVariance, budget: r.budgetVariance, healthy: r.healthy,
+    }));
+  `);
+  const out = execSync(`npx tsx ${JSON.stringify(probe)}`, {
+    cwd: path.join(root, 'server'), stdio: 'pipe', encoding: 'utf8',
+    env: { ...process.env, DB_PATH: dbPath, NODE_ENV: 'test' },
+  });
+  const line = out.trim().split('\n').filter((l) => l.startsWith('RESULT ')).pop();
+  if (!line) throw new Error('reconciliation probe produced no result');
+  const r = JSON.parse(line.slice('RESULT '.length));
+  const bad = ['amount', 'cash', 'saving', 'budget'].filter((k) => Math.abs(r[k]) >= 0.01);
+  if (bad.length) throw new Error(`non-zero variance: ${bad.map((k) => `${k}=${r[k]}`).join(', ')}`);
+  if (!r.healthy) throw new Error('reconciliation reports unhealthy');
+  fs.rmSync(tmp, { recursive: true, force: true });
+  return 'amount/cash/saving/budget all 0';
+});
+
 console.log('\nBranding');
 check('official logo asset present', () => {
   const branding = fs.readFileSync(path.join(root, 'src', 'config', 'branding.ts'), 'utf8');
