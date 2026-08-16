@@ -12,7 +12,7 @@ import type { OperationsReport } from '../../types';
 import { formatAFN } from '../../utils/format';
 import { formatJalaliDateTime } from '../../utils/jalali';
 import { ShamsiDateInput } from '../common/ShamsiDateInput';
-import { brandPrintHeaderHtml } from '../../config/branding';
+import { BRAND_NAME, brandPrintHeaderHtml } from '../../config/branding';
 
 type Period = 'today' | 'month' | 'year' | 'range';
 type Gender = 'all' | 'male' | 'female';
@@ -176,7 +176,7 @@ export default function OperationsReportView() {
         <div className="space-y-5">
           {/* Header */}
           <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-            <div className="text-[11px] font-black text-rose-700 tracking-wide">THE TOEFL HOUSE</div>
+            <div className="text-[11px] font-black text-rose-700 tracking-wide">{BRAND_NAME}</div>
             <div className="text-sm font-extrabold text-slate-900 mt-0.5">Operations &amp; Financial Report — {m.periodLabel}</div>
             <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-1 text-[11px] text-slate-500">
               <span>Report ID: <b className="text-slate-800 font-mono">{m.reportId}</b></span>

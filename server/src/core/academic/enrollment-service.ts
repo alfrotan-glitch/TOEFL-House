@@ -285,8 +285,18 @@ export class EnrollmentService {
 
       if (input.autoInvoice !== false && snapshot.total > 0) {
         invoiceId = makeId('inv');
+        // A discount may not exceed the fee it discounts. `Math.max(0, total -
+        // discount)` silently floored the net at zero, so a client-supplied
+        // 9,999,999 on a 5,000 enrolment produced a 100% discount and a net of
+        // 0 — a wiped obligation reported as success. journey.routes passes
+        // discountAmount straight from the request body, so this is reachable
+        // from the API and must be rejected here, at the one place every
+        // caller converges.
         const discount = Math.max(0, Number(input.discountAmount || 0));
-        const net = Math.max(0, snapshot.total - discount);
+        if (discount > snapshot.total) {
+          throw new HttpError(400, `Discount cannot exceed the enrolment fee of ${snapshot.total} AFN.`);
+        }
+        const net = snapshot.total - discount;
         
         const due = new Date();
         due.setDate(due.getDate() + 14);

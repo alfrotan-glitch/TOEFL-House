@@ -367,7 +367,7 @@ export default function BooksModals(props: BooksModalsProps) {
               <div className="text-center pt-2 text-[9px] text-slate-400 space-y-1">
                 <p>{BRAND_NAME} cashier stamp &amp; signature</p>
                 <div className="h-10 w-24 mx-auto border border-dashed border-indigo-200/50 rounded-full flex items-center justify-center text-[8px] text-indigo-400 font-bold rotate-6">
-                  TOEFL HOUSE PAID
+                  {BRAND_NAME} PAID
                 </div>
                 <p className="mt-2 text-[8px]">Thank you for your purchase!</p>
               </div>

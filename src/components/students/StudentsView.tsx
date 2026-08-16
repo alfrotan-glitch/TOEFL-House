@@ -445,14 +445,48 @@ export default function StudentsView({
                 </select>
               </div>
 
+              {/* Obligation summary, shown BEFORE submission so the operator can
+                  see what is owed rather than typing blind. Every figure is the
+                  server's own balance (GET /payments/balances) — the frontend
+                  does not recompute financial truth, it displays it. */}
+              {payCategory === 'fee' && (() => {
+                const fin = getStudentFinance(paymentStudent.id);
+                return (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-1">
+                    <div className="flex justify-between"><span className="text-slate-500">Total tuition</span><span className="font-mono font-bold">{formatAFN(fin.total)}</span></div>
+                    <div className="flex justify-between"><span className="text-slate-500">Already paid</span><span className="font-mono font-bold">{formatAFN(fin.paid)}</span></div>
+                    <div className="flex justify-between border-t border-slate-200 pt-1">
+                      <span className="text-slate-600 font-semibold">Remaining</span>
+                      <span className={`font-mono font-extrabold ${fin.debt > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>{formatAFN(fin.debt)}</span>
+                    </div>
+                    {fin.debt <= 0 && (
+                      <p className="text-emerald-700 font-bold pt-1">Fully Paid — No outstanding balance.</p>
+                    )}
+                  </div>
+                );
+              })()}
+
               <div>
                 <label className="block text-slate-600 font-medium mb-1">Amount (AFN):</label>
-                <input type="number" value={payAmount} onChange={(e) => setPayAmount(Number(e.target.value))} className={`${inputCls} font-mono`} min={1} required />
+                <input
+                  type="number"
+                  value={payAmount}
+                  onChange={(e) => setPayAmount(Number(e.target.value))}
+                  className={`${inputCls} font-mono`}
+                  min={1}
+                  max={payCategory === 'fee' ? getStudentFinance(paymentStudent.id).debt || undefined : undefined}
+                  required
+                />
+                {/* UX only. The backend rejects an over-payment independently —
+                    see the overpayment regression suite. */}
+                {payCategory === 'fee' && payAmount > getStudentFinance(paymentStudent.id).debt && (
+                  <p className="text-rose-600 font-semibold mt-1">Amount exceeds the remaining balance of {formatAFN(getStudentFinance(paymentStudent.id).debt)}.</p>
+                )}
               </div>
 
               <div className="flex gap-2 justify-end pt-3 border-t">
                 <button type="button" onClick={() => setPaymentStudent(null)} className={btnSecondary}>Cancel</button>
-                <button type="submit" disabled={paymentBusy} className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-semibold hover:bg-emerald-700 cursor-pointer shadow-sm text-xs disabled:opacity-50">{paymentBusy ? 'Recording…' : 'Confirm Payment'}</button>
+                <button type="submit" disabled={paymentBusy || (payCategory === 'fee' && getStudentFinance(paymentStudent.id).debt <= 0)} className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-semibold hover:bg-emerald-700 cursor-pointer shadow-sm text-xs disabled:opacity-50 disabled:cursor-not-allowed">{paymentBusy ? 'Recording…' : 'Confirm Payment'}</button>
               </div>
             </form>
           </div>

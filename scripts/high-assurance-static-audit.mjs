@@ -29,7 +29,15 @@ if (!sourceOnly && !exists('package-lock.json')) failures.push('Root package-loc
 if (!exists('server/package-lock.json')) failures.push('server/package-lock.json is missing.');
 
 const serverPkg = JSON.parse(read('server/package.json'));
-if (serverPkg.scripts?.typecheck !== 'tsc --noEmit') failures.push('server/package.json must expose a deterministic typecheck script.');
+// The invariant is that the server typechecks with no emit — not that the
+// script is one exact string. It was `!== 'tsc --noEmit'`, which failed the
+// moment a SECOND, stricter check was added (the test tsconfig, which covers
+// src/tests after they were excluded from the build config). An invariant that
+// breaks when the thing it guards gets stronger is testing the wrong property.
+const serverTypecheck = serverPkg.scripts?.typecheck ?? '';
+if (!/\btsc\b/.test(serverTypecheck) || !serverTypecheck.includes('--noEmit')) {
+  failures.push('server/package.json must expose a deterministic typecheck script running tsc --noEmit.');
+}
 
 const auth = read('server/src/middleware/auth.ts');
 if (!auth.includes('export function requirePermission')) failures.push('Canonical requirePermission middleware is missing.');

@@ -27,13 +27,21 @@ const read = (rel: string) => fs.readFileSync(path.join(repoRoot, rel), 'utf8');
 
 describe('printed documents use authoritative branding', () => {
   it('the student fee bill prints the official logo, name and slogan', () => {
-    const src = read('src/components/visitors/ConvertToStudentModal.tsx');
-
-    // It must delegate to the shared print header, which is the only place the
-    // logo/name/slogan are assembled.
-    expect(src).toContain('brandPrintHeaderHtml');
+    // The document builder was extracted from the modal into a pure module so
+    // its output can be parsed as a DOM (see fee-bill-render.test.ts). This
+    // guards the source of truth: the template must delegate to the shared
+    // print header rather than assembling its own.
+    const template = read('src/utils/feeBillTemplate.ts');
+    expect(template).toContain('brandPrintHeaderHtml');
+    expect(template).toContain('BRAND_NAME');
+    expect(template).toContain('BRAND_SLOGAN');
     // The regression: a hand-typed institute name in the receipt header.
-    expect(src).not.toMatch(/<h1>\s*TOEFL HOUSE\s*<\/h1>/i);
+    expect(template).not.toMatch(/<h1>\s*TOEFL HOUSE\s*<\/h1>/i);
+
+    // And the modal must call the extracted builder, not rebuild the document.
+    const modal = read('src/components/visitors/ConvertToStudentModal.tsx');
+    expect(modal).toContain('buildFeeBillHtml');
+    expect(modal).not.toContain('<!DOCTYPE html>');
   });
 
   it('the shared print header emits the logo, brand name and exact slogan', () => {

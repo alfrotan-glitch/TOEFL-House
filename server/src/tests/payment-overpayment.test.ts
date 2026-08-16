@@ -275,3 +275,57 @@ describe('ad-hoc charges are unbacked by design but must be explained', () => {
     expect(ledger.description).not.toBe(`Received other payment from `);
   });
 });
+
+/**
+ * The third instance of the same class, found by the cross-cutting sweep for
+ * Math.min/Math.max applied to money. `enroll()` floored the net at zero via
+ * `Math.max(0, total - discount)`, and journey.routes passes discountAmount
+ * straight from the request body — so an API client could enrol with a
+ * 9,999,999 discount on a 5,000 fee and receive a fully-discounted invoice.
+ *
+ * Guarded at the service boundary rather than in each route, because that is
+ * the single point every enrolment caller converges on.
+ */
+/** A level carrying a real fee, so the invoice branch under test is reached. */
+function ensurePaidLevel(): string {
+  const existing = db.prepare('SELECT id FROM levels WHERE default_fee > 0 LIMIT 1').get() as { id: string } | undefined;
+  if (existing) return existing.id;
+  db.prepare(`INSERT OR IGNORE INTO programs (id, name, code, branch_id) VALUES ('prog_overpay', 'Overpay Program', 'OP', ?)`).run(BRANCH);
+  db.prepare(
+    `INSERT INTO levels (id, program_id, name, code, "order", default_fee)
+     VALUES ('lvl_overpay', 'prog_overpay', 'Overpay Level', 'OL', 1, 5000)`
+  ).run();
+  return 'lvl_overpay';
+}
+
+describe('enrolment discount cannot exceed the enrolment fee', () => {
+  it('rejects a discount larger than the fee', async () => {
+    const { getEnrollmentService } = await import('../core/academic/enrollment-service.js');
+    const studentId = await newStudent();
+    const levelId = ensurePaidLevel();
+
+    expect(() => getEnrollmentService(db).enroll({
+      studentId, branchId: BRANCH, semesterName: 'Guarded', levelId,
+      enrollmentType: 'new', actorUserId: 'u_overpay', actorName: 'Overpay Mgr',
+      autoInvoice: true, discountAmount: 9_999_999,
+    } as never)).toThrow(/discount cannot exceed/i);
+  });
+
+  it('still allows a legitimate partial discount', async () => {
+    const { getEnrollmentService } = await import('../core/academic/enrollment-service.js');
+    const studentId = await newStudent();
+    const levelId = ensurePaidLevel();
+
+    const res = getEnrollmentService(db).enroll({
+      studentId, branchId: BRANCH, semesterName: 'Discounted', levelId,
+      enrollmentType: 'new', actorUserId: 'u_overpay', actorName: 'Overpay Mgr',
+      autoInvoice: true, discountAmount: 500,
+    } as never) as { invoiceId: string | null };
+
+    expect(res.invoiceId).toBeTruthy();
+    const inv = db.prepare('SELECT total_amount, discount_amount, net_amount FROM invoices WHERE id = ?')
+      .get(res.invoiceId) as { total_amount: number; discount_amount: number; net_amount: number };
+    expect(inv.discount_amount).toBe(500);
+    expect(inv.net_amount).toBe(inv.total_amount - 500);
+  });
+});

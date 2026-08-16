@@ -1,0 +1,28 @@
+{
+  // Type-checks the test suite.
+  //
+  // tsconfig.json is the BUILD config: it sets rootDir to ./src so that only
+  // backend code reaches dist/, and it excludes src/tests because tests are
+  // never shipped. That exclusion would otherwise leave the tests unchecked,
+  // and a test importing a frontend module (the fee-bill template) legitimately
+  // needs to reach outside server/src.
+  //
+  // This config restores full coverage: same strictness, no rootDir, tests
+  // included. `npm run typecheck` runs both.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "noEmit": true
+  },
+  // Only the specific frontend modules the tests import — pulling in
+  // ../src/**/* would drag the whole React app (and require jsx config)
+  // into a backend typecheck.
+  "include": [
+    "src/**/*",
+    "../src/utils/feeBillTemplate.ts",
+    "../src/config/documentIssuer.ts",
+    "../src/config/branding.ts",
+    "../src/types.ts"
+  ],
+  "exclude": ["node_modules", "dist", "data"]
+}

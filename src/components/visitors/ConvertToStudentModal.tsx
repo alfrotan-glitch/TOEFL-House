@@ -7,7 +7,8 @@ import React, { useState, useMemo, useRef } from 'react';
 import { Visitor, Class, Branch } from '../../types';
 import { formatAFN } from '../../utils/format';
 import { Banknote, CreditCard, Building2, Receipt, CheckCircle2, AlertCircle, Printer, Loader2, X } from 'lucide-react';
-import { BRAND_NAME, BRAND_SLOGAN, brandPrintHeaderHtml } from '../../config/branding';
+import { BRAND_NAME } from '../../config/branding';
+import { buildFeeBillHtml } from '../../utils/feeBillTemplate';
 import { resolveDocumentIssuer } from '../../config/documentIssuer';
 
 type PaymentMethod = 'cash' | 'card' | 'bank_transfer';
@@ -144,39 +145,24 @@ export default function ConvertToStudentModal({
     const printWindow = window.open('', '_blank', 'width=460,height=680');
     if (!printWindow) return triggerToast('Please allow popups to print the receipt.', 'error');
     
-    printWindow.document.write(`
-      <!DOCTYPE html><html><head><title>Receipt ${result?.receiptNumber || ''}</title>
-      <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Courier New', monospace; font-size: 12px; padding: 20px; max-width: 380px; margin: 0 auto; color: #1e293b; }
-        .header { text-align: center; border-bottom: 2px dashed #94a3b8; padding-bottom: 12px; margin-bottom: 12px; }
-        .header h1 { font-size: 16px; font-weight: 800; letter-spacing: 1px; }
-        .header p { font-size: 10px; color: #64748b; margin-top: 2px; }
-        .row { display: flex; justify-content: space-between; padding: 4px 0; }
-        .label { color: #64748b; } .value { font-weight: 700; text-align: right; }
-        .divider { border-top: 1px dashed #cbd5e1; margin: 8px 0; }
-        .total-row { font-size: 14px; font-weight: 800; }
-        .footer { text-align: center; margin-top: 16px; padding-top: 12px; border-top: 2px dashed #94a3b8; font-size: 10px; color: #94a3b8; }
-        .status-badge { display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 10px; font-weight: 700; }
-      </style></head><body>
-        ${brandPrintHeaderHtml('Registration Receipt', resolveDocumentIssuer(branches.find((b) => b.id === (conversionBranchId || convertingVisitor.branchId || activeBranchId))))}
-        <div class="row"><span class="label">Receipt #</span><span class="value">${result?.receiptNumber || '-'}</span></div>
-        <div class="row"><span class="label">Date</span><span class="value">${new Date().toISOString().slice(0, 10)}</span></div>
-        <div class="row"><span class="label">Student</span><span class="value">${convertingVisitor.fullName}</span></div>
-        <div class="row"><span class="label">Student Code</span><span class="value">${result?.studentCode || '-'}</span></div>
-        <div class="divider"></div>
-        <div class="row"><span class="label">Class</span><span class="value">${selectedClass?.name || '-'}</span></div>
-        <div class="row"><span class="label">Invoice #</span><span class="value">${result?.invoiceNumber || '-'}</span></div>
-        ${discountPercent > 0 ? `<div class="row"><span class="label">Gross Fee</span><span class="value">${formatAFN(semesterFee)}</span></div><div class="row"><span class="label">Discount (${discountPercent}%)</span><span class="value">-${formatAFN(Number(semesterFee||0) - netAmount)}</span></div>` : ''}
-        <div class="divider"></div>
-        <div class="row total-row"><span class="label">Net Payable</span><span class="value">${formatAFN(result?.netAmount || netAmount)} AFN</span></div>
-        <div class="divider"></div>
-        <div class="row"><span class="label">Paid Today</span><span class="value">${formatAFN(safeAmountPaid)} AFN</span></div>
-        <div class="row"><span class="label">Payment Method</span><span class="value">${METHOD_LABELS[paymentMethod]}</span></div>
-        ${isPartialPayment ? `<div class="divider"></div><div class="row"><span class="label">Remaining</span><span class="value" style="color:#b45309;">${formatAFN(remainingAfterPayment)} AFN</span></div>` : ''}
-        <div class="footer"><p>Thank you for choosing ${BRAND_NAME}!</p><p style="margin-top:2px;">${BRAND_SLOGAN}</p><p style="margin-top:4px;">This is a system-generated receipt.</p></div>
-      </body></html>
-    `);
+    printWindow.document.write(buildFeeBillHtml(
+      {
+        receiptNumber: result?.receiptNumber || null,
+        studentName: convertingVisitor.fullName,
+        studentCode: result?.studentCode || null,
+        className: selectedClass?.name || null,
+        invoiceNumber: result?.invoiceNumber || null,
+        grossFee: Number(semesterFee || 0),
+        discountPercent,
+        netPayable: Number(result?.netAmount ?? netAmount),
+        paidToday: safeAmountPaid,
+        remaining: isPartialPayment ? remainingAfterPayment : 0,
+        paymentMethodLabel: METHOD_LABELS[paymentMethod],
+        issueDate: new Date().toISOString().slice(0, 10),
+      },
+      resolveDocumentIssuer(branches.find((b) => b.id === (conversionBranchId || convertingVisitor.branchId || activeBranchId))),
+      formatAFN,
+    ));
     printWindow.document.close();
     printWindow.focus();
     setTimeout(() => printWindow.print(), 250);
@@ -198,7 +184,7 @@ export default function ConvertToStudentModal({
 
           <div ref={receiptRef} className="mx-5 bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
             <div className="text-center pb-2.5 border-b border-dashed border-slate-300">
-              <p className="font-black text-slate-900 text-sm tracking-wide">TOEFL HOUSE</p>
+              <p className="font-black text-slate-900 text-sm tracking-wide">{BRAND_NAME}</p>
               <p className="text-[10px] text-slate-400">Registration Receipt</p>
             </div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">

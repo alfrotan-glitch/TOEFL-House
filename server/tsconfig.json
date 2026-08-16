@@ -29,6 +29,7 @@
   "exclude": [
     "node_modules",
     "dist",
-    "data"
+    "data",
+    "src/tests"
   ]
 }
