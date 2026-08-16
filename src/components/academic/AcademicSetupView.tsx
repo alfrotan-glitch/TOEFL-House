@@ -44,6 +44,11 @@ function ToggleActive({ active, onToggle, disabled }: { active: boolean; onToggl
 
 export default function AcademicSetupView({ branchId }: { branchId?: string } = {}) {
   const [tab, setTab] = useState<Tab>('terms');
+  // Tracks which heavy panels have been opened at least once, so each mounts
+  // lazily but then STAYS mounted instead of refetching on every revisit.
+  const [visited, setVisited] = useState<Record<string, boolean>>({});
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+  useEffect(() => { setVisited((seen) => (seen[tab] ? seen : { ...seen, [tab]: true })); }, [tab]);
   const [programs, setPrograms] = useState<Program[]>([]);
   const [levels, setLevels] = useState<Level[]>([]);
   const [slots, setSlots] = useState<TimeSlot[]>([]);
@@ -87,7 +92,7 @@ export default function AcademicSetupView({ branchId }: { branchId?: string } = 
       const draft: Record<string, number> = {}; for (const fee of f) draft[fee.levelId] = fee.fee; setFeeDraft(draft);
       setExpanded((prev) => { const next = { ...prev }; for (const prog of p) { if (next[prog.id] === undefined) next[prog.id] = true; } return next; });
     } catch (err) { setError(err instanceof Error ? err.message : 'Failed to load configuration'); }
-    finally { setLoading(false); }
+    finally { setLoading(false); setHasLoadedOnce(true); }
   }, []);
 
   useEffect(() => { void (async () => { await reload(); })(); }, [reload]);
@@ -104,7 +109,12 @@ export default function AcademicSetupView({ branchId }: { branchId?: string } = 
   const phase2Complete = programs.length > 0 && versionCount > 0;
   const phase3Complete = phase2Complete && offeringCount > 0;
 
-  if (loading) {
+  // Only the FIRST load replaces the page. `run()` calls reload() after every
+  // mutation, and this branch used to blank the whole screen each time —
+  // adding one term made the entire Control Center disappear and re-appear.
+  // Subsequent reloads keep the page on screen; `busy` drives a local
+  // indicator instead.
+  if (loading && !hasLoadedOnce) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] text-slate-400 gap-3">
         <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
@@ -402,9 +412,16 @@ export default function AcademicSetupView({ branchId }: { branchId?: string } = 
             </div>
           )}
 
-          {tab === 'versions' && <ProgramVersionsPanel />}
-          {tab === 'offerings' && <OfferingsPanel branchId={branchId} onChange={() => setOfferingCount((count) => count + 1)} />}
-          {tab === 'generate' && <ClassGenerationWizard branchId={branchId} />}
+          {/* These three panels each load their own data on mount. Rendering
+              them with `tab === x && <Panel/>` UNMOUNTED them on every tab
+              switch, so returning to a tab refetched everything from scratch —
+              the flash and reload the operators reported. Keeping them mounted
+              once visited preserves their state and their fetched data, so a
+              return visit costs zero requests. They are still not mounted until
+              first opened, so the initial page load is unchanged. */}
+          <div hidden={tab !== 'versions'}>{visited.versions && <ProgramVersionsPanel />}</div>
+          <div hidden={tab !== 'offerings'}>{visited.offerings && <OfferingsPanel branchId={branchId} onChange={() => setOfferingCount((count) => count + 1)} />}</div>
+          <div hidden={tab !== 'generate'}>{visited.generate && <ClassGenerationWizard branchId={branchId} />}</div>
 
         </div>
       </div>
