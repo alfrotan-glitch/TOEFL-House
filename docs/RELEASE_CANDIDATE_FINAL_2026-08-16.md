@@ -119,6 +119,11 @@ resolved by the real asset, never by weakening the test.
 - **Backups share the DB disk.** Restore is proven; survival of a disk failure is not.
 - **Frontend behaviour is unverified by automated tests** — no runner, no
   headless browser available.
+- **CI has never executed on GitHub's own infrastructure.** All four jobs were
+  proven green locally using CI's exact commands and a strict `npm ci`, but the
+  hosted runner has not started a single step, so the workflow remains unproven
+  in its real environment — in particular the `better-sqlite3` native build,
+  which fails in this sandbox only because there is no egress to nodejs.org.
 
 ---
 
@@ -195,7 +200,7 @@ is empty.
 | 8 | Backup / restore | **PASS** — `VACUUM INTO`, then all students/payments/transactions deleted, restored 7/6/24, `integrity ok`, 65 migrations, and the restored DB reconciles to zero |
 | 9 | RBAC / object isolation | **PASS** — **19/19 blocked, 0 breaches**: 8 cross-branch object attacks (403/404), 8 privilege escalations by a registrar (403), 3 unauthenticated (401) |
 | 10 | Logo + exact slogan | **PASS** — exactly one logo file, `sha256 c1c9549e…` identical through clone and build; one `BRAND_SLOGAN` constant, exact casing |
-| 11 | **CI actually executes** | **PARTIAL** — workflow active and triggering; runner blocked by an account billing lock (see below) |
+| 11 | **CI actually executes** | **PARTIAL** — workflow active, triggering, and all 4 jobs proven green locally under CI's exact commands; hosted runner blocked by an account billing lock (see below) |
 
 **Gate 11 — resolved in the repository, blocked in the GitHub account.**
 
@@ -216,6 +221,32 @@ wired and is mutation-proven:
 
 `npm run release:validate` is therefore **16 passed · 0 failed · 0 skipped,
 exit 0 — RELEASE VALIDATION PASSED.**
+
+**Because the hosted runner never starts, the workflow's steps were executed
+locally instead** — from a fresh clone, using CI's exact commands, including
+`npm ci` (strict lockfile install) rather than the `npm install` used elsewhere
+in this audit:
+
+| CI job | commands | result |
+|---|---|---|
+| Frontend | `typecheck`, `lint`, `build`, `audit:bundle` | **4/4 exit 0** |
+| Backend (`working-directory: server`) | `typecheck`, `lint`, `test`, `preflight:fresh-schema` | **4/4 exit 0**, 799/799 |
+| Static audit | `audit:static` | **exit 0** |
+| Release validation | `release:validate` | **exit 0** — 16 passed · 0 failed |
+
+Two things this surfaced that `npm install` had hidden:
+
+- **`npm ci` in `server/` fails in this sandbox**, because `better-sqlite3` has
+  no prebuilt binary for this platform and `node-gyp` cannot reach
+  `nodejs.org` to fetch Node headers (`SSL_ERROR_SYSCALL`, no egress). This is
+  environmental, not a repository defect: `curl` to nodejs.org fails outright,
+  and re-running the identical `npm ci` with `npm_config_nodedir=/usr/local`
+  succeeds and produces a 2.1 MB `better_sqlite3.node`. GitHub-hosted runners
+  have that egress, so the step is expected to pass there — but it is
+  **UNPROVEN on GitHub's own infrastructure** until a run actually executes.
+- **CI sets `NODE_ENV=test` globally.** Verified this does not degrade the
+  production build: the frontend build under `NODE_ENV=test` still emits
+  minified output with no React development bundle.
 
 **The remaining obstacle is not in the codebase.** Every triggered run fails
 after ~2 seconds with **0 steps executed** and the annotation:
