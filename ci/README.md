@@ -42,3 +42,19 @@ Until this runs automatically, the gate is manual. That is precisely how the
 with duplicate tuition charges, because nothing mechanically required the
 concurrency tests to cover the guarded payment categories. A gate that depends
 on someone remembering to run it is not a gate.
+
+## Verified blocked (2026-08-16)
+
+This is not a theoretical limitation. Activation was attempted during the audit
+by copying this file to `.github/workflows/ci.yml` and pushing:
+
+```
+! [remote rejected] arena/01a0062e-toefl-house -> arena/01a0062e-toefl-house
+  (refusing to allow a GitHub App to create or update workflow
+   `.github/workflows/ci.yml` without `workflows` permission)
+```
+
+**Until a human with `workflows` permission copies this file to
+`.github/workflows/ci.yml`, NONE of the quality gates below run automatically.**
+Every "gate passed" statement in the audit reports was produced by running the
+commands manually. Treat this as an open release blocker, not a formality.

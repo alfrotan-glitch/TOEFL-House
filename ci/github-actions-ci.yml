@@ -59,6 +59,13 @@ jobs:
       - name: Typecheck
         working-directory: server
         run: npm run typecheck
+      # server `lint` runs eslint AND tsc. Until 2026-08-16 it was tsc only, so
+      # eslint had never run over server/src and 7 real errors had accumulated
+      # unnoticed. Keep this step distinct from Typecheck so a regression in
+      # either check is attributable.
+      - name: Lint (eslint + tsc)
+        working-directory: server
+        run: npm run lint
       - name: Test suite
         working-directory: server
         run: npm test
