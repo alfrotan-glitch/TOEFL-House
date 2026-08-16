@@ -2,13 +2,15 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { formatJalaliAxis, formatJalali } from '../../utils/jalali';
 import {TrendingUp, TrendingDown, Users, School, Wallet, PiggyBank, Eye, EyeOff, UserCheck, Clock, Zap, AlertTriangle, BookOpen, Activity, GraduationCap, Loader2, CheckCircle2, CalendarDays, BarChart3, Sparkles} from 'lucide-react';
 import {AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend, RadialBarChart, RadialBar} from 'recharts';
-import {Student, Teacher, Class, Visitor, Invoice, FinancialTransaction, AuditLog, BudgetLine, UserRole} from '../../types';
+import { AuditLog, BudgetLine, Class, FinanceDashboard, FinancialTransaction, Invoice, Student, Teacher, UserRole, Visitor } from '../../types';
 import BusinessOperatingSystemView from './BusinessOperatingSystemView';
 import OperationsWorkQueue from './OperationsWorkQueue';
 import {useAuth} from '../../contexts/useAuth';
 import {formatAFN} from '../../utils/format';
 
 interface DashboardViewProps {
+  /** Server-computed period totals. The authoritative source for money tiles. */
+  financeDashboard: FinanceDashboard | null;
   students: Student[];
   teachers: Teacher[];
   invoices: Invoice[];
@@ -60,6 +62,7 @@ const ChartTooltip = ({ active, payload, label }: any) => {
 
 export default function DashboardView({
   students, teachers, invoices, classes, visitors, transactions, budgetLines, mainAccountBalance,
+  financeDashboard,
   auditLogs, activeRole, registerVisitorToStudent, runSavingEngine, savingPercent,
   getExecutiveDashboard, getMarketingFunnel, getStudentAnalytics, getDecisionWarnings,
   getProfitDistribution, withdrawProfitDistribution, revenueByClass = [], revenueByTimeSlot = [], onNavigate
@@ -105,11 +108,15 @@ export default function DashboardView({
   }, [visitors, students, timeframe, todayStr]);
 
   const metrics = useMemo(() => {
-    const todayIncome = transactions.filter((t) => t.type === 'income' && t.date === todayStr).reduce((s, t) => s + t.amount, 0);
-    const todayExpense = transactions.filter((t) => t.type === 'expense' && t.date === todayStr).reduce((s, t) => s + t.amount, 0);
-    const monthPrefix = todayStr.slice(0, 7);
-    const monthIncome = transactions.filter((t) => t.type === 'income' && t.date.startsWith(monthPrefix)).reduce((s, t) => s + t.amount, 0);
-    const monthExpense = transactions.filter((t) => t.type === 'expense' && t.date.startsWith(monthPrefix)).reduce((s, t) => s + t.amount, 0);
+    // Money totals come from the server, which sums the whole period in SQL.
+    // Reducing the loaded `transactions` array understated these tiles as soon
+    // as a period exceeded one page (the endpoint returns 500 rows by default);
+    // a 700-row day was reported 99,311 AFN short. The client array is still
+    // used for the sparkline shape and for non-financial counts.
+    const todayIncome = financeDashboard?.today?.income ?? 0;
+    const todayExpense = financeDashboard?.today?.expense ?? 0;
+    const monthIncome = financeDashboard?.month?.income ?? 0;
+    const monthExpense = financeDashboard?.month?.expense ?? 0;
 
     const activeStudents = students.filter((s) => s.status === 'active').length;
     const activeClasses = classes.filter((c) => c.status === 'active').length;
@@ -144,7 +151,11 @@ export default function DashboardView({
       pendingLeads: pendingLeadsList.length, conversionRate, budgetChartData,
       chartData, pendingLeadsList
     };
-  }, [transactions, todayStr, students, classes, teachers, visitors, budgetLines]);
+  }, [
+    transactions, students, classes, teachers, visitors, budgetLines,
+    financeDashboard?.today?.income, financeDashboard?.today?.expense,
+    financeDashboard?.month?.income, financeDashboard?.month?.expense,
+  ]);
 
   const { activeClassOptions } = useMemo(() => {
     const qVisitor = visitors.find((v) => v.id === quickRegVisitorId);

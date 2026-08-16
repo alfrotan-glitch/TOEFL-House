@@ -214,6 +214,7 @@ function AuthenticatedApp() {
           <DashboardView
             students={store.students} teachers={store.teachers} classes={store.classes} visitors={store.visitors} invoices={store.invoices}
             transactions={store.transactions} budgetLines={store.budgetLines} savingBalance={store.savingBalance}
+            financeDashboard={store.financeDashboard}
             mainAccountBalance={store.mainAccountBalance} auditLogs={store.auditLogs} activeRole={activeRole}
             registerVisitorToStudent={store.registerVisitorToStudent} runSavingEngine={store.runSavingEngine}
             savingPercent={store.settings.dailySavingPercent} getExecutiveDashboard={store.getExecutiveDashboard}
