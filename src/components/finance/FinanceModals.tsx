@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useCallback, useState } from 'react';
 import { FileText, Check } from 'lucide-react';
 import { BudgetLine, FinancialTransaction } from '../../types';
 import { formatAFN } from '../../utils/format';
+import { api } from '../../api/client';
 
 interface FinanceModalsProps {
   chargingBudgetLine: BudgetLine | null;
@@ -18,11 +19,51 @@ interface FinanceModalsProps {
 }
 
 /** Bundles the "charge budget line" modal and the printable official financial report modal. */
+interface PeriodTotals { income: number; expense: number; count: number }
+
 export default function FinanceModals({
   chargingBudgetLine, setChargingBudgetLine, chargeAmount, setChargeAmount,
   handleChargeBudgetSubmit, mainAccountBalance,
   showReportModal, setShowReportModal, timeFrame, transactions,
 }: FinanceModalsProps) {
+  // Authoritative period totals, summed server-side over the whole range.
+  const [totals, setTotals] = useState<PeriodTotals | null>(null);
+  const [totalsError, setTotalsError] = useState<string | null>(null);
+
+  const loadTotals = useCallback(async () => {
+    setTotalsError(null);
+    setTotals(null);
+    const todayStr = new Date().toISOString().split('T')[0];
+    const query: Record<string, string> =
+      timeFrame === 'daily' ? { period: 'range', from: todayStr, to: todayStr }
+      : timeFrame === 'monthly' ? { period: 'month', month: todayStr.slice(0, 7) }
+      : timeFrame === 'yearly' ? { period: 'year', year: todayStr.slice(0, 4) }
+      : { period: 'year', year: todayStr.slice(0, 4) };
+    try {
+      const report = await api.get<{
+        financial: { income: { total: number }; expense: { total: number } };
+      }>('/reports/overview', query);
+      setTotals({
+        income: Number(report.financial?.income?.total ?? 0),
+        expense: Number(report.financial?.expense?.total ?? 0),
+        count: Number.POSITIVE_INFINITY,
+      });
+    } catch (err) {
+      setTotalsError(err instanceof Error ? err.message : 'Could not load period totals.');
+    }
+  }, [timeFrame]);
+
+  // Fetch on open / timeframe change without a prop-mirroring effect
+  // (react-hooks/set-state-in-effect): derive the "needs a fetch" condition
+  // during render and kick the request off once per distinct key.
+  const totalsKey = showReportModal ? `${timeFrame}` : '';
+  const [loadedKey, setLoadedKey] = useState<string>('');
+  if (totalsKey && totalsKey !== loadedKey) {
+    setLoadedKey(totalsKey);
+    void loadTotals();
+  }
+  if (!totalsKey && loadedKey) setLoadedKey('');
+
   return (
     <>
       {chargingBudgetLine && (
@@ -86,7 +127,7 @@ export default function FinanceModals({
         const currentMonth = todayStr.substring(0, 7);
         const currentYear = todayStr.substring(0, 4);
 
-        // Filter transactions for report
+        // The visible line items come from the loaded page of transactions.
         const reportTransactions = transactions.filter(t => {
           if (timeFrame === 'daily') return t.date === todayStr;
           if (timeFrame === 'monthly') return t.date.startsWith(currentMonth);
@@ -94,9 +135,13 @@ export default function FinanceModals({
           return true;
         });
 
-        const reportIncome = reportTransactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
-        const reportExpense = reportTransactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
-        const reportNet = reportIncome - reportExpense;
+        // ...but the TOTALS must come from the server, which sums the whole
+        // period in SQL. Summing the loaded page understated an official
+        // statement by 99,311 AFN once the day exceeded one page: the client
+        // holds at most 500 rows, and there were 700.
+        const reportIncome = totals ? totals.income : null;
+        const reportExpense = totals ? totals.expense : null;
+        const reportNet = totals ? totals.income - totals.expense : null;
 
         return (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-250">
@@ -146,28 +191,44 @@ export default function FinanceModals({
                 </div>
 
                 {/* Main Metrics Summary */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div className="border border-slate-200/80 rounded-2xl p-4 bg-emerald-50/20 text-left space-y-1">
-                    <p className="text-[10px] text-emerald-600 font-bold">Total income (credit)</p>
-                    <p className="text-base font-black text-emerald-700 font-mono">+{formatAFN(reportIncome)}</p>
+                {totalsError ? (
+                  <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-800 flex items-center justify-between gap-3">
+                    <span className="font-semibold">Totals unavailable: {totalsError}. This statement must not be issued from a partial figure.</span>
+                    <button type="button" onClick={() => void loadTotals()} className="shrink-0 font-bold underline hover:no-underline">Retry</button>
                   </div>
+                ) : reportIncome === null || reportExpense === null || reportNet === null ? (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-center text-xs text-slate-500 font-semibold">
+                    Calculating period totals…
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="border border-slate-200/80 rounded-2xl p-4 bg-emerald-50/20 text-left space-y-1">
+                      <p className="text-[10px] text-emerald-600 font-bold">Total income (credit)</p>
+                      <p className="text-base font-black text-emerald-700 font-mono">+{formatAFN(reportIncome)}</p>
+                    </div>
 
-                  <div className="border border-slate-200/80 rounded-2xl p-4 bg-rose-50/20 text-left space-y-1">
-                    <p className="text-[10px] text-rose-500 font-bold">Total expenses (debit)</p>
-                    <p className="text-base font-black text-rose-600 font-mono">-{formatAFN(reportExpense)}</p>
-                  </div>
+                    <div className="border border-slate-200/80 rounded-2xl p-4 bg-rose-50/20 text-left space-y-1">
+                      <p className="text-[10px] text-rose-500 font-bold">Total expenses (debit)</p>
+                      <p className="text-base font-black text-rose-600 font-mono">-{formatAFN(reportExpense)}</p>
+                    </div>
 
-                  <div className="border border-indigo-100 rounded-2xl p-4 bg-indigo-50/30 text-left space-y-1">
-                    <p className="text-[10px] text-indigo-600 font-bold">Net profit / surplus</p>
-                    <p className={`text-base font-black font-mono ${reportNet >= 0 ? 'text-indigo-700' : 'text-rose-600'}`}>
-                      {formatAFN(reportNet)}
-                    </p>
+                    <div className="border border-indigo-100 rounded-2xl p-4 bg-indigo-50/30 text-left space-y-1">
+                      <p className="text-[10px] text-indigo-600 font-bold">Net profit / surplus</p>
+                      <p className={`text-base font-black font-mono ${reportNet >= 0 ? 'text-indigo-700' : 'text-rose-600'}`}>
+                        {formatAFN(reportNet)}
+                      </p>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Ledger Listing inside Report */}
                 <div className="space-y-2">
-                  <h4 className="font-bold text-slate-900 border-b border-slate-100 pb-1.5 text-xs">Period line items</h4>
+                  <h4 className="font-bold text-slate-900 border-b border-slate-100 pb-1.5 text-xs">
+                    Period line items
+                    <span className="ml-1.5 font-semibold text-slate-400">
+                      (most recent {reportTransactions.length}; totals above cover the full period)
+                    </span>
+                  </h4>
                   <div className="border border-slate-150 rounded-xl overflow-hidden">
                     <table className="w-full text-left border-collapse text-[11px]">
                       <thead>

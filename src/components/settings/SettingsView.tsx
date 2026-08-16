@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {Building2, Database, Edit, Trash2, Plus, X, User, HeartHandshake, Tag, KeyRound, UserPlus, CheckCircle2, MapPin, ShieldCheck} from 'lucide-react';
 import PositionsPanel, { PositionRow, PermissionDef } from './PositionsPanel';
 import UserPositionsPanel, { UserLite } from './UserPositionsPanel';
@@ -201,13 +201,28 @@ export default function SettingsView({
   const [resettingUserId, setResettingUserId] = useState<string | null>(null);
   const [resetTempPassword, setResetTempPassword] = useState<string>('');
 
+  const [userAccountsError, setUserAccountsError] = useState<string | null>(null);
+
+  // A swallowed failure here rendered an EMPTY account list with no warning,
+  // which reads as "this academy has no users" rather than "the list could not
+  // be loaded" — a dangerous thing to show an owner managing access.
   const loadUserAccounts = useCallback(() => {
-    listUserAccounts().then(setUserAccounts).catch(() => {});
+    setUserAccountsError(null);
+    listUserAccounts()
+      .then(setUserAccounts)
+      .catch((err) => {
+        setUserAccountsError(err instanceof Error ? err.message : 'Could not load user accounts.');
+      });
   }, [listUserAccounts]);
 
-  useEffect(() => {
-    if (activeRole === 'owner') loadUserAccounts();
-  }, [activeRole, loadUserAccounts]);
+  // Load once per owner session without mirroring props into state inside an
+  // effect (react-hooks/set-state-in-effect).
+  const [accountsLoadedFor, setAccountsLoadedFor] = useState<string>('');
+  if (activeRole === 'owner' && accountsLoadedFor !== 'owner') {
+    setAccountsLoadedFor('owner');
+    loadUserAccounts();
+  }
+  if (activeRole !== 'owner' && accountsLoadedFor) setAccountsLoadedFor('');
 
 
   const handleCreateUser = async (e: React.FormEvent) => {
@@ -861,6 +876,15 @@ export default function SettingsView({
             )}
 
             <div className="space-y-2">
+              {userAccountsError && (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs text-rose-800 flex items-center justify-between gap-3">
+                  <span className="font-semibold">Could not load user accounts: {userAccountsError}</span>
+                  <button type="button" onClick={loadUserAccounts} className="shrink-0 font-bold underline hover:no-underline">Retry</button>
+                </div>
+              )}
+              {!userAccountsError && userAccounts.length === 0 && (
+                <p className="text-xs text-slate-400 italic px-1 py-2">No user accounts yet.</p>
+              )}
               {userAccounts.map((u) => (
                 <div key={u.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-50 border border-slate-100 rounded-xl px-3.5 py-2.5 text-xs">
                   <div>
