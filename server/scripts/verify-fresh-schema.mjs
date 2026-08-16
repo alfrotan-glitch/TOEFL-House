@@ -80,7 +80,7 @@ function applyMigration(db, sql) {
       const msg = String(err.message || '');
       // Idempotent re-application is expected for ADD COLUMN / duplicate index.
       if (/duplicate column name|already exists/i.test(msg)) continue;
-      throw new Error(`${msg}\n  in statement: ${stmt.slice(0, 160)}`);
+      throw new Error(`${msg}\n  in statement: ${stmt.slice(0, 160)}`, { cause: err });
     }
   }
 }
