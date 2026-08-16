@@ -281,13 +281,21 @@ booksRouter.post(
     db.transaction(() => {
       if (book) stmtUpdateBookStockAdd.run(sale.quantity, book.price, book.purchase_price, book.entry_date, book.id);
       stmtUpdateSaleStatus.run(sale.id);
-      const refundLedger = db.prepare(
-        `INSERT INTO financial_transactions (id, type, category, amount, date, description, reference_id, operator_name, branch_id) VALUES (?, 'income', ?, ?, ?, ?, ?, ?, ?)`
-      );
-      refundLedger.run(
-        id('tx_refund'), categoryType + '_refund', -refundValue, date,
-        `Contra-revenue refund for book sale ${sale.id}`, sale.id, user.fullName, saleBranchId
-      );
+      // The sale credits cash through recordIncome(); the refund MUST debit it
+      // through the same path. Writing the contra row straight into
+      // financial_transactions left the ledger saying -500 while the branch
+      // cash account still held the 500 — 500 AFN of cash that existed in one
+      // source of truth and not the other, and the gap grew with every refund.
+      // recordIncome() also reclaims the savings sweep this sale triggered.
+      recordIncome({
+        category: categoryType + '_refund',
+        amount: -refundValue,
+        date,
+        description: `Contra-revenue refund for book sale ${sale.id}`,
+        referenceId: sale.id,
+        operatorName: user.fullName, operatorRole: user.role ?? null,
+        branchId: saleBranchId,
+      });
     })();
 
     addNotification('Book refund and return', `Sale invoice #${sale.id} was successfully refunded and ${sale.quantity} copies were returned to stock.`, 'info', saleBranchId);

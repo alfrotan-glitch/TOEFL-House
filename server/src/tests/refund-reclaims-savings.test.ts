@@ -144,3 +144,56 @@ describe('F-9: a full refund of a fully-paid amount', () => {
     expect(getFinanceAccount('branch', BRANCH)).toEqual({ mainBalance: 0, savingBalance: 0 });
   });
 });
+
+/**
+ * F-10 (CRITICAL, proven live over HTTP):
+ *
+ *   POST /api/books/sales/:saleId/refund wrote its contra-revenue row STRAIGHT
+ *   into financial_transactions instead of going through recordIncome(). The
+ *   sale credited the branch cash account; the refund did not debit it.
+ *
+ *   Measured on a clean database: after one 500 AFN sale and its refund the
+ *   ledger said -500 while finance_accounts still held the 500. That is 500 AFN
+ *   of cash that exists in one source of truth and not the other, per refund,
+ *   accumulating forever — the exact "duplicate business truth" this system is
+ *   supposed to forbid.
+ *
+ * The asymmetry WAS the bug: one direction of the same transaction used the
+ * shared money path and the other hand-rolled a SQL INSERT.
+ */
+describe('F-10: every money path debits cash through recordIncome', () => {
+  it('a book-sale refund returns cash and savings to their pre-sale state', () => {
+    income(500, 'book sale');
+    expect(getFinanceAccount('branch', BRANCH)).toEqual({ mainBalance: 475, savingBalance: 25 });
+
+    // What the refund route now does.
+    db.transaction(() =>
+      recordIncome({
+        category: 'book_refund', amount: -500, date: '2026-05-01',
+        description: 'Contra-revenue refund for book sale',
+        operatorName: 'Test', operatorRole: 'owner', branchId: BRANCH,
+      }),
+    )();
+
+    expect(getFinanceAccount('branch', BRANCH)).toEqual({ mainBalance: 0, savingBalance: 0 });
+    const r = reconcile(BRANCH);
+    expect(r.actualMain).toBe(r.expectedMain);
+    expect(r.actualSaving).toBe(r.expectedSaving);
+  });
+
+  it('no route bypasses recordIncome to write a negative income row', () => {
+    // Structural guard. A hand-rolled INSERT of a negative income row is how
+    // F-10 happened, and it is invisible in review because the SQL looks fine
+    // on its own — the defect is only in what it OMITS (the cash debit).
+    const fs = require('node:fs') as typeof import('node:fs');
+    const path = require('node:path') as typeof import('node:path');
+    const routesDir = path.resolve(__dirname, '..', 'routes');
+    const offenders: string[] = [];
+    for (const file of fs.readdirSync(routesDir).filter((f) => f.endsWith('.ts'))) {
+      const src = fs.readFileSync(path.join(routesDir, file), 'utf8');
+      // An INSERT into financial_transactions that hardcodes type 'income'.
+      if (/INSERT INTO financial_transactions[^`]*'income'/.test(src)) offenders.push(file);
+    }
+    expect(offenders, 'use recordIncome() so cash and ledger move together').toEqual([]);
+  });
+});
