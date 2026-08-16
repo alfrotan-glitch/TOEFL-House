@@ -127,6 +127,11 @@ export default function DashboardView({
     const convertedLeads = visitors.filter((v) => v.status === 'registered').length;
     const conversionRate = visitors.length > 0 ? Math.round((convertedLeads / visitors.length) * 100) : 0;
 
+    // NOTE: the 7-day sparkline is derived from the loaded `transactions`
+    // page, so it shows SHAPE, not authoritative totals. It is labelled as a
+    // trend and never presented as a figure anyone reconciles against. The
+    // KPI tiles above deliberately come from the server instead. If this chart
+    // ever grows a "total" readout it must move to /finance/pnl first.
     const chartData = Array.from({ length: 7 }, (_, idx) => {
       const d = new Date();
       d.setDate(d.getDate() - (6 - idx));
