@@ -28,6 +28,7 @@ import {
   // Rule Engine types
   BusinessRule, RuleCategory, RuleEngineResult, BusinessRuleVersion, PipelineStage,
   Branch, Campus, Organization, TeacherContractType,
+  StudentBalanceRow,
 } from './types';
 
 /** Real due/paid/remaining figures for one teacher/month, mirroring GET /teachers/:id/salary-status. */
@@ -144,8 +145,76 @@ export function useApiStore() {
 
   const bq = useMemo(() => ({ branchId: currentBranchId }), [currentBranchId]);
 
+
+
   // ---------- Existing reloaders ----------
-  const reloadStudents = useCallback(() => api.get<Student[]>('/students', { ...bq, limit: '2000' }).then(setStudents), [bq]);
+
+  // Whether the roster in state is the LITE projection (id, code, name,
+  // status, registration date, gender, branch — no semesters, no joins).
+  // Screens needing full records call reloadStudents(), which always refetches
+  // and clears this flag; a lite roster can therefore never masquerade as one.
+  const [studentsAreLite, setStudentsAreLite] = useState(false);
+  const [studentBalances, setStudentBalances] = useState<StudentBalanceRow[]>([]);
+
+  const reloadStudents = useCallback(
+    () => api.get<Student[]>('/students', { ...bq, limit: '2000' })
+      .then((rows) => { setStudents(rows); setStudentsAreLite(false); }),
+    [bq],
+  );
+
+  /**
+   * Lightweight roster for tabs that only resolve a student id to a name in a
+   * dropdown or lookup table (books, exams, attendance, visitors, dashboard).
+   *
+   * The full projection is 25 fields plus a nested `semesters` array and two
+   * extra batch queries — 1.4 MB for 2,000 students. Six of eight tabs were
+   * downloading all of it to render names in a picker. Lite is ~60 bytes/row.
+   *
+   * Reuses whatever roster is already in memory: a FULL roster obviously
+   * satisfies a lookup, and a lite one already did the job. Only an empty
+   * roster triggers a request, so tab switching costs nothing.
+   */
+  const reloadStudentsLite = useCallback(() => {
+    let alreadyPopulated = false;
+    // Read current state without adding `students` as a dependency, which
+    // would rebuild every reloader on each roster change.
+    setStudents((current) => {
+      alreadyPopulated = current.length > 0;
+      return current;
+    });
+    if (alreadyPopulated) return Promise.resolve();
+    return api
+      .get<Student[]>('/students', { ...bq, limit: '2000', view: 'lite' })
+      .then((rows) => { setStudents(rows); setStudentsAreLite(true); });
+  }, [bq]);
+  /**
+   * Guarantees a FULL roster is in memory. Screens that read semesters,
+   * discounts or contact details must call this rather than assuming the
+   * loaded roster is complete — it may be the lite projection.
+   */
+  const ensureFullStudents = useCallback(() => {
+    let needsUpgrade = false;
+    setStudents((current) => {
+      needsUpgrade = current.length === 0;
+      return current;
+    });
+    setStudentsAreLite((lite) => {
+      if (lite) needsUpgrade = true;
+      return lite;
+    });
+    return needsUpgrade ? reloadStudents() : Promise.resolve();
+  }, [reloadStudents]);
+
+  /**
+   * Per-student tuition balances, aggregated server-side.
+   * Replaces reducing the paginated payments array, which silently reported
+   * every student outside the first page as owing their full fee.
+   */
+  const reloadStudentBalances = useCallback(
+    () => api.get<StudentBalanceRow[]>('/payments/balances', bq).then(setStudentBalances),
+    [bq],
+  );
+
   const reloadTeachers = useCallback(() => api.get<Teacher[]>('/teachers', bq).then(setTeachers), [bq]);
   const reloadEmployees = useCallback(
     () => (canSeeFinance ? api.get<Employee[]>('/employees', bq).then(setEmployees) : Promise.resolve()),
@@ -340,7 +409,9 @@ export function useApiStore() {
         // before operational datasets are hydrated; dashboard data loads after the
         // workspace is visible and is never allowed to hold the global startup gate.
         return Promise.all([
-          reloadStudents(),
+          // Dashboard needs student COUNTS (status, registration date), not
+          // full records: the lite roster skips 18 fields and two joins.
+          reloadStudentsLite(),
           reloadTeachers(),
           reloadClasses(),
           reloadVisitors(),
@@ -348,21 +419,21 @@ export function useApiStore() {
           ...(canSeeFinance ? [reloadFinanceOverview()] : []),
         ]);
       case 'students':
-        return Promise.all([reloadStudents(), reloadPayments(), reloadClasses(), reloadProgramVersions()]);
+        return Promise.all([reloadStudents(), reloadStudentBalances(), reloadClasses(), reloadProgramVersions()]);
       case 'teachers':
         return Promise.all([reloadTeachers(), reloadEmployees(), reloadSkills(), reloadClassTeacherSkills()]);
       case 'classes':
         return Promise.all([reloadClasses(), reloadTeachers(), reloadSkills(), reloadClassTeacherSkills(), reloadSessions()]);
       case 'visitors':
-        return Promise.all([reloadVisitors(), reloadStudents(), reloadClasses(), reloadProgramVersions()]);
+        return Promise.all([reloadVisitors(), reloadStudentsLite(), reloadClasses(), reloadProgramVersions()]);
       case 'books':
-        return Promise.all([reloadBooks(), reloadBookSales(), reloadStudents()]);
+        return Promise.all([reloadBooks(), reloadBookSales(), reloadStudentsLite()]);
       case 'finance':
         return Promise.all([reloadBudgetLines(), reloadFinanceOverview()]);
       case 'exams':
-        return Promise.all([reloadExams(), reloadExamResults(), reloadStudents(), reloadClasses()]);
+        return Promise.all([reloadExams(), reloadExamResults(), reloadStudentsLite(), reloadClasses()]);
       case 'attendance':
-        return Promise.all([reloadAttendance(), reloadSessions(), reloadStudents(), reloadClasses()]);
+        return Promise.all([reloadAttendance(), reloadSessions(), reloadStudentsLite(), reloadClasses()]);
       case 'academic-setup':
         return Promise.all([reloadBranches(), reloadCampuses(), reloadOrganization(), reloadSkills(), reloadProgramVersions()]);
       case 'settings':
@@ -378,7 +449,7 @@ export function useApiStore() {
       case 'audit':
         return reloadAuditLogs();
       case 'operations-report':
-        return Promise.all([reloadStudents(), reloadClasses(), reloadVisitors()]);
+        return Promise.all([reloadStudentsLite(), reloadClasses(), reloadVisitors()]);
       default:
         return Promise.resolve();
     }
@@ -386,8 +457,8 @@ export function useApiStore() {
     canSeeFinance, reloadAuditLogs, reloadAttendance, reloadBookSales, reloadBooks, reloadBranches, reloadBudgetLines, reloadCampuses,
     reloadClasses, reloadClassTeacherSkills, reloadDonations, reloadDonors, reloadEmployees, reloadExamResults, reloadExams,
     reloadFinanceOverview, reloadFundingCampaigns, reloadImpactMetrics, reloadImpactReports,
-    reloadNotifications, reloadOrganization, reloadPartners, reloadPayments, reloadProgramVersions,
-    reloadScholarshipAwards, reloadScholarships, reloadSessions, reloadSkills, reloadStudents, reloadTeachers,
+    reloadNotifications, reloadOrganization, reloadPartners, reloadProgramVersions,
+    reloadScholarshipAwards, reloadScholarships, reloadSessions, reloadSkills, reloadStudents, reloadStudentsLite, reloadStudentBalances, reloadTeachers,
     reloadVisitors, reloadWorkflows, reloadAutomations, reloadSponsorships,
   ]);
 
@@ -1112,6 +1183,7 @@ export function useApiStore() {
     createBranch, updateBranch, deactivateBranch, deleteBranch,
     // Utils
     changeBranch, reloadAll, ensureTabData, ensureFinanceSection, isTabLoading, reloadNotifications, reloadVisitors, reloadFinanceDashboard,
+    studentsAreLite, ensureFullStudents, studentBalances, reloadStudentBalances,
     // Existing business operations
     addVisitor, updateVisitorCRM, addVisitorFollowUp, updateVisitor, advanceVisitorStage, registerVisitorToStudent,
     addStudentManual, updateStudentStatus, updateStudent, recordFeePayment, enrollStudentSemester, issueStudentCard,

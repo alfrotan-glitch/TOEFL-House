@@ -6,15 +6,16 @@
 import {api} from '../../api/client';
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {GraduationCap, Search, Filter, Eye, CreditCard, UserPlus, Users, RotateCcw, X, Download} from 'lucide-react';
-import {Student, Class, Payment, UserRole, Exam, ExamResult, Attendance, Branch, Visitor} from '../../types';
+import {Student, Class, Payment, UserRole, Exam, ExamResult, Attendance, Branch, Visitor, StudentBalanceRow } from '../../types';
 import AddStudentForm from './AddStudentForm';
 import StudentProfileDrawer from './StudentProfileDrawer';
 import {formatAFN} from '../../utils/format';
 import Toast from '../common/Toast';
 import {useAcademicOptions} from '../../hooks/useAcademicOptions';
-import { computeStudentBalance } from '../../utils/studentBalance';
 
 interface StudentsViewProps {
+  /** Server-aggregated tuition balances (GET /payments/balances). */
+  studentBalances: StudentBalanceRow[];
   students: Student[];
   visitors?: Visitor[];
   classes: Class[];
@@ -35,6 +36,7 @@ interface StudentsViewProps {
 }
 
 export default function StudentsView({
+  studentBalances,
   students, visitors = [], classes, payments, exams, examResults, attendance, activeRole, branches, activeBranchId,
   addStudentManual, updateStudentStatus, updateStudent, enrollStudentSemester, issueStudentCard, books = []
 }: StudentsViewProps) {
@@ -88,23 +90,20 @@ export default function StudentsView({
 
   const activeStudentInfo = selectedStudent ? students.find(s => s.id === selectedStudent.id) || selectedStudent : null;
 
-  // Precomputed finance map — O(1) per row instead of O(students × payments).
+  // Finance map from SERVER-aggregated balances.
+  //
+  // This used to reduce the loaded `payments` array. That array is one page:
+  // with 6,000 payments and a 2,000-row cap, two thirds never reached the
+  // browser, and every student outside the first page was displayed as owing
+  // their FULL fee despite having paid. The server now sums all payments per
+  // student in SQL, using the same authoritative rule as studentBalance.
   const financeByStudent = useMemo(() => {
     const map = new Map<string, { total: number; paid: number; debt: number }>();
-    // Group payments once so this stays O(students + payments), then defer the
-    // arithmetic to the shared authoritative helper.
-    const byStudent = new Map<string, typeof payments>();
-    for (const pay of payments) {
-      if (!pay.studentId) continue;
-      const bucket = byStudent.get(pay.studentId);
-      if (bucket) bucket.push(pay); else byStudent.set(pay.studentId, [pay]);
-    }
-    for (const st of students) {
-      const b = computeStudentBalance(st.id, st.semesters, byStudent.get(st.id) || [], 'active');
-      map.set(st.id, { total: b.tuitionDue, paid: b.tuitionPaid, debt: b.outstanding });
+    for (const b of studentBalances) {
+      map.set(b.studentId, { total: b.tuitionDue, paid: b.tuitionPaid, debt: b.outstanding });
     }
     return map;
-  }, [students, payments]);
+  }, [studentBalances]);
 
   const getStudentFinance = (studentId: string) => financeByStudent.get(studentId) || { total: 0, paid: 0, debt: 0 };
 

@@ -1374,3 +1374,16 @@ export interface OperationsReport {
     };
   };
 }
+
+/**
+ * Per-student tuition balance, aggregated server-side over ALL payments.
+ * Mirrors GET /api/payments/balances. Used instead of reducing the paginated
+ * payments list, which under-reported any student outside the first page.
+ */
+export interface StudentBalanceRow {
+  studentId: string;
+  tuitionDue: number;
+  tuitionPaid: number;
+  outstanding: number;
+  creditBalance: number;
+}
