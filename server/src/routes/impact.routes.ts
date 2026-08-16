@@ -278,12 +278,12 @@ impactRouter.post(
     if (!canAccessBranchResource(req, student.branch_id)) {
       throw new HttpError(403, 'Student belongs to another branch.');
     }
-    if (student.branch_id !== user.branchId) {
-      throw new HttpError(400, 'Student and success story must belong to the same branch.');
-    }
-
+    // The story belongs to the STUDENT's branch. Requiring it to equal the
+    // operator's home branch refused every legitimate multi-branch author
+    // (an owner was authorized by canAccessBranchResource on the line above
+    // and then rejected here), and filed the story under the wrong branch.
     const newId = id('ss');
-    stmtInsertStory.run(newId, studentId, title, content, photoUrl || null, JSON.stringify(tags || []), user.branchId);
+    stmtInsertStory.run(newId, studentId, title, content, photoUrl || null, JSON.stringify(tags || []), student.branch_id);
 
     writeAudit(req, `Published success story for ${student.full_name}: "${title}"`);
     res.status(201).json({ id: newId });

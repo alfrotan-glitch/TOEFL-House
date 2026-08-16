@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
-import { authenticate, authorize, requirePermission, resolveBranchScope } from '../middleware/auth.js';
+import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id } from '../utils/ids.js';
@@ -17,10 +17,15 @@ const stmtGetAllSkills = db.prepare('SELECT * FROM skills ORDER BY name');
 const stmtGetSkillByName = db.prepare('SELECT id FROM skills WHERE name = ?');
 const stmtInsertSkill = db.prepare('INSERT INTO skills (id, name) VALUES (?, ?)');
 
-const stmtGetCtsByBranch = db.prepare('SELECT * FROM class_teacher_skills WHERE branch_id = ?');
-const stmtGetCtsByBranchAndTeacher = db.prepare('SELECT * FROM class_teacher_skills WHERE branch_id = ? AND teacher_id = ?');
-const stmtGetCtsByBranchAndClass = db.prepare('SELECT * FROM class_teacher_skills WHERE branch_id = ? AND class_id = ?');
-const stmtGetCtsByBranchTeacherClass = db.prepare('SELECT * FROM class_teacher_skills WHERE branch_id = ? AND teacher_id = ? AND class_id = ?');
+// One scope-aware listing query replaces four near-identical branch/filter
+// permutations. `isAll` comes from resolveBranchScope, so a user authorized
+// across several branches sees all of them instead of only their home branch.
+const stmtListCts = db.prepare(
+  `SELECT * FROM class_teacher_skills
+    WHERE (:isAll = 1 OR branch_id = :branchId)
+      AND (:teacherId IS NULL OR teacher_id = :teacherId)
+      AND (:classId IS NULL OR class_id = :classId)`
+);
 
 const stmtGetTeacherById = db.prepare('SELECT * FROM teachers WHERE id = ?');
 const stmtCountDistinctSkillsInClass = db.prepare(`SELECT COUNT(DISTINCT skill_id) as c FROM class_teacher_skills WHERE class_id = ? AND assignment_type IN ('primary','assistant')`);
@@ -115,19 +120,14 @@ classTeacherSkillsRouter.get(
   '/',
   authorize('manager', 'head_of_department', 'registrar', 'finance', 'owner'),
   ah(async (req, res) => {
-    const user = getUserContext(req);
     const { teacherId, classId } = req.query as Record<string, string>;
-    let rows: any[];
-    if (teacherId && classId) {
-      rows = stmtGetCtsByBranchTeacherClass.all(user.branchId, teacherId, classId);
-    } else if (teacherId) {
-      rows = stmtGetCtsByBranchAndTeacher.all(user.branchId, teacherId);
-    } else if (classId) {
-      rows = stmtGetCtsByBranchAndClass.all(user.branchId, classId);
-    } else {
-      rows = stmtGetCtsByBranch.all(user.branchId);
-    }
-    
+    const { branchId, isAll } = resolveBranchScope(req);
+    const rows = stmtListCts.all({
+      isAll: isAll ? 1 : 0,
+      branchId: branchId ?? null,
+      teacherId: teacherId || null,
+      classId: classId || null,
+    }) as any[];
     res.json(rows.map(mapAssignment));
   })
 );
@@ -160,10 +160,15 @@ classTeacherSkillsRouter.post(
 
     const teacher = stmtGetTeacherById.get(teacherId) as any;
     if (!teacher) throw new HttpError(404, 'Teacher not found.');
-    if (teacher.branch_id !== user.branchId) throw new HttpError(403, 'Teacher belongs to another branch.');
+    if (!canAccessBranchResource(req, teacher.branch_id)) throw new HttpError(403, 'Teacher belongs to another branch.');
     const cls = db.prepare('SELECT id, branch_id, status, lifecycle_stage FROM classes WHERE id = ?').get(classId) as any;
     if (!cls) throw new HttpError(404, 'Class not found.');
-    if (cls.branch_id !== user.branchId) throw new HttpError(403, 'Class belongs to another branch.');
+    if (!canAccessBranchResource(req, cls.branch_id)) throw new HttpError(403, 'Class belongs to another branch.');
+    // The teaching work happens where the CLASS is, so the class branch owns
+    // the assignment. Deriving it from the operator's home branch instead
+    // mis-filed every assignment a multi-branch user created.
+    if (teacher.branch_id !== cls.branch_id) throw new HttpError(400, 'Teacher and class must belong to the same branch.');
+    const assignmentBranchId = cls.branch_id;
     if (cls.status === 'cancelled' || cls.lifecycle_stage === 'archived') throw new HttpError(409, 'Cannot assign a teacher to a cancelled or archived class.');
     const skill = db.prepare('SELECT id FROM skills WHERE id = ?').get(skillId) as any;
     if (!skill) throw new HttpError(404, 'Skill not found.');
@@ -172,7 +177,7 @@ classTeacherSkillsRouter.post(
       const session = stmtGetSessionForCts.get(sessionId) as any;
       if (!session) throw new HttpError(404, 'Session not found.');
       if (session.class_id !== classId) throw new HttpError(400, 'sessionId does not belong to the specified class.');
-      if (session.branch_id !== user.branchId) throw new HttpError(403, 'Session belongs to another branch.');
+      if (session.branch_id !== assignmentBranchId) throw new HttpError(400, 'Session belongs to another branch.');
     }
     // A teacher must be employable to receive new teaching work. This is an
     // employment-status rule, NOT a contract-type rule.
@@ -221,7 +226,7 @@ classTeacherSkillsRouter.post(
 
     const newId = id('cts');
     try {
-      stmtInsertCts.run(newId, classId, teacherId, skillId, resolvedRate, user.branchId, resolvedType, startDate || null, endDate || null, reason || null, sessionId || null);
+      stmtInsertCts.run(newId, classId, teacherId, skillId, resolvedRate, assignmentBranchId, resolvedType, startDate || null, endDate || null, reason || null, sessionId || null);
     } catch (err: any) {
       if (String(err.message).includes('UNIQUE')) {
         throw new HttpError(409, 'This teacher is already assigned to this skill in this class (and session, if specified).');
@@ -242,7 +247,7 @@ classTeacherSkillsRouter.put(
     const user = getUserContext(req);
     const existing = stmtGetCtsById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Assignment not found.');
-    if (existing.branch_id !== user.branchId) throw new HttpError(403, 'Assignment belongs to another branch.');
+    if (!canAccessBranchResource(req, existing.branch_id)) throw new HttpError(403, 'Assignment belongs to another branch.');
     
     const { monthlyRate, assignmentType, startDate, endDate, reason } = req.body;
     if (monthlyRate == null && assignmentType === undefined && startDate === undefined && endDate === undefined && reason === undefined) {
@@ -299,7 +304,7 @@ classTeacherSkillsRouter.delete(
     if (!existing) throw new HttpError(404, 'Assignment not found.');
     
     const user = getUserContext(req);
-    if (existing.branch_id !== user.branchId) throw new HttpError(403, 'Assignment belongs to another branch.');
+    if (!canAccessBranchResource(req, existing.branch_id)) throw new HttpError(403, 'Assignment belongs to another branch.');
     stmtDeleteCts.run(req.params.id);
     writeAudit(req, `Removed teacher skill assignment from class ${existing.class_id}`);
     res.json({ ok: true });
@@ -323,7 +328,7 @@ classTeacherSkillsRouter.post(
     const user = getUserContext(req);
     const original = stmtGetCtsById.get(req.params.id) as any;
     if (!original) throw new HttpError(404, 'Assignment not found.');
-    if (original.branch_id !== user.branchId) throw new HttpError(403, 'Assignment belongs to another branch.');
+    if (!canAccessBranchResource(req, original.branch_id)) throw new HttpError(403, 'Assignment belongs to another branch.');
 
     const { substituteTeacherId, sessionId, reason, monthlyRate } = req.body;
     if (!substituteTeacherId || !sessionId) throw new HttpError(400, 'substituteTeacherId and sessionId are required.');
@@ -335,15 +340,15 @@ classTeacherSkillsRouter.post(
 
     const teacher = stmtGetTeacherById.get(substituteTeacherId) as any;
     if (!teacher) throw new HttpError(404, 'Substitute teacher not found.');
-    if (teacher.branch_id !== user.branchId) throw new HttpError(403, 'Substitute teacher belongs to another branch.');
-    if (session.branch_id !== user.branchId) throw new HttpError(403, 'Session belongs to another branch.');
+    if (teacher.branch_id !== original.branch_id) throw new HttpError(400, 'Substitute teacher belongs to another branch.');
+    if (session.branch_id !== original.branch_id) throw new HttpError(400, 'Session belongs to another branch.');
     if (teacher.status !== 'active') throw new HttpError(400, 'Substitute teacher must be active.');
 
     const newId = id('cts');
     try {
       stmtInsertCts.run(
         newId, original.class_id, substituteTeacherId, original.skill_id,
-        monthlyRate != null ? Number(monthlyRate) : 0, user.branchId,
+        monthlyRate != null ? Number(monthlyRate) : 0, original.branch_id,
         'substitute', session.date ?? null, session.date ?? null, reason, sessionId
       );
     } catch (err: any) {
