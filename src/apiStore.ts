@@ -131,7 +131,62 @@ export function useApiStore() {
 
   const [isLoading, setIsLoading] = useState(true);
   const [isTabLoading, setIsTabLoading] = useState(false);
+  /**
+   * Set when the roster changes elsewhere, so cached copies are refetched.
+   * A ref, not state: nothing renders from it, and writing it must not trigger
+   * a re-render of every consumer of this store.
+   */
+  const rosterStaleRef = useRef(false);
+  const setRosterStale = useCallback((value: boolean) => { rosterStaleRef.current = value; }, []);
+
   const [loadedTabs, setLoadedTabs] = useState<Set<string>>(new Set());
+
+  /**
+   * Which tabs render which dataset.
+   *
+   * `loadedTabs` is a "already fetched, don't fetch again" cache. It was only
+   * ever cleared on login or branch switch, so once a tab had loaded it served
+   * whatever was in memory forever: register a student on Students, open Exams,
+   * and the new student was missing from the picker until the user pressed F5.
+   * Mutating a dataset now evicts every tab that displays it.
+   */
+  const TAB_DATASETS: Record<string, readonly string[]> = useMemo(() => ({
+    students:   ['dashboard', 'students', 'visitors', 'books', 'exams', 'attendance', 'operations-report'],
+    payments:   ['students', 'finance'],
+    visitors:   ['dashboard', 'visitors', 'operations-report'],
+    teachers:   ['dashboard', 'teachers', 'classes'],
+    classes:    ['dashboard', 'classes', 'students', 'visitors', 'exams', 'attendance', 'operations-report'],
+    attendance: ['students', 'attendance'],
+    books:      ['books'],
+    exams:      ['exams'],
+    finance:    ['dashboard', 'finance'],
+    skills:     ['teachers', 'classes', 'academic-setup'],
+    funding:    ['funding'],
+    academic:   ['academic-setup', 'students', 'visitors', 'classes'],
+    settings:   ['settings', 'academic-setup'],
+    organization: ['settings', 'academic-setup', 'dashboard'],
+    workflows:  ['workflows'],
+    audit:      ['audit'],
+  }), []);
+
+  /**
+   * Marks datasets as changed so dependent tabs refetch on next visit.
+   * Call after any mutation, alongside the immediate reload of the current view.
+   */
+  const invalidate = useCallback((...datasets: string[]) => {
+    setLoadedTabs((prev) => {
+      const next = new Set(prev);
+      for (const ds of datasets) {
+        for (const tab of TAB_DATASETS[ds] ?? []) next.delete(tab);
+      }
+      // Every backend mutation writes an audit log, so the trail is always stale.
+      next.delete('audit');
+      return next;
+    });
+    // The roster is cached separately (reloadStudentsLite reuses whatever is in
+    // memory), so evicting tabs is not enough — mark it stale too.
+    if (datasets.includes('students')) setRosterStale(true);
+  }, [TAB_DATASETS, setRosterStale]);
   const loadingTabsRef = useRef<Set<string>>(new Set());
 
   // Keep the working branch in sync with the authenticated user's branch by
@@ -160,8 +215,8 @@ export function useApiStore() {
 
   const reloadStudents = useCallback(
     () => api.get<Student[]>('/students', { ...bq, limit: '2000' })
-      .then((rows) => { setStudents(rows); setStudentsAreLite(false); }),
-    [bq],
+      .then((rows) => { setStudents(rows); setStudentsAreLite(false); setRosterStale(false); }),
+    [bq, setRosterStale],
   );
 
   /**
@@ -184,11 +239,14 @@ export function useApiStore() {
       alreadyPopulated = current.length > 0;
       return current;
     });
-    if (alreadyPopulated) return Promise.resolve();
+    // Reuse an in-memory roster ONLY while it is still trusted. Previously this
+    // skipped whenever anything was loaded, so a student registered on another
+    // tab never appeared in pickers until a page refresh.
+    if (alreadyPopulated && !rosterStaleRef.current) return Promise.resolve();
     return api
       .get<Student[]>('/students', { ...bq, limit: '2000', view: 'lite' })
-      .then((rows) => { setStudents(rows); setStudentsAreLite(true); });
-  }, [bq]);
+      .then((rows) => { setStudents(rows); setStudentsAreLite(true); setRosterStale(false); });
+  }, [bq, setRosterStale]);
   /**
    * Guarantees a FULL roster is in memory. Screens that read semesters,
    * discounts or contact details must call this rather than assuming the
@@ -302,6 +360,7 @@ export function useApiStore() {
   }) => {
     await api.post('/campuses', payload);
     await reloadCampuses();
+    invalidate('organization');
   };
 
   const updateCampus = async (campusId: string, payload: Partial<{
@@ -310,16 +369,19 @@ export function useApiStore() {
   }>) => {
     await api.put(`/campuses/${campusId}`, payload);
     await reloadCampuses();
+    invalidate('organization');
   };
 
   const deactivateCampus = async (campusId: string) => {
     await api.delete(`/campuses/${campusId}`);
     await Promise.all([reloadCampuses(), reloadBranches(), reloadOrganization()]);
+    invalidate('organization');
   };
 
   const deleteCampus = async (campusId: string) => {
     await api.delete(`/campuses/${campusId}?permanent=true`);
     await Promise.all([reloadCampuses(), reloadBranches(), reloadOrganization()]);
+    invalidate('organization');
   };
 
   const createBranch = async (payload: {
@@ -328,6 +390,7 @@ export function useApiStore() {
   }) => {
     await api.post('/branches', payload);
     await reloadBranches();
+    invalidate('organization');
   };
 
   const updateBranch = async (branchId: string, payload: Partial<{
@@ -336,16 +399,19 @@ export function useApiStore() {
   }>) => {
     await api.put(`/branches/${branchId}`, payload);
     await reloadBranches();
+    invalidate('organization');
   };
 
   const deactivateBranch = async (branchId: string) => {
     await api.delete(`/branches/${branchId}`);
     await reloadBranches();
+    invalidate('organization');
   };
 
   const deleteBranch = async (branchId: string) => {
     await api.delete(`/branches/${branchId}?permanent=true`);
     await Promise.all([reloadBranches(), reloadCampuses(), reloadOrganization()]);
+    invalidate('organization');
   };
   
   const reloadSkills = useCallback(() => api.get<Skill[]>('/skills').then(setSkills), []);
@@ -584,6 +650,7 @@ export function useApiStore() {
       emergencyContactName, emergencyContactPhone, branchId, programVersionId,
     });
     await reloadVisitors();
+    invalidate('visitors');
     return created;
   };
 
@@ -592,21 +659,25 @@ export function useApiStore() {
     nextContactDate: string, notes?: string) => {
     await api.patch(`/visitors/${visitorId}/crm`, { interestedCourse, followUpStatus, nextContactDate, notes });
     await reloadVisitors();
+    invalidate('visitors');
   };
 
   const addVisitorFollowUp = async (visitorId: string, notes: string, outcome?: string) => {
     await api.post(`/visitors/${visitorId}/followups`, { notes, outcome: outcome || null });
     await reloadVisitors();
+    invalidate('visitors');
   };
 
   const updateVisitor = async (visitorId: string, updatedFields: Partial<Visitor>) => {
     await api.patch(`/visitors/${visitorId}`, updatedFields);
     await reloadVisitors();
+    invalidate('visitors');
   };
 
   const advanceVisitorStage = async (visitorId: string, stage?: PipelineStage) => {
     await api.post(`/visitors/${visitorId}/advance-stage`, stage ? { stage } : {});
     await reloadVisitors();
+    invalidate('visitors');
   };
 
   const registerVisitorToStudent = async (
@@ -615,6 +686,7 @@ export function useApiStore() {
   ) => {
     const result = await api.post<{ studentId: string; studentCode: string; receiptNumber: string; invoiceId: string; invoiceNumber: string; netAmount: number; status: string }>(`/visitors/${visitorId}/convert`, { classId, amountPaid, discountPercent, notes, semesterFee, branchId, paymentMethod });
     await Promise.all([reloadVisitors(), reloadStudents(), reloadPayments(), reloadTransactions(), reloadFinanceOverview(), reloadNotifications(), reloadInvoices()]);
+    invalidate('finance', 'payments', 'students', 'visitors');
     return result;
   };
 
@@ -630,6 +702,7 @@ export function useApiStore() {
       tazkiraNo, whatsapp, dob, schoolOrUniversity, emergencyContactName, emergencyContactPhone, amountPaidNow, branchId,
     });
     await Promise.all([reloadStudents(), reloadPayments(), reloadTransactions(), reloadFinanceOverview()]);
+    invalidate('finance', 'payments', 'students');
   };
 
   const updateStudentStatus = async (studentId: string, status: 'active' | 'inactive' | 'graduated' | 'suspended') => {
@@ -644,11 +717,13 @@ export function useApiStore() {
       }
     }
     await reloadStudents();
+    invalidate('students');
   };
 
   const updateStudent = async (studentId: string, updatedFields: Partial<Student>) => {
     await api.patch(`/students/${studentId}`, updatedFields);
     await reloadStudents();
+    invalidate('students');
   };
 
   const recordFeePayment = async (studentId: string, amount: number,
@@ -659,23 +734,27 @@ export function useApiStore() {
     await api.post(`/students/${studentId}/payments`, { amount, category, notes },
       undefined, { 'Idempotency-Key': crypto.randomUUID() });
     await Promise.all([reloadPayments(), reloadTransactions(), reloadFinanceOverview(), reloadNotifications()]);
+    invalidate('finance', 'payments');
   };
 
   const enrollStudentSemester = async (studentId: string, semesterName: string, classId: string,
     tuitionAmount: number, amountPaidNow?: number, notes?: string) => {
     await api.post(`/students/${studentId}/enroll-semester`, { semesterName, classId, tuitionAmount, amountPaidNow, notes });
     await Promise.all([reloadStudents(), reloadPayments(), reloadTransactions(), reloadFinanceOverview(), reloadNotifications()]);
+    invalidate('finance', 'payments', 'students');
   };
 
   const issueStudentCard = async (studentId: string, cardDesign: { primaryColor: string; bgStyle: string; photo?: string | null; officePhone?: string; whatsapp?: string; socials?: { facebook?: string; instagram?: string; website?: string } }, notes?: string) => {
     const result = await api.post<{ feeCharged: number }>(`/students/${studentId}/issue-card`, { cardDesign, notes });
     await Promise.all([reloadStudents(), reloadPayments(), reloadTransactions(), reloadFinanceOverview(), reloadNotifications()]);
+    invalidate('finance', 'payments', 'students');
     return result;
   };
 
   const chargeBudget = async (budgetLineId: string, amount: number) => {
     await api.post(`/finance/budget-lines/${budgetLineId}/charge`, { amount });
     await Promise.all([reloadBudgetLines(), reloadTransactions(), reloadFinanceOverview(), reloadNotifications()]);
+    invalidate('finance');
   };
 
   const createExpenseRequest = async (
@@ -686,6 +765,7 @@ export function useApiStore() {
   ) => {
     await api.post('/finance/expense-requests', { title, amount, budgetLineId, ...meta });
     await Promise.all([reloadExpenseRequests(), reloadNotifications()]);
+    invalidate('finance');
   };
 
   const recordOperationalPayment = async (input: OperationalPaymentInput) => {
@@ -700,6 +780,7 @@ export function useApiStore() {
       reloadFinanceOverview(),
       reloadNotifications(),
     ]);
+    invalidate('finance');
     return result;
   };
 
@@ -710,26 +791,31 @@ export function useApiStore() {
   const updateExpenseAutoApproveThreshold = async (threshold: number) => {
     await api.put('/finance/expense-auto-approve-threshold', { threshold });
     setExpenseAutoApproveThreshold(threshold);
+    invalidate('finance', 'settings');
   };
 
   const processExpenseApproval = async (requestId: string, isApproved: boolean, rejectReason?: string) => {
     await api.post(`/finance/expense-requests/${requestId}/decide`, { isApproved, rejectReason });
     await Promise.all([reloadExpenseRequests(), reloadBudgetLines(), reloadTransactions(), reloadNotifications()]);
+    invalidate('finance');
   };
 
   const runSavingEngine = async () => {
     await api.post('/finance/saving-engine/run');
     await Promise.all([reloadFinanceOverview(), reloadTransactions(), reloadNotifications()]);
+    invalidate('finance');
   };
 
   const updateSavingSettings = async (percent: number) => {
     await api.put('/finance/saving-engine/settings', { percent });
     await reloadFinanceOverview();
+    invalidate('finance');
   };
 
   const processMonthEnd = async (budgetLineId: string, decision: 'return' | 'transfer', targetBudgetLineId?: string) => {
     await api.post(`/finance/budget-lines/${budgetLineId}/month-end`, { decision, targetBudgetLineId });
     await Promise.all([reloadBudgetLines(), reloadTransactions(), reloadFinanceOverview(), reloadNotifications()]);
+    invalidate('finance');
   };
 
   const addBook = async (title: string, price: number, stock: number, isChapter: boolean, entryDate?: string, purchasePrice?: number) => {
@@ -738,58 +824,69 @@ export function useApiStore() {
     // caller may access that branch).
     await api.post('/books', { title, price, stock, isChapter, entryDate, purchasePrice, branchId: currentBranchId });
     await reloadBooks();
+    invalidate('books');
   };
 
   const editBook = async (id: string, title: string, price: number, stock: number, isChapter: boolean, purchasePrice?: number) => {
     await api.put(`/books/${id}`, { title, price, stock, isChapter, purchasePrice });
     await reloadBooks();
+    invalidate('books');
   };
 
   const deleteBook = async (id: string) => {
     await api.delete(`/books/${id}`);
     await reloadBooks();
+    invalidate('books');
   };
 
   const recordBookSale = async (bookId: string, quantity: number, customerName: string, studentId?: string,
     discountAmount: number = 0, paymentMethod: 'cash' | 'card' | 'transfer' = 'cash') => {
     await api.post(`/books/${bookId}/sell`, { quantity, customerName, studentId, discountAmount, paymentMethod });
     await Promise.all([reloadBooks(), reloadBookSales(), reloadFinanceOverview(), reloadTransactions(), reloadNotifications()]);
+    invalidate('books', 'finance');
   };
 
   const refundBookSale = async (saleId: string) => {
     await api.post(`/books/sales/${saleId}/refund`);
     await Promise.all([reloadBooks(), reloadBookSales(), reloadFinanceOverview(), reloadTransactions(), reloadNotifications()]);
+    invalidate('books', 'finance');
   };
 
   // ================= Exams (Two-Phase Workflow) =================
   const registerExam = async (title: string, date: string, fee: number) => {
     await api.post('/exams', { title, date, fee });
     await reloadExams();
+    invalidate('exams');
   };
 
   const editExam = async (examId: string, payload: { title: string; date: string; fee: number }) => {
     await api.put(`/exams/${examId}`, payload);
     await reloadExams();
+    invalidate('exams');
   };
 
   const deleteExam = async (examId: string) => {
     await api.delete(`/exams/${examId}`);
     await Promise.all([reloadExams(), reloadExamResults()]);
+    invalidate('exams');
   };
 
   const enrollExamCandidate = async (payload: { examId: string; studentId?: string; visitorId?: string; feePaid: boolean }) => {
     await api.post(`/exams/${payload.examId}/enroll`, payload);
     await Promise.all([reloadExamResults(), reloadTransactions(), reloadFinanceOverview(), reloadNotifications()]);
+    invalidate('exams', 'finance');
   };
 
   const addExamResult = async (payload: { examId: string; resultId: string; score: number; certIssued: boolean }) => {
     await api.patch(`/exams/${payload.examId}/results/${payload.resultId}`, { score: payload.score, certIssued: payload.certIssued });
     await Promise.all([reloadExamResults(), reloadFinanceOverview(), reloadTransactions()]);
+    invalidate('exams', 'finance');
   };
 
   const correctExamScore = async (payload: { examId: string; resultId: string; score: number }) => {
     await api.put(`/exams/${payload.examId}/results/${payload.resultId}/correct`, { score: payload.score });
     await Promise.all([reloadExamResults(), reloadFinanceOverview()]);
+    invalidate('exams', 'finance');
   };
 
   const addTeacher = async (fullName: string, phone: string, email: string, baseSalary: number,
@@ -799,6 +896,7 @@ export function useApiStore() {
       branchId: branchId || currentBranchId,
     });
     await reloadTeachers();
+    invalidate('teachers');
   };
 
   const transferTeacher = async (teacherId: string, targetBranchId: string) => {
@@ -807,6 +905,7 @@ export function useApiStore() {
       { targetBranchId }
     );
     await reloadTeachers();
+    invalidate('teachers');
     return result;
   };
 
@@ -815,11 +914,13 @@ export function useApiStore() {
     contractType?: 'monthly' | 'hourly' | 'per_session', status?: 'active' | 'inactive' | 'on_leave') => {
     await api.put(`/teachers/${id}`, { fullName, phone, email, baseSalary, salaryType, specialization, qualification, contractType, status });
     await reloadTeachers();
+    invalidate('teachers');
   };
 
   const deleteTeacher = async (id: string) => {
     await api.delete(`/teachers/${id}`);
     await reloadTeachers();
+    invalidate('teachers');
   };
 
   const getTeacherComputedSalary = async (teacherId: string) => {
@@ -833,32 +934,38 @@ export function useApiStore() {
   const payTeacherSalary = async (teacherId: string, monthName: string, amountPaid: number, paymentType: 'full' | 'partial' | 'advance') => {
     await api.post(`/teachers/${teacherId}/pay-salary`, { monthName, amountPaid, paymentType });
     await Promise.all([reloadBudgetLines(), reloadTransactions(), reloadNotifications()]);
+    invalidate('finance');
   };
 
   const addEmployee = async (fullName: string, phone: string, email: string, role: string, baseSalary: number, branchId?: string) => {
     await api.post('/employees', { fullName, phone, email, role, baseSalary, branchId: branchId || currentBranchId });
     await reloadEmployees();
+    invalidate('teachers');
   };
 
   const editEmployee = async (id: string, fullName: string, phone: string, email: string, role: string, baseSalary: number, status: 'active' | 'inactive') => {
     await api.put(`/employees/${id}`, { fullName, phone, email, role, baseSalary, status });
     await reloadEmployees();
+    invalidate('teachers');
   };
 
   const deleteEmployee = async (id: string) => {
     await api.delete(`/employees/${id}`);
     await reloadEmployees();
+    invalidate('teachers');
   };
 
   const transferEmployee = async (employeeId: string, targetBranchId: string) => {
     const result = await api.post<{ ok: boolean }>(`/employees/${employeeId}/transfer`, { targetBranchId });
     await reloadEmployees();
+    invalidate('teachers');
     return result;
   };
 
   const payEmployeeSalary = async (employeeId: string, monthName: string, amountPaid: number, paymentType: 'full' | 'partial' | 'advance') => {
     await api.post(`/employees/${employeeId}/pay-salary`, { monthName, amountPaid, paymentType });
     await Promise.all([reloadBudgetLines(), reloadTransactions(), reloadNotifications()]);
+    invalidate('finance');
   };
 
   // ================= Class Management & LMS =================
@@ -877,6 +984,7 @@ export function useApiStore() {
       activationDate: extras?.activationDate, minViableSize: extras?.minViableSize, branchId: extras?.branchId,
     });
     await reloadClasses();
+    invalidate('classes');
   };
 
   const editClass = async (
@@ -889,16 +997,19 @@ export function useApiStore() {
       genderPolicy: genderPolicy || 'mixed',
     });
     await reloadClasses();
+    invalidate('classes');
   };
 
   const deleteClass = async (id: string) => {
     await api.delete(`/classes/${id}`);
     await reloadClasses();
+    invalidate('classes');
   };
 
   const mergeClass = async (sourceId: string, targetClassId: string) => {
     const result = await api.post<{ ok: boolean; movedStudents: number }>(`/classes/${sourceId}/merge`, { targetClassId });
     await reloadClasses();
+    invalidate('classes');
     return result;
   };
 
@@ -912,12 +1023,14 @@ export function useApiStore() {
     records: { targetId: string; targetType: 'student' | 'teacher'; status: 'present' | 'absent' | 'sick' | 'leave'; classId?: string }[]) => {
     await api.post('/attendance', { date, records });
     await reloadAttendance();
+    invalidate('attendance');
   };
 
   // --- NEW: Class LMS & Gradebook Operations ---
   const activateClass = async (classId: string) => {
     await api.post(`/classes/${classId}/activate`);
     await reloadClasses();
+    invalidate('classes');
   };
 
   const getClassGradebook = async (classId: string) => {
@@ -930,57 +1043,67 @@ export function useApiStore() {
 
   const createClassAssessment = async (classId: string, payload: { title: string; type: string; weight: number; maxScore: number; date?: string }) => {
     await api.post(`/classes/${classId}/assessments`, payload);
+    invalidate('academic', 'classes');
   };
 
   const saveClassGrades = async (classId: string, grades: Array<{ assessmentId: string; studentId: string; score: number; status: string }>) => {
     await api.put(`/classes/${classId}/grades`, { grades });
+    invalidate('academic', 'classes');
   };
 
   const completeClassSemester = async (classId: string) => {
     await api.post(`/classes/${classId}/complete-semester`);
     await Promise.all([reloadClasses(), reloadStudents()]); // Reload students as their status might change
+    invalidate('classes', 'students');
   };
 
   // ================= Admin & Settings =================
   const addPartner = async (fullName: string, phone: string, email: string, sharePercent: number, roleDescription: string) => {
     await api.post('/partners', { fullName, phone, email, sharePercent, roleDescription });
     await reloadPartners();
+    invalidate('settings');
   };
 
   const editPartner = async (id: string, fullName: string, phone: string, email: string, sharePercent: number, roleDescription: string) => {
     await api.put(`/partners/${id}`, { fullName, phone, email, sharePercent, roleDescription });
     await reloadPartners();
+    invalidate('settings');
   };
 
   const deletePartner = async (id: string) => {
     await api.delete(`/partners/${id}`);
     await reloadPartners();
+    invalidate('settings');
   };
 
   const addSkill = async (name: string) => {
     await api.post('/skills', { name });
     await reloadSkills();
+    invalidate('skills');
   };
 
   const assignTeacherSkill = async (classId: string, teacherId: string, skillId: string, monthlyRate: number) => {
     await api.post('/class-teacher-skills', { classId, teacherId, skillId, monthlyRate });
     await Promise.all([reloadClassTeacherSkills(), reloadTeachers()]);
+    invalidate('skills', 'teachers');
   };
 
   const editTeacherSkillRate = async (assignmentId: string, monthlyRate: number) => {
     await api.put(`/class-teacher-skills/${assignmentId}`, { monthlyRate });
     await reloadClassTeacherSkills();
+    invalidate('skills');
   };
 
   const removeTeacherSkill = async (assignmentId: string) => {
     await api.delete(`/class-teacher-skills/${assignmentId}`);
     await reloadClassTeacherSkills();
+    invalidate('skills');
   };
 
 
   const listUserAccounts = async () => api.get<any[]>('/users');
-  const createUserAccount = async (params: any) => { await api.post('/users', params); };
-  const updateUserAccount = async (userId: string, updates: any) => { await api.patch(`/users/${userId}`, updates); };
+  const createUserAccount = async (params: any) => { await api.post('/users', params); invalidate('settings'); };
+  const updateUserAccount = async (userId: string, updates: any) => { await api.patch(`/users/${userId}`, updates); invalidate('settings'); };
   const resetUserPassword = async (userId: string, tempPassword: string) => {
     await api.post(`/users/${userId}/reset-password`, { tempPassword });
   };
@@ -988,20 +1111,27 @@ export function useApiStore() {
   // ── Positions & access (owner-only, data-driven position lifecycle) ──
   const listPositions = async () => api.get<any[]>('/security/roles');
   const listPermissionCatalog = async () => api.get<any[]>('/security/permissions');
-  const createPosition = async (params: { name: string; description?: string; permissions?: { permissionId: string; scope?: string }[] }) =>
-    api.post<any>('/security/roles', params);
+  const createPosition = async (params: { name: string; description?: string; permissions?: { permissionId: string; scope?: string }[] }) => {
+    const created = await api.post<any>('/security/roles', params);
+    invalidate('settings');
+    return created;
+  };
   const updatePosition = async (roleId: string, updates: { name?: string; description?: string; isActive?: boolean }): Promise<void> => {
     await api.patch(`/security/roles/${roleId}`, updates);
+    invalidate('settings');
   };
   const updatePositionPermissions = async (roleId: string, permissions: { permissionId: string; scope?: string }[]): Promise<void> => {
     await api.put(`/security/roles/${roleId}/permissions`, { permissions });
+    invalidate('settings');
   };
   const listUserPositions = async (userId: string) => api.get<any[]>(`/security/users/${userId}/roles`);
   const assignUserPosition = async (userId: string, params: { roleId: string; scopeType?: string; scopeId?: string | null }): Promise<void> => {
     await api.post(`/security/users/${userId}/roles`, params);
+    invalidate('settings');
   };
   const removeUserPosition = async (userId: string, assignmentId: string): Promise<void> => {
     await api.delete(`/security/users/${userId}/roles/${assignmentId}`);
+    invalidate('settings');
   };
   const viewEffectivePermissions = async (userId: string) => api.get<any[]>(`/security/users/${userId}/effective-permissions`);
 
@@ -1015,47 +1145,56 @@ export function useApiStore() {
   const withdrawProfitDistribution = async (amount: number, recipientPartnerId?: string, notes?: string) => {
     await api.post('/bos/profit-distribution/withdraw', { amount, recipientPartnerId, notes });
     await Promise.all([reloadFinanceOverview(), reloadTransactions(), reloadRevenueByClass(), reloadRevenueByTimeSlot()]);
+    invalidate('finance');
   };
 
   const classifyBudgetLine = async (budgetLineId: string, costType?: 'fixed' | 'variable', isMarketing?: boolean) => {
     await api.put(`/finance/budget-lines/${budgetLineId}/classify`, { costType, isMarketing });
     await reloadBudgetLines();
+    invalidate('finance');
   };
 
   // ================= 1.0.0 NEW operations =================
   const addDonor = async (data: Partial<Donor>) => {
     await api.post('/funding/donors', data);
     await reloadDonors();
+    invalidate('funding');
   };
 
   const editDonor = async (id: string, data: Partial<Donor>) => {
     await api.put(`/funding/donors/${id}`, data);
     await reloadDonors();
+    invalidate('funding');
   };
 
   const addFundingCampaign = async (data: Partial<FundingCampaign>) => {
     await api.post('/funding/campaigns', data);
     await reloadFundingCampaigns();
+    invalidate('funding');
   };
 
   const recordDonation = async (data: Partial<Donation>) => {
     await api.post('/funding/donations', data);
     await Promise.all([reloadDonations(), reloadFundingCampaigns(), reloadTransactions(), reloadFinanceOverview()]);
+    invalidate('finance', 'funding');
   };
 
   const addScholarship = async (data: Partial<Scholarship>) => {
     await api.post('/funding/scholarships', data);
     await reloadScholarships();
+    invalidate('funding');
   };
 
   const awardScholarship = async (data: Partial<ScholarshipAward>) => {
     await api.post('/funding/scholarships/award', data);
     await Promise.all([reloadScholarships(), reloadScholarshipAwards(), reloadStudents()]);
+    invalidate('funding', 'students');
   };
 
   const addSponsorship = async (data: Partial<SponsorshipAgreement>) => {
     await api.post('/funding/sponsorships', data);
     await reloadSponsorships();
+    invalidate('funding');
   };
 
   const generateImpactReport = async (period: string, donorId?: string) => {
@@ -1067,16 +1206,19 @@ export function useApiStore() {
   const approveWorkflowStep = async (instanceId: string, notes?: string) => {
     await api.post(`/workflows/instances/${instanceId}/approve`, { notes });
     await reloadWorkflows();
+    invalidate('workflows');
   };
 
   const rejectWorkflowStep = async (instanceId: string, reason: string) => {
     await api.post(`/workflows/instances/${instanceId}/reject`, { reason });
     await reloadWorkflows();
+    invalidate('workflows');
   };
 
   const triggerWorkflow = async (definitionId: string, entityType: string, entityId: string) => {
     await api.post('/workflows/trigger', { definitionId, entityType, entityId });
     await reloadWorkflows();
+    invalidate('workflows');
   };
 
   const getWorkflowInstanceDetail = async (instanceId: string) => {
@@ -1091,28 +1233,33 @@ export function useApiStore() {
   const createBusinessRule = async (data: Partial<BusinessRule>) => {
     const rule = await api.post<BusinessRule>('/rules', data);
     await reloadBusinessRules(rule.category);
+    invalidate('workflows');
     return rule;
   };
 
   const updateBusinessRule = async (ruleId: string, category: RuleCategory, data: Partial<BusinessRule>) => {
     const rule = await api.patch<BusinessRule>(`/rules/${ruleId}`, data);
     await reloadBusinessRules(category);
+    invalidate('workflows');
     return rule;
   };
 
   const deactivateBusinessRule = async (ruleId: string, category: RuleCategory) => {
     await api.patch(`/rules/${ruleId}/deactivate`);
     await reloadBusinessRules(category);
+    invalidate('workflows');
   };
 
   const deleteBusinessRule = async (ruleId: string, category: RuleCategory) => {
     await api.delete(`/rules/${ruleId}`);
     await reloadBusinessRules(category);
+    invalidate('workflows');
   };
 
   const rollbackBusinessRule = async (ruleId: string, category: RuleCategory, version: number) => {
     const rule = await api.post<BusinessRule>(`/rules/${ruleId}/rollback`, { version });
     await reloadBusinessRules(category);
+    invalidate('workflows');
     return rule;
   };
 
@@ -1127,11 +1274,13 @@ export function useApiStore() {
   const createAutomation = async (data: Partial<Automation>) => {
     await api.post('/automations', data);
     await reloadAutomations();
+    invalidate('workflows');
   };
 
   const toggleAutomation = async (id: string, isActive: boolean) => {
     await api.patch(`/automations/${id}`, { isActive });
     await reloadAutomations();
+    invalidate('workflows');
   };
 
   const createInvoice = async (payload: {
@@ -1143,12 +1292,14 @@ export function useApiStore() {
   }) => {
     const inv = await api.post<Invoice>('/invoices', payload);
     await reloadInvoices();
+    invalidate('finance');
     return inv;
   };
 
   const issueInvoice = async (invoiceId: string) => {
     const inv = await api.post<Invoice>(`/invoices/${invoiceId}/issue`, {});
     await reloadInvoices();
+    invalidate('finance');
     return inv;
   };
 
@@ -1162,17 +1313,20 @@ export function useApiStore() {
       { 'Idempotency-Key': crypto.randomUUID() }
     );
     await Promise.all([reloadInvoices(), reloadPayments(), reloadTransactions(), reloadFinanceOverview(), reloadFinanceConfig()]);
+    invalidate('finance', 'payments');
     return result;
   };
 
   const cancelInvoice = async (invoiceId: string) => {
     await api.post(`/invoices/${invoiceId}/cancel`, {});
     await reloadInvoices();
+    invalidate('finance');
   };
 
   const updateFinanceConfig = async (patch: Partial<FinanceConfig>) => {
     await api.put('/invoices/config/settings', patch);
     await Promise.all([reloadFinanceConfig(), reloadFinanceOverview()]);
+    invalidate('finance');
   };
 
 
