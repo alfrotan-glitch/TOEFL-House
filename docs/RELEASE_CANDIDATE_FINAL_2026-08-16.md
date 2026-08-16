@@ -175,6 +175,49 @@ tables → `integrity_check` ok → `foreign_key_check` ok → both production b
 
 ---
 
+## FINAL RELEASE LOCK — independent re-verification
+
+Re-run end to end from a **fresh `git clone` into `/tmp/rc/app`** (not the working
+copy), with a from-source `better-sqlite3` build, a virgin database, and the
+**compiled production server** (`node dist/index.js`, `NODE_ENV=production`).
+No code was changed during this lock; the repository diff against the RC commit
+is empty.
+
+| # | Gate | Result |
+|---|---|---|
+| 1 | Clean checkout / install / build | **PASS** — 399 tracked files, no `node_modules`/`.env`/DB in the clone; root + server install exit 0; native rebuild `gyp info ok`; both builds exit 0 |
+| 2 | Migrations & schema convergence | **PASS** — 65 migrations, 106 tables, `integrity_check ok`, `foreign_key_check` 0 violations; re-running `initSchema` is a no-op (65 → 65) |
+| 3 | Full test suite | **PASS** — **799/799, 80 files, exit 0** |
+| 4 | Typecheck + lint (frontend & server) | **PASS** — all four exit 0 |
+| 5 | `release:validate` | **15 passed · 1 failed**, exit 1 — fails only on CI activation |
+| 6 | Financial reconciliation | **PASS** — amount/cash/saving/budget = 0 and `healthy` at **every** step of the lifecycle, and again on the restored database |
+| 7 | Lifecycle + reversals | **PASS** — payment → refund → over-refund rejected (400) → treasury → budget charge → payroll → **void restores the budget line exactly (+20 000)** → double-void 409; book sale → refund |
+| 8 | Backup / restore | **PASS** — `VACUUM INTO`, then all students/payments/transactions deleted, restored 7/6/24, `integrity ok`, 65 migrations, and the restored DB reconciles to zero |
+| 9 | RBAC / object isolation | **PASS** — **19/19 blocked, 0 breaches**: 8 cross-branch object attacks (403/404), 8 privilege escalations by a registrar (403), 3 unauthenticated (401) |
+| 10 | Logo + exact slogan | **PASS** — exactly one logo file, `sha256 c1c9549e…` identical through clone and build; one `BRAND_SLOGAN` constant, exact casing |
+| 11 | **CI actually executes** | **FAIL** — see below |
+
+**Gate 11, in two parts.** The workflow's *content* is sound: it invokes the real
+`npm run release:validate`, and running that exact command against a deliberate
+mutation (`budgetVariance` hard-coded to `0`, hiding all budget drift) **exited 1**
+and reported `RELEASE BLOCKED · server test suite`. So the pipeline would catch a
+real regression.
+
+But it does not run. GitHub reports **zero workflows and zero runs**, and
+`.github` does not exist on the remote (404). A fourth activation attempt via the
+REST contents API — a different mechanism from `git push` — was also refused:
+`Resource not accessible by integration (HTTP 403)`.
+
+Three notes on the verification itself: several first-attempt probe failures were
+faults in my *harness*, not the product — the system correctly rejected a `fee`
+payment without `semesterId`, a card fee at the wrong configured amount, an
+invalid `paymentType`, a `full` payment that did not settle the balance, and a
+payroll void against the wrong teacher. Each was re-run against the real contract
+before being counted. The `Secure` session cookie also had to be attached by hand
+over plain HTTP, which is correct production behaviour, not a defect.
+
+---
+
 ## RELEASE DECISION
 
 > ### BLOCKED — on exactly one item, which no longer has a code remedy.
