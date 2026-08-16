@@ -184,11 +184,20 @@ function getStmts(db: Database.Database) {
     getTargetSkills: db.prepare(
       `SELECT COALESCE(target_skills_per_month, 0) AS t FROM teachers WHERE id = ?`
     ),
+    // VOIDED rows must not count as paid.
+    //
+    // Both of these ignored `status`, so a voided salary payment still
+    // occupied the period: after voiding a wrong 10,000 AFN payment the clerk
+    // got "Nothing remains payable" and the teacher could NEVER be paid for
+    // that month again. Voiding is advertised as a correction mechanism, so it
+    // has to actually release the period it reverses.
     sumPaidForPeriod: db.prepare(
-      `SELECT COALESCE(SUM(paid_amount), 0) as s FROM teacher_salary_ledger WHERE teacher_id = ? AND period_key = ?`
+      `SELECT COALESCE(SUM(paid_amount), 0) as s FROM teacher_salary_ledger
+        WHERE teacher_id = ? AND period_key = ? AND status = 'posted'`
     ),
     checkFullPay: db.prepare(
-      `SELECT id FROM teacher_salary_ledger WHERE teacher_id = ? AND period_key = ? AND payment_type = 'full' LIMIT 1`
+      `SELECT id FROM teacher_salary_ledger
+        WHERE teacher_id = ? AND period_key = ? AND payment_type = 'full' AND status = 'posted' LIMIT 1`
     )
   };
   

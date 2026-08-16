@@ -21,6 +21,7 @@ import {
   CONTRACT_TYPES,
 } from '../core/payroll/class-payroll.js';
 import { jalaliPeriodLabel } from '../utils/jalali.js';
+import { resolveIdempotency, isUniqueViolation } from '../utils/idempotency.js';
 
 export const teachersRouter = Router();
 teachersRouter.use(authenticate);
@@ -65,7 +66,6 @@ const stmtCountActiveClassesForTeacher = db.prepare(`SELECT COUNT(DISTINCT class
 const stmtCountSkillsForTeacher = db.prepare("SELECT COUNT(*) as c FROM class_teacher_skills WHERE teacher_id = ?");
 const stmtGetActiveTeacherClasses = db.prepare("SELECT id, name, branch_id, status FROM classes WHERE teacher_id = ? AND status = 'active' ORDER BY name");
 const stmtGetActiveTeacherAssignments = db.prepare(`SELECT cts.id, cts.class_id, cts.skill_id, cts.assignment_type, cts.session_id, cts.start_date, cts.end_date, c.name AS class_name FROM class_teacher_skills cts JOIN classes c ON c.id = cts.class_id WHERE cts.teacher_id = ? AND cts.assignment_type IN ('primary','assistant') AND (cts.end_date IS NULL OR cts.end_date >= date('now'))`);
-const stmtGetTeacherSalaryLedger = db.prepare("SELECT COALESCE(SUM(paid_amount),0) AS paid FROM teacher_salary_ledger WHERE teacher_id = ? AND period_key = ?");
 
 const stmtInsertTeacher = db.prepare(
   `INSERT INTO teachers (id, full_name, phone, email, base_salary, salary_type, performance_score, status, branch_id, joined_date, specialization, qualification, contract_type, default_skill_rate, target_skills_per_month) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)`
@@ -408,13 +408,32 @@ teachersRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(asy
   const numericAmount = amountPaid == null ? undefined : Number(amountPaid);
   if (numericAmount != null && (!Number.isFinite(numericAmount) || numericAmount <= 0)) throw new HttpError(400, 'Payment amount must be greater than zero.');
 
-  const idempotencyKey = typeof req.get('Idempotency-Key') === 'string' ? req.get('Idempotency-Key')!.trim() : '';
+  // Idempotency is ALWAYS applied, never only when the caller remembers a key.
+  //
+  // Payroll previously honoured an explicit Idempotency-Key and did nothing at
+  // all without one: six concurrent identical un-keyed 1,000 AFN partials
+  // created SIX ledger rows and six expense entries. This is the same defect
+  // class already fixed for student payments — a double-click, a refresh or a
+  // retry double-pays a teacher, bounded only by the period's due amount.
+  //
+  // When no key is supplied a fingerprint of the business intent is derived,
+  // so retries of the same intent collapse while a genuinely later, distinct
+  // payment (a different amount, or a different time bucket) still goes
+  // through. The DB unique index on idempotency_key is the race arbiter.
+  const { key: idempotencyKey } = resolveIdempotency(req, {
+    route: 'teacher-pay-salary',
+    teacherId: teacher.id,
+    periodKey,
+    amount: numericAmount ?? null,
+    type,
+    actorUserId: user.userId,
+  });
   const result = (() => {
     db.exec('BEGIN IMMEDIATE');
     try {
       const freshTeacher = stmtGetTeacherById.get(teacher.id) as TeacherRow;
       if (!freshTeacher || freshTeacher.status === 'inactive') throw new HttpError(400, 'Teacher is not eligible for salary payment.');
-      if (idempotencyKey) {
+      {
         const existing = stmtGetTeacherSalaryByIdempotency.get(idempotencyKey) as any;
         if (existing) {
           if (existing.teacher_id !== freshTeacher.id || existing.period_key !== periodKey) throw new HttpError(409, 'Idempotency key was already used for a different payroll operation.');
@@ -452,12 +471,27 @@ teachersRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(asy
       // whether the caller sent '1405-05', 'Asad 1405' or a legacy '2026-08'.
       const periodLabel = jalaliPeriodLabel(periodKey);
       stmtInsertFinTx.run(txId, resolvedAmount, date, `Paid ${finalPaymentType} salary for ${periodLabel} to teacher ${freshTeacher.full_name}`, freshTeacher.id, user.fullName, payrollBranchId);
-      stmtInsertSalaryLedgerWithIdempotency.run(ledgerId, freshTeacher.id, periodKey, periodLabel, adjustedDue, resolvedAmount, finalPaymentType, txId, JSON.stringify(dueInfo.breakdown), payrollBranchId, user.fullName, idempotencyKey || null);
+      stmtInsertSalaryLedgerWithIdempotency.run(ledgerId, freshTeacher.id, periodKey, periodLabel, adjustedDue, resolvedAmount, finalPaymentType, txId, JSON.stringify(dueInfo.breakdown), payrollBranchId, user.fullName, idempotencyKey);
 
       db.exec('COMMIT');
       return { amountPaid: resolvedAmount, due: adjustedDue, previouslyPaid: alreadyPaid, remainingAfter: Math.max(0, remaining - resolvedAmount), periodKey, teacher: freshTeacher };
     } catch (err) {
       try { db.exec('ROLLBACK'); } catch { /* rollback may already be complete */ }
+      // Atomic backstop. The replay pre-check above is a fast path; under true
+      // concurrency several requests pass it simultaneously and only one can
+      // win uq_teacher_salary_idempotency. The losers replay the winner's
+      // result rather than surfacing a 500 or paying the teacher twice.
+      if (isUniqueViolation(err)) {
+        const winner = stmtGetTeacherSalaryByIdempotency.get(idempotencyKey) as any;
+        if (winner && winner.teacher_id === teacher.id) {
+          return {
+            amountPaid: Number(winner.paid_amount), due: Number(winner.due_amount),
+            previouslyPaid: Math.max(0, Number(winner.due_amount) - Number(winner.paid_amount)),
+            remainingAfter: Math.max(0, Number(winner.due_amount) - Number(winner.paid_amount)),
+            periodKey, teacher, replayed: true,
+          };
+        }
+      }
       throw err;
     }
   })();
@@ -486,7 +520,19 @@ teachersRouter.post('/:id/payroll/:ledgerId/void', requirePermission('Payroll.Ed
     if (!budgetLine) throw new HttpError(500, 'Teacher salary budget line is not configured.');
     const reversalTxId = id('tx');
     stmtUpdateBudgetAmount.run(-Number(freshLedger.paid_amount), budgetLine.id);
-    stmtInsertFinTx.run(reversalTxId, Number(freshLedger.paid_amount), today(), `Voided teacher salary payment ${freshLedger.id}: ${reason}`, freshLedger.id, user.fullName, payrollBranchId);
+    // CONTRA ENTRY — the amount must be NEGATIVE.
+    //
+    // This wrote a POSITIVE `expense` row, so voiding a 6,000 AFN salary raised
+    // reported salary expense from 15,000 to 21,000 instead of returning it to
+    // 9,000: the P&L counted the payment twice and the void never subtracted.
+    // The budget was restored correctly, which is why the bug was invisible to
+    // budget checks and only corrupted reporting.
+    //
+    // Signed-negative reversal is the established convention everywhere else
+    // in this system (student refunds via recordIncome, book-sale contra
+    // revenue), so this row now matches its siblings and every SUM() over
+    // financial_transactions nets out without needing to know about voids.
+    stmtInsertFinTx.run(reversalTxId, -Number(freshLedger.paid_amount), today(), `Voided teacher salary payment ${freshLedger.id}: ${reason}`, freshLedger.id, user.fullName, payrollBranchId);
     stmtVoidSalaryLedger.run(user.fullName, reason, freshLedger.id);
     db.exec('COMMIT');
     writeAudit(req, `Voided teacher salary payment ${freshLedger.id} for ${teacher.full_name}: ${reason}`);
