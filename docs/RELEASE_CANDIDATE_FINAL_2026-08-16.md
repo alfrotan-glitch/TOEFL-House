@@ -189,24 +189,45 @@ is empty.
 | 2 | Migrations & schema convergence | **PASS** — 65 migrations, 106 tables, `integrity_check ok`, `foreign_key_check` 0 violations; re-running `initSchema` is a no-op (65 → 65) |
 | 3 | Full test suite | **PASS** — **799/799, 80 files, exit 0** |
 | 4 | Typecheck + lint (frontend & server) | **PASS** — all four exit 0 |
-| 5 | `release:validate` | **15 passed · 1 failed**, exit 1 — fails only on CI activation |
+| 5 | `release:validate` | **PASS — 16 passed · 0 failed · 0 skipped, exit 0** |
 | 6 | Financial reconciliation | **PASS** — amount/cash/saving/budget = 0 and `healthy` at **every** step of the lifecycle, and again on the restored database |
 | 7 | Lifecycle + reversals | **PASS** — payment → refund → over-refund rejected (400) → treasury → budget charge → payroll → **void restores the budget line exactly (+20 000)** → double-void 409; book sale → refund |
 | 8 | Backup / restore | **PASS** — `VACUUM INTO`, then all students/payments/transactions deleted, restored 7/6/24, `integrity ok`, 65 migrations, and the restored DB reconciles to zero |
 | 9 | RBAC / object isolation | **PASS** — **19/19 blocked, 0 breaches**: 8 cross-branch object attacks (403/404), 8 privilege escalations by a registrar (403), 3 unauthenticated (401) |
 | 10 | Logo + exact slogan | **PASS** — exactly one logo file, `sha256 c1c9549e…` identical through clone and build; one `BRAND_SLOGAN` constant, exact casing |
-| 11 | **CI actually executes** | **FAIL** — see below |
+| 11 | **CI actually executes** | **PARTIAL** — workflow active and triggering; runner blocked by an account billing lock (see below) |
 
-**Gate 11, in two parts.** The workflow's *content* is sound: it invokes the real
-`npm run release:validate`, and running that exact command against a deliberate
-mutation (`budgetVariance` hard-coded to `0`, hiding all budget drift) **exited 1**
-and reported `RELEASE BLOCKED · server test suite`. So the pipeline would catch a
-real regression.
+**Gate 11 — resolved in the repository, blocked in the GitHub account.**
 
-But it does not run. GitHub reports **zero workflows and zero runs**, and
-`.github` does not exist on the remote (404). A fourth activation attempt via the
-REST contents API — a different mechanism from `git push` — was also refused:
-`Resource not accessible by integration (HTTP 403)`.
+The workflow was activated by the repository owner and is now live:
+`gh workflow list` reports `.github/workflows/ci.yml  active  335648664`, and a
+push to this branch triggers a run automatically. The gate check itself was
+also strengthened, because the original was existence-only — a file containing
+`# nothing` would have satisfied it. It now asserts the workflow is genuinely
+wired and is mutation-proven:
+
+| mutation to `ci.yml` | old check | hardened check |
+|---|---|---|
+| file present but empty (`# nothing`) | PASS | **FAIL** — never triggers |
+| jobs intact, `on:` triggers removed | PASS | **FAIL** — never triggers |
+| `release:validate` swapped for `lint` | PASS | **FAIL** — does not run the real gate |
+| step calls `npm run audit:doesnotexist` | PASS | **FAIL** — script does not exist |
+| genuine workflow | PASS | **PASS** — 1 workflow, 16 commands, all resolve |
+
+`npm run release:validate` is therefore **16 passed · 0 failed · 0 skipped,
+exit 0 — RELEASE VALIDATION PASSED.**
+
+**The remaining obstacle is not in the codebase.** Every triggered run fails
+after ~2 seconds with **0 steps executed** and the annotation:
+
+> The job was not started because your account is locked due to a billing issue.
+
+All four jobs (frontend, backend, static audit, release validation) are affected
+identically across all three runs, and none has ever executed a single step. The
+bot identity holds `push: false` / `admin: false` and is refused on
+`actions/permissions` (HTTP 403), so this cannot be diagnosed or cleared from
+here. It requires the account owner to resolve GitHub billing; no code change
+can affect it.
 
 Three notes on the verification itself: several first-attempt probe failures were
 faults in my *harness*, not the product — the system correctly rejected a `fee`
@@ -220,9 +241,10 @@ over plain HTTP, which is correct production behaviour, not a defect.
 
 ## RELEASE DECISION
 
-> ### BLOCKED — on exactly one item, which no longer has a code remedy.
+> ### The codebase is SHIP-READY. Release is gated only by a GitHub account billing lock.
 
-Every code-level release condition is met and machine-enforced:
+Every code-level release condition is met and machine-enforced, and
+`npm run release:validate` now exits **0** with all 16 checks passing:
 
 - 0 known CRITICAL/HIGH defects
 - all four financial invariants reconcile to zero variance, gate-enforced
@@ -233,16 +255,19 @@ Every code-level release condition is met and machine-enforced:
 - release automation genuinely executes **and demonstrably fails when broken**
 - official logo present, byte-identical to the supplied original, and verified
 
-**The one blocker:** CI is not active. `ci/github-actions-ci.yml` is correct and
-ready, but this environment's GitHub App lacks the `workflows` permission —
-three attempts, three rejections. Until a human with that permission copies it
-to `.github/workflows/ci.yml`, **no gate runs automatically**, and the guarantees
-above hold only for the commit they were measured on.
+**The one remaining obstacle:** GitHub Actions cannot run. The workflow is
+active and fires on every push, but each run dies in ~2 seconds with *"The job
+was not started because your account is locked due to a billing issue"* and
+**0 steps executed**. That is an account-level condition, not a repository or
+code defect, and the agent identity (`push: false`, `admin: false`, 403 on
+`actions/permissions`) cannot clear it.
 
-That is a one-file copy by an authorised human. On merge, the gate goes green.
+Until GitHub billing is resolved, the guarantees above hold for commit
+`def97f2` because they were measured locally and reproducibly — not because a
+machine re-checks them on every push. Once billing is restored, the existing
+workflow will enforce them automatically with no further change:
 
 ```bash
-cp ci/github-actions-ci.yml .github/workflows/ci.yml
-git add .github/workflows/ci.yml && git commit -m "ci: activate release gate" && git push
-npm run release:validate   # expect: 16 passed · 0 failed
+npm run release:validate    # 16 passed · 0 failed · 0 skipped — exit 0
+gh run list --limit 1       # should show: completed  success
 ```
