@@ -184,11 +184,66 @@ check('no build output or secrets tracked', () => {
   return `${tracked.length - 1} files tracked`;
 });
 check('CI workflow is active', () => {
+  // Existence is not activation. An empty `ci.yml`, one that never triggers, or
+  // one whose steps call npm scripts that no longer exist would all satisfy a
+  // file-exists check while catching nothing — so this asserts the workflow is
+  // actually wired: it triggers on push/PR, it invokes the real gate, and every
+  // command it will run resolves to a script that exists today.
   const active = path.join(root, '.github', 'workflows');
-  if (!fs.existsSync(active) || fs.readdirSync(active).filter((f) => /\.ya?ml$/.test(f)).length === 0) {
+  const files = fs.existsSync(active) ? fs.readdirSync(active).filter((f) => /\.ya?ml$/.test(f)) : [];
+  if (files.length === 0) {
     throw new Error('.github/workflows is empty — ci/github-actions-ci.yml has not been activated, so NO gate runs automatically');
   }
-  return 'workflows present';
+
+  const scriptsIn = (pkgDir) => {
+    const p = path.join(pkgDir, 'package.json');
+    return fs.existsSync(p) ? Object.keys(JSON.parse(fs.readFileSync(p, 'utf8')).scripts ?? {}) : [];
+  };
+  const rootScripts = scriptsIn(root);
+  const serverScripts = scriptsIn(path.join(root, 'server'));
+
+  let triggers = false;
+  let invokesGate = false;
+  let commands = 0;
+  const missing = [];
+
+  for (const file of files) {
+    const lines = fs.readFileSync(path.join(active, file), 'utf8').split('\n');
+    const body = lines.join('\n');
+    if (/^on:/m.test(body) && /^\s+(push|pull_request):/m.test(body)) triggers = true;
+
+    // Track the nearest `working-directory:` so `npm run x` is resolved against
+    // the package that will actually execute it.
+    let cwd = 'root';
+    for (const line of lines) {
+      const wd = line.match(/working-directory:\s*\.?\/?(\S+)/);
+      if (wd) cwd = wd[1].replace(/\/$/, '') === 'server' ? 'server' : 'root';
+      if (/^\s*(- )?(name|uses|jobs|[a-z-]+):\s*$/.test(line) && !/run:/.test(line)) {
+        if (/^\s{2,4}[a-z-]+:\s*$/.test(line)) cwd = 'root'; // new job resets context
+      }
+      const run = line.match(/run:\s*(.+)$/);
+      if (!run) continue;
+      const cmd = run[1].trim().replace(/^["']|["']$/g, '');
+      if (cmd === '|' || cmd.startsWith('#')) continue;
+      commands++;
+      if (/npm run release:validate/.test(cmd)) invokesGate = true;
+      const named = cmd.match(/npm run ([a-z0-9:_-]+)/i);
+      if (named) {
+        const script = named[1];
+        const pool = cwd === 'server' ? serverScripts : rootScripts;
+        // A script may legitimately live in either package; only fail when it
+        // exists in neither, which is unambiguously a broken workflow.
+        if (!pool.includes(script) && !rootScripts.includes(script) && !serverScripts.includes(script)) {
+          missing.push(`${file}: npm run ${script}`);
+        }
+      }
+    }
+  }
+
+  if (!triggers) throw new Error('no workflow triggers on push or pull_request — it would never run');
+  if (!invokesGate) throw new Error('no workflow step runs `npm run release:validate` — CI would not execute the real gate');
+  if (missing.length) throw new Error(`workflow calls scripts that do not exist: ${missing.slice(0, 4).join(', ')}`);
+  return `${files.length} workflow(s), ${commands} commands, all resolve, runs release:validate`;
 });
 
 const pass = results.filter((r) => r.status === 'PASS').length;
