@@ -110,7 +110,7 @@ describe('F1 — duplicate payment requests', () => {
 
   it('sequential double-click (the classic case) charges once', async () => {
     const sid = await newStudent('Double Clicker');
-    const body = { amount: 750, category: 'exam' };
+    const body = { amount: 750, category: 'exam', notes: 'Ad-hoc test charge' };
     const first = await supertest(app).post(`/api/students/${sid}/payments`).set(auth()).send(body);
     const second = await supertest(app).post(`/api/students/${sid}/payments`).set(auth()).send(body);
     expect(first.status).toBe(201);
@@ -122,8 +122,8 @@ describe('F1 — duplicate payment requests', () => {
   it('an explicit Idempotency-Key replay returns the ORIGINAL receipt', async () => {
     const sid = await newStudent('Keyed Payer');
     const key = 'test-key-fixed-001';
-    const a = await supertest(app).post(`/api/students/${sid}/payments`).set(auth()).set('Idempotency-Key', key).send({ amount: 900, category: 'other' });
-    const b = await supertest(app).post(`/api/students/${sid}/payments`).set(auth()).set('Idempotency-Key', key).send({ amount: 900, category: 'other' });
+    const a = await supertest(app).post(`/api/students/${sid}/payments`).set(auth()).set('Idempotency-Key', key).send({ amount: 900, category: 'other', notes: 'Ad-hoc test charge' });
+    const b = await supertest(app).post(`/api/students/${sid}/payments`).set(auth()).set('Idempotency-Key', key).send({ amount: 900, category: 'other', notes: 'Ad-hoc test charge' });
     expect(a.status).toBe(201);
     expect(b.status).toBe(200);
     expect(b.body.receiptNumber).toBe(a.body.receiptNumber);
@@ -134,7 +134,7 @@ describe('F1 — duplicate payment requests', () => {
 describe('F2 — duplicate refund requests', () => {
   it('5 identical refund requests move money out exactly once', async () => {
     const sid = await newStudent('Refund Target');
-    await supertest(app).post(`/api/students/${sid}/payments`).set(auth()).send({ amount: 5000, category: 'other' });
+    await supertest(app).post(`/api/students/${sid}/payments`).set(auth()).send({ amount: 5000, category: 'other', notes: 'Ad-hoc test charge' });
 
     const responses = await Promise.all(
       Array.from({ length: 5 }, () => supertest(app).post(`/api/students/${sid}/refund`).set(auth()).send({ amount: 1000, reason: 'duplicate test' })),
@@ -155,8 +155,8 @@ describe('F2 — duplicate refund requests', () => {
 describe('legitimate distinct business events remain possible', () => {
   it('two explicitly keyed identical payments both succeed', async () => {
     const sid = await newStudent('Legit Repeater');
-    const a = await supertest(app).post(`/api/students/${sid}/payments`).set(auth()).set('Idempotency-Key', 'legit-a').send({ amount: 1000, category: 'other' });
-    const b = await supertest(app).post(`/api/students/${sid}/payments`).set(auth()).set('Idempotency-Key', 'legit-b').send({ amount: 1000, category: 'other' });
+    const a = await supertest(app).post(`/api/students/${sid}/payments`).set(auth()).set('Idempotency-Key', 'legit-a').send({ amount: 1000, category: 'other', notes: 'Ad-hoc test charge' });
+    const b = await supertest(app).post(`/api/students/${sid}/payments`).set(auth()).set('Idempotency-Key', 'legit-b').send({ amount: 1000, category: 'other', notes: 'Ad-hoc test charge' });
     expect(a.status).toBe(201);
     expect(b.status).toBe(201);
     expect(a.body.receiptNumber).not.toBe(b.body.receiptNumber);
@@ -165,9 +165,9 @@ describe('legitimate distinct business events remain possible', () => {
 
   it('payments differing in amount or category are separate events', async () => {
     const sid = await newStudent('Varied Payer');
-    await supertest(app).post(`/api/students/${sid}/payments`).set(auth()).send({ amount: 1000, category: 'other' });
-    await supertest(app).post(`/api/students/${sid}/payments`).set(auth()).send({ amount: 2000, category: 'other' });
-    await supertest(app).post(`/api/students/${sid}/payments`).set(auth()).send({ amount: 1000, category: 'exam' });
+    await supertest(app).post(`/api/students/${sid}/payments`).set(auth()).send({ amount: 1000, category: 'other', notes: 'Ad-hoc test charge' });
+    await supertest(app).post(`/api/students/${sid}/payments`).set(auth()).send({ amount: 2000, category: 'other', notes: 'Ad-hoc test charge' });
+    await supertest(app).post(`/api/students/${sid}/payments`).set(auth()).send({ amount: 1000, category: 'exam', notes: 'Ad-hoc test charge' });
     expect(paymentsOf(sid)).toMatchObject({ c: 3, s: 4000 });
   });
 
@@ -300,7 +300,7 @@ describe('F4 — outstanding must respect discounts and installments', () => {
 describe('audit trail reflects one business event, not one per click', () => {
   it('a replayed payment does not write extra audit or journey rows', async () => {
     const sid = await newStudent('Audit Subject');
-    const body = { amount: 1234, category: 'other' };
+    const body = { amount: 1234, category: 'other', notes: 'Ad-hoc test charge' };
     await Promise.all(Array.from({ length: 5 }, () => supertest(app).post(`/api/students/${sid}/payments`).set(auth()).send(body)));
 
     const audits = db.prepare(`SELECT COUNT(*) AS c FROM audit_logs WHERE action LIKE ?`).get(`%1234 AFN%`) as { c: number };

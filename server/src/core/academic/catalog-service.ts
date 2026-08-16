@@ -62,7 +62,17 @@ export class AcademicCatalogService {
   constructor(private db: Database.Database) {
     this.stmtListAll = db.prepare(`SELECT pv.*, p.name AS program_name FROM program_versions pv JOIN programs p ON p.id = pv.program_id ORDER BY p.name, pv.version_number DESC`);
     this.stmtListByProgram = db.prepare(`SELECT pv.*, p.name AS program_name FROM program_versions pv JOIN programs p ON p.id = pv.program_id WHERE pv.program_id = ? ORDER BY pv.version_number DESC`);
-    this.stmtGetVersion = db.prepare(`SELECT pv.*, p.name AS program_name FROM program_versions pv JOIN programs p ON p.id = pv.program_id WHERE pv.id = ?`);
+    // created_by stores a user id. Surfacing the raw UUID in the Versions &
+    // Rules pane told the operator nothing, so resolve it to a name here —
+    // LEFT JOIN because the author may since have been deleted, and losing the
+    // version record over a missing user would be far worse.
+    this.stmtGetVersion = db.prepare(
+      `SELECT pv.*, p.name AS program_name, u.full_name AS created_by_name
+         FROM program_versions pv
+         JOIN programs p ON p.id = pv.program_id
+         LEFT JOIN users u ON u.id = pv.created_by
+        WHERE pv.id = ?`
+    );
     this.stmtGetLevelsByVersion = db.prepare(`SELECT * FROM levels WHERE program_version_id = ? OR (program_id = (SELECT program_id FROM program_versions WHERE id = ?) AND program_version_id IS NULL) ORDER BY "order" ASC`);
     this.stmtGetSubjectsByVersion = db.prepare(`SELECT * FROM subjects WHERE program_version_id = ? ORDER BY sort_order, code`);
     this.stmtGetModulesBySubjects = db.prepare(`SELECT * FROM modules WHERE subject_id IN (SELECT value FROM json_each(?)) ORDER BY sort_order`);

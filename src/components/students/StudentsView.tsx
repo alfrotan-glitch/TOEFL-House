@@ -55,6 +55,7 @@ export default function StudentsView({
   // Smart Payment Modal State
   const [paymentStudent, setPaymentStudent] = useState<Student | null>(null);
   const [payCategory, setPayCategory] = useState<'fee' | 'book' | 'card' | 'installment' | 'other'>('fee');
+  const [payReason, setPayReason] = useState('');
   const [payAmount, setPayAmount] = useState(0);
   const [paySemesterId, setPaySemesterId] = useState('');
   const [payInstallmentId, setPayInstallmentId] = useState('');
@@ -195,6 +196,7 @@ export default function StudentsView({
         semesterId: payCategory === 'fee' ? paySemesterId : undefined,
         installmentId: payCategory === 'installment' ? payInstallmentId : undefined,
         bookId: payCategory === 'book' ? payBookId : undefined,
+        notes: payCategory === 'other' ? payReason.trim() : undefined,
       }, undefined, { 'Idempotency-Key': idem });
       triggerToast('Payment recorded successfully.', 'success');
       setPaymentStudent(null);
@@ -375,7 +377,7 @@ export default function StudentsView({
             <form onSubmit={handleSmartPayment} className="space-y-3 text-left">
               <div>
                 <label className="block text-slate-600 font-medium mb-1">Payment Category:</label>
-                <select value={payCategory} onChange={(e) => { setPayCategory(e.target.value as any); setPayAmount(0); }} className={inputCls}>
+                <select value={payCategory} onChange={(e) => { setPayCategory(e.target.value as any); setPayAmount(0); setPayReason(''); }} className={inputCls}>
                   <option value="fee">Class Tuition Fee</option>
                   <option value="installment">Settle Installment</option>
                   <option value="book">Book Purchase</option>
@@ -402,6 +404,25 @@ export default function StudentsView({
                     <option value="">-- Pending Installments --</option>
                     {paymentStudent.installmentPlan?.filter(i => i.status !== 'paid').map(inst => <option key={inst.id} value={inst.id}>{inst.dueDate} - {formatAFN(inst.amount)}</option>)}
                   </select>
+                </div>
+              )}
+
+              {payCategory === 'other' && (
+                <div>
+                  <label className="block text-slate-600 font-medium mb-1">Reason for this charge:</label>
+                  <input
+                    type="text"
+                    value={payReason}
+                    onChange={(e) => setPayReason(e.target.value)}
+                    placeholder="e.g. Exam re-sit fee, replacement handout"
+                    className={inputCls}
+                    required
+                    minLength={3}
+                  />
+                  {/* An ad-hoc charge has no obligation to justify it, so the
+                      reason is what makes it auditable. The server enforces
+                      this too — this input only avoids a round-trip. */}
+                  <p className="text-[11px] text-slate-400 mt-1">Required. Appears on the receipt and in the financial ledger.</p>
                 </div>
               )}
 

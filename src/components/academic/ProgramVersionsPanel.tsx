@@ -15,6 +15,8 @@ interface ProgramVersion {
   effective_to?: string | null;
   published_at?: string | null;
   created_by?: string | null;
+  /** Resolved display name for created_by; the raw column holds a user id. */
+  created_by_name?: string | null;
 }
 interface TreeLevel { id: string; name: string; code?: string; order?: number; default_fee?: number; }
 interface PlacementRule { id: string; name: string; min_score: number; max_score: number; recommended_level_id?: string; }
@@ -306,7 +308,7 @@ export default function ProgramVersionsPanel() {
                     </div>
                     <div>
                       <dt className="text-slate-400 font-semibold uppercase tracking-wide text-[10px]">Created by</dt>
-                      <dd className="font-bold text-slate-700 mt-0.5">{tree.version.created_by || '—'}</dd>
+                      <dd className="font-bold text-slate-700 mt-0.5">{tree.version.created_by_name || '—'}</dd>
                     </div>
                   </dl>
                 </div>

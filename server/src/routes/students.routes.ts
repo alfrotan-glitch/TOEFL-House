@@ -740,7 +740,22 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
     bookRefId = bookId;
   }
   else if (['chapter', 'exam', 'other'].includes(category)) {
+    // AD-HOC CHARGES. These three are deliberately not backed by a
+    // pre-created obligation: they exist so the desk can take money for
+    // something the catalogue does not model (a re-sit, a lab fee, a
+    // replacement handout). The operator states the amount and it is recorded
+    // EXACTLY as entered — never capped, never adjusted.
+    //
+    // Because there is no obligation to check the amount against, the reason
+    // IS the control. Without it the payment reached the ledger as the
+    // meaningless default "Smart Payment", so an auditor reviewing an
+    // unexplained 7,777 AFN charge had nothing to review. A free-amount charge
+    // with no stated purpose is not auditable, so the reason is mandatory.
     if (requestedAmount === null) throw new HttpError(400, 'Amount is required for this payment category.');
+    const reason = typeof notes === 'string' ? notes.trim() : '';
+    if (reason.length < 3) {
+      throw new HttpError(400, 'A reason is required for an ad-hoc charge. Describe what this payment is for.');
+    }
     resolvedAmount = requestedAmount;
   }
   else if (['card', 'diploma', 'placement'].includes(category)) {
@@ -803,7 +818,16 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
       const updated = stmtUpdateBookStock.run(bookRefId, student.branch_id);
       if (updated.changes !== 1) throw new HttpError(409, 'Book stock changed. Please retry.');
     }
-    recordIncome({ category, amount: resolvedAmount, date, description: `Received ${category} payment from ${student.full_name}`, referenceId: student.id, paymentId: payId, operatorName: user.fullName, operatorRole: user.role ?? null, branchId: student.branch_id });
+    // Ad-hoc charges carry their stated reason into the ledger. Every other
+    // category is self-describing (a 'fee' row is explained by its semester, a
+    // 'book' row by its book), but an ad-hoc amount is only explicable by the
+    // reason the operator gave, so the ledger must show it rather than a
+    // generic "Received other payment from X".
+    const adHoc = ['chapter', 'exam', 'other'].includes(category);
+    const ledgerDescription = adHoc
+      ? `${category === 'other' ? 'Ad-hoc charge' : `${category} charge`} for ${student.full_name}: ${String(notes).trim()}`
+      : `Received ${category} payment from ${student.full_name}`;
+    recordIncome({ category, amount: resolvedAmount, date, description: ledgerDescription, referenceId: student.id, paymentId: payId, operatorName: user.fullName, operatorRole: user.role ?? null, branchId: student.branch_id });
   });
   try {
     tx();

@@ -145,7 +145,7 @@ describe('a manager cannot WRITE across branches', () => {
     const res = await supertest(app)
       .post(`/api/students/${STU_A}/payments`)
       .set(auth(mgr(BR_B, 'u_live_b')))
-      .send({ amount: 500, category: 'other' });
+      .send({ amount: 500, category: 'other', notes: 'Ad-hoc test charge' });
     expect([403, 404]).toContain(res.status);
 
     const after = (db.prepare(`SELECT COUNT(*) AS c FROM payments WHERE student_id = ?`).get(STU_A) as { c: number }).c;
@@ -172,7 +172,7 @@ describe('a manager cannot WRITE across branches', () => {
     const res = await supertest(app)
       .post(`/api/students/${STU_B}/payments`)
       .set(auth(mgr(BR_B, 'u_live_b')))
-      .send({ amount: 250, category: 'other' });
+      .send({ amount: 250, category: 'other', notes: 'Ad-hoc test charge' });
     expect(res.status).toBe(201);
   });
 });

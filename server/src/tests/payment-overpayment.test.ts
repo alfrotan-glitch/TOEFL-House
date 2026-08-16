@@ -202,3 +202,76 @@ describe('discounts cannot exceed the amount they discount', () => {
     expect(res.body.netAmount).toBe(4500);
   });
 });
+
+/**
+ * Ad-hoc charges ('other' / 'exam' / 'chapter') — the STOP CONDITION.
+ *
+ * An audit of real usage settled the question these categories raised. They
+ * are DELIBERATELY not backed by a pre-created obligation: "Other Fee" is an
+ * operator-selectable option in the payment dialog, and the desk uses it for
+ * things the catalogue does not model (an exam re-sit, a replacement
+ * handout). Blocking them would have broken a legitimate workflow, so the
+ * capability is preserved.
+ *
+ * But with no obligation to validate the amount against, the REASON is the
+ * only control. Previously the ledger recorded these as the default
+ * "Smart Payment", so an auditor reviewing an unexplained 7,777 AFN charge had
+ * nothing to review. These tests fix the semantics in place:
+ *
+ *   - the amount is recorded exactly as entered, never capped or adjusted;
+ *   - a substantive reason is mandatory;
+ *   - the reason reaches the ledger, not just the payment row.
+ */
+describe('ad-hoc charges are unbacked by design but must be explained', () => {
+  it('rejects an ad-hoc charge with no reason', async () => {
+    const studentId = await newStudent();
+    const res = await supertest(app).post(`/api/students/${studentId}/payments`).set(auth())
+      .send({ amount: 7777, category: 'other', paymentMethod: 'cash' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/reason is required/i);
+
+    const rows = db.prepare('SELECT COUNT(*) AS c FROM payments WHERE student_id = ?').get(studentId) as { c: number };
+    expect(rows.c).toBe(0);
+  });
+
+  it('rejects a token reason that explains nothing', async () => {
+    const studentId = await newStudent();
+    const res = await supertest(app).post(`/api/students/${studentId}/payments`).set(auth())
+      .send({ amount: 500, category: 'other', paymentMethod: 'cash', notes: 'ab' });
+    expect(res.status).toBe(400);
+  });
+
+  it('accepts an explained ad-hoc charge and records the amount EXACTLY', async () => {
+    const studentId = await newStudent();
+    const res = await supertest(app).post(`/api/students/${studentId}/payments`).set(auth())
+      .send({ amount: 7777, category: 'other', paymentMethod: 'cash', notes: 'Exam re-sit fee' });
+
+    expect(res.status).toBe(201);
+    // No obligation exists, so there is nothing to cap against — and nothing
+    // may be substituted for what the operator entered.
+    expect(res.body.amountCharged).toBe(7777);
+
+    const pay = db.prepare(
+      `SELECT amount, notes FROM payments WHERE student_id = ? AND category = 'other'`
+    ).get(studentId) as { amount: number; notes: string };
+    expect(pay.amount).toBe(7777);
+    expect(pay.notes).toBe('Exam re-sit fee');
+  });
+
+  it('carries the reason into the financial ledger, not just the payment row', async () => {
+    const studentId = await newStudent();
+    await supertest(app).post(`/api/students/${studentId}/payments`).set(auth())
+      .send({ amount: 1200, category: 'other', paymentMethod: 'cash', notes: 'Replacement handout' });
+
+    const ledger = db.prepare(
+      `SELECT description, amount FROM financial_transactions
+        WHERE reference_id = ? AND type = 'income' AND category = 'other'`
+    ).get(studentId) as { description: string; amount: number };
+
+    // The regression: this used to read "Received other payment from X",
+    // leaving an unexplained amount in the ledger.
+    expect(ledger.amount).toBe(1200);
+    expect(ledger.description).toContain('Replacement handout');
+    expect(ledger.description).not.toBe(`Received other payment from `);
+  });
+});
