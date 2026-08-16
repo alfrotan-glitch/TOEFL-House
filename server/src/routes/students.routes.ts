@@ -77,7 +77,23 @@ const stmtInsertSemester = db.prepare(
 const stmtInsertPayment = db.prepare(
   `INSERT INTO payments (id, student_id, amount, date, payment_method, status, category, notes, receipt_number, branch_id, semester, invoice_id, book_id, idempotency_key) VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?)`
 );
-const stmtGetPaymentByIdempotency = db.prepare('SELECT id, receipt_number, amount FROM payments WHERE idempotency_key = ?');
+/**
+ * Idempotency replay lookup, SCOPED TO THE STUDENT.
+ *
+ * The key alone is not sufficient. A client-supplied `Idempotency-Key` is
+ * attacker- and bug-controlled, and reusing one across two students used to
+ * return the FIRST student's receipt for the SECOND student's genuine payment
+ * — the second charge was silently swallowed and never booked (proven: two
+ * payable 700 AFN charges, one key, second student left with zero payments and
+ * the first student's receipt number). Matching on student_id as well means a
+ * replay can only ever return that same student's own earlier payment.
+ *
+ * Cross-student key collisions still hit the UNIQUE index and are surfaced as
+ * a conflict rather than a false success.
+ */
+const stmtGetPaymentByIdempotency = db.prepare(
+  'SELECT id, receipt_number, amount FROM payments WHERE idempotency_key = ? AND student_id = ?',
+);
 // Placement fees are auto-booked once at assessment completion (payment row
 // with idempotency key 'placement:<attemptId>' linked to the candidate's
 // visitor). This detects that booking for a converted student so a manual
@@ -639,7 +655,7 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
   const replayEligible = clientSuppliedKey || !GUARDED_CATEGORIES.includes(category);
   if (replayEligible) {
     for (const candidate of idempotencyCandidates) {
-      const existing = stmtGetPaymentByIdempotency.get(candidate) as any;
+      const existing = stmtGetPaymentByIdempotency.get(candidate, student.id) as any;
       if (existing) return res.status(200).json({ receiptNumber: existing.receipt_number, amountCharged: existing.amount, idempotentReplay: true });
     }
   }
@@ -765,8 +781,12 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
     // win the unique index on payments.idempotency_key — the losers replay
     // the winner's result instead of surfacing a 500 or double-charging.
     if (isUniqueViolation(err)) {
-      const winner = stmtGetPaymentByIdempotency.get(idempotencyKey) as any;
+      const winner = stmtGetPaymentByIdempotency.get(idempotencyKey, student.id) as any;
       if (winner) return res.status(200).json({ receiptNumber: winner.receipt_number, amountCharged: winner.amount, idempotentReplay: true });
+      // The key is taken, but by a DIFFERENT student — the caller reused one
+      // key for two distinct charges. Refuse loudly: replaying the other
+      // student's receipt would silently lose this payment.
+      throw new HttpError(409, 'This Idempotency-Key was already used for a different student. Use a unique key per payment.');
     }
     throw err;
   }
@@ -798,7 +818,7 @@ studentsRouter.post('/:id/refund', requirePermission('Refund.Approve'), ah(async
     actorUserId: user.userId,
   });
   for (const candidate of idempotencyCandidates) {
-    const existing = stmtGetPaymentByIdempotency.get(candidate) as any;
+    const existing = stmtGetPaymentByIdempotency.get(candidate, student.id) as any;
     if (existing) return res.status(200).json({ receiptNumber: existing.receipt_number, idempotentReplay: true });
   }
   const rc = `REF-${nextReceiptNumber()}`;
@@ -813,15 +833,17 @@ studentsRouter.post('/:id/refund', requirePermission('Refund.Approve'), ah(async
       .reduce((sum, p) => sum + Math.abs(Number(p.amount || 0)), 0);
     const refundable = Math.max(0, paid - refunded);
     if (refundAmount > refundable) throw new HttpError(400, `Refund exceeds the refundable balance of ${refundable} AFN.`);
-    stmtInsertSimplePayment.run(payId, student.id, -refundAmount, date, 'cash', 'refund', String(reason).trim(), rc, student.branch_id, idempotencyKey || null);
+    stmtInsertSimplePayment.run(payId, student.id, -refundAmount, date, 'cash', 'refund', String(reason).trim(), rc, student.branch_id, idempotencyKey);
     recordIncome({ category: 'refund', amount: -refundAmount, date, description: `Refund issued to ${student.full_name}`, referenceId: student.id, paymentId: payId, operatorName: user.fullName, operatorRole: user.role ?? null, branchId: student.branch_id });
   });
   try {
     tx();
   } catch (err) {
     if (isUniqueViolation(err)) {
-      const winner = stmtGetPaymentByIdempotency.get(idempotencyKey) as any;
+      const winner = stmtGetPaymentByIdempotency.get(idempotencyKey, student.id) as any;
       if (winner) return res.status(200).json({ receiptNumber: winner.receipt_number, idempotentReplay: true });
+      // Key already used by another student — refuse rather than lose the refund.
+      throw new HttpError(409, 'This Idempotency-Key was already used for a different student. Use a unique key per refund.');
     }
     throw err;
   }

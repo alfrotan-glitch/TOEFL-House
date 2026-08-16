@@ -209,6 +209,47 @@ describe('legitimate repeat business still succeeds on guarded categories', () =
     expect(String(extra.body.error)).toMatch(/already fully paid/i);
   });
 
+  it('a reused Idempotency-Key across two students is REFUSED, never silently swallowed', async () => {
+    // Found in the final adversarial pass. The replay lookup matched on the key
+    // alone, so reusing one key for two different students returned the FIRST
+    // student's receipt for the SECOND student's genuine payment: 200 OK, a
+    // receipt number that belonged to someone else, and the money never booked.
+    // Client keys are caller-controlled, so this was reachable by a bug or by
+    // an attacker wanting a payment to disappear.
+    const one = await newStudent('Key Collide One');
+    const two = await newStudent('Key Collide Two');
+    const semOne = await enrol(one, 9_000);
+    const semTwo = await enrol(two, 9_000);
+    const key = 'shared-across-students';
+
+    const first = await supertest(app).post(`/api/students/${one}/payments`).set(auth())
+      .set('Idempotency-Key', key).send({ amount: 700, category: 'fee', semesterId: semOne, paymentMethod: 'cash' });
+    expect(first.status).toBe(201);
+
+    const second = await supertest(app).post(`/api/students/${two}/payments`).set(auth())
+      .set('Idempotency-Key', key).send({ amount: 700, category: 'fee', semesterId: semTwo, paymentMethod: 'cash' });
+
+    // Must NOT be a 200 replay carrying the other student's receipt.
+    expect(second.status).toBe(409);
+    expect(String(second.body.error)).toMatch(/different student/i);
+    expect(second.body.receiptNumber).toBeUndefined();
+    // And the second student must still owe the money.
+    expect(paymentsOf(two).c).toBe(0);
+  });
+
+  it('the SAME student replaying their own key still collapses to one charge', async () => {
+    const sid = await newStudent('Own Key Replay');
+    const semesterId = await enrol(sid, 9_000);
+    const body = { amount: 600, category: 'fee', semesterId, paymentMethod: 'cash' };
+    const a = await supertest(app).post(`/api/students/${sid}/payments`).set(auth()).set('Idempotency-Key', 'own-key').send(body);
+    const b = await supertest(app).post(`/api/students/${sid}/payments`).set(auth()).set('Idempotency-Key', 'own-key').send(body);
+    expect(a.status).toBe(201);
+    expect(b.status).toBe(200);
+    expect(b.body.idempotentReplay).toBe(true);
+    expect(b.body.receiptNumber).toBe(a.body.receiptNumber);
+    expect(paymentsOf(sid)).toMatchObject({ c: 1, s: 600 });
+  });
+
   it('a different amount is a different intent and is charged', async () => {
     const sid = await newStudent('Varied Amounts');
     const semesterId = await enrol(sid, 60_000);
