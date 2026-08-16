@@ -662,3 +662,134 @@ Uniform `resolveIdempotency` coverage rose from 3 to 4 of 7 money-writing route 
 ## L. Architectural lesson
 
 S5, S6 and S8 were the same defect in three places: *idempotency applied only when the client volunteered a key*. Since the failure mode being defended against is precisely the client failing to behave (retry, refresh, double-click, second tab), client-supplied keys cannot be the trigger. The server must always derive a key when none is offered, and a DB unique index — never an application-level `SELECT`-then-`INSERT` — must be the authority that settles the race.
+
+---
+---
+
+# ADDENDUM 5 — Whole-System Sweep: Financial Truth, Fabricated Data, Readability
+
+**Date:** 2026-08-16 · **Commits:** `a577f4a`, `4a4ac96`
+**Trigger:** the user reported two symptoms — financial figures appearing under both Academic and Finance in the student profile, and "TOEFL Instructor" showing on every teacher profile — and asked for a genuine whole-system re-examination, plus the Academic Setup readability problem.
+
+Both reported symptoms were real, and the first one was the visible edge of a materially worse accounting defect.
+
+## A. Environment note
+
+The sandbox was re-cloned between sessions: `node_modules`, `server/.env` and the runtime SQLite database were all gone, and local git history had reset to the base commit. All prior work was intact on the remote; the workspace was restored with `git reset --hard 52d40d5`. The database was rebuilt from the 61 migrations and re-seeded. **Owner credentials are now `owner` / `E2eAuditPass!2026New`** (the bootstrap forces a password change on first login).
+
+## B. Defects found, reproduced and fixed
+
+### S9 — refunds rendered as INCOME on the student profile · HIGH
+
+`GET /payments` returned only `id`, `studentId`, `amount`, `date`, `category`, `receiptNumber`. `status` and `notes` were dropped, so every consumer saw `status === undefined`. The profile keyed its refund styling on `status === 'refunded'` — a value student refunds never carry, since they are `completed` rows in the `refund` category.
+
+Proven live: a −2,000 AFN refund rendered as the literal string **`+-2000` in green**, styled as money received.
+
+Fix: the API returns `status`, `notes`, `semester` and `paymentMethod`; the UI keys on a shared predicate (`category==='refund' || status==='refunded' || amount<0`) and prints a real minus sign over the absolute value. Refunds are also labelled "Refund" rather than showing the raw category string.
+
+### S10 — five surfaces, five different answers to "how much has this student paid" · CRITICAL
+
+| Surface | Categories counted | Semester scope |
+|---|---|---|
+| Student profile | fee + installment + refund | ALL |
+| Roster list | fee + installment + refund | ACTIVE |
+| **Student portal** | fee + installment | ACTIVE |
+| **Branch dashboard** | fee + installment | ALL |
+| Enrollment hold | fee + installment + refund | ACTIVE |
+
+Refunds are stored signed-negative, so the two surfaces omitting them credited students with money that had been handed back.
+
+Controlled proof — a student charged 13,000 who paid 13,000 and was refunded 2,000 genuinely owes 2,000:
+
+```
+staff screens      2,000 owed     correct
+student's portal       0 owed     WRONG — the portal forgave a real debt
+branch dashboard       0 owed     WRONG — receivable understated
+```
+
+The academy was under-billing **every student who had ever been refunded**, and telling those students they owed nothing.
+
+Fix: one authoritative definition, `server/src/utils/studentBalance.ts`, mirrored for the client as `src/utils/studentBalance.ts`. Tuition paid = `fee + installment + refund`. Non-tuition categories (book, card, exam, diploma, placement, chapter, other) are real income but never pay down tuition. Outstanding is floored **per student** so one student's credit cannot mask another's debt. `all` vs `active` scope is now an explicit argument rather than an accident. The profile, roster, portal, enrollment hold and dashboard all call it.
+
+Verified live: dashboard outstanding for the controlled student moved from **0 → 2,000**, matching an independent recomputation exactly.
+
+### S11 — a partially refunded semester could never be settled · HIGH
+
+Both semester-settlement sites summed only `category === 'fee'` rows for that semester name. Refunds carry no semester, so they were invisible.
+
+Reproduced live:
+
+```
+semester fee 10,000 → pay 10,000        201
+refund 4,000                            201   (student has paid 6,000, owes 4,000)
+collect the remaining 4,000             400 "This semester is already fully paid."
+```
+
+The academy **could not collect a debt the student genuinely owed**. Installments were excluded by the same predicate, under-crediting installment-paid semesters.
+
+Fix: both sites count fee + installment rows for that semester plus the student's refund rows, filtered on `status='completed'`. After the fix the 4,000 collection is accepted and net tuition returns to 10,000 of 10,000.
+
+### S12 — fabricated data presented as fact · MEDIUM
+
+Four places invented values rather than showing an unset state:
+
+| Location | Invented | Why it matters |
+|---|---|---|
+| Teacher profile | `'TOEFL Instructor'` | every teacher without a specialization appeared to hold one — the user's report |
+| Teacher profile | `'Fixed'` contract type | **invents a payroll basis** for a teacher with no contract recorded |
+| Placement result | `'Supervisor'` examiner | attributes an assessment decision to nobody in particular |
+| Printed certificate | `'Standardized Exam'` | prints a fabricated exam title on an **official document** |
+
+All four now render an explicit unset state.
+
+### S13 — Academic Setup readability · MEDIUM
+
+Program names and descriptions, level names and their metadata line, and time-slot labels were clipped with `truncate` despite sitting in full-width rows with abundant space — exactly as reported. The program-name edit input had no width class and collapsed to a few characters, and the branch-fee input clipped five-digit fees.
+
+Fixed there, and eleven further truncations of user-entered content in wide card layouts were relaxed across offerings, class generation, the test bank, the journey timeline, expenses, settings, visitors, and the attendance roster — where a 96px column cut off most Afghan full names. Sidebar and navigation truncation is deliberate and was deliberately left alone.
+
+## C. Areas attacked and found sound
+
+These were probed specifically to avoid reporting only what was broken:
+
+| Area | Attack | Result |
+|---|---|---|
+| Authentication | 6 money endpoints unauthenticated; garbage/malformed/empty tokens | all `401` |
+| Money mutation without auth | payments, donations, invoices | all `401` |
+| Money validation | `-5000`, `0`, `1e18`, `'abc'`, `null` | all `400` |
+| Refund over-draw | refund 50,000 against 1,000 paid | `400`, refused |
+| Refund race | 6 concurrent full refunds of one 1,000 payment | `{201:1, 400:5}` — exactly 1,000 refunded, never more |
+| Suspended student | new invoice | `409`, blocked (payment still allowed — correct; prior debt must remain settleable) |
+| Non-existent student | payment | `404` |
+| Report periods | inverted range, missing bound, malformed date, SQL-ish injection, 200-year range, bad quarter/year | all `400` with precise messages |
+| Activity-based reporting | a period with zero activity | 0 rows in every collection — no empty filler |
+| Ledger integrity | API payments missing an income row; duplicate income per payment; NULL `branch_id` in 4 money tables | 0 / 0 / 0 |
+
+A methodological note: three "payments with no income row" initially looked like a defect, but they were rows my own harness had inserted directly via SQL, bypassing the API. Excluding harness rows, the ledger is clean. Worth recording because it is exactly the kind of self-inflicted false positive that produces a bogus defect report.
+
+## D. Regression evidence
+
+| Gate | Result |
+|---|---|
+| Server suite | **652 passed / 60 files** (was 648, was 623 two addenda ago) |
+| New `student-balance-consistency.test.ts` | 14 tests — balance arithmetic, cross-surface agreement, S11 semester settlement |
+| Mutation testing | excluding refunds → 2 failures; removing the per-student floor → 1 failure; reverting the S11 predicate → 2 failures |
+| Frontend typecheck / lint / build | clean |
+| `audit:static` / `audit:product` | PASS / no FAIL |
+| `preflight:fresh-schema` | 60 migrations, no drift |
+
+A fixture bug worth recording: `students.phone` carries a partial UNIQUE index, so seeding three fixtures with the same phone number made `INSERT OR REPLACE` silently delete the previous student, emptying the fixture and producing five confusing assertion failures with no error. Each fixture now gets its own number. A sibling suite also truncates `students` and `student_semesters` wholesale against the shared test database, so this suite re-seeds per test rather than once.
+
+## E. Honest remaining gaps
+
+1. **`POST /exams/:id/enroll` remains UNVERIFIED** across three addenda — the dataset still has no exam rows, so no attack can be staged. It is the one money writer with no evidence either way.
+2. **Multi-branch isolation is proven only at the query layer**, by `dashboard-branch-isolation.test.ts`. The live database still has a single branch, so no live cross-branch RBAC attack has been run against a real second branch's data.
+3. **Dashboard performance at scale is unmeasured.** The N+1 review remains static; no load test has been performed. Several list endpoints (`academic.routes.ts` programs/levels/rooms/terms, `books`, `automations`, `branches`) call `.all()` with no LIMIT — fine at current volume, unbounded by construction.
+4. **The 90-second derived-idempotency window** remains a heuristic, as described in Addendum 4.
+5. **`utils/erpHelpers` retains three deprecated balance helpers.** They have no callers and now carry `@deprecated` pointers, but deleting them outright would be the cleaner end state.
+
+## F. Architectural lesson
+
+S9, S10 and S11 are one defect wearing three costumes: **a business quantity with no single owner**. "How much has this student paid" was re-derived independently in five places, and each author made a locally reasonable choice about refunds and semester scope. No individual snippet looks wrong in review; only comparing them reveals that the system disagreed with itself about money — and that the disagreement consistently favoured the student over the academy.
+
+The fix is not better arithmetic in five places. It is one definition, called from five places, with the scope choice made explicit at each call site.
