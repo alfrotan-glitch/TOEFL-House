@@ -5,6 +5,7 @@ import { nextInvoiceNumber } from '../utils/invoice.js';
  */
 import { Router } from 'express';
 import { db } from '../db/connection.js';
+import { parsePagination as parsePaginationShared } from '../utils/pagination.js';
 import { getStudentBalance } from '../utils/studentBalance.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { hasAnyRole } from '../core/rbac/rbac-service.js';
@@ -123,12 +124,16 @@ function getUserContext(req: import('express').Request) {
   return user;
 }
 
+/**
+ * Delegates to the shared hardened parser. The previous local version let a
+ * NEGATIVE limit through (`-1` is truthy and not > MAX_PAGE_SIZE), and SQLite
+ * reads `LIMIT -1` as unbounded — so `?limit=-1` dumped the whole table.
+ */
 function parsePagination(req: import('express').Request) {
-  const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
-  let limit = parseInt(req.query.limit as string, 10) || DEFAULT_PAGE_SIZE;
-  if (limit > MAX_PAGE_SIZE) limit = MAX_PAGE_SIZE;
-  const offset = parseInt(req.query.offset as string, 10) || (page - 1) * limit;
-  return { limit, offset };
+  return parsePaginationShared(req as { query: Record<string, unknown> }, {
+    defaultPageSize: DEFAULT_PAGE_SIZE,
+    maxPageSize: MAX_PAGE_SIZE,
+  });
 }
 
 type StudentContextRow = StudentRow;

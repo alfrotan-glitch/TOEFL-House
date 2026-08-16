@@ -17,6 +17,7 @@
 
 import { Router } from 'express';
 import { db } from '../db/connection.js';
+import { parsePagination as parsePaginationShared } from '../utils/pagination.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
@@ -323,7 +324,9 @@ automationsRouter.get(
     const existing = stmtGetAutomationById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Automation not found.');
 
-    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    // Was `Math.min(Number(limit) || 50, 200)`: a negative value is truthy and
+    // survives the min, producing `LIMIT -1` — unbounded in SQLite.
+    const { limit } = parsePaginationShared(req as { query: Record<string, unknown> }, { defaultPageSize: 50, maxPageSize: 200 });
     const rows = stmtGetExecutionLogs.all(`automation:${req.params.id}`, limit) as any[];
 
     res.json(

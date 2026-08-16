@@ -5,6 +5,7 @@ import { authenticate, authorize, resolveBranchScope, canAccessBranchResource } 
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
+import { isUniqueViolation } from '../utils/idempotency.js';
 import { getNumberSetting } from '../utils/settings.js';
 import { recordIncome } from '../utils/income.js';
 import { evaluateRules } from '../core/configuration/rule-engine.js';
@@ -221,7 +222,18 @@ examsRouter.post(
         });
       }
     });
-    enrollTx();
+    try {
+      enrollTx();
+    } catch (err) {
+      // uq_exam_results_student / uq_exam_results_visitor (migration 062) are
+      // the authoritative guard; the SELECT above is only a fast path. Two
+      // requests that pass it together must still produce ONE enrolment and
+      // ONE exam-fee income row, reported as the same business error.
+      if (isUniqueViolation(err)) {
+        throw new HttpError(409, `${candidateName} is already enrolled in this exam.`);
+      }
+      throw err;
+    }
 
     writeAudit(req, `Enrolled ${candidateName} in exam ${exam.title}`);
     res.status(201).json({ id: newId, candidateName });

@@ -17,6 +17,7 @@ Access control:
 */
 import { Router } from 'express';
 import { db } from '../db/connection.js';
+import { parsePagination as parsePaginationShared } from '../utils/pagination.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource, hasLegacyRole, hasAnyLegacyRole } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
@@ -253,15 +254,12 @@ const AF_TEACHING_DAYS = [6, 0, 1, 2, 3, 4];
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 100;
 
+/** Shared hardened parser (this router's guard was already correct). */
 function parsePagination(req: import('express').Request): { page: number; limit: number; offset: number } {
-  const rawPage = parseInt(req.query.page as string, 10);
-  const page = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1;
-  const rawLimit = parseInt(req.query.limit as string, 10);
-  let limit = Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : DEFAULT_PAGE_SIZE;
-  if (limit > MAX_PAGE_SIZE) limit = MAX_PAGE_SIZE;
-  const rawOffset = parseInt(req.query.offset as string, 10);
-  const offset = Number.isFinite(rawOffset) && rawOffset >= 0 ? rawOffset : (page - 1) * limit;
-  return { page, limit, offset };
+  return parsePaginationShared(req as { query: Record<string, unknown> }, {
+    defaultPageSize: DEFAULT_PAGE_SIZE,
+    maxPageSize: MAX_PAGE_SIZE,
+  });
 }
 
 function mapSessionRow(r: any, classTeacherId?: string | null) {
