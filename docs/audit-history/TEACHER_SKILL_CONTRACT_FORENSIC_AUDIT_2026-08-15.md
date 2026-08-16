@@ -793,3 +793,160 @@ A fixture bug worth recording: `students.phone` carries a partial UNIQUE index, 
 S9, S10 and S11 are one defect wearing three costumes: **a business quantity with no single owner**. "How much has this student paid" was re-derived independently in five places, and each author made a locally reasonable choice about refunds and semester scope. No individual snippet looks wrong in review; only comparing them reveals that the system disagreed with itself about money — and that the disagreement consistently favoured the student over the academy.
 
 The fix is not better arithmetic in five places. It is one definition, called from five places, with the scope choice made explicit at each call site.
+
+---
+---
+
+# ADDENDUM 6 — Closing the Gaps, and What Closing Them Revealed
+
+**Date:** 2026-08-16 · **Commits:** `02eb074`, `5dd8832`, `70357a7`
+**Objective:** close the three gaps carried honestly through Addenda 4 and 5, then keep hunting.
+
+Closing them was not a formality — two of the three investigations uncovered new defects that no amount of code reading had surfaced.
+
+## A. The three gaps, closed
+
+### GAP 1 — exam enrolment (UNVERIFIED across three addenda)
+
+No exam rows existed, so no attack was possible. An exam with a real 3,000 AFN fee was created and the route attacked with a **barrier-synchronised 30-way race, six consecutive trials**: `{201:1, 409:29}` every time, one enrolment, one income row.
+
+It held — but *incidentally*. The guard was an application-level SELECT followed by an INSERT with no atomic backstop; it survives only because better-sqlite3 serialises calls inside one process. A second process, a connection pool, or any networked database would let two requests pass the SELECT together and book the fee twice.
+
+**Migration 062** adds the real constraint — two *partial* indexes, because a row carries either a `student_id` or a `visitor_id` and SQLite treats NULLs as distinct, so one composite index would constrain nothing.
+
+Proven by mutation: with the application check **disabled outright** (`if (false && existing)`), the live 30-way race still produced `{201:1, 409:29}`. The index alone is sufficient.
+
+### GAP 2 — branch isolation (query-layer only)
+
+A real second branch, a real manager scoped to it, and a real login now drive the actual middleware.
+
+| Attack | Result |
+|---|---|
+| Read students / payments / invoices / dashboards | only own branch; `77777` visible, `11111` never |
+| Escalate via `?branchId=<other>` | no leak |
+| Payment, refund, invoice, suspend, edit, read on a foreign student | **all 403/404, zero rows written** |
+| Same operations inside own branch | still succeed |
+
+Recorded as `branch-isolation-live.test.ts` (9 tests) through supertest with real signed tokens.
+
+**Method note worth keeping.** A first pass reported *two leaks*. Both were coincidental substring matches — the digits of one branch's figure appearing inside an unrelated number. Re-running with deliberately distinctive amounts (`11111` / `77777`) disproved both. A leak test that greps for any occurrence of a value will manufacture false positives; the values must be chosen so a match cannot be accidental.
+
+### GAP 3 — dashboard performance at scale (unmeasured)
+
+Seeded **5,000 students, 20,000 payments, 20,000 ledger rows** and measured ten endpoints over seven runs each.
+
+| Endpoint | p50 |
+|---|---|
+| `/students` | 51 ms |
+| `/finance/dashboard` | 38 ms |
+| `/bos/executive-dashboard` | 32 ms |
+| `/reports/overview` (year) | 27 ms |
+| `/payments` | 24 ms |
+
+Nothing exceeded 400 ms. Outstanding tuition reconciled **exactly** at 20,103,559.00 AFN against an independent recomputation, with zero duplicate income rows.
+
+## B. What the measurement exposed
+
+### S14 — the row cap could be escaped with a negative limit · HIGH
+
+```js
+let limit = parseInt(req.query.limit, 10) || DEFAULT_PAGE_SIZE;
+if (limit > MAX_PAGE_SIZE) limit = MAX_PAGE_SIZE;
+```
+
+`-1` is truthy, so the default never fires; `-1 > 2000` is false, so the ceiling never fires. It reaches SQLite as `LIMIT -1` — which SQLite defines as *no limit*.
+
+```
+GET /students?limit=2000  ->  2,000 rows / 1,336,317 bytes   (the cap)
+GET /students?limit=-1    ->  5,027 rows / 3,362,514 bytes   (everything)
+```
+
+`automations` had the same hole in different clothing: `Math.min(Number(limit) || 50, 200)` returns `-1` unchanged. A fractional limit was mishandled too — `parseInt('1.5')` is `1`, silently yielding a one-row page.
+
+Fixed with one shared parser (`utils/pagination.ts`) accepting only a finite positive integer literal. 10 regression tests; mutation-tested — the original expression fails 3.
+
+### S16 — no free-text field had a length ceiling · MEDIUM
+
+`POST /students/manual` with a **1,000,000-character** `fullName` returned `201 Created` and stored it verbatim. The only thing that ever refused was Express's body limit at ~5 MB, answering `500 "request entity too large"` — a client mistake reported as a server fault.
+
+A roster response returns up to 2,000 rows, so a handful of such records turns every list endpoint into megabytes, and the record persists to poison each subsequent read.
+
+Fixed with `utils/textInput.ts` (name 200, short 60, email 254, line 500, notes 5000) on the student, visitor and teacher creation routes. Verified live: 200 accepted, 201 rejected, 1,000,000 rejected, and `محمد احمد رحیمی` with a normal note still succeeds.
+
+### S17 — the official statement was summed from one page · CRITICAL
+
+`FinanceModals` built the printable *"Official statement of income & expenses"* by filtering the `transactions` array the client had loaded and reducing it. That array is **one server page** — 500 rows by default.
+
+```
+TRUE income today (SQL)        149,311.00
+"Official statement" printed    50,000.00
+understatement                  99,311.00
+```
+
+The authoritative endpoint had the right answer all along: `/reports/overview` returned 149,311.00.
+
+This is exactly the failure the brief names — reconstructing financial truth in the client when an authoritative ledger exists. Totals now come from the server; the line-item table is labelled *"most recent N; totals above cover the full period"*; and if the totals request fails the statement **refuses to render figures** rather than issuing a document from a partial number.
+
+### S18 — the same defect in the main dashboard · CRITICAL
+
+`DashboardView` computed today's and this month's income and expense the same way, from the same paged array. Same 700-row reproduction: tile showed **50,000** against a true **149,311**.
+
+`GET /finance/dashboard` already returned precisely these figures summed in SQL. No new endpoint was needed — the authoritative source existed and the dashboard simply was not using it. Verified after the fix: **149,311.00, EXACT**.
+
+### Also fixed
+
+`SettingsView` swallowed its user-account load failure with `.catch(() => {})`, rendering an **empty account list with no warning**. To an owner managing access that reads as "this academy has no users" rather than "the list could not be loaded". Now shows the error with a retry, and a genuine empty state is distinguished from a failed one.
+
+## C. S15 — the placement fee, and a lesson in mutation testing
+
+The placement assessment fee books real income at completion, and had never been attacked. Three tests now cover it.
+
+The mutation result was the interesting part. **Removing the compare-and-set guard alone did not fail the suite** — the idempotency key `placement:<attempt>` on `uq_payments_idempotency` caught the duplicate. Only defeating *both* layers failed 4 tests.
+
+That is the correct outcome, and it is worth stating plainly: a mutation that does not fail your tests is not automatically a bad test. Here it revealed that the route has **two genuinely independent guards**, and the suite now proves that rather than assuming it. Had I stopped at the first mutation I would have wrongly "fixed" a test that was fine.
+
+## D. Final money-writer matrix — all live, all concurrent
+
+| Writer | Attack | Result |
+|---|---|---|
+| Student payment (keyed) | 10 concurrent | 1 row |
+| Student payment (un-keyed) | 10 concurrent | 1 row |
+| Donation (un-keyed) | 8 concurrent | 1 row |
+| Invoice pay (un-keyed) | 8 concurrent | 1 row |
+| Exam enrolment | 10 concurrent | 1 row |
+| Book sale | 8 concurrent | 1 row |
+| Teacher salary | 5 concurrent | 1 ledger row |
+| Visitor convert | 5 concurrent | 1 student, 1 enrolment |
+| Placement fee | 5 replays | 1 payment, 1 income row |
+
+Integrity: **0** payments with more than one income row; **0** completed API payments without one. Dashboard reconciliation **EXACT**.
+
+A second false positive is worth recording here too: the sweep initially reported exam enrolment as VULNERABLE with *zero* rows. The harness had taken `branches[0]`, which was the newly created Herat branch, not the owner's. The `403 "Student belongs to another branch"` was branch isolation working correctly. Two of the three anomalies in the final sweep were defects in my own test harness, not the product.
+
+## E. Areas attacked and found sound
+
+SQL injection through student search (4 payloads, table intact, 0 rows leaked); invalid enum values (400); duplicate phone numbers (409 on the partial unique index); stored script tags (persisted verbatim, escaped at render by React rather than mangled on input); unauthenticated access to 6 money endpoints (401); malformed tokens (401); negative, zero, overflowing and non-numeric money (400); refund over-draw (400); 6 concurrent full refunds of one payment (exactly one succeeded); report period boundaries including inverted ranges and 200-year spans (400).
+
+## F. Gate state
+
+| Gate | Result |
+|---|---|
+| Server suite | **691 passed / 64 files** (623 → 648 → 652 → 678 → 691) |
+| New this addendum | exam uniqueness (7), branch isolation live (9), pagination (10), text bounds (11), placement fee (3) |
+| Frontend typecheck / lint / build | clean |
+| `audit:static` / `audit:product` | PASS / no FAIL |
+| `preflight:fresh-schema` | 61 migrations, no drift |
+
+## G. Remaining risks — the honest list
+
+1. **The 90-second derived-idempotency window** remains a heuristic. Two genuinely distinct, identical, un-keyed transactions by the same operator for the same subject within 90 seconds collapse into one. The UI always sends explicit keys, so real workflows are unaffected; `IDEMPOTENCY_WINDOW_SECONDS` tunes it.
+2. **Length ceilings were applied to the three main creation routes** (student, visitor, teacher). Other routes accepting free text — class names, book titles, expense descriptions, notes on various records — are still unbounded. Lower severity, same class of defect.
+3. **Performance was measured at 5,000 students on one machine with a warm cache.** It is evidence of the right order of magnitude, not a load test with concurrent users.
+4. **The frontend still loads up to 2,000 students on login.** That is now bounded and fast (51 ms, 1.3 MB), but it is an eager full-roster fetch that will need pagination in the UI well before an academy reaches five figures.
+5. **`utils/erpHelpers`** retains three deprecated balance helpers with no callers. Deleting them is cleaner than deprecating them.
+
+## H. Architectural lesson
+
+S17 and S18 are one mistake made twice: **treating a paginated client cache as if it were the ledger**. Both were invisible in review because the code reads perfectly — `transactions.filter(...).reduce(...)` is idiomatic and obviously correct *if* `transactions` is complete. It never was.
+
+The general rule this yields: any figure presented as authoritative — a printed statement, a dashboard KPI, a reconciliation total — must be computed where the complete data lives. A client array is a *sample for display*, never a *basis for arithmetic*. The clue that both defects were reachable is that the correct endpoints already existed and returned the right numbers; nobody had connected them.
