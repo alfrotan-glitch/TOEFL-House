@@ -32,6 +32,9 @@
  * leaves the books unbalanced is not a fix.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { db, initSchema } from '../db/connection.js';
 import { recordIncome } from '../utils/income.js';
 import { getFinanceAccount } from '../utils/financeAccounts.js';
@@ -185,9 +188,7 @@ describe('F-10: every money path debits cash through recordIncome', () => {
     // Structural guard. A hand-rolled INSERT of a negative income row is how
     // F-10 happened, and it is invisible in review because the SQL looks fine
     // on its own — the defect is only in what it OMITS (the cash debit).
-    const fs = require('node:fs') as typeof import('node:fs');
-    const path = require('node:path') as typeof import('node:path');
-    const routesDir = path.resolve(__dirname, '..', 'routes');
+    const routesDir = path.resolve(fileURLToPath(new URL('.', import.meta.url)), '..', 'routes');
     const offenders: string[] = [];
     for (const file of fs.readdirSync(routesDir).filter((f) => f.endsWith('.ts'))) {
       const src = fs.readFileSync(path.join(routesDir, file), 'utf8');
