@@ -1,0 +1,157 @@
+#!/usr/bin/env node
+/**
+ * Reproducible release validation.
+ * ============================================================================
+ * One command that runs every release gate in order and fails loudly on the
+ * first problem. Before this existed, "the gates pass" meant a human had
+ * remembered to run eight separate commands in two directories — and the only
+ * scripted release step, `release:clean`, was a PowerShell file that exits 127
+ * on Linux, so CI would have reported success for a step that never ran.
+ *
+ *   node scripts/release-validate.mjs            # full gate
+ *   node scripts/release-validate.mjs --quick    # skip builds and the suite
+ *
+ * Every check is a real command with a real exit code. Nothing here reports a
+ * result it did not actually observe.
+ */
+import { execSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { fileURLToPath } from 'node:url';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const quick = process.argv.includes('--quick');
+const results = [];
+let failed = 0;
+
+function run(name, cmd, opts = {}) {
+  if (quick && opts.slow) {
+    results.push({ name, status: 'SKIP', detail: '--quick' });
+    return true;
+  }
+  process.stdout.write(`  ${name.padEnd(38)} `);
+  try {
+    execSync(cmd, { cwd: opts.cwd ?? root, stdio: 'pipe', encoding: 'utf8', env: { ...process.env, ...opts.env } });
+    process.stdout.write('PASS\n');
+    results.push({ name, status: 'PASS' });
+    return true;
+  } catch (err) {
+    const out = `${err.stdout ?? ''}${err.stderr ?? ''}`.trim().split('\n').slice(-4).join('\n      ');
+    process.stdout.write('FAIL\n');
+    if (out) console.log(`      ${out}`);
+    results.push({ name, status: 'FAIL', detail: out });
+    failed++;
+    return false;
+  }
+}
+
+function check(name, fn) {
+  process.stdout.write(`  ${name.padEnd(38)} `);
+  try {
+    const detail = fn();
+    process.stdout.write(`PASS${detail ? `  (${detail})` : ''}\n`);
+    results.push({ name, status: 'PASS', detail });
+    return true;
+  } catch (err) {
+    process.stdout.write(`FAIL\n      ${err.message}\n`);
+    results.push({ name, status: 'FAIL', detail: err.message });
+    failed++;
+    return false;
+  }
+}
+
+console.log(`\nTOEFL House ERP — release validation${quick ? ' (quick)' : ''}\n`);
+
+console.log('Static analysis');
+run('frontend typecheck', 'npm run typecheck');
+run('frontend lint', 'npm run lint');
+run('server lint (eslint + tsc)', 'npm run lint', { cwd: path.join(root, 'server') });
+run('product integrity audit', 'npm run audit:product');
+run('high-assurance static audit', 'npm run audit:static');
+
+console.log('\nBuild');
+run('frontend production build', 'npm run build', { slow: true });
+run('server production build', 'npm run build', { cwd: path.join(root, 'server'), slow: true });
+run('bundle weight', 'npm run audit:bundle', { slow: true });
+
+console.log('\nTests');
+run('server test suite', 'npm test', { cwd: path.join(root, 'server'), slow: true });
+
+console.log('\nDatabase');
+run('fresh-schema preflight', 'npm run preflight:fresh-schema', { cwd: path.join(root, 'server'), slow: true });
+
+check('fresh install + migrations', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'th-release-'));
+  const dbPath = path.join(tmp, 'fresh.sqlite');
+  const probe = path.join(tmp, 'probe.mjs');
+  fs.writeFileSync(probe, `
+    import { db, initSchema } from ${JSON.stringify(path.join(root, 'server', 'src', 'db', 'connection.ts'))};
+    initSchema();
+    const migrations = db.prepare('SELECT COUNT(*) c FROM schema_migrations').get().c;
+    const tables = db.prepare("SELECT COUNT(*) c FROM sqlite_master WHERE type='table'").get().c;
+    const integrity = db.pragma('integrity_check')[0].integrity_check;
+    const fk = db.pragma('foreign_key_check').length;
+    console.log('RESULT ' + JSON.stringify({ migrations, tables, integrity, fk }));
+  `);
+  const out = execSync(`npx tsx ${JSON.stringify(probe)}`, {
+    cwd: path.join(root, 'server'), stdio: 'pipe', encoding: 'utf8',
+    env: { ...process.env, DB_PATH: dbPath, NODE_ENV: 'test' },
+  });
+  const line = out.trim().split('\n').filter((l) => l.startsWith('RESULT ')).pop();
+  if (!line) throw new Error('fresh-install probe produced no result');
+  const r = JSON.parse(line.slice('RESULT '.length));
+  if (r.integrity !== 'ok') throw new Error(`integrity_check = ${r.integrity}`);
+  if (r.fk !== 0) throw new Error(`${r.fk} foreign-key violations`);
+  if (r.migrations < 1) throw new Error('no migrations applied');
+  fs.rmSync(tmp, { recursive: true, force: true });
+  return `${r.migrations} migrations, ${r.tables} tables, integrity ok`;
+});
+
+console.log('\nBranding');
+check('official logo asset present', () => {
+  const branding = fs.readFileSync(path.join(root, 'src', 'config', 'branding.ts'), 'utf8');
+  const url = /BRAND_LOGO_URL = '([^']+)'/.exec(branding)?.[1];
+  if (!url) throw new Error('BRAND_LOGO_URL is not defined in src/config/branding.ts');
+  const asset = path.join(root, 'public', url.replace(/^\//, ''));
+  if (!fs.existsSync(asset)) {
+    throw new Error(`missing ${path.relative(root, asset)} — copy the official PNG there (see public/brand/README.md)`);
+  }
+  if (fs.statSync(asset).size < 1024) throw new Error('logo asset is suspiciously small; is it a placeholder?');
+  return `${(fs.statSync(asset).size / 1024).toFixed(1)} KB`;
+});
+check('official slogan is exact', () => {
+  const branding = fs.readFileSync(path.join(root, 'src', 'config', 'branding.ts'), 'utf8');
+  if (!branding.includes("BRAND_SLOGAN = 'Unlock the world with TOEFL'")) {
+    throw new Error('BRAND_SLOGAN does not match the official wording');
+  }
+  return 'Unlock the world with TOEFL';
+});
+
+console.log('\nRelease hygiene');
+check('no build output or secrets tracked', () => {
+  const tracked = execSync('git ls-files', { cwd: root, encoding: 'utf8' }).split('\n');
+  const forbidden = tracked.filter((f) =>
+    /^(dist|server\/dist|server\/data)\//.test(f) || /(^|\/)\.env$/.test(f) || /\.sqlite(-wal|-shm)?$/.test(f));
+  if (forbidden.length) throw new Error(`tracked build output/secrets: ${forbidden.slice(0, 5).join(', ')}`);
+  return `${tracked.length - 1} files tracked`;
+});
+check('CI workflow is active', () => {
+  const active = path.join(root, '.github', 'workflows');
+  if (!fs.existsSync(active) || fs.readdirSync(active).filter((f) => /\.ya?ml$/.test(f)).length === 0) {
+    throw new Error('.github/workflows is empty — ci/github-actions-ci.yml has not been activated, so NO gate runs automatically');
+  }
+  return 'workflows present';
+});
+
+const pass = results.filter((r) => r.status === 'PASS').length;
+const skip = results.filter((r) => r.status === 'SKIP').length;
+console.log(`\n${'─'.repeat(58)}`);
+console.log(`  ${pass} passed · ${failed} failed · ${skip} skipped`);
+if (failed) {
+  console.log('\n  RELEASE BLOCKED:');
+  for (const r of results.filter((x) => x.status === 'FAIL')) console.log(`    · ${r.name}`);
+  console.log();
+  process.exit(1);
+}
+console.log('\n  RELEASE VALIDATION PASSED\n');

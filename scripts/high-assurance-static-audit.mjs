@@ -97,10 +97,17 @@ if (sourceFiles.length) {
 // excludes them from source/release preparation.
 if (!sourceOnly) {
   const gitignore = exists('.gitignore') ? read('.gitignore') : '';
-  const cleanScript = exists('scripts/prepare-clean-release.ps1') ? read('scripts/prepare-clean-release.ps1') : '';
   for (const required of ['node_modules', 'dist', 'server/data', 'server/.env', '.env']) {
     if (!gitignore.includes(required)) failures.push(`.gitignore must exclude ${required}.`);
-    if (!cleanScript.includes(required)) failures.push(`Clean-release preparation must remove ${required}.`);
+  }
+  // Release hygiene is now asserted against the real repository state by
+  // scripts/release-validate.mjs ("no build output or secrets tracked"), which
+  // reads `git ls-files`. The previous check grepped a PowerShell script for
+  // path strings — it passed whether or not that script could run, and the
+  // script exited 127 on any non-Windows machine, so CI would have reported a
+  // release step that never executed as successful.
+  if (!exists('scripts/release-validate.mjs')) {
+    failures.push('scripts/release-validate.mjs (portable release gate) is missing.');
   }
 }
 
