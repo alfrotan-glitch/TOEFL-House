@@ -1,0 +1,110 @@
+/**
+ * Reconciliation must check the CASH POSITION, not only payments vs ledger.
+ * ============================================================================
+ * Why this exists (2026-08-16 release-candidate audit):
+ *
+ *   GET /finance/reconciliation compared payment rows against their ledger
+ *   rows. Both live in the same table family, so the check was structurally
+ *   incapable of seeing a money path that updated the ledger but not the cash
+ *   account.
+ *
+ *   That blind spot is what let F-10 survive: a book-sale refund wrote a -500
+ *   contra row and never debited finance_accounts. The branch was reporting
+ *   500 AFN of cash it did not have, and reconciliation still said "healthy".
+ *   Fixing the refund closes that instance; this check closes the CLASS, so
+ *   the next money path that forgets to move cash is caught by the system
+ *   rather than by an auditor.
+ *
+ * Invariant, per branch:
+ *     main_balance   = SUM(income) - SUM(expense) - SUM(saving_transfer)
+ *     saving_balance = SUM(saving_transfer)
+ */
+import { describe, it, expect, beforeEach } from 'vitest';
+import { db, initSchema } from '../db/connection.js';
+import { computeReconciliation } from '../utils/reconciliation.js';
+import { recordIncome } from '../utils/income.js';
+import { getFinanceAccount } from '../utils/financeAccounts.js';
+import { setSetting } from '../utils/settings.js';
+import { id } from '../utils/ids.js';
+
+const BRANCH = 'cash_recon_branch';
+
+const income = (amount: number, category = 'fee') =>
+  db.transaction(() =>
+    recordIncome({
+      category, amount, date: '2026-06-01', description: `${category} ${amount}`,
+      operatorName: 'Test', operatorRole: 'owner', branchId: BRANCH,
+    }),
+  )();
+
+beforeEach(() => {
+  initSchema();
+  db.prepare(`INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, 'Loc')`).run(BRANCH, BRANCH);
+  db.prepare(`DELETE FROM financial_transactions WHERE branch_id = ?`).run(BRANCH);
+  db.prepare(`DELETE FROM finance_accounts WHERE scope_type='branch' AND scope_id = ?`).run(BRANCH);
+  setSetting('daily_saving_percent', '5');
+});
+
+describe('cash-position reconciliation', () => {
+  it('a clean branch reconciles with zero variance', () => {
+    income(1000);
+    income(-200, 'refund');
+    const r = computeReconciliation({ branchId: BRANCH, isAll: false });
+    expect(r.cashVariance).toBe(0);
+    expect(r.savingVariance).toBe(0);
+  });
+
+  it('DETECTS phantom cash: a ledger row written without debiting the account', () => {
+    income(500, 'book');
+    const before = computeReconciliation({ branchId: BRANCH, isAll: false });
+    expect(before.cashVariance).toBe(0);
+
+    // Exactly what F-10 did: a contra-revenue row straight into the ledger,
+    // bypassing recordIncome() and therefore never touching finance_accounts.
+    db.prepare(
+      `INSERT INTO financial_transactions (id, type, category, amount, date, description, operator_name, branch_id)
+       VALUES (?, 'income', 'book_refund', -500, '2026-06-02', 'hand-rolled contra row', 'Test', ?)`,
+    ).run(id('tx'), BRANCH);
+
+    const after = computeReconciliation({ branchId: BRANCH, isAll: false });
+    // The account still holds cash the ledger says was returned.
+    expect(after.cashVariance).toBe(500);
+    expect(after.healthy).toBe(false);
+
+    // The OLD check could not see this — proving the new dimension is load-bearing.
+    expect(after.amountVariance).toBe(0);
+  });
+
+  it('DETECTS the inverse: cash moved without a ledger row', () => {
+    income(300);
+    db.prepare(
+      `UPDATE finance_accounts SET main_balance = main_balance + 750 WHERE scope_type='branch' AND scope_id = ?`,
+    ).run(BRANCH);
+
+    const r = computeReconciliation({ branchId: BRANCH, isAll: false });
+    expect(r.cashVariance).toBe(750);
+    expect(r.healthy).toBe(false);
+  });
+
+  it('DETECTS a savings balance that drifts from the transfer ledger', () => {
+    income(1000);
+    db.prepare(
+      `UPDATE finance_accounts SET saving_balance = saving_balance + 40 WHERE scope_type='branch' AND scope_id = ?`,
+    ).run(BRANCH);
+
+    const r = computeReconciliation({ branchId: BRANCH, isAll: false });
+    expect(r.savingVariance).toBe(40);
+    expect(r.healthy).toBe(false);
+  });
+
+  it('a real refund through recordIncome keeps the position healthy', () => {
+    income(500, 'book');
+    income(-500, 'book_refund');
+    const acct = getFinanceAccount('branch', BRANCH);
+    expect(acct).toEqual({ mainBalance: 0, savingBalance: 0 });
+
+    const r = computeReconciliation({ branchId: BRANCH, isAll: false });
+    expect(r.cashVariance).toBe(0);
+    expect(r.savingVariance).toBe(0);
+  });
+});

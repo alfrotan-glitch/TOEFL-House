@@ -26,6 +26,9 @@ export interface ReconciliationResult {
     ledgerAmount: number;
     variance: number;
   }>;
+  /** Cash-position check: do finance_accounts agree with the ledger? */
+  cashVariance: number;
+  savingVariance: number;
   healthy: boolean;
 }
 
@@ -92,6 +95,29 @@ export function computeReconciliation(opts: { branchId: string | null; isAll: bo
     ? db.prepare(mismatchSql).all()
     : db.prepare(mismatchSql).all(boundBranchId)) as Array<{ payment_id: string; payment_amount: number; ledger_amount: number }>;
 
+  // ── Cash position ────────────────────────────────────────────────────────
+  // The payment/ledger check above compares two views of the SAME table family
+  // and so cannot see a money path that updates the ledger but not the cash
+  // account. That blind spot hid F-10: a book-sale refund wrote a -500 contra
+  // row and never debited finance_accounts, leaving 500 AFN of phantom cash
+  // that every reconciliation still reported as healthy.
+  //
+  // Invariant, per branch:
+  //     main_balance   = income - expense - saving_transfer
+  //     saving_balance = saving_transfer
+  const cashSql = `SELECT COALESCE(SUM(CASE WHEN type='income' THEN amount WHEN type='expense' THEN -amount WHEN type='saving_transfer' THEN -amount ELSE 0 END),0) AS v FROM financial_transactions WHERE 1=1`;
+  const savingSql = `SELECT COALESCE(SUM(CASE WHEN type='saving_transfer' THEN amount ELSE 0 END),0) AS v FROM financial_transactions WHERE 1=1`;
+  const expectedMain = scalarValue(cashSql, 'AND branch_id = ?', boundBranchId);
+  const expectedSaving = scalarValue(savingSql, 'AND branch_id = ?', boundBranchId);
+
+  const acctSql = `SELECT COALESCE(SUM(main_balance),0) AS main, COALESCE(SUM(saving_balance),0) AS saving FROM finance_accounts WHERE scope_type = 'branch'`;
+  const acctRow = (boundBranchId === null
+    ? db.prepare(acctSql).get()
+    : db.prepare(`${acctSql} AND scope_id = ?`).get(boundBranchId)) as { main: number; saving: number };
+
+  const cashVariance = Math.round((Number(acctRow.main || 0) - expectedMain) * 100) / 100;
+  const savingVariance = Math.round((Number(acctRow.saving || 0) - expectedSaving) * 100) / 100;
+
   return {
     scope: isAll ? 'organization' : 'branch',
     branchId: branchId || null,
@@ -108,6 +134,9 @@ export function computeReconciliation(opts: { branchId: string | null; isAll: bo
       ledgerAmount: r.ledger_amount,
       variance: Math.round((Number(r.payment_amount) - Number(r.ledger_amount)) * 100) / 100,
     })),
-    healthy: Math.abs(paymentBacked - ledgerBacked) < 0.01 && unmatchedPayments === 0 && orphanLedgerRows === 0 && mismatchRows.length === 0,
+    cashVariance,
+    savingVariance,
+    healthy: Math.abs(paymentBacked - ledgerBacked) < 0.01 && unmatchedPayments === 0 && orphanLedgerRows === 0 && mismatchRows.length === 0
+      && Math.abs(cashVariance) < 0.01 && Math.abs(savingVariance) < 0.01,
   };
 }
