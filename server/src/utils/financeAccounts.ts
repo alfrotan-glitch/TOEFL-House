@@ -25,7 +25,9 @@ function statements(database: Database.Database) {
     stmtIncrementSaving: database.prepare(`UPDATE finance_accounts SET saving_balance = saving_balance + ?, updated_at = datetime('now')
       WHERE scope_type = ? AND scope_id = ?`),
     stmtDecrementMainIfSufficient: database.prepare(`UPDATE finance_accounts SET main_balance = main_balance - ?, updated_at = datetime('now')
-      WHERE scope_type = ? AND scope_id = ? AND main_balance >= ?`)
+      WHERE scope_type = ? AND scope_id = ? AND main_balance >= ?`),
+    stmtDecrementSavingIfSufficient: database.prepare(`UPDATE finance_accounts SET saving_balance = saving_balance - ?, updated_at = datetime('now')
+      WHERE scope_type = ? AND scope_id = ? AND saving_balance >= ?`)
   };
 }
 
@@ -70,5 +72,18 @@ export function decrementMainBalanceIfSufficient(scope: FinanceAccountScope, sco
   ensureFinanceAccount(scope, scopeId);
   const { stmtDecrementMainIfSufficient } = statements(getDb());
   return stmtDecrementMainIfSufficient.run(amount, scope, scopeId, amount).changes === 1;
+}
+
+/**
+ * Debits the saving account only if it fully covers the amount, in one
+ * conditional UPDATE. Used when a reversal must reclaim money that the
+ * automatic savings sweep moved out of main — see recordIncome().
+ */
+export function decrementSavingBalanceIfSufficient(scope: FinanceAccountScope, scopeId: string, amount: number): boolean {
+  amount = assertMoney(amount, 'saving account debit');
+  if (amount <= 0) return false;
+  ensureFinanceAccount(scope, scopeId);
+  const { stmtDecrementSavingIfSufficient } = statements(getDb());
+  return stmtDecrementSavingIfSufficient.run(amount, scope, scopeId, amount).changes === 1;
 }
 

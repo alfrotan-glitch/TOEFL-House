@@ -1,8 +1,15 @@
 import { assertMoney } from './money.js';
+import { HttpError } from '../middleware/errorHandler.js';
 import { db } from '../db/connection.js';
 import { id, today } from './ids.js';
 import { getNumberSetting } from './settings.js';
-import { decrementMainBalanceIfSufficient, incrementMainBalance, incrementSavingBalance } from './financeAccounts.js';
+import {
+  decrementMainBalanceIfSufficient, decrementSavingBalanceIfSufficient,
+  getFinanceAccount, incrementMainBalance, incrementSavingBalance,
+} from './financeAccounts.js';
+
+/** Money is stored to 2dp; keep intermediate arithmetic on the same grid. */
+const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
 // ── Performance: Module-level Prepared Statements ──────────────────────────
 const stmtInsertIncomeTx = db.prepare(
@@ -65,8 +72,46 @@ export function recordIncome(params: RecordIncomeParams): { savingAmount: number
   );
 
   if (normalizedAmount < 0) {
-    if (!decrementMainBalanceIfSufficient('branch', params.branchId, Math.abs(normalizedAmount))) {
-      throw new Error('Insufficient branch operating cash for this reversal/refund.');
+    // A reversal must be able to undo what the original income did.
+    //
+    // Positive income does TWO things: it credits main, then immediately
+    // sweeps `daily_saving_percent` of it into savings. Debiting only main on
+    // the way back therefore cannot cover the full amount — after a 200 AFN
+    // payment with a 5% sweep, main holds 190 and a legitimate 200 AFN refund
+    // failed outright. The money was not missing, it was in the savings
+    // account, one row away.
+    //
+    // So: take what main can cover, and reclaim the remainder from the savings
+    // the sweep created. Savings is a destination for operating income, not a
+    // ring-fenced fund, and this only ever pulls back money the sweep itself
+    // put there.
+    const owed = Math.abs(normalizedAmount);
+    if (!decrementMainBalanceIfSufficient('branch', params.branchId, owed)) {
+      const { mainBalance, savingBalance } = getFinanceAccount('branch', params.branchId);
+      const fromSaving = round2(owed - mainBalance);
+      if (mainBalance < 0 || fromSaving > savingBalance) {
+        throw new HttpError(
+          409,
+          `Insufficient branch funds for this reversal/refund. Available: ${round2(mainBalance + savingBalance)} AFN, required: ${owed} AFN.`,
+        );
+      }
+      if (mainBalance > 0 && !decrementMainBalanceIfSufficient('branch', params.branchId, mainBalance)) {
+        throw new HttpError(409, 'Branch operating balance changed during this reversal. Please retry.');
+      }
+      if (!decrementSavingBalanceIfSufficient('branch', params.branchId, fromSaving)) {
+        throw new HttpError(409, 'Insufficient branch savings for this reversal/refund.');
+      }
+      // The sweep that moved this money into savings is itself reversed, so the
+      // saving_transfer ledger nets to what was actually retained.
+      stmtInsertSavingTx.run(
+        id('tx_saving'),
+        -fromSaving,
+        date,
+        `Savings reclaimed to fund reversal: ${params.description}`,
+        'Real-time Saving Engine',
+        params.operatorRole ?? null,
+        params.branchId,
+      );
     }
   } else {
     incrementMainBalance('branch', params.branchId, normalizedAmount);
@@ -79,7 +124,7 @@ export function recordIncome(params: RecordIncomeParams): { savingAmount: number
 
   if (savingAmount > 0) {
     if (!decrementMainBalanceIfSufficient('branch', params.branchId, savingAmount)) {
-      throw new Error('Insufficient branch cash for automatic savings transfer.');
+      throw new HttpError(409, 'Insufficient branch cash for the automatic savings transfer.');
     }
     incrementSavingBalance('branch', params.branchId, savingAmount);
 
