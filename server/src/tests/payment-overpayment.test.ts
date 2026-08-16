@@ -329,3 +329,42 @@ describe('enrolment discount cannot exceed the enrolment fee', () => {
     expect(inv.net_amount).toBe(inv.total_amount - 500);
   });
 });
+
+/**
+ * Fourth instance of the silent-substitution class, found in the final
+ * hardening pass by probing negative values on every money endpoint:
+ *
+ *   POST /invoices  items: [{ quantity: -3, unitPrice: 500 }]
+ *     -> 201, invoice line quantity 1, total 500
+ *
+ * An invalid quantity fell back to 1, so a real invoice line appeared for a
+ * charge the operator never entered. Rejected now, like the capped payment,
+ * the capped discount and the capped enrolment discount before it.
+ */
+describe('invoice line quantities are validated, not coerced', () => {
+  it('rejects a negative quantity instead of substituting 1', async () => {
+    const studentId = await newStudent();
+    const res = await supertest(app).post('/api/invoices').set(auth())
+      .send({ studentId, items: [{ description: 'Tuition', quantity: -3, unitPrice: 500 }] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/quantity/i);
+    const count = db.prepare('SELECT COUNT(*) AS c FROM invoices WHERE student_id = ?').get(studentId) as { c: number };
+    expect(count.c).toBe(0);
+  });
+
+  it('rejects a fractional quantity', async () => {
+    const studentId = await newStudent();
+    const res = await supertest(app).post('/api/invoices').set(auth())
+      .send({ studentId, items: [{ description: 'Tuition', quantity: 1.5, unitPrice: 500 }] });
+    expect(res.status).toBe(400);
+  });
+
+  it('still accepts a valid multi-unit line and prices it correctly', async () => {
+    const studentId = await newStudent();
+    const res = await supertest(app).post('/api/invoices').set(auth())
+      .send({ studentId, items: [{ description: 'Books', quantity: 3, unitPrice: 500 }] });
+    expect(res.status).toBe(201);
+    expect(res.body.totalAmount).toBe(1500);
+  });
+});

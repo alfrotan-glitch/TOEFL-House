@@ -188,8 +188,16 @@ invoicesRouter.post(
     if (student.status === 'suspended') throw new HttpError(409, 'Suspended students cannot receive new invoices.');
 
     const normalized = items.map((it) => {
-      const rawQuantity = Number(it.quantity ?? 1);
-      const quantity = Number.isInteger(rawQuantity) && rawQuantity > 0 ? rawQuantity : 1;
+      // An invalid quantity is REJECTED, not silently coerced to 1. The
+      // fallback meant `quantity: -3` produced a real invoice line of
+      // quantity 1 — a charge the operator never entered, on a financial
+      // document, reported as success. Same silent-substitution class as the
+      // capped payment and the capped discount.
+      const rawQuantity = it.quantity === undefined || it.quantity === null ? 1 : Number(it.quantity);
+      if (!Number.isInteger(rawQuantity) || rawQuantity <= 0) {
+        throw new HttpError(400, 'Each item needs a whole quantity greater than zero.');
+      }
+      const quantity = rawQuantity;
       const unitPrice = assertMoney(it.unitPrice, 'unitPrice');
       if (!it.description?.trim()) {
         throw new HttpError(400, 'Each item needs a description and a non-negative unit price.');

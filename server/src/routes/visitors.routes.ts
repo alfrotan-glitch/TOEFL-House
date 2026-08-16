@@ -401,7 +401,13 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
   const grossTuition = Number(semesterFee != null ? semesterFee : classItem.fee != null ? classItem.fee : 0);
   const requestedDiscount = Math.max(0, Math.min(100, Number(discountPercent) || 0));
   const discountRule = evaluateRules({ category: 'discount', branchId: studentBranchId, data: { discountPercent: requestedDiscount, leadSource: visitor.source }, dryRun: false });
-  const effectiveDiscount = Math.min(30, Number(discountRule.finalOutputs.discountPercent ?? requestedDiscount));
+  // The rule engine IS the discount authority — `rule_default_discount_cap`
+  // holds the institutional ceiling and is editable at runtime by an admin.
+  // This line used to re-cap the engine's answer at a hardcoded 30, so raising
+  // the configured cap to 50% silently had no effect here: the engine returned
+  // 50 and the route quietly clamped it back to 30. A policy that cannot be
+  // changed from the place it is configured is not a policy.
+  const effectiveDiscount = Math.max(0, Math.min(100, Number(discountRule.finalOutputs.discountPercent ?? requestedDiscount)));
   const netTuition = Math.max(0, Math.round(grossTuition - (grossTuition * effectiveDiscount) / 100));
   const paidNow = Number(amountPaid);
   if (paidNow > netTuition && netTuition > 0) throw new HttpError(400, `Amount received cannot exceed payable fee: ${netTuition} AFN.`);
