@@ -44,14 +44,6 @@ export function resolvePlacementRequirement(
   return { mode, profile, reason: mode === 'optional' ? 'policy_optional' : 'policy_required', firstLevelExemptApplied: false };
 }
 
-/** Is the given level the first (lowest-order) level of the program version? */
-export function isFirstLevel(programVersionId: string, levelId: string | null | undefined): boolean {
-  if (!levelId) return false;
-  const levels = stmtVersionLevels.all(programVersionId, programVersionId) as any[];
-  const first = levels.filter((l) => Number(l.is_active) !== 0).sort((a, b) => Number(a.order) - Number(b.order))[0];
-  return !!first && String(first.id) === String(levelId);
-}
-
 /** Full policy view for a visitor (profile + rules + resolved requirement). */
 export function resolvePolicyForVisitor(visitor: any, targetLevelId?: string | null) {
   const version = stmtProgramVersion.get(visitor.program_version_id) as any;

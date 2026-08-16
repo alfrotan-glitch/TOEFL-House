@@ -14,6 +14,7 @@ import { getFinanceAccount } from '../utils/financeAccounts.js';
 import { id, today } from '../utils/ids.js';
 import { recordIncome } from '../utils/income.js';
 import { nextReceiptNumber, nextStudentCode } from '../utils/receipt.js';
+import Database from 'better-sqlite3';
 
 const BRANCH_ID = 'b_extended';
 
@@ -594,7 +595,6 @@ describe('§E Transaction Safety', () => {
 describe('§F True Concurrency (Multi-Connection)', () => {
   it('F1: SQLite WAL handles concurrent readers + writer stress test', () => {
     // Open 5 readonly connections to verify WAL concurrent read support
-    const Database = require('better-sqlite3');
     const readers = [];
     for (let i = 0; i < 5; i++) {
       const r = new Database(db.name, { readonly: true });

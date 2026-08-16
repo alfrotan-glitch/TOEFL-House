@@ -118,12 +118,6 @@ export function isPostActivation(stage: ClassStage): boolean {
   return POST_ACTIVATION_STAGES.includes(stage);
 }
 
-/** Stages in which day-to-day teaching activity (new sessions, attendance)
- *  should be allowed to proceed. Suspended classes are activated but paused. */
-export function canScheduleTeachingActivity(stage: ClassStage): boolean {
-  return stage === 'in_progress' || stage === 'activated';
-}
-
 // ============================================================================
 // Enrollment Lifecycle Engine
 // ============================================================================

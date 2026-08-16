@@ -7,7 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "seed": "tsx src/db/seed.ts",
-    "lint": "tsc --noEmit",
+    "lint": "eslint src scripts && tsc --noEmit",
     "test": "vitest run",
     "build": "tsc && node scripts/copy-dist-assets.mjs",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",

@@ -71,11 +71,6 @@ export function contractPaysPerSkill(model: TeacherSalaryModel): boolean {
   return model === 'per_skill' || model === 'hybrid' || model === 'per_level';
 }
 
-/** True when the contract includes a guaranteed fixed monthly component. */
-export function contractHasFixedComponent(model: TeacherSalaryModel): boolean {
-  return model === 'fixed' || model === 'hybrid';
-}
-
 export interface TeacherPayrollInput {
   id: string;
   branch_id: string;

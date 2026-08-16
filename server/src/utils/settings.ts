@@ -37,16 +37,6 @@ export function getNumberSetting(key: string, fallback: number): number {
  * Safe under concurrent access.
  */
 
-const stmtAtomicDecrementIfSufficient = db.prepare(
-  `UPDATE system_settings
-   SET value = CAST(value AS INTEGER) - ?
-   WHERE key = ? AND CAST(value AS INTEGER) >= ?`
-);
-
-export function decrementNumberSettingIfSufficient(key: string, amount: number): boolean {
-  if (!Number.isFinite(amount) || amount <= 0) return false;
-  return stmtAtomicDecrementIfSufficient.run(amount, key, amount).changes === 1;
-}
 export function incrementNumberSetting(key: string, delta: number, fallback = 0): number {
   // If the key doesn't exist, it inserts with (fallback + delta).
   // If it exists, it adds delta to the current value and returns the new value.

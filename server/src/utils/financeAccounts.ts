@@ -25,9 +25,7 @@ function statements(database: Database.Database) {
     stmtIncrementSaving: database.prepare(`UPDATE finance_accounts SET saving_balance = saving_balance + ?, updated_at = datetime('now')
       WHERE scope_type = ? AND scope_id = ?`),
     stmtDecrementMainIfSufficient: database.prepare(`UPDATE finance_accounts SET main_balance = main_balance - ?, updated_at = datetime('now')
-      WHERE scope_type = ? AND scope_id = ? AND main_balance >= ?`),
-    stmtSetMain: database.prepare(`UPDATE finance_accounts SET main_balance = ?, updated_at = datetime('now')
-      WHERE scope_type = ? AND scope_id = ?`)
+      WHERE scope_type = ? AND scope_id = ? AND main_balance >= ?`)
   };
 }
 
@@ -74,15 +72,3 @@ export function decrementMainBalanceIfSufficient(scope: FinanceAccountScope, sco
   return stmtDecrementMainIfSufficient.run(amount, scope, scopeId, amount).changes === 1;
 }
 
-export function setMainBalance(scope: FinanceAccountScope, scopeId: string, amount: number): void {
-  amount = assertMoney(amount, 'main account balance');
-  ensureFinanceAccount(scope, scopeId);
-  const { stmtSetMain } = statements(getDb());
-  const result = stmtSetMain.run(amount, scope, scopeId);
-  if (result.changes !== 1) throw new Error('Finance account not found.');
-}
-
-export function sumBranchFinanceAccounts() {
-  const row = getDb().prepare(`SELECT COALESCE(SUM(main_balance),0) AS main_balance, COALESCE(SUM(saving_balance),0) AS saving_balance FROM finance_accounts WHERE scope_type = 'branch'`).get() as { main_balance: number; saving_balance: number };
-  return { mainBalance: Number(row.main_balance || 0), savingBalance: Number(row.saving_balance || 0) };
-}

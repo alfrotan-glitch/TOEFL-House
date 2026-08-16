@@ -513,7 +513,7 @@ academicRouter.put('/program-versions/:id/placement-profile', authorize('owner',
   stmtUpsertPlacementProfile.run(...args);
   writeAudit(req, `Updated placement assessment configuration for ${version.program_name} ${version.version_label}`);
   const row=stmtGetPlacementProfiles.get(req.params.id, version.branch_id) as any;
-  let parsedSections=[]; let parsedComponents=[];
+  let parsedSections: unknown[]; let parsedComponents: unknown[];
   try { parsedSections=JSON.parse(row.sections_json||'[]'); } catch { parsedSections=[]; }
   try { parsedComponents=JSON.parse(row.components_json||'[]'); } catch { parsedComponents=[]; }
   res.json({ configured:true, programVersionId:req.params.id, programName:version.program_name, versionLabel:version.version_label, required:!!row.required, enabled:!!row.enabled, method:row.method, sections:parsedSections, components:parsedComponents, scoringModel:row.scoring_model || 'weighted_average', allowRetake:!!row.allow_retake, maxScore:Number(row.max_score), passScore:Number(row.pass_score), instructions:row.instructions });

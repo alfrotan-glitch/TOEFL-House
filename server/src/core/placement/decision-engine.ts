@@ -87,7 +87,7 @@ export function evaluateDecision(opts: {
     : null;
 
   // 1) Policy decision rules (conditional skill thresholds).
-  let policyRules: DecisionRule[] = [];
+  let policyRules: DecisionRule[];
   try { policyRules = opts.decisionRulesJson ? JSON.parse(opts.decisionRulesJson) : []; } catch { policyRules = []; }
   if (Array.isArray(policyRules) && policyRules.length > 0 && percentage != null) {
     for (const rule of policyRules) {

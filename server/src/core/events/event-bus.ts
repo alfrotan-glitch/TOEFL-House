@@ -529,21 +529,6 @@ export const eventBus = new EventBus();
 // §5 — CONVENIENCE HELPERS
 // ============================================================================
 
-export function createChildEvent(
-  parent: DomainEvent,
-  type: DomainEventType,
-  aggregateType: AggregateType,
-  aggregateId: string,
-  payload: Record<string, unknown>,
-): DomainEvent {
-  return eventBus.createEvent(type, aggregateType, aggregateId, payload, {
-    correlationId: parent.correlationId,
-    causationId: parent.id,
-    operatorId: parent.operatorId,
-    branchId: parent.branchId,
-  });
-}
-
 export async function initializeEventBus(): Promise<void> {
   initEventBusSchema();
   eventBus.markHandlersReady();

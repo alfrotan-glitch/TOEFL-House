@@ -195,7 +195,7 @@ classTeacherSkillsRouter.post(
     // One-off roles (substitute/guest/examiner) may also be unpaid or
     // compensated outside the monthly-rate mechanism.
     const paysPerSkill = contractPaysPerSkill(normalizeContractType(teacher.salary_type));
-    let resolvedRate = monthlyRate != null ? Number(monthlyRate) : Number(teacher.default_skill_rate) || 0;
+    const resolvedRate = monthlyRate != null ? Number(monthlyRate) : Number(teacher.default_skill_rate) || 0;
     if (!Number.isFinite(resolvedRate) || resolvedRate < 0) throw new HttpError(400, 'monthlyRate must be a non-negative number.');
     if (resolvedRate <= 0 && paysPerSkill && PAYROLL_ELIGIBLE_TYPES.includes(resolvedType)) {
       throw new HttpError(400, 'monthlyRate is required for a primary/assistant assignment on a Skill-paid contract (or set defaultSkillRate on the teacher contract).');

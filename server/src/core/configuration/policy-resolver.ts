@@ -25,11 +25,3 @@ export function resolveFee(db: BetterSqlite3.Database, branchId: string | null |
   return row?.value != null && Number.isFinite(Number(row.value)) ? Number(row.value) : fallback;
 }
 
-export function resolveFeeSchedule(db: BetterSqlite3.Database, branchId: string | null | undefined) {
-  return {
-    placementTestFee: resolveFee(db, branchId, 'placementTestFee'),
-    registrationFee: resolveFee(db, branchId, 'registrationFee'),
-    cardIssuanceFee: resolveFee(db, branchId, 'cardIssuanceFee'),
-    diplomaFee: resolveFee(db, branchId, 'diplomaFee'),
-  };
-}
