@@ -241,7 +241,7 @@ export default function AcademicSetupView({ branchId }: { branchId?: string } = 
                       </>
                     ) : (
                       <>
-                        <div className="flex-1 min-w-[140px]"><p className="font-bold">{s.label} <span className="font-mono text-indigo-600">({s.code})</span></p><p className="text-[10px] text-slate-500">{s.startTime} – {s.endTime}</p></div>
+                        <div className="flex-1 min-w-[200px]"><p className="font-bold break-words">{s.label} <span className="font-mono text-indigo-600">({s.code})</span></p><p className="text-[10px] text-slate-500">{s.startTime} – {s.endTime}</p></div>
                         <ToggleActive active={s.isActive} disabled={busy} onToggle={() => run(async () => { await api.put(`/academic/time-slots/${s.id}`, { isActive: !s.isActive }); })} />
                         <button type="button" className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg" onClick={() => { setEditSlotId(s.id); setEditSlot({ code: s.code, label: s.label, startTime: s.startTime, endTime: s.endTime }); }}><Pencil className="w-3.5 h-3.5" /></button>
                         <button type="button" className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg" disabled={busy} onClick={() => { if (!window.confirm('Deactivate this time slot?')) return; run(async () => { await api.delete(`/academic/time-slots/${s.id}`); }); }}><Trash2 className="w-3.5 h-3.5" /></button>
@@ -320,14 +320,14 @@ export default function AcademicSetupView({ branchId }: { branchId?: string } = 
                           <div className="flex-1 min-w-0">
                             {editProgId === p.id ? (
                               <div className="flex flex-wrap gap-1.5 text-xs">
-                                <input value={editProgName} onChange={(e) => setEditProgName(e.target.value)} className="border border-slate-200 rounded-lg px-2 py-1 font-bold" />
+                                <input value={editProgName} onChange={(e) => setEditProgName(e.target.value)} className="border border-slate-200 rounded-lg px-2 py-1 font-bold flex-1 min-w-[180px]" placeholder="Program name" />
                                 <input value={editProgCode} onChange={(e) => setEditProgCode(e.target.value)} className="border border-slate-200 rounded-lg px-2 py-1 font-mono w-24" placeholder="Code" />
                                 <input value={editProgDesc} onChange={(e) => setEditProgDesc(e.target.value)} className="border border-slate-200 rounded-lg px-2 py-1 flex-1 min-w-[120px]" placeholder="Description" />
                                 <button type="button" disabled={busy} className="p-1.5 rounded-lg bg-emerald-600 text-white" onClick={() => run(async () => { await api.put(`/academic/programs/${p.id}`, { name: editProgName, code: editProgCode || null, description: editProgDesc || null }); setEditProgId(null); })}><Check className="w-3.5 h-3.5" /></button>
                                 <button type="button" className="p-1.5 rounded-lg bg-slate-100 text-slate-600" onClick={() => setEditProgId(null)}><X className="w-3.5 h-3.5" /></button>
                               </div>
                             ) : (
-                              <><p className="font-extrabold text-slate-900 text-sm truncate">{p.name} {p.code ? <span className="font-mono text-indigo-600 text-xs">({p.code})</span> : null}</p>{p.description && <p className="text-[10px] text-slate-400 truncate">{p.description}</p>}</>
+                              <><p className="font-extrabold text-slate-900 text-sm break-words">{p.name} {p.code ? <span className="font-mono text-indigo-600 text-xs">({p.code})</span> : null}</p>{p.description && <p className="text-[10px] text-slate-500 break-words leading-relaxed mt-0.5">{p.description}</p>}</>
                             )}
                           </div>
                           <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{childLevels.length} level{childLevels.length === 1 ? '' : 's'}</span>
@@ -357,14 +357,14 @@ export default function AcademicSetupView({ branchId }: { branchId?: string } = 
                                   </div>
                                 ) : (
                                   <div className="flex flex-wrap items-center gap-2">
-                                    <div className="flex-1 min-w-[140px]">
-                                      <p className="font-bold text-slate-900"><span className="text-slate-400 mr-1">{l.order}.</span>{l.name} {l.code ? <span className="font-mono text-indigo-600">({l.code})</span> : null}</p>
-                                      <p className="text-[10px] text-slate-500 mt-0.5">{l.durationMonths} mo · catalog {formatAFN(l.defaultFee)} · pass {l.passMark}% · min class {(l as any).minViableSize ?? 5}</p>
+                                    <div className="flex-1 min-w-[220px]">
+                                      <p className="font-bold text-slate-900 break-words"><span className="text-slate-400 mr-1">{l.order}.</span>{l.name} {l.code ? <span className="font-mono text-indigo-600">({l.code})</span> : null}</p>
+                                      <p className="text-[10px] text-slate-500 mt-0.5 break-words leading-relaxed">{l.durationMonths} mo · catalog {formatAFN(l.defaultFee)} · pass {l.passMark}% · min class {(l as any).minViableSize ?? 5}</p>
                                     </div>
                                     <div className="flex items-center gap-1.5 bg-emerald-50/80 border border-emerald-100 rounded-lg px-2 py-1">
                                       <Building2 className="w-3 h-3 text-emerald-600" />
                                       <span className="text-[10px] text-emerald-800 font-bold">Branch fee</span>
-                                      <input aria-label="Branch fee override" type="number" className="w-20 border border-emerald-200 rounded px-1.5 py-0.5 text-[11px] font-mono" value={feeFor(l.id, l.defaultFee)} onChange={(e) => setFeeDraft((d) => ({ ...d, [l.id]: Number(e.target.value) }))} />
+                                      <input aria-label="Branch fee override" type="number" className="w-28 border border-emerald-200 rounded px-2 py-0.5 text-[11px] font-mono" value={feeFor(l.id, l.defaultFee)} onChange={(e) => setFeeDraft((d) => ({ ...d, [l.id]: Number(e.target.value) }))} />
                                       <button title="Save branch-specific fee override" type="button" disabled={busy} className="text-[10px] font-bold text-emerald-700 hover:underline" onClick={() => run(async () => { await api.put('/academic/level-fees', { levelId: l.id, fee: feeFor(l.id, l.defaultFee) }); })}>Save</button>
                                     </div>
                                     <ToggleActive active={l.isActive} disabled={busy} onToggle={() => run(async () => { await api.put(`/academic/levels/${l.id}`, { isActive: !l.isActive }); })} />

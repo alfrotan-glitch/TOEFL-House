@@ -12,6 +12,7 @@ import { useAuth } from '../../contexts/useAuth';
 import type { Student, Payment, Attendance } from '../../types';
 import { printStudentIdCard, type IdCardDesign } from '../../utils/certificateTemplates';
 import { formatAFN } from '../../utils/format';
+import { computeStudentBalance } from '../../utils/studentBalance';
 
 export default function StudentPortalView() {
   const { logout } = useAuth();
@@ -60,9 +61,12 @@ export default function StudentPortalView() {
   const myAttendance = attendance.filter((a) => a.targetId === student.id && a.targetType === 'student');
   const present = myAttendance.filter((a) => a.status === 'present' || a.status === 'leave').length;
   const rate = myAttendance.length ? Math.round((present / myAttendance.length) * 100) : null;
-  const totalDue = (student.semesters || []).reduce((acc, s) => acc + (s.status === 'active' ? (Number(s.netFeeAmount ?? s.feeAmount) || 0) : 0), 0);
-  const totalPaid = myPayments.filter((p) => p.category === 'fee' || p.category === 'installment').reduce((acc, p) => acc + Number(p.amount || 0), 0);
-  const debt = Math.max(0, totalDue - totalPaid);
+  // Was excluding refunds, so a refunded student saw their debt as already
+  // settled. Uses the shared authoritative helper now.
+  const portalBalance = computeStudentBalance(student.id, student.semesters, myPayments, 'active');
+  const totalDue = portalBalance.tuitionDue;
+  const totalPaid = portalBalance.tuitionPaid;
+  const debt = portalBalance.outstanding;
   const cardDesign = student.cardDesign;
 
   const printCard = () => {

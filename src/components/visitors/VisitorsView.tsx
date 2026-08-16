@@ -283,7 +283,7 @@ export default function VisitorsView({
                             <div key={v.id} onClick={() => setSelectedVisitorId(v.id)} className="bg-white border border-slate-200 rounded-xl p-3 space-y-2 shadow-sm hover:shadow-md hover:border-indigo-200 transition-all cursor-pointer">
                               <div className="flex items-start justify-between gap-2">
                                 <div className="min-w-0">
-                                  <p className="font-extrabold text-slate-800 text-[11px] truncate">{v.fullName}</p>
+                                  <p className="font-extrabold text-slate-800 text-[11px] break-words">{v.fullName}</p>
                                   <p className="text-[9px] font-mono text-slate-400 mt-0.5">{v.serialNo}</p>
                                 </div>
                                 {v.nextContactDate && <span className={`text-[9px] font-black ${v.nextContactDate < todayIso ? 'text-rose-600' : 'text-slate-400'}`}>{v.nextContactDate < todayIso ? 'OVERDUE' : v.nextContactDate}</span>}

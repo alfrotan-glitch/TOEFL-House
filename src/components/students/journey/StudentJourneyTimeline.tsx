@@ -162,7 +162,7 @@ export default function StudentJourneyTimeline({ studentId }: Props) {
           </div>
           <div className="bg-slate-50 border border-slate-100 rounded-xl p-2">
             <p className="text-slate-400 font-bold uppercase tracking-wide">Program</p>
-            <p className="font-extrabold text-slate-900 mt-0.5 truncate">{state.currentProgram || '—'}</p>
+            <p className="font-extrabold text-slate-900 mt-0.5 break-words">{state.currentProgram || '—'}</p>
           </div>
           <div className={`border rounded-xl p-2 ${state.finance.remaining > 0 ? 'bg-rose-50/50 border-rose-100' : 'bg-emerald-50/50 border-emerald-100'}`}>
             <p className={`font-bold uppercase tracking-wide ${state.finance.remaining > 0 ? 'text-rose-500' : 'text-emerald-500'}`}>Balance Due</p>

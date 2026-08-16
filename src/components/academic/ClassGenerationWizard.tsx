@@ -168,8 +168,8 @@ export default function ClassGenerationWizard({ branchId }: { branchId?: string 
         )}
 
         {selectedOffering && <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 px-3 py-3"><div className="text-[10px] font-bold uppercase text-indigo-500">Program</div><div className="text-sm font-extrabold text-slate-800 truncate mt-1">{selectedOffering.programName || '—'}</div></div>
-          <div className="rounded-xl border border-sky-100 bg-sky-50/60 px-3 py-3"><div className="text-[10px] font-bold uppercase text-sky-500">Level</div><div className="text-sm font-extrabold text-slate-800 truncate mt-1">{selectedOffering.levelName || '—'}</div></div>
+          <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 px-3 py-3"><div className="text-[10px] font-bold uppercase text-indigo-500">Program</div><div className="text-sm font-extrabold text-slate-800 break-words mt-1">{selectedOffering.programName || '—'}</div></div>
+          <div className="rounded-xl border border-sky-100 bg-sky-50/60 px-3 py-3"><div className="text-[10px] font-bold uppercase text-sky-500">Level</div><div className="text-sm font-extrabold text-slate-800 break-words mt-1">{selectedOffering.levelName || '—'}</div></div>
           <div className="rounded-xl border border-amber-100 bg-amber-50/60 px-3 py-3"><div className="text-[10px] font-bold uppercase text-amber-600 flex items-center gap-1"><DollarSign className="w-3 h-3" /> Fee Snapshot</div><div className="text-sm font-extrabold text-slate-800 mt-1">{formatAFN(selectedOffering.feeSnapshot)}</div></div>
           <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 px-3 py-3"><div className="text-[10px] font-bold uppercase text-emerald-600 flex items-center gap-1"><Users className="w-3 h-3" /> Planned Capacity</div><div className="text-sm font-extrabold text-slate-800 mt-1">{selectedOffering.capacityTotal || 0} seats <span className="text-[10px] font-semibold text-slate-400">(derived)</span></div></div>
         </div>}

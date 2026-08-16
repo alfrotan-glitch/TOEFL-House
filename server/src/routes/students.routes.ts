@@ -5,6 +5,7 @@ import { nextInvoiceNumber } from '../utils/invoice.js';
  */
 import { Router } from 'express';
 import { db } from '../db/connection.js';
+import { getStudentBalance } from '../utils/studentBalance.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { hasAnyRole } from '../core/rbac/rbac-service.js';
 import { writeAudit } from '../middleware/audit.js';
@@ -200,12 +201,9 @@ function checkAcademicHold(req: import('express').Request, studentId: string) {
   const canOverride = !!req.rbac && hasAnyRole(req.rbac, ['owner', 'general_manager', 'finance_manager']);
   if (canOverride) return;
 
-  const semesters = stmtGetActiveSemesterBalances.all(studentId) as Array<{ id: string; semester_name: string; net_fee_amount: number | null; fee_amount: number | null }>;
-  const totalDebt = semesters.reduce((sum, sem) => {
-    const due = Number(sem.net_fee_amount ?? sem.fee_amount ?? 0);
-    const paid = Number((stmtGetStudentPaymentsBySemester.get(studentId, sem.semester_name) as { paid: number } | undefined)?.paid ?? 0);
-    return sum + Math.max(0, due - paid);
-  }, 0);
+  // Uses the shared authoritative balance so the hold threshold agrees with the
+  // debt shown on the profile, the roster, the portal and the dashboard.
+  const totalDebt = getStudentBalance(db, studentId, 'active').outstanding;
 
   if (totalDebt > 0) {
     throw new HttpError(403, `Academic Hold: Student has an outstanding debt of ${totalDebt} AFN. Please clear the balance before new enrollment.`);
@@ -219,7 +217,15 @@ paymentsRouter.get('/', requirePermission('Payment.View'), ah(async (req, res) =
   const { branchId, isAll } = resolveBranchScope(req);
   const { limit, offset } = parsePagination(req);
   const rows = isAll ? stmtGetPaymentsAll.all(limit, offset) : (branchId ? stmtGetPaymentsByBranch.all(branchId, limit, offset) : []);
-  res.json(rows.map((r) => ({ id: r.id, studentId: r.student_id, amount: r.amount, date: r.date, category: r.category, receiptNumber: r.receipt_number })));
+  // `status` and `notes` were omitted, so every consumer saw status===undefined
+  // and rendered refunds as positive '+' payments. `semester` lets a caller
+  // attribute a payment to the term it settled.
+  res.json(rows.map((r) => ({
+    id: r.id, studentId: r.student_id, amount: r.amount, date: r.date,
+    category: r.category, receiptNumber: r.receipt_number,
+    status: r.status, notes: r.notes, semester: r.semester ?? null,
+    paymentMethod: r.payment_method ?? null,
+  })));
 }));
 
 /**

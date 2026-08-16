@@ -50,7 +50,7 @@ export default function TeacherProfileDrawer({
                   <span className="text-[10px] font-bold text-slate-400">Not evaluated</span>
                 )}
               </h2>
-              <p className="text-indigo-100 text-sm">{teacher.specialization || 'TOEFL Instructor'}</p>
+              <p className="text-indigo-100 text-sm">{teacher.specialization?.trim() ? teacher.specialization : <span className="italic text-indigo-200/80">Specialization not set</span>}</p>
               <div className="flex gap-4 mt-1 text-xs text-indigo-50">
                 <span className="flex items-center gap-1"><Phone className="w-3 h-3" /> {teacher.phone}</span>
                 {teacher.email && <span className="flex items-center gap-1"><Mail className="w-3 h-3" /> {teacher.email}</span>}
@@ -84,7 +84,7 @@ export default function TeacherProfileDrawer({
             <div className="grid grid-cols-2 gap-4 text-xs">
               <div>
                 <p className="text-slate-400 font-semibold">Contract Type</p>
-                <p className="font-bold text-slate-800 capitalize">{teacher.salaryType?.replace('_', ' ') || 'Fixed'}</p>
+                <p className="font-bold text-slate-800 capitalize">{teacher.salaryType ? teacher.salaryType.replace('_', ' ') : <span className="italic font-semibold text-slate-400 normal-case">Not set</span>}</p>
               </div>
               <div>
                 <p className="text-slate-400 font-semibold">Base Salary</p>

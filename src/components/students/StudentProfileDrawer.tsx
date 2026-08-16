@@ -7,6 +7,7 @@ import { ShamsiDate } from '../common/ShamsiDate';
 import {CheckCircle2, Award, QrCode, CreditCard, Calendar, AlertCircle, Palette, CheckSquare, Printer, Plus, RotateCcw, X, Pencil, Save, Ban, Camera} from 'lucide-react';
 import {Student, Class, Payment, Exam, ExamResult, Attendance} from '../../types';
 import {formatAFN} from '../../utils/format';
+import { computeStudentBalance, isRefundPayment } from '../../utils/studentBalance';
 import {printStudentIdCard} from '../../utils/certificateTemplates';
 import StudentJourneyTimeline from './journey/StudentJourneyTimeline';
 
@@ -86,11 +87,13 @@ export default function StudentProfileDrawer({
     }
   }
 
-  // Financial Calculations
-  const totalTuition = student.semesters?.reduce((acc, s) => acc + (Number(s.netFeeAmount ?? s.feeAmount) || 0), 0) || 0;
-  const totalPaidFees = payments.filter(p => p.studentId === student.id && (p.category === 'fee' || p.category === 'installment' || p.category === 'refund')).reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
-  const remainingDebt = Math.max(0, Number(totalTuition) - Math.max(0, Number(totalPaidFees)));
-  const paidPercentage = totalTuition > 0 ? Math.min(100, Math.round((Math.max(0, totalPaidFees) / totalTuition) * 100)) : 100;
+  // Financial Calculations — single authoritative definition shared with the
+  // roster, the portal, the enrollment hold and the dashboard.
+  const balance = computeStudentBalance(student.id, student.semesters, payments, 'all');
+  const totalTuition = balance.tuitionDue;
+  const totalPaidFees = balance.tuitionPaid;
+  const remainingDebt = balance.outstanding;
+  const paidPercentage = balance.paidPercentage;
 
   // Attendance Calculations
   const studentAttendance = attendance ? attendance.filter(a => a.targetId === student.id && a.targetType === 'student') : [];
@@ -293,8 +296,8 @@ export default function StudentProfileDrawer({
               <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
                 {payments.filter(p => p.studentId === student.id).map(pay => (
                   <div key={pay.id} className="flex justify-between items-center text-[11px] bg-slate-50 border border-slate-100 p-2.5 rounded-xl">
-                    <div><p className="font-black text-slate-800 text-[10px]">{pay.category === 'fee' ? 'Tuition' : pay.category}</p><p className="text-[9px] text-slate-400 font-mono">{pay.date} • {pay.receiptNumber}</p></div>
-                    <span className={`font-mono font-black px-2 py-0.5 rounded-lg border text-[10px] ${pay.status === 'refunded' ? 'bg-rose-50 text-rose-600 border-rose-100' : 'bg-emerald-50 text-emerald-600 border-emerald-100'}`}>{pay.status === 'refunded' ? '-' : '+'}{formatAFN(Number(pay.amount||0))}</span>
+                    <div><p className="font-black text-slate-800 text-[10px]">{pay.category === 'fee' ? 'Tuition' : pay.category === 'refund' ? 'Refund' : pay.category}</p><p className="text-[9px] text-slate-400 font-mono">{pay.date} • {pay.receiptNumber}</p></div>
+                    <span className={`font-mono font-black px-2 py-0.5 rounded-lg border text-[10px] ${isRefundPayment(pay) ? 'bg-rose-50 text-rose-600 border-rose-100' : 'bg-emerald-50 text-emerald-600 border-emerald-100'}`}>{isRefundPayment(pay) ? '−' : '+'}{formatAFN(Math.abs(Number(pay.amount||0)))}</span>
                   </div>
                 ))}
                 {payments.filter(p => p.studentId === student.id).length === 0 && <p className="text-[10px] text-slate-400 text-center py-4 italic">No transactions yet.</p>}

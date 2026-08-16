@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
+import { getBranchOutstanding } from '../utils/studentBalance.js';
 import { authenticate, authorize, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { hasRole } from '../core/rbac/rbac-service.js';
 import { writeAudit } from '../middleware/audit.js';
@@ -70,13 +71,17 @@ const stmtMarketingCost = db.prepare(
 //    debt of every discounted student (proven: 6,000 reported vs 3,000 real).
 //  - count 'installment' payments as well as 'fee'; an installment pays down
 //    exactly the same tuition debt.
-const stmtOutstandingPayments = db.prepare(`
-  SELECT COALESCE(SUM(sem_total.total - COALESCE(paid.total, 0)), 0) as outstanding
-  FROM (SELECT student_id, SUM(COALESCE(net_fee_amount, fee_amount)) as total FROM student_semesters GROUP BY student_id) sem_total
-  JOIN students st ON st.id = sem_total.student_id AND st.branch_id = ?
-  LEFT JOIN (SELECT student_id, SUM(amount) as total FROM payments WHERE category IN ('fee','installment') AND status = 'completed' AND branch_id = ? GROUP BY student_id) paid ON paid.student_id = sem_total.student_id
-  WHERE sem_total.total > COALESCE(paid.total, 0)
-`);
+// Outstanding tuition now comes from the shared authoritative helper
+// (server/src/utils/studentBalance.ts) so the dashboard, the student profile,
+// the roster list, the portal and the enrollment hold cannot drift apart.
+// Two corrections it carries over and one it adds:
+//  - net_fee_amount (post-discount); the gross fee overstated discounted debt.
+//  - 'installment' pays down the same tuition debt as 'fee'.
+//  - NEW: 'refund' is included. Refunds are stored signed-negative, so leaving
+//    them out credited the student with money that had been handed back and
+//    understated branch debt for every refunded student.
+// Per-student outstanding is floored at zero so one student's credit balance
+// cannot mask another student's debt.
 
 const stmtNewStudentsCount = db.prepare(`SELECT COUNT(*) as count FROM students WHERE registration_date BETWEEN ? AND ? AND branch_id=?`);
 const stmtClassAvgSize = db.prepare(`
@@ -190,7 +195,7 @@ bosRouter.get(
     const variableTotal = (stmtVariableTotal.get(branchId) as any).variableTotal;
     const teacherCost = (stmtTeacherCost.get(from, to, branchId) as any).teacherCost;
     const marketingCost = (stmtMarketingCost.get(branchId, from, to) as any).c;
-    const outstandingRow = stmtOutstandingPayments.get(branchId, branchId) as any;
+    const outstandingTuition = getBranchOutstanding(db, branchId);
 
     const financeAccount = getFinanceAccount('branch', branchId);
     const mainAccountBalance = financeAccount.mainBalance;
@@ -223,7 +228,7 @@ bosRouter.get(
       reserveFundBalance: savingBalance,
       reserveFundTarget,
       reserveFundProgress: reserveFundTarget > 0 ? Math.min(100, Math.round((savingBalance / reserveFundTarget) * 100)) : 0,
-      outstandingPayments: outstandingRow.outstanding,
+      outstandingPayments: outstandingTuition,
       teacherCost,
       marketingCost,
       marketingROI: marketingCost > 0 ? Math.round(((monthlyRevenue - marketingCost) / marketingCost) * 100) : null,

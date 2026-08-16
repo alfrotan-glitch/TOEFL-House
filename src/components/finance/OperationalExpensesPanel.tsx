@@ -370,7 +370,7 @@ export default function OperationalExpensesPanel({
                     className="flex items-center justify-between gap-2 border border-slate-100 rounded-xl px-3 py-2 text-xs"
                   >
                     <div className="min-w-0">
-                      <p className="font-bold text-slate-800 truncate">{r.title}</p>
+                      <p className="font-bold text-slate-800 break-words">{r.title}</p>
                       <p className="text-[10px] text-slate-400 mt-0.5">
                         {bl?.name || '—'} · {r.date}
                         {r.billPeriod ? ` · period: ${r.billPeriod}` : ''}

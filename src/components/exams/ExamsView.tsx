@@ -240,7 +240,7 @@ export default function ExamsView({
                 <p className="text-base font-serif text-slate-600 mt-2">has successfully completed and passed the</p>
                 
                 <p className="text-2xl font-serif font-bold text-slate-800 uppercase tracking-wider">
-                  {exams.find(e => e.id === printingResult.examId)?.title || 'Standardized Exam'}
+                  {exams.find(e => e.id === printingResult.examId)?.title ?? ''}
                 </p>
                 
                 <div className="mt-3 px-6 py-1.5 bg-rose-50 border border-rose-200 rounded-full">

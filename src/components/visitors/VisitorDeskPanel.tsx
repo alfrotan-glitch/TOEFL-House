@@ -180,7 +180,7 @@ export default function VisitorDeskPanel({
                   <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0"><Award className="w-4 h-4 text-emerald-700" /></div>
                   <div className="flex-1">
                     <p className="font-extrabold text-emerald-900 text-[11px]">Placement completed — {visitor.placementScore.total}/100</p>
-                    <p className="text-[10px] text-emerald-700 mt-0.5">Recommended: <span className="font-black">{visitor.placementScore.levelRecommendation}</span> · by {visitor.placementScore.examiner || 'Supervisor'}</p>
+                    <p className="text-[10px] text-emerald-700 mt-0.5">Recommended: <span className="font-black">{visitor.placementScore.levelRecommendation}</span> {visitor.placementScore.examiner ? <> · by {visitor.placementScore.examiner}</> : null}</p>
                   </div>
                   <button onClick={onOpenPlacementTest} className="px-2.5 py-1.5 bg-white border border-emerald-200 text-emerald-700 rounded-lg text-[10px] font-bold hover:bg-emerald-50 cursor-pointer">Re-test</button>
                 </div>

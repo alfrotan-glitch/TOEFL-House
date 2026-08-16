@@ -848,7 +848,7 @@ export default function SessionsView({
                     <div className="max-h-48 space-y-2 overflow-y-auto">
                       {classAttendance.slice(0, 12).map((st) => (
                         <div key={st.studentId} className="flex items-center gap-2 text-[11px]">
-                          <span className="w-24 truncate font-semibold text-slate-700">{st.studentName}</span>
+                          <span className="flex-1 min-w-[160px] break-words font-semibold text-slate-700">{st.studentName}</span>
                           <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100">
                             <div
                               className={`h-full rounded-full ${

@@ -12,6 +12,7 @@ import StudentProfileDrawer from './StudentProfileDrawer';
 import {formatAFN} from '../../utils/format';
 import Toast from '../common/Toast';
 import {useAcademicOptions} from '../../hooks/useAcademicOptions';
+import { computeStudentBalance } from '../../utils/studentBalance';
 
 interface StudentsViewProps {
   students: Student[];
@@ -90,15 +91,17 @@ export default function StudentsView({
   // Precomputed finance map — O(1) per row instead of O(students × payments).
   const financeByStudent = useMemo(() => {
     const map = new Map<string, { total: number; paid: number; debt: number }>();
-    const paidByStudent = new Map<string, number>();
+    // Group payments once so this stays O(students + payments), then defer the
+    // arithmetic to the shared authoritative helper.
+    const byStudent = new Map<string, typeof payments>();
     for (const pay of payments) {
-      if (!pay.studentId || (pay.category !== 'fee' && pay.category !== 'installment' && pay.category !== 'refund')) continue;
-      paidByStudent.set(pay.studentId, (paidByStudent.get(pay.studentId) || 0) + Number(pay.amount || 0));
+      if (!pay.studentId) continue;
+      const bucket = byStudent.get(pay.studentId);
+      if (bucket) bucket.push(pay); else byStudent.set(pay.studentId, [pay]);
     }
     for (const st of students) {
-      const total = (st.semesters || []).reduce((acc, sem) => acc + (sem.status === 'active' ? (Number(sem.netFeeAmount ?? sem.feeAmount) || 0) : 0), 0);
-      const paid = Math.max(0, paidByStudent.get(st.id) || 0);
-      map.set(st.id, { total, paid, debt: Math.max(0, total - paid) });
+      const b = computeStudentBalance(st.id, st.semesters, byStudent.get(st.id) || [], 'active');
+      map.set(st.id, { total: b.tuitionDue, paid: b.tuitionPaid, debt: b.outstanding });
     }
     return map;
   }, [students, payments]);

@@ -115,7 +115,7 @@ export default function TestBankAdminView({ triggerToast }: { triggerToast: (m: 
             <div className="flex items-start justify-between gap-2">
               <div className="flex items-center gap-2 min-w-0">
                 <span className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">{t.testType === 'listening' ? <Mic className="w-4 h-4" /> : t.testType === 'reading' ? <BookOpen className="w-4 h-4" /> : t.testType === 'writing' ? <PenLine className="w-4 h-4" /> : <MessageSquareText className="w-4 h-4" />}</span>
-                <div className="min-w-0"><div className="text-sm font-black text-slate-800 truncate">{t.title}</div><div className="text-[10px] text-slate-400 uppercase tracking-wide">{t.testType} · v{t.version ?? 1} · {t.difficulty || 'no difficulty'}</div></div>
+                <div className="min-w-0"><div className="text-sm font-black text-slate-800 break-words">{t.title}</div><div className="text-[10px] text-slate-400 uppercase tracking-wide">{t.testType} · v{t.version ?? 1} · {t.difficulty || 'no difficulty'}</div></div>
               </div>
               <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase shrink-0 ${t.status === 'active' ? 'bg-emerald-100 text-emerald-700' : t.status === 'archived' ? 'bg-slate-100 text-slate-500' : 'bg-amber-100 text-amber-700'}`}>{t.status}</span>
             </div>
