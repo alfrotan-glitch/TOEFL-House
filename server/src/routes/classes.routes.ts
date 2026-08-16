@@ -3,6 +3,7 @@ import { db } from '../db/connection.js';
 import { parsePagination as parsePaginationShared } from '../utils/pagination.js';
 import { assertTextLengths, TEXT_LIMITS } from '../utils/textInput.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
+import { assertClassAccess, isClassTeacherScoped } from '../core/rbac/abac.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
@@ -260,6 +261,14 @@ function requireClass(req: import('express').Request, classId: string): ClassRow
     const cross = !!row.branch_id && canAccessBranchResource(req, row.branch_id);
     if (!cross) throw new HttpError(403, 'Class belongs to another branch.');
   }
+
+  // A branch check is not sufficient for a teacher. Colleagues share a branch,
+  // so branch-only authorization let one teacher read AND overwrite another
+  // teacher's gradebook (proven live: a linked teacher user PUT a score of 99
+  // into a class taught by someone else, and the row persisted). Sessions
+  // already enforce ownership via assertCanMarkSession; classes must match.
+  if (isClassTeacherScoped(req)) assertClassAccess(req, classId);
+
   return row;
 }
 

@@ -46,6 +46,8 @@ function seedStudent(studentId: string, branchId: string, name: string) {
   ).run(studentId, `TH-GL-${studentId.slice(-4)}`, name, today(), branchId);
 }
 
+const GL_TEACHER = 't_gl_owner_profile';
+
 let app: express.Express;
 let owner: TokenPayload;
 let teacher: TokenPayload;
@@ -56,6 +58,16 @@ beforeAll(async () => {
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(BRANCH, 'GL Branch', 'Loc');
   await seedUser('u_gl_owner', 'owner', BRANCH, 'gl_owner');
   await seedUser('u_gl_teacher', 'teacher', BRANCH, 'gl_teacher');
+  // The teacher user must be linked to a real teacher profile, and that
+  // teacher must actually teach the classes under test. Before F-6 was fixed
+  // this fixture had neither, so it asserted that an UNLINKED teacher could
+  // grade a class with NO teacher assigned — a scenario the product must
+  // refuse. Grade-lock behaviour is only meaningful for the owning teacher.
+  db.prepare(
+    `INSERT OR IGNORE INTO teachers (id, full_name, phone, branch_id, status, joined_date)
+     VALUES (?, 'GL Teacher', '0700330001', ?, 'active', ?)`,
+  ).run(GL_TEACHER, BRANCH, today());
+  db.prepare(`UPDATE users SET linked_teacher_id = ? WHERE id = 'u_gl_teacher'`).run(GL_TEACHER);
   syncLegacyUserRoles(db);
   owner = makeUser({ userId: 'u_gl_owner', role: 'owner', branchId: BRANCH });
   teacher = makeUser({ userId: 'u_gl_teacher', role: 'teacher', branchId: BRANCH });
@@ -65,6 +77,7 @@ beforeAll(async () => {
 async function createActivatedClass(name: string): Promise<string> {
   const res = await supertest(app).post('/api/classes').set(authHeader(owner)).send({ name, level: 'A1', branchId: BRANCH, capacity: 10 });
   const classId = res.body.id;
+  db.prepare('UPDATE classes SET teacher_id = ? WHERE id = ?').run(GL_TEACHER, classId);
   const svc = getClassLifecycleService(db);
   svc.activate(classId);
   db.prepare(`INSERT OR IGNORE INTO sessions (id, class_id, date, start_time, end_time, status, session_type, branch_id) VALUES (?, ?, ?, '09:00', '10:00', 'scheduled', 'regular', ?)` )

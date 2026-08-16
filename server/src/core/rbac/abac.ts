@@ -16,6 +16,18 @@ const stmtIsUserClassTeacher = db.prepare(
    WHERE c.id = ? AND u.id = ?`
 );
 
+/**
+ * True when the caller's authority over classes is limited to the classes they
+ * personally teach, rather than to a whole branch. Callers in this bucket must
+ * pass an ownership check on every class they touch — a branch check alone lets
+ * one teacher act on a colleague's class.
+ */
+export function isClassTeacherScoped(req: Request): boolean {
+  if (!req.rbac) return false;
+  const scope = getPermissionScope(req.rbac, 'Class.View');
+  return scope === 'own' || scope === 'class' || hasLegacyRole(req, 'teacher');
+}
+
 export function canAccessClass(req: Request, classId: string): boolean {
   if (!req.user || !req.rbac) return false;
 
@@ -24,8 +36,7 @@ export function canAccessClass(req: Request, classId: string): boolean {
   ).get(classId) as { id: string; branchId: string | null } | undefined;
   if (!row) return false;
 
-  const scope = getPermissionScope(req.rbac, 'Class.View');
-  if (scope === 'own' || scope === 'class' || hasLegacyRole(req, 'teacher')) {
+  if (isClassTeacherScoped(req)) {
     return !!stmtIsUserClassTeacher.get(classId, req.user.userId);
   }
 
