@@ -12,12 +12,33 @@
  *  §8  Student code uniqueness (atomic counter)
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import express from 'express';
+import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { id, today } from '../utils/ids.js';
 import { recordIncome } from '../utils/income.js';
 import { nextReceiptNumber, nextStudentCode } from '../utils/receipt.js';
+import { signToken, type TokenPayload } from '../utils/auth.js';
+import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import invoicesRouter from '../routes/invoices.routes.js';
+import { errorHandler } from '../middleware/errorHandler.js';
 
 const BRANCH_ID = 'b_audit';
+
+/** Real router + real auth, so invoice guards are exercised over HTTP. */
+function invoiceApp() {
+  const app = express();
+  app.use(express.json());
+  app.use('/api/invoices', invoicesRouter);
+  app.use(errorHandler);
+  return app;
+}
+const financeAuth = () => ({
+  Authorization: `Bearer ${signToken({
+    userId: 'u_fin_audit', username: 'u_fin_audit', role: 'finance',
+    branchId: BRANCH_ID, fullName: 'Finance Audit',
+  } as TokenPayload)}`,
+});
 
 beforeAll(() => {
   initSchema();
@@ -33,6 +54,13 @@ beforeAll(() => {
   // Seed the student_code_counter to a known value so tests are deterministic
   db.prepare("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('student_code_counter', '5000')").run();
   db.prepare("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('receipt_counter', '100')").run();
+
+  bootstrapRbacCatalog(db);
+  db.prepare(
+    `INSERT OR REPLACE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
+     VALUES ('u_fin_audit', 'u_fin_audit', 'Finance Audit', 'finance', ?, 'x', 1, 0)`
+  ).run(BRANCH_ID);
+  syncLegacyUserRoles(db);
 });
 
 afterAll(() => {
@@ -276,30 +304,70 @@ describe('§4 Invoice State Machine', () => {
     expect(inv.status).toBe('partial');
   });
 
-  it('paid invoices cannot be cancelled (CHECK constraint)', () => {
-    db.prepare("UPDATE invoices SET status = 'paid' WHERE id = ?").run(invId);
-    // Attempt to cancel — should fail due to application guard
-    const paid = db.prepare('SELECT COALESCE(SUM(amount),0) as s FROM payments WHERE invoice_id = ? AND status = \'completed\'').get(invId) as any;
-    // The cancel endpoint checks: if paid > 0, reject. This is an app-level guard.
-    expect(true).toBe(true); // Verified by code review — cancel rejects if payments exist
+  // The three tests that used to live here were false confidence. They wrote a
+  // status with UPDATE and then asserted the UPDATE had worked — that tests
+  // SQLite, not the product — and one literally read
+  //     expect(true).toBe(true); // Verified by code review
+  // A rule "verified by code review" is not verified at all: the guard could be
+  // deleted and every one of them would still pass. They are replaced below by
+  // requests through the real router, which fail if the guard is removed.
+
+  it('a paid invoice cannot be cancelled — through the real endpoint', async () => {
+    const paidInv = id('inv');
+    db.prepare(
+      `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number)
+       VALUES (?, ?, 1000, 1000, 'paid', ?, '2099-01-01', ?, 'INV-2099-00010')`
+    ).run(paidInv, stuId, today(), BRANCH_ID);
+
+    const res = await supertest(invoiceApp()).post(`/api/invoices/${paidInv}/cancel`).set(financeAuth());
+    expect(res.status).toBe(400);
+    expect(String(res.body.error)).toMatch(/cannot be cancelled/i);
+    expect((db.prepare('SELECT status FROM invoices WHERE id = ?').get(paidInv) as any).status).toBe('paid');
   });
 
-  it('cancelled invoices cannot receive payments (app guard)', () => {
+  it('an invoice with payments cannot be cancelled, even when not marked paid', async () => {
+    const inv = id('inv');
+    db.prepare(
+      `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number)
+       VALUES (?, ?, 1000, 1000, 'partial', ?, '2099-01-01', ?, 'INV-2099-00011')`
+    ).run(inv, stuId, today(), BRANCH_ID);
+    db.prepare(
+      `INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, receipt_number, branch_id, idempotency_key)
+       VALUES (?, ?, ?, 400, ?, 'cash', 'completed', 'fee', ?, ?, ?)`
+    ).run(id('pay'), stuId, inv, today(), nextReceiptNumber(), BRANCH_ID, id('idem'));
+
+    const res = await supertest(invoiceApp()).post(`/api/invoices/${inv}/cancel`).set(financeAuth());
+    expect(res.status).toBe(400);
+    // Cancelling an invoice that already took money would strand the payment.
+    expect(String(res.body.error)).toMatch(/refund first/i);
+  });
+
+  it('a cancelled invoice cannot receive a payment', async () => {
     const inv2 = id('inv');
     db.prepare(
       `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number)
        VALUES (?, ?, 1000, 1000, 'cancelled', ?, '2099-01-01', ?, 'INV-2099-00004')`
     ).run(inv2, stuId, today(), BRANCH_ID);
-    // The pay endpoint checks: only issued/partial/overdue can accept payment
-    // cancelled is NOT in that list — verified by code inspection
-    const inv = db.prepare('SELECT status FROM invoices WHERE id = ?').get(inv2) as any;
-    expect(inv.status).toBe('cancelled');
+
+    const res = await supertest(invoiceApp())
+      .post(`/api/invoices/${inv2}/pay`).set(financeAuth())
+      .send({ amount: 100, paymentMethod: 'cash' });
+    expect(res.status).toBe(400);
+    expect(db.prepare('SELECT COUNT(*) c FROM payments WHERE invoice_id = ?').get(inv2)).toEqual({ c: 0 });
   });
 
-  it('draft invoices cannot receive payments (app guard)', () => {
-    // The pay endpoint only allows: issued, partial, overdue
-    // draft is NOT in that list — verified by code inspection
-    expect(['issued', 'partial', 'overdue'].includes('draft')).toBe(false);
+  it('a draft invoice cannot receive a payment', async () => {
+    const draft = id('inv');
+    db.prepare(
+      `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number)
+       VALUES (?, ?, 1000, 1000, 'draft', ?, '2099-01-01', ?, 'INV-2099-00012')`
+    ).run(draft, stuId, today(), BRANCH_ID);
+
+    const res = await supertest(invoiceApp())
+      .post(`/api/invoices/${draft}/pay`).set(financeAuth())
+      .send({ amount: 100, paymentMethod: 'cash' });
+    expect(res.status).toBe(400);
+    expect(db.prepare('SELECT COUNT(*) c FROM payments WHERE invoice_id = ?').get(draft)).toEqual({ c: 0 });
   });
 });
 
