@@ -368,6 +368,8 @@ export interface Student {
   cardDesign?: CardDesign;
   semesters?: Semester[];
   totalDebt?: number;
+  /** Authoritative, server-computed. Present on GET /students/:id. */
+  balance?: StudentBalances;
 }
 
 export interface PlacementScore {
@@ -1386,6 +1388,30 @@ export interface StudentBalanceRow {
   tuitionPaid: number;
   outstanding: number;
   creditBalance: number;
+  /** Present on server responses. */
+  paidPercentage?: number;
+}
+
+/**
+ * The authoritative balance returned WITH a single student by
+ * GET /api/students/:id. Clients render these figures rather than re-deriving
+ * tuition from the paginated payments array: that duplicate computation
+ * disagreed with the server whenever a semester was completed.
+ *
+ *   lifetime — every semester ever charged (the profile view)
+ *   current  — only currently-active semesters (what is owed right now)
+ */
+export interface StudentBalanceFigures {
+  tuitionDue: number;
+  tuitionPaid: number;
+  outstanding: number;
+  creditBalance: number;
+  paidPercentage: number;
+}
+
+export interface StudentBalances {
+  lifetime: StudentBalanceFigures;
+  current: StudentBalanceFigures;
 }
 
 /**

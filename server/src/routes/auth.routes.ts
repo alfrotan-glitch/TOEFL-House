@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { db } from '../db/connection.js';
 import { hashPassword, verifyPassword, signToken, verifyToken, resolveJwtExpiresInSeconds } from '../utils/auth.js';
 import { id } from '../utils/ids.js';
@@ -23,11 +23,51 @@ function clearSessionCookie(res: import('express').Response): void {
   res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; Max-Age=0; Path=/; HttpOnly; SameSite=Strict${secure}`);
 }
 
-/** Rate limiter for login: max 10 attempts per 15 minutes per IP (Audit §6.5). */
+/**
+ * Login rate limiting — two layers, deliberately.
+ *
+ * The previous single limiter was keyed on IP alone at 10 attempts / 15 min.
+ * Every member of staff at a branch shares one NAT egress IP, so ten wrong
+ * passwords from one person locked out the ENTIRE office for fifteen minutes.
+ * Observed live during the 2026-08-16 audit: four unrelated accounts were
+ * locked out by one probe. That is a trivial internal denial of service and a
+ * standing support burden.
+ *
+ * Layer 1 (per account+IP) is the credential-stuffing guard: it bounds guesses
+ * against any ONE username without punishing colleagues behind the same IP.
+ * Layer 2 (per IP, much wider) still bounds a distributed sweep that rotates
+ * usernames from a single source.
+ */
+const ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
+
+/** Normalised username for keying; falsy/oversized input collapses to a constant. */
+function usernameKeyPart(req: import('express').Request): string {
+  const raw = (req.body as { username?: unknown } | undefined)?.username;
+  if (typeof raw !== 'string') return '_';
+  const trimmed = raw.trim().toLowerCase();
+  // Bound the key so a hostile client cannot grow the limiter's memory with
+  // unique multi-kilobyte usernames.
+  return trimmed ? trimmed.slice(0, 64) : '_';
+}
+
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
+  windowMs: ATTEMPT_WINDOW_MS,
   max: 10,
-  message: { error: 'Too many login attempts. Please try again in 15 minutes.' },
+  keyGenerator: (req) => `${ipKeyGenerator(req.ip ?? '')}|${usernameKeyPart(req)}`,
+  message: { error: 'Too many login attempts for this account. Please try again in 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+/**
+ * Whole-IP ceiling. Sized so a full branch (reception, registrars, finance,
+ * teachers) can legitimately sign in and mistype during one window, while a
+ * scripted sweep across many usernames from one host is still stopped.
+ */
+const loginIpLimiter = rateLimit({
+  windowMs: ATTEMPT_WINDOW_MS,
+  max: 100,
+  message: { error: 'Too many login attempts from this network. Please try again in 15 minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -79,6 +119,7 @@ function buildRequiredRbacContext(row: Pick<UserRow, 'id' | 'username' | 'full_n
 
 authRouter.post(
   '/login',
+  loginIpLimiter,
   loginLimiter,
   ah(async (req, res) => {
     const { username, password } = req.body as { username?: string; password?: string };

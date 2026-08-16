@@ -85,8 +85,8 @@ beforeAll(async () => {
   const mkPayment = (id: string, student: string, amount: number, branch: string) =>
     db
       .prepare(
-        `INSERT OR REPLACE INTO payments (id, student_id, amount, date, payment_method, status, category, receipt_number, branch_id)
-         VALUES (?, ?, ?, ?, 'cash', 'completed', 'fee', ?, ?)`,
+        `INSERT OR REPLACE INTO payments (id, student_id, amount, date, payment_method, status, category, receipt_number, branch_id, idempotency_key)
+         VALUES (?, ?, ?, ?, 'cash', 'completed', 'fee', ?, ?, hex(randomblob(16)))`,
       )
       .run(id, student, amount, d, `RC-${id}`, branch);
 

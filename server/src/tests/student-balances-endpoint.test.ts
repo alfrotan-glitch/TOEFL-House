@@ -82,8 +82,8 @@ beforeEach(async () => {
   const mkPayment = (id: string, n: number, amount: number, category: string) =>
     db
       .prepare(
-        `INSERT OR REPLACE INTO payments (id, student_id, amount, date, payment_method, status, category, receipt_number, branch_id)
-         VALUES (?, ?, ?, ?, 'cash', 'completed', ?, ?, ?)`,
+        `INSERT OR REPLACE INTO payments (id, student_id, amount, date, payment_method, status, category, receipt_number, branch_id, idempotency_key)
+         VALUES (?, ?, ?, ?, 'cash', 'completed', ?, ?, ?, hex(randomblob(16)))`,
       )
       .run(id, `balep_s${n}`, amount, d, category, `RC-${id}`, BRANCH);
 
@@ -158,8 +158,8 @@ describe('S19: balances are aggregated server-side over ALL payments', () => {
          VALUES (?, ?, ?, 'male', ?, 'active', ?, ?)`,
       ).run(`balep_s${i}`, `BEP-${i}`, `Filler ${i}`, `0701${String(i).padStart(6, '0')}`, d, BRANCH);
       db.prepare(
-        `INSERT OR REPLACE INTO payments (id, student_id, amount, date, payment_method, status, category, receipt_number, branch_id)
-         VALUES (?, ?, 500, ?, 'cash', 'completed', 'fee', ?, ?)`,
+        `INSERT OR REPLACE INTO payments (id, student_id, amount, date, payment_method, status, category, receipt_number, branch_id, idempotency_key)
+         VALUES (?, ?, 500, ?, 'cash', 'completed', 'fee', ?, ?, hex(randomblob(16)))`,
       ).run(`balep_fill${i}`, `balep_s${i}`, d, `RC-F${i}`, BRANCH);
     }
 

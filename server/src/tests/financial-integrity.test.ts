@@ -82,8 +82,8 @@ describe('§1 Transaction Integrity', () => {
       ).run(invoiceId, studentId, date, BRANCH_ID);
 
       db.prepare(
-        `INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, receipt_number, branch_id)
-         VALUES (?, ?, ?, 4500, ?, 'cash', 'completed', 'fee', ?, ?)`
+        `INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, receipt_number, branch_id, idempotency_key)
+     VALUES (?, ?, ?, 4500, ?, 'cash', 'completed', 'fee', ?, ?, hex(randomblob(16)))`
       ).run(paymentId, studentId, invoiceId, date, rc, BRANCH_ID);
 
       recordIncome({
@@ -198,8 +198,8 @@ describe('§3 Financial Reconciliation', () => {
       ).run(invoiceId, studentId, amount, amount, date, BRANCH_ID);
 
       db.prepare(
-        `INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, receipt_number, branch_id)
-         VALUES (?, ?, ?, ?, ?, 'cash', 'completed', 'fee', ?, ?)`
+        `INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, receipt_number, branch_id, idempotency_key)
+     VALUES (?, ?, ?, ?, ?, 'cash', 'completed', 'fee', ?, ?, hex(randomblob(16)))`
       ).run(paymentId, studentId, invoiceId, amount, date, rc, BRANCH_ID);
 
       recordIncome({
@@ -318,8 +318,8 @@ describe('§5 Payment Method Validation', () => {
     for (const method of valid) {
       const rc = nextReceiptNumber();
       db.prepare(
-        `INSERT INTO payments (id, student_id, amount, date, payment_method, status, category, receipt_number, branch_id)
-         VALUES (?, ?, 100, ?, ?, 'completed', 'fee', ?, ?)`
+        `INSERT INTO payments (id, student_id, amount, date, payment_method, status, category, receipt_number, branch_id, idempotency_key)
+     VALUES (?, ?, 100, ?, ?, 'completed', 'fee', ?, ?, hex(randomblob(16)))`
       ).run(id('pay'), stuId, today(), method, rc, BRANCH_ID);
 
       const p = db.prepare('SELECT payment_method FROM payments WHERE receipt_number = ?').get(rc) as any;
@@ -336,8 +336,8 @@ describe('§5 Payment Method Validation', () => {
 
     expect(() => {
       db.prepare(
-        `INSERT INTO payments (id, student_id, amount, date, payment_method, status, category, receipt_number, branch_id)
-         VALUES (?, ?, 100, ?, 'crypto', 'completed', 'fee', 'R-FAKE', ?)`
+        `INSERT INTO payments (id, student_id, amount, date, payment_method, status, category, receipt_number, branch_id, idempotency_key)
+     VALUES (?, ?, 100, ?, 'crypto', 'completed', 'fee', 'R-FAKE', ?, hex(randomblob(16)))`
       ).run(id('pay'), stuId, today(), BRANCH_ID);
     }).toThrow();
   });

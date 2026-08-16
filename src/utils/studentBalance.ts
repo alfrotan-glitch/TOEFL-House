@@ -1,78 +1,35 @@
 /**
- * Student tuition balance — the single frontend definition.
- * ============================================================================
- * Mirrors server/src/utils/studentBalance.ts. Three components each had their
- * own arithmetic and disagreed about the same student:
+ * Client-side payment display helpers.
  *
- *   StudentProfileDrawer  fee+installment+refund over ALL semesters
- *   StudentsView (list)   fee+installment+refund over ACTIVE semesters
- *   StudentPortalView     fee+installment      over ACTIVE semesters
+ * WHAT THIS FILE DELIBERATELY DOES NOT DO
+ * ----------------------------------------------------------------------------
+ * It does not compute tuition balances. It used to export
+ * `computeStudentBalance`, which re-derived "how much has this student paid"
+ * in the browser from the loaded `payments` array. That created a second
+ * source of financial truth which disagreed with the server:
  *
- * A student who paid 10,000 + 3,000 and was refunded 2,000 against 13,000 of
- * tuition was shown 11,000 paid / 2,000 owed on staff screens but 13,000 paid
- * / 0 owed in their own portal — the portal silently forgave a real debt.
+ *   - the payments array is ONE PAGE, so any student whose payments fell
+ *     outside the page appeared to owe their full fee, and
+ *   - the client summed ALL semesters while the server's roster endpoint
+ *     summed only ACTIVE ones, so completing a semester made the roster and
+ *     the profile drawer report debts 20,000 AFN apart for the same student.
  *
- * Rules (identical to the server):
- *   - Tuition paid counts categories fee, installment and refund. Refunds are
- *     stored SIGNED (negative), so including them subtracts.
- *   - Non-tuition categories (book, card, exam, diploma, placement, chapter,
- *     other) are real income but do not pay down tuition.
- *   - Outstanding is floored at zero; surplus is reported as creditBalance.
+ * Tuition figures now come exclusively from the server, which sums every
+ * payment in SQL (server/src/utils/studentBalance.ts):
+ *
+ *   GET /api/students/:id     -> `balance.lifetime` and `balance.current`
+ *   GET /api/payments/balances -> one authoritative row per student
+ *
+ * Anything that needs a balance reads one of those. Do not reintroduce a
+ * client-side computation here.
  */
-import type { Payment, Semester } from '../types';
-
-/** Payment categories that pay down tuition. 'refund' is signed-negative. */
-export const TUITION_PAYMENT_CATEGORIES = ['fee', 'installment', 'refund'] as const;
-
-export type BalanceScope = 'all' | 'active';
-
-export interface StudentBalance {
-  tuitionDue: number;
-  tuitionPaid: number;
-  outstanding: number;
-  creditBalance: number;
-  paidPercentage: number;
-}
-
-function round2(n: number): number {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
-}
-
-function isTuitionPayment(category: string | undefined | null): boolean {
-  return (TUITION_PAYMENT_CATEGORIES as readonly string[]).includes(String(category ?? ''));
-}
-
-/** True when a payment row represents money handed back to the student. */
-export function isRefundPayment(pay: Pick<Payment, 'category' | 'status' | 'amount'>): boolean {
-  return pay.category === 'refund' || pay.status === 'refunded' || Number(pay.amount ?? 0) < 0;
-}
+import { Payment } from '../types';
 
 /**
- * Authoritative balance for one student.
- * `payments` may be the whole list; it is filtered by student id here.
+ * True when a payment row represents money handed back to the student.
+ * Presentation only — decides whether the row renders as a credit ("−") or a
+ * debit ("+"). Refunds are stored signed-negative by the server.
  */
-export function computeStudentBalance(
-  studentId: string,
-  semesters: Semester[] | undefined,
-  payments: Payment[] | undefined,
-  scope: BalanceScope = 'all',
-): StudentBalance {
-  const inScope = (semesters ?? []).filter((s) => (scope === 'active' ? s.status === 'active' : true));
-  const tuitionDue = round2(
-    inScope.reduce((acc, s) => acc + (Number(s.netFeeAmount ?? s.feeAmount) || 0), 0),
-  );
-
-  const tuitionPaid = round2(
-    (payments ?? [])
-      .filter((p) => p.studentId === studentId && isTuitionPayment(p.category) && p.status !== 'failed' && p.status !== 'pending')
-      .reduce((acc, p) => acc + (Number(p.amount) || 0), 0),
-  );
-
-  return {
-    tuitionDue,
-    tuitionPaid,
-    outstanding: round2(Math.max(0, tuitionDue - tuitionPaid)),
-    creditBalance: round2(Math.max(0, tuitionPaid - tuitionDue)),
-    paidPercentage: tuitionDue > 0 ? Math.min(100, Math.max(0, Math.round((tuitionPaid / tuitionDue) * 100))) : 100,
-  };
+export function isRefundPayment(pay: Pick<Payment, 'category' | 'status' | 'amount'>): boolean {
+  return pay.category === 'refund' || pay.status === 'refunded' || Number(pay.amount ?? 0) < 0;
 }

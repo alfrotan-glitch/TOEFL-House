@@ -186,6 +186,52 @@ function validateDatabaseIntegrity(db: Database.Database): void {
 /**
  * Runs all pending migrations in db/migrations/ against the given database.
  */
+/** How many pre-migration snapshots to keep before pruning the oldest. */
+const MIGRATION_BACKUP_RETENTION = 10;
+
+/**
+ * Writes a consistent snapshot of the database next to it, under `backups/`.
+ *
+ * Uses `VACUUM INTO`, which produces a transactionally consistent copy of a
+ * live SQLite database — unlike a filesystem copy, which can capture a torn
+ * page or miss the WAL. In-memory databases (tests) are skipped.
+ *
+ * A backup failure must never block startup: an operator with a healthy
+ * database and a full disk still needs the service to come up. The failure is
+ * logged loudly instead.
+ */
+function backupBeforeMigrations(db: Database.Database, pendingCount: number): void {
+  const source = db.name;
+  if (!source || source === ':memory:' || source.startsWith('file:memory')) return;
+  // A throwaway test database is recreated from scratch on every run, so a
+  // recovery point is meaningless — and writing one would litter the source
+  // tree with snapshots beside src/tests/test.sqlite.
+  if (process.env.NODE_ENV === 'test') return;
+
+  try {
+    const backupDir = path.join(path.dirname(source), 'backups');
+    fs.mkdirSync(backupDir, { recursive: true });
+
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const target = path.join(backupDir, `pre-migration-${stamp}.sqlite`);
+    // VACUUM INTO cannot overwrite, so a collision means a backup already exists.
+    if (!fs.existsSync(target)) {
+      db.prepare('VACUUM INTO ?').run(target);
+      console.log(`🛟 Pre-migration backup written (${pendingCount} pending): ${target}`);
+    }
+
+    const snapshots = fs
+      .readdirSync(backupDir)
+      .filter((f) => f.startsWith('pre-migration-') && f.endsWith('.sqlite'))
+      .sort();
+    for (const stale of snapshots.slice(0, Math.max(0, snapshots.length - MIGRATION_BACKUP_RETENTION))) {
+      fs.unlinkSync(path.join(backupDir, stale));
+    }
+  } catch (err) {
+    console.error('⚠️  Pre-migration backup FAILED — continuing without a recovery point:', err);
+  }
+}
+
 export function runMigrations(db: Database.Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -213,6 +259,18 @@ export function runMigrations(db: Database.Database): void {
       (r) => r.version
     )
   );
+
+  const pending = files.filter((f) => !applied.has(f.replace(/\.sql$/, '')));
+  if (pending.length === 0) return;
+
+  // Point-in-time backup BEFORE the first pending migration runs.
+  //
+  // Individual migrations are atomic, but the schema is forward-only: there
+  // are no `down` scripts. A migration that succeeds and commits, yet turns
+  // out to be semantically wrong, previously left no way back — and nothing
+  // else in the codebase ever copied the database. This snapshot is the
+  // recovery point for that case.
+  backupBeforeMigrations(db, pending.length);
 
   const recordApplied = db.prepare(
     'INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?, ?)'

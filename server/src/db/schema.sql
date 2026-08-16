@@ -919,20 +919,6 @@ CREATE INDEX IF NOT EXISTS idx_wl_class ON class_waitlist(class_id);
 CREATE INDEX IF NOT EXISTS idx_wl_student ON class_waitlist(student_id);
 CREATE INDEX IF NOT EXISTS idx_wl_status ON class_waitlist(status);
 
-CREATE TABLE IF NOT EXISTS student_id_cards ( 
-  id           TEXT PRIMARY KEY, 
-  student_id   TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE, 
-  issued_at    TEXT NOT NULL, 
-  expires_at   TEXT, 
-  fee_amount   REAL NOT NULL DEFAULT 0, 
-  printed      INTEGER NOT NULL DEFAULT 0, 
-  reprinted    INTEGER NOT NULL DEFAULT 0, 
-  design       TEXT, 
-  branch_id    TEXT REFERENCES branches(id) ON DELETE SET NULL, 
-  notes        TEXT, 
-  created_at   TEXT NOT NULL DEFAULT (datetime('now')) 
-); 
-
 CREATE INDEX IF NOT EXISTS idx_students_branch       ON students(branch_id); 
 CREATE INDEX IF NOT EXISTS idx_students_status       ON students(status); 
 CREATE INDEX IF NOT EXISTS idx_students_lead         ON students(lead_id); 
@@ -950,7 +936,6 @@ CREATE INDEX IF NOT EXISTS idx_sje_student_time      ON student_journey_events(s
 CREATE INDEX IF NOT EXISTS idx_sje_type              ON student_journey_events(event_type, occurred_at DESC); 
 CREATE INDEX IF NOT EXISTS idx_sje_enrollment        ON student_journey_events(enrollment_id); 
 CREATE INDEX IF NOT EXISTS idx_enrollment_events_student ON enrollment_events(student_id, created_at DESC); 
-CREATE INDEX IF NOT EXISTS idx_id_cards_student      ON student_id_cards(student_id); 
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_students_tazkira_no ON students(tazkira_no) WHERE tazkira_no IS NOT NULL AND tazkira_no != ''; 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_students_phone ON students(phone) WHERE phone IS NOT NULL AND phone != ''; 

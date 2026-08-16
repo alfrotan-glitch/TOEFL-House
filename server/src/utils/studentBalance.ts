@@ -98,6 +98,57 @@ export function getStudentBalance(db: Database, studentId: string, scope: Balanc
   return deriveBalance(due.total, paid.total);
 }
 
+/** One roster row: a student id plus their authoritative balance. */
+export interface StudentBalanceRow extends StudentBalance {
+  studentId: string;
+}
+
+/**
+ * Balances for a page of the roster, in one query.
+ *
+ * The roster endpoint used to inline its own copy of this SQL. That copy
+ * silently diverged: it summed only `status = 'active'` semesters while
+ * getStudentBalance('all') summed every semester, so completing a semester
+ * made the list and the profile disagree. Both scopes are legitimate
+ * questions, but they must come from ONE definition — this one.
+ *
+ * `scope` matches getStudentBalance exactly, so a row here always equals
+ * getStudentBalance(db, id, scope) for the same student.
+ */
+export function getStudentBalancesPage(
+  db: Database,
+  opts: { branchId: string | null; scope?: BalanceScope; limit: number; offset: number },
+): StudentBalanceRow[] {
+  const { branchId, scope = 'all', limit, offset } = opts;
+  const semesterFilter = scope === 'active' ? `WHERE status = 'active'` : '';
+  const branchFilter = branchId ? 'WHERE st.branch_id = ?' : '';
+  const params = branchId ? [branchId] : [];
+
+  const rows = db
+    .prepare(
+      `SELECT st.id AS student_id,
+              COALESCE(sem.total, 0) AS tuition_due,
+              COALESCE(paid.total, 0) AS tuition_paid
+         FROM students st
+         LEFT JOIN (
+           SELECT student_id, SUM(COALESCE(net_fee_amount, fee_amount)) AS total
+           FROM student_semesters ${semesterFilter} GROUP BY student_id
+         ) sem ON sem.student_id = st.id
+         LEFT JOIN (
+           SELECT student_id, SUM(amount) AS total
+           FROM payments
+           WHERE status = 'completed' AND category IN (${CATEGORY_SQL})
+           GROUP BY student_id
+         ) paid ON paid.student_id = st.id
+         ${branchFilter}
+         ORDER BY st.registration_date DESC
+         LIMIT ? OFFSET ?`,
+    )
+    .all(...params, limit, offset) as Array<{ student_id: string; tuition_due: number; tuition_paid: number }>;
+
+  return rows.map((r) => ({ studentId: r.student_id, ...deriveBalance(r.tuition_due, r.tuition_paid) }));
+}
+
 /**
  * Branch-wide outstanding tuition — the dashboard figure.
  * Sums per-student outstanding (each floored at zero) so one student's credit

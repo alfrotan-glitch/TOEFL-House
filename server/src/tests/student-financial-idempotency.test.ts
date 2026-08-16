@@ -245,7 +245,7 @@ describe('F3 — dashboard revenue must not be multiplied by JOINs', () => {
       db.prepare(`INSERT OR REPLACE INTO classes (id,name,level,branch_id,status,lifecycle_stage,schedule_time,fee) VALUES (?,?,'A1',?,'active','in_progress','08:00',1000)`).run(cid, name, BRANCH);
       db.prepare(`INSERT OR REPLACE INTO student_semesters (id,student_id,semester_name,class_id,enroll_date,fee_amount,net_fee_amount,status) VALUES (?,'join_probe',?,?,?,1000,1000,'active')`).run(`join_sem_${cid}`, sem, cid, d);
     }
-    db.prepare(`INSERT OR REPLACE INTO payments (id,student_id,amount,date,payment_method,status,category,receipt_number,branch_id,semester) VALUES ('join_pay','join_probe',9999,?,'cash','completed','fee','RC-JOIN',?,'JT0')`).run(d, BRANCH);
+    db.prepare(`INSERT OR REPLACE INTO payments (id,student_id,amount,date,payment_method,status,category,receipt_number,branch_id,semester, idempotency_key) VALUES ('join_pay','join_probe',9999,?,'cash','completed','fee','RC-JOIN',?,'JT0', hex(randomblob(16)))`).run(d, BRANCH);
 
     const rows = db
       .prepare(
@@ -273,8 +273,8 @@ describe('F4 — outstanding must respect discounts and installments', () => {
     const d = today();
     db.prepare(`INSERT OR IGNORE INTO students (id,student_code,full_name,status,registration_date,branch_id,gender) VALUES ('out_probe2','TH-OUT2','Out Probe','active',?,?,'male')`).run(d, BRANCH);
     db.prepare(`INSERT OR REPLACE INTO student_semesters (id,student_id,semester_name,enroll_date,fee_amount,net_fee_amount,status) VALUES ('out_sem2','out_probe2','OutTerm2',?,10000,7000,'active')`).run(d);
-    db.prepare(`INSERT OR REPLACE INTO payments (id,student_id,amount,date,payment_method,status,category,receipt_number,branch_id) VALUES ('out_p1','out_probe2',3000,?,'cash','completed','fee','RC-O1',?)`).run(d, BRANCH);
-    db.prepare(`INSERT OR REPLACE INTO payments (id,student_id,amount,date,payment_method,status,category,receipt_number,branch_id) VALUES ('out_p2','out_probe2',1000,?,'cash','completed','installment','RC-O2',?)`).run(d, BRANCH);
+    db.prepare(`INSERT OR REPLACE INTO payments (id,student_id,amount,date,payment_method,status,category,receipt_number,branch_id, idempotency_key) VALUES ('out_p1','out_probe2',3000,?,'cash','completed','fee','RC-O1',?, hex(randomblob(16)))`).run(d, BRANCH);
+    db.prepare(`INSERT OR REPLACE INTO payments (id,student_id,amount,date,payment_method,status,category,receipt_number,branch_id, idempotency_key) VALUES ('out_p2','out_probe2',1000,?,'cash','completed','installment','RC-O2',?, hex(randomblob(16)))`).run(d, BRANCH);
 
     const outstanding = (
       db

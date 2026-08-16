@@ -69,7 +69,7 @@ const stmtInsertConvertedSemester = db.prepare(`INSERT INTO student_semesters (i
 const stmtInsertConvertedRegistration = db.prepare(`INSERT INTO registrations (id, student_id, class_id, date, amount_paid, receipt_number, discount_applied, branch_id, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 const stmtInsertConvertedInvoice = db.prepare(`INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, notes, invoice_number, issued_by, student_name, student_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 const stmtInsertInvoiceItem = db.prepare(`INSERT INTO invoice_items (id, invoice_id, description, quantity, unit_price, amount) VALUES (?, ?, ?, 1, ?, ?)`);
-const stmtInsertConvertedPayment = db.prepare(`INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, notes, receipt_number, branch_id) VALUES (?, ?, ?, ?, ?, ?, 'completed', 'fee', ?, ?, ?)`);
+const stmtInsertConvertedPayment = db.prepare(`INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, notes, receipt_number, branch_id, idempotency_key) VALUES (?, ?, ?, ?, ?, ?, 'completed', 'fee', ?, ?, ?, ?)`);
 
 const VISITOR_FLOW = ['lead', 'inquiry', 'follow_up', 'placement_booking', 'placement_fee', 'placement_completed', 'class_fee', 'card_issued', 'book_issued', 'registration', 'enrollment', 'active', 'graduated', 'alumni', 'lost'] as const;
 
@@ -436,7 +436,11 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
 
     if (paidNow > 0) {
       const paymentId = id('pay');
-      stmtInsertConvertedPayment.run(paymentId, newStudentId, invoiceId, paidNow, date, resolvedPaymentMethod, `Registration payment for ${classItem.name}`, receiptNumber, studentBranchId);
+      // Conversion is already serialised by uq_students_lead_id (one student
+      // per visitor), so this payment can never legitimately repeat. Keying it
+      // on the visitor makes that invariant explicit at the database level
+      // instead of depending only on the enclosing uniqueness check.
+      stmtInsertConvertedPayment.run(paymentId, newStudentId, invoiceId, paidNow, date, resolvedPaymentMethod, `Registration payment for ${classItem.name}`, receiptNumber, studentBranchId, `visitor-convert:${visitor.id}`);
       recordIncome({ category: 'fee', amount: paidNow, date, description: `Registration fee for ${visitor.full_name} (${studentCode})`, referenceId: invoiceId, operatorName: user.fullName, operatorRole: user.role ?? null, branchId: studentBranchId, paymentId });
     }
 

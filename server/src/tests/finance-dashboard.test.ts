@@ -105,8 +105,8 @@ beforeAll(async () => {
     VALUES (?, 'TH-DASH-2', 'Dashboard Student 2', 'active', ?, ?, 'male')`).run('stu_dash_2', date, BRANCH_A);
   db.prepare(`INSERT OR IGNORE INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number)
     VALUES (?, 'stu_dash_1', 12000, 0, 12000, 'partial', ?, ?, ?, 'INV-DASH-1')`).run('dash_inv_open', date, date, BRANCH_A);
-  db.prepare(`INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, receipt_number, branch_id)
-    VALUES (?, 'stu_dash_1', 'dash_inv_open', 4000, ?, 'cash', 'completed', 'fee', 'R-DASH-1', ?)`).run(id('pay'), date, BRANCH_A);
+  db.prepare(`INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, receipt_number, branch_id, idempotency_key)
+     VALUES (?, 'stu_dash_1', 'dash_inv_open', 4000, ?, 'cash', 'completed', 'fee', 'R-DASH-1', ?, hex(randomblob(16)))`).run(id('pay'), date, BRANCH_A);
   db.prepare(`INSERT OR IGNORE INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number)
     VALUES (?, 'stu_dash_2', 5000, 0, 5000, 'paid', ?, ?, ?, 'INV-DASH-2')`).run('dash_inv_paid', date, date, BRANCH_A);
 

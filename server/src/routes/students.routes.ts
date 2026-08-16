@@ -7,7 +7,7 @@ import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { assertTextLengths, TEXT_LIMITS } from '../utils/textInput.js';
 import { parsePagination as parsePaginationShared } from '../utils/pagination.js';
-import { getStudentBalance } from '../utils/studentBalance.js';
+import { getStudentBalance, getStudentBalancesPage } from '../utils/studentBalance.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { hasAnyRole } from '../core/rbac/rbac-service.js';
 import { writeAudit } from '../middleware/audit.js';
@@ -118,6 +118,16 @@ const stmtUpdateStudentInstallments = db.prepare('UPDATE students SET installmen
 // works for API consumers.
 const DEFAULT_PAGE_SIZE = 2000;
 const MAX_PAGE_SIZE = 2000;
+
+/** The only student lifecycle states the schema permits. */
+const STUDENT_STATUSES = ['active', 'inactive', 'graduated', 'suspended'] as const;
+
+/** Rejects an unknown status filter instead of quietly returning everything. */
+function assertStudentStatus(value: string): void {
+  if (!(STUDENT_STATUSES as readonly string[]).includes(value)) {
+    throw new HttpError(400, `Invalid status filter. Expected one of: ${STUDENT_STATUSES.join(', ')}.`);
+  }
+}
 
 function getUserContext(req: import('express').Request) {
   const user = req.user;
@@ -249,46 +259,17 @@ paymentsRouter.get('/', requirePermission('Payment.View'), ah(async (req, res) =
  */
 paymentsRouter.get('/balances', requirePermission('Payment.View'), ah(async (req, res) => {
   const { branchId, isAll } = resolveBranchScope(req);
-  const where = isAll ? '' : 'WHERE st.branch_id = ?';
-  const params = isAll ? [] : [branchId];
   // Bounded to the same window as the roster it accompanies: returning a row
-  // per student for the whole academy (8,000 rows / 782 KB) to annotate a
-  // 2,000-row page is wasted transfer. Ordered to match the roster's default.
+  // per student for the whole academy to annotate a 2,000-row page is wasted
+  // transfer. Ordered to match the roster's default ordering.
   const { limit, offset } = parsePaginationShared(req as { query: Record<string, unknown> }, {
     defaultPageSize: DEFAULT_PAGE_SIZE,
     maxPageSize: MAX_PAGE_SIZE,
   });
-  const rows = db.prepare(`
-    SELECT st.id AS student_id,
-           COALESCE(sem.total, 0) AS tuition_due,
-           COALESCE(paid.total, 0) AS tuition_paid
-    FROM students st
-    LEFT JOIN (
-      SELECT student_id, SUM(COALESCE(net_fee_amount, fee_amount)) AS total
-      FROM student_semesters WHERE status = 'active' GROUP BY student_id
-    ) sem ON sem.student_id = st.id
-    LEFT JOIN (
-      SELECT student_id, SUM(amount) AS total
-      FROM payments
-      WHERE status = 'completed' AND category IN ('fee','installment','refund')
-      GROUP BY student_id
-    ) paid ON paid.student_id = st.id
-    ${where}
-    ORDER BY st.registration_date DESC
-    LIMIT ? OFFSET ?
-  `).all(...params, limit, offset) as Array<{ student_id: string; tuition_due: number; tuition_paid: number }>;
-
-  res.json(rows.map((r) => {
-    const due = Number(r.tuition_due) || 0;
-    const paid = Number(r.tuition_paid) || 0;
-    return {
-      studentId: r.student_id,
-      tuitionDue: due,
-      tuitionPaid: paid,
-      outstanding: Math.max(0, Math.round((due - paid) * 100) / 100),
-      creditBalance: Math.max(0, Math.round((paid - due) * 100) / 100),
-    };
-  }));
+  // Delegates to the single authoritative definition. This endpoint used to
+  // inline its own SQL, which summed only active semesters while the profile
+  // summed all of them — the same student showed two different debts.
+  res.json(getStudentBalancesPage(db, { branchId: isAll ? null : branchId, scope: 'all', limit, offset }));
 }));
 
 /**
@@ -313,7 +294,14 @@ studentsRouter.get('/search', requirePermission('Student.View'), ah(async (req, 
     const like = `%${q.replace(/[%_\\]/g, (m) => `\\${m}`)}%`;
     for (let i = 0; i < 7; i++) params.push(like);
   }
-  if (status && ['active', 'inactive', 'graduated', 'suspended'].includes(status)) { where.push('status = ?'); params.push(status); }
+  if (status) {
+    // Reject rather than silently ignore. An unrecognised value used to be
+    // dropped, so `?status=' OR '1'='1` (and any typo) returned the UNFILTERED
+    // page: callers could not tell "no matches" from "filter discarded".
+    assertStudentStatus(status);
+    where.push('status = ?');
+    params.push(status);
+  }
   if (classId) { where.push(`EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id = students.id AND e.class_id = ?)`); params.push(classId); }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const total = (db.prepare(`SELECT COUNT(*) AS c FROM students ${whereSql}`).get(...params) as { c: number }).c;
@@ -339,7 +327,14 @@ studentsRouter.get('/', requirePermission('Student.View'), ah(async (req, res) =
     const like = `%${q.replace(/[%_\\]/g, (m) => `\\${m}`)}%`;
     for (let i = 0; i < 7; i++) params.push(like);
   }
-  if (status && ['active', 'inactive', 'graduated', 'suspended'].includes(status)) { where.push('status = ?'); params.push(status); }
+  if (status) {
+    // Reject rather than silently ignore. An unrecognised value used to be
+    // dropped, so `?status=' OR '1'='1` (and any typo) returned the UNFILTERED
+    // page: callers could not tell "no matches" from "filter discarded".
+    assertStudentStatus(status);
+    where.push('status = ?');
+    params.push(status);
+  }
   if (classId) {
     where.push(`EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id = students.id AND e.class_id = ?)`);
     params.push(classId);
@@ -389,11 +384,32 @@ studentsRouter.get('/me', authorize('student'), ah(async (req, res) => {
   const student = db.prepare('SELECT * FROM students WHERE id = ?').get(studentId) as StudentRow | undefined;
   if (!student) throw new HttpError(404, 'Linked student profile not found.');
   if (student.branch_id !== user.branchId) throw new HttpError(403, 'Student profile is outside your scope.');
-  res.json(mapStudents([student])[0]);
+  // Same authoritative balance the staff-facing profile receives, so a student
+  // and the registrar looking at the same record never see different numbers.
+  res.json({
+    ...mapStudents([student])[0],
+    balance: {
+      lifetime: getStudentBalance(db, student.id, 'all'),
+      current: getStudentBalance(db, student.id, 'active'),
+    },
+  });
 }));
 
 studentsRouter.get('/:id', requirePermission('Student.View'), ah(async (req, res) => {
-  res.json(mapStudents([requireStudent(req, req.params.id) as StudentRow])[0]);
+  const student = requireStudent(req, req.params.id) as StudentRow;
+  // The balance ships WITH the student so no client ever has to re-derive it.
+  // The profile drawer and the student portal each used to recompute tuition
+  // from the paginated payments array, which disagreed with this endpoint the
+  // moment a semester was completed (server counted active semesters only,
+  // client counted all) — the same student showed a 20,000 AFN different debt
+  // on the roster and on the profile.
+  res.json({
+    ...mapStudents([student])[0],
+    balance: {
+      lifetime: getStudentBalance(db, student.id, 'all'),
+      current: getStudentBalance(db, student.id, 'active'),
+    },
+  });
 }));
 
 // ============================================================================
@@ -474,7 +490,11 @@ studentsRouter.post('/manual', requirePermission('Student.Create'), ah(async (re
     if (paidNow > 0) {
       const pid = id('pay');
       receiptNumber = nextReceiptNumber();
-      stmtInsertSimplePayment.run(pid, newId, paidNow, regDate, 'cash', 'fee', 'Class fee payment', receiptNumber, studentBranchId, null);
+      // Registration is guarded by unique phone/email/tazkira, so this payment
+      // cannot legitimately repeat; keying it on the new student makes that
+      // explicit to the database rather than leaving the column NULL (which
+      // silently disables uq_payments_idempotency).
+      stmtInsertSimplePayment.run(pid, newId, paidNow, regDate, 'cash', 'fee', 'Class fee payment', receiptNumber, studentBranchId, `register:${newId}`);
       recordIncome({ category: 'fee', amount: paidNow, date: regDate, description: `Registration fee for ${fullName}`, referenceId: newId, paymentId: pid, operatorName: user.fullName, operatorRole: user.role ?? null, branchId: studentBranchId });
     }
     stmtInsertRegistration.run(id('reg'), newId, classId || null, regDate, paidNow, receiptNumber, resolvedTuition - netTuitionDue, studentBranchId, 'manual', 'Current Semester');
@@ -608,6 +628,13 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
   // categories the guards run first and the unique index below is the
   // duplicate backstop. Free-amount categories have no such guard, so the
   // derived key is what protects them.
+  //
+  // CRITICAL: skipping the *pre-check* is safe; skipping the *persisted key*
+  // is not. The key is always written (see stmtInsertPayment below) so that
+  // uq_payments_idempotency can actually arbitrate concurrent requests. When
+  // the key was written as NULL for guarded categories, SQLite treated every
+  // NULL as distinct, the unique index never fired, and 12 concurrent un-keyed
+  // `fee` payments produced 12 payments and 12 income rows from one intent.
   const GUARDED_CATEGORIES = ['fee', 'installment', 'book', 'card', 'diploma', 'placement'];
   const replayEligible = clientSuppliedKey || !GUARDED_CATEGORIES.includes(category);
   if (replayEligible) {
@@ -717,7 +744,13 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
       currentInst.status = 'paid';
       stmtUpdateStudentInstallments.run(JSON.stringify(currentPlan), student.id);
     }
-    stmtInsertPayment.run(payId, student.id, resolvedAmount, date, resolvedMethod, category, notes || 'Smart Payment', rc, student.branch_id, semName, null, bookRefId, replayEligible ? (idempotencyKey || null) : null);
+    // The idempotency key is ALWAYS persisted, for every category. It is the
+    // only mechanism that serialises concurrent duplicates: the pre-checks
+    // above are read-then-write and every concurrent request passes them
+    // simultaneously. Writing NULL here (previously done for guarded
+    // categories) disabled the unique index, because SQLite considers each
+    // NULL distinct.
+    stmtInsertPayment.run(payId, student.id, resolvedAmount, date, resolvedMethod, category, notes || 'Smart Payment', rc, student.branch_id, semName, null, bookRefId, idempotencyKey);
     if (category === 'book') {
       const updated = stmtUpdateBookStock.run(bookRefId, student.branch_id);
       if (updated.changes !== 1) throw new HttpError(409, 'Book stock changed. Please retry.');
@@ -852,7 +885,11 @@ studentsRouter.post('/:id/enroll-semester', requirePermission('Class.Assign', 'S
     stmtInsertSemester.run(newSemId, student.id, semesterName, classId || null, date, resolvedTuition, netTuition);
     if (paidNow > 0) {
       const semPayId = id('pay');
-      stmtInsertPayment.run(semPayId, student.id, paidNow, date, 'cash', 'fee', `Semester fee for ${semesterName}`, rc, student.branch_id, semesterName, null, null, null);
+      // Keyed on the semester enrolment itself: uq_student_semester_active
+      // already forbids a second active semester of the same name, so this
+      // payment cannot legitimately repeat. A NULL here would disable
+      // uq_payments_idempotency for the row.
+      stmtInsertPayment.run(semPayId, student.id, paidNow, date, 'cash', 'fee', `Semester fee for ${semesterName}`, rc, student.branch_id, semesterName, null, null, `enroll-semester:${student.id}:${semesterName}`);
       recordIncome({ category: 'fee', amount: paidNow, date, description: `Received ${semesterName} fee from ${student.full_name}`, referenceId: student.id, paymentId: semPayId, operatorName: user.fullName, operatorRole: user.role ?? null, branchId: student.branch_id });
     }
     // Enrollment happens in the same transaction (see manual-add above).
@@ -879,15 +916,29 @@ studentsRouter.post('/:id/issue-card', requirePermission('Student.Print', 'Payme
   const cardFeeAlreadyPaid = isFirstIssuance ? !!stmtHasPaidFixedFee.get(student.id, 'card', 'card', student.id) : false;
   const cardFee = isFirstIssuance && !cardFeeAlreadyPaid ? Number(resolveFee(db, student.branch_id, 'cardIssuanceFee') || 0) : 0;
 
+  // The card fee is a once-per-student business event, so its idempotency key
+  // is the event identity itself — not a time-bucketed fingerprint. Two
+  // concurrent first-issuances therefore collide on uq_payments_idempotency
+  // and exactly one books the fee, without relying on the read-then-write
+  // `cardFeeAlreadyPaid` check winning the race.
+  const cardFeeIdempotencyKey = `card-fee:${student.id}`;
   const tx = db.transaction(() => {
     stmtUpdateStudentCard.run(JSON.stringify(cardDesign), notes ?? student.notes, student.id);
     if (isFirstIssuance && cardFee > 0) {
       const pid = id('pay');
-      stmtInsertSimplePayment.run(pid, student.id, cardFee, date, 'cash', 'card', 'ID Card Issuance', nextReceiptNumber(), student.branch_id, null);
+      stmtInsertSimplePayment.run(pid, student.id, cardFee, date, 'cash', 'card', 'ID Card Issuance', nextReceiptNumber(), student.branch_id, cardFeeIdempotencyKey);
       recordIncome({ category: 'card', amount: cardFee, date, description: `ID card fee for ${student.full_name}`, referenceId: student.id, paymentId: pid, operatorName: user.fullName, operatorRole: user.role ?? null, branchId: student.branch_id });
     }
   });
-  tx();
+  try {
+    tx();
+  } catch (err) {
+    // A concurrent issuance already booked the fee. The card itself is still
+    // updated by the winning transaction, so this is a success for the caller.
+    if (!isUniqueViolation(err)) throw err;
+    writeAudit(req, `Reissued ID card for ${student.full_name}`, { newValue: JSON.stringify({ feeCharged: 0, concurrentIssuance: true }) });
+    return res.status(201).json({ ok: true, feeCharged: 0 });
+  }
 
   writeAudit(req, `${isFirstIssuance ? 'Issued' : 'Reissued'} ID card for ${student.full_name}`, { newValue: JSON.stringify({ feeCharged: isFirstIssuance ? cardFee : 0 }) });
   res.status(201).json({ ok: true, feeCharged: isFirstIssuance ? cardFee : 0 });

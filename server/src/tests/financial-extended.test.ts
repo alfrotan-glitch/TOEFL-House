@@ -95,8 +95,8 @@ describe('§A Failure Recovery', () => {
         ).run(regId, studentId, today(), rc, BRANCH_ID);
 
         db.prepare(
-          `INSERT INTO payments (id, student_id, amount, date, payment_method, status, category, receipt_number, branch_id)
-           VALUES (?, ?, 4500, ?, 'cash', 'completed', 'fee', ?, ?)`
+          `INSERT INTO payments (id, student_id, amount, date, payment_method, status, category, receipt_number, branch_id, idempotency_key)
+     VALUES (?, ?, 4500, ?, 'cash', 'completed', 'fee', ?, ?, hex(randomblob(16)))`
         ).run(payId, studentId, today(), rc, BRANCH_ID);
 
         db.prepare(
@@ -136,8 +136,8 @@ describe('§A Failure Recovery', () => {
         ).run(regId, studentId, today(), rc, BRANCH_ID);
 
         db.prepare(
-          `INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, receipt_number, branch_id)
-           VALUES (?, ?, ?, 4500, ?, 'INVALID_METHOD', 'completed', 'fee', ?, ?)`
+          `INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, receipt_number, branch_id, idempotency_key)
+     VALUES (?, ?, ?, 4500, ?, 'INVALID_METHOD', 'completed', 'fee', ?, ?, hex(randomblob(16)))`
         ).run(id('pay'), studentId, invId, today(), rc, BRANCH_ID);
       })();
       expect.unreachable('Should have thrown');
@@ -166,8 +166,8 @@ describe('§A Failure Recovery', () => {
     try {
       db.transaction(() => {
         db.prepare(
-          `INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, receipt_number, branch_id)
-           VALUES (?, ?, ?, 4500, ?, 'cash', 'completed', 'fee', ?, ?)`
+          `INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, receipt_number, branch_id, idempotency_key)
+     VALUES (?, ?, ?, 4500, ?, 'cash', 'completed', 'fee', ?, ?, hex(randomblob(16)))`
         ).run(payId, studentId, invId, today(), rc, BRANCH_ID);
 
         recordIncome({
@@ -205,8 +205,8 @@ describe('§A Failure Recovery', () => {
     try {
       db.transaction(() => {
         db.prepare(
-          `INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, receipt_number, branch_id)
-           VALUES (?, ?, ?, 4500, ?, 'crypto', 'completed', 'fee', 'R-FAKE', ?)`
+          `INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, receipt_number, branch_id, idempotency_key)
+     VALUES (?, ?, ?, 4500, ?, 'crypto', 'completed', 'fee', 'R-FAKE', ?, hex(randomblob(16)))`
         ).run(id('pay'), studentId, invId, today(), BRANCH_ID);
       })();
     } catch { /* expected */ }
@@ -273,8 +273,8 @@ describe('§B Concurrency', () => {
 
       db.transaction(() => {
         db.prepare(
-          `INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, receipt_number, branch_id)
-           VALUES (?, ?, ?, 1000, ?, 'cash', 'completed', 'fee', ?, ?)`
+          `INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, receipt_number, branch_id, idempotency_key)
+     VALUES (?, ?, ?, 1000, ?, 'cash', 'completed', 'fee', ?, ?, hex(randomblob(16)))`
         ).run(pid, studentId, invId, today(), rc, BRANCH_ID);
 
         recordIncome({
@@ -366,8 +366,8 @@ describe('§C Reconciliation', () => {
         ).run(iid, sid, amount, amount, today(), BRANCH_ID, `INV-C1-${String(i).padStart(3, '0')}`);
 
         db.prepare(
-          `INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, receipt_number, branch_id)
-           VALUES (?, ?, ?, ?, ?, 'cash', 'completed', 'fee', ?, ?)`
+          `INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, receipt_number, branch_id, idempotency_key)
+     VALUES (?, ?, ?, ?, ?, 'cash', 'completed', 'fee', ?, ?, hex(randomblob(16)))`
         ).run(pid, sid, iid, amount, today(), rc, BRANCH_ID);
 
         recordIncome({
@@ -526,8 +526,8 @@ describe('§E Transaction Safety', () => {
 
     db.transaction(() => {
       db.prepare(
-        `INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, receipt_number, branch_id)
-         VALUES (?, ?, ?, 5000, ?, 'cash', 'completed', 'fee', ?, ?)`
+        `INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, receipt_number, branch_id, idempotency_key)
+     VALUES (?, ?, ?, 5000, ?, 'cash', 'completed', 'fee', ?, ?, hex(randomblob(16)))`
       ).run(payId, studentId, invId, today(), rc, BRANCH_ID);
 
       recordIncome({
@@ -571,8 +571,8 @@ describe('§E Transaction Safety', () => {
         ).run(invId, studentId, today(), BRANCH_ID);
 
         db.prepare(
-          `INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, receipt_number, branch_id)
-           VALUES (?, ?, ?, 1000, ?, 'cash', 'completed', 'fee', ?, ?)`
+          `INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, receipt_number, branch_id, idempotency_key)
+     VALUES (?, ?, ?, 1000, ?, 'cash', 'completed', 'fee', ?, ?, hex(randomblob(16)))`
         ).run(payId, studentId, invId, today(), nextReceiptNumber(), BRANCH_ID);
 
         recordIncome({

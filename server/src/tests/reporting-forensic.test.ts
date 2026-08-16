@@ -122,8 +122,8 @@ describe('Reporting forensic — new required metrics + period consistency', () 
     db.prepare(`INSERT OR IGNORE INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number)
       VALUES ('rep_inv', 'rep_stu', 5000, 500, 4500, 'partial', '2026-06-10', '2026-07-10', ?, 'INV-REP-1')`).run(BRANCH);
     const repPayId = id('pay');
-    db.prepare(`INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, receipt_number, branch_id)
-      VALUES (?, 'rep_stu', 'rep_inv', 2000, '2026-06-11', 'cash', 'completed', 'fee', 'R-REP-1', ?)`).run(repPayId, BRANCH);
+    db.prepare(`INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, receipt_number, branch_id, idempotency_key)
+     VALUES (?, 'rep_stu', 'rep_inv', 2000, '2026-06-11', 'cash', 'completed', 'fee', 'R-REP-1', ?, hex(randomblob(16)))`).run(repPayId, BRANCH);
     // Mirror what the real writers do: a payment creates a ledger income row.
     db.prepare(`INSERT INTO financial_transactions (id, type, category, amount, date, description, reference_id, payment_id, operator_name, branch_id)
       VALUES (?, 'income', 'fee', 2000, '2026-06-11', 'Rep invoice payment', 'rep_inv', ?, 'T', ?)`).run(id('tx'), repPayId, BRANCH);

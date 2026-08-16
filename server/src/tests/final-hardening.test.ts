@@ -152,8 +152,8 @@ beforeAll(async () => {
 
   // One payment tied to the male student (for gender splits).
   const paymentId = id('pay');
-  db.prepare(`INSERT INTO payments (id, student_id, amount, date, payment_method, status, category, receipt_number, branch_id)
-    VALUES (?, 'h_stu_m', 6000, ?, 'cash', 'completed', 'fee', 'R-H-1', ?)`).run(paymentId, today(), BRANCH);
+  db.prepare(`INSERT INTO payments (id, student_id, amount, date, payment_method, status, category, receipt_number, branch_id, idempotency_key)
+     VALUES (?, 'h_stu_m', 6000, ?, 'cash', 'completed', 'fee', 'R-H-1', ?, hex(randomblob(16)))`).run(paymentId, today(), BRANCH);
   db.prepare(`INSERT INTO financial_transactions (id, type, category, amount, date, description, reference_id, payment_id, operator_name, branch_id)
     VALUES (?, 'income', 'fee', 6000, ?, 'Invoice payment — Hardening Male', 'h_inv', ?, 'Owner', ?)`)
     .run(id('tx'), today(), paymentId, BRANCH);

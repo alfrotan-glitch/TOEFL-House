@@ -74,8 +74,8 @@ beforeEach(() => {
   const mkPayment = (id: string, student: string, amount: number, category: string, branch = BRANCH) =>
     db
       .prepare(
-        `INSERT OR REPLACE INTO payments (id, student_id, amount, date, payment_method, status, category, receipt_number, branch_id)
-         VALUES (?, ?, ?, ?, 'cash', 'completed', ?, ?, ?)`,
+        `INSERT OR REPLACE INTO payments (id, student_id, amount, date, payment_method, status, category, receipt_number, branch_id, idempotency_key)
+         VALUES (?, ?, ?, ?, 'cash', 'completed', ?, ?, ?, hex(randomblob(16)))`,
       )
       .run(id, student, amount, d, category, `RC-${id}`, branch);
 
@@ -156,8 +156,8 @@ describe('S10: branch outstanding matches the sum of its students', () => {
     const before = getBranchOutstanding(db, BRANCH);
     // Massively overpay one student; the branch receivable must not shrink.
     db.prepare(
-      `INSERT OR REPLACE INTO payments (id, student_id, amount, date, payment_method, status, category, receipt_number, branch_id)
-       VALUES ('bal_overpay', ?, 999999, ?, 'cash', 'completed', 'fee', 'RC-OVER', ?)`,
+      `INSERT OR REPLACE INTO payments (id, student_id, amount, date, payment_method, status, category, receipt_number, branch_id, idempotency_key)
+       VALUES ('bal_overpay', ?, 999999, ?, 'cash', 'completed', 'fee', 'RC-OVER', ?, hex(randomblob(16)))`,
     ).run(S_BOOK, today(), BRANCH);
 
     const after = getBranchOutstanding(db, BRANCH);
@@ -235,8 +235,8 @@ describe('S11: a refund reopens the semester debt it belongs to', () => {
   const addPayment = (id: string, amount: number, category: string, semester: string | null) =>
     db
       .prepare(
-        `INSERT OR REPLACE INTO payments (id, student_id, amount, date, payment_method, status, category, receipt_number, branch_id, semester)
-         VALUES (?, ?, ?, ?, 'cash', 'completed', ?, ?, ?, ?)`,
+        `INSERT OR REPLACE INTO payments (id, student_id, amount, date, payment_method, status, category, receipt_number, branch_id, semester, idempotency_key)
+         VALUES (?, ?, ?, ?, 'cash', 'completed', ?, ?, ?, ?, hex(randomblob(16)))`,
       )
       .run(id, S_SEM, amount, today(), category, `RC-${id}`, BRANCH, semester);
 

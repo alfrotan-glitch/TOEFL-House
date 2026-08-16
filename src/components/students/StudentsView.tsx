@@ -350,7 +350,7 @@ export default function StudentsView({
             </div>
             <div className="flex-1 overflow-y-auto p-6">
               <StudentProfileDrawer
-                key={activeStudentInfo.id} student={activeStudentInfo} payments={payments} attendance={attendance} attendanceSummary={attendanceSummary} exams={exams} examResults={examResults} classes={classes}
+                key={activeStudentInfo.id} student={activeStudentInfo} serverBalance={studentBalances.find(b => b.studentId === activeStudentInfo.id)} payments={payments} attendance={attendance} attendanceSummary={attendanceSummary} exams={exams} examResults={examResults} classes={classes}
                 isOwnerOrManager={isOwnerOrManager} isRegistrar={isRegistrar} updateStudent={updateStudent} updateStudentStatus={updateStudentStatus}
                 issueStudentCard={issueStudentCard} triggerToast={triggerToast} onClose={() => setSelectedStudent(null)}
                 onOpenEnroll={() => { setEnrollSemesterName(''); setEnrollClassId(''); setEnrollTuitionAmount(0); setEnrollAmountPaidNow(0); setShowEnrollModal(true); }}

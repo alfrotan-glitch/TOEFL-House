@@ -5,9 +5,9 @@
 import React, { useState } from 'react';
 import { ShamsiDate } from '../common/ShamsiDate';
 import {CheckCircle2, Award, QrCode, CreditCard, Calendar, AlertCircle, Palette, CheckSquare, Printer, Plus, RotateCcw, X, Pencil, Save, Ban, Camera} from 'lucide-react';
-import {Student, Class, Payment, Exam, ExamResult, Attendance, AttendanceSummaryRow } from '../../types';
+import {Student, Class, Payment, Exam, ExamResult, Attendance, AttendanceSummaryRow, StudentBalanceRow } from '../../types';
 import {formatAFN} from '../../utils/format';
-import { computeStudentBalance, isRefundPayment } from '../../utils/studentBalance';
+import { isRefundPayment } from '../../utils/studentBalance';
 import {printStudentIdCard} from '../../utils/certificateTemplates';
 import StudentJourneyTimeline from './journey/StudentJourneyTimeline';
 
@@ -15,6 +15,13 @@ interface StudentProfileDrawerProps {
   /** Server-aggregated attendance rates (GET /attendance/summary). */
   attendanceSummary?: AttendanceSummaryRow[];
   student: Student;
+  /**
+   * Authoritative tuition balance for this student (GET /payments/balances).
+   * The drawer must NOT re-derive tuition from `payments`: that array is one
+   * page, and the client rule diverged from the server's the moment a semester
+   * was completed — the roster and this drawer showed debts 20,000 AFN apart.
+   */
+  serverBalance?: StudentBalanceRow;
   payments: Payment[];
   attendance: Attendance[];
   exams: Exam[];
@@ -44,7 +51,7 @@ interface StudentProfileDrawerProps {
 
 export default function StudentProfileDrawer({
   attendanceSummary,
-  student, payments, attendance, exams, examResults, classes,
+  student, serverBalance, payments, attendance, exams, examResults, classes,
   isOwnerOrManager, isRegistrar, updateStudent, updateStudentStatus, issueStudentCard,
   triggerToast, onOpenEnroll, onOpenExtraClass, onOpenRefund, onPayInstallment
 }: StudentProfileDrawerProps) {
@@ -90,13 +97,17 @@ export default function StudentProfileDrawer({
     }
   }
 
-  // Financial Calculations — single authoritative definition shared with the
-  // roster, the portal, the enrollment hold and the dashboard.
-  const balance = computeStudentBalance(student.id, student.semesters, payments, 'all');
-  const totalTuition = balance.tuitionDue;
-  const totalPaidFees = balance.tuitionPaid;
-  const remainingDebt = balance.outstanding;
-  const paidPercentage = balance.paidPercentage;
+  // Financial figures come from the SERVER, which sums every payment for this
+  // student in SQL. Deriving them here from the paginated `payments` array
+  // produced a second, disagreeing source of truth. `student.balance` is
+  // present when the record was fetched individually; otherwise the roster's
+  // authoritative row is used. Both originate from utils/studentBalance.
+  const serverFigures = student.balance?.lifetime ?? serverBalance;
+  const totalTuition = serverFigures?.tuitionDue ?? 0;
+  const totalPaidFees = serverFigures?.tuitionPaid ?? 0;
+  const remainingDebt = serverFigures?.outstanding ?? 0;
+  const paidPercentage = serverFigures?.paidPercentage
+    ?? (totalTuition > 0 ? Math.min(100, Math.max(0, Math.round((totalPaidFees / totalTuition) * 100))) : 100);
 
   // Attendance. The recent-days strip below is drawn from the loaded page, but
   // the RATE comes from the server, which aggregates the complete history:

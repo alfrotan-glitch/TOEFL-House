@@ -32,8 +32,8 @@ describe('Payment Recording', () => {
 
     db.transaction(() => {
       db.prepare(
-        `INSERT INTO payments (id, student_id, amount, date, payment_method, status, category, branch_id)
-         VALUES (?, ?, ?, ?, 'cash', 'completed', 'fee', 'b1')`
+        `INSERT INTO payments (id, student_id, amount, date, payment_method, status, category, branch_id, idempotency_key)
+     VALUES (?, ?, ?, ?, 'cash', 'completed', 'fee', 'b1', hex(randomblob(16)))`
       ).run(paymentId, 's1', amount, date);
 
       db.prepare(
@@ -60,8 +60,8 @@ describe('Payment Recording', () => {
     const paymentId = id('pay');
     expect(() => {
       db.prepare(
-        `INSERT INTO payments (id, student_id, amount, date, payment_method, status, category, branch_id)
-         VALUES (?, 'nonexistent', 1000, ?, 'cash', 'completed', 'fee', 'b1')`
+        `INSERT INTO payments (id, student_id, amount, date, payment_method, status, category, branch_id, idempotency_key)
+     VALUES (?, 'nonexistent', 1000, ?, 'cash', 'completed', 'fee', 'b1', hex(randomblob(16)))`
       ).run(paymentId, today());
     }).toThrow();
   });
