@@ -1,0 +1,85 @@
+# The release gate, executed automatically.
+#
+# Before this existed the full gate (typecheck / lint / build / tests /
+# schema preflight) was manual, so nothing mechanically prevented a regression
+# from reaching the default branch — including the class of defect found in the
+# 2026-08-16 audit, where a green suite coexisted with duplicate tuition
+# charges because the concurrency tests never touched the guarded categories.
+#
+# Every job here is the same command a developer runs locally. If a step cannot
+# pass in CI it must not pass in review either.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# A newer push to the same ref supersedes an in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The server refuses to boot on a short/known-weak secret; tests need one.
+  JWT_SECRET: ci-only-jwt-secret-not-used-in-production-0123456789
+  NODE_ENV: test
+
+jobs:
+  frontend:
+    name: Frontend — typecheck, lint, build, bundle budget
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build
+      # Guards the first-paint payload: the chart bundle must stay off the
+      # critical path and React must appear exactly once.
+      - run: npm run audit:bundle
+
+  backend:
+    name: Backend — typecheck, tests, schema preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - name: Install server dependencies
+        working-directory: server
+        run: npm ci --no-audit --no-fund
+      - name: Typecheck
+        working-directory: server
+        run: npm run typecheck
+      - name: Test suite
+        working-directory: server
+        run: npm test
+      # schema.sql alone must build a valid database AND must not drift from
+      # the fully-migrated shape. A column that exists only after a migration
+      # breaks a fresh install, because routes prepare statements at import.
+      - name: Fresh-schema preflight
+        working-directory: server
+        run: npm run preflight:fresh-schema
+
+  static-audit:
+    name: Static audit — architecture invariants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Install server dependencies (audit reads server sources)
+        working-directory: server
+        run: npm ci --no-audit --no-fund
+      - run: npm run audit:static
