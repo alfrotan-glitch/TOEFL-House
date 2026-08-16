@@ -170,6 +170,21 @@ function parseJson<T>(value: string | null | undefined, fallback: T): T {
   try { return JSON.parse(value) as T; } catch { return fallback; }
 }
 
+/**
+ * Parses a stored JSON array, falling back when the column holds anything that
+ * is not actually an array.
+ *
+ * parseJson() only guards against a PARSE failure, not against the parsed value
+ * having the wrong shape. A double-encoded plan (a JSON string containing JSON)
+ * parses cleanly to a string, and the caller then did `plan.find(...)` on it —
+ * producing `500 plan.find is not a function` on the payment endpoint. Malformed
+ * stored data must degrade to "no installments", never crash a money route.
+ */
+function parseJsonArray<T>(value: string | null | undefined): T[] {
+  const parsed = parseJson<unknown>(value, null);
+  return Array.isArray(parsed) ? (parsed as T[]) : [];
+}
+
 function requireStudent(req: import('express').Request, studentId: string): StudentContextRow {
   const student = stmtGetStudentById.get(studentId) as StudentContextRow | undefined;
   if (!student) throw new HttpError(404, 'Student not found.');
@@ -686,7 +701,7 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
   } 
   else if (category === 'installment') {
     if (!installmentId) throw new HttpError(400, 'installmentId is required.');
-    const plan = parseJson(student.installment_plan, [] as Array<{ id: string; amount: number; status: string; dueDate?: string }>);
+    const plan = parseJsonArray<{ id: string; amount: number; status: string; dueDate?: string }>(student.installment_plan);
     const inst = plan.find((i) => i.id === installmentId);
     if (!inst || inst.status === 'paid') throw new HttpError(409, 'Installment not found or already paid.');
     resolvedAmount = Number(inst.amount);
@@ -754,7 +769,7 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
     }
     if (category === 'installment') {
       const currentStudent = stmtGetStudentById.get(student.id) as any;
-      const currentPlan = parseJson(currentStudent?.installment_plan, [] as Array<{ id: string; amount: number; status: string; dueDate?: string }>);
+      const currentPlan = parseJsonArray<{ id: string; amount: number; status: string; dueDate?: string }>(currentStudent?.installment_plan);
       const currentInst = currentPlan.find((item) => item.id === installmentId);
       if (!currentInst || currentInst.status === 'paid') throw new HttpError(409, 'Installment is no longer payable.');
       currentInst.status = 'paid';
@@ -980,6 +995,33 @@ studentsRouter.patch('/:id', requirePermission('Student.Edit'), ah(async (req, r
   if (phoneOwner && phoneOwner.id !== existing.id) throw new HttpError(409, 'A student with this phone number already exists.');
   if (emailOwner && emailOwner.id !== existing.id) throw new HttpError(409, 'A student with this email already exists.');
   if (tazkiraOwner && tazkiraOwner.id !== existing.id) throw new HttpError(409, 'A student with this Tazkira/ID number already exists.');
+  // Validate the installment plan at the WRITE boundary. It is stored as JSON
+  // and later drives real payments, so a malformed plan is corrupt financial
+  // data, not a cosmetic problem. Accepting a pre-serialised string here
+  // double-encoded it (the column is JSON.stringify'd below), which parsed back
+  // to a string and crashed the payment route with
+  // `500 plan.find is not a function`.
+  if (f.installmentPlan !== undefined && f.installmentPlan !== null) {
+    if (!Array.isArray(f.installmentPlan)) {
+      throw new HttpError(400, 'installmentPlan must be an array of installments, not a string or object.');
+    }
+    const seen = new Set<string>();
+    for (const item of f.installmentPlan as Array<Record<string, unknown>>) {
+      if (!item || typeof item !== 'object') throw new HttpError(400, 'Each installment must be an object.');
+      const instId = typeof item.id === 'string' ? item.id.trim() : '';
+      if (!instId) throw new HttpError(400, 'Each installment needs a non-empty id.');
+      // Duplicate ids would make "pay installment X" ambiguous, and marking one
+      // paid would silently settle the other.
+      if (seen.has(instId)) throw new HttpError(400, `Duplicate installment id "${instId}".`);
+      seen.add(instId);
+      const amount = Number(item.amount);
+      if (!Number.isFinite(amount) || amount <= 0) throw new HttpError(400, `Installment "${instId}" must have an amount greater than 0.`);
+      if (item.status !== undefined && !['pending', 'paid'].includes(String(item.status))) {
+        throw new HttpError(400, `Installment "${instId}" has an invalid status.`);
+      }
+    }
+  }
+
     let effDiscount = merge('discountPercent', 'discount_percent');
   if (typeof effDiscount !== 'number' || !Number.isFinite(effDiscount) || effDiscount < 0) throw new HttpError(400, 'Discount must be zero or greater.');
   if (effDiscount > 0) {
