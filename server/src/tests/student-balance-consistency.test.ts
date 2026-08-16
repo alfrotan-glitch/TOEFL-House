@@ -194,3 +194,77 @@ describe('S9: the payments API must expose the fields the UI renders', () => {
     expect(net.s).toBe(11000);
   });
 });
+
+/**
+ * S11 — a partially refunded semester could never be settled.
+ * The semester-debt calculation counted only category==='fee' rows for that
+ * semester, so a refund did not reopen the debt: the route answered
+ * "This semester is already fully paid." and the academy could not collect
+ * money the student genuinely owed. Proven live before the fix.
+ */
+describe('S11: a refund reopens the semester debt it belongs to', () => {
+  const S_SEM = 'bal_stu_sempay';
+  const SEM_NAME = 'SemPay Term';
+
+  beforeEach(() => {
+    const d = today();
+    db.prepare(`DELETE FROM payments WHERE id LIKE 'balsp_%'`).run();
+    db.prepare(`DELETE FROM student_semesters WHERE id LIKE 'balsp_%'`).run();
+    db.prepare(`DELETE FROM students WHERE id = ?`).run(S_SEM);
+
+    db.prepare(
+      `INSERT OR REPLACE INTO students (id, student_code, full_name, gender, phone, status, registration_date, branch_id)
+       VALUES (?, 'BAL-SP', 'SemPay Probe', 'male', '0700009999', 'active', ?, ?)`,
+    ).run(S_SEM, d, BRANCH);
+    db.prepare(
+      `INSERT OR REPLACE INTO student_semesters (id, student_id, semester_name, enroll_date, fee_amount, net_fee_amount, status)
+       VALUES ('balsp_sem', ?, ?, ?, 10000, 10000, 'active')`,
+    ).run(S_SEM, SEM_NAME, d);
+  });
+
+  /** Mirrors the route's semester-settlement rule. */
+  const paidTowardSemester = () =>
+    (db.prepare(`SELECT * FROM payments WHERE student_id = ?`).all(S_SEM) as any[])
+      .filter(
+        (p) =>
+          p.status === 'completed' &&
+          ((p.semester === SEM_NAME && (p.category === 'fee' || p.category === 'installment')) || p.category === 'refund'),
+      )
+      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+
+  const addPayment = (id: string, amount: number, category: string, semester: string | null) =>
+    db
+      .prepare(
+        `INSERT OR REPLACE INTO payments (id, student_id, amount, date, payment_method, status, category, receipt_number, branch_id, semester)
+         VALUES (?, ?, ?, ?, 'cash', 'completed', ?, ?, ?, ?)`,
+      )
+      .run(id, S_SEM, amount, today(), category, `RC-${id}`, BRANCH, semester);
+
+  it('a full payment settles the semester', () => {
+    addPayment('balsp_p1', 10000, 'fee', SEM_NAME);
+    expect(paidTowardSemester()).toBe(10000);
+    expect(Math.max(0, 10000 - paidTowardSemester())).toBe(0);
+  });
+
+  it('refunding 4,000 of a settled semester reopens a 4,000 debt', () => {
+    addPayment('balsp_p1', 10000, 'fee', SEM_NAME);
+    addPayment('balsp_p2', -4000, 'refund', null); // refunds carry no semester
+    expect(paidTowardSemester()).toBe(6000);
+    const debt = Math.max(0, 10000 - paidTowardSemester());
+    expect(debt).toBe(4000);
+    // The defect: the old rule saw 10,000 paid and refused the collection.
+    expect(debt).not.toBe(0);
+  });
+
+  it('installments count toward the same semester debt as fees', () => {
+    addPayment('balsp_p1', 6000, 'fee', SEM_NAME);
+    addPayment('balsp_p2', 4000, 'installment', SEM_NAME);
+    expect(paidTowardSemester()).toBe(10000);
+  });
+
+  it('a non-tuition purchase never settles the semester', () => {
+    addPayment('balsp_p1', 10000, 'book', SEM_NAME);
+    expect(paidTowardSemester()).toBe(0);
+    expect(Math.max(0, 10000 - paidTowardSemester())).toBe(10000);
+  });
+});

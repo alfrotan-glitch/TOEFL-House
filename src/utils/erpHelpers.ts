@@ -25,16 +25,25 @@ export const calculateTotalTuition = (student: Student): number => {
   return Math.max(0, raw - Math.round((raw * discount) / 100));
 };
 
+/**
+ * @deprecated Counts only category==='fee', so it ignores installments AND
+ * refunds — it will overstate what a refunded student has paid. Use
+ * `computeStudentBalance` from utils/studentBalance, which is the single
+ * authoritative definition shared with the server. Kept only so any straggling
+ * import keeps compiling; it has no callers.
+ */
 export const calculateTotalPaidFees = (studentId: string, payments: Payment[]): number => {
   return payments
     .filter((p) => p.studentId === studentId && p.category === 'fee')
     .reduce((acc, p) => acc + p.amount, 0);
 };
 
+/** @deprecated Use `computeStudentBalance(...).outstanding`. Ignores refunds. */
 export const calculateRemainingDebt = (student: Student, payments: Payment[]): number => {
   return calculateTotalTuition(student) - calculateTotalPaidFees(student.id, payments);
 };
 
+/** @deprecated Use `computeStudentBalance(...).paidPercentage`. Ignores refunds. */
 export const calculatePaidPercentage = (student: Student, payments: Payment[]): number => {
   const totalTuition = calculateTotalTuition(student);
   if (totalTuition <= 0) return 100;

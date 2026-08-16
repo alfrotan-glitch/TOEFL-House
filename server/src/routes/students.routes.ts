@@ -525,7 +525,13 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
     if (!semesterId) throw new HttpError(400, 'semesterId is required when paying a class fee.');
     const sem = (stmtGetSemestersByStudent.all(student.id) as any[]).find(s => s.id === semesterId);
     if (!sem) throw new HttpError(404, 'Semester not found.');
-    const totalPaidForSem = (stmtGetPaymentsByStudent.all(student.id) as any[]).filter(p => p.semester === sem.semester_name && p.category === 'fee').reduce((acc, p) => acc + p.amount, 0);
+    // Refunds must count against the semester, otherwise a partially refunded
+    // student is treated as fully paid and the academy is unable to collect a
+    // debt they genuinely owe. Refunds are stored signed-negative and are not
+    // tagged with a semester, so they are attributed to the student's tuition.
+    const totalPaidForSem = (stmtGetPaymentsByStudent.all(student.id) as any[])
+      .filter(p => p.status === 'completed' && ((p.semester === sem.semester_name && (p.category === 'fee' || p.category === 'installment')) || p.category === 'refund'))
+      .reduce((acc, p) => acc + Number(p.amount || 0), 0);
     const semDebt = Math.max(0, Number(sem.net_fee_amount ?? sem.fee_amount) - totalPaidForSem);
     if (semDebt <= 0) throw new HttpError(400, 'This semester is already fully paid.');
     resolvedAmount = semDebt;
@@ -592,7 +598,7 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
       const currentSem = (stmtGetSemestersByStudent.all(student.id) as any[]).find((s) => s.id === semesterId);
       if (!currentSem) throw new HttpError(404, 'Semester not found.');
       const currentPaid = (stmtGetPaymentsByStudent.all(student.id) as PaymentRow[])
-        .filter((p) => p.status === 'completed' && p.semester === currentSem.semester_name && p.category === 'fee')
+        .filter((p) => p.status === 'completed' && ((p.semester === currentSem.semester_name && (p.category === 'fee' || p.category === 'installment')) || p.category === 'refund'))
         .reduce((sum, p) => sum + Number(p.amount || 0), 0);
       const currentDebt = Math.max(0, Number(currentSem.net_fee_amount ?? currentSem.fee_amount) - currentPaid);
       if (currentDebt <= 0) throw new HttpError(409, 'This semester is already fully paid.');
