@@ -6,6 +6,15 @@ interface Program { id: string; name: string; isActive?: boolean; }
 interface ProgramVersion {
   id: string; program_id: string; program_name?: string; version_label: string;
   version_number: number; status: string; is_default?: number; duration_months?: number; description?: string | null;
+  /**
+   * Lifecycle metadata. The API has always returned these (getVersionTree does
+   * `SELECT pv.*`); they were simply absent from this interface and therefore
+   * invisible in the UI. Optional because older rows may not have them set.
+   */
+  effective_from?: string | null;
+  effective_to?: string | null;
+  published_at?: string | null;
+  created_by?: string | null;
 }
 interface TreeLevel { id: string; name: string; code?: string; order?: number; default_fee?: number; }
 interface PlacementRule { id: string; name: string; min_score: number; max_score: number; recommended_level_id?: string; }
@@ -243,7 +252,7 @@ export default function ProgramVersionsPanel() {
         {/* Left: Versions List */}
         <div className="lg:col-span-4 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden h-fit sticky top-4">
           <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 text-xs font-extrabold text-slate-600 uppercase tracking-wider">All Versions</div>
-          <div className="max-h-[600px] overflow-y-auto">
+          <div className="max-h-[calc(100vh-12rem)] overflow-y-auto">
             {versions.length === 0 ? (
               <p className="p-4 text-xs text-slate-400 text-center">No versions yet.</p>
             ) : (
@@ -262,7 +271,7 @@ export default function ProgramVersionsPanel() {
         </div>
 
         {/* Right: Details & Rules (FIXED LAYOUT) */}
-        <div className="lg:col-span-8 bg-white rounded-2xl border border-slate-200 shadow-sm p-6 min-h-[400px]">
+        <div className="lg:col-span-8 bg-white rounded-2xl border border-slate-200 shadow-sm p-6 min-h-[400px] overflow-visible">
           {!tree ? (
             <div className="flex flex-col items-center justify-center h-full text-center text-slate-400 py-12">
               <BookOpen className="w-10 h-10 mb-3" />
@@ -276,6 +285,30 @@ export default function ProgramVersionsPanel() {
                 <div>
                   <p className="text-lg font-extrabold text-slate-900">{tree.version.program_name} — {tree.version.version_label}</p>
                   <p className="text-xs text-slate-500 mt-1">Status: <span className="font-bold capitalize">{tree.version.status}</span> · {tree.levels?.length || 0} Levels attached</p>
+                  {/* Effective dates, publication state and authorship were already
+                      returned by the API (getVersionTree does `SELECT pv.*`) but were
+                      never rendered, so the operator could not tell WHEN a version
+                      applies or WHETHER it is live — the core of the "nothing
+                      meaningful is visible" report. Each field is omitted when unset
+                      rather than printed as "null". */}
+                  <dl className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 text-xs">
+                    <div>
+                      <dt className="text-slate-400 font-semibold uppercase tracking-wide text-[10px]">Effective from</dt>
+                      <dd className="font-bold text-slate-700 mt-0.5">{tree.version.effective_from || '—'}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-400 font-semibold uppercase tracking-wide text-[10px]">Effective to</dt>
+                      <dd className="font-bold text-slate-700 mt-0.5">{tree.version.effective_to || 'Open-ended'}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-400 font-semibold uppercase tracking-wide text-[10px]">Published</dt>
+                      <dd className="font-bold text-slate-700 mt-0.5">{tree.version.published_at || 'Not published'}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-slate-400 font-semibold uppercase tracking-wide text-[10px]">Created by</dt>
+                      <dd className="font-bold text-slate-700 mt-0.5">{tree.version.created_by || '—'}</dd>
+                    </div>
+                  </dl>
                 </div>
                 {tree.version.status !== 'published' && tree.version.status !== 'archived' && (
                   <button type="button" disabled={busy} onClick={() => setShowPublishModal(true)} className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 cursor-pointer">
