@@ -16,7 +16,8 @@
     "test:backend": "npm --prefix server test",
     "audit:product": "node scripts/verify-product-integrity.mjs",
     "audit:static": "node scripts/high-assurance-static-audit.mjs",
-    "release:clean": "powershell -ExecutionPolicy Bypass -File ./scripts/prepare-clean-release.ps1"
+    "release:clean": "powershell -ExecutionPolicy Bypass -File ./scripts/prepare-clean-release.ps1",
+    "audit:bundle": "node scripts/verify-bundle-weight.mjs"
   },
   "dependencies": {
     "lucide-react": "1.27.0",

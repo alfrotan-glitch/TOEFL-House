@@ -23,12 +23,19 @@ export default defineConfig({
     chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {
-        manualChunks(id) {
-          if (!id.includes('node_modules')) return undefined;
-          if (id.includes('/react/') || id.includes('/react-dom/')) return 'react';
-          if (id.includes('/recharts/')) return 'charts';
-          if (id.includes('/lucide-react/')) return 'icons';
-          return undefined;
+        // Rolldown's `advancedChunks` groups, not `manualChunks`: with the
+        // function form, React's CJS entry points (react/index.js,
+        // react-dom/cjs/react-dom.production.js) were pulled into whichever
+        // chunk first required them — recharts. That put a 412 KB charting
+        // library in the entry's preload graph, so every user downloaded it
+        // before the first paint even though only the lazy Dashboard renders
+        // a chart. Explicit priority-ordered groups keep React in one chunk.
+        advancedChunks: {
+          groups: [
+            { name: 'react', test: /[\\/]node_modules[\\/](react|react-dom)[\\/]/, priority: 30 },
+            { name: 'icons', test: /[\\/]node_modules[\\/]lucide-react[\\/]/, priority: 20 },
+            { name: 'charts', test: /[\\/]node_modules[\\/](recharts|d3-[^/]*|victory-[^/]*|decimal\.js-light)[\\/]/, priority: 10 },
+          ],
         },
       },
     },
