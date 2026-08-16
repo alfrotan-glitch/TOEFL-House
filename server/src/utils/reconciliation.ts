@@ -102,13 +102,23 @@ export function computeReconciliation(opts: { branchId: string | null; isAll: bo
   // row and never debited finance_accounts, leaving 500 AFN of phantom cash
   // that every reconciliation still reported as healthy.
   //
-  // Invariant, per branch:
-  //     main_balance   = income - expense - saving_transfer
-  //     saving_balance = saving_transfer
-  const cashSql = `SELECT COALESCE(SUM(CASE WHEN type='income' THEN amount WHEN type='expense' THEN -amount WHEN type='saving_transfer' THEN -amount ELSE 0 END),0) AS v FROM financial_transactions WHERE 1=1`;
-  const savingSql = `SELECT COALESCE(SUM(CASE WHEN type='saving_transfer' THEN amount ELSE 0 END),0) AS v FROM financial_transactions WHERE 1=1`;
-  const expectedMain = scalarValue(cashSql, 'AND branch_id = ?', boundBranchId);
+  // The formula must mirror how money ACTUALLY moves in this system:
+  //   * operating income credits branch cash, and the savings sweep moves a
+  //     slice of it into the branch saving account;
+  //   * `capital_injection` credits the ORGANIZATION treasury, not branch cash,
+  //     even though the row is stamped with the operator's branch;
+  //   * `budget_charge` debits the ORGANIZATION treasury into a budget line;
+  //   * `expense` rows are paid FROM budget lines (payroll, utilities), so they
+  //     do not debit branch cash either.
+  //
+  // Hence, per branch:
+  //     main_balance   = SUM(operating income) - SUM(saving_transfer)
+  //     saving_balance = SUM(saving_transfer)
+  const operatingIncomeSql = `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type='income' AND category <> 'capital_injection'`;
+  const savingSql = `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type='saving_transfer'`;
+  const operatingIncome = scalarValue(operatingIncomeSql, 'AND branch_id = ?', boundBranchId);
   const expectedSaving = scalarValue(savingSql, 'AND branch_id = ?', boundBranchId);
+  const expectedMain = Math.round((operatingIncome - expectedSaving) * 100) / 100;
 
   const acctSql = `SELECT COALESCE(SUM(main_balance),0) AS main, COALESCE(SUM(saving_balance),0) AS saving FROM finance_accounts WHERE scope_type = 'branch'`;
   const acctRow = (boundBranchId === null

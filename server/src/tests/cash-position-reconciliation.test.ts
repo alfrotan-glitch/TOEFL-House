@@ -15,9 +15,16 @@
  *   the next money path that forgets to move cash is caught by the system
  *   rather than by an auditor.
  *
- * Invariant, per branch:
- *     main_balance   = SUM(income) - SUM(expense) - SUM(saving_transfer)
+ * Invariant, per branch — mirroring how money actually moves here:
+ *     main_balance   = SUM(operating income) - SUM(saving_transfer)
  *     saving_balance = SUM(saving_transfer)
+ *
+ * `capital_injection` credits the ORGANIZATION treasury (not branch cash) and
+ * `budget_charge` debits it into a budget line; `expense` rows are paid FROM
+ * budget lines, so none of the three touch branch cash. An earlier draft of
+ * this check subtracted expenses from branch cash and reported a false -69,500
+ * variance on a perfectly healthy branch — a reconciliation that cries wolf is
+ * worse than none, because it trains operators to ignore it.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { db, initSchema } from '../db/connection.js';
@@ -52,6 +59,31 @@ describe('cash-position reconciliation', () => {
     const r = computeReconciliation({ branchId: BRANCH, isAll: false });
     expect(r.cashVariance).toBe(0);
     expect(r.savingVariance).toBe(0);
+  });
+
+  it('budget-funded expenses do NOT count against branch cash (no false alarm)', () => {
+    income(1000);
+    const clean = computeReconciliation({ branchId: BRANCH, isAll: false });
+    expect(clean.cashVariance).toBe(0);
+
+    // Payroll and utilities are paid from budget lines, and capital movements
+    // belong to the organization treasury. None may perturb the branch check.
+    db.prepare(
+      `INSERT INTO financial_transactions (id, type, category, amount, date, description, operator_name, branch_id)
+       VALUES (?, 'expense', 'salary', 30000, '2026-06-02', 'salary from budget line', 'Test', ?)`,
+    ).run(id('tx'), BRANCH);
+    db.prepare(
+      `INSERT INTO financial_transactions (id, type, category, amount, date, description, operator_name, branch_id)
+       VALUES (?, 'income', 'capital_injection', 100000, '2026-06-02', 'owner capital', 'Test', ?)`,
+    ).run(id('tx'), BRANCH);
+    db.prepare(
+      `INSERT INTO financial_transactions (id, type, category, amount, date, description, operator_name, branch_id)
+       VALUES (?, 'budget_charge', 'utility', 60000, '2026-06-02', 'fund a budget line', 'Test', ?)`,
+    ).run(id('tx'), BRANCH);
+
+    const after = computeReconciliation({ branchId: BRANCH, isAll: false });
+    expect(after.cashVariance, 'branch cash must be unaffected by treasury/budget flows').toBe(0);
+    expect(after.savingVariance).toBe(0);
   });
 
   it('DETECTS phantom cash: a ledger row written without debiting the account', () => {
