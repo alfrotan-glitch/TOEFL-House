@@ -5,6 +5,7 @@
  */
 import { Router } from 'express';
 import { db } from '../db/connection.js';
+import { assertTextLengths, TEXT_LIMITS } from '../utils/textInput.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
@@ -229,6 +230,7 @@ academicRouter.post(
   ah(async (req, res) => {
     const { name, code, description, durationMonths, isActive, branchId } = req.body ?? {};
     if (!name || !String(name).trim()) throw new HttpError(400, 'Program name is required.');
+    assertTextLengths([[name, 'Program name', TEXT_LIMITS.name], [code, 'Code', TEXT_LIMITS.short], [description, 'Description', TEXT_LIMITS.notes]]);
     const resolvedBranch = branchId || req.user?.branchId;
     requireAcademicBranchAccess(req, resolvedBranch);
     const newId = id('prog');

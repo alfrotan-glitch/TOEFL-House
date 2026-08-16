@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
+import { assertTextLengths, TEXT_LIMITS } from '../utils/textInput.js';
 import { authenticate, authorize, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { resolveIdempotency } from '../utils/idempotency.js';
@@ -81,6 +82,7 @@ booksRouter.post(
   ah(async (req, res) => {
     const { title, price, stock, isChapter, entryDate, purchasePrice, branchId } = req.body;
     if (!title || price == null || stock == null) throw new HttpError(400, 'Title, price, and quantity are required.');
+    assertTextLengths([[title, 'Title', TEXT_LIMITS.line]]);
     if (!Number.isInteger(Number(stock)) || Number(stock) < 0) throw new HttpError(400, 'Stock must be a non-negative integer.');
 
     // The book is created in the caller's working branch (the branch the UI is

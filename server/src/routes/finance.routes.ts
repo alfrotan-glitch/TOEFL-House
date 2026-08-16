@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
+import { assertTextLengths, TEXT_LIMITS } from '../utils/textInput.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource, hasLegacyRole } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
@@ -474,6 +475,7 @@ financeRouter.post(
     if (!title?.trim() || !Number.isFinite(Number(amount)) || Number(amount) <= 0 || !budgetLine) {
       throw new HttpError(400, 'Title, a positive amount, and a valid budget line are required.');
     }
+    assertTextLengths([[title, 'Title', TEXT_LIMITS.line]]);
     
     const { expenseKind, paymentMethod, billPeriod, notes } = normalizeExpenseMeta(req.body);
     const newId = id('req');
@@ -503,6 +505,7 @@ financeRouter.post(
     if (!title?.trim() || !Number.isFinite(resolvedAmount) || resolvedAmount <= 0 || !budgetLine) {
       throw new HttpError(400, 'Title, a valid amount, and a budget line are required.');
     }
+    assertTextLengths([[title, 'Title', TEXT_LIMITS.line]]);
 
     const { expenseKind, paymentMethod, billPeriod, notes } = normalizeExpenseMeta(req.body);
     const threshold = getNumberSetting('expense_auto_approve_threshold', SYSTEM_DEFAULTS.expenseAutoApproveThreshold);

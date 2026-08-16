@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
+import { assertTextLengths, TEXT_LIMITS } from '../utils/textInput.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
@@ -327,6 +328,7 @@ classesRouter.post(
       name, teacherId, level, levelId, programId, capacity, scheduleTime, startDate, endDate,
       fee, minViableSize, branchId, roomId, timeSlotId, academicTermId, activationDate, genderPolicy,
     } = req.body;
+    assertTextLengths([[(req.body as { name?: unknown }).name, 'Class name', TEXT_LIMITS.name]]);
     
     if (!name) throw new HttpError(400, 'Class name is required.');
 
