@@ -7,6 +7,7 @@ import React, { useState, useMemo, useRef } from 'react';
 import { Visitor, Class, Branch } from '../../types';
 import { formatAFN } from '../../utils/format';
 import { Banknote, CreditCard, Building2, Receipt, CheckCircle2, AlertCircle, Printer, Loader2, X } from 'lucide-react';
+import { BRAND_NAME, BRAND_SLOGAN } from '../../config/branding';
 
 type PaymentMethod = 'cash' | 'card' | 'bank_transfer';
 
@@ -172,7 +173,7 @@ export default function ConvertToStudentModal({
         <div class="row"><span class="label">Paid Today</span><span class="value">${formatAFN(safeAmountPaid)} AFN</span></div>
         <div class="row"><span class="label">Payment Method</span><span class="value">${METHOD_LABELS[paymentMethod]}</span></div>
         ${isPartialPayment ? `<div class="divider"></div><div class="row"><span class="label">Remaining</span><span class="value" style="color:#b45309;">${formatAFN(remainingAfterPayment)} AFN</span></div>` : ''}
-        <div class="footer"><p>Thank you for choosing The TOEFL House!</p><p style="margin-top:4px;">This is a system-generated receipt.</p></div>
+        <div class="footer"><p>Thank you for choosing ${BRAND_NAME}!</p><p style="margin-top:2px;">${BRAND_SLOGAN}</p><p style="margin-top:4px;">This is a system-generated receipt.</p></div>
       </body></html>
     `);
     printWindow.document.close();

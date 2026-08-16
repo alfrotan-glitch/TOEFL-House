@@ -3,6 +3,7 @@ import { FileText, Check } from 'lucide-react';
 import { BudgetLine, FinancialTransaction } from '../../types';
 import { formatAFN } from '../../utils/format';
 import { api } from '../../api/client';
+import { BRAND_NAME } from '../../config/branding';
 
 interface FinanceModalsProps {
   chargingBudgetLine: BudgetLine | null;
@@ -154,7 +155,7 @@ export default function FinanceModals({
                     <FileText className="w-5 h-5 text-indigo-600" />
                     Official statement of income & expenses
                   </h3>
-                  <p className="text-[10px] text-slate-400">The TOEFL House ERP Treasury • Financial report</p>
+                  <p className="text-[10px] text-slate-400">{BRAND_NAME} Treasury • Financial report</p>
                 </div>
                 <button 
                   onClick={() => setShowReportModal(false)} 

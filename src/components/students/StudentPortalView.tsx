@@ -12,6 +12,8 @@ import { useAuth } from '../../contexts/useAuth';
 import type { Student, Payment, Attendance } from '../../types';
 import { printStudentIdCard, type IdCardDesign } from '../../utils/certificateTemplates';
 import { formatAFN } from '../../utils/format';
+import { BRAND_NAME } from '../../config/branding';
+import { BrandLogo } from '../common/BrandLogo';
 
 export default function StudentPortalView() {
   const { logout } = useAuth();
@@ -89,7 +91,7 @@ export default function StudentPortalView() {
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center"><GraduationCap className="w-5 h-5" /></div>
           <div>
-            <div className="font-black text-sm tracking-wide">The TOEFL House — Student Portal</div>
+            <div className="font-black text-sm tracking-wide">{BRAND_NAME} — Student Portal</div>
             <div className="text-[10px] text-rose-100">Read-only self-service · {student.branchId ? `Branch ${student.branchId}` : ''}</div>
           </div>
         </div>
@@ -101,10 +103,10 @@ export default function StudentPortalView() {
         <div className="bg-white rounded-2xl border border-rose-200 overflow-hidden shadow-sm">
           <div className="bg-gradient-to-r from-rose-900 to-rose-600 px-5 py-3 flex justify-between items-center">
             <div>
-              <div className="font-black text-white text-sm">The TOEFL House</div>
+              <div className="font-black text-white text-sm">{BRAND_NAME}</div>
               <div className="text-[8px] font-bold text-rose-100 tracking-[0.18em]">STUDENT IDENTITY CARD</div>
             </div>
-            <div className="w-9 h-9 rounded-full bg-white text-rose-700 flex items-center justify-center font-black text-xs">TH</div>
+            <div className="w-9 h-9 rounded-full bg-white flex items-center justify-center p-1"><BrandLogo height={18} /></div>
           </div>
           <div className="px-5 py-4 flex gap-4 items-center">
             <div className="w-20 h-24 rounded-xl border-2 border-rose-500 bg-rose-50 flex items-center justify-center overflow-hidden shrink-0">
@@ -166,7 +168,7 @@ export default function StudentPortalView() {
         </div>
 
         <div className="text-center text-[10px] text-slate-400">
-          Contact the office for any correction. <span className="font-bold text-slate-500">The TOEFL House</span>
+          Contact the office for any correction. <span className="font-bold text-slate-500">{BRAND_NAME}</span>
         </div>
       </main>
     </div>

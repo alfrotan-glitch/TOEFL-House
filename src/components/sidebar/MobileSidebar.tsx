@@ -5,6 +5,8 @@ import SidebarBranchSelector from './SidebarBranchSelector';
 import SidebarSection from './SidebarSection';
 import SidebarFooter from './SidebarFooter';
 import type {NavSectionConfig, NavItemConfig, SidebarBranchOption, SidebarCampusOption} from '../../types/navigation';
+import { BrandLogo } from '../common/BrandLogo';
+import { BRAND_NAME, BRAND_SLOGAN } from '../../config/branding';
 
 interface MobileSidebarProps {
   isOpen: boolean;
@@ -58,12 +60,12 @@ export default function MobileSidebar({
         {/* Mobile brand */}
         <div className="h-16 flex items-center px-5 border-b border-white/[0.06] relative overflow-hidden">
           <div className="flex items-center gap-2.5 relative z-10">
-            <div className="w-9 h-9 bg-gradient-to-br from-indigo-500 to-violet-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/30 shrink-0">
-              <span className="text-white font-black text-sm tracking-tight">TH</span>
+            <div className="w-9 h-9 bg-white rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20 shrink-0 p-1">
+              <BrandLogo height={22} />
             </div>
             <div>
-              <h1 className="text-[15px] font-bold text-slate-100 tracking-tight leading-none">The TOEFL House</h1>
-              <p className="text-[8px] text-slate-400 font-bold uppercase tracking-[0.16em] mt-0.5">Enterprise ERP</p>
+              <h1 className="text-[15px] font-bold text-slate-100 tracking-tight leading-none">{BRAND_NAME}</h1>
+              <p className="text-[8px] text-slate-400 font-bold uppercase tracking-[0.16em] mt-0.5">{BRAND_SLOGAN}</p>
             </div>
           </div>
         </div>

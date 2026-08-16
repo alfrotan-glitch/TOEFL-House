@@ -7,6 +7,7 @@ import BusinessOperatingSystemView from './BusinessOperatingSystemView';
 import OperationsWorkQueue from './OperationsWorkQueue';
 import {useAuth} from '../../contexts/useAuth';
 import {formatAFN} from '../../utils/format';
+import { BRAND_NAME } from '../../config/branding';
 
 interface DashboardViewProps {
   /** Server-computed period totals. The authoritative source for money tiles. */
@@ -246,7 +247,7 @@ export default function DashboardView({
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(99,102,241,.28),transparent_34%),radial-gradient(circle_at_bottom_left,rgba(16,185,129,.16),transparent_28%)]" />
           <div className="relative flex flex-col xl:flex-row xl:items-end xl:justify-between gap-5">
             <div>
-              <div className="flex items-center gap-2 text-[10px] font-black tracking-[0.18em] uppercase text-indigo-300"><Sparkles className="w-3.5 h-3.5" /> The TOEFL House Command Center</div>
+              <div className="flex items-center gap-2 text-[10px] font-black tracking-[0.18em] uppercase text-indigo-300"><Sparkles className="w-3.5 h-3.5" /> {BRAND_NAME} Command Center</div>
               <h2 className="mt-2 text-2xl lg:text-3xl font-black tracking-tight">Run the school from one place.</h2>
               <p className="mt-2 max-w-2xl text-sm text-slate-300">Admissions, academic operations and finance are surfaced together so the next action is obvious—not buried inside modules.</p>
             </div>

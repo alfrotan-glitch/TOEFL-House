@@ -21,6 +21,7 @@ import LedgerPanel from './LedgerPanel';
 import PnLPanel from './PnLPanel';
 import MonthEndPanel from './MonthEndPanel';
 import FinanceDashboardPanel from './FinanceDashboardPanel';
+import { BRAND_NAME } from '../../config/branding';
 
 export interface FinanceViewProps {
   budgetLines: BudgetLine[];
@@ -160,7 +161,7 @@ export default function FinanceView(props: FinanceViewProps) {
     <div className="space-y-6 font-sans text-left" dir="ltr" id="finance-view-root">
       <div className="flex flex-col sm:flex-row items-center justify-between border-b border-slate-200 pb-4 gap-4">
         <div>
-          <h2 className="text-xl font-extrabold text-slate-900">Central Finance & Treasury (The TOEFL House)</h2>
+          <h2 className="text-xl font-extrabold text-slate-900">Central Finance &amp; Treasury ({BRAND_NAME})</h2>
           <p className="text-xs text-slate-500 mt-1">
             Budgets, operational expenses, invoices, approvals, savings, and general ledger — all figures from the database.
           </p>

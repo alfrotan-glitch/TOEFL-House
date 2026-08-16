@@ -9,6 +9,7 @@ import { TrendingUp, TrendingDown, Printer } from 'lucide-react';
 import { api } from '../../api/client';
 import { formatAFN } from '../../utils/format';
 import { formatJalaliDateTime } from '../../utils/jalali';
+import { brandPrintHeaderHtml } from '../../config/branding';
 
 interface PnlPayload {
   from: string | null;
@@ -84,7 +85,7 @@ export default function PnLPanel({ selectedYear, selectedMonth }: Props) {
         .net{font-size:16px;font-weight:800}
         @media print{body{margin:20px}}
       </style></head><body>
-      <h1>The TOEFL House — Profit &amp; Loss (operating)</h1>
+      ${brandPrintHeaderHtml('Profit &amp; Loss (operating)')}
       <div class="meta">Period: <b>${periodLabel}</b> · Scope: <b>${pnl.scope}</b> · Generated: <b>${formatJalaliDateTime(new Date().toISOString())}</b> · Source: server ledger</div>
       <h2>Income</h2><table>${rows(incomeRows)}<tr class="total"><td>Total income</td><td class="num">${formatAFN(pnl.income)}</td></tr></table>
       <h2>Expenses</h2><table>${rows(expenseRows)}<tr class="total"><td>Total expenses</td><td class="num">${formatAFN(pnl.expense)}</td></tr></table>

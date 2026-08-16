@@ -7,6 +7,7 @@ import type {CourseOption} from '../../utils/academicOptions';
 import React, { useState } from 'react';
 import {X, Award, Check, Copy, UserCog, PhoneCall, CheckCircle2, Plus, User, UserCheck, UserPlus, ChevronRight} from 'lucide-react';
 import {Visitor} from '../../types';
+import { BRAND_NAME } from '../../config/branding';
 
 interface VisitorDeskPanelProps {
   visitor: Visitor;
@@ -93,12 +94,12 @@ export default function VisitorDeskPanel({
   };
 
   const templates = [
-    { title: 'Welcome message 👋 (Dari)', text: `محترم ${visitor.gender === 'male' ? 'آقای' : 'خانم'} ${visitor.fullName}، سلام!\nاز مراجعه شما به The TOEFL House تشکر می‌کنیم. مشوره امروز شما ثبت گردید.\nدوره مورد علاقه: ${visitor.interestedCourse || 'the selected program'}\nمنتظر حضور شما در صنف استیم.\n— The TOEFL House` },
-    { title: 'New class reminder 🔔', text: `Dear ${visitor.gender === 'male' ? 'Mr' : 'Ms'} ${visitor.fullName},\nFollowing our conversation, seats are limited for ${visitor.interestedCourse || 'the selected program'}. Please visit reception to finalize enrollment.\n— The TOEFL House` },
+    { title: 'Welcome message 👋 (Dari)', text: `محترم ${visitor.gender === 'male' ? 'آقای' : 'خانم'} ${visitor.fullName}، سلام!\nاز مراجعه شما به ${BRAND_NAME} تشکر می‌کنیم. مشوره امروز شما ثبت گردید.\nدوره مورد علاقه: ${visitor.interestedCourse || 'the selected program'}\nمنتظر حضور شما در صنف استیم.\n— ${BRAND_NAME}` },
+    { title: 'New class reminder 🔔', text: `Dear ${visitor.gender === 'male' ? 'Mr' : 'Ms'} ${visitor.fullName},\nFollowing our conversation, seats are limited for ${visitor.interestedCourse || 'the selected program'}. Please visit reception to finalize enrollment.\n— ${BRAND_NAME}` },
   ];
 
   if (visitor.fatherName || visitor.emergencyContactName) {
-    templates.push({ title: 'Parent notice 👪 (Dari)', text: `محترم ${visitor.fatherName || visitor.emergencyContactName} صاحب، سلام!\nبه اطلاع شما رسانیده می‌شود که ${visitor.fullName} امروز به مرکز TOEFL House مراجعه نموده و برای دوره ثبت اولیه صورت گرفت.\nبا احترام\n— The TOEFL House` });
+    templates.push({ title: 'Parent notice 👪 (Dari)', text: `محترم ${visitor.fatherName || visitor.emergencyContactName} صاحب، سلام!\nبه اطلاع شما رسانیده می‌شود که ${visitor.fullName} امروز به مرکز ${BRAND_NAME} مراجعه نموده و برای دوره ثبت اولیه صورت گرفت.\nبا احترام\n— ${BRAND_NAME}` });
   }
 
   const copyText = (text: string, index: number) => {

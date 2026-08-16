@@ -8,6 +8,7 @@ import type {TeacherSalaryStatus} from '../../apiStore';
 import {formatAFN} from '../../utils/format';
 import {recentJalaliPeriods, jalaliPeriodLabel} from '../../utils/jalali';
 import {ShamsiDate} from '../common/ShamsiDate';
+import { BRAND_NAME } from '../../config/branding';
 
 /** Labels for the five contract types. A contract type describes how the
  *  teacher is PAID; it never affects whether Skills are recorded. */
@@ -409,7 +410,7 @@ export default function TeachersModals(props: TeachersModalsProps) {
             </div>
             <div id="printed-staff-payslip-area" className="bg-white border-2 border-dashed border-slate-300 rounded-2xl p-6 space-y-6 text-slate-800 relative select-text" dir="ltr">
               <div className="flex flex-col sm:flex-row justify-between items-center pb-4 border-b-2 border-slate-200 gap-4">
-                <div className="text-center sm:text-left space-y-1"><h3 className="font-black text-slate-950 text-base">The TOEFL House Higher Education</h3><p className="text-[10px] text-slate-400 font-bold">Finance calculation, salary payment, and central treasury</p></div>
+                <div className="text-center sm:text-left space-y-1"><h3 className="font-black text-slate-950 text-base">{BRAND_NAME}</h3><p className="text-[10px] text-slate-400 font-bold">Finance calculation, salary payment, and central treasury</p></div>
                 <div className="text-center sm:text-left space-y-1 font-mono text-[10px] text-slate-500"><p className="font-bold text-slate-900 text-xs">Receipt No: {printedPayslip.serialNo}</p><p>Date: <ShamsiDate value={printedPayslip.date} format="long" /></p></div>
               </div>
               <div className="bg-slate-50 border border-slate-100 rounded-xl p-2.5 text-center font-black text-slate-900 text-xs tracking-wider">Official monthly salary settlement slip</div>

@@ -2,6 +2,8 @@ import React from 'react';
 import { Trash2, X, AlertCircle, Edit, Info, History, Printer, RotateCcw, TrendingDown, Plus } from 'lucide-react';
 import { Book, BookSale } from '../../types';
 import { formatAFN } from '../../utils/format';
+import { BrandLogo } from '../common/BrandLogo';
+import { BRAND_NAME } from '../../config/branding';
 
 interface BooksModalsProps {
   // Edit book modal
@@ -254,7 +256,8 @@ export default function BooksModals(props: BooksModalsProps) {
             >
               {/* Receipt Header logo */}
               <div className="text-center space-y-1 border-b border-slate-200 pb-3">
-                <h4 className="font-black text-slate-900 text-sm">The TOEFL House Academy</h4>
+                <div className="flex justify-center pb-1"><BrandLogo height={30} /></div>
+                <h4 className="font-black text-slate-900 text-sm">{BRAND_NAME}</h4>
                 <p className="text-[10px] text-slate-500 font-semibold">Bookstore finance & inventory</p>
                 <p className="text-[9px] text-slate-400 font-mono">Phone: 0788223344</p>
               </div>
@@ -355,7 +358,7 @@ export default function BooksModals(props: BooksModalsProps) {
 
               {/* Footer Stamp */}
               <div className="text-center pt-2 text-[9px] text-slate-400 space-y-1">
-                <p>The TOEFL House cashier stamp & signature</p>
+                <p>{BRAND_NAME} cashier stamp &amp; signature</p>
                 <div className="h-10 w-24 mx-auto border border-dashed border-indigo-200/50 rounded-full flex items-center justify-center text-[8px] text-indigo-400 font-bold rotate-6">
                   TOEFL HOUSE PAID
                 </div>
@@ -398,7 +401,7 @@ export default function BooksModals(props: BooksModalsProps) {
             </div>
             
             <p className="text-xs text-slate-600 leading-relaxed">
-              Are you sure you want to delete book/chapter <strong className="text-slate-900 font-bold">“{bookToDelete.title}”</strong> from The TOEFL House inventory?
+              Are you sure you want to delete book/chapter <strong className="text-slate-900 font-bold">“{bookToDelete.title}”</strong> from {BRAND_NAME} inventory?
             </p>
             
             <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl flex items-start gap-2.5 text-[11px] text-rose-800 leading-relaxed">
@@ -583,7 +586,8 @@ export default function BooksModals(props: BooksModalsProps) {
             >
               {/* Header section */}
               <div className="text-center space-y-1.5 border-b-2 border-double border-slate-300 pb-4">
-                <h3 className="font-black text-slate-900 text-base">The TOEFL House Academy</h3>
+                <div className="flex justify-center pb-1"><BrandLogo height={34} /></div>
+                <h3 className="font-black text-slate-900 text-base">{BRAND_NAME}</h3>
                 <p className="text-xs text-slate-600 font-bold">Bookstore finance & inventory — stock balance report</p>
                 <div className="flex justify-center gap-6 text-[10px] text-slate-500 font-mono pt-1">
                   <span>Report date: {new Date().toISOString().split('T')[0]}</span>
@@ -660,7 +664,7 @@ export default function BooksModals(props: BooksModalsProps) {
 
               {/* Disclaimer */}
               <div className="flex justify-between items-center text-[9px] text-slate-400 pt-4 border-t border-slate-100">
-                <p>* Internal report based on the latest The TOEFL House inventory entries.</p>
+                <p>* Internal report based on the latest {BRAND_NAME} inventory entries.</p>
                 <p>Institutional finance — admin approval</p>
               </div>
             </div>

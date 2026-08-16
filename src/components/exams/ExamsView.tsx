@@ -6,6 +6,8 @@ import { Award, Plus, Check, Sparkles, AlertCircle, Bookmark, User, UserPlus, Cr
 import { Exam, ExamResult, Student, Visitor, UserRole } from '../../types';
 import { formatAFN } from '../../utils/format';
 import { ShamsiDateInput } from '../common/ShamsiDateInput';
+import { BRAND_NAME } from '../../config/branding';
+import { BrandLogo } from '../common/BrandLogo';
 
 interface ExamsViewProps {
   exams: Exam[];
@@ -217,11 +219,11 @@ export default function ExamsView({
               
               {/* Header */}
               <header className="flex flex-col items-center">
-                <div className="w-20 h-20 bg-linear-to-br from-rose-600 to-[#4c0519] rounded-full flex items-center justify-center shadow-lg ring-4 ring-rose-500/40 mb-3">
-                  <span className="text-white font-serif font-black text-2xl tracking-tight">TH</span>
+                <div className="bg-white rounded-2xl flex items-center justify-center shadow-lg ring-4 ring-rose-500/30 mb-3 px-4 py-3">
+                  <BrandLogo height={52} />
                 </div>
                 <h1 className="text-4xl font-serif font-extrabold text-[#4c0519] tracking-wide leading-none">
-                  The TOEFL House
+                  {BRAND_NAME}
                 </h1>
                 <div className="w-32 h-0.5 bg-rose-600 mt-3 mb-2"></div>
                 <p className="text-xs font-serif font-bold text-slate-500 uppercase tracking-[0.4em]">
@@ -585,7 +587,7 @@ export default function ExamsView({
                 ) : (
                   <div className="bg-amber-50 border border-amber-200 text-amber-800 p-3 rounded-lg text-[10px] flex gap-1.5 leading-relaxed">
                     <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span>Per The TOEFL House policy, certificates are issued only for scores 90 and above.</span>
+                    <span>Per {BRAND_NAME} policy, certificates are issued only for scores 90 and above.</span>
                   </div>
                 )}
 

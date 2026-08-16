@@ -15,6 +15,8 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../contexts/useAuth';
 import { api } from '../../api/client';
+import { BrandLogo } from '../common/BrandLogo';
+import { BRAND_NAME, BRAND_SLOGAN } from '../../config/branding';
 
 export default function LoginView() {
   const auth = useAuth() as { login?: (u: string, p: string) => Promise<void> | void; isLoading?: boolean; refreshUser?: () => Promise<void> };
@@ -83,12 +85,12 @@ export default function LoginView() {
 
         {/* brand mark */}
         <div className="relative flex items-center gap-3 fade-up">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-rose-400 via-rose-500 to-red-600 grid place-items-center shadow-lg shadow-rose-900/50 ring-1 ring-white/20">
-            <span className="text-white font-black text-lg font-display tracking-tight">TH</span>
+          <div className="rounded-2xl bg-white/95 px-3 py-2 shadow-lg shadow-rose-900/40 ring-1 ring-white/20">
+            <BrandLogo height={34} />
           </div>
           <div>
-            <h1 className="text-white font-display font-bold text-lg leading-none tracking-tight">The TOEFL House</h1>
-            <p className="overline text-rose-200/45 mt-1">Enterprise ERP</p>
+            <h1 className="text-white font-display font-bold text-lg leading-none tracking-tight">{BRAND_NAME}</h1>
+            <p className="overline text-rose-200/45 mt-1">{BRAND_SLOGAN}</p>
           </div>
         </div>
 
@@ -145,10 +147,8 @@ export default function LoginView() {
         <div className="w-full max-w-sm">
           {/* mobile-only brand mark */}
           <div className="lg:hidden flex items-center gap-2.5 mb-10 fade-up">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-rose-500 to-red-600 grid place-items-center shadow-md">
-              <span className="text-white font-black font-display">TH</span>
-            </div>
-            <span className="font-display font-bold text-slate-900 tracking-tight">The TOEFL House</span>
+            <BrandLogo height={32} />
+            <span className="font-display font-bold text-slate-900 tracking-tight">{BRAND_NAME}</span>
           </div>
 
           <div className="fade-up" style={{ animationDelay: '60ms' }}>

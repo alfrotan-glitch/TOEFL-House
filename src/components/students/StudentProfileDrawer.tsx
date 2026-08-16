@@ -10,6 +10,8 @@ import {formatAFN} from '../../utils/format';
 import { isRefundPayment } from '../../utils/studentBalance';
 import {printStudentIdCard} from '../../utils/certificateTemplates';
 import StudentJourneyTimeline from './journey/StudentJourneyTimeline';
+import { BRAND_NAME } from '../../config/branding';
+import { BrandLogo } from '../common/BrandLogo';
 
 interface StudentProfileDrawerProps {
   /** Server-aggregated attendance rates (GET /attendance/summary). */
@@ -370,10 +372,10 @@ export default function StudentProfileDrawer({
           <div className="bg-white rounded-3xl overflow-hidden shadow-lg border border-rose-200">
             <div className="bg-gradient-to-r from-rose-900 to-rose-600 px-5 py-3 flex justify-between items-center">
               <div>
-                <div className="font-black text-white text-sm tracking-wide">The TOEFL House</div>
+                <div className="font-black text-white text-sm tracking-wide">{BRAND_NAME}</div>
                 <div className="text-[8px] font-bold text-rose-100 tracking-[0.18em]">STUDENT IDENTITY CARD</div>
               </div>
-              <div className="w-9 h-9 rounded-full bg-white text-rose-700 flex items-center justify-center font-black text-xs">TH</div>
+              <div className="w-9 h-9 rounded-full bg-white flex items-center justify-center p-1"><BrandLogo height={18} /></div>
             </div>
             <div className="px-5 py-4 flex gap-4">
               <div className="w-20 h-24 rounded-xl border-2 border-rose-500 bg-rose-50 flex items-center justify-center overflow-hidden shrink-0 text-slate-300">

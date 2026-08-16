@@ -9,6 +9,7 @@ import PositionsPanel, { PositionRow, PermissionDef } from './PositionsPanel';
 import UserPositionsPanel, { UserLite } from './UserPositionsPanel';
 import {SystemSettings, Branch, Campus, Partner, UserRole} from '../../types';
 import {ALL_ROLES, getRoleLabel} from '../../config/roles';
+import { BRAND_NAME } from '../../config/branding';
 
 interface UserAccount {
   id: string; username: string; fullName: string; email: string | null; role: string;
@@ -418,7 +419,7 @@ export default function SettingsView({
           </h3>
           <div className="bg-indigo-50/40 border border-indigo-100 rounded-xl p-3 text-xs space-y-1">
             <p className="font-extrabold text-slate-900">Organization</p>
-            <p className="text-slate-700 font-bold">{settings.organization?.name || 'The TOEFL House'}</p>
+            <p className="text-slate-700 font-bold">{settings.organization?.name || BRAND_NAME}</p>
             <p className="text-slate-500">Hierarchy: Organization → Campus → Branch. Branches always belong to one campus.</p>
           </div>
 

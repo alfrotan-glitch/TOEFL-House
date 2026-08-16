@@ -12,6 +12,7 @@ import type { OperationsReport } from '../../types';
 import { formatAFN } from '../../utils/format';
 import { formatJalaliDateTime } from '../../utils/jalali';
 import { ShamsiDateInput } from '../common/ShamsiDateInput';
+import { brandPrintHeaderHtml } from '../../config/branding';
 
 type Period = 'today' | 'month' | 'year' | 'range';
 type Gender = 'all' | 'male' | 'female';
@@ -43,7 +44,7 @@ function printableReport(report: OperationsReport) {
       .muted{color:#64748b}
       @media print{body{margin:20px}}
     </style></head><body>
-    <div class="brand">The TOEFL House</div>
+    ${brandPrintHeaderHtml()}
     <div class="title">Operations &amp; Financial Report — ${m.periodLabel}</div>
     <div class="meta">
       Report ID: <b>${m.reportId}</b><br>

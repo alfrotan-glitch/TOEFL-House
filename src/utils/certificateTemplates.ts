@@ -1,5 +1,6 @@
 import QRCode from 'qrcode';
 import { Student } from '../types';
+import { BRAND_NAME, BRAND_NAME_DARI, BRAND_SLOGAN, brandLogoAbsoluteUrl } from '../config/branding';
 
 export type PrintLang = 'en' | 'dari';
 
@@ -49,7 +50,7 @@ export async function printStudentIdCard(
   const labels =
     lang === 'dari'
       ? {
-          org: 'تافل هاوس',
+          org: BRAND_NAME_DARI,
           title: 'کارت هویت شاگرد',
           name: 'نام',
           code: 'کد',
@@ -64,7 +65,7 @@ export async function printStudentIdCard(
           female: 'خانم',
         }
       : {
-          org: 'The TOEFL House',
+          org: BRAND_NAME,
           title: 'STUDENT IDENTITY CARD',
           name: 'Name',
           code: 'Code',
@@ -116,7 +117,8 @@ export async function printStudentIdCard(
     .head { background: linear-gradient(135deg, ${BRAND_ROSE_DEEP} 0%, ${BRAND_ROSE} 100%); color: #fff; padding: 14px 18px; display: flex; justify-content: space-between; align-items: center; }
     .head .brand { font-weight: 800; font-size: 15px; letter-spacing: 0.03em; }
     .head .title { font-size: 9px; opacity: 0.9; margin-top: 2px; letter-spacing: 0.06em; }
-    .head .logo { width: 34px; height: 34px; border-radius: 50%; background: #fff; color: ${BRAND_ROSE}; font-weight: 900; font-size: 13px; display: flex; align-items: center; justify-content: center; }
+    .head .logo { height: 34px; width: auto; background: #fff; border-radius: 8px; padding: 3px 6px; display: flex; align-items: center; justify-content: center; }
+    .head .logo img { height: 26px; width: auto; object-fit: contain; display: block; }
     .body { padding: 16px 18px; display: flex; gap: 14px; }
     .photo { width: 96px; height: 112px; border-radius: 12px; border: 2px solid ${BRAND_ROSE}; background: #fff1f2; display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; }
     .info { flex: 1; min-width: 0; }
@@ -140,7 +142,7 @@ export async function printStudentIdCard(
         <div class="brand">${labels.org}</div>
         <div class="title">${labels.title}</div>
       </div>
-      <div class="logo">TH</div>
+      <div class="logo"><img src="${brandLogoAbsoluteUrl()}" alt="${BRAND_NAME}" /></div>
     </div>
     <div class="body">
       <div class="photo">${photoHtml}</div>
@@ -149,7 +151,7 @@ export async function printStudentIdCard(
         <div class="row"><span class="k">${labels.code}</span><br/><span class="v">${esc(student.studentCode || student.id)}</span></div>
         <div class="row"><span class="k">${labels.gender}</span> · <span class="v">${gender}</span></div>
         <div class="row"><span class="k">${labels.registered}</span> · <span class="v">${esc(student.registrationDate || '—')}</span></div>
-        ${customMotto ? `<div class="motto">${esc(customMotto)}</div>` : ''}
+        <div class="motto">${esc(customMotto || BRAND_SLOGAN)}</div>
       </div>
     </div>
     <div class="foot">

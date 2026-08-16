@@ -21,6 +21,7 @@
 
 import React, { Component, type ErrorInfo, type ReactNode } from 'react';
 import { AlertTriangle, RefreshCw, Home, Copy, CheckCircle2, Bug, Shield } from 'lucide-react';
+import { BRAND_NAME } from '../config/branding';
 
 // ============================================================================
 // Types
@@ -210,7 +211,7 @@ function DefaultFallback({
 
           {/* Footer */}
           <p className="text-[10px] text-slate-400 text-center pt-2 border-t border-slate-100">
-            The TOEFL House ERP · 1.0.0 · {new Date().toLocaleDateString('en-US')}
+            {BRAND_NAME} ERP · 1.0.0 · {new Date().toLocaleDateString('en-US')}
           </p>
         </div>
       </div>
