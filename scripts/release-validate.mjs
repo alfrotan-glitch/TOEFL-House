@@ -32,12 +32,27 @@ function run(name, cmd, opts = {}) {
   }
   process.stdout.write(`  ${name.padEnd(38)} `);
   try {
-    execSync(cmd, { cwd: opts.cwd ?? root, stdio: 'pipe', encoding: 'utf8', env: { ...process.env, ...opts.env } });
+    // maxBuffer must exceed the noisiest command's output. The server suite
+    // prints ~1.5 MB (every migration, for 80 files), which silently blew past
+    // execSync's 1 MB default: the child was killed with SIGTERM and reported
+    // FAIL even when all 799 tests passed. A gate that fails for a reason
+    // unrelated to what it measures is not a gate, so cap generously and treat
+    // a buffer overflow as an error about the harness, never about the code.
+    execSync(cmd, {
+      cwd: opts.cwd ?? root,
+      stdio: 'pipe',
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+      env: { ...process.env, ...opts.env },
+    });
     process.stdout.write('PASS\n');
     results.push({ name, status: 'PASS' });
     return true;
   } catch (err) {
-    const out = `${err.stdout ?? ''}${err.stderr ?? ''}`.trim().split('\n').slice(-4).join('\n      ');
+    // A signal kill means the command never reported a verdict of its own.
+    // Say so explicitly rather than blaming the code under test.
+    const killed = err.signal ? `killed by ${err.signal} (harness limit, not a test result)` : '';
+    const out = killed || `${err.stdout ?? ''}${err.stderr ?? ''}`.trim().split('\n').slice(-4).join('\n      ');
     process.stdout.write('FAIL\n');
     if (out) console.log(`      ${out}`);
     results.push({ name, status: 'FAIL', detail: out });
