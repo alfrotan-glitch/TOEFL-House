@@ -47,7 +47,7 @@ import { createHash } from 'node:crypto';
 export const IDEMPOTENCY_WINDOW_SECONDS = 90;
 
 /** Reads an explicit client-supplied idempotency key, if any. */
-export function readClientIdempotencyKey(req: {
+function readClientIdempotencyKey(req: {
   get(name: string): string | undefined;
   body?: unknown;
 }): string {

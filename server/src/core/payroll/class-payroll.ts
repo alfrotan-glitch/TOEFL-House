@@ -242,7 +242,7 @@ export function gregorianToday(): string {
 }
 
 /** Checks if a class is operational for payroll purposes */
-export function isClassOperational(
+function isClassOperational(
   row: { status: string; activation_date?: string | null; start_date?: string | null; end_date?: string | null },
   asOfDate: string = gregorianToday(),
 ): boolean {

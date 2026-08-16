@@ -17,7 +17,7 @@ const stmtAtomicIncrement = db.prepare(
    RETURNING value`
 );
 
-export function getSetting(key: string, fallback: string): string {
+function getSetting(key: string, fallback: string): string {
   const row = stmtGetSetting.get(key) as { value: string } | undefined;
   return row ? row.value : fallback;
 }

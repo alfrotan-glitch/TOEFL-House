@@ -209,7 +209,7 @@ export function parseComponents(profile: any): PolicyComponent[] {
   }));
 }
 
-export function normalizePolicyComponents(profile: any): PolicyComponent[] {
+function normalizePolicyComponents(profile: any): PolicyComponent[] {
   let raw: unknown;
   try { raw = JSON.parse(profile.components_json || '[]'); } catch { raw = []; }
   const parsed: any[] = Array.isArray(raw) && raw.length > 0 ? raw : (DEFAULT_COMPONENTS as any[]);

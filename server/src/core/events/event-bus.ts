@@ -176,7 +176,7 @@ export interface PublishResult {
 // §2 — SCHEMA INITIALIZATION
 // ============================================================================
 
-export function initEventBusSchema(): void {
+function initEventBusSchema(): void {
   // Intentionally empty — schema.sql is the single source of truth.
 }
 

@@ -14,7 +14,7 @@ export function nowIso(): string {
   return new Date().toISOString().slice(0, 19).replace('T', ' ');
 }
 
-export function isoToSeconds(iso: string | null | undefined): number | null {
+function isoToSeconds(iso: string | null | undefined): number | null {
   if (!iso) return null;
   const t = Date.parse(iso.replace(' ', 'T') + 'Z');
   return Number.isFinite(t) ? Math.floor(t / 1000) : null;
