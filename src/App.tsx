@@ -7,6 +7,7 @@
  * Domain-oriented ERP | Event-driven operations
  */
 import React, { useState, useCallback, useMemo, useEffect, useRef, lazy, Suspense } from 'react';
+import { resolveDocumentIssuer } from './config/documentIssuer';
 import {
   Bell, Building2, UserCheck, LogOut, Menu, Search,
   CheckCircle2, AlertCircle, Info, CheckCheck,
@@ -326,7 +327,7 @@ function AuthenticatedApp() {
       case 'impact':
         return <ImpactView reports={store.impactReports} generateReport={store.generateImpactReport} />;
       case 'books':
-        return <BooksView books={store.books} bookSales={store.bookSales} students={store.students} recordBookSale={store.recordBookSale} addBook={store.addBook} editBook={store.editBook} deleteBook={store.deleteBook} refundBookSale={store.refundBookSale} activeRole={activeRole} />;
+        return <BooksView issuer={resolveDocumentIssuer(store.settings.branches.find((b) => b.id === activeBranchId))} books={store.books} bookSales={store.bookSales} students={store.students} recordBookSale={store.recordBookSale} addBook={store.addBook} editBook={store.editBook} deleteBook={store.deleteBook} refundBookSale={store.refundBookSale} activeRole={activeRole} />;
       case 'workflows':
         return <WorkflowsView instances={store.workflows} automations={store.automations} activeRole={activeRole} approveWorkflowStep={store.approveWorkflowStep} rejectWorkflowStep={store.rejectWorkflowStep} getWorkflowInstanceDetail={store.getWorkflowInstanceDetail} toggleAutomation={store.toggleAutomation} />;
       case 'rules':

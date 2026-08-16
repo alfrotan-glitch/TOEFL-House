@@ -696,7 +696,17 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
     const semDebt = Math.max(0, Number(sem.net_fee_amount ?? sem.fee_amount) - totalPaidForSem);
     if (semDebt <= 0) throw new HttpError(400, 'This semester is already fully paid.');
     resolvedAmount = semDebt;
-    if (requestedAmount !== null) resolvedAmount = Math.min(requestedAmount, semDebt);
+    // An amount larger than the outstanding balance is REJECTED, never capped.
+    // Silently charging semDebt instead of the requested figure told the
+    // operator "payment registered" for a number they did not enter, so a
+    // mistyped 30000 against a 3000 debt looked successful and the receipt
+    // disagreed with the cash drawer. The caller must correct the amount.
+    if (requestedAmount !== null) {
+      if (requestedAmount > semDebt) {
+        throw new HttpError(400, `Payment exceeds the remaining balance for this enrollment. Outstanding: ${semDebt} AFN.`);
+      }
+      resolvedAmount = requestedAmount;
+    }
     semName = sem.semester_name;
   } 
   else if (category === 'installment') {
@@ -763,7 +773,14 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
         .reduce((sum, p) => sum + Number(p.amount || 0), 0);
       const currentDebt = Math.max(0, Number(currentSem.net_fee_amount ?? currentSem.fee_amount) - currentPaid);
       if (currentDebt <= 0) throw new HttpError(409, 'This semester is already fully paid.');
-      resolvedAmount = requestedAmount === null ? currentDebt : Math.min(requestedAmount, currentDebt);
+      // Authoritative re-read inside the transaction. This is the check that
+      // actually holds under concurrency: two operators paying the last 5000
+      // both pass the pre-check above, but only one can see currentDebt > 0
+      // here. Reject rather than cap, for the same reason as the pre-check.
+      if (requestedAmount !== null && requestedAmount > currentDebt) {
+        throw new HttpError(400, `Payment exceeds the remaining balance for this enrollment. Outstanding: ${currentDebt} AFN.`);
+      }
+      resolvedAmount = requestedAmount === null ? currentDebt : requestedAmount;
       semName = currentSem.semester_name;
       if (resolvedAmount <= 0) throw new HttpError(400, 'Amount must be greater than 0.');
     }

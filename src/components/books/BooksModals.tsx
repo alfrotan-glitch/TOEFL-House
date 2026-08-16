@@ -4,8 +4,11 @@ import { Book, BookSale } from '../../types';
 import { formatAFN } from '../../utils/format';
 import { BrandLogo } from '../common/BrandLogo';
 import { BRAND_NAME } from '../../config/branding';
+import type { DocumentIssuer } from '../../config/documentIssuer';
 
 interface BooksModalsProps {
+  /** Contact details of the issuing branch, for printed receipts. */
+  issuer: DocumentIssuer;
   // Edit book modal
   editingBook: Book | null;
   setEditingBook: (b: Book | null) => void;
@@ -60,6 +63,7 @@ export default function BooksModals(props: BooksModalsProps) {
     editingBook, setEditingBook, editTitle, setEditTitle, editIsChapter, setEditIsChapter,
     editPrice, setEditPrice, editPurchasePrice, setEditPurchasePrice, editStock, setEditStock, handleEditBookSubmit,
     selectedBookHistory, setSelectedBookHistory,
+    issuer,
     selectedSaleReceipt, setSelectedSaleReceipt,
     bookToDelete, setBookToDelete, handleDeleteConfirm,
     saleToRefund, setSaleToRefund, handleRefundConfirm,
@@ -259,7 +263,10 @@ export default function BooksModals(props: BooksModalsProps) {
                 <div className="flex justify-center pb-1"><BrandLogo height={30} /></div>
                 <h4 className="font-black text-slate-900 text-sm">{BRAND_NAME}</h4>
                 <p className="text-[10px] text-slate-500 font-semibold">Bookstore finance & inventory</p>
-                <p className="text-[9px] text-slate-400 font-mono">Phone: 0788223344</p>
+                {issuer.branchName && <p className="text-[10px] text-slate-500 font-semibold">{issuer.branchName}</p>}
+                {issuer.address && <p className="text-[9px] text-slate-400">{issuer.address}</p>}
+                {issuer.phone && <p className="text-[9px] text-slate-400 font-mono">Phone: {issuer.phone}</p>}
+                {issuer.email && <p className="text-[9px] text-slate-400 font-mono">{issuer.email}</p>}
               </div>
 
               {/* Receipt metadata */}

@@ -127,4 +127,26 @@ describe('branding is centralised', () => {
     walk(repoRoot);
     expect(copies.length, `expected exactly one logo file, found: ${copies.join(', ')}`).toBeLessThanOrEqual(1);
   });
+
+  it('no document template hardcodes a business phone number', () => {
+    // The book-sale receipt printed a literal `0788223344` on every copy from
+    // every branch. Contact details are per-branch operational data and must
+    // come from the API via resolveDocumentIssuer(), never from source.
+    //
+    // Matches an Afghan mobile literal (07xxxxxxxx) or a +93 number in real
+    // code. Comments are stripped first, so the explanatory note in
+    // documentIssuer.ts does not trip this, and validation HINT text
+    // ("e.g. 0799887766") is allowed — it is guidance, not business identity.
+    const offenders: string[] = [];
+    for (const file of frontendFiles()) {
+      const code = codeOnly(fs.readFileSync(file, 'utf8'));
+      for (const line of code.split('\n')) {
+        if (/e\.g\.|example|placeholder/i.test(line)) continue;
+        if (/(["'>\s])(?:\+93[\d\s-]{7,}|07\d{8})(?=["'<\s.,)]|$)/.test(line)) {
+          offenders.push(`${path.relative(repoRoot, file)}: ${line.trim().slice(0, 90)}`);
+        }
+      }
+    }
+    expect(offenders, `hardcoded business phone number(s):\n${offenders.join('\n')}`).toEqual([]);
+  });
 });

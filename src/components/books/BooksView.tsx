@@ -8,6 +8,7 @@ import {BookOpen, ShoppingBag, Plus, Sparkles, ClipboardList, TrendingUp, Calend
 import {Book, BookSale, Student, UserRole} from '../../types';
 import BooksModals from './BooksModals';
 import {formatAFN} from '../../utils/format';
+import type { DocumentIssuer } from '../../config/documentIssuer';
 import { ShamsiDateInput } from '../common/ShamsiDateInput';
 
 interface BooksViewProps {
@@ -27,6 +28,8 @@ interface BooksViewProps {
   deleteBook: (id: string) => Promise<void>;
   refundBookSale: (saleId: string) => Promise<void>;
   activeRole: UserRole;
+  /** Contact details of the issuing branch, for printed receipts. */
+  issuer: DocumentIssuer;
 }
 
 export default function BooksView({
@@ -38,7 +41,8 @@ export default function BooksView({
   editBook,
   deleteBook,
   refundBookSale,
-  activeRole
+  activeRole,
+  issuer
 }: BooksViewProps) {
   /** Change in Settings later; default alert when stock <= this. */
   const LOW_STOCK_THRESHOLD = 5;
@@ -1250,6 +1254,7 @@ export default function BooksView({
       )}
 
       <BooksModals
+        issuer={issuer}
         editingBook={editingBook}
         setEditingBook={setEditingBook}
         editTitle={editTitle}
