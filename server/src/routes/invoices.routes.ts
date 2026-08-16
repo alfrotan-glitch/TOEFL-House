@@ -199,7 +199,15 @@ invoicesRouter.post(
 
     const totalAmount = assertMoney(normalized.reduce((sum, it) => sum + it.amount, 0), 'invoice total');
     const requestedDiscount = assertMoney(discountAmount, 'discount amount');
-    const discount = Math.min(requestedDiscount, totalAmount);
+    // A discount larger than the invoice is REJECTED, not capped. Capping
+    // turned a mistyped 99999 on a 5,000 invoice into a silent 100% discount
+    // (net 0) and reported success — wiping a real tuition obligation with no
+    // trace that anything unusual happened. Same defect class as the tuition
+    // overpayment: never quietly substitute a number the operator did not enter.
+    if (requestedDiscount > totalAmount) {
+      throw new HttpError(400, `Discount cannot exceed the invoice total of ${totalAmount} AFN.`);
+    }
+    const discount = requestedDiscount;
     const netAmount = assertMoney(totalAmount - discount, 'invoice net amount');
 
     const dueDays = getNumberSetting('invoice_due_days', SYSTEM_DEFAULTS.invoiceDueDays);

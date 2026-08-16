@@ -28,6 +28,7 @@ import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
 import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
 import { studentsRouter } from '../routes/students.routes.js';
+import { invoicesRouter } from '../routes/invoices.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 
 const BRANCH = 'overpay_branch';
@@ -94,6 +95,7 @@ beforeAll(async () => {
   app = express();
   app.use(express.json());
   app.use('/api/students', studentsRouter);
+  app.use('/api/invoices', invoicesRouter);
   app.use(errorHandler);
 });
 
@@ -167,5 +169,36 @@ describe('tuition payment cannot exceed the remaining balance', () => {
       `SELECT COALESCE(SUM(amount),0) AS s FROM payments WHERE student_id = ? AND status = 'completed'`
     ).get(studentId) as { s: number };
     expect(paid.s).toBe(5000);
+  });
+});
+
+/**
+ * The same defect class, found by searching for `Math.min(...)` applied to
+ * money rather than by another bug report. An excessive DISCOUNT was capped to
+ * the total, so a mistyped 99,999 on a 5,000 invoice silently became a 100%
+ * discount (net 0) and reported success — wiping a real obligation.
+ */
+describe('discounts cannot exceed the amount they discount', () => {
+  it('rejects an invoice discount larger than the invoice total', async () => {
+    const studentId = await newStudent();
+    const res = await supertest(app).post('/api/invoices').set(auth()).send({
+      studentId,
+      items: [{ description: 'Tuition', quantity: 1, unitPrice: 5000 }],
+      discountAmount: 99999,
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/discount cannot exceed/i);
+  });
+
+  it('still accepts a legitimate partial discount', async () => {
+    const studentId = await newStudent();
+    const res = await supertest(app).post('/api/invoices').set(auth()).send({
+      studentId,
+      items: [{ description: 'Tuition', quantity: 1, unitPrice: 5000 }],
+      discountAmount: 500,
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.discountAmount).toBe(500);
+    expect(res.body.netAmount).toBe(4500);
   });
 });

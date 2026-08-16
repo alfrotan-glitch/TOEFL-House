@@ -191,7 +191,15 @@ booksRouter.post(
     const saleBranchId = book.branch_id;
 
     const totalAmount = book.price * quantity;
-    const finalDiscount = Math.max(0, Math.min(Number(discountAmount || 0), totalAmount));
+    // Reject an over-large discount rather than capping it to the sale total,
+    // which silently turned a mistyped figure into a free book. Same rule as
+    // tuition payments and invoices.
+    const requestedDiscount = Number(discountAmount || 0);
+    if (!Number.isFinite(requestedDiscount) || requestedDiscount < 0) throw new HttpError(400, 'Discount must be a positive amount.');
+    if (requestedDiscount > totalAmount) {
+      throw new HttpError(400, `Discount cannot exceed the sale total of ${totalAmount} AFN.`);
+    }
+    const finalDiscount = requestedDiscount;
     const netAmount = totalAmount - finalDiscount;
     const categoryType = book.is_chapter ? 'chapter' : 'book';
     const method = paymentMethod || 'cash';
