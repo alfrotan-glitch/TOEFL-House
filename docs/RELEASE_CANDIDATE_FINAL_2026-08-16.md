@@ -1,232 +1,205 @@
-# Final release-candidate audit — pass 5
+# Release Candidate — Final Report
 
-Fifth independent pass, continuing from four earlier audits. Nothing was taken
-on trust: the full gate was re-run from scratch, the fixes from previous passes
-were attacked directly, and the hunt targeted defect classes no earlier pass
-had touched — the discount/installment path, JSON-column integrity, and the
-release automation itself.
+**Date:** 2026-08-16 · **Branch:** `arena/01a0062e-toefl-house` · **HEAD:** `c5b50d5`
+**Suite:** 799/799 passing, 80 files · **Release gate:** 15 passed · 1 failed · 0 skipped
 
----
-
-## F-11 — the installment plan was unvalidated financial data (HIGH, fixed)
-
-`PATCH /api/students/:id` accepted **any** value for `installmentPlan` and
-stored it with an unconditional `JSON.stringify()`. Sending an already
-serialised plan — the obvious mistake for a client that keeps it as a string —
-double-encoded the column. It parsed back to a *string*, and the payment route
-called `plan.find(...)` on it:
-
-```
-POST /api/students/:id/payments { category: 'installment', ... }
-  -> 500 "plan.find is not a function"
-```
-
-Two defects behind one symptom:
-
-1. **Corrupt financial data accepted at the write boundary.** The plan drives
-   real charges. There was no validation at all — no shape check, no id check,
-   no amount check, no duplicate check.
-2. **A money endpoint returned 500 on data the server itself wrote.**
-   `parseJson()` guarded against a *parse* failure but not against the parsed
-   value having the wrong *shape* — a JSON string parses perfectly well.
-
-**Fix.** `PATCH` now rejects a non-array plan, missing/blank ids, duplicate ids,
-non-positive or non-numeric amounts, and unknown statuses. Duplicate ids matter
-specifically: they make "pay installment X" ambiguous, and settling one would
-silently mark the other paid. Reads go through `parseJsonArray()`, so
-pre-existing corrupt rows degrade to "no installments" (a handled 409) instead
-of crashing.
-
-Verified live: all seven malformed shapes now 400 with nothing written; 8
-concurrent payments of one installment give **1×201 / 7×409**, one payment row
-and one agreeing ledger row.
-
-**Class swept.** Every other client-controlled JSON column was checked —
-`automations` already validates `Array.isArray` on both POST and PATCH. F-11
-was an isolated gap, now closed.
-
-## F-12 — the release script could not run on the release machine (fixed)
-
-The only scripted release step, `release:clean`, was a **PowerShell** file. On
-Linux it exits **127** (`sh: 1: powershell: not found`). Any CI runner would
-have executed a release step that did nothing, and the failure is easy to miss
-mid-log.
-
-Worse, the high-assurance static audit "verified" that script by **grepping it
-for path strings** — so it asserted the existence of *text*, not the behaviour
-of a release process, and passed whether or not the script could execute.
-
-**Fix.** `scripts/release-validate.mjs` — one portable command, real exit codes,
-nothing reported that was not observed:
-
-```
-npm run release:validate          # full gate
-npm run release:validate:quick    # static + DB only
-```
-
-It runs typecheck and lint (frontend + server), the product-integrity and
-static audits, both production builds, bundle weight, the server test suite,
-fresh-schema preflight, a **real fresh install into a temp directory**
-(asserting migration count, `integrity_check`, `foreign_key_check`), branding
-(the official logo must exist and exceed 1 KB; the slogan must match exactly),
-and release hygiene (no build output, `.env` or `.sqlite` tracked — read from
-`git ls-files`, not from a script's source text).
-
-Two bugs in my own first version (a top-level-`await` probe and a stale
-static-audit assertion) were found **by running it**, not by assuming it worked.
+This supersedes the pass-5 report. It covers the final hardening pass, which was
+run against a **rebuilt-from-clean environment** (fresh `npm install`,
+recompiled `better-sqlite3`, fresh database, fresh bootstrap) so that no earlier
+state could flatter the result.
 
 ---
 
-## Verification
+## FIXED
 
-| Gate | Result |
+### 1. Budget lines were the third store of money, and nothing reconciled them (`ae6376d`)
+
+The system holds value in **three** independent places: branch cash accounts,
+the organization treasury, and budget lines. Only the first two were reconciled.
+
+Payroll and operational expenses are paid **from a budget line, not from branch
+cash**, so an expense row written without decrementing its line — or a decrement
+with no matching expense row — misstated spendable budget with nothing to catch
+it. Neither existing dimension could: the payment↔ledger check compares two
+views of the same table family, and the cash check *deliberately* excludes
+expenses because they never touch branch cash.
+
+Invariant added to `server/src/utils/reconciliation.ts`, per branch:
+
+```
+SUM(budget_lines.current_amount) = SUM(budget_charge) − SUM(expense)
+```
+
+exposed as `budgetVariance` and folded into the `healthy` gate.
+
+Live evidence across a full funding → payroll → void cycle:
+
+| step | current | charged | spent | expected | |
+|---|---|---|---|---|---|
+| charge 50 000 | 50 000 | 50 000 | 0 | 50 000 | OK |
+| pay 20 000 | 30 000 | 50 000 | 20 000 | 30 000 | OK |
+| void | 50 000 | 50 000 | 0 | 50 000 | OK |
+
+Both branch-scoped and org-scoped `computeReconciliation` report
+`amount 0 · cash 0 · saving 0 · budget 0 · healthy`.
+
+Two tests in `cash-position-reconciliation.test.ts` (8/8). The key assertion is
+that when a budget line drifts, `budgetVariance` is non-zero **while
+`cashVariance` stays 0** — proving the new dimension is load-bearing rather than
+a restatement of an existing one. Mutation-verified: removing it from the
+healthy gate fails 2 tests; defining expected as "charged only" fails 1.
+
+### 2. The release gate's most important check had never actually run (`c5b50d5`)
+
+Installing the logo turned the suite green, which immediately exposed a defect
+in the gate itself: `server test suite` reported **FAIL** while `npm test`
+exited 0 by hand.
+
+The cause was not the code under test. The suite prints ~1.46 MB (every
+migration, across 80 files) and `execSync`'s default `maxBuffer` is 1 MB. Node
+kills the child with `SIGTERM` on overflow and `execSync` throws. Reproduced
+directly:
+
+```
+THREW -> code: null | signal: SIGTERM | msg: spawnSync /bin/sh ENOBUFS
+```
+
+So the pipeline's central quality gate had **never observed the tests at all**,
+and would have masked a genuine failure behind the identical generic FAIL.
+Fixed by raising `maxBuffer` to 64 MB and reporting a signal kill as
+`killed by SIGTERM (harness limit, not a test result)` — a gate must never
+attribute its own limits to the system under test.
+
+### 3. Financial invariants are now enforced by the release gate (`c87c404`)
+
+A `financial invariants reconcile` check bootstraps a throwaway database in a
+temp directory, runs the **real** `computeReconciliation`, and fails on any
+non-zero amount/cash/saving/budget variance. It proves the invariants on a clean
+install rather than on whatever state a developer's database happens to hold.
+
+### 4. Official logo installed at the canonical path (`67943af`)
+
+The official PNG finally reached the repository (uploaded to the root as
+`Logo - Color N.png` after four failed delivery attempts). Verified before
+installing — valid PNG signature, 8499 × 4162, 8-bit RGBA, 622 801 bytes — then
+**moved, not copied**, to `public/brand/toefl-house-logo.png`.
+
+The installed file is byte-identical to the supplied original
+(`sha256 c1c9549eb18a230b…`) and the production build copies it to `dist/brand/`
+unchanged. Nothing was recreated, resized, recoloured or approximated, and
+`git mv` leaves no duplicate — which the "logo is not duplicated" test enforces.
+
+**Effect: the branding suite passes 6/6 and the entire suite is green for the
+first time (799/799).** The single long-standing intentional failure was
+resolved by the real asset, never by weakening the test.
+
+---
+
+## REMAINING
+
+| # | Item | Severity | Note |
+|---|---|---|---|
+| 1 | **CI is inert** | **RELEASE BLOCKER** | `ci/github-actions-ci.yml` is correct but not at `.github/workflows/`. Three push attempts rejected: *"refusing to allow a GitHub App to create or update workflow … without `workflows` permission"*. Needs a human. |
+| 2 | F-10 historical phantom-cash rows | MEDIUM | Forward path fixed; pre-existing production rows still need a data-repair migration. |
+| 3 | Employee pay-salary `LIKE` duplicate guard | MEDIUM | Bypassable via `paymentType:'advance'` or a varied `monthName`. |
+| 4 | 5 money writers use bespoke guards | LOW | Work correctly; not yet unified on `resolveIdempotency`. |
+| 5 | Unbounded list endpoints | LOW | Books/funding lists have no server-side paging. |
+| 6 | Students tab payload | LOW | ~1.7 MB at 8 000 students; needs real UI pagination. |
+| 7 | `impact.routes.ts` has no tests | LOW | Reporting-only surface. |
+| 8 | 3 oversized modules · 576 `any` · no frontend test runner | LOW | Long-term maintainability. |
+
+---
+
+## UNPROVEN
+
+- **8-way concurrent over-refund race.** Never reproduced; SQLite's single-writer
+  lock may make it unreachable in this deployment, but that is not proof.
+- **Multi-process / multi-instance behaviour.** All guarantees here assume the
+  documented single-process SQLite deployment.
+- **Backups share the DB disk.** Restore is proven; survival of a disk failure is not.
+- **Frontend behaviour is unverified by automated tests** — no runner, no
+  headless browser available.
+
+---
+
+## SIMPLIFIED
+
+This pass **added no new abstraction**. `budgetVariance` is four SQL aggregates
+and one subtraction inside the existing `computeReconciliation` — no new module,
+middleware, helper layer or config surface. The gate fix removed a failure mode
+rather than adding a branch. Net new production code is roughly 20 lines.
+
+Test count moved 797 → 799: two tests, both proving a business invariant, both
+mutation-verified. No test was weakened or deleted to make the gate green.
+
+---
+
+## VERIFICATION
+
+**Every gate was verified by breaking it, not by observing it pass.** Each
+mutation was reverted and the tree confirmed clean afterwards.
+
+| mutation | gate response |
 |---|---|
-| Full test suite | **796 / 797** (1 intentional — missing logo) |
-| Frontend typecheck / lint | PASS |
-| Server lint (eslint + tsc) | PASS, **0 errors** |
-| Frontend + server production builds | PASS |
-| Product-integrity + static audits | PASS |
-| Bundle weight | PASS |
-| Fresh-schema preflight | PASS |
-| Fresh install | 65 migrations, 106 tables, `integrity ok`, 0 FK violations |
-| Migration convergence | fresh vs migrated: **355 objects, 0 differences** |
-| Backup → destroy → restore | verified **on live data** (15 students, 12 payments, 232,670 AFN) |
-| Reconciliation | amount 0, cash 0, saving 0, healthy |
-| Working tree | clean |
+| bad type in `branding.ts` | `frontend typecheck` FAIL → BLOCKED |
+| force `budgetVariance = 999` | `financial invariants reconcile` FAIL → BLOCKED |
+| `git add -f .env` | `no build output or secrets tracked` FAIL → BLOCKED |
+| reword slogan capitalisation | `official slogan is exact` FAIL → BLOCKED |
+| drop `budgetVariance` from healthy gate | 2 tests fail |
+| expected budget = charged only | 1 test fails |
 
-**Full business lifecycle, end to end:** visitor registration → teacher hire →
-class creation → enrollment with partial payment → balance (due 12,000 / paid
-4,000 / outstanding 8,000) → remaining payment → outstanding 0 → session →
-class activation → attendance → assessment → grade → exam enrollment with fee →
-book sale → teacher payroll → reconciliation **healthy with zero variance**.
+**Adversarial probes run live against the running API (not unit tests):**
 
-**Reversal matrix — every money type reverses cleanly:**
+- **Cross-branch isolation — 13/13 blocked.** A manager confined to another
+  branch was denied on every branch-1 object: student GET/PATCH/payments/refund/
+  status → 403; teacher GET/PATCH → 404, pay-salary → 403; book sell → 403,
+  PATCH → 404. Student lists were filtered and `/finance/reconciliation`
+  returned only the attacker's own branch.
+- **Privilege escalation — 10/10 blocked.** A registrar received 403 on all of
+  `/automations` (×3), `/settings` (×2), `/rules/definitions`,
+  `/finance/treasury/deposit`, `/finance/reconciliation`, `/finance/pnl`,
+  budget-line charge.
+- **`automations.routes.ts` "0 scope calls" was a false positive.** The table has
+  no `branch_id` — automations are global configuration — and all 8 routes are
+  role-gated (writes owner-only) by an `authorize` that fails closed. A
+  scope call there would have been meaningless.
+- **Atomicity:** an out-of-stock book sale returned 409 with *zero* state change
+  across `finance_accounts`, `financial_transactions`, `payments`, `books.stock`.
+- **Error semantics:** 128 malformed requests across 8 endpoints with hostile
+  values (`null`, `{}`, `1e308`, `"NaN"`, NUL bytes, path traversal, XSS, SQLi)
+  produced **0 × 5xx**.
 
-| Reversal | Result | Cash vs ledger |
-|---|---|---|
-| Student refund 1,000 | 201 | exact |
-| Book-sale refund | 200 | exact |
-| Payroll void | 200 | exact |
-
-The payroll void netted its 25,000 expense to zero and restored the budget line.
-
-**Financial source-of-truth:** `/finance/pnl` income + `capital_injection`
-equals raw ledger income exactly; `/finance/pnl` expense equals raw expense
-exactly. No surface reconstructs its own truth.
-
-**Adversarial re-audit after remediation — 16/16 passed:** six sensitive
-endpoints all 401 unauthenticated; `alg=none` forgery rejected; tampered
-signature rejected; SQL injection shows no row amplification and tables intact;
-all five reconciliation dimensions zero/healthy; P&L agrees with the ledger.
-
-**RBAC:** a receptionist cannot self-grant the owner role, list users, read
-finance, create branches, read the role catalog, pay salaries, or deposit to
-the treasury — all 403. Discount edits are capped at 30% by a **configurable
-business rule** with an evaluation audit log (I requested 90%, the server
-stored 30%) — backend-enforced, exactly as required.
-
-**Mutation testing (M20–M21), both caught:** removing the installment
-write-validation fails 2; reverting `parseJsonArray` to the shape-blind
-`parseJson` fails 1.
+**Full clean-environment validation:** fresh install → 65 migrations → 106
+tables → `integrity_check` ok → `foreign_key_check` ok → both production builds
+→ bootstrap → reconciliation all-zero → 799/799 tests.
 
 ---
 
-## Simplification
+## RELEASE DECISION
 
-- Removed `scripts/prepare-clean-release.ps1` — dead on every non-Windows machine.
-- De-exported six functions (`readClientIdempotencyKey`, `getSetting`,
-  `initEventBusSchema`, `isClassOperational`, `normalizePolicyComponents`,
-  `isoToSeconds`) with exactly one internal use and zero external consumers.
-  **Not dead code** — needlessly public. Verified before touching them.
-- Unused dependencies: **0**. Unreferenced tables: **0** of 106.
-- Investigated and deliberately kept two false-positive "orphan" categories:
-  lazily-imported view components (`lazy(() => import(...))` defeats a naive
-  grep) and `server/src/db/seed.ts` (an npm script entry point).
+> ### BLOCKED — on exactly one item, which no longer has a code remedy.
 
-Net: one new script, one deleted script, six narrowed exports, +5 tests for a
-proven HIGH defect. No new middleware, abstraction, or compatibility layer.
+Every code-level release condition is met and machine-enforced:
 
----
+- 0 known CRITICAL/HIGH defects
+- all four financial invariants reconcile to zero variance, gate-enforced
+- fresh migration convergence proven on a clean install
+- authorization isolation proven adversarially at the HTTP layer
+- lifecycle and reversal workflows pass
+- lint, typecheck and both builds pass
+- release automation genuinely executes **and demonstrably fails when broken**
+- official logo present, byte-identical to the supplied original, and verified
 
-## Blockers — both external, both proven
+**The one blocker:** CI is not active. `ci/github-actions-ci.yml` is correct and
+ready, but this environment's GitHub App lacks the `workflows` permission —
+three attempts, three rejections. Until a human with that permission copies it
+to `.github/workflows/ci.yml`, **no gate runs automatically**, and the guarantees
+above hold only for the commit they were measured on.
 
-### 1. Official logo asset — absent after four delivery attempts
+That is a one-file copy by an authorised human. On merge, the gate goes green.
 
-`public/brand/toefl-house-logo.png` does not exist. The PNG has now failed to
-reach the workspace **four** times (`/home/user/uploads/` is never created; the
-only PNGs on the machine are OS-supplied).
-
-The branding system is complete and wired to that single path, and the release
-gate now fails explicitly on it. Verified end-to-end in an earlier pass with a
-temporary throwaway file: with an asset present the branding suite passes 6/6
-and the build copies it to `dist/brand/`. That file was **deleted, not
-committed** — recreating the logo is forbidden, and a placeholder would hide
-the gap rather than close it.
-
-**Exact action required:** copy the official PNG to
-`public/brand/toefl-house-logo.png`. No code change needed.
-
-### 2. CI is inert
-
-Activation was re-attempted this pass and rejected again:
-
+```bash
+cp ci/github-actions-ci.yml .github/workflows/ci.yml
+git add .github/workflows/ci.yml && git commit -m "ci: activate release gate" && git push
+npm run release:validate   # expect: 16 passed · 0 failed
 ```
-! [remote rejected] arena/01a0062e-toefl-house
-  (refusing to allow a GitHub App to create or update workflow
-   `.github/workflows/ci.yml` without `workflows` permission)
-```
-
-Two independent confirmations across two sessions.
-
-**Exact action required:** a human with the `workflows` permission copies
-`ci/github-actions-ci.yml` to `.github/workflows/ci.yml`. The pipeline now
-includes a `release-validation` job running `npm run release:validate`.
-
----
-
-## Remaining risks
-
-- Owner role carries all permission codes regardless of scope; scope governs
-  rows, not endpoints. Deliberate, documented (pass 2).
-- Employee pay-salary duplicate guard is free-text `LIKE` matching, bypassable
-  via `paymentType:'advance'` or a varied `monthName`. Low severity, open.
-- Five route files write money without the shared `resolveIdempotency`. Probed
-  under concurrency and correct today via business-event guards plus DB
-  constraints, but they rely on SQLite's synchronous driver.
-- Books/funding list endpoints unbounded — correct now, a scale risk later.
-- Single-process SQLite ceiling; automatic backups sit on the same disk.
-- Three oversized modules (`types.ts`, `apiStore.ts`, `classes.routes.ts`); 576
-  `any` in server source; no frontend test runner.
-
----
-
-## Verdict
-
-**No known CRITICAL or HIGH defects remain.** Every defect found across five
-passes is fixed, mutation-verified, and covered by a regression test that fails
-when the fix is reverted.
-
-Against the stated targets:
-
-| Target | Status |
-|---|---|
-| No known CRITICAL/HIGH defects | **Met** |
-| No duplicate business truth | **Met** — P&L, ledger, cash and budget all agree |
-| No financial reconciliation gaps | **Met** — amount/cash/saving all 0 |
-| No cross-scope authorization gaps | **Met** — 0 leaks, escalation blocked |
-| No dead/legacy clutter | **Met** — 0 unused deps/tables/exports |
-| No unnecessary complexity | **Met** — net simplification |
-| No false-confidence tests | **Met** — tautological tests removed in pass 4 |
-| Reproducible release validation | **Met** — one command; it correctly blocks |
-
-**This is a Release Candidate blocked on two external items**, neither a code
-defect: the official logo asset and CI activation. Both are proven, not
-asserted, and both have an exact one-step remedy.
-
-The five-pass pattern is worth stating plainly: **every pass found real HIGH or
-CRITICAL defects the previous pass missed, with a green suite throughout.** The
-most valuable finding this pass was not a bug in the product but a bug in the
-*verification* — a release script that could not run and a static audit that
-checked its text rather than its behaviour. Automation that reports success for
-work it never performed is the most dangerous artefact in a release process,
-and it is exactly what the new gate is designed to make impossible.
