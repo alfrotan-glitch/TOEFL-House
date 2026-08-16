@@ -63,6 +63,26 @@ export function brandLogoAbsoluteUrl(): string {
 }
 
 /**
+ * Contact details of the issuing branch, as printed on a document header.
+ * Structurally identical to DocumentIssuer in ./documentIssuer — declared
+ * here as a minimal shape so this module stays dependency-free and usable
+ * from print windows that have no access to the React store.
+ */
+export interface PrintIssuer {
+  branchName?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+}
+
+/** Escapes text interpolated into printed HTML. */
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string
+  ));
+}
+
+/**
  * Standard brand header for printable HTML documents (receipts, invoices,
  * reports, certificates). Centralised so every printed artefact carries the
  * same official logo, name and slogan without each template re-inventing one.
@@ -70,14 +90,22 @@ export function brandLogoAbsoluteUrl(): string {
  * Returns a self-contained HTML fragment; callers supply their own document
  * shell and any additional styling.
  */
-export function brandPrintHeaderHtml(subtitle?: string): string {
+export function brandPrintHeaderHtml(subtitle?: string, issuer?: PrintIssuer): string {
   const logo = brandLogoAbsoluteUrl();
+  // Branch contact lines are optional and each is omitted when unset, so a
+  // branch with no configured phone prints no phone line rather than a
+  // placeholder or a literal typed into the template.
+  const contact = [issuer?.branchName, issuer?.address, issuer?.phone, issuer?.email]
+    .filter((line): line is string => typeof line === 'string' && line.trim().length > 0)
+    .map((line) => escapeHtml(line))
+    .join(' &middot; ');
   return `
     <div class="th-brand-header" style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
       <img src="${logo}" alt="${BRAND_NAME}" style="height:44px;width:auto;object-fit:contain;" />
       <div style="line-height:1.25;">
         <div style="font-weight:800;font-size:15px;letter-spacing:0.01em;">${BRAND_NAME}</div>
         <div style="font-size:10px;opacity:0.72;">${BRAND_SLOGAN}</div>
+        ${contact ? `<div style="font-size:9px;opacity:0.66;margin-top:2px;">${contact}</div>` : ''}
         ${subtitle ? `<div style="font-size:11px;font-weight:600;margin-top:2px;">${subtitle}</div>` : ''}
       </div>
     </div>`;

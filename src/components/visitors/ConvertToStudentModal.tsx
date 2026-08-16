@@ -7,7 +7,8 @@ import React, { useState, useMemo, useRef } from 'react';
 import { Visitor, Class, Branch } from '../../types';
 import { formatAFN } from '../../utils/format';
 import { Banknote, CreditCard, Building2, Receipt, CheckCircle2, AlertCircle, Printer, Loader2, X } from 'lucide-react';
-import { BRAND_NAME, BRAND_SLOGAN } from '../../config/branding';
+import { BRAND_NAME, BRAND_SLOGAN, brandPrintHeaderHtml } from '../../config/branding';
+import { resolveDocumentIssuer } from '../../config/documentIssuer';
 
 type PaymentMethod = 'cash' | 'card' | 'bank_transfer';
 
@@ -140,14 +141,14 @@ export default function ConvertToStudentModal({
 
   const handlePrintReceipt = () => {
     if (!receiptRef.current) return;
-    const printWindow = window.open('', '_blank', 'width=400,height=600');
+    const printWindow = window.open('', '_blank', 'width=460,height=680');
     if (!printWindow) return triggerToast('Please allow popups to print the receipt.', 'error');
     
     printWindow.document.write(`
       <!DOCTYPE html><html><head><title>Receipt ${result?.receiptNumber || ''}</title>
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Courier New', monospace; font-size: 12px; padding: 20px; max-width: 320px; margin: 0 auto; color: #1e293b; }
+        body { font-family: 'Courier New', monospace; font-size: 12px; padding: 20px; max-width: 380px; margin: 0 auto; color: #1e293b; }
         .header { text-align: center; border-bottom: 2px dashed #94a3b8; padding-bottom: 12px; margin-bottom: 12px; }
         .header h1 { font-size: 16px; font-weight: 800; letter-spacing: 1px; }
         .header p { font-size: 10px; color: #64748b; margin-top: 2px; }
@@ -158,7 +159,7 @@ export default function ConvertToStudentModal({
         .footer { text-align: center; margin-top: 16px; padding-top: 12px; border-top: 2px dashed #94a3b8; font-size: 10px; color: #94a3b8; }
         .status-badge { display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 10px; font-weight: 700; }
       </style></head><body>
-        <div class="header"><h1>TOEFL HOUSE</h1><p>Registration Receipt</p></div>
+        ${brandPrintHeaderHtml('Registration Receipt', resolveDocumentIssuer(branches.find((b) => b.id === (conversionBranchId || convertingVisitor.branchId || activeBranchId))))}
         <div class="row"><span class="label">Receipt #</span><span class="value">${result?.receiptNumber || '-'}</span></div>
         <div class="row"><span class="label">Date</span><span class="value">${new Date().toISOString().slice(0, 10)}</span></div>
         <div class="row"><span class="label">Student</span><span class="value">${convertingVisitor.fullName}</span></div>

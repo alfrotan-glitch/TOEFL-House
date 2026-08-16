@@ -186,18 +186,33 @@ export class StudentJourneyEngine {
     return this.stmtListEvents.all(studentId) as JourneyEventRow[];
   }
 
+  /**
+   * The ACADEMIC lifecycle timeline.
+   *
+   * Financial events are excluded. They have their own timeline
+   * (getFinancialTimeline) and rendering an invoice or payment in both places
+   * duplicated the same transaction in the student profile: the academic
+   * history became a second, weaker copy of the ledger, and the two views
+   * disagreed the moment one was filtered differently.
+   *
+   * `listEvents` still returns the complete, unfiltered event log — this is a
+   * presentation split, not a loss of history. Anything needing the full
+   * chronology (audit, projection, `getState`) keeps using listEvents.
+   */
   getTimeline(studentId: string): TimelineItem[] {
-    return this.listEvents(studentId).map((row) => ({
-      id: row.id,
-      eventType: row.event_type,
-      label: JOURNEY_EVENT_LABELS[row.event_type as JourneyEventTypeName] || row.event_type,
-      occurredAt: row.occurred_at,
-      branchId: row.branch_id,
-      enrollmentId: row.enrollment_id,
-      payload: parsePayload(row.payload),
-      actorName: row.actor_name,
-      correlationId: row.correlation_id,
-    }));
+    return this.listEvents(studentId)
+      .filter((row) => !FINANCIAL_EVENT_TYPES.has(row.event_type as JourneyEventTypeName))
+      .map((row) => ({
+        id: row.id,
+        eventType: row.event_type,
+        label: JOURNEY_EVENT_LABELS[row.event_type as JourneyEventTypeName] || row.event_type,
+        occurredAt: row.occurred_at,
+        branchId: row.branch_id,
+        enrollmentId: row.enrollment_id,
+        payload: parsePayload(row.payload),
+        actorName: row.actor_name,
+        correlationId: row.correlation_id,
+      }));
   }
 
   getFinancialTimeline(studentId: string): TimelineItem[] {
