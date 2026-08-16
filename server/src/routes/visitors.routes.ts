@@ -4,6 +4,7 @@
  */
 import { Router } from 'express';
 import { db } from '../db/connection.js';
+import { assertTextLengths, TEXT_LIMITS } from '../utils/textInput.js';
 import { parsePagination as parsePaginationShared } from '../utils/pagination.js';
 import { authenticate, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
@@ -204,6 +205,21 @@ visitorsRouter.post('/', requirePermission('Lead.Create'), ah(async (req, res) =
   if (!fullName || !gender || !source) throw new HttpError(400, 'Full name, gender, and source are required.');
   assertVisitorGender(gender);
   assertVisitorSource(source);
+  // Bound free text (see utils/textInput.ts — S16).
+  assertTextLengths([
+    [fullName, 'Full name', TEXT_LIMITS.name],
+    [fatherName, "Father's name", TEXT_LIMITS.name],
+    [phone, 'Phone', TEXT_LIMITS.short],
+    [whatsapp, 'WhatsApp', TEXT_LIMITS.short],
+    [tazkiraNo, 'Tazkira number', TEXT_LIMITS.short],
+    [email, 'Email', TEXT_LIMITS.email],
+    [addressRegion, 'Address', TEXT_LIMITS.line],
+    [schoolOrUniversity, 'School or university', TEXT_LIMITS.line],
+    [emergencyContactName, 'Emergency contact name', TEXT_LIMITS.name],
+    [emergencyContactPhone, 'Emergency contact phone', TEXT_LIMITS.short],
+    [interestedCourse, 'Interested course', TEXT_LIMITS.line],
+    [notes, 'Notes', TEXT_LIMITS.notes],
+  ]);
   const targetBranchId = branchId || user.branchId;
   assertBranchTargetAccess(req, targetBranchId, user.branchId);
   const targetStage = stage || 'lead';

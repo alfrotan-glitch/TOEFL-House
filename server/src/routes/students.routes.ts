@@ -5,6 +5,7 @@ import { nextInvoiceNumber } from '../utils/invoice.js';
  */
 import { Router } from 'express';
 import { db } from '../db/connection.js';
+import { assertTextLengths, TEXT_LIMITS } from '../utils/textInput.js';
 import { parsePagination as parsePaginationShared } from '../utils/pagination.js';
 import { getStudentBalance } from '../utils/studentBalance.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
@@ -323,6 +324,23 @@ studentsRouter.post('/manual', requirePermission('Student.Create'), ah(async (re
   const { fullName, phone, email, gender, discountPercent, notes, classId, fatherName, addressRegion, tazkiraNo, whatsapp, dob, schoolOrUniversity, emergencyContactName, emergencyContactPhone, tuitionAmount, amountPaidNow, branchId } = req.body;
   if (!fullName || !String(fullName).trim() || !gender) throw new HttpError(400, 'Full name and gender are required.');
   if (!['male', 'female'].includes(gender)) throw new HttpError(400, 'Invalid gender.');
+  // Bound every free-text field. Without this a 1,000,000-character name was
+  // accepted and stored, and any list endpoint returning that row became
+  // megabytes of JSON. The only previous refusal was Express's body limit,
+  // which answered 500 rather than 400.
+  assertTextLengths([
+    [fullName, 'Full name', TEXT_LIMITS.name],
+    [fatherName, "Father's name", TEXT_LIMITS.name],
+    [phone, 'Phone', TEXT_LIMITS.short],
+    [whatsapp, 'WhatsApp', TEXT_LIMITS.short],
+    [tazkiraNo, 'Tazkira number', TEXT_LIMITS.short],
+    [email, 'Email', TEXT_LIMITS.email],
+    [addressRegion, 'Address', TEXT_LIMITS.line],
+    [schoolOrUniversity, 'School or university', TEXT_LIMITS.line],
+    [emergencyContactName, 'Emergency contact name', TEXT_LIMITS.name],
+    [emergencyContactPhone, 'Emergency contact phone', TEXT_LIMITS.short],
+    [notes, 'Notes', TEXT_LIMITS.notes],
+  ]);
   const safePhone = phone ? String(phone).trim() : '';
   const safeEmail = email ? String(email).trim() : '';
   const safeTazkira = tazkiraNo ? String(tazkiraNo).trim() : '';

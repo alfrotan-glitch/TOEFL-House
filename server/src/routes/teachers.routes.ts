@@ -8,6 +8,7 @@
  */
 import { Router } from 'express';
 import { db } from '../db/connection.js';
+import { assertTextLengths, TEXT_LIMITS } from '../utils/textInput.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
@@ -171,6 +172,14 @@ teachersRouter.post('/', requirePermission('Teacher.Create'), ah(async (req, res
   const { fullName, phone, email, baseSalary, salaryType, specialization, qualification, contractType, branchId, defaultSkillRate: bodyDefaultSkillRate } = req.body;
   const numericBaseSalary = Number(baseSalary);
   if (!fullName || !String(fullName).trim() || !Number.isFinite(numericBaseSalary) || numericBaseSalary < 0) throw new HttpError(400, 'Full name and a valid non-negative base salary are required.');
+  // Bound free text (see utils/textInput.ts — S16).
+  assertTextLengths([
+    [fullName, 'Full name', TEXT_LIMITS.name],
+    [phone, 'Phone', TEXT_LIMITS.short],
+    [email, 'Email', TEXT_LIMITS.email],
+    [specialization, 'Specialization', TEXT_LIMITS.line],
+    [qualification, 'Qualification', TEXT_LIMITS.line],
+  ]);
 
   const resolvedBranchId = typeof branchId === 'string' && branchId.trim() ? branchId.trim() : user.branchId;
   if (!canAccessBranchResource(req, resolvedBranchId)) throw new HttpError(403, 'Target branch is outside your authorized scope.');

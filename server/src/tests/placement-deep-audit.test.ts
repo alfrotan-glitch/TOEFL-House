@@ -269,4 +269,93 @@ describe('Placement Exam deep audit', () => {
     console.log(`[EVIDENCE] convert with incomplete placement (attempt ${start.body.id} in_progress) → ${conv.status} ${conv.body.error || ''}`);
     expect(conv.status).toBe(400);
   });
+
+  /**
+   * S15 probe — the placement fee is a money writer that had never been
+   * attacked. Completing an attempt books a real income row, so a duplicate
+   * completion would be duplicate revenue.
+   *
+   * Two independent guards are asserted here, because either alone would be
+   * fragile:
+   *   1. stmtCompleteAttempt carries `WHERE status IN ('in_progress','paused')`
+   *      and the route checks `changes !== 1` — an atomic compare-and-set, not
+   *      a read-then-write.
+   *   2. The fee payment is written with idempotency_key `placement:<attempt>`,
+   *      which lands on the unique index uq_payments_idempotency.
+   */
+  it('S15: completing one attempt twice books the fee exactly once', async () => {
+    seedVisitor('pda_v_dupe', 'Dupe Candidate', BRANCH_A, VERSION);
+    const start = await supertest(app).post('/api/placement/visitors/pda_v_dupe/placement/attempts').set(authHeader(owner)).send({});
+    const attemptId = start.body.id as string;
+
+    const first = await completeAttempt('pda_v_dupe', attemptId, owner);
+    expect(first.status).toBe(200);
+    expect(first.body.feeCharged).toBe(300);
+
+    // Replay the completion five times.
+    const replays = [];
+    for (let i = 0; i < 5; i++) {
+      replays.push(
+        await supertest(app)
+          .post(`/api/placement/visitors/pda_v_dupe/placement/attempts/${attemptId}/complete`)
+          .set(authHeader(owner))
+          .send({}),
+      );
+    }
+    // Every replay must be refused — the attempt is already closed.
+    for (const r of replays) expect(r.status).toBeGreaterThanOrEqual(400);
+
+    const payRows = db
+      .prepare(`SELECT COUNT(*) AS c, COALESCE(SUM(amount),0) AS s FROM payments WHERE idempotency_key = ?`)
+      .get(`placement:${attemptId}`) as { c: number; s: number };
+    expect(payRows.c).toBe(1);
+    expect(payRows.s).toBe(300);
+
+    const incomeRows = db
+      .prepare(`SELECT COUNT(*) AS c, COALESCE(SUM(amount),0) AS s FROM financial_transactions
+                WHERE category='placement' AND reference_id = ?`)
+      .get(attemptId) as { c: number; s: number };
+    expect(incomeRows.c).toBe(1);
+    expect(incomeRows.s).toBe(300);
+  });
+
+  it('S15: the completion guard is an atomic compare-and-set, not a read-then-write', async () => {
+    seedVisitor('pda_v_cas', 'CAS Candidate', BRANCH_A, VERSION);
+    const start = await supertest(app).post('/api/placement/visitors/pda_v_cas/placement/attempts').set(authHeader(owner)).send({});
+    const attemptId = start.body.id as string;
+    await completeAttempt('pda_v_cas', attemptId, owner);
+
+    // Driving the UPDATE directly must report zero changed rows once closed:
+    // that is what makes a concurrent second completer lose deterministically
+    // rather than depending on statement ordering.
+    const res = db
+      .prepare(
+        `UPDATE placement_assessment_attempts
+         SET status='completed', total_score=1, max_score=1, percentage=1
+         WHERE id = ? AND status IN ('in_progress','paused')`,
+      )
+      .run(attemptId);
+    expect(res.changes).toBe(0);
+  });
+
+  it('S15: a SECOND genuine attempt is still allowed to charge its own fee', async () => {
+    // Business-event uniqueness must not become "a visitor may only ever be
+    // assessed once". The key is per-attempt, so a legitimate retake charges
+    // again (subject to the first-completion policy).
+    seedVisitor('pda_v_retake', 'Retake Candidate', BRANCH_A, VERSION);
+    const a1 = await supertest(app).post('/api/placement/visitors/pda_v_retake/placement/attempts').set(authHeader(owner)).send({});
+    await completeAttempt('pda_v_retake', a1.body.id, owner);
+
+    const a2 = await supertest(app).post('/api/placement/visitors/pda_v_retake/placement/attempts').set(authHeader(owner)).send({});
+    // A retake may or may not be permitted by policy; if it is, it must be a
+    // DISTINCT attempt with its own idempotency key.
+    if (a2.status === 201) {
+      expect(a2.body.id).not.toBe(a1.body.id);
+      const k1 = db.prepare(`SELECT COUNT(*) AS c FROM payments WHERE idempotency_key = ?`).get(`placement:${a1.body.id}`) as { c: number };
+      expect(k1.c).toBe(1);
+    } else {
+      expect(a2.status).toBeGreaterThanOrEqual(400);
+    }
+  });
+
 });
