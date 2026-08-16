@@ -18,7 +18,7 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { authenticate, authorize, canAccessBranchResource } from '../middleware/auth.js';
-import { hasRole } from '../core/rbac/rbac-service.js';
+import { hasRole, isGlobalOwner } from '../core/rbac/rbac-service.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id } from '../utils/ids.js';
@@ -116,7 +116,7 @@ eventsRouter.get(
   ah(async (req, res) => {
     const chain = eventBus.getCorrelationChain(req.params.correlationId);
     if (chain.length === 0) throw new HttpError(404, 'No events found for this correlation ID.');
-    if (!req.rbac || !hasRole(req.rbac, 'owner')) {
+    if (!req.rbac || !isGlobalOwner(req.rbac)) {
       const foreign = chain.some((e) => !canAccessBranchResource(req, e.branchId));
       if (foreign) throw new HttpError(403, 'Event correlation chain contains events outside your access scope.');
     }
@@ -304,7 +304,7 @@ eventsRouter.get(
     if (eventId) { sql += ' AND ehl.event_id = ?'; params.push(eventId); }
     if (handler) { sql += ' AND ehl.handler LIKE ?'; params.push(`%${handler}%`); }
     if (success !== undefined) { sql += ' AND ehl.success = ?'; params.push(success === 'true' ? 1 : 0); }
-    if (!req.rbac || !hasRole(req.rbac, 'owner')) {
+    if (!req.rbac || !isGlobalOwner(req.rbac)) {
       sql += ' AND de.branch_id = ?';
       params.push(req.user?.branchId);
     }

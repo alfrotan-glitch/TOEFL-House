@@ -335,6 +335,25 @@ export function hasRole(ctx: RbacUserContext, roleCode: string): boolean {
   return ctx.roles.some((r) => r.roleCode === roleCode);
 }
 
+/**
+ * True only for a GLOBAL owner — the application superuser.
+ *
+ * `hasRole(ctx, 'owner')` ignores scope, and every superuser short-circuit in
+ * the codebase used it. Granting someone the owner role scoped to a single
+ * campus therefore produced a FULL owner: proven live, a user holding
+ * owner@campus_kbl read students and finance belonging to a different campus,
+ * listed all users, and created branches. Scoping the grant did nothing.
+ *
+ * The owner model itself is intentional (documented in the permission catalog
+ * and in middleware/auth.ts) — it is the *scoped* grant that must not confer
+ * it. Both the real seeded owner and the legacy-role fallback are
+ * organization-scoped, so requiring organization scope preserves every
+ * legitimate owner while closing the escalation.
+ */
+export function isGlobalOwner(ctx: RbacUserContext): boolean {
+  return ctx.roles.some((r) => r.roleCode === 'owner' && r.scopeType === 'organization');
+}
+
 export function hasAnyRole(ctx: RbacUserContext, roleCodes: string[]): boolean {
   return roleCodes.some((role) => hasRole(ctx, role));
 }
@@ -361,7 +380,10 @@ export function getPermissionScope(ctx: RbacUserContext, code: string): Permissi
  * access by itself. Access is derived from the user's actual RBAC assignment.
  */
 export function canAccessBranch(db: Database.Database, ctx: RbacUserContext, branchId: string): boolean {
-  if (hasRole(ctx, 'owner')) return true;
+  // Only an organization-scoped owner sees everything. A campus- or
+  // branch-scoped owner falls through to the scope checks below, exactly like
+  // any other role.
+  if (isGlobalOwner(ctx)) return true;
 
   const branch = db.prepare('SELECT campus_id AS campusId FROM branches WHERE id = ?').get(branchId) as
     | { campusId: string | null }
@@ -378,5 +400,5 @@ export function canAccessBranch(db: Database.Database, ctx: RbacUserContext, bra
 }
 
 export function canAccessAllBranches(ctx: RbacUserContext): boolean {
-  return hasRole(ctx, 'owner') || ctx.roles.some((r) => r.scopeType === 'organization');
+  return isGlobalOwner(ctx) || ctx.roles.some((r) => r.scopeType === 'organization');
 }

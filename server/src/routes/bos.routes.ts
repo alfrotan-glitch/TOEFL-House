@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { getBranchOutstanding } from '../utils/studentBalance.js';
 import { authenticate, authorize, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
-import { hasRole } from '../core/rbac/rbac-service.js';
+import { hasRole, isGlobalOwner } from '../core/rbac/rbac-service.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
@@ -22,7 +22,7 @@ function requireBosBranch(req: import('express').Request): string {
 }
 
 function requireOwner(req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) {
-  if (!req.rbac || !hasRole(req.rbac, 'owner')) {
+  if (!req.rbac || !isGlobalOwner(req.rbac)) {
     return res.status(403).json({ error: 'Owner authorization is required for this operation.' });
   }
   next();

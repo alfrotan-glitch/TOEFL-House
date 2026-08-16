@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { verifyToken, TokenPayload, UserRole } from '../utils/auth.js';
 import { db } from '../db/connection.js';
-import { buildRbacContext, hasPermission, hasAnyPermission, hasAnyRole, hasRole, canAccessBranch, canAccessAllBranches, type RbacUserContext } from '../core/rbac/rbac-service.js';
+import { buildRbacContext, hasPermission, hasAnyPermission, hasAnyRole, hasRole, isGlobalOwner, canAccessBranch, canAccessAllBranches, type RbacUserContext } from '../core/rbac/rbac-service.js';
 import { LEGACY_ROLE_MAP } from '../core/rbac/permission-catalog.js';
 
 // Removed local Role type to use centralized UserRole from utils/auth.ts
@@ -132,7 +132,7 @@ export function authorize(...roles: UserRole[]) {
     // route lists therefore implicitly include the owner; business-rule gates
     // (grade locks, rescore guards, cancellation reasons, etc.) still apply
     // independently of this role check.
-    if (req.rbac && hasRole(req.rbac, 'owner')) return next();
+    if (req.rbac && isGlobalOwner(req.rbac)) return next();
     if (hasAnyLegacyRole(req, roles)) return next();
     return res.status(403).json({ error: 'You do not have permission to perform this operation.' });
   };
@@ -148,7 +148,7 @@ export function requirePermission(...codes: string[]) {
     // access (Owner model): role-gated routes grant the owner through authorize();
     // permission-gated routes must not exclude the owner merely because the
     // catalog omits a code for audit documentation purposes.
-    if (req.rbac && hasRole(req.rbac, 'owner')) return next();
+    if (req.rbac && isGlobalOwner(req.rbac)) return next();
     if (req.rbac && hasAnyPermission(req.rbac, codes)) return next();
     return res.status(403).json({
       error: 'You do not have permission to perform this operation.',

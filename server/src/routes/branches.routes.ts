@@ -6,7 +6,7 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { authenticate, authorize, denyPermissionless, canAccessBranchResource } from '../middleware/auth.js';
-import { hasRole } from '../core/rbac/rbac-service.js';
+import { hasRole, isGlobalOwner } from '../core/rbac/rbac-service.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id } from '../utils/ids.js';
@@ -174,7 +174,7 @@ function assertUniqueCampusCode(code: string, excludeId?: string): void {
 }
 
 function requireCampusAccess(req: import('express').Request, campusId: string): void {
-  if (!!req.rbac && hasRole(req.rbac, 'owner')) return;
+  if (!!req.rbac && isGlobalOwner(req.rbac)) return;
   const branches = db.prepare('SELECT id FROM branches WHERE campus_id = ?').all(campusId) as Array<{ id: string }>;
   if (!branches.some((b) => canAccessBranchResource(req, b.id))) {
     throw new HttpError(403, 'Campus is outside your access scope.');
@@ -230,7 +230,7 @@ campusesRouter.get(
     ensureOrganization();
     const activeOnly = req.query.active === 'true' || req.query.active === '1';
     let rows = (activeOnly ? stmtGetActiveCampuses.all() : stmtGetAllCampuses.all()) as any[];
-    if (!req.rbac || !hasRole(req.rbac, 'owner')) {
+    if (!req.rbac || !isGlobalOwner(req.rbac)) {
       rows = rows.filter((r) => {
         const branches = db.prepare('SELECT id FROM branches WHERE campus_id = ?').all(r.id) as Array<{ id: string }>;
         return branches.some((b) => canAccessBranchResource(req, b.id));
@@ -368,7 +368,7 @@ branchesRouter.get(
     
     // Fetch all and filter in JS (branches table is small, avoids dynamic SQL preparation)
     let rows = stmtGetAllBranches.all() as any[];
-    if (!req.rbac || !hasRole(req.rbac, 'owner')) {
+    if (!req.rbac || !isGlobalOwner(req.rbac)) {
       rows = rows.filter((r) => canAccessBranchResource(req, r.id));
     }
     

@@ -3,7 +3,7 @@ import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { db } from '../db/connection.js';
 import { hashPassword, verifyPassword, signToken, verifyToken, resolveJwtExpiresInSeconds } from '../utils/auth.js';
 import { id } from '../utils/ids.js';
-import { syncPrimaryUserRole } from '../core/rbac/rbac-service.js';
+import { syncPrimaryUserRole, isGlobalOwner } from '../core/rbac/rbac-service.js';
 import { authenticate, readSessionCookie } from '../middleware/auth.js';
 import { hasRole } from '../core/rbac/rbac-service.js';
 import { buildRbacContext, type RbacUserContext } from '../core/rbac/rbac-service.js';
@@ -161,7 +161,7 @@ authRouter.post(
     
     const tabAccess: Record<string, boolean> = {};
     for (const [tab, perm] of Object.entries(TAB_PERMISSION_MAP)) {
-      tabAccess[tab] = rbac.permissionCodes.has(perm) || hasRole(rbac, 'owner');
+      tabAccess[tab] = rbac.permissionCodes.has(perm) || isGlobalOwner(rbac);
     }
     
     res.json({
@@ -193,7 +193,7 @@ authRouter.get(
     
     const tabAccess: Record<string, boolean> = {};
     for (const [tab, perm] of Object.entries(TAB_PERMISSION_MAP)) {
-      tabAccess[tab] = rbac.permissionCodes.has(perm) || hasRole(rbac, 'owner');
+      tabAccess[tab] = rbac.permissionCodes.has(perm) || isGlobalOwner(rbac);
     }
     
     res.json({
