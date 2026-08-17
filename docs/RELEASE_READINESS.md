@@ -160,6 +160,8 @@ rule engine is now the single authority.
 | HIGH | — | none open | — |
 | MEDIUM | D-1 | F-10 historical phantom-cash rows in existing production data | Forward path fixed. Repair migration `067_repair_f10_phantom_cash.sql` now **written and proven on a production-like copy** (variance 1500 -> 0, atomic, idempotent, healthy DBs untouched). **Not yet run against production.** |
 | MEDIUM | D-2 | Employee pay-salary `LIKE` duplicate guard bypassable via `paymentType:'advance'` or a varied `monthName` | Narrower than teacher payroll, which two unique indexes protect. |
+| MEDIUM | D-10 | Audit rows created before this fix are filed under the operator's branch, not the branch acted on | Forward path fixed (writeAudit now resolves the target branch). **Historical audit rows are NOT rewritten** — a branch-scoped audit view will under-report events that predate the fix. |
+| LOW | D-11 | Book-profit tile in `BooksView.tsx` computes profit client-side using `purchasePrice ?? 0` | Display-only aggregate; overstates profit when a book has no recorded purchase price. No backend equivalent exists to consume. |
 | LOW | D-3 | `invoices` carries two unique indexes enforcing the same rule | Redundant, not a correctness defect. See §F. |
 | LOW | D-4 | 5 money writers use bespoke guards instead of `resolveIdempotency` | Each proven correct under concurrency; unification is cosmetic. |
 | LOW | D-5 | Unbounded list endpoints; Students tab payload at scale | No defect at current volume; see C-3. |
@@ -228,6 +230,7 @@ charges) when the new business rule took effect; every assertion was preserved.
 
 | # | Blocker | Owner | Status |
 |---|---|---|---|
+| H-4 | Confirm the two indexes restored by migration 068 exist in production after deploy (`idx_users_role`, `idx_placement_profile_program_branch`) | DBA / operator | **OPEN** — verified on clones only |
 | H-1 | Visual sign-off of Versions & Rules at 1920×1080 and at a smaller viewport | A person at a screen | **OPEN** — cannot be closed in a headless sandbox (C-1) |
 | H-2 | One physical print of the student fee bill | A person at a printer | **OPEN** — cannot be closed in a headless sandbox (C-2) |
 | H-3 | Run migration `067_repair_f10_phantom_cash.sql` against production data before first use | DBA / operator | **OPEN** — migration now exists and is verified on a copy; it applies automatically on next app boot. Take a backup first (the runner also writes one). See D-1. |

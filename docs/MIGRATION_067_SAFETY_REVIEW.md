@@ -251,3 +251,86 @@ history, or any constraint.
 **It has not been run against production.** Migrations apply automatically on
 next app boot, so deploying this build *is* the execution — schedule it
 deliberately and confirm the pre-migration snapshot exists afterwards.
+
+---
+
+# Addendum — Full production-clone rehearsal (pass 11)
+
+The first review ran against a copy whose business tables were empty, so
+"payments 0 -> 0" proved very little. This addendum repeats the exercise on a
+**populated** production-like database and covers migration 068 as well.
+
+## How the clone was built
+
+Data was created by driving the **real HTTP API** (not direct SQL): 8 students
+across 2 branches, 8 payments, 6 book sales incl. 1 refund through the real
+refund path, 1 invoice, teacher payroll funded from a real budget line, and a
+200,000 AFN treasury capital injection. The clone was then taken with SQLite's
+backup API and confirmed logically identical to the source.
+
+Populated state: 106 tables · 338 indexes · 31 ledger rows · 26 audit rows ·
+integrity ok · FK violations 0.
+
+## Result: migration 067 is a NO-OP on healthy real data
+
+| scope | account main | ledger formula | outcome |
+|---|---|---|---|
+| branch 1 | 19,510 | 19,510 | no-op |
+| branch 2 (West) | 7,600 | 7,600 | no-op |
+| organization treasury | 80,000 | excluded by design | untouched |
+
+**This is the capital_injection defect caught for real.** Branch 1 carries a
+200,000 AFN `capital_injection` row stamped with its `branch_id`. With the
+exclusion, the formula returns 19,510 and the migration correctly does nothing.
+Without it, the migration would have written 219,510 — inventing 200,000 AFN of
+phantom cash on a healthy branch.
+
+## Before/after across the whole database
+
+Applied via the real application boot path (`connection.ts` → `runMigrations`).
+
+Unchanged: tables 106 · indexes 338 · integrity ok · FK 0 · ledger total
+380,090 · payments 23,800 · teacher ledger 30,000 · budget total 90,000 ·
+audit rows 26 · all account balances · ledger by type and by category ·
+invoice totals · book-sale status counts.
+
+One count moved: `budget_lines` 17 → 34. **Investigated and attributed:** this
+is `ensureBudgetLineCatalog()` provisioning the 17 default lines for the second
+branch on boot, guarded by `NOT EXISTS`. Proven not to be the migration by
+applying 067 alone outside the app: `budget_lines 17 -> 17`.
+
+Reconciliation through the real API after migrating, per branch:
+`cashVariance 0 · savingVariance 0 · amountVariance 0 · budgetVariance 0 ·
+healthy true` for **both** branches.
+
+## Backup and restore
+
+The runner wrote its pre-migration snapshot automatically. Verified: integrity
+ok, 106 tables, 338 indexes, FK 0, and **all financial figures identical** to
+the pre-migration state (the only difference is the `schema_migrations` row for
+067, which is the point of the snapshot). A restore drill booted the
+application directly on the restored file: 7 students, 8 payments, branch-1
+main 19,510 — a working database, not just a readable file.
+
+## Migration chain review (all 68)
+
+- **Total:** 68 migrations, applied in filename order, tracked in
+  `schema_migrations`; each runs inside `BEGIN`/`COMMIT`.
+- **Destructive operations:** `DROP TABLE` appears in 15 migrations. Every one
+  inspected is the SQLite rebuild idiom (create-new → copy → drop-old →
+  rename); no data-losing drop was found. Several early migrations delete
+  seeded demo rows by explicit id — intentional, and inert on real data.
+- **Foreign-key integrity:** 0 violations on fresh, upgraded, and backup.
+- **Fresh-schema reproducibility:** `preflight:fresh-schema` passes, 67
+  migrations, no drift.
+- **Upgrade-path reproducibility:** independently compared a fresh install
+  against the upgraded production clone. **This found the drift that the
+  preflight does not catch** — 2 indexes present only on upgraded databases.
+  Fixed by migration 068; fresh and upgraded are now byte-identical in
+  structure (106 tables, 201 non-internal indexes, 0 declared-but-missing).
+- **Duplicate indexes:** `invoices` still carries two unique indexes enforcing
+  the same rule (D-3). Redundant, not a correctness defect; left alone
+  deliberately rather than editing history.
+- **Rollback/recovery:** automatic `VACUUM INTO` snapshot before any pending
+  migration, retained by count; per-migration transaction rollback proven by
+  fault injection.
