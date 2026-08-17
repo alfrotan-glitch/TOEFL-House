@@ -12,6 +12,8 @@ import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
 import { resolvePlacementRequirement } from '../core/placement/policy-engine.js';
+import { evaluateConversionEligibility } from '../core/placement/placement-policy.js';
+import { stmtLatestCompletedAttempt } from '../core/placement/store.js';
 import { addNotification } from '../utils/notifications.js';
 import { recordIncome } from '../utils/income.js';
 import { getNumberSetting } from '../utils/settings.js';
@@ -387,12 +389,14 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
     // from the selected class's level when available.
     const requirement = resolvePlacementRequirement(effectiveProgramVersionId, requestedStudentBranchId, classItem.level_id || null);
     db.prepare(`UPDATE visitors SET placement_requirement_mode=? WHERE id=?`).run(requirement.mode, visitor.id);
-    if (requirement.mode === 'required' && visitor.placement_status !== 'completed') {
-      throw new HttpError(400, 'Placement assessment is required for the selected program before enrollment.');
-    }
-    if (requirement.mode === 'optional' && !['completed', 'exempt'].includes(visitor.placement_status)) {
-      throw new HttpError(400, 'Placement is optional for this program: complete it or record an exemption before enrollment.');
-    }
+    // INDEPENDENT ENFORCEMENT BOUNDARY. Conversion does not trust the visitor's
+    // status string or the denormalised placement_score JSON: it re-reads the
+    // authoritative `outcome` recorded on the latest completed attempt. Even if
+    // an invalid placement state were persisted by a bug, a manual DB edit or a
+    // future code path, a failed candidate cannot become an enrolled student.
+    const latestAttempt = stmtLatestCompletedAttempt.get(visitor.id) as { status?: string; outcome?: string | null } | undefined;
+    const placementEligibility = evaluateConversionEligibility(requirement.mode, String(visitor.placement_status ?? ''), latestAttempt ?? null);
+    if (!placementEligibility.eligible) throw new HttpError(400, placementEligibility.reason);
     if (classItem.program_version_id && String(classItem.program_version_id) !== String(effectiveProgramVersionId)) throw new HttpError(400, 'Selected class belongs to a different program version.');
   }
   if (classItem.status && classItem.status !== 'active') throw new HttpError(400, 'Cannot enroll into an inactive class.');

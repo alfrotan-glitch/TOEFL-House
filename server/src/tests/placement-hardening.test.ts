@@ -302,8 +302,24 @@ describe('Placement final hardening', () => {
     // Not completed -> blocked.
     const blocked = await supertest(app).post('/api/visitors/pha_v_conv/convert').set(authHeader(owner)).send({ classId: 'pha_class', amountPaid: 0, branchId: BRANCH_A, programVersionId: VERSION });
     expect(blocked.status).toBe(400);
-    // Complete placement -> converts.
-    await fullAttempt('pha_v_conv', owner, 20);
+    // A FAILING sitting must not enable conversion. skill=20 yields a weighted
+    // 56% against this profile's own pass_score of 60 (skills 80 x 0.6 +
+    // written 20 x 0.2 + interview 20 x 0.2). Before the placement integrity
+    // work this fixture converted anyway, because pass_score was never
+    // enforced — the test asserted the defect. The implementation is correct
+    // and the fixture was wrong, so it now proves both halves of the rule.
+    const failing = await fullAttempt('pha_v_conv', owner, 20);
+    expect(failing.complete.status).toBe(200);
+    expect(failing.complete.body.outcome).toBe('failed');
+    const blockedByScore = await supertest(app).post('/api/visitors/pha_v_conv/convert').set(authHeader(owner)).send({ classId: 'pha_class', amountPaid: 0, branchId: BRANCH_A, programVersionId: VERSION });
+    expect(blockedByScore.status).toBe(400);
+    expect(String(blockedByScore.body.error)).toMatch(/did not meet the placement policy/i);
+
+    // Complete placement with a genuinely passing result -> converts.
+    // skill=25 yields 70% (skills 100 x 0.6 + written 25 x 0.2 + interview 25 x 0.2).
+    db.prepare(`UPDATE placement_assessment_profiles SET allow_retake=1 WHERE program_version_id=? AND branch_id=?`).run(VERSION, BRANCH_A);
+    const passing = await fullAttempt('pha_v_conv', owner, 25);
+    expect(passing.complete.body.outcome).toBe('passed');
     const converted = await supertest(app).post('/api/visitors/pha_v_conv/convert').set(authHeader(owner)).send({ classId: 'pha_class', amountPaid: 0, branchId: BRANCH_A, programVersionId: VERSION });
     expect(converted.status).toBe(201);
     expect(converted.body.studentCode).toBeTruthy();

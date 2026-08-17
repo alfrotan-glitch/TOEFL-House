@@ -15,7 +15,7 @@ import { recordIncome } from '../utils/income.js';
 import { resolveFee } from '../core/configuration/policy-resolver.js';
 import {
   stmtVisitor, stmtAttempt, stmtCurrentAttempt, stmtAttempts, stmtResults, stmtInsertAttempt, stmtLastAttemptNumber,
-  stmtCompleteAttempt, stmtInsertPlacementFeePayment, stmtUpdateVisitorPlacement, stmtVisitorCompletedCount,
+  stmtCompleteAttempt, stmtInsertPlacementFeePayment, stmtUpdateVisitorPlacement, stmtVisitorCompletedCount, stmtSetAttemptOutcome,
   stmtUpsertResponse, stmtResponsesByAttemptTest, stmtTestById, stmtQuestionsByTest, stmtSectionsByTest,
   getVisitorOr404, assertVisitorBranchAccess, getUserContext, mapProfile, mapAttempt, getProgramAssessment,
   parseComponents, normalizeScore, upsertResult, getRequiredMissing, type PolicyComponent,
@@ -26,7 +26,8 @@ import {
   startComponentTimer, pauseAttempt, resumeAttempt, componentTimingView, computeDeadline, nowIso, componentTimeLimitSeconds, timingState,
 } from '../core/placement/timing-engine.js';
 import { autoScoreQuestion, normalizeAutoScore, scoreProvenance, scoreComponentBody } from '../core/placement/scoring-engine.js';
-import { evaluateDecision, assertNoConflictingLevels } from '../core/placement/decision-engine.js';
+import { evaluateDecision, assertNoConflictingLevels, evaluateOutcome } from '../core/placement/decision-engine.js';
+import { readRetakePolicy, evaluateStartEligibility, evaluateBilling, WAIVED_STATUS } from '../core/placement/placement-policy.js';
 import { placementActivityReport } from '../core/placement/reporting.js';
 
 export const placementAttemptRouter = Router();
@@ -82,8 +83,13 @@ placementAttemptRouter.post('/visitors/:visitorId/placement/attempts', authorize
   // Optional mode: authorized skip records an audited exemption instead of an attempt.
   if (requirement.mode === 'optional' && req.body?.skip === true) {
     const reason = String(req.body?.reason || 'Candidate opted to skip optional placement.').trim().slice(0, 500);
-    db.prepare(`UPDATE visitors SET placement_status='waived', placement_status_at=datetime('now'), placement_requirement_mode='optional', placement_score=? WHERE id=?`)
-      .run(JSON.stringify({ mode: 'optional', skipped: true, exempt: true, reason, at: nowIso(), by: user.userId }), visitor.id);
+    // Canonical waiver status is 'waived' — the only value the visitors
+    // placement_status CHECK permits. The conversion gate previously looked for
+    // 'exempt', a value nothing ever wrote, which made this audited skip a dead
+    // end (the candidate could never be enrolled). Both boundaries now resolve
+    // the term through the shared domain policy.
+    db.prepare(`UPDATE visitors SET placement_status=?, placement_status_at=datetime('now'), placement_requirement_mode='optional', placement_score=? WHERE id=?`)
+      .run(WAIVED_STATUS, JSON.stringify({ mode: 'optional', skipped: true, waived: true, reason, at: nowIso(), by: user.userId }), visitor.id);
     writeAudit(req, `Placement exempted (optional skip) for ${visitor.full_name}`, { newValue: JSON.stringify({ mode: 'optional', reason, operatorId: user.userId }) });
     res.json({ skipped: true, mode: 'optional', reason });
     return;
@@ -96,10 +102,15 @@ placementAttemptRouter.post('/visitors/:visitorId/placement/attempts', authorize
   const components = parseComponents(profile);
   const enabledComponents = components.filter((c) => c.enabled);
   if (enabledComponents.length === 0) throw new HttpError(409, 'Placement policy has no enabled components.');
-  // Retake guard: allow_retake=0 blocks a second completed attempt.
-  if (Number((stmtVisitorCompletedCount.get(visitor.id) as any).c || 0) > 0 && !profile.allow_retake) {
-    throw new HttpError(409, 'Retakes are not allowed for this placement policy.');
-  }
+  // Retake eligibility comes from the shared domain policy so the rule cannot
+  // drift from the conversion/billing logic. This check is the friendly error
+  // path; the hard guarantee is the partial unique index
+  // `uq_placement_open_attempt` (migration 070), which makes "at most one open
+  // attempt per visitor" atomic. Before that index, opening several attempts
+  // before completing any bypassed allowRetake=false entirely.
+  const retakePolicy = readRetakePolicy(profile);
+  const eligibility = evaluateStartEligibility(retakePolicy, Number((stmtVisitorCompletedCount.get(visitor.id) as any).c || 0));
+  if (!eligibility.allowed) throw new HttpError(409, eligibility.reason);
 
   const now = nowIso();
   const startedAt = now;
@@ -125,7 +136,7 @@ placementAttemptRouter.post('/visitors/:visitorId/placement/attempts', authorize
 
   const attemptNumber = Number((stmtLastAttemptNumber.get(visitor.id) as any).n || 0) + 1;
   const attemptId = id('pat');
-  const tx = db.transaction(() => {
+  const insertAttempt = db.transaction(() => {
     stmtInsertAttempt.run(attemptId, visitor.id, visitor.program_version_id, profile.id, visitor.branch_id, attemptNumber, snapshot, user.userId, null, expiresAt, Number(profile.version ?? 1));
     for (const c of enabledComponents) {
       upsertResult({
@@ -137,7 +148,31 @@ placementAttemptRouter.post('/visitors/:visitorId/placement/attempts', authorize
     db.prepare(`UPDATE visitors SET placement_status='in_progress', placement_status_at=datetime('now'), placement_requirement_mode=?, placement_method=?, current_placement_attempt_id=?, stage=CASE WHEN stage IN ('lead','inquiry','follow_up','placement_booking') THEN 'placement_booking' ELSE stage END WHERE id=?`)
       .run(requirement.mode, profile.method, attemptId, visitor.id);
   });
-  tx();
+  try {
+    insertAttempt();
+  } catch (err) {
+    // The database is the authority on both placement uniqueness invariants:
+    //   uq_placement_open_attempt      — one open attempt per visitor
+    //   UNIQUE(visitor_id, attempt_number) — no duplicate attempt numbering
+    // Concurrent or duplicated requests land here; surface a precise 409
+    // instead of leaking a raw SQLITE_CONSTRAINT error as a 500/400.
+    // SQLite reports the offending COLUMNS, not the index name, e.g.
+    //   "UNIQUE constraint failed: placement_assessment_attempts.visitor_id"
+    //        → uq_placement_open_attempt (one open attempt per visitor)
+    //   "...visitor_id, placement_assessment_attempts.attempt_number"
+    //        → UNIQUE(visitor_id, attempt_number) (numbering race)
+    const e = err as { code?: string; message?: string } | null;
+    if (e?.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      const message = String(e.message ?? '');
+      if (message.includes('attempt_number')) {
+        throw new HttpError(409, 'Another placement attempt was created for this candidate at the same moment. Please retry.');
+      }
+      if (message.includes('visitor_id')) {
+        throw new HttpError(409, 'This candidate already has an open placement attempt. Complete, cancel or expire it before starting another.');
+      }
+    }
+    throw err;
+  }
   writeAudit(req, `Started placement assessment for ${visitor.full_name} (policy v${profile.version ?? 1}, mode ${requirement.mode})`, { newValue: JSON.stringify({ attemptId, policyVersion: profile.version ?? 1, expiresAt }) });
   res.status(201).json(mapAttempt(stmtAttempt.get(attemptId)));
 }));
@@ -180,6 +215,16 @@ placementAttemptRouter.put('/visitors/:visitorId/placement/attempts/:attemptId/t
 
   const answers = Array.isArray(req.body?.answers) ? req.body.answers : [];
   const feedbacks: Record<string, string> = {};
+  // ATOMIC: every submitted answer plus the component result derived from them
+  // is one submission. A partial write (some answers stored, the derived score
+  // not updated) would leave the component's recorded score disagreeing with
+  // the responses it was computed from.
+  let stored: any[] = [];
+  let earned = 0;
+  let max = 0;
+  let answered = 0;
+  let autoComplete = false;
+  const applySubmission = db.transaction(() => {
   for (const a of answers) {
     const q = test.questions.find((tq: any) => String(tq.question_key) === String(a?.questionKey));
     if (!q) throw new HttpError(400, `Unknown question key "${a?.questionKey}" in test "${test.title}".`);
@@ -200,11 +245,11 @@ placementAttemptRouter.put('/visitors/:visitorId/placement/attempts/:attemptId/t
   }
 
   // Component state derives from ALL stored responses (server truth).
-  const stored = stmtResponsesByAttemptTest.all(attempt.id, test.id) as any[];
+  stored = stmtResponsesByAttemptTest.all(attempt.id, test.id) as any[];
   const storedByKey = new Map(stored.map((r) => [String(r.question_key), r]));
-  let earned = 0;
-  let max = 0;
-  let answered = 0;
+  earned = 0;
+  max = 0;
+  answered = 0;
   for (const q of test.questions) {
     const pts = Number(q.points || 0);
     max += pts;
@@ -213,7 +258,7 @@ placementAttemptRouter.put('/visitors/:visitorId/placement/attempts/:attemptId/t
   }
   const allAnswered = answered === test.questions.length;
   const hasManual = test.questions.some((q: any) => q.qtype === 'essay' || q.qtype === 'speaking');
-  const autoComplete = allAnswered && !hasManual;
+  autoComplete = allAnswered && !hasManual;
   const autoResult = normalizeAutoScore(earned, max, component.maxScore);
 
   if (autoComplete) {
@@ -234,6 +279,8 @@ placementAttemptRouter.put('/visitors/:visitorId/placement/attempts/:attemptId/t
       submittedAt: allAnswered ? nowIso() : null, elapsedSeconds: allAnswered ? elapsedSeconds : null,
     });
   }
+  });
+  applySubmission();
 
   writeAudit(req, `Recorded content responses for ${visitor.full_name} on test "${test.title}" (${answered}/${test.questions.length} answered, ${earned}/${max} auto points)`);
   res.json({
@@ -321,18 +368,30 @@ placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/
   const totalScore = percentage == null ? null : Math.round(percentage * 100) / 100;
   const maxScore = 100;
 
-  const firstCompleted = Number((stmtVisitorCompletedCount.get(visitor.id) as any).c || 0) === 0;
-  const placementFee = firstCompleted ? Number(resolveFee(db, visitor.branch_id, 'placementTestFee') || 0) : 0;
+  // AUTHORITATIVE OUTCOME. The decision engine already knows whether the policy
+  // was met (required components, per-component minScore, overall passScore);
+  // before this hardening every caller discarded that verdict, which is how a
+  // 10% candidate completed and enrolled. The sitting is still RECORDED — a
+  // failed exam is a real, auditable, billable business event — but the
+  // outcome is persisted so the conversion boundary can refuse it.
+  const { outcome, reasons } = evaluateOutcome(decision);
+
+  // Billing is policy-driven and snapshotted with the attempt, so changing the
+  // academic configuration mid-flight cannot alter what this sitting costs.
+  const retakePolicy = readRetakePolicy(profile);
+  const priorCompleted = Number((stmtVisitorCompletedCount.get(visitor.id) as any).c || 0);
+  const billing = evaluateBilling(retakePolicy, priorCompleted, Number(resolveFee(db, visitor.branch_id, 'placementTestFee') || 0));
+  const placementFee = billing.amount;
   const date = today();
-  const resultSnapshot = JSON.stringify({ percentage, totalScore, maxScore, recommendation: { levelId: recommendedLevelId, text: recommendationText, ruleId: decisionRuleId }, results, policyVersion: snapshot.policyVersion ?? profile.policyVersion ?? 1 });
+  const resultSnapshot = JSON.stringify({ percentage, totalScore, maxScore, outcome, unmetRequirements: decision.unmetRequirements, recommendation: { levelId: recommendedLevelId, text: recommendationText, ruleId: decisionRuleId }, results, policyVersion: snapshot.policyVersion ?? profile.policyVersion ?? 1 });
 
   let feeReceipt: string | null = null;
   let feePaymentId: string | null = null;
   const tx = db.transaction(() => {
-    const updated = stmtCompleteAttempt.run(totalScore, maxScore, percentage, recommendedLevelId, recommendationText, user.userId, decisionRuleId, attempt.id) as any;
+    const updated = stmtCompleteAttempt.run(totalScore, maxScore, percentage, recommendedLevelId, recommendationText, user.userId, decisionRuleId, outcome, attempt.id) as any;
     if (updated.changes !== 1) throw new HttpError(409, 'This placement attempt is already closed.');
     stmtUpdateVisitorPlacement.run(resultSnapshot, profile.method, attempt.id, visitor.id);
-    if (firstCompleted && placementFee > 0) {
+    if (billing.billable && placementFee > 0) {
       const paymentId = id('pay');
       const receiptNumber = nextReceiptNumber();
       stmtInsertPlacementFeePayment.run(paymentId, placementFee, date, `Placement assessment fee — ${visitor.full_name}`, receiptNumber, visitor.branch_id, `placement:${attempt.id}`);
@@ -342,11 +401,23 @@ placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/
     }
   });
   tx();
-  if (firstCompleted && placementFee > 0) addNotification('Placement Assessment Recorded', `Placement assessment completed for ${visitor.full_name}. Fee: ${placementFee} AFN.`, 'success', visitor.branch_id);
-  writeAudit(req, `Completed placement assessment for ${visitor.full_name}: ${percentage}% — ${recommendationText}`, {
-    newValue: JSON.stringify({ ...JSON.parse(resultSnapshot), decisionRuleId, fee: { amount: firstCompleted ? placementFee : 0, receipt: feeReceipt, paymentId: feePaymentId, attemptId: attempt.id } }),
+  if (billing.billable && placementFee > 0) addNotification('Placement Assessment Recorded', `Placement assessment completed for ${visitor.full_name}. Fee: ${placementFee} AFN.`, 'success', visitor.branch_id);
+  writeAudit(req, `Completed placement assessment for ${visitor.full_name}: ${percentage}% — ${outcome.toUpperCase()} — ${recommendationText}`, {
+    newValue: JSON.stringify({ ...JSON.parse(resultSnapshot), decisionRuleId, fee: { amount: placementFee, receipt: feeReceipt, paymentId: feePaymentId, attemptId: attempt.id, reason: billing.reason } }),
   });
-  res.json({ ok: true, feeCharged: firstCompleted ? placementFee : 0, decision: { percentage, recommendedLevelId, decisionRuleId, recommendationText }, attempt: mapAttempt(stmtAttempt.get(attempt.id)) });
+  // A failed sitting is a successful recording of a real outcome, so this stays
+  // HTTP 200 and reports the authoritative verdict in the body. Enrollment is
+  // blocked independently at the conversion boundary.
+  res.json({
+    ok: true,
+    outcome,
+    passed: outcome === 'passed',
+    unmetRequirements: decision.unmetRequirements,
+    failureReasons: reasons,
+    feeCharged: placementFee,
+    decision: { percentage, recommendedLevelId, decisionRuleId, recommendationText },
+    attempt: mapAttempt(stmtAttempt.get(attempt.id)),
+  });
 }));
 
 // ============================================================================
@@ -399,17 +470,23 @@ placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/
   const level = (snapshot.profile?.levels || []).find((l: any) => l.id === levelId);
   if (!level) throw new HttpError(400, 'Override level is not part of this program.');
   const before = { recommendedLevelId: attempt.recommended_level_id, recommendationText: attempt.recommendation_text };
-  db.prepare(`UPDATE placement_assessment_attempts SET override_level_id=?, override_reason=?, override_by=?, override_at=datetime('now'), recommended_level_id=?, recommendation_text=?, updated_at=datetime('now') WHERE id=?`)
-    .run(levelId, reason, user.userId, levelId, `${level.name} — manual override: ${reason}`, attempt.id);
-  // Keep the visitor placement_score consistent with the override.
   const visitorRow = getVisitorOr404(req.params.visitorId);
-  if (visitorRow.placement_score) {
-    try {
-      const score = JSON.parse(visitorRow.placement_score);
-      score.recommendation = { ...score.recommendation, levelId, text: `${level.name} — manual override: ${reason}`, overridden: true, overrideBy: user.userId, overrideAt: nowIso() };
-      db.prepare(`UPDATE visitors SET placement_score=? WHERE id=?`).run(JSON.stringify(score), visitorRow.id);
-    } catch { /* placement_score not JSON — leave untouched */ }
-  }
+  // ATOMIC: the attempt row and the visitor's denormalised placement_score copy
+  // describe the same decision. Writing them outside a transaction allowed a
+  // failure between the two to leave the enrolled level contradicting the
+  // audited override, with no error surfaced.
+  const applyOverride = db.transaction(() => {
+    db.prepare(`UPDATE placement_assessment_attempts SET override_level_id=?, override_reason=?, override_by=?, override_at=datetime('now'), recommended_level_id=?, recommendation_text=?, updated_at=datetime('now') WHERE id=?`)
+      .run(levelId, reason, user.userId, levelId, `${level.name} — manual override: ${reason}`, attempt.id);
+    if (visitorRow.placement_score) {
+      try {
+        const score = JSON.parse(visitorRow.placement_score);
+        score.recommendation = { ...score.recommendation, levelId, text: `${level.name} — manual override: ${reason}`, overridden: true, overrideBy: user.userId, overrideAt: nowIso() };
+        db.prepare(`UPDATE visitors SET placement_score=? WHERE id=?`).run(JSON.stringify(score), visitorRow.id);
+      } catch { /* placement_score not JSON — leave untouched */ }
+    }
+  });
+  applyOverride();
   writeAudit(req, `Manual placement override for ${visitor.full_name}: ${before.recommendedLevelId} → ${levelId}`, { oldValue: JSON.stringify(before), newValue: JSON.stringify({ recommendedLevelId: levelId, reason, operatorId: user.userId, attemptId: attempt.id }) });
   res.json({ ok: true, recommendedLevelId: levelId, recommendationText: `${level.name} — manual override: ${reason}` });
 }));
@@ -433,34 +510,46 @@ placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/
   const scored = scoreComponentBody(component, req.body ?? {}, snapshot.tests || [], attempt.id);
   const prov = scoreProvenance(scored.score ?? 0, component.maxScore, component.weight);
   const nextVersion = Number(existing.score_version || 1) + 1;
-  upsertResult({
-    attemptId: attempt.id, key: component.key, type: component.type, label: component.label,
-    status: 'completed', score: scored.score, maxScore: component.maxScore, weight: component.weight,
-    notes: existing.notes, resultText: String(req.body?.resultText ?? existing.result_text ?? ''),
-    evaluatorUserId: user.userId, rawScore: scored.rawScore ?? scored.score, percentage: prov.percentage, weightedScore: prov.weightedScore,
-    scoreVersion: nextVersion, payloadJson: JSON.stringify(scored.payload),
-  });
-  db.prepare(`UPDATE placement_assessment_results SET corrected_at=datetime('now'), correction_reason=?, updated_at=datetime('now') WHERE attempt_id=? AND component_key=?`)
-    .run(reason.slice(0, 500), attempt.id, component.key);
-
-  // Re-run the decision engine and persist the updated result.
   const profile = snapshot.profile || {};
-  const decision = evaluateDecision({
-    components: snapshot.profile?.components || [], results: stmtResults.all(attempt.id) as any[],
-    rules: snapshot.profile?.placementRules || [], decisionRulesJson: profile.decisionRules != null ? JSON.stringify(profile.decisionRules) : null,
-    levels: profile.levels || [], scoringModel: String(profile.scoringModel || 'weighted_average'), passScore: Number(profile.passScore ?? 60),
-  });
-  db.prepare(`UPDATE placement_assessment_attempts SET total_score=?, percentage=?, recommended_level_id=?, recommendation_text=?, decision_rule_id=?, updated_at=datetime('now') WHERE id=?`)
-    .run(decision.percentage, decision.percentage, decision.recommendedLevelId, decision.recommendationText, decision.decisionRuleId, attempt.id);
   const visitorRow = getVisitorOr404(req.params.visitorId);
-  const resultSnapshot = JSON.stringify({ percentage: decision.percentage, totalScore: decision.percentage, maxScore: 100, recommendation: { levelId: decision.recommendedLevelId, text: decision.recommendationText, ruleId: decision.decisionRuleId }, results: stmtResults.all(attempt.id), policyVersion: snapshot.policyVersion ?? 1 });
-  db.prepare(`UPDATE visitors SET placement_score=? WHERE id=?`).run(resultSnapshot, visitorRow.id);
+
+  // ATOMIC: a correction rewrites the component result, its correction
+  // metadata, the attempt's recomputed decision AND the visitor's denormalised
+  // copy. These are one business fact; a partial write would leave the
+  // recorded decision disagreeing with the scores it was derived from.
+  let decision!: ReturnType<typeof evaluateDecision>;
+  let outcome!: 'passed' | 'failed';
+  const applyCorrection = db.transaction(() => {
+    upsertResult({
+      attemptId: attempt.id, key: component.key, type: component.type, label: component.label,
+      status: 'completed', score: scored.score, maxScore: component.maxScore, weight: component.weight,
+      notes: existing.notes, resultText: String(req.body?.resultText ?? existing.result_text ?? ''),
+      evaluatorUserId: user.userId, rawScore: scored.rawScore ?? scored.score, percentage: prov.percentage, weightedScore: prov.weightedScore,
+      scoreVersion: nextVersion, payloadJson: JSON.stringify(scored.payload),
+    });
+    db.prepare(`UPDATE placement_assessment_results SET corrected_at=datetime('now'), correction_reason=?, updated_at=datetime('now') WHERE attempt_id=? AND component_key=?`)
+      .run(reason.slice(0, 500), attempt.id, component.key);
+
+    // Re-run the decision engine and re-derive the authoritative outcome, so a
+    // correction can legitimately flip a sitting between passed and failed.
+    decision = evaluateDecision({
+      components: snapshot.profile?.components || [], results: stmtResults.all(attempt.id) as any[],
+      rules: snapshot.profile?.placementRules || [], decisionRulesJson: profile.decisionRules != null ? JSON.stringify(profile.decisionRules) : null,
+      levels: profile.levels || [], scoringModel: String(profile.scoringModel || 'weighted_average'), passScore: Number(profile.passScore ?? 60),
+    });
+    outcome = evaluateOutcome(decision).outcome;
+    db.prepare(`UPDATE placement_assessment_attempts SET total_score=?, percentage=?, recommended_level_id=?, recommendation_text=?, decision_rule_id=?, outcome=?, updated_at=datetime('now') WHERE id=?`)
+      .run(decision.percentage, decision.percentage, decision.recommendedLevelId, decision.recommendationText, decision.decisionRuleId, outcome, attempt.id);
+    const resultSnapshot = JSON.stringify({ percentage: decision.percentage, totalScore: decision.percentage, maxScore: 100, outcome, unmetRequirements: decision.unmetRequirements, recommendation: { levelId: decision.recommendedLevelId, text: decision.recommendationText, ruleId: decision.decisionRuleId }, results: stmtResults.all(attempt.id), policyVersion: snapshot.policyVersion ?? 1 });
+    db.prepare(`UPDATE visitors SET placement_score=? WHERE id=?`).run(resultSnapshot, visitorRow.id);
+  });
+  applyCorrection();
 
   writeAudit(req, `Score correction for ${visitor.full_name} component "${component.label}" (v${existing.score_version || 1} → v${nextVersion})`, {
     oldValue: JSON.stringify({ score: existing.score, percentage: existing.percentage, resultText: existing.result_text }),
-    newValue: JSON.stringify({ score: scored.score, percentage: prov.percentage, reason, operatorId: user.userId }),
+    newValue: JSON.stringify({ score: scored.score, percentage: prov.percentage, outcome, reason, operatorId: user.userId }),
   });
-  res.json({ ok: true, score: scored.score, percentage: prov.percentage, scoreVersion: nextVersion, decision: { percentage: decision.percentage, recommendedLevelId: decision.recommendedLevelId, decisionRuleId: decision.decisionRuleId, recommendationText: decision.recommendationText } });
+  res.json({ ok: true, score: scored.score, percentage: prov.percentage, scoreVersion: nextVersion, outcome, decision: { percentage: decision.percentage, recommendedLevelId: decision.recommendedLevelId, decisionRuleId: decision.decisionRuleId, recommendationText: decision.recommendationText } });
 }));
 
 // ============================================================================

@@ -66,9 +66,17 @@ export function evaluateDecision(opts: {
 
   // Minimum-score enforcement: a completed component below its policy minScore
   // blocks the placement decision (required components) or is flagged.
+  // A management-approved waiver (owner/manager only, reason required, audited)
+  // is an authorised exemption from that component's requirement, so a waived
+  // row satisfies minScore rather than failing it for having a null score.
+  // This matters now that `unmetRequirements` is enforced at the completion and
+  // conversion boundaries: without it, waiving a section with a configured
+  // minScore would make the attempt impossible to complete.
   const minScoreFailures = components.filter((c) => c.required && c.minScore != null && c.minScore > 0).filter((c) => {
     const row = completed.find((r) => r.component_key === c.key);
-    if (!row || row.score == null) return true;
+    if (!row) return true;
+    if (row.status === 'waived') return false;
+    if (row.score == null) return true;
     return Number(row.score) < Number(c.minScore);
   });
   for (const c of minScoreFailures) {
@@ -157,6 +165,46 @@ export function evaluateDecision(opts: {
     belowPass: percentage != null && percentage < Number(passScore),
     unmetRequirements,
   };
+}
+
+/** Authoritative pass/fail verdict for a finished sitting. */
+export type PlacementOutcome = 'passed' | 'failed';
+
+export interface OutcomeEvaluation {
+  outcome: PlacementOutcome;
+  /** Human-readable reasons the policy was not met. Empty when passed. */
+  reasons: string[];
+}
+
+/**
+ * THE authoritative pass/fail rule for a placement sitting.
+ *
+ * This is the single place in the system that decides whether a candidate met
+ * the configured placement policy. Both the completion boundary and the
+ * student-conversion boundary call it, so the two can never disagree.
+ *
+ * A sitting passes only when ALL of the following hold:
+ *   1. every required component has a completed/waived result
+ *      (`unmetRequirements` — includes per-component minScore failures), and
+ *   2. the overall score meets the policy pass score (`belowPass`), unless the
+ *      policy produced no percentage at all and instead recommended an
+ *      explicit level (level-assessment style policies).
+ *
+ * Deliberately derived from `DecisionEvaluation`, which is itself computed from
+ * persisted, server-held results against the attempt's immutable policy
+ * snapshot. No client-supplied value participates in this decision.
+ */
+export function evaluateOutcome(decision: DecisionEvaluation): OutcomeEvaluation {
+  const reasons: string[] = [];
+  for (const unmet of decision.unmetRequirements) {
+    reasons.push(`Required assessment section not satisfied: ${unmet}.`);
+  }
+  // A policy that yields no percentage (pure level assessment) is judged on the
+  // recommendation alone; `belowPass` is only meaningful when a score exists.
+  if (decision.percentage != null && decision.belowPass) {
+    reasons.push('Overall placement score is below the configured pass score.');
+  }
+  return { outcome: reasons.length === 0 ? 'passed' : 'failed', reasons };
 }
 
 export function assertNoConflictingLevels(results: any[]): string | null {

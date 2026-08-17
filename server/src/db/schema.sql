@@ -254,6 +254,12 @@ CREATE TABLE IF NOT EXISTS placement_assessment_profiles (
   components_json TEXT NOT NULL DEFAULT '[]',
   scoring_model TEXT NOT NULL DEFAULT 'weighted_average',
   allow_retake INTEGER NOT NULL DEFAULT 1,
+  -- Retake + billing policy (migration 070). Defaults reproduce the historical
+  -- behaviour: unlimited attempts, first sitting billed, retakes free.
+  max_attempts INTEGER,
+  first_attempt_billable INTEGER NOT NULL DEFAULT 1,
+  retake_billable INTEGER NOT NULL DEFAULT 0,
+  retake_fee_amount REAL,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(program_version_id, branch_id)
@@ -287,10 +293,19 @@ CREATE TABLE IF NOT EXISTS placement_assessment_attempts (
   override_reason TEXT,
   override_by TEXT REFERENCES users(id) ON DELETE SET NULL,
   override_at TEXT,
+  outcome TEXT CHECK (outcome IS NULL OR outcome IN ('passed','failed')),
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(visitor_id, attempt_number)
 );
+-- At most one OPEN placement attempt per visitor. This is the atomic guard
+-- behind retake policy: a count-then-insert check in the application layer
+-- cannot survive concurrent requests (see migration 070).
+CREATE UNIQUE INDEX IF NOT EXISTS uq_placement_open_attempt
+  ON placement_assessment_attempts(visitor_id)
+  WHERE status IN ('in_progress','paused');
+CREATE INDEX IF NOT EXISTS idx_placement_attempts_visitor_outcome
+  ON placement_assessment_attempts(visitor_id, status, outcome);
 
 CREATE TABLE IF NOT EXISTS placement_assessment_results (
   id TEXT PRIMARY KEY,

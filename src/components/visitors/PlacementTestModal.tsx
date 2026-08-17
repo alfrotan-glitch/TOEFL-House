@@ -187,7 +187,17 @@ export default function PlacementTestModal({ visitor, onClose, onCompleted, trig
     setCompleting(true);
     try{
       const result=await api.post<any>(`/placement/visitors/${visitor.id}/placement/attempts/${attempt.id}/complete`,{notes:null});
-      triggerToast(`Placement completed: ${result.attempt?.percentage ?? 0}% — ${result.attempt?.recommendation_text ?? 'Decision recorded'}`,'success');
+      // The pass/fail verdict is decided server-side; the UI only reports it.
+      // A failed sitting is still a recorded result, so it is surfaced as a
+      // warning rather than a success — never as a silent green "completed".
+      const failed = result?.outcome === 'failed';
+      const reasons = Array.isArray(result?.failureReasons) && result.failureReasons.length > 0 ? ` (${result.failureReasons.join(' ')})` : '';
+      triggerToast(
+        failed
+          ? `Placement recorded as NOT PASSED: ${result.attempt?.percentage ?? 0}%${reasons}`
+          : `Placement passed: ${result.attempt?.percentage ?? 0}% — ${result.attempt?.recommendation_text ?? 'Decision recorded'}`,
+        failed ? 'error' : 'success'
+      );
       await onCompleted();
     }catch(err:any){triggerToast(err?.message||'Could not complete the assessment.','error');}
     finally{setCompleting(false);}

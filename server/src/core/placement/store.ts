@@ -121,9 +121,21 @@ export const stmtUpsertResult: Stmt = db.prepare(`
 `);
 export const stmtCompleteAttempt: Stmt = db.prepare(`
   UPDATE placement_assessment_attempts
-  SET status='completed', completed_at=datetime('now'), total_score=?, max_score=?, percentage=?, recommended_level_id=?, recommendation_text=?, examiner_user_id=?, decision_rule_id=?, updated_at=datetime('now')
+  SET status='completed', completed_at=datetime('now'), total_score=?, max_score=?, percentage=?, recommended_level_id=?, recommendation_text=?, examiner_user_id=?, decision_rule_id=?, outcome=?, updated_at=datetime('now')
   WHERE id=? AND status IN ('in_progress','paused')
 `);
+/** Latest completed sitting for a visitor — the row conversion is judged on. */
+export const stmtLatestCompletedAttempt: Stmt = db.prepare(`
+  SELECT id, status, outcome, percentage, recommended_level_id, override_level_id, completed_at
+  FROM placement_assessment_attempts
+  WHERE visitor_id = ? AND status = 'completed'
+  ORDER BY completed_at DESC, attempt_number DESC
+  LIMIT 1
+`);
+/** Rewrite the persisted outcome after an audited correction/override. */
+export const stmtSetAttemptOutcome: Stmt = db.prepare(
+  `UPDATE placement_assessment_attempts SET outcome=?, updated_at=datetime('now') WHERE id=?`
+);
 export const stmtInsertPlacementFeePayment: Stmt = db.prepare(
   `INSERT INTO payments (id, student_id, amount, date, payment_method, status, category, notes, receipt_number, branch_id, idempotency_key)
    VALUES (?, NULL, ?, ?, 'cash', 'completed', 'placement', ?, ?, ?, ?)`
@@ -294,6 +306,13 @@ export function mapProfile(profile: any, version: any, levels: any[], rules: any
     levels,
     placementRules: rules,
     allowRetake: Boolean(profile.allow_retake),
+    // Retake + billing terms travel with the attempt snapshot so that changing
+    // the academic configuration mid-flight cannot alter the eligibility or the
+    // price of an already-started sitting (migration 070).
+    maxAttempts: profile.max_attempts == null ? null : Number(profile.max_attempts),
+    firstAttemptBillable: profile.first_attempt_billable == null ? true : Boolean(Number(profile.first_attempt_billable)),
+    retakeBillable: Boolean(Number(profile.retake_billable ?? 0)),
+    retakeFeeAmount: profile.retake_fee_amount == null ? null : Number(profile.retake_fee_amount),
     passScore: Number(profile.pass_score ?? PLACEMENT_DEFAULTS.passScore),
     maxScore: Number(profile.max_score ?? PLACEMENT_DEFAULTS.maxScore),
     instructions: profile.instructions ?? null,

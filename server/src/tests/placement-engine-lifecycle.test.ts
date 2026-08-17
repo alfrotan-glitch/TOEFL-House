@@ -359,25 +359,51 @@ describe('Placement Assessment Engine lifecycle', () => {
     expect(done2.body.decision.recommendedLevelId).toBe(LEVEL_B1); // band fallback (60-100)
   });
 
-  it('minimum-score enforcement: a completed component below minScore blocks the decision', async () => {
-    const makeVisitor7 = 'engine_lifecycle_visitor_min';
-    makeVisitor(makeVisitor7, 'V-20007');
+  /**
+   * REGRESSION: this test previously carried this exact title while scoring
+   * 100/100 and asserting success — it never exercised the below-minimum case
+   * at all. That false confidence is why P-1 (minScore never enforced) survived
+   * to a production-readiness review with a green suite. It now proves the real
+   * invariant in both directions and fails against the old implementation.
+   */
+  it('minimum-score enforcement: a completed component below minScore fails the sitting and blocks conversion', async () => {
+    const vid = 'engine_lifecycle_visitor_min';
+    makeVisitor(vid, 'V-20007');
     await putProfile({
-      enabled: true, required: true, requirementMode: 'required', allowRetake: true, maxScore: 100, passScore: 60,
-      components: [{ key: 'listen', type: 'content_test', label: 'Listening', required: true, weight: 100, maxScore: 100, testId: LISTENING_TEST, minScore: 80 }],
+      enabled: true, required: true, requirementMode: 'required', allowRetake: true, maxScore: 100, passScore: 10,
+      components: [{ key: 'manual', type: 'written_test', label: 'Manual', required: true, weight: 100, maxScore: 100, minScore: 80 }],
     });
-    const start = await supertest(app).post(`/api/placement/visitors/${makeVisitor7}/placement/attempts`).set(authHeader(owner)).send({});
+    const start = await supertest(app).post(`/api/placement/visitors/${vid}/placement/attempts`).set(authHeader(owner)).send({});
     const attemptId = start.body.id;
-    await supertest(app).put(`/api/placement/visitors/${makeVisitor7}/placement/attempts/${attemptId}/tests/listen/responses`).set(authHeader(owner)).send({ answers: [{ questionKey: 'q1', response: 'B' }, { questionKey: 'q2', response: 'Seine' }] });
-    // 20/20 = 100 ≥ 80 → completes; craft a below-min result instead by direct score manipulation on a manual component.
-    const done = await supertest(app).post(`/api/placement/visitors/${makeVisitor7}/placement/attempts/${attemptId}/complete`).set(authHeader(owner)).send({});
+
+    // 50 clears the overall passScore (10) but is BELOW the component minScore
+    // (80), so minScore must fail the sitting on its own.
+    await supertest(app).put(`/api/placement/visitors/${vid}/placement/attempts/${attemptId}/components/manual`).set(authHeader(owner)).send({ score: 50 });
+    const done = await supertest(app).post(`/api/placement/visitors/${vid}/placement/attempts/${attemptId}/complete`).set(authHeader(owner)).send({});
     expect(done.status).toBe(200);
-    expect(done.body.attempt.percentage).toBe(100);
+    expect(done.body.outcome).toBe('failed');
+    expect(done.body.unmetRequirements.join(' ')).toMatch(/below minimum score 80/);
+    // The verdict is persisted, not merely returned.
+    expect((db.prepare('SELECT outcome FROM placement_assessment_attempts WHERE id=?').get(attemptId) as any).outcome).toBe('failed');
+
+    // Same policy, a score at the minimum -> passes.
+    const start2 = await supertest(app).post(`/api/placement/visitors/${vid}/placement/attempts`).set(authHeader(owner)).send({});
+    await supertest(app).put(`/api/placement/visitors/${vid}/placement/attempts/${start2.body.id}/components/manual`).set(authHeader(owner)).send({ score: 80 });
+    const done2 = await supertest(app).post(`/api/placement/visitors/${vid}/placement/attempts/${start2.body.id}/complete`).set(authHeader(owner)).send({});
+    expect(done2.body.outcome).toBe('passed');
+    expect(done2.body.unmetRequirements).toEqual([]);
   });
 
   it('manual override: owner/manager only, reason required, audited; registrar denied', async () => {
     const makeVisitor8 = 'engine_lifecycle_visitor_override';
     makeVisitor(makeVisitor8, 'V-20008');
+    // Re-assert the listening policy: the preceding minScore test rewrites the
+    // shared program-version profile, and this case depends on the `listen`
+    // content component existing.
+    await putProfile({
+      enabled: true, required: true, requirementMode: 'required', allowRetake: true, maxScore: 100, passScore: 60,
+      components: [{ key: 'listen', type: 'content_test', label: 'Listening', required: true, weight: 100, maxScore: 100, testId: LISTENING_TEST }],
+    });
     const start = await supertest(app).post(`/api/placement/visitors/${makeVisitor8}/placement/attempts`).set(authHeader(owner)).send({});
     const attemptId = start.body.id;
     await supertest(app).put(`/api/placement/visitors/${makeVisitor8}/placement/attempts/${attemptId}/tests/listen/responses`).set(authHeader(owner)).send({ answers: [{ questionKey: 'q1', response: 'B' }, { questionKey: 'q2', response: 'Seine' }] });
