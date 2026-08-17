@@ -1867,3 +1867,37 @@ CREATE TRIGGER IF NOT EXISTS trg_scholarship_awards_money_scale_insert
 BEFORE INSERT ON scholarship_awards
 WHEN ABS(NEW.amount - ROUND(NEW.amount, 2)) > 0.0000001
 BEGIN SELECT RAISE(ABORT, 'scholarship amount must have at most two decimal places'); END;
+
+-- Money in this system is never negative at rest: refunds and voids are
+-- recorded as separate contra rows in financial_transactions, never as a
+-- negative invoice or a negative fee. See migration 069 — these mirror it so a
+-- fresh install and an upgraded database end up with identical triggers.
+CREATE TRIGGER IF NOT EXISTS trg_invoices_nonnegative_insert
+BEFORE INSERT ON invoices
+WHEN NEW.total_amount < 0 OR NEW.discount_amount < 0 OR NEW.net_amount < 0
+BEGIN SELECT RAISE(ABORT, 'invoice amounts cannot be negative'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_invoices_nonnegative_update
+BEFORE UPDATE OF total_amount, discount_amount, net_amount ON invoices
+WHEN NEW.total_amount < 0 OR NEW.discount_amount < 0 OR NEW.net_amount < 0
+BEGIN SELECT RAISE(ABORT, 'invoice amounts cannot be negative'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_student_semesters_nonnegative_insert
+BEFORE INSERT ON student_semesters
+WHEN NEW.fee_amount < 0 OR (NEW.net_fee_amount IS NOT NULL AND NEW.net_fee_amount < 0)
+BEGIN SELECT RAISE(ABORT, 'semester fee cannot be negative'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_student_semesters_nonnegative_update
+BEFORE UPDATE OF fee_amount, net_fee_amount ON student_semesters
+WHEN NEW.fee_amount < 0 OR (NEW.net_fee_amount IS NOT NULL AND NEW.net_fee_amount < 0)
+BEGIN SELECT RAISE(ABORT, 'semester fee cannot be negative'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_exams_fee_nonnegative_insert
+BEFORE INSERT ON exams
+WHEN NEW.fee < 0
+BEGIN SELECT RAISE(ABORT, 'exam fee cannot be negative'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_exams_fee_nonnegative_update
+BEFORE UPDATE OF fee ON exams
+WHEN NEW.fee < 0
+BEGIN SELECT RAISE(ABORT, 'exam fee cannot be negative'); END;

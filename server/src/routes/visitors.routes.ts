@@ -2,6 +2,7 @@
  * TOEFL House ERP — Visitors Routes (BC #2: CRM)
  * Handles lead pipeline, follow-ups, placement tests, and conversion to student.
  */
+import { assertMoney } from '../utils/money.js';
 import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { assertTextLengths, TEXT_LIMITS } from '../utils/textInput.js';
@@ -355,7 +356,15 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
 
   const { classId, amountPaid, discountPercent, notes, semesterFee, branchId, programVersionId, levelId, paymentMethod } = req.body ?? {};
   if (!classId) throw new HttpError(400, 'Class is required.');
-  if (amountPaid == null || Number(amountPaid) < 0) throw new HttpError(400, 'Received fee amount is required.');
+  // `Number(x) < 0` is a coercion, not a validation: NaN < 0 is false, so
+  // "abc" sailed through and reached SQLite as a NOT NULL violation. Both
+  // figures are money and must clear the same bar as every other monetary
+  // input. Reproduced before this guard existed: semesterFee "abc" surfaced a
+  // raw constraint error, semesterFee -6000 wrote an invoice with
+  // total_amount -6000 and discount_amount -6000, and a 0 fee accepted a
+  // 50,000 AFN payment against it.
+  if (amountPaid == null) throw new HttpError(400, 'Received fee amount is required.');
+  const validatedAmountPaid = assertMoney(amountPaid, 'received fee amount');
 
   const resolvedPaymentMethod = ['cash', 'card', 'bank_transfer'].includes(paymentMethod) ? paymentMethod : 'cash';
   const requestedStudentBranchId = branchId || visitor.branch_id || user.branchId;
@@ -398,7 +407,7 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
 
   const studentBranchId = requestedStudentBranchId;
   if (classItem.branch_id && classItem.branch_id !== studentBranchId) throw new HttpError(400, 'Selected class does not belong to the target branch.');
-  const grossTuition = Number(semesterFee != null ? semesterFee : classItem.fee != null ? classItem.fee : 0);
+  const grossTuition = assertMoney(semesterFee != null ? semesterFee : classItem.fee != null ? classItem.fee : 0, 'semester fee');
   const requestedDiscount = Math.max(0, Math.min(100, Number(discountPercent) || 0));
   const discountRule = evaluateRules({ category: 'discount', branchId: studentBranchId, data: { discountPercent: requestedDiscount, leadSource: visitor.source }, dryRun: false });
   // The rule engine IS the discount authority — `rule_default_discount_cap`
@@ -409,8 +418,11 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
   // changed from the place it is configured is not a policy.
   const effectiveDiscount = Math.max(0, Math.min(100, Number(discountRule.finalOutputs.discountPercent ?? requestedDiscount)));
   const netTuition = Math.max(0, Math.round(grossTuition - (grossTuition * effectiveDiscount) / 100));
-  const paidNow = Number(amountPaid);
-  if (paidNow > netTuition && netTuition > 0) throw new HttpError(400, `Amount received cannot exceed payable fee: ${netTuition} AFN.`);
+  const paidNow = validatedAmountPaid;
+  // The `&& netTuition > 0` escape hatch let any amount be collected against a
+  // zero-fee enrolment (50,000 AFN against a 0 fee was accepted and stored).
+  // Money may never exceed what is actually payable, including when nothing is.
+  if (paidNow > netTuition) throw new HttpError(400, `Amount received cannot exceed payable fee: ${netTuition} AFN.`);
 
   const studentCode = nextStudentCode();
   const qrCode = `${studentCode}-${String(visitor.full_name).toUpperCase().replace(/\s+/g, '-')}`;
