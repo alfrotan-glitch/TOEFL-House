@@ -298,3 +298,165 @@ D-12 remain open and are unaffected by this change.
 
 **GL-1 (browser visual inspection at 1920×1080) and GL-2 (a printed fee bill)
 remain OPEN.** They require a human and have not been performed.
+
+---
+
+## §10 — REMEDIATION RECORD, PART 2 (pass 24): D-6 … D-12
+
+Closes the remaining findings. As in §9 the fixes are at the server/domain
+layer; no frontend workarounds.
+
+### D-6 — "This Month" was a Gregorian window under a Jalali label — **FIXED**
+
+**Source of truth traced.** Two independent definitions of a month existed:
+`finance.routes.ts` used `${today.slice(0,7)}-01`, while
+`core/payroll/class-payroll.ts` already resolved periods with
+`jalaliMonthToGregorianRange()` and **pays staff for Shamsi months**. The
+Dashboard therefore disagreed with the payroll sitting beside it.
+
+**Reproduced.** On 2026-08-17 (26 Asad 1405):
+
+| | window | branch-1 income |
+|---|---|---|
+| Gregorian (before) | 2026-08-01 … 08-17 | 389,974 |
+| Shamsi (after) | 2026-07-23 … 08-17 | **550,921** |
+
+**160,947 AFN** — 29% of the month — fell outside the window while the tile was
+labelled اسد ۱۴۰۵. The gap is **9–10 days every month, all year**, not an edge
+case.
+
+**Fixed** by introducing `server/src/core/calendar/periods.ts` as the single
+calendar authority. Dashboard and Finance both consume it; there is no second
+month definition left. Storage stays Gregorian — only the boundary resolution
+is Shamsi. `collectedThisMonth` moved from a `LIKE 'YYYY-MM%'` prefix (which
+*cannot* express a Shamsi period) to a range compare over the same window. The
+API now returns `periodKey`/`from`/`to`, and the UI labels the period it
+actually summed (اسد ۱۴۰۵) instead of the ambiguous "This month".
+
+### D-7 — no Dashboard metric coverage — **FIXED**
+
+63 tests added this pass (28 in pass 23, 35 now), all at the API/domain layer:
+`reporting-periods` (23), `finance-dashboard-period` (21), `dashboard-timezone`
+(10). Per the agreed scope no frontend test framework was introduced — the
+frontend is now a thin rendering layer with no authoritative logic to test.
+
+### D-8 — month-boundary mutant survived all tests — **FIXED**
+
+That mutant (`P1`, month reverts to the Gregorian slice) and 15 others are now
+killed. See the mutation table below.
+
+### D-10 — 11 statements re-prepared per request — **FIXED**
+
+All 11 hoisted to module level, matching the convention the rest of
+`finance.routes.ts` already followed. Each has an all-branch and a
+branch-scoped variant so isolation stays in SQL, not in string interpolation.
+Verified no scope leakage between interleaved callers, including concurrently.
+`/api/finance/dashboard`: **84 ms → 41 ms**.
+
+### D-11 — planner chose a 2-value index — **FIXED**
+
+Migration **071** (forward-only, index-only, no historical migration touched)
+adds `financial_transactions(branch_id, date, type)` and
+`payments(branch_id, date)`.
+
+```
+before: SEARCH USING INDEX idx_fin_tx_type (type=?)   + USE TEMP B-TREE FOR GROUP BY
+after:  SEARCH USING INDEX idx_fin_tx_branch_date_type (branch_id=? AND date>? AND date<?)
+```
+
+7-day cash flow **6.31 ms → 0.50 ms (12.6×)**; month-to-date **9.12 → 0.84 ms**.
+Temp B-tree eliminated. Applied to a live 60,882-row database with an automatic
+pre-migration backup; schema-drift preflight passes at 70 migrations.
+
+### D-12 — PII over-fetch — **ALREADY RESOLVED; audit claim corrected**
+
+Verified live: the Dashboard loads `/students?view=lite`, which returns
+`id, studentCode, fullName, status, registrationDate, gender, branchId` and
+**no PII** (the full projection's `phone, email, fatherName, tazkiraNo, dob`
+are absent). The original finding described a state that the lite projection
+had already superseded. Since pass 23 the Dashboard no longer needs student
+records for counts at all, so the now-dead `teachers` and `transactions` props
+were removed from `DashboardView`.
+
+### Re-audit of the whole Dashboard for the same defect classes
+
+- **Client-derived authoritative metrics: none.** The four surviving
+  `filter`/`reduce` calls are record pickers (quick-registration dropdown,
+  budget chart rows, gender-eligible classes) and a bounded work queue whose
+  badge counts the items it renders.
+- **Gregorian month slices used as boundaries: none** (one comment only).
+- **UTC date derivation on Dashboard paths: none.**
+- **NEW FINDING, FIXED — D-13:** `OperationsWorkQueue` derived "today" via
+  `toISOString()` to decide overdue follow-ups, a surviving instance of D-4. It
+  now consumes the server's `today` with a local-time fallback.
+- **NOT FIXED (out of scope, recorded):** ~20 `toISOString()` day derivations
+  in non-Dashboard views (books, exams, sessions, funding, teachers payslips,
+  visitors conversion). Same class as D-4 and worth a follow-up pass; untouched
+  here because the brief was explicit not to modify unrelated functionality.
+
+### Mutation testing — 16/16 killed, 1 proven equivalent
+
+| Mutant | Result |
+|---|---|
+| P1 month reverts to Gregorian slice | KILLED |
+| P2 month starts on the 2nd | KILLED |
+| P3 month shifted to the previous Shamsi month | KILLED |
+| P4a/P4b period end no longer clamped to today | KILLED |
+| P5 year starts 1 January | KILLED |
+| P6 leap-year Hut length wrong | KILLED after fix |
+| P7 malformed input silently accepted | KILLED |
+| A1 `addDays` off by one | KILLED |
+| C1 cash-flow axis drifts from window | KILLED |
+| C2 cash-flow window start wrong | KILLED |
+| F1 finance reverts to Gregorian month | KILLED |
+| F2 `collectedThisMonth` window widened | KILLED after fix |
+| F2b `collectedThisMonth` ignores branch | KILLED after fix |
+| F3 month total ignores branch scope | KILLED |
+| F4 trend axis reverts to Date+local formatter | KILLED after fix |
+| F5 trend window start off by one | KILLED |
+| A2 `addDays` via local Date accessors | **equivalent mutant** |
+
+Five mutants initially survived. Each exposed a genuine gap, closed by adding
+coverage — never by weakening an assertion:
+
+- **P6** — no leap Shamsi year was exercised (1405 is common). Added 1403/1408.
+- **F2** — the fixture had **no payments at all**, so `collectedThisMonth` was 0
+  either way. Added payments inside, before, and in the divergence gap.
+- **F2b** — a **cross-branch financial leak** was invisible because no other
+  branch had payments. Added a 333,000 AFN branch-B collection.
+- **F4** — the runner executes in **UTC**, where the correct and broken date
+  bases coincide. Added assertions that run under `America/New_York`,
+  `Asia/Kabul` and `Pacific/Apia`.
+- **A2** — investigated over 7,056 combinations across 7 timezones: byte
+  identical everywhere, so it is **provably equivalent**, not a coverage gap.
+
+**A defect I introduced and caught.** While hoisting statements I changed the
+trend axis to `new Date(iso)` + `toLocaleDateString('en-CA')`. Because
+`new Date('YYYY-MM-DD')` parses as **UTC midnight**, that returns the previous
+day in any zone behind UTC — 4,032 divergent day-keys across the zones tested.
+My own new timezone suite failed on it. Fixed properly with `addDays()`, pure
+string calendar arithmetic that touches no timezone at all.
+
+### Regression checks on the pass-23 Summary API
+
+12/12 live reconciliations against DB truth: `activeStudents` 2220,
+`conversionRate` 20%, `pendingLeads` 200, cash-flow today 104,950 — and the two
+endpoints agree with each other on today's income. RBAC unchanged (401
+unauth/bad token, forged `?branchId=` re-scoped, `branchId=all` organization-only,
+SQL injection parameterized to an empty scope). Financial audit: 35 money
+columns, 60,959 column-rows, **clean**.
+
+### Gates
+
+1105/1105 tests (was 1050) · eslint 0 errors (102 server / 5 frontend warnings,
+unchanged) · all typechecks clean · frontend + backend builds OK · schema-drift
+preflight SUCCESS at 70 migrations · `release:validate` 16/16 · financial
+invariants reconcile to 0.
+
+### Status after this pass
+
+D-1 … D-13 **CLOSED**. No confirmed Dashboard defect remains open.
+
+**GL-1 (real-browser visual inspection at 1920×1080) and GL-2 (one printed fee
+bill) remain OPEN.** No browser automation exists in this environment; these
+require a human and have not been performed.

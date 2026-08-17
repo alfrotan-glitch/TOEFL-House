@@ -1,8 +1,8 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { formatJalaliAxis, formatJalali } from '../../utils/jalali';
+import { formatJalaliAxis, formatJalali, toPersianDigits } from '../../utils/jalali';
 import {TrendingUp, TrendingDown, Users, School, Wallet, PiggyBank, Eye, EyeOff, UserCheck, Clock, Zap, AlertTriangle, BookOpen, Activity, GraduationCap, Loader2, CheckCircle2, CalendarDays, BarChart3, Sparkles} from 'lucide-react';
 import {AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend, RadialBarChart, RadialBar} from 'recharts';
-import { AuditLog, BudgetLine, Class, DashboardSummary, FinanceDashboard, FinancialTransaction, Invoice, Student, Teacher, UserRole, Visitor } from '../../types';
+import { AuditLog, BudgetLine, Class, DashboardSummary, FinanceDashboard, Invoice, Student, UserRole, Visitor } from '../../types';
 import BusinessOperatingSystemView from './BusinessOperatingSystemView';
 import OperationsWorkQueue from './OperationsWorkQueue';
 import {useAuth} from '../../contexts/useAuth';
@@ -21,11 +21,9 @@ interface DashboardViewProps {
    */
   dashboardSummary: DashboardSummary | null;
   students: Student[];
-  teachers: Teacher[];
   invoices: Invoice[];
   classes: Class[];
   visitors: Visitor[];
-  transactions: FinancialTransaction[];
   budgetLines: BudgetLine[];
   savingBalance: number;
   mainAccountBalance: number;
@@ -70,7 +68,7 @@ const ChartTooltip = ({ active, payload, label }: any) => {
 };
 
 export default function DashboardView({
-  students, teachers, invoices, classes, visitors, transactions, budgetLines, mainAccountBalance,
+  students, invoices, classes, visitors, budgetLines, mainAccountBalance,
   financeDashboard, dashboardSummary,
   auditLogs, activeRole, registerVisitorToStudent, runSavingEngine, savingPercent,
   getExecutiveDashboard, getMarketingFunnel, getStudentAnalytics, getDecisionWarnings,
@@ -113,6 +111,20 @@ export default function DashboardView({
   const timeStats = useMemo(() => {
     const p = dashboardSummary?.periods?.[timeframe];
     return { visitors: p?.newVisitors ?? 0, students: p?.newStudents ?? 0 };
+  }, [dashboardSummary, timeframe]);
+
+  /**
+   * The period label states the window the SERVER actually summed. "This month"
+   * is the Shamsi month (اسد ۱۴۰۵), which does not share boundaries with the
+   * Gregorian one — naming it removes the ambiguity that made audit finding
+   * D-6 invisible to the reader.
+   */
+  const timeframeLabel = useMemo(() => {
+    const b = dashboardSummary?.boundaries?.[timeframe];
+    if (!b) return timeframe === 'today' ? 'Today' : `This ${timeframe}`;
+    if (timeframe === 'today') return formatJalali(b.from, 'long');
+    if (timeframe === 'month') return formatJalali(b.from, 'month-year');
+    return toPersianDigits(String(b.periodKey ?? ''));
   }, [dashboardSummary, timeframe]);
 
   const metrics = useMemo(() => {
@@ -282,7 +294,7 @@ export default function DashboardView({
           </div>
         </section>
         
-        <OperationsWorkQueue visitors={visitors} invoices={invoices} classes={classes} students={students} onNavigate={onNavigate} />
+        <OperationsWorkQueue visitors={visitors} invoices={invoices} classes={classes} students={students} serverToday={dashboardSummary?.today} onNavigate={onNavigate} />
         
         {/* Premium Header */}
         <header className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
@@ -371,7 +383,7 @@ export default function DashboardView({
                     </div>
                   </div>
                   <p className="text-5xl font-black text-slate-900 tracking-tight tabular-nums">{timeStats.visitors}</p>
-                  <p className="text-xs text-slate-500 mt-2 font-medium capitalize">{timeframe === 'today' ? 'Today' : `This ${timeframe}`}</p>
+                  <p className="text-xs text-slate-500 mt-2 font-medium">{timeframeLabel}</p>
                 </div>
                 <div className="bg-gradient-to-br from-emerald-500/10 to-transparent p-6 rounded-2xl border border-emerald-500/20">
                   <div className="flex justify-between items-center mb-4">
@@ -381,7 +393,7 @@ export default function DashboardView({
                     </div>
                   </div>
                   <p className="text-5xl font-black text-slate-900 tracking-tight tabular-nums">{timeStats.students}</p>
-                  <p className="text-xs text-slate-500 mt-2 font-medium capitalize">{timeframe === 'today' ? 'Today' : `This ${timeframe}`}</p>
+                  <p className="text-xs text-slate-500 mt-2 font-medium">{timeframeLabel}</p>
                 </div>
               </div>
             </div>

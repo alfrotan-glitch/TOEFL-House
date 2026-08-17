@@ -276,17 +276,36 @@ describe('D-4 — one date authority, server local time', () => {
     const b = res.body.boundaries;
     expect(b.today.from).toBe(TODAY);
     expect(b.today.to).toBe(TODAY);
-    expect(b.month.from).toBe(`${TODAY.slice(0, 7)}-01`);
-    expect(b.year.from).toBe(`${TODAY.slice(0, 4)}-01-01`);
+    // Month/year are SHAMSI periods (D-6), so they must equal the calendar
+    // authority rather than a `YYYY-MM-01` string slice.
+    const expectedMonth = periodBoundaries('month', TODAY);
+    const expectedYear = periodBoundaries('year', TODAY);
+    expect(b.month.from).toBe(expectedMonth.from);
+    expect(b.month.to).toBe(expectedMonth.to);
+    expect(b.year.from).toBe(expectedYear.from);
+    // The window must never run past today.
+    expect(b.month.to <= TODAY).toBe(true);
+    expect(b.year.to <= TODAY).toBe(true);
   });
 
   it('period boundaries are pure and correct for a known date', () => {
-    expect(periodBoundaries('today', '2026-08-17')).toEqual({ period: 'today', from: '2026-08-17', to: '2026-08-17' });
-    expect(periodBoundaries('month', '2026-08-17')).toEqual({ period: 'month', from: '2026-08-01', to: '2026-08-17' });
-    expect(periodBoundaries('year', '2026-08-17')).toEqual({ period: 'year', from: '2026-01-01', to: '2026-08-17' });
-    // Month/year boundaries must hold on the first day of a period.
-    expect(periodBoundaries('month', '2026-01-01').from).toBe('2026-01-01');
-    expect(periodBoundaries('year', '2026-01-01').from).toBe('2026-01-01');
+    // 2026-08-17 is 26 Asad 1405. Asad 1405 spans 2026-07-23 .. 2026-08-22,
+    // and the Jalali year 1405 opens on Nawruz, 2026-03-21.
+    expect(periodBoundaries('today', '2026-08-17')).toMatchObject({ period: 'today', from: '2026-08-17', to: '2026-08-17' });
+    expect(periodBoundaries('month', '2026-08-17')).toMatchObject({
+      period: 'month', from: '2026-07-23', to: '2026-08-17', periodKey: '1405-05', periodEnd: '2026-08-22',
+    });
+    expect(periodBoundaries('year', '2026-08-17')).toMatchObject({
+      period: 'year', from: '2026-03-21', to: '2026-08-17', periodKey: '1405',
+    });
+  });
+
+  it('a Gregorian month start is NOT used as the month boundary (D-6)', () => {
+    const b = periodBoundaries('month', '2026-08-17');
+    expect(b.from).not.toBe('2026-08-01');
+    // The nine days the Gregorian window wrongly excluded are inside the period.
+    expect(b.from < '2026-08-01').toBe(true);
+    expect('2026-07-25' >= b.from && '2026-07-25' <= b.to).toBe(true);
   });
 
   it('per-period intake counts respect those boundaries', async () => {

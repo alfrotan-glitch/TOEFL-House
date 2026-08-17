@@ -16,14 +16,24 @@ interface Props {
   invoices: Invoice[];
   classes: Class[];
   students: Student[];
+  /** Server's local date — the single date authority (see DashboardSummary). */
+  serverToday?: string;
   onNavigate?: (tab: string) => void;
 }
 
-function isoToday() { return new Date().toISOString().slice(0, 10); }
+/**
+ * The work queue decides what is "due today" or "overdue". Deriving that day
+ * with toISOString() is UTC, which disagrees with the server's local date for
+ * the first 4.5 hours of every day in Asia/Kabul (audit D-4) — long enough for
+ * the morning shift to see a follow-up as not-yet-due. `today` is supplied by
+ * the server via the Dashboard summary; this local fallback keeps the queue
+ * renderable before that arrives and uses local time, never UTC.
+ */
+function isoToday() { return new Date().toLocaleDateString('en-CA'); }
 
-export default function OperationsWorkQueue({ visitors, invoices, classes, students, onNavigate }: Props) {
+export default function OperationsWorkQueue({ visitors, invoices, classes, students, serverToday, onNavigate }: Props) {
   const items = useMemo<QueueItem[]>(() => {
-    const today = isoToday();
+    const today = serverToday ?? isoToday();
     const next: QueueItem[] = [];
     for (const v of visitors) {
       if (v.status === 'registered' || v.stage === 'lost') continue;
@@ -44,7 +54,7 @@ export default function OperationsWorkQueue({ visitors, invoices, classes, stude
     for (const s of suspended) next.push({ id: `std-${s.id}`, title: `Review ${s.fullName}`, detail: 'Student is suspended', priority: 'high', tab: 'students', icon: AlertCircle });
     const rank = { critical: 0, high: 1, normal: 2 } as const;
     return next.sort((a, b) => rank[a.priority] - rank[b.priority]).slice(0, 10);
-  }, [visitors, invoices, classes, students]);
+  }, [visitors, invoices, classes, students, serverToday]);
 
   return (
     <section className="rounded-3xl bg-white/80 backdrop-blur-xl border border-slate-200/70 shadow-sm p-5 lg:p-6">

@@ -30,21 +30,22 @@
  */
 import type BetterSqlite3 from 'better-sqlite3';
 import { today } from '../../utils/ids.js';
+import {
+  periodBoundaries,
+  addDays,
+  type PeriodBoundaries,
+  type ReportingPeriod,
+} from '../calendar/periods.js';
 
-export type DashboardPeriod = 'today' | 'month' | 'year';
+export { periodBoundaries };
+export type { PeriodBoundaries };
+
+export type DashboardPeriod = ReportingPeriod;
 
 export interface DashboardScope {
   /** Null when the caller legitimately sees the whole organization. */
   branchId: string | null;
   isAll: boolean;
-}
-
-export interface PeriodBoundaries {
-  period: DashboardPeriod;
-  /** Inclusive ISO date (YYYY-MM-DD), server local time. */
-  from: string;
-  /** Inclusive ISO date (YYYY-MM-DD), server local time. */
-  to: string;
 }
 
 export interface DashboardSummary {
@@ -69,23 +70,16 @@ export interface DashboardSummary {
   cashFlow: Array<{ date: string; income: number; expense: number }>;
 }
 
-/**
- * Period boundaries in SERVER LOCAL TIME — the single date authority (D-4).
+/*
+ * Period boundaries come from `core/calendar/periods.ts`, the single calendar
+ * authority, and are re-exported above so existing importers keep working.
  *
- * `today()` uses `toLocaleDateString('en-CA')`, the convention already used
- * across this codebase, which yields an ISO date in the server's local zone.
- * Deriving boundaries from `toISOString()` (UTC) instead is exactly what made
- * the client and server disagree for 4.5 hours every day in Asia/Kabul.
- *
- * Month and year windows are Gregorian, matching `financial_transactions.date`
- * and every other date column in the schema. Jalali is a display concern only;
- * see D-6 in the audit, which is out of scope for this change.
+ * Two properties matter here and are enforced there:
+ *   - Dates are SERVER LOCAL (`toLocaleDateString('en-CA')`), never UTC (D-4).
+ *   - "Month"/"year" are HIJRI SHAMSI periods resolved to their Gregorian span,
+ *     so a figure labelled اسد ۱۴۰۵ actually covers اسد ۱۴۰۵ (D-6), and the
+ *     Dashboard agrees with payroll, which already pays on Shamsi months.
  */
-export function periodBoundaries(period: DashboardPeriod, todayStr: string = today()): PeriodBoundaries {
-  if (period === 'today') return { period, from: todayStr, to: todayStr };
-  if (period === 'month') return { period, from: `${todayStr.slice(0, 7)}-01`, to: todayStr };
-  return { period, from: `${todayStr.slice(0, 4)}-01-01`, to: todayStr };
-}
 
 /** Build `WHERE`-clause fragments that honour branch scope with bound params. */
 function scopeClause(scope: DashboardScope, column = 'branch_id'): { sql: string; params: unknown[] } {
@@ -145,11 +139,10 @@ export function buildDashboardSummary(
   });
 
   // ── Cash flow — SQL GROUP BY, reconciles with /finance/dashboard (D-2) ────
-  // The window start is derived with local-date arithmetic so it lines up with
-  // `today()`; using UTC here would reintroduce the D-4 boundary skew.
-  const start = new Date(`${todayStr}T00:00:00`);
-  start.setDate(start.getDate() - (days - 1));
-  const fromDate = start.toLocaleDateString('en-CA');
+  // Window and axis are both built with `addDays`, pure calendar arithmetic on
+  // the date string. Constructing Dates and reformatting them is timezone- and
+  // DST-sensitive (see the note on `addDays`), which is how D-4 arose.
+  const fromDate = addDays(todayStr, -(days - 1));
 
   const rows = db
     .prepare(
@@ -165,9 +158,7 @@ export function buildDashboardSummary(
   const byDate = new Map(rows.map((r) => [r.date, r]));
   const cashFlow: DashboardSummary['cashFlow'] = [];
   for (let i = 0; i < days; i += 1) {
-    const d = new Date(`${fromDate}T00:00:00`);
-    d.setDate(d.getDate() + i);
-    const iso = d.toLocaleDateString('en-CA');
+    const iso = addDays(fromDate, i);
     const hit = byDate.get(iso);
     // Days with no activity are returned as explicit zeros so the chart has a
     // continuous axis and an empty period renders as a flat line, not a gap.

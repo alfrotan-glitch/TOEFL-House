@@ -1191,9 +1191,12 @@ CREATE INDEX IF NOT EXISTS idx_fin_tx_branch         ON financial_transactions(b
 CREATE INDEX IF NOT EXISTS idx_fin_tx_date           ON financial_transactions(date); 
 CREATE INDEX IF NOT EXISTS idx_fin_tx_type           ON financial_transactions(type); 
 CREATE INDEX IF NOT EXISTS idx_fin_tx_payment        ON financial_transactions(payment_id); 
+-- Composite for Dashboard/Finance range aggregates (migration 071, audit D-11).
+CREATE INDEX IF NOT EXISTS idx_fin_tx_branch_date_type ON financial_transactions(branch_id, date, type); 
 CREATE INDEX IF NOT EXISTS idx_payments_student      ON payments(student_id); 
 CREATE INDEX IF NOT EXISTS idx_payments_branch       ON payments(branch_id); 
 CREATE INDEX IF NOT EXISTS idx_payments_date         ON payments(date); 
+CREATE INDEX IF NOT EXISTS idx_payments_branch_date   ON payments(branch_id, date); 
 CREATE INDEX IF NOT EXISTS idx_payments_invoice      ON payments(invoice_id); 
 CREATE INDEX IF NOT EXISTS idx_payments_book         ON payments(book_id); -- ADDED INDEX 
 CREATE INDEX IF NOT EXISTS idx_invoices_student      ON invoices(student_id); 

@@ -5,6 +5,7 @@ import { authenticate, authorize, requirePermission, resolveBranchScope, canAcce
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
+import { periodBoundaries, addDays } from '../core/calendar/periods.js';
 import { addNotification } from '../utils/notifications.js';
 import { getNumberSetting, setSetting } from '../utils/settings.js';
 import { decrementMainBalanceIfSufficient, incrementMainBalance, getFinanceAccount } from '../utils/financeAccounts.js';
@@ -28,6 +29,42 @@ const stmtInsertFinTx = db.prepare(
 );
 
 const stmtGetAllBudgetLines = db.prepare('SELECT * FROM budget_lines ORDER BY id');
+
+// ── Finance command-center statements (GET /dashboard) ──────────────────────
+// Prepared once at module load, like every other statement in this file. These
+// eleven were being re-prepared on each request (audit D-10): the hot path of
+// the finance landing page was the only place that skipped the convention.
+// Each has an all-branch and a branch-scoped variant so branch isolation stays
+// in the SQL rather than in string interpolation.
+const stmtDashLedgerTotalsAll = db.prepare(
+  `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type = ? AND date >= ? AND date <= ?`
+);
+const stmtDashLedgerTotalsBranch = db.prepare(
+  `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type = ? AND branch_id = ? AND date >= ? AND date <= ?`
+);
+const stmtDashBudgetAll = db.prepare('SELECT id, name, allocated_amount, current_amount FROM budget_lines ORDER BY name');
+const stmtDashBudgetBranch = db.prepare('SELECT id, name, allocated_amount, current_amount FROM budget_lines WHERE branch_id = ? ORDER BY name');
+const INVOICE_RECEIVABLE_SQL = `SELECT i.id, i.net_amount, i.status, i.due_date, i.branch_id,
+            (SELECT COALESCE(SUM(p.amount),0) FROM payments p WHERE p.invoice_id = i.id AND p.status = 'completed') AS paid
+          FROM invoices i`;
+const stmtDashInvoicesAll = db.prepare(INVOICE_RECEIVABLE_SQL);
+const stmtDashInvoicesBranch = db.prepare(`${INVOICE_RECEIVABLE_SQL} WHERE i.branch_id = ?`);
+const stmtDashCollectedAll = db.prepare(
+  `SELECT COALESCE(SUM(amount),0) AS v FROM payments WHERE status = 'completed' AND date >= ? AND date <= ?`
+);
+const stmtDashCollectedBranch = db.prepare(
+  `SELECT COALESCE(SUM(amount),0) AS v FROM payments WHERE status = 'completed' AND date >= ? AND date <= ? AND branch_id = ?`
+);
+const stmtDashPendingAll = db.prepare(`SELECT id, title, amount, requester, date FROM expense_requests WHERE status = 'pending' ORDER BY date DESC`);
+const stmtDashPendingBranch = db.prepare(`SELECT id, title, amount, requester, date FROM expense_requests WHERE status = 'pending' AND branch_id = ? ORDER BY date DESC`);
+const stmtDashRecentAll = db.prepare(`SELECT id, date, type, category, amount, description, operator_name, branch_id FROM financial_transactions ORDER BY date DESC, rowid DESC LIMIT 10`);
+const stmtDashRecentBranch = db.prepare(`SELECT id, date, type, category, amount, description, operator_name, branch_id FROM financial_transactions WHERE branch_id = ? ORDER BY date DESC, rowid DESC LIMIT 10`);
+const TREND_SQL = `SELECT date,
+            COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END),0) AS income,
+            COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END),0) AS expense
+          FROM financial_transactions`;
+const stmtDashTrendAll = db.prepare(`${TREND_SQL} WHERE date >= ? GROUP BY date ORDER BY date`);
+const stmtDashTrendBranch = db.prepare(`${TREND_SQL} WHERE branch_id = ? AND date >= ? GROUP BY date ORDER BY date`);
 const stmtGetBudgetLinesByBranch = db.prepare('SELECT * FROM budget_lines WHERE branch_id = ? ORDER BY id');
 
 const stmtGetAllExpenseRequests = db.prepare('SELECT * FROM expense_requests ORDER BY date DESC');
@@ -173,16 +210,23 @@ financeRouter.get(
   ah(async (req, res) => {
     const { branchId, isAll } = resolveBranchScope(req);
     const todayStr = today();
-    const monthStart = `${todayStr.slice(0, 7)}-01`;
+    // "This month" is the HIJRI SHAMSI month, resolved to its Gregorian span by
+    // the single calendar authority. Using `${todayStr.slice(0, 7)}-01` here
+    // summed a Gregorian window under a Jalali label and misattributed 9-10
+    // days of money every month (audit D-6). Payroll already reports on Shamsi
+    // months, so this also makes the two agree.
+    const monthPeriod = periodBoundaries('month', todayStr);
+    const monthStart = monthPeriod.from;
 
     // Balances (organization treasury for owner scope, branch account otherwise).
     const account = isAll ? getFinanceAccount('organization', 'global') : getFinanceAccount('branch', branchId!);
 
     // Ledger movement helpers — bound parameters only, never string concatenation.
     const ledgerTotals = (type: 'income' | 'expense', from: string, to: string) => {
-      const where = isAll ? ' AND date >= ? AND date <= ?' : ' AND branch_id = ? AND date >= ? AND date <= ?';
-      const params = isAll ? [from, to] : [branchId, from, to];
-      return Number((db.prepare(`SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type = ?${where}`).get(type, ...params) as { v: number }).v || 0);
+      const row = (isAll
+        ? stmtDashLedgerTotalsAll.get(type, from, to)
+        : stmtDashLedgerTotalsBranch.get(type, branchId, from, to)) as { v: number };
+      return Number(row.v || 0);
     };
 
     const todayIncome = ledgerTotals('income', todayStr, todayStr);
@@ -192,8 +236,8 @@ financeRouter.get(
 
     // Budget utilization.
     const budgetRows = (isAll
-      ? db.prepare('SELECT id, name, allocated_amount, current_amount FROM budget_lines ORDER BY name').all()
-      : db.prepare('SELECT id, name, allocated_amount, current_amount FROM budget_lines WHERE branch_id = ? ORDER BY name').all(branchId)) as Array<{ id: string; name: string; allocated_amount: number; current_amount: number }>;
+      ? stmtDashBudgetAll.all()
+      : stmtDashBudgetBranch.all(branchId)) as Array<{ id: string; name: string; allocated_amount: number; current_amount: number }>;
 
     let allocatedTotal = 0;
     let remainingTotal = 0;
@@ -212,12 +256,8 @@ financeRouter.get(
 
     // Receivables — open = issued/partial with an unpaid balance.
     const invoiceRows = (isAll
-      ? db.prepare(`SELECT i.id, i.net_amount, i.status, i.due_date, i.branch_id,
-            (SELECT COALESCE(SUM(p.amount),0) FROM payments p WHERE p.invoice_id = i.id AND p.status = 'completed') AS paid
-          FROM invoices i`).all()
-      : db.prepare(`SELECT i.id, i.net_amount, i.status, i.due_date, i.branch_id,
-            (SELECT COALESCE(SUM(p.amount),0) FROM payments p WHERE p.invoice_id = i.id AND p.status = 'completed') AS paid
-          FROM invoices i WHERE i.branch_id = ?`).all(branchId)) as Array<{ id: string; net_amount: number; status: string; due_date: string | null; branch_id: string; paid: number }>;
+      ? stmtDashInvoicesAll.all()
+      : stmtDashInvoicesBranch.all(branchId)) as Array<{ id: string; net_amount: number; status: string; due_date: string | null; branch_id: string; paid: number }>;
 
     let openInvoices = 0;
     let openValue = 0;
@@ -239,37 +279,40 @@ financeRouter.get(
       }
     }
 
-    const collectedThisMonth = Number((db.prepare(`SELECT COALESCE(SUM(amount),0) AS v FROM payments WHERE status = 'completed' AND date LIKE ?${isAll ? '' : ' AND branch_id = ?'}`).get(`${monthStart.slice(0, 7)}%`, ...(isAll ? [] : [branchId])) as { v: number }).v || 0);
+    // A `LIKE 'YYYY-MM%'` prefix match can only ever express a GREGORIAN month,
+    // so it cannot represent a Shamsi period at all. Range-compare instead, over
+    // the same window as month income/expense, so every "this month" figure on
+    // the panel covers exactly the same days (audit D-6).
+    const collectedThisMonth = Number(((isAll
+      ? stmtDashCollectedAll.get(monthStart, todayStr)
+      : stmtDashCollectedBranch.get(monthStart, todayStr, branchId)) as { v: number }).v || 0);
 
     // Pending approvals.
     const pending = (isAll
-      ? db.prepare(`SELECT id, title, amount, requester, date FROM expense_requests WHERE status = 'pending' ORDER BY date DESC`).all()
-      : db.prepare(`SELECT id, title, amount, requester, date FROM expense_requests WHERE status = 'pending' AND branch_id = ? ORDER BY date DESC`).all(branchId)) as Array<{ id: string; title: string; amount: number; requester: string; date: string }>;
+      ? stmtDashPendingAll.all()
+      : stmtDashPendingBranch.all(branchId)) as Array<{ id: string; title: string; amount: number; requester: string; date: string }>;
     const pendingValue = pending.reduce((s, p) => s + Number(p.amount || 0), 0);
 
     // Recent ledger activity.
     const recent = (isAll
-      ? db.prepare(`SELECT id, date, type, category, amount, description, operator_name, branch_id FROM financial_transactions ORDER BY date DESC, rowid DESC LIMIT 10`).all()
-      : db.prepare(`SELECT id, date, type, category, amount, description, operator_name, branch_id FROM financial_transactions WHERE branch_id = ? ORDER BY date DESC, rowid DESC LIMIT 10`).all(branchId)) as Array<{ id: string; date: string; type: string; category: string; amount: number; description: string; operator_name: string; branch_id: string }>;
+      ? stmtDashRecentAll.all()
+      : stmtDashRecentBranch.all(branchId)) as Array<{ id: string; date: string; type: string; category: string; amount: number; description: string; operator_name: string; branch_id: string }>;
 
     // 14-day income/expense trend.
-    const trendFrom = new Date(todayStr);
-    trendFrom.setDate(trendFrom.getDate() - 13);
+    // Calendar arithmetic on the date STRING. Going through a Date object here
+    // is timezone-sensitive: `new Date('2026-08-17')` is UTC midnight, so
+    // reformatting it with a local formatter yields the previous day west of
+    // UTC (audit D-4). `addDays` avoids the round trip entirely.
+    const trendStart = addDays(todayStr, -13);
     const trendRows = (isAll
-      ? db.prepare(`SELECT date,
-            COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END),0) AS income,
-            COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END),0) AS expense
-          FROM financial_transactions WHERE date >= ? GROUP BY date ORDER BY date`).all(trendFrom.toISOString().slice(0, 10))
-      : db.prepare(`SELECT date,
-            COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END),0) AS income,
-            COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END),0) AS expense
-          FROM financial_transactions WHERE branch_id = ? AND date >= ? GROUP BY date ORDER BY date`).all(branchId, trendFrom.toISOString().slice(0, 10))) as Array<{ date: string; income: number; expense: number }>;
+      ? stmtDashTrendAll.all(trendStart)
+      : stmtDashTrendBranch.all(branchId, trendStart)) as Array<{ date: string; income: number; expense: number }>;
     const trendMap = new Map(trendRows.map((r) => [r.date, r]));
     const trend: Array<{ date: string; income: number; expense: number }> = [];
     for (let i = 0; i < 14; i++) {
-      const d = new Date(trendFrom);
-      d.setDate(trendFrom.getDate() + i);
-      const key = d.toISOString().slice(0, 10);
+      // Same basis as `trendStart`, so the axis and the SQL window can never
+      // drift apart by a day in any timezone.
+      const key = addDays(trendStart, i);
       const row = trendMap.get(key);
       trend.push({ date: key, income: Number(row?.income || 0), expense: Number(row?.expense || 0) });
     }
@@ -279,7 +322,16 @@ financeRouter.get(
       branchId: branchId || null,
       balances: { main: account.mainBalance, saving: account.savingBalance },
       today: { income: todayIncome, expense: todayExpense, net: todayIncome - todayExpense },
-      month: { income: monthIncome, expense: monthExpense, net: monthIncome - monthExpense },
+      month: {
+        income: monthIncome,
+        expense: monthExpense,
+        net: monthIncome - monthExpense,
+        // The exact window these figures cover, so the panel can state the
+        // period instead of leaving the reader to assume a calendar.
+        periodKey: monthPeriod.periodKey,
+        from: monthPeriod.from,
+        to: monthPeriod.to,
+      },
       budget: {
         lines: budgetRows.length,
         allocated: allocatedTotal,

@@ -699,7 +699,12 @@ export interface DashboardSummary {
   branchId: string | null;
   /** Server local date (YYYY-MM-DD). The single date authority for the Dashboard. */
   today: string;
-  boundaries: Record<'today' | 'month' | 'year', { period: string; from: string; to: string }>;
+  /**
+   * The exact Gregorian span of each period, plus the Shamsi key it represents.
+   * Periods are Hijri Shamsi (audit D-6): "this month" is اسد ۱۴۰۵, which does
+   * not share boundaries with the Gregorian month.
+   */
+  boundaries: Record<'today' | 'month' | 'year', { period: string; from: string; to: string; periodKey: string; periodEnd: string }>;
   population: {
     activeStudents: number;
     totalStudents: number;
