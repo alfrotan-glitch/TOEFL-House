@@ -110,9 +110,42 @@ const DEFAULT_BUDGET_LINES: Array<{
   { key: 'misc', name: 'Miscellaneous', icon: 'MoreHorizontal', costType: 'variable', purpose: 'misc' },
 ];
 
-function ensureBudgetLineCatalog(db: Database.Database): void {
+/**
+ * Provision the default budget lines for ONE branch.
+ *
+ * This used to run only as part of the boot-time catalogue sweep, so a branch
+ * created through the API had no budget lines until the next restart. The
+ * branch looked fine — it had a finance account and accepted students — but
+ * payroll failed with "Teacher salary budget line is not configured." and no
+ * expense could be charged. Branch creation now calls this directly, so a new
+ * branch is fully operational the moment it exists.
+ *
+ * Idempotent: each insert is guarded by NOT EXISTS on (branch_id, purpose),
+ * so calling it for an already-provisioned branch is a no-op.
+ */
+export function ensureBranchBudgetLines(db: Database.Database, branchId: string): void {
   if (!tableExists(db, 'budget_lines') || !tableExists(db, 'branches')) return;
-  const insert = db.prepare(`
+  const insert = budgetLineInsert(db);
+  const seed = db.transaction(() => {
+    for (const line of DEFAULT_BUDGET_LINES) {
+      insert.run(
+        `budget_${line.key}_${branchId}`,
+        line.name,
+        line.icon,
+        line.costType,
+        line.marketing ? 1 : 0,
+        line.purpose,
+        branchId,
+        branchId,
+        line.purpose,
+      );
+    }
+  });
+  seed();
+}
+
+function budgetLineInsert(db: Database.Database) {
+  return db.prepare(`
     INSERT INTO budget_lines
       (id, name, current_amount, allocated_amount, icon, cost_type, is_marketing, purpose, branch_id)
     SELECT ?, ?, 0, 0, ?, ?, ?, ?, ?
@@ -120,6 +153,11 @@ function ensureBudgetLineCatalog(db: Database.Database): void {
       SELECT 1 FROM budget_lines WHERE branch_id = ? AND purpose = ?
     )
   `);
+}
+
+function ensureBudgetLineCatalog(db: Database.Database): void {
+  if (!tableExists(db, 'budget_lines') || !tableExists(db, 'branches')) return;
+  const insert = budgetLineInsert(db);
   const branches = db.prepare(`SELECT id FROM branches WHERE is_active = 1`).all() as Array<{ id: string }>;
   const seed = db.transaction(() => {
     for (const branch of branches) {

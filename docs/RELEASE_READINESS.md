@@ -164,7 +164,7 @@ rule engine is now the single authority.
 | LOW | D-11 | Book-profit tile in `BooksView.tsx` computes profit client-side using `purchasePrice ?? 0` | Display-only aggregate; overstates profit when a book has no recorded purchase price. No backend equivalent exists to consume. |
 | LOW | D-12 | Historical rows created before the pass-12 money fixes may hold invalid values (book price 'abc'/null/negative, negative invoice, 1e15 salary) | Entry points and DB triggers now block them, but **no data repair was run** — migration 069 deliberately does not rewrite history. Run `node server/scripts/audit-financial-data.mjs <db>` (read-only) before go-live; it scans 35 money columns and exits non-zero if any corrupt value exists. |
 | LOW | D-13 | Historical scholarship rows written before pass-13 may hold a non-numeric/negative `total_budget` | The award handler now refuses to award against a non-finite budget (fails closed), but **no data repair was run**. Covered by `server/scripts/audit-financial-data.mjs` (read-only detection; repair remains a human decision). |
-| MEDIUM | D-14 | Pre-existing corrupt money values are DETECTED but never repaired | `audit-financial-data.mjs` finds non-numeric, NULL, negative, sub-cent and precision-overflow values across 35 money columns. **Repair is deliberately a human decision** — silently rewriting a financial record destroys the evidence of what happened. Entry points and DB triggers prevent new ones. |
+| LOW | D-14 | Pre-existing corrupt money values are DETECTED but never repaired — **not applicable to the current greenfield deployment** (no legacy data); applies to any future migration of an existing database | `audit-financial-data.mjs` finds non-numeric, NULL, negative, sub-cent and precision-overflow values across 35 money columns. **Repair is deliberately a human decision** — silently rewriting a financial record destroys the evidence of what happened. Entry points and DB triggers prevent new ones. |
 | LOW | D-3 | `invoices` carries two unique indexes enforcing the same rule | Redundant, not a correctness defect. See §F. |
 | LOW | D-4 | 5 money writers use bespoke guards instead of `resolveIdempotency` | Each proven correct under concurrency; unification is cosmetic. |
 | LOW | D-5 | Unbounded list endpoints; Students tab payload at scale | No defect at current volume; see C-3. |
@@ -263,9 +263,9 @@ real production database** and passed.
 |---|---|---|---|---|---|---|
 | **GL-1** | Visual/responsive sign-off of Academic Control Center → Versions & Rules at 1920×1080 and at a smaller viewport | **BLOCKED — sandbox** · **OPEN — human** | No browser engine is obtainable here: `cdn.playwright.dev`, Chrome-for-Testing, `objects.githubusercontent.com` and `deb.debian.org` all return HTTP **000**; WeasyPrint installs but its Pango native libraries are absent. jsdom is not a substitute for visual inspection. | A person opens the page in a real browser at both sizes and confirms layout, no clipping, no overlap | A person at a screen | **YES** — cosmetic/layout risk is unquantified |
 | **GL-2** | One physically printed student fee bill inspected on paper | **BLOCKED — sandbox** · **OPEN — human** | Same missing print/render stack as GL-1. HTML/CSS source review is not evidence about a physical print. | One bill printed on 80 mm stock; logo, branch contact data, fee/discount/paid/remaining, paper size, page breaks and clipping all confirmed | A person at a printer | **YES** — the fee bill is a customer-facing financial document |
-| **GL-3** | Migrations 067–069 applied to the production database | **OPEN — production** | Verified end-to-end on a production-shaped clone carrying reproduced F-10 damage (phantom cash **4750 → 3500**), and on a fresh install. **Never executed against real data.** | Deploy the build (migrations run on boot), then `verify-deployment.mjs` exits **0** | DBA / operator on the production host | **YES** — it is the deployment |
-| **GL-4** | Confirm migration 068's indexes exist in production and are used | **OPEN — production** · *tooling complete* | The check is written, adversarially tested (9 tests that sabotage a good database) and mutation-verified — but **tool-verified is not production-verified**. It has never been run where the real data is. | `node server/scripts/verify-deployment.mjs <db>` exits **0**, showing `idx_users_role` and `idx_placement_profile_program_branch` present and the query plan using the index | DBA / operator on the production host | **NO** — performance-only; degrades to a table scan, no incorrect results |
-| **GL-5** | Audit existing production data for pre-existing corrupt money values | **OPEN — production** · *tooling complete* | Tool verified on clean and deliberately corrupted fixtures (finds all 9 injected issues, reports clean on a good database). **Whether production holds corrupt values is UNKNOWN — not clean.** | `node server/scripts/audit-financial-data.mjs <db>` exits **0**; or exit **1** with a recorded human decision for every row it lists | Finance owner + DBA on the production host | **YES** — unknown financial state |
+| **GL-3** | Migrations 067–069 applied to the production database | **OPEN — production** (low risk on greenfield) | Verified on a fresh install and on a production-shaped clone carrying reproduced F-10 damage (phantom cash **4750 → 3500**). On greenfield, 067 is a **no-op** — there is no divergence to repair — so the risky part of this item does not arise. | Deploy the build (migrations run on boot), then `verify-deployment.mjs` exits **0** | DBA / operator on the production host | **YES** — it is the deployment |
+| **GL-4** | Confirm migration 068's indexes exist in production and are used | **OPEN — production** · *tooling complete; pre-satisfied on greenfield* | Tool-verified is still not production-verified. However `verify-deployment.mjs` returns **8/8 PASS on a freshly seeded greenfield database**, so on a new install this closes the moment the command is run once. | `node server/scripts/verify-deployment.mjs <db>` exits **0** | DBA / operator on the production host | **NO** — performance-only; degrades to a table scan, no incorrect results |
+| **GL-5** | Audit existing production data for pre-existing corrupt money values | **NOT APPLICABLE — greenfield** (pre-deployment prerequisite only) | **The production database does not exist yet.** A greenfield install has no legacy rows, so there is nothing to be corrupt. Confirmed: the audit exits **0** on a freshly seeded database. It remains a standing prerequisite for any FUTURE deployment onto an existing database, and a useful post-go-live health check. | `node server/scripts/audit-financial-data.mjs <db>` exits **0** — already demonstrated on a greenfield DB | Operator, at first deploy and periodically thereafter | **NO** — vacuous on a database with no data |
 
 ### Why production cannot be reached from here
 
@@ -280,10 +280,17 @@ steps that can only be performed where the real data lives.
 
 All four must hold. Nothing here can be satisfied by tests or CI.
 
-1. **GL-3** — build deployed; `verify-deployment.mjs` exits **0** against the production database.
-2. **GL-5** — `audit-financial-data.mjs` exits **0**, or every row it reports has a recorded, signed-off human decision (this also closes D-12, D-13, D-14).
-3. **GL-1 and GL-2** — a person confirms the screen layout and one printed fee bill.
-4. **GL-4** — covered by criterion 1 (same command). If it alone fails, that is a performance defect, not a correctness one, and may be accepted knowingly.
+**Greenfield deployment (the current situation — no production database exists yet):**
+
+1. **GL-3** — build deployed and seeded; `verify-deployment.mjs` exits **0**. Expected to pass first time: it already returns 8/8 on a freshly seeded database.
+2. **GL-1 and GL-2** — a person confirms the screen layout and one printed fee bill. **These are the only substantive remaining blockers.**
+3. **GL-4** — closed by the same command as criterion 1.
+4. **GL-5** — **not applicable**; there is no legacy data. Run the audit anyway as a baseline, and keep it as a periodic health check.
+
+**If a future deployment targets an EXISTING database,** GL-5 becomes live again
+and must be satisfied before deploying: `audit-financial-data.mjs` exits **0**,
+or every row it reports has a recorded, signed-off human decision (also closing
+D-12, D-13, D-14).
 
 Until 1–3 are satisfied the correct status is **NO-GO**, regardless of test or
 CI results. A green suite demonstrates the absence of the failures it models

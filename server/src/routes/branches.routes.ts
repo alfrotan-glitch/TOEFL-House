@@ -5,6 +5,7 @@
  */
 import { Router } from 'express';
 import { db } from '../db/connection.js';
+import { ensureBranchBudgetLines } from '../db/organizationHierarchy.js';
 import { authenticate, authorize, denyPermissionless, canAccessBranchResource } from '../middleware/auth.js';
 import { hasRole, isGlobalOwner } from '../core/rbac/rbac-service.js';
 import { writeAudit } from '../middleware/audit.js';
@@ -419,6 +420,12 @@ branchesRouter.post(
 
     stmtInsertSavingAccount.run(newId);
     ensureFinanceAccount('branch', newId);
+    // Budget lines used to be provisioned only by the boot-time catalogue
+    // sweep, so a branch created here had a finance account and accepted
+    // students but could not run payroll ("Teacher salary budget line is not
+    // configured.") or charge any expense until the server was restarted.
+    // Provision them with the branch so it is operational immediately.
+    ensureBranchBudgetLines(db, newId);
 
     writeAudit(req, `Created branch: ${name.trim()} (${code.trim().toUpperCase()})`);
     const created = stmtGetBranchById.get(newId);
