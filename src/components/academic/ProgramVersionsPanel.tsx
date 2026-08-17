@@ -70,6 +70,7 @@ export default function ProgramVersionsPanel() {
       setPrograms(progs || []);
       setVersions(vers || []);
       setTestBankTests(bankTests || []);
+
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to load versions');
     } finally {
@@ -90,6 +91,21 @@ export default function ProgramVersionsPanel() {
   }, [setPlacementProfile]);
 
   useEffect(() => { void (async () => { await loadInitialData(); })(); }, [loadInitialData]);
+
+  // Auto-select on arrival so the detail pane shows real configuration instead
+  // of an empty "Select a Version" placeholder — requiring a click before ANY
+  // version or rule data appears was a large part of the "nothing meaningful is
+  // visible" report. Prefers the published default, since that is the version
+  // currently in force. Runs only while nothing is selected, so it never fights
+  // an operator's own choice.
+  useEffect(() => {
+    if (selectedId || versions.length === 0) return;
+    const preferred =
+      versions.find((v) => v.status === 'published' && v.is_default) ??
+      versions.find((v) => v.status === 'published') ??
+      versions[0];
+    if (preferred) void loadTree(preferred.id);
+  }, [versions, selectedId, loadTree]);
 
   const handleApiCall = async (fn: () => Promise<void>, successMsg: string) => {
     setBusy(true); setError(null);
