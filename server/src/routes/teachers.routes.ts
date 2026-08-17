@@ -13,6 +13,7 @@ import { authenticate, authorize, requirePermission, resolveBranchScope, canAcce
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
+import { assertMoney } from '../utils/money.js';
 import { addNotification } from '../utils/notifications.js';
 import { evaluateRules } from '../core/configuration/rule-engine.js';
 import {
@@ -170,8 +171,13 @@ teachersRouter.get('/', requirePermission('Teacher.View'), ah(async (req, res) =
 teachersRouter.post('/', requirePermission('Teacher.Create'), ah(async (req, res) => {
   const user = getUserContext(req);
   const { fullName, phone, email, baseSalary, salaryType, specialization, qualification, contractType, branchId, defaultSkillRate: bodyDefaultSkillRate } = req.body;
-  const numericBaseSalary = Number(baseSalary);
-  if (!fullName || !String(fullName).trim() || !Number.isFinite(numericBaseSalary) || numericBaseSalary < 0) throw new HttpError(400, 'Full name and a valid non-negative base salary are required.');
+  if (!fullName || !String(fullName).trim()) throw new HttpError(400, 'Full name and a valid non-negative base salary are required.');
+  // Finite and non-negative was not enough: 1e15 passed and became a base
+  // salary of one quadrillion. assertMoney adds the two-decimal rounding and
+  // the safe-integer-cents ceiling every other money field already enforces.
+  let numericBaseSalary: number;
+  try { numericBaseSalary = assertMoney(baseSalary, 'base salary'); }
+  catch { throw new HttpError(400, 'Full name and a valid non-negative base salary are required.'); }
   // Bound free text (see utils/textInput.ts — S16).
   assertTextLengths([
     [fullName, 'Full name', TEXT_LIMITS.name],

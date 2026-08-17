@@ -6,6 +6,7 @@ import { writeAudit } from '../middleware/audit.js';
 import { resolveIdempotency } from '../utils/idempotency.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
+import { assertMoney } from '../utils/money.js';
 import { addNotification } from '../utils/notifications.js';
 import { recordIncome } from '../utils/income.js';
 
@@ -83,6 +84,15 @@ booksRouter.post(
     const { title, price, stock, isChapter, entryDate, purchasePrice, branchId } = req.body;
     if (!title || price == null || stock == null) throw new HttpError(400, 'Title, price, and quantity are required.');
     assertTextLengths([[title, 'Title', TEXT_LIMITS.line]]);
+    // Stock was validated but price was written through untouched, so the
+    // literal string "abc" was stored as a price — along with null, -100,
+    // 0.001 and 1e15. A book with a non-numeric price then became permanently
+    // unsellable: /sell computes `book.price * quantity`, producing NaN and a
+    // raw "NOT NULL constraint failed: book_sales.total_amount" from SQLite.
+    const validatedPrice = assertMoney(price, 'book price');
+    const validatedPurchasePrice = purchasePrice !== undefined
+      ? assertMoney(purchasePrice, 'book purchase price')
+      : null;
     if (!Number.isInteger(Number(stock)) || Number(stock) < 0) throw new HttpError(400, 'Stock must be a non-negative integer.');
 
     // The book is created in the caller's working branch (the branch the UI is
@@ -97,16 +107,16 @@ booksRouter.post(
     const existing = stmtGetBookByTitleAndType.get(branchIdResolved, isChapter ? 1 : 0, normalizedTitle) as any;
 
     const targetDate = entryDate || today();
-    const finalPurchasePrice = purchasePrice !== undefined ? purchasePrice : Math.round(price * 0.6);
+    const finalPurchasePrice = validatedPurchasePrice !== null ? validatedPurchasePrice : Math.round(validatedPrice * 0.6);
 
     db.transaction(() => {
       if (existing) {
-        stmtUpdateBookStockAdd.run(stock, price, finalPurchasePrice, targetDate, existing.id);
-        stmtInsertRestockHistory.run(id('rs'), existing.id, targetDate, stock, price, finalPurchasePrice);
+        stmtUpdateBookStockAdd.run(stock, validatedPrice, finalPurchasePrice, targetDate, existing.id);
+        stmtInsertRestockHistory.run(id('rs'), existing.id, targetDate, stock, validatedPrice, finalPurchasePrice);
       } else {
         const newId = id('bk');
-        stmtInsertBook.run(newId, String(title).trim(), price, finalPurchasePrice, stock, isChapter ? 1 : 0, branchIdResolved, targetDate);
-        stmtInsertRestockHistory.run(id('rs'), newId, targetDate, stock, price, finalPurchasePrice);
+        stmtInsertBook.run(newId, String(title).trim(), validatedPrice, finalPurchasePrice, stock, isChapter ? 1 : 0, branchIdResolved, targetDate);
+        stmtInsertRestockHistory.run(id('rs'), newId, targetDate, stock, validatedPrice, finalPurchasePrice);
       }
     })();
 
@@ -127,10 +137,10 @@ booksRouter.put(
     
     stmtUpdateBook.run(
       title ?? existing.title, 
-      price ?? existing.price, 
+      price != null ? assertMoney(price, 'book price') : existing.price, 
       stock ?? existing.stock,
       isChapter !== undefined ? (isChapter ? 1 : 0) : existing.is_chapter,
-      purchasePrice !== undefined ? purchasePrice : existing.purchase_price, 
+      purchasePrice !== undefined ? assertMoney(purchasePrice, 'book purchase price') : existing.purchase_price, 
       req.params.id
     );
     
