@@ -231,16 +231,33 @@ charges) when the new business rule took effect; every assertion was preserved.
 
 ## H. GO-LIVE BLOCKERS
 
-| # | Blocker | Owner | Status |
-|---|---|---|---|
-| H-4 | Confirm the two indexes restored by migration 068 exist in production after deploy (`idx_users_role`, `idx_placement_profile_program_branch`) | DBA / operator | **OPEN** — verified on clones only |
-| H-5 | Run `node server/scripts/audit-financial-data.mjs` against the real production database and decide on any rows it reports | Finance owner + DBA | **OPEN** — tool verified on clean and corrupt fixtures; never run against production |
-| H-1 | Visual sign-off of Versions & Rules at 1920×1080 and at a smaller viewport | A person at a screen | **OPEN** — cannot be closed in a headless sandbox (C-1) |
-| H-2 | One physical print of the student fee bill | A person at a printer | **OPEN** — cannot be closed in a headless sandbox (C-2) |
-| H-3 | Run migration `067_repair_f10_phantom_cash.sql` against production data before first use | DBA / operator | **OPEN** — migration now exists and is verified on a copy; it applies automatically on next app boot. Take a backup first (the runner also writes one). See D-1. |
+All remaining blockers are **external/manual production dependencies**. None is
+a code defect awaiting a fix, and none can be closed from a build environment.
+Each now has a tool or a documented procedure that makes closing it mechanical.
 
-No code-level blocker remains open. All three items above are human or
-operational actions, not defects awaiting a fix.
+| # | Blocker | Owner | How to close | Status |
+|---|---|---|---|---|
+| H-1 | Visual sign-off of Versions & Rules at 1920×1080 and a smaller viewport | A person at a screen | Open the page in a real browser at both sizes | **EXTERNAL** — no browser engine obtainable here; all vendor hosts and the OS package mirror return HTTP 000, and the Pango libraries WeasyPrint needs are absent |
+| H-2 | One physical print of the student fee bill | A person at a printer | Print one bill on 80 mm stock and inspect it | **EXTERNAL** — same reason as H-1 |
+| H-3 | Apply migration 067 to production | DBA / operator | Deploy the build — migrations run on boot. See `docs/DEPLOYMENT_067_069.md` | **EXTERNAL** — verified end-to-end on a production-shaped clone (phantom cash 4750 → 3500), never run on real data |
+| H-4 | Confirm migration 068's indexes exist in production | DBA / operator | `node server/scripts/verify-deployment.mjs <db>` — exit 0 closes this item | **EXTERNAL — tooling COMPLETE**; the check is written, adversarially tested and mutation-verified |
+| H-5 | Audit existing production data for pre-existing corrupt money | Finance owner + DBA | `node server/scripts/audit-financial-data.mjs <db>` — exit 0 closes this item; exit 1 lists record ids, values, corruption type and blast radius for a human decision | **EXTERNAL — tooling COMPLETE**; verified on both clean and deliberately corrupted fixtures |
+
+**Why production data cannot be reached from here:** the system is file-based
+SQLite with no remote-database driver (`grep` for `DATABASE_URL`/`postgres`/
+`mysql` in `db/connection.ts` returns nothing), and a filesystem-wide search
+finds no production `erp.sqlite` — every database present was created by this
+audit under `/tmp`. So H-3/H-4/H-5 are not "unfinished work"; they are steps
+that can only be performed where the real data lives.
+
+### Exact conditions to change NO-GO to GO
+
+1. `verify-deployment.mjs` exits **0** against the production database after deploy (closes H-3, H-4).
+2. `audit-financial-data.mjs` exits **0**, or every row it reports has a recorded human decision (closes H-5, D-12, D-13, D-14).
+3. A person confirms H-1 and H-2 with their own eyes.
+
+Until 1–3 are done the correct status is **NO-GO**, regardless of test or CI
+results.
 
 ---
 
