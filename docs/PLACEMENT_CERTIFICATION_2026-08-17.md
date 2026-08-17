@@ -11,7 +11,13 @@ re-run, and independent source reconstruction of the whole lifecycle.
 
 ---
 
-## VERDICT: ❌ NOT CERTIFIED FOR PRODUCTION
+> **UPDATE — blockers closed in `ba379b4`.** C-1, C-3 and C-4 were remediated
+> and re-verified: all three original exploits are blocked against a live API,
+> 16 alternate-path probes fail to bypass, and 5 mutation reverts of the exact
+> original bugs are each caught by the new tests. See §8. The verdict below is
+> preserved as the record of the audit as performed.
+
+## VERDICT (at time of audit): ❌ NOT CERTIFIED FOR PRODUCTION
 
 > **«Can a malicious, careless, concurrent, or technically sophisticated client
 > cause Placement Exam to produce an academically invalid, financially
@@ -299,3 +305,66 @@ was hardened. C-1 alone reduces the entire remediation to opt-in.
 
 The subsystem is **close** — the architecture is right and the invariants are
 real. It is not yet certifiable.
+
+
+---
+
+## 8. Remediation of C-1, C-3, C-4 (commit `ba379b4`)
+
+### Enforcement architecture
+```
+Academic/Placement Policy (snapshotted per attempt)
+        ↓
+decision-engine.ts        evaluateDecision → evaluateOutcome     (pass/fail)
+        ↓
+placement-policy.ts       evaluateConversionEligibility  ← visitor → student
+                          evaluateEnrollmentEligibility  ← student → class   [NEW]
+        ↓                 (both share one predicate — cannot disagree)
+EnrollmentService.enroll()          ← single chokepoint for 5 enrolment paths
+enrollment-gate.ts                  ← same rule for the 1 raw-INSERT path
+        ↓
+Database invariants       attempts.outcome · uq_placement_open_attempt
+```
+
+| Blocker | Root cause | Fix |
+|---|---|---|
+| **C-1** | Invariant lived at the *conversion* boundary, not the *enrolment* boundary; 5 paths + 1 raw INSERT never consulted placement | One gate in `EnrollmentService.enroll()` + `assertPlacementEligibleForClass()` for the raw-INSERT path, both delegating to the new shared `evaluateEnrollmentEligibility()` |
+| **C-3** | Batch endpoint written as a global sweep | `resolveBranchScope` (existing convention); audit records the applied scope |
+| **C-4** | `mapAttempt` spread `...attempt` over the sanitized copy, re-adding raw `snapshot_json`; `autoScoreQuestion` returned `Expected: <key>` | Raw column destructured out and never re-attached; feedback reduced to `Correct`/`Incorrect` |
+
+### Exploit before → after (live API)
+| Exploit | Before | After |
+|---|---|---|
+| `POST /students/manual` into a gated class | **201 student created** | **400** — no student row |
+| Same as `registrar` | **201** | **400** |
+| Branch-2 manager runs expiry sweep | **expired branch-1 attempt** | **expired: 0**, attempt still `in_progress` |
+| `GET /placement` answer keys | **`['B','Seine']` exposed** | none; no `snapshot_json` |
+| Wrong-answer feedback | **`Expected: A`** | `Incorrect` |
+| Legitimate passed candidate converts | 201 | **201** (no regression) |
+| Failed candidate converts | 400 | **400** (no regression) |
+
+### Alternate-path adversarial probes (16/16 blocked)
+two-step create-then-enrol · `enroll-semester` · forged `lead_id` to an
+unassessed visitor · forged `placement_status='completed'` with no attempt ·
+genuinely failed sitting · 6 concurrent enrolments · `skipPlacementGate`
+injected in the request body (both routes) · `?branchId=all` and body
+`branchId` from a single-branch manager · report/visitors/students list key
+leakage · test-bank preview role-gating. A genuinely passing candidate is still
+enrolled (no false positive).
+
+### Mutation verification
+Reverting each original bug is caught: C-4a `mapAttempt` spread → 3 tests ·
+C-4b feedback echo → 3 · C-1a service gate → 1 · C-1b raw-INSERT gate → 3 ·
+C-3 unscoped sweep → 2.
+
+### Gates
+1022/1022 tests (17 new) · eslint 0 errors · both typechecks clean · no schema
+drift (69 migrations) · release gate 16/16 · frontend builds · **CI 4/4**.
+Placement payments reconcile exactly with the ledger; 0 students enrolled from a
+failed placement; 0 feedback rows containing a key.
+
+### Remaining risks
+- **GL-1 / GL-2** (browser visual sign-off, printed fee bill) remain open — unobtainable in this environment.
+- **C-2** (15 source-grep tests that kill no mutants), **C-5** (`cancel` unguarded read-then-write; 0/25 races corrupted), **C-6** (advisory duplicate recommendation logic) remain open as non-blocking.
+- `journey-engine.createEnrollment()` writes enrollments but has **no callers**; it is unreachable today and was deliberately left unmodified. If it is ever wired up, it must route through the same gate.
+- Multi-process concurrency untested (single Node process, serialised writer).
