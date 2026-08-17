@@ -189,6 +189,51 @@ export function evaluateConversionEligibility(
 }
 
 /**
+ * THE placement gate for enrolling a student into a class.
+ *
+ * `evaluateConversionEligibility` guards the visitor→student conversion route.
+ * This function guards the *other* direction: an already-existing student row
+ * being enrolled into a class. The certification audit found that placement was
+ * enforced only on the conversion route, while five other code paths reached
+ * `EnrollmentService.enroll()` (and one raw INSERT) with no placement check —
+ * so `POST /api/students/manual` enrolled a candidate into a placement-required
+ * class with no assessment at all (finding C-1).
+ *
+ * Both functions delegate the actual verdict to the same predicate below, so
+ * the two boundaries can never disagree about what "eligible" means.
+ *
+ * A student with no `lead_id` has no visitor record and therefore no placement
+ * history. That is NOT treated as an exemption: when the target program
+ * requires placement, an unlinked student is refused, because otherwise
+ * creating a student directly would remain a bypass.
+ */
+export interface EnrollmentPlacementState {
+  /** visitors.placement_status for the student's originating lead, if any. */
+  placementStatus: string | null;
+  /** The student's latest completed placement attempt, if any. */
+  attempt: { status?: string | null; outcome?: string | null } | null;
+  /** True when the student row has no originating visitor (lead_id IS NULL). */
+  hasVisitorRecord: boolean;
+}
+
+export function evaluateEnrollmentEligibility(
+  requirementMode: string,
+  state: EnrollmentPlacementState
+): ConversionEligibility {
+  if (requirementMode === 'not_required') return { eligible: true, reason: 'not_required' };
+
+  if (!state.hasVisitorRecord) {
+    return {
+      eligible: false,
+      reason:
+        'This program requires a placement assessment. The student has no placement record, so they must be registered through the visitor placement workflow before enrollment.',
+    };
+  }
+
+  return evaluateConversionEligibility(requirementMode, String(state.placementStatus ?? ''), state.attempt);
+}
+
+/**
  * Canonical waiver status.
  *
  * The audit found two vocabularies for one concept: the skip handler wrote

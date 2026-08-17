@@ -12,6 +12,8 @@ import {
   TERMINAL_ENROLLMENT_STATUSES,
 } from './lifecycle-engine.js';
 import { countActiveStudentsInClass } from './class-capacity.js';
+import { resolvePlacementRequirement } from '../placement/policy-engine.js';
+import { evaluateEnrollmentEligibility } from '../placement/placement-policy.js';
 
 export interface EnrollStudentInput {
   studentId: string;
@@ -36,6 +38,11 @@ export interface EnrollStudentInput {
    *  'reserved' to create a not-yet-active enrollment (e.g. for a future
    *  Waitlist Engine phase) without going through a second write. */
   initialStatus?: EnrollmentStatus;
+  /** Set ONLY by the visitor conversion route, which evaluates the identical
+   *  placement rule against richer context (target level → first-level
+   *  exemption) immediately before calling enroll(). Server-side callers only;
+   *  never bound from a request body. */
+  skipPlacementGate?: boolean;
   /** When false, enroll() does not create the student_semesters projection
    *  row. Callers that maintain their own (richer) semester row in the same
    *  transaction pass false to avoid duplicate projection writes. Defaults
@@ -66,6 +73,9 @@ export class EnrollmentService {
   private stmtGetLevel: Database.Statement;
   private stmtGetVersion: Database.Statement;
   private stmtGetClass: Database.Statement;
+  private stmtGetStudentPlacementLink: Database.Statement;
+  private stmtGetVisitorPlacement: Database.Statement;
+  private stmtGetLatestCompletedAttempt: Database.Statement;
   private stmtGetStudent: Database.Statement;
   private stmtInsertEnrollment: Database.Statement;
   private stmtInsertInvoice: Database.Statement;
@@ -104,6 +114,9 @@ export class EnrollmentService {
     this.stmtGetLevel = db.prepare('SELECT * FROM levels WHERE id = ?');
     this.stmtGetVersion = db.prepare(`SELECT pv.*, p.name AS program_name FROM program_versions pv JOIN programs p ON p.id = pv.program_id WHERE pv.id = ?`);
     this.stmtGetClass = db.prepare('SELECT * FROM classes WHERE id = ?');
+    this.stmtGetStudentPlacementLink = db.prepare('SELECT lead_id FROM students WHERE id = ?');
+    this.stmtGetVisitorPlacement = db.prepare('SELECT placement_status FROM visitors WHERE id = ?');
+    this.stmtGetLatestCompletedAttempt = db.prepare(`SELECT status, outcome FROM placement_assessment_attempts WHERE visitor_id = ? AND status = 'completed' ORDER BY completed_at DESC, attempt_number DESC LIMIT 1`);
     this.stmtGetStudent = db.prepare('SELECT id, branch_id, status, gender FROM students WHERE id = ?');
     // Capacity is counted by the single authoritative rule in
     // class-capacity.ts (enrollments, not student_semesters).
@@ -174,6 +187,51 @@ export class EnrollmentService {
     );
   }
 
+  /**
+   * Resolve the student's placement state and apply the shared domain rule.
+   *
+   * Reads the requirement from the program version the student is actually
+   * being enrolled into (falling back to the class's own level so a caller
+   * cannot dodge the gate by omitting programVersionId), then delegates the
+   * verdict to `evaluateEnrollmentEligibility`. No rule logic lives here.
+   */
+  private assertPlacementEligible(input: EnrollStudentInput, programVersionId: string | null, levelCode: string | null): void {
+    // Resolve the target level: explicit input first, then the class's level.
+    // Without this fallback, omitting levelId would skip first-level exemption
+    // handling and could refuse an otherwise-legitimate enrollment.
+    let targetLevelId: string | null = input.levelId ?? null;
+    let effectiveVersionId: string | null = programVersionId;
+    if (input.classId) {
+      const cls = this.stmtGetClass.get(input.classId) as any;
+      if (cls?.level_id) {
+        targetLevelId = targetLevelId || cls.level_id;
+        if (!effectiveVersionId) {
+          const classLevel = this.stmtGetLevel.get(cls.level_id) as any;
+          effectiveVersionId = classLevel?.program_version_id ?? null;
+        }
+      }
+    }
+    // No program version anywhere means no placement policy can apply. This is
+    // the historical behaviour for ad-hoc classes and is preserved.
+    if (!effectiveVersionId) return;
+
+    const requirement = resolvePlacementRequirement(effectiveVersionId, input.branchId, targetLevelId);
+    if (requirement.mode === 'not_required') return;
+
+    const student = this.stmtGetStudentPlacementLink.get(input.studentId) as { lead_id: string | null } | undefined;
+    const leadId = student?.lead_id ?? null;
+    const visitor = leadId ? (this.stmtGetVisitorPlacement.get(leadId) as { placement_status: string | null } | undefined) : undefined;
+    const attempt = leadId ? (this.stmtGetLatestCompletedAttempt.get(leadId) as { status: string; outcome: string | null } | undefined) : undefined;
+
+    const verdict = evaluateEnrollmentEligibility(requirement.mode, {
+      placementStatus: visitor?.placement_status ?? null,
+      attempt: attempt ?? null,
+      hasVisitorRecord: Boolean(leadId && visitor),
+    });
+    if (!verdict.eligible) throw new HttpError(400, verdict.reason);
+    void levelCode;
+  }
+
   enroll(input: EnrollStudentInput) {
     const student = this.stmtGetStudent.get(input.studentId) as { id: string; branch_id: string; status: string; gender: string } | undefined;
     if (!student) throw new HttpError(404, 'Student not found.');
@@ -229,6 +287,21 @@ export class EnrollmentService {
       const activeCount = countActiveStudentsInClass(this.db, input.classId);
       const capacity = Number(cls.capacity ?? 0);
       if (capacity > 0 && activeCount >= capacity) throw new HttpError(409, 'Selected class is full.');
+    }
+
+    // ── PLACEMENT GATE (single enforcement point for every enrollment path) ──
+    // Every route that enrolls a student funnels through this method, so the
+    // placement invariant lives here rather than being repeated per route.
+    // Before this, only visitor→student conversion checked placement and five
+    // other paths did not (certification finding C-1).
+    //
+    // `skipPlacementGate` exists for the visitor conversion route, which has
+    // already evaluated the identical rule against richer context (the target
+    // level, for first-level exemption) moments earlier in the same
+    // transaction. It is an internal flag on a server-side call signature and
+    // is never reachable from an HTTP request body.
+    if (!input.skipPlacementGate) {
+      this.assertPlacementEligible(input, programVersionId, levelCode);
     }
 
     const enrollmentId = makeId('enr');

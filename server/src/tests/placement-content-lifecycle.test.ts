@@ -464,7 +464,12 @@ describe('Placement content-driven lifecycle (test bank → responses → scorin
     expect(res.status).toBe(200);
     expect(res.body.autoScore).toBe(10);
     expect(res.body.complete).toBe(true);
-    expect(res.body.feedback.q1).toContain('Expected: A');
+    // The feedback must state correctness WITHOUT echoing the expected answer.
+    // This previously asserted `Expected: A`, i.e. it verified the leak that
+    // certification finding C-4 reported: a candidate submitting wrong answers
+    // was handed the key for every question they missed.
+    expect(res.body.feedback.q1).toBe('Incorrect');
+    expect(JSON.stringify(res.body)).not.toContain('Expected:');
     // Cancel the retake so the visitor history stays tidy.
     const cancel = await supertest(app).post(`/api/placement/visitors/${visitorId}/placement/attempts/${attempt2}/cancel`).set(authHeader(owner)).send({ reason: 'retake test finished' });
     expect(cancel.status).toBe(200);

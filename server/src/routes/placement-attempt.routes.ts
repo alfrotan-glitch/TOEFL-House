@@ -5,7 +5,7 @@
  */
 import { Router } from 'express';
 import { db } from '../db/connection.js';
-import { authorize, requirePermission, canAccessBranchResource } from '../middleware/auth.js';
+import { authorize, requirePermission, canAccessBranchResource, resolveBranchScope } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
@@ -568,18 +568,28 @@ placementAttemptRouter.post('/maintenance/expire', authorize('owner', 'manager')
   const user = getUserContext(req);
   const now = nowIso();
   let expiredCount = 0;
+  // Branch scope is mandatory for this sweep. It used to run unfiltered, so a
+  // manager at ANY branch expired live attempts across every other branch —
+  // the only cross-branch mutation in the subsystem (certification finding
+  // C-3). `resolveBranchScope` is the established convention: it silently
+  // re-scopes a foreign ?branchId= to the caller's own branch, and only grants
+  // isAll to a role that genuinely holds all-branch access.
+  const scope = resolveBranchScope(req);
   db.transaction(() => {
     // Expire both in-progress AND paused attempts that are past their expiry
     // (pause freezes component timers; it does not exempt the attempt from its
     // overall deadline).
-    const due = db.prepare(`SELECT id, visitor_id FROM placement_assessment_attempts WHERE status IN ('in_progress','paused') AND expires_at IS NOT NULL AND expires_at < ?`).all(now) as Array<{ id: string; visitor_id: string }>;
+    const due = (scope.isAll
+      ? db.prepare(`SELECT id, visitor_id FROM placement_assessment_attempts WHERE status IN ('in_progress','paused') AND expires_at IS NOT NULL AND expires_at < ?`).all(now)
+      : db.prepare(`SELECT id, visitor_id FROM placement_assessment_attempts WHERE status IN ('in_progress','paused') AND expires_at IS NOT NULL AND expires_at < ? AND branch_id = ?`).all(now, scope.branchId)
+    ) as Array<{ id: string; visitor_id: string }>;
     expiredCount = due.length;
     for (const a of due) {
       db.prepare(`UPDATE placement_assessment_attempts SET status='expired', completed_at=datetime('now'), updated_at=datetime('now') WHERE id=? AND status IN ('in_progress','paused')`).run(a.id);
       db.prepare(`UPDATE visitors SET placement_status='not_started', placement_status_at=datetime('now'), current_placement_attempt_id=NULL WHERE id=? AND current_placement_attempt_id=?`).run(a.visitor_id, a.id);
     }
   })();
-  writeAudit(req, `Placement expiry sweep: ${expiredCount} attempt(s) marked expired`, { newValue: JSON.stringify({ count: expiredCount, operatorId: user.userId }) });
+  writeAudit(req, `Placement expiry sweep: ${expiredCount} attempt(s) marked expired`, { newValue: JSON.stringify({ count: expiredCount, operatorId: user.userId, scope: scope.isAll ? 'all_branches' : scope.branchId }) });
   res.json({ ok: true, expired: expiredCount });
 }));
 

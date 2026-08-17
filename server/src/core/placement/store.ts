@@ -323,13 +323,20 @@ export function mapProfile(profile: any, version: any, levels: any[], rules: any
 }
 
 export function mapAttempt(attempt: any) {
+  // The raw column is destructured OUT here and never re-attached. Previously
+  // this function sanitised `snapshot` and then spread `...attempt` over the
+  // result, which re-added the untouched `snapshot_json` string — so every
+  // answer key shipped to the client anyway (certification finding C-4).
+  // `stmtAttempt` and `stmtCurrentAttempt` are `SELECT *`, so the raw column is
+  // present on most rows reaching this serializer.
+  const { snapshot_json: rawSnapshot, ...row } = attempt ?? {};
   const snapshot = (() => {
-    try { return JSON.parse(attempt.snapshot_json || '{}') as Record<string, unknown>; }
+    try { return JSON.parse(rawSnapshot || '{}') as Record<string, unknown>; }
     catch { return {}; }
   })();
   // Answer keys never leave the server through the read views: strip them from
   // the attempt snapshot before it reaches the client (auto-scoring reads the
-  // raw snapshot_json internally, so stripping here is safe).
+  // raw snapshot_json from the database internally, so stripping here is safe).
   if (Array.isArray((snapshot as any).tests)) {
     (snapshot as any).tests = ((snapshot as any).tests as any[]).map((t: any) => ({
       ...t,
@@ -339,7 +346,7 @@ export function mapAttempt(attempt: any) {
       }),
     }));
   }
-  return { ...attempt, snapshot, results: stmtResults.all(attempt.id) };
+  return { ...row, snapshot, results: stmtResults.all(attempt.id) };
 }
 
 export function getProgramAssessment(visitor: any) {

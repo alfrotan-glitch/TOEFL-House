@@ -23,6 +23,7 @@ import { getJourneyEngine } from '../core/journey/journey-engine.js';
 import { getEnrollmentService } from '../core/academic/enrollment-service.js';
 import { countActiveStudentsInClass } from '../core/academic/class-capacity.js';
 import { assertClassGenderAllowsStudent } from './classes.routes.js';
+import { assertPlacementEligibleForClass } from '../core/placement/enrollment-gate.js';
 import { JourneyEventType } from '../core/journey/event-types.js';
 import { SYSTEM_DEFAULTS } from '../core/configuration/policy-catalog.js';
 import { resolveIdempotency, isUniqueViolation } from '../utils/idempotency.js';
@@ -584,6 +585,12 @@ studentsRouter.post('/:id/enroll-class', requirePermission('Class.Assign', 'Stud
   if (stmtCheckActiveEnrollment.get(student.id, classId)) throw new HttpError(409, 'Already enrolled in this class.');
   
   assertClassGenderAllowsStudent(classId, student.gender);
+  // Extra-class enrollment writes the enrollment row directly rather than going
+  // through EnrollmentService.enroll(), so it applies the same placement
+  // invariant explicitly — otherwise it remains a bypass of the gate installed
+  // for certification finding C-1. Same shared domain rule, no second
+  // implementation of it.
+  assertPlacementEligibleForClass(db, student.id, classId, student.branch_id);
 
   // Check Academic Hold
   checkAcademicHold(req, student.id);
