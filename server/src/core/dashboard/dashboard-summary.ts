@@ -31,6 +31,7 @@
 import type BetterSqlite3 from 'better-sqlite3';
 import { today } from '../../utils/ids.js';
 import { LEAD_CLOSED_SQL, LEAD_CONVERTED_SQL, LEAD_OPEN_SQL } from '../visitors/lead-lifecycle.js';
+import { OPERATING_EXPENSE_SQL, OPERATING_INCOME_SQL } from '../finance/ledger-classification.js';
 import {
   periodBoundaries,
   addDays,
@@ -164,9 +165,17 @@ export function buildDashboardSummary(
 
   const rows = db
     .prepare(
+      // OPERATING activity only. This previously summed every income/expense
+      // row, so an owner capital injection appeared as revenue and an owner
+      // drawing as cost. Live proof before the fix: a day with a 100,000
+      // capital injection and a 50,000 drawing rendered as
+      // income 100,000 / expense 50,000 here while /finance/pnl and
+      // /reports/overview both reported 0 / 0 for the same day and branch.
+      // Equity movements are real and are reported by those surfaces under
+      // `transfers`; they are simply not trading results.
       `SELECT date,
-              COALESCE(SUM(CASE WHEN type = 'income'  THEN amount END), 0) AS income,
-              COALESCE(SUM(CASE WHEN type = 'expense' THEN amount END), 0) AS expense
+              COALESCE(SUM(CASE WHEN ${OPERATING_INCOME_SQL}  THEN amount END), 0) AS income,
+              COALESCE(SUM(CASE WHEN ${OPERATING_EXPENSE_SQL} THEN amount END), 0) AS expense
          FROM financial_transactions
         WHERE date >= ? AND date <= ?${s.sql}
         GROUP BY date`

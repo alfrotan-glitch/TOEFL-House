@@ -16,6 +16,7 @@
  */
 import { Router } from 'express';
 import { LEAD_CONVERTED_SQL } from '../core/visitors/lead-lifecycle.js';
+import { OPERATING_EXPENSE_SQL, OPERATING_INCOME_SQL } from '../core/finance/ledger-classification.js';
 import { db } from '../db/connection.js';
 import { authenticate, requirePermission, resolveBranchScope } from '../middleware/auth.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
@@ -374,12 +375,12 @@ reportsRouter.get(
     const prevToIso = prevTo.toISOString().slice(0, 10);
     const prevTotals = (isAll
       ? db.prepare(`SELECT
-          COALESCE(SUM(CASE WHEN type='income' AND category != 'capital_injection' THEN amount ELSE 0 END),0) AS income,
-          COALESCE(SUM(CASE WHEN type='expense' AND category != 'profit_distribution' THEN amount ELSE 0 END),0) AS expense
+          COALESCE(SUM(CASE WHEN ${OPERATING_INCOME_SQL} THEN amount ELSE 0 END),0) AS income,
+          COALESCE(SUM(CASE WHEN ${OPERATING_EXPENSE_SQL} THEN amount ELSE 0 END),0) AS expense
         FROM financial_transactions WHERE date >= ? AND date <= ?`).get(prevFromIso, prevToIso)
       : db.prepare(`SELECT
-          COALESCE(SUM(CASE WHEN type='income' AND category != 'capital_injection' THEN amount ELSE 0 END),0) AS income,
-          COALESCE(SUM(CASE WHEN type='expense' AND category != 'profit_distribution' THEN amount ELSE 0 END),0) AS expense
+          COALESCE(SUM(CASE WHEN ${OPERATING_INCOME_SQL} THEN amount ELSE 0 END),0) AS income,
+          COALESCE(SUM(CASE WHEN ${OPERATING_EXPENSE_SQL} THEN amount ELSE 0 END),0) AS expense
         FROM financial_transactions WHERE branch_id = ? AND date >= ? AND date <= ?`).get(branchId, prevFromIso, prevToIso)) as { income: number; expense: number };
     const previous = {
       from: prevFromIso,

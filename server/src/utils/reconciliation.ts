@@ -9,6 +9,7 @@
  * better-sqlite3 — this used to break the owner (branchId=all) path.
  */
 import { db } from '../db/connection.js';
+import { OPERATING_INCOME_SQL } from '../core/finance/ledger-classification.js';
 
 export interface ReconciliationResult {
   scope: 'organization' | 'branch';
@@ -116,7 +117,7 @@ export function computeReconciliation(opts: { branchId: string | null; isAll: bo
   // Hence, per branch:
   //     main_balance   = SUM(operating income) - SUM(saving_transfer)
   //     saving_balance = SUM(saving_transfer)
-  const operatingIncomeSql = `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type='income' AND category <> 'capital_injection'`;
+  const operatingIncomeSql = `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE ${OPERATING_INCOME_SQL}`;
   const savingSql = `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type='saving_transfer'`;
   const operatingIncome = scalarValue(operatingIncomeSql, 'AND branch_id = ?', boundBranchId);
   const expectedSaving = scalarValue(savingSql, 'AND branch_id = ?', boundBranchId);

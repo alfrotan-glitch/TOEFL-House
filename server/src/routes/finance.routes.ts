@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { CAPITAL_INJECTION_CATEGORY, PROFIT_DISTRIBUTION_CATEGORY, isOperatingExpense, isOperatingIncome } from '../core/finance/ledger-classification.js';
 import { db } from '../db/connection.js';
 import { assertTextLengths, TEXT_LIMITS } from '../utils/textInput.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource, hasLegacyRole } from '../middleware/auth.js';
@@ -827,10 +828,13 @@ financeRouter.get(
     let savingTransferred = 0;
 
     for (const row of finalByCategory) {
-      if (row.type === 'income' && row.category === 'capital_injection') capitalInjection += row.total;
-      else if (row.type === 'income') income += row.total;
-      else if (row.type === 'expense' && row.category === 'profit_distribution') profitDistribution += row.total;
-      else if (row.type === 'expense') expense += row.total;
+      // Same classification authority as the Dashboard, Reports and
+      // reconciliation use, so a change to the rule cannot land in three
+      // places and miss the fourth.
+      if (row.type === 'income' && row.category === CAPITAL_INJECTION_CATEGORY) capitalInjection += row.total;
+      else if (isOperatingIncome(row)) income += row.total;
+      else if (row.type === 'expense' && row.category === PROFIT_DISTRIBUTION_CATEGORY) profitDistribution += row.total;
+      else if (isOperatingExpense(row)) expense += row.total;
       else if (row.type === 'budget_charge') budgetCharged += row.total;
       else if (row.type === 'saving_transfer') savingTransferred += row.total;
     }
