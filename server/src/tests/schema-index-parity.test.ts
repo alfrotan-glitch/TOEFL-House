@@ -30,7 +30,17 @@ import { runMigrations } from '../db/migrate.js';
 
 const dbDir = path.resolve(fileURLToPath(new URL('.', import.meta.url)), '..', 'db');
 
-/** Build a database exactly the way a brand-new install does: schema then migrations. */
+/**
+ * Build a database exactly the way a brand-new install does: schema then
+ * migrations.
+ *
+ * The database lives in a temp directory, never in the source tree:
+ * `runMigrations` writes a `backups/pre-migration-*.sqlite` snapshot beside
+ * whatever file it is migrating, and its NODE_ENV=test escape hatch only
+ * applies when the env var is set. A run that skipped setup.ts once dropped a
+ * 2 MB snapshot into `src/tests/backups/`, which then got committed and
+ * tripped the release gate's "no build output or secrets tracked" check.
+ */
 function buildFreshDatabase(): Database.Database {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'parity-')), 'fresh.sqlite');
   const db = new Database(file);
@@ -88,5 +98,16 @@ describe('schema.sql and the migration chain agree', () => {
     expect(db.pragma('foreign_key_check')).toEqual([]);
     expect((db.pragma('integrity_check') as Array<{ integrity_check: string }>)[0].integrity_check).toBe('ok');
     db.close();
+  });
+});
+
+describe('tests never write migration snapshots into the source tree', () => {
+  it('no backups directory exists under src/tests', () => {
+    // runMigrations() drops a pre-migration snapshot next to the database it
+    // migrates. One escaped into src/tests/backups/, got committed, and the
+    // release gate blocked on it. Every test that calls runMigrations must
+    // target a temp path.
+    const strayBackups = path.join(path.resolve(fileURLToPath(new URL('.', import.meta.url))), 'backups');
+    expect(fs.existsSync(strayBackups)).toBe(false);
   });
 });

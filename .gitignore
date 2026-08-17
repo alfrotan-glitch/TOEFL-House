@@ -13,4 +13,10 @@ server/BOOTSTRAP_CREDENTIALS.txt
 
 # Test/runtime databases
 server/src/tests/test.sqlite*
+# Pre-migration snapshots. runMigrations() writes these next to the database
+# it is migrating; a test that calls it directly (bypassing the NODE_ENV=test
+# guard in setup.ts) would otherwise drop a multi-MB .sqlite into the source
+# tree and get it committed. release:validate treats that as a blocker.
+server/src/tests/backups/
+server/data/backups/
 server/data/
