@@ -106,9 +106,15 @@ function seedClasses() {
   seedClass(CLASS_FULL, 'Full Class', BRANCH_A, 1, 'mixed', 4000);
 }
 
+let directSerialCounter = 900000;
+
 function createVisitorDirect(overrides: Record<string, any> = {}): string {
   const visitorId = id('v');
-  const serialNo = `V-${Date.now()}`;
+  // `V-${Date.now()}` collides whenever two fixtures are built inside the same
+  // millisecond, which the new uq_visitors_serial_no constraint (migration 072,
+  // audit V-3) now rejects outright. A monotonic counter keeps fixtures unique
+  // without weakening the constraint the test suite exists to protect.
+  const serialNo = overrides.serial_no ?? `V-T${++directSerialCounter}`;
   const programVersionId = overrides.program_version_id ?? null;
   db.prepare(
     `INSERT INTO visitors (id, serial_no, full_name, phone, email, gender, source, campaign_id, stage, assigned_to,
@@ -849,7 +855,7 @@ describe('Visitor Module', () => {
       const res = await supertest(app)
         .post(`/api/visitors/${vid}/advance-stage`)
         .set(authHeader(registrarA))
-        .send({});
+        .send({ fromStage: 'lead' });
 
       expect(res.status).toBe(200);
       expect(res.body.from).toBe('lead');
@@ -861,14 +867,18 @@ describe('Visitor Module', () => {
       const vid = createVisitorDirect({ stage: 'lead', branch_id: BRANCH_A });
       const flow = ['inquiry', 'follow_up', 'placement_booking', 'placement_fee', 'placement_completed'];
 
+      // Sequential advancement still works; each step states the stage it is
+      // leaving, which is what makes CONCURRENT chaining impossible (V-7).
+      let currentStage = 'lead';
       for (const expectedStage of flow) {
         const res = await supertest(app)
           .post(`/api/visitors/${vid}/advance-stage`)
           .set(authHeader(registrarA))
-          .send({});
+          .send({ fromStage: currentStage });
 
         expect(res.status).toBe(200);
         expect(res.body.to).toBe(expectedStage);
+        currentStage = expectedStage;
       }
 
       expect(getVisitor(vid).stage).toBe('placement_completed');
@@ -880,7 +890,7 @@ describe('Visitor Module', () => {
       const res = await supertest(app)
         .post(`/api/visitors/${vid}/advance-stage`)
         .set(authHeader(registrarA))
-        .send({ stage: 'placement_completed' });
+        .send({ stage: 'placement_completed', fromStage: 'lead' });
 
       expect(res.status).toBe(400);
       expect(res.body.error).toContain('Invalid transition');
@@ -893,7 +903,7 @@ describe('Visitor Module', () => {
       const res = await supertest(app)
         .post(`/api/visitors/${vid}/advance-stage`)
         .set(authHeader(registrarA))
-        .send({ stage: 'invalid_stage' });
+        .send({ stage: 'invalid_stage', fromStage: 'lead' });
 
       expect(res.status).toBe(400);
       expect(res.body.error).toContain('Invalid visitor stage');
@@ -905,7 +915,7 @@ describe('Visitor Module', () => {
       const res = await supertest(app)
         .post(`/api/visitors/${vid}/advance-stage`)
         .set(authHeader(registrarA))
-        .send({});
+        .send({ fromStage: 'lost' });
 
       expect(res.status).toBe(400);
       expect(res.body.error).toContain('Cannot auto-advance');
@@ -917,7 +927,7 @@ describe('Visitor Module', () => {
       const res = await supertest(app)
         .post(`/api/visitors/${vid}/advance-stage`)
         .set(authHeader(registrarA))
-        .send({});
+        .send({ fromStage: 'alumni' });
 
       expect(res.status).toBe(200);
       expect(res.body.to).toBe('lost');
@@ -931,7 +941,7 @@ describe('Visitor Module', () => {
       const res = await supertest(app)
         .post(`/api/visitors/${vid}/advance-stage`)
         .set(authHeader(registrarA))
-        .send({ stage: 'lead' });
+        .send({ stage: 'lead', fromStage: 'enrollment' });
 
       // The API currently allows explicit jumps to any valid stage
       // This test documents the current behavior
@@ -1064,7 +1074,7 @@ describe('Visitor Module', () => {
       const res = await supertest(app)
         .post(`/api/visitors/${vid}/advance-stage`)
         .set(authHeader(registrarA))
-        .send({});
+        .send({ fromStage: 'lead' });
 
       expect(res.status).toBe(200);
       expect(getVisitor(vid).stage).toBe('inquiry');
@@ -1548,12 +1558,14 @@ describe('Visitor Module', () => {
       ];
       const vid = createVisitorDirect({ stage: 'lead', branch_id: BRANCH_A });
 
+      let priorStage = 'lead';
       for (const stage of validStages) {
         const res = await supertest(app)
           .post(`/api/visitors/${vid}/advance-stage`)
           .set(authHeader(registrarA))
-          .send({ stage });
+          .send({ stage, fromStage: priorStage });
         expect(res.status).toBe(200);
+        priorStage = stage;
       }
 
       expect(getVisitor(vid).stage).toBe('alumni');
@@ -1808,27 +1820,32 @@ describe('Visitor Module', () => {
     it('should handle concurrent stage updates without data corruption', async () => {
       const vid = createVisitorDirect({ stage: 'lead', branch_id: BRANCH_A });
 
-      // Multiple concurrent stage advances — only one should succeed per advance
+      // CORRECTED (audit V-7). This test previously asserted that BOTH
+      // concurrent advances succeed and the lead ends two stages further on,
+      // which encoded the defect as intended behaviour: it is why deleting the
+      // compare-and-swap guard did not fail any test. Ten parallel requests
+      // walked a lead from 'lead' to 'enrollment' — through placement_booking,
+      // placement_fee and placement_completed — from one user action.
+      //
+      // Both requests now declare the stage they are leaving, so exactly one
+      // may win and the other is told to reload.
       const promises = [
         supertest(app)
           .post(`/api/visitors/${vid}/advance-stage`)
           .set(authHeader(registrarA))
-          .send({}),
+          .send({ fromStage: 'lead' }),
         supertest(app)
           .post(`/api/visitors/${vid}/advance-stage`)
           .set(authHeader(registrarA))
-          .send({}),
+          .send({ fromStage: 'lead' }),
       ];
 
       const results = await Promise.all(promises);
-      // Both should succeed (the second will advance from inquiry to follow_up)
-      for (const res of results) {
-        expect(res.status).toBe(200);
-      }
+      expect(results.filter((r) => r.status === 200)).toHaveLength(1);
+      expect(results.filter((r) => r.status === 409)).toHaveLength(1);
 
-      // Final stage should be follow_up (advanced twice from lead)
-      const visitor = getVisitor(vid);
-      expect(visitor.stage).toBe('follow_up');
+      // One deliberate action, one transition.
+      expect(getVisitor(vid).stage).toBe('inquiry');
     });
 
     it('should prevent concurrent duplicate conversions', async () => {

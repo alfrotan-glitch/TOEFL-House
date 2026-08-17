@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { authenticate, requirePermission, resolveBranchScope } from '../middleware/auth.js';
+import { hasPermission, isGlobalOwner } from '../core/rbac/rbac-service.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 
 export const searchRouter = Router();
@@ -22,6 +23,22 @@ searchRouter.get('/', requirePermission('Student.View', 'Lead.View', 'Teacher.Vi
   if (raw.length > 80) throw new HttpError(400, 'Search query is too long.');
 
   const { branchId } = resolveBranchScope(req);
+
+  // AUTHORIZATION (audit V-5).
+  //
+  // The route guard is an OR across six permissions, which is correct for
+  // reaching the endpoint but was silently treated as authorization for all six
+  // ENTITY TYPES. A teacher holding only Class.View received lead records —
+  // name, serial and stage — from an endpoint whose own /api/visitors list
+  // correctly returns 403, and could confirm whether any phone number belonged
+  // to a lead. Each category is now gated on its own permission.
+  const may = (code: string) => Boolean(req.rbac && (isGlobalOwner(req.rbac) || hasPermission(req.rbac, code)));
+  const mayStudents = may('Student.View');
+  const mayLeads = may('Lead.View');
+  const mayTeachers = may('Teacher.View');
+  const mayClasses = may('Class.View');
+  const mayInvoices = may('Invoice.View');
+  const mayBooks = may('Book.View');
   const q = like(raw);
   const limit = 8;
   const results: Array<{ id: string; entity: string; title: string; subtitle: string; tab: string; meta?: string }> = [];
@@ -33,34 +50,34 @@ searchRouter.get('/', requirePermission('Student.View', 'Lead.View', 'Teacher.Vi
     }
   };
 
-  const students = branchId
+  const students = !mayStudents ? [] : branchId
     ? db.prepare(`SELECT id, full_name AS title, COALESCE(student_code,'') AS subtitle, branch_id FROM students WHERE branch_id = ? AND (full_name LIKE ? ESCAPE '\\' OR student_code LIKE ? ESCAPE '\\' OR phone LIKE ? ESCAPE '\\') ORDER BY created_at DESC LIMIT ?`).all(branchId, q, q, q, limit)
     : db.prepare(`SELECT id, full_name AS title, COALESCE(student_code,'') AS subtitle, branch_id FROM students WHERE (full_name LIKE ? ESCAPE '\\' OR student_code LIKE ? ESCAPE '\\' OR phone LIKE ? ESCAPE '\\') ORDER BY created_at DESC LIMIT ?`).all(q, q, q, limit);
   push((students as any[]).map(r => ({ id: r.id, title: r.title, subtitle: r.subtitle, tab: 'students', meta: r.branch_id })), 'Student');
 
-  const visitors = branchId
+  const visitors = !mayLeads ? [] : branchId
     ? db.prepare(`SELECT id, full_name AS title, COALESCE(serial_no,'') AS subtitle, stage FROM visitors WHERE branch_id = ? AND (full_name LIKE ? ESCAPE '\\' OR serial_no LIKE ? ESCAPE '\\' OR phone LIKE ? ESCAPE '\\') ORDER BY created_at DESC LIMIT ?`).all(branchId, q, q, q, limit)
     : db.prepare(`SELECT id, full_name AS title, COALESCE(serial_no,'') AS subtitle, stage FROM visitors WHERE full_name LIKE ? ESCAPE '\\' OR serial_no LIKE ? ESCAPE '\\' OR phone LIKE ? ESCAPE '\\' ORDER BY created_at DESC LIMIT ?`).all(q, q, q, limit);
   push((visitors as any[]).map(r => ({ id: r.id, title: r.title, subtitle: r.subtitle, tab: 'visitors', meta: r.stage })), 'Visitor');
 
-  const teachers = branchId
+  const teachers = !mayTeachers ? [] : branchId
     ? db.prepare(`SELECT id, full_name AS title, COALESCE(phone,'') AS subtitle FROM teachers WHERE branch_id = ? AND (full_name LIKE ? ESCAPE '\\' OR phone LIKE ? ESCAPE '\\' OR specialization LIKE ? ESCAPE '\\') ORDER BY full_name LIMIT ?`).all(branchId, q, q, q, limit)
     : db.prepare(`SELECT id, full_name AS title, COALESCE(phone,'') AS subtitle FROM teachers WHERE full_name LIKE ? ESCAPE '\\' OR phone LIKE ? ESCAPE '\\' OR specialization LIKE ? ESCAPE '\\' ORDER BY full_name LIMIT ?`).all(q, q, q, limit);
   push((teachers as any[]).map(r => ({ id: r.id, title: r.title, subtitle: r.subtitle, tab: 'teachers' })), 'Teacher');
 
   // classes has no `code` column (schema.sql defines only name/level/status);
   // search by name and show the level as the subtitle.
-  const classes = branchId
+  const classes = !mayClasses ? [] : branchId
     ? db.prepare(`SELECT id, name AS title, COALESCE(level,'') AS subtitle, status FROM classes WHERE branch_id = ? AND name LIKE ? ESCAPE '\\' ORDER BY start_date DESC LIMIT ?`).all(branchId, q, limit)
     : db.prepare(`SELECT id, name AS title, COALESCE(level,'') AS subtitle, status FROM classes WHERE name LIKE ? ESCAPE '\\' ORDER BY start_date DESC LIMIT ?`).all(q, limit);
   push((classes as any[]).map(r => ({ id: r.id, title: r.title, subtitle: r.subtitle, tab: 'classes', meta: r.status })), 'Class');
 
-  const invoices = branchId
+  const invoices = !mayInvoices ? [] : branchId
     ? db.prepare(`SELECT id, invoice_number AS title, COALESCE(student_name,'') AS subtitle, status FROM invoices WHERE branch_id = ? AND (invoice_number LIKE ? ESCAPE '\\' OR student_name LIKE ? ESCAPE '\\') ORDER BY issue_date DESC LIMIT ?`).all(branchId, q, q, limit)
     : db.prepare(`SELECT id, invoice_number AS title, COALESCE(student_name,'') AS subtitle, status FROM invoices WHERE invoice_number LIKE ? ESCAPE '\\' OR student_name LIKE ? ESCAPE '\\' ORDER BY issue_date DESC LIMIT ?`).all(q, q, limit);
   push((invoices as any[]).map(r => ({ id: r.id, title: r.title, subtitle: r.subtitle, tab: 'finance', meta: r.status })), 'Invoice');
 
-  const books = branchId
+  const books = !mayBooks ? [] : branchId
     ? db.prepare(`SELECT id, title, title AS subtitle, stock, branch_id FROM books WHERE branch_id = ? AND title LIKE ? ESCAPE '\\' ORDER BY title LIMIT ?`).all(branchId, q, limit)
     : db.prepare(`SELECT id, title, title AS subtitle, stock FROM books WHERE title LIKE ? ESCAPE '\\' ORDER BY title LIMIT ?`).all(q, limit);
   push((books as any[]).map(r => ({ id: r.id, title: r.title, subtitle: r.subtitle, tab: 'books', meta: `${r.stock ?? 0} in stock` })), 'Book');

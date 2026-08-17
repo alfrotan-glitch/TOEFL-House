@@ -5,18 +5,17 @@
 import { assertMoney } from '../utils/money.js';
 import { Router } from 'express';
 import { db } from '../db/connection.js';
-import { assertTextLengths, TEXT_LIMITS } from '../utils/textInput.js';
+import { TEXT_LIMITS, optionalText, requiredText } from '../utils/textInput.js';
 import { parsePagination as parsePaginationShared } from '../utils/pagination.js';
 import { authenticate, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
 import { resolvePlacementRequirement } from '../core/placement/policy-engine.js';
-import { evaluateConversionEligibility } from '../core/placement/placement-policy.js';
-import { stmtLatestCompletedAttempt } from '../core/placement/store.js';
+import { resolveGoverningProgramVersionId } from '../core/placement/enrollment-gate.js';
 import { addNotification } from '../utils/notifications.js';
 import { recordIncome } from '../utils/income.js';
-import { getNumberSetting } from '../utils/settings.js';
+import { getNumberSetting, incrementNumberSetting } from '../utils/settings.js';
 import { evaluateRules } from '../core/configuration/rule-engine.js';
 import { resolveFee } from '../core/configuration/policy-resolver.js';
 import { assertClassGenderAllowsStudent } from './classes.routes.js';
@@ -33,6 +32,9 @@ visitorsRouter.use(authenticate);
 
 // ── Performance Optimization: Prepared Statements ──────────────────────────
 const stmtGetVisitorById = db.prepare('SELECT * FROM visitors WHERE id = ?');
+const stmtFindVisitorByTazkira = db.prepare("SELECT id FROM visitors WHERE tazkira_no = ? LIMIT 1");
+const stmtFindVisitorByTazkiraExcluding = db.prepare("SELECT id FROM visitors WHERE tazkira_no = ? AND id <> ? LIMIT 1");
+const stmtFindStudentByTazkiraNo = db.prepare("SELECT id FROM students WHERE tazkira_no = ? LIMIT 1");
 const stmtGetProgramVersionForVisitor = db.prepare(`SELECT pv.id, pv.program_id, pv.status, p.name AS program_name, p.branch_id FROM program_versions pv JOIN programs p ON p.id = pv.program_id WHERE pv.id = ?`);
 const stmtGetAllVisitors = db.prepare('SELECT * FROM visitors ORDER BY visit_date DESC LIMIT ? OFFSET ?');
 const stmtGetVisitorsByBranch = db.prepare('SELECT * FROM visitors WHERE branch_id = ? ORDER BY visit_date DESC LIMIT ? OFFSET ?');
@@ -43,7 +45,6 @@ const stmtGetFollowupsBatch = db.prepare(
   `SELECT * FROM visitor_followups WHERE visitor_id IN (SELECT value FROM json_each(?)) ORDER BY date DESC`
 );
 
-const stmtGetMaxVisitorSerial = db.prepare("SELECT serial_no FROM visitors WHERE serial_no LIKE 'V-%' ORDER BY CAST(SUBSTR(serial_no, 3) AS INTEGER) DESC LIMIT 1");
 const stmtInsertVisitor = db.prepare(
   `INSERT INTO visitors (id, serial_no, full_name, phone, email, gender, source, campaign_id, stage, assigned_to, visit_date, status, notes, branch_id, interested_course, follow_up_status, next_contact_date, father_name, address_region, tazkira_no, whatsapp, dob, school_or_university, emergency_contact_name, emergency_contact_phone, program_version_id, placement_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'visited', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'not_started')`
 );
@@ -55,6 +56,7 @@ const stmtUpdateVisitorPlacement = db.prepare("UPDATE visitors SET placement_sco
 const stmtUpdateVisitorCRM = db.prepare(`UPDATE visitors SET interested_course=?, follow_up_status=?, next_contact_date=?, stage=?, notes=COALESCE(?, notes) WHERE id=?`);
 const stmtUpdateVisitorStage = db.prepare('UPDATE visitors SET stage = ? WHERE id = ? AND stage = ?');
 const stmtGetPlacementProfile = db.prepare(`SELECT pap.*, pv.program_id, p.name AS program_name FROM placement_assessment_profiles pap JOIN program_versions pv ON pv.id = pap.program_version_id JOIN programs p ON p.id = pv.program_id WHERE pap.program_version_id = ? AND (pap.branch_id = ? OR pap.branch_id IS NULL) AND pap.enabled = 1 ORDER BY pap.branch_id IS NOT NULL DESC LIMIT 1`);
+const stmtGetLevelProgramVersion = db.prepare('SELECT program_version_id FROM levels WHERE id = ?');
 const stmtGetProgramVersionById = db.prepare(`SELECT pv.*, p.branch_id, p.name AS program_name FROM program_versions pv JOIN programs p ON p.id = pv.program_id WHERE pv.id = ?`);
 
 // Pipeline aggregation statements
@@ -84,6 +86,122 @@ const VISITOR_TRANSITIONS: Record<string, string> = Object.fromEntries(VISITOR_F
 
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 100;
+
+// ============================================================================
+// SHARED FIELD AUTHORITY (audit V-2, V-4)
+// ============================================================================
+/**
+ * The bounded text fields of a visitor, with their ceilings. CREATE and PATCH
+ * both drive off this one table, because the audit found them diverging:
+ * CREATE rejected a 100,000-character name with 400 while PATCH stored it in
+ * full, along with unbounded notes, tazkira, email and every other free-text
+ * field. Validation written inline per handler is validation that drifts.
+ */
+const VISITOR_TEXT_FIELDS: ReadonlyArray<readonly [string, string, number]> = [
+  ['fullName', 'Full name', TEXT_LIMITS.name],
+  ['fatherName', "Father's name", TEXT_LIMITS.name],
+  ['phone', 'Phone', TEXT_LIMITS.short],
+  ['whatsapp', 'WhatsApp', TEXT_LIMITS.short],
+  ['tazkiraNo', 'Tazkira number', TEXT_LIMITS.short],
+  ['email', 'Email', TEXT_LIMITS.email],
+  ['addressRegion', 'Address', TEXT_LIMITS.line],
+  ['schoolOrUniversity', 'School or university', TEXT_LIMITS.line],
+  ['emergencyContactName', 'Emergency contact name', TEXT_LIMITS.name],
+  ['emergencyContactPhone', 'Emergency contact phone', TEXT_LIMITS.short],
+  ['interestedCourse', 'Interested course', TEXT_LIMITS.line],
+  ['notes', 'Notes', TEXT_LIMITS.notes],
+] as const;
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Validate an optional calendar date. A malformed value used to be stored
+ * verbatim ("9999-99-99", "not-a-date"), which then silently loses every
+ * subsequent date comparison it takes part in.
+ */
+function assertOptionalIsoDate(value: unknown, field: string): string | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string' || !ISO_DATE_RE.test(value.trim())) {
+    throw new HttpError(400, `${field} must be a valid date in YYYY-MM-DD format.`);
+  }
+  const iso = value.trim();
+  const [y, m, d] = iso.split('-').map(Number);
+  const probe = new Date(Date.UTC(y, m - 1, d));
+  if (probe.getUTCFullYear() !== y || probe.getUTCMonth() !== m - 1 || probe.getUTCDate() !== d) {
+    throw new HttpError(400, `${field} is not a real calendar date.`);
+  }
+  return iso;
+}
+
+/**
+ * Type-check, trim and bound every supplied text field, returning only the keys
+ * actually present in the payload. `optionalText` throws 400 on a non-string,
+ * so `phone: ["injected"]` can no longer be coerced into the string "injected".
+ */
+function normalizeVisitorText(body: Record<string, unknown>): Record<string, string | null> {
+  const out: Record<string, string | null> = {};
+  for (const [key, label, max] of VISITOR_TEXT_FIELDS) {
+    if (!(key in body)) continue;
+    if (key === 'fullName') {
+      out[key] = requiredText(body[key], label, max);
+    } else {
+      out[key] = optionalText(body[key], label, max);
+    }
+  }
+  return out;
+}
+
+/**
+ * National ID uniqueness — the institutional policy, matching students.
+ *
+ * `uq_students_tazkira_no` has long been GLOBAL (not per-branch) and excludes
+ * NULL/empty. A person is the same person in either table, so visitors adopt
+ * the identical rule. The database enforces it (migration 072); this check
+ * exists to return a clear 409 instead of a raw constraint error, exactly as
+ * students.routes.ts already does.
+ */
+function assertTazkiraAvailable(tazkira: string | null, excludeVisitorId?: string): void {
+  if (!tazkira) return;
+  const clash = excludeVisitorId
+    ? stmtFindVisitorByTazkiraExcluding.get(tazkira, excludeVisitorId)
+    : stmtFindVisitorByTazkira.get(tazkira);
+  if (clash) throw new HttpError(409, 'A visitor with this Tazkira/ID number already exists.');
+  const asStudent = stmtFindStudentByTazkiraNo.get(tazkira);
+  if (asStudent) throw new HttpError(409, 'A student with this Tazkira/ID number already exists.');
+}
+
+/**
+ * Build a compact, non-sensitive audit diff (audit V-8).
+ *
+ * Records WHICH fields changed and their before/after values, so a change like
+ * detaching a placement-governed program is reconstructable. Free-text and
+ * contact fields are reported as a redacted marker with their length rather
+ * than their content: the forensic question is "what changed", not "what is
+ * this person's phone number", and the audit log has a wider readership than
+ * the visitor record itself.
+ */
+const AUDIT_REDACTED_FIELDS = new Set([
+  'phone', 'whatsapp', 'email', 'tazkiraNo', 'addressRegion',
+  'emergencyContactName', 'emergencyContactPhone', 'notes', 'dob', 'fatherName',
+]);
+
+function summariseChange(field: string, value: unknown): string {
+  if (value === null || value === undefined || value === '') return '∅';
+  if (AUDIT_REDACTED_FIELDS.has(field)) return `«set:${String(value).length}»`;
+  return String(value).slice(0, 120);
+}
+
+function buildAuditDiff(
+  fields: ReadonlyArray<readonly [string, unknown, unknown]>
+): { oldValue: string; newValue: string; changed: string[] } | null {
+  const changed = fields.filter(([, before, after]) => String(before ?? '') !== String(after ?? ''));
+  if (changed.length === 0) return null;
+  return {
+    oldValue: changed.map(([f, before]) => `${f}=${summariseChange(f, before)}`).join('; '),
+    newValue: changed.map(([f, , after]) => `${f}=${summariseChange(f, after)}`).join('; '),
+    changed: changed.map(([f]) => f),
+  };
+}
 
 function assertVisitorSource(source: string): void {
   if (!VISITOR_SOURCES.has(source)) throw new HttpError(400, 'Invalid visitor source.');
@@ -204,25 +322,22 @@ visitorsRouter.get('/pipeline', requirePermission('Lead.View'), ah(async (req, r
 // ============================================================================ 
 visitorsRouter.post('/', requirePermission('Lead.Create'), ah(async (req, res) => {
   const user = getUserContext(req);
-  const { fullName, phone, email, gender, source, notes, interestedCourse, followUpStatus, nextContactDate, fatherName, addressRegion, tazkiraNo, whatsapp, dob, schoolOrUniversity, emergencyContactName, emergencyContactPhone, campaignId, stage, assignedTo, branchId, programVersionId } = req.body;
-  if (!fullName || !gender || !source) throw new HttpError(400, 'Full name, gender, and source are required.');
+  const { gender, source, campaignId, stage, assignedTo, branchId, programVersionId } = req.body;
+  if (!gender || !source) throw new HttpError(400, 'Full name, gender, and source are required.');
   assertVisitorGender(gender);
   assertVisitorSource(source);
-  // Bound free text (see utils/textInput.ts — S16).
-  assertTextLengths([
-    [fullName, 'Full name', TEXT_LIMITS.name],
-    [fatherName, "Father's name", TEXT_LIMITS.name],
-    [phone, 'Phone', TEXT_LIMITS.short],
-    [whatsapp, 'WhatsApp', TEXT_LIMITS.short],
-    [tazkiraNo, 'Tazkira number', TEXT_LIMITS.short],
-    [email, 'Email', TEXT_LIMITS.email],
-    [addressRegion, 'Address', TEXT_LIMITS.line],
-    [schoolOrUniversity, 'School or university', TEXT_LIMITS.line],
-    [emergencyContactName, 'Emergency contact name', TEXT_LIMITS.name],
-    [emergencyContactPhone, 'Emergency contact phone', TEXT_LIMITS.short],
-    [interestedCourse, 'Interested course', TEXT_LIMITS.line],
-    [notes, 'Notes', TEXT_LIMITS.notes],
-  ]);
+  // One normalization/validation authority, shared with PATCH (audit V-4).
+  // Type-checks, trims and bounds every text field; throws 400 on a non-string.
+  const text = normalizeVisitorText(req.body as Record<string, unknown>);
+  const fullName = requiredText(req.body?.fullName, 'Full name', TEXT_LIMITS.name);
+  const { phone = null, email = null, notes = null, interestedCourse = null, fatherName = null,
+          addressRegion = null, tazkiraNo = null, whatsapp = null, schoolOrUniversity = null,
+          emergencyContactName = null, emergencyContactPhone = null } = text;
+  const followUpStatus = req.body?.followUpStatus;
+  const nextContactDate = assertOptionalIsoDate(req.body?.nextContactDate, 'Next contact date');
+  const dob = assertOptionalIsoDate(req.body?.dob, 'Date of birth');
+  // National ID uniqueness — same policy as students (audit V-2).
+  assertTazkiraAvailable(tazkiraNo);
   const targetBranchId = branchId || user.branchId;
   assertBranchTargetAccess(req, targetBranchId, user.branchId);
   const targetStage = stage || 'lead';
@@ -253,12 +368,14 @@ visitorsRouter.post('/', requirePermission('Lead.Create'), ah(async (req, res) =
     if (campaign.status !== 'active') throw new HttpError(400, 'Campaign is not active.');
   }
   const newId = id('v');
-  let serialNo = 'V-1001';
+  // V-3: allocate from the same atomic counter that issues receipt and student
+  // codes (`INSERT … ON CONFLICT DO UPDATE … RETURNING`, one statement). The
+  // previous `SELECT MAX(serial)+1` was a read-then-write: two connections both
+  // read V-1031 and both inserts were accepted, because nothing in the schema
+  // said otherwise. `uq_visitors_serial_no` (migration 072) is the backstop.
+  const serialNo = `V-${incrementNumberSetting('visitor_serial_counter', 1, 1000)}`;
 
   const tx = db.transaction(() => {
-    const maxRow = stmtGetMaxVisitorSerial.get() as any;
-    const maxNum = maxRow ? parseInt(String(maxRow.serial_no).replace('V-', ''), 10) : 1000;
-    serialNo = `V-${maxNum + 1}`;
     stmtInsertVisitor.run(
       newId, serialNo, fullName, phone || null, email || null, gender, source, campaignId || null, targetStage, assignedTo || null,
       today(), notes || null, targetBranchId, interestedCourse || (selectedProgramVersionId ? (stmtGetProgramVersionById.get(selectedProgramVersionId) as any)?.program_name : null) || null, followUpStatus || 'medium_interest', nextContactDate || null,
@@ -283,6 +400,13 @@ visitorsRouter.patch('/:id', requirePermission('Lead.Edit'), ah(async (req, res)
   if (f.source !== undefined) assertVisitorSource(f.source);
   if (f.gender !== undefined) assertVisitorGender(f.gender);
   if (f.followUpStatus !== undefined) assertFollowUpStatus(f.followUpStatus);
+  // V-4: the SAME normalization authority CREATE uses. Previously PATCH
+  // validated enums but nothing else, so a 100,000-character name, a
+  // non-string phone and "9999-99-99" as a date were all accepted and stored.
+  const text = normalizeVisitorText(f as Record<string, unknown>);
+  if (f.nextContactDate !== undefined) assertOptionalIsoDate(f.nextContactDate, 'Next contact date');
+  if (f.dob !== undefined) assertOptionalIsoDate(f.dob, 'Date of birth');
+  if ('tazkiraNo' in text) assertTazkiraAvailable(text.tazkiraNo, existing.id);
   if (f.programVersionId !== undefined && f.programVersionId !== null) { const pv = stmtGetProgramVersionById.get(f.programVersionId) as any; if (!pv) throw new HttpError(404, 'Selected program version not found.'); if (pv.branch_id !== existing.branch_id) throw new HttpError(400, 'Selected program belongs to another branch.'); if (pv.status !== 'published') throw new HttpError(400, 'Selected program version is not published.'); }
   if (f.assignedTo) { const assignee = db.prepare('SELECT id, branch_id, status FROM users WHERE id = ?').get(f.assignedTo) as any; if (!assignee || assignee.status === 'inactive') throw new HttpError(400, 'Assigned user is not active.'); if (assignee.branch_id !== existing.branch_id && !canAccessBranchResource(req, assignee.branch_id)) throw new HttpError(403, 'Assigned user is outside the visitor branch scope.'); }
   if (f.campaignId) { const campaign = db.prepare('SELECT id, branch_id, status FROM campaigns WHERE id = ?').get(f.campaignId) as any; if (!campaign) throw new HttpError(400, 'Campaign not found.'); if (campaign.branch_id !== existing.branch_id) throw new HttpError(400, 'Campaign does not belong to the visitor branch.'); if (campaign.status !== 'active') throw new HttpError(400, 'Campaign is not active.'); }
@@ -292,7 +416,8 @@ visitorsRouter.patch('/:id', requirePermission('Lead.Edit'), ah(async (req, res)
       db.prepare(`UPDATE visitors SET placement_score=NULL, placement_method=NULL, placement_status='not_started', current_placement_attempt_id=NULL, stage=CASE WHEN stage IN ('placement_booking','placement_fee','placement_completed') THEN 'follow_up' ELSE stage END WHERE id=?`).run(existing.id);
     })();
   }
-  const merge = (k: string, c: string) => (f[k] !== undefined ? f[k] : existing[c]);
+  // Normalized values win over the raw body for every text field.
+  const merge = (k: string, c: string) => (k in text ? text[k] : f[k] !== undefined ? f[k] : existing[c]);
   
   stmtUpdateVisitor.run(
     merge('fullName', 'full_name'), merge('phone', 'phone'), merge('email', 'email'), merge('gender', 'gender'), merge('source', 'source'), 
@@ -302,7 +427,38 @@ visitorsRouter.patch('/:id', requirePermission('Lead.Edit'), ah(async (req, res)
     merge('dob', 'dob'), merge('schoolOrUniversity', 'school_or_university'), merge('emergencyContactName', 'emergency_contact_name'),
     merge('emergencyContactPhone', 'emergency_contact_phone'), f.programVersionId !== undefined ? f.programVersionId : existing.program_version_id, req.params.id
   );
-  writeAudit(req, `Updated visitor details: ${existing.full_name}`);
+  // V-8: record WHAT changed. The audit previously wrote
+  // `old_value=NULL, new_value=NULL`, so the V-1 exploit step — detaching a
+  // placement-governed program — was indistinguishable from any other edit.
+  // Contact/free-text values are redacted to a length marker: the forensic
+  // question is which field moved, not the lead's phone number.
+  const diff = buildAuditDiff([
+    ['fullName', existing.full_name, merge('fullName', 'full_name')],
+    ['phone', existing.phone, merge('phone', 'phone')],
+    ['email', existing.email, merge('email', 'email')],
+    ['gender', existing.gender, merge('gender', 'gender')],
+    ['source', existing.source, merge('source', 'source')],
+    ['campaignId', existing.campaign_id, merge('campaignId', 'campaign_id')],
+    ['assignedTo', existing.assigned_to, merge('assignedTo', 'assigned_to')],
+    ['notes', existing.notes, merge('notes', 'notes')],
+    ['interestedCourse', existing.interested_course, merge('interestedCourse', 'interested_course')],
+    ['followUpStatus', existing.follow_up_status, merge('followUpStatus', 'follow_up_status')],
+    ['nextContactDate', existing.next_contact_date, merge('nextContactDate', 'next_contact_date')],
+    ['fatherName', existing.father_name, merge('fatherName', 'father_name')],
+    ['addressRegion', existing.address_region, merge('addressRegion', 'address_region')],
+    ['tazkiraNo', existing.tazkira_no, merge('tazkiraNo', 'tazkira_no')],
+    ['whatsapp', existing.whatsapp, merge('whatsapp', 'whatsapp')],
+    ['dob', existing.dob, merge('dob', 'dob')],
+    ['schoolOrUniversity', existing.school_or_university, merge('schoolOrUniversity', 'school_or_university')],
+    ['emergencyContactName', existing.emergency_contact_name, merge('emergencyContactName', 'emergency_contact_name')],
+    ['emergencyContactPhone', existing.emergency_contact_phone, merge('emergencyContactPhone', 'emergency_contact_phone')],
+    ['programVersionId', existing.program_version_id, f.programVersionId !== undefined ? f.programVersionId : existing.program_version_id],
+  ]);
+  writeAudit(
+    req,
+    `Updated visitor details: ${existing.full_name}${diff ? ` [${diff.changed.join(', ')}]` : ' (no change)'}`,
+    diff ? { oldValue: diff.oldValue, newValue: diff.newValue } : undefined
+  );
   res.json({ ok: true });
 }));
 
@@ -354,6 +510,13 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
   
   // Idempotency check
   if (visitor.status === 'registered') throw new HttpError(409, 'This visitor has already been converted.');
+  // V-6: closure means the same thing at every endpoint. The stage workflow
+  // refuses `lost -> inquiry`, yet conversion used to rewrite the stage
+  // straight to 'enrollment', silently resurrecting a closed lead. Reopening
+  // is a deliberate, audited act — it must not be a side effect of converting.
+  if (visitor.stage === 'lost') {
+    throw new HttpError(409, 'This lead is closed (lost). Reopen it before converting.');
+  }
   if (stmtGetStudentByLeadId.get(visitor.id)) throw new HttpError(409, 'A student record already exists for this visitor.');
 
   const { classId, amountPaid, discountPercent, notes, semesterFee, branchId, programVersionId, levelId, paymentMethod } = req.body ?? {};
@@ -384,20 +547,32 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
     const pv = stmtGetProgramVersionById.get(effectiveProgramVersionId) as any;
     if (!pv) throw new HttpError(409, 'The visitor program version no longer exists.');
     if (pv.branch_id !== requestedStudentBranchId) throw new HttpError(400, 'Visitor program does not belong to the target branch.');
-    // Placement policy gate (configuration-driven: required / optional /
-    // not_required + first-level exemption). The visitor's target level comes
-    // from the selected class's level when available.
-    const requirement = resolvePlacementRequirement(effectiveProgramVersionId, requestedStudentBranchId, classItem.level_id || null);
-    db.prepare(`UPDATE visitors SET placement_requirement_mode=? WHERE id=?`).run(requirement.mode, visitor.id);
-    // INDEPENDENT ENFORCEMENT BOUNDARY. Conversion does not trust the visitor's
-    // status string or the denormalised placement_score JSON: it re-reads the
-    // authoritative `outcome` recorded on the latest completed attempt. Even if
-    // an invalid placement state were persisted by a bug, a manual DB edit or a
-    // future code path, a failed candidate cannot become an enrolled student.
-    const latestAttempt = stmtLatestCompletedAttempt.get(visitor.id) as { status?: string; outcome?: string | null } | undefined;
-    const placementEligibility = evaluateConversionEligibility(requirement.mode, String(visitor.placement_status ?? ''), latestAttempt ?? null);
-    if (!placementEligibility.eligible) throw new HttpError(400, placementEligibility.reason);
-    if (classItem.program_version_id && String(classItem.program_version_id) !== String(effectiveProgramVersionId)) throw new HttpError(400, 'Selected class belongs to a different program version.');
+  }
+
+  // ── PLACEMENT ELIGIBILITY ──────────────────────────────────────────────────
+  // Deliberately NOT evaluated here. `EnrollmentService.enroll()` below is the
+  // single placement authority for every enrollment path, and it resolves the
+  // governing program from the CLASS's level rather than from the visitor row.
+  //
+  // This route used to run its own copy of the rule inside
+  // `if (effectiveProgramVersionId)`. Because that condition reads the
+  // visitor's program, detaching it with a Lead.Edit PATCH skipped the check
+  // entirely (audit V-1) — a candidate with a completed 'failed' attempt was
+  // enrolled into the program version they had failed. A second implementation
+  // of an invariant is a second answer to it.
+  //
+  // The requirement mode is still denormalised onto the visitor for reporting,
+  // resolved the same way the authority resolves it: class level first.
+  {
+    const governingProgramVersionId = resolveGoverningProgramVersionId(
+      classItem,
+      effectiveProgramVersionId,
+      (levelId) => (stmtGetLevelProgramVersion.get(levelId) as { program_version_id: string | null } | undefined)?.program_version_id ?? null
+    );
+    if (governingProgramVersionId) {
+      const requirement = resolvePlacementRequirement(governingProgramVersionId, requestedStudentBranchId, classItem.level_id || null);
+      db.prepare(`UPDATE visitors SET placement_requirement_mode=? WHERE id=?`).run(requirement.mode, visitor.id);
+    }
   }
   if (classItem.status && classItem.status !== 'active') throw new HttpError(400, 'Cannot enroll into an inactive class.');
   assertClassGenderAllowsStudent(classId, visitor.gender);
@@ -468,7 +643,7 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
 
     journey.appendEvent({ studentId: newStudentId, eventType: JourneyEventType.STUDENT_REGISTERED, occurredAt: date, branchId: studentBranchId, actorUserId: user.userId, actorName: user.fullName, payload: { studentCode, fromVisitorId: visitor.id, classId, source: visitor.source } });
     
-    getEnrollmentService(db).enroll({ studentId: newStudentId, branchId: studentBranchId, semesterName: 'Current Semester', classId, enrollmentType: 'new', programVersionId: effectiveProgramVersionId, levelId: levelId || classItem.level_id || null, actorUserId: user.userId, actorName: user.fullName, startedAt: date, autoInvoice: false, notes: notes || null, writeSemester: false, skipPlacementGate: true });
+    getEnrollmentService(db).enroll({ studentId: newStudentId, branchId: studentBranchId, semesterName: 'Current Semester', classId, enrollmentType: 'new', programVersionId: effectiveProgramVersionId, levelId: levelId || classItem.level_id || null, actorUserId: user.userId, actorName: user.fullName, startedAt: date, autoInvoice: false, notes: notes || null, writeSemester: false });
 
     journey.appendEvent({ studentId: newStudentId, eventType: JourneyEventType.INVOICE_ISSUED, occurredAt: date, branchId: studentBranchId, actorUserId: user.userId, actorName: user.fullName, payload: { invoiceId, invoiceNumber, amount: netTuition, category: 'fee', label: 'Registration invoice' } });
     if (paidNow > 0) journey.appendEvent({ studentId: newStudentId, eventType: JourneyEventType.PAYMENT_RECORDED, occurredAt: date, branchId: studentBranchId, actorUserId: user.userId, actorName: user.fullName, payload: { amount: paidNow, category: 'fee', receiptNumber, label: 'Conversion payment' } });
@@ -488,11 +663,33 @@ visitorsRouter.post('/:id/advance-stage', requirePermission('Lead.Edit'), ah(asy
   const row = requireVisitor(req, req.params.id);
   const current = row.stage || 'lead';
   let next = req.body?.stage as string | undefined;
+  // V-7: a stage advance is one business transition per user action.
+  //
+  // Each request was already individually correct — the UPDATE is a
+  // compare-and-swap on the current stage — but ten parallel bodyless calls
+  // each won their own CAS in sequence and walked a lead from 'lead' all the
+  // way to 'enrollment', straight through placement_booking, placement_fee and
+  // placement_completed. Ten HTTP requests are not ten deliberate decisions.
+  //
+  // The caller must therefore state which stage it believes it is leaving, and
+  // that token is checked against the row inside the same transaction as the
+  // write. `fromStage` is REQUIRED rather than optional: an optional guard
+  // protects only the callers that already thought about the problem.
+  const fromStage = req.body?.fromStage as string | undefined;
+  if (!fromStage) {
+    throw new HttpError(400, 'fromStage is required: send the stage you are advancing from.');
+  }
+  if (fromStage !== current) {
+    throw new HttpError(409, 'Visitor stage changed concurrently; reload and retry.');
+  }
   if (!next) next = VISITOR_TRANSITIONS[current];
   if (!next) throw new HttpError(400, `Cannot auto-advance from stage "${current}".`);
   assertVisitorStage(next);
   if (next !== VISITOR_TRANSITIONS[current] && next !== 'lost') {
     throw new HttpError(400, `Invalid transition from "${current}" to "${next}".`);
+  }
+  if (current === 'lost') {
+    throw new HttpError(409, 'This lead is closed (lost) and cannot be advanced.');
   }
   const changed = stmtUpdateVisitorStage.run(next, req.params.id, current);
   if (changed.changes !== 1) throw new HttpError(409, 'Visitor stage changed concurrently; reload and retry.');

@@ -234,6 +234,13 @@ CREATE INDEX IF NOT EXISTS idx_visitors_stage        ON visitors(stage);
 CREATE INDEX IF NOT EXISTS idx_visitors_campaign     ON visitors(campaign_id); 
 CREATE INDEX IF NOT EXISTS idx_visitors_source       ON visitors(source); 
 CREATE INDEX IF NOT EXISTS idx_visitors_branch_status ON visitors(branch_id, status);
+-- Visitor identity integrity (uq_visitors_serial_no, uq_visitors_tazkira_no)
+-- is created by migration 072, NOT here. schema.sql is executed before the
+-- migration runner on every boot, so declaring the unique indexes here would
+-- abort startup on any existing database that still holds duplicates — the
+-- very rows migration 072 exists to release. A fresh install gets them from
+-- the migration in the same boot, so both paths converge (preflight verifies
+-- there is no drift between them).
 CREATE TABLE IF NOT EXISTS placement_assessment_profiles (
   id TEXT PRIMARY KEY,
   program_version_id TEXT NOT NULL REFERENCES program_versions(id) ON DELETE CASCADE,

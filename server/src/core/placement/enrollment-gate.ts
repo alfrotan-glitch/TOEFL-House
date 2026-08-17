@@ -12,6 +12,32 @@ import { HttpError } from '../../middleware/errorHandler.js';
 import { resolvePlacementRequirement } from './policy-engine.js';
 import { evaluateEnrollmentEligibility } from './placement-policy.js';
 
+/**
+ * The program version that GOVERNS an enrollment, resolved the one correct way.
+ *
+ * The class's own level is authoritative, because that is what determines which
+ * placement policy applies to the seat being filled. A caller-supplied program
+ * (from a visitor row or a request body) is only a fallback for classes that
+ * carry no level.
+ *
+ * Audit V-1 existed precisely because two call sites disagreed about this:
+ * `EnrollmentService` resolved class → level → program_version_id, while the
+ * conversion route read `visitors.program_version_id`. Detaching the visitor's
+ * program therefore silenced the route's gate while the class remained
+ * placement-governed. Everything that needs this answer now calls this function.
+ */
+export function resolveGoverningProgramVersionId(
+  cls: { level_id?: string | null; program_version_id?: string | null } | null | undefined,
+  fallbackProgramVersionId: string | null | undefined,
+  lookupLevelProgramVersion?: (levelId: string) => string | null
+): string | null {
+  if (cls?.level_id && lookupLevelProgramVersion) {
+    const fromLevel = lookupLevelProgramVersion(cls.level_id);
+    if (fromLevel) return fromLevel;
+  }
+  return fallbackProgramVersionId ?? null;
+}
+
 export function assertPlacementEligibleForClass(
   db: BetterSqlite3.Database,
   studentId: string,

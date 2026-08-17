@@ -417,3 +417,198 @@ input validation**, which is where the remediation should be aimed.
 
 GL-1 (browser visual inspection) and GL-2 (printed fee bill) remain human-only
 and were not performed.
+
+---
+
+# REMEDIATION RECORD — V-1 … V-8 (same day)
+
+Every root cause was re-verified independently before any code changed, and
+each invariant was moved to a domain or database chokepoint rather than patched
+per route.
+
+## Findings closed
+
+| ID | Sev | Status | Where the invariant now lives |
+|---|---|---|---|
+| **V-1** | CRITICAL | **CLOSED** | `EnrollmentService.assertPlacementEligible` — unconditional, single authority |
+| **V-2** | HIGH | **CLOSED** | `uq_visitors_tazkira_no` (migration 072) + `assertTazkiraAvailable` |
+| **V-3** | HIGH | **CLOSED** | `uq_visitors_serial_no` + atomic `system_settings` counter |
+| **V-4** | HIGH | **CLOSED** | `normalizeVisitorText` / `assertOptionalIsoDate`, shared by CREATE and PATCH |
+| **V-5** | HIGH | **CLOSED** | Per-category permission gating in `search.routes.ts` |
+| **V-6** | MEDIUM | **CLOSED** | Conversion refuses `stage='lost'` |
+| **V-7** | MEDIUM | **CLOSED** | Mandatory `fromStage` optimistic-concurrency token |
+| **V-8** | MEDIUM | **CLOSED** | `buildAuditDiff` — field-level old/new with PII redaction |
+| V-9 | MEDIUM | **CLOSED** (opportunistic) | `VisitorsView` uses local date, matching server `today()` |
+| V-10/V-11/V-12 | LOW | Open — see remaining risks |
+
+## Root causes and fixes
+
+### V-1 — two gates that resolved the program differently
+
+Independently re-verified before changing anything. Traced **every** enrollment
+writer, not just the audited routes:
+
+- `EnrollmentService.enroll()` — 4 callers (visitors, students×2, journey, waitlist)
+- `students.routes.ts:65` raw INSERT (extra-class) — already gated via `assertPlacementEligibleForClass`
+- `journey-engine.ts:149` raw INSERT — **zero external callers**, dead code, not a live bypass
+
+Confirmed `visitors.routes.ts:471` was the **only** caller passing
+`skipPlacementGate: true`. The route resolved the program from
+`visitors.program_version_id`; the service resolves it from `class → level →
+program_version_id`. Detaching the visitor's program made the route's check
+evaluate nothing — skipped, not failed — while the class remained governed.
+
+**Fix, at the chokepoint:**
+1. `skipPlacementGate` **deleted** from the input contract and the call site. The
+   gate is now unconditional; there is no opt-out to misuse.
+2. New shared `resolveGoverningProgramVersionId()` in the placement domain,
+   used by **both** the service and the route, so the two can no longer disagree
+   about which program governs a seat. The class's level is authoritative; a
+   caller-supplied program is only a fallback for classes with no level.
+
+### V-2 / V-3 — no identity constraints at all
+
+The institutional policy already existed for students
+(`uq_students_tazkira_no`, global, excluding NULL/empty) and was adopted
+verbatim: *a person is the same person in either table*. Serial allocation moved
+from `SELECT MAX(serial)+1` to the same atomic `system_settings` counter that
+issues receipt and student codes (`INSERT … ON CONFLICT DO UPDATE … RETURNING`).
+
+**Migration 072 handles pre-existing violations without data loss.** A
+`CREATE UNIQUE INDEX` aborts if the table already violates it, so duplicates are
+*released and annotated*, never deleted — a lead is a person a counselor spoke
+to, and its follow-ups and audit trail must survive. Verified on the real
+audit database: 5 colliding national IDs → 1 retained, 4 annotated, **67
+visitors before and after**.
+
+A design trap found by running the migration against dirty data: `schema.sql`
+executes **before** the migration runner on every boot, so declaring the unique
+indexes there aborted startup on any existing database. The indexes are
+migration-only, with the reason recorded in `schema.sql`.
+
+### V-4 — validation written inline, twice
+
+One table (`VISITOR_TEXT_FIELDS`) plus `normalizeVisitorText()` now drives both
+handlers, using the existing `optionalText`/`requiredText` primitives (type
+check, trim, bound, 400). Dates go through `assertOptionalIsoDate`, which
+rejects `9999-99-99` by real-calendar validation.
+
+### V-5 — OR-semantics treated as per-entity authorization
+
+Each search category is gated on its own permission (`Lead.View` for visitors).
+Verified there is no over-blocking: a registrar still gets visitor results.
+
+### V-6 / V-7 — lifecycle
+
+Conversion refuses a `lost` lead. `advance-stage` now **requires** `fromStage`;
+an optional token protects only callers who already thought about the race.
+The frontend sends the stage it rendered.
+
+### V-8 — audit without values
+
+`buildAuditDiff` records changed fields with before/after. Contact and free-text
+values are redacted to `«set:N»` — the forensic question is *which field moved*,
+and the audit log has a wider readership than the visitor record.
+
+## Before / after — original exploits re-run live
+
+| Exploit | Before | After |
+|---|---|---|
+| Convert with placement required | 400 blocked | 400 blocked |
+| **PATCH `programVersionId:null` → convert** | **201 TH-001003** | **400 "Placement assessment is required"** |
+| **FAILED candidate + detach → convert** | **201 TH-001005** | **400 "Placement assessment is required"** |
+| 5× identical national ID | 5 leads created | 1 created, **409** ×2, padded variant **409** |
+| Duplicate serial, 2 connections | both accepted | **UNIQUE constraint failed** |
+| PATCH 100k name / 50k notes | 200 stored | **400** / **400** |
+| PATCH non-string phone / bad date | 200 coerced | **400** / **400** |
+| PATCH `fullName:null` | 500 raw SQLite | **400** |
+| Teacher `/api/search?q=Dup` | 5 lead records | **0** |
+| Teacher phone enumeration | 5 records | **0** |
+| Convert a `lost` lead | 201 resurrected | **409 "Reopen it before converting"** |
+| 10 concurrent advances | 10 succeeded → `enrollment` | **1 succeeded → `inquiry`** |
+| Audit of the tampering step | `old=null new=null` | `old=programVersionId=pv_a` → `new=programVersionId=∅` |
+
+**Alternate enrollment paths**, all vs. the placement-required class:
+manual student create → blocked · extra-class → blocked · journey enrollments →
+blocked · visitor conversion → blocked.
+
+**No regression:** legitimate conversion returns 201 with a paid 6,000 AFN
+invoice; payments **6,300 = ledger 6,300**, 0 orphans, financial audit clean;
+8 concurrent conversions → 1 student, 1 payment; cross-branch PATCH/convert 403;
+unauthenticated 401; forged `serialNo`/`status`/`placementStatus` ignored.
+
+## Tests and mutation results
+
+**37 tests** in `visitor-subsystem-audit.test.ts` (was 27; the 17 `.fails()`
+markers are gone — every defect test is now a positive assertion), plus a
+cross-process serial race test using two real connections.
+
+Mutation testing, **12 mutants: 11 killed, 1 proven equivalent**.
+
+Three initially survived — each a real coverage failure, fixed by adding tests:
+
+- **M8** (`fromStage` made optional) survived because every test supplied it.
+  Added: bodyless advance must 400; a stale token must 409.
+- **M10** (atomic counter → `MAX+1`) survived because in one process the
+  read-then-write is still serialised. Added a test on the *observable*
+  difference: insert `V-990000` and a `MAX+1` allocator jumps to follow it,
+  while a counter does not.
+- **M2** (revert the shared resolver) — investigated on a live server rather
+  than assumed: creation auto-assigns the branch's default program, so the gate
+  fires via the fallback. **Equivalent mutant**, not a gap.
+
+**Two existing tests encoded defective behaviour and were corrected:**
+
+1. `'should handle concurrent stage updates without data corruption'` asserted
+   that **both** concurrent advances succeed and the lead ends two stages on —
+   it encoded V-7 as intended, which is why deleting the CAS guard failed no
+   test. Now asserts exactly one 200, one 409, final stage `inquiry`.
+2. `createVisitorDirect` used `V-${Date.now()}`, which collides within a
+   millisecond. Replaced with a monotonic counter — the fixture was fixed, not
+   the constraint weakened.
+
+One pre-existing flake fixed: a `Pacific/Apia` assertion in
+`finance-dashboard-period.test.ts` pinned a literal date and began failing after
+11:00 UTC. It now compares against the date the server computed under that zone.
+
+## False positives — dismissed
+
+| Suspicion | Why not a defect |
+|---|---|
+| `journey-engine.createEnrollment` is a shadow bypass | Zero external callers; dead code |
+| Extra-class enrollment bypasses placement | Already calls `assertPlacementEligibleForClass` |
+| Detaching a program should be forbidden | Legitimate `Lead.Edit`; the defect was the *enrollment*, not the edit. Test corrected to assert the enrollment is blocked |
+| Conversion into an ungoverned class with a governed visitor should pass | The visitor's program is a deliberate fallback; blocking is correct |
+| M2 is a coverage gap | Verified equivalent against a live server |
+
+## Remaining risks
+
+- **V-10** (dead guard on the non-existent `classes.program_version_id`),
+  **V-11** (raw SQLite text on unhandled 500s elsewhere), **V-12** (PII breadth
+  in the visitor list) — all LOW, out of the V-1…V-8 scope, unchanged.
+- ~20 `toISOString()` day derivations remain in non-visitor views.
+- `fromStage` is a **breaking API change** for any external client of
+  `advance-stage`. The single in-repo caller was updated.
+- Migration 072 releases duplicate identities into `notes`; an operator must
+  reconcile those rows manually. Deliberate — the alternative is deleting leads.
+- GL-1 / GL-2 remain human-only and were not performed.
+
+## Gates
+
+1142/1142 tests · eslint 0 errors (102 server / 5 frontend warnings, unchanged) ·
+all typechecks clean · both builds OK · schema-drift preflight SUCCESS ·
+`release:validate` 16/16 · financial audit clean.
+
+## Verdict
+
+# GO — for the Visitor subsystem
+
+V-1 through V-8 are closed, each verified by re-running the original exploit
+against a live server and confirming DB truth. The placement gate is now a
+single unconditional authority shared by all four enrollment paths; identity is
+enforced by the database; validation, search authorization, lifecycle and audit
+are consistent.
+
+This verdict covers V-1…V-8 only. V-10/V-11/V-12 remain open at LOW severity,
+and **GL-1/GL-2 are still open**, so this is not a statement about the product
+as a whole.

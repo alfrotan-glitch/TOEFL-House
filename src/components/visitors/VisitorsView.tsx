@@ -62,7 +62,11 @@ export default function VisitorsView({
   const [sourceFilter, setSourceFilter] = useState<string>('all');
   const [interestFilter, setInterestFilter] = useState<string>('all');
 
-  const todayIso = new Date().toISOString().split('T')[0];
+  // Local calendar date, matching the server's `today()` (toLocaleDateString
+  // 'en-CA'). Deriving this with toISOString() is UTC, which in Asia/Kabul
+  // (UTC+4:30) returns YESTERDAY for the first 4.5 hours of every working day —
+  // flagging follow-ups that are due today as OVERDUE.
+  const todayIso = new Date().toLocaleDateString('en-CA');
 
   const leadPipelineStatus = useCallback((v: Visitor): string => v.status || (v.stage === 'registration' || v.stage === 'enrollment' ? 'registered' : 'visited'), []);
   const isPendingLead = useCallback((v: Visitor) => ['visited', 'follow_up', 'lead'].includes(leadPipelineStatus(v)), [leadPipelineStatus]);

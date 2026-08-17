@@ -211,6 +211,14 @@ describe('D-4 — the trend axis is correct in a non-UTC timezone', () => {
    * operated from elsewhere), so the axis is asserted with the process zone
    * switched, which is the only way this class of bug is visible.
    */
+  const withTZSync = <T>(tz: string, fn: () => T): T => {
+    const prev = process.env.TZ;
+    process.env.TZ = tz;
+    try { return fn(); } finally {
+      if (prev === undefined) delete process.env.TZ; else process.env.TZ = prev;
+    }
+  };
+
   const withTZ = async <T>(tz: string, fn: () => Promise<T>): Promise<T> => {
     const prev = process.env.TZ;
     process.env.TZ = tz;
@@ -225,7 +233,14 @@ describe('D-4 — the trend axis is correct in a non-UTC timezone', () => {
         const res = await supertest(app).get('/api/finance/dashboard').set(authHeader(financeA));
         const trend = res.body.trend as Array<{ date: string }>;
         expect(trend).toHaveLength(14);
-        expect(trend[13].date).toBe(TODAY);
+        // Compare against the date the SERVER computed under this zone, not the
+        // suite's module-level TODAY. In Pacific/Apia (UTC+13) the local day has
+        // already rolled over for part of the UTC day, so pinning the literal
+        // made the test fail on wall-clock time rather than on behaviour. The
+        // invariant under test is that the axis ENDS on the server's today and
+        // is contiguous — not which calendar day that happens to be.
+        const serverToday = withTZSync(tz, () => today());
+        expect(trend[13].date).toBe(serverToday);
         expect(new Set(trend.map((t) => t.date)).size).toBe(14);
         for (let i = 1; i < trend.length; i += 1) {
           const prev = new Date(`${trend[i - 1].date}T00:00:00Z`);
@@ -238,11 +253,12 @@ describe('D-4 — the trend axis is correct in a non-UTC timezone', () => {
     it(`still reconciles each day with the ledger in ${tz}`, async () => {
       await withTZ(tz, async () => {
         const res = await supertest(app).get('/api/finance/dashboard').set(authHeader(financeA));
-        const total = (res.body.trend as Array<{ income: number }>).reduce((a, r) => a + r.income, 0);
+        const trendRows = res.body.trend as Array<{ date: string; income: number }>;
+        const total = trendRows.reduce((a, r) => a + r.income, 0);
         const truth = (db.prepare(
           `SELECT COALESCE(SUM(amount),0) v FROM financial_transactions
             WHERE type='income' AND branch_id=? AND date >= ? AND date <= ?`
-        ).get(BRANCH_A, (res.body.trend as Array<{ date: string }>)[0].date, TODAY) as { v: number }).v;
+        ).get(BRANCH_A, trendRows[0].date, trendRows[trendRows.length - 1].date) as { v: number }).v;
         expect(total).toBe(truth);
       });
     });

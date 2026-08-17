@@ -14,6 +14,7 @@ import {
 import { countActiveStudentsInClass } from './class-capacity.js';
 import { resolvePlacementRequirement } from '../placement/policy-engine.js';
 import { evaluateEnrollmentEligibility } from '../placement/placement-policy.js';
+import { resolveGoverningProgramVersionId } from '../placement/enrollment-gate.js';
 
 export interface EnrollStudentInput {
   studentId: string;
@@ -38,11 +39,6 @@ export interface EnrollStudentInput {
    *  'reserved' to create a not-yet-active enrollment (e.g. for a future
    *  Waitlist Engine phase) without going through a second write. */
   initialStatus?: EnrollmentStatus;
-  /** Set ONLY by the visitor conversion route, which evaluates the identical
-   *  placement rule against richer context (target level → first-level
-   *  exemption) immediately before calling enroll(). Server-side callers only;
-   *  never bound from a request body. */
-  skipPlacementGate?: boolean;
   /** When false, enroll() does not create the student_semesters projection
    *  row. Callers that maintain their own (richer) semester row in the same
    *  transaction pass false to avoid duplicate projection writes. Defaults
@@ -205,11 +201,15 @@ export class EnrollmentService {
       const cls = this.stmtGetClass.get(input.classId) as any;
       if (cls?.level_id) {
         targetLevelId = targetLevelId || cls.level_id;
-        if (!effectiveVersionId) {
-          const classLevel = this.stmtGetLevel.get(cls.level_id) as any;
-          effectiveVersionId = classLevel?.program_version_id ?? null;
-        }
       }
+      // The class's level is authoritative; the caller-supplied program is only
+      // a fallback. Shared with the conversion route so the two can never
+      // disagree about which program governs the seat (audit V-1).
+      effectiveVersionId = resolveGoverningProgramVersionId(
+        cls,
+        effectiveVersionId,
+        (levelId) => (this.stmtGetLevel.get(levelId) as any)?.program_version_id ?? null
+      );
     }
     // No program version anywhere means no placement policy can apply. This is
     // the historical behaviour for ad-hoc classes and is preserved.
@@ -295,14 +295,21 @@ export class EnrollmentService {
     // Before this, only visitor→student conversion checked placement and five
     // other paths did not (certification finding C-1).
     //
-    // `skipPlacementGate` exists for the visitor conversion route, which has
-    // already evaluated the identical rule against richer context (the target
-    // level, for first-level exemption) moments earlier in the same
-    // transaction. It is an internal flag on a server-side call signature and
-    // is never reachable from an HTTP request body.
-    if (!input.skipPlacementGate) {
-      this.assertPlacementEligible(input, programVersionId, levelCode);
-    }
+    // UNCONDITIONAL. There is deliberately no opt-out parameter.
+    //
+    // A `skipPlacementGate` flag used to exist for the visitor conversion
+    // route, justified by the claim that conversion "evaluates the identical
+    // placement rule" moments earlier. That claim was false, and the gap was
+    // exploitable (audit V-1): the route read the program off the VISITOR,
+    // while this method resolves it from the CLASS's level. Clearing
+    // `visitors.program_version_id` with an ordinary Lead.Edit PATCH therefore
+    // made the route's check evaluate nothing at all — it was skipped, not
+    // failed — and a candidate whose attempt completed with outcome 'failed'
+    // was enrolled into the very program version they had failed.
+    //
+    // Two gates that resolve their inputs differently are two different rules.
+    // This is now the single placement authority for every enrollment path.
+    this.assertPlacementEligible(input, programVersionId, levelCode);
 
     const enrollmentId = makeId('enr');
     const skillsJson = input.skillsFocus ? JSON.stringify(input.skillsFocus) : null;

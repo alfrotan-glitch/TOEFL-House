@@ -684,7 +684,15 @@ export function useApiStore() {
   };
 
   const advanceVisitorStage = async (visitorId: string, stage?: PipelineStage) => {
-    await api.post(`/visitors/${visitorId}/advance-stage`, stage ? { stage } : {});
+    // Send the stage we believe the visitor is currently in. The server uses it
+    // as an optimistic-concurrency token: if another operator (or a double
+    // click) already advanced this lead, the request is rejected with 409
+    // instead of chaining a second transition on top (audit V-7).
+    const current = visitors.find((v) => v.id === visitorId)?.stage;
+    await api.post(`/visitors/${visitorId}/advance-stage`, {
+      ...(stage ? { stage } : {}),
+      ...(current ? { fromStage: current } : {}),
+    });
     await reloadVisitors();
     invalidate('visitors');
   };
