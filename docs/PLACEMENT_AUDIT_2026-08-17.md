@@ -1,5 +1,10 @@
 # Placement Exam Subsystem — Forensic Audit (2026-08-17)
 
+> **STATUS: REMEDIATED in commit `c675f56`.** P-1…P-5 are fixed and verified;
+> see §7 (added after remediation) for what changed, how each finding was
+> re-tested against a live API, and what remains unverified. The audit body
+> below is preserved unedited as the record of the defects as found.
+
 **Scope:** full-stack review of the Placement Exam / Placement Test subsystem.
 **Method:** independent discovery across the whole codebase, then a live running system
 (seeded DB, real HTTP API, adversarial requests). No code was modified during this audit;
@@ -390,3 +395,87 @@ close: the enforcement point is missing, not the logic.
   given one confirmed instance, **assume others until checked**.
 - Standing blockers **GL-1** (browser visual sign-off) and **GL-2** (printed fee bill) remain
   open and are not addressable in this environment.
+
+---
+
+## 7. Remediation record (commit `c675f56`)
+
+### Root cause
+All findings reduce to **one defect class**: *placement rules were evaluated at
+the wrong moment against the wrong predicate, and the authoritative result was
+discarded.* Completion validated component **presence** instead of policy
+**compliance** (P-1); the retake guard ran only at creation, counted only
+*completed* sittings, and used a read-then-write pattern concurrency defeats
+(P-2). P-3 and P-4 are consequences of duplicated state with no single owner —
+two status vocabularies, and two copies of one decision written outside a
+transaction.
+
+### Enforcement architecture now
+```
+Academic/Placement Policy  (placement_assessment_profiles, snapshotted per attempt)
+        ↓
+Decision engine            evaluateDecision → evaluateOutcome   ← THE pass/fail rule
+        ↓
+Domain policy module       core/placement/placement-policy.ts
+                           evaluateStartEligibility · evaluateBilling
+                           evaluateConversionEligibility · WAIVED_STATUS
+        ↓
+Application enforcement    /complete (persists outcome) · /convert (re-reads it)
+        ↓
+Database invariants        attempts.outcome · uq_placement_open_attempt
+```
+No route reimplements a placement rule; completion and conversion consult the
+same module, so they cannot drift.
+
+### Fix per finding
+| # | Fix | Type |
+|---|---|---|
+| P-1 | `evaluateOutcome()` is the single pass/fail authority; `/complete` persists `outcome`; `/convert` independently re-reads it | Required fix |
+| P-2 | Partial unique index `uq_placement_open_attempt` (atomic); eligibility + billing moved into configurable, snapshotted policy | Required fix |
+| P-3 | `'waived'` is canonical (the only value the CHECK allows); `'exempt'` accepted defensively on read only | Required fix |
+| P-4 | `override`, `correct` and the content-responses handler wrapped in transactions; `correct` re-derives the outcome | Required fix |
+| P-5 | False-confidence test replaced; unrealistic conversion fixture corrected | Required fix |
+| — | Waived components no longer count as `minScore` failures | Defensive |
+| — | Precise 409s for both uniqueness violations instead of a raw constraint error | Defensive |
+| — | UI reports a failed sitting as a warning, never a green "completed" | Defensive |
+
+### Business invariants now enforced
+1. A sitting missing any required component **cannot complete**.
+2. A sitting below a component `minScore` or the overall `passScore` is recorded **`failed`**.
+3. A `failed` (or outcome-less) placement **cannot be converted** into a student — checked independently of visitor status.
+4. At most **one open attempt per visitor** (database-enforced).
+5. `allowRetake=false` / `maxAttempts` hold under sequential **and** concurrent load.
+6. Billing follows configured policy; each attempt is billed **at most once** (`placement:<attemptId>`).
+7. Fee and ledger are written in one transaction and reconcile exactly.
+8. A waived candidate has a **complete, convertible** lifecycle.
+9. Override/correction never leave partial state; corrections re-derive the outcome.
+10. Client-supplied outcome, score, percentage, level and fee are **ignored**.
+
+### Financial impact
+Placement payments reconciled exactly against the ledger on the verification DB
+(1950 = 1950; 0 orphans, 0 duplicate idempotency keys). Existing idempotency
+behaviour is unchanged. Default policy values reproduce historical billing
+exactly, so no institution's fees change on upgrade. Retakes can now optionally
+be billed — closing the revenue leak in P-2 — but only when explicitly configured.
+
+### Verification
+- **1005/1005 tests pass** (30 new adversarial in `placement-integrity.test.ts`).
+- **Mutation-verified** — the new tests are not vacuous:
+  outcome forced to `passed` → **8 fail**; unique index removed → **2 fail**;
+  status-only conversion gate restored → **5 fail**.
+- **11/11 original exploits re-tested against a live API** on a fresh seeded DB.
+- Migration 070 applied to a **real corrupted database** (8 duplicate open
+  attempts): reduced to 1, outcomes backfilled truthfully (10%/50% → failed,
+  80%/95% → passed), no dangling references.
+- eslint 0 errors · both typechecks clean · no schema drift (69 migrations) ·
+  release gate 16/16 · frontend builds · **CI 4/4 green**.
+
+### Remaining risks / unverified
+- **GL-1** (browser visual sign-off) and **GL-2** (printed fee bill) remain open
+  and are unobtainable in this environment.
+- P-4 rollback is proven for a *validation* failure; a crash induced mid-transaction
+  was not simulated.
+- `placement_media` (speaking audio) and the test-bank mutation surface remain
+  unexercised adversarially.
+- The remaining placement test files were not individually re-audited for the
+  P-5 pattern beyond the two instances corrected here.
