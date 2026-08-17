@@ -59,13 +59,16 @@ export default function VisitorDeskPanel({
    */
   const [eligibility, setEligibility] = useState<ConversionEligibility | null>(null);
   useEffect(() => {
-    if (!checkConversionEligibility || !canConvertLead) return;
+    // Fetched for EVERY viewer. Gating this on `canConvertLead` meant a
+    // counselor — who is authorized to run the placement assessment that
+    // unblocks the lead — never learned the lead was blocked.
+    if (!checkConversionEligibility) return;
     let cancelled = false;
     checkConversionEligibility(visitor.id)
       .then((res) => { if (!cancelled) setEligibility(res); })
       .catch(() => { /* Non-fatal: the modal re-checks and fails closed. */ });
     return () => { cancelled = true; };
-  }, [visitor.id, visitor.placementStatus, visitor.status, checkConversionEligibility, canConvertLead]);
+  }, [visitor.id, visitor.placementStatus, visitor.status, checkConversionEligibility]);
   const [deskTab, setDeskTab] = useState<'details' | 'logs'>('details');
   const [followUpInput, setFollowUpInput] = useState<string>('');
   const [followUpOutcome, setFollowUpOutcome] = useState<string>('');
@@ -201,7 +204,9 @@ export default function VisitorDeskPanel({
 
         {/* Why Enroll is unavailable — stated before the operator invests any
             data entry, with the assessment as the obvious next step. */}
-        {canConvertLead && eligibility && !eligibility.eligible && visitor.status !== 'registered' && (
+        {/* Shown regardless of Lead.Convert: a blocker is information, not an
+            action. The Enroll BUTTON above remains gated on Lead.Convert. */}
+        {eligibility && !eligibility.eligible && visitor.status !== 'registered' && (
           <div className="px-6 pb-3 shrink-0">
             <p className="flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[10px] font-semibold text-amber-900">
               <Award className="mt-0.5 h-3 w-3 shrink-0 text-amber-600" />

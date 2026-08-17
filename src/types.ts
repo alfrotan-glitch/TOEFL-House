@@ -719,6 +719,11 @@ export interface VisitorSummary {
   filtered: number;
   /** Lead count per source over the whole scoped population. */
   bySource: Array<{ source: string; count: number }>;
+  /**
+   * Lead count per workflow stage over the whole scoped population.
+   * The kanban renders its column badges from this, never from the loaded page.
+   */
+  byStage: Array<{ stage: string; count: number }>;
 }
 
 /** The visitor list query the store owns and the server executes. */

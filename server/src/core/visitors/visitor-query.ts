@@ -78,6 +78,20 @@ export interface VisitorSummary {
    * channel the server actually stores.
    */
   bySource: Array<{ source: string; count: number }>;
+  /**
+   * Lead count per workflow `stage` over the whole scoped population.
+   *
+   * The kanban board — the DEFAULT view — bucketed the loaded PAGE into its
+   * five columns and printed those lengths as column badges. With 250 leads it
+   * showed "New: 21" against a true 223, directly beneath a KPI strip that
+   * correctly said 250: two contradictory numbers on one screen. This is the
+   * same defect class as UX-1, and it is fixed the same way — counted in SQL,
+   * rendered by the client.
+   *
+   * Keyed by the raw stage value so the client owns the column grouping;
+   * NULL stage is normalised to 'lead', matching the lifecycle predicates.
+   */
+  byStage: Array<{ stage: string; count: number }>;
 }
 
 /**
@@ -224,6 +238,14 @@ export function buildVisitorSummary(
     [...s.params, ...f.params, ...overdueClause.params]
   );
 
+  const byStage = (
+    db
+      .prepare(
+        `SELECT COALESCE(stage,'lead') AS stage, COUNT(*) AS c ${base} GROUP BY COALESCE(stage,'lead') ORDER BY c DESC`
+      )
+      .all(...s.params) as Array<{ stage: string; c: number }>
+  ).map((r) => ({ stage: r.stage, count: Number(r.c) }));
+
   const bySource = (
     db
       .prepare(
@@ -237,6 +259,7 @@ export function buildVisitorSummary(
     branchId: scope.isAll ? null : scope.branchId,
     today: todayStr,
     bySource,
+    byStage,
     total,
     pipeline,
     registered,

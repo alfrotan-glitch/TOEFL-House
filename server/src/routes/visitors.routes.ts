@@ -360,12 +360,26 @@ visitorsRouter.get('/summary', requirePermission('Lead.View'), ah(async (req, re
  * Conversion eligibility preview (UX-3).
  *
  * Read-only: it calls INTO the same placement authority the write path uses,
- * so it can never green-light a conversion the write path would refuse. Guarded
- * by `Lead.Convert` — the permission for the action it previews — so it cannot
- * be used to probe placement policy by a role that could not convert anyway.
+ * so it can never green-light a conversion the write path would refuse.
+ *
+ * Guarded by `Lead.View`, NOT `Lead.Convert`. It was originally the stricter
+ * permission, on the reasoning that a preview should require the right to
+ * perform the action it previews. That was wrong in this domain: counselors
+ * hold Lead.View/Edit and are authorized to RUN placement assessments (verified
+ * against /api/placement/visitors/:id/placement), but not Lead.Convert. Gating
+ * the preview on Lead.Convert therefore hid "placement assessment required"
+ * from the very role whose job is to clear it, while the registrar who could
+ * see the message could not act on it.
+ *
+ * The payload is safe at this level: it exposes only lead lifecycle state and
+ * the placement requirement for a class, both of which a Lead.View holder can
+ * already read from the visitor record and the program catalogue. It exposes
+ * no financial data and grants no capability — `POST /:id/convert` remains
+ * gated on `Lead.Convert`.
+ *
  * `requireVisitor` enforces the same branch isolation as every other route here.
  */
-visitorsRouter.get('/:id/conversion-eligibility', requirePermission('Lead.Convert'), ah(async (req, res) => {
+visitorsRouter.get('/:id/conversion-eligibility', requirePermission('Lead.View'), ah(async (req, res) => {
   const visitor = requireVisitor(req, req.params.id);
   const rawClassId = req.query.classId;
   const classId = typeof rawClassId === 'string' && rawClassId.trim() !== '' ? rawClassId.trim() : null;

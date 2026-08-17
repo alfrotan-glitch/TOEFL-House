@@ -27,6 +27,7 @@ let owner: TokenPayload;
 let registrarA: TokenPayload;
 let counselorA: TokenPayload;
 let registrarB: TokenPayload;
+let teacherA: TokenPayload;
 let app: express.Express;
 
 const authHeader = (u: TokenPayload) => ({ Authorization: `Bearer ${signToken(u)}` });
@@ -90,12 +91,14 @@ beforeAll(async () => {
   insU.run('vux_reg', 'vux_reg', pwd, 'Registrar A', 'registrar', BRANCH_A);
   insU.run('vux_cou', 'vux_cou', pwd, 'Counselor A', 'counselor', BRANCH_A);
   insU.run('vux_regb', 'vux_regb', pwd, 'Registrar B', 'registrar', BRANCH_B);
+  insU.run('vux_tea', 'vux_tea', pwd, 'Teacher A', 'teacher', BRANCH_A);
   syncLegacyUserRoles(db);
 
   owner = { userId: 'vux_own', username: 'vux_own', role: 'owner', branchId: BRANCH_A, fullName: 'Owner' } as TokenPayload;
   registrarA = { userId: 'vux_reg', username: 'vux_reg', role: 'registrar', branchId: BRANCH_A, fullName: 'Registrar A' } as TokenPayload;
   counselorA = { userId: 'vux_cou', username: 'vux_cou', role: 'counselor', branchId: BRANCH_A, fullName: 'Counselor A' } as TokenPayload;
   registrarB = { userId: 'vux_regb', username: 'vux_regb', role: 'registrar', branchId: BRANCH_B, fullName: 'Registrar B' } as TokenPayload;
+  teacherA = { userId: 'vux_tea', username: 'vux_tea', role: 'teacher', branchId: BRANCH_A, fullName: 'Teacher A' } as TokenPayload;
 
   app = express();
   app.use(express.json());
@@ -418,19 +421,50 @@ describe('UX-4 — eligibility preview enforces the same authorization as conver
     seedVisitors([{ id: 'vux_vP1', name: 'Perm Subject', phone: '0703000001', branch: BRANCH_A }]);
   });
 
-  it('refuses a counselor, who also cannot convert', async () => {
+  /**
+   * REVISED (audit N-2). The preview was originally gated on `Lead.Convert`,
+   * on the reasoning that previewing an action should require the right to
+   * perform it. That was wrong for this domain: counselors hold Lead.View/Edit
+   * and are authorized to RUN the placement assessment that unblocks the lead,
+   * but not Lead.Convert. Hiding the blocker from them meant the only role who
+   * could read "placement assessment required" was the one who could not act
+   * on it.
+   *
+   * The preview is therefore readable at `Lead.View` while the WRITE stays at
+   * `Lead.Convert`. Reading a blocker is information; enrolling is authority.
+   */
+  it('lets a counselor READ eligibility but still refuses the conversion', async () => {
     const preview = await supertest(app)
       .get('/api/visitors/vux_vP1/conversion-eligibility?classId=vux_open')
       .set(authHeader(counselorA));
-    expect(preview.status).toBe(403);
+    expect(preview.status).toBe(200);
+    expect(preview.body).toHaveProperty('eligible');
 
-    // Same verdict on the action the preview describes — the UI hiding the
-    // button is cosmetic; this is the enforcement.
+    // The capability boundary is unmoved: the action itself is still refused.
     const write = await supertest(app)
       .post('/api/visitors/vux_vP1/convert')
       .set(authHeader(counselorA))
       .send({ classId: 'vux_open', amountPaid: 0 });
     expect(write.status).toBe(403);
+  });
+
+  it('the preview grants no capability and leaks no financial data', async () => {
+    const preview = await supertest(app)
+      .get('/api/visitors/vux_vP1/conversion-eligibility?classId=vux_open')
+      .set(authHeader(counselorA));
+    expect(preview.status).toBe(200);
+    // Whitelist the payload: only lifecycle/placement facts a Lead.View holder
+    // can already read. No fee, discount, invoice or payment field may appear.
+    expect(Object.keys(preview.body).sort()).toEqual([
+      'code', 'eligible', 'placementActionable', 'placementStatus', 'reason', 'requirementMode',
+    ]);
+  });
+
+  it('still refuses a role without Lead.View entirely', async () => {
+    const preview = await supertest(app)
+      .get('/api/visitors/vux_vP1/conversion-eligibility?classId=vux_open')
+      .set(authHeader(teacherA));
+    expect(preview.status).toBe(403);
   });
 
   it('allows a registrar', async () => {

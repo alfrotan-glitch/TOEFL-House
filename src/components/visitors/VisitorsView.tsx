@@ -2,11 +2,12 @@
  * @license SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {UserPlus, Search, Sparkles, UserCheck, MessageSquare, Megaphone, Share2, Compass, AlertCircle, CheckCircle2, Clock, Kanban, List, Award} from 'lucide-react';
 import {Visitor, Class, Branch, Teacher, VisitorSummary, VisitorQuery, ConversionEligibility} from '../../types'; // Added Teacher
 import {hasPermission} from '../../config/permissions';
 import {VISITOR_SOURCE_OPTIONS, SOURCE_LABELS} from '../../config/visitorSources';
+import {isLeadClosed, isLeadOpen, leadLifecycleBucket, LEAD_BUCKET_LABEL, LEAD_BUCKET_BADGE} from '../../config/leadLifecycle';
 import AddVisitorForm from './AddVisitorForm';
 import VisitorDeskPanel from './VisitorDeskPanel';
 import PlacementTestModal from './PlacementTestModal';
@@ -123,10 +124,52 @@ export default function VisitorsView({
   // flagging follow-ups that are due today as OVERDUE.
   const todayIso = new Date().toLocaleDateString('en-CA');
 
-  const leadPipelineStatus = useCallback((v: Visitor): string => v.status || (v.stage === 'registration' || v.stage === 'enrollment' ? 'registered' : 'visited'), []);
-  const isPendingLead = useCallback((v: Visitor) => ['visited', 'follow_up', 'lead'].includes(leadPipelineStatus(v)), [leadPipelineStatus]);
-  const isConvertedLead = useCallback((v: Visitor) => leadPipelineStatus(v) === 'registered', [leadPipelineStatus]);
-  const isOverdueContact = useCallback((v: Visitor) => v.nextContactDate && !isConvertedLead(v) && v.nextContactDate < todayIso, [isConvertedLead, todayIso]);
+  // Row-level lifecycle comes from the shared vocabulary, which mirrors the
+  // server's authority. The inline rule this replaces read
+  // `status || (stage === 'registration' || stage === 'enrollment' ? …)`, whose
+  // stage branch was unreachable because `status` is NOT NULL, and which had no
+  // notion of closed-lost — so a dead lead rendered "In follow-up" with an
+  // "Enroll now" button the server refuses.
+  // Thin wrappers kept only where the JSX reads better; the badge renders
+  // straight from `leadLifecycleBucket`, so no separate "converted" helper is
+  // needed here.
+  const isClosedLead = useCallback((v: Visitor) => isLeadClosed(v), []);
+  const isPendingLead = useCallback((v: Visitor) => isLeadOpen(v), []);
+  // Only an OPEN lead can be overdue: a converted lead needs no follow-up and a
+  // closed one is no longer worked.
+  const isOverdueContact = useCallback((v: Visitor) => Boolean(v.nextContactDate) && isLeadOpen(v) && (v.nextContactDate as string) < todayIso, [todayIso]);
+
+  /**
+   * Advance a lead one stage, with the feedback the bare call never gave.
+   *
+   * `advanceVisitorStage` sends `fromStage` as an optimistic-concurrency token
+   * (audit V-7), so a double-click or a colleague working the same lead is
+   * correctly rejected with 409. The click handler used to be
+   * `onClick={() => advanceVisitorStage(v.id)}` — no await, no catch — so that
+   * rejection became an unhandled promise: the card did not move and nothing
+   * was said. Users read that as a broken button and clicked again, which is
+   * precisely what produces the next 409.
+   *
+   * `advancing` also disables the button in flight, removing the double-click
+   * that causes the conflict in the first place.
+   */
+  const [advancing, setAdvancing] = useState<string | null>(null);
+  const handleAdvance = useCallback(async (v: Visitor) => {
+    if (advancing) return;
+    setAdvancing(v.id);
+    try {
+      await advanceVisitorStage(v.id);
+      triggerToast(`${v.fullName} moved to the next stage.`, 'success');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Could not advance this lead.';
+      triggerToast(message, 'error');
+      // A 409 means our view of the stage is stale; resync so the next click
+      // is made against the truth rather than repeating the same conflict.
+      await reloadVisitors().catch(() => undefined);
+    } finally {
+      setAdvancing(null);
+    }
+  }, [advancing, advanceVisitorStage, reloadVisitors]);
 
   /**
    * Headline figures come from the server (UX-1).
@@ -149,6 +192,16 @@ export default function VisitorsView({
    * `visitors.length` — that is the page, and quoting a page as a total is the
    * whole defect. The UI shows a placeholder until the real figure arrives.
    */
+  /**
+   * Per-stage population counts from the server, keyed for O(1) lookup.
+   * Null until the summary lands, so a column badge shows a placeholder rather
+   * than a confident zero while loading.
+   */
+  const stageTotals = useMemo(() => {
+    if (!visitorSummary?.byStage) return null;
+    return Object.fromEntries(visitorSummary.byStage.map((r) => [r.stage, r.count])) as Record<string, number>;
+  }, [visitorSummary]);
+
   const totalMatching = visitorSummary?.filtered ?? null;
   const totalPages = Math.max(1, Math.ceil((totalMatching ?? 0) / pageSize));
   const hasActiveFilters = Boolean(searchTerm) || statusFilter !== 'all' || sourceFilter !== 'all' || interestFilter !== 'all';
@@ -365,9 +418,15 @@ export default function VisitorsView({
                               this only flags the row the user is looking at, using the
                               same local-calendar `todayIso` the server's today() matches. */}
                           <td className={`py-3 px-3 font-mono font-semibold ${isOverdueContact(v) ? 'text-rose-600' : 'text-indigo-600'}`}>{v.nextContactDate ? <span className="flex items-center gap-1 text-[10px]"><Clock className="w-3.5 h-3.5" /> {v.nextContactDate}{isOverdueContact(v) ? <span className="font-black uppercase text-[9px]">overdue</span> : null}</span> : <span className="text-slate-300">-</span>}</td>
-                          <td className="py-3 px-3 text-center"><span className={`inline-flex px-2 py-1 rounded-full text-[9px] font-black border ${isConvertedLead(v) ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>{isConvertedLead(v) ? 'Enrolled' : 'In follow-up'}</span></td>
+                          <td className="py-3 px-3 text-center"><span className={`inline-flex px-2 py-1 rounded-full text-[9px] font-black border ${LEAD_BUCKET_BADGE[leadLifecycleBucket(v)]}`}>{LEAD_BUCKET_LABEL[leadLifecycleBucket(v)]}</span></td>
                           <td className="py-3 px-3 text-left" onClick={(e) => e.stopPropagation()}>
-                            {isPendingLead(v) ? (canConvertLead ? <button onClick={() => setConvertingVisitor(v)} className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[10px] px-3 py-1.5 rounded-xl shadow-xs flex items-center gap-1"><UserCheck className="w-3.5 h-3.5" /> Enroll now</button> : <span className="text-[10px] text-slate-400 font-bold" title="Only the registrar can enroll a lead.">Registrar only</span>) : <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-0.5 justify-end"><CheckCircle2 className="w-3.5 h-3.5" /> Completed</span>}
+                            {isClosedLead(v)
+                              ? <span className="text-[10px] text-slate-400 font-bold" title="Reopen this lead before it can be enrolled.">Closed</span>
+                              : isPendingLead(v)
+                                ? (canConvertLead
+                                    ? <button onClick={() => setConvertingVisitor(v)} className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[10px] px-3 py-1.5 rounded-xl shadow-xs flex items-center gap-1"><UserCheck className="w-3.5 h-3.5" /> Enroll now</button>
+                                    : <span className="text-[10px] text-slate-400 font-bold" title="Only the registrar can enroll a lead.">Registrar only</span>)
+                                : <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-0.5 justify-end"><CheckCircle2 className="w-3.5 h-3.5" /> Completed</span>}
                           </td>
                         </tr>
                       );
@@ -379,15 +438,25 @@ export default function VisitorsView({
           ) : (
             /* Workflow board */
             <div className="overflow-x-auto pb-2">
-              <div className="grid grid-cols-5 gap-3 min-w-[1200px] items-start">
+              <div className="grid grid-cols-6 gap-3 min-w-[1320px] items-start">
                 {[
                   { key: 'new', label: 'New', stages: ['lead', 'inquiry'], tone: 'slate' },
                   { key: 'nurture', label: 'Nurture', stages: ['follow_up'], tone: 'indigo' },
                   { key: 'placement', label: 'Placement', stages: ['placement_booking', 'placement_fee', 'placement_completed'], tone: 'violet' },
                   { key: 'enrollment', label: 'Enrollment', stages: ['class_fee', 'card_issued', 'book_issued', 'registration'], tone: 'amber' },
-                  { key: 'lifecycle', label: 'Lifecycle', stages: ['enrollment', 'active', 'graduated', 'alumni', 'lost'], tone: 'emerald' },
+                  { key: 'lifecycle', label: 'Enrolled', stages: ['enrollment', 'active', 'graduated', 'alumni'], tone: 'emerald' },
+                  // 'lost' had been folded into Lifecycle alongside enrollment,
+                  // active, graduated and alumni — won and lost outcomes in one
+                  // pile. A closed lead is its own terminal state.
+                  { key: 'lost', label: 'Lost', stages: ['lost'], tone: 'slate' },
                 ].map((col) => {
                   const colVisitors = filteredVisitors.filter((v) => col.stages.includes(v.stage || 'lead'));
+                  // Column badge = SERVER count over the whole population.
+                  // Using colVisitors.length here showed "New: 21" against a
+                  // true 223, because filteredVisitors is one 25-row page.
+                  const colTotal = stageTotals
+                    ? col.stages.reduce((n, st) => n + (stageTotals[st] ?? 0), 0)
+                    : null;
                   return (
                     <div key={col.key} className="rounded-2xl border border-slate-200 bg-slate-50/70 min-h-[430px] p-3">
                       <div className="flex items-center justify-between mb-3 px-1">
@@ -395,11 +464,13 @@ export default function VisitorsView({
                           <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">{col.label}</p>
                           <p className="text-[9px] text-slate-400">{col.stages.length} workflow stage{col.stages.length > 1 ? 's' : ''}</p>
                         </div>
-                        <span className="px-2 py-1 rounded-full bg-white border border-slate-200 text-[10px] font-black text-slate-700">{colVisitors.length}</span>
+                        <span className="px-2 py-1 rounded-full bg-white border border-slate-200 text-[10px] font-black text-slate-700" title={colTotal !== null ? `${colTotal} lead(s) in this phase across the whole branch` : undefined}>{colTotal ?? '—'}</span>
                       </div>
                       <div className="space-y-2 max-h-[560px] overflow-y-auto pr-1">
                         {colVisitors.length === 0 ? (
-                          <div className="border border-dashed border-slate-200 rounded-xl bg-white/60 p-6 text-center text-[10px] text-slate-400">No leads in this phase.</div>
+                          <div className="border border-dashed border-slate-200 rounded-xl bg-white/60 p-6 text-center text-[10px] text-slate-400">
+                            {isFetching ? 'Loading…' : colTotal ? `${colTotal} lead(s) in this phase — not on this page.` : 'No leads in this phase.'}
+                          </div>
                         ) : colVisitors.map((v) => {
                           const nextStage = (() => {
                             const order = ['lead','inquiry','follow_up','placement_booking','placement_fee','placement_completed','class_fee','card_issued','book_issued','registration','enrollment','active','graduated','alumni','lost'];
@@ -426,7 +497,12 @@ export default function VisitorsView({
                               <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2" onClick={(e) => e.stopPropagation()}>
                                 <button onClick={() => setSelectedVisitorId(v.id)} className="text-[9px] font-bold text-slate-500 hover:text-indigo-600">Open workspace</button>
                                 {nextStage && nextStage !== 'lost' && canEditLead ? (
-                                  <button onClick={() => advanceVisitorStage(v.id)} className="text-[9px] font-black text-white bg-indigo-600 hover:bg-indigo-700 px-2.5 py-1.5 rounded-lg">Advance</button>
+                                  <button
+                                    onClick={() => void handleAdvance(v)}
+                                    disabled={advancing === v.id}
+                                    title={`Advance ${v.fullName} to ${nextStage.replace(/_/g, ' ')}`}
+                                    className="text-[9px] font-black text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed px-2.5 py-1.5 rounded-lg"
+                                  >{advancing === v.id ? 'Advancing…' : `Advance → ${nextStage.replace(/_/g, ' ')}`}</button>
                                 ) : v.stage === 'lost' ? (
                                   <span className="text-[9px] font-black text-slate-400">Closed</span>
                                 ) : null}

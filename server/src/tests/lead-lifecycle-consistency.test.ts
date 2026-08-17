@@ -23,7 +23,7 @@ import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-ser
 import { visitorsRouter } from '../routes/visitors.routes.js';
 import { dashboardRouter } from '../routes/dashboard.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
-import { buildVisitorSummary } from '../core/visitors/visitor-query.js';
+import { buildVisitorSummary, queryVisitorPage } from '../core/visitors/visitor-query.js';
 import { buildDashboardSummary } from '../core/dashboard/dashboard-summary.js';
 import {
   leadLifecycleBucket,
@@ -241,6 +241,52 @@ describe('every consumer reports the same lead buckets', () => {
     // …but it does appear in the per-stage funnel, which is a different question.
     const regStage = pipe.body.stages.find((s: any) => s.stage === 'registration');
     expect(regStage.count).toBe(1);
+  });
+});
+
+// ===========================================================================
+// byStage — the kanban's authoritative column counts (audit N-1)
+// ===========================================================================
+describe('byStage counts the whole population, not a page', () => {
+  beforeEach(() => {
+    for (let i = 0; i < 30; i++) seedVisitor({ status: 'visited', stage: 'lead' });
+    seedVisitor({ status: 'visited', stage: 'inquiry' });
+    seedVisitor({ status: 'visited', stage: 'lost' });
+    for (let i = 0; i < 4; i++) seedVisitor({ status: 'registered', stage: 'enrollment' });
+    seedVisitor({ status: 'visited', stage: null });
+  });
+
+  it('reports every stage over the full scoped population', () => {
+    const v = buildVisitorSummary(db, { branchId: BRANCH, isAll: false }, {}, today());
+    const byStage = Object.fromEntries(v.byStage.map((r) => [r.stage, r.count]));
+    // The board previously derived these from a 25-row page and showed 21.
+    expect(byStage.lead).toBe(31); // 30 explicit + 1 NULL normalised to 'lead'
+    expect(byStage.inquiry).toBe(1);
+    expect(byStage.lost).toBe(1);
+    expect(byStage.enrollment).toBe(4);
+  });
+
+  it('byStage sums to the population total, so no lead is invisible on the board', () => {
+    const v = buildVisitorSummary(db, { branchId: BRANCH, isAll: false }, {}, today());
+    expect(v.byStage.reduce((n, r) => n + r.count, 0)).toBe(v.total);
+  });
+
+  it('is unaffected by the page window', () => {
+    const scope = { branchId: BRANCH, isAll: false };
+    const a = buildVisitorSummary(db, scope, {}, today());
+    // Summary is page-independent by construction; assert it explicitly so a
+    // future refactor cannot quietly reintroduce page-derived counts.
+    const page = queryVisitorPage(db, scope, {}, { limit: 5, offset: 0 }, today());
+    expect(page.rows).toHaveLength(5);
+    const b = buildVisitorSummary(db, scope, {}, today());
+    expect(b.byStage).toEqual(a.byStage);
+    expect(b.total).toBe(a.total);
+  });
+
+  it('normalises a NULL stage to lead rather than dropping the row', () => {
+    const v = buildVisitorSummary(db, { branchId: BRANCH, isAll: false }, {}, today());
+    expect(v.byStage.some((r) => r.stage === null as unknown as string)).toBe(false);
+    expect(v.byStage.reduce((n, r) => n + r.count, 0)).toBe(v.total);
   });
 });
 
