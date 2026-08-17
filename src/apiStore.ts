@@ -29,8 +29,7 @@ import {
   BusinessRule, RuleCategory, RuleEngineResult, BusinessRuleVersion, PipelineStage,
   Branch, Campus, Organization, TeacherContractType,
   StudentBalanceRow,
-  AttendanceSummaryRow,
-} from './types';
+  AttendanceSummaryRow, DashboardSummary,} from './types';
 
 /** Real due/paid/remaining figures for one teacher/month, mirroring GET /teachers/:id/salary-status. */
 export interface TeacherSalaryStatus {
@@ -101,6 +100,7 @@ export function useApiStore() {
   const [transactions, setTransactions] = useState<FinancialTransaction[]>([]);
   const [financeReconciliation, setFinanceReconciliation] = useState<{ healthy: boolean; scope: string; branchId: string | null; paymentBackedTotal: number; ledgerBackedTotal: number; amountVariance: number; unmatchedPayments: number; orphanLedgerRows: number; mismatchedPayments: Array<{ paymentId: string; paymentAmount: number; ledgerAmount: number; variance: number }> } | null>(null);
   const [financeDashboard, setFinanceDashboard] = useState<FinanceDashboard | null>(null);
+  const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [savingBalance, setSavingBalance] = useState(0);
@@ -346,6 +346,14 @@ export function useApiStore() {
       : Promise.resolve(),
     [canSeeFinance]
   );
+  // Authoritative Dashboard KPIs. Every population metric (conversion rate,
+  // pending leads, active students, per-period intake) and the cash-flow series
+  // are computed in SQL server-side. The Dashboard must render these and derive
+  // nothing itself — see docs/DASHBOARD_AUDIT_2026-08-17.md (D-1..D-5).
+  const reloadDashboardSummary = useCallback(
+    () => api.get<DashboardSummary>('/dashboard/summary', bq).then(setDashboardSummary).catch(() => setDashboardSummary(null)),
+    [bq]
+  );
   const reloadFinanceDashboard = useCallback(
     () => (canSeeFinance ? api.get<FinanceDashboard>('/finance/dashboard', bq).then(setFinanceDashboard).catch(() => setFinanceDashboard(null)) : Promise.resolve()),
     [bq, canSeeFinance]
@@ -494,6 +502,7 @@ export function useApiStore() {
           reloadClasses(),
           reloadVisitors(),
           reloadNotifications(),
+          reloadDashboardSummary(),
           ...(canSeeFinance ? [reloadFinanceOverview()] : []),
         ]);
       case 'students':
@@ -1342,7 +1351,7 @@ export function useApiStore() {
   return {
     // Raw values
     students, teachers, employees, partners, classes, visitors, attendance, payments,
-    books, bookSales, exams, examResults, budgetLines, expenseRequests, invoices, financeConfig, transactions, auditLogs, financeReconciliation, financeDashboard,
+    books, bookSales, exams, examResults, budgetLines, expenseRequests, invoices, financeConfig, transactions, auditLogs, financeReconciliation, financeDashboard, dashboardSummary,
     savingBalance, mainAccountBalance, expenseAutoApproveThreshold, notifications, settings, currentBranchName, isLoading,
     skills, classTeacherSkills, branches, campuses, organization,
     // 1.0.0 values
@@ -1357,7 +1366,7 @@ export function useApiStore() {
     createCampus, updateCampus, deactivateCampus, deleteCampus,
     createBranch, updateBranch, deactivateBranch, deleteBranch,
     // Utils
-    changeBranch, reloadAll, ensureTabData, ensureFinanceSection, isTabLoading, reloadNotifications, reloadVisitors, reloadFinanceDashboard,
+    changeBranch, reloadAll, ensureTabData, ensureFinanceSection, isTabLoading, reloadNotifications, reloadVisitors, reloadFinanceDashboard, reloadDashboardSummary,
     studentsAreLite, ensureFullStudents, studentBalances, reloadStudentBalances,
     attendanceSummary, reloadAttendanceSummary,
     // Existing business operations

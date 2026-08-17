@@ -63,6 +63,7 @@ import enrollmentRouter from './routes/enrollment.routes.js';
 import waitlistRouter from './routes/waitlist.routes.js';
 import searchRouter from './routes/search.routes.js';
 import { reportsRouter } from './routes/reports.routes.js';
+import { dashboardRouter } from './routes/dashboard.routes.js';
 
 // ============================================================================
 // §1 — INITIALIZATION
@@ -216,6 +217,7 @@ app.use('/api/rules', rulesRouter);
 app.use('/api/bos', bosRouter);
 app.use('/api/search', searchRouter);
 app.use('/api/reports', reportsRouter);
+app.use('/api/dashboard', dashboardRouter);
 
 // ============================================================================
 // §5 — 404 HANDLER & GLOBAL ERROR HANDLER

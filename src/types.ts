@@ -688,6 +688,32 @@ export interface ExpenseReport {
  * manager's landing view (GET /api/finance/dashboard). Every figure is
  * calculated in SQL on the backend; the UI only renders it.
  */
+/**
+ * Authoritative Dashboard KPIs, computed entirely server-side in SQL.
+ * The Dashboard renders these values and must not re-derive any of them from
+ * loaded entity arrays — doing so is what produced audit findings D-1..D-5
+ * (metrics counted from a paginated page rather than the population).
+ */
+export interface DashboardSummary {
+  scope: 'organization' | 'branch';
+  branchId: string | null;
+  /** Server local date (YYYY-MM-DD). The single date authority for the Dashboard. */
+  today: string;
+  boundaries: Record<'today' | 'month' | 'year', { period: string; from: string; to: string }>;
+  population: {
+    activeStudents: number;
+    totalStudents: number;
+    activeClasses: number;
+    activeTeachers: number;
+    totalVisitors: number;
+    pendingLeads: number;
+    convertedLeads: number;
+    conversionRate: number;
+  };
+  periods: Record<'today' | 'month' | 'year', { newVisitors: number; newStudents: number }>;
+  cashFlow: Array<{ date: string; income: number; expense: number }>;
+}
+
 export interface FinanceDashboard {
   scope: 'organization' | 'branch';
   branchId: string | null;

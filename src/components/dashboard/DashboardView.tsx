@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { formatJalaliAxis, formatJalali } from '../../utils/jalali';
 import {TrendingUp, TrendingDown, Users, School, Wallet, PiggyBank, Eye, EyeOff, UserCheck, Clock, Zap, AlertTriangle, BookOpen, Activity, GraduationCap, Loader2, CheckCircle2, CalendarDays, BarChart3, Sparkles} from 'lucide-react';
 import {AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend, RadialBarChart, RadialBar} from 'recharts';
-import { AuditLog, BudgetLine, Class, FinanceDashboard, FinancialTransaction, Invoice, Student, Teacher, UserRole, Visitor } from '../../types';
+import { AuditLog, BudgetLine, Class, DashboardSummary, FinanceDashboard, FinancialTransaction, Invoice, Student, Teacher, UserRole, Visitor } from '../../types';
 import BusinessOperatingSystemView from './BusinessOperatingSystemView';
 import OperationsWorkQueue from './OperationsWorkQueue';
 import {useAuth} from '../../contexts/useAuth';
@@ -12,6 +12,14 @@ import { BRAND_NAME } from '../../config/branding';
 interface DashboardViewProps {
   /** Server-computed period totals. The authoritative source for money tiles. */
   financeDashboard: FinanceDashboard | null;
+  /**
+   * Server-computed KPIs — the authoritative source for EVERY population
+   * metric and for the cash-flow series. Counting the entity arrays below
+   * instead produced audit findings D-1..D-5: those arrays are paginated
+   * (visitors are hard-capped at 100 server-side), so client-side counts
+   * silently described a page rather than the population.
+   */
+  dashboardSummary: DashboardSummary | null;
   students: Student[];
   teachers: Teacher[];
   invoices: Invoice[];
@@ -63,7 +71,7 @@ const ChartTooltip = ({ active, payload, label }: any) => {
 
 export default function DashboardView({
   students, teachers, invoices, classes, visitors, transactions, budgetLines, mainAccountBalance,
-  financeDashboard,
+  financeDashboard, dashboardSummary,
   auditLogs, activeRole, registerVisitorToStudent, runSavingEngine, savingPercent,
   getExecutiveDashboard, getMarketingFunnel, getStudentAnalytics, getDecisionWarnings,
   getProfitDistribution, withdrawProfitDistribution, revenueByClass = [], revenueByTimeSlot = [], onNavigate
@@ -92,21 +100,20 @@ export default function DashboardView({
   }, [toast]);
 
   const triggerToast = (message: string, type: 'success' | 'error' | 'info') => setToast({ message, type });
-  const todayStr = new Date().toISOString().split('T')[0];
+  // The server's local date is the single date authority. Deriving it here with
+  // toISOString() (UTC) made the client and server disagree for 4.5 hours every
+  // day in Asia/Kabul — audit finding D-4. The fallback keeps the component
+  // renderable before the summary arrives, and uses local time, never UTC.
+  const todayStr = dashboardSummary?.today ?? new Date().toLocaleDateString('en-CA');
 
+  // Per-period intake comes from the server, which counts the whole population
+  // in SQL over server-local date boundaries. The previous implementation
+  // filtered the loaded arrays, so "New Visitors" could never exceed the
+  // 100-row visitor page (audit D-1 class).
   const timeStats = useMemo(() => {
-    const filterByDate = (dateStr?: string) => {
-      if (!dateStr) return false;
-      if (timeframe === 'today') return dateStr === todayStr;
-      if (timeframe === 'month') return dateStr.startsWith(todayStr.slice(0, 7));
-      return dateStr.startsWith(todayStr.slice(0, 4));
-    };
-
-    return {
-      visitors: visitors.filter(v => filterByDate(v.visitDate)).length,
-      students: students.filter(s => filterByDate(s.registrationDate)).length,
-    };
-  }, [visitors, students, timeframe, todayStr]);
+    const p = dashboardSummary?.periods?.[timeframe];
+    return { visitors: p?.newVisitors ?? 0, students: p?.newStudents ?? 0 };
+  }, [dashboardSummary, timeframe]);
 
   const metrics = useMemo(() => {
     // Money totals come from the server, which sums the whole period in SQL.
@@ -119,30 +126,33 @@ export default function DashboardView({
     const monthIncome = financeDashboard?.month?.income ?? 0;
     const monthExpense = financeDashboard?.month?.expense ?? 0;
 
-    const activeStudents = students.filter((s) => s.status === 'active').length;
-    const activeClasses = classes.filter((c) => c.status === 'active').length;
-    const activeTeachers = teachers.filter((t) => (t.status || 'active') === 'active').length;
-    
-    const pendingLeadsList = visitors.filter((v) => v.status === 'visited' || v.status === 'follow_up');
-    const convertedLeads = visitors.filter((v) => v.status === 'registered').length;
-    const conversionRate = visitors.length > 0 ? Math.round((convertedLeads / visitors.length) * 100) : 0;
+    // POPULATION METRICS — server-computed (SQL COUNT over the whole scoped
+    // table). Counting the loaded arrays instead is audit findings D-1/D-3/D-5:
+    // visitors are hard-capped at 100 rows server-side, so the conversion rate
+    // reported 50% against a true 20%, and pending leads 50 against a true 200.
+    // `activeStudents` had the same latent bug above 2,000 students per branch.
+    const pop = dashboardSummary?.population;
+    const activeStudents = pop?.activeStudents ?? 0;
+    const activeClasses = pop?.activeClasses ?? 0;
+    const activeTeachers = pop?.activeTeachers ?? 0;
+    const totalStudents = pop?.totalStudents ?? 0;
+    const conversionRate = pop?.conversionRate ?? 0;
+    const pendingLeads = pop?.pendingLeads ?? 0;
 
-    // NOTE: the 7-day sparkline is derived from the loaded `transactions`
-    // page, so it shows SHAPE, not authoritative totals. It is labelled as a
-    // trend and never presented as a figure anyone reconciles against. The
-    // KPI tiles above deliberately come from the server instead. If this chart
-    // ever grows a "total" readout it must move to /finance/pnl first.
-    const chartData = Array.from({ length: 7 }, (_, idx) => {
-      const d = new Date();
-      d.setDate(d.getDate() - (6 - idx));
-      const iso = d.toISOString().split('T')[0];
-      const label = formatJalaliAxis(d.toLocaleDateString('en-CA'));
-      return {
-        name: label,
-        Income: transactions.filter((t) => t.type === 'income' && t.date === iso).reduce((s, t) => s + t.amount, 0),
-        Expense: transactions.filter((t) => t.type === 'expense' && t.date === iso).reduce((s, t) => s + t.amount, 0),
-      };
-    });
+    // The quick-registration dropdown still needs actual visitor RECORDS, not a
+    // count. It is explicitly a "recent leads" picker over the loaded page, and
+    // is labelled as such — it never claims to be the full pending population.
+    const pendingLeadsList = visitors.filter((v) => v.status === 'visited' || v.status === 'follow_up');
+
+    // CASH FLOW — server-computed daily aggregate. This chart renders exact AFN
+    // in its tooltip, so it must reconcile with the ledger. Reducing the loaded
+    // `transactions` page understated a 700-row day by 39,540 AFN (45%) while
+    // the KPI tile beside it showed the correct figure — audit finding D-2.
+    const chartData = (dashboardSummary?.cashFlow ?? []).map((row) => ({
+      name: formatJalaliAxis(row.date),
+      Income: row.income,
+      Expense: row.expense,
+    }));
 
     const budgetChartData = budgetLines.filter((b) => b.allocatedAmount > 0 || b.currentAmount > 0).slice(0, 8).map((b) => ({
       name: b.name.length > 12 ? `${b.name.slice(0, 12)}…` : b.name,
@@ -153,12 +163,12 @@ export default function DashboardView({
     return {
       todayIncome, todayExpense, netToday: todayIncome - todayExpense,
       monthIncome, monthExpense, monthNet: monthIncome - monthExpense,
-      activeStudents, activeClasses, activeTeachers,
-      pendingLeads: pendingLeadsList.length, conversionRate, budgetChartData,
+      activeStudents, activeClasses, activeTeachers, totalStudents,
+      pendingLeads, conversionRate, budgetChartData,
       chartData, pendingLeadsList
     };
   }, [
-    transactions, students, classes, teachers, visitors, budgetLines,
+    dashboardSummary, visitors, budgetLines,
     financeDashboard?.today?.income, financeDashboard?.today?.expense,
     financeDashboard?.month?.income, financeDashboard?.month?.expense,
   ]);
@@ -400,7 +410,7 @@ export default function DashboardView({
                         <div className="flex-1">
                           <p className="font-bold text-slate-800 text-sm mb-1.5">{c.name}</p>
                           <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                            <div className="bg-gradient-to-r from-indigo-500 to-violet-500 h-1.5 rounded-full transition-all duration-700 ease-out" style={{ width: `${(c.revenue / revenueByClass[0].revenue) * 100}%` }} />
+                            <div className="bg-gradient-to-r from-indigo-500 to-violet-500 h-1.5 rounded-full transition-all duration-700 ease-out" style={{ width: `${revenueByClass[0].revenue > 0 ? (c.revenue / revenueByClass[0].revenue) * 100 : 0}%` }} />
                           </div>
                         </div>
                         <p className="font-mono font-bold text-slate-900 text-sm tabular-nums">{formatAFN(c.revenue)}</p>
@@ -480,7 +490,7 @@ export default function DashboardView({
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Active Students</span>
                 </div>
                 <p className="text-3xl font-extrabold tracking-tight text-slate-900 tabular-nums">{metrics.activeStudents}</p>
-                <p className="text-xs text-slate-500 mt-1 font-medium">{students.length} total records</p>
+                <p className="text-xs text-slate-500 mt-1 font-medium">{metrics.totalStudents} total records</p>
               </div>
 
               <div className={`${glassCard} p-6 group`}>

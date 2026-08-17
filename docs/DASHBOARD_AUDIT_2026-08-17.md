@@ -214,3 +214,87 @@ client happens to have loaded*. The durable fix is a single server-computed
 dashboard-summary endpoint for non-financial KPIs, mirroring what
 `/api/finance/dashboard` already does correctly for money — not a larger page
 size, which only moves the ceiling.
+
+---
+
+## §9 — REMEDIATION RECORD (pass 23, same day)
+
+The defects below were remediated after this audit was published. The fix was
+**architectural**, not a pagination-limit increase: raising limits would only
+move the threshold at which the numbers silently become wrong again.
+
+### What changed
+
+| Layer | Change |
+|---|---|
+| `server/src/core/dashboard/dashboard-summary.ts` | **New.** All KPIs computed as SQL `COUNT`/`SUM` over the whole scoped table. Pure `periodBoundaries()` helper. Cash flow is a `GROUP BY date` with a zero-filled continuous axis, `days` clamped 1..90. |
+| `server/src/routes/dashboard.routes.ts` | **New.** `GET /api/dashboard/summary`, guarded by `authenticate` + `requirePermission('Dashboard.View')` + `resolveBranchScope(req)`. |
+| `server/src/index.ts` | Router mounted at `/api/dashboard`. |
+| `src/apiStore.ts`, `src/types.ts`, `src/App.tsx` | `dashboardSummary` state + loader; typed contract. |
+| `src/components/dashboard/DashboardView.tsx` | **All authoritative derivation deleted.** The view now renders server values only. |
+
+### The rule now enforced
+
+> The Dashboard **displays** server-computed results. It does not re-derive any
+> authoritative metric from a loaded entity array.
+
+The one surviving client-side `filter` builds the quick-registration dropdown,
+which needs visitor *records* rather than a count and is explicitly a
+"recent leads" picker — it never presents itself as a population figure.
+
+### Date policy (D-4)
+
+A single authority: the **server's local date**, `toLocaleDateString('en-CA')`,
+matching `utils/ids.ts today()`. The server returns `today` plus explicit
+`boundaries` for each period, so the client cannot compute a different day.
+Windows stay Gregorian to match `financial_transactions.date`; Jalali remains
+display-only (D-6 unchanged).
+
+### Before / after — reproduced live against the 60,882-transaction dataset
+
+| ID | Metric | Before (client) | After (server) | DB truth | |
+|---|---|---|---|---|---|
+| D-1 | Conversion rate | 50% | **20%** | 20% | FIXED |
+| D-2 | Cash flow, today income | 62,250 | **104,950** | 104,950 | FIXED |
+| D-3 | Pending leads | 50 | **200** | 200 | FIXED |
+| D-4 | Date authority | client UTC | **server local** | — | FIXED |
+| D-5 | Active students | 1,970 | **2,220** | 2,220 | FIXED |
+| D-1b | New visitors today | 100 (page cap) | **250** | 250 | FIXED |
+
+Also folded into the API because they shared the defect class:
+`activeClasses`, `activeTeachers`, and the "N total records" caption.
+
+Opportunistically fixed: **D-9**, the `NaN%` bar width, now guarded against a
+zero-revenue leader.
+
+### Verification
+
+- **28 new tests** in `server/src/tests/dashboard-summary.test.ts`, with
+  fixtures deliberately exceeding every page ceiling (250 visitors > 100 cap,
+  2,250 students > 2,000 cap, 700 transactions > 500 page).
+- **Mutation testing: 14/14 mutants killed.** Two survivors found real gaps and
+  were closed by adding coverage, not by weakening assertions:
+  - `on_leave`/inactive teachers and class-status counting were untested;
+  - the fixture contained no `follow_up` visitors, so dropping that state was
+    invisible. Both now covered.
+  - One candidate mutant (`COALESCE` default flip) is **equivalent/unreachable**:
+    `teachers.status` is `NOT NULL DEFAULT 'active'` with a CHECK constraint.
+- Adversarial: unauth 401, forged `?branchId=` silently re-scoped, `branchId=all`
+  refused for a single-branch manager, hostile `?days=` clamped, SQL injection in
+  `branchId` parameterized to a harmless empty scope, empty branch returns zeros
+  with no divide-by-zero, 8 concurrent reads against 25 interleaved writes all
+  returned reconcilable snapshots.
+
+### Gates at this commit
+
+1050/1050 tests (was 1022) · eslint 0 errors / 102 warnings (unchanged) · both
+typechecks clean · frontend build OK · fresh-schema preflight SUCCESS
+(69 migrations) · `release:validate` 16/16.
+
+### Status
+
+D-1, D-2, D-3, D-4, D-5 — **CLOSED**. D-9 closed. D-6, D-7, D-8, D-10, D-11,
+D-12 remain open and are unaffected by this change.
+
+**GL-1 (browser visual inspection at 1920×1080) and GL-2 (a printed fee bill)
+remain OPEN.** They require a human and have not been performed.
