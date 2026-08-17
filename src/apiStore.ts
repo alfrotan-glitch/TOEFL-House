@@ -796,7 +796,10 @@ export function useApiStore() {
 
   const processExpenseApproval = async (requestId: string, isApproved: boolean, rejectReason?: string) => {
     await api.post(`/finance/expense-requests/${requestId}/decide`, { isApproved, rejectReason });
-    await Promise.all([reloadExpenseRequests(), reloadBudgetLines(), reloadTransactions(), reloadNotifications()]);
+    // Approving pays the expense from its budget line and writes an `expense`
+    // ledger row, so the overview totals move (verified: expense 20000 ->
+    // 27000, net 480000 -> 473000).
+    await Promise.all([reloadExpenseRequests(), reloadBudgetLines(), reloadTransactions(), reloadFinanceOverview(), reloadNotifications()]);
     invalidate('finance');
   };
 
@@ -933,7 +936,12 @@ export function useApiStore() {
 
   const payTeacherSalary = async (teacherId: string, monthName: string, amountPaid: number, paymentType: 'full' | 'partial' | 'advance') => {
     await api.post(`/teachers/${teacherId}/pay-salary`, { monthName, amountPaid, paymentType });
-    await Promise.all([reloadBudgetLines(), reloadTransactions(), reloadNotifications()]);
+    // A salary payment writes an `expense` ledger row, so GET /finance/overview
+    // returns different `expense` and `net` totals immediately afterwards
+    // (verified: expense 0 -> 20000, net 500000 -> 480000). Without reloading
+    // it the finance header keeps showing the pre-payment net until something
+    // else happens to refresh it.
+    await Promise.all([reloadBudgetLines(), reloadTransactions(), reloadFinanceOverview(), reloadNotifications()]);
     invalidate('finance');
   };
 
@@ -964,7 +972,8 @@ export function useApiStore() {
 
   const payEmployeeSalary = async (employeeId: string, monthName: string, amountPaid: number, paymentType: 'full' | 'partial' | 'advance') => {
     await api.post(`/employees/${employeeId}/pay-salary`, { monthName, amountPaid, paymentType });
-    await Promise.all([reloadBudgetLines(), reloadTransactions(), reloadNotifications()]);
+    // Same as teacher payroll: this moves `expense` and `net` on the overview.
+    await Promise.all([reloadBudgetLines(), reloadTransactions(), reloadFinanceOverview(), reloadNotifications()]);
     invalidate('finance');
   };
 
