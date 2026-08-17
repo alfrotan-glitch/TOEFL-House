@@ -851,7 +851,7 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
     getJourneyEngine(db).appendEvent({ studentId: student.id, eventType: JourneyEventType.PAYMENT_RECORDED, occurredAt: date, branchId: student.branch_id, actorUserId: user.userId, actorName: user.fullName, payload: { amount: resolvedAmount, category, receiptNumber: rc } });
   } catch (err) { console.warn('[journey] failed', err); }
 
-  writeAudit(req, `Recorded ${category} payment ${resolvedAmount} AFN from ${student.full_name}`, { newValue: JSON.stringify({ receipt: rc, amount: resolvedAmount, category, paymentId: payId, semester: semName, bookId: bookRefId }) });
+  writeAudit(req, `Recorded ${category} payment ${resolvedAmount} AFN from ${student.full_name}`, { branchId: student.branch_id, newValue: JSON.stringify({ receipt: rc, amount: resolvedAmount, category, paymentId: payId, semester: semName, bookId: bookRefId }) });
   res.status(201).json({ receiptNumber: rc, amountCharged: resolvedAmount });
 }));
 
@@ -908,7 +908,7 @@ studentsRouter.post('/:id/refund', requirePermission('Refund.Approve'), ah(async
     getJourneyEngine(db).appendEvent({ studentId: student.id, eventType: JourneyEventType.PAYMENT_RECORDED, occurredAt: date, branchId: student.branch_id, actorUserId: user.userId, actorName: user.fullName, payload: { amount: -refundAmount, category: 'refund', receiptNumber: rc } });
   } catch (err) { console.warn('[journey] failed', err); }
 
-  writeAudit(req, `Refunded ${refundAmount} AFN to ${student.full_name}`, { oldValue: JSON.stringify({ reason: String(reason) }), newValue: JSON.stringify({ receipt: rc, amount: refundAmount, paymentId: payId }) });
+  writeAudit(req, `Refunded ${refundAmount} AFN to ${student.full_name}`, { branchId: student.branch_id, oldValue: JSON.stringify({ reason: String(reason) }), newValue: JSON.stringify({ receipt: rc, amount: refundAmount, paymentId: payId }) });
   res.status(201).json({ receiptNumber: rc });
 }));
 

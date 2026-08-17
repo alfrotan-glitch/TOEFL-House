@@ -80,6 +80,31 @@ function assertRuleManagementCategory(category: RuleCategory): void {
   }
 }
 
+/**
+ * The decision-bearing fields of a rule, for before/after audit capture.
+ *
+ * Rule changes were audited by NAME only ("Updated rule: Discount Cap 30%"),
+ * with old_value and new_value both null. For configuration that governs money
+ * — `rule_default_discount_cap` sets the institutional discount ceiling — that
+ * is not an audit trail: it records that something changed, not what it
+ * changed from or to, so an unauthorised or mistaken edit is untraceable.
+ */
+function ruleSnapshot(rule: unknown): string {
+  const r = rule as Record<string, unknown> | null | undefined;
+  if (!r) return JSON.stringify(null);
+  return JSON.stringify({
+    id: r.id,
+    name: r.name,
+    category: r.category,
+    conditions: r.conditions,
+    actions: r.actions,
+    priority: r.priority,
+    isActive: r.isActive,
+    scopeBranchId: r.scopeBranchId,
+    version: r.version,
+  });
+}
+
 rulesRouter.get('/meta', authorize('owner', 'manager', 'finance', 'registrar', 'head_of_department'), ah(async (_req, res) => {
   res.json({ categories: RULE_CATEGORY_META });
 }));
@@ -166,7 +191,7 @@ rulesRouter.post(
       },
       user.fullName
     );
-    writeAudit(req, `Created new rule: ${rule.name} (category: ${rule.category})`);
+    writeAudit(req, `Created new rule: ${rule.name} (category: ${rule.category})`, { newValue: ruleSnapshot(rule) });
     res.status(201).json(rule);
   })
 );
@@ -208,7 +233,7 @@ rulesRouter.patch(
       },
       user.fullName
     );
-    writeAudit(req, `Updated rule: ${updated.name} (version ${updated.version})`);
+    writeAudit(req, `Updated rule: ${updated.name} (version ${updated.version})`, { oldValue: ruleSnapshot(existing), newValue: ruleSnapshot(updated) });
     res.json(updated);
   })
 );
@@ -227,7 +252,7 @@ rulesRouter.post(
     assertRuleManagementCategory(existing.category);
     
     const restored = rollbackRule(req.params.id, version, user.fullName);
-    writeAudit(req, `Rolled back rule "${existing.name}" to version ${version}`);
+    writeAudit(req, `Rolled back rule "${existing.name}" to version ${version}`, { oldValue: ruleSnapshot(existing), newValue: ruleSnapshot(restored) });
     res.json(restored);
   })
 );
@@ -246,7 +271,7 @@ rulesRouter.patch(
     }
     
     deactivateRule(req.params.id, user.fullName);
-    writeAudit(req, `Deactivated rule: ${existing.name}`);
+    writeAudit(req, `Deactivated rule: ${existing.name}`, { oldValue: ruleSnapshot(existing), newValue: ruleSnapshot(getRuleById(req.params.id)) });
     res.json({ ok: true });
   })
 );
@@ -260,7 +285,7 @@ rulesRouter.delete(
     if (!existing) throw new HttpError(404, 'Rule not found.');
     assertRuleManagementCategory(existing.category);
     deleteRule(req.params.id);
-    writeAudit(req, `Permanently deleted rule: ${existing.name}`);
+    writeAudit(req, `Permanently deleted rule: ${existing.name}`, { oldValue: ruleSnapshot(existing) });
     res.json({ ok: true });
   })
 );
