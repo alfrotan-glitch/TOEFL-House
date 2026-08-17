@@ -1,7 +1,7 @@
 /**
  * The post-deployment verifier must actually catch a bad deployment.
  * ============================================================================
- * `scripts/verify-deployment.mjs` is how an operator closes release item H-4
+ * `scripts/verify-deployment.mjs` is how an operator closes go-live blocker GL-4
  * (and confirms 067/069 landed) against the REAL database after deploying.
  * A verifier that only ever says PASS is worse than no verifier, so these
  * tests sabotage a good database in each of the specific ways a deployment can
@@ -75,15 +75,15 @@ describe('deployment verifier', () => {
     expect(code).toBe(0);
   });
 
-  it('reports H-4 explicitly so the operator can close it', () => {
-    expect(run(deployed).out).toContain('H-4: migration 068 indexes present');
+  it('reports GL-4 explicitly so the operator can close it', () => {
+    expect(run(deployed).out).toContain('GL-4: migration 068 indexes present');
   });
 
   it('FAILS when a migration 068 index is missing', () => {
     const file = sabotage((db) => db.exec('DROP INDEX IF EXISTS idx_users_role'));
     const { code, out } = run(file);
     expect(code).toBe(1);
-    expect(out).toMatch(/FAIL {2}H-4/);
+    expect(out).toMatch(/FAIL {2}GL-4/);
     expect(out).toContain('idx_users_role');
   });
 

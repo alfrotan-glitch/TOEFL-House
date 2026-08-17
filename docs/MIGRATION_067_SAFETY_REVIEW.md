@@ -8,7 +8,7 @@ copy (`/tmp/f4/erp.sqlite`, `/tmp/prod-like.sqlite`, `/tmp/rollback-test.sqlite`
 
 ## 0. First finding: the migration under review did not exist
 
-`docs/RELEASE_READINESS.md` H-3 instructed an operator to *"run the F-10 repair
+`docs/RELEASE_READINESS.md` (the blocker now numbered GL-3) instructed an operator to *"run the F-10 repair
 migration against production"*. There was no such file. Migrations stopped at
 `066`, and `grep -rn "F-10"` matched only prose and two test files.
 

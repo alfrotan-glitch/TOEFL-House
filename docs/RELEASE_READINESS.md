@@ -231,33 +231,63 @@ charges) when the new business rule took effect; every assertion was preserved.
 
 ## H. GO-LIVE BLOCKERS
 
-All remaining blockers are **external/manual production dependencies**. None is
-a code defect awaiting a fix, and none can be closed from a build environment.
-Each now has a tool or a documented procedure that makes closing it mechanical.
+### Naming — read this first
 
-| # | Blocker | Owner | How to close | Status |
-|---|---|---|---|---|
-| H-1 | Visual sign-off of Versions & Rules at 1920×1080 and a smaller viewport | A person at a screen | Open the page in a real browser at both sizes | **EXTERNAL** — no browser engine obtainable here; all vendor hosts and the OS package mirror return HTTP 000, and the Pango libraries WeasyPrint needs are absent |
-| H-2 | One physical print of the student fee bill | A person at a printer | Print one bill on 80 mm stock and inspect it | **EXTERNAL** — same reason as H-1 |
-| H-3 | Apply migration 067 to production | DBA / operator | Deploy the build — migrations run on boot. See `docs/DEPLOYMENT_067_069.md` | **EXTERNAL** — verified end-to-end on a production-shaped clone (phantom cash 4750 → 3500), never run on real data |
-| H-4 | Confirm migration 068's indexes exist in production | DBA / operator | `node server/scripts/verify-deployment.mjs <db>` — exit 0 closes this item | **EXTERNAL — tooling COMPLETE**; the check is written, adversarially tested and mutation-verified |
-| H-5 | Audit existing production data for pre-existing corrupt money | Finance owner + DBA | `node server/scripts/audit-financial-data.mjs <db>` — exit 0 closes this item; exit 1 lists record ids, values, corruption type and blast radius for a human decision | **EXTERNAL — tooling COMPLETE**; verified on both clean and deliberately corrupted fixtures |
+`H-1` and `H-2` were used earlier in this project for two HIGH-severity **code
+defects** (`docs/ADVERSARIAL_AUDIT_2026-08-16.md`, `docs/REMEDIATION_2026-08-16.md`:
+disagreeing sources of financial truth, and a test that gave false assurance).
+Both of those were fixed and are regression-locked today by
+`balance-single-source-of-truth.test.ts` and
+`student-financial-idempotency.test.ts` (22 tests, passing).
 
-**Why production data cannot be reached from here:** the system is file-based
-SQLite with no remote-database driver (`grep` for `DATABASE_URL`/`postgres`/
-`mysql` in `db/connection.ts` returns nothing), and a filesystem-wide search
-finds no production `erp.sqlite` — every database present was created by this
-audit under `/tmp`. So H-3/H-4/H-5 are not "unfinished work"; they are steps
-that can only be performed where the real data lives.
+Reusing `H-n` for go-live blockers was ambiguous. **Go-live blockers are now
+`GL-n`.** The old code defects keep their historical `H-n` identifiers inside
+the audit documents where they were raised; nothing below refers to them.
 
-### Exact conditions to change NO-GO to GO
+### Status vocabulary
 
-1. `verify-deployment.mjs` exits **0** against the production database after deploy (closes H-3, H-4).
-2. `audit-financial-data.mjs` exits **0**, or every row it reports has a recorded human decision (closes H-5, D-12, D-13, D-14).
-3. A person confirms H-1 and H-2 with their own eyes.
+Exactly one of these applies to each item. A verification **tool** existing is
+never sufficient to close an item — the tool must have been **run against the
+real production database** and passed.
 
-Until 1–3 are done the correct status is **NO-GO**, regardless of test or CI
-results.
+| Status | Meaning |
+|---|---|
+| **CLOSED** | Verified with evidence produced in this environment. |
+| **OPEN — production** | Needs the real production database/environment. Tooling may be complete; execution has not happened. |
+| **OPEN — human** | Needs a person to look at something and judge it. |
+| **BLOCKED — sandbox** | Impossible from this sandbox for a demonstrated technical reason. |
+
+### The blockers
+
+| # | Requirement | Status | Why it is still open | Evidence required to close | Who / where | Blocks deploy? |
+|---|---|---|---|---|---|---|
+| **GL-1** | Visual/responsive sign-off of Academic Control Center → Versions & Rules at 1920×1080 and at a smaller viewport | **BLOCKED — sandbox** · **OPEN — human** | No browser engine is obtainable here: `cdn.playwright.dev`, Chrome-for-Testing, `objects.githubusercontent.com` and `deb.debian.org` all return HTTP **000**; WeasyPrint installs but its Pango native libraries are absent. jsdom is not a substitute for visual inspection. | A person opens the page in a real browser at both sizes and confirms layout, no clipping, no overlap | A person at a screen | **YES** — cosmetic/layout risk is unquantified |
+| **GL-2** | One physically printed student fee bill inspected on paper | **BLOCKED — sandbox** · **OPEN — human** | Same missing print/render stack as GL-1. HTML/CSS source review is not evidence about a physical print. | One bill printed on 80 mm stock; logo, branch contact data, fee/discount/paid/remaining, paper size, page breaks and clipping all confirmed | A person at a printer | **YES** — the fee bill is a customer-facing financial document |
+| **GL-3** | Migrations 067–069 applied to the production database | **OPEN — production** | Verified end-to-end on a production-shaped clone carrying reproduced F-10 damage (phantom cash **4750 → 3500**), and on a fresh install. **Never executed against real data.** | Deploy the build (migrations run on boot), then `verify-deployment.mjs` exits **0** | DBA / operator on the production host | **YES** — it is the deployment |
+| **GL-4** | Confirm migration 068's indexes exist in production and are used | **OPEN — production** · *tooling complete* | The check is written, adversarially tested (9 tests that sabotage a good database) and mutation-verified — but **tool-verified is not production-verified**. It has never been run where the real data is. | `node server/scripts/verify-deployment.mjs <db>` exits **0**, showing `idx_users_role` and `idx_placement_profile_program_branch` present and the query plan using the index | DBA / operator on the production host | **NO** — performance-only; degrades to a table scan, no incorrect results |
+| **GL-5** | Audit existing production data for pre-existing corrupt money values | **OPEN — production** · *tooling complete* | Tool verified on clean and deliberately corrupted fixtures (finds all 9 injected issues, reports clean on a good database). **Whether production holds corrupt values is UNKNOWN — not clean.** | `node server/scripts/audit-financial-data.mjs <db>` exits **0**; or exit **1** with a recorded human decision for every row it lists | Finance owner + DBA on the production host | **YES** — unknown financial state |
+
+### Why production cannot be reached from here
+
+Established, not assumed: the system is file-based SQLite with **no remote
+database driver** (no `DATABASE_URL`, `postgres`, `mysql` or `mongodb`
+reference in `src/db/connection.ts`), and a filesystem-wide search finds **no
+production `erp.sqlite`** — every database present was created by this audit
+under `/tmp`. GL-3/GL-4/GL-5 are therefore not unfinished engineering; they are
+steps that can only be performed where the real data lives.
+
+### Exact GO criteria
+
+All four must hold. Nothing here can be satisfied by tests or CI.
+
+1. **GL-3** — build deployed; `verify-deployment.mjs` exits **0** against the production database.
+2. **GL-5** — `audit-financial-data.mjs` exits **0**, or every row it reports has a recorded, signed-off human decision (this also closes D-12, D-13, D-14).
+3. **GL-1 and GL-2** — a person confirms the screen layout and one printed fee bill.
+4. **GL-4** — covered by criterion 1 (same command). If it alone fails, that is a performance defect, not a correctness one, and may be accepted knowingly.
+
+Until 1–3 are satisfied the correct status is **NO-GO**, regardless of test or
+CI results. A green suite demonstrates the absence of the failures it models
+and nothing more.
 
 ---
 
@@ -270,8 +300,8 @@ guard is removed. The three business-policy questions are now settled with
 evidence rather than assumption, and two of them uncovered real auditability
 gaps that are now closed.
 
-I am not claiming this system is **production-ready**, because three GO-LIVE
-BLOCKERS remain open (H-1, H-2, H-3) and none of them can be closed from here.
+I am not claiming this system is **production-ready**, because five GO-LIVE
+BLOCKERS remain open (GL-1 … GL-5) and none of them can be closed from here.
 A green suite demonstrates the absence of the failures it models — nothing
 beyond that. What this report supports is an *informed* decision to ship, with
 the residual risks named, ranked, and assigned.

@@ -6,7 +6,7 @@
  * questions that cannot be answered from a build environment:
  *
  *   - did every migration actually apply?
- *   - did migration 068's indexes land? (release item H-4)
+ *   - did migration 068's indexes land? (go-live blocker GL-4)
  *   - did migration 069's money guards land?
  *   - did migration 067 leave every branch reconciled?
  *   - is the pre-migration backup on disk?
@@ -63,7 +63,7 @@ check('every migration on disk is recorded as applied', () => {
   return { ok: missing.length === 0, detail: missing.length ? `NOT applied: ${missing.join(', ')}` : `${applied.size} applied` };
 });
 
-check('H-4: migration 068 indexes present', () => {
+check('GL-4: migration 068 indexes present', () => {
   const need = ['idx_users_role', 'idx_placement_profile_program_branch'];
   const missing = need.filter((n) =>
     db.prepare("SELECT COUNT(*) c FROM sqlite_master WHERE type='index' AND name=?").get(n).c === 0);
