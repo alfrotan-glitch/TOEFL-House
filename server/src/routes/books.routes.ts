@@ -204,8 +204,9 @@ booksRouter.post(
     // Reject an over-large discount rather than capping it to the sale total,
     // which silently turned a mistyped figure into a free book. Same rule as
     // tuition payments and invoices.
-    const requestedDiscount = Number(discountAmount || 0);
-    if (!Number.isFinite(requestedDiscount) || requestedDiscount < 0) throw new HttpError(400, 'Discount must be a positive amount.');
+    let requestedDiscount: number;
+    try { requestedDiscount = assertMoney(discountAmount || 0, 'discount'); }
+    catch { throw new HttpError(400, 'Discount must be a positive amount.'); }
     if (requestedDiscount > totalAmount) {
       throw new HttpError(400, `Discount cannot exceed the sale total of ${totalAmount} AFN.`);
     }

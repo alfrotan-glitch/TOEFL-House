@@ -11,6 +11,7 @@ import { getStudentBalance, getStudentBalancesPage } from '../utils/studentBalan
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { hasAnyRole } from '../core/rbac/rbac-service.js';
 import { writeAudit } from '../middleware/audit.js';
+import { assertMoney } from '../utils/money.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
 import { recordIncome } from '../utils/income.js';
@@ -506,13 +507,20 @@ studentsRouter.post('/manual', requirePermission('Student.Create'), ah(async (re
     const cls = stmtGetClassFee.get(classId) as any;
     resolvedTuition = cls ? cls.fee : 0;
   }
-  resolvedTuition = Number(resolvedTuition ?? 0);
-  if (!Number.isFinite(resolvedTuition) || resolvedTuition < 0) throw new HttpError(400, 'Tuition amount must be zero or greater.');
+  // finite + non-negative was not enough: 1e15 passed and became a tuition of
+  // one quadrillion. assertMoney adds the two-decimal rounding and the
+  // safe-integer-cents ceiling used by every other money field.
+  try { resolvedTuition = assertMoney(resolvedTuition ?? 0, 'tuition amount'); }
+  catch { throw new HttpError(400, 'Tuition amount must be zero or greater.'); }
 
-  const paidNow = Number(amountPaidNow ?? 0);
-  if (!Number.isFinite(paidNow) || paidNow < 0) throw new HttpError(400, 'Amount paid must be zero or greater.');
+  let paidNow: number;
+  try { paidNow = assertMoney(amountPaidNow ?? 0, 'amount paid'); }
+  catch { throw new HttpError(400, 'Amount paid must be zero or greater.'); }
   const netTuitionDue = Math.max(0, resolvedTuition - Math.round((resolvedTuition * effDiscount) / 100));
-  if (paidNow > netTuitionDue && netTuitionDue > 0) throw new HttpError(400, 'Amount received cannot exceed payable fee.');
+  // The `&& netTuitionDue > 0` escape hatch let any sum be collected against a
+  // zero-fee enrolment — the same hole already closed in the visitor
+  // conversion path. Money may never exceed what is payable, including zero.
+  if (paidNow > netTuitionDue) throw new HttpError(400, 'Amount received cannot exceed payable fee.');
 
   let receiptNumber: string | null = null;
   const tx = db.transaction(() => {
@@ -585,8 +593,9 @@ studentsRouter.post('/:id/enroll-class', requirePermission('Class.Assign', 'Stud
   const baseFee = cls.fee || 0;
   const discount = student.discount_percent || 0;
   const netFee = Math.max(0, baseFee - Math.round(baseFee * discount / 100));
-  const paidNow = Number(amountPaidNow || 0);
-  if (!Number.isFinite(paidNow) || paidNow < 0) throw new HttpError(400, 'Amount paid must be zero or greater.');
+  let paidNow: number;
+  try { paidNow = assertMoney(amountPaidNow || 0, 'amount paid'); }
+  catch { throw new HttpError(400, 'Amount paid must be zero or greater.'); }
   if (paidNow > netFee) throw new HttpError(400, 'Amount paid cannot exceed the payable fee.');
 
   const tx = db.transaction(() => {

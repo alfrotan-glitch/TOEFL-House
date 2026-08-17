@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { authenticate, authorize, canAccessBranchResource } from '../middleware/auth.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
+import { assertMoney } from '../utils/money.js';
 import { getJourneyEngine } from '../core/journey/journey-engine.js';
 import { getEnrollmentService } from '../core/academic/enrollment-service.js';
 import { assertClassGenderAllowsStudent } from './classes.routes.js';
@@ -182,7 +183,7 @@ journeyRouter.post(
       actorUserId: user.userId,
       actorName: user.fullName,
       autoInvoice: autoInvoice !== false,
-      discountAmount: discountAmount != null ? Number(discountAmount) : 0,
+      discountAmount: discountAmount != null ? assertMoney(discountAmount, 'discount amount') : 0,
     });
 
     writeAudit(req, `Enrollment ${result.enrollmentId} for student ${student.full_name}`);

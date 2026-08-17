@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
+import { assertMoney } from '../utils/money.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id } from '../utils/ids.js';
 import { contractPaysPerSkill, normalizeContractType } from '../core/payroll/class-payroll.js';
@@ -200,8 +201,12 @@ classTeacherSkillsRouter.post(
     // One-off roles (substitute/guest/examiner) may also be unpaid or
     // compensated outside the monthly-rate mechanism.
     const paysPerSkill = contractPaysPerSkill(normalizeContractType(teacher.salary_type));
-    const resolvedRate = monthlyRate != null ? Number(monthlyRate) : Number(teacher.default_skill_rate) || 0;
-    if (!Number.isFinite(resolvedRate) || resolvedRate < 0) throw new HttpError(400, 'monthlyRate must be a non-negative number.');
+    // `Number(x)` here accepted 'abc' as NaN and only the follow-up isFinite
+    // check caught it, while 1e15 passed entirely. Route it through the one
+    // monetary boundary so every rejection reason is consistent.
+    const resolvedRate = monthlyRate != null
+      ? assertMoney(monthlyRate, 'monthlyRate')
+      : assertMoney(teacher.default_skill_rate ?? 0, 'monthlyRate');
     if (resolvedRate <= 0 && paysPerSkill && PAYROLL_ELIGIBLE_TYPES.includes(resolvedType)) {
       throw new HttpError(400, 'monthlyRate is required for a primary/assistant assignment on a Skill-paid contract (or set defaultSkillRate on the teacher contract).');
     }

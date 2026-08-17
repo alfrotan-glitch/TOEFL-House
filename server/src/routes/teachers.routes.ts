@@ -197,8 +197,9 @@ teachersRouter.post('/', requirePermission('Teacher.Create'), ah(async (req, res
   const allowedContractTypes = ['monthly','hourly','per_session'];
   if (contractType && !allowedContractTypes.includes(contractType)) throw new HttpError(400, 'Invalid contract type.');
   if ((resolvedType === 'per_session') && contractType && contractType !== 'per_session') throw new HttpError(400, 'A per-session salary model requires a per-session contract type.');
-  const defaultSkillRate = bodyDefaultSkillRate == null ? 0 : Number(bodyDefaultSkillRate);
-  if (!Number.isFinite(defaultSkillRate) || defaultSkillRate < 0) throw new HttpError(400, 'Default skill rate must be a non-negative number.');
+  let defaultSkillRate: number;
+  try { defaultSkillRate = bodyDefaultSkillRate == null ? 0 : assertMoney(bodyDefaultSkillRate, 'default skill rate'); }
+  catch { throw new HttpError(400, 'Default skill rate must be a non-negative number.'); }
   if ((resolvedType === 'per_skill' || resolvedType === 'hybrid') && defaultSkillRate <= 0 && Number(baseSalary) <= 0) {
     throw new HttpError(400, 'A skill-based salary requires a positive base salary or default skill rate.');
   }

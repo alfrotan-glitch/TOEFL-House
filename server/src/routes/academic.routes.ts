@@ -8,6 +8,7 @@ import { db } from '../db/connection.js';
 import { assertTextLengths, TEXT_LIMITS } from '../utils/textInput.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
+import { assertMoney } from '../utils/money.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id } from '../utils/ids.js';
 import { ACADEMIC_DEFAULTS, PLACEMENT_DEFAULTS } from '../core/configuration/policy-catalog.js';
@@ -329,7 +330,11 @@ academicRouter.post(
       JSON.stringify(prerequisites || []),
       code?.trim()?.toUpperCase() || null,
       Number(durationMonths) || ACADEMIC_DEFAULTS.levelDurationMonths,
-      Number(defaultFee) || ACADEMIC_DEFAULTS.levelDefaultFee,
+      // `Number(defaultFee) || fallback` accepted 'abc' (NaN -> falls back
+      // silently), -6000 and 1e15. A level fee is the SOURCE of every class
+      // fee and therefore of every student's tuition, so a bad value here
+      // propagates into enrolment and invoicing.
+      defaultFee == null ? ACADEMIC_DEFAULTS.levelDefaultFee : assertMoney(defaultFee, 'default fee'),
       Number(passMark) || ACADEMIC_DEFAULTS.levelPassMark,
       isActive === false || isActive === 0 ? 0 : 1,
       Number(minViableSize) >= 0 ? Number(minViableSize) : ACADEMIC_DEFAULTS.levelMinViableSize
@@ -354,7 +359,7 @@ academicRouter.put(
       prerequisites !== undefined ? JSON.stringify(prerequisites) : existing.prerequisites,
       code !== undefined ? code : existing.code,
       durationMonths ?? existing.duration_months,
-      defaultFee ?? existing.default_fee,
+      defaultFee == null ? existing.default_fee : assertMoney(defaultFee, 'default fee'),
       passMark ?? existing.pass_mark,
       isActive === false || isActive === 0 ? 0 : isActive === true || isActive === 1 ? 1 : existing.is_active ?? 1,
       minViableSize !== undefined ? Number(minViableSize) : (existing.min_viable_size ?? ACADEMIC_DEFAULTS.levelMinViableSize),
@@ -406,20 +411,21 @@ academicRouter.put(
   ah(async (req, res) => {
     const { levelId, branchId, fee } = req.body ?? {};
     if (!levelId || fee == null) throw new HttpError(400, 'levelId and fee are required.');
+    const validatedOverrideFee = assertMoney(fee, 'level fee');
     const resolvedBranch = branchId || req.user?.branchId;
     requireAcademicBranchAccess(req, resolvedBranch);
     requireLevelAccess(req, levelId);
 
     const existing = stmtGetFeesByLevelBranch.get(levelId, resolvedBranch) as any;
     if (existing) {
-      stmtUpdateLevelFee.run(Number(fee), existing.id);
+      stmtUpdateLevelFee.run(validatedOverrideFee, existing.id);
       res.json(mapFee(stmtGetFeeById.get(existing.id)));
       return;
     }
     
     const newId = id('lbf');
-    stmtInsertLevelFee.run(newId, levelId, resolvedBranch, Number(fee));
-    writeAudit(req, `Set branch fee for level ${levelId}: ${fee}`);
+    stmtInsertLevelFee.run(newId, levelId, resolvedBranch, validatedOverrideFee);
+    writeAudit(req, `Set branch fee for level ${levelId}: ${validatedOverrideFee}`);
     res.status(201).json(mapFee(stmtGetFeeById.get(newId)));
   })
 );

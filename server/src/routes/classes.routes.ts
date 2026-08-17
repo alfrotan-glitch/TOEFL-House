@@ -5,6 +5,7 @@ import { assertTextLengths, TEXT_LIMITS } from '../utils/textInput.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { assertClassAccess, isClassTeacherScoped } from '../core/rbac/abac.js';
 import { writeAudit } from '../middleware/audit.js';
+import { assertMoney } from '../utils/money.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
 import { getJourneyEngine } from '../core/journey/journey-engine.js';
@@ -349,7 +350,11 @@ classesRouter.post(
     if (!userBranchId) throw new HttpError(403, 'User branch context is missing.');
 
     let resolvedLevelLabel = level || '';
-    let resolvedFee = fee;
+    // Without a levelId this is the raw client value and used to be written
+    // straight to classes.fee: 'abc', -6000 and 1e15 were all stored. With a
+    // levelId it is replaced by the level's fee below, which is now validated
+    // at its own source.
+    let resolvedFee = fee == null ? 0 : assertMoney(fee, 'class fee');
     let resolvedSchedule = scheduleTime || null;
     const resolvedBranch = branchId || userBranchId;
     if (!canAccessBranchResource(req, resolvedBranch)) throw new HttpError(403, 'Target branch is outside your authorized scope.');

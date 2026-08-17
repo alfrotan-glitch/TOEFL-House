@@ -232,11 +232,12 @@ fundingRouter.post(
     const { name, description, donorId, targetAmount, startDate, endDate } = req.body;
     
     if (!name || !targetAmount) throw new HttpError(400, 'Campaign name and target amount are required.');
+    const validatedTarget = assertMoney(targetAmount, 'campaign target amount');
 
     const newId = id('camp');
     const tx = db.transaction(() => {
       stmtInsertCampaign.run(
-        newId, name, description || null, donorId || null, targetAmount,
+        newId, name, description || null, donorId || null, validatedTarget,
         startDate || today(), endDate || null, user.branchId
       );
       return eventBus.emit('campaign.created', 'campaign', newId, { name, targetAmount }, { operatorId: user.userId, branchId: user.branchId });
