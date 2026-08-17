@@ -24,6 +24,7 @@ import { authenticate, authorize, resolveBranchScope, canAccessBranchResource } 
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
+import { assertMoney } from '../utils/money.js';
 import { addNotification } from '../utils/notifications.js';
 import { recordIncome } from '../utils/income.js';
 import { resolveIdempotency } from '../utils/idempotency.js';
@@ -389,11 +390,16 @@ fundingRouter.post(
     const { name, donorId, campaignId, totalBudget, criteria } = req.body;
     
     if (!name || !totalBudget) throw new HttpError(400, 'Scholarship name and total budget are required.');
+    // Unvalidated, this stored the literal string 'abc' as a budget. The award
+    // handler then computed `total_budget - allocated_amount` = NaN, and
+    // `amount > NaN` is false, so an award of 999,999 sailed past the budget
+    // check on a fund with no real budget at all.
+    const validatedBudget = assertMoney(totalBudget, 'scholarship budget');
 
     const newId = id('sch');
-    stmtInsertScholarship.run(newId, name, donorId || null, campaignId || null, totalBudget, criteria || null, user.branchId);
+    stmtInsertScholarship.run(newId, name, donorId || null, campaignId || null, validatedBudget, criteria || null, user.branchId);
 
-    writeAudit(req, `Created scholarship fund: ${name} (budget: ${totalBudget} AFN)`);
+    writeAudit(req, `Created scholarship fund: ${name} (budget: ${validatedBudget} AFN)`);
     res.status(201).json({ id: newId });
   })
 );
@@ -415,17 +421,28 @@ fundingRouter.post(
     const user = getUserContext(req);
     const { scholarshipId, studentId, amount, awardDate, semester, notes } = req.body;
     
-    if (!scholarshipId || !studentId || !amount || amount <= 0) {
+    if (!scholarshipId || !studentId || !amount) {
       throw new HttpError(400, 'Scholarship, student, and a positive amount are required.');
     }
+    // `amount <= 0` is a coercion, not a validation: NaN <= 0 is false.
+    const awardAmount = assertMoney(amount, 'award amount');
+    if (awardAmount <= 0) throw new HttpError(400, 'Scholarship, student, and a positive amount are required.');
 
     const scholarship = stmtGetScholarshipById.get(scholarshipId) as any;
     if (!scholarship) throw new HttpError(404, 'Scholarship not found.');
     requireFundingBranchAccess(req, scholarship.branch_id);
     if (scholarship.status !== 'active') throw new HttpError(409, 'This scholarship is no longer active.');
 
-    const remaining = scholarship.total_budget - scholarship.allocated_amount;
-    if (amount > remaining) {
+    // Both operands are coerced explicitly: a legacy row written before the
+    // budget was validated can still hold a non-numeric total, and a NaN
+    // comparison silently approves every award.
+    const totalBudgetValue = Number(scholarship.total_budget);
+    const allocatedValue = Number(scholarship.allocated_amount) || 0;
+    if (!Number.isFinite(totalBudgetValue)) {
+      throw new HttpError(409, 'This scholarship has an invalid budget and cannot be awarded against.');
+    }
+    const remaining = totalBudgetValue - allocatedValue;
+    if (!(awardAmount <= remaining)) {
       throw new HttpError(409, `Insufficient scholarship budget. Remaining: ${remaining.toLocaleString()} AFN.`);
     }
 
@@ -440,20 +457,20 @@ fundingRouter.post(
     const date = awardDate || today();
 
     const tx = db.transaction(() => {
-      stmtInsertAward.run(newId, scholarshipId, studentId, amount, date, semester || null, notes || null, student.branch_id);
-      const newAllocated = scholarship.allocated_amount + amount;
-      const newStatus = newAllocated >= scholarship.total_budget ? 'exhausted' : 'active';
+      stmtInsertAward.run(newId, scholarshipId, studentId, awardAmount, date, semester || null, notes || null, student.branch_id);
+      const newAllocated = allocatedValue + awardAmount;
+      const newStatus = newAllocated >= totalBudgetValue ? 'exhausted' : 'active';
       stmtUpdateScholarshipAllocation.run(newAllocated, newStatus, scholarshipId);
       return eventBus.emit('scholarship.awarded', 'scholarship', newId, 
-      { scholarshipId, studentId, studentName: student.full_name, amount }, 
+      { scholarshipId, studentId, studentName: student.full_name, amount: awardAmount }, 
       { operatorId: user.userId, branchId: student.branch_id }
       );
     });
     const event = tx();
     void eventBus.dispatch(event);
 
-    addNotification('Scholarship Awarded', `${student.full_name} was awarded ${amount.toLocaleString()} AFN from "${scholarship.name}".`, 'success', student.branch_id);
-    writeAudit(req, `Awarded scholarship: ${amount} AFN to ${student.full_name} from "${scholarship.name}"`);
+    addNotification('Scholarship Awarded', `${student.full_name} was awarded ${awardAmount.toLocaleString()} AFN from "${scholarship.name}".`, 'success', student.branch_id);
+    writeAudit(req, `Awarded scholarship: ${awardAmount} AFN to ${student.full_name} from "${scholarship.name}"`);
     res.status(201).json({ id: newId });
   })
 );
@@ -480,6 +497,8 @@ fundingRouter.post(
     const { donorId, studentId, programId, monthlyAmount, startDate, endDate } = req.body;
     
     if (!donorId || !monthlyAmount) throw new HttpError(400, 'Donor and monthly amount are required.');
+    const validatedMonthly = assertMoney(monthlyAmount, 'monthly sponsorship amount');
+    if (validatedMonthly <= 0) throw new HttpError(400, 'Donor and monthly amount are required.');
 
     const donor = stmtGetDonorById.get(donorId) as any;
     if (!donor) throw new HttpError(404, 'Donor not found.');
