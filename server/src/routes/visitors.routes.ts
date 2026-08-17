@@ -13,6 +13,8 @@ import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
 import { resolvePlacementRequirement } from '../core/placement/policy-engine.js';
 import { resolveGoverningProgramVersionId } from '../core/placement/enrollment-gate.js';
+import { buildVisitorSummary, queryVisitorPage, type VisitorFilters } from '../core/visitors/visitor-query.js';
+import { evaluateConversionEligibilityForVisitor } from '../core/visitors/conversion-eligibility.js';
 import { addNotification } from '../utils/notifications.js';
 import { recordIncome } from '../utils/income.js';
 import { getNumberSetting, incrementNumberSetting } from '../utils/settings.js';
@@ -245,6 +247,29 @@ function parsePagination(req: import('express').Request) {
   });
 }
 
+/**
+ * Read list filters off the query string.
+ *
+ * Values are passed straight to `buildVisitorFilterClause`, which binds every
+ * one of them as a SQL parameter — nothing here is interpolated into SQL. An
+ * unknown value simply matches nothing rather than erroring, because a filter
+ * is a view preference, not a command.
+ */
+function readVisitorFilters(req: import('express').Request): VisitorFilters {
+  const str = (key: string): string | undefined => {
+    const raw = req.query[key];
+    return typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : undefined;
+  };
+  return {
+    search: str('search'),
+    status: str('status'),
+    source: str('source'),
+    interest: str('interest'),
+    placement: str('placement'),
+    overdueOnly: req.query.overdue === 'true' || req.query.overdue === '1',
+  };
+}
+
 function requireVisitor(req: import('express').Request, visitorId: string): any {
   const visitor = stmtGetVisitorById.get(visitorId) as any;
   if (!visitor) throw new HttpError(404, 'Visitor not found.');
@@ -285,20 +310,70 @@ function mapVisitors(rows: any[]) {
 // ============================================================================ 
 // §1 — LIST / READ 
 // ============================================================================ 
+/**
+ * Visitor list — server-side search, filter and pagination (UX-1).
+ *
+ * Filtering happens in SQL so that page N is a page of the FILTERED set. When
+ * the client filtered a fetched page in JavaScript, a search for lead #101 of
+ * 250 returned "no matches" for a person who existed, and every KPI was
+ * computed from the truncated array. `X-Total-Count` now reports the count of
+ * rows matching the caller's filters (the paginator's denominator) and
+ * `X-Unfiltered-Count` the whole scoped population, so the UI can say
+ * "showing 20 of 137 matching / 250 total" without counting anything itself.
+ */
 visitorsRouter.get('/', requirePermission('Lead.View'), ah(async (req, res) => {
-  const { branchId, isAll } = resolveBranchScope(req);
+  const scope = resolveBranchScope(req);
   const { limit, offset } = parsePagination(req);
-  const countRow = isAll ? stmtCountAllVisitors.get() as { c: number } : stmtCountVisitorsByBranch.get(branchId) as { c: number };
-  const rows = isAll ? stmtGetAllVisitors.all(limit, offset) : stmtGetVisitorsByBranch.all(branchId, limit, offset);
-  res.setHeader('X-Total-Count', String(countRow.c));
+  const filters = readVisitorFilters(req);
+  const todayStr = today();
+
+  const { rows, filteredTotal } = queryVisitorPage(db, scope, filters, { limit, offset }, todayStr);
+  const unfiltered = scope.isAll
+    ? (stmtCountAllVisitors.get() as { c: number }).c
+    : (stmtCountVisitorsByBranch.get(scope.branchId) as { c: number }).c;
+
+  res.setHeader('X-Total-Count', String(filteredTotal));
+  res.setHeader('X-Unfiltered-Count', String(unfiltered));
   res.setHeader('X-Page-Limit', String(limit));
   res.setHeader('X-Page-Offset', String(offset));
   res.json(mapVisitors(rows as any[]));
 }));
 
+/**
+ * Authoritative visitor KPIs (UX-1).
+ *
+ * Same authority model as `/dashboard/summary`: SQL aggregates over the whole
+ * scoped population, never a page. The client renders these and derives none
+ * of them. `Lead.View` is the permission every lead-viewing role already holds,
+ * so this adds no new access.
+ */
+visitorsRouter.get('/summary', requirePermission('Lead.View'), ah(async (req, res) => {
+  const scope = resolveBranchScope(req);
+  res.json(buildVisitorSummary(db, scope, readVisitorFilters(req), today()));
+}));
+
 // ============================================================================ 
 // §2 — PIPELINE VIEW 
 // ============================================================================ 
+/**
+ * Conversion eligibility preview (UX-3).
+ *
+ * Read-only: it calls INTO the same placement authority the write path uses,
+ * so it can never green-light a conversion the write path would refuse. Guarded
+ * by `Lead.Convert` — the permission for the action it previews — so it cannot
+ * be used to probe placement policy by a role that could not convert anyway.
+ * `requireVisitor` enforces the same branch isolation as every other route here.
+ */
+visitorsRouter.get('/:id/conversion-eligibility', requirePermission('Lead.Convert'), ah(async (req, res) => {
+  const visitor = requireVisitor(req, req.params.id);
+  const rawClassId = req.query.classId;
+  const classId = typeof rawClassId === 'string' && rawClassId.trim() !== '' ? rawClassId.trim() : null;
+  const { branchId } = resolveBranchScope(req);
+  res.json(
+    evaluateConversionEligibilityForVisitor(db, visitor, classId, visitor.branch_id ?? branchId ?? null)
+  );
+}));
+
 visitorsRouter.get('/pipeline', requirePermission('Lead.View'), ah(async (req, res) => {
   const { branchId, isAll } = resolveBranchScope(req);
   const stageRows = isAll ? stmtGetPipelineAll.all() : stmtGetPipelineByBranch.all(branchId) as any[];

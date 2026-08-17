@@ -6,6 +6,7 @@ import React, { useState } from 'react';
 import { UserPlus, X, CheckCircle2, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 import { Branch, Visitor } from '../../types';
 import { validatePhone } from '../../utils/erpHelpers';
+import { VISITOR_SOURCE_OPTIONS } from '../../config/visitorSources';
 import { ShamsiDateInput } from '../common/ShamsiDateInput';
 
 interface AddVisitorFormProps {
@@ -52,6 +53,10 @@ export default function AddVisitorForm({
   const [submitting, setSubmitting] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false); // Collapsible state
 
+  // Local calendar date, matching the server's `today()`. Used to stop a future
+  // date of birth being enterable at all.
+  const todayIso = new Date().toLocaleDateString('en-CA');
+
   const inputCls = "w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/10 font-medium transition-all";
   const labelCls = "block text-slate-600 mb-1 font-bold text-[11px]";
 
@@ -73,7 +78,13 @@ export default function AddVisitorForm({
       if (created?.id) onVisitorCreated?.(created.id);
       onCancel();
     } catch (err: any) {
-      triggerToast(err?.response?.data?.error || 'Could not save visitor.', 'error');
+      // UX-2: `api` is fetch-based and throws ApiError with `.message` — there
+      // is no `.response.data` anywhere in this codebase. Reading the Axios
+      // shape first meant EVERY actionable server message (duplicate Tazkira,
+      // invalid date, name too long) collapsed into one generic sentence on
+      // the receptionist's most-used screen. Sibling modals already read
+      // `err.message`; this now matches them.
+      triggerToast(err?.message || 'Could not save visitor. Please check the fields and try again.', 'error');
     } finally {
       setSubmitting(false);
     }
@@ -94,11 +105,11 @@ export default function AddVisitorForm({
         {/* Primary Contact */}
         <div>
           <label className={labelCls}>Full name *</label>
-          <input type="text" placeholder="e.g. Zabiullah Amini" value={fullName} onChange={(e) => setFullName(e.target.value)} className={inputCls} required />
+          <input type="text" placeholder="e.g. Zabiullah Amini" maxLength={200} value={fullName} onChange={(e) => setFullName(e.target.value)} className={inputCls} required />
         </div>
         <div>
           <label className={labelCls}>Phone (preferably WhatsApp) *</label>
-          <input type="tel" placeholder="e.g. 0729112233" value={phone} onChange={(e) => setPhone(e.target.value)} className={`${inputCls} font-mono text-left`} required />
+          <input type="tel" placeholder="e.g. 0729112233" maxLength={60} value={phone} onChange={(e) => setPhone(e.target.value)} className={`${inputCls} font-mono text-left`} required />
         </div>
         <div>
           <label className={labelCls}>Gender</label>
@@ -109,7 +120,7 @@ export default function AddVisitorForm({
         <div>
           <label className={labelCls}>Lead source</label>
           <select value={source} onChange={(e) => setSource(e.target.value as any)} className={inputCls}>
-            <option value="social">Social media (Telegram/Instagram)</option><option value="ads">Paid ads & Facebook</option><option value="friend">Direct referral</option><option value="other">Other / outdoor ads</option>
+            {VISITOR_SOURCE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </div>
 
@@ -165,15 +176,18 @@ export default function AddVisitorForm({
 
         {showAdvanced && (
           <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-5 animate-in fade-in duration-200">
-            <div><label className={labelCls}>Email (optional)</label><input type="email" placeholder="name@example.com" value={email} onChange={(e) => setEmail(e.target.value)} className={`${inputCls} font-mono text-left`} /></div>
-            <div><label className={labelCls}>Father's name</label><input type="text" placeholder="e.g. Mohammad Zaman" value={fatherName} onChange={(e) => setFatherName(e.target.value)} className={inputCls} /></div>
-            <div><label className={labelCls}>Tazkira number</label><input type="text" placeholder="e.g. 1234-5678-901" value={tazkiraNo} onChange={(e) => setTazkiraNo(e.target.value)} className={`${inputCls} font-mono`} /></div>
-            <div><label className={labelCls}>Date of birth / age</label><input type="text" placeholder="e.g. 2002-07-15 or 24" value={dob} onChange={(e) => setDob(e.target.value)} className={inputCls} /></div>
-            <div><label className={labelCls}>WhatsApp (if different)</label><input type="tel" placeholder="e.g. 0722334455" value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} className={`${inputCls} font-mono text-left`} /></div>
-            <div><label className={labelCls}>School / university</label><input type="text" placeholder="e.g. Kabul Polytechnic" value={schoolOrUniversity} onChange={(e) => setSchoolOrUniversity(e.target.value)} className={inputCls} /></div>
-            <div className="sm:col-span-2"><label className={labelCls}>Region, district & address</label><input type="text" placeholder="e.g. Kabul, District 6, Baraki" value={addressRegion} onChange={(e) => setAddressRegion(e.target.value)} className={inputCls} /></div>
-            <div><label className={labelCls}>Emergency contact name</label><input type="text" placeholder="e.g. Abdul Rahim" value={emergencyContactName} onChange={(e) => setEmergencyContactName(e.target.value)} className={inputCls} /></div>
-            <div><label className={labelCls}>Emergency phone</label><input type="tel" placeholder="e.g. 0799112233" value={emergencyContactPhone} onChange={(e) => setEmergencyContactPhone(e.target.value)} className={`${inputCls} font-mono text-left`} /></div>
+            <div><label className={labelCls}>Email (optional)</label><input type="email" placeholder="name@example.com" maxLength={254} value={email} onChange={(e) => setEmail(e.target.value)} className={`${inputCls} font-mono text-left`} /></div>
+            <div><label className={labelCls}>Father's name</label><input type="text" placeholder="e.g. Mohammad Zaman" maxLength={200} value={fatherName} onChange={(e) => setFatherName(e.target.value)} className={inputCls} /></div>
+            <div><label className={labelCls}>Tazkira number</label><input type="text" placeholder="e.g. 1234-5678-901" maxLength={60} value={tazkiraNo} onChange={(e) => setTazkiraNo(e.target.value)} className={`${inputCls} font-mono`} /></div>
+            {/* UX-5: the server validates this with assertOptionalIsoDate, so a
+                free-text "24" is rejected. A date input makes the only accepted
+                format the only enterable one. */}
+            <div><label className={labelCls}>Date of birth</label><input type="date" max={todayIso} value={dob} onChange={(e) => setDob(e.target.value)} className={inputCls} /><p className="mt-1 text-[10px] text-slate-400">Optional — format YYYY-MM-DD.</p></div>
+            <div><label className={labelCls}>WhatsApp (if different)</label><input type="tel" placeholder="e.g. 0722334455" maxLength={60} value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} className={`${inputCls} font-mono text-left`} /></div>
+            <div><label className={labelCls}>School / university</label><input type="text" placeholder="e.g. Kabul Polytechnic" maxLength={500} value={schoolOrUniversity} onChange={(e) => setSchoolOrUniversity(e.target.value)} className={inputCls} /></div>
+            <div className="sm:col-span-2"><label className={labelCls}>Region, district & address</label><input type="text" placeholder="e.g. Kabul, District 6, Baraki" maxLength={500} value={addressRegion} onChange={(e) => setAddressRegion(e.target.value)} className={inputCls} /></div>
+            <div><label className={labelCls}>Emergency contact name</label><input type="text" placeholder="e.g. Abdul Rahim" maxLength={200} value={emergencyContactName} onChange={(e) => setEmergencyContactName(e.target.value)} className={inputCls} /></div>
+            <div><label className={labelCls}>Emergency phone</label><input type="tel" placeholder="e.g. 0799112233" maxLength={60} value={emergencyContactPhone} onChange={(e) => setEmergencyContactPhone(e.target.value)} className={`${inputCls} font-mono text-left`} /></div>
           </div>
         )}
 

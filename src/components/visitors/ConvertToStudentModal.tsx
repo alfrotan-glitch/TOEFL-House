@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo, useRef } from 'react';
-import { Visitor, Class, Branch } from '../../types';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { Visitor, Class, Branch, ConversionEligibility } from '../../types';
 import { formatAFN } from '../../utils/format';
-import { Banknote, CreditCard, Building2, Receipt, CheckCircle2, AlertCircle, Printer, Loader2, X } from 'lucide-react';
+import { Banknote, CreditCard, Building2, Receipt, CheckCircle2, AlertCircle, Printer, Loader2, X, Award, ShieldAlert } from 'lucide-react';
 import { BRAND_NAME } from '../../config/branding';
 import { buildFeeBillHtml } from '../../utils/feeBillTemplate';
 import { resolveDocumentIssuer } from '../../config/documentIssuer';
@@ -40,6 +40,10 @@ interface ConvertToStudentModalProps {
   ) => Promise<ConversionResult>;
   onClose: () => void;
   triggerToast: (msg: string, type: 'success' | 'error' | 'info') => void;
+  /** Read-only pre-flight against the server's placement authority (UX-3). */
+  checkConversionEligibility: (visitorId: string, classId?: string) => Promise<ConversionEligibility>;
+  /** Send the operator straight to the assessment that unblocks this lead. */
+  onOpenPlacementTest?: () => void;
 }
 
 const PAYMENT_METHODS: { value: PaymentMethod; label: string; icon: React.ReactNode }[] = [
@@ -66,7 +70,9 @@ export default function ConvertToStudentModal({
   activeBranchId,
   registerVisitorToStudent,
   onClose,
-  triggerToast
+  triggerToast,
+  checkConversionEligibility,
+  onOpenPlacementTest
 }: ConvertToStudentModalProps) {
   const [classId, setClassId] = useState<string>('');
   const [amountPaid, setAmountPaid] = useState<number>(0);
@@ -80,6 +86,45 @@ export default function ConvertToStudentModal({
   const receiptRef = useRef<HTMLDivElement>(null);
 
   const selectedClass = classes.find((c) => c.id === classId);
+
+  // ── Placement pre-flight (UX-3) ───────────────────────────────────────────
+  // The server refuses placement-ineligible conversions, but it could only say
+  // so at Confirm — after the operator had chosen a class, entered a fee and a
+  // discount, and often taken cash. We now ask the SAME authority up front:
+  // once on open (lifecycle blockers) and again whenever the class changes
+  // (the class's level decides which placement policy governs the seat).
+  const [eligibility, setEligibility] = useState<ConversionEligibility | null>(null);
+  const [checkingEligibility, setCheckingEligibility] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCheckingEligibility(true);
+    checkConversionEligibility(convertingVisitor.id, classId || undefined)
+      .then((res) => { if (!cancelled) setEligibility(res); })
+      .catch((err: any) => {
+        // Fail CLOSED on a check failure: showing a payment form we cannot
+        // vouch for is the exact dead end this feature removes.
+        if (!cancelled) {
+          setEligibility({
+            eligible: false,
+            code: 'placement_required',
+            reason: err?.message || 'Could not verify enrollment eligibility. Please retry.',
+            requirementMode: 'unknown',
+            placementStatus: convertingVisitor.placementStatus || 'not_started',
+            placementActionable: false,
+          });
+        }
+      })
+      .finally(() => { if (!cancelled) setCheckingEligibility(false); });
+    return () => { cancelled = true; };
+  }, [convertingVisitor.id, convertingVisitor.placementStatus, classId, checkConversionEligibility]);
+
+  /** True when the lead can never convert in this modal (no class will help). */
+  const blockedOutright = Boolean(
+    eligibility && !eligibility.eligible &&
+    ['already_converted', 'lead_lost', 'student_exists'].includes(eligibility.code)
+  );
+  const blockedForClass = Boolean(eligibility && !eligibility.eligible && !blockedOutright);
 
   const eligibleClasses = useMemo(
     () =>
@@ -122,6 +167,7 @@ export default function ConvertToStudentModal({
     e.preventDefault();
 
     if (!classId) return triggerToast('Please select a class.', 'error');
+    if (eligibility && !eligibility.eligible) return triggerToast(eligibility.reason, 'error');
     if (safeAmountPaid > netAmount && netAmount > 0) return triggerToast(`Amount paid exceeds the net fee (${formatAFN(netAmount)}).`, 'error');
 
     const finalBranchId = conversionBranchId || convertingVisitor.branchId || activeBranchId;
@@ -234,7 +280,43 @@ export default function ConvertToStudentModal({
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 cursor-pointer"><X size={16} /></button>
         </div>
 
+        {/* Lifecycle blockers make the whole form pointless — show the reason
+            and an exit instead of a fee/payment form that cannot succeed. */}
+        {blockedOutright ? (
+          <div className="space-y-3">
+            <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-3 text-rose-900">
+              <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
+              <div>
+                <p className="font-bold text-[11px]">This lead cannot be enrolled</p>
+                <p className="text-[10px] mt-0.5 text-rose-800">{eligibility?.reason}</p>
+              </div>
+            </div>
+            <button type="button" onClick={onClose} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl cursor-pointer">Close</button>
+          </div>
+        ) : (
         <form onSubmit={handleConvertConfirm} className="space-y-3.5">
+          {/* Placement verdict, shown BEFORE the fee and payment fields. */}
+          {checkingEligibility ? (
+            <p className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400"><Loader2 className="h-3 w-3 animate-spin" /> Checking enrollment eligibility…</p>
+          ) : blockedForClass ? (
+            <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-amber-900">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+              <div className="flex-1">
+                <p className="font-bold text-[11px]">Placement assessment required</p>
+                <p className="text-[10px] mt-0.5 text-amber-800">{eligibility?.reason}</p>
+                {eligibility?.placementActionable && onOpenPlacementTest && (
+                  <button
+                    type="button"
+                    onClick={onOpenPlacementTest}
+                    className="mt-2 inline-flex items-center gap-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-[10px] px-3 py-1.5 rounded-lg cursor-pointer"
+                  ><Award className="h-3 w-3" /> Open assessment workspace</button>
+                )}
+              </div>
+            </div>
+          ) : eligibility?.requirementMode && eligibility.requirementMode !== 'not_required' ? (
+            <p className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-700"><CheckCircle2 className="h-3 w-3" /> Placement cleared — enrollment allowed.</p>
+          ) : null}
+
           <div>
             <label className="block text-slate-600 font-medium mb-1">Assign to class:</label>
             <select
@@ -328,11 +410,16 @@ export default function ConvertToStudentModal({
 
           <div className="flex gap-2 justify-end pt-3 border-t border-slate-100">
             <button type="button" onClick={onClose} className="px-4 py-2 bg-slate-100 text-slate-600 rounded-lg font-semibold hover:bg-slate-200 cursor-pointer">Cancel</button>
-            <button type="submit" disabled={converting || (safeAmountPaid > netAmount && netAmount > 0)} className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-semibold hover:bg-emerald-700 cursor-pointer shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5">
+            <button
+              type="submit"
+              disabled={converting || checkingEligibility || blockedForClass || (safeAmountPaid > netAmount && netAmount > 0)}
+              title={blockedForClass ? eligibility?.reason : undefined}
+              className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-semibold hover:bg-emerald-700 cursor-pointer shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5">
               {converting ? <Loader2 size={14} className="animate-spin" /> : <Receipt size={14} />} {converting ? 'Processing...' : 'Confirm & create invoice'}
             </button>
           </div>
         </form>
+        )}
       </div>
     </div>
   );

@@ -236,6 +236,9 @@ function AuthenticatedApp() {
             programVersions={store.settings.programVersions}
             addVisitorFollowUp={store.addVisitorFollowUp} updateVisitor={store.updateVisitor} reloadVisitors={store.reloadVisitors}
             advanceVisitorStage={store.advanceVisitorStage} registerVisitorToStudent={store.registerVisitorToStudent}
+            visitorSummary={store.visitorSummary} visitorQuery={store.visitorQuery}
+            checkConversionEligibility={store.checkConversionEligibility}
+            permissionCodes={user?.permissions ? Array.from(user.permissions) : undefined} activeRole={activeRole}
           />
         );
       case 'students':

@@ -694,6 +694,62 @@ export interface ExpenseReport {
  * loaded entity arrays — doing so is what produced audit findings D-1..D-5
  * (metrics counted from a paginated page rather than the population).
  */
+/**
+ * Server-computed visitor KPIs (UX-1). Mirrors GET /visitors/summary.
+ *
+ * These are SQL aggregates over the WHOLE branch-scoped population. The UI
+ * renders them and derives none of them — counting a loaded page is exactly the
+ * defect this replaces.
+ */
+export interface VisitorSummary {
+  scope: 'organization' | 'branch';
+  branchId: string | null;
+  /** Server local date. The client must not compute its own. */
+  today: string;
+  /** Whole scoped population, ignoring filters. */
+  total: number;
+  /** Open leads: neither converted nor closed-lost. */
+  pipeline: number;
+  registered: number;
+  /** Closed-lost leads, counted separately so they inflate no other bucket. */
+  lost: number;
+  overdue: number;
+  conversionRate: number;
+  /** Rows matching the current filters — the paginator's denominator. */
+  filtered: number;
+  /** Lead count per source over the whole scoped population. */
+  bySource: Array<{ source: string; count: number }>;
+}
+
+/** The visitor list query the store owns and the server executes. */
+export interface VisitorQuery {
+  search?: string;
+  status?: string;
+  source?: string;
+  interest?: string;
+  placement?: string;
+  overdueOnly?: boolean;
+  page?: number;
+  pageSize?: number;
+}
+
+/** Mirrors GET /visitors/:id/conversion-eligibility (UX-3). */
+export interface ConversionEligibility {
+  eligible: boolean;
+  code:
+    | 'ok'
+    | 'placement_required'
+    | 'already_converted'
+    | 'lead_lost'
+    | 'student_exists'
+    | 'class_not_found'
+    | 'class_inactive';
+  reason: string;
+  requirementMode: string;
+  placementStatus: string;
+  placementActionable: boolean;
+}
+
 export interface DashboardSummary {
   scope: 'organization' | 'branch';
   branchId: string | null;

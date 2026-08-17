@@ -29,7 +29,7 @@ import {
   BusinessRule, RuleCategory, RuleEngineResult, BusinessRuleVersion, PipelineStage,
   Branch, Campus, Organization, TeacherContractType,
   StudentBalanceRow,
-  AttendanceSummaryRow, DashboardSummary,} from './types';
+  AttendanceSummaryRow, DashboardSummary, VisitorSummary, VisitorQuery, ConversionEligibility,} from './types';
 
 /** Real due/paid/remaining figures for one teacher/month, mirroring GET /teachers/:id/salary-status. */
 export interface TeacherSalaryStatus {
@@ -66,6 +66,13 @@ async function safeGet<T>(path: string, query?: Record<string, string | undefine
   }
 }
 
+/**
+ * Rows per visitor page. Deliberately far below the server's MAX_PAGE_SIZE:
+ * the point of UX-1 is that the UI pages through the full population, not that
+ * it grabs a bigger slice and keeps counting locally.
+ */
+const VISITOR_PAGE_SIZE = 25;
+
 export function useApiStore() {
   const { user } = useAuth();
   const legacyCanPickBranch = user?.role === 'owner' || user?.role === 'manager';
@@ -87,6 +94,15 @@ export function useApiStore() {
   const [partners, setPartners] = useState<Partner[]>([]);
   const [classes, setClasses] = useState<Class[]>([]);
   const [visitors, setVisitors] = useState<Visitor[]>([]);
+  const [visitorSummary, setVisitorSummary] = useState<VisitorSummary | null>(null);
+  const [visitorQuery, setVisitorQuery] = useState<VisitorQuery>({ page: 0, pageSize: VISITOR_PAGE_SIZE });
+  /**
+   * Mirror of `visitorQuery` readable synchronously inside callbacks. State
+   * would make `reloadVisitors` change identity on every query change, and the
+   * mutation helpers that call it would then need it in their dependency
+   * arrays — a re-render cascade. The ref keeps `reloadVisitors` stable.
+   */
+  const visitorQueryRef = useRef<VisitorQuery>({ page: 0, pageSize: VISITOR_PAGE_SIZE });
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [books, setBooks] = useState<Book[]>([]);
@@ -285,10 +301,63 @@ export function useApiStore() {
     [canPickBranch]
   );
   const reloadClasses = useCallback(() => api.get<Class[]>('/classes', bq).then(setClasses), [bq]);
+  /**
+   * Visitors are fetched one SERVER-FILTERED page at a time (UX-1).
+   *
+   * The previous version pulled a fixed 100 rows and let the view search,
+   * filter and count inside that array: with 250 leads the conversion tile read
+   * 27% against a true 11%, and searching for lead #101+ reported "no matches"
+   * for a person who existed. Search and filters now travel to the server, so a
+   * page is a page OF THE MATCHES, and every headline number comes from
+   * `/visitors/summary` instead of being derived here.
+   */
   const reloadVisitors = useCallback(
-    () => (canSeeVisitors ? api.get<Visitor[]>('/visitors', { ...bq, limit: '100' }).then(setVisitors) : Promise.resolve()),
+    (query?: VisitorQuery) => {
+      if (!canSeeVisitors) return Promise.resolve();
+      // A bare reloadVisitors() after a mutation must refresh the view the user
+      // is LOOKING AT. Defaulting to an empty query would silently drop their
+      // search and bounce them to page 1 every time they logged a follow-up.
+      const effective = query ?? visitorQueryRef.current;
+      const page = effective.page ?? 0;
+      const pageSize = effective.pageSize ?? VISITOR_PAGE_SIZE;
+      const params: Record<string, string | undefined> = {
+        ...bq,
+        limit: String(pageSize),
+        offset: String(page * pageSize),
+        search: effective.search || undefined,
+        status: effective.status && effective.status !== 'all' ? effective.status : undefined,
+        source: effective.source && effective.source !== 'all' ? effective.source : undefined,
+        interest: effective.interest && effective.interest !== 'all' ? effective.interest : undefined,
+        placement: effective.placement && effective.placement !== 'all' ? effective.placement : undefined,
+        overdue: effective.overdueOnly ? 'true' : undefined,
+      };
+      const nextQuery = { ...effective, page, pageSize };
+      visitorQueryRef.current = nextQuery;
+      setVisitorQuery(nextQuery);
+      return Promise.all([
+        api.get<Visitor[]>('/visitors', params),
+        api.get<VisitorSummary>('/visitors/summary', params),
+      ]).then(([rows, summary]) => {
+        setVisitors(rows);
+        setVisitorSummary(summary);
+      });
+    },
     [bq, canSeeVisitors]
   );
+  /**
+   * Ask the server whether a conversion would be accepted, before showing the
+   * user a fee/payment form (UX-3). Read-only: the server answers by calling
+   * into the same placement authority the write path enforces, so this can
+   * never green-light something Confirm would refuse.
+   */
+  const checkConversionEligibility = useCallback(
+    (visitorId: string, classId?: string) =>
+      api.get<ConversionEligibility>(`/visitors/${visitorId}/conversion-eligibility`, {
+        classId: classId || undefined,
+      }),
+    []
+  );
+
   const reloadAttendance = useCallback(() => api.get<Attendance[]>('/attendance', bq).then(setAttendance), [bq]);
 
   /**
@@ -1358,7 +1427,7 @@ export function useApiStore() {
 
   return {
     // Raw values
-    students, teachers, employees, partners, classes, visitors, attendance, payments,
+    students, teachers, employees, partners, classes, visitors, visitorSummary, visitorQuery, attendance, payments,
     books, bookSales, exams, examResults, budgetLines, expenseRequests, invoices, financeConfig, transactions, auditLogs, financeReconciliation, financeDashboard, dashboardSummary,
     savingBalance, mainAccountBalance, expenseAutoApproveThreshold, notifications, settings, currentBranchName, isLoading,
     skills, classTeacherSkills, branches, campuses, organization,
@@ -1378,7 +1447,7 @@ export function useApiStore() {
     studentsAreLite, ensureFullStudents, studentBalances, reloadStudentBalances,
     attendanceSummary, reloadAttendanceSummary,
     // Existing business operations
-    addVisitor, updateVisitorCRM, addVisitorFollowUp, updateVisitor, advanceVisitorStage, registerVisitorToStudent,
+    addVisitor, updateVisitorCRM, addVisitorFollowUp, updateVisitor, advanceVisitorStage, registerVisitorToStudent, checkConversionEligibility,
     addStudentManual, updateStudentStatus, updateStudent, recordFeePayment, enrollStudentSemester, issueStudentCard,
     chargeBudget, createExpenseRequest, recordOperationalPayment, getExpenseReport, updateExpenseAutoApproveThreshold, processExpenseApproval, runSavingEngine, updateSavingSettings, createInvoice, issueInvoice, payInvoice, cancelInvoice, updateFinanceConfig, reloadInvoices,
     processMonthEnd, addBook, editBook, deleteBook, recordBookSale, refundBookSale, 

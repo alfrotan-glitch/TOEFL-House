@@ -4,9 +4,9 @@
  */
 
 import type {CourseOption} from '../../utils/academicOptions';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {X, Award, Check, Copy, UserCog, PhoneCall, CheckCircle2, Plus, User, UserCheck, UserPlus, ChevronRight} from 'lucide-react';
-import {Visitor} from '../../types';
+import {Visitor, ConversionEligibility} from '../../types';
 import { BRAND_NAME } from '../../config/branding';
 
 interface VisitorDeskPanelProps {
@@ -25,6 +25,11 @@ interface VisitorDeskPanelProps {
   onOpenConvert: () => void;
   courseOptions?: CourseOption[];
   triggerToast: (message: string, type: 'success' | 'error' | 'info') => void;
+  /** UX-4 — the backend requires Lead.Convert / Lead.Edit for these actions. */
+  canConvertLead?: boolean;
+  canEditLead?: boolean;
+  /** UX-3 — read-only pre-flight so Enroll is never a dead end. */
+  checkConversionEligibility?: (visitorId: string, classId?: string) => Promise<ConversionEligibility>;
 }
 
 interface PipelineStep {
@@ -45,7 +50,22 @@ const PIPELINE_STEPS: PipelineStep[] = [
 
 export default function VisitorDeskPanel({
   visitor, courseOptions = [], onClose, updateVisitorCRM, addVisitorFollowUp, updateVisitor, onOpenPlacementTest, onOpenConvert, triggerToast,
+  canConvertLead = true, canEditLead = true, checkConversionEligibility,
 }: VisitorDeskPanelProps) {
+  /**
+   * Lead-level conversion eligibility (UX-3), checked with no class selected:
+   * it answers "is this lead convertible at all?" so the Enroll button can
+   * explain itself instead of opening a form that ends in a refusal.
+   */
+  const [eligibility, setEligibility] = useState<ConversionEligibility | null>(null);
+  useEffect(() => {
+    if (!checkConversionEligibility || !canConvertLead) return;
+    let cancelled = false;
+    checkConversionEligibility(visitor.id)
+      .then((res) => { if (!cancelled) setEligibility(res); })
+      .catch(() => { /* Non-fatal: the modal re-checks and fails closed. */ });
+    return () => { cancelled = true; };
+  }, [visitor.id, visitor.placementStatus, visitor.status, checkConversionEligibility, canConvertLead]);
   const [deskTab, setDeskTab] = useState<'details' | 'logs'>('details');
   const [followUpInput, setFollowUpInput] = useState<string>('');
   const [followUpOutcome, setFollowUpOutcome] = useState<string>('');
@@ -160,9 +180,33 @@ export default function VisitorDeskPanel({
         {/* Action Buttons */}
         {visitor.status !== 'registered' && (
           <div className="px-6 py-3 border-b border-slate-100 flex gap-2 shrink-0">
-            <button onClick={() => setDeskTab('logs')} className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl font-bold text-xs cursor-pointer transition-colors shadow-sm ${currentStep?.key === 'followup' ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}><PhoneCall className="w-3.5 h-3.5" /> Log Follow-up</button>
+            {canEditLead && (
+              <button onClick={() => setDeskTab('logs')} className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl font-bold text-xs cursor-pointer transition-colors shadow-sm ${currentStep?.key === 'followup' ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}><PhoneCall className="w-3.5 h-3.5" /> Log Follow-up</button>
+            )}
             <button onClick={onOpenPlacementTest} className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl font-bold text-xs cursor-pointer transition-colors shadow-sm ${currentStep?.key === 'placement' ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}><Award className="w-3.5 h-3.5" /> {visitor.placementStatus === 'completed' ? 'Re-assess' : 'Assessment Workspace'}</button>
-            <button onClick={onOpenConvert} className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl font-bold text-xs cursor-pointer transition-colors shadow-sm ${currentStep?.key === 'enroll' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}><UserCheck className="w-3.5 h-3.5" /> Enroll</button>
+            {/* UX-4: hidden outright when the caller lacks Lead.Convert — the
+                server 403s, so offering the button only wastes the operator's
+                data entry. UX-3: when placement blocks this lead the button is
+                disabled and says so, rather than opening a payment form. */}
+            {canConvertLead && (
+              <button
+                onClick={onOpenConvert}
+                disabled={Boolean(eligibility && !eligibility.eligible && !eligibility.placementActionable)}
+                title={eligibility && !eligibility.eligible ? eligibility.reason : undefined}
+                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl font-bold text-xs cursor-pointer transition-colors shadow-sm disabled:opacity-40 disabled:cursor-not-allowed ${currentStep?.key === 'enroll' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}
+              ><UserCheck className="w-3.5 h-3.5" /> Enroll</button>
+            )}
+          </div>
+        )}
+
+        {/* Why Enroll is unavailable — stated before the operator invests any
+            data entry, with the assessment as the obvious next step. */}
+        {canConvertLead && eligibility && !eligibility.eligible && visitor.status !== 'registered' && (
+          <div className="px-6 pb-3 shrink-0">
+            <p className="flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[10px] font-semibold text-amber-900">
+              <Award className="mt-0.5 h-3 w-3 shrink-0 text-amber-600" />
+              <span>{eligibility.reason}</span>
+            </p>
           </div>
         )}
 

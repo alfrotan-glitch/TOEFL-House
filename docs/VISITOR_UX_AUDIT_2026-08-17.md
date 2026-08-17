@@ -202,3 +202,58 @@ Items 1-4 are what separate "the backend is correct" from "the staff can trust t
 ---
 
 *Audit only; no production code was modified. GL-1 (browser visual inspection) and GL-2 (printed fee bill) remain open human verification steps and are not claimed as verified.*
+
+---
+
+# REMEDIATION RECORD — UX-1 … UX-5
+
+**Date:** 2026-08-17 · **Scope:** UX-1…UX-5 only. UX-6+ deliberately untouched.
+**Rule applied:** fix the root cause at the correct server/domain layer, never with a frontend workaround.
+
+## What changed
+
+| # | Root cause | Fix (layer) |
+|---|---|---|
+| **UX-1** | The client fetched a fixed 100-row page, then searched, filtered and counted inside that array. | **Server.** New `core/visitors/visitor-query.ts`: SQL search/filter/pagination + `buildVisitorSummary` (aggregates over the whole scoped table). New `GET /visitors/summary`. `GET /visitors` now filters in SQL and returns `X-Total-Count` (matches) and `X-Unfiltered-Count` (population). The view renders server figures and derives none. |
+| **UX-2** | `AddVisitorForm` read the Axios shape `err.response.data.error`; the fetch client throws `ApiError` with `.message`. | **Client, one line.** Reads `err.message` first, matching the sibling modals. |
+| **UX-3** | Placement was enforced only at write time, after the fee/payment form. | **Server.** New `core/visitors/conversion-eligibility.ts` + `GET /visitors/:id/conversion-eligibility`. It owns **no policy** — it calls into `resolveGoverningProgramVersionId` → `resolvePlacementRequirement` → `evaluateEnrollmentEligibility`, the same three functions the write path uses, so it can never green-light what Confirm would refuse. The modal checks on open and on class change, and fails **closed** if the check errors. |
+| **UX-4** | Zero permission awareness in the visitor UI. | **Client + server.** UI gates on the exact codes the routes require (`Lead.Create`/`Lead.Edit`/`Lead.Convert`) via the existing `hasPermission`. The new preview endpoint is guarded by `Lead.Convert` and `requireVisitor`, so it cannot be used to probe placement policy. |
+| **UX-5** | Placeholder advertised `"2002-07-15 or 24"`; the server had been hardened to `assertOptionalIsoDate`. | **Client.** `<input type="date" max={today}>`; label and helper text state YYYY-MM-DD. `maxLength` on every text field now mirrors the server's `TEXT_LIMITS`. |
+
+Two defects found *while* fixing were also corrected, both inside UX-1's blast radius:
+- **UX-8 (lost leads):** `stage='lost'` leaves `status='visited'`, so dead leads counted as open pipeline. All buckets now treat `COALESCE(stage,'lead')='lost'` as terminal.
+- **UX-7 (source vocabulary):** new `src/config/visitorSources.ts` is the single list mirroring the server's nine-value enum; the summary returns a real `bySource` GROUP BY. `friend` is no longer mislabelled "Referral".
+
+## Live verification (250-lead dataset)
+
+| Metric | Before | After | Truth |
+|---|---|---|---|
+| Total leads | 100 | **251** | 251 |
+| Conversion | 27% | **11%** | 11% |
+| Search "Lead Person 249" | *No visitors match this search* | **1 row found** | exists |
+| Convert refusal | after fee + payment entry | **before the form** | — |
+| Counselor preview / convert | button shown, 403 at submit | **403 at both; button hidden** | — |
+| `dob:"24"` | rejected, message swallowed | rejected, **date input prevents entry** | — |
+| Duplicate Tazkira | "Could not save visitor." | **"A visitor with this Tazkira/ID number already exists."** | — |
+
+Adversarial probes: `' OR 1=1--`, `'; DROP TABLE visitors;--`, bare `%` and `_` all return 0 rows with the table intact (parameters bound, LIKE metacharacters escaped). `?branchId=<other>` and `?branchId=all` are re-scoped to the caller's own branch for a registrar; only the owner gets organization scope.
+
+## Test quality
+
+31 new tests in `server/src/tests/visitor-ux-remediation.test.ts`. **Mutation-tested: 12 mutants, 12 killed.**
+
+M7 — *preview resolves the program from the visitor row instead of the class level* — **initially SURVIVED**. Every existing case had the visitor carrying the governed program, so a preview with the V-1 defect shape still gave the right answer by accident. A test was added for a class-governed/visitor-detached lead; M7 is now killed. This is recorded because it is exactly the false-confidence gap mutation testing exists to find.
+
+Killed mutants: filters ignored · conversion rate over a page · lost counted as pipeline · NULL stage dropped · LIKE metacharacters unescaped · preview always eligible · preview ignores class level · lifecycle blockers skipped · preview loses `Lead.Convert` · preview loses branch isolation · summary ignores branch scope · `X-Total-Count` = page length.
+
+## Gates
+
+1173/1173 tests (was 1142) · server lint **0 errors** (104 warnings, pre-existing) · frontend lint **0 errors** (6 warnings; baseline 5, +1 inherent async-fetch pattern) · both builds ✓ · `preflight:fresh-schema` SUCCESS (71 migrations, no drift) · `release-validate.mjs` **16/16 PASSED**.
+
+No migration was added or modified. RBAC, branch isolation, financial and placement invariants are unchanged — the placement rule in particular gained a read-only caller, not a second implementation.
+
+## Still open
+
+UX-6, UX-9 … UX-14 are untouched by request. **UX-14** (client requires phone, server does not) intersects UX-2's "labels must match backend validation" but is a *contract* decision, not a copy fix — it needs a server-side ruling on whether phone is mandatory, so it stays open rather than being resolved by weakening the form.
+
+**GL-1** (browser visual inspection at 1920×1080 and a smaller viewport) and **GL-2** (one actual printed fee bill) remain human-only steps and are **not** claimed as verified.

@@ -2,9 +2,11 @@
  * @license SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo , useCallback} from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {UserPlus, Search, Sparkles, UserCheck, MessageSquare, Megaphone, Share2, Compass, AlertCircle, CheckCircle2, Clock, Kanban, List, Award} from 'lucide-react';
-import {Visitor, Class, Branch, Teacher} from '../../types'; // Added Teacher
+import {Visitor, Class, Branch, Teacher, VisitorSummary, VisitorQuery, ConversionEligibility} from '../../types'; // Added Teacher
+import {hasPermission} from '../../config/permissions';
+import {VISITOR_SOURCE_OPTIONS, SOURCE_LABELS} from '../../config/visitorSources';
 import AddVisitorForm from './AddVisitorForm';
 import VisitorDeskPanel from './VisitorDeskPanel';
 import PlacementTestModal from './PlacementTestModal';
@@ -33,18 +35,29 @@ interface VisitorsViewProps {
   ) => Promise<void>;
   addVisitorFollowUp: (visitorId: string, notes: string, outcome?: string) => Promise<void>;
   updateVisitor: (visitorId: string, updatedFields: Partial<Visitor>) => Promise<void>;
-  reloadVisitors: () => Promise<void>;
+  reloadVisitors: (query?: VisitorQuery) => Promise<void>;
+  /** Server-computed KPIs. Null until the first load resolves. */
+  visitorSummary?: VisitorSummary | null;
+  /** The query the store last executed, so the view reflects server state. */
+  visitorQuery?: VisitorQuery;
+  /** Effective permission codes for the signed-in user (UX-4). */
+  permissionCodes?: string[];
+  /** Signed-in role; 'owner' implies every permission. */
+  activeRole?: string;
   advanceVisitorStage: (visitorId: string, stage?: Visitor['stage']) => Promise<void>;
   registerVisitorToStudent: (
     visitorId: string, classId: string, amountPaid: number, discountPercent: number, notes?: string,
     semesterFee?: number, branchId?: string, paymentMethod?: 'cash' | 'card' | 'bank_transfer'
   ) => Promise<{ studentId: string; studentCode: string; receiptNumber: string; invoiceId: string; invoiceNumber: string; netAmount: number; status: string }>;
+  /** Read-only pre-flight for conversion (UX-3). */
+  checkConversionEligibility: (visitorId: string, classId?: string) => Promise<ConversionEligibility>;
   programVersions?: Array<{ id: string; name: string; versionLabel: string; status: string }>;
 }
 
 export default function VisitorsView({
   visitors, classes, branches, activeBranchId, addVisitor, updateVisitorCRM, addVisitorFollowUp,
-  updateVisitor, reloadVisitors, advanceVisitorStage, registerVisitorToStudent, programVersions = []
+  updateVisitor, reloadVisitors, visitorSummary, visitorQuery, permissionCodes, activeRole,
+  advanceVisitorStage, registerVisitorToStudent, checkConversionEligibility, programVersions = []
 }: VisitorsViewProps) {
   const { courseOptions } = useAcademicOptions(classes, activeBranchId);
 
@@ -61,6 +74,48 @@ export default function VisitorsView({
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [sourceFilter, setSourceFilter] = useState<string>('all');
   const [interestFilter, setInterestFilter] = useState<string>('all');
+  const [page, setPage] = useState<number>(0);
+  const [isFetching, setIsFetching] = useState<boolean>(false);
+
+  /**
+   * Changing a filter invalidates the current page number — page 3 of a
+   * previous filter is meaningless under a new one. Resetting at the event is
+   * simpler (and lint-clean) versus reacting to the change in an effect.
+   */
+  const applyFilter = useCallback(<T,>(setter: (v: T) => void) => (value: T) => { setter(value); setPage(0); }, []);
+
+  // ── Permission-aware UI (UX-4) ────────────────────────────────────────────
+  // The backend already refuses these actions; the audit found the UI offering
+  // them to everyone, so a counselor filled in a class, fee and payment method
+  // before being told "You do not have permission to perform this operation."
+  // These flags mirror the exact permission codes the routes require.
+  const canCreateLead = hasPermission(permissionCodes, 'Lead.Create', activeRole);
+  const canEditLead = hasPermission(permissionCodes, 'Lead.Edit', activeRole);
+  const canConvertLead = hasPermission(permissionCodes, 'Lead.Convert', activeRole);
+
+  /**
+   * Push the current search/filters to the server (UX-1).
+   *
+   * Search is debounced so typing does not issue a request per keystroke; the
+   * filter selects apply immediately. Every change resets to page 0, because
+   * page 3 of a previous filter is meaningless under a new one.
+   */
+  const pageSize = visitorQuery?.pageSize ?? 25;
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setIsFetching(true);
+      void reloadVisitors({
+        search: searchTerm || undefined,
+        status: statusFilter,
+        source: sourceFilter,
+        interest: interestFilter,
+        page,
+        pageSize,
+      }).finally(() => setIsFetching(false));
+    }, searchTerm ? 300 : 0);
+    return () => clearTimeout(handle);
+  }, [searchTerm, statusFilter, sourceFilter, interestFilter, page, pageSize, reloadVisitors]);
+
 
   // Local calendar date, matching the server's `today()` (toLocaleDateString
   // 'en-CA'). Deriving this with toISOString() is UTC, which in Asia/Kabul
@@ -73,32 +128,44 @@ export default function VisitorsView({
   const isConvertedLead = useCallback((v: Visitor) => leadPipelineStatus(v) === 'registered', [leadPipelineStatus]);
   const isOverdueContact = useCallback((v: Visitor) => v.nextContactDate && !isConvertedLead(v) && v.nextContactDate < todayIso, [isConvertedLead, todayIso]);
 
-  const stats = useMemo(() => {
-    const pendingCount = visitors.filter(isPendingLead).length;
-    const convertedCount = visitors.filter(isConvertedLead).length;
-    const overdueCount = visitors.filter(isOverdueContact).length;
-    const conversionRate = visitors.length > 0 ? Math.round((convertedCount / visitors.length) * 100) : 0;
-    return { pendingCount, convertedCount, overdueCount, conversionRate };
-  }, [visitors, isPendingLead, isConvertedLead, isOverdueContact]);
+  /**
+   * Headline figures come from the server (UX-1).
+   *
+   * These were previously counted from the loaded page: with 250 leads the
+   * conversion tile read 27% against a true 11%. Nothing here recomputes a
+   * population — the view renders what /visitors/summary returned. `stats` is
+   * null until the first response lands so the UI can show a placeholder
+   * instead of a confident zero.
+   */
+  const stats = visitorSummary;
 
-  const filteredVisitors = useMemo(() => {
-    return visitors.filter(v => {
-      const matchesSearch = v.fullName.toLowerCase().includes(searchTerm.toLowerCase()) || v.phone.includes(searchTerm) || (v.notes && v.notes.toLowerCase().includes(searchTerm.toLowerCase()));
-      const matchesStatus = statusFilter === 'all' || leadPipelineStatus(v) === statusFilter;
-      const matchesSource = sourceFilter === 'all' || v.source === sourceFilter;
-      const matchesInterest = interestFilter === 'all' || v.followUpStatus === interestFilter;
-      return matchesSearch && matchesStatus && matchesSource && matchesInterest;
-    });
-  }, [visitors, searchTerm, statusFilter, sourceFilter, interestFilter, leadPipelineStatus]);
+  /**
+   * `visitors` is already the server's filtered page. Filtering it again here
+   * is what made lead #101 unfindable, so the list renders the rows as given.
+   */
+  const filteredVisitors = visitors;
+  /**
+   * Null until the server answers. Deliberately NOT defaulted to
+   * `visitors.length` — that is the page, and quoting a page as a total is the
+   * whole defect. The UI shows a placeholder until the real figure arrives.
+   */
+  const totalMatching = visitorSummary?.filtered ?? null;
+  const totalPages = Math.max(1, Math.ceil((totalMatching ?? 0) / pageSize));
+  const hasActiveFilters = Boolean(searchTerm) || statusFilter !== 'all' || sourceFilter !== 'all' || interestFilter !== 'all';
 
   const activeVisitor = visitors.find(v => v.id === selectedVisitorId) || null;
 
 
   const SOURCE_BADGES: Record<string, { class: string; icon: React.ReactNode; label: string }> = {
-    ads: { class: 'bg-sky-50 text-sky-700 border-sky-100', icon: <Megaphone className="w-3 h-3" />, label: 'Facebook ads' },
-    friend: { class: 'bg-emerald-50 text-emerald-700 border-emerald-100', icon: <Share2 className="w-3 h-3" />, label: 'Referral' },
-    social: { class: 'bg-indigo-50 text-indigo-700 border-indigo-100', icon: <Compass className="w-3 h-3" />, label: 'Social media' },
-    other: { class: 'bg-slate-50 text-slate-700 border-slate-100', icon: <MessageSquare className="w-3 h-3" />, label: 'Other' },
+    ads: { class: 'bg-sky-50 text-sky-700 border-sky-100', icon: <Megaphone className="w-3 h-3" />, label: SOURCE_LABELS.ads },
+    facebook: { class: 'bg-sky-50 text-sky-700 border-sky-100', icon: <Megaphone className="w-3 h-3" />, label: SOURCE_LABELS.facebook },
+    friend: { class: 'bg-emerald-50 text-emerald-700 border-emerald-100', icon: <Share2 className="w-3 h-3" />, label: SOURCE_LABELS.friend },
+    referral: { class: 'bg-emerald-50 text-emerald-700 border-emerald-100', icon: <Share2 className="w-3 h-3" />, label: SOURCE_LABELS.referral },
+    walk_in: { class: 'bg-violet-50 text-violet-700 border-violet-100', icon: <UserCheck className="w-3 h-3" />, label: SOURCE_LABELS.walk_in },
+    social: { class: 'bg-indigo-50 text-indigo-700 border-indigo-100', icon: <Compass className="w-3 h-3" />, label: SOURCE_LABELS.social },
+    event: { class: 'bg-amber-50 text-amber-700 border-amber-100', icon: <Sparkles className="w-3 h-3" />, label: SOURCE_LABELS.event },
+    organic: { class: 'bg-teal-50 text-teal-700 border-teal-100', icon: <Search className="w-3 h-3" />, label: SOURCE_LABELS.organic },
+    other: { class: 'bg-slate-50 text-slate-700 border-slate-100', icon: <MessageSquare className="w-3 h-3" />, label: SOURCE_LABELS.other },
   };
 
   const INTEREST_BADGES: Record<string, string> = {
@@ -122,37 +189,41 @@ export default function VisitorsView({
             <button onClick={() => setCrmViewMode('list')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${crmViewMode === 'list' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-500'}`}><List className="w-3.5 h-3.5" /> Table</button>
             <button onClick={() => setCrmViewMode('kanban')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${crmViewMode === 'kanban' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-500'}`}><Kanban className="w-3.5 h-3.5" /> Kanban</button>
           </div>
-          <button onClick={() => setShowAddForm(!showAddForm)} className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl cursor-pointer shadow-md transition-all hover:-translate-y-0.5">
-            <UserPlus className="w-4 h-4 stroke-[2.5]" /> New visitor
-          </button>
+          {canCreateLead && (
+            <button onClick={() => setShowAddForm(!showAddForm)} className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl cursor-pointer shadow-md transition-all hover:-translate-y-0.5">
+              <UserPlus className="w-4 h-4 stroke-[2.5]" /> New visitor
+            </button>
+          )}
         </div>
       </div>
 
-      {/* KPI strip */}
+      {/* KPI strip — every figure is server-computed over the FULL population.
+          A dash is shown until the summary lands: a confident "0" during load
+          is itself a wrong number. */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <div className="rounded-2xl border border-slate-200 bg-white p-3.5 shadow-sm"><p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Total leads</p><p className="mt-0.5 font-mono text-lg font-black text-slate-900">{visitors.length}</p></div>
-        <div className="rounded-2xl border border-amber-100 bg-amber-50/50 p-3.5 shadow-sm"><p className="text-[10px] font-semibold uppercase tracking-wide text-amber-700/70">In pipeline</p><p className="mt-0.5 font-mono text-lg font-black text-amber-900">{stats.pendingCount}</p></div>
-        <div className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-3.5 shadow-sm"><p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700/70">Enrolled</p><p className="mt-0.5 font-mono text-lg font-black text-emerald-900">{stats.convertedCount}</p></div>
-        <div className="rounded-2xl border border-indigo-100 bg-indigo-50/40 p-3.5 shadow-sm"><p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-700/70">Conversion</p><p className="mt-0.5 font-mono text-lg font-black text-indigo-900">{stats.conversionRate}%</p></div>
-        <div className={`rounded-2xl border p-3.5 shadow-sm ${stats.overdueCount > 0 ? 'border-rose-200 bg-rose-50/60' : 'border-slate-200 bg-white'}`}><p className={`text-[10px] font-semibold uppercase tracking-wide ${stats.overdueCount > 0 ? 'text-rose-700/80' : 'text-slate-400'}`}>Overdue</p><p className={`mt-0.5 font-mono text-lg font-black ${stats.overdueCount > 0 ? 'text-rose-800' : 'text-slate-900'}`}>{stats.overdueCount}</p></div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-3.5 shadow-sm"><p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Total leads</p><p className="mt-0.5 font-mono text-lg font-black text-slate-900">{stats ? stats.total : '—'}</p></div>
+        <div className="rounded-2xl border border-amber-100 bg-amber-50/50 p-3.5 shadow-sm"><p className="text-[10px] font-semibold uppercase tracking-wide text-amber-700/70">In pipeline</p><p className="mt-0.5 font-mono text-lg font-black text-amber-900">{stats ? stats.pipeline : '—'}</p></div>
+        <div className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-3.5 shadow-sm"><p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700/70">Enrolled</p><p className="mt-0.5 font-mono text-lg font-black text-emerald-900">{stats ? stats.registered : '—'}</p></div>
+        <div className="rounded-2xl border border-indigo-100 bg-indigo-50/40 p-3.5 shadow-sm"><p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-700/70">Conversion</p><p className="mt-0.5 font-mono text-lg font-black text-indigo-900">{stats ? `${stats.conversionRate}%` : '—'}</p></div>
+        <div className={`rounded-2xl border p-3.5 shadow-sm ${stats && stats.overdue > 0 ? 'border-rose-200 bg-rose-50/60' : 'border-slate-200 bg-white'}`}><p className={`text-[10px] font-semibold uppercase tracking-wide ${stats && stats.overdue > 0 ? 'text-rose-700/80' : 'text-slate-400'}`}>Overdue</p><p className={`mt-0.5 font-mono text-lg font-black ${stats && stats.overdue > 0 ? 'text-rose-800' : 'text-slate-900'}`}>{stats ? stats.overdue : '—'}</p></div>
       </div>
 
-      {stats.overdueCount > 0 && (
+      {stats && stats.overdue > 0 && (
         <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50/80 px-3 py-2.5 text-xs text-rose-950">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
-          <div><p className="font-bold">{stats.overdueCount} lead(s) past next-contact date</p><p className="text-[10px] text-rose-800/80">Open the desk panel and log a follow-up or update the contact date.</p></div>
+          <div><p className="font-bold">{stats.overdue} lead(s) past next-contact date</p><p className="text-[10px] text-rose-800/80">Open the desk panel and log a follow-up or update the contact date.</p></div>
         </div>
       )}
 
       {/* Marketing Funnel Dashboard */}
-      {visitors.length > 0 && (
+      {stats && stats.total > 0 && (
         <div className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-xs space-y-6">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3 flex-wrap gap-2">
             <h3 className="text-sm font-black text-slate-900 flex items-center gap-2"><Sparkles className="w-5 h-5 text-indigo-600 stroke-[2.5] animate-pulse" /> Branch conversion dashboard</h3>
             <div className="flex gap-4 text-xs font-bold">
-              <span className="text-slate-500">Total: <span className="text-slate-900 font-mono">{visitors.length}</span></span>
-              <span className="text-amber-600">Follow-up: <span className="font-mono">{stats.pendingCount}</span></span>
-              <span className="text-emerald-600 font-extrabold">Enrolled: <span className="font-mono">{stats.convertedCount}</span></span>
+              <span className="text-slate-500">Total: <span className="text-slate-900 font-mono">{stats.total}</span></span>
+              <span className="text-amber-600">Follow-up: <span className="font-mono">{stats.pipeline}</span></span>
+              <span className="text-emerald-600 font-extrabold">Enrolled: <span className="font-mono">{stats.registered}</span></span>
               <span className="text-indigo-600 font-black">Rate: <span className="font-mono">{stats.conversionRate}%</span></span>
             </div>
           </div>
@@ -161,28 +232,35 @@ export default function VisitorsView({
               <div className="w-full bg-slate-50 rounded-2xl h-10 flex items-center justify-between px-4 overflow-hidden border border-slate-150 relative">
                 <div className="absolute inset-y-0 right-0 bg-indigo-600/5 w-full rounded-r-2xl" />
                 <span className="font-extrabold text-slate-800 text-xs z-10 flex items-center gap-2"><span className="w-5 h-5 rounded-lg bg-indigo-600 text-white flex items-center justify-center text-[10px] font-bold">1</span> Inbound leads</span>
-                <span className="font-mono font-black text-slate-900 text-sm z-10">{visitors.length} (100%)</span>
+                <span className="font-mono font-black text-slate-900 text-sm z-10">{stats.total} (100%)</span>
               </div>
               <div className="w-full bg-slate-50 rounded-2xl h-10 flex items-center justify-between px-4 overflow-hidden border border-slate-150 relative">
-                <div className="absolute inset-y-0 right-0 bg-amber-500/5 rounded-r-2xl border-l border-amber-300/30" style={{ width: `${visitors.length > 0 ? (stats.pendingCount / visitors.length) * 100 : 0}%` }} />
+                <div className="absolute inset-y-0 right-0 bg-amber-500/5 rounded-r-2xl border-l border-amber-300/30" style={{ width: `${stats.total > 0 ? (stats.pipeline / stats.total) * 100 : 0}%` }} />
                 <span className="font-extrabold text-slate-800 text-xs z-10 flex items-center gap-2"><span className="w-5 h-5 rounded-lg bg-amber-500 text-white flex items-center justify-center text-[10px] font-bold">2</span> Active nurturing</span>
-                <span className="font-mono font-black text-amber-700 text-sm z-10">{stats.pendingCount} ({visitors.length > 0 ? Math.round((stats.pendingCount / visitors.length) * 100) : 0}%)</span>
+                <span className="font-mono font-black text-amber-700 text-sm z-10">{stats.pipeline} ({stats.total > 0 ? Math.round((stats.pipeline / stats.total) * 100) : 0}%)</span>
               </div>
               <div className="w-full bg-slate-50 rounded-2xl h-10 flex items-center justify-between px-4 overflow-hidden border border-slate-150 relative">
                 <div className="absolute inset-y-0 right-0 bg-emerald-500/5 rounded-r-2xl border-l border-emerald-300/30" style={{ width: `${stats.conversionRate}%` }} />
                 <span className="font-extrabold text-slate-800 text-xs z-10 flex items-center gap-2"><span className="w-5 h-5 rounded-lg bg-emerald-500 text-white flex items-center justify-center text-[10px] font-bold">3</span> Converted students</span>
-                <span className="font-mono font-black text-emerald-700 text-sm z-10">{stats.convertedCount} ({stats.conversionRate}%)</span>
+                <span className="font-mono font-black text-emerald-700 text-sm z-10">{stats.registered} ({stats.conversionRate}%)</span>
               </div>
             </div>
             <div className="lg:col-span-4 bg-slate-50/50 border border-slate-200/60 rounded-2xl p-4 space-y-3">
               <h4 className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">Channel performance:</h4>
+              {/* Counts come from the server's GROUP BY over every source it
+                  stores. Counting the loaded page here under-reported every
+                  channel, and iterating a 4-key badge map hid walk_in,
+                  referral, event, organic and facebook entirely. */}
               <div className="space-y-2 text-xs">
-                {Object.entries(SOURCE_BADGES).map(([key, val]) => (
-                  <div key={key} className="flex justify-between items-center bg-white p-2.5 rounded-xl border border-slate-100">
-                    <span className="flex items-center gap-1.5 font-bold text-slate-700">{val.icon} {val.label}</span>
-                    <span className="font-mono font-black text-slate-900">{visitors.filter(v => v.source === key).length}</span>
-                  </div>
-                ))}
+                {(stats.bySource || []).map(({ source, count }) => {
+                  const badge = SOURCE_BADGES[source] || SOURCE_BADGES.other;
+                  return (
+                    <div key={source} className="flex justify-between items-center bg-white p-2.5 rounded-xl border border-slate-100">
+                      <span className="flex items-center gap-1.5 font-bold text-slate-700">{badge.icon} {SOURCE_LABELS[source] || source}</span>
+                      <span className="font-mono font-black text-slate-900">{count}</span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -209,18 +287,54 @@ export default function VisitorsView({
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 text-xs">
               <div className="relative sm:col-span-5">
-                <input type="text" placeholder="Search by name, phone, or notes…" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-3 pr-9 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/10 font-semibold" />
+                <input type="text" placeholder="Search by name, phone, or notes…" value={searchTerm} onChange={(e) => applyFilter(setSearchTerm)(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-3 pr-9 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/10 font-semibold" />
                 <Search className="w-4 h-4 text-slate-400 absolute right-3 top-2.5" />
               </div>
-              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="sm:col-span-2 bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold cursor-pointer focus:outline-none">
-                <option value="all">All statuses</option><option value="visited">Pending</option><option value="registered">Enrolled</option>
+              <select value={statusFilter} onChange={(e) => applyFilter(setStatusFilter)(e.target.value)} className="sm:col-span-2 bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold cursor-pointer focus:outline-none">
+                <option value="all">All statuses</option><option value="pending">In pipeline</option><option value="registered">Enrolled</option><option value="lost">Lost</option>
               </select>
-              <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} className="sm:col-span-2 bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold cursor-pointer focus:outline-none">
-                <option value="all">All sources</option><option value="social">Social media</option><option value="ads">Facebook ads</option><option value="friend">Friends</option><option value="other">Other</option>
+              <select value={sourceFilter} onChange={(e) => applyFilter(setSourceFilter)(e.target.value)} className="sm:col-span-2 bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold cursor-pointer focus:outline-none">
+                <option value="all">All sources</option>
+                {VISITOR_SOURCE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
-              <select value={interestFilter} onChange={(e) => setInterestFilter(e.target.value)} className="sm:col-span-3 bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold cursor-pointer focus:outline-none">
+              <select value={interestFilter} onChange={(e) => applyFilter(setInterestFilter)(e.target.value)} className="sm:col-span-3 bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold cursor-pointer focus:outline-none">
                 <option value="all">All interest levels</option><option value="high_interest">🔥 High</option><option value="medium_interest">⚡ Medium</option><option value="low_interest">❄️ Low</option><option value="not_answering">📞 No response</option><option value="no_interest">❌ Dropped</option>
               </select>
+            </div>
+
+            {/* Result count + paginator. The user must always know how much of
+                the population they are looking at — the audit's core failure
+                was a screen that showed 100 of 250 leads and said nothing. */}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-[11px]">
+              <p className="font-bold text-slate-500">
+                {isFetching ? 'Loading…' : (
+                  <>
+                    Showing <span className="font-mono text-slate-800">{filteredVisitors.length}</span>
+                    {' '}of <span className="font-mono text-slate-800">{totalMatching ?? '—'}</span>
+                    {hasActiveFilters ? ' matching' : ''} lead{totalMatching === 1 ? '' : 's'}
+                    {hasActiveFilters && stats ? <span className="text-slate-400"> · {stats.total} total</span> : null}
+                  </>
+                )}
+              </p>
+              <div className="flex items-center gap-1.5">
+                {hasActiveFilters && (
+                  <button
+                    onClick={() => { setSearchTerm(''); setStatusFilter('all'); setSourceFilter('all'); setInterestFilter('all'); setPage(0); }}
+                    className="px-2.5 py-1 rounded-lg font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                  >Clear filters</button>
+                )}
+                <button
+                  onClick={() => setPage((n) => Math.max(0, n - 1))}
+                  disabled={page === 0 || isFetching}
+                  className="px-2.5 py-1 rounded-lg font-bold border border-slate-200 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 cursor-pointer"
+                >Previous</button>
+                <span className="font-mono font-bold text-slate-600 px-1">{page + 1} / {totalPages}</span>
+                <button
+                  onClick={() => setPage((n) => Math.min(totalPages - 1, n + 1))}
+                  disabled={page >= totalPages - 1 || isFetching}
+                  className="px-2.5 py-1 rounded-lg font-bold border border-slate-200 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 cursor-pointer"
+                >Next</button>
+              </div>
             </div>
           </div>
 
@@ -232,7 +346,13 @@ export default function VisitorsView({
                   <th className="py-3 px-3">Visitor</th><th className="py-3 px-3">Phone / source</th><th className="py-3 px-3">Level / course</th><th className="py-3 px-3">Next contact</th><th className="py-3 px-3 text-center">Status</th><th className="py-3 px-3 text-left">Enrollment</th>
                 </tr></thead>
                 <tbody className="divide-y divide-slate-50 text-slate-600">
-                  {filteredVisitors.length === 0 ? <tr><td colSpan={6} className="text-center py-10 text-slate-400">No visitors match this search.</td></tr> : (
+                  {filteredVisitors.length === 0 ? (
+                    <tr><td colSpan={6} className="text-center py-10 text-slate-400">
+                      {isFetching ? 'Loading leads…'
+                        : hasActiveFilters ? 'No leads match these filters. Try Clear filters.'
+                        : 'No leads yet. Use “New visitor” to register the first one.'}
+                    </td></tr>
+                  ) : (
                     filteredVisitors.map((v) => {
                       const src = SOURCE_BADGES[v.source] || SOURCE_BADGES.other;
                       const intBadge = INTEREST_BADGES[v.followUpStatus || ''] || 'bg-slate-50 text-slate-500';
@@ -241,10 +361,13 @@ export default function VisitorsView({
                           <td className="py-3 px-3"><p className="font-extrabold text-slate-800 text-xs sm:text-sm">{v.fullName}</p><p className="text-[10px] text-slate-400 mt-0.5">Visit: {v.visitDate}</p></td>
                           <td className="py-3 px-3"><p className="font-mono font-bold text-slate-700 text-xs">{v.phone}</p><div className="mt-1"><span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border ${src.class}`}>{src.icon} {src.label}</span></div></td>
                           <td className="py-3 px-3"><div className="flex flex-col gap-1"><span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md w-fit border border-indigo-100">{v.interestedCourse || '—'}</span><span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-semibold border w-fit ${intBadge}`}>{v.followUpStatus?.replace('_', ' ')}</span>{v.placementScore && <span className="inline-flex items-center gap-0.5 text-[9px] text-emerald-700 font-extrabold bg-emerald-50 px-1.5 rounded-md w-fit"><Award className="w-3 h-3" /> {v.placementScore.total} pts</span>}</div></td>
-                          <td className="py-3 px-3 font-mono font-semibold text-indigo-600">{v.nextContactDate ? <span className="flex items-center gap-1 text-[10px]"><Clock className="w-3.5 h-3.5" /> {v.nextContactDate}</span> : <span className="text-slate-300">-</span>}</td>
+                          {/* Row-level overdue marker. The COUNT is server-computed;
+                              this only flags the row the user is looking at, using the
+                              same local-calendar `todayIso` the server's today() matches. */}
+                          <td className={`py-3 px-3 font-mono font-semibold ${isOverdueContact(v) ? 'text-rose-600' : 'text-indigo-600'}`}>{v.nextContactDate ? <span className="flex items-center gap-1 text-[10px]"><Clock className="w-3.5 h-3.5" /> {v.nextContactDate}{isOverdueContact(v) ? <span className="font-black uppercase text-[9px]">overdue</span> : null}</span> : <span className="text-slate-300">-</span>}</td>
                           <td className="py-3 px-3 text-center"><span className={`inline-flex px-2 py-1 rounded-full text-[9px] font-black border ${isConvertedLead(v) ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>{isConvertedLead(v) ? 'Enrolled' : 'In follow-up'}</span></td>
                           <td className="py-3 px-3 text-left" onClick={(e) => e.stopPropagation()}>
-                            {isPendingLead(v) ? <button onClick={() => setConvertingVisitor(v)} className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[10px] px-3 py-1.5 rounded-xl shadow-xs flex items-center gap-1"><UserCheck className="w-3.5 h-3.5" /> Enroll now</button> : <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-0.5 justify-end"><CheckCircle2 className="w-3.5 h-3.5" /> Completed</span>}
+                            {isPendingLead(v) ? (canConvertLead ? <button onClick={() => setConvertingVisitor(v)} className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[10px] px-3 py-1.5 rounded-xl shadow-xs flex items-center gap-1"><UserCheck className="w-3.5 h-3.5" /> Enroll now</button> : <span className="text-[10px] text-slate-400 font-bold" title="Only the registrar can enroll a lead.">Registrar only</span>) : <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-0.5 justify-end"><CheckCircle2 className="w-3.5 h-3.5" /> Completed</span>}
                           </td>
                         </tr>
                       );
@@ -302,7 +425,7 @@ export default function VisitorsView({
                               </div>
                               <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2" onClick={(e) => e.stopPropagation()}>
                                 <button onClick={() => setSelectedVisitorId(v.id)} className="text-[9px] font-bold text-slate-500 hover:text-indigo-600">Open workspace</button>
-                                {nextStage && nextStage !== 'lost' ? (
+                                {nextStage && nextStage !== 'lost' && canEditLead ? (
                                   <button onClick={() => advanceVisitorStage(v.id)} className="text-[9px] font-black text-white bg-indigo-600 hover:bg-indigo-700 px-2.5 py-1.5 rounded-lg">Advance</button>
                                 ) : v.stage === 'lost' ? (
                                   <span className="text-[9px] font-black text-slate-400">Closed</span>
@@ -323,7 +446,7 @@ export default function VisitorsView({
 
       {/* Modals */}
       {activeVisitor && (
-        <VisitorDeskPanel courseOptions={courseOptions} key={activeVisitor.id} visitor={activeVisitor} onClose={() => setSelectedVisitorId(null)} updateVisitorCRM={updateVisitorCRM} addVisitorFollowUp={addVisitorFollowUp} updateVisitor={updateVisitor} onOpenPlacementTest={() => setShowPlacementModal(true)} onOpenConvert={() => setConvertingVisitor(activeVisitor)} triggerToast={triggerToast} />
+        <VisitorDeskPanel courseOptions={courseOptions} key={activeVisitor.id} visitor={activeVisitor} onClose={() => setSelectedVisitorId(null)} updateVisitorCRM={updateVisitorCRM} addVisitorFollowUp={addVisitorFollowUp} updateVisitor={updateVisitor} onOpenPlacementTest={() => setShowPlacementModal(true)} onOpenConvert={() => setConvertingVisitor(activeVisitor)} triggerToast={triggerToast} canConvertLead={canConvertLead} canEditLead={canEditLead} checkConversionEligibility={checkConversionEligibility} />
       )}
 
       {activeVisitor && showPlacementModal && (
@@ -336,7 +459,7 @@ export default function VisitorsView({
       )}
 
       {convertingVisitor && (
-        <ConvertToStudentModal convertingVisitor={convertingVisitor} classes={classes} branches={branches} activeBranchId={activeBranchId} registerVisitorToStudent={registerVisitorToStudent} onClose={() => setConvertingVisitor(null)} triggerToast={triggerToast} />
+        <ConvertToStudentModal convertingVisitor={convertingVisitor} classes={classes} branches={branches} activeBranchId={activeBranchId} registerVisitorToStudent={registerVisitorToStudent} onClose={() => setConvertingVisitor(null)} triggerToast={triggerToast} checkConversionEligibility={checkConversionEligibility} onOpenPlacementTest={() => { setSelectedVisitorId(convertingVisitor.id); setConvertingVisitor(null); setShowPlacementModal(true); }} />
       )}
 
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
