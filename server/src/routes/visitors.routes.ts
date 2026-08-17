@@ -15,6 +15,7 @@ import { resolvePlacementRequirement } from '../core/placement/policy-engine.js'
 import { resolveGoverningProgramVersionId } from '../core/placement/enrollment-gate.js';
 import { buildVisitorSummary, queryVisitorPage, type VisitorFilters } from '../core/visitors/visitor-query.js';
 import { evaluateConversionEligibilityForVisitor } from '../core/visitors/conversion-eligibility.js';
+import { LEAD_CONVERTED_SQL } from '../core/visitors/lead-lifecycle.js';
 import { addNotification } from '../utils/notifications.js';
 import { recordIncome } from '../utils/income.js';
 import { getNumberSetting, incrementNumberSetting } from '../utils/settings.js';
@@ -387,8 +388,28 @@ visitorsRouter.get('/pipeline', requirePermission('Lead.View'), ah(async (req, r
     return { stage, count, conversionRate: prevCount > 0 ? Math.round((count / prevCount) * 1000) / 10 : 100 };
   });
 
-  const totalLeads = stageCounts.get('lead') || 0;
-  const totalRegistrations = stageCounts.get('registration') || 0;
+  // `stages` above is a genuine per-stage funnel and is left untouched.
+  //
+  // The two scalar metrics were not. They read:
+  //   totalLeads         = COUNT(stage='lead')          -- leads STILL IN 'lead'
+  //   totalRegistrations = COUNT(stage='registration')
+  // Conversion writes stage='enrollment' and never passes through
+  // 'registration', so a converted lead was never counted: with 27 real
+  // conversions in the database this endpoint reported 0 registrations and a
+  // 0% conversion rate. Worse, the denominator SHRANK as leads progressed out
+  // of 'lead', so the metric moved the wrong way as the business improved.
+  //
+  // Both now use the shared lifecycle authority, so this endpoint agrees with
+  // /visitors/summary, /dashboard/summary, BOS and reports.
+  const totals = db.prepare(
+    `SELECT
+       COUNT(*) AS total,
+       SUM(CASE WHEN ${LEAD_CONVERTED_SQL} THEN 1 ELSE 0 END) AS converted
+     FROM visitors WHERE 1=1${isAll ? '' : ' AND branch_id = ?'}`
+  ).get(...(isAll ? [] : [branchId])) as { total: number; converted: number };
+
+  const totalLeads = Number(totals.total || 0);
+  const totalRegistrations = Number(totals.converted || 0);
   res.json({ stages, totalLeads, totalRegistrations, overallConversion: totalLeads > 0 ? Math.round((totalRegistrations / totalLeads) * 1000) / 10 : 0 });
 }));
 

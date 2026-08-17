@@ -30,6 +30,7 @@
  */
 import type BetterSqlite3 from 'better-sqlite3';
 import { today } from '../../utils/ids.js';
+import { LEAD_CLOSED_SQL, LEAD_CONVERTED_SQL, LEAD_OPEN_SQL } from '../visitors/lead-lifecycle.js';
 import {
   periodBoundaries,
   addDays,
@@ -60,8 +61,15 @@ export interface DashboardSummary {
     activeClasses: number;
     activeTeachers: number;
     totalVisitors: number;
+    /** Leads still winnable: neither converted nor closed-lost. */
     pendingLeads: number;
     convertedLeads: number;
+    /**
+     * Closed-lost leads. Reported so that
+     * pendingLeads + convertedLeads + closedLeads === totalVisitors holds, and
+     * so a dead lead never inflates the open pipeline.
+     */
+    closedLeads: number;
     /** Whole-population conversion rate, 0-100, rounded. */
     conversionRate: number;
   };
@@ -112,9 +120,19 @@ export function buildDashboardSummary(
   // how the previous client-side count treated it: `(t.status || 'active')`.
   const activeTeachers = countOf(db, `SELECT COUNT(*) AS c FROM teachers WHERE COALESCE(status, 'active') = 'active'${s.sql}`, s.params);
 
+  // Lead buckets come from the shared lifecycle authority
+  // (core/visitors/lead-lifecycle.ts). This module previously defined
+  // `pendingLeads` as an ALLOW-LIST — `status IN ('visited','follow_up')` —
+  // which had two faults:
+  //   1. it counted a closed-lost lead as still pending, so this endpoint
+  //      reported 226 open leads where the Visitors screen reported 225;
+  //   2. an allow-list silently drops any row whose status is neither value,
+  //      so a new status would undercount without failing anything.
+  // `open` is now the COMPLEMENT of converted+closed, which cannot undercount.
   const totalVisitors = countOf(db, `SELECT COUNT(*) AS c FROM visitors WHERE 1=1${s.sql}`, s.params);
-  const pendingLeads = countOf(db, `SELECT COUNT(*) AS c FROM visitors WHERE status IN ('visited','follow_up')${s.sql}`, s.params);
-  const convertedLeads = countOf(db, `SELECT COUNT(*) AS c FROM visitors WHERE status = 'registered'${s.sql}`, s.params);
+  const pendingLeads = countOf(db, `SELECT COUNT(*) AS c FROM visitors WHERE ${LEAD_OPEN_SQL}${s.sql}`, s.params);
+  const convertedLeads = countOf(db, `SELECT COUNT(*) AS c FROM visitors WHERE ${LEAD_CONVERTED_SQL}${s.sql}`, s.params);
+  const closedLeads = countOf(db, `SELECT COUNT(*) AS c FROM visitors WHERE ${LEAD_CLOSED_SQL}${s.sql}`, s.params);
   // Denominator is the FULL visitor population, not a page (D-1).
   const conversionRate = totalVisitors > 0 ? Math.round((convertedLeads / totalVisitors) * 100) : 0;
 
@@ -172,7 +190,7 @@ export function buildDashboardSummary(
     boundaries,
     population: {
       activeStudents, totalStudents, activeClasses, activeTeachers,
-      totalVisitors, pendingLeads, convertedLeads, conversionRate,
+      totalVisitors, pendingLeads, convertedLeads, closedLeads, conversionRate,
     },
     periods: {
       today: periodCounts(boundaries.today),

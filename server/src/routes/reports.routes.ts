@@ -15,6 +15,7 @@
  * self-explanatory and traceable without ERP access.
  */
 import { Router } from 'express';
+import { LEAD_CONVERTED_SQL } from '../core/visitors/lead-lifecycle.js';
 import { db } from '../db/connection.js';
 import { authenticate, requirePermission, resolveBranchScope } from '../middleware/auth.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
@@ -302,8 +303,8 @@ reportsRouter.get(
           WHERE a.status='completed' AND a.branch_id = ? AND a.started_at >= ? AND a.started_at <= ?
           GROUP BY level_code ORDER BY c DESC`).all(branchId, from + ' 00:00:00', to + ' 23:59:59')) as Array<{ level_code: string; c: number }>;
     const conversionQ = isAll
-      ? db.prepare(`SELECT COUNT(*) AS c FROM visitors WHERE status='registered' AND visit_date >= ? AND visit_date <= ?`).get(from, to)
-      : db.prepare(`SELECT COUNT(*) AS c FROM visitors WHERE status='registered' AND branch_id = ? AND visit_date >= ? AND visit_date <= ?`).get(branchId, from, to);
+      ? db.prepare(`SELECT COUNT(*) AS c FROM visitors WHERE ${LEAD_CONVERTED_SQL} AND visit_date >= ? AND visit_date <= ?`).get(from, to)
+      : db.prepare(`SELECT COUNT(*) AS c FROM visitors WHERE ${LEAD_CONVERTED_SQL} AND branch_id = ? AND visit_date >= ? AND visit_date <= ?`).get(branchId, from, to);
     const placement = {
       attempts: Number(pQ.attempts || 0),
       completed: Number(pQ.completed || 0),

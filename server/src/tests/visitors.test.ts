@@ -121,7 +121,7 @@ function createVisitorDirect(overrides: Record<string, any> = {}): string {
       visit_date, status, notes, branch_id, interested_course, follow_up_status, next_contact_date,
       father_name, address_region, tazkira_no, whatsapp, dob, school_or_university,
       emergency_contact_name, emergency_contact_phone, program_version_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'visited', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     visitorId, serialNo,
     overrides.full_name || 'Test Visitor',
@@ -133,6 +133,10 @@ function createVisitorDirect(overrides: Record<string, any> = {}): string {
     overrides.stage || 'lead',
     overrides.assigned_to ?? null,
     today(),
+    // `status` was hardcoded to 'visited' and silently ignored any override, so
+    // a fixture could not express a CONVERTED lead — which is exactly the state
+    // the lifecycle rules turn on.
+    overrides.status ?? 'visited',
     overrides.notes ?? null,
     overrides.branch_id || BRANCH_A,
     overrides.interested_course || 'TOEFL Preparation',
@@ -804,18 +808,34 @@ describe('Visitor Module', () => {
       expect(inquiryStage.count).toBe(1);
     });
 
-    it('should return overall conversion rate', async () => {
+    /**
+     * Rewritten: the previous version asserted the DEFECT.
+     *
+     * It seeded `stage='registration'` and expected `totalRegistrations === 1`,
+     * but conversion never writes that stage — it writes status='registered'
+     * and stage='enrollment'. So the old assertion could only pass for a lead
+     * that had NOT actually converted, and a genuinely converted lead scored
+     * zero. With 27 real conversions in a live database the endpoint reported
+     * a 0% conversion rate and this test still passed.
+     *
+     * A converted lead is now defined the same way everywhere:
+     * status='registered' (see core/visitors/lead-lifecycle.ts).
+     */
+    it('counts converted leads, not leads parked in the transient registration stage', async () => {
       createVisitorDirect({ stage: 'lead', branch_id: BRANCH_A });
-      createVisitorDirect({ stage: 'registration', branch_id: BRANCH_A });
+      createVisitorDirect({ stage: 'registration', branch_id: BRANCH_A });          // NOT converted
+      createVisitorDirect({ stage: 'enrollment', status: 'registered', branch_id: BRANCH_A }); // converted
 
       const res = await supertest(app)
         .get('/api/visitors/pipeline')
         .set(authHeader(registrarA));
 
       expect(res.status).toBe(200);
-      expect(res.body.totalLeads).toBe(1);
+      // Denominator is the whole population, not just leads still sitting in 'lead'.
+      expect(res.body.totalLeads).toBe(3);
+      // Only the genuinely converted lead counts.
       expect(res.body.totalRegistrations).toBe(1);
-      expect(res.body.overallConversion).toBeGreaterThan(0);
+      expect(res.body.overallConversion).toBeCloseTo(33.3, 1);
     });
 
     it('should return all pipeline stages', async () => {

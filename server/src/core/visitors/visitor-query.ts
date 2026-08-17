@@ -26,6 +26,7 @@
  * parameter — no user input is ever concatenated into SQL.
  */
 import type BetterSqlite3 from 'better-sqlite3';
+import { LEAD_CLOSED_SQL, LEAD_CONVERTED_SQL, LEAD_OPEN_SQL } from './lead-lifecycle.js';
 
 export interface VisitorScope {
   /** Null when the caller legitimately sees the whole organization. */
@@ -80,25 +81,17 @@ export interface VisitorSummary {
 }
 
 /**
- * Closed-lost detection.
+ * Lifecycle predicates come from the shared authority (core/visitors/lead-lifecycle.ts).
  *
- * `visitors.status` and `visitors.stage` are independent columns: advancing a
- * lead to `stage='lost'` leaves `status='visited'` untouched. Treating status
- * alone as the pipeline state is UX-8. Every bucket below therefore reads
- * `stage='lost'` as terminal, so a dead lead is never counted as open and never
- * sits in the conversion denominator as if it were still winnable.
- *
- * Kept as one constant because three call sites need the identical predicate;
- * a second copy is a second answer.
- *
- * `stage` is NULLable, so every test wraps it in COALESCE. Writing
- * `stage = 'lost' = 0` instead silently drops NULL-stage rows from the pipeline
- * count — verified against SQLite while building this module — which would have
- * reintroduced the undercount this work exists to remove.
+ * They used to be declared privately here. That was correct for this module but
+ * left the Dashboard, BOS and reports each carrying their own copy, and the
+ * copies disagreed: on identical data this module reported 225 open leads while
+ * the Dashboard reported 226, because only this one treated closed-lost as
+ * terminal. One question must have one implementation.
  */
-const LOST_SQL = `COALESCE(stage,'lead') = 'lost'`;
-const REGISTERED_SQL = `status = 'registered'`;
-const PIPELINE_SQL = `status <> 'registered' AND COALESCE(stage,'lead') <> 'lost'`;
+const LOST_SQL = LEAD_CLOSED_SQL;
+const REGISTERED_SQL = LEAD_CONVERTED_SQL;
+const PIPELINE_SQL = LEAD_OPEN_SQL;
 
 function scopeClause(scope: VisitorScope): { sql: string; params: unknown[] } {
   return scope.isAll ? { sql: '', params: [] } : { sql: ` AND branch_id = ?`, params: [scope.branchId] };

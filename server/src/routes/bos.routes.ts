@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { LEAD_CONVERTED_SQL } from '../core/visitors/lead-lifecycle.js';
 import { db } from '../db/connection.js';
 import { getBranchOutstanding } from '../utils/studentBalance.js';
 import { authenticate, authorize, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
@@ -98,7 +99,7 @@ const stmtMarketingFunnel = db.prepare(`
     source,
     COUNT(*) as leads,
     SUM(CASE WHEN placement_score IS NOT NULL THEN 1 ELSE 0 END) as placementTests,
-    SUM(CASE WHEN status = 'registered' THEN 1 ELSE 0 END) as registrations
+    SUM(CASE WHEN ${LEAD_CONVERTED_SQL} THEN 1 ELSE 0 END) as registrations
   FROM visitors
   WHERE branch_id = ? AND visit_date BETWEEN ? AND ?
   GROUP BY source
