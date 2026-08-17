@@ -73,3 +73,36 @@ export const LEAD_BUCKET_BADGE: Record<LeadLifecycleBucket, string> = {
   closed: 'bg-slate-100 text-slate-500 border-slate-200',
   open: 'bg-amber-50 text-amber-700 border-amber-200',
 };
+
+/**
+ * Placement status, surfaced where a counselor can act on it (audit UX-10).
+ *
+ * `placementStatus` previously reached the UI in exactly one place — a button
+ * label reading "Assessment Workspace" / "Re-assess" — so nobody could answer
+ * "who still needs assessing?" without opening leads one at a time. Since
+ * placement gates enrolment (UX-3), that state belongs in the list.
+ *
+ * Values mirror the schema CHECK on visitors.placement_status:
+ * not_started | scheduled | in_progress | completed | waived.
+ */
+export const PLACEMENT_LABEL: Record<string, string> = {
+  not_started: 'Not assessed',
+  scheduled: 'Booked',
+  in_progress: 'In progress',
+  completed: 'Assessed',
+  waived: 'Waived',
+};
+
+export const PLACEMENT_BADGE: Record<string, string> = {
+  not_started: 'bg-slate-50 text-slate-500 border-slate-200',
+  scheduled: 'bg-violet-50 text-violet-700 border-violet-200',
+  in_progress: 'bg-violet-50 text-violet-700 border-violet-200',
+  completed: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  waived: 'bg-sky-50 text-sky-700 border-sky-200',
+};
+
+/** Normalise a possibly-absent placement status to a known key. */
+export function placementKey(status: string | null | undefined): string {
+  const k = status ?? 'not_started';
+  return k in PLACEMENT_LABEL ? k : 'not_started';
+}

@@ -691,3 +691,75 @@ describe('UX-9 — possible-duplicate lookup warns without blocking', () => {
     expect(res.body.candidates).toHaveLength(0);
   });
 });
+
+// ===========================================================================
+// UX-10 — placement state is filterable (the server filter now has a UI)
+// ===========================================================================
+describe('UX-10 — placement state can be isolated', () => {
+  beforeEach(() => {
+    const ins = db.prepare(`INSERT OR REPLACE INTO visitors
+      (id, serial_no, full_name, phone, gender, source, status, stage, branch_id, visit_date, placement_status)
+      VALUES (?,?,?,?,'male','walk_in','visited','lead',?,?,?)`);
+    ins.run('vux_p1', 'P-1', 'Needs One', '0700310001', BRANCH_A, today(), 'not_started');
+    ins.run('vux_p2', 'P-2', 'Needs Two', '0700310002', BRANCH_A, today(), 'scheduled');
+    ins.run('vux_p3', 'P-3', 'Needs Three', '0700310003', BRANCH_A, today(), 'in_progress');
+    ins.run('vux_p4', 'P-4', 'Assessed', '0700310004', BRANCH_A, today(), 'completed');
+    ins.run('vux_p5', 'P-5', 'Waived', '0700310005', BRANCH_A, today(), 'waived');
+  });
+
+  it('needs_assessment covers exactly the unfinished states', async () => {
+    const res = await supertest(app)
+      .get('/api/visitors?placement=needs_assessment&limit=100')
+      .set(authHeader(registrarA));
+    const ids = res.body.map((v: any) => v.id).filter((i: string) => i.startsWith('vux_p'));
+    expect(ids.sort()).toEqual(['vux_p1', 'vux_p2', 'vux_p3']);
+  });
+
+  it('completed and waived are separately filterable', async () => {
+    const done = await supertest(app).get('/api/visitors?placement=completed&limit=100').set(authHeader(registrarA));
+    expect(done.body.map((v: any) => v.id)).toContain('vux_p4');
+    expect(done.body.map((v: any) => v.id)).not.toContain('vux_p5');
+
+    const waived = await supertest(app).get('/api/visitors?placement=waived&limit=100').set(authHeader(registrarA));
+    expect(waived.body.map((v: any) => v.id)).toContain('vux_p5');
+  });
+
+  it('the placement filter narrows the reported total, not just the page', async () => {
+    const res = await supertest(app)
+      .get('/api/visitors/summary?placement=needs_assessment')
+      .set(authHeader(registrarA));
+    // `filtered` reflects the filter; `total` remains the honest population.
+    expect(res.body.filtered).toBeLessThan(res.body.total);
+    expect(res.body.filtered).toBeGreaterThanOrEqual(3);
+  });
+});
+
+// ===========================================================================
+// UX-14 — validation messages name the field that is actually missing
+// ===========================================================================
+describe('UX-14 — required-field errors are actionable', () => {
+  it('names gender when only gender is missing', async () => {
+    const res = await supertest(app).post('/api/visitors').set(authHeader(registrarA))
+      .send({ fullName: 'Has A Name', phone: '0700320001', source: 'walk_in' });
+    expect(res.status).toBe(400);
+    // Previously: "Full name, gender, and source are required." — which accused
+    // a field the caller had supplied.
+    expect(String(res.body.error)).toMatch(/gender/i);
+    expect(String(res.body.error)).not.toMatch(/full name/i);
+  });
+
+  it('names the source when only the source is missing', async () => {
+    const res = await supertest(app).post('/api/visitors').set(authHeader(registrarA))
+      .send({ fullName: 'Has A Name', phone: '0700320002', gender: 'male' });
+    expect(res.status).toBe(400);
+    expect(String(res.body.error)).toMatch(/source/i);
+    expect(String(res.body.error)).not.toMatch(/full name/i);
+  });
+
+  it('still names the full name when the full name really is missing', async () => {
+    const res = await supertest(app).post('/api/visitors').set(authHeader(registrarA))
+      .send({ phone: '0700320003', gender: 'male', source: 'walk_in' });
+    expect(res.status).toBe(400);
+    expect(String(res.body.error)).toMatch(/full name/i);
+  });
+});

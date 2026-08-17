@@ -458,7 +458,14 @@ visitorsRouter.get('/pipeline', requirePermission('Lead.View'), ah(async (req, r
 visitorsRouter.post('/', requirePermission('Lead.Create'), ah(async (req, res) => {
   const user = getUserContext(req);
   const { gender, source, campaignId, stage, assignedTo, branchId, programVersionId } = req.body;
-  if (!gender || !source) throw new HttpError(400, 'Full name, gender, and source are required.');
+  // Name the field that is ACTUALLY missing. This previously threw
+  // "Full name, gender, and source are required." while testing only gender and
+  // source, so a request that supplied a full name was told the full name was
+  // missing — the exact class of unactionable message the UX-2 fix set out to
+  // remove. (`fullName` itself is validated by `requiredText` below, which
+  // raises its own precise error.)
+  if (!gender) throw new HttpError(400, 'Gender is required.');
+  if (!source) throw new HttpError(400, 'Lead source is required.');
   assertVisitorGender(gender);
   assertVisitorSource(source);
   // One normalization/validation authority, shared with PATCH (audit V-4).

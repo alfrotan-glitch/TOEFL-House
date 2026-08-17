@@ -7,7 +7,7 @@ import {UserPlus, Search, Sparkles, UserCheck, MessageSquare, Megaphone, Share2,
 import {Visitor, Class, Branch, Teacher, VisitorSummary, VisitorQuery, ConversionEligibility, DuplicateCandidate} from '../../types'; // Added Teacher
 import {hasPermission} from '../../config/permissions';
 import {VISITOR_SOURCE_OPTIONS, SOURCE_LABELS} from '../../config/visitorSources';
-import {isLeadClosed, isLeadOpen, leadLifecycleBucket, LEAD_BUCKET_LABEL, LEAD_BUCKET_BADGE} from '../../config/leadLifecycle';
+import {isLeadClosed, isLeadOpen, leadLifecycleBucket, LEAD_BUCKET_LABEL, LEAD_BUCKET_BADGE, PLACEMENT_LABEL, PLACEMENT_BADGE, placementKey} from '../../config/leadLifecycle';
 import AddVisitorForm from './AddVisitorForm';
 import VisitorDeskPanel from './VisitorDeskPanel';
 import PlacementTestModal from './PlacementTestModal';
@@ -77,6 +77,7 @@ export default function VisitorsView({
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [sourceFilter, setSourceFilter] = useState<string>('all');
   const [interestFilter, setInterestFilter] = useState<string>('all');
+  const [placementFilter, setPlacementFilter] = useState<string>('all');
   const [page, setPage] = useState<number>(0);
   const [isFetching, setIsFetching] = useState<boolean>(false);
 
@@ -112,12 +113,13 @@ export default function VisitorsView({
         status: statusFilter,
         source: sourceFilter,
         interest: interestFilter,
+        placement: placementFilter,
         page,
         pageSize,
       }).finally(() => setIsFetching(false));
     }, searchTerm ? 300 : 0);
     return () => clearTimeout(handle);
-  }, [searchTerm, statusFilter, sourceFilter, interestFilter, page, pageSize, reloadVisitors]);
+  }, [searchTerm, statusFilter, sourceFilter, interestFilter, placementFilter, page, pageSize, reloadVisitors]);
 
 
   // Local calendar date, matching the server's `today()` (toLocaleDateString
@@ -206,7 +208,7 @@ export default function VisitorsView({
 
   const totalMatching = visitorSummary?.filtered ?? null;
   const totalPages = Math.max(1, Math.ceil((totalMatching ?? 0) / pageSize));
-  const hasActiveFilters = Boolean(searchTerm) || statusFilter !== 'all' || sourceFilter !== 'all' || interestFilter !== 'all';
+  const hasActiveFilters = Boolean(searchTerm) || statusFilter !== 'all' || sourceFilter !== 'all' || interestFilter !== 'all' || placementFilter !== 'all';
 
   const activeVisitor = visitors.find(v => v.id === selectedVisitorId) || null;
 
@@ -341,7 +343,7 @@ export default function VisitorsView({
               <h3 className="text-sm font-black text-slate-900 flex items-center gap-2"><Compass className="w-4.5 h-4.5 text-indigo-600" /> Applicant status & lead bank</h3>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 text-xs">
-              <div className="relative sm:col-span-5">
+              <div className="relative sm:col-span-4">
                 <input type="text" placeholder="Search by name, phone, or notes…" value={searchTerm} onChange={(e) => applyFilter(setSearchTerm)(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-3 pr-9 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/10 font-semibold" />
                 <Search className="w-4 h-4 text-slate-400 absolute right-3 top-2.5" />
               </div>
@@ -352,7 +354,16 @@ export default function VisitorsView({
                 <option value="all">All sources</option>
                 {VISITOR_SOURCE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
-              <select value={interestFilter} onChange={(e) => applyFilter(setInterestFilter)(e.target.value)} className="sm:col-span-3 bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold cursor-pointer focus:outline-none">
+              {/* Placement filter. The server has supported ?placement= since the
+                  UX-1 work; it simply had no UI, so "who still needs assessing?"
+                  was unanswerable without opening leads one by one. */}
+              <select value={placementFilter} onChange={(e) => applyFilter(setPlacementFilter)(e.target.value)} className="sm:col-span-2 bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold cursor-pointer focus:outline-none">
+                <option value="all">All placement states</option>
+                <option value="needs_assessment">Needs assessment</option>
+                <option value="completed">Assessed</option>
+                <option value="waived">Waived</option>
+              </select>
+              <select value={interestFilter} onChange={(e) => applyFilter(setInterestFilter)(e.target.value)} className="sm:col-span-2 bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold cursor-pointer focus:outline-none">
                 <option value="all">All interest levels</option><option value="high_interest">🔥 High</option><option value="medium_interest">⚡ Medium</option><option value="low_interest">❄️ Low</option><option value="not_answering">📞 No response</option><option value="no_interest">❌ Dropped</option>
               </select>
             </div>
@@ -374,7 +385,7 @@ export default function VisitorsView({
               <div className="flex items-center gap-1.5">
                 {hasActiveFilters && (
                   <button
-                    onClick={() => { setSearchTerm(''); setStatusFilter('all'); setSourceFilter('all'); setInterestFilter('all'); setPage(0); }}
+                    onClick={() => { setSearchTerm(''); setStatusFilter('all'); setSourceFilter('all'); setInterestFilter('all'); setPlacementFilter('all'); setPage(0); }}
                     className="px-2.5 py-1 rounded-lg font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
                   >Clear filters</button>
                 )}
@@ -415,7 +426,7 @@ export default function VisitorsView({
                         <tr key={v.id} onClick={() => setSelectedVisitorId(v.id)} className={`hover:bg-indigo-50/15 transition-all cursor-pointer ${selectedVisitorId === v.id ? 'bg-indigo-50/25 border-r-2 border-indigo-600' : ''}`}>
                           <td className="py-3 px-3"><p className="font-extrabold text-slate-800 text-xs sm:text-sm">{v.fullName}</p><p className="text-[10px] text-slate-400 mt-0.5">Visit: {v.visitDate}</p></td>
                           <td className="py-3 px-3"><p className="font-mono font-bold text-slate-700 text-xs">{v.phone}</p><div className="mt-1"><span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border ${src.class}`}>{src.icon} {src.label}</span></div></td>
-                          <td className="py-3 px-3"><div className="flex flex-col gap-1"><span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md w-fit border border-indigo-100">{v.interestedCourse || '—'}</span><span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-semibold border w-fit ${intBadge}`}>{v.followUpStatus?.replace('_', ' ')}</span>{v.placementScore && <span className="inline-flex items-center gap-0.5 text-[9px] text-emerald-700 font-extrabold bg-emerald-50 px-1.5 rounded-md w-fit"><Award className="w-3 h-3" /> {v.placementScore.total} pts</span>}</div></td>
+                          <td className="py-3 px-3"><div className="flex flex-col gap-1"><span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md w-fit border border-indigo-100">{v.interestedCourse || '—'}</span><span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-semibold border w-fit ${intBadge}`}>{v.followUpStatus?.replace('_', ' ')}</span>{v.placementScore && <span className="inline-flex items-center gap-0.5 text-[9px] text-emerald-700 font-extrabold bg-emerald-50 px-1.5 rounded-md w-fit"><Award className="w-3 h-3" /> {v.placementScore.total} pts</span>}<span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-semibold border w-fit ${PLACEMENT_BADGE[placementKey(v.placementStatus)]}`}>{PLACEMENT_LABEL[placementKey(v.placementStatus)]}</span></div></td>
                           {/* Row-level overdue marker. The COUNT is server-computed;
                               this only flags the row the user is looking at, using the
                               same local-calendar `todayIso` the server's today() matches. */}
