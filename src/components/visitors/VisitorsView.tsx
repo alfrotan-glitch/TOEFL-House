@@ -4,7 +4,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {UserPlus, Search, Sparkles, UserCheck, MessageSquare, Megaphone, Share2, Compass, AlertCircle, CheckCircle2, Clock, Kanban, List, Award} from 'lucide-react';
-import {Visitor, Class, Branch, Teacher, VisitorSummary, VisitorQuery, ConversionEligibility} from '../../types'; // Added Teacher
+import {Visitor, Class, Branch, Teacher, VisitorSummary, VisitorQuery, ConversionEligibility, DuplicateCandidate} from '../../types'; // Added Teacher
 import {hasPermission} from '../../config/permissions';
 import {VISITOR_SOURCE_OPTIONS, SOURCE_LABELS} from '../../config/visitorSources';
 import {isLeadClosed, isLeadOpen, leadLifecycleBucket, LEAD_BUCKET_LABEL, LEAD_BUCKET_BADGE} from '../../config/leadLifecycle';
@@ -52,13 +52,15 @@ interface VisitorsViewProps {
   ) => Promise<{ studentId: string; studentCode: string; receiptNumber: string; invoiceId: string; invoiceNumber: string; netAmount: number; status: string }>;
   /** Read-only pre-flight for conversion (UX-3). */
   checkConversionEligibility: (visitorId: string, classId?: string) => Promise<ConversionEligibility>;
+  /** Advisory duplicate lookup for the registration form (UX-9). */
+  checkDuplicateLeads?: (params: { phone?: string; tazkiraNo?: string; fullName?: string }) => Promise<DuplicateCandidate[]>;
   programVersions?: Array<{ id: string; name: string; versionLabel: string; status: string }>;
 }
 
 export default function VisitorsView({
   visitors, classes, branches, activeBranchId, addVisitor, updateVisitorCRM, addVisitorFollowUp,
   updateVisitor, reloadVisitors, visitorSummary, visitorQuery, permissionCodes, activeRole,
-  advanceVisitorStage, registerVisitorToStudent, checkConversionEligibility, programVersions = []
+  advanceVisitorStage, registerVisitorToStudent, checkConversionEligibility, checkDuplicateLeads, programVersions = []
 }: VisitorsViewProps) {
   const { courseOptions } = useAcademicOptions(classes, activeBranchId);
 
@@ -324,7 +326,7 @@ export default function VisitorsView({
       {showAddForm && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto animate-in fade-in duration-200" id="add-visitor-form-modal">
           <div className="w-full max-w-2xl my-auto">
-            <AddVisitorForm programVersions={programVersions} activeBranchId={activeBranchId} branches={branches} addVisitor={addVisitor} onCancel={() => setShowAddForm(false)} triggerToast={triggerToast} onVisitorCreated={(visitorId) => setSelectedVisitorId(visitorId)} />
+            <AddVisitorForm programVersions={programVersions} activeBranchId={activeBranchId} branches={branches} addVisitor={addVisitor} onCancel={() => setShowAddForm(false)} triggerToast={triggerToast} onVisitorCreated={(visitorId) => setSelectedVisitorId(visitorId)} checkDuplicateLeads={checkDuplicateLeads} onOpenExistingLead={(visitorId) => { setShowAddForm(false); setSelectedVisitorId(visitorId); }} />
           </div>
         </div>
       )}

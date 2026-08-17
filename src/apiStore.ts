@@ -29,7 +29,7 @@ import {
   BusinessRule, RuleCategory, RuleEngineResult, BusinessRuleVersion, PipelineStage,
   Branch, Campus, Organization, TeacherContractType,
   StudentBalanceRow,
-  AttendanceSummaryRow, DashboardSummary, VisitorSummary, VisitorQuery, ConversionEligibility,} from './types';
+  AttendanceSummaryRow, DashboardSummary, VisitorSummary, VisitorQuery, ConversionEligibility, DuplicateCandidate,} from './types';
 
 /** Real due/paid/remaining figures for one teacher/month, mirroring GET /teachers/:id/salary-status. */
 export interface TeacherSalaryStatus {
@@ -344,6 +344,24 @@ export function useApiStore() {
     },
     [bq, canSeeVisitors]
   );
+  /**
+   * Advisory possible-duplicate lookup for the registration form (UX-9).
+   *
+   * Never blocks a submit: it returns candidates and the operator decides.
+   * Phone is deliberately not a unique key server-side because household and
+   * office lines are legitimately shared.
+   */
+  const checkDuplicateLeads = useCallback(
+    (params: { phone?: string; tazkiraNo?: string; fullName?: string }) =>
+      api.get<{ candidates: DuplicateCandidate[] }>('/visitors/duplicate-check', {
+        ...bq,
+        phone: params.phone || undefined,
+        tazkiraNo: params.tazkiraNo || undefined,
+        fullName: params.fullName || undefined,
+      }).then((r) => r.candidates ?? []),
+    [bq]
+  );
+
   /**
    * Ask the server whether a conversion would be accepted, before showing the
    * user a fee/payment form (UX-3). Read-only: the server answers by calling
@@ -1447,7 +1465,7 @@ export function useApiStore() {
     studentsAreLite, ensureFullStudents, studentBalances, reloadStudentBalances,
     attendanceSummary, reloadAttendanceSummary,
     // Existing business operations
-    addVisitor, updateVisitorCRM, addVisitorFollowUp, updateVisitor, advanceVisitorStage, registerVisitorToStudent, checkConversionEligibility,
+    addVisitor, updateVisitorCRM, addVisitorFollowUp, updateVisitor, advanceVisitorStage, registerVisitorToStudent, checkConversionEligibility, checkDuplicateLeads,
     addStudentManual, updateStudentStatus, updateStudent, recordFeePayment, enrollStudentSemester, issueStudentCard,
     chargeBudget, createExpenseRequest, recordOperationalPayment, getExpenseReport, updateExpenseAutoApproveThreshold, processExpenseApproval, runSavingEngine, updateSavingSettings, createInvoice, issueInvoice, payInvoice, cancelInvoice, updateFinanceConfig, reloadInvoices,
     processMonthEnd, addBook, editBook, deleteBook, recordBookSale, refundBookSale, 

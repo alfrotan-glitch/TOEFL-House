@@ -738,6 +738,19 @@ export interface VisitorQuery {
   pageSize?: number;
 }
 
+/** A possible pre-existing lead, from GET /visitors/duplicate-check (UX-9). */
+export interface DuplicateCandidate {
+  id: string;
+  serialNo: string | null;
+  fullName: string;
+  phone: string | null;
+  visitDate: string | null;
+  status: string | null;
+  stage: string | null;
+  /** Why this candidate was suggested. Tazkira is an identity match. */
+  matchedOn: 'tazkira' | 'phone' | 'name';
+}
+
 /** Mirrors GET /visitors/:id/conversion-eligibility (UX-3). */
 export interface ConversionEligibility {
   eligible: boolean;

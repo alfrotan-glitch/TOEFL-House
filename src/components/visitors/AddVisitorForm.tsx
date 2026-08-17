@@ -2,9 +2,9 @@
  * @license SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
-import { UserPlus, X, CheckCircle2, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
-import { Branch, Visitor } from '../../types';
+import React, { useState, useEffect } from 'react';
+import { UserPlus, X, CheckCircle2, Loader2, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react';
+import { Branch, Visitor, DuplicateCandidate } from '../../types';
 import { validatePhone } from '../../utils/erpHelpers';
 import { VISITOR_SOURCE_OPTIONS } from '../../config/visitorSources';
 import { ShamsiDateInput } from '../common/ShamsiDateInput';
@@ -23,11 +23,16 @@ interface AddVisitorFormProps {
   onCancel: () => void;
   triggerToast: (msg: string, type: 'success' | 'error' | 'info') => void;
   onVisitorCreated?: (visitorId: string) => void;
+  /** Advisory duplicate lookup (UX-9). Never blocks submit. */
+  checkDuplicateLeads?: (params: { phone?: string; tazkiraNo?: string; fullName?: string }) => Promise<DuplicateCandidate[]>;
+  /** Open an existing lead instead of creating a second record. */
+  onOpenExistingLead?: (visitorId: string) => void;
   programVersions?: Array<{ id: string; name: string; versionLabel: string; status: string }>;
 }
 
 export default function AddVisitorForm({
   branches, activeBranchId, addVisitor, onCancel, triggerToast, onVisitorCreated, programVersions = [],
+  checkDuplicateLeads, onOpenExistingLead,
 }: AddVisitorFormProps) {
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
@@ -52,6 +57,38 @@ export default function AddVisitorForm({
   
   const [submitting, setSubmitting] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false); // Collapsible state
+
+  /**
+   * Possible-duplicate warning (UX-9).
+   *
+   * Advisory by design. The audit proved a receptionist could silently
+   * re-register a returning walk-in — identical name and phone created a second
+   * row, because only Tazkira is unique server-side and it is optional. Making
+   * phone unique would be wrong (household and office lines are shared), so the
+   * operator is shown what we already have and decides.
+   *
+   * Debounced, and keyed off the identifying fields only, so typing a name does
+   * not issue a request per keystroke.
+   */
+  const [dupResult, setDupResult] = useState<DuplicateCandidate[]>([]);
+  const phoneDigits = phone.replace(/\D/g, '');
+  const hasDupSignal = phoneDigits.length >= 7 || tazkiraNo.trim().length >= 4;
+  // Derived, not stored: with too little typed to search on, there is nothing
+  // to show. Clearing state inside the effect for this case would be a
+  // synchronous setState that cascades a render on every keystroke.
+  const duplicates = hasDupSignal ? dupResult : [];
+
+  useEffect(() => {
+    if (!checkDuplicateLeads || !hasDupSignal) return;
+    let cancelled = false;
+    const t = setTimeout(() => {
+      checkDuplicateLeads({ phone: phone.trim() || undefined, tazkiraNo: tazkiraNo.trim() || undefined })
+        .then((rows) => { if (!cancelled) setDupResult(rows); })
+        // A failed advisory lookup must never obstruct registration.
+        .catch(() => { if (!cancelled) setDupResult([]); });
+    }, 400);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [phone, tazkiraNo, hasDupSignal, checkDuplicateLeads]);
 
   // Local calendar date, matching the server's `today()`. Used to stop a future
   // date of birth being enterable at all.
@@ -100,6 +137,38 @@ export default function AddVisitorForm({
         <button type="button" onClick={onCancel} className="p-1.5 bg-slate-50 hover:bg-slate-100 text-slate-500 rounded-lg cursor-pointer"><X className="w-4 h-4" /></button>
       </div>
       
+      {/* Possible-duplicate warning. Advisory: it never blocks the submit, it
+          just makes the existing record visible before a second one is created. */}
+      {duplicates.length > 0 && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
+          <p className="flex items-center gap-1.5 text-[11px] font-bold text-amber-900">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-600" />
+            {duplicates.length === 1 ? 'A matching lead already exists' : `${duplicates.length} matching leads already exist`}
+          </p>
+          <ul className="mt-1.5 space-y-1">
+            {duplicates.map((c) => (
+              <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white/70 px-2 py-1.5">
+                <span className="text-[10px] text-amber-950">
+                  <span className="font-bold">{c.fullName}</span>
+                  {c.serialNo ? <span className="font-mono text-amber-700"> · {c.serialNo}</span> : null}
+                  {c.phone ? <span className="font-mono"> · {c.phone}</span> : null}
+                  {c.visitDate ? <span className="text-amber-700"> · first visit {c.visitDate}</span> : null}
+                  <span className="text-amber-700"> · matched on {c.matchedOn}</span>
+                </span>
+                {onOpenExistingLead && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenExistingLead(c.id)}
+                    className="rounded-lg bg-amber-600 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-amber-700 cursor-pointer"
+                  >Open instead</button>
+                )}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1.5 text-[9px] text-amber-700">A shared family or office phone is normal — continue if this is a different person.</p>
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-5 text-xs">
         
         {/* Primary Contact */}

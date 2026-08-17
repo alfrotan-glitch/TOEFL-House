@@ -16,6 +16,7 @@ import { resolveGoverningProgramVersionId } from '../core/placement/enrollment-g
 import { buildVisitorSummary, queryVisitorPage, type VisitorFilters } from '../core/visitors/visitor-query.js';
 import { evaluateConversionEligibilityForVisitor } from '../core/visitors/conversion-eligibility.js';
 import { LEAD_CONVERTED_SQL } from '../core/visitors/lead-lifecycle.js';
+import { findDuplicateCandidates } from '../core/visitors/duplicate-lookup.js';
 import { addNotification } from '../utils/notifications.js';
 import { recordIncome } from '../utils/income.js';
 import { getNumberSetting, incrementNumberSetting } from '../utils/settings.js';
@@ -379,6 +380,30 @@ visitorsRouter.get('/summary', requirePermission('Lead.View'), ah(async (req, re
  *
  * `requireVisitor` enforces the same branch isolation as every other route here.
  */
+/**
+ * Possible-duplicate lookup (audit UX-9).
+ *
+ * Advisory only: it returns candidates and never refuses anything. The hard
+ * identity rule remains the Tazkira unique index (migration 072); phone is
+ * deliberately NOT unique because household and office lines are legitimately
+ * shared, and blocking those at the front desk would be worse than a duplicate.
+ *
+ * Gated on `Lead.Create` — the action it assists — and branch-scoped, so it
+ * cannot be used to enumerate another branch's leads.
+ */
+visitorsRouter.get('/duplicate-check', requirePermission('Lead.Create'), ah(async (req, res) => {
+  const scope = resolveBranchScope(req);
+  const str = (k: string) => (typeof req.query[k] === 'string' ? (req.query[k] as string) : undefined);
+  res.json({
+    candidates: findDuplicateCandidates(db, scope, {
+      phone: str('phone'),
+      tazkiraNo: str('tazkiraNo'),
+      fullName: str('fullName'),
+      excludeVisitorId: str('excludeVisitorId'),
+    }),
+  });
+}));
+
 visitorsRouter.get('/:id/conversion-eligibility', requirePermission('Lead.View'), ah(async (req, res) => {
   const visitor = requireVisitor(req, req.params.id);
   const rawClassId = req.query.classId;

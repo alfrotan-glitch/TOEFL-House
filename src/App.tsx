@@ -237,7 +237,7 @@ function AuthenticatedApp() {
             addVisitorFollowUp={store.addVisitorFollowUp} updateVisitor={store.updateVisitor} reloadVisitors={store.reloadVisitors}
             advanceVisitorStage={store.advanceVisitorStage} registerVisitorToStudent={store.registerVisitorToStudent}
             visitorSummary={store.visitorSummary} visitorQuery={store.visitorQuery}
-            checkConversionEligibility={store.checkConversionEligibility}
+            checkConversionEligibility={store.checkConversionEligibility} checkDuplicateLeads={store.checkDuplicateLeads}
             permissionCodes={user?.permissions ? Array.from(user.permissions) : undefined} activeRole={activeRole}
           />
         );

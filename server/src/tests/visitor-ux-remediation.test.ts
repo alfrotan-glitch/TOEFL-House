@@ -32,6 +32,12 @@ let app: express.Express;
 
 const authHeader = (u: TokenPayload) => ({ Authorization: `Bearer ${signToken(u)}` });
 
+/** Create a visitor through the real route, so server-side defaults apply. */
+const createVisitor = (as: TokenPayload, body: Record<string, unknown> = {}) =>
+  supertest(app).post('/api/visitors').set(authHeader(as)).send({
+    fullName: 'UX Subject', gender: 'male', source: 'walk_in', ...body,
+  });
+
 /** Deterministic dates so "overdue" is unambiguous. */
 const PAST = '2020-01-01';
 const FUTURE = '2099-01-01';
@@ -542,5 +548,146 @@ describe('UX-2 — server error messages are specific enough to act on', () => {
         .send({ fullName: `Source ${source}`, phone: `07060000${String(i).padStart(2, '0')}`, gender: 'male', source });
       expect(res.status, `source ${source} should be accepted`).toBe(201);
     }
+  });
+});
+
+// ===========================================================================
+// UX-9 — advisory duplicate lookup
+// ===========================================================================
+describe('UX-9 — possible-duplicate lookup warns without blocking', () => {
+  beforeEach(async () => {
+    await createVisitor(registrarA, { fullName: 'Ahmad Zia', phone: '0700123456', tazkiraNo: 'TZK-DUP-A' });
+  });
+
+  it('finds an existing lead by phone before a duplicate is created', async () => {
+    const res = await supertest(app)
+      .get('/api/visitors/duplicate-check?phone=0700123456')
+      .set(authHeader(registrarA));
+    expect(res.status).toBe(200);
+    expect(res.body.candidates).toHaveLength(1);
+    expect(res.body.candidates[0].fullName).toBe('Ahmad Zia');
+    expect(res.body.candidates[0].matchedOn).toBe('phone');
+  });
+
+  it('is not defeated by phone formatting', async () => {
+    for (const p of ['0700 123 456', '0700-123-456', '+93700123456', '(0700)123456']) {
+      const res = await supertest(app)
+        .get(`/api/visitors/duplicate-check?phone=${encodeURIComponent(p)}`)
+        .set(authHeader(registrarA));
+      expect(res.body.candidates.length, `format ${p}`).toBe(1);
+    }
+  });
+
+  it('reports a Tazkira hit as an identity match', async () => {
+    const res = await supertest(app)
+      .get('/api/visitors/duplicate-check?tazkiraNo=TZK-DUP-A')
+      .set(authHeader(registrarA));
+    expect(res.body.candidates[0].matchedOn).toBe('tazkira');
+  });
+
+  it('returns nothing for a genuinely new contact', async () => {
+    const res = await supertest(app)
+      .get('/api/visitors/duplicate-check?phone=0788000123')
+      .set(authHeader(registrarA));
+    expect(res.body.candidates).toHaveLength(0);
+  });
+
+  /**
+   * The whole point of ADVISORY: a shared household or office line is normal in
+   * this market, so the lookup must warn while the write still succeeds. A hard
+   * unique index on phone would block real enrolments at the front desk.
+   */
+  it('still allows the registration it warned about', async () => {
+    const warn = await supertest(app)
+      .get('/api/visitors/duplicate-check?phone=0700123456')
+      .set(authHeader(registrarA));
+    expect(warn.body.candidates).toHaveLength(1);
+
+    const created = await createVisitor(registrarA, { fullName: 'Ahmad Zia Sibling', phone: '0700123456' });
+    expect(created.status).toBe(201);
+  });
+
+  it('never leaks leads from another branch', async () => {
+    await createVisitor(registrarB, { fullName: 'Branch B Person', phone: '0700999888' });
+    const res = await supertest(app)
+      .get('/api/visitors/duplicate-check?phone=0700999888')
+      .set(authHeader(registrarA));
+    expect(res.status).toBe(200);
+    expect(res.body.candidates).toHaveLength(0);
+  });
+
+  it('refuses a role with no lead permissions at all', async () => {
+    const res = await supertest(app)
+      .get('/api/visitors/duplicate-check?phone=0700123456')
+      .set(authHeader(teacherA));
+    expect(res.status).toBe(403);
+  });
+
+  /**
+   * Pins the exact permission, not merely "some lead permission".
+   *
+   * Every built-in lead-facing role happens to hold BOTH Lead.View and
+   * Lead.Create, so a test using those roles cannot tell the two apart — a
+   * mutation swapping Lead.Create for Lead.View survived until this case
+   * existed. A purpose-built role with View but not Create makes the boundary
+   * observable: the lookup assists REGISTRATION, so it must require Lead.Create.
+   */
+  it('requires Lead.Create specifically, not merely Lead.View', async () => {
+    const roleId = 'vux_role_viewonly';
+    db.prepare(`INSERT OR IGNORE INTO roles (id, code, name, description, is_system)
+                VALUES (?, 'vux_view_only', 'UX View Only', 'Lead.View but not Lead.Create', 0)`).run(roleId);
+    const viewPerm = db.prepare(`SELECT id FROM permissions WHERE code = 'Lead.View'`).get() as { id: string } | undefined;
+    expect(viewPerm, 'Lead.View must exist in the catalogue').toBeTruthy();
+    db.prepare(`INSERT OR IGNORE INTO role_permissions (id, role_id, permission_id, default_scope)
+                VALUES ('vux_rp_view', ?, ?, 'branch')`).run(roleId, viewPerm!.id);
+
+    const pwd = await hashPassword('Str0ng!Pass2026');
+    db.prepare(`INSERT OR IGNORE INTO users (id,username,password_hash,full_name,role,branch_id,must_change_password)
+                VALUES ('vux_vo','vux_vo',?,'View Only','registrar',?,0)`).run(pwd, BRANCH_A);
+    db.prepare(`DELETE FROM user_roles WHERE user_id = 'vux_vo'`).run();
+    db.prepare(`INSERT INTO user_roles (id, user_id, role_id, scope_type, scope_id, is_primary, assigned_by, assigned_at)
+                VALUES ('vux_ur_vo','vux_vo',?, 'branch', ?, 1, 'vux_own', datetime('now'))`).run(roleId, BRANCH_A);
+
+    const viewOnly = { userId: 'vux_vo', username: 'vux_vo', role: 'registrar', branchId: BRANCH_A, fullName: 'View Only' } as TokenPayload;
+
+    // Can read the list (Lead.View)…
+    const list = await supertest(app).get('/api/visitors?limit=1').set(authHeader(viewOnly));
+    expect(list.status).toBe(200);
+    // …but cannot use the registration-assist lookup (needs Lead.Create).
+    const dup = await supertest(app)
+      .get('/api/visitors/duplicate-check?phone=0700123456')
+      .set(authHeader(viewOnly));
+    expect(dup.status).toBe(403);
+  });
+
+  it('treats a lookup value as data, never as SQL or a LIKE pattern', async () => {
+    for (const probe of ["'; DROP TABLE visitors;--", '%', '_', '%%%']) {
+      const res = await supertest(app)
+        .get(`/api/visitors/duplicate-check?tazkiraNo=${encodeURIComponent(probe)}`)
+        .set(authHeader(registrarA));
+      expect(res.status).toBe(200);
+      expect(res.body.candidates, `probe ${probe}`).toHaveLength(0);
+    }
+    // The table is intact.
+    const after = await supertest(app).get('/api/visitors/summary').set(authHeader(registrarA));
+    expect(after.body.total).toBeGreaterThan(0);
+  });
+
+  /**
+   * A short fragment must not become a wildcard.
+   *
+   * The suffix match is `LIKE '%<key>'`, so without a minimum length '070'
+   * would match every phone ENDING in 070 and bury the operator in false
+   * positives — which trains them to ignore the warning entirely, defeating the
+   * feature. The fixture below makes that observable rather than incidental.
+   */
+  it('ignores a phone fragment too short to be meaningful', async () => {
+    // A lead whose number ENDS in the fragment: it must not be suggested.
+    await createVisitor(registrarA, { fullName: 'Ends With Fragment', phone: '0733444070' });
+    const res = await supertest(app)
+      .get('/api/visitors/duplicate-check?phone=070')
+      .set(authHeader(registrarA));
+    expect(res.status).toBe(200);
+    expect(res.body.candidates).toHaveLength(0);
   });
 });
