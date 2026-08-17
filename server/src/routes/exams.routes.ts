@@ -6,6 +6,7 @@ import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
 import { isUniqueViolation } from '../utils/idempotency.js';
+import { assertMoney } from '../utils/money.js';
 import { getNumberSetting } from '../utils/settings.js';
 import { recordIncome } from '../utils/income.js';
 import { evaluateRules } from '../core/configuration/rule-engine.js';
@@ -100,8 +101,15 @@ examsRouter.post(
     const branchId = req.user?.branchId;
     if (!branchId) throw new HttpError(403, 'User branch context is missing.');
     
+    // The exam fee is money and must clear the same bar as every other
+    // monetary input. `Math.max(0, Number(fee ?? 0))` silently turned rubbish
+    // into a real charge: "abc" reached SQLite and surfaced a raw NOT NULL
+    // constraint error, 1e309 was stored as NULL, -500 became a free exam, and
+    // 0.001 was accepted as a sub-cent fee.
+    const resolvedFee = assertMoney(fee ?? 0, 'exam fee');
+
     const newId = id('ex');
-    stmtInsertExam.run(newId, String(title).trim(), date, Math.max(0, Number(fee ?? 0)), String(type), branchId);
+    stmtInsertExam.run(newId, String(title).trim(), date, resolvedFee, String(type), branchId);
     writeAudit(req, `Created new exam event: ${title}`);
     res.status(201).json({ id: newId });
   })
@@ -116,16 +124,17 @@ examsRouter.put(
     
     const allowedTypes = new Set(['placement', 'midterm', 'final', 'certification']);
     const nextType = String(type || exam.type);
-    const nextFee = typeof fee === 'number' ? fee : exam.fee;
+    // Same monetary bar as creation: a fee edited to 0.001 or 1e309 is not a
+    // valid charge just because the row already exists.
+    const nextFee = assertMoney(fee != null ? fee : exam.fee, 'exam fee');
     if (!allowedTypes.has(nextType)) throw new HttpError(400, 'Invalid exam type.');
-    if (!Number.isFinite(Number(nextFee)) || Number(nextFee) < 0) throw new HttpError(400, 'Exam fee cannot be negative.');
     if (date && String(date) < String(exam.date) && (stmtCountScoredResults.get(exam.id) as { c: number }).c > 0) {
       throw new HttpError(409, 'Exam date cannot move backward after scores have been recorded.');
     }
     stmtUpdateExam.run(
       String(title || exam.title).trim(),
       date || exam.date,
-      Number(nextFee),
+      nextFee,
       nextType,
       req.params.id
     );

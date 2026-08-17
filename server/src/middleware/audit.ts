@@ -1,6 +1,7 @@
 import type { Request } from 'express';
 import { db } from '../db/connection.js';
 import { id, today, nowTimeFa } from '../utils/ids.js';
+import { canAccessBranchResource } from './auth.js';
 
 /**
  * Defines the expected shape of the authenticated user object on the request.
@@ -38,6 +39,34 @@ const insertAuditStmt = db.prepare(
  * Resilience: If the database insert fails, the error is logged to the console
  * but does NOT crash the main Express request flow.
  */
+/**
+ * The branch a request is acting ON, when it differs from the operator's own.
+ *
+ * Owners and managers work across branches: the branch they are creating a
+ * student, book, or teacher in arrives in the request body (or as an explicit
+ * ?branchId query), while their JWT still carries their home branch. Falling
+ * straight back to `user.branchId` filed those events under the wrong branch —
+ * a student created in West Branch produced an audit row stamped with the
+ * operator's Main Branch, and West Branch's audit view returned nothing at all.
+ *
+ * Only a branch the caller is actually authorized for is honoured, so this
+ * cannot be used to forge attribution: an unauthorized value is ignored and the
+ * operator's own branch is recorded instead.
+ */
+function requestTargetBranchId(req: Request): string | null {
+  const body = req.body as { branchId?: unknown } | undefined;
+  const raw = typeof body?.branchId === 'string' ? body.branchId
+    : typeof req.query?.branchId === 'string' ? req.query.branchId
+    : null;
+  if (!raw || raw === 'all') return null;
+  try {
+    return canAccessBranchResource(req, raw) ? raw : null;
+  } catch {
+    // Attribution must never break the write that is being audited.
+    return null;
+  }
+}
+
 export function writeAudit(
   req: Request,
   action: string,
@@ -61,7 +90,7 @@ export function writeAudit(
     new_value: opts?.newValue || null,
     ip: ip,
     device: req.headers['user-agent'] || 'unknown',
-    branch_id: opts?.branchId || user.branchId || null,
+    branch_id: opts?.branchId || requestTargetBranchId(req) || user.branchId || null,
   };
 
   try {

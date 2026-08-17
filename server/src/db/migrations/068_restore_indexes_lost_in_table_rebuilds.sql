@@ -1,0 +1,52 @@
+-- 068 — Restore two indexes silently lost during earlier table rebuilds
+--
+-- WHY
+-- ---
+-- SQLite cannot ALTER most table constraints, so several migrations use the
+-- standard rebuild idiom:
+--
+--     CREATE TABLE x_new (...);  INSERT INTO x_new SELECT ... FROM x;
+--     DROP TABLE x;              ALTER TABLE x_new RENAME TO x;
+--
+-- Dropping a table also drops every index attached to it. Each rebuild
+-- therefore has to recreate the indexes it inherited, and two were forgotten:
+--
+--   * `idx_users_role` — declared in schema.sql, dropped by the `users`
+--     rebuild in 052_student_portal.sql, never recreated.
+--   * `idx_placement_profile_program_branch` — declared in schema.sql and
+--     created by 037, dropped by the `placement_assessment_profiles` rebuild
+--     in 058_placement_engine.sql, never recreated.
+--
+-- The effect is schema drift between two databases that both report the same
+-- migration version:
+--
+--   * a database that existed BEFORE those rebuilds keeps the indexes (they
+--     were created, then the rebuild dropped them — but on such installs
+--     schema.sql had already recreated them on a later boot);
+--   * a FRESH install runs schema.sql first and the migrations afterwards, so
+--     the rebuild drops them last and nothing puts them back.
+--
+-- Measured on this codebase, fresh vs upgraded:
+--
+--     EXPLAIN QUERY PLAN SELECT * FROM users WHERE role = ?
+--       fresh install  -> SCAN users
+--       upgraded       -> SEARCH users USING INDEX idx_users_role (role=?)
+--
+-- Same code, same reported schema version, different execution plans. This is
+-- a correctness-of-deployment problem even though no query returns a wrong
+-- answer: performance testing on one shape does not predict the other.
+--
+-- WHAT THIS DOES
+-- --------------
+-- Creates the two missing indexes, nothing else. `IF NOT EXISTS` makes it a
+-- no-op on databases that already have them, so it is safe on every install
+-- and safe to run twice. No data is read, written, or deleted; no table is
+-- rebuilt; no constraint changes.
+--
+-- Index creation is not destructive and needs no data backfill. Historical
+-- migrations are deliberately left untouched.
+
+CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+
+CREATE INDEX IF NOT EXISTS idx_placement_profile_program_branch
+  ON placement_assessment_profiles(program_version_id, branch_id, enabled);
