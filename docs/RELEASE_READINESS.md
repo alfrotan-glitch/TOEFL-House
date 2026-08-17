@@ -1,150 +1,253 @@
-# TOEFL House ERP — Release Readiness Report
+# TOEFL House ERP — Final Release Readiness Report
 
-**Commit:** `d65472f` · **Branch:** `arena/01a0062e-toefl-house` · **Date:** 2026-08-16
-
-| Gate | Result |
-|---|---|
-| Server test suite | **845 passed / 845**, 86 files |
-| Frontend typecheck · lint · build | exit 0 · **0 errors** · exit 0 |
-| Server typecheck (build + test configs) · lint · build | exit 0 · exit 0 · exit 0 |
-| Static / product / bundle audits | exit 0 · exit 0 · exit 0 |
-| Fresh-schema preflight | 65 migrations, **no drift** |
-| `npm run release:validate` | **16 passed · 0 failed · 0 skipped** |
-| GitHub Actions CI | **4/4 SUCCESS** (run `31981277338`) |
+**Commit:** `c56c576` · **Branch:** `arena/01a0062e-toefl-house` · **Date:** 2026-08-17
 
 ---
 
-## 1. VERIFIED
+## A. VERIFIED
 
-Each item below was proven by execution — a live API probe, a parsed DOM, or a
-mutation that made the guard fail.
+Every item was proven by execution against the running API, a parsed DOM, or a
+mutation that made the guard fail. Nothing here rests on code reading alone.
 
-### Financial integrity
+### Full financial lifecycle — 18/18
 
-| Property | Evidence |
+Registration → enrollment → obligation → partial payment → duplicate attempt →
+overpayment attempt → concurrent finals → zero balance → refund → concurrent
+refunds → over-refund → history → audit → reconciliation.
+
+| Step | Evidence |
 |---|---|
-| No silent capping | 4 instances found and fixed: tuition payment, invoice discount, enrolment discount, invoice quantity. Each returns 400 and writes nothing. |
-| No negative/zero money | Rejected on 8 endpoints — payments (×4 categories), treasury deposit, budget charge, invoice unit price, invoice quantity. |
-| No overpayment | Payment > remaining → 400, balance unchanged. Payment on a settled obligation → 400. |
-| No excessive discount | Invoice, enrolment and book-sale discounts all reject amounts above the base. |
-| Concurrency | 8 concurrent final tuition payments → **1×201, no overpayment**. 10 concurrent ad-hoc charges → 1×201 + 9×200 replays. 8 concurrent refunds → 1×201 + 7×200. |
-| Ledger correctness | All four reconciliation dimensions (amount, cash, saving, budget) = 0 after every lifecycle step, and on a restored backup. |
-| Client cannot set financial truth | Frontend reads `/payments/balances`; no ledger arithmetic in components. |
+| Obligation created | due = 10,000 |
+| Partial payment 4,000 | outstanding = 6,000, reconciliation 0 |
+| Duplicate identical payment | **200 replay**, balance unchanged at 6,000 |
+| Overpayment 99,999 | **400**, balance untouched at 6,000 |
+| 8 concurrent final payments | `{201: 1, 400: 7}` → paid 10,000, outstanding 0 |
+| Payment on settled obligation | **400** |
+| Refund 2,500 | 201, reconciliation 0 |
+| 6 concurrent refunds | `{201: 1, 200: 5}` → **1 row written** |
+| Over-refund | **400** |
+| History / audit | 4 payment rows preserved, 6 audit rows |
+| Final org-wide reconciliation | amount/cash/saving/budget all **0** |
 
-### Authorization & isolation
-19/19 adversarial probes blocked across two sessions: cross-branch payments,
-refunds, invoice read/pay/create, payroll, teacher edit, student read/update/
-status; low-privilege teacher blocked on treasury, reconciliation, refund,
-users; unauthenticated → 401. Tested by direct API call, never through the UI.
+### Domain lifecycles — 20/20
 
-### Audit completeness
-`who + role`, `when`, `branch`, `amount`, and `reason` captured for enrollment,
-initial payment, subsequent payment, ad-hoc charge and refund. Verified by
-reading `audit_logs` rows directly.
+- **Books:** sale, excessive discount rejected (400), refund, double refund rejected (409), sale row preserved as `refunded` — not deleted.
+- **Teacher compensation:** raise **appends** (`[30000, 36000]`, both retained), partial salary keeps `due 36000 / remaining 16000`, void preserves `paid_amount 20000` with reason, double void rejected (409), reconciliation 0 throughout.
+- **Invoices:** valid discount (total 5,000 → net 4,500), excessive discount rejected, negative quantity rejected.
+- **Academic:** invalid class 404, payment for non-existent student 404.
 
-### Historical integrity
-Zero `DELETE` statements against financial or historical tables. A raise
-appends a compensation period (30,000 → 35,000, both retained). A partial
-salary payment preserves the outstanding balance (due 30,000 / paid 20,000 /
-remaining 10,000). A void keeps the row, preserves `paid_amount`, and records
-`voided_by` / `voided_at` / `void_reason` plus a reversal transaction.
+### Silent fallback / coercion / capping
 
-### Database
-65 migrations, no drift, foreign keys **ON**, 0 violations, `integrity_check ok`,
-idempotency unique indexes present on `payments` and `teacher_salary_ledger`.
+Four instances found and closed across this engagement — tuition payment, invoice
+discount, enrolment discount, invoice quantity. A fifth (hardcoded discount
+ceiling) is covered under §B. Remaining `Math.min` uses are pagination limits
+and percentage bounds; `books.purchasePrice` defaulting to 60 % of price is a
+documented cost convention, not an override of operator input.
+
+Negative/zero money rejected on **8 endpoints**.
+
+### Authorization, branch isolation, RBAC
+
+**19/19** adversarial probes blocked by direct API call (never via the UI):
+cross-branch payments, refunds, invoice read/pay/create, payroll, teacher edit,
+student read/update/status; low-privilege teacher blocked on treasury,
+reconciliation, refund, users; unauthenticated → 401.
+
+### Frontend does not compute financial truth
+
+No ledger arithmetic in components; the payment dialog reads
+`/payments/balances`. Scholarship budget subtraction is display-only with no
+ledger effect.
+
+### Destructive operations
+
+**Zero** `DELETE` statements against financial or historical tables. The only
+`UPDATE` on the salary ledger sets void metadata and preserves `paid_amount`,
+guarded by `status='posted'`.
 
 ### Documents
-**15 print surfaces, 0 hardcoded literals.** All read `BRAND_NAME` /
-`brandPrintHeaderHtml` / `resolveDocumentIssuer`. The fee bill is parsed as a
-real DOM: logo is an `<img>` at `BRAND_LOGO_URL`, exact slogan present, branch
-name/address/phone/email printed, and a branch with nothing configured still
-renders a valid receipt with no `null`.
 
-**Print geometry** (structural, from the emitted CSS): `@page size: 80mm auto`
-— a continuous roll, so blank pages are impossible; `page-break-inside: avoid`;
-`print-color-adjust: exact` (browsers drop images otherwise); no fixed heights
-and no `overflow:hidden`, so there is no clipping path. 12 rows, none empty.
+15 print surfaces, **0 hardcoded literals**. The fee bill is parsed as a real
+DOM: logo `<img>` at `BRAND_LOGO_URL`, exact slogan, branch contact from the
+branch record; a branch with nothing configured still renders a valid receipt
+with no `null`. Print CSS: `@page size: 80mm auto` (continuous roll — blank
+pages structurally impossible), `page-break-inside: avoid`,
+`print-color-adjust: exact`, no fixed heights, no `overflow:hidden`.
 
-### Versions & Rules layout (static)
-Grid is 4+8 of 12, collapsing to one column below `lg`, with `sm`/`xl`
-breakpoints. No fixed heights (`min-h-[400px]` is a floor). The only
-`max-h` is viewport-relative. `overflow-hidden` appears once, on an `h-fit`
-card for rounded corners. Revisiting a tab costs **0 requests**; only the first
-load replaces the page.
+### Mutation verification — 17 guards
 
-### Mutation verification — 15 guards
-
-| Guard | Mutation | Result |
-|---|---|---|
-| Tuition overpay rejection | restore `Math.min(requested, debt)` | 2 FAIL |
-| Invoice discount cap | remove the check | 1 FAIL |
-| Enrolment discount cap | restore `Math.max(0, total-discount)` | 1 FAIL |
-| Invoice quantity validation | restore the `: 1` coercion | 2 FAIL |
-| Discount cap is configuration | restore `Math.min(30, …)` | 1 FAIL |
-| Ad-hoc charge reason | delete the reason check | 2 FAIL |
-| Timeline separation | remove `FINANCIAL_EVENT_TYPES` filter | 2 FAIL |
-| Compensation append-only | make a raise DELETE prior rows | 2 FAIL |
-| Fee-bill branding | restore literal `<h1>TOEFL HOUSE</h1>` | 2 FAIL |
-| No hardcoded phone | reinstate `0788223344` | 1 FAIL |
-| Budget reconciliation | drop from the healthy gate | 2 FAIL |
-| Tests are typechecked | type error inside a test | lint exit 2 |
-| Static audit invariant | set typecheck to `echo skipped` | audit FAIL |
-| Release gate: typecheck | bad type in `branding.ts` | BLOCKED |
-| Release gate: hygiene | `git add -f .env` | BLOCKED |
+Tuition overpay (2 fail) · invoice discount (1) · enrolment discount (1) ·
+invoice quantity (2) · discount cap is configuration (1) · ad-hoc reason (2) ·
+timeline separation (2) · compensation append-only (2) · fee-bill branding (2) ·
+no hardcoded phone (1) · budget reconciliation (2) · **cross-branch audit
+attribution (1)** · **rule before/after capture (1)** · tests are typechecked
+(lint exit 2) · static audit invariant (audit FAIL) · release-gate typecheck
+(BLOCKED) · release-gate hygiene (BLOCKED).
 
 ---
 
-## 2. NOT VERIFIED
+## B. BUSINESS POLICY CONFIRMED
 
-| # | Item | Why, precisely |
-|---|---|---|
-| N-1 | **Rendered pixels** of Versions & Rules at 1920×1080, and reflow at smaller viewports | No browser engine is obtainable in this sandbox. `npx playwright install chromium` fails with `Client network socket disconnected before secure TLS connection was established` against `cdn.playwright.dev`; `apt-get install chromium` reports no such package. jsdom parses HTML but computes **no box geometry**, so "readable", "no excessive empty space" and "responsive" cannot be machine-checked. Structure, data and request counts *are* verified (above). |
-| N-2 | **Rasterised print output** of the fee bill | Same cause. The document, its `@page` geometry and its print rules are asserted in a real DOM; only a physical print dialog proves ink on paper. |
-| N-3 | Behaviour at production data volume | All 8 major endpoints respond in **< 10 ms**, but at ~30 students. The Students tab is projected at ~1.7 MB for 8k students. |
-| N-4 | Multi-process / multi-instance operation | Every guarantee here assumes the documented single-process SQLite deployment. |
-| N-5 | 8-way over-refund race | Never reproduced; SQLite's single-writer lock may make it unreachable, but that is not proof. |
+### B-1 — Ad-hoc charges: **enabled, with all seven controls (7/7 verified)**
+
+| Requirement | Evidence |
+|---|---|
+| Mandatory reason | omitted → **400** |
+| Exact amount, no capping | 3,333 requested → 3,333 charged |
+| Audit trail | `Repro Owner / owner`, branch recorded |
+| Authorization | cross-branch 403, unauthenticated 401 |
+| Branch scope | payment and ledger both filed to the student's branch |
+| Idempotency | 10 concurrent → `{201: 1, 200: 9}`, **1 row written** |
+| Payment/ledger/audit consistency | 3,333 in all three; ledger reads `Ad-hoc charge for …: Exam re-sit fee` |
+
+### B-2 — Owner cross-branch scope: **confirmed as intended, one gap fixed**
+
+Three equal owners with absolute access is the intended design and is retained.
+Verified it does **not** cost auditability or integrity: every action is
+attributed to the owner by name and role, money is attributed to the student's
+branch, no API route can delete financial history, and org-wide reconciliation
+stays at zero after cross-branch activity.
+
+**Gap found and fixed:** a financial audit entry was filed under the *actor's*
+home branch, so an owner working in branch B had the entry recorded against
+branch A — a branch-scoped audit review of B would not have shown it. Payments
+and refunds now pass `branchId` explicitly. The money rows were always correct;
+only the audit row was wrong. Mutation-verified.
+
+### B-3 — Discount-cap governance: **owner/manager only, now fully audited**
+
+Authorization matrix, all proven live: registrar **403** · teacher **403** ·
+finance **403** · manager from another branch **403** (modify and delete) ·
+unauthenticated **401**. Global rules are owner-managed; managers are confined
+to their own branch by an explicit scope check.
+
+**Gap found and fixed:** changes were audited by rule *name* only
+(`old_value: null, new_value: null`). For configuration that governs money that
+records *that* something changed, not what it changed from or to. All five
+mutating handlers now capture before/after snapshots:
+
+```
+WHO    Repro Owner / owner
+WHEN   2026-08-17 00:33
+SCOPE  branch=1
+BEFORE priority=205  actions=[{set_value discountPercent 30}]
+AFTER  priority=210  actions=[{set_value discountPercent 30}]
+```
+
+Separately, the route previously re-clamped the engine's answer with a
+hardcoded `Math.min(30, …)`, so raising the configured cap had no effect. The
+rule engine is now the single authority.
 
 ---
 
-## 3. BUSINESS DECISION REQUIRED
+## C. NOT VERIFIED
 
-| # | Item | Position taken |
+| # | Item | Why |
 |---|---|---|
-| B-1 | Ad-hoc charges (`other` / `exam` / `chapter`) accept any amount with no backing obligation | **Resolved on evidence, reversible.** Audited as an intentional feature — "Other Fee" is an operator-selectable option and 16 tests depend on it. Capability preserved; because no obligation exists to validate the amount, a reason is now **mandatory** and flows into the ledger description. If you would rather every charge be obligation-backed, say so — the change is small and localised. |
-| B-2 | The owner role holds every permission code regardless of branch scope | **Deliberate and documented**, but it means an owner can act in any branch. Confirm this matches your governance model. |
-| B-3 | Discount ceiling now honours `rule_default_discount_cap` at runtime | Previously a hardcoded 30% overrode the configured rule. Admins can now raise it. Confirm who may edit that rule. |
+| C-1 | Rendered pixels of Versions & Rules at 1920×1080; reflow at smaller viewports | **No browser engine is obtainable in this sandbox.** `npx playwright install chromium` fails with `Client network socket disconnected before secure TLS connection was established` against `cdn.playwright.dev`; `apt-get install chromium` reports no such package. jsdom parses HTML but computes **no box geometry**, so "readable", "no excessive empty space" and "responsive" cannot be machine-checked. Structure, data, and request counts are verified. |
+| C-2 | Rasterised print output of the fee bill | Same cause. Document, `@page` geometry and print rules asserted in a real DOM; only a physical print dialog proves ink. |
+| C-3 | Behaviour at production data volume | 8 major endpoints < 10 ms, but at ~30 students. Students tab projected ~1.7 MB at 8k students. |
+| C-4 | Multi-process / multi-instance operation | All guarantees assume the documented single-process SQLite deployment. |
+| C-5 | 8-way over-refund race | Never reproduced; SQLite's single-writer lock may make it unreachable, but that is not proof. |
 
 ---
 
-## 4. REMAINING RISK
+## D. REMAINING RISKS
 
 | Severity | # | Item | Status |
 |---|---|---|---|
-| **CRITICAL** | — | none open | — |
-| **HIGH** | — | none open | — |
-| MEDIUM | M-1 | F-10 historical phantom-cash rows in existing production data | Forward path fixed; pre-existing rows need a one-off repair migration run against real data. |
-| MEDIUM | M-2 | Employee pay-salary `LIKE` duplicate guard bypassable via `paymentType:'advance'` or a varied `monthName` | Narrower than teacher payroll, which two unique indexes protect. |
-| LOW | L-1 | `invoices` carries two unique indexes enforcing the same rule | Redundant, not a correctness defect. Left in place rather than churn valid migration history. |
-| LOW | L-2 | 5 money writers use bespoke guards instead of `resolveIdempotency` | Each proven correct under concurrency; unification is cosmetic. |
-| LOW | L-3 | Unbounded list endpoints; Students tab payload at scale | No defect at current volume; see N-3. |
-| LOW | L-4 | ~100 unused-variable lint **warnings** in server source | Surfaced when the dead lint gate was restored. Kept at the project's own `warn` severity rather than raising the bar mid-release. |
-| LOW | L-5 | 576 `any` in server source; 3 oversized modules | Maintainability, not correctness. |
-| LOW | L-6 | `impact.routes.ts` has no test coverage | Reporting-only surface. |
-| LOW | L-7 | Single-process SQLite; backups share the DB disk | Restore is proven; survival of disk failure is not. |
+| CRITICAL | — | none open | — |
+| HIGH | — | none open | — |
+| MEDIUM | D-1 | F-10 historical phantom-cash rows in existing production data | Forward path fixed; pre-existing rows need a one-off repair migration run against real data. |
+| MEDIUM | D-2 | Employee pay-salary `LIKE` duplicate guard bypassable via `paymentType:'advance'` or a varied `monthName` | Narrower than teacher payroll, which two unique indexes protect. |
+| LOW | D-3 | `invoices` carries two unique indexes enforcing the same rule | Redundant, not a correctness defect. See §F. |
+| LOW | D-4 | 5 money writers use bespoke guards instead of `resolveIdempotency` | Each proven correct under concurrency; unification is cosmetic. |
+| LOW | D-5 | Unbounded list endpoints; Students tab payload at scale | No defect at current volume; see C-3. |
+| LOW | D-6 | ~100 unused-variable lint **warnings** in server source | Surfaced when the dead lint gate was restored; kept at the project's own `warn` severity rather than raising the bar mid-release. |
+| LOW | D-7 | 576 `any` in server source; 3 oversized modules | Maintainability, not correctness. |
+| LOW | D-8 | `impact.routes.ts` has no test coverage | Reporting-only surface. |
+| LOW | D-9 | Single-process SQLite; backups share the DB disk | Restore is proven; survival of disk failure is not. |
+
+---
+
+## E. FILES CHANGED
+
+**176 files, +14,717 / −777** against base `1b275cb`.
+
+This final policy pass touched three files:
+
+| File | Change |
+|---|---|
+| `server/src/routes/rules.routes.ts` | `ruleSnapshot()` + before/after capture on all 5 mutating handlers (B-3) |
+| `server/src/routes/students.routes.ts` | explicit `branchId` on payment and refund audit entries (B-2) |
+| `server/src/tests/governance-audit.test.ts` | **new** — 4 governance regression tests |
+
+Key modules added across the engagement: `src/config/branding.ts`,
+`src/config/documentIssuer.ts`, `src/utils/feeBillTemplate.ts`,
+`server/src/utils/reconciliation.ts` (budget dimension),
+`scripts/release-validate.mjs`, `server/tsconfig.test.json`,
+`public/brand/toefl-house-logo.png`.
+
+---
+
+## F. DATABASE / MIGRATION IMPACT
+
+- **Zero migrations were modified.** `git diff --name-status` shows every
+  migration as `A` (added). No historical migration was rewritten to make an
+  audit pass.
+- **8 migrations added** (059–066), all forward-only: idempotency uniqueness on
+  book sales, donations, exam enrolments and payments; a non-negative budget-line
+  constraint; and a salary-period fix excluding voided rows.
+- **65 migrations total, no drift** — `preflight:fresh-schema` passes.
+- Foreign keys **ON**, 0 violations, `integrity_check ok`.
+- **Recommended as a separate, controlled future project (not done here):**
+  consolidating the redundant `invoices` unique index (D-3). It is a duplicate,
+  not a defect, and does not justify touching migration history now.
+
+---
+
+## G. TEST / CI RESULTS
+
+| Gate | Result |
+|---|---|
+| Server test suite | **849 passed / 849**, 87 files |
+| Frontend typecheck · lint · build | exit 0 · **0 errors** · exit 0 |
+| Server typecheck (build + test configs) · lint · build | exit 0 · **0 errors** · exit 0 |
+| Static / product / bundle audits | exit 0 · exit 0 · exit 0 |
+| Fresh-schema preflight | 65 migrations, no drift |
+| `npm run release:validate` | **16 passed · 0 failed · 0 skipped** |
+| GitHub Actions CI | **4/4 SUCCESS** (run `31982938733`) |
+
+No test was weakened, skipped, deleted or rewritten to obtain a green gate. Two
+pre-existing suites had **fixtures** updated (a reason added to ad-hoc test
+charges) when the new business rule took effect; every assertion was preserved.
+
+---
+
+## H. GO-LIVE BLOCKERS
+
+| # | Blocker | Owner | Status |
+|---|---|---|---|
+| H-1 | Visual sign-off of Versions & Rules at 1920×1080 and at a smaller viewport | A person at a screen | **OPEN** — cannot be closed in a headless sandbox (C-1) |
+| H-2 | One physical print of the student fee bill | A person at a printer | **OPEN** — cannot be closed in a headless sandbox (C-2) |
+| H-3 | Run the F-10 repair migration against production data before first use | DBA / operator | **OPEN** — see D-1 |
+
+No code-level blocker remains open. All three items above are human or
+operational actions, not defects awaiting a fix.
 
 ---
 
 ## Verdict
 
-**No CRITICAL or HIGH issue remains open.** Every defect found across this work
-is fixed, reproduced before the fix, verified after it by live probe, and
-protected by a regression test that was proven to fail when the guard is
-removed.
+No CRITICAL or HIGH issue remains open. Every defect found across this
+engagement was reproduced before the fix, corrected at the root cause,
+re-verified live, and protected by a regression test proven to fail when its
+guard is removed. The three business-policy questions are now settled with
+evidence rather than assumption, and two of them uncovered real auditability
+gaps that are now closed.
 
-This is **not a claim that the system is defect-free or production-ready.**
-A green suite proves the absence of the failures it models, nothing more. Two
-acceptance criteria (N-1, N-2) are genuinely unverifiable in a headless sandbox
-and need a person at a screen and a printer; three items (B-1…B-3) are policy
-choices that only you can ratify. Everything else is recorded above with its
-severity and rationale so the decision to ship is an informed one rather than
-an optimistic one.
+I am not claiming this system is **production-ready**, because three GO-LIVE
+BLOCKERS remain open (H-1, H-2, H-3) and none of them can be closed from here.
+A green suite demonstrates the absence of the failures it models — nothing
+beyond that. What this report supports is an *informed* decision to ship, with
+the residual risks named, ranked, and assigned.
