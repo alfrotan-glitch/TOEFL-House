@@ -785,8 +785,14 @@ export interface DashboardSummary {
     activeClasses: number;
     activeTeachers: number;
     totalVisitors: number;
+    /** Leads still winnable: neither converted nor closed-lost. */
     pendingLeads: number;
     convertedLeads: number;
+    /**
+     * Closed-lost leads, so pendingLeads + convertedLeads + closedLeads
+     * === totalVisitors holds and a dead lead never inflates open pipeline.
+     */
+    closedLeads: number;
     conversionRate: number;
   };
   periods: Record<'today' | 'month' | 'year', { newVisitors: number; newStudents: number }>;

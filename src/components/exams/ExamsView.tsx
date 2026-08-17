@@ -4,6 +4,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Award, Plus, Check, Sparkles, AlertCircle, Bookmark, User, UserPlus, CreditCard, ClipboardList, CalendarDays, Trash2, Edit3, X, History, CalendarCheck, Printer, Edit } from 'lucide-react';
 import { Exam, ExamResult, Student, Visitor, UserRole } from '../../types';
+import { isLeadClosed } from '../../config/leadLifecycle';
 import { formatAFN } from '../../utils/format';
 import { ShamsiDateInput } from '../common/ShamsiDateInput';
 import { BRAND_NAME } from '../../config/branding';
@@ -55,7 +56,10 @@ export default function ExamsView({
   const studentMap = useMemo(() => new Map(students.map(s => [s.id, s])), [students]);
   const visitorMap = useMemo(() => new Map(visitors.map(v => [v.id, v])), [visitors]);
   const activeStudents = useMemo(() => students.filter(s => s.status === 'active'), [students]);
-  const activeVisitors = useMemo(() => visitors.filter(v => !v.status || v.status === 'visited' || v.status === 'follow_up'), [visitors]);
+  // Mirrors the server's exam-eligibility rule: anything not closed-lost.
+  // The old inline allow-list tested `status` against stage vocabulary and
+  // disagreed with the backend, which refused every candidate it offered.
+  const activeVisitors = useMemo(() => visitors.filter((v) => !isLeadClosed(v)), [visitors]);
 
   const todayStr = new Date().toISOString().split('T')[0];
   const upcomingExams = useMemo(() => exams.filter(e => e.date >= todayStr).sort((a,b) => a.date.localeCompare(b.date)), [exams, todayStr]);

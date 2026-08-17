@@ -1,4 +1,5 @@
 import { nextScopedDocumentNumber } from '../utils/documentNumbers.js';
+import { isLeadClosed } from '../core/visitors/lead-lifecycle.js';
 import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { authenticate, authorize, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
@@ -48,7 +49,8 @@ const stmtCheckEnrollment = db.prepare(
 );
 
 const stmtGetStudentById = db.prepare('SELECT id, full_name, branch_id, status FROM students WHERE id = ?');
-const stmtGetVisitorById = db.prepare('SELECT id, full_name, branch_id, status FROM visitors WHERE id = ?');
+// `stage` is required: closed-lost lives on stage, not status (lead-lifecycle).
+const stmtGetVisitorById = db.prepare('SELECT id, full_name, branch_id, status, stage FROM visitors WHERE id = ?');
 const stmtCountCertificatesByStudent = db.prepare('SELECT COUNT(*) as c FROM certificates WHERE student_id = ?');
 const stmtInsertCertificate = db.prepare(
   `INSERT INTO certificates (id, student_id, issue_date, certificate_no, grade, branch_id) VALUES (?, ?, ?, ?, ?, ?)`
@@ -207,7 +209,16 @@ examsRouter.post(
       const visitor = stmtGetVisitorById.get(visitorId) as any;
       if (!visitor) throw new HttpError(404, 'Visitor not found.');
       if (visitor.branch_id !== exam.branch_id) throw new HttpError(403, 'Visitor belongs to another branch.');
-      if (visitor.status && !['new', 'lead', 'inquiry', 'follow_up', 'placement', 'placement_completed', 'enrollment'].includes(visitor.status)) throw new HttpError(409, 'Visitor is not eligible for exam enrollment.');
+      // This guard tested `visitor.status` against a list of STAGE values
+      // ('new', 'lead', 'inquiry', 'placement', ...). `status` only ever holds
+      // 'visited' or 'registered', neither of which appears in that list, so
+      // the condition was true for every visitor and exam enrolment was
+      // refused 100% of the time — verified live before this fix.
+      //
+      // The intent is plainly "do not enrol a dead lead". That is the
+      // closed-lost bucket, which lives on `stage` and is defined once in
+      // core/visitors/lead-lifecycle.ts.
+      if (isLeadClosed(visitor)) throw new HttpError(409, 'This lead is closed (lost) and cannot be enrolled in an exam.');
       candidateName = visitor.full_name;
     }
 

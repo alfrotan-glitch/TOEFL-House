@@ -3,6 +3,7 @@ import { formatJalaliAxis, formatJalali, toPersianDigits } from '../../utils/jal
 import {TrendingUp, TrendingDown, Users, School, Wallet, PiggyBank, Eye, EyeOff, UserCheck, Clock, Zap, AlertTriangle, BookOpen, Activity, GraduationCap, Loader2, CheckCircle2, CalendarDays, BarChart3, Sparkles} from 'lucide-react';
 import {AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend, RadialBarChart, RadialBar} from 'recharts';
 import { AuditLog, BudgetLine, Class, DashboardSummary, FinanceDashboard, Invoice, Student, UserRole, Visitor } from '../../types';
+import { isLeadOpen } from '../../config/leadLifecycle';
 import BusinessOperatingSystemView from './BusinessOperatingSystemView';
 import OperationsWorkQueue from './OperationsWorkQueue';
 import {useAuth} from '../../contexts/useAuth';
@@ -154,7 +155,12 @@ export default function DashboardView({
     // The quick-registration dropdown still needs actual visitor RECORDS, not a
     // count. It is explicitly a "recent leads" picker over the loaded page, and
     // is labelled as such — it never claims to be the full pending population.
-    const pendingLeadsList = visitors.filter((v) => v.status === 'visited' || v.status === 'follow_up');
+    //
+    // It must, however, agree with the tile above it about what "pending"
+    // MEANS. The old inline test (status 'visited' or 'follow_up') was the
+    // allow-list the server no longer uses, so a closed-lost lead — excluded
+    // from the count — was still offered here for quick registration.
+    const pendingLeadsList = visitors.filter(isLeadOpen);
 
     // CASH FLOW — server-computed daily aggregate. This chart renders exact AFN
     // in its tooltip, so it must reconcile with the ledger. Reducing the loaded
