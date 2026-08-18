@@ -552,12 +552,39 @@ financeRouter.post(
       title?: string; amount?: number; budgetLineId?: string; requireApproval?: boolean;
     };
     
-    const resolvedAmount = Number(amount);
+    // F-2: `Number()` is a coercion, not a parse, so values that are not
+    // amounts became real payments. Reproduced live on a fresh database:
+    //     true     -> 201, 1 AFN paid from the budget line
+    //     [500]    -> 201, 500 AFN paid
+    //     '0x10'   -> 201, 16 AFN paid
+    //     [[7]]    -> 201, 7 AFN paid
+    //     0.001    -> 500, leaking the two-decimal database trigger
+    // `assertMoney` is the boundary /treasury/deposit on this same router
+    // already uses; it parses, rounds to 2dp and applies the precision
+    // ceiling. The endpoint's own "> 0" rule is kept and applied to the
+    // PARSED value, so 0.001 (which rounds to 0) is now a clean 400 instead
+    // of a database error. Any amount >= 0.01 behaves exactly as before.
+    let resolvedAmount: number;
+    try { resolvedAmount = assertMoney(amount, 'Expense amount'); }
+    catch { throw new HttpError(400, 'Title, a valid amount, and a budget line are required.'); }
     const budgetLine = stmtGetBudgetLineById.get(budgetLineId) as any;
     if (budgetLine) requireBudgetLine(req, String(budgetLineId));
-    if (!title?.trim() || !Number.isFinite(resolvedAmount) || resolvedAmount <= 0 || !budgetLine) {
+    if (!title?.trim() || resolvedAmount <= 0 || !budgetLine) {
       throw new HttpError(400, 'Title, a valid amount, and a budget line are required.');
     }
+    // F-1: book the expense to the branch that actually owns the budget line.
+    // `POST /expense-requests/:id/decide` — the other caller of
+    // payFromBudgetLine — already enforces this exact invariant, rejecting a
+    // request whose budget line belongs to another branch with 409 and paying
+    // with `branchId: budgetLine.branch_id`. This path used `user.branchId`
+    // for both the expense_request row and the ledger row, so a global owner
+    // spending another branch's line drained THAT branch's budget while the
+    // expense landed on their own: verified 1,200 AFN left branch B's line
+    // and branch A's expense total rose by 1,200 while B's stayed 0.
+    // Branch expense totals feed /finance/overview, /finance/dashboard,
+    // the reports P&L and the BOS break-even KPIs, so the misattribution
+    // propagates into every branch-scoped financial figure.
+    const expenseBranchId = budgetLine.branch_id || user.branchId;
     assertTextLengths([[title, 'Title', TEXT_LIMITS.line]]);
 
     const { expenseKind, paymentMethod, billPeriod, notes } = normalizeExpenseMeta(req.body);
@@ -569,7 +596,7 @@ financeRouter.post(
 
     if (!shouldAutoPay) {
       stmtInsertExpenseRequest.run(
-        newId, title.trim(), resolvedAmount, budgetLineId, user.fullName, 'pending', date, user.branchId,
+        newId, title.trim(), resolvedAmount, budgetLineId, user.fullName, 'pending', date, expenseBranchId,
         expenseKind, billPeriod, paymentMethod, notes, 0, user.userId, null
       );
       addNotification('Operational expense awaiting approval', `"${title}" (${resolvedAmount} AFN) exceeds the auto-approve threshold (${threshold} AFN) and needs manager/owner approval.`, 'warning', user.branchId);
@@ -583,13 +610,13 @@ financeRouter.post(
 
     const tx = db.transaction(() => {
       stmtInsertExpenseRequest.run(
-        newId, title.trim(), resolvedAmount, budgetLineId, user.fullName, 'approved', date, user.branchId,
+        newId, title.trim(), resolvedAmount, budgetLineId, user.fullName, 'approved', date, expenseBranchId,
         expenseKind, billPeriod, paymentMethod, notes, 1, user.userId, user.userId
       );
       db.prepare("UPDATE expense_requests SET approved_by = ? WHERE id = ?").run(user.fullName, newId);
       
       payFromBudgetLine({
-        budgetLine, amount: resolvedAmount, title: title.trim(), date, operatorName: user.fullName, branchId: user.branchId, requestId: newId, paymentMethod,
+        budgetLine, amount: resolvedAmount, title: title.trim(), date, operatorName: user.fullName, branchId: expenseBranchId, requestId: newId, paymentMethod,
       });
     });
     tx();
