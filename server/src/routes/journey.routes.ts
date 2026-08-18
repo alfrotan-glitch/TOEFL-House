@@ -8,14 +8,26 @@ import { getEnrollmentService } from '../core/academic/enrollment-service.js';
 import { assertClassGenderAllowsStudent } from './classes.routes.js';
 import { JourneyEventType } from '../core/journey/event-types.js';
 import { writeAudit } from '../middleware/audit.js';
+// The journey route is NOT a second status authority (audit STU-C1). It
+// delegates every students.status write to the same guarded function the
+// status endpoint uses.
+import { applyStudentStatus } from './students.routes.js';
+import {
+  assertStudentTransition,
+  isStudentStatus,
+  STUDENT_STATUSES,
+  type StudentStatus,
+} from '../core/students/student-lifecycle.js';
 
 export const journeyRouter = Router({ mergeParams: true });
 journeyRouter.use(authenticate);
 
 // ── Performance Optimization: Prepared Statements ──────────────────────────
 const stmtGetStudentCore = db.prepare('SELECT id, full_name, branch_id, status, gender FROM students WHERE id = ?');
-const stmtUpdateStudentStatus = db.prepare('UPDATE students SET status = ? WHERE id = ?');
-const stmtGraduateStudent = db.prepare("UPDATE students SET status = 'graduated' WHERE id = ?");
+// stmtUpdateStudentStatus / stmtGraduateStudent removed (audit STU-C1): this
+// module no longer writes students.status directly. Both event types now go
+// through applyStudentStatus(), which validates the transition and performs
+// the enrollment side effects.
 
 const engine = () => getJourneyEngine(db);
 
@@ -123,15 +135,38 @@ journeyRouter.post(
       throw new HttpError(400, 'Unsupported or missing eventType for manual append.');
     }
 
-    // Profile status mirror (not source of truth — journey is)
+    // Profile status mirror. This used to be a second, unvalidated writer of
+    // students.status: it accepted 'suspended' (which the status endpoint
+    // explicitly refuses because suspension must defer enrollments), skipped
+    // every transition rule, and silently ignored unknown values. It now
+    // delegates to the single guarded authority — audit STU-C1.
+    const applyStatus = (to: StudentStatus) => {
+      const from = (isStudentStatus(student.status) ? student.status : 'active') as StudentStatus;
+      if (to === 'suspended') {
+        throw new HttpError(
+          400,
+          'Use POST /api/students/:id/suspend to suspend a student — suspension must also defer their enrollments.',
+        );
+      }
+      if (from === 'suspended' && to === 'active') {
+        throw new HttpError(
+          400,
+          'Use POST /api/students/:id/resume to reactivate a suspended student.',
+        );
+      }
+      assertStudentTransition(from, to);
+      if (from !== to) applyStudentStatus(req, student, to);
+    };
+
     if (eventType === JourneyEventType.STATUS_CHANGED && payload?.status) {
       const st = String(payload.status);
-      if (['active', 'inactive', 'graduated', 'suspended'].includes(st)) {
-        stmtUpdateStudentStatus.run(st, studentId);
+      if (!isStudentStatus(st)) {
+        throw new HttpError(400, `Status must be one of: ${STUDENT_STATUSES.join(', ')}.`);
       }
+      applyStatus(st);
     }
     if (eventType === JourneyEventType.GRADUATED) {
-      stmtGraduateStudent.run(studentId);
+      applyStatus('graduated');
     }
 
     const item = engine().appendEvent({

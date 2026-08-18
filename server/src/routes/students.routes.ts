@@ -27,6 +27,15 @@ import { assertPlacementEligibleForClass } from '../core/placement/enrollment-ga
 import { JourneyEventType } from '../core/journey/event-types.js';
 import { SYSTEM_DEFAULTS } from '../core/configuration/policy-catalog.js';
 import { resolveIdempotency, isUniqueViolation } from '../utils/idempotency.js';
+// Single authorities for the Student subsystem (audit STU-C1/C2/H1/H3).
+import { normalizeStudentInput, studentPhoneKey } from '../core/students/student-input.js';
+import {
+  assertStudentTransition,
+  assertStudentOperable,
+  isStudentStatus,
+  STUDENT_STATUSES,
+  type StudentStatus,
+} from '../core/students/student-lifecycle.js';
 
 export const studentsRouter = Router();
 studentsRouter.use(authenticate);
@@ -51,7 +60,29 @@ const stmtGetClassDetails = db.prepare('SELECT * FROM classes WHERE id = ?');
 const stmtGetClassFee = db.prepare('SELECT fee FROM classes WHERE id = ?');
 const stmtGetBookPrice = db.prepare('SELECT id, title, price, stock FROM books WHERE id = ? AND branch_id = ?');
 const stmtUpdateBookStock = db.prepare('UPDATE books SET stock = stock - 1 WHERE id = ? AND branch_id = ? AND stock > 0');
-const stmtFindStudentByPhone = db.prepare("SELECT id, full_name FROM students WHERE phone = ? LIMIT 1");
+/**
+ * Phone identity lookup, normalized (audit STU-H3).
+ *
+ * The old statement compared the raw column, so "0700-111-001" and
+ * "+93700111001" both slipped past an existing "0700111001". This mirrors
+ * `phoneMatchKey()` — digits only, compared on the last 9 — which is the same
+ * rule migration 073's unique index enforces at the database level. The two
+ * must stay in lockstep: the application produces the clean 409, the index is
+ * the race-safe backstop.
+ */
+const stmtFindStudentByPhoneKey = db.prepare(
+  `SELECT id, full_name FROM students
+    WHERE phone IS NOT NULL AND TRIM(phone) <> ''
+      AND SUBSTR(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone,' ',''),'-',''),'(',''),')',''),'+',''), -9) = ?
+    LIMIT 1`
+);
+
+/** Resolve the current owner of a normalized phone key, or undefined. */
+function findStudentByPhoneKey(phone: string | null | undefined): { id: string; full_name: string } | undefined {
+  const key = studentPhoneKey(phone);
+  if (!key) return undefined;
+  return stmtFindStudentByPhoneKey.get(key) as { id: string; full_name: string } | undefined;
+}
 const stmtFindStudentByEmail = db.prepare("SELECT id, full_name FROM students WHERE lower(email) = lower(?) LIMIT 1");
 const stmtFindStudentByTazkira = db.prepare("SELECT id, full_name FROM students WHERE tazkira_no = ? LIMIT 1");
 const stmtInsertRegistration = db.prepare(
@@ -128,6 +159,21 @@ const stmtUpdateStudentDetails = db.prepare(
   `UPDATE students SET full_name=?, phone=?, email=?, discount_percent=?, gender=?, father_name=?, address_region=?, tazkira_no=?, whatsapp=?, dob=?, school_or_university=?, emergency_contact_name=?, emergency_contact_phone=?, notes=?, placement_score=?, installment_plan=?, card_design=? WHERE id=?`
 );
 const stmtUpdateStudentStatus = db.prepare('UPDATE students SET status = ? WHERE id = ?');
+/**
+ * Graduation releases the seat (audit STU-H4). Only enrollments that still
+ * occupy capacity are touched — `active|confirmed|pending`, exactly the set
+ * `countActiveStudentsInClass()` counts — so terminal rows (dropped,
+ * transferred, withdrawn) keep their historical status.
+ */
+const stmtCompleteEnrollmentsOnGraduation = db.prepare(
+  `UPDATE enrollments
+      SET status = 'completed', ended_at = COALESCE(ended_at, datetime('now')), updated_at = datetime('now')
+    WHERE student_id = ? AND status IN ('active','confirmed','pending')`
+);
+const stmtCompleteSemestersOnGraduation = db.prepare(
+  `UPDATE student_semesters SET status = 'completed'
+    WHERE student_id = ? AND status IN ('active','deferred')`
+);
 const stmtUpdateStudentInstallments = db.prepare('UPDATE students SET installment_plan = ? WHERE id = ?');
 
 // The frontend loads the student list once per workspace and filters/searchs
@@ -137,8 +183,9 @@ const stmtUpdateStudentInstallments = db.prepare('UPDATE students SET installmen
 const DEFAULT_PAGE_SIZE = 2000;
 const MAX_PAGE_SIZE = 2000;
 
-/** The only student lifecycle states the schema permits. */
-const STUDENT_STATUSES = ['active', 'inactive', 'graduated', 'suspended'] as const;
+// STUDENT_STATUSES was a local copy of the lifecycle vocabulary — one of the
+// four divergent copies audit STU-M2 recorded. It now comes from the single
+// authority in core/students/student-lifecycle.ts.
 
 /** Rejects an unknown status filter instead of quietly returning everything. */
 function assertStudentStatus(value: string): void {
@@ -196,6 +243,46 @@ function requireStudent(req: import('express').Request, studentId: string): Stud
     if (!cross) throw new HttpError(403, 'Student belongs to another branch.');
   }
   return student;
+}
+
+/**
+ * THE single writer for `students.status` (audit STU-C1).
+ *
+ * Both the status endpoint here and `POST /students/:id/journey/events` route
+ * through this function, so the transition rules, the enrollment side effects
+ * and the audit entry can never diverge between the two paths again.
+ *
+ * Graduation additionally CLOSES the student's open enrollments (audit
+ * STU-H4). Previously `status='graduated'` touched only the profile column,
+ * leaving `enrollments.status='active'` behind — and because
+ * `countActiveStudentsInClass()` counts active enrollments, the graduate kept
+ * occupying a seat forever. Live evidence: a paying applicant was refused with
+ * "Selected class is full." while one of the three seats was held by a
+ * graduate. Closing the enrollment is the correct fix; the capacity predicate
+ * itself was right and is deliberately left alone.
+ *
+ * Runs in a single transaction so a student can never be graduated with their
+ * enrollments left half-closed.
+ */
+export function applyStudentStatus(
+  req: import('express').Request,
+  student: { id: string; full_name: string; status: string },
+  to: StudentStatus,
+): void {
+  const from = student.status;
+  db.transaction(() => {
+    stmtUpdateStudentStatus.run(to, student.id);
+    if (to === 'graduated') {
+      // Free the seat(s). `completed` is the enrollment-lifecycle terminal
+      // state for a finished course and is excluded from the capacity count.
+      stmtCompleteEnrollmentsOnGraduation.run(student.id);
+      stmtCompleteSemestersOnGraduation.run(student.id);
+    }
+  })();
+  writeAudit(req, `Changed student ${student.full_name} status to ${to}`, {
+    oldValue: JSON.stringify({ status: from }),
+    newValue: JSON.stringify({ status: to }),
+  });
 }
 
 interface StudentRow { id: string; student_code: string; full_name: string; phone: string | null; email: string | null; qr_code: string | null; status: string; registration_date: string; branch_id: string; discount_percent: number; gender: string; lead_id: string | null; father_name: string | null; address_region: string | null; tazkira_no: string | null; whatsapp: string | null; dob: string | null; school_or_university: string | null; emergency_contact_name: string | null; emergency_contact_phone: string | null; notes: string | null; placement_score: string | null; installment_plan: string | null; card_design: string | null; }
@@ -314,45 +401,32 @@ paymentsRouter.get('/balances', requirePermission('Payment.View'), ah(async (req
 studentsRouter.get('/search', requirePermission('Student.View'), ah(async (req, res) => {
   const { branchId, isAll } = resolveBranchScope(req);
   const { limit, offset } = parsePagination(req);
-  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
-  const status = typeof req.query.status === 'string' ? req.query.status.trim() : '';
-  const classId = typeof req.query.classId === 'string' ? req.query.classId.trim() : '';
-  const where: string[] = [];
-  const params: unknown[] = [];
-  if (!isAll) { where.push('branch_id = ?'); params.push(branchId); }
-  if (q) {
-    where.push(`(full_name LIKE ? ESCAPE '\\' OR student_code LIKE ? ESCAPE '\\' OR phone LIKE ? ESCAPE '\\'
-                OR COALESCE(tazkira_no,'') LIKE ? ESCAPE '\\' OR COALESCE(whatsapp,'') LIKE ? ESCAPE '\\'
-                OR COALESCE(email,'') LIKE ? ESCAPE '\\' OR COALESCE(father_name,'') LIKE ? ESCAPE '\\')`);
-    const like = `%${q.replace(/[%_\\]/g, (m) => `\\${m}`)}%`;
-    for (let i = 0; i < 7; i++) params.push(like);
-  }
-  if (status) {
-    // Reject rather than silently ignore. An unrecognised value used to be
-    // dropped, so `?status=' OR '1'='1` (and any typo) returned the UNFILTERED
-    // page: callers could not tell "no matches" from "filter discarded".
-    assertStudentStatus(status);
-    where.push('status = ?');
-    params.push(status);
-  }
-  if (classId) { where.push(`EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id = students.id AND e.class_id = ?)`); params.push(classId); }
-  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const { whereSql, params } = buildStudentListWhere(req, { branchId, isAll });
   const total = (db.prepare(`SELECT COUNT(*) AS c FROM students ${whereSql}`).get(...params) as { c: number }).c;
   const rows = db.prepare(`SELECT * FROM students ${whereSql} ORDER BY registration_date DESC LIMIT ? OFFSET ?`).all(...params, limit, offset) as StudentRow[];
   res.json({ rows: mapStudents(rows), total });
 }));
 
-studentsRouter.get('/', requirePermission('Student.View'), ah(async (req, res) => {
-  const { branchId, isAll } = resolveBranchScope(req);
-  const { limit, offset } = parsePagination(req);
-  // Server-side search + filters so the list stays correct beyond page 1:
-  // q matches name / code / phone / tazkira / whatsapp / email / father.
+/**
+ * THE shared filter definition for the student roster, search and export
+ * (audit STU-H2). Previously the roster and the search endpoint each carried
+ * their own copy of this WHERE clause, and the CSV export had no server-side
+ * filter at all — it reduced whatever page the browser happened to hold.
+ * One builder means the three surfaces can never disagree about what
+ * "the current filter" means.
+ *
+ * Branch scoping is applied here, so no caller can forget it.
+ */
+function buildStudentListWhere(
+  req: import('express').Request,
+  scope: { branchId: string | null; isAll: boolean },
+): { whereSql: string; params: unknown[] } {
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
   const status = typeof req.query.status === 'string' ? req.query.status.trim() : '';
   const classId = typeof req.query.classId === 'string' ? req.query.classId.trim() : '';
   const where: string[] = [];
   const params: unknown[] = [];
-  if (!isAll) { where.push('branch_id = ?'); params.push(branchId); }
+  if (!scope.isAll) { where.push('branch_id = ?'); params.push(scope.branchId); }
   if (q) {
     where.push(`(full_name LIKE ? ESCAPE '\\' OR student_code LIKE ? ESCAPE '\\' OR phone LIKE ? ESCAPE '\\'
                 OR COALESCE(tazkira_no,'') LIKE ? ESCAPE '\\' OR COALESCE(whatsapp,'') LIKE ? ESCAPE '\\'
@@ -372,7 +446,98 @@ studentsRouter.get('/', requirePermission('Student.View'), ah(async (req, res) =
     where.push(`EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id = students.id AND e.class_id = ?)`);
     params.push(classId);
   }
-  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  return { whereSql: where.length ? `WHERE ${where.join(' AND ')}` : '', params };
+}
+
+/**
+ * Server-side CSV export over the FULL filtered dataset (audit STU-H2).
+ *
+ * The UI used to build the CSV from `filteredStudents` — the loaded page —
+ * so an export of a 2,162-student branch silently produced 2,000 rows, with
+ * financial columns (Total Fee / Paid / Debt). Offline management records were
+ * quietly incomplete with nothing indicating truncation.
+ *
+ * This endpoint applies exactly the same filters as the roster (shared via
+ * buildStudentListWhere) and streams every matching row, joining the
+ * authoritative balance definition rather than recomputing fees client-side.
+ * It is bounded only by the filter, not by a page size.
+ */
+studentsRouter.get('/export', requirePermission('Student.View'), ah(async (req, res) => {
+  const { branchId, isAll } = resolveBranchScope(req);
+  // EXACTLY the same filter builder the roster uses — one definition, so an
+  // export can never disagree with the list the operator is looking at.
+  const { whereSql, params } = buildStudentListWhere(req, { branchId, isAll });
+
+  const rows = db.prepare(
+    `SELECT id, student_code, full_name, phone, whatsapp, father_name, tazkira_no,
+            email, gender, status, registration_date
+       FROM students ${whereSql}
+      ORDER BY registration_date DESC`
+  ).all(...params) as StudentRow[];
+
+  // Authoritative balances for exactly these students, from the single
+  // definition in utils/studentBalance — never recomputed client-side.
+  const balances = new Map<string, { tuitionDue: number; tuitionPaid: number; outstanding: number }>();
+  for (const b of getStudentBalancesPage(db, {
+    branchId: isAll ? null : branchId, scope: 'all', limit: rows.length || 1, offset: 0,
+  })) {
+    balances.set(b.studentId, { tuitionDue: b.tuitionDue, tuitionPaid: b.tuitionPaid, outstanding: b.outstanding });
+  }
+
+  const classesByStudent = new Map<string, string>();
+  if (rows.length) {
+    for (const r of db.prepare(
+      `SELECT student_id, GROUP_CONCAT(class_id, '; ') AS cls FROM enrollments
+        WHERE status IN ('active','confirmed','pending') GROUP BY student_id`
+    ).all() as Array<{ student_id: string; cls: string }>) {
+      classesByStudent.set(r.student_id, r.cls);
+    }
+  }
+
+  const esc = (v: unknown) => {
+    const str = v === null || v === undefined ? '' : String(v);
+    return /[",\n\r]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+  };
+  const header = ['Code', 'Full Name', 'Phone', 'WhatsApp', 'Father Name', 'Tazkira No', 'Email',
+                  'Gender', 'Status', 'Classes', 'Total Fee', 'Paid', 'Debt', 'Registered'];
+  const lines = [header.join(',')];
+  for (const r of rows) {
+    const fin = balances.get(r.id) ?? { tuitionDue: 0, tuitionPaid: 0, outstanding: 0 };
+    lines.push([
+      r.student_code, r.full_name, r.phone, r.whatsapp, r.father_name, r.tazkira_no, r.email,
+      r.gender, r.status, classesByStudent.get(r.id) ?? '',
+      fin.tuitionDue, fin.tuitionPaid, fin.outstanding, r.registration_date,
+    ].map(esc).join(','));
+  }
+
+  writeAudit(req, `Exported ${rows.length} students to CSV`);
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('X-Total-Count', String(rows.length));
+  res.setHeader('Content-Disposition', `attachment; filename="students-${today()}.csv"`);
+  res.send(lines.join('\n'));
+}));
+
+studentsRouter.get('/', requirePermission('Student.View'), ah(async (req, res) => {
+  const { branchId, isAll } = resolveBranchScope(req);
+  const { limit, offset } = parsePagination(req);
+  // Server-side search + filters so the list stays correct beyond page 1:
+  // q matches name / code / phone / tazkira / whatsapp / email / father.
+  const { whereSql, params } = buildStudentListWhere(req, { branchId, isAll });
+
+  // Authoritative totals (audit STU-H2). The roster used to return a bare
+  // array capped at MAX_PAGE_SIZE with no total, so a client could not tell a
+  // full result from a truncated one: with 2,162 students the UI rendered
+  // 2,000 rows and captioned them "2000 of 2000". These headers mirror the
+  // Visitors roster contract (X-Total-Count / X-Unfiltered-Count / X-Page-*),
+  // which the frontend already knows how to consume.
+  const filteredTotal = (db.prepare(`SELECT COUNT(*) AS c FROM students ${whereSql}`).get(...params) as { c: number }).c;
+  const unfilteredTotal = isAll
+    ? (db.prepare('SELECT COUNT(*) AS c FROM students').get() as { c: number }).c
+    : (db.prepare('SELECT COUNT(*) AS c FROM students WHERE branch_id = ?').get(branchId) as { c: number }).c;
+  res.setHeader('X-Total-Count', String(filteredTotal));
+  res.setHeader('X-Unfiltered-Count', String(unfilteredTotal));
+  res.setHeader('X-Page-Limit', String(limit));
+  res.setHeader('X-Page-Offset', String(offset));
 
   // `?view=lite` returns only the four fields a picker or lookup table needs.
   //
@@ -450,31 +615,26 @@ studentsRouter.get('/:id', requirePermission('Student.View'), ah(async (req, res
 // ============================================================================
 studentsRouter.post('/manual', requirePermission('Student.Create'), ah(async (req, res) => {
   const user = getUserContext(req);
-  const { fullName, phone, email, gender, discountPercent, notes, classId, fatherName, addressRegion, tazkiraNo, whatsapp, dob, schoolOrUniversity, emergencyContactName, emergencyContactPhone, tuitionAmount, amountPaidNow, branchId } = req.body;
-  if (!fullName || !String(fullName).trim() || !gender) throw new HttpError(400, 'Full name and gender are required.');
-  if (!['male', 'female'].includes(gender)) throw new HttpError(400, 'Invalid gender.');
-  // Bound every free-text field. Without this a 1,000,000-character name was
-  // accepted and stored, and any list endpoint returning that row became
-  // megabytes of JSON. The only previous refusal was Express's body limit,
-  // which answered 500 rather than 400.
-  assertTextLengths([
-    [fullName, 'Full name', TEXT_LIMITS.name],
-    [fatherName, "Father's name", TEXT_LIMITS.name],
-    [phone, 'Phone', TEXT_LIMITS.short],
-    [whatsapp, 'WhatsApp', TEXT_LIMITS.short],
-    [tazkiraNo, 'Tazkira number', TEXT_LIMITS.short],
-    [email, 'Email', TEXT_LIMITS.email],
-    [addressRegion, 'Address', TEXT_LIMITS.line],
-    [schoolOrUniversity, 'School or university', TEXT_LIMITS.line],
-    [emergencyContactName, 'Emergency contact name', TEXT_LIMITS.name],
-    [emergencyContactPhone, 'Emergency contact phone', TEXT_LIMITS.short],
-    [notes, 'Notes', TEXT_LIMITS.notes],
-  ]);
-  const safePhone = phone ? String(phone).trim() : '';
-  const safeEmail = email ? String(email).trim() : '';
-  const safeTazkira = tazkiraNo ? String(tazkiraNo).trim() : '';
-  if (!safePhone) throw new HttpError(400, 'Phone is required.');
-  if (stmtFindStudentByPhone.get(safePhone)) throw new HttpError(409, 'A student with this phone number already exists.');
+  const { discountPercent, classId, tuitionAmount, amountPaidNow, branchId } = req.body;
+  // ONE validation authority, shared with PATCH (audit STU-H1). It type-checks,
+  // trims and bounds every text field, validates gender against the same
+  // allow-list the gender-policy engine enforces, and rejects impossible
+  // calendar dates. PATCH previously performed none of this and persisted
+  // values this path rejects.
+  const input = normalizeStudentInput(req.body as Record<string, unknown>, 'create');
+  const {
+    fullName = null, phone = null, email = null, notes = null, fatherName = null,
+    addressRegion = null, tazkiraNo = null, whatsapp = null, schoolOrUniversity = null,
+    emergencyContactName = null, emergencyContactPhone = null,
+  } = input.text;
+  const gender = input.gender as string;
+  const dob = input.dob ?? null;
+  const safePhone = phone ?? '';
+  const safeEmail = email ?? '';
+  const safeTazkira = tazkiraNo ?? '';
+  // Phone identity is compared on the NORMALIZED key (audit STU-H3), matching
+  // migration 073's unique index.
+  if (findStudentByPhoneKey(safePhone)) throw new HttpError(409, 'A student with this phone number already exists.');
   if (safeEmail && stmtFindStudentByEmail.get(safeEmail)) throw new HttpError(409, 'A student with this email already exists.');
   if (safeTazkira && stmtFindStudentByTazkira.get(safeTazkira)) throw new HttpError(409, 'A student with this Tazkira/ID number already exists.');
 
@@ -563,6 +723,8 @@ studentsRouter.post('/manual', requirePermission('Student.Create'), ah(async (re
 studentsRouter.post('/:id/enroll-class', requirePermission('Class.Assign', 'Student.Edit'), ah(async (req, res) => {
   const user = getUserContext(req);
   const student = requireStudent(req, req.params.id);
+  // A graduated or suspended student may not take a new class (audit STU-C2).
+  assertStudentOperable(student, 'enroll this student in a class');
   const { classId, amountPaidNow = 0, notes } = req.body || {};
 
   if (!classId) throw new HttpError(400, 'classId is required.');
@@ -935,6 +1097,7 @@ studentsRouter.post('/:id/refund', requirePermission('Refund.Approve'), ah(async
 studentsRouter.post('/:id/enroll-semester', requirePermission('Class.Assign', 'Student.Edit'), ah(async (req, res) => {
   const user = getUserContext(req);
   const student = requireStudent(req, req.params.id);
+  assertStudentOperable(student, 'enroll this student in a semester');
   const { semesterName, classId, tuitionAmount, amountPaidNow, notes } = req.body ?? {};
   
   if (!semesterName || !String(semesterName).trim()) throw new HttpError(400, 'Semester name is required.');
@@ -1000,6 +1163,8 @@ studentsRouter.post('/:id/enroll-semester', requirePermission('Class.Assign', 'S
 studentsRouter.post('/:id/issue-card', requirePermission('Student.Print', 'Payment.Create'), ah(async (req, res) => {
   const user = getUserContext(req);
   const student = requireStudent(req, req.params.id);
+  // Chargeable service: must not bill a graduated student (audit STU-C2).
+  assertStudentOperable(student, 'issue an ID card for this student');
   const { cardDesign, notes } = req.body;
   const isFirstIssuance = !student.card_design;
   const date = today();
@@ -1040,13 +1205,28 @@ studentsRouter.post('/:id/issue-card', requirePermission('Student.Print', 'Payme
 
 studentsRouter.patch('/:id', requirePermission('Student.Edit'), ah(async (req, res) => {
   const existing = requireStudent(req, req.params.id);
-  const f = req.body;
+  // SAME validation authority as CREATE (audit STU-H1). Previously this
+  // handler validated nothing and merged raw body fields straight into the
+  // UPDATE, so gender "martian", a 5,000-character name, a "9999-99-99" date
+  // and `phone: ["x"]` were all accepted and persisted — values the CREATE
+  // path rejects with 400. `mode: 'patch'` validates only the supplied keys,
+  // but applies identical rules to them.
+  const patchInput = normalizeStudentInput(req.body as Record<string, unknown>, 'patch');
+  const f: Record<string, unknown> = { ...req.body };
+  // Substitute the normalized/validated values so the merge below can never
+  // reintroduce the raw payload.
+  for (const [k, v] of Object.entries(patchInput.text)) f[k] = v;
+  if (patchInput.gender !== undefined) f.gender = patchInput.gender;
+  if (req.body?.dob !== undefined) f.dob = patchInput.dob;
+
   const merge = <K extends keyof StudentRow>(k: string, c: K) => (f[k] !== undefined ? f[k] : existing[c]);
 
   const nextPhone = String(merge('phone', 'phone') ?? '').trim();
   const nextEmail = String(merge('email', 'email') ?? '').trim();
   const nextTazkira = String(merge('tazkiraNo', 'tazkira_no') ?? '').trim();
-  const phoneOwner = nextPhone ? stmtFindStudentByPhone.get(nextPhone) as { id: string } | undefined : undefined;
+  // Normalized phone identity (audit STU-H3) — a formatting change must not
+  // let one person occupy two student records.
+  const phoneOwner = findStudentByPhoneKey(nextPhone);
   const emailOwner = nextEmail ? stmtFindStudentByEmail.get(nextEmail) as { id: string } | undefined : undefined;
   const tazkiraOwner = nextTazkira ? stmtFindStudentByTazkira.get(nextTazkira) as { id: string } | undefined : undefined;
   if (phoneOwner && phoneOwner.id !== existing.id) throw new HttpError(409, 'A student with this phone number already exists.');
@@ -1110,9 +1290,26 @@ studentsRouter.patch('/:id', requirePermission('Student.Edit'), ah(async (req, r
 studentsRouter.patch('/:id/status', requirePermission('Student.Edit', 'Student.Suspend'), ah(async (req, res) => {
   const existing = requireStudent(req, req.params.id);
   const { status } = req.body;
-  if (!['active', 'inactive', 'graduated'].includes(status)) throw new HttpError(400, 'Use the suspend/resume workflow for suspended status.');
-  stmtUpdateStudentStatus.run(status, req.params.id);
-  writeAudit(req, `Changed student ${existing.full_name} status to ${status}`);
+  // Vocabulary and transition legality both come from the single Student
+  // lifecycle authority (audit STU-C1/C2). Previously this accepted any of
+  // three values from ANY current state, so `graduated → inactive → active`
+  // laundered a terminal state back into an active one.
+  if (!isStudentStatus(status)) {
+    throw new HttpError(400, `Status must be one of: ${STUDENT_STATUSES.join(', ')}.`);
+  }
+  if (status === 'suspended') {
+    // Suspension has real side effects (enrollments deferred, semesters held).
+    // It must go through the workflow that performs them.
+    throw new HttpError(400, 'Use the suspend/resume workflow for suspended status.');
+  }
+  const from = (isStudentStatus(existing.status) ? existing.status : 'active') as StudentStatus;
+  if (from === 'suspended' && status === 'active') {
+    // Resuming likewise owns enrollment re-activation.
+    throw new HttpError(400, 'Use the suspend/resume workflow to reactivate a suspended student.');
+  }
+  assertStudentTransition(from, status);
+  if (from === status) return res.json({ ok: true, unchanged: true });
+  applyStudentStatus(req, existing, status);
   res.json({ ok: true });
 }));
 
@@ -1121,6 +1318,7 @@ studentsRouter.post('/:id/transfer', authorize('registrar', 'manager', 'head_of_
   const { toClassId, notes } = req.body || {};
   if (!toClassId) throw new HttpError(400, 'toClassId is required.');
   const student = requireStudent(req, req.params.id);
+  assertStudentOperable(student, 'transfer this student');
   const targetClass = stmtGetClassDetails.get(toClassId) as any;
   if (!targetClass) throw new HttpError(404, 'Target class not found.');
   if (targetClass.branch_id !== student.branch_id) throw new HttpError(400, 'Target class belongs to another branch.');
