@@ -584,6 +584,30 @@ describe('STU-H2 — roster exposes authoritative totals', () => {
     expect(res.text).toContain('"Comma, ""Quoted"" Name"');
   });
 
+  it('GET /students/summary is authoritative over the full filtered set', async () => {
+    const res = await supertest(app).get('/api/students/summary').set(authHeader(reg));
+    expect(res.status).toBe(200);
+    const dbTotal = (db.prepare('SELECT COUNT(*) c FROM students WHERE branch_id = ?').get(BRANCH) as { c: number }).c;
+    expect(res.body.filtered).toBe(dbTotal);
+    expect(res.body.unfiltered).toBeGreaterThanOrEqual(res.body.filtered);
+    // Status buckets must reconcile with the filtered total.
+    const summed = (res.body.byStatus as Array<{ count: number }>).reduce((a, r) => a + r.count, 0);
+    expect(summed).toBe(res.body.filtered);
+  });
+
+  it('summary respects the same filters as the roster', async () => {
+    const res = await supertest(app).get('/api/students/summary?q=Paged%20Student').set(authHeader(reg));
+    expect(res.status).toBe(200);
+    expect(res.body.filtered).toBeGreaterThanOrEqual(BULK);
+    expect(res.body.filtered).toBeLessThan(res.body.unfiltered + 1);
+  });
+
+  it('summary is branch-isolated', async () => {
+    const res = await supertest(app).get('/api/students/summary').set(authHeader(reg));
+    const dbTotal = (db.prepare('SELECT COUNT(*) c FROM students WHERE branch_id = ?').get(BRANCH) as { c: number }).c;
+    expect(res.body.unfiltered).toBe(dbTotal);
+  });
+
   it('an unknown status filter is rejected, never silently ignored', async () => {
     const res = await supertest(app).get('/api/students?status=notastatus').set(authHeader(reg));
     expect(res.status).toBe(400);

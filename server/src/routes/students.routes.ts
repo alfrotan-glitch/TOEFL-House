@@ -450,6 +450,40 @@ function buildStudentListWhere(
 }
 
 /**
+ * Authoritative roster summary (audit STU-H2).
+ *
+ * Mirrors `GET /visitors/summary`, which the Visitors tab already uses. Every
+ * figure is computed in SQL over the FULL filtered set — never derived from
+ * the page the browser happens to hold. The Students tab previously captioned
+ * its list "2000 of 2000" against a true 2,162 because both numbers came from
+ * the truncated array.
+ */
+studentsRouter.get('/summary', requirePermission('Student.View'), ah(async (req, res) => {
+  const { branchId, isAll } = resolveBranchScope(req);
+  const { whereSql, params } = buildStudentListWhere(req, { branchId, isAll });
+
+  const filtered = (db.prepare(`SELECT COUNT(*) AS c FROM students ${whereSql}`).get(...params) as { c: number }).c;
+  const unfiltered = isAll
+    ? (db.prepare('SELECT COUNT(*) AS c FROM students').get() as { c: number }).c
+    : (db.prepare('SELECT COUNT(*) AS c FROM students WHERE branch_id = ?').get(branchId) as { c: number }).c;
+
+  const byStatus = db.prepare(
+    `SELECT status, COUNT(*) AS count FROM students ${whereSql} GROUP BY status`
+  ).all(...params) as Array<{ status: string; count: number }>;
+
+  res.json({
+    filtered,
+    unfiltered,
+    byStatus,
+    // Convenience shape so the UI never has to re-derive these.
+    active: byStatus.find((r) => r.status === 'active')?.count ?? 0,
+    inactive: byStatus.find((r) => r.status === 'inactive')?.count ?? 0,
+    suspended: byStatus.find((r) => r.status === 'suspended')?.count ?? 0,
+    graduated: byStatus.find((r) => r.status === 'graduated')?.count ?? 0,
+  });
+}));
+
+/**
  * Server-side CSV export over the FULL filtered dataset (audit STU-H2).
  *
  * The UI used to build the CSV from `filteredStudents` — the loaded page —

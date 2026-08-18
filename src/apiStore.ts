@@ -29,6 +29,7 @@ import {
   BusinessRule, RuleCategory, RuleEngineResult, BusinessRuleVersion, PipelineStage,
   Branch, Campus, Organization, TeacherContractType,
   StudentBalanceRow,
+  StudentSummary,
   AttendanceSummaryRow, DashboardSummary, VisitorSummary, VisitorQuery, ConversionEligibility, DuplicateCandidate,} from './types';
 
 /** Real due/paid/remaining figures for one teacher/month, mirroring GET /teachers/:id/salary-status. */
@@ -227,11 +228,21 @@ export function useApiStore() {
   // and clears this flag; a lite roster can therefore never masquerade as one.
   const [studentsAreLite, setStudentsAreLite] = useState(false);
   const [studentBalances, setStudentBalances] = useState<StudentBalanceRow[]>([]);
+  // Authoritative roster totals (audit STU-H2). Never derived from the loaded page.
+  const [studentSummary, setStudentSummary] = useState<StudentSummary | null>(null);
   const [attendanceSummary, setAttendanceSummary] = useState<AttendanceSummaryRow[]>([]);
 
   const reloadStudents = useCallback(
-    () => api.get<Student[]>('/students', { ...bq, limit: '2000' })
-      .then((rows) => { setStudents(rows); setStudentsAreLite(false); setRosterStale(false); }),
+    () => Promise.all([
+      api.get<Student[]>('/students', { ...bq, limit: '2000' }),
+      // The roster page is still capped; the SUMMARY is what tells the user how
+      // many students actually exist, so a truncated page can no longer be
+      // presented as the whole roster (audit STU-H2).
+      api.get<StudentSummary>('/students/summary', bq).catch(() => null),
+    ]).then(([rows, summary]) => {
+      setStudents(rows); setStudentsAreLite(false); setRosterStale(false);
+      if (summary) setStudentSummary(summary);
+    }),
     [bq, setRosterStale],
   );
 
@@ -1462,7 +1473,7 @@ export function useApiStore() {
     createBranch, updateBranch, deactivateBranch, deleteBranch,
     // Utils
     changeBranch, reloadAll, ensureTabData, ensureFinanceSection, isTabLoading, reloadNotifications, reloadVisitors, reloadFinanceDashboard, reloadDashboardSummary,
-    studentsAreLite, ensureFullStudents, studentBalances, reloadStudentBalances,
+    studentsAreLite, ensureFullStudents, studentBalances, reloadStudentBalances, studentSummary,
     attendanceSummary, reloadAttendanceSummary,
     // Existing business operations
     addVisitor, updateVisitorCRM, addVisitorFollowUp, updateVisitor, advanceVisitorStage, registerVisitorToStudent, checkConversionEligibility, checkDuplicateLeads,

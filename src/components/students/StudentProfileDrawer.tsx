@@ -51,6 +51,37 @@ interface StudentProfileDrawerProps {
   onPayInstallment: (installmentId: string, amount: number) => void;
 }
 
+/**
+ * Client-side mirror of the server's STUDENT_TRANSITIONS
+ * (server/src/core/students/student-lifecycle.ts).
+ *
+ * This is presentation only — it decides which buttons are offered. The server
+ * remains the sole authority and re-validates every transition; this exists so
+ * the operator is not invited to click something that can only return 409.
+ */
+const STUDENT_TRANSITIONS: Record<string, readonly string[]> = {
+  active: ['active', 'inactive', 'suspended', 'graduated'],
+  inactive: ['inactive', 'active', 'graduated'],
+  suspended: ['suspended', 'active', 'inactive'],
+  graduated: ['graduated'],
+};
+
+function canTransition(from: string | null | undefined, to: string): boolean {
+  return (STUDENT_TRANSITIONS[String(from ?? 'active')] ?? []).includes(to);
+}
+
+function terminalHint(from: string | null | undefined): string {
+  return String(from) === 'graduated'
+    ? 'This student has graduated — graduation is a final state.'
+    : `Not allowed from "${from}".`;
+}
+
+const STATUS_ACTIONS = [
+  { to: 'active' as const, label: 'Active', activeClass: 'bg-emerald-600 text-white' },
+  { to: 'inactive' as const, label: 'Hold', activeClass: 'bg-rose-600 text-white' },
+  { to: 'graduated' as const, label: 'Graduated', activeClass: 'bg-indigo-600 text-white' },
+];
+
 export default function StudentProfileDrawer({
   attendanceSummary,
   student, serverBalance, payments, attendance, exams, examResults, classes,
@@ -58,6 +89,28 @@ export default function StudentProfileDrawer({
   triggerToast, onOpenEnroll, onOpenExtraClass, onOpenRefund, onPayInstallment
 }: StudentProfileDrawerProps) {
   const [drawerTab, setDrawerTab] = useState<'info' | 'card'>('info');
+  const [statusBusy, setStatusBusy] = useState(false);
+
+  /**
+   * Single place that performs a status change from this drawer, so every
+   * button reports the SERVER's message on failure instead of a generic
+   * "failed" (the audit flagged generic errors as a defect class).
+   */
+  const changeStatus = async (
+    to: 'active' | 'inactive' | 'graduated' | 'suspended',
+    successMessage?: string,
+  ) => {
+    if (statusBusy) return;
+    setStatusBusy(true);
+    try {
+      await updateStudentStatus(student.id, to);
+      triggerToast(successMessage ?? `Student marked ${to}.`, 'success');
+    } catch (err) {
+      triggerToast(err instanceof Error ? err.message : `Could not set status to ${to}.`, 'error');
+    } finally {
+      setStatusBusy(false);
+    }
+  };
   const [editingIdentity, setEditingIdentity] = useState(false);
   const [draftPhone, setDraftPhone] = useState(student.phone || '');
   const [draftEmail, setDraftEmail] = useState(student.email || '');
@@ -179,9 +232,24 @@ export default function StudentProfileDrawer({
         <div className="flex flex-wrap gap-2 items-center">
           {isOwnerOrManager && (
             <div className="flex gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
-              <button onClick={() => updateStudentStatus(student.id, 'active')} className={`px-3 py-1.5 rounded-lg text-[10px] font-bold cursor-pointer ${student.status === 'active' ? 'bg-emerald-600 text-white' : 'text-slate-600'}`}>Active</button>
-              <button onClick={() => updateStudentStatus(student.id, 'inactive')} className={`px-3 py-1.5 rounded-lg text-[10px] font-bold cursor-pointer ${student.status === 'inactive' ? 'bg-rose-600 text-white' : 'text-slate-600'}`}>Hold</button>
-              <button onClick={() => updateStudentStatus(student.id, 'graduated')} className={`px-3 py-1.5 rounded-lg text-[10px] font-bold cursor-pointer ${student.status === 'graduated' ? 'bg-indigo-600 text-white' : 'text-slate-600'}`}>Graduated</button>
+              {/* Lifecycle-aware controls. Graduation is terminal server-side
+                  (audit STU-C2), so offering "Active"/"Hold" on a graduated
+                  student would only produce a 409. Suspended students must go
+                  through the suspend/resume workflow below, not these. */}
+              {STATUS_ACTIONS.map(({ to, label, activeClass }) => {
+                const allowed = canTransition(student.status, to);
+                return (
+                  <button
+                    key={to}
+                    onClick={() => changeStatus(to)}
+                    disabled={!allowed || statusBusy}
+                    title={allowed ? `Mark as ${label}` : terminalHint(student.status)}
+                    className={`px-3 py-1.5 rounded-lg text-[10px] font-bold ${allowed && !statusBusy ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'} ${student.status === to ? activeClass : 'text-slate-600'}`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
             </div>
           )}
           {isRegistrar && (
@@ -190,12 +258,12 @@ export default function StudentProfileDrawer({
             </button>
           )}
           {isRegistrar && student.status !== 'suspended' && (
-            <button onClick={async () => { try { await updateStudentStatus(student.id, 'suspended'); triggerToast('Student suspended.', 'info'); } catch (err) { triggerToast(err instanceof Error ? err.message : 'Suspend failed.', 'error'); } }} className="flex items-center gap-1 text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-amber-50 text-amber-700 border border-amber-100 hover:bg-amber-100 cursor-pointer">
+            <button disabled={statusBusy} onClick={() => changeStatus('suspended', 'Student suspended.')} className="flex items-center gap-1 text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-amber-50 text-amber-700 border border-amber-100 hover:bg-amber-100 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer">
               <Ban className="w-3 h-3" /> Suspend
             </button>
           )}
           {isRegistrar && student.status === 'suspended' && (
-            <button onClick={() => updateStudentStatus(student.id, 'active')} className="flex items-center gap-1 text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-100 hover:bg-emerald-100 cursor-pointer">
+            <button disabled={statusBusy} onClick={() => changeStatus('active', 'Student resumed.')} className="flex items-center gap-1 text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-100 hover:bg-emerald-100 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer">
               <CheckCircle2 className="w-3 h-3" /> Resume
             </button>
           )}

@@ -1493,6 +1493,21 @@ export interface OperationsReport {
  * Mirrors GET /api/payments/balances. Used instead of reducing the paginated
  * payments list, which under-reported any student outside the first page.
  */
+/**
+ * Authoritative Students roster summary from GET /students/summary.
+ * Computed server-side over the FULL filtered set — the UI must never
+ * re-derive these from the loaded page (audit STU-H2).
+ */
+export interface StudentSummary {
+  filtered: number;
+  unfiltered: number;
+  byStatus: Array<{ status: string; count: number }>;
+  active: number;
+  inactive: number;
+  suspended: number;
+  graduated: number;
+}
+
 export interface StudentBalanceRow {
   studentId: string;
   tuitionDue: number;

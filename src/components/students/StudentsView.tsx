@@ -6,7 +6,7 @@
 import {api} from '../../api/client';
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {GraduationCap, Search, Filter, Eye, CreditCard, UserPlus, Users, RotateCcw, X, Download} from 'lucide-react';
-import {Student, Class, Payment, UserRole, Exam, ExamResult, Attendance, Branch, Visitor, StudentBalanceRow, AttendanceSummaryRow } from '../../types';
+import {Student, Class, Payment, UserRole, Exam, ExamResult, Attendance, Branch, Visitor, StudentBalanceRow, AttendanceSummaryRow, StudentSummary } from '../../types';
 import AddStudentForm from './AddStudentForm';
 import StudentProfileDrawer from './StudentProfileDrawer';
 import {formatAFN} from '../../utils/format';
@@ -35,13 +35,16 @@ interface StudentsViewProps {
   enrollStudentSemester: (studentId: string, semesterName: string, classId: string, tuitionAmount: number, amountPaidNow?: number, notes?: string) => void;
   issueStudentCard: (studentId: string, cardDesign: { primaryColor: string; bgStyle: string }, notes?: string) => Promise<{ feeCharged: number }>;
   books?: any[]; // Needed for smart book payments
+  /** Authoritative roster totals from the server (audit STU-H2). */
+  studentSummary?: StudentSummary | null;
 }
 
 export default function StudentsView({
   attendanceSummary,
   studentBalances,
   students, visitors = [], classes, payments, exams, examResults, attendance, activeRole, branches, activeBranchId,
-  addStudentManual, updateStudentStatus, updateStudent, enrollStudentSemester, issueStudentCard, books = []
+  addStudentManual, updateStudentStatus, updateStudent, enrollStudentSemester, issueStudentCard, books = [],
+  studentSummary = null
 }: StudentsViewProps) {
   const { educationalSections } = useAcademicOptions(classes, activeBranchId);
   const [subTab, setSubTab] = useState<'list' | 'add'>('list');
@@ -111,6 +114,8 @@ export default function StudentsView({
 
   const getStudentFinance = (studentId: string) => financeByStudent.get(studentId) || { total: 0, paid: 0, debt: 0 };
 
+
+
   // Debounced whole-DB search. Empty term + all filters -> use loaded roster.
   const serverSearch = useCallback(async (offset: number) => {
     const q = searchTerm.trim();
@@ -160,23 +165,62 @@ export default function StudentsView({
     return matchesSearch && matchesStatus && matchesClass;
   });
 
-  // Export the filtered list as CSV for management / offline records.
-  const exportCsv = () => {
-    if (filteredStudents.length === 0) return triggerToast('No students to export.', 'info');
-    const head = ['Code', 'Full Name', 'Phone', 'WhatsApp', 'Father Name', 'Tazkira No', 'Email', 'Gender', 'Status', 'Class', 'Total Fee', 'Paid', 'Debt', 'Registered'];
-    const rows = filteredStudents.map((st) => {
-      const fin = getStudentFinance(st.id);
-      const cls = (st.semesters || []).map((sem) => sem.classId).filter(Boolean).join('; ');
-      return [st.studentCode, st.fullName, st.phone || '', st.whatsapp || '', st.fatherName || '', st.tazkiraNo || '', st.email || '', st.gender, st.status, cls, fin.total, fin.paid, fin.debt, st.registrationDate || ''];
-    });
-    const csv = [head, ...rows].map((r) => r.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `students-${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    triggerToast(`Exported ${filteredStudents.length} students.`, 'success');
+  /**
+   * Roster caption (audit STU-H2).
+   *
+   * The old caption was `${filteredStudents.length} of ${students.length}`,
+   * where BOTH numbers came from the truncated page — so a branch with 2,162
+   * students was captioned "2000 of 2000" and nothing indicated that 162 rows
+   * were missing. The denominator is now the server's authoritative total, and
+   * when the page really is short of it we say so explicitly.
+   */
+  const rosterCaption = useMemo(() => {
+    const shown = filteredStudents.length;
+    const total = studentSummary?.filtered ?? null;
+    if (total === null) return `${shown} student${shown === 1 ? '' : 's'} loaded`;
+    if (shown < total) {
+      return `Showing ${shown} of ${total} students — refine the search or use filters to reach the rest`;
+    }
+    return `${shown} of ${total} student${total === 1 ? '' : 's'}`;
+  }, [filteredStudents.length, studentSummary]);
+
+  /**
+   * CSV export (audit STU-H2).
+   *
+   * This used to serialise `filteredStudents` — the loaded page — so an export
+   * of a 2,162-student branch silently produced 2,000 rows, including
+   * financial columns. It now asks the server to build the file over the FULL
+   * filtered dataset, using the authoritative balance definition.
+   */
+  const [exporting, setExporting] = useState(false);
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const params = new URLSearchParams();
+      const q = searchTerm.trim();
+      if (q) params.set('q', q);
+      if (statusFilter !== 'all') params.set('status', statusFilter);
+      if (classFilter !== 'all') params.set('classId', classFilter);
+      const qs = params.toString();
+      const res = await fetch(`/api/students/export${qs ? `?${qs}` : ''}`, { credentials: 'include' });
+      if (!res.ok) {
+        let msg = 'Export failed.';
+        try { msg = (await res.json()).error || msg; } catch { /* non-JSON error body */ }
+        return triggerToast(msg, 'error');
+      }
+      const total = Number(res.headers.get('X-Total-Count') || 0);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `students-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      triggerToast(total ? `Exported ${total} students.` : 'No students to export.', total ? 'success' : 'info');
+    } catch {
+      triggerToast('Export failed. Check your connection and try again.', 'error');
+    } finally {
+      setExporting(false);
+    }
   };
 
   // Handlers
@@ -283,15 +327,16 @@ export default function StudentsView({
                 <option value="all">All Classes</option>
                 {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
-              <button type="button" onClick={exportCsv} className="ml-1 px-3 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs cursor-pointer flex items-center gap-1">
-                <Download className="w-3.5 h-3.5" /> Export CSV
+              <button type="button" onClick={exportCsv} disabled={exporting} aria-busy={exporting}
+                className="ml-1 px-3 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold text-xs cursor-pointer flex items-center gap-1">
+                <Download className="w-3.5 h-3.5" /> {exporting ? 'Exporting…' : 'Export CSV'}
               </button>
             </div>
           </div>
           <div className="text-[11px] text-slate-500 font-semibold px-1 -mt-1">
             {searchResults !== null
               ? (searchLoading && searchOffset === 0 ? 'Searching the full database…' : `${searchTotal} match${searchTotal === 1 ? '' : 'es'} found`)
-              : `${filteredStudents.length} of ${students.length} students`}
+              : rosterCaption}
           </div>
 
           {/* Table */}
