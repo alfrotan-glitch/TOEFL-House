@@ -1030,6 +1030,39 @@ CREATE TABLE IF NOT EXISTS employees (
 
 CREATE INDEX IF NOT EXISTS idx_employees_branch      ON employees(branch_id); 
 
+-- Employee payroll ledger (teacher audit T-1). Mirrors teacher_salary_ledger
+-- for the employee domain: `teacher_salary_ledger.teacher_id` is a NOT NULL FK
+-- to teachers(id) and the teacher payroll engine SUMs that table to decide what
+-- a TEACHER is still owed, so employee rows cannot live there without
+-- corrupting teacher payroll. Canonical definition — migration 075 creates the
+-- same shape on existing databases.
+CREATE TABLE IF NOT EXISTS employee_salary_ledger (
+  id              TEXT PRIMARY KEY,
+  employee_id     TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  period_key      TEXT NOT NULL,
+  period_label    TEXT NOT NULL,
+  paid_amount     REAL NOT NULL DEFAULT 0,
+  payment_type    TEXT NOT NULL CHECK (payment_type IN ('full','partial','advance')),
+  transaction_id  TEXT,
+  notes           TEXT,
+  branch_id       TEXT NOT NULL,
+  paid_at         TEXT NOT NULL DEFAULT (datetime('now')),
+  operator_name   TEXT,
+  idempotency_key TEXT,
+  status          TEXT NOT NULL DEFAULT 'posted' CHECK (status IN ('posted','voided')),
+  voided_at       TEXT,
+  voided_by       TEXT,
+  void_reason     TEXT
+); 
+CREATE UNIQUE INDEX IF NOT EXISTS uq_employee_salary_idempotency
+  ON employee_salary_ledger(idempotency_key) WHERE idempotency_key IS NOT NULL; 
+CREATE UNIQUE INDEX IF NOT EXISTS uq_employee_salary_full_period
+  ON employee_salary_ledger(employee_id, period_key) WHERE payment_type = 'full' AND status = 'posted'; 
+CREATE INDEX IF NOT EXISTS idx_employee_salary_period
+  ON employee_salary_ledger(employee_id, period_key, paid_at); 
+CREATE INDEX IF NOT EXISTS idx_employee_salary_branch_period
+  ON employee_salary_ledger(branch_id, period_key, paid_at); 
+
 -- ============================================================================ 
 -- BC #10: INVENTORY (Moved before Finance for Foreign Key Integrity) 
 -- ============================================================================ 

@@ -102,7 +102,20 @@ const stmtUpdateEmployeeBranch = db.prepare('UPDATE employees SET branch_id = ? 
 const stmtUpdateUserBranchForEmployee = db.prepare('UPDATE users SET branch_id = ? WHERE linked_employee_id = ?');
 const stmtUpdateUserBranchById = db.prepare('UPDATE users SET branch_id = ? WHERE id = ?');
 const stmtSoftDeleteEmployee = db.prepare("UPDATE employees SET status = 'inactive' WHERE id = ?");
-const stmtCheckDuplicateEmployeePay = db.prepare(`SELECT id FROM financial_transactions WHERE reference_id = ? AND category = 'salary' AND description LIKE ? LIMIT 1`);
+
+// ── EMPLOYEE PAYROLL LEDGER (teacher audit T-1) ────────────────────────────
+// Employee salary payment previously wrote ONLY a raw financial_transactions
+// expense row, with no ledger, no idempotency and no reconcilable trail. Its
+// sole duplicate guard was a `description LIKE '%full salary%<month>%'` string
+// match that covered `full` only and was a check-then-act under concurrency.
+// These statements mirror the hardened teacher payroll path exactly.
+const stmtGetEmployeeSalaryByIdempotency = db.prepare(
+  'SELECT id, employee_id, period_key, paid_amount, payment_type, transaction_id, branch_id, status FROM employee_salary_ledger WHERE idempotency_key = ?'
+);
+const stmtInsertEmployeeSalaryLedger = db.prepare(
+  `INSERT INTO employee_salary_ledger (id, employee_id, period_key, period_label, paid_amount, payment_type, transaction_id, notes, branch_id, operator_name, idempotency_key, status)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'posted')`
+);
 
 /** The five contract types, taken from the payroll engine's single source of
  *  truth so routes, engine and database CHECK can never drift apart again. */
@@ -622,33 +635,109 @@ employeesRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(as
   if (employee.status === 'inactive') throw new HttpError(400, 'Cannot pay salary to an inactive employee.');
 
   const { monthName, amountPaid, paymentType } = req.body as { monthName: string; amountPaid: number; paymentType: 'full' | 'partial' | 'advance' };
-  if (!monthName || !amountPaid || amountPaid <= 0) throw new HttpError(400, 'Month and payment amount are required.');
-  
+  if (!monthName || amountPaid == null) throw new HttpError(400, 'Month and payment amount are required.');
+
   const resolvedAmount = Number(amountPaid);
+  if (!Number.isFinite(resolvedAmount) || resolvedAmount <= 0) throw new HttpError(400, 'Payment amount must be greater than zero.');
   const type = paymentType || 'full';
   if (!['full', 'partial', 'advance'].includes(type)) throw new HttpError(400, 'Invalid payment type.');
 
-  const budgetLine = stmtGetBudgetByPurpose.get('employee_salary', employee.branch_id) as BudgetRow | undefined;
-  if (!budgetLine) throw new HttpError(500, 'Employee salary budget line is not configured.');
-  if (budgetLine.current_amount < resolvedAmount) throw new HttpError(409, `Insufficient employee salary budget. Balance: ${budgetLine.current_amount} AFN.`);
+  // `toPeriodKey` normalises 'Asad 1405', 'اسد ۱۴۰۵', '1405-05' and '2026-08'
+  // to one canonical key so the same month written two ways is one period.
+  // It returns '' for anything it cannot parse; falling back to the raw label
+  // keeps unparseable-but-distinct months distinct. Collapsing them to a shared
+  // '' would make two different months look like retries of each other and
+  // refuse the second, legitimate payment. This endpoint has never constrained
+  // the month format, so nothing previously accepted is rejected now.
+  const periodKey = toPeriodKey(monthName) || String(monthName).trim();
 
-  if (type === 'full') {
-    const dup = stmtCheckDuplicateEmployeePay.get(employee.id, `%full salary%${monthName}%`) as any;
-    if (dup) throw new HttpError(409, `A full salary payment for "${monthName}" already exists.`);
-  }
+  // ── SERVER-SIDE IDEMPOTENCY (teacher audit T-1) ──────────────────────────
+  // Always applied, never only when the caller remembers a key — the same
+  // model the teacher payroll path uses. Previously this endpoint had NO
+  // idempotency at all and ignored an explicit Idempotency-Key header
+  // outright: six concurrent identical 1,000 AFN partials produced six
+  // payments and six expense rows (reproduced live on a fresh database).
+  //
+  // The derived fingerprint collapses retries of the SAME intent while
+  // leaving genuinely distinct payments alone: a different amount, a
+  // different month, a different payment type or a later time bucket all
+  // produce a different key. Verified: 1,000 partial + 2,500 partial +
+  // another month + an advance all still succeed.
+  const { key: idempotencyKey } = resolveIdempotency(req, {
+    route: 'employee-pay-salary',
+    employeeId: employee.id,
+    periodKey,
+    amount: resolvedAmount,
+    type,
+    actorUserId: user.userId,
+  });
 
   const typeLabel = type === 'partial' ? 'partial salary' : type === 'advance' ? 'salary advance' : 'full salary';
   const date = today();
+  const periodLabel = jalaliPeriodLabel(periodKey);
 
-  const tx = db.transaction(() => {
-    stmtUpdateBudgetAmount.run(resolvedAmount, budgetLine.id);
-    stmtInsertFinTx.run(id('tx'), resolvedAmount, date, `Paid ${typeLabel} for ${monthName} to employee ${employee.full_name} (${employee.role})`, employee.id, user.fullName, employee.branch_id);
+  const result = (() => {
+    // BEGIN IMMEDIATE takes the write lock up front so the replay check, the
+    // budget debit and both inserts are one atomic unit — matching the
+    // teacher path. Previously the budget read happened outside the
+    // transaction entirely.
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const replay = stmtGetEmployeeSalaryByIdempotency.get(idempotencyKey) as
+        | { id: string; employee_id: string; period_key: string; paid_amount: number; payment_type: string } | undefined;
+      if (replay) {
+        if (replay.employee_id !== employee.id || replay.period_key !== periodKey) {
+          throw new HttpError(409, 'Idempotency key was already used for a different payroll operation.');
+        }
+        db.exec('COMMIT');
+        return { amountPaid: Number(replay.paid_amount), ledgerId: replay.id, replayed: true, remainingBudget: null as number | null };
+      }
+
+      const budgetLine = stmtGetBudgetByPurpose.get('employee_salary', employee.branch_id) as BudgetRow | undefined;
+      if (!budgetLine) throw new HttpError(500, 'Employee salary budget line is not configured.');
+      // Conditional debit: the balance is re-checked by the database in the
+      // same statement that spends it, so two concurrent payments cannot both
+      // pass a stale read.
+      const debited = db.prepare('UPDATE budget_lines SET current_amount = current_amount - ? WHERE id = ? AND current_amount >= ?')
+        .run(resolvedAmount, budgetLine.id, resolvedAmount);
+      if (debited.changes !== 1) throw new HttpError(409, `Insufficient employee salary budget. Balance: ${budgetLine.current_amount} AFN.`);
+
+      const txId = id('tx');
+      const ledgerId = id('esl');
+      stmtInsertFinTx.run(txId, resolvedAmount, date, `Paid ${typeLabel} for ${monthName} to employee ${employee.full_name} (${employee.role})`, employee.id, user.fullName, employee.branch_id);
+      // The canonical financial trail this endpoint never had. `uq_employee_salary_full_period`
+      // replaces the old description-LIKE guard for full payments.
+      stmtInsertEmployeeSalaryLedger.run(ledgerId, employee.id, periodKey, periodLabel, resolvedAmount, type, txId, null, employee.branch_id, user.fullName, idempotencyKey);
+
+      db.exec('COMMIT');
+      return { amountPaid: resolvedAmount, ledgerId, replayed: false, remainingBudget: Number(budgetLine.current_amount) - resolvedAmount };
+    } catch (err) {
+      try { db.exec('ROLLBACK'); } catch { /* rollback may already be complete */ }
+      // Atomic backstop: under true concurrency several requests pass the
+      // replay pre-check together and only one can win the unique index. The
+      // losers replay the winner's result rather than paying twice or
+      // surfacing a 500.
+      if (isUniqueViolation(err)) {
+        const winner = stmtGetEmployeeSalaryByIdempotency.get(idempotencyKey) as { id: string; employee_id: string; paid_amount: number } | undefined;
+        if (winner && winner.employee_id === employee.id) {
+          return { amountPaid: Number(winner.paid_amount), ledgerId: winner.id, replayed: true, remainingBudget: null as number | null };
+        }
+        // A full-period collision is a genuine business conflict, not a retry.
+        throw new HttpError(409, `A full salary payment for "${monthName}" already exists.`);
+      }
+      throw err;
+    }
+  })();
+
+  if (!result.replayed) {
+    addNotification('Employee Salary Paid', `Salary of ${result.amountPaid} AFN paid to employee ${employee.full_name}.`, 'success', employee.branch_id);
+    writeAudit(req, `Paid salary to employee ${employee.full_name} — ${result.amountPaid} AFN for ${monthName}`);
+  }
+  res.status(201).json({
+    ok: true, amountPaid: result.amountPaid, monthName, paymentType: type,
+    ledgerId: result.ledgerId, replayed: result.replayed,
+    remainingBudget: result.remainingBudget,
   });
-  tx();
-
-  addNotification('Employee Salary Paid', `Salary of ${resolvedAmount} AFN paid to employee ${employee.full_name}.`, 'success', employee.branch_id);
-  writeAudit(req, `Paid salary to employee ${employee.full_name} — ${resolvedAmount} AFN for ${monthName}`);
-  res.status(201).json({ ok: true, amountPaid: resolvedAmount, monthName, paymentType: type, remainingBudget: budgetLine.current_amount - resolvedAmount });
 }));
 
 export default teachersRouter;
