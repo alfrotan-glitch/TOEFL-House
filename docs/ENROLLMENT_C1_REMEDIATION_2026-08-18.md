@@ -138,7 +138,7 @@ One row shows an active enrollment with no active semester: it is the **extra-cl
 | Commit | Content |
 |---|---|
 | `3281609` | **Recovery** of the E-1…E-4 remediation (was lost: `34ffc1c` never pushed, sandbox reset destroyed local history). Rebased onto the real remote history at `d746150` rather than force-pushing over it. |
-| `db41bcd` | This pass: C-1 projection fix + JourneyEngine dead-writer removal + 13 regression tests. |
+| `a6fbcc9` | This pass: C-1 projection fix + JourneyEngine dead-writer removal + 13 regression tests. |
 
 ---
 
@@ -147,7 +147,7 @@ One row shows an active enrollment with no active semester: it is the **extra-cl
 **VERIFIED SUCCEEDED.** GitHub authentication (previously expired) is working again.
 
 - `3281609` — pushed and confirmed via `git ls-remote` (`d746150..3281609`)
-- `db41bcd` — pushed and confirmed via `git ls-remote`; local `HEAD` and `refs/heads/arena/01a0062e-toefl-house` match exactly
+- `a6fbcc9` — pushed and confirmed via `git ls-remote`; local `HEAD` and `refs/heads/arena/01a0062e-toefl-house` match exactly
 
 Working tree clean at end of pass.
 
