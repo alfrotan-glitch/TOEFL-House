@@ -12,9 +12,10 @@ import {
   TERMINAL_ENROLLMENT_STATUSES,
 } from './lifecycle-engine.js';
 import { countActiveStudentsInClass } from './class-capacity.js';
+import { assertClassGenderAllows, assertNoDuplicateSeatEnrollment, assertNotAlreadySeatedInClass } from './class-admission.js';
 import { resolvePlacementRequirement } from '../placement/policy-engine.js';
 import { evaluateEnrollmentEligibility } from '../placement/placement-policy.js';
-import { resolveGoverningProgramVersionId } from '../placement/enrollment-gate.js';
+import { resolveGoverningProgramVersionId, assertPlacementEligibleForClass } from '../placement/enrollment-gate.js';
 
 export interface EnrollStudentInput {
   studentId: string;
@@ -78,6 +79,7 @@ export class EnrollmentService {
   private stmtInsertInvoiceItem: Database.Statement;
   
   private stmtGetActiveEnrollment: Database.Statement;
+  private stmtGetLatestEnrollment: Database.Statement;
   private stmtGetSuspendedEnrollment: Database.Statement;
   private stmtCompleteEnrollment: Database.Statement;
   private stmtTransferOutEnrollment: Database.Statement;
@@ -131,6 +133,10 @@ export class EnrollmentService {
     );
 
     this.stmtGetActiveEnrollment = db.prepare(`SELECT * FROM enrollments WHERE student_id = ? AND status = 'active' ORDER BY started_at DESC LIMIT 1`);
+    // Used only to explain *why* a transfer was refused (audit E-1): reporting
+    // the most recent enrollment's status turns an opaque 409 into an
+    // actionable message.
+    this.stmtGetLatestEnrollment = db.prepare(`SELECT * FROM enrollments WHERE student_id = ? ORDER BY created_at DESC, started_at DESC LIMIT 1`);
     this.stmtGetSuspendedEnrollment = db.prepare(`SELECT * FROM enrollments WHERE student_id = ? AND status = 'suspended' ORDER BY started_at DESC LIMIT 1`);
     this.stmtCompleteEnrollment = db.prepare(`UPDATE enrollments SET status = 'completed', ended_at = datetime('now'), updated_at = datetime('now'), notes = COALESCE(notes, '') || ? WHERE id = ?`);
     this.stmtTransferOutEnrollment = db.prepare(`UPDATE enrollments SET status = 'transferred', ended_at = datetime('now'), updated_at = datetime('now'), notes = COALESCE(notes, '') || ? WHERE id = ?`);
@@ -232,6 +238,38 @@ export class EnrollmentService {
     void levelCode;
   }
 
+  /**
+   * DUPLICATE ENROLLMENT AUTHORITY (audit E-2).
+   *
+   * The business rule is: a student may hold at most ONE seat-consuming
+   * enrollment in a given class at a time. "Seat-consuming" is deliberately
+   * the same predicate capacity uses (`ACTIVE_ENROLLMENT_STATUSES` =
+   * active / confirmed / pending) — if a row is counted against the class
+   * capacity, it is a seat, and a student cannot hold two seats in one class.
+   * Closed rows (transferred / dropped / withdrawn / completed / graduated)
+   * are history and are intentionally NOT covered, so a student may legitimately
+   * re-enroll in a class they previously left or repeat.
+   *
+   * Before remediation this rule existed only as an inline check in
+   * `students.routes.ts`, keyed on `status='active'` alone. Every other writer
+   * — including `journey/enrollments`, which delegates here — had no duplicate
+   * rule at all, so the same student could be given six active enrollments in
+   * one class by varying `semesterName`. The rule now lives at the single
+   * creation authority and is backed by a partial UNIQUE index (migration 074)
+   * so it holds even under a race.
+   *
+   * Note the rule is per (student, class) and NOT per (student, class,
+   * semester): semester name is caller-supplied free text and using it as part
+   * of the key is precisely what made the old DB index bypassable.
+   */
+  private assertNoDuplicateClassEnrollment(
+    studentId: string,
+    classId: string | null | undefined,
+    semesterName: string | null | undefined,
+  ): void {
+    assertNoDuplicateSeatEnrollment(this.db, studentId, classId, semesterName);
+  }
+
   enroll(input: EnrollStudentInput) {
     const student = this.stmtGetStudent.get(input.studentId) as { id: string; branch_id: string; status: string; gender: string } | undefined;
     if (!student) throw new HttpError(404, 'Student not found.');
@@ -289,6 +327,12 @@ export class EnrollmentService {
       if (capacity > 0 && activeCount >= capacity) throw new HttpError(409, 'Selected class is full.');
     }
 
+    // ── DUPLICATE GATE (single enforcement point for every enrollment path) ──
+    // Only the extra-class route used to check this, so `journey/enrollments`
+    // — which funnels through this method — could stack unlimited active
+    // enrollments for one student in one class (audit E-2).
+    this.assertNoDuplicateClassEnrollment(input.studentId, input.classId, input.semesterName ?? null);
+
     // ── PLACEMENT GATE (single enforcement point for every enrollment path) ──
     // Every route that enrolls a student funnels through this method, so the
     // placement invariant lives here rather than being repeated per route.
@@ -319,6 +363,9 @@ export class EnrollmentService {
         const current = countActiveStudentsInClass(this.db, input.classId);
         const capacity = Number((this.stmtGetClass.get(input.classId) as any)?.capacity ?? 0);
         if (capacity > 0 && current >= capacity) throw new HttpError(409, 'Selected class is full.');
+        // Re-checked under the write lock so two concurrent requests cannot
+        // both pass the pre-flight duplicate check (audit E-2).
+        this.assertNoDuplicateClassEnrollment(input.studentId, input.classId, input.semesterName ?? null);
       }
       const snapshot = this.catalog.buildFeeSnapshot({
         programVersionId, levelId: input.levelId, branchId: input.branchId, enrollmentType,
@@ -407,18 +454,81 @@ export class EnrollmentService {
     return run();
   }
 
+  /**
+   * Move a student from their current class into another one.
+   *
+   * TRANSFER SEMANTICS (audit E-1). A transfer MOVES an existing seat; it is
+   * not a way to create one. Before remediation this method treated the source
+   * enrollment as optional (`if (active)`) while running the destination
+   * INSERT unconditionally, which made it an unguarded enrollment-CREATE path:
+   * it resurrected students whose only enrollment was terminal, admitted
+   * students with no enrollment at all, and skipped both the placement gate
+   * and the lifecycle state machine that `enroll()` enforces.
+   *
+   * The contract is now explicit:
+   *
+   *   source enrollment  — MUST exist and MUST be 'active'. A student whose
+   *                        enrollments are all terminal (graduated / dropped /
+   *                        withdrawn / transferred) or who has none has nothing
+   *                        to transfer; the correct operation is a fresh
+   *                        enrollment through `enroll()`, which applies the
+   *                        admission gates.
+   *   source state       — active → 'transferred', validated through
+   *                        `assertEnrollmentTransition` (the single lifecycle
+   *                        authority) rather than an unchecked UPDATE.
+   *   destination class  — must exist, be active, be in the student's branch,
+   *                        admit the student's gender, have a free seat, and
+   *                        not already hold a seat-consuming enrollment for
+   *                        this student.
+   *   destination enroll — created 'active', carrying the source program
+   *                        lineage forward.
+   *   financials         — unchanged by design: the source semester row is
+   *                        closed and a new zero-fee row opened, so the
+   *                        obligation is NOT duplicated (verified live).
+   *
+   * Admission gates (placement, gender, duplicate, capacity) are applied here
+   * in the domain layer, not in the route, so every caller — the students
+   * route, the transfer-request approval workflow, and any future writer —
+   * gets the same rule.
+   */
   transfer(input: { studentId: string; toClassId: string; notes?: string | null; actorUserId?: string | null; }) {
     const student = this.stmtGetStudent.get(input.studentId) as { id: string; branch_id: string; status: string; gender: string } | undefined;
-    if (!student) throw new Error('Student not found.');
-    if (student.status === 'suspended') throw new Error('Suspended students must be resumed before transfer.');
+    if (!student) throw new HttpError(404, 'Student not found.');
+    if (student.status === 'suspended') throw new HttpError(409, 'Suspended students must be resumed before transfer.');
     const active = this.stmtGetActiveEnrollment.get(input.studentId) as any;
     const toClass = this.stmtGetClass.get(input.toClassId) as any;
-    if (!toClass) throw new Error('Target class not found.');
-    if (toClass.branch_id !== student.branch_id) throw new Error('Target class belongs to another branch.');
-    if (toClass.status && toClass.status !== 'active') throw new Error('Target class is not active.');
+    if (!toClass) throw new HttpError(404, 'Target class not found.');
+    if (toClass.branch_id !== student.branch_id) throw new HttpError(400, 'Target class belongs to another branch.');
+    if (toClass.status && toClass.status !== 'active') throw new HttpError(400, 'Target class is not active.');
+
+    // ── A TRANSFER REQUIRES AN ACTIVE SOURCE ENROLLMENT (audit E-1) ──
+    // Without this, the destination INSERT below runs for a student who has
+    // nothing to transfer, silently manufacturing an enrollment that never
+    // passed the admission gates.
+    if (!active) {
+      const latest = this.stmtGetLatestEnrollment.get(input.studentId) as { status: string } | undefined;
+      throw new HttpError(
+        409,
+        latest
+          ? `This student has no active enrollment to transfer (most recent enrollment is '${latest.status}'). ` +
+            'Enroll the student instead — transferring cannot revive a closed enrollment.'
+          : 'This student has no enrollment to transfer. Enroll the student first.',
+      );
+    }
+
+    // The outgoing enrollment moves active → 'transferred'. Route it through
+    // the lifecycle authority so transfer can never perform a state change the
+    // state machine forbids.
+    assertEnrollmentTransition(active.status as EnrollmentStatus, 'transferred');
 
     const fromClassId = active?.class_id || null;
-    if (fromClassId === input.toClassId) throw new Error('Student is already in this class.');
+    if (fromClassId === input.toClassId) throw new HttpError(400, 'Student is already in this class.');
+
+    // Destination admission gates — the same rules `enroll()` applies, so the
+    // two paths cannot disagree about who may occupy a seat.
+    assertClassGenderAllows(toClass, student.gender);
+    assertPlacementEligibleForClass(this.db, input.studentId, input.toClassId, student.branch_id);
+    assertNotAlreadySeatedInClass(this.db, input.studentId, input.toClassId);
 
     const newEnrollmentId = makeId('enr');
 
@@ -427,10 +537,15 @@ export class EnrollmentService {
       const targetCapacity = Number(toClass.capacity ?? 0);
       if (targetCapacity > 0 && currentTargetCount >= targetCapacity) throw new HttpError(409, 'Target class is full.');
 
-      if (active) {
-        this.stmtTransferOutEnrollment.run(input.notes ? `\n[transfer] ${input.notes}` : '\n[transfer]', active.id);
-        this.stmtInsertTransferEvent.run(makeId('eev'), active.id, input.studentId, fromClassId, input.toClassId, input.notes || null, input.actorUserId || null);
-      }
+      // Re-checked inside the transaction: the pre-flight guard above runs
+      // before the write lock, so the duplicate rule is confirmed here where
+      // it is race-safe (mirrors how capacity is handled).
+      assertNotAlreadySeatedInClass(this.db, input.studentId, input.toClassId);
+
+      // `active` is guaranteed non-null: a transfer without an active source
+      // enrollment is rejected before the transaction opens (audit E-1).
+      this.stmtTransferOutEnrollment.run(input.notes ? `\n[transfer] ${input.notes}` : '\n[transfer]', active.id);
+      this.stmtInsertTransferEvent.run(makeId('eev'), active.id, input.studentId, fromClassId, input.toClassId, input.notes || null, input.actorUserId || null);
 
       this.stmtInsertNewEnrollment.run(
         newEnrollmentId, input.studentId, active?.program_id || toClass.program_id || null,
@@ -460,7 +575,7 @@ export class EnrollmentService {
 
   suspend(input: { studentId: string; notes?: string | null; actorUserId?: string | null }) {
     const active = this.stmtGetActiveEnrollment.get(input.studentId) as any;
-    if (!active) throw new Error('No active enrollment to suspend.');
+    if (!active) throw new HttpError(409, 'No active enrollment to suspend.');
 
     this.db.transaction(() => {
       this.stmtSuspendEnrollment.run(input.notes ? `\n[suspend] ${input.notes}` : '\n[suspend]', active.id);
@@ -478,16 +593,16 @@ export class EnrollmentService {
 
   resume(input: { studentId: string; classId?: string | null; notes?: string | null; actorUserId?: string | null; }) {
     const student = this.stmtGetStudent.get(input.studentId) as { id: string; branch_id: string; status: string } | undefined;
-    if (!student) throw new Error('Student not found.');
+    if (!student) throw new HttpError(404, 'Student not found.');
     const suspended = this.stmtGetSuspendedEnrollment.get(input.studentId) as any;
-    if (!suspended) throw new Error('No suspended enrollment to resume.');
+    if (!suspended) throw new HttpError(409, 'No suspended enrollment to resume.');
 
     const classId = input.classId || suspended.class_id;
-    if (!classId) throw new Error('classId required to resume.');
+    if (!classId) throw new HttpError(400, 'classId required to resume.');
     const targetClass = this.stmtGetClass.get(classId) as any;
-    if (!targetClass) throw new Error('Resume class not found.');
-    if (targetClass.branch_id !== student.branch_id) throw new Error('Resume class belongs to another branch.');
-    if (targetClass.status !== 'active') throw new Error('Resume class is not active.');
+    if (!targetClass) throw new HttpError(404, 'Resume class not found.');
+    if (targetClass.branch_id !== student.branch_id) throw new HttpError(400, 'Resume class belongs to another branch.');
+    if (targetClass.status !== 'active') throw new HttpError(400, 'Resume class is not active.');
 
     this.db.transaction(() => {
       const currentTargetCount = countActiveStudentsInClass(this.db, classId);

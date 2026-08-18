@@ -1,0 +1,74 @@
+-- 074_enrollment_class_uniqueness.sql
+-- ---------------------------------------------------------------------------
+-- Duplicate-enrollment integrity (enrollment audit E-2).
+--
+-- THE DEFECT
+-- `POST /api/students/:id/enroll-class` rejected a second enrollment in the
+-- same class with 409 "Already enrolled in this class.", but that guard was an
+-- inline check in students.routes.ts and no other writer had one. Both
+-- `POST /api/students/:id/journey/enrollments` and the transfer path could
+-- create additional seat-consuming enrollments for the same student in the
+-- same class. Proven live: six active enrollments in one class for one
+-- student, created by varying the caller-supplied `semesterName`.
+--
+-- WHY THE EXISTING INDEX DID NOT PREVENT IT
+-- `uq_student_semester_active ON student_semesters(student_id, semester_name)
+--  WHERE status='active'` (migration 056) constrains the derived semester
+-- projection, not enrollments, and is keyed on semester_name — free text
+-- supplied by the caller. Sending a different name each time bypassed it
+-- completely. That index is a projection guard; it was never the business rule.
+--
+-- THE BUSINESS RULE
+-- A student may hold at most ONE seat-consuming enrollment in a given class
+-- FOR A GIVEN SEMESTER.
+--
+-- The semester belongs in the key, and this was established from behaviour,
+-- not assumed. Enrolling one student in one class for consecutive terms is a
+-- supported and financially material flow: POST /students/:id/enroll-semester
+-- exists to do exactly that, and balance-single-source-of-truth.test.ts pins
+-- the money ('Term One' 20,000 + 'Term Two' 30,000 in a single class must
+-- yield 50,000 lifetime tuition). A bare (student, class) key rejects the
+-- second term with a 409 and silently destroys billable revenue — an earlier
+-- draft of this migration did precisely that and the suite caught it.
+--
+-- "Seat-consuming" is deliberately the same set the capacity predicate uses
+-- (core/academic/class-capacity.ts ACTIVE_ENROLLMENT_STATUSES): if a row counts
+-- against class capacity it is a seat. Closed rows (transferred / dropped /
+-- withdrawn / completed / graduated) are history and are intentionally NOT
+-- constrained, so a student may legitimately re-enroll in, or repeat, a class
+-- they previously left. Rows with class_id IS NULL are program-level
+-- enrollments with no seat and are excluded.
+--
+-- COALESCE(semester_name,'') keeps NULL from defeating the index: SQLite treats
+-- NULLs as distinct, so without it two seat rows that both omit the semester
+-- would not collide.
+--
+-- WHY A DB CONSTRAINT AND NOT ONLY THE SERVICE GUARD
+-- The application guard is a check-then-act. better-sqlite3 serialises writes
+-- in-process so it holds today, but a second process, a pool, or a move off
+-- SQLite would let two requests pass the SELECT together. The service-layer
+-- guard (EnrollmentService.assertNoDuplicateClassEnrollment) gives the correct
+-- 409; this index makes the invariant unbreakable.
+--
+-- HISTORICAL DATA
+-- Collisions were inventoried before authoring this migration:
+--   - freshly seeded database:            0 collisions
+--   - the Student-subsystem audit harness: 0 collisions
+--   - the Enrollment audit harness:        4 collisions, all created by the
+--     audit's own E-2 exploit probes earlier the same day
+-- No naturally occurring collision was found in any non-exploit dataset.
+-- This migration therefore does NOT delete, merge, or rewrite any row: history
+-- is preserved exactly as recorded. Should a deployment carry genuine
+-- historical duplicates, `CREATE UNIQUE INDEX` fails loudly at migration time
+-- rather than silently discarding data — the operator then reconciles the rows
+-- deliberately (closing the redundant enrollment with a real lifecycle
+-- transition, which preserves the audit trail) and re-runs the migration.
+-- Dropped first so the index is created from THIS definition even where an
+-- earlier form of it already exists. `IF NOT EXISTS` alone would silently keep
+-- a stale definition.
+DROP INDEX IF EXISTS uq_enrollment_active_seat_per_class;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_enrollment_active_seat_per_class
+  ON enrollments(student_id, class_id, COALESCE(semester_name, ''))
+  WHERE class_id IS NOT NULL
+    AND status IN ('active', 'confirmed', 'pending');

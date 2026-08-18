@@ -24,6 +24,7 @@ import { getEnrollmentService } from '../core/academic/enrollment-service.js';
 import { countActiveStudentsInClass } from '../core/academic/class-capacity.js';
 import { assertClassGenderAllowsStudent } from './classes.routes.js';
 import { assertPlacementEligibleForClass } from '../core/placement/enrollment-gate.js';
+import { assertNotAlreadySeatedInClass } from '../core/academic/class-admission.js';
 import { JourneyEventType } from '../core/journey/event-types.js';
 import { SYSTEM_DEFAULTS } from '../core/configuration/policy-catalog.js';
 import { resolveIdempotency, isUniqueViolation } from '../utils/idempotency.js';
@@ -91,7 +92,6 @@ const stmtInsertRegistration = db.prepare(
 const stmtGetActiveSemesterBalances = db.prepare(`SELECT s.id, s.semester_name, s.net_fee_amount, s.fee_amount FROM student_semesters s WHERE s.student_id = ? AND s.status = 'active'`);
 const stmtGetStudentPaymentsBySemester = db.prepare("SELECT COALESCE(SUM(CASE WHEN category IN ('fee','installment') THEN amount WHEN category = 'refund' THEN amount ELSE 0 END), 0) AS paid FROM payments WHERE student_id = ? AND semester = ? AND status = 'completed'");
 
-const stmtCheckActiveEnrollment = db.prepare("SELECT id FROM enrollments WHERE student_id = ? AND class_id = ? AND status = 'active'");
 const stmtInsertEnrollment = db.prepare(
   `INSERT INTO enrollments (id, student_id, program_id, semester_name, level_code, class_id, branch_id, enrollment_type, status, started_at, notes, fee_snapshot_json) VALUES (?, ?, ?, ?, ?, ?, ?, 'extra', 'active', ?, ?, ?)`
 );
@@ -778,7 +778,11 @@ studentsRouter.post('/:id/enroll-class', requirePermission('Class.Assign', 'Stud
     throw new HttpError(400, `Cannot enroll in a class that is ${cls.status}.`);
   }
   
-  if (stmtCheckActiveEnrollment.get(student.id, classId)) throw new HttpError(409, 'Already enrolled in this class.');
+  // Duplicate rule comes from the single domain authority (audit E-2). This
+  // route used to carry its own narrower version keyed on status='active'
+  // only, which disagreed with the capacity predicate about what occupies a
+  // seat; the shared rule covers active|confirmed|pending.
+  assertNotAlreadySeatedInClass(db, student.id, classId);
   
   assertClassGenderAllowsStudent(classId, student.gender);
   // Extra-class enrollment writes the enrollment row directly rather than going
@@ -1362,7 +1366,15 @@ studentsRouter.post('/:id/transfer', authorize('registrar', 'manager', 'head_of_
     const result = getEnrollmentService(db).transfer({ studentId: req.params.id, toClassId, notes: notes || null, actorUserId: user.userId });
     writeAudit(req, `Transferred student ${student.full_name} to class ${targetClass.name}`, { newValue: JSON.stringify({ toClassId, notes: notes || null }) });
     res.json({ ok: true, ...result });
-  } catch (err: any) { throw new HttpError(400, err?.message || 'Transfer failed.'); }
+  } catch (err: unknown) {
+    // The service now raises typed HttpErrors (audit E-4): a full class is a
+    // 409, a missing student a 404, a bad request a 400. Re-wrapping everything
+    // as 400 flattened that contract and — worse — would have relabelled a
+    // genuine server fault as a client error. Pass domain errors through
+    // untouched and let the error handler classify anything else.
+    if (err instanceof HttpError) throw err;
+    throw new HttpError(400, err instanceof Error ? err.message : 'Transfer failed.');
+  }
 }));
 
 studentsRouter.post('/:id/suspend', authorize('registrar', 'manager', 'head_of_department', 'owner'), ah(async (req, res) => {

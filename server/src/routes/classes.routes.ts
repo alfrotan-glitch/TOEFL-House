@@ -21,6 +21,8 @@ import {
 } from '../core/academic/promotion-engine.js';
 import { getRetakePolicy, countPriorRetakes, getMakeupPolicy, getFullPolicyProfile } from '../core/academic/academic-policy-service.js';
 import { getEnrollmentService } from '../core/academic/enrollment-service.js';
+import { assertClassGenderAllows } from '../core/academic/class-admission.js';
+import { ACTIVE_ENROLLMENT_STATUSES } from '../core/academic/class-capacity.js';
 import type { UserRole } from '../utils/auth.js';
 import { ACADEMIC_DEFAULTS } from '../core/configuration/policy-catalog.js';
 
@@ -137,15 +139,33 @@ const stmtDeleteClassTeacherSkills = db.prepare('DELETE FROM class_teacher_skill
 const stmtDeleteSessionsForClass = db.prepare('DELETE FROM sessions WHERE class_id = ?');
 const stmtDeleteClass = db.prepare('DELETE FROM classes WHERE id = ?');
 
+// ── CLASS MERGE: what moves (audit E-3) ──────────────────────────────────
+// A merge relocates the source class's *live* population into the target and
+// then cancels the source. "Live" must mean exactly the same thing the
+// capacity gate counts, otherwise the operation reserves seats for students it
+// then abandons. Before remediation the gate counted active|confirmed|pending
+// but the UPDATE moved only 'active', so a pending enrollment was left
+// pointing at a class that the very same transaction cancelled — while its
+// fee row moved to the target, splitting the student across two classes.
+//
+// Per enrollment state:
+//   active / confirmed / pending  → MOVE (they occupy a seat in the source)
+//   completed / graduated         → REMAIN (historical outcome of the source
+//                                   class; rewriting them would falsify the
+//                                   record of where the student studied)
+//   transferred / dropped / withdrawn → REMAIN (closed history, same reason)
+// The moved set is therefore ACTIVE_ENROLLMENT_STATUSES — the single
+// seat-consuming predicate shared with capacity and duplicate detection.
+const MERGE_MOVABLE_STATUS_SQL = ACTIVE_ENROLLMENT_STATUSES.map((s) => `'${s}'`).join(', ');
 const stmtUpdateSemestersMerge = db.prepare(
   `UPDATE student_semesters SET class_id = ? WHERE class_id = ? AND status = 'active'`
 );
 const stmtUpdateEnrollmentsMerge = db.prepare(
-  `UPDATE enrollments SET class_id = ? WHERE class_id = ? AND status = 'active'`
+  `UPDATE enrollments SET class_id = ? WHERE class_id = ? AND status IN (${MERGE_MOVABLE_STATUS_SQL})`
 );
 const stmtDeleteFutureSourceRosters = db.prepare(`DELETE FROM rosters WHERE student_id IN (SELECT student_id FROM enrollments WHERE class_id = ?) AND session_id IN (SELECT id FROM sessions WHERE class_id = ? AND date >= date('now') AND status != 'cancelled')`);
 const stmtGetFutureTargetSessions = db.prepare(`SELECT id FROM sessions WHERE class_id = ? AND date >= date('now') AND status != 'cancelled'`);
-const stmtGetSourceActiveStudents = db.prepare(`SELECT DISTINCT student_id FROM enrollments WHERE class_id = ? AND status = 'active'`);
+const stmtGetSourceActiveStudents = db.prepare(`SELECT DISTINCT student_id FROM enrollments WHERE class_id = ? AND status IN (${MERGE_MOVABLE_STATUS_SQL})`);
 const stmtInsertMergeRoster = db.prepare(`INSERT OR IGNORE INTO rosters (id, session_id, student_id, attendance_status) VALUES (?, ?, ?, 'not_marked')`);
 // Cancellation itself (lifecycle_stage/status/cancellation_reason) goes
 // through classLifecycle.cancel() so it's validated and audited the same
@@ -569,11 +589,18 @@ classesRouter.post(
     }
 
     const mergeTx = db.transaction(() => {
-      stmtUpdateSemestersMerge.run(targetClassId, sourceId);
-      stmtUpdateEnrollmentsMerge.run(target.id, source.id);
-      stmtDeleteFutureSourceRosters.run(source.id, source.id);
-      const targetSessions = stmtGetFutureTargetSessions.all(target.id) as { id: string }[];
+      // Snapshot the population BEFORE the UPDATE — afterwards these rows point
+      // at the target class and the query would return nothing.
       const sourceStudents = stmtGetSourceActiveStudents.all(source.id) as { student_id: string }[];
+
+      stmtUpdateSemestersMerge.run(targetClassId, sourceId);
+      stmtDeleteFutureSourceRosters.run(source.id, source.id);
+      // `movedStudents` is reported from the rows this UPDATE actually touched,
+      // not from the pre-flight count. The two used to be different numbers
+      // (audit E-3: reported 2, moved 1) which made the API response untrue.
+      const movedRows = stmtUpdateEnrollmentsMerge.run(target.id, source.id).changes;
+
+      const targetSessions = stmtGetFutureTargetSessions.all(target.id) as { id: string }[];
       for (const student of sourceStudents) {
         for (const session of targetSessions) stmtInsertMergeRoster.run(id('ros'), session.id, student.student_id);
       }
@@ -583,14 +610,15 @@ classesRouter.post(
       });
       stmtLinkMergedClass.run(
         targetClassId,
-        `Merged into ${target.name} (${targetClassId}) with ${enrolled} student(s).`,
+        `Merged into ${target.name} (${targetClassId}) with ${sourceStudents.length} student(s).`,
         sourceId
       );
+      return { movedStudents: sourceStudents.length, movedRows };
     });
-    mergeTx();
+    const { movedStudents, movedRows } = mergeTx();
 
-    writeAudit(req, `Merged class ${source.name} into ${target.name} (${enrolled} student(s) moved)`);
-    res.json({ ok: true, movedStudents: enrolled, sourceId, targetClassId });
+    writeAudit(req, `Merged class ${source.name} into ${target.name} (${movedStudents} student(s), ${movedRows} enrollment(s) moved)`);
+    res.json({ ok: true, movedStudents, movedEnrollments: movedRows, sourceId, targetClassId });
   })
 );
 
@@ -1303,19 +1331,14 @@ attendanceRouter.get(
 
 export default classesRouter;
 
-/** Reject enrollment when student gender conflicts with class gender_policy. */
+/** Reject enrollment when student gender conflicts with class gender_policy.
+ *
+ *  The rule itself lives in `core/academic/class-admission.ts` so that
+ *  EnrollmentService can enforce it on every write path (audit E-1: the
+ *  transfer-request path bypassed this route-level check entirely). This
+ *  export is retained for the existing route callers and delegates to that
+ *  single authority — it is not a second implementation. */
 export function assertClassGenderAllowsStudent(classId: string, studentGender: string | null | undefined) {
   const cls = stmtGetClassGenderAndName.get(classId) as { gender_policy?: string; name: string } | undefined;
-  if (!cls) throw new HttpError(404, 'Class not found.');
-  
-  const policy = cls.gender_policy || 'mixed';
-  if (policy === 'mixed') return;
-  
-  const g = (studentGender || '').toLowerCase();
-  if (policy === 'female' && g !== 'female') {
-    throw new HttpError(400, `Class "${cls.name}" is for female students only.`);
-  }
-  if (policy === 'male' && g !== 'male') {
-    throw new HttpError(400, `Class "${cls.name}" is for male students only.`);
-  }
+  assertClassGenderAllows(cls, studentGender);
 }
