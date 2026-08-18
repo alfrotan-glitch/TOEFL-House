@@ -372,9 +372,17 @@ teachersRouter.post('/:id/evaluation', authorize('manager', 'head_of_department'
   const teacher = requireTeacher(req, req.params.id);
   const { score, criteria, notes } = req.body;
 
-  if (score == null || score <= 0 || score > 100) {
-    throw new HttpError(400, 'Evaluation score must be a positive number between 1 and 100.');
-  }
+  // T-3: parse the score instead of comparing a raw, unvalidated body value.
+  // `score <= 0 || score > 100` is a COMPARISON, not a parse, so anything that
+  // is not a number slipped past it and reached SQLite. Reproduced live:
+  //     'abc' / {} / '50abc' -> 500 "NOT NULL constraint failed: teacher_evaluations.score"
+  //     true                 -> 201, stored as score 1
+  //     '0x10'               -> 201, stored as score 16
+  // (`NaN <= 0` and `NaN > 100` are both false, so NaN passed every branch.)
+  // `assertPerformanceScore` with allowZero:false is exactly this endpoint's
+  // documented rule — "a positive number between 1 and 100" — expressed as a
+  // parse with type discipline. The accepted range is unchanged.
+  const numericScore = assertPerformanceScore(score, 'Evaluation score', { allowZero: false });
   if (criteria && (typeof criteria !== 'object' || Array.isArray(criteria))) {
     throw new HttpError(400, 'Evaluation criteria must be an object.');
   }
@@ -384,18 +392,21 @@ teachersRouter.post('/:id/evaluation', authorize('manager', 'head_of_department'
   const criteriaJson = JSON.stringify(criteria || {});
 
   const tx = db.transaction(() => {
-    stmtInsertEvaluation.run(evalId, teacher.id, user.userId, date, Number(score), criteriaJson, notes || null);
+    // Persist and report the PARSED score. Echoing the raw body value back
+    // meant a '0x10' request answered 201 with score:'0x10' while the row
+    // actually held 16.
+    stmtInsertEvaluation.run(evalId, teacher.id, user.userId, date, numericScore, criteriaJson, notes || null);
     stmtUpdateTeacher.run(
       teacher.full_name, teacher.phone, teacher.email, teacher.base_salary, teacher.salary_type,
       teacher.specialization, teacher.qualification, teacher.contract_type, teacher.status,
-      teacher.default_skill_rate, Number(score), null, teacher.id
+      teacher.default_skill_rate, numericScore, null, teacher.id
     );
   });
   tx();
 
-  writeAudit(req, `Evaluated teacher ${teacher.full_name} with score: ${score}/100`);
-  addNotification('Teacher Evaluated', `${teacher.full_name} received a performance score of ${score}/100.`, 'info', teacher.branch_id);
-  res.status(201).json({ ok: true, score });
+  writeAudit(req, `Evaluated teacher ${teacher.full_name} with score: ${numericScore}/100`);
+  addNotification('Teacher Evaluated', `${teacher.full_name} received a performance score of ${numericScore}/100.`, 'info', teacher.branch_id);
+  res.status(201).json({ ok: true, score: numericScore });
 }));
 
 // ============================================================================ 
@@ -452,8 +463,14 @@ teachersRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(asy
   const type = paymentType || 'full';
   if (!['full','partial','advance'].includes(type)) throw new HttpError(400, 'Invalid payment type.');
 
-  const numericAmount = amountPaid == null ? undefined : Number(amountPaid);
-  if (numericAmount != null && (!Number.isFinite(numericAmount) || numericAmount <= 0)) throw new HttpError(400, 'Payment amount must be greater than zero.');
+  // T-3: same treatment as the employee path. `amountPaid` is optional here
+  // (omitting it means "pay the full remaining balance"), so null/undefined
+  // stays undefined; anything actually supplied is parsed rather than coerced.
+  // Pre-fix, 0.001 passed `> 0` and was rejected by the two-decimal database
+  // trigger as a raw 500 — the audit recorded this path as a correct control,
+  // which live reproduction refuted.
+  const numericAmount = amountPaid == null ? undefined : assertMoney(amountPaid, 'Payment amount');
+  if (numericAmount != null && numericAmount <= 0) throw new HttpError(400, 'Payment amount must be greater than zero.');
 
   // Idempotency is ALWAYS applied, never only when the caller remembers a key.
   //
@@ -664,8 +681,15 @@ employeesRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(as
   const { monthName, amountPaid, paymentType } = req.body as { monthName: string; amountPaid: number; paymentType: 'full' | 'partial' | 'advance' };
   if (!monthName || amountPaid == null) throw new HttpError(400, 'Month and payment amount are required.');
 
-  const resolvedAmount = Number(amountPaid);
-  if (!Number.isFinite(resolvedAmount) || resolvedAmount <= 0) throw new HttpError(400, 'Payment amount must be greater than zero.');
+  // T-3: parse with the shared money boundary, THEN apply this endpoint's own
+  // "greater than zero" rule to the parsed value. `Number()` is a coercion, so
+  // `true` became a 1 AFN payment and '0x10' became a 16 AFN payment — both
+  // real money, both answered 201. Sub-cent amounts passed `> 0` unrounded and
+  // were rejected by the two-decimal database trigger as a raw 500;
+  // assertMoney rounds 0.001 to 0, which this guard then refuses as a clean
+  // 400. The accepted range is unchanged: any amount >= 0.01 still works.
+  const resolvedAmount = assertMoney(amountPaid, 'Payment amount');
+  if (resolvedAmount <= 0) throw new HttpError(400, 'Payment amount must be greater than zero.');
   const type = paymentType || 'full';
   if (!['full', 'partial', 'advance'].includes(type)) throw new HttpError(400, 'Invalid payment type.');
 
