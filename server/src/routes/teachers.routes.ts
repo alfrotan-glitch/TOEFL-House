@@ -621,6 +621,14 @@ employeesRouter.post('/', requirePermission('Employee.Edit'), ah(async (req, res
   const user = getUserContext(req);
   const { fullName, phone, email, role, baseSalary, branchId } = req.body;
   if (!fullName || !role || baseSalary == null) throw new HttpError(400, 'Full name, role, and base salary are required.');
+  // Employee salary uses the same money boundary as every other salary field.
+  // Without it `Number()` never even ran here: the raw body value went straight
+  // into a REAL column, and SQLite's type affinity STORES non-numeric text
+  // verbatim rather than rejecting it (proven: 'abc', '50abc', '' persisted as
+  // TEXT). Aggregates then treat those rows as 0, silently under-reporting
+  // payroll. Teacher create/update already route through assertMoney; this is
+  // the same invariant, not a new rule.
+  const numericBaseSalary = assertMoney(baseSalary, 'Base salary');
 
   const resolvedBranchId = typeof branchId === 'string' && branchId.trim() ? branchId.trim() : user.branchId;
   if (!canAccessBranchResource(req, resolvedBranchId)) throw new HttpError(403, 'Target branch is outside your authorized scope.');
@@ -629,7 +637,7 @@ employeesRouter.post('/', requirePermission('Employee.Edit'), ah(async (req, res
   if (!branch.is_active) throw new HttpError(400, 'Cannot assign an employee to an inactive branch.');
 
   const newId = id('emp');
-  stmtInsertEmployee.run(newId, fullName, phone || null, email || null, role, baseSalary, resolvedBranchId, today());
+  stmtInsertEmployee.run(newId, fullName, phone || null, email || null, role, numericBaseSalary, resolvedBranchId, today());
   writeAudit(req, `Created new employee: ${fullName} (${role}) at branch ${branch.name}`);
   res.status(201).json(mapEmployee(stmtGetEmployeeById.get(newId) as EmployeeRow));
 }));
@@ -661,7 +669,22 @@ employeesRouter.put('/:id', requirePermission('Employee.Edit'), ah(async (req, r
   const { fullName, phone, email, role, baseSalary, status } = req.body;
   if (status && !['active', 'inactive'].includes(status)) throw new HttpError(400, 'Invalid status.');
 
-  stmtUpdateEmployee.run(fullName ?? existing.full_name, phone ?? existing.phone, email ?? existing.email, role ?? existing.role, baseSalary ?? existing.base_salary, status ?? existing.status, existing.id);
+  // This writer had NO validation of any kind: the raw body value was passed
+  // straight to a REAL column. Reproduced live on a fresh database —
+  //     1e15    -> 200, stored 1000000000000000
+  //     -5000   -> 200, stored -5000        (a negative salary)
+  //     'abc'   -> 200, stored as TEXT 'abc'
+  //     ''      -> 200, stored as TEXT ''
+  //     '0x10'  -> 200, stored as TEXT '0x10'
+  //     [5]     -> 200, stored 5
+  //     true    -> 500 (raw SQLite bind error leaked to the client)
+  // SQLite REAL affinity does not reject non-numeric text, it stores it as-is,
+  // and SUM() then counts those rows as 0 — payroll silently under-reports.
+  // `assertMoney` is the boundary the teacher writers already use. Omitting
+  // baseSalary still means "leave it unchanged".
+  const nextBaseSalary = baseSalary != null ? assertMoney(baseSalary, 'Base salary') : Number(existing.base_salary);
+
+  stmtUpdateEmployee.run(fullName ?? existing.full_name, phone ?? existing.phone, email ?? existing.email, role ?? existing.role, nextBaseSalary, status ?? existing.status, existing.id);
   writeAudit(req, `Updated employee details: ${existing.full_name}`);
   res.json(mapEmployee(stmtGetEmployeeById.get(existing.id) as EmployeeRow));
 }));
