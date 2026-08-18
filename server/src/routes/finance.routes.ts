@@ -524,21 +524,47 @@ financeRouter.post(
     const { title, amount, budgetLineId } = req.body;
     const budgetLine = stmtGetBudgetLineById.get(budgetLineId) as any;
     if (budgetLine) requireBudgetLine(req, String(budgetLineId));
-    
-    if (!title?.trim() || !Number.isFinite(Number(amount)) || Number(amount) <= 0 || !budgetLine) {
+
+    // F-3a: `Number.isFinite(Number(amount))` VALIDATED a coercion but then
+    // stored the RAW body value, so the check and the write disagreed.
+    // Reproduced live on a fresh database:
+    //     '0x10'  -> 201, persisted as TEXT '0x10' in a REAL column
+    //     [500]   -> 201, persisted as 500
+    //     true    -> 500 "SQLite3 can only bind numbers, strings, bigints..."
+    //     [[7]]   -> 500 (same raw bind error)
+    //     0.001   -> 500, leaking the two-decimal database trigger
+    //     1e15    -> 201, persisted
+    // A TEXT amount is not inert: `/expense-report` accumulates with
+    // `r.totalAmount += er.amount` (string concatenation), the dashboard sums
+    // pending value, and `/decide` feeds `request.amount` straight into
+    // payFromBudgetLine. `assertMoney` is the boundary /treasury/deposit and
+    // /operational-payments on this same router already use.
+    let resolvedAmount: number;
+    try { resolvedAmount = assertMoney(amount, 'Expense amount'); }
+    catch { throw new HttpError(400, 'Title, a positive amount, and a valid budget line are required.'); }
+    if (!title?.trim() || resolvedAmount <= 0 || !budgetLine) {
       throw new HttpError(400, 'Title, a positive amount, and a valid budget line are required.');
     }
     assertTextLengths([[title, 'Title', TEXT_LIMITS.line]]);
-    
+
+    // F-3b: book the request to the branch that owns the budget line, exactly
+    // as /operational-payments and /decide do. Storing `user.branchId` let a
+    // global owner create a cross-branch request that `/decide` then refused
+    // forever with its own 409 ("...belong to different branches"): verified
+    // permanently stuck in `pending`, approvable AND rejectable never — because
+    // the branch check runs before the approve/reject split.
+    const requestBranchId = budgetLine.branch_id || user.branchId;
     const { expenseKind, paymentMethod, billPeriod, notes } = normalizeExpenseMeta(req.body);
     const newId = id('req');
     stmtInsertExpenseRequest.run(
-      newId, title, amount, budgetLineId, user.fullName, 'pending', today(), user.branchId,
+      newId, title, resolvedAmount, budgetLineId, user.fullName, 'pending', today(), requestBranchId,
       expenseKind, billPeriod, paymentMethod, notes, 0, user.userId, null
     );
     
-    addNotification('New expense request', `Expense request "${title}" for ${amount} AFN against budget ${budgetLine.name} is pending approval.`, 'info', user.branchId);
-    writeAudit(req, `Created expense request: ${title} for ${amount} AFN against budget ${budgetLine.name}`);
+    // Report the PARSED amount and notify the branch that will actually pay,
+    // so the notification, the audit line and the stored row all agree.
+    addNotification('New expense request', `Expense request "${title}" for ${resolvedAmount} AFN against budget ${budgetLine.name} is pending approval.`, 'info', requestBranchId);
+    writeAudit(req, `Created expense request: ${title} for ${resolvedAmount} AFN against budget ${budgetLine.name}`);
     res.status(201).json({ id: newId, status: 'pending' });
   })
 );
@@ -707,7 +733,14 @@ financeRouter.post(
     
     if (!isApproved) {
       stmtUpdateExpenseRequestRejected.run(rejectReason || 'Rejected by the course owner', user.fullName, user.userId, request.id);
-      addNotification('Budget request rejected', `Request "${request.title}" was rejected by the course owner. Reason: ${rejectReason || 'Not specified'}`, 'alert', user.branchId);
+      // F-4: this passed 'alert', which `notifications.type` does not allow
+      // (CHECK: info|warning|critical|success). The rejection UPDATE had
+      // already committed, so the CHECK violation surfaced AFTER the state
+      // change: the request really was rejected but the caller received
+      // 400 "Invalid data provided. Please check your inputs." and could not
+      // tell that it had worked. 'warning' matches the sibling
+      // "awaiting approval" notification on the same workflow.
+      addNotification('Budget request rejected', `Request "${request.title}" was rejected by the course owner. Reason: ${rejectReason || 'Not specified'}`, 'warning', user.branchId);
       writeAudit(req, `Rejected expense request: ${request.title}`, { oldValue: 'pending', newValue: 'rejected' });
       return res.json({ status: 'rejected' });
     }

@@ -39,8 +39,10 @@ const MUTANTS = [
     id: 'M2',
     invariant: 'F-2 the positive-amount rule still applies to the parsed value',
     file: F,
-    find: "    if (!title?.trim() || resolvedAmount <= 0 || !budgetLine) {",
-    replace: '    if (!title?.trim() || !budgetLine) {',
+    // /expense-requests now contains a byte-identical line (the F-3 fix used
+    // the same pattern), so anchor on this endpoint's distinct error message.
+    find: "    if (!title?.trim() || resolvedAmount <= 0 || !budgetLine) {\n      throw new HttpError(400, 'Title, a valid amount, and a budget line are required.');",
+    replace: "    if (!title?.trim() || !budgetLine) {\n      throw new HttpError(400, 'Title, a valid amount, and a budget line are required.');",
   },
   {
     id: 'M3',
