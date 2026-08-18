@@ -5,7 +5,7 @@ import { assertTextLengths, TEXT_LIMITS } from '../utils/textInput.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { assertClassAccess, isClassTeacherScoped } from '../core/rbac/abac.js';
 import { writeAudit } from '../middleware/audit.js';
-import { assertMoney } from '../utils/money.js';
+import { assertMoney, assertSeatCount } from '../utils/money.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
 import { getJourneyEngine } from '../core/journey/journey-engine.js';
@@ -32,6 +32,10 @@ const classLifecycle = getClassLifecycleService(db);
 
 export const ATTENDANCE_PAGE_SIZE = 2000;
 const ATTENDANCE_MAX_PAGE_SIZE = 5000;
+
+/** Page size used when a caller explicitly requests a window on GET /classes. */
+export const CLASS_PAGE_SIZE = 200;
+const CLASS_MAX_PAGE_SIZE = 1000;
 
 const classesRouter = Router();
 classesRouter.use(authenticate);
@@ -171,8 +175,20 @@ const stmtInsertMergeRoster = db.prepare(`INSERT OR IGNORE INTO rosters (id, ses
 // through classLifecycle.cancel() so it's validated and audited the same
 // way as every other transition; this statement only records the merge
 // linkage, which is merge-specific and has no place in the lifecycle engine.
+// APPENDS the merge record instead of overwriting `notes` (audit C-5). The
+// previous statement replaced the column outright, so any operator note on the
+// source class ("waiting on the landlord", "do not reuse this room") was
+// destroyed by an unrelated administrative action, with no copy anywhere —
+// silent historical data loss. The merge line is now appended to whatever was
+// already recorded.
 const stmtLinkMergedClass = db.prepare(
-  `UPDATE classes SET merged_into_id = ?, notes = ? WHERE id = ?`
+  `UPDATE classes
+      SET merged_into_id = ?,
+          notes = CASE
+                    WHEN notes IS NULL OR TRIM(notes) = '' THEN ?
+                    ELSE notes || char(10) || ?
+                  END
+    WHERE id = ?`
 );
 
 const stmtGetMergeCandidatesByLevelId = db.prepare(`
@@ -350,7 +366,43 @@ classesRouter.get(
   ah(async (req, res) => {
     const { branchId, isAll } = resolveBranchScope(req);
     const rows = (isAll ? stmtGetAllClasses.all() : stmtGetClassesByBranch.all(branchId)) as ClassRow[];
-    res.json(rows.map(mapClass));
+
+    // PAGINATION CONTRACT (audit C-7). This endpoint ACCEPTED `limit`/`offset`
+    // and silently ignored them: `?limit=10` against 326 classes returned all
+    // 326 (reproduced live). A caller that believes it is paging therefore gets
+    // the whole table, and any client that trusts the page size to bound
+    // rendering or an export is working from a false premise.
+    //
+    // The window is applied ONLY when the caller explicitly asks for one. The
+    // default stays unbounded on purpose: the workspace store fetches
+    // `/classes` once and filters client-side, so introducing a default page
+    // here would silently truncate that view — trading a documented-but-honest
+    // unbounded read for silent data loss, which is strictly worse. Callers
+    // that want a page now get exactly the page they asked for, and
+    // `?includeTotal=1` returns the authoritative unfiltered total alongside
+    // it so a paging client can never drift from the real count.
+    const wantsWindow = req.query.limit !== undefined || req.query.offset !== undefined;
+    const mapped = rows.map(mapClass);
+
+    if (!wantsWindow) {
+      if (req.query.includeTotal === '1') {
+        res.json({ rows: mapped, total: mapped.length });
+        return;
+      }
+      res.json(mapped);
+      return;
+    }
+
+    const { limit, offset } = parsePaginationShared(req as { query: Record<string, unknown> }, {
+      defaultPageSize: CLASS_PAGE_SIZE,
+      maxPageSize: CLASS_MAX_PAGE_SIZE,
+    });
+    const page = mapped.slice(offset, offset + limit);
+    if (req.query.includeTotal === '1') {
+      res.json({ rows: page, total: mapped.length });
+      return;
+    }
+    res.json(page);
   })
 );
 
@@ -392,8 +444,10 @@ classesRouter.post(
     }
     const resolvedGender = genderPolicy === 'female' || genderPolicy === 'male' || genderPolicy === 'mixed' ? genderPolicy : 'mixed';
 
-    let resolvedCapacity = capacity || 0;
-    let resolvedMinViable = minViableSize || 0;
+    // Seat counts are validated at BOTH writers so create and update cannot
+    // disagree about what a capacity is (audit C-3).
+    let resolvedCapacity = capacity == null ? 0 : assertSeatCount(capacity, 'Class capacity');
+    let resolvedMinViable = minViableSize == null ? 0 : assertSeatCount(minViableSize, 'Minimum viable size');
 
     if (levelId) {
       const lvl = stmtGetLevelById.get(levelId) as any;
@@ -474,15 +528,36 @@ classesRouter.put(
     const hasRoomRule = !!existing.room_id;
 
     const nextLevel = hasLevelRule ? existing.level : (level ?? existing.level);
-    const nextFee = hasLevelRule ? existing.fee : (fee ?? existing.fee);
+    // MONETARY VALIDATION ON UPDATE (audit C-3). POST /api/classes has always
+    // run the fee through assertMoney; this UPDATE did not, so the same field
+    // that is rejected at creation was writable here with no validation at all.
+    // Proven live: PUT stored fee = -1000, "abc", "0x10" and 1e15, and the
+    // string values then flowed into the money paths — an extra-class
+    // enrollment against fee "abc" produced netFee null and, with a payment
+    // attached, defeated the "amount paid cannot exceed the payable fee" guard
+    // (NaN comparisons are always false). 1e15 produced a real 1,000,000,000,000,000
+    // AFN invoice. assertMoney is the same boundary every other money field in
+    // this codebase uses, so this closes the asymmetry rather than inventing a
+    // second rule. A class whose fee is pinned by a configured level is
+    // untouched — that branch never reads the client value.
+    const nextFee = hasLevelRule ? existing.fee : (fee == null ? existing.fee : assertMoney(fee, 'class fee'));
     const nextSchedule = hasSlotRule ? existing.schedule_time : (scheduleTime ?? existing.schedule_time);
-    const nextCapacity = hasRoomRule ? existing.capacity : (capacity ?? existing.capacity);
+    // Capacity is a SEAT COUNT, not money: it must be a whole, non-negative
+    // number. assertClassPlanningConstraints below already rejects negatives
+    // and non-finite values, but it accepted 7.5 (stored verbatim, so a
+    // "capacity 2.5" class admitted 3 students) and 1e15. Normalising to a
+    // safe integer here keeps the seat arithmetic honest at its single entry
+    // point. Room-pinned capacities are untouched.
+    const nextCapacity = hasRoomRule ? existing.capacity : (capacity == null ? existing.capacity : assertSeatCount(capacity, 'Class capacity'));
+    const nextMinViable = minViableSize == null
+      ? existing.min_viable_size
+      : assertSeatCount(minViableSize, 'Minimum viable size');
 
     assertClassPlanningConstraints({
       classId: existing.id, branchId: existing.branch_id, teacherId: nextTeacherId,
       roomId: existing.room_id, timeSlotId: existing.time_slot_id, scheduleTime: nextSchedule,
       startDate: startDate ?? existing.start_date, endDate: endDate ?? existing.end_date,
-      capacity: nextCapacity, minViableSize: minViableSize ?? existing.min_viable_size,
+      capacity: nextCapacity, minViableSize: nextMinViable,
     });
 
     const validGenders = ['female', 'male', 'mixed'];
@@ -493,7 +568,7 @@ classesRouter.put(
         name ?? existing.name, nextTeacherId, nextLevel,
         nextCapacity, nextSchedule,
         startDate ?? existing.start_date, endDate ?? existing.end_date,
-        nextFee, minViableSize ?? existing.min_viable_size, req.params.id
+        nextFee, nextMinViable, req.params.id
       );
 
       if (requestedGender && validGenders.includes(requestedGender)) {
@@ -588,6 +663,46 @@ classesRouter.post(
       throw new HttpError(400, `Target class only has ${free} free seat(s), but source has ${enrolled} active student(s).`);
     }
 
+    // ── GENDER ADMISSION GATE ON MERGE (audit C-2) ─────────────────────────
+    // Merge is an ADMISSION path: it seats the source's students in the target.
+    // Every other admission path (manual registration, extra-class enrollment,
+    // enroll-semester, waitlist conversion, visitor conversion, transfer)
+    // applies the class gender policy through the domain authority in
+    // core/academic/class-admission.ts. Merge did not, so it was a hole around
+    // a rule the rest of the system enforces: a female student was moved into a
+    // male-only class with HTTP 200, a move the direct endpoint rejects with
+    // 400 "Class ... is for male students only." (both reproduced live).
+    //
+    // The comparison-by-class-policy the merge-candidates endpoint already does
+    // is only a UI filter — it never runs on the write path and is trivially
+    // bypassed by posting a targetClassId directly. It is also strictly weaker
+    // than the real rule: a 'mixed' source can hold male students that a
+    // 'female' target must refuse, which a policy-vs-policy comparison cannot
+    // see. So this gate checks the ACTUAL STUDENTS being moved against the
+    // target's policy, using the same function every other writer calls — one
+    // rule, one implementation.
+    //
+    // Legitimate merges are unaffected: female→female, male→male, anything into
+    // 'mixed', and a same-gender population moving into a matching class all
+    // pass (verified).
+    const movingStudents = db.prepare(
+      `SELECT DISTINCT s.id, s.full_name, s.gender
+         FROM enrollments e JOIN students s ON s.id = e.student_id
+        WHERE e.class_id = ? AND e.status IN (${MERGE_MOVABLE_STATUS_SQL})`
+    ).all(sourceId) as { id: string; full_name: string; gender: string | null }[];
+    for (const student of movingStudents) {
+      try {
+        assertClassGenderAllows({ gender_policy: target.gender_policy, name: target.name }, student.gender);
+      } catch {
+        throw new HttpError(
+          400,
+          `Cannot merge: ${student.full_name} does not meet the gender policy of "${target.name}" ` +
+            `(target admits ${target.gender_policy || 'mixed'} students). ` +
+            'Move this student individually, or choose a compatible target class.',
+        );
+      }
+    }
+
     const mergeTx = db.transaction(() => {
       // Snapshot the population BEFORE the UPDATE — afterwards these rows point
       // at the target class and the query would return nothing.
@@ -608,11 +723,8 @@ classesRouter.post(
         reason: `Merged into ${target.name} (${targetClassId})`,
         operatorId: req.user?.userId,
       });
-      stmtLinkMergedClass.run(
-        targetClassId,
-        `Merged into ${target.name} (${targetClassId}) with ${sourceStudents.length} student(s).`,
-        sourceId
-      );
+      const mergeNote = `Merged into ${target.name} (${targetClassId}) with ${sourceStudents.length} student(s).`;
+      stmtLinkMergedClass.run(targetClassId, mergeNote, mergeNote, sourceId);
       return { movedStudents: sourceStudents.length, movedRows };
     });
     const { movedStudents, movedRows } = mergeTx();

@@ -30,6 +30,62 @@ import { eventBus } from '../events/event-bus.js';
 import { HttpError } from '../../middleware/errorHandler.js';
 import { today } from '../../utils/ids.js';
 import { assertClassTransition, deriveLegacyClassStatus, type ClassStage } from './lifecycle-engine.js';
+import { ACTIVE_ENROLLMENT_STATUSES } from './class-capacity.js';
+
+/**
+ * ROSTER-DRAIN INVARIANT (class audit C-1) — the single definition.
+ *
+ * A class may not be CANCELLED while students still hold a seat-consuming
+ * enrollment in it.
+ *
+ * WHY THIS IS THE RULE, established from this codebase's own behaviour rather
+ * than assumed:
+ *
+ *  1. `POST /:id/merge` already upholds it exactly. Merge relocates every
+ *     seat-consuming enrollment into the target and only THEN cancels the
+ *     source, so at the moment the source becomes 'cancelled' it holds zero
+ *     live seats. The enrollment audit (E-3) made this explicit and locked it
+ *     with a regression test: "a live enrollment pointing at a dead class" is
+ *     named there as the defect being fixed.
+ *  2. `DELETE /:id` refuses while ANY seat-consuming enrollment exists
+ *     ("Transfer or complete them before deleting, or merge into another
+ *     class"), which is the same invariant stated for a different terminal
+ *     operation.
+ *  3. `POST /:id/complete-semester` — the intended completion path — resolves
+ *     every student through the Promotion Engine before locking the class, so
+ *     it too leaves no live seat behind.
+ *
+ * The direct `POST /:id/cancel` endpoint was the only terminal writer that did
+ * NOT apply it, so it stranded live enrollments on a dead class: the seats
+ * stayed counted, the student stayed "enrolled" in a class that no longer runs,
+ * and the class could then never be deleted because its own stranded seats
+ * tripped the delete guard (reproduced live — see the C-1 regression suite).
+ *
+ * SEAT-CONSUMING is deliberately the same predicate capacity and duplicate
+ * detection use (`ACTIVE_ENROLLMENT_STATUSES`): if a row counts against class
+ * capacity, it is a live seat. Closed rows (transferred / dropped / withdrawn /
+ * completed / graduated) are history and never block cancellation, so
+ * cancelling an empty class, or one whose students have all left, stays legal.
+ *
+ * WHY 'completed' AND 'archived' ARE DELIBERATELY EXCLUDED
+ * --------------------------------------------------------
+ * They are NOT stranding states in this design. `complete-semester` resolves
+ * students through the Promotion Engine, and an outcome of `manual_review`
+ * INTENTIONALLY leaves the enrollment and its semester row 'active' after the
+ * class locks — `GET /:id/promotion/pending-review` exists precisely to list
+ * those rows, and it only returns anything once the stage is 'completed' or
+ * 'archived'. `POST /:id/promotion/resolve/:studentId` then closes each one
+ * (verified live: resolve returns 200 on a completed class). Blocking those two
+ * stages would break the documented manual-review workflow, so the guard is
+ * scoped to cancellation, which has no such resolution path and no reason to
+ * retain a live seat.
+ *
+ * Merge is unaffected: it drains the roster inside the same transaction before
+ * calling cancel(), so the guard sees zero live seats by then.
+ */
+export const ROSTER_DRAIN_GUARDED_STAGES: readonly ClassStage[] = ['cancelled'];
+
+const SEAT_STATUS_SQL = ACTIVE_ENROLLMENT_STATUSES.map((s) => `'${s}'`).join(', ');
 
 export interface ClassRowLite {
   id: string;
@@ -51,6 +107,7 @@ export class ClassLifecycleService {
   private stmtSetStage: Database.Statement;
   private stmtSetStageWithActivation: Database.Statement;
   private stmtSetStageWithCancellation: Database.Statement;
+  private stmtCountLiveSeats: Database.Statement;
 
   constructor(private db: Database.Database) {
     this.stmtGetClass = db.prepare('SELECT * FROM classes WHERE id = ?');
@@ -61,6 +118,15 @@ export class ClassLifecycleService {
     this.stmtSetStageWithCancellation = db.prepare(
       `UPDATE classes SET lifecycle_stage = ?, status = ?, cancellation_reason = ? WHERE id = ?`,
     );
+    this.stmtCountLiveSeats = db.prepare(
+      `SELECT COUNT(DISTINCT student_id) AS c FROM enrollments
+        WHERE class_id = ? AND status IN (${SEAT_STATUS_SQL})`,
+    );
+  }
+
+  /** Live (seat-consuming) enrollments currently held by this class. */
+  private countLiveSeats(classId: string): number {
+    return Number((this.stmtCountLiveSeats.get(classId) as { c: number } | undefined)?.c ?? 0);
   }
 
   getOrThrow(classId: string): ClassRowLite {
@@ -87,6 +153,27 @@ export class ClassLifecycleService {
     if (to === 'in_progress') {
       const scheduled = this.db.prepare(`SELECT COUNT(*) AS c FROM sessions WHERE class_id = ? AND status != 'cancelled'`).get(classId) as { c: number };
       if (Number(scheduled.c) === 0) throw new HttpError(409, 'Class cannot start teaching before at least one teaching session has been scheduled.');
+    }
+
+    // ── ROSTER-DRAIN GUARD (audit C-1) ──────────────────────────────────────
+    // Cancellation must not strand live enrollments (see the invariant
+    // documented above ROSTER_DRAIN_GUARDED_STAGES). Enforced here, at the
+    // single transition funnel, so POST /:id/cancel and every future writer
+    // that reaches 'cancelled' inherit it rather than each route repeating it.
+    //
+    // Merge is unaffected: it moves the seats out of the source inside its own
+    // transaction BEFORE calling cancel(), so the count is already zero.
+    if (ROSTER_DRAIN_GUARDED_STAGES.includes(to)) {
+      const liveSeats = this.countLiveSeats(classId);
+      if (liveSeats > 0) {
+        throw new HttpError(
+          409,
+          `This class still has ${liveSeats} enrolled student(s) and cannot be cancelled. ` +
+            'Resolve them first — merge this class into another, transfer them, or ' +
+            'drop/withdraw each enrollment — so no student is left attached to a ' +
+            'cancelled class.',
+        );
+      }
     }
 
     const nextStatus = deriveLegacyClassStatus(to);

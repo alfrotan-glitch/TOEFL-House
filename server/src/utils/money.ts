@@ -60,3 +60,41 @@ export function assertMoney(value: unknown, field = 'amount', opts: { allowNegat
   if (!Number.isSafeInteger(Math.round(Math.abs(rounded) * 100))) throw new HttpError(400, `${field} exceeds supported monetary precision.`);
   return Object.is(rounded, -0) ? 0 : rounded;
 }
+
+/**
+ * Seat-count boundary (class audit C-3).
+ *
+ * Capacity and minimum-viable-size are COUNTS OF PEOPLE, not money: they must
+ * be whole, non-negative and small enough to be meaningful. This lived nowhere
+ * before, so `PUT /api/classes/:id` stored `capacity: 7.5` verbatim — and a
+ * fractional capacity is not a harmless cosmetic value: `activeCount >= 7.5`
+ * admits 8 students to a "7.5-seat" class, and `capacity: 2.5` was observed
+ * admitting 3. `1e15` was equally accepted, making the capacity gate
+ * meaningless.
+ *
+ * Deliberately separate from assertMoney: money allows two decimal places,
+ * a seat does not. Zero remains legal and keeps its established meaning
+ * throughout this codebase — "no configured limit" (every capacity gate is
+ * written `capacity > 0 && ...`), which is why zero is not rejected here.
+ */
+const MAX_SEAT_COUNT = 100000;
+
+export function assertSeatCount(value: unknown, field = 'Count'): number {
+  let n: number;
+  if (typeof value === 'number') {
+    n = value;
+  } else if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed === '' || !DECIMAL_NUMERAL.test(trimmed)) {
+      throw new HttpError(400, `${field} must be a whole number.`);
+    }
+    n = Number(trimmed);
+  } else {
+    throw new HttpError(400, `${field} must be a whole number.`);
+  }
+  if (!Number.isFinite(n)) throw new HttpError(400, `${field} must be a whole number.`);
+  if (!Number.isInteger(n)) throw new HttpError(400, `${field} must be a whole number of seats.`);
+  if (n < 0) throw new HttpError(400, `${field} cannot be negative.`);
+  if (n > MAX_SEAT_COUNT) throw new HttpError(400, `${field} exceeds the maximum supported value (${MAX_SEAT_COUNT}).`);
+  return n;
+}

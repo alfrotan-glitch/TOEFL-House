@@ -817,7 +817,31 @@ studentsRouter.post('/:id/enroll-class', requirePermission('Class.Assign', 'Stud
 
     if (paidNow > 0) {
       const pid = id('pay');
-      stmtInsertPayment.run(pid, student.id, paidNow, date, 'cash', 'fee', `Extra class fee: ${cls.name}`, nextReceiptNumber(), student.branch_id, null, null, null, null);
+      // idempotency_key was NULL here, which migration 063's trigger rejects
+      // ("payment idempotency_key is required"). Every paid extra-class
+      // enrollment therefore failed with HTTP 500 and rolled back entirely —
+      // the feature was unusable whenever money was collected with it, while
+      // the unpaid path (amountPaidNow omitted) worked, which is why the gap
+      // went unnoticed. Reproduced live against an ordinary numeric class fee,
+      // so it is not a side effect of any other finding (audit C-6).
+      //
+      // KEYED ON THE ENROLLMENT, NOT ON (student, class).
+      //
+      // A (student, class) key looks tempting but is WRONG, and the audit's own
+      // mutation testing caught it: a student who enrolls, pays, DROPS, and
+      // later legitimately re-enrolls in the same class must be able to pay
+      // again. With a (student, class) key that second, entirely valid payment
+      // collided with the first and was refused 409 — silently destroying
+      // billable revenue, the same class of mistake migration 074 documents for
+      // the enrollment index.
+      //
+      // `enrollId` is minted once per enrollment above, so the key is unique per
+      // real financial event and stays traceable back to it. Double-submit
+      // protection does not depend on this key at all: it comes from the
+      // duplicate-seat guard (assertNotAlreadySeatedInClass) backed by
+      // uq_enrollment_active_seat_per_class (074) — verified live, 5 concurrent
+      // submits yield exactly 1x201 and 4x409 "Already enrolled in this class."
+      stmtInsertPayment.run(pid, student.id, paidNow, date, 'cash', 'fee', `Extra class fee: ${cls.name}`, nextReceiptNumber(), student.branch_id, null, null, null, `extra-class:${enrollId}`);
       recordIncome({ category: 'fee', amount: paidNow, date, description: `Extra class fee from ${student.full_name}`, referenceId: student.id, paymentId: pid, operatorName: user.fullName, operatorRole: user.role ?? null, branchId: student.branch_id });
     }
 
