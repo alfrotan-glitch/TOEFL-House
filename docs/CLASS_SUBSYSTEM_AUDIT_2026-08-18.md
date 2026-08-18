@@ -297,6 +297,54 @@ this codebase (every gate is written `capacity > 0 && …`).
 
 ---
 
+### C-4 — MEDIUM — `PUT /api/classes/:id` writes `min_viable_size` with no validation
+
+**Reproduction**
+```
+PUT /api/classes/X {minViableSize: -5}   → 200, stored -5
+PUT /api/classes/X {minViableSize: 7.5}  → 200, stored 7.5
+PUT /api/classes/X {minViableSize: "abc"}→ 200, stored "abc"
+PUT /api/classes/X {minViableSize: 1e15} → 200
+```
+
+**Expected** — `min_viable_size` is a **seat count**, subject to the same
+boundary as `capacity`.
+
+**Actual** — unvalidated, exactly like `fee` and `capacity` (C-3). It is the
+third field on the same statement and shares the same root cause.
+
+**Root cause** — identical to C-3: validation implemented at the creation route
+instead of at the field boundary, so the update writer never inherited it.
+
+**Blast radius** — `min_viable_size` drives the `underMin` signal on
+`GET /:id/merge-candidates`, which is what tells staff a class is not viable and
+should be merged. A fractional or absurd value corrupts a real operational
+decision (`enrolled < min_viable_size` against `7.5` or `"abc"`), and a negative
+value makes a class permanently "viable" regardless of enrollment.
+
+**Financial impact** — indirect only (merge/viability decisions).
+**Security impact** — none. **Concurrency impact** — none.
+
+**Existing coverage** — none at the time of discovery.
+
+**Remediation** — routed through the same `assertSeatCount` boundary as
+`capacity`, at both writers.
+
+**PROCESS NOTE — why this section exists.** The remediation for C-4 shipped in
+commit `54fa6245` (it shares the `assertSeatCount` line with C-3) but the
+finding was **folded into C-3 and never written up**: the report jumped C-3 → C-5,
+the verdict said "6/6" while listing six IDs with C-4 absent, and no negative
+test or mutant covered it. A dedicated reconciliation pass confirmed the code
+guard genuinely worked (all garbage → 400, nothing stored) **but proved the
+mutant SURVIVED** — deleting the guard passed all 61 tests. The gap was
+coverage and documentation, not behaviour. Both are now closed: 6 dedicated
+tests and mutant M5b.
+
+**Mutation evidence** — M5b KILLED (survived before the dedicated tests were
+added; killed after).
+
+---
+
 ### C-5 — MEDIUM — Class merge destroys operator notes
 
 **Reproduction** — source class with
@@ -470,15 +518,16 @@ branch-scoped.
 
 ## 8. Mutation testing (Phase 10)
 
-`server/scripts/class-mutation-test.mjs` — 18 mutants, each removing exactly one
+`server/scripts/class-mutation-test.mjs` — 19 mutants, each removing exactly one
 critical invariant, each requiring the full suite to fail.
 
 Covered: C-1 roster-drain guard and its seat predicate; C-2 merge gender gate
 and the shared admission rule; C-3 fee and capacity validation and seat
-integrality; C-5 note preservation; C-6 payment idempotency; C-7 pagination
-window; plus the pre-existing capacity gate, duplicate-seat guard, branch
-isolation, teacher object-level authorization, merge capacity check, merge
-transaction boundary, canonical seat predicate and delete guard.
+integrality; C-4 min_viable_size validation; C-5 note preservation; C-6 payment
+idempotency; C-7 pagination window; plus the pre-existing capacity gate,
+duplicate-seat guard, branch isolation, teacher object-level authorization,
+merge capacity check, merge transaction boundary, canonical seat predicate and
+delete guard.
 
 ### 8.1 Harness correctness (two traps caught and closed)
 
@@ -526,7 +575,28 @@ than explained away.
   situation. Coverage added for all three seat-consuming statuses (active,
   confirmed, pending) plus the negative case (closed history still deletable).
 
-No test was weakened at any point. Round 2 results: see §10.
+No test was weakened at any point. Round 2 results: 18/18 killed.
+
+### 8.3 Round 3 — C-4 reconciliation (finalization pass)
+
+A dedicated pre-freeze reconciliation of **C-4** — prompted by the observation
+that the report's finding IDs jumped C-3 → C-5 while the verdict claimed
+"6/6" — established that C-4 was a **documentation and coverage defect, not a
+behavioural one**:
+
+- The code guard shipped in `54fa6245` and genuinely works: `minViableSize` of
+  `-5`, `7.5`, `"abc"`, `1e15`, `true`, `[]` all return 400 with nothing stored,
+  and a legitimate value (8) is accepted.
+- But **the mutant SURVIVED**: replacing the guard with
+  `minViableSize ?? existing.min_viable_size` passed all 61 tests. The
+  invariant held only by luck of nobody editing it.
+
+Closed by 6 dedicated C-4 tests and permanent mutant **M5b**, which is KILLED
+after the change (and demonstrably survived before it). Final: **19/19 killed**.
+
+This is recorded rather than quietly corrected because a finding that is fixed
+in code but absent from the report is exactly the kind of gap an audit trail
+exists to prevent.
 
 ---
 
@@ -538,7 +608,7 @@ No test was weakened at any point. Round 2 results: see §10.
 | `server/src/routes/classes.routes.ts` | C-2 merge gender gate; C-3 fee/capacity validation on both writers; C-5 note append; C-7 pagination |
 | `server/src/routes/students.routes.ts` | C-6 extra-class payment idempotency key |
 | `server/src/utils/money.ts` | new `assertSeatCount` boundary |
-| `server/src/tests/class-subsystem-remediation.test.ts` | 61 regression/adversarial tests (new) |
+| `server/src/tests/class-subsystem-remediation.test.ts` | 67 regression/adversarial tests (new) |
 | `server/scripts/class-mutation-test.mjs` | mutation harness (new) |
 | `docs/CLASS_SUBSYSTEM_AUDIT_2026-08-18.md` | this report (new) |
 
@@ -552,7 +622,7 @@ reconciled.
 
 | Gate | Baseline (`1567004`) | After remediation |
 |---|---|---|
-| Backend tests | 1320 / 1320 | **1381 / 1381** (114 files, +61 new, 0 regressions) |
+| Backend tests | 1320 / 1320 | **1387 / 1387** (114 files, +67 new, 0 regressions) |
 | Backend lint + typecheck | PASS (0 errors) | **PASS** (0 errors, 108 pre-existing warnings) |
 | Frontend typecheck | PASS | **PASS** |
 | Frontend lint | PASS (6 warnings) | **PASS** (6 pre-existing warnings) |
@@ -560,14 +630,14 @@ reconciled.
 | Backend build | PASS | **PASS** |
 | Fresh-schema preflight | 73 migrations, no drift | **73 migrations, no drift** |
 | Release validation | 16 / 16 | **16 / 16 PASSED** |
-| Mutation testing | n/a | **18 / 18 KILLED, 0 survived** (exit 0) |
+| Mutation testing | n/a | **19 / 19 KILLED, 0 survived** (exit 0) |
 | Mutation residue scan | n/a | **CLEAN** |
 
 Reproduce with:
 
 ```bash
 npm run release:validate
-cd server && node scripts/class-mutation-test.mjs   # expects 18/18 KILLED, exit 0
+cd server && node scripts/class-mutation-test.mjs   # expects 19/19 KILLED, exit 0
 ```
 
 No migration was added, so the migration count is unchanged at 73 and there is

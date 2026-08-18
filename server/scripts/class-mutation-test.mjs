@@ -72,6 +72,15 @@ const MUTANTS = [
     replace: '    const nextCapacity = hasRoomRule ? existing.capacity : (capacity ?? existing.capacity);',
   },
   {
+    id: 'M5b',
+    invariant: 'C-4 min_viable_size validation on PUT /classes/:id',
+    file: F.classes,
+    find: `    const nextMinViable = minViableSize == null
+      ? existing.min_viable_size
+      : assertSeatCount(minViableSize, 'Minimum viable size');`,
+    replace: '    const nextMinViable = minViableSize ?? existing.min_viable_size;',
+  },
+  {
     id: 'M6',
     invariant: 'C-3 seat counts must be whole numbers',
     file: F.money,

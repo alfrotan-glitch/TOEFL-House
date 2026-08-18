@@ -389,6 +389,43 @@ describe('C-3 — PUT /:id validates fee and capacity', () => {
     expect(put.status).toBe(400);
   });
 
+  it.each([-5, 7.5, 1e15, 'abc'] as unknown[])(
+    'C-4 — THE EXPLOIT: minViableSize %j is refused and nothing is stored',
+    async (badMinViable) => {
+      // C-4 was remediated alongside C-3 (same `assertSeatCount` boundary) but
+      // was left without its own negative test, so mutation testing proved the
+      // suite would not notice if the guard were deleted. min_viable_size is a
+      // SEAT COUNT: it drives the merge-candidates "underMin" signal that tells
+      // staff which classes are unviable, so a fractional or absurd value
+      // corrupts a real operational decision.
+      const cid = makeClass(`c4_mv_${String(badMinViable).replace(/\W/g, '')}`, 20);
+      db.prepare('UPDATE classes SET min_viable_size = 5 WHERE id = ?').run(cid);
+
+      const res = await supertest(app).put(`/api/classes/${cid}`)
+        .set(authHeader(owner)).send({ minViableSize: badMinViable });
+
+      expect(res.status).toBe(400);
+      expect(clsRow(cid).min_viable_size).toBe(5);
+    },
+  );
+
+  it('C-4 — a legitimate minViableSize update still works', async () => {
+    const cid = makeClass('c4_mv_ok', 20);
+    const res = await supertest(app).put(`/api/classes/${cid}`)
+      .set(authHeader(owner)).send({ minViableSize: 8 });
+    expect(res.status).toBe(200);
+    expect(clsRow(cid).min_viable_size).toBe(8);
+  });
+
+  it('C-4 — omitting minViableSize leaves it untouched', async () => {
+    const cid = makeClass('c4_mv_partial', 20);
+    db.prepare('UPDATE classes SET min_viable_size = 7 WHERE id = ?').run(cid);
+    const res = await supertest(app).put(`/api/classes/${cid}`)
+      .set(authHeader(owner)).send({ name: 'Renamed' });
+    expect(res.status).toBe(200);
+    expect(clsRow(cid).min_viable_size).toBe(7);
+  });
+
   it('LEGITIMATE fee and capacity updates still work', async () => {
     const cid = makeClass('c3_ok', 10, { fee: 5000 });
     const res = await supertest(app).put(`/api/classes/${cid}`).set(authHeader(owner))
