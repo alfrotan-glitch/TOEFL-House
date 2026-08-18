@@ -79,6 +79,59 @@ export function assertMoney(value: unknown, field = 'amount', opts: { allowNegat
  */
 const MAX_SEAT_COUNT = 100000;
 
+/**
+ * Performance-score boundary (teacher audit T-2).
+ *
+ * `PUT /api/teachers/:id` previously did
+ * `Math.max(0, Math.min(100, Number(performanceScore)))`, which is a CLAMP, not
+ * a validation. Three consequences, all reproduced live:
+ *   - `5000` returned 200 and silently stored 100
+ *   - `-20`  returned 200 and silently stored 0
+ *   - `'abc'` became NaN and reached the database, surfacing as HTTP 500
+ * A clamp answers 200 while storing something the caller never sent, so the
+ * caller believes a value was accepted that was in fact rewritten.
+ *
+ * RANGE: 0..100. The upper bound is the 100-point evaluation scale used by
+ * `POST /:id/evaluation`. Zero is the established "not yet evaluated" sentinel:
+ * `POST /api/teachers` hardcodes `performance_score = 0` for every new teacher
+ * precisely so that no half-appraisal is fabricated. Zero is therefore a legal
+ * stored state and is accepted here.
+ *
+ * `allowZero: false` expresses the stricter rule an evaluation EVENT needs — a
+ * recorded appraisal of zero is not the same thing as "never appraised". That
+ * option exists so the two rules can share one type-discipline implementation;
+ * the evaluation endpoint itself is deliberately left unchanged (finding T-3).
+ *
+ * Deliberately separate from assertMoney: a score has no currency precision and
+ * a hard upper bound, neither of which money has.
+ */
+export function assertPerformanceScore(
+  value: unknown,
+  field = 'Performance score',
+  opts: { allowZero?: boolean } = {},
+): number {
+  const { allowZero = true } = opts;
+  let n: number;
+  if (typeof value === 'number') {
+    n = value;
+  } else if (typeof value === 'string') {
+    const trimmed = value.trim();
+    // Same type discipline as assertMoney: '' is a missing value, not zero,
+    // and booleans/arrays/objects/null are never scores.
+    if (trimmed === '' || !DECIMAL_NUMERAL.test(trimmed)) {
+      throw new HttpError(400, `${field} must be a number between ${allowZero ? 0 : 1} and 100.`);
+    }
+    n = Number(trimmed);
+  } else {
+    throw new HttpError(400, `${field} must be a number between ${allowZero ? 0 : 1} and 100.`);
+  }
+  if (!Number.isFinite(n)) throw new HttpError(400, `${field} must be a number between ${allowZero ? 0 : 1} and 100.`);
+  if (n > 100) throw new HttpError(400, `${field} cannot exceed 100.`);
+  if (n < 0) throw new HttpError(400, `${field} cannot be negative.`);
+  if (!allowZero && n === 0) throw new HttpError(400, `${field} must be greater than zero.`);
+  return n;
+}
+
 export function assertSeatCount(value: unknown, field = 'Count'): number {
   let n: number;
   if (typeof value === 'number') {

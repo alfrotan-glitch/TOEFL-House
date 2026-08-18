@@ -13,7 +13,7 @@ import { authenticate, authorize, requirePermission, resolveBranchScope, canAcce
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
-import { assertMoney } from '../utils/money.js';
+import { assertMoney, assertPerformanceScore } from '../utils/money.js';
 import { addNotification } from '../utils/notifications.js';
 import { evaluateRules } from '../core/configuration/rule-engine.js';
 import {
@@ -239,19 +239,46 @@ teachersRouter.put('/:id', requirePermission('Teacher.Edit'), ah(async (req, res
   const existing = requireTeacher(req, req.params.id);
   const { fullName, phone, email, baseSalary, salaryType, specialization, qualification, contractType, status, performanceScore } = req.body;
   if (status && !['active','inactive','on_leave'].includes(status)) throw new HttpError(400, 'Invalid teacher status.');
-  const nextBaseSalary = baseSalary != null ? Number(baseSalary) : Number(existing.base_salary);
-  if (!Number.isFinite(nextBaseSalary) || nextBaseSalary < 0) throw new HttpError(400, 'Base salary must be a non-negative number.');
-  if (req.body.defaultSkillRate != null && (!Number.isFinite(Number(req.body.defaultSkillRate)) || Number(req.body.defaultSkillRate) < 0)) throw new HttpError(400, 'Default skill rate must be a non-negative number.');
+  // ── T-2: money fields use the SAME authority as POST ─────────────────────
+  // These were validated only for `!Number.isFinite(...) || < 0`, which is a
+  // coercion rather than a parse. Reproduced live on a fresh database, PUT
+  // accepted values POST refuses with 400:
+  //     1e15 -> stored (and propagated into computed-salary)
+  //     ''   -> stored as 0        (a blank form field became a ZERO salary)
+  //     true -> stored as 1
+  //     [5]  -> stored as 5
+  //     '0x10' -> stored as 16
+  // `assertMoney` is the boundary POST already uses; it adds the decimal-numeral
+  // parse, two-decimal rounding and the safe-integer-cents ceiling. Routing PUT
+  // through it makes create and update agree on what a valid amount is.
+  let nextBaseSalary: number;
+  if (baseSalary != null) {
+    try { nextBaseSalary = assertMoney(baseSalary, 'Base salary'); }
+    catch (err) { throw err instanceof HttpError ? err : new HttpError(400, 'Base salary must be a non-negative number.'); }
+  } else {
+    nextBaseSalary = Number(existing.base_salary);
+  }
   const resolvedType = salaryType ? (ALLOWED_SALARY_TYPES.includes(salaryType) ? salaryType : (() => { throw new HttpError(400, 'Invalid salary type.'); })()) : existing.salary_type;
   const nextContractType = contractType ?? existing.contract_type;
   if (nextContractType && !['monthly','hourly','per_session'].includes(nextContractType)) throw new HttpError(400, 'Invalid contract type.');
   if (resolvedType === 'per_session' && nextContractType && nextContractType !== 'per_session') throw new HttpError(400, 'A per-session salary model requires a per-session contract type.');
   
-  // Validate performance score
-  const resolvedScore = performanceScore != null ? Math.max(0, Math.min(100, Number(performanceScore))) : existing.performance_score;
+  // T-2: REJECT an out-of-range score instead of silently clamping it.
+  // `Math.max(0, Math.min(100, Number(x)))` answered 200 while storing a value
+  // the caller never sent (5000 -> 100, -20 -> 0), and 'abc' became NaN and
+  // reached the database as HTTP 500. A rejected write is honest; a clamped one
+  // is a silent rewrite of the caller's intent.
+  const resolvedScore = performanceScore != null
+    ? assertPerformanceScore(performanceScore, 'Performance score')
+    : existing.performance_score;
 
-  const nextDefaultSkillRate = req.body.defaultSkillRate != null ? Number(req.body.defaultSkillRate) : Number(existing.default_skill_rate);
-  if (!Number.isFinite(nextDefaultSkillRate) || nextDefaultSkillRate < 0) throw new HttpError(400, 'Default skill rate must be a non-negative number.');
+  let nextDefaultSkillRate: number;
+  if (req.body.defaultSkillRate != null) {
+    try { nextDefaultSkillRate = assertMoney(req.body.defaultSkillRate, 'Default skill rate'); }
+    catch (err) { throw err instanceof HttpError ? err : new HttpError(400, 'Default skill rate must be a non-negative number.'); }
+  } else {
+    nextDefaultSkillRate = Number(existing.default_skill_rate);
+  }
   const nextTargetSkills = req.body.targetSkillsPerMonth != null ? Number(req.body.targetSkillsPerMonth) : null;
   if (nextTargetSkills != null && (!Number.isFinite(nextTargetSkills) || nextTargetSkills < 0)) throw new HttpError(400, 'Target Skills per month must be a non-negative number.');
   const compensationChanged = nextBaseSalary !== Number(existing.base_salary) || resolvedType !== existing.salary_type || nextContractType !== existing.contract_type || nextDefaultSkillRate !== Number(existing.default_skill_rate);
