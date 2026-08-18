@@ -655,3 +655,236 @@ describe('E-4 — enrollment error contract', () => {
     if (thrown?.status !== undefined) expect(thrown.status).not.toBe(200);
   });
 });
+
+// ===========================================================================
+// C-1 — enrollment → student_semesters projection (closure-audit finding)
+// ===========================================================================
+//
+// `student_semesters` is a derived projection of the enrollment and
+// EnrollmentService is its single writer. Closing an enrollment used to leave
+// the projection `status='active'`, which (a) made
+// `uq_student_semester_active` reject a legitimate re-enrolment into the same
+// term with an opaque DB-level 409, and (b) kept the dropped term inside the
+// ACTIVE balance scope, overstating current debt.
+//
+// 'deferred' is the correct closed state, not 'completed': the schema CHECK
+// permits only active|completed|deferred, and classes.routes.ts already maps a
+// manual-review 'drop'/'retake' outcome to 'deferred' while calling this same
+// service. Lifetime financial truth is untouched.
+describe('C-1 — dropped/withdrawn enrollments close their semester projection', () => {
+  function semestersOf(sid: string) {
+    return db.prepare(
+      'SELECT semester_name, class_id, status, COALESCE(net_fee_amount, fee_amount, 0) AS fee FROM student_semesters WHERE student_id = ? ORDER BY rowid'
+    ).all(sid) as { semester_name: string; class_id: string; status: string; fee: number }[];
+  }
+  function dueLifetime(sid: string) {
+    return (db.prepare(
+      'SELECT COALESCE(SUM(COALESCE(net_fee_amount, fee_amount, 0)), 0) t FROM student_semesters WHERE student_id = ?'
+    ).get(sid) as { t: number }).t;
+  }
+  function dueActiveScope(sid: string) {
+    return (db.prepare(
+      "SELECT COALESCE(SUM(COALESCE(net_fee_amount, fee_amount, 0)), 0) t FROM student_semesters WHERE student_id = ? AND status = 'active'"
+    ).get(sid) as { t: number }).t;
+  }
+  async function activeEnrollmentId(sid: string) {
+    return (db.prepare("SELECT id FROM enrollments WHERE student_id = ? AND status = 'active'").get(sid) as { id: string }).id;
+  }
+
+  it('a dropped enrollment defers its semester row (1) instead of leaving it active', async () => {
+    makeClass('c1_drop', 10);
+    const sid = await createStudent({ classId: 'c1_drop' });
+    expect(semestersOf(sid).map((r) => r.status)).toEqual(['active']);
+
+    const enr = await activeEnrollmentId(sid);
+    const res = await supertest(app).post(`/api/enrollments/${enr}/drop`)
+      .set(authHeader(reg)).send({ reason: 'C-1 regression' });
+    expect(res.status).toBe(200);
+
+    // Pre-fix this stayed 'active'.
+    expect(semestersOf(sid).map((r) => r.status)).toEqual(['deferred']);
+  });
+
+  it('a withdrawn enrollment defers its semester row too', async () => {
+    makeClass('c1_wd', 10);
+    const sid = await createStudent({ classId: 'c1_wd' });
+    const enr = await activeEnrollmentId(sid);
+
+    const res = await supertest(app).post(`/api/enrollments/${enr}/withdraw`)
+      .set(authHeader(reg)).send({ reason: 'C-1 regression' });
+    expect(res.status).toBe(200);
+    expect(semestersOf(sid).map((r) => r.status)).toEqual(['deferred']);
+  });
+
+  it('same-semester re-enrolment is possible after a drop (2)', async () => {
+    makeClass('c1_re', 10);
+    const sid = await createStudent({ classId: 'c1_re' });
+    const semName = semestersOf(sid)[0].semester_name;
+    const enr = await activeEnrollmentId(sid);
+    await supertest(app).post(`/api/enrollments/${enr}/drop`).set(authHeader(reg)).send({ reason: 'x' });
+
+    const again = await supertest(app).post(`/api/students/${sid}/journey/enrollments`)
+      .set(authHeader(reg)).send({ classId: 'c1_re', semesterName: semName, enrollmentType: 'new' });
+
+    // Pre-fix: 409 "A record with this unique information already exists."
+    expect(again.status).toBe(201);
+    expect(seatsUsed('c1_re')).toBe(1);
+  });
+
+  it('a different semester still enrols normally after a drop (3)', async () => {
+    makeClass('c1_diff', 10);
+    const sid = await createStudent({ classId: 'c1_diff' });
+    const enr = await activeEnrollmentId(sid);
+    await supertest(app).post(`/api/enrollments/${enr}/drop`).set(authHeader(reg)).send({ reason: 'x' });
+
+    const next = await supertest(app).post(`/api/students/${sid}/journey/enrollments`)
+      .set(authHeader(reg)).send({ classId: 'c1_diff', semesterName: 'A Later Term', enrollmentType: 'new' });
+    expect(next.status).toBe(201);
+  });
+
+  it('drop + re-enrol does not duplicate the fee obligation and preserves payments (4, 5)', async () => {
+    makeClass('c1_fee', 10);
+    const sid = await createStudent({ classId: 'c1_fee' });
+    const semName = semestersOf(sid)[0].semester_name;
+    const semId = (db.prepare('SELECT id FROM student_semesters WHERE student_id = ?').get(sid) as { id: string }).id;
+
+    const pay = await supertest(app).post(`/api/students/${sid}/payments`)
+      .set(authHeader(reg)).send({ amount: 2000, category: 'fee', paymentMethod: 'cash', semesterId: semId });
+    expect(pay.status).toBeLessThan(400);
+
+    const lifetimeBefore = dueLifetime(sid);
+    const paidBefore = (db.prepare(
+      "SELECT COALESCE(SUM(amount), 0) t FROM payments WHERE student_id = ? AND status = 'completed'"
+    ).get(sid) as { t: number }).t;
+    expect(paidBefore).toBe(2000);
+
+    const enr = await activeEnrollmentId(sid);
+    await supertest(app).post(`/api/enrollments/${enr}/drop`).set(authHeader(reg)).send({ reason: 'x' });
+    await supertest(app).post(`/api/students/${sid}/journey/enrollments`)
+      .set(authHeader(reg)).send({ classId: 'c1_fee', semesterName: semName, enrollmentType: 'new' });
+
+    // Historical obligation preserved exactly; the replacement term adds no
+    // second charge for the same money.
+    expect(dueLifetime(sid)).toBe(lifetimeBefore);
+    expect((db.prepare(
+      "SELECT COALESCE(SUM(amount), 0) t FROM payments WHERE student_id = ? AND status = 'completed'"
+    ).get(sid) as { t: number }).t).toBe(paidBefore);
+    // Nothing was deleted — the dropped term survives as history.
+    expect(semestersOf(sid).some((r) => r.status === 'deferred' && r.fee === lifetimeBefore)).toBe(true);
+  });
+
+  it('a dropped term leaves the ACTIVE balance scope but stays in lifetime debt', async () => {
+    makeClass('c1_scope', 10);
+    const sid = await createStudent({ classId: 'c1_scope' });
+    const lifetime = dueLifetime(sid);
+    expect(dueActiveScope(sid)).toBe(lifetime);
+
+    const enr = await activeEnrollmentId(sid);
+    await supertest(app).post(`/api/enrollments/${enr}/drop`).set(authHeader(reg)).send({ reason: 'x' });
+
+    // Current debt no longer counts a term the student left...
+    expect(dueActiveScope(sid)).toBe(0);
+    // ...but the money owed is not erased.
+    expect(dueLifetime(sid)).toBe(lifetime);
+  });
+
+  it('terminal enrollment states remain protected after the projection change (6)', async () => {
+    makeClass('c1_term', 10);
+    const sid = await createStudent({ classId: 'c1_term' });
+    const enr = await activeEnrollmentId(sid);
+    await supertest(app).post(`/api/enrollments/${enr}/drop`).set(authHeader(reg)).send({ reason: 'x' });
+
+    const again = await supertest(app).post(`/api/enrollments/${enr}/drop`)
+      .set(authHeader(reg)).send({ reason: 'x' });
+    expect(again.status).toBe(409);
+
+    const transfer = await supertest(app).post(`/api/students/${sid}/transfer`)
+      .set(authHeader(reg)).send({ toClassId: 'c1_term' });
+    expect(transfer.status).toBeGreaterThanOrEqual(400);
+  });
+
+  it('the projection write is inside the drop transaction — a failed drop changes nothing (8)', () => {
+    const svc = getEnrollmentService(db);
+    const sid = 'c1_atomic_student';
+    db.prepare(
+      `INSERT OR REPLACE INTO students (id, student_code, full_name, registration_date, gender, phone, branch_id, status)
+       VALUES (?, 'TH-C1A01', 'C1 Atomic', date('now'), 'male', '0790000911', ?, 'active')`
+    ).run(sid, BRANCH);
+    makeClass('c1_atomic', 10);
+    const created = svc.enroll({ studentId: sid, branchId: BRANCH, classId: 'c1_atomic', enrollmentType: 'new', startedAt: today() });
+
+    const semBefore = semestersOf(sid);
+    // 'dropped' is terminal: a second drop must throw, and must not have
+    // deferred anything on its way out.
+    svc.drop(created.enrollmentId, { reason: 'first' });
+    const semAfterFirst = semestersOf(sid);
+    expect(semAfterFirst.every((r) => r.status === 'deferred')).toBe(true);
+
+    expect(() => svc.drop(created.enrollmentId, { reason: 'second' })).toThrow();
+    // The failed second drop left the projection exactly as the first one did.
+    expect(semestersOf(sid)).toEqual(semAfterFirst);
+    expect(semBefore.length).toBe(semAfterFirst.length); // no row added or removed
+  });
+
+  it('concurrent drop + re-enrol cannot produce two active projections (7)', async () => {
+    makeClass('c1_conc', 10);
+    const sid = await createStudent({ classId: 'c1_conc' });
+    const semName = semestersOf(sid)[0].semester_name;
+    const enr = await activeEnrollmentId(sid);
+    await supertest(app).post(`/api/enrollments/${enr}/drop`).set(authHeader(reg)).send({ reason: 'x' });
+
+    const attempts = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        supertest(app).post(`/api/students/${sid}/journey/enrollments`)
+          .set(authHeader(reg)).send({ classId: 'c1_conc', semesterName: semName, enrollmentType: 'new' })
+      )
+    );
+    expect(attempts.filter((r) => r.status === 201)).toHaveLength(1);
+    expect(semestersOf(sid).filter((r) => r.status === 'active')).toHaveLength(1);
+    expect(seatsUsed('c1_conc')).toBe(1);
+  });
+
+  it('dropping ONE enrollment does not defer the student\'s other concurrent terms', async () => {
+    // A student may legitimately hold seats in two classes at once (the
+    // extra-class / concurrent-enrolment flow). The projection close must be
+    // scoped to the dropped enrollment's own class: a student-wide UPDATE would
+    // silently deactivate the term they are still attending, removing a real
+    // obligation from the ACTIVE balance scope and corrupting current debt.
+    makeClass('c1_scopeA', 10);
+    makeClass('c1_scopeB', 10);
+    const sid = await createStudent({ classId: 'c1_scopeA' });
+    const second = await supertest(app).post(`/api/students/${sid}/journey/enrollments`)
+      .set(authHeader(reg)).send({ classId: 'c1_scopeB', semesterName: 'Parallel Term', enrollmentType: 'new' });
+    expect(second.status).toBe(201);
+
+    const before = semestersOf(sid);
+    expect(before.filter((r) => r.status === 'active')).toHaveLength(2);
+    const activeDueBefore = dueActiveScope(sid);
+
+    const enrA = (db.prepare(
+      "SELECT id FROM enrollments WHERE student_id = ? AND class_id = 'c1_scopeA' AND status = 'active'"
+    ).get(sid) as { id: string }).id;
+    const res = await supertest(app).post(`/api/enrollments/${enrA}/drop`)
+      .set(authHeader(reg)).send({ reason: 'scope probe' });
+    expect(res.status).toBe(200);
+
+    const after = semestersOf(sid);
+    // Exactly the dropped class's projection closed.
+    expect(after.find((r) => r.class_id === 'c1_scopeA')?.status).toBe('deferred');
+    // The other class the student is still attending is untouched.
+    expect(after.find((r) => r.class_id === 'c1_scopeB')?.status).toBe('active');
+    expect(after.filter((r) => r.status === 'active')).toHaveLength(1);
+    // Current debt drops by exactly the abandoned term, not by both.
+    const droppedFee = before.find((r) => r.class_id === 'c1_scopeA')!.fee;
+    expect(dueActiveScope(sid)).toBe(activeDueBefore - droppedFee);
+    expect(seatsUsed('c1_scopeB')).toBe(1);
+  });
+
+  it('JourneyEngine owns no enrollment-INSERT authority (9)', async () => {
+    const engine = (await import('../core/journey/journey-engine.js')).getJourneyEngine(db);
+    // The unguarded raw-INSERT path was removed; the journey layer records
+    // facts only. If this ever returns a function again, a shadow enrollment
+    // writer has been reintroduced.
+    expect((engine as unknown as Record<string, unknown>).createEnrollment).toBeUndefined();
+  });
+});

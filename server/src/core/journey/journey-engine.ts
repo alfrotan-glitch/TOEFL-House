@@ -125,7 +125,6 @@ export class StudentJourneyEngine {
   private readonly stmtAppendEvent: Database.Statement;
   private readonly stmtListEvents: Database.Statement;
   private readonly stmtListFinancialEvents: Database.Statement;
-  private readonly stmtInsertEnrollment: Database.Statement;
 
   constructor(private readonly db: Database.Database) {
     this.stmtAppendEvent = db.prepare(
@@ -143,13 +142,6 @@ export class StudentJourneyEngine {
       `SELECT * FROM student_journey_events 
        WHERE student_id = ? AND event_type IN (${FINANCIAL_EVENT_SQL_LIST}) 
        ORDER BY occurred_at ASC, created_at ASC`
-    );
-
-    this.stmtInsertEnrollment = db.prepare(
-      `INSERT INTO enrollments (
-         id, student_id, program_id, program_name, semester_name, level_code,
-         class_id, branch_id, enrollment_type, status, skills_focus, started_at, notes
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`
     );
   }
 
@@ -372,66 +364,16 @@ export class StudentJourneyEngine {
     return state;
   }
 
-  /**
-   * Create a canonical enrollment row and emit ENROLLMENT_CREATED (or RETAKE / PROGRAM).
-   */
-  createEnrollment(params: {
-    studentId: string;
-    branchId: string;
-    programId?: string | null;
-    programName?: string | null;
-    semesterName?: string | null;
-    levelCode?: string | null;
-    classId?: string | null;
-    enrollmentType?: 'new' | 'repeat' | 'partial_repeat' | 'resume' | 'jump';
-    skillsFocus?: string[] | null;
-    notes?: string | null;
-    actorUserId?: string | null;
-    actorName?: string | null;
-    startedAt?: string;
-  }): { enrollmentId: string; event: TimelineItem } {
-    const enrollmentId = id('enr');
-    const startedAt = params.startedAt || new Date().toISOString().replace('T', ' ').slice(0, 19);
-    const enrollmentType = params.enrollmentType || 'new';
-    const skillsJson = params.skillsFocus ? JSON.stringify(params.skillsFocus) : null;
-
-    const eventType =
-      enrollmentType === 'repeat' || enrollmentType === 'partial_repeat'
-        ? JourneyEventType.RETAKE_STARTED
-        : enrollmentType === 'jump'
-          ? JourneyEventType.PROGRAM_STARTED
-          : JourneyEventType.ENROLLMENT_CREATED;
-
-    // Wrap DB operations in a transaction to guarantee Event Sourcing atomicity
-    const createTx = this.db.transaction(() => {
-      this.stmtInsertEnrollment.run(
-        enrollmentId, params.studentId, params.programId ?? null, params.programName ?? null,
-        params.semesterName ?? null, params.levelCode ?? null, params.classId ?? null,
-        params.branchId, enrollmentType, skillsJson, startedAt, params.notes ?? null
-      );
-
-      return this.appendEvent({
-        studentId: params.studentId,
-        eventType,
-        occurredAt: startedAt,
-        branchId: params.branchId,
-        enrollmentId,
-        actorUserId: params.actorUserId,
-        actorName: params.actorName,
-        payload: {
-          enrollmentId, enrollmentType,
-          programName: params.programName,
-          semesterName: params.semesterName,
-          levelCode: params.levelCode,
-          classId: params.classId,
-          skillsFocus: params.skillsFocus,
-        },
-      });
-    });
-
-    const event = createTx();
-    return { enrollmentId, event };
-  }
+  // NOTE: `createEnrollment()` was removed here (closure-audit residual risk).
+  // It performed a raw `INSERT INTO enrollments` with no capacity, placement,
+  // gender, duplicate or branch checks and no lifecycle validation — a
+  // complete bypass of every admission invariant. It had zero production
+  // callers (verified by exhaustive search across routes, services, tests and
+  // dynamic dispatch), so it was dead code rather than an active defect, but
+  // leaving it in place meant any future caller would silently become a shadow
+  // enrollment writer. EnrollmentService.enroll() is the single creation
+  // authority; the journey layer records facts via appendEvent() and must not
+  // own an independent INSERT path.
 }
 
 export function getJourneyEngine(db: Database.Database): StudentJourneyEngine {

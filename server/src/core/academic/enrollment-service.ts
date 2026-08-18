@@ -95,6 +95,7 @@ export class EnrollmentService {
   
   private stmtSuspendEnrollment: Database.Statement;
   private stmtDeferActiveSemesters: Database.Statement;
+  private stmtDeferSemesterForClass: Database.Statement;
   private stmtInsertSuspendEvent: Database.Statement;
   
   private stmtResumeEnrollment: Database.Statement;
@@ -169,6 +170,11 @@ export class EnrollmentService {
 
     this.stmtSuspendEnrollment = db.prepare(`UPDATE enrollments SET status = 'suspended', updated_at = datetime('now'), notes = COALESCE(notes,'') || ? WHERE id = ?`);
     this.stmtDeferActiveSemesters = db.prepare(`UPDATE student_semesters SET status = 'deferred' WHERE student_id = ? AND status = 'active'`);
+    // Class-scoped variant used when a single enrollment closes (C-1): the
+    // student-wide statement above belongs to suspend(), which defers the
+    // student's whole load. Dropping one enrollment must only close that
+    // enrollment's own semester projection.
+    this.stmtDeferSemesterForClass = db.prepare(`UPDATE student_semesters SET status = 'deferred' WHERE student_id = ? AND class_id = ? AND status = 'active'`);
     this.stmtInsertSuspendEvent = db.prepare(`INSERT INTO enrollment_events (id, enrollment_id, student_id, event_type, from_class_id, to_class_id, notes, actor_user_id) VALUES (?, ?, ?, 'suspended', ?, NULL, ?, ?)`);
 
     this.stmtResumeEnrollment = db.prepare(`UPDATE enrollments SET status = 'active', class_id = ?, updated_at = datetime('now'), ended_at = NULL WHERE id = ?`);
@@ -674,6 +680,33 @@ export class EnrollmentService {
       // mirroring how suspend() already does this for its own hold state.
       if ((input.to === 'dropped' || input.to === 'withdrawn') && enrollment.class_id) {
         this.stmtDeleteFutureRosters.run(enrollment.student_id, enrollment.class_id);
+        // ── ENROLLMENT → SEMESTER PROJECTION (closure-audit finding C-1) ──
+        // `student_semesters` is a derived projection of the enrollment, and
+        // EnrollmentService is its single writer. Closing an enrollment without
+        // closing that projection left the row `status='active'`, which had two
+        // consequences: (1) `uq_student_semester_active(student_id,
+        // semester_name)` (migration 056) then rejected a legitimate
+        // re-enrolment into the same term with an opaque DB-level 409, and
+        // (2) the dropped term kept counting toward the ACTIVE balance scope,
+        // overstating current debt (proven: 6000 still reported as current
+        // after a drop).
+        //
+        // 'deferred' — not 'completed' — is the correct target, established
+        // from the existing precedent in classes.routes.ts: a manual-review
+        // outcome of 'drop'/'retake' already maps the semester to 'deferred'
+        // while calling this same service. It is also the only other status the
+        // schema CHECK permits ('active','completed','deferred'), and
+        // 'completed' would falsely assert the term was finished.
+        //
+        // Financial truth is preserved, not rewritten: the lifetime scope in
+        // utils/studentBalance.ts applies no status filter, so the obligation
+        // and every payment against it remain intact; only the ACTIVE scope
+        // stops counting a term the student is no longer attending. No row is
+        // deleted and no amount is altered.
+        //
+        // Scoped to this enrollment's own class so a student's other concurrent
+        // terms are untouched.
+        this.stmtDeferSemesterForClass.run(enrollment.student_id, enrollment.class_id);
       }
 
       try {
