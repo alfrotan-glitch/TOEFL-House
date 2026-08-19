@@ -517,8 +517,20 @@ academicRouter.put('/program-versions/:id/placement-profile', authorize('owner',
   // behaviour: unlimited attempts, first sitting billed, retakes free.
   const maxAttempts = body.maxAttempts == null || body.maxAttempts === '' ? null : Number(body.maxAttempts);
   if (maxAttempts != null && (!Number.isInteger(maxAttempts) || maxAttempts < 1)) throw new HttpError(400, 'maxAttempts must be a positive whole number.');
-  const retakeFeeAmount = body.retakeFeeAmount == null || body.retakeFeeAmount === '' ? null : Number(body.retakeFeeAmount);
-  if (retakeFeeAmount != null && (!Number.isFinite(retakeFeeAmount) || retakeFeeAmount < 0)) throw new HttpError(400, 'retakeFeeAmount must be a non-negative amount.');
+  // This is not inert configuration: evaluateBilling reads it back on every
+  // retake and the value is charged through recordIncome inside the completion
+  // transaction. `!Number.isFinite(x) || x < 0` is weaker than that charge
+  // boundary, so a fee this endpoint accepted could not actually be paid.
+  // Reproduced live: 0.001 stored fine, then the retake completion threw
+  // "payment amount must have at most two decimal places" (HTTP 500) and rolled
+  // back, leaving the attempt stranded in_progress with no payment — and every
+  // retry failed identically, so the candidate could never finish. 1e15 and
+  // 1e20 stranded it the same way via "exceeds supported monetary precision".
+  // assertMoney is the canonical boundary already used by the level default fee
+  // and level branch fee override in this same file.
+  const retakeFeeAmount = body.retakeFeeAmount == null || body.retakeFeeAmount === ''
+    ? null
+    : assertMoney(body.retakeFeeAmount, 'retakeFeeAmount');
   const firstAttemptBillable = body.firstAttemptBillable === false || body.firstAttemptBillable === 0 ? 0 : 1;
   const retakeBillable = body.retakeBillable === true || body.retakeBillable === 1 ? 1 : 0;
 
