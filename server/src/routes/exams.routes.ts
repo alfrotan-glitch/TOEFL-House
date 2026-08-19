@@ -374,6 +374,32 @@ examsRouter.put(
     let certNo = result.certificate_no;
     let certIssued = 0;
 
+    // EXM-1: a correction that crosses the pass threshold issues a real
+    // certificate, so it must carry the diploma fee exactly as the score-entry
+    // path does. This handler had no recordIncome call at all, so the identical
+    // document was produced for free — reachable through the ordinary
+    // split-role workflow where a registrar records a failing score and a
+    // manager later corrects it upward (proven live: 500 AFN vs 0 AFN for the
+    // same certificate).
+    //
+    // The charge reuses the score-entry rule verbatim: once per student,
+    // whether it was already settled by a certificate issuance or at the
+    // payment desk. Re-issuing after a revocation therefore does not bill the
+    // student a second time.
+    let correctionDiplomaFee = 0;
+    if (shouldHaveCert && !result.certificate_issued && result.student_id) {
+      const priorCertCount = (stmtCountCertificatesByStudent.get(result.student_id) as { c: number }).c;
+      const alreadyPaid = db.prepare(`
+        SELECT 1 FROM (
+          SELECT 1 FROM payments WHERE student_id = ? AND category = 'diploma' AND status = 'completed'
+          UNION ALL
+          SELECT 1 FROM financial_transactions WHERE type = 'income' AND category = 'diploma' AND reference_id = ? AND amount > 0
+        ) LIMIT 1
+      `).get(result.student_id, result.student_id);
+      correctionDiplomaFee =
+        priorCertCount === 0 && !alreadyPaid ? Number(resolveFee(db, exam.branch_id, 'diplomaFee') || 0) : 0;
+    }
+
     const correctTx = db.transaction(() => {
       if (shouldHaveCert && !result.certificate_issued) {
         // Issue new certificate if score was corrected to passing threshold
@@ -381,6 +407,18 @@ examsRouter.put(
         certIssued = 1;
         if (result.student_id) {
           stmtInsertCertificate.run(id('cert'), result.student_id, today(), certNo, status, exam.branch_id);
+          if (correctionDiplomaFee > 0) {
+            recordIncome({
+              category: 'diploma',
+              amount: correctionDiplomaFee,
+              date: today(),
+              description: `Diploma fee for ${result.candidate_name} (${certNo}) — issued on score correction`,
+              referenceId: result.student_id,
+              operatorName: user.fullName,
+              operatorRole: user.role ?? null,
+              branchId: exam.branch_id,
+            });
+          }
         }
       } else if (!shouldHaveCert && result.certificate_issued) {
         // Revoke certificate if score was corrected to below the passing threshold
@@ -396,7 +434,7 @@ examsRouter.put(
     correctTx();
 
     writeAudit(req, `Corrected score to ${score} for ${result.candidate_name}. Certificate: ${certIssued ? 'Issued' : 'Revoked/None'}`);
-    res.json({ id: result.id, status, certificateNo: certNo, certificateIssued: !!certIssued });
+    res.json({ id: result.id, status, certificateNo: certNo, certificateIssued: !!certIssued, diplomaFee: correctionDiplomaFee });
   })
 );
 
