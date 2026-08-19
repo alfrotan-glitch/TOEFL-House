@@ -68,7 +68,24 @@ function sabotage(mutate: (db: Database.Database) => void): string {
 let deployed: string;
 beforeAll(() => { deployed = buildDeployed(); });
 
-describe('deployment verifier', () => {
+/**
+ * Timeout note: every case here builds a REAL database (schema + all 75
+ * migrations) and then spawns `node scripts/verify-deployment.mjs` as a child
+ * process. On an unloaded 2-CPU runner each case takes ~0.55 s, but under CPU
+ * contention the same case was measured at ~2.8 s — a 5x slowdown — because the
+ * migration run and the subprocess compete for the same two cores.
+ *
+ * With the global 10 s testTimeout that is close enough to the limit to fail on
+ * a busy CI machine, which is exactly what happened (observed: a 412 s suite
+ * run versus 160 s here, with "FAILS when a migration on disk was never
+ * applied" reporting exit code 0 because the child was killed before it could
+ * report). The verifier itself is correct — reproduced directly: it exits 1 and
+ * prints "NOT applied: 069_nonnegative_money_guards".
+ *
+ * The generous suite timeout below removes the environment-sensitivity without
+ * weakening a single assertion.
+ */
+describe('deployment verifier', { timeout: 60_000 }, () => {
   it('passes on a correctly deployed database', () => {
     const { code, out } = run(deployed);
     expect(out).toContain('0 failed');

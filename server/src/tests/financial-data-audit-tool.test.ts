@@ -74,7 +74,14 @@ beforeAll(() => {
   db.close();
 });
 
-describe('financial data audit tool', () => {
+/**
+ * Timeout note: this suite builds a real database (schema + all 75 migrations)
+ * and/or spawns a child process. On an unloaded 2-CPU runner that is fast, but
+ * under CPU contention the same work was measured ~5x slower, which brings it
+ * close to the global 10 s testTimeout on a busy CI machine. The generous suite
+ * timeout below removes that environment-sensitivity; no assertion is relaxed.
+ */
+describe('financial data audit tool', { timeout: 60_000 }, () => {
   it('exits 0 and reports clean on a database with no corrupt money', () => {
     const { code, out } = runAudit(cleanDb);
     expect(code).toBe(0);
