@@ -16,7 +16,7 @@ import { recordIncome } from '../utils/income.js';
 import { nextReceiptNumber } from '../utils/receipt.js';
 import { nextInvoiceNumber } from '../utils/invoice.js';
 import { SYSTEM_DEFAULTS } from '../core/configuration/policy-catalog.js';
-import { assertMoney } from '../utils/money.js';
+import { assertMoney, assertDayOffset } from '../utils/money.js';
 import { resolveIdempotency, isUniqueViolation } from '../utils/idempotency.js';
 
 export const invoicesRouter = Router();
@@ -136,16 +136,31 @@ invoicesRouter.put(
   '/config/settings',
   authorize('manager', 'owner'),
   ah(async (req, res) => {
-    const body = req.body as Record<string, number | undefined>;
+    const body = req.body as Record<string, unknown>;
     const map: Record<string, string> = {
       invoiceDueDays: 'invoice_due_days',
       expenseAutoApproveThreshold: 'expense_auto_approve_threshold',
       dailySavingPercent: 'daily_saving_percent',
     };
     for (const [jsKey, dbKey] of Object.entries(map)) {
-      if (body[jsKey] != null && Number(body[jsKey]) >= 0) {
-        setSetting(dbKey, String(Number(body[jsKey])));
+      if (body[jsKey] == null) continue;
+      if (jsKey === 'invoiceDueDays') {
+        // INV-1: `Number(x) >= 0` accepted 1e20, which is stored fine and only
+        // fails later — `new Date().setDate(getDate() + 1e20)` produces an
+        // Invalid Date and `.toISOString()` throws, so EVERY subsequent invoice
+        // creation and issue returned HTTP 500 "Invalid time value" until an
+        // owner reverted the setting. Validating the day count here keeps the
+        // failure at the configuration write, where it is visible and harmless.
+        //
+        // `assertDayOffset` is the shared whole-number boundary (same type
+        // discipline as assertMoney/assertSeatCount); its ceiling is a
+        // technical one — the largest offset that still yields a valid Date —
+        // deliberately NOT an invented business maximum.
+        setSetting(dbKey, String(assertDayOffset(body[jsKey], 'Invoice due days')));
+        continue;
       }
+      const n = Number(body[jsKey]);
+      if (Number.isFinite(n) && n >= 0) setSetting(dbKey, String(n));
     }
     writeAudit(req, 'Updated finance configuration settings');
     res.json({ ok: true });
@@ -199,6 +214,15 @@ invoicesRouter.post(
       }
       const quantity = rawQuantity;
       const unitPrice = assertMoney(it.unitPrice, 'unitPrice');
+      // INV-2: assertMoney ROUNDS to two decimals, so a sub-cent unitPrice was
+      // silently stored as a different price (0.001 -> a 0 AFN invoice line,
+      // reported as success). The canonical policy established for fee
+      // configuration — and enforced by the payments/financial_transactions
+      // money-scale triggers — is to REJECT a value that is not exact money
+      // rather than quietly substitute one the operator never entered.
+      if (typeof it.unitPrice === 'number' && it.unitPrice !== unitPrice) {
+        throw new HttpError(400, 'unitPrice must have at most two decimal places.');
+      }
       if (!it.description?.trim()) {
         throw new HttpError(400, 'Each item needs a description and a non-negative unit price.');
       }
@@ -207,6 +231,10 @@ invoicesRouter.post(
 
     const totalAmount = assertMoney(normalized.reduce((sum, it) => sum + it.amount, 0), 'invoice total');
     const requestedDiscount = assertMoney(discountAmount, 'discount amount');
+    // Same rule as unitPrice: never round a discount into a different figure.
+    if (typeof discountAmount === 'number' && discountAmount !== requestedDiscount) {
+      throw new HttpError(400, 'discount amount must have at most two decimal places.');
+    }
     // A discount larger than the invoice is REJECTED, not capped. Capping
     // turned a mistyped 99999 on a 5,000 invoice into a silent 100% discount
     // (net 0) and reported success — wiping a real tuition obligation with no

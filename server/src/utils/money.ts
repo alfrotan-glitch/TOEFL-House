@@ -132,6 +132,53 @@ export function assertPerformanceScore(
   return n;
 }
 
+/**
+ * The largest day offset that still produces a valid JavaScript Date.
+ *
+ * ECMAScript clamps a time value to +/-8.64e15 ms (about 100,000,000 days
+ * either side of the epoch); anything beyond that is an Invalid Date. This is a
+ * TECHNICAL ceiling derived from the language, deliberately NOT an invented
+ * business maximum for how long an invoice may remain payable.
+ */
+const MAX_DAY_OFFSET = 100_000_000;
+
+/**
+ * A whole number of days used to offset a date (finding INV-1).
+ *
+ * `invoice_due_days` previously accepted anything passing `Number(x) >= 0`, so
+ * 1e20 was stored happily and then broke every invoice creation and issue with
+ * HTTP 500 "Invalid time value" — a persistent denial of service that only an
+ * owner/manager could clear. Rejecting at the write keeps the failure visible
+ * and local.
+ *
+ * Same type discipline as assertMoney and assertSeatCount: '' is a missing
+ * value rather than zero, and booleans/arrays/objects/null are never day
+ * counts. Deliberately separate from assertMoney — a day count has no currency
+ * precision — and separate from assertSeatCount, whose ceiling and wording are
+ * about seats.
+ */
+export function assertDayOffset(value: unknown, field = 'Days'): number {
+  let n: number;
+  if (typeof value === 'number') {
+    n = value;
+  } else if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed === '' || !DECIMAL_NUMERAL.test(trimmed)) {
+      throw new HttpError(400, `${field} must be a whole number of days.`);
+    }
+    n = Number(trimmed);
+  } else {
+    throw new HttpError(400, `${field} must be a whole number of days.`);
+  }
+  if (!Number.isFinite(n)) throw new HttpError(400, `${field} must be a whole number of days.`);
+  if (!Number.isInteger(n)) throw new HttpError(400, `${field} must be a whole number of days.`);
+  if (n < 0) throw new HttpError(400, `${field} cannot be negative.`);
+  if (n > MAX_DAY_OFFSET) {
+    throw new HttpError(400, `${field} exceeds the maximum supported value (${MAX_DAY_OFFSET}).`);
+  }
+  return n;
+}
+
 export function assertSeatCount(value: unknown, field = 'Count'): number {
   let n: number;
   if (typeof value === 'number') {
