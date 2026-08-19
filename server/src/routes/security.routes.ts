@@ -3,7 +3,7 @@ import { db } from '../db/connection.js';
 import { authenticate, requirePermission, canAccessBranchResource } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
-import { resolveUserPermissions, syncPrimaryUserRole } from '../core/rbac/rbac-service.js';
+import { resolveUserPermissions, syncPrimaryUserRole, isGlobalOwner } from '../core/rbac/rbac-service.js';
 import { TAB_PERMISSION_MAP, LEGACY_ROLE_MAP } from '../core/rbac/permission-catalog.js';
 import { id } from '../utils/ids.js';
 import type { UserRole } from '../utils/auth.js';
@@ -22,6 +22,7 @@ const stmtGetRoleByName = db.prepare('SELECT id FROM roles WHERE name = ?');
 const stmtGetMaxRoleSort = db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM roles');
 const stmtGetPermissionsByRoleId = db.prepare(`SELECT p.id AS permissionId, p.code, p.resource, p.action, p.description, p.category, rp.default_scope AS scope FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id WHERE rp.role_id = ?`);
 const stmtGetRoleCodeById = db.prepare('SELECT id, code FROM roles WHERE id = ?');
+const stmtGetRoleWithSystemFlag = db.prepare('SELECT id, code, is_system AS isSystem FROM roles WHERE id = ?');
 const stmtDeleteRolePermissions = db.prepare('DELETE FROM role_permissions WHERE role_id = ?');
 const stmtInsertRolePermission = db.prepare('INSERT INTO role_permissions (id, role_id, permission_id, default_scope) VALUES (?, ?, ?, ?)');
 
@@ -56,9 +57,30 @@ function requireTargetUserAccess(req: import('express').Request, userId: string)
   return target;
 }
 
+/** Is the caller a global owner? Only they may act beyond a single branch. */
+function callerIsGlobalOwner(req: import('express').Request): boolean {
+  return !!req.rbac && isGlobalOwner(req.rbac);
+}
+
+/**
+ * A grant may never widen scope beyond the granter's own reach.
+ *
+ * Previously only `scopeType === 'branch'` was validated, so 'organization'
+ * and 'campus' sailed past: a branch manager with delegated Role.Edit granted
+ * an ORGANIZATION-scoped assignment (HTTP 201), which canAccessAllBranches
+ * reads as access to every branch. Anything wider than a branch the caller can
+ * already reach is now owner-only.
+ */
 function requireScopedAssignment(req: import('express').Request, scopeType: string | undefined, scopeId: string | null | undefined) {
-  if (scopeType === 'branch' && scopeId && !canAccessBranchResource(req, scopeId)) {
-    throw new HttpError(403, 'Role scope targets a branch outside your access.');
+  const scope = scopeType || 'branch';
+  if (scope === 'branch') {
+    if (scopeId && !canAccessBranchResource(req, scopeId)) {
+      throw new HttpError(403, 'Role scope targets a branch outside your access.');
+    }
+    return;
+  }
+  if (!callerIsGlobalOwner(req)) {
+    throw new HttpError(403, `Only a global owner may grant ${scope}-scoped access.`);
   }
 }
 
@@ -100,11 +122,21 @@ securityRouter.get('/roles/:id', requirePermission('Role.View'), ah(async (req, 
 }));
 
 securityRouter.put('/roles/:id/permissions', requirePermission('Role.Edit'), ah(async (req, res) => {
-  const role = stmtGetRoleCodeById.get(req.params.id) as { id: string; code: string } | undefined;
+  const role = stmtGetRoleWithSystemFlag.get(req.params.id) as { id: string; code: string; isSystem: number } | undefined;
   if (!role) throw new HttpError(404, 'Role not found.');
-  
+  // System roles are the identity model the whole RBAC evaluator rests on. This
+  // handler deletes every row then re-inserts the body, so an unguarded call
+  // rewrites a system role wholesale. Reproduced live: a branch manager with
+  // delegated Role.Edit cut the OWNER role's permission set down to 3 entries
+  // and got {"ok":true,"count":3} — a denial of service against the owner.
+  if (role.isSystem && !callerIsGlobalOwner(req)) {
+    throw new HttpError(403, 'Only a global owner may change the permissions of a system role.');
+  }
+
   const body = req.body as { permissions?: { permissionId: string; scope?: string }[] };
   if (!Array.isArray(body.permissions)) throw new HttpError(400, 'permissions array is required.');
+  // A grant may not widen scope beyond the granter's reach.
+  for (const p of body.permissions) requireScopedAssignment(req, p.scope || 'branch', null);
   
   const tx = db.transaction(() => {
     stmtDeleteRolePermissions.run(role.id);
@@ -147,6 +179,8 @@ securityRouter.post('/roles', requirePermission('Role.Edit'), ah(async (req, res
     if (p.scope && !['organization', 'campus', 'branch', 'department', 'program', 'class', 'own'].includes(p.scope)) {
       throw new HttpError(400, `Invalid scope '${p.scope}' on a permission.`);
     }
+    // A new position may not carry scope the creator cannot themselves grant.
+    if (p.scope) requireScopedAssignment(req, p.scope, null);
   }
   const maxSort = (stmtGetMaxRoleSort.get() as { m: number }).m;
   const roleId = id('role');
@@ -209,6 +243,15 @@ securityRouter.post('/users/:userId/roles', requirePermission('User.Edit', 'Role
   
   const role = stmtGetRoleCodeById.get(roleId) as { id: string; code: string } | undefined;
   if (!role) throw new HttpError(404, 'Role not found.');
+  // A principal may never grant privilege it does not itself hold. `owner` is
+  // not an ordinary role: isGlobalOwner() short-circuits requirePermission() in
+  // middleware/auth.ts, so holding it bypasses every permission check in every
+  // branch. Reproduced live: a branch manager with delegated Role.Edit assigned
+  // the owner role to an ordinary receptionist (HTTP 201) and that victim's
+  // rebuilt context reported isGlobalOwner = true, canAccessAllBranches = true.
+  if (role.code === 'owner' && !callerIsGlobalOwner(req)) {
+    throw new HttpError(403, 'Only a global owner may grant the owner role.');
+  }
   const primaryLegacyRole = isPrimary ? legacyRoleForCanonicalCode(role.code) : null;
   if (isPrimary) {
     if (!primaryLegacyRole) {
