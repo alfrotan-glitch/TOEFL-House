@@ -302,7 +302,27 @@ export function buildRbacContext(db: Database.Database, user: {
     roles = stmts.getUserRoles.all(user.id) as RbacUserContext['roles'];
   }
   
-  if (roles.length === 0) {
+  // The legacy fallback exists for ONE transient state: a user who authenticates
+  // before syncLegacyUserRoles() has materialized their user_roles rows. It must
+  // never fire for a user whose assignments exist but are currently expired —
+  // that user has been deliberately time-limited, and expiry must revoke.
+  //
+  // RBAC-1, reproduced live over HTTP before this guard existed: a campus-scoped
+  // owner whose grant lapsed was handed a SYNTHESIZED organization-scoped owner
+  // role, because getUserRoles() correctly filters on `expires_at` and returns
+  // zero rows, which this branch read as "legacy user". isGlobalOwner() then
+  // returned true and every authorize()/requirePermission() short-circuit
+  // opened. Expiring the grant WIDENED access from one campus to all branches
+  // (GET /students/:id in another campus went 403 -> 200).
+  //
+  // `hasUserRole` is deliberately unfiltered by expiry: it answers "has this
+  // user ever been assigned a role?", which is exactly the question that
+  // separates a genuine legacy user from a lapsed one. resolveUserPermissions()
+  // above already gates its own legacy fallback on the same statement, so this
+  // makes role resolution agree with permission resolution instead of
+  // contradicting it.
+  const hasAnyAssignment = rbacSchemaExists(db) && !!stmts.hasUserRole.get(user.id);
+  if (roles.length === 0 && !hasAnyAssignment) {
     const roleCode = LEGACY_ROLE_MAP[user.role as UserRole] || user.role;
     const def = ROLE_DEFINITIONS.find((r) => r.code === roleCode);
     roles = [{ 
