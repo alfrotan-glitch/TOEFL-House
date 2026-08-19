@@ -751,6 +751,17 @@ CREATE INDEX IF NOT EXISTS idx_academic_terms_branch ON academic_terms(branch_id
 -- BC #4: STUDENT 
 -- ============================================================================ 
 
+-- Migration 076: authoritative household identity, declared before `students`
+-- because students.household_id references it. Free-text `father_name` is not
+-- identity, so FAMILY_OF_FOUR_PLUS eligibility is counted from this grouping.
+CREATE TABLE IF NOT EXISTS households (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
+  branch_id  TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  notes      TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS students ( 
   id                      TEXT PRIMARY KEY, 
   student_code            TEXT NOT NULL UNIQUE, 
@@ -762,6 +773,10 @@ CREATE TABLE IF NOT EXISTS students (
   registration_date       TEXT NOT NULL, 
   branch_id               TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT, 
   discount_percent        REAL NOT NULL DEFAULT 0, 
+  -- Migration 076: authoritative family/household identity for the
+  -- FAMILY_OF_FOUR_PLUS discount category. Member count is derived from this
+  -- link, never from a client-supplied familyMemberCount.
+  household_id            TEXT REFERENCES households(id),
   lead_id                 TEXT REFERENCES visitors(id) ON DELETE SET NULL, 
   gender                  TEXT NOT NULL, 
   father_name             TEXT, 
@@ -1959,3 +1974,63 @@ CREATE TRIGGER IF NOT EXISTS trg_exams_fee_nonnegative_update
 BEFORE UPDATE OF fee ON exams
 WHEN NEW.fee < 0
 BEGIN SELECT RAISE(ABORT, 'exam fee cannot be negative'); END;
+
+
+-- Migration 076: discount authorization & eligibility (CFG-1).
+-- A Rule Engine rule is a calculation; THESE tables are the authorization.
+CREATE INDEX IF NOT EXISTS idx_students_household ON students(household_id);
+
+CREATE TABLE IF NOT EXISTS student_staff_relations (
+  id          TEXT PRIMARY KEY,
+  student_id  TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  staff_type  TEXT NOT NULL CHECK (staff_type IN ('teacher','employee')),
+  teacher_id  TEXT REFERENCES teachers(id) ON DELETE CASCADE,
+  employee_id TEXT REFERENCES employees(id) ON DELETE CASCADE,
+  degree      INTEGER NOT NULL CHECK (degree IN (1,2)),
+  branch_id   TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  verified_by TEXT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  -- Exactly one counterparty, matching staff_type.
+  CHECK ((staff_type = 'teacher'  AND teacher_id  IS NOT NULL AND employee_id IS NULL)
+      OR (staff_type = 'employee' AND employee_id IS NOT NULL AND teacher_id  IS NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_staff_relations_student ON student_staff_relations(student_id);
+
+CREATE TABLE IF NOT EXISTS student_discount_authorizations (
+  id                 TEXT PRIMARY KEY,
+  student_id         TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  category           TEXT NOT NULL CHECK (category IN (
+                       'COURSE_AMBASSADOR',
+                       'FIRST_DEGREE_RELATIVE',
+                       'SECOND_DEGREE_RELATIVE',
+                       'FAMILY_OF_FOUR_PLUS',
+                       'SPONSORSHIP'
+                     )),
+  requested_percent  REAL,
+  approved_percent   REAL NOT NULL,
+  eligibility_ref    TEXT,
+  approved_by        TEXT,
+  approved_by_user_id TEXT,
+  approved_at        TEXT,
+  reason             TEXT,
+  evidence_ref       TEXT,
+  status             TEXT NOT NULL DEFAULT 'active'
+                       CHECK (status IN ('active','revoked','expired')),
+  effective_from     TEXT,
+  effective_to       TEXT,
+  branch_id          TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  source             TEXT NOT NULL DEFAULT 'manual',
+  created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_discount_auth_student ON student_discount_authorizations(student_id, status);
+
+CREATE TRIGGER IF NOT EXISTS trg_discount_auth_percent_insert
+BEFORE INSERT ON student_discount_authorizations
+WHEN NEW.approved_percent < 0 OR NEW.approved_percent > 100
+BEGIN SELECT RAISE(ABORT, 'approved_percent must be between 0 and 100'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_discount_auth_percent_update
+BEFORE UPDATE OF approved_percent ON student_discount_authorizations
+WHEN NEW.approved_percent < 0 OR NEW.approved_percent > 100
+BEGIN SELECT RAISE(ABORT, 'approved_percent must be between 0 and 100'); END;

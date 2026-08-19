@@ -21,6 +21,7 @@ import { addNotification } from '../utils/notifications.js';
 import { recordIncome } from '../utils/income.js';
 import { getNumberSetting, incrementNumberSetting } from '../utils/settings.js';
 import { evaluateRules } from '../core/configuration/rule-engine.js';
+import { resolveAuthorizedDiscount } from '../core/configuration/discount-authority.js';
 import { resolveFee } from '../core/configuration/policy-resolver.js';
 import { assertClassGenderAllowsStudent } from './classes.routes.js';
 import { getEnrollmentService } from '../core/academic/enrollment-service.js';
@@ -737,7 +738,11 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
   // the configured cap to 50% silently had no effect here: the engine returned
   // 50 and the route quietly clamped it back to 30. A policy that cannot be
   // changed from the place it is configured is not a policy.
-  const effectiveDiscount = Math.max(0, Math.min(100, Number(discountRule.finalOutputs.discountPercent ?? requestedDiscount)));
+  // CFG-1: the rule engine's answer is a candidate, not an authorization. A
+  // visitor being converted has no student row yet, so ordinary policy
+  // (<= 20%) governs; an exception must be authorized after conversion.
+  const ruleDiscount = Math.max(0, Math.min(100, Number(discountRule.finalOutputs.discountPercent ?? requestedDiscount)));
+  const effectiveDiscount = resolveAuthorizedDiscount(db, null, ruleDiscount, { branchId: studentBranchId }).percent;
   const netTuition = Math.max(0, Math.round(grossTuition - (grossTuition * effectiveDiscount) / 100));
   const paidNow = validatedAmountPaid;
   // The `&& netTuition > 0` escape hatch let any amount be collected against a

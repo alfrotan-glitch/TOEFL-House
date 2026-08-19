@@ -17,6 +17,7 @@ import { id, today } from '../utils/ids.js';
 import { recordIncome } from '../utils/income.js';
 import { getNumberSetting, incrementNumberSetting } from '../utils/settings.js';
 import { evaluateRules } from '../core/configuration/rule-engine.js';
+import { resolveAuthorizedDiscount } from '../core/configuration/discount-authority.js';
 import { resolveFee } from '../core/configuration/policy-resolver.js';
 import { nextReceiptNumber, nextStudentCode } from '../utils/receipt.js';
 import { getJourneyEngine } from '../core/journey/journey-engine.js';
@@ -678,6 +679,12 @@ studentsRouter.post('/manual', requirePermission('Student.Create'), ah(async (re
     const cap = evaluateRules({ category: 'discount', branchId: branchId || user.branchId, data: { discountPercent: effDiscount } });
     if (typeof cap.finalOutputs.discountPercent === 'number') effDiscount = cap.finalOutputs.discountPercent;
   }
+  // CFG-1: the Rule Engine computes a candidate; it is not authorization. The
+  // student does not exist yet, so no authorization record can apply and
+  // ordinary policy (<= 20%) governs. Without this, a manager rule
+  // (`conditions: []`, `discountPercent: 95`) set the discount directly —
+  // reproduced at every priority (1/10/199 -> 95, 201/999/10000 -> 30).
+  effDiscount = resolveAuthorizedDiscount(db, null, effDiscount, { branchId: branchId || user.branchId }).percent;
 
   const studentCode = nextStudentCode();
   const studentBranchId = typeof branchId === 'string' && branchId.trim() ? branchId.trim() : user.branchId;
@@ -798,7 +805,12 @@ studentsRouter.post('/:id/enroll-class', requirePermission('Class.Assign', 'Stud
   const enrollId = id('enr');
   const date = today();
   const baseFee = cls.fee || 0;
-  const discount = student.discount_percent || 0;
+  // CFG-1: re-resolve authorization at the moment the charge is issued. The
+  // stored `discount_percent` is a cached figure; if the authorization behind
+  // it was revoked or expired since, it must not fund a NEW invoice. Proven:
+  // a revoked 100% sponsorship still produced a zero-fee enrollment. Already
+  // issued invoices are untouched — only this new document is re-derived.
+  const discount = resolveAuthorizedDiscount(db, student.id, Number(student.discount_percent || 0), { branchId: student.branch_id }).percent;
   const netFee = Math.max(0, baseFee - Math.round(baseFee * discount / 100));
   let paidNow: number;
   try { paidNow = assertMoney(amountPaidNow || 0, 'amount paid'); }
@@ -1206,7 +1218,10 @@ studentsRouter.post('/:id/enroll-semester', requirePermission('Class.Assign', 'S
   }
   resolvedTuition = Number(resolvedTuition ?? 0);
   if (!Number.isFinite(resolvedTuition) || resolvedTuition < 0) throw new HttpError(400, 'Tuition amount must be zero or greater.');
-  const discountAmount = Math.round(resolvedTuition * Math.max(0, Number(student.discount_percent || 0)) / 100);
+  // CFG-1: same re-resolution as enroll-class — a revoked or expired grant
+  // must not price a new semester.
+  const effectivePercent = resolveAuthorizedDiscount(db, student.id, Math.max(0, Number(student.discount_percent || 0)), { branchId: student.branch_id }).percent;
+  const discountAmount = Math.round(resolvedTuition * effectivePercent / 100);
   const netTuition = Math.max(0, resolvedTuition - discountAmount);
   const paidNow = Number(amountPaidNow ?? 0);
   if (!Number.isFinite(paidNow) || paidNow < 0) throw new HttpError(400, 'Amount received must be zero or greater.');
@@ -1351,6 +1366,10 @@ studentsRouter.patch('/:id', requirePermission('Student.Edit'), ah(async (req, r
     const cap = evaluateRules({ category: 'discount', branchId: existing.branch_id, data: { discountPercent: effDiscount } });
     if (typeof cap.finalOutputs.discountPercent === 'number') effDiscount = cap.finalOutputs.discountPercent;
   }
+  // CFG-1: bound the rule candidate by what this student is actually
+  // authorized to receive. An authorized exception (ambassador, relative,
+  // family, sponsorship) raises the ceiling; absent one, ordinary <= 20%.
+  effDiscount = resolveAuthorizedDiscount(db, existing.id, Number(effDiscount), { branchId: existing.branch_id }).percent;
 
   stmtUpdateStudentDetails.run(
     merge('fullName', 'full_name'), merge('phone', 'phone'), merge('email', 'email'), effDiscount, merge('gender', 'gender'),

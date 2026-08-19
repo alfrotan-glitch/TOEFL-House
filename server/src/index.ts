@@ -57,6 +57,7 @@ import eventsRouter from './routes/events.routes.js';
 import auditRouter, { notificationsRouter } from './routes/audit.routes.js';
 import systemSettingsRouter from './routes/settings.routes.js';
 import { rulesRouter } from './routes/rules.routes.js';
+import { discountAuthorizationsRouter } from './routes/discount-authorizations.routes.js';
 import bosRouter from './routes/bos.routes.js';
 import sessionsRouter from './routes/sessions.routes.js';
 import enrollmentRouter from './routes/enrollment.routes.js';
@@ -213,6 +214,7 @@ app.use('/api/notifications', notificationsRouter);
 
 app.use('/api/settings', systemSettingsRouter);
 app.use('/api/rules', rulesRouter);
+app.use('/api/discount-authorizations', discountAuthorizationsRouter);
 
 app.use('/api/bos', bosRouter);
 app.use('/api/search', searchRouter);
