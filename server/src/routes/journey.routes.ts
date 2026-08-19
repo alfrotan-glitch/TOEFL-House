@@ -5,6 +5,8 @@ import { ah, HttpError } from '../middleware/errorHandler.js';
 import { assertMoney } from '../utils/money.js';
 import { getJourneyEngine } from '../core/journey/journey-engine.js';
 import { getEnrollmentService } from '../core/academic/enrollment-service.js';
+import { getCatalogService } from '../core/academic/catalog-service.js';
+import { resolveAuthorizedDiscount } from '../core/configuration/discount-authority.js';
 import { assertClassGenderAllowsStudent } from './classes.routes.js';
 import { JourneyEventType } from '../core/journey/event-types.js';
 import { writeAudit } from '../middleware/audit.js';
@@ -201,6 +203,51 @@ journeyRouter.post(
 
     const { programVersionId, levelId, autoInvoice, discountAmount } = req.body ?? {};
     if (classId) assertClassGenderAllowsStudent(classId, student.gender);
+
+    // JRN-1. This route accepted an absolute AFN discount and handed it to
+    // EnrollmentService, whose only bound is `discount <= fee`. A registrar
+    // could therefore waive 100% of tuition: reproduced live on a 10,000 AFN
+    // class for a student with no authorization row — discountAmount 10000
+    // returned 201 and wrote invoice 10000/10000/0. Every other tuition
+    // discount path (students.routes manual create + new semester, visitors
+    // conversion) resolves the ceiling through resolveAuthorizedDiscount, the
+    // canonical CFG-1 authority; this one did not call it at all. The parity
+    // control: the same registrar sending discountPercent 100 to
+    // POST /students/manual is clamped to a stored 20.
+    //
+    // The requested amount is converted to a percent of the SAME fee snapshot
+    // the service will price the invoice from — built here through the shared
+    // catalog authority rather than recomputed — and bounded by whatever the
+    // authority permits for this student, branch and category.
+    //
+    // Fail-closed rather than clamp: the caller stated an explicit AFN figure,
+    // so silently substituting a smaller one would report success for a price
+    // nobody authorised. The sibling money routes (book sale, invoice) also
+    // reject an over-large discount instead of capping it. students.routes
+    // clamps a *percent it derived itself* from the rule engine, which is a
+    // different act — there the caller never named an amount.
+    const requestedDiscount = discountAmount != null ? assertMoney(discountAmount, 'discount amount') : 0;
+    if (requestedDiscount > 0) {
+      const resolvedLevelId = levelId || null;
+      const level = resolvedLevelId
+        ? (db.prepare('SELECT program_version_id FROM levels WHERE id = ?').get(resolvedLevelId) as { program_version_id?: string } | undefined)
+        : undefined;
+      const snapshot = getCatalogService(db).buildFeeSnapshot({
+        programVersionId: programVersionId || level?.program_version_id || null,
+        levelId: resolvedLevelId,
+        branchId: student.branch_id,
+        enrollmentType: enrollmentType || 'new',
+      });
+      const feeTotal = Number(snapshot.total || 0);
+      const authorized = resolveAuthorizedDiscount(db, studentId, 100, { branchId: student.branch_id });
+      const maxDiscount = Math.round((feeTotal * authorized.percent) / 100);
+      if (requestedDiscount > maxDiscount) {
+        throw new HttpError(
+          400,
+          `Discount of ${requestedDiscount} AFN exceeds the authorized maximum of ${maxDiscount} AFN (${authorized.percent}% of ${feeTotal} AFN) for this student.`,
+        );
+      }
+    }
     
     const result = getEnrollmentService(db).enroll({
       studentId,
@@ -218,7 +265,7 @@ journeyRouter.post(
       actorUserId: user.userId,
       actorName: user.fullName,
       autoInvoice: autoInvoice !== false,
-      discountAmount: discountAmount != null ? assertMoney(discountAmount, 'discount amount') : 0,
+      discountAmount: requestedDiscount,
     });
 
     writeAudit(req, `Enrollment ${result.enrollmentId} for student ${student.full_name}`);
