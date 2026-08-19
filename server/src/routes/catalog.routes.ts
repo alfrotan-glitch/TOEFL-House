@@ -153,10 +153,21 @@ catalogRouter.post('/promotion-rules', requirePermission('AcademicSetup.Edit', '
   const b = req.body ?? {};
   if (!b.programVersionId || !b.name) throw new HttpError(400, 'programVersionId and name required.');
   
+  // ACFG-1: these two are Layer 1 of the promotion authority — they OUTRANK
+  // levels.pass_mark and the branch profile in
+  // promotion-engine.resolvePromotionCriteria, and feed
+  // `scoreOk = finalPercentage >= minScore`, whose outcome writes
+  // student_semesters.status and drives enrollment transitions. Written raw,
+  // they accepted -1, 101, 1e9 and 'abc' into columns with no CHECK. Bounded
+  // with the same 0..100 discipline the branch profile (Layer 3) already used.
+  // Omitted still means the documented default (60 / 75).
+  const ruleMinScore = b.minScore == null ? 60 : assertPercent(b.minScore, 'minimum score');
+  const ruleMinAttendance = b.minAttendancePct == null ? 75 : assertPercent(b.minAttendancePct, 'minimum attendance percentage');
+
   const newId = id('promo');
   stmtInsertPromotionRule.run(
     newId, b.programVersionId, b.fromLevelId ?? null, b.toLevelId ?? null, b.name, 
-    b.minScore ?? 60, b.minAttendancePct ?? 75, b.requireAllSubjects !== false ? 1 : 0, 
+    ruleMinScore, ruleMinAttendance, b.requireAllSubjects !== false ? 1 : 0, 
     b.autoPromote ? 1 : 0, b.branchId ?? null
   );
   writeAudit(req, `Created promotion rule: ${b.name}`);

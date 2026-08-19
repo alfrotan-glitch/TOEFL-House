@@ -8,7 +8,7 @@ import { db } from '../db/connection.js';
 import { assertTextLengths, TEXT_LIMITS } from '../utils/textInput.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
-import { assertMoney } from '../utils/money.js';
+import { assertMoney, assertPerformanceScore } from '../utils/money.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id } from '../utils/ids.js';
 import { ACADEMIC_DEFAULTS, PLACEMENT_DEFAULTS } from '../core/configuration/policy-catalog.js';
@@ -335,7 +335,16 @@ academicRouter.post(
       // fee and therefore of every student's tuition, so a bad value here
       // propagates into enrolment and invoicing.
       defaultFee == null ? ACADEMIC_DEFAULTS.levelDefaultFee : assertMoney(defaultFee, 'default fee'),
-      Number(passMark) || ACADEMIC_DEFAULTS.levelPassMark,
+      // ACFG-1: `Number(passMark) || levelPassMark` was a coercion, not a
+      // validation. 'abc' became NaN and fell through to 70, and an explicit 0
+      // did the same, so a typo silently became a valid-looking threshold; -1,
+      // 101 and 1e9 were stored verbatim. levels.pass_mark is Layer 2 of the
+      // promotion authority (promotion-engine.resolvePromotionCriteria) and
+      // feeds `scoreOk = finalPercentage >= minScore`, whose outcome writes
+      // student_semesters.status and drives enrollment transitions. Bounded
+      // with the same 0..100 discipline the branch profile (Layer 3) already
+      // enforced. Omitted/null still means "use the configured default".
+      passMark == null ? ACADEMIC_DEFAULTS.levelPassMark : assertPerformanceScore(passMark, 'Level pass mark'),
       isActive === false || isActive === 0 ? 0 : 1,
       Number(minViableSize) >= 0 ? Number(minViableSize) : ACADEMIC_DEFAULTS.levelMinViableSize
     );
@@ -360,7 +369,11 @@ academicRouter.put(
       code !== undefined ? code : existing.code,
       durationMonths ?? existing.duration_months,
       defaultFee == null ? existing.default_fee : assertMoney(defaultFee, 'default fee'),
-      passMark ?? existing.pass_mark,
+      // ACFG-1: this update wrote the raw body value with no validation at all,
+      // so -1, 101, 1e9, 'abc' and true all reached levels.pass_mark (no CHECK
+      // on the column). Same canonical bound as the create path; an omitted or
+      // null passMark still means "leave unchanged".
+      passMark == null ? existing.pass_mark : assertPerformanceScore(passMark, 'Level pass mark'),
       isActive === false || isActive === 0 ? 0 : isActive === true || isActive === 1 ? 1 : existing.is_active ?? 1,
       minViableSize !== undefined ? Number(minViableSize) : (existing.min_viable_size ?? ACADEMIC_DEFAULTS.levelMinViableSize),
       req.params.id
