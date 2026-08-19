@@ -22,6 +22,7 @@ import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
 const dbPath = process.argv[2] || process.env.DB_PATH || path.join('data', 'erp.sqlite');
 
@@ -51,8 +52,17 @@ const check = (name, fn) => {
 };
 
 const migrationsOnDisk = (() => {
-  const dir = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src', 'db', 'migrations');
-  const distDir = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'dist', 'db', 'migrations');
+  // `new URL(import.meta.url).pathname` is NOT a filesystem path on Windows:
+  // it yields '/C:/Users/...', which fs.existsSync() can never resolve. Both
+  // candidate directories then looked absent, `migrationsOnDisk` came back
+  // empty, nothing could be reported missing, and this check silently PASSED
+  // on a database with unapplied migrations — the verifier's single most
+  // important job, failing open. Reproduced: a database with 069 deleted from
+  // schema_migrations exited 0 on Windows and 1 on Linux.
+  // fileURLToPath() is the correct conversion on every platform.
+  const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+  const dir = path.join(scriptDir, '..', 'src', 'db', 'migrations');
+  const distDir = path.join(scriptDir, '..', 'dist', 'db', 'migrations');
   const useDir = fs.existsSync(dir) ? dir : distDir;
   return fs.existsSync(useDir) ? fs.readdirSync(useDir).filter((f) => f.endsWith('.sql')).sort() : [];
 })();

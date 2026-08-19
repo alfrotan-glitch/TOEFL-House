@@ -1,7 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = path.resolve(new URL('..', import.meta.url).pathname);
+// `.pathname` yields '/C:/Users/...' on Windows, which is not a usable
+// filesystem path — every read() below would throw ENOENT and this release
+// gate could never run there. fileURLToPath() is correct on all platforms.
+const root = fileURLToPath(new URL('..', import.meta.url));
 const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
 const fail = (msg) => { console.error(`[FAIL] ${msg}`); process.exitCode = 1; };
 
