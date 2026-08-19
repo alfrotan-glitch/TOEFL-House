@@ -58,6 +58,23 @@ const stmtTodayRevenue = db.prepare(`SELECT COALESCE(SUM(amount),0) as revenue F
 const stmtMonthlyRevenue = db.prepare(`SELECT COALESCE(SUM(amount),0) as revenue FROM financial_transactions WHERE type='income' AND date BETWEEN ? AND ? AND branch_id=?`);
 const stmtMonthlyExpense = db.prepare(`SELECT COALESCE(SUM(amount),0) as expense FROM financial_transactions WHERE type='expense' AND date BETWEEN ? AND ? AND branch_id=?`);
 const stmtFixedTotal = db.prepare(`SELECT COALESCE(SUM(allocated_amount),0) as fixedTotal FROM budget_lines WHERE branch_id=? AND cost_type='fixed'`);
+// BOS-1: profit distributions ALREADY taken in the period.
+//
+// The withdrawable ceiling is a share of profit, and a withdrawal is booked as
+// an expense — so it lowers profit by 100% of itself while the ceiling is only
+// 20% of profit. Each payout therefore removed just a fifth of itself from the
+// limit and the limit replenished instead of closing. Proven live: a branch
+// with a published 32,000 AFN monthly maximum paid out 140,630 AFN over ten
+// sequential calls (4.4x the cap, 70% of all revenue) with every individual
+// request passing its own check.
+//
+// The gross profit (before distributions) is the basis for the tier, and the
+// amount already distributed is subtracted from the ceiling, so the period
+// total can never exceed the figure the calculate endpoint published.
+const stmtPeriodDistributed = db.prepare(
+  `SELECT COALESCE(SUM(amount),0) as distributed FROM financial_transactions
+    WHERE category='profit_distribution' AND date BETWEEN ? AND ? AND branch_id=?`
+);
 const stmtVariableTotal = db.prepare(`SELECT COALESCE(SUM(allocated_amount),0) as variableTotal FROM budget_lines WHERE branch_id=? AND cost_type='variable'`);
 const stmtTeacherCost = db.prepare(`SELECT COALESCE(SUM(amount),0) as teacherCost FROM financial_transactions WHERE category='salary' AND type='expense' AND date BETWEEN ? AND ? AND branch_id=?`);
 
@@ -384,22 +401,29 @@ bosRouter.get(
     const expense = (stmtMonthlyExpense.get(from, to, branchId) as any).expense;
     const fixedTotal = (stmtFixedTotal.get(branchId) as any).fixedTotal;
 
-    const profit = revenue - expense;
+    const distributed = (stmtPeriodDistributed.get(from, to, branchId) as any).distributed;
+    // Gross profit excludes distributions already taken, so paying one out does
+    // not lower the tier and re-open the ceiling (BOS-1).
+    const profit = revenue - expense + distributed;
     const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
     const tierPercent = profitDistributionTier(margin);
     const reserveFundTarget = fixedTotal * 6;
     const reserveFundBalance = getFinanceAccount('branch', branchId).savingBalance;
     const reserveMet = reserveFundBalance >= reserveFundTarget;
-    const maxWithdrawable = reserveMet && profit > 0 ? Math.round((profit * tierPercent) / 100) : 0;
+    const periodAllowance = profit > 0 ? Math.round((profit * tierPercent) / 100) : 0;
+    // What is still available, not what was available before anything was paid.
+    const maxWithdrawable = reserveMet ? Math.max(0, periodAllowance - distributed) : 0;
 
     res.json({
       period: req.query.period || today().slice(0, 7),
-      revenue, expense, profit,
+      revenue, expense, profit: revenue - expense,
       profitMargin: Math.round(margin * 10) / 10,
       tierPercent,
       reserveFundTarget,
       reserveFundBalance,
       reserveFundMet: reserveMet,
+      periodAllowance,
+      alreadyDistributed: distributed,
       maxWithdrawable,
     });
   })
@@ -430,7 +454,12 @@ bosRouter.post(
       const revenue = Number((stmtMonthlyRevenue.get(from, to, branchId) as any).revenue || 0);
       const expense = Number((stmtMonthlyExpense.get(from, to, branchId) as any).expense || 0);
       const fixedTotal = Number((stmtFixedTotal.get(branchId) as any).fixedTotal || 0);
-      const profit = assertMoney(revenue - expense, 'calculated profit', { allowNegative: true });
+      const distributed = assertMoney(
+        Number((stmtPeriodDistributed.get(from, to, branchId) as any).distributed || 0),
+        'distributed this period',
+      );
+      // Gross profit, i.e. before profit distributions (BOS-1).
+      const profit = assertMoney(revenue - expense + distributed, 'calculated profit', { allowNegative: true });
       const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
       const tierPercent = profitDistributionTier(margin);
       const reserveFundTarget = assertMoney(fixedTotal * 6, 'reserve target');
@@ -440,9 +469,11 @@ bosRouter.post(
         throw new HttpError(409, `Profit withdrawal not allowed: the contingency reserve fund has not yet reached its 6-month target (${Math.round(reserveFundBalance).toLocaleString()} of ${Math.round(reserveFundTarget).toLocaleString()} AFN).`);
       }
 
-      const maxWithdrawable = Math.max(0, assertMoney((profit * tierPercent) / 100, 'maximum withdrawal', { allowNegative: true }));
+      const periodAllowance = Math.max(0, assertMoney((profit * tierPercent) / 100, 'maximum withdrawal', { allowNegative: true }));
+      // The ceiling applies to the PERIOD, not to each request.
+      const maxWithdrawable = Math.max(0, assertMoney(periodAllowance - distributed, 'remaining withdrawal allowance', { allowNegative: true }));
       if (amount > maxWithdrawable) {
-        throw new HttpError(409, `Requested amount exceeds this month's maximum withdrawable limit (${maxWithdrawable.toLocaleString()} AFN based on ${Math.round(margin)}% profit margin).`);
+        throw new HttpError(409, `Requested amount exceeds this month's remaining withdrawable limit (${maxWithdrawable.toLocaleString()} AFN of a ${periodAllowance.toLocaleString()} AFN allowance based on a ${Math.round(margin)}% profit margin; ${distributed.toLocaleString()} AFN already distributed).`);
       }
 
       const currentMainBalance = assertMoney(getFinanceAccount('branch', branchId).mainBalance, 'main account balance');
