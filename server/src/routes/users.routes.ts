@@ -69,9 +69,10 @@ usersRouter.post(
       if (db.prepare('SELECT id FROM users WHERE linked_student_id = ?').get(st.id)) throw new HttpError(409, 'This student already has a portal account.');
     }
     const newId = id('usr');
-    // Student portal accounts authenticate with code + name (no password
-    // login), so the password-change quarantine must not apply to them.
-    const mustChangePassword = role === 'student' ? 0 : 1;
+    // SPA-1: portal accounts authenticate with a real secret now, so a
+    // student is onboarded exactly like staff — with an owner-issued
+    // temporary password that must be rotated on first use.
+    const mustChangePassword = 1;
     const createTx = db.transaction(() => {
       stmtInsertUser.run(newId, username, passwordHash, fullName, email || null, role, branchId, campusId, linkedTeacherId || null, linkedEmployeeId || null, linkedPartnerId || null, linkedStudentId || null, mustChangePassword);
       syncPrimaryUserRole(db, newId, role as UserRole, String(branchId), req.user!.userId);
@@ -110,8 +111,10 @@ usersRouter.patch(
         db.prepare('UPDATE users SET campus_id = ? WHERE id = ?').run(campus, req.params.id);
       }
       if (role || branchId) syncPrimaryUserRole(db, req.params.id, nextRole, nextBranchId, req.user!.userId);
-      // Student accounts have no password flow — never quarantine them.
-      if (nextRole === 'student') db.prepare('UPDATE users SET must_change_password = 0 WHERE id = ?').run(req.params.id);
+      // SPA-1: portal accounts now have a real password flow, so the
+      // must_change_password quarantine applies to them exactly as it does to
+      // staff. Clearing it here would silently cancel a forced rotation
+      // requested via reset-password.
       if (role || branchId || isActive === false) db.prepare('UPDATE users SET session_version = session_version + 1 WHERE id = ?').run(req.params.id);
     });
     updateTx();

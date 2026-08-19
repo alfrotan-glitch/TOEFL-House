@@ -106,8 +106,12 @@ const stmtInsertSponsorship = db.prepare(
   `INSERT INTO sponsorship_agreements (id, donor_id, student_id, program_id, monthly_amount, start_date, end_date, status, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)`
 );
 const stmtGetSponsorshipById = db.prepare('SELECT * FROM sponsorship_agreements WHERE id = ?');
+// SPL-1: the terminal-state guard is re-checked inside the UPDATE itself, so
+// two concurrent transitions cannot both observe 'active' and both write.
+// Exactly one caller changes `changes` to 1; the loser is reported a 409.
 const stmtUpdateSponsorship = db.prepare(
-  `UPDATE sponsorship_agreements SET monthly_amount = ?, end_date = ?, status = ? WHERE id = ?`
+  `UPDATE sponsorship_agreements SET monthly_amount = ?, end_date = ?, status = ?
+     WHERE id = ? AND status NOT IN ('completed','terminated')`
 );
 
 // Summary
@@ -560,6 +564,22 @@ fundingRouter.patch(
     if (status && !['active', 'completed', 'terminated'].includes(status)) {
       throw new HttpError(400, 'Invalid sponsorship status.');
     }
+
+    // SPL-1: `completed` and `terminated` are TERMINAL. The handler previously
+    // wrote whichever of the three values arrived, so
+    // `active -> terminated -> active` silently resurrected a closed
+    // commitment, and a money edit could rewrite a historical agreement.
+    //
+    // Renewal is expressed the way this module already expresses it: POST a
+    // NEW agreement. There is no reactivation endpoint to reuse and inventing
+    // one would be inventing business policy, so the historical row stays
+    // immutable instead.
+    if (existing.status === 'completed' || existing.status === 'terminated') {
+      throw new HttpError(
+        409,
+        `This sponsorship agreement is ${existing.status} and can no longer be modified. Create a new agreement to renew the sponsorship.`,
+      );
+    }
     // The create handler validates the monthly amount with assertMoney; this
     // update did not validate it at all. Reproduced live: -99999, 'abc' and
     // 0.001 were all stored (HTTP 200) — a negative recurring donor commitment
@@ -570,12 +590,20 @@ fundingRouter.patch(
         ? existing.monthly_amount
         : assertMoney(monthlyAmount, 'monthly sponsorship amount');
 
-    stmtUpdateSponsorship.run(
+    const applied = stmtUpdateSponsorship.run(
       validatedMonthly, endDate ?? existing.end_date, 
       status ?? existing.status, req.params.id
     );
+    // Lost the race: another request moved this agreement to a terminal state
+    // between the check above and this write.
+    if (applied.changes !== 1) {
+      throw new HttpError(409, 'This sponsorship agreement was closed concurrently. Create a new agreement to renew the sponsorship.');
+    }
 
-    writeAudit(req, `Updated sponsorship agreement: ${req.params.id}`);
+    writeAudit(req, `Updated sponsorship agreement: ${req.params.id}`, {
+      oldValue: JSON.stringify({ status: existing.status, monthlyAmount: existing.monthly_amount }),
+      newValue: JSON.stringify({ status: status ?? existing.status, monthlyAmount: validatedMonthly }),
+    });
     res.json({ ok: true });
   })
 );

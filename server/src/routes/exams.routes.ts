@@ -421,7 +421,33 @@ examsRouter.put(
           }
         }
       } else if (!shouldHaveCert && result.certificate_issued) {
-        // Revoke certificate if score was corrected to below the passing threshold
+        // Revoke certificate if score was corrected to below the passing threshold.
+        //
+        // EXM-2 (POLICY, deliberate): revocation does NOT reverse money, and
+        // the exam correction engine is NOT a financial authority. Two fee
+        // semantics exist and the system distinguishes them explicitly:
+        //
+        //   payments/income category 'exam'    — the examination SERVICE, paid
+        //       at enrolment (exams.routes ~L234). It was delivered: the
+        //       candidate sat the exam. A score change never makes it
+        //       refundable.
+        //   payments/income category 'diploma' — certificate ISSUANCE, charged
+        //       ONCE PER STUDENT and only when no prior certificate and no
+        //       prior diploma payment exist (the `priorCertCount === 0 &&
+        //       !alreadyPaid` rule above).
+        //
+        // Because the diploma charge is once-per-student and the re-issue path
+        // deliberately does not re-bill, auto-reversing it here would let a
+        // correct-down / correct-up cycle hand back money and then re-issue the
+        // same certificate for free. The charge is therefore retained, and the
+        // ledger stays reconciled (cash remains backed by its income row;
+        // nothing is minted, destroyed or duplicated).
+        //
+        // If the institution decides a revoked certificate should be refunded,
+        // that is an OWNER POLICY DECISION and must be executed through the one
+        // refund authority — POST /students/:id/refund, which carries
+        // `Refund.Approve`, mandatory idempotency, the refundable-balance
+        // recompute and recordIncome(). It must never be written from here.
         if (certNo) stmtDeleteCertificate.run(certNo);
         certNo = null;
         certIssued = 0;

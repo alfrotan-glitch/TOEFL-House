@@ -133,11 +133,12 @@ describe('Account creation — RangeError regression (rbac-service sync)', () =>
     ).get(res.body.id) as { scope_id: string | null } | undefined;
     expect(rbacRole?.scope_id).toBe(BRANCH);
 
-    // Student portal accounts have no password flow — the password-change
-    // quarantine must not apply (regression: admin-created student accounts
-    // were stuck quarantined forever and got 403 on every portal request).
+    // SPA-1: portal accounts authenticate with a real secret now, so an
+    // owner-issued temporary password is quarantined until the student
+    // rotates it — exactly like staff. (Before SPA-1 the portal logged in
+    // with code + name, so the quarantine was deliberately skipped.)
     const quarantined = db.prepare('SELECT must_change_password FROM users WHERE id = ?').get(res.body.id) as { must_change_password: number };
-    expect(quarantined.must_change_password).toBe(0);
+    expect(quarantined.must_change_password).toBe(1);
   });
 
   it('rejects a linked student that belongs to another branch', async () => {
@@ -187,36 +188,74 @@ describe('Account creation — RangeError regression (rbac-service sync)', () =>
   });
 });
 
-describe('Student portal login (code + name only)', () => {
-  it('logs in with student code + full name and returns a scoped token', async () => {
+/**
+ * SPA-1 rewrote this contract. The portal used to authenticate with
+ * `studentCode + fullName` (neither is a secret) and auto-provisioned an
+ * account on first contact. It now requires a real secret verified through the
+ * same `verifyPassword` authority staff logins use, and never mints an account
+ * implicitly. These tests were updated to the new authority — every security
+ * assertion they made is preserved and strengthened below.
+ */
+describe('Student portal login (student code + secret)', () => {
+  const PORTAL_SECRET = 'Portal-Login-Pass-2026';
+
+  beforeAll(async () => {
+    // Onboard stu_portal_2 through the canonical owner-only authority.
+    const created = await supertest(app)
+      .post('/api/users')
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({
+        username: 'stu_portal_2_account',
+        tempPassword: PORTAL_SECRET,
+        fullName: 'Maryam Karimi Portal',
+        role: 'student',
+        branchId: BRANCH,
+        linkedStudentId: 'stu_portal_2',
+      });
+    expect(created.status).toBe(201);
+    // Clear the first-use quarantine so this suite can exercise the login path
+    // itself (rotation is covered in student-portal-secret-auth.test.ts).
+    db.prepare('UPDATE users SET must_change_password = 0 WHERE id = ?').run(created.body.id);
+  });
+
+  it('logs in with student code + secret and returns a scoped token', async () => {
     const res = await supertest(app)
       .post('/api/auth/student-login')
-      .send({ studentCode: 'TH-P-001002', fullName: 'Maryam Karimi Portal' });
+      .send({ studentCode: 'TH-P-001002', password: PORTAL_SECRET });
     expect(res.status).toBe(200);
     expect(res.body.user.role).toBe('student');
     expect(res.body.user.permissions).toEqual([]);
     expect(res.body.token).toBeTruthy();
   });
 
-  it('auto-provisions a portal user row linked to the student', async () => {
+  it('REJECTS the retired code + name credential', async () => {
+    const res = await supertest(app)
+      .post('/api/auth/student-login')
+      .send({ studentCode: 'TH-P-001002', fullName: 'Maryam Karimi Portal' });
+    expect([400, 401]).toContain(res.status);
+    expect(res.body.token).toBeFalsy();
+  });
+
+  it('has a portal user row linked to the student', () => {
     const row = db.prepare('SELECT username, role, linked_student_id FROM users WHERE linked_student_id = ?').get('stu_portal_2') as
       | { username: string; role: string; linked_student_id: string } | undefined;
     expect(row).toBeTruthy();
-    expect(row!.username).toContain('stu_');
     expect(row!.role).toBe('student');
   });
 
-  it('rejects an unknown student code with 404', async () => {
+  it('rejects an unknown student code with 401 (no enumeration)', async () => {
     const res = await supertest(app)
       .post('/api/auth/student-login')
-      .send({ studentCode: 'TH-NOPE-0000', fullName: 'Nobody' });
-    expect(res.status).toBe(404);
+      .send({ studentCode: 'TH-NOPE-0000', password: PORTAL_SECRET });
+    expect(res.status).toBe(401);
+    // and no account is silently created for a code that does not exist
+    expect(db.prepare('SELECT id FROM users WHERE username LIKE ?').get('stu_TH-NOPE%')).toBeFalsy();
   });
 
-  it('rejects a name mismatch with 401', async () => {
+  it('rejects a wrong secret with 401', async () => {
     const res = await supertest(app)
       .post('/api/auth/student-login')
-      .send({ studentCode: 'TH-P-001002', fullName: 'Wrong Name Here' });
+      .send({ studentCode: 'TH-P-001002', password: 'Wrong-Secret-Here-1' });
     expect(res.status).toBe(401);
   });
 });
@@ -225,9 +264,15 @@ describe('Student self-scope — read only, own profile only', () => {
   let studentToken: string;
 
   beforeAll(async () => {
+    // stu_portal_1 was onboarded earlier in this file via POST /api/users with
+    // tempPassword 'Student-Acc-Pass-123'. SPA-1 quarantines a freshly issued
+    // temporary password, which is cleared here so this suite can exercise the
+    // self-scope authorization rules rather than the rotation flow.
+    db.prepare('UPDATE users SET must_change_password = 0 WHERE linked_student_id = ?').run('stu_portal_1');
     const res = await supertest(app)
       .post('/api/auth/student-login')
-      .send({ studentCode: 'TH-P-001001', fullName: 'Ali Ahmad Portal' });
+      .send({ studentCode: 'TH-P-001001', password: 'Student-Acc-Pass-123' });
+    expect(res.status).toBe(200);
     studentToken = res.body.token;
   });
 

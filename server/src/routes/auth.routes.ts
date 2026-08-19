@@ -2,8 +2,7 @@ import { Router } from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { db } from '../db/connection.js';
 import { hashPassword, verifyPassword, signToken, verifyToken, resolveJwtExpiresInSeconds } from '../utils/auth.js';
-import { id } from '../utils/ids.js';
-import { syncPrimaryUserRole, isGlobalOwner } from '../core/rbac/rbac-service.js';
+import { isGlobalOwner } from '../core/rbac/rbac-service.js';
 import { authenticate, readSessionCookie } from '../middleware/auth.js';
 import { hasRole } from '../core/rbac/rbac-service.js';
 import { buildRbacContext, type RbacUserContext } from '../core/rbac/rbac-service.js';
@@ -207,60 +206,73 @@ authRouter.get(
 );
 
 /**
- * Student self-service login: student code + full name only.
- * The account is auto-provisioned on first login, tied to the student's
- * branch + campus, and the token carries role 'student' — which grants no
- * administrative permission anywhere. The student can only reach the
- * read-only portal endpoints (object-checked against linked_student_id).
+ * Student self-service login: student code + PORTAL SECRET.
+ *
+ * SPA-1 — this endpoint used to accept `studentCode + fullName` and
+ * auto-provision an account on first contact. Neither factor is a secret:
+ * `student_code` is issued from a sequential counter (utils/receipt.ts,
+ * `student_code_counter`, base 1000) and a student's full name is public to
+ * classmates and staff, so knowing a classmate's name was enough to walk the
+ * low-entropy code space and take over their portal session.
+ *
+ * `student_code` is now an IDENTIFIER only. Authentication is delegated to the
+ * same canonical primitive staff logins use — `verifyPassword` against
+ * `users.password_hash` — including the constant-time dummy-hash comparison on
+ * the miss path so a wrong secret and an unknown/unprovisioned code are
+ * indistinguishable to the caller. No second authentication authority is
+ * introduced.
+ *
+ * Onboarding and rotation reuse the existing owner-only authorities
+ * (`POST /api/users` with role 'student' + linkedStudentId, and
+ * `POST /api/users/:id/reset-password`, which bumps session_version in the
+ * same statement). Self-service rotation reuses `POST /api/auth/change-password`.
+ * Because a portal account is now credentialed, it is no longer created
+ * implicitly here: a student without an account cannot log in, and no account
+ * is silently minted by an anonymous request.
+ *
+ * The issued token still carries role 'student', which holds no permission
+ * anywhere; the portal remains object-checked against linked_student_id.
  */
 authRouter.post(
   '/student-login',
   studentLoginLimiter,
   ah(async (req, res) => {
-    const { studentCode, fullName } = req.body ?? {};
-    if (!studentCode || !fullName) throw new HttpError(400, 'Student code and full name are required.');
-    const code = String(studentCode).trim();
-    const name = String(fullName).trim();
-    if (!code || !name) throw new HttpError(400, 'Student code and full name are required.');
+    const { studentCode, password } = req.body ?? {};
+    // A credential must be a STRING, never coerced. `String(['secret'])`
+    // yields 'secret', so accepting an array would let `password: ["s3cret"]`
+    // authenticate — caught in adversarial testing of this very handler.
+    if (typeof studentCode !== 'string' || typeof password !== 'string') {
+      throw new HttpError(400, 'Student code and password are required.');
+    }
+    const code = studentCode.trim();
+    const secret = password;
+    if (!code || !secret) throw new HttpError(400, 'Student code and password are required.');
 
     const student = db.prepare(`SELECT * FROM students WHERE LOWER(TRIM(student_code)) = LOWER(TRIM(?))`).get(code) as
       | { id: string; student_code: string; full_name: string; branch_id: string; status: string } | undefined;
-    if (!student) throw new HttpError(404, 'No student found with this code.');
+
+    // Look the portal account up before branching, so every failure mode below
+    // costs one password verification and returns the same 401.
+    const user = student
+      ? (db.prepare(`SELECT * FROM users WHERE linked_student_id = ? AND role = 'student'`).get(student.id) as
+          | { id: string; username: string; full_name: string; role: string; branch_id: string; password_hash: string; is_active: number; session_version: number; must_change_password: number }
+          | undefined)
+      : undefined;
+
+    const passwordMatches = user
+      ? await verifyPassword(secret, user.password_hash)
+      : await verifyPassword(secret, DUMMY_HASH);
+
+    // One indistinguishable answer for: unknown code, no portal account,
+    // wrong secret. Enumerating student codes must not be possible here.
+    if (!student || !user || !passwordMatches) {
+      throw new HttpError(401, 'Invalid student code or password.');
+    }
+    if (!user.is_active) {
+      throw new HttpError(403, 'This portal account has been deactivated. Contact the office.');
+    }
     if (student.status === 'suspended' || student.status === 'inactive') {
       throw new HttpError(403, 'This student account is not active. Contact the office.');
-    }
-    if (String(student.full_name).trim().toLowerCase() !== name.toLowerCase()) {
-      throw new HttpError(401, 'The name does not match this student code.');
-    }
-
-    // Reuse an existing portal account if one exists; otherwise auto-provision.
-    let user = db.prepare('SELECT * FROM users WHERE linked_student_id = ?').get(student.id) as
-      | { id: string; username: string; full_name: string; role: string; branch_id: string; session_version: number; must_change_password: number } | undefined;
-    if (!user) {
-      const newId = id('usr');
-      const baseUsername = `stu_${code.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40)}`;
-      let username = baseUsername;
-      let suffix = 1;
-      while (db.prepare('SELECT id FROM users WHERE username = ?').get(username)) {
-        username = `${baseUsername}_${suffix}`;
-        suffix += 1;
-      }
-      // No password: the portal authenticates by code + name. The hash is a
-      // random opaque value so the row satisfies NOT NULL and can never be
-      // used for a password login.
-      const randomHash = await hashPassword(`student-portal-${newId}-${Date.now()}`);
-      const campus = (db.prepare('SELECT b.campus_id FROM branches b WHERE b.id = ?').get(student.branch_id) as { campus_id?: string | null } | undefined)?.campus_id ?? null;
-      db.transaction(() => {
-        db.prepare(`INSERT INTO users (id, username, password_hash, full_name, role, branch_id, campus_id, linked_student_id, is_active, must_change_password, session_version)
-          VALUES (?, ?, ?, ?, 'student', ?, ?, ?, 1, 0, 1)`).run(newId, username, randomHash, student.full_name, student.branch_id, campus, student.id);
-        syncPrimaryUserRole(db, newId, 'student', student.branch_id, 'system');
-      })();
-      user = db.prepare('SELECT * FROM users WHERE id = ?').get(newId) as typeof user;
-      // Account auto-provisioning is an identity/security mutation: record it
-      // with the student as the operator (portal principals hold no staff
-      // position, so operator_role is 'student').
-      req.user = { userId: user!.id, username: user!.username, role: 'student' as UserRow['role'], branchId: user!.branch_id, fullName: user!.full_name, sessionVersion: 1 };
-      writeAudit(req, `Auto-provisioned student portal account for ${student.full_name} (${code})`, { newValue: JSON.stringify({ userId: user!.id, studentId: student.id, branchId: student.branch_id }) });
     }
 
     const token = signToken({
@@ -270,11 +282,23 @@ authRouter.post(
     db.prepare("UPDATE users SET last_login_at = datetime('now') WHERE id = ?").run(user!.id);
     setSessionCookie(res, token);
 
+    // Operator attribution for a real authentication event. The secret is
+    // never part of the audit payload.
+    req.user = {
+      userId: user!.id, username: user!.username, role: 'student' as UserRow['role'],
+      branchId: user!.branch_id, fullName: user!.full_name, sessionVersion: user!.session_version,
+    };
+    writeAudit(req, 'Student portal login', { branchId: user!.branch_id });
+
     res.json({
       ...(process.env.NODE_ENV === 'production' ? {} : { token }),
       user: {
         id: user!.id, username: user!.username, fullName: user!.full_name, email: null,
-        role: 'student', branchId: user!.branch_id, mustChangePassword: false,
+        role: 'student', branchId: user!.branch_id,
+        // A forced rotation must be visible to the portal client, exactly as
+        // it is for staff — the quarantine in authenticate() applies to this
+        // account too.
+        mustChangePassword: !!user!.must_change_password,
         permissions: [], roles: [{ roleId: 'student', roleCode: 'student', roleName: 'Student', scopeType: 'branch', scopeId: user!.branch_id }],
         tabAccess: {},
       },
