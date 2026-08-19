@@ -5,6 +5,7 @@ import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { authenticate, requirePermission, authorize, canAccessBranchResource } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
+import { assertMoney } from '../utils/money.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id } from '../utils/ids.js';
 import { getCatalogService } from '../core/academic/catalog-service.js';
@@ -50,8 +51,11 @@ const stmtInsertFeeRule = db.prepare(
 const stmtGetFeeRuleById = db.prepare('SELECT * FROM fee_rules WHERE id = ?');
 
 const stmtGetBranchProfile = db.prepare('SELECT * FROM branch_academic_profiles WHERE branch_id = ?');
+// OR IGNORE so seeding a default row is idempotent: the branch-profile PUT
+// seeds first so its UPSERT always resolves through the COALESCE (update)
+// path, which is what gives partial payloads "leave unchanged" semantics.
 const stmtInsertDefaultBranchProfile = db.prepare(
-  `INSERT INTO branch_academic_profiles (branch_id, updated_at) VALUES (?, datetime('now'))`
+  `INSERT OR IGNORE INTO branch_academic_profiles (branch_id, updated_at) VALUES (?, datetime('now'))`
 );
 const stmtUpsertBranchProfile = db.prepare(
   `INSERT INTO branch_academic_profiles (
@@ -271,21 +275,86 @@ catalogRouter.get('/branch-profile/:branchId', requirePermission('AcademicSetup.
   res.json(row);
 }));
 
+/**
+ * Fee fields on a branch profile are MONEY, so they are validated by the same
+ * canonical authority Finance uses (`assertMoney`) rather than a second,
+ * divergent validator. Configuration is the right place to reject a bad
+ * amount: previously `-100`, `0.001`, `1e20` and even the text `"abc"` were
+ * written straight into REAL NOT NULL columns, and `resolveFee()` (which only
+ * checks Number.isFinite) then handed them to the money writers. A sub-cent
+ * fee surfaced as a HTTP 500 at payment time — "payment amount must have at
+ * most two decimal places" — long after the bad value was already persisted.
+ *
+ * Invalid configuration must never become authoritative money.
+ *
+ * `assertMoney` rounds to two decimals, so a sub-cent input would silently
+ * become a DIFFERENT fee (0.001 -> 0, a free placement test). A value that
+ * cannot be represented exactly is therefore refused rather than rounded.
+ */
+const FEE_FIELDS = [
+  ['placementTestFee', 'placement test fee'],
+  ['registrationFee', 'registration fee'],
+  ['cardFee', 'card fee'],
+  ['diplomaFee', 'diploma fee'],
+] as const;
+
+/** Percentage-style profile fields: finite, 0..100, not money. */
+function assertPercent(value: unknown, field: string): number {
+  const n = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+  if (typeof n !== 'number' || !Number.isFinite(n)) throw new HttpError(400, `${field} must be a finite number.`);
+  if (n < 0 || n > 100) throw new HttpError(400, `${field} must be between 0 and 100.`);
+  return n;
+}
+
 catalogRouter.put('/branch-profile/:branchId', requirePermission('AcademicSetup.Edit', 'Settings.Edit'), ah(async (req, res) => {
   if (!canAccessBranchResource(req, req.params.branchId)) throw new HttpError(403, 'Branch is outside your authorized scope.');
-  const b = req.body ?? {};
-  // Use atomic UPSERT to eliminate race conditions and extra queries
+  const b = (req.body ?? {}) as Record<string, unknown>;
+
+  // Validate BEFORE any write. An omitted field means "leave unchanged" and
+  // is skipped; a field that is present must be valid.
+  const fees: Record<string, number | null> = {};
+  for (const [key, label] of FEE_FIELDS) {
+    if (b[key] === undefined || b[key] === null) { fees[key] = null; continue; }
+    const money = assertMoney(b[key], label);
+    // Reject rather than silently round a value that is not exact money.
+    if (typeof b[key] === 'number' && (b[key] as number) !== money) {
+      throw new HttpError(400, `${label} must have at most two decimal places.`);
+    }
+    fees[key] = money;
+  }
+  const passMark = b.defaultPassMark === undefined || b.defaultPassMark === null
+    ? null : assertPercent(b.defaultPassMark, 'default pass mark');
+  const minAttendance = b.defaultMinAttendance === undefined || b.defaultMinAttendance === null
+    ? null : assertPercent(b.defaultMinAttendance, 'default minimum attendance');
+
+  // CFG-4: the UPSERT cannot express "leave unchanged" for a NOT NULL column.
+  // SQLite validates the INSERT tuple's NOT NULL constraints BEFORE the
+  // ON CONFLICT clause runs, so a NULL placeholder aborts the statement even
+  // when the COALESCE in DO UPDATE would have preserved the old value —
+  // proven by execution. That is why the first write for a branch, and every
+  // partial payload, returned HTTP 500.
+  //
+  // Resolving each value against the existing row in code (rather than in SQL)
+  // keeps PUT's established semantics: a supplied field is written, an omitted
+  // field keeps its current value, and a brand new profile falls back to the
+  // column defaults.
+  const existing = stmtGetBranchProfile.get(req.params.branchId) as
+    | Record<string, unknown>
+    | undefined;
+  const keep = <T>(supplied: T | null, column: string, fallback: T): T =>
+    supplied !== null ? supplied : ((existing?.[column] as T | undefined) ?? fallback);
+
   stmtUpsertBranchProfile.run(
     req.params.branchId,
-    b.defaultProgramVersionId ?? null, 
-    b.placementTestFee ?? null, 
-    b.registrationFee ?? null,
-    b.cardFee ?? null, 
-    b.diplomaFee ?? null, 
-    b.defaultPassMark ?? null, 
-    b.defaultMinAttendance ?? null,
-    b.academicYearLabel ?? null, 
-    b.notes ?? null
+    b.defaultProgramVersionId ?? existing?.default_program_version_id ?? null,
+    keep(fees.placementTestFee, 'placement_test_fee', 0),
+    keep(fees.registrationFee, 'registration_fee', 0),
+    keep(fees.cardFee, 'card_fee', 0),
+    keep(fees.diplomaFee, 'diploma_fee', 0),
+    keep(passMark, 'default_pass_mark', 60),
+    keep(minAttendance, 'default_min_attendance', 75),
+    b.academicYearLabel ?? existing?.academic_year_label ?? null,
+    b.notes ?? existing?.notes ?? null
   );
   writeAudit(req, `Updated branch academic profile ${req.params.branchId}`);
   res.json(stmtGetBranchProfile.get(req.params.branchId));
