@@ -11,7 +11,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { db } from '../db/connection.js';
-import { authorize } from '../middleware/auth.js';
+import { authorize, canAccessBranchResource } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id } from '../utils/ids.js';
@@ -28,6 +28,29 @@ export const placementTestBankRouter = Router();
 const VALID_TEST_TYPES = ['listening', 'reading', 'writing', 'speaking'];
 const VALID_QTYPES = ['mcq', 'short_answer', 'essay', 'speaking'];
 const VALID_SECTION_KINDS = ['audio_track', 'passage', 'prompt_block', 'instructions'];
+
+/**
+ * PTB-1: by-id access must obey the same branch authority the list already
+ * applies (`WHERE branch_id IS NULL OR branch_id = ?`). Without this the
+ * scoping on the list was decorative — the row stayed reachable by id, and a
+ * manager of another branch could rewrite, archive/activate or preview it.
+ * Preview matters on its own: serializeTest() returns `answerKey` for every
+ * question, and policy-engine.ts refuses any content_test whose test is not
+ * `status='active'`, so a foreign archive breaks the owning branch's
+ * placement assessment.
+ *
+ * `branch_id IS NULL` means "global template" and stays readable/editable by
+ * every branch — that is existing product behaviour, deliberately preserved.
+ * Reuses canAccessBranchResource, the same helper placement-attempt.routes.ts
+ * uses, so a global owner keeps cross-branch reach and no second authority is
+ * introduced.
+ */
+function assertPlacementAssetBranch(req: import('express').Request, branchId: string | null | undefined): void {
+  if (branchId === null || branchId === undefined) return; // global template
+  if (!canAccessBranchResource(req, branchId)) {
+    throw new HttpError(403, 'This placement asset belongs to another branch.');
+  }
+}
 
 function validateQuestions(questions: any[]) {
   for (const q of questions) {
@@ -96,7 +119,15 @@ placementTestBankRouter.post('/test-bank', authorize('owner', 'manager', 'head_o
     if (!rubric) throw new HttpError(400, 'Rubric not found.');
   }
   const testId = id('ptst');
+  // PTB-1: a client-supplied branchId is a request, not authorization. It was
+  // stored verbatim, letting a manager plant a test into another branch
+  // (proven: B2 manager -> stored branch_id = B1). An explicit null still
+  // means "global template"; anything else must be a branch the caller may
+  // actually write to.
   const resolvedBranch = branchId === null || branchId === undefined ? user.branchId : String(branchId);
+  if (resolvedBranch !== null && resolvedBranch !== undefined && !canAccessBranchResource(req, resolvedBranch)) {
+    throw new HttpError(403, 'Target branch is outside your authorized scope.');
+  }
   const tx = db.transaction(() => {
     stmtInsertTest.run(testId, String(title).trim(), testType, instructions || null, audioUrl || null, transcript || null, passage || null, 'draft', resolvedBranch, user.userId, difficulty || null, durationSeconds == null ? null : Number(durationSeconds), rubricId || null, wordTarget == null ? null : Number(wordTarget), contentJson ? JSON.stringify(contentJson) : null);
     replaceQuestions(testId, Array.isArray(questions) ? questions : []);
@@ -110,6 +141,7 @@ placementTestBankRouter.post('/test-bank', authorize('owner', 'manager', 'head_o
 placementTestBankRouter.put('/test-bank/:id', authorize('owner', 'manager', 'head_of_department'), ah(async (req, res) => {
   const existing = stmtTestById.get(req.params.id) as any;
   if (!existing) throw new HttpError(404, 'Test not found.');
+  assertPlacementAssetBranch(req, existing.branch_id);
   const { title, testType, instructions, audioUrl, transcript, passage, status, questions, sections, difficulty, durationSeconds, rubricId, wordTarget, contentJson } = req.body ?? {};
   if (title !== undefined && !String(title).trim()) throw new HttpError(400, 'Test title is required.');
   if (testType !== undefined && !VALID_TEST_TYPES.includes(testType)) throw new HttpError(400, 'Invalid test type.');
@@ -147,6 +179,7 @@ placementTestBankRouter.put('/test-bank/:id', authorize('owner', 'manager', 'hea
 placementTestBankRouter.post('/test-bank/:id/activate', authorize('owner', 'manager', 'head_of_department'), ah(async (req, res) => {
   const existing = stmtTestById.get(req.params.id) as any;
   if (!existing) throw new HttpError(404, 'Test not found.');
+  assertPlacementAssetBranch(req, existing.branch_id);
   const qCount = (stmtQuestionsByTest.all(existing.id) as any[]).length;
   if (qCount === 0) throw new HttpError(400, 'Cannot activate a test with no questions.');
   stmtUpdateTest.run(existing.title, existing.test_type, existing.instructions, existing.audio_url, existing.transcript, existing.passage, 'active', existing.difficulty, existing.duration_seconds, existing.rubric_id, existing.word_target, existing.content_json, existing.id);
@@ -157,6 +190,7 @@ placementTestBankRouter.post('/test-bank/:id/activate', authorize('owner', 'mana
 placementTestBankRouter.post('/test-bank/:id/archive', authorize('owner', 'manager', 'head_of_department'), ah(async (req, res) => {
   const existing = stmtTestById.get(req.params.id) as any;
   if (!existing) throw new HttpError(404, 'Test not found.');
+  assertPlacementAssetBranch(req, existing.branch_id);
   stmtUpdateTest.run(existing.title, existing.test_type, existing.instructions, existing.audio_url, existing.transcript, existing.passage, 'archived', existing.difficulty, existing.duration_seconds, existing.rubric_id, existing.word_target, existing.content_json, existing.id);
   writeAudit(req, `Archived placement test-bank entry "${existing.title}"`);
   res.json({ ok: true });
@@ -166,6 +200,7 @@ placementTestBankRouter.post('/test-bank/:id/archive', authorize('owner', 'manag
 placementTestBankRouter.get('/test-bank/:id/preview', authorize('owner', 'manager', 'head_of_department'), ah(async (req, res) => {
   const test = stmtTestById.get(req.params.id) as any;
   if (!test) throw new HttpError(404, 'Test not found.');
+  assertPlacementAssetBranch(req, test.branch_id);
   res.json(serializeTest(test));
 }));
 
@@ -198,6 +233,7 @@ placementTestBankRouter.post('/rubrics', authorize('owner', 'manager', 'head_of_
 placementTestBankRouter.put('/rubrics/:id', authorize('owner', 'manager', 'head_of_department'), ah(async (req, res) => {
   const existing = stmtRubricById.get(req.params.id) as any;
   if (!existing) throw new HttpError(404, 'Rubric not found.');
+  assertPlacementAssetBranch(req, existing.branch_id);
   const { title, kind, criteria } = req.body ?? {};
   let totalWeight = 0;
   const nextCriteria = Array.isArray(criteria) ? criteria : JSON.parse(existing.criteria_json || '[]');
