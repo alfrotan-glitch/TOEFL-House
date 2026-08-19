@@ -6,41 +6,28 @@ const serverRoot = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(serverRoot, '..');
 
 export default defineConfig({
+  // Vite's root is the REPOSITORY, not server/.
+  //
+  // `fee-bill-render.test.ts` imports the shared frontend modules
+  // (src/utils/feeBillTemplate, src/config/branding, src/types) so the printed
+  // document is asserted against the real production builder rather than a
+  // copy. Those files live above server/, and Vite refuses to transform files
+  // outside its root: on Windows the drive-letter form of those paths made the
+  // out-of-root check reject them, the file was handed to Node untransformed,
+  // and Node threw a bare "SyntaxError: Invalid or unexpected token" with no
+  // file and no line (visible as `import 0ms` in the run summary).
+  //
+  // Widening the root removes the out-of-root condition itself instead of
+  // working around it with allow-lists, so it behaves identically on Windows,
+  // Linux and CI.
+  root: repoRoot,
   test: {
-    setupFiles: ['./src/tests/setup.ts'],
+    setupFiles: [path.join(serverRoot, 'src', 'tests', 'setup.ts')],
     environment: 'node',
     globals: true,
     testTimeout: 10000,
     fileParallelism: false,
-    include: ['src/tests/**/*.test.ts'],
-    exclude: ['node_modules/**', 'dist/**'],
-    // `fee-bill-render.test.ts` imports the SHARED frontend modules
-    // (src/utils/feeBillTemplate, src/config/branding, src/types) so the
-    // printed document is tested as the real thing rather than a copy. Those
-    // files live ABOVE this vitest root.
-    //
-    // Vite only transforms files it is allowed to serve. Outside the root and
-    // without this allow-list the file can be handed to Node untransformed —
-    // Node then meets TypeScript syntax and throws a bare
-    // "SyntaxError: Invalid or unexpected token" with no file or line, which is
-    // exactly the reported failure. It reproduces on Windows (drive-letter
-    // path normalisation makes the out-of-root check reject these paths) while
-    // passing on Linux, which is why the same commit behaved differently on
-    // the two machines.
-    //
-    // Declaring the repository root keeps the shared-module import working on
-    // every platform.
-    server: {
-      deps: {
-        // Ensure the shared frontend sources are processed by Vite (inlined)
-        // rather than being resolved as external CommonJS by Node.
-        inline: [/[\\/]src[\\/](utils|config|types)[\\/]/],
-      },
-    },
-  },
-  server: {
-    fs: {
-      allow: [repoRoot, serverRoot],
-    },
+    include: ['server/src/tests/**/*.test.ts'],
+    exclude: ['**/node_modules/**', '**/dist/**'],
   },
 });
