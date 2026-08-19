@@ -29,6 +29,7 @@ const SUITES = [
   'src/tests/p1-scope-hardening.test.ts',
   'src/tests/class-teacher-ownership.test.ts',
   'src/tests/rbac-search-entity-permission.test.ts',
+  'src/tests/rbac-home-branch-invariant.test.ts',
 ].join(' ');
 const TEST_CMD = FULL ? 'npx vitest run --silent 2>&1' : `npx vitest run ${SUITES} --silent 2>&1`;
 
