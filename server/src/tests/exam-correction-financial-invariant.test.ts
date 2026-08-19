@@ -165,6 +165,49 @@ describe('EXM-2 — a correction cycle never mints, destroys or duplicates money
     expect(rows.c).toBe(0);
   });
 
+  // POLICY 2 (approved, explicit): a downward correction must NOT trigger a
+  // refund. These assertions state that invariant directly rather than leaving
+  // it implied by the absence of a reversal.
+  it('POLICY: a downward correction issues no refund of any kind', async () => {
+    // Put the candidate back above the pass mark, then correct downward.
+    await correct(95);
+    const paymentsBefore = (db
+      .prepare(`SELECT COUNT(*) AS c FROM payments WHERE student_id = 'exm_stu'`)
+      .get() as { c: number }).c;
+    const negativeLedgerBefore = (db
+      .prepare(`SELECT COUNT(*) AS c FROM financial_transactions WHERE amount < 0`)
+      .get() as { c: number }).c;
+    const incomeBefore = diplomaIncome();
+
+    const res = await correct(15);
+    expect(res.status).toBe(200);
+    expect(res.body.certificateIssued).toBe(false);
+
+    // No refund payment row, no negative ledger movement, no income reversal.
+    const paymentsAfter = (db
+      .prepare(`SELECT COUNT(*) AS c FROM payments WHERE student_id = 'exm_stu'`)
+      .get() as { c: number }).c;
+    const negativeLedgerAfter = (db
+      .prepare(`SELECT COUNT(*) AS c FROM financial_transactions WHERE amount < 0`)
+      .get() as { c: number }).c;
+    expect(paymentsAfter).toBe(paymentsBefore);
+    expect(negativeLedgerAfter).toBe(negativeLedgerBefore);
+    expect(diplomaIncome()).toBe(incomeBefore);
+    expect(
+      (db.prepare(`SELECT COUNT(*) AS c FROM payments WHERE category = 'refund'`).get() as { c: number }).c,
+    ).toBe(0);
+  });
+
+  it('POLICY: the entitlement IS revoked even though the money is retained', () => {
+    // Lifecycle authority acted (certificate withdrawn) while financial truth
+    // was preserved — the two are decoupled on purpose.
+    expect(certCount()).toBe(0);
+    const row = db.prepare(`SELECT certificate_issued, certificate_no FROM exam_results WHERE id = 'exm_res'`).get() as
+      { certificate_issued: number; certificate_no: string | null };
+    expect(row.certificate_issued).toBe(0);
+    expect(row.certificate_no).toBeNull();
+  });
+
   it('cash stays backed and the ledger reconciles after the whole cycle', () => {
     const acct = getFinanceAccount('branch', BRANCH);
     expect(acct.mainBalance + acct.savingBalance).toBeGreaterThanOrEqual(0);

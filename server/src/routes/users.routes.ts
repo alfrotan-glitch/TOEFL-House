@@ -53,7 +53,20 @@ usersRouter.post(
     if (!ALLOWED_ROLES.includes(role)) {
       throw new HttpError(400, 'Invalid role specified.');
     }
-    if (String(tempPassword).length < 12) throw new HttpError(400, 'Temporary password must be at least 12 characters.');
+    // SPA-3 (approved policy): a student's initial password is their NAME, and
+    // real names are routinely shorter than the 12-character staff minimum
+    // ("Sara Noori" is 10). Applying the staff rule to portal accounts would
+    // make the approved policy unimplementable. Staff keep the 12-character
+    // floor unchanged; student accounts require a non-empty credential.
+    const minCredentialLength = role === 'student' ? 1 : 12;
+    if (String(tempPassword).length < minCredentialLength) {
+      throw new HttpError(
+        400,
+        role === 'student'
+          ? 'A student portal password is required.'
+          : 'Temporary password must be at least 12 characters.',
+      );
+    }
     if (!canAccessBranchResource(req, String(branchId))) throw new HttpError(403, 'Target branch is outside your authorized scope.');
 
     const exists = stmtCheckUsernameExists.get(username);
@@ -69,10 +82,16 @@ usersRouter.post(
       if (db.prepare('SELECT id FROM users WHERE linked_student_id = ?').get(st.id)) throw new HttpError(409, 'This student already has a portal account.');
     }
     const newId = id('usr');
-    // SPA-1: portal accounts authenticate with a real secret now, so a
-    // student is onboarded exactly like staff — with an owner-issued
-    // temporary password that must be rotated on first use.
-    const mustChangePassword = 1;
+    // SPA-3 (approved policy): a student portal account is issued with the
+    // student's NAME as the initial password and is NOT forced to rotate it —
+    // rotation stays optional and user-initiated via
+    // POST /api/auth/change-password. Staff accounts keep the mandatory
+    // first-use rotation.
+    //
+    // SPA-1 remains in force underneath: the credential is still verified with
+    // bcrypt against users.password_hash, so the name is never compared as
+    // plaintext and there is still exactly one authentication authority.
+    const mustChangePassword = role === 'student' ? 0 : 1;
     const createTx = db.transaction(() => {
       stmtInsertUser.run(newId, username, passwordHash, fullName, email || null, role, branchId, campusId, linkedTeacherId || null, linkedEmployeeId || null, linkedPartnerId || null, linkedStudentId || null, mustChangePassword);
       syncPrimaryUserRole(db, newId, role as UserRole, String(branchId), req.user!.userId);

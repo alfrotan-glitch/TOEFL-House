@@ -133,12 +133,11 @@ describe('Account creation — RangeError regression (rbac-service sync)', () =>
     ).get(res.body.id) as { scope_id: string | null } | undefined;
     expect(rbacRole?.scope_id).toBe(BRANCH);
 
-    // SPA-1: portal accounts authenticate with a real secret now, so an
-    // owner-issued temporary password is quarantined until the student
-    // rotates it — exactly like staff. (Before SPA-1 the portal logged in
-    // with code + name, so the quarantine was deliberately skipped.)
+    // SPA-3 (approved policy): a student's initial password is their NAME and
+    // they are NOT forced to rotate it — rotation is optional and
+    // user-initiated. Staff accounts keep the mandatory first-use rotation.
     const quarantined = db.prepare('SELECT must_change_password FROM users WHERE id = ?').get(res.body.id) as { must_change_password: number };
-    expect(quarantined.must_change_password).toBe(1);
+    expect(quarantined.must_change_password).toBe(0);
   });
 
   it('rejects a linked student that belongs to another branch', async () => {

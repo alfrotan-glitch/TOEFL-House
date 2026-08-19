@@ -28,9 +28,10 @@ export default function LoginView() {
   const [showPw, setShowPw] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Student portal mode: student code + full name, no password.
+  // Student portal mode: student ID + password. The initial password is the
+  // student's own name (approved policy SPA-3); it can be changed later.
   const [studentMode, setStudentMode] = useState(false);
-  const [studentName, setStudentName] = useState('');
+  const [studentPassword, setStudentPassword] = useState('');
 
 
   const onSubmit = useCallback(
@@ -38,8 +39,8 @@ export default function LoginView() {
       e.preventDefault();
       setError(null);
       if (studentMode) {
-        if (!username.trim() || !studentName.trim()) {
-          setError('Enter both your student code and full name.');
+        if (!username.trim() || !studentPassword) {
+          setError('Enter both your student ID and your password.');
           return;
         }
         setBusy(true);
@@ -47,11 +48,11 @@ export default function LoginView() {
           // The AuthContext is cookie-based; the server sets the session
           // cookie, so just refresh the current session.
           await api.post('/auth/student-login', {
-            studentCode: username.trim(), fullName: studentName.trim(),
+            studentCode: username.trim(), password: studentPassword,
           });
           await refreshUser();
         } catch (err: any) {
-          setError(err?.message || 'Student sign-in failed. Check your code and name.');
+          setError(err?.message || 'Student sign-in failed. Check your student ID and password.');
         } finally {
           setBusy(false);
         }
@@ -70,7 +71,7 @@ export default function LoginView() {
         setBusy(false);
       }
     },
-    [username, password, studentName, studentMode, login, refreshUser],
+    [username, password, studentPassword, studentMode, login, refreshUser],
   );
 
   return (
@@ -185,17 +186,18 @@ export default function LoginView() {
 
             {studentMode && (
               <div>
-                <label className="label" htmlFor="studentName">Full Name</label>
+                <label className="label" htmlFor="studentPassword">Password</label>
                 <div className="relative">
-                  <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
-                    id="studentName"
+                    id="studentPassword"
                     className="input pl-10"
                     style={{ paddingLeft: '2.5rem' }}
-                    autoComplete="name"
-                    placeholder="Your full name as registered"
-                    value={studentName}
-                    onChange={(e) => setStudentName(e.target.value)}
+                    type={showPw ? 'text' : 'password'}
+                    autoComplete="current-password"
+                    placeholder="Your name, unless you changed it"
+                    value={studentPassword}
+                    onChange={(e) => setStudentPassword(e.target.value)}
                   />
                 </div>
               </div>
