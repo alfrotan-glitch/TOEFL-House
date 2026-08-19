@@ -193,7 +193,7 @@ export function assertSeatCount(value: unknown, field = 'Count'): number {
     throw new HttpError(400, `${field} must be a whole number.`);
   }
   if (!Number.isFinite(n)) throw new HttpError(400, `${field} must be a whole number.`);
-  if (!Number.isInteger(n)) throw new HttpError(400, `${field} must be a whole number of seats.`);
+  if (!Number.isInteger(n)) throw new HttpError(400, `${field} must be a whole number.`);
   if (n < 0) throw new HttpError(400, `${field} cannot be negative.`);
   if (n > MAX_SEAT_COUNT) throw new HttpError(400, `${field} exceeds the maximum supported value (${MAX_SEAT_COUNT}).`);
   return n;

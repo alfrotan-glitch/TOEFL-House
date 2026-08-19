@@ -6,7 +6,7 @@ import { writeAudit } from '../middleware/audit.js';
 import { resolveIdempotency } from '../utils/idempotency.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
-import { assertMoney } from '../utils/money.js';
+import { assertMoney, assertSeatCount } from '../utils/money.js';
 import { addNotification } from '../utils/notifications.js';
 import { recordIncome } from '../utils/income.js';
 
@@ -176,8 +176,21 @@ booksRouter.post(
     const book = requireBook(req, req.params.id);
     const { quantity, customerName, studentId, discountAmount, paymentMethod } = req.body;
     
-    if (!quantity || quantity <= 0) throw new HttpError(400, 'Invalid quantity.');
-    if (book.stock < quantity) throw new HttpError(409, `Insufficient stock (current stock: ${book.stock})`);
+    // A book is a physical object, so the quantity must be a whole count. The
+    // previous `!quantity || quantity <= 0` guard let anything else through and
+    // the value flowed straight into `book.price * quantity` and
+    // `SET stock = stock - ?`. Proven live: 0.5 sold for 50 AFN and left 9.5
+    // copies in inventory, 0.001 left 4.999, and `[3]` was coerced to 3.
+    // Fractional stock is corrupt inventory, not a smaller sale.
+    //
+    // assertSeatCount is the existing canonical whole-number boundary (finite,
+    // integer, non-negative, bounded, same type discipline as assertMoney), so
+    // it is reused rather than adding a second integer validator.
+    let saleQuantity: number;
+    try { saleQuantity = assertSeatCount(quantity, 'Quantity'); }
+    catch { throw new HttpError(400, 'Quantity must be a whole number greater than zero.'); }
+    if (saleQuantity <= 0) throw new HttpError(400, 'Quantity must be a whole number greater than zero.');
+    if (book.stock < saleQuantity) throw new HttpError(409, `Insufficient stock (current stock: ${book.stock})`);
 
     const user = req.user;
     if (!user?.branchId || !user?.fullName) throw new HttpError(403, 'User context is missing.');
@@ -200,7 +213,7 @@ booksRouter.post(
     // owner/manager switches branches in the UI).
     const saleBranchId = book.branch_id;
 
-    const totalAmount = book.price * quantity;
+    const totalAmount = book.price * saleQuantity;
     // Reject an over-large discount rather than capping it to the sale total,
     // which silently turned a mistyped figure into a free book. Same rule as
     // tuition payments and invoices.
@@ -228,7 +241,7 @@ booksRouter.post(
       bookId: book.id,
       studentId: studentId || null,
       customerName: customerName || null,
-      quantity: Number(quantity),
+      quantity: saleQuantity,
       discount: finalDiscount,
       method,
       actorUserId: user.userId ?? null,
@@ -240,17 +253,17 @@ booksRouter.post(
     const saleIdempotencyKey = saleIdemCandidates[0];
 
     const saleTx = db.transaction(() => {
-      const stockUpdate = stmtUpdateBookStockSub.run(quantity, book.id, saleBranchId, quantity);
+      const stockUpdate = stmtUpdateBookStockSub.run(saleQuantity, book.id, saleBranchId, saleQuantity);
       if (stockUpdate.changes !== 1) throw new HttpError(409, 'Book stock changed or is insufficient. Please retry.');
       stmtInsertBookSale.run(
-        newSaleId, book.id, quantity, totalAmount, finalDiscount, netAmount, method, date, 
+        newSaleId, book.id, saleQuantity, totalAmount, finalDiscount, netAmount, method, date, 
         customerName || 'Walk-in customer', studentId || null, saleBranchId, saleIdempotencyKey
       );
       recordIncome({
         category: categoryType,
         amount: netAmount,
         date,
-        description: `Sold ${quantity} copies of "${book.title}" to ${customerName || 'Walk-in customer'} (${methodLabel}${finalDiscount > 0 ? ` - with discount ${finalDiscount} AFN` : ''})`,
+        description: `Sold ${saleQuantity} copies of "${book.title}" to ${customerName || 'Walk-in customer'} (${methodLabel}${finalDiscount > 0 ? ` - with discount ${finalDiscount} AFN` : ''})`,
         referenceId: book.id,
         operatorName: user.fullName, operatorRole: user.role ?? null,
         branchId: saleBranchId,
@@ -270,8 +283,8 @@ booksRouter.post(
       throw err;
     }
 
-    addNotification('Book sale successful', `A total of ${quantity} book copies were sold for a net amount of ${netAmount} AFN and recorded in the main account.`, 'success', saleBranchId);
-    writeAudit(req, `Recorded book sale: ${quantity} copies of ${book.title} for a total of ${totalAmount} AFN (net: ${netAmount} AFN, method: ${methodLabel})`);
+    addNotification('Book sale successful', `A total of ${saleQuantity} book copies were sold for a net amount of ${netAmount} AFN and recorded in the main account.`, 'success', saleBranchId);
+    writeAudit(req, `Recorded book sale: ${saleQuantity} copies of ${book.title} for a total of ${totalAmount} AFN (net: ${netAmount} AFN, method: ${methodLabel})`);
     res.status(201).json({ id: newSaleId });
   })
 );
