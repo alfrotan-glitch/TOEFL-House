@@ -1,10 +1,10 @@
 /**
  * Academic Setup — Premium 3-Phase Wizard Hub
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   BookOpen, Clock, DoorOpen, Layers, Plus, RefreshCw, CalendarRange,
-  ChevronDown, ChevronRight, Pencil, Trash2, Power, X, Check, Building2,
+  ChevronDown, ChevronRight, Pencil, Trash2, Archive, Power, X, Check, Building2,
   GitBranch, Wand2, Lock, CheckCircle2, Settings, Package, Loader2
 } from 'lucide-react';
 import { api } from '../../api/client';
@@ -14,7 +14,30 @@ import ClassGenerationWizard from './ClassGenerationWizard';
 import OfferingsPanel from './OfferingsPanel';
 import { ShamsiDateInput } from '../common/ShamsiDateInput';
 
-type Tab = 'catalog' | 'versions' | 'offerings' | 'generate' | 'slots' | 'rooms' | 'terms';
+/**
+ * Canonical workflow order. The union used to be declared in a completely
+ * different order from the order operators actually meet the steps in
+ * ('catalog' first, 'terms' last), which made the type a misleading guide to
+ * the workflow. It is now derived from a single ordered list so the type, the
+ * navigation and the phase numbering cannot drift apart again.
+ *
+ * Phase meaning:
+ *   1 Infrastructure  — the branch calendar and physical capacity.
+ *   2 Curriculum      — what is taught. Independent of phase 1 (see the phase
+ *                       completion block for why).
+ *   3 Course delivery — binds curriculum to infrastructure.
+ */
+const TAB_ORDER = [
+  { id: 'terms',     phase: 1, label: '1.1 Academic Terms' },
+  { id: 'slots',     phase: 1, label: '1.2 Time Slots' },
+  { id: 'rooms',     phase: 1, label: '1.3 Physical Rooms' },
+  { id: 'catalog',   phase: 2, label: '2.1 Programs & Levels' },
+  { id: 'versions',  phase: 2, label: '2.2 Versions & Rules' },
+  { id: 'offerings', phase: 3, label: '3.1 Course Offerings' },
+  { id: 'generate',  phase: 3, label: '3.2 Generate Classes' },
+] as const;
+
+type Tab = (typeof TAB_ORDER)[number]['id'];
 
 function NavButton({ t, label, icon, isLocked, tab, setTab }: { t: Tab; label: string; icon: React.ReactNode; isLocked: boolean; tab: Tab; setTab: React.Dispatch<React.SetStateAction<Tab>> }) {
   return (
@@ -33,6 +56,14 @@ interface Room { id: string; code: string; name: string; capacity: number; isAct
 interface Term { id: string; year: number; code: string; name: string; startDate?: string | null; endDate?: string | null; isActive: boolean; }
 interface FeeRow { id: string; levelId: string; fee: number; }
 
+/**
+ * Canonical empty state for the "new academic term" form. Kept as a module
+ * constant so a successful create can restore it exactly: leaving the previous
+ * values on screen made operators believe the create had failed and submit
+ * again, which the `UNIQUE(branch_id, year, code)` constraint then rejected.
+ */
+const INITIAL_TERM_FORM = { year: new Date().getFullYear(), code: 'FALL', name: 'Fall', startDate: '', endDate: '' };
+
 function ToggleActive({ active, onToggle, disabled }: { active: boolean; onToggle: () => void; disabled?: boolean }) {
   return (
     <button type="button" disabled={disabled} onClick={onToggle} title={active ? 'Deactivate' : 'Activate'}
@@ -42,7 +73,20 @@ function ToggleActive({ active, onToggle, disabled }: { active: boolean; onToggl
   );
 }
 
-export default function AcademicSetupView({ branchId }: { branchId?: string } = {}) {
+export default function AcademicSetupView({ branchId, activeRole, permissionCodes }: { branchId?: string; activeRole?: string; permissionCodes?: string[] } = {}) {
+  // Capability is read from the same permission list the rest of the app uses
+  // (see FinanceView's `hasPermissionCode`) instead of being assumed from the
+  // fact that the tab rendered at all.
+  //
+  // Academic Setup spans two authorities: `academic.routes.ts` is role-gated
+  // (`owner`/`manager`) while `catalog.routes.ts` requires `AcademicSetup.Edit`.
+  // A General Manager therefore CAN edit terms/rooms/programs but CANNOT create
+  // program versions, so the two capabilities are tracked separately and the
+  // affected controls are disabled with an explanation rather than failing with
+  // a bare 403 after the user has filled in a form.
+  const hasPermissionCode = (code: string) => activeRole === 'owner' || (permissionCodes?.includes(code) ?? false);
+  const canEditAcademicInfrastructure = activeRole === 'owner' || activeRole === 'manager' || hasPermissionCode('AcademicSetup.Edit');
+  const canEditCatalog = hasPermissionCode('AcademicSetup.Edit');
   const [tab, setTab] = useState<Tab>('terms');
   // Tracks which heavy panels have been opened at least once, so each mounts
   // lazily but then STAYS mounted instead of refetching on every revisit.
@@ -63,6 +107,12 @@ export default function AcademicSetupView({ branchId }: { branchId?: string } = 
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  // Invalidation token for the heavy child panels. They stay mounted once
+  // visited (a deliberate optimisation — see the render comment below), which
+  // means they never re-fetch on their own. Bumping this key remounts them, so
+  // "Refresh Data", a successful mutation and a branch change all reach the
+  // data they own instead of leaving it stale.
+  const [panelRefreshKey, setPanelRefreshKey] = useState(0);
 
   const [progName, setProgName] = useState(''); const [progCode, setProgCode] = useState(''); const [progDesc, setProgDesc] = useState('');
   const [editProgId, setEditProgId] = useState<string | null>(null); const [editProgName, setEditProgName] = useState(''); const [editProgCode, setEditProgCode] = useState(''); const [editProgDesc, setEditProgDesc] = useState('');
@@ -72,9 +122,17 @@ export default function AcademicSetupView({ branchId }: { branchId?: string } = 
   const [feeDraft, setFeeDraft] = useState<Record<string, number>>({});
   const [slotForm, setSlotForm] = useState({ code: '', label: '', startTime: '08:00', endTime: '09:30' }); const [editSlotId, setEditSlotId] = useState<string | null>(null); const [editSlot, setEditSlot] = useState({ code: '', label: '', startTime: '', endTime: '' });
   const [roomForm, setRoomForm] = useState({ code: '', name: '', capacity: 20 }); const [editRoomId, setEditRoomId] = useState<string | null>(null); const [editRoom, setEditRoom] = useState({ code: '', name: '', capacity: 20 });
-  const [termForm, setTermForm] = useState({ year: new Date().getFullYear(), code: 'FALL', name: 'Fall', startDate: '', endDate: '' }); const [editTermId, setEditTermId] = useState<string | null>(null); const [editTerm, setEditTerm] = useState({ year: 2026, code: '', name: '', startDate: '', endDate: '' });
+  const [termForm, setTermForm] = useState(INITIAL_TERM_FORM); const [editTermId, setEditTermId] = useState<string | null>(null); const [editTerm, setEditTerm] = useState({ year: 2026, code: '', name: '', startDate: '', endDate: '' });
+
+  // Monotonic token guarding against out-of-order responses. Switching branch
+  // A → B fires a new load while A's requests may still be in flight; without
+  // this, A's slower response could resolve last and repaint stale data as if
+  // it belonged to B.
+  const loadSeq = useRef(0);
 
   const reload = useCallback(async () => {
+    const seq = ++loadSeq.current;
+    const isCurrent = () => seq === loadSeq.current;
     setLoading(true);
     setError(null);
     try {
@@ -84,30 +142,83 @@ export default function AcademicSetupView({ branchId }: { branchId?: string } = 
         api.get<TimeSlot[]>('/academic/time-slots'), api.get<Room[]>('/academic/rooms'),
         api.get<Term[]>('/academic/terms'), api.get<FeeRow[]>('/academic/level-fees'),
       ]);
+      if (!isCurrent()) return;
       setAcademicDefaults(defaults);
       setLvlMonths(defaults.levelDurationMonths); setLvlFee(defaults.levelDefaultFee); setLvlPass(defaults.levelPassMark); setLvlMinViable(defaults.levelMinViableSize);
       setEditLvl((current) => ({ ...current, durationMonths: defaults.levelDurationMonths, defaultFee: defaults.levelDefaultFee, passMark: defaults.levelPassMark, minViableSize: defaults.levelMinViableSize }));
       setPrograms(Array.isArray(p) ? p : []); setLevels(Array.isArray(l) ? l : []); setSlots(Array.isArray(s) ? s : []); setRooms(Array.isArray(r) ? r : []); setTerms(Array.isArray(tm) ? tm : []); setFees(Array.isArray(f) ? f : []);
-      try { const [offs, vers] = await Promise.all([api.get<any[]>('/offerings'), api.get<any[]>('/catalog/program-versions')]); setOfferingCount(Array.isArray(offs) ? offs.length : 0); setVersionCount(Array.isArray(vers) ? vers.length : 0); } catch { setOfferingCount(0); setVersionCount(0); }
+      // Offering/version counts gate Phase 3, so they are always read back from
+      // the server rather than inferred from local activity.
+      try { const [offs, vers] = await Promise.all([api.get<any[]>('/offerings'), api.get<any[]>('/catalog/program-versions')]); if (!isCurrent()) return; setOfferingCount(Array.isArray(offs) ? offs.length : 0); setVersionCount(Array.isArray(vers) ? vers.length : 0); } catch { if (!isCurrent()) return; setOfferingCount(0); setVersionCount(0); }
       const draft: Record<string, number> = {}; for (const fee of f) draft[fee.levelId] = fee.fee; setFeeDraft(draft);
       setExpanded((prev) => { const next = { ...prev }; for (const prog of p) { if (next[prog.id] === undefined) next[prog.id] = true; } return next; });
-    } catch (err) { setError(err instanceof Error ? err.message : 'Failed to load configuration'); }
-    finally { setLoading(false); setHasLoadedOnce(true); }
+    } catch (err) { if (!isCurrent()) return; setError(err instanceof Error ? err.message : 'Failed to load configuration'); }
+    finally { if (isCurrent()) { setLoading(false); setHasLoadedOnce(true); } }
   }, []);
 
-  useEffect(() => { void (async () => { await reload(); })(); }, [reload]);
+  // Reload whenever the active branch changes. Every endpoint on this page is
+  // scoped server-side from the caller's token/branch context, so the branch is
+  // never sent as a client-controlled parameter; `branchId` is used purely as
+  // the signal that the authoritative scope moved and the cached view is stale.
+  useEffect(() => {
+    // Clear branch-scoped data immediately so the previous branch's terms,
+    // rooms and programs cannot stay on screen during the transition.
+    setPrograms([]); setLevels([]); setSlots([]); setRooms([]); setTerms([]); setFees([]);
+    setOfferingCount(0); setVersionCount(0); setFeeDraft({}); setExpanded({});
+    setEditTermId(null); setEditSlotId(null); setEditRoomId(null); setEditProgId(null); setEditLvlId(null); setLevelFormProgramId(null);
+    setPanelRefreshKey((k) => k + 1);
+    void (async () => { await reload(); })();
+  }, [reload, branchId]);
 
+  // Every mutation funnels through here so that authoritative state is re-read
+  // afterwards. On failure nothing is invalidated and no derived completion
+  // state moves, which is what keeps a failed create from unlocking a phase.
   const run = async (fn: () => Promise<void>) => {
+    if (!canEditAcademicInfrastructure) { setError('You do not have permission to change academic configuration.'); return; }
     setBusy(true); setError(null);
-    try { await fn(); await reload(); } catch (err) { setError(err instanceof Error ? err.message : 'Operation failed'); } finally { setBusy(false); }
+    try {
+      await fn();
+      await reload();
+      setPanelRefreshKey((k) => k + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Operation failed');
+    } finally { setBusy(false); }
   };
 
   const levelsOf = (programId: string) => levels.filter((l) => l.programId === programId).sort((a, b) => a.order - b.order);
   const feeFor = (levelId: string, defaultFee: number) => feeDraft[levelId] !== undefined ? feeDraft[levelId] : defaultFee;
 
-  const phase1Complete = terms.length > 0 && slots.length > 0 && rooms.length > 0;
-  const phase2Complete = programs.length > 0 && versionCount > 0;
-  const phase3Complete = phase2Complete && offeringCount > 0;
+  // ---------------------------------------------------------------------
+  // Phase completion — domain validity, not row counts.
+  //
+  // Row counts were a false proxy: an INACTIVE term, or a term with no
+  // calendar, satisfied `terms.length > 0` while being unusable by session
+  // generation, so the wizard reported "Phase 1 Complete" over a configuration
+  // that could not actually run.
+  //
+  // The dependency graph is derived from what the backend engines truly read:
+  //   • Programs/levels are pure curriculum. They are consumed by nothing that
+  //     needs a room or a time slot, so Phase 2 does NOT depend on them.
+  //     Requiring a room before an operator could type a program was an
+  //     artificial block that forced people to invent placeholder rooms.
+  //   • Class generation is the step that genuinely needs a bounded term, a
+  //     slot and a room (class-generation-engine reads term start/end; classes
+  //     carry room_id and time_slot_id), so that dependency belongs to Phase 3.
+  // ---------------------------------------------------------------------
+  const activeTerms = terms.filter((t) => t.isActive);
+  /** A term can only drive session generation when it is active AND bounded. */
+  const schedulableTerms = activeTerms.filter((t) => t.startDate && t.endDate);
+  const activeSlots = slots.filter((s) => s.isActive);
+  const activeRooms = rooms.filter((r) => r.isActive);
+  const activePrograms = programs.filter((p) => p.isActive);
+
+  /** Phase 1 owns the calendar/infrastructure a branch needs to operate. */
+  const phase1Complete = activeTerms.length > 0 && activeSlots.length > 0 && activeRooms.length > 0;
+  /** Phase 2 is curriculum only — deliberately independent of rooms/slots. */
+  const phase2Complete = activePrograms.length > 0 && versionCount > 0;
+  /** Phase 3 additionally needs schedulable infrastructure to place classes. */
+  const phase3Complete =
+    phase2Complete && offeringCount > 0 && schedulableTerms.length > 0 && activeSlots.length > 0 && activeRooms.length > 0;
 
   // Only the FIRST load replaces the page. `run()` calls reload() after every
   // mutation, and this branch used to blank the whole screen each time —
@@ -141,13 +252,13 @@ export default function AcademicSetupView({ branchId }: { branchId?: string } = 
           <div className="hidden md:flex items-center gap-1.5 text-[11px] font-bold text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
             {phase3Complete ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> : phase2Complete ? <span className="text-amber-600">Next: create a Course Offering</span> : phase1Complete ? <span className="text-amber-600">Next: add a Program</span> : <span className="text-amber-600">Next: add Terms, Time Slots, Rooms</span>}
           </div>
-          <button type="button" onClick={() => reload()} className="text-xs font-bold text-indigo-600 flex items-center gap-1 hover:underline shrink-0 bg-indigo-50 px-3 py-2 rounded-xl cursor-pointer">
+          <button type="button" onClick={() => { void reload(); setPanelRefreshKey((k) => k + 1); }} className="text-xs font-bold text-indigo-600 flex items-center gap-1 hover:underline shrink-0 bg-indigo-50 px-3 py-2 rounded-xl cursor-pointer">
             <RefreshCw className="w-3.5 h-3.5" /> Refresh Data
           </button>
         </div>
       </div>
 
-      {error && <div className="bg-rose-50 border border-rose-200 text-rose-700 text-sm font-semibold rounded-xl p-4 flex items-center gap-2">{error}</div>}
+      {error && <div role="alert" className="bg-rose-50 border border-rose-200 text-rose-700 text-sm font-semibold rounded-xl p-4 flex items-center gap-2">{error}</div>}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
@@ -161,15 +272,17 @@ export default function AcademicSetupView({ branchId }: { branchId?: string } = 
               <NavButton tab={tab} setTab={setTab} t="rooms" label="1.3 Physical Rooms" icon={<DoorOpen className="w-3.5 h-3.5" />} isLocked={false} />
             </div>
             {phase1Complete && <p className="text-[10px] text-emerald-600 font-bold mt-2 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Phase 1 Complete</p>}
+            {activeTerms.length > 0 && schedulableTerms.length === 0 && <p className="text-[10px] text-amber-600 font-bold mt-2">Add start and end dates to an active term so sessions can be generated.</p>}
           </div>
 
           <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-            <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider mb-3 flex items-center gap-1.5"><span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] ${phase1Complete ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-400'}`}>2</span> Curriculum</h3>
+            <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-wider mb-3 flex items-center gap-1.5"><span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] ${phase2Complete ? 'bg-indigo-600 text-white' : 'bg-indigo-600 text-white'}`}>2</span> Curriculum</h3>
             <div className="space-y-2">
-              <NavButton tab={tab} setTab={setTab} t="catalog" label="2.1 Programs & Levels" icon={<Layers className="w-3.5 h-3.5" />} isLocked={!phase1Complete} />
-              <NavButton tab={tab} setTab={setTab} t="versions" label="2.2 Versions & Rules" icon={<GitBranch className="w-3.5 h-3.5" />} isLocked={!phase1Complete} />
+              <NavButton tab={tab} setTab={setTab} t="catalog" label="2.1 Programs & Levels" icon={<Layers className="w-3.5 h-3.5" />} isLocked={false} />
+              <NavButton tab={tab} setTab={setTab} t="versions" label="2.2 Versions & Rules" icon={<GitBranch className="w-3.5 h-3.5" />} isLocked={false} />
             </div>
-            {!phase1Complete && <p className="text-[10px] text-amber-600 font-bold mt-2">Set up terms, slots, and rooms above to unlock curriculum steps.</p>}
+            {!phase2Complete && <p className="text-[10px] text-slate-500 font-bold mt-2">Curriculum can be authored at any time — it does not depend on rooms or time slots.</p>}
+            {phase2Complete && <p className="text-[10px] text-emerald-600 font-bold mt-2 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Phase 2 Complete</p>}
           </div>
 
           <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
@@ -179,12 +292,16 @@ export default function AcademicSetupView({ branchId }: { branchId?: string } = 
               <NavButton tab={tab} setTab={setTab} t="generate" label="3.2 Generate Classes" icon={<Wand2 className="w-3.5 h-3.5" />} isLocked={!phase3Complete} />
             </div>
             {!phase2Complete && <p className="text-[10px] text-amber-600 font-bold mt-2">Add a program and publish a version to unlock course delivery.</p>}
-            {phase2Complete && !phase3Complete && <p className="text-[10px] text-amber-600 font-bold mt-2">Create at least one Course Offering before generating classes.</p>}
+            {phase2Complete && !phase3Complete && <p className="text-[10px] text-amber-600 font-bold mt-2">{offeringCount === 0 ? 'Create at least one Course Offering before generating classes.' : schedulableTerms.length === 0 ? 'Class generation needs an active term with both a start and an end date.' : activeSlots.length === 0 ? 'Class generation needs at least one active time slot.' : 'Class generation needs at least one active room.'}</p>}
           </div>
         </div>
 
         {/* Right Content Area */}
-        <div className="lg:col-span-8 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm min-h-[400px]">
+        <div className="lg:col-span-8 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm min-h-[400px] min-w-0">
+          {/* The header banner can sit off-screen once a tab's list grows, so a
+              failed mutation is surfaced again directly above the form that
+              caused it. */}
+          {error && <div role="alert" className="mb-4 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold rounded-xl px-4 py-3 flex items-start justify-between gap-3"><span>{error}</span><button type="button" onClick={() => setError(null)} className="text-rose-400 hover:text-rose-600 shrink-0"><X className="w-3.5 h-3.5" /></button></div>}
           
           {tab === 'terms' && (
             <div className="space-y-4">
@@ -192,14 +309,15 @@ export default function AcademicSetupView({ branchId }: { branchId?: string } = 
                 <h2 className="text-lg font-extrabold text-slate-900">Academic Terms & Calendar</h2>
                 <p className="text-xs text-slate-500 mt-1">Define semesters (e.g., Fall 2026) and their start/end dates. Sessions are auto-generated only within these dates.</p>
               </div>
-              <form className="bg-slate-50 border border-slate-200 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs items-end"
-                onSubmit={(e) => { e.preventDefault(); run(async () => { await api.post('/academic/terms', termForm); }); }}>
-                <p className="col-span-2 sm:col-span-5 font-extrabold text-slate-800">New academic term</p>
+              <form className="bg-slate-50 border border-slate-200 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs items-end"
+                onSubmit={(e) => { e.preventDefault(); run(async () => { await api.post('/academic/terms', termForm); setTermForm(INITIAL_TERM_FORM); }); }}>
+                <p className="col-span-2 sm:col-span-3 font-extrabold text-slate-800">New academic term</p>
                 <input type="number" required value={termForm.year} onChange={(e) => setTermForm({ ...termForm, year: Number(e.target.value) })} className="border border-slate-200 rounded-lg px-2 py-1.5" placeholder="Year" />
                 <input required value={termForm.code} onChange={(e) => setTermForm({ ...termForm, code: e.target.value })} placeholder="Code" className="border border-slate-200 rounded-lg px-2 py-1.5 font-mono" />
                 <input required value={termForm.name} onChange={(e) => setTermForm({ ...termForm, name: e.target.value })} placeholder="Name" className="border border-slate-200 rounded-lg px-2 py-1.5" />
-                <ShamsiDateInput value={termForm.startDate} onChange={(v) => setTermForm({ ...termForm, startDate: v })} />
-                <button type="submit" disabled={busy} className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-bold disabled:opacity-50 flex items-center justify-center gap-1">{busy && <Loader2 className="w-3 h-3 animate-spin" />} Create</button>
+                <div className="col-span-2 sm:col-span-1"><label className="block text-[10px] font-bold text-slate-500 mb-1">Start date</label><ShamsiDateInput value={termForm.startDate} onChange={(v) => setTermForm({ ...termForm, startDate: v })} /></div>
+                <div className="col-span-2 sm:col-span-1"><label className="block text-[10px] font-bold text-slate-500 mb-1">End date</label><ShamsiDateInput value={termForm.endDate} onChange={(v) => setTermForm({ ...termForm, endDate: v })} /></div>
+                <button type="submit" disabled={busy} className="col-span-2 sm:col-span-1 px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-bold disabled:opacity-50 flex items-center justify-center gap-1">{busy && <Loader2 className="w-3 h-3 animate-spin" />} Create</button>
               </form>
               <div className="space-y-2">
                 {terms.length === 0 ? <p className="text-xs text-slate-400 italic text-center py-8">No academic terms yet.</p> : terms.map((tm) => (
@@ -208,13 +326,19 @@ export default function AcademicSetupView({ branchId }: { branchId?: string } = 
                       <>
                         <input type="number" value={editTerm.year} onChange={(e) => setEditTerm({ ...editTerm, year: Number(e.target.value) })} className="border rounded-lg px-2 py-1 w-20" />
                         <input value={editTerm.code} onChange={(e) => setEditTerm({ ...editTerm, code: e.target.value })} className="border rounded-lg px-2 py-1 font-mono w-24" />
-                        <input value={editTerm.name} onChange={(e) => setEditTerm({ ...editTerm, name: e.target.value })} className="border rounded-lg px-2 py-1 flex-1" />
+                        <input value={editTerm.name} onChange={(e) => setEditTerm({ ...editTerm, name: e.target.value })} className="border rounded-lg px-2 py-1 flex-1 min-w-[120px]" />
+                        <div className="flex items-center gap-2 basis-full flex-wrap">
+                          <span className="text-[10px] font-bold text-slate-500 uppercase">Start</span>
+                          <ShamsiDateInput value={editTerm.startDate} onChange={(v) => setEditTerm({ ...editTerm, startDate: v })} />
+                          <span className="text-[10px] font-bold text-slate-500 uppercase">End</span>
+                          <ShamsiDateInput value={editTerm.endDate} onChange={(v) => setEditTerm({ ...editTerm, endDate: v })} />
+                        </div>
                         <button type="button" disabled={busy} className="p-1.5 bg-emerald-600 text-white rounded-lg" onClick={() => run(async () => { await api.put(`/academic/terms/${tm.id}`, editTerm); setEditTermId(null); })}><Check className="w-3.5 h-3.5" /></button>
                         <button type="button" className="p-1.5 bg-slate-100 rounded-lg" onClick={() => setEditTermId(null)}><X className="w-3.5 h-3.5" /></button>
                       </>
                     ) : (
                       <>
-                        <div className="flex-1"><p className="font-bold">{tm.name} <span className="font-mono text-indigo-600">({tm.code})</span></p><p className="text-[10px] text-slate-500">Year {tm.year}{tm.startDate ? ` · ${tm.startDate}` : ''}</p></div>
+                        <div className="flex-1"><p className="font-bold">{tm.name} <span className="font-mono text-indigo-600">({tm.code})</span></p><p className="text-[10px] text-slate-500">Year {tm.year}{tm.startDate || tm.endDate ? ` · ${tm.startDate || '—'} → ${tm.endDate || '—'}` : ''}{!tm.endDate && <span className="ml-1 text-amber-600 font-bold">· no end date: sessions are unbounded</span>}</p></div>
                         <ToggleActive active={tm.isActive} disabled={busy} onToggle={() => run(async () => { await api.put(`/academic/terms/${tm.id}`, { isActive: !tm.isActive }); })} />
                         <button type="button" className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg" onClick={() => { setEditTermId(tm.id); setEditTerm({ year: tm.year, code: tm.code, name: tm.name, startDate: tm.startDate || '', endDate: tm.endDate || '' }); }}><Pencil className="w-3.5 h-3.5" /></button>
                       </>
@@ -254,7 +378,7 @@ export default function AcademicSetupView({ branchId }: { branchId?: string } = 
                         <div className="flex-1 min-w-[200px]"><p className="font-bold break-words">{s.label} <span className="font-mono text-indigo-600">({s.code})</span></p><p className="text-[10px] text-slate-500">{s.startTime} – {s.endTime}</p></div>
                         <ToggleActive active={s.isActive} disabled={busy} onToggle={() => run(async () => { await api.put(`/academic/time-slots/${s.id}`, { isActive: !s.isActive }); })} />
                         <button type="button" className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg" onClick={() => { setEditSlotId(s.id); setEditSlot({ code: s.code, label: s.label, startTime: s.startTime, endTime: s.endTime }); }}><Pencil className="w-3.5 h-3.5" /></button>
-                        <button type="button" className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg" disabled={busy} onClick={() => { if (!window.confirm('Deactivate this time slot?')) return; run(async () => { await api.delete(`/academic/time-slots/${s.id}`); }); }}><Trash2 className="w-3.5 h-3.5" /></button>
+                        <button type="button" title="Deactivate time slot" className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-lg" disabled={busy || !s.isActive} onClick={() => { if (!window.confirm('Deactivate this time slot? It stays on existing classes and can be reactivated.')) return; run(async () => { await api.delete(`/academic/time-slots/${s.id}`); }); }}><Archive className="w-3.5 h-3.5" /></button>
                       </>
                     )}
                   </div>
@@ -290,7 +414,7 @@ export default function AcademicSetupView({ branchId }: { branchId?: string } = 
                         <div className="flex-1"><p className="font-bold">{r.name} <span className="font-mono text-indigo-600">({r.code})</span></p><p className="text-[10px] text-slate-500">Capacity {r.capacity}</p></div>
                         <ToggleActive active={r.isActive} disabled={busy} onToggle={() => run(async () => { await api.put(`/academic/rooms/${r.id}`, { isActive: !r.isActive }); })} />
                         <button type="button" className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg" onClick={() => { setEditRoomId(r.id); setEditRoom({ code: r.code, name: r.name, capacity: r.capacity }); }}><Pencil className="w-3.5 h-3.5" /></button>
-                        <button type="button" className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg" disabled={busy} onClick={() => { if (!window.confirm('Deactivate this room?')) return; run(async () => { await api.delete(`/academic/rooms/${r.id}`); }); }}><Trash2 className="w-3.5 h-3.5" /></button>
+                        <button type="button" title="Deactivate room" className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-lg" disabled={busy || !r.isActive} onClick={() => { if (!window.confirm('Deactivate this room? It stays on existing classes and can be reactivated.')) return; run(async () => { await api.delete(`/academic/rooms/${r.id}`); }); }}><Archive className="w-3.5 h-3.5" /></button>
                       </>
                     )}
                   </div>
@@ -343,7 +467,7 @@ export default function AcademicSetupView({ branchId }: { branchId?: string } = 
                           <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{childLevels.length} level{childLevels.length === 1 ? '' : 's'}</span>
                           <ToggleActive active={p.isActive} disabled={busy} onToggle={() => run(async () => { await api.put(`/academic/programs/${p.id}`, { isActive: !p.isActive }); })} />
                           {editProgId !== p.id && <button type="button" className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100" onClick={() => { setEditProgId(p.id); setEditProgName(p.name); setEditProgCode(p.code || ''); setEditProgDesc(p.description || ''); }}><Pencil className="w-3.5 h-3.5" /></button>}
-                          <button type="button" className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50" disabled={busy} onClick={() => { if (!window.confirm(`Remove or deactivate program "${p.name}"?`)) return; run(async () => { await api.delete(`/academic/programs/${p.id}`); }); }}><Trash2 className="w-3.5 h-3.5" /></button>
+                          <button type="button" className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50" disabled={busy} onClick={() => { if (!window.confirm(`Remove program "${p.name}"?\n\nIf it is already used by levels, classes or offerings it is deactivated instead of deleted.`)) return; run(async () => { await api.delete(`/academic/programs/${p.id}`); }); }}><Trash2 className="w-3.5 h-3.5" /></button>
                         </div>
 
                         {open && (
@@ -379,7 +503,7 @@ export default function AcademicSetupView({ branchId }: { branchId?: string } = 
                                     </div>
                                     <ToggleActive active={l.isActive} disabled={busy} onToggle={() => run(async () => { await api.put(`/academic/levels/${l.id}`, { isActive: !l.isActive }); })} />
                                     <button type="button" className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100" onClick={() => { setEditLvlId(l.id); setEditLvl({ name: l.name, code: l.code || '', order: l.order, durationMonths: l.durationMonths, defaultFee: l.defaultFee, passMark: l.passMark, minViableSize: (l as any).minViableSize ?? 5 }); }}><Pencil className="w-3.5 h-3.5" /></button>
-                                    <button type="button" className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50" disabled={busy} onClick={() => { if (!window.confirm(`Remove level "${l.name}"?`)) return; run(async () => { await api.delete(`/academic/levels/${l.id}`); }); }}><Trash2 className="w-3.5 h-3.5" /></button>
+                                    <button type="button" className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50" disabled={busy} onClick={() => { if (!window.confirm(`Remove level "${l.name}"?\n\nIf it is already referenced it is deactivated instead of deleted.`)) return; run(async () => { await api.delete(`/academic/levels/${l.id}`); }); }}><Trash2 className="w-3.5 h-3.5" /></button>
                                   </div>
                                 )}
                               </div>
@@ -419,9 +543,22 @@ export default function AcademicSetupView({ branchId }: { branchId?: string } = 
               once visited preserves their state and their fetched data, so a
               return visit costs zero requests. They are still not mounted until
               first opened, so the initial page load is unchanged. */}
-          <div hidden={tab !== 'versions'}>{visited.versions && <ProgramVersionsPanel />}</div>
-          <div hidden={tab !== 'offerings'}>{visited.offerings && <OfferingsPanel branchId={branchId} onChange={() => setOfferingCount((count) => count + 1)} />}</div>
-          <div hidden={tab !== 'generate'}>{visited.generate && <ClassGenerationWizard branchId={branchId} />}</div>
+          {/* `key` is the invalidation contract: all three panels own their own
+              fetched data, so remounting them on `panelRefreshKey` is how a
+              parent Refresh, a successful mutation, or a branch change reaches
+              that data. `branchId` is passed to every branch-scoped panel so the
+              contract is uniform rather than per-panel guesswork; the server
+              still derives real scope from the caller's token. */}
+          <div hidden={tab !== 'versions'}>
+            {tab === 'versions' && !canEditCatalog && (
+              <div role="status" className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-800">
+                You can view program versions and edit the placement policy, but creating or publishing a version requires the <span className="font-mono">AcademicSetup.Edit</span> permission. Ask an owner to grant it.
+              </div>
+            )}
+            {visited.versions && <ProgramVersionsPanel key={`versions-${branchId ?? 'all'}-${panelRefreshKey}`} branchId={branchId} />}
+          </div>
+          <div hidden={tab !== 'offerings'}>{visited.offerings && <OfferingsPanel key={`offerings-${branchId ?? 'all'}-${panelRefreshKey}`} branchId={branchId} onChange={() => { void reload(); }} />}</div>
+          <div hidden={tab !== 'generate'}>{visited.generate && <ClassGenerationWizard key={`generate-${branchId ?? 'all'}-${panelRefreshKey}`} branchId={branchId} />}</div>
 
         </div>
       </div>

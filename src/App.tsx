@@ -339,7 +339,7 @@ function AuthenticatedApp() {
       case 'audit':
         return <AuditLogView />;
       case 'academic-setup':
-        return <AcademicSetupView branchId={activeBranchId} />;
+        return <AcademicSetupView branchId={activeBranchId} activeRole={activeRole} permissionCodes={user?.permissions ? Array.from(user.permissions) : undefined} />;
       case 'test-bank':
         return <TestBankAdminView triggerToast={triggerToast} />;
       case 'settings':

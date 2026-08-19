@@ -13,7 +13,30 @@ interface ContentTest { id:string; title:string; testType:string; instructions?:
 interface PlacementProfile { configured:boolean; enabled:boolean; required:boolean; requirementMode?:string; firstLevelExempt?:boolean; expiresMinutes?:number|null; policyVersion?:number; method:string; programName:string; versionLabel?:string; instructions?:string|null; components:ComponentConfig[]; levels:Array<{id:string;name:string;code?:string|null}>; allowRetake:boolean; passScore:number; contentTests?:ContentTest[]; }
 interface AttemptResult { component_key:string; component_type:string; label:string; status:string; score:number|null; max_score:number; weight:number; selected_level_id?:string|null; notes?:string|null; result_text?:string|null; payload_json?:string|null; started_at?:string|null; deadline_at?:string|null; elapsed_seconds?:number|null; timeout_flag?:number|null; raw_score?:number|null; percentage?:number|null; score_version?:number|null; }
 interface Attempt { id:string; attempt_number:number; status:string; percentage?:number|null; recommendation_text?:string|null; expires_at?:string|null; results:AttemptResult[]; }
-interface Requirement { mode:string; reason?:string; firstLevelExemptApplied?:boolean; }
+type PlacementDecision = 'REQUIRED' | 'NOT_REQUIRED' | 'EXEMPT' | 'CONFIGURATION_ERROR' | 'INVALID_CONTEXT';
+interface Requirement { mode:string; decision?:PlacementDecision; reason?:string; firstLevelExemptApplied?:boolean; policySource?:string; }
+
+/**
+ * Human-readable presentation for each placement decision.
+ *
+ * A single "Placement not required" panel used to be shown for five very
+ * different situations, three of which are configuration faults rather than
+ * business decisions — a green tick told the operator everything was fine while
+ * the enrollment gate was actually blocking the candidate. Raw machine reasons
+ * ('no_policy') were also surfaced verbatim.
+ */
+const DECISION_PRESENTATION: Record<PlacementDecision, { tone:'ok'|'warn'|'error'; title:string; body:string }> = {
+  NOT_REQUIRED: { tone:'ok', title:'Placement not required',
+    body:'The policy for this program version does not require a placement assessment.' },
+  EXEMPT: { tone:'ok', title:'Candidate is exempt',
+    body:'This program requires a placement assessment, but this candidate is exempt because they are entering the first level.' },
+  CONFIGURATION_ERROR: { tone:'error', title:'Placement policy is not configured',
+    body:'No placement policy exists for this program version, so the system cannot tell whether an assessment is required. Enrollment is blocked until an administrator configures the policy in Academic Setup → Versions & Rules.' },
+  INVALID_CONTEXT: { tone:'error', title:'Program selection is incomplete',
+    body:'This candidate has no valid program version selected, so no placement policy can apply. Set the program/curriculum version on the visitor record first.' },
+  REQUIRED: { tone:'warn', title:'Placement required',
+    body:'This program requires a placement assessment.' },
+};
 
 interface Props { visitor: Visitor; onClose:()=>void; onCompleted:()=>Promise<void>; triggerToast:(message:string,type:'success'|'error'|'info')=>void; }
 
@@ -230,12 +253,33 @@ export default function PlacementTestModal({ visitor, onClose, onCompleted, trig
 
   if(loading) return <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50"><div className="bg-white rounded-2xl p-8 shadow-2xl flex items-center gap-3 text-slate-600 font-bold"><Loader2 className="w-5 h-5 animate-spin"/>Loading placement workspace…</div></div>;
 
-  if(requirement?.mode==='not_required'){
+  // Anything that stops the assessment from running is presented here, but with
+  // the tone and wording that match the ACTUAL decision. A configuration fault
+  // must never render as a green success state.
+  if(requirement && requirement.mode==='not_required'){
+    const decision: PlacementDecision =
+      requirement.decision
+      ?? (requirement.firstLevelExemptApplied ? 'EXEMPT'
+        : requirement.reason === 'no_policy' ? 'CONFIGURATION_ERROR'
+        : requirement.reason === 'no_program_selected' || requirement.reason === 'program_version_not_found' ? 'INVALID_CONTEXT'
+        : 'NOT_REQUIRED');
+    const view = DECISION_PRESENTATION[decision];
+    const tone = view.tone === 'ok'
+      ? { chip:'bg-emerald-100 text-emerald-600', box:'bg-slate-50 border-slate-100 text-slate-600' }
+      : { chip:'bg-amber-100 text-amber-700', box:'bg-amber-50 border-amber-200 text-amber-800' };
     return (
-      <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50" onClick={onClose}>
-        <div className="bg-white rounded-2xl p-8 shadow-2xl max-w-md w-full" onClick={e=>e.stopPropagation()}>
-          <div className="flex items-start justify-between"><div className="flex items-center gap-3"><span className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center"><ShieldCheck className="w-5 h-5"/></span><div><h3 className="font-black text-slate-800">Placement not required</h3><p className="text-xs text-slate-500">This program/level does not require a placement assessment.</p></div></div><button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400"><X className="w-4 h-4"/></button></div>
-          <div className="mt-4 rounded-xl bg-slate-50 border border-slate-100 p-3 text-xs text-slate-600">Reason: {requirement.reason || 'no_policy'}{requirement.firstLevelExemptApplied ? ' (first-level exemption)' : ''}</div>
+      <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onClose}>
+        <div role="dialog" aria-modal="true" aria-label={view.title} className="bg-white rounded-2xl p-8 shadow-2xl max-w-md w-full" onClick={e=>e.stopPropagation()}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <span className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${tone.chip}`}>
+                {view.tone === 'ok' ? <ShieldCheck className="w-5 h-5"/> : <AlertTriangle className="w-5 h-5"/>}
+              </span>
+              <div className="min-w-0"><h3 className="font-black text-slate-800 break-words">{view.title}</h3></div>
+            </div>
+            <button onClick={onClose} aria-label="Close" className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 shrink-0"><X className="w-4 h-4"/></button>
+          </div>
+          <div className={`mt-4 rounded-xl border p-3 text-xs leading-relaxed ${tone.box}`}>{view.body}</div>
           <button onClick={onClose} className="mt-5 w-full py-3 rounded-xl bg-slate-800 text-white text-sm font-black">Close</button>
         </div>
       </div>

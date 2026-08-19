@@ -10,6 +10,7 @@ import { authenticate, authorize, requirePermission, resolveBranchScope, canAcce
 import { writeAudit } from '../middleware/audit.js';
 import { assertMoney, assertPerformanceScore } from '../utils/money.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
+import { assertOptionalIsoDate, assertDateRange } from '../utils/isoDate.js';
 import { id } from '../utils/ids.js';
 import { ACADEMIC_DEFAULTS, PLACEMENT_DEFAULTS } from '../core/configuration/policy-catalog.js';
 import { validatePolicyComponents, validateDecisionRules } from '../core/placement/policy-engine.js';
@@ -727,16 +728,21 @@ academicRouter.post(
     if (!year || !code || !name) throw new HttpError(400, 'year, code, and name are required.');
     const resolvedBranch = branchId || req.user?.branchId;
     requireAcademicBranchAccess(req, resolvedBranch);
+    // Dates bound automatic session generation, so a malformed or reversed
+    // range must never reach storage.
+    const start = assertOptionalIsoDate(startDate, 'startDate');
+    const end = assertOptionalIsoDate(endDate, 'endDate');
+    assertDateRange(start, end);
     const newId = id('term');
-    
+
     stmtInsertTerm.run(
       newId,
       resolvedBranch,
       Number(year),
       String(code).trim().toUpperCase(),
       String(name).trim(),
-      startDate || null,
-      endDate || null,
+      start,
+      end,
       isActive === false ? 0 : 1
     );
     writeAudit(req, `Created academic term ${name}`);
@@ -752,13 +758,31 @@ academicRouter.put(
     if (!existing) throw new HttpError(404, 'Academic term not found.');
     requireAcademicBranchAccess(req, existing.branch_id);
     const { year, code, name, startDate, endDate, isActive } = req.body ?? {};
-    
+
+    // PATCH-style semantics: a field that is not supplied stays unchanged.
+    //
+    // Previously this used `startDate !== undefined ? startDate : existing`,
+    // which looks safe but is not: the edit form always sends its whole state
+    // object, and its date inputs hold `''` when the form was hydrated without
+    // them. `'' !== undefined` is true, so the empty string won a real stored
+    // date and editing only a term's NAME silently erased its calendar,
+    // breaking session generation. Clearing a date is therefore expressed
+    // explicitly as `null`, never by an empty string.
+    const resolveDate = (incoming: unknown, current: string | null): string | null => {
+      if (incoming === undefined || incoming === '') return current;
+      if (incoming === null) return null;
+      return incoming as string;
+    };
+    const nextStart = assertOptionalIsoDate(resolveDate(startDate, existing.start_date), 'startDate');
+    const nextEnd = assertOptionalIsoDate(resolveDate(endDate, existing.end_date), 'endDate');
+    assertDateRange(nextStart, nextEnd);
+
     stmtUpdateTerm.run(
       year ?? existing.year,
       code ?? existing.code,
       name ?? existing.name,
-      startDate !== undefined ? startDate : existing.start_date,
-      endDate !== undefined ? endDate : existing.end_date,
+      nextStart,
+      nextEnd,
       isActive === false ? 0 : isActive === true ? 1 : existing.is_active,
       req.params.id
     );

@@ -9,7 +9,7 @@
  */
 import type BetterSqlite3 from 'better-sqlite3';
 import { HttpError } from '../../middleware/errorHandler.js';
-import { resolvePlacementRequirement } from './policy-engine.js';
+import { resolvePlacementRequirement, isAuthoritativeDecision } from './policy-engine.js';
 import { evaluateEnrollmentEligibility } from './placement-policy.js';
 
 /**
@@ -51,6 +51,15 @@ export function assertPlacementEligibleForClass(
   if (!programVersionId) return;
 
   const requirement = resolvePlacementRequirement(programVersionId, branchId, cls.level_id);
+  // Fail CLOSED on configuration faults. A missing/unresolvable profile is not
+  // a business waiver, and previously fell through this check and admitted the
+  // student without any assessment.
+  if (!isAuthoritativeDecision(requirement)) {
+    throw new HttpError(
+      409,
+      'Placement policy is not configured for this program version. An administrator must configure it in Academic Setup before enrollment can proceed.'
+    );
+  }
   if (requirement.mode === 'not_required') return;
 
   const student = db.prepare('SELECT lead_id FROM students WHERE id = ?').get(studentId) as { lead_id: string | null } | undefined;

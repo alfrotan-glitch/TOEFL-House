@@ -31,9 +31,19 @@ interface VersionTree {
 }
 
 const inputCls = "w-full text-xs border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 transition-all";
-const labelCls = "block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1";
+// `break-words` so long labels ("Pass / recommendation threshold") wrap inside
+// a narrow card instead of spilling over neighbouring controls.
+const labelCls = "block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 break-words";
 
-export default function ProgramVersionsPanel() {
+/**
+ * `branchId` is accepted for contract parity with the other branch-scoped
+ * academic panels. It is intentionally NOT sent to the API: every endpoint this
+ * panel calls resolves branch scope server-side from the caller's token, and
+ * passing a client-supplied branch would bypass that authority. The parent
+ * remounts this panel when the branch changes (see the `key` in
+ * AcademicSetupView), which is what makes the reload happen.
+ */
+export default function ProgramVersionsPanel({ branchId: _branchId }: { branchId?: string } = {}) {
   const [programs, setPrograms] = useState<Program[]>([]);
   const [versions, setVersions] = useState<ProgramVersion[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -289,7 +299,13 @@ export default function ProgramVersionsPanel() {
         </div>
 
         {/* Right: Details & Rules (FIXED LAYOUT) */}
-        <div className="lg:col-span-8 bg-white rounded-2xl border border-slate-200 shadow-sm p-6 min-h-[400px] overflow-visible">
+        {/* `@container` makes the inner grids respond to THIS panel's real width
+            instead of the viewport. The panel renders inside the parent page's
+            8/12 column and then splits again 8/12, so a viewport-based `xl:`
+            breakpoint fired at ~44% of the available width and packed 12-column
+            rows into a few hundred pixels — the overlap operators reported.
+            `overflow-visible` was masking it rather than fixing it. */}
+        <div className="@container lg:col-span-8 bg-white rounded-2xl border border-slate-200 shadow-sm p-6 min-h-[400px] min-w-0">
           {!tree ? (
             <div className="flex flex-col items-center justify-center h-full text-center text-slate-400 py-12">
               <BookOpen className="w-10 h-10 mb-3" />
@@ -357,7 +373,7 @@ export default function ProgramVersionsPanel() {
                     <div className="flex items-center gap-2"><div className="p-2 bg-indigo-100 rounded-lg"><Zap className="w-4 h-4 text-indigo-700" /></div><div><h4 className="text-sm font-extrabold text-slate-900">Placement Assessment Blueprint</h4><p className="text-[11px] text-slate-500">This program version owns the complete assessment workflow used for every candidate.</p></div></div>
                     <label className="flex items-center gap-2 text-xs font-bold whitespace-nowrap"><input type="checkbox" checked={placementConfig.enabled} onChange={e=>setPlacementConfig((c:any)=>({...c,enabled:e.target.checked}))}/> Enabled</label>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mb-5">
+                  <div className="grid grid-cols-1 @md:grid-cols-2 @4xl:grid-cols-3 gap-3 mb-5">
                     <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 min-w-0"><label className={labelCls}>Placement requirement</label><select value={placementConfig.requirementMode} onChange={e=>setPlacementConfig((c:any)=>({...c,requirementMode:e.target.value, required: e.target.value==='required', enabled: e.target.value!=='not_required'}))} className={`${inputCls} min-w-0`}>
                       <option value="required">Required</option>
                       <option value="optional">Optional (may skip)</option>
@@ -381,19 +397,19 @@ export default function ProgramVersionsPanel() {
                   <div className="space-y-3">
                     {(placementConfig.components || []).map((c:any, index:number) => (
                       <div key={c.key} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-12 gap-3 items-end">
-                          <div className="xl:col-span-4 min-w-0"><label className={labelCls}>Section name</label><input value={c.label} onChange={e=>updatePlacementComponent(index,{label:e.target.value})} className={`${inputCls} min-w-0`} /></div>
-                          <div className="xl:col-span-3 min-w-0"><label className={labelCls}>Type</label><select value={c.type} onChange={e=>updatePlacementComponent(index,{type:e.target.value})} className={`${inputCls} min-w-0`}>{componentTypes.map(t=><option key={t.value} value={t.value}>{t.label}</option>)}</select></div>
-                          <div className="xl:col-span-2 min-w-0"><label className={labelCls}>Weight %</label><input type="number" min="0" max="100" value={c.weight} onChange={e=>updatePlacementComponent(index,{weight:Number(e.target.value)})} className={`${inputCls} min-w-[5rem]`}/></div>
-                          <div className="xl:col-span-2 min-w-0"><label className={labelCls}>Max score</label><input type="number" min="1" value={c.maxScore} onChange={e=>updatePlacementComponent(index,{maxScore:Number(e.target.value)})} className={`${inputCls} min-w-[5rem]`}/></div>
-                          <button type="button" onClick={()=>removePlacementComponent(index)} aria-label={`Remove ${c.label || 'assessment section'}`} className="h-[42px] rounded-xl border border-rose-200 text-rose-600 hover:bg-rose-50 flex items-center justify-center xl:col-span-1"><Trash2 className="w-3.5 h-3.5"/></button>
+                        <div className="grid grid-cols-1 @md:grid-cols-2 @3xl:grid-cols-4 gap-3 items-end">
+                          <div className="min-w-0"><label className={labelCls}>Section name</label><input value={c.label} onChange={e=>updatePlacementComponent(index,{label:e.target.value})} className={`${inputCls} min-w-0`} /></div>
+                          <div className="min-w-0"><label className={labelCls}>Type</label><select value={c.type} onChange={e=>updatePlacementComponent(index,{type:e.target.value})} className={`${inputCls} min-w-0`}>{componentTypes.map(t=><option key={t.value} value={t.value}>{t.label}</option>)}</select></div>
+                          <div className="min-w-0"><label className={labelCls}>Weight %</label><input type="number" min="0" max="100" value={c.weight} onChange={e=>updatePlacementComponent(index,{weight:Number(e.target.value)})} className={`${inputCls} min-w-[5rem]`}/></div>
+                          <div className="min-w-0"><label className={labelCls}>Max score</label><input type="number" min="1" value={c.maxScore} onChange={e=>updatePlacementComponent(index,{maxScore:Number(e.target.value)})} className={`${inputCls} min-w-[5rem]`}/></div>
+                          <button type="button" onClick={()=>removePlacementComponent(index)} aria-label={`Remove ${c.label || 'assessment section'}`} className="h-[42px] rounded-xl border border-rose-200 text-rose-600 hover:bg-rose-50 flex items-center justify-center min-w-0"><Trash2 className="w-3.5 h-3.5"/></button>
                         </div>
-                        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-12 gap-3 items-end">
-                          <label className="xl:col-span-2 flex items-center gap-2 text-[11px] font-bold text-slate-600 rounded-xl bg-slate-50 border border-slate-100 px-3 py-3"><input type="checkbox" checked={c.required !== false} onChange={e=>updatePlacementComponent(index,{required:e.target.checked})}/> Required</label>
-                          <div className="xl:col-span-2 min-w-0"><label className={labelCls}>Time limit (s)</label><input type="number" min="0" value={c.timeLimitSeconds ?? (c.durationMinutes ? c.durationMinutes*60 : '')} onChange={e=>updatePlacementComponent(index,{timeLimitSeconds: e.target.value === '' ? null : Number(e.target.value), durationMinutes: undefined})} className={`${inputCls} min-w-[5rem]`} placeholder="no timer"/></div>
-                          <div className="xl:col-span-2 min-w-0"><label className={labelCls}>Min score</label><input type="number" min="0" value={c.minScore ?? ''} onChange={e=>updatePlacementComponent(index,{minScore: e.target.value === '' ? null : Number(e.target.value)})} className={`${inputCls} min-w-[5rem]`} placeholder="none"/></div>
-                          <div className="xl:col-span-3 min-w-0"><label className={labelCls}>Scoring</label><select value={c.scoringMethod || (c.type==='content_test' ? 'hybrid' : 'manual')} onChange={e=>updatePlacementComponent(index,{scoringMethod:e.target.value})} className={`${inputCls} min-w-0`}><option value="auto">Auto</option><option value="manual">Manual</option><option value="hybrid">Hybrid</option></select></div>
-                          <div className="xl:col-span-3 min-w-0"><label className={labelCls}>Instructions</label><input value={c.instructions || ''} onChange={e=>updatePlacementComponent(index,{instructions:e.target.value})} className={`${inputCls} min-w-0`} placeholder="Examiner guidance…"/></div>
+                        <div className="mt-3 grid grid-cols-1 @md:grid-cols-2 @3xl:grid-cols-4 gap-3 items-end">
+                          <label className="min-w-0 flex items-center gap-2 text-[11px] font-bold text-slate-600 rounded-xl bg-slate-50 border border-slate-100 px-3 py-3"><input type="checkbox" checked={c.required !== false} onChange={e=>updatePlacementComponent(index,{required:e.target.checked})}/> Required</label>
+                          <div className="min-w-0"><label className={labelCls}>Time limit (s)</label><input type="number" min="0" value={c.timeLimitSeconds ?? (c.durationMinutes ? c.durationMinutes*60 : '')} onChange={e=>updatePlacementComponent(index,{timeLimitSeconds: e.target.value === '' ? null : Number(e.target.value), durationMinutes: undefined})} className={`${inputCls} min-w-[5rem]`} placeholder="no timer"/></div>
+                          <div className="min-w-0"><label className={labelCls}>Min score</label><input type="number" min="0" value={c.minScore ?? ''} onChange={e=>updatePlacementComponent(index,{minScore: e.target.value === '' ? null : Number(e.target.value)})} className={`${inputCls} min-w-[5rem]`} placeholder="none"/></div>
+                          <div className="min-w-0"><label className={labelCls}>Scoring</label><select value={c.scoringMethod || (c.type==='content_test' ? 'hybrid' : 'manual')} onChange={e=>updatePlacementComponent(index,{scoringMethod:e.target.value})} className={`${inputCls} min-w-0`}><option value="auto">Auto</option><option value="manual">Manual</option><option value="hybrid">Hybrid</option></select></div>
+                          <div className="min-w-0"><label className={labelCls}>Instructions</label><input value={c.instructions || ''} onChange={e=>updatePlacementComponent(index,{instructions:e.target.value})} className={`${inputCls} min-w-0`} placeholder="Examiner guidance…"/></div>
                         </div>
                         {c.type === 'content_test' && (
                           <div className="mt-3 rounded-xl bg-indigo-50/50 border border-indigo-100 p-3">

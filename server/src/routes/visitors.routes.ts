@@ -10,6 +10,7 @@ import { parsePagination as parsePaginationShared } from '../utils/pagination.js
 import { authenticate, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
+import { assertOptionalIsoDate } from '../utils/isoDate.js';
 import { id, today } from '../utils/ids.js';
 import { resolvePlacementRequirement } from '../core/placement/policy-engine.js';
 import { resolveGoverningProgramVersionId } from '../core/placement/enrollment-gate.js';
@@ -117,26 +118,8 @@ const VISITOR_TEXT_FIELDS: ReadonlyArray<readonly [string, string, number]> = [
   ['notes', 'Notes', TEXT_LIMITS.notes],
 ] as const;
 
-const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-/**
- * Validate an optional calendar date. A malformed value used to be stored
- * verbatim ("9999-99-99", "not-a-date"), which then silently loses every
- * subsequent date comparison it takes part in.
- */
-function assertOptionalIsoDate(value: unknown, field: string): string | null {
-  if (value === undefined || value === null || value === '') return null;
-  if (typeof value !== 'string' || !ISO_DATE_RE.test(value.trim())) {
-    throw new HttpError(400, `${field} must be a valid date in YYYY-MM-DD format.`);
-  }
-  const iso = value.trim();
-  const [y, m, d] = iso.split('-').map(Number);
-  const probe = new Date(Date.UTC(y, m - 1, d));
-  if (probe.getUTCFullYear() !== y || probe.getUTCMonth() !== m - 1 || probe.getUTCDate() !== d) {
-    throw new HttpError(400, `${field} is not a real calendar date.`);
-  }
-  return iso;
-}
+// Calendar-date validation lives in `utils/isoDate.ts` so the academic term
+// routes enforce exactly the same rule. See that module for the rationale.
 
 /**
  * Type-check, trim and bound every supplied text field, returning only the keys

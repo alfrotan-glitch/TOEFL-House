@@ -116,6 +116,29 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
   { code: 'Branch.View', resource: 'Branch', action: 'View', description: 'View branches', category: 'security' },
   { code: 'Branch.Edit', resource: 'Branch', action: 'Edit', description: 'Edit branches', category: 'security' },
   { code: 'AcademicSetup.View', resource: 'AcademicSetup', action: 'View', description: 'View academic setup', category: 'security' },
+  // AUTHORIZATION SEMANTICS FOR ACADEMIC SETUP (documented deliberately).
+  //
+  // The Academic Configuration Center is guarded by two different authorities,
+  // and they are NOT interchangeable:
+  //
+  //   • `academic.routes.ts` uses `authorize('owner','manager')` — a LEGACY
+  //     ROLE check. Terms, slots, rooms, programs, levels and the placement
+  //     profile live here, so a General Manager can administer them.
+  //   • `catalog.routes.ts` uses `requirePermission('AcademicSetup.Edit')` —
+  //     a PERMISSION check covering program versions, subjects, modules and
+  //     promotion/placement rules.
+  //
+  // `AcademicSetup.Edit` is currently held by NO shipped role (owner passes via
+  // the global-owner bypass in `authorize`/`requirePermission`, not via a
+  // grant). The observable consequence is that a General Manager can save a
+  // placement policy but receives 403 when creating a program version from the
+  // very same panel.
+  //
+  // This is left as an explicit OWNER DECISION rather than being silently
+  // widened here: granting `AcademicSetup.Edit` to `general_manager` would also
+  // hand them promotion-rule and subject/module authority, which is a business
+  // policy change, not a bug fix. The UI no longer pretends otherwise — it
+  // reads real capability and disables what the caller cannot perform.
   { code: 'AcademicSetup.Edit', resource: 'AcademicSetup', action: 'Edit', description: 'Edit academic setup', category: 'security' },
   { code: 'Report.View', resource: 'Report', action: 'View', description: 'View operational and financial reports', category: 'reporting' },
 ];

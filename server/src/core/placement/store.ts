@@ -57,6 +57,8 @@ export const stmtProgramVersion: Stmt = db.prepare(`
 `);
 export const stmtProfile: Stmt = db.prepare('SELECT * FROM placement_assessment_profiles WHERE program_version_id = ? AND branch_id = ?');
 export const stmtGlobalProfile: Stmt = db.prepare('SELECT * FROM placement_assessment_profiles WHERE program_version_id = ? AND branch_id IS NULL ORDER BY updated_at DESC, version DESC LIMIT 1');
+/** Does ANY placement profile exist for this program version, on any branch? */
+export const stmtAnyProfileForVersion: Stmt = db.prepare('SELECT 1 AS present FROM placement_assessment_profiles WHERE program_version_id = ? LIMIT 1');
 export const stmtLevels: Stmt = db.prepare('SELECT id, name, code, "order", is_active FROM levels WHERE program_version_id = ? ORDER BY "order"');
 export const stmtVersionLevels: Stmt = db.prepare(`
   SELECT id, name, code, "order", is_active FROM levels

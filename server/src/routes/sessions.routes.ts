@@ -46,7 +46,10 @@ const stmtGetClassById = db.prepare('SELECT * FROM classes WHERE id = ?');
 const stmtGetTeacherById = db.prepare('SELECT id FROM teachers WHERE id = ?');
 const stmtGetUserLinkedTeacher = db.prepare('SELECT linked_teacher_id FROM users WHERE id = ?');
 const stmtGetTimeSlot = db.prepare('SELECT start_time, end_time FROM time_slots WHERE id = ?');
-const stmtGetAcademicTerm = db.prepare('SELECT start_date, end_date FROM academic_terms WHERE id = ?');
+// `branch_id` is selected because the handler enforces that a class and its
+// academic term belong to the same branch. The column was previously omitted,
+// so `term.branch_id` was always undefined and that guard could never fire.
+const stmtGetAcademicTerm = db.prepare('SELECT branch_id, start_date, end_date FROM academic_terms WHERE id = ?');
 const stmtGetHolidays = db.prepare('SELECT date FROM academic_holidays WHERE branch_id = ?');
 const stmtGetClassSkills = db.prepare('SELECT skill_id, teacher_id FROM class_teacher_skills WHERE class_id = ?');
 const stmtGetActiveSemesters = db.prepare(`SELECT DISTINCT student_id AS sid FROM student_semesters WHERE class_id = ? AND COALESCE(status, 'active') = 'active'`);

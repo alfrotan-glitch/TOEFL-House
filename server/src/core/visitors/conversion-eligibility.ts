@@ -28,7 +28,7 @@
  */
 import type BetterSqlite3 from 'better-sqlite3';
 import { resolveGoverningProgramVersionId } from '../placement/enrollment-gate.js';
-import { resolvePlacementRequirement } from '../placement/policy-engine.js';
+import { resolvePlacementRequirement, isAuthoritativeDecision } from '../placement/policy-engine.js';
 import { evaluateEnrollmentEligibility } from '../placement/placement-policy.js';
 
 export interface ConversionEligibilityResult {
@@ -42,7 +42,8 @@ export interface ConversionEligibilityResult {
     | 'lead_lost'
     | 'student_exists'
     | 'class_not_found'
-    | 'class_inactive';
+    | 'class_inactive'
+    | 'placement_policy_unconfigured';
   /** Operator-facing explanation. Safe to display verbatim. */
   reason: string;
   /** Resolved placement requirement mode for the governing program. */
@@ -161,11 +162,29 @@ export function evaluateConversionEligibilityForVisitor(
     cls.level_id ?? null
   );
 
+  // Mirror the authoritative enrollment gate: a configuration fault is not a
+  // waiver, so this pre-flight check must report it instead of green-lighting
+  // a conversion the write path will (correctly) reject.
+  if (!isAuthoritativeDecision(requirement)) {
+    return {
+      eligible: false,
+      code: 'placement_policy_unconfigured',
+      reason:
+        'Placement policy is not configured for this program version. An administrator must configure it in Academic Setup before this candidate can be enrolled.',
+      requirementMode: requirement.mode,
+      placementStatus,
+      placementActionable: false,
+    };
+  }
+
   if (requirement.mode === 'not_required') {
     return {
       eligible: true,
       code: 'ok',
-      reason: 'No placement assessment is required for this program.',
+      reason:
+        requirement.decision === 'EXEMPT'
+          ? 'This candidate is exempt from the required placement assessment.'
+          : 'No placement assessment is required for this program.',
       requirementMode: requirement.mode,
       placementStatus,
       placementActionable: false,

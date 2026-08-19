@@ -60,7 +60,7 @@ placementAttemptRouter.get('/visitors/:visitorId/placement', authorize('owner', 
   res.json({
     visitorId: visitor.id,
     programVersionId: visitor.program_version_id,
-    requirement: { mode: requirement.mode, reason: requirement.reason, firstLevelExemptApplied: requirement.firstLevelExemptApplied },
+    requirement: { mode: requirement.mode, decision: requirement.decision, reason: requirement.reason, firstLevelExemptApplied: requirement.firstLevelExemptApplied, policySource: requirement.policySource },
     profile: profile ? mapProfile(profile, version, levels, rules) : { configured: false, enabled: false, required: false, requirementMode: 'not_required', components: [], levels, placementRules: rules, allowRetake: true, passScore: 60, maxScore: 100, instructions: null },
     attempts: (stmtAttempts.all(visitor.id) as any[]).map((a) => mapAttempt(a)),
     current: current ? mapAttempt(current) : null,

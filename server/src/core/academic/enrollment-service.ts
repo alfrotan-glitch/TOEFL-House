@@ -13,7 +13,7 @@ import {
 } from './lifecycle-engine.js';
 import { countActiveStudentsInClass } from './class-capacity.js';
 import { assertClassGenderAllows, assertNoDuplicateSeatEnrollment, assertNotAlreadySeatedInClass } from './class-admission.js';
-import { resolvePlacementRequirement } from '../placement/policy-engine.js';
+import { resolvePlacementRequirement, isAuthoritativeDecision } from '../placement/policy-engine.js';
 import { evaluateEnrollmentEligibility } from '../placement/placement-policy.js';
 import { resolveGoverningProgramVersionId, assertPlacementEligibleForClass } from '../placement/enrollment-gate.js';
 
@@ -228,6 +228,16 @@ export class EnrollmentService {
     if (!effectiveVersionId) return;
 
     const requirement = resolvePlacementRequirement(effectiveVersionId, input.branchId, targetLevelId);
+    // Fail CLOSED on configuration faults: a program version exists, so a
+    // placement policy is expected. A missing/unresolvable profile must not be
+    // read as an administrative waiver. (Ad-hoc classes with no program version
+    // at all are handled by the `!effectiveVersionId` early return above.)
+    if (!isAuthoritativeDecision(requirement)) {
+      throw new HttpError(
+        409,
+        'Placement policy is not configured for this program version. An administrator must configure it in Academic Setup before enrollment can proceed.'
+      );
+    }
     if (requirement.mode === 'not_required') return;
 
     const student = this.stmtGetStudentPlacementLink.get(input.studentId) as { lead_id: string | null } | undefined;
