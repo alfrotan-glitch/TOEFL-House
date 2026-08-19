@@ -262,9 +262,19 @@ fundingRouter.patch(
     if (status && !['active', 'completed', 'cancelled'].includes(status)) {
       throw new HttpError(400, 'Invalid campaign status.');
     }
+    // The create handler validates the target with assertMoney; this update did
+    // not validate it at all. Reproduced live: 'abc', -5000 and 0.001 were all
+    // stored (HTTP 200) into a REAL NOT NULL column with no CHECK, and `true`
+    // returned a 500 leaking "SQLite3 can only bind numbers...". One poisoned
+    // row silently removed a campaign from SUM(target_amount), because SQLite
+    // coerces the stored text to 0. Same canonical boundary as the create path.
+    const validatedTarget =
+      targetAmount === undefined || targetAmount === null
+        ? existing.target_amount
+        : assertMoney(targetAmount, 'campaign target amount');
 
     stmtUpdateCampaign.run(
-      name ?? existing.name, description ?? existing.description, targetAmount ?? existing.target_amount,
+      name ?? existing.name, description ?? existing.description, validatedTarget,
       endDate ?? existing.end_date, status ?? existing.status, req.params.id
     );
 
@@ -522,18 +532,18 @@ fundingRouter.post(
     const newId = id('spon');
     const tx = db.transaction(() => {
       stmtInsertSponsorship.run(
-        newId, donorId, studentId || null, programId || null, monthlyAmount,
+        newId, donorId, studentId || null, programId || null, validatedMonthly,
         startDate || today(), endDate || null, user.branchId
       );
       return eventBus.emit('sponsorship.created', 'sponsorship', newId,
-        { donorId, donorName: donor.full_name, studentId, monthlyAmount },
+        { donorId, donorName: donor.full_name, studentId, monthlyAmount: validatedMonthly },
         { operatorId: user.userId, branchId: user.branchId }
       );
     });
     const event = tx();
     void eventBus.dispatch(event);
 
-    writeAudit(req, `Created sponsorship agreement: ${donor.full_name} → ${monthlyAmount} AFN/month`);
+    writeAudit(req, `Created sponsorship agreement: ${donor.full_name} → ${validatedMonthly} AFN/month`);
     res.status(201).json({ id: newId });
   })
 );
@@ -550,9 +560,18 @@ fundingRouter.patch(
     if (status && !['active', 'completed', 'terminated'].includes(status)) {
       throw new HttpError(400, 'Invalid sponsorship status.');
     }
+    // The create handler validates the monthly amount with assertMoney; this
+    // update did not validate it at all. Reproduced live: -99999, 'abc' and
+    // 0.001 were all stored (HTTP 200) — a negative recurring donor commitment
+    // and a text value inside a REAL NOT NULL column — and `true` returned a
+    // 500 leaking the SQLite driver message. Same canonical boundary as create.
+    const validatedMonthly =
+      monthlyAmount === undefined || monthlyAmount === null
+        ? existing.monthly_amount
+        : assertMoney(monthlyAmount, 'monthly sponsorship amount');
 
     stmtUpdateSponsorship.run(
-      monthlyAmount ?? existing.monthly_amount, endDate ?? existing.end_date, 
+      validatedMonthly, endDate ?? existing.end_date, 
       status ?? existing.status, req.params.id
     );
 
