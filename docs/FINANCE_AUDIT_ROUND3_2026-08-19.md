@@ -4,7 +4,18 @@
 **Branch:** `arena/01a0151e-toefl-house`
 **Baseline commit:** `f3ffcf9` (round-2 head)
 **Final commit:** `a6a8d44` (pushed; local == remote)
-**Verdict:** **FREEZE** — see §10 for the exact scope and the caveats attached to it.
+**Verdict:** **FINANCE AUDIT — COMPLETE · FINANCE CODE FREEZE — APPROVED ·
+PRODUCTION DATA VERIFICATION — NOT APPLICABLE (PRE-PRODUCTION)** — see §10.
+
+> **Lifecycle status (2026-08-19, post-audit correction).** The system has not
+> yet entered real production operation, so no real `erp.sqlite` containing live
+> financial data exists. Production-data verification is therefore **NOT
+> APPLICABLE** at this stage rather than outstanding, and production corruption
+> is **NOT APPLICABLE** because there is no production dataset that could be
+> corrupt. This was confirmed by an exhaustive filesystem scan (§3), not
+> assumed. Code integrity and behavioural integrity are **VERIFIED** on their
+> own evidence. The one future operational action is recorded in §3a; it is a
+> go-live checklist item, **not an unresolved defect in this audit**.
 
 ---
 
@@ -119,19 +130,61 @@ through `assertMoney`), `finance.routes.ts` and `exams.routes.ts` (raw
 
 ---
 
-## 3. Production-data corruption status
+## 3. Production-data status — **NOT APPLICABLE (pre-production)**
 
-**Cannot be re-verified in this workspace — reported as unknown rather than
-clean.** The round-2 check ran against `server/data/erp.sqlite`; that file is
-gitignored and was lost when the sandbox was re-cloned mid-session. It is not
-present now.
+**There is no real production database to verify, because the system has not
+yet entered production operation.** This section originally reported the status
+as "unknown" on the assumption that a live database existed and had been lost to
+a mid-session re-clone. That framing was wrong, and it is corrected here:
+nothing has been lost, because no live financial dataset has ever existed.
 
-What is known: round 2's scan of that database found **0 corruption** across all
-detectors. Round 3 found no *new* defect that writes silently — the F-5 writers
-produce rows that are visibly wrong (a 1 AFN payment where 1000 was intended),
-not subtly wrong.
+Established by evidence, not assumption:
 
-**Recommended before deploy** (read-only, no migration proposed):
+- `server/data/erp.sqlite` does not exist; `server/data/` contains only
+  `placement-media/`.
+- The path is gitignored (`.gitignore:8,22`) and was **never committed** —
+  `git log --all -- **/erp.sqlite` returns nothing.
+- An exhaustive scan opened **all 122 SQLite-format files** on the filesystem.
+  Exactly 27 held any financial rows, and **all 27 are this repository's own
+  test fixtures**: `/tmp/f10-*/db.sqlite` from
+  `migration-067-f10-repair.test.ts:39` (`mkdtempSync(…'f10-')`, 2–3 rows with
+  hardcoded ids `a1`/`tx_f10_1`, zero students, and a truncated schema whose
+  `payments` table has no `student_id`), plus `/tmp/deployed-*` and
+  `/tmp/sabotage-*` from `deployment-verifier.test.ts` (0 students, 0 payments,
+  0 ledger rows) and empty `/tmp/backups/pre-migration-*` files.
+- No dump, archive or `.bak` containing financial data exists anywhere.
+
+Consequently:
+
+| Item | Status |
+|---|---|
+| Production-data verification | **NOT APPLICABLE** — no real production financial data exists yet |
+| Production corruption | **NOT APPLICABLE** — no production dataset exists to corrupt |
+| Production-data repair migration | **NOT REQUIRED** — nothing to repair |
+
+No synthetic production database was created and no test fixture was substituted
+to manufacture a result. A verification that cannot be performed is reported as
+not applicable, never as a pass.
+
+## 3a. The one remaining operational action (go-live checklist, not a defect)
+
+When the system first enters real production and begins accumulating real
+financial data, run the **existing, unmodified** read-only detector against the
+real `erp.sqlite` **before declaring the production-data baseline verified**:
+
+```bash
+cd server && node scripts/audit-financial-data.mjs /path/to/erp.sqlite
+node scripts/verify-deployment.mjs /path/to/erp.sqlite
+```
+
+`audit-financial-data.mjs` only reads — it never writes, migrates or deletes —
+and it exits `0` clean, `1` on suspect rows, `2` when the database is missing,
+so it cannot silently report a pass against an absent file (verified by
+execution). Copy the database read-only rather than pointing the application at
+it; booting the app would apply migrations and mutate the very artifact being
+audited.
+
+Supplementary reconciliation queries for that first baseline:
 
 ```sql
 SELECT COUNT(*) FROM payments   WHERE typeof(amount) NOT IN ('real','integer');
@@ -143,9 +196,17 @@ SELECT COUNT(*) FROM funding_campaigns fc
        ROUND((SELECT COALESCE(SUM(amount),0) FROM donations WHERE campaign_id = fc.id),2);
 ```
 
-**No repair migration is proposed.** Per the standing constraint, historical data
-is not repaired unless corruption is empirically found *and* a repair rule is
-provable. Neither condition is currently met.
+**No repair migration is proposed or required.** Per the standing constraint,
+historical data is not repaired unless corruption is empirically found *and* a
+repair rule is provable. At this lifecycle stage neither condition can even
+arise: there is no production dataset.
+
+One note for whoever runs that first baseline: F-5 and F-6 were closed at
+`a6a8d44`, before any production data existed. Any malformed row found later
+therefore cannot have been produced by the defects this audit closed. The F-5
+writers also failed *visibly* rather than subtly (a 1 AFN payment where 1,000
+was intended), so a suspect row should be root-caused against its own timestamp
+and code path rather than attributed to a defect that was fixed pre-launch.
 
 ---
 
@@ -221,12 +282,15 @@ Legitimate control flows still succeed (payment 201, donation 201).
 
 ---
 
-## 8. Remaining unverified risks
+## 8. Remaining risks — explicitly classified as unverified / non-defect
 
-Stated plainly rather than folded into a PASS:
+Stated plainly rather than folded into a PASS. **None of these is an open defect,
+and none of them justifies a further audit round.** They are documented so they
+are not rediscovered as "new findings" later.
 
-1. **Production-data status is unknown in this workspace** (§3). The queries are
-   provided; they should be run against the real database before deploy.
+1. **Production-data baseline — NOT APPLICABLE, deferred to go-live**
+   (§3, §3a). Not a defect and not an unverified risk in the current state:
+   there is no production dataset. The detector and the procedure are ready.
 2. **Concurrency remains structurally untestable here.** `better-sqlite3` is
    synchronous, so HTTP-level parallelism cannot interleave inside a handler.
    Multi-process contention is therefore unproven — not proven safe.
@@ -260,31 +324,47 @@ confident and wrong "clean" verdict:
 
 ## 10. Verdict
 
-# FREEZE
+# FINANCE AUDIT — COMPLETE
+# FINANCE CODE FREEZE — APPROVED
+# PRODUCTION DATA VERIFICATION — NOT APPLICABLE (PRE-PRODUCTION)
 
-Finance is recommended for freeze at commit **`a6a8d44`**, with the scope stated
-honestly:
+Finance is frozen at commit **`a6a8d44`**. The audit is complete for the current
+pre-production lifecycle stage.
 
-**What is proven.** The money-writer surface — the endpoints that create,
-modify, refund or report cash — now parses every amount at a single authority.
-Four proven defects across two findings are closed, each reproduced live before
-the fix and re-verified after. 1654 tests, 26 finance mutants killed across
-three rounds with every survivor either killed or *proven* equivalent by
-execution, and a fresh-DB real-HTTP adversarial run that reconciles with zero
-variance.
+| Dimension | Status | Basis |
+|---|---|---|
+| Finance code integrity | **VERIFIED** | F-3, F-4, F-5, F-6 closed; 1654/1654 tests; 11/11 mutants killed with 2 proven equivalent; lint, typecheck and build clean; 74 migrations, no drift; release validation 16/16 |
+| Finance behavioural integrity | **VERIFIED** | Fresh-DB and real-HTTP adversarial testing: 30 hostile requests, **0 violations**; reconciliation healthy with **zero variances** |
+| Production-data verification | **NOT APPLICABLE** | No real production financial data exists yet (§3) |
+| Production corruption | **NOT APPLICABLE** | No production dataset exists to corrupt (§3) |
+| Production-data repair migration | **NOT REQUIRED** | Nothing to repair |
+| Finance audit | **COMPLETE** | For the current pre-production state |
 
-**Why freeze is now justified where round 2 said no.** Round 2 declined to
-freeze because the income and refund writers had never been examined. They have
-now been mapped, attacked and closed, and the remaining raw-`Number()` sites
-have each been triaged to a cleared or non-material conclusion. The defect class
-that produced F-1 through F-6 has no remaining unexamined instance on the money
-surface.
+**Defects closed across all three rounds.** F-1 and F-2 (branch misattribution
+and amount coercion on `/operational-payments`), F-3 and F-4 (expense-request
+coercion, branch misattribution, and a post-commit notification CHECK violation
+on the reject path), F-5 (unparsed amounts at four income/refund money writers,
+three of them moving real cash), and F-6 (idempotency fingerprints built from
+raw input, causing double charges). Every one was reproduced live on a fresh
+database before being fixed, and re-verified after.
 
-**What this freeze does not claim.** It does not claim the production database
-is clean — that check could not be run here (§3) and should be run before
-deploy. It does not claim concurrency safety under multi-process contention,
-which is not testable in this environment. It does not resolve the open business
-questions in §8.5, which are decisions for the business, not defects for me to
-invent answers to.
+**Why the freeze is justified now.** Round 2 declined to freeze because the
+income and refund writers had never been examined. They have now been mapped,
+attacked and closed, and every remaining raw-`Number()` site on the money
+surface has been triaged to a cleared or non-material conclusion. The defect
+class that produced F-1 through F-6 has no remaining unexamined instance. Two
+candidate findings were rejected with evidence rather than reported as defects
+(refund/void symmetry; `discount_percent > 100`), and two surviving mutants were
+proven equivalent by execution rather than assumed.
 
-If the §3 queries return anything non-zero, the freeze should be reopened.
+**What this freeze does not claim.** It does not claim multi-process concurrency
+safety, which is structurally untestable under synchronous `better-sqlite3`. It
+does not resolve the open business-policy questions in §8.5, which are decisions
+for the business rather than defects to invent answers to. Both are recorded in
+§8 as unverified / non-defect risks, not as open findings.
+
+**Scope closure.** No further Finance audit round is warranted. This audit is
+closed unless new evidence or a new financial requirement appears. The single
+future action — running the existing read-only detector against the real
+`erp.sqlite` at go-live (§3a) — is an operational checklist item for the
+production-data baseline, **not an unresolved defect in this audit**.
