@@ -294,7 +294,22 @@ fundingRouter.post(
     const user = getUserContext(req);
     const { campaignId, donorId, amount, date, restricted, restrictionNote } = req.body;
     
-    if (!donorId || !amount || amount <= 0) throw new HttpError(400, 'Donor and a positive amount are required.');
+    if (!donorId || !amount) throw new HttpError(400, 'Donor and a positive amount are required.');
+    // `amount <= 0` on the RAW body is a coercion, not a validation, and it is
+    // the only guard the donation desk had. Reproduced on a fresh DB before
+    // this line existed: `true`, `[[7]]` and `{a:1}` reached the driver and
+    // returned 500 "SQLite3 can only bind numbers..." / "Too few parameter
+    // values", and 0.001 surfaced the raw trigger text "donation amount must
+    // have at most two decimal places". No money ever moved and the
+    // transaction rolled back cleanly (donations, campaign raised_amount and
+    // financial_transactions all stayed at 0) — the defect is the contract,
+    // not the cash: client mistakes were reported as server faults with
+    // driver internals leaked to the caller.
+    // Parsed ONCE here so the value that is validated is the same value that
+    // feeds the idempotency fingerprint below and is stored — matching the
+    // scholarship-award boundary in this same file.
+    const donationAmount = assertMoney(amount, 'donation amount');
+    if (donationAmount <= 0) throw new HttpError(400, 'Donor and a positive amount are required.');
 
     const donor = stmtGetDonorById.get(donorId) as any;
     if (!donor) throw new HttpError(404, 'Donor not found.');
@@ -316,7 +331,7 @@ fundingRouter.post(
       route: 'donation',
       donorId,
       campaignId: campaignId || null,
-      amount: Number(amount),
+      amount: donationAmount,
       date: donationDate,
       actorUserId: user.userId ?? null,
     });
@@ -330,21 +345,21 @@ fundingRouter.post(
 
     const tx = db.transaction(() => {
       stmtInsertDonation.run(
-        newId, campaignId || null, donorId, amount, donationDate, 
+        newId, campaignId || null, donorId, donationAmount, donationDate, 
         restricted ? 1 : 0, restrictionNote || null, receiptNo, user.branchId, donationIdemKey
       );
 
       if (campaignId) {
-        stmtUpdateCampaignRaisedAmount.run(amount, campaignId);
+        stmtUpdateCampaignRaisedAmount.run(donationAmount, campaignId);
       }
 
       recordIncome({
-        category: 'donation', amount, date: donationDate,
+        category: 'donation', amount: donationAmount, date: donationDate,
         description: `Donation received from ${donor.full_name}${campaignId ? ' (campaign)' : ''}${restricted ? ' [RESTRICTED]' : ''}`,
         referenceId: newId, operatorName: user.fullName, operatorRole: user.role ?? null, branchId: user.branchId,
       });
       return eventBus.emit('donation.received', 'donation', newId, 
-      { donorId, donorName: donor.full_name, amount, campaignId, restricted: !!restricted }, 
+      { donorId, donorName: donor.full_name, amount: donationAmount, campaignId, restricted: !!restricted }, 
       { operatorId: user.userId, branchId: user.branchId }
       );
     });
@@ -363,8 +378,8 @@ fundingRouter.post(
     }
     void eventBus.dispatch(event);
 
-    addNotification('Donation Received', `A donation of ${amount.toLocaleString()} AFN was received from ${donor.full_name}. Receipt: ${receiptNo}`, 'success', user.branchId);
-    writeAudit(req, `Recorded donation: ${amount} AFN from ${donor.full_name} (receipt: ${receiptNo})`);
+    addNotification('Donation Received', `A donation of ${donationAmount.toLocaleString()} AFN was received from ${donor.full_name}. Receipt: ${receiptNo}`, 'success', user.branchId);
+    writeAudit(req, `Recorded donation: ${donationAmount} AFN from ${donor.full_name} (receipt: ${receiptNo})`);
     res.status(201).json({ id: newId, receiptNo });
   })
 );

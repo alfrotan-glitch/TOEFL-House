@@ -877,11 +877,25 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
   // click. When no key is supplied a fingerprint of the business intent is
   // derived, so retries collapse while a genuinely new later charge (a
   // different time bucket, or an explicit client key) still goes through.
+  // F-5: parse ONCE, before the idempotency fingerprint is derived, so the
+  // fingerprint, the validation and the stored amount all describe the same
+  // value. `Number()` here let non-amounts through as real charges:
+  //     true -> 1 AFN, [500] -> 500 AFN, '0x10' -> 16 AFN, [[7]] -> 7 AFN
+  //     (each with real cash movement), and 0.001 leaked a 500 from the
+  //     two-decimal database trigger.
+  // `null` still means "amount not supplied", which several categories rely on
+  // to derive the charge themselves, so that contract is preserved exactly.
+  const amountSupplied = !(amount === undefined || amount === null || amount === '');
+  let parsedAmount: number | null = null;
+  if (amountSupplied) {
+    try { parsedAmount = assertMoney(amount, 'Amount'); }
+    catch { throw new HttpError(400, 'Amount must be greater than 0.'); }
+  }
   const { key: idempotencyKey, candidates: idempotencyCandidates, clientSupplied: clientSuppliedKey } = resolveIdempotency(req, {
     route: 'student-payment',
     studentId: student.id,
     category,
-    amount: amount === undefined || amount === null || amount === '' ? null : Number(amount),
+    amount: parsedAmount,
     semesterId: semesterId ?? null,
     installmentId: installmentId ?? null,
     bookId: bookId ?? null,
@@ -919,8 +933,8 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
   let resolvedAmount = 0;
   let semName: string | null = null;
   let bookRefId: string | null = null;
-  const requestedAmount = amount === undefined || amount === null || amount === '' ? null : Number(amount);
-  if (requestedAmount !== null && (!Number.isFinite(requestedAmount) || requestedAmount <= 0)) throw new HttpError(400, 'Amount must be greater than 0.');
+  const requestedAmount = parsedAmount;
+  if (requestedAmount !== null && requestedAmount <= 0) throw new HttpError(400, 'Amount must be greater than 0.');
 
   if (category === 'fee') {
     if (!semesterId) throw new HttpError(400, 'semesterId is required when paying a class fee.');
@@ -1099,8 +1113,18 @@ studentsRouter.post('/:id/refund', requirePermission('Refund.Approve'), ah(async
   const user = getUserContext(req);
   const student = requireStudent(req, req.params.id);
   const { amount, reason } = req.body;
-  const refundAmount = Number(amount);
-  if (!Number.isFinite(refundAmount) || refundAmount <= 0) throw new HttpError(400, 'Refund amount must be positive.');
+  // F-5: a refund moves real money OUT, so the amount must be parsed, not
+  // coerced. Reproduced live on a fresh database (student funded first):
+  //     true   -> 201, a real -1 AFN refund   (branch cash -1.00)
+  //     [500]  -> 201, a real -500 AFN refund (branch cash -500.00)
+  //     '0x10' -> 201, a real -16 AFN refund
+  //     [[7]]  -> 201, a real -7 AFN refund
+  //     0.001  -> 500, leaking the two-decimal database trigger
+  // The refundable-balance cap still applies afterwards, unchanged.
+  let refundAmount: number;
+  try { refundAmount = assertMoney(amount, 'Refund amount'); }
+  catch { throw new HttpError(400, 'Refund amount must be positive.'); }
+  if (refundAmount <= 0) throw new HttpError(400, 'Refund amount must be positive.');
   if (!reason || !String(reason).trim()) throw new HttpError(400, 'Refund reason is required.');
   const date = today();
   // Refunds move real money out; the same mandatory idempotency applies.

@@ -295,7 +295,21 @@ invoicesRouter.post(
     const { amount, paymentMethod, notes } = req.body as { amount?: number; paymentMethod?: string; notes?: string };
     const VALID_METHODS = ['cash', 'card', 'bank_transfer'] as const;
     const resolvedMethod = VALID_METHODS.includes(paymentMethod as any) ? paymentMethod : 'cash';
-    const payAmount = Number(amount);
+    // F-5: `Number()` is a coercion, not a parse, so values that are not
+    // amounts became real invoice payments with real cash movement.
+    // Reproduced live on a fresh database:
+    //     true   -> 201, a 1 AFN payment (cash +0.95 after the savings sweep)
+    //     [500]  -> 201, a 500 AFN payment
+    //     '0x10' -> 201, a 16 AFN payment
+    //     [[7]]  -> 201, a 7 AFN payment
+    //     0.001  -> 500, leaking the two-decimal database trigger
+    // `assertMoney` is the boundary this router already uses elsewhere; the
+    // endpoint's own "> 0" rule then applies to the PARSED value, so 0.001
+    // (which rounds to 0) is a clean 400 rather than a database error.
+    // Any amount >= 0.01 behaves exactly as before.
+    let payAmount: number;
+    try { payAmount = assertMoney(amount, 'Payment amount'); }
+    catch { throw new HttpError(400, 'Payment amount must be positive.'); }
     if (!(payAmount > 0)) throw new HttpError(400, 'Payment amount must be positive.');
 
     const date = today();
