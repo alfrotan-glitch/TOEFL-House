@@ -1247,6 +1247,25 @@ classesRouter.post('/:id/promotion/resolve/:studentId', authorize('owner', 'mana
     throw new HttpError(400, `Invalid outcome: "${outcome}". Must be one of: promote, retake, conditional_pass, drop.`);
   }
 
+  // SSL-1: a manual review only exists once the class has been completed and
+  // the Promotion Engine has actually produced a decision. Without this the
+  // endpoint would resolve promotions for classes that never finished —
+  // reproduced live at every stage, including `draft` and `cancelled`, each
+  // returning HTTP 200 and flipping student_semesters.status.
+  //
+  // That flip is financial, not merely academic: `getStudentBalance(..., 'active')`
+  // sums tuition over ACTIVE semesters only, so moving a semester out of
+  // 'active' erases the debt `checkAcademicHold()` blocks new enrolments on
+  // while leaving it owed in the lifetime scope. Reproduced end-to-end:
+  // enrol -> 403 Academic Hold, resolve on a `draft` class -> 200,
+  // enrol again -> 201 with 40,000 AFN still outstanding.
+  //
+  // This is the same window the read counterpart GET /:id/promotion/pending-review
+  // already enforces; the write path simply never applied it.
+  if (cls.lifecycle_stage !== 'completed' && cls.lifecycle_stage !== 'archived') {
+    throw new HttpError(409, 'Promotion decisions can only be resolved after the class semester has been completed.');
+  }
+
   const semester = db.prepare('SELECT * FROM student_semesters WHERE student_id = ? AND class_id = ?').get(req.params.studentId, cls.id) as any;
   if (!semester) throw new HttpError(404, 'No semester record found for this student in this class.');
   if (semester.status !== 'active') {
