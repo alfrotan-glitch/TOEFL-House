@@ -623,20 +623,16 @@ export type ExpenseKind = 'recurring_bill' | 'one_time_purchase' | 'maintenance'
 
 /**
  * The three accounting treatments the Finance UI must keep visually distinct.
- * Mirrors `server/src/core/finance/category-taxonomy.ts`; the SERVER is the
- * authority and always sends the resolved value — the frontend never derives it.
+ * Mirrors `server/src/core/finance/category-taxonomy.ts`. The SERVER resolves
+ * every value; the browser holds no classification logic of its own.
  */
 export type FinanceCategoryClassification =
   | 'operating_expense'
   | 'capital_expenditure'
   | 'non_expense_cash_movement';
 
-/**
- * Whether a budget line's place in the canonical taxonomy is settled.
- * `needs_review` means the upgrade could not establish the subcategory (or the
- * category) without guessing and deliberately did not invent one.
- */
-export type BudgetLineMappingStatus = 'mapped' | 'needs_review' | 'out_of_taxonomy';
+/** Which payroll run a budget line funds. */
+export type PayrollTarget = 'teacher' | 'employee';
 
 /** A channel or vendor BELOW a subcategory — e.g. Facebook under Digital Advertising. */
 export interface FinanceCategoryChannel {
@@ -665,28 +661,42 @@ export interface FinanceCategory {
   subcategories: FinanceSubcategory[];
 }
 
+/**
+ * A branch-level allocation under exactly one canonical subcategory.
+ *
+ * The taxonomy is complete and organization-wide; budget lines are sparse and
+ * deliberate. Every field describing WHERE the line sits is resolved by the
+ * server — the browser never maps a line to a category or a treatment.
+ */
 export interface BudgetLine {
   id: string;
   name: string;
   currentAmount: number;
   allocatedAmount: number;
-  icon: string;
+  icon?: string | null;
   costType: 'fixed' | 'variable';
-  isMarketing: boolean;
-  purpose?: string;
   branchId: string;
-  /** Canonical node this envelope belongs to (subcategory, or category when unresolved). */
-  categoryId?: string | null;
-  subcategoryId?: string | null;
-  subcategoryName?: string | null;
-  parentCategoryId?: string | null;
-  parentCategoryName?: string | null;
+  /** Canonical subcategory this envelope belongs to. */
+  subcategoryId: string | null;
+  subcategoryName: string | null;
+  /** Parent category of that subcategory. */
+  categoryId: string | null;
+  categoryName: string | null;
   /** Server-resolved accounting treatment. Never computed in the browser. */
-  classification?: FinanceCategoryClassification;
-  mappingStatus?: BudgetLineMappingStatus;
+  classification: FinanceCategoryClassification;
   channelId?: string | null;
-  sortOrder?: number;
-  isActive?: boolean;
+  /** Set on the two payroll envelopes; NULL on every ordinary line. */
+  payrollTarget?: PayrollTarget | null;
+  sortOrder: number;
+  isActive: boolean;
+}
+
+/** Payload for POST /finance/budget-lines. */
+export interface BudgetLineInput {
+  subcategoryId: string;
+  name: string;
+  costType?: 'fixed' | 'variable';
+  channelId?: string | null;
 }
 
 export interface ExpenseRequest {
@@ -725,7 +735,6 @@ export interface OperationalPaymentInput {
 export interface ExpenseReportRow {
   budgetLineId: string;
   budgetLineName: string;
-  purpose: string;
   totalAmount: number;
   count: number;
   costType: 'fixed' | 'variable';

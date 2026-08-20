@@ -20,7 +20,7 @@ import { api } from './api/client';
 import { useAuth } from './contexts/useAuth';
 import {
   Student, Teacher, Employee, Partner, Class, Visitor, Attendance, Payment, Book, BookSale,
-  Exam, ExamResult, BudgetLine, FinanceCategory, ExpenseRequest, FinancialTransaction, AuditLog, Notification,
+  Exam, ExamResult, BudgetLine, BudgetLineInput, FinanceCategory, ExpenseRequest, FinancialTransaction, AuditLog, Notification,
   Skill, ClassTeacherSkill, OperationalPaymentInput, ExpenseReport, ExpenseKind, Invoice, FinanceConfig, FinanceDashboard,
   // 1.0.0 types
   Donor, FundingCampaign, Donation, Scholarship, ScholarshipAward, SponsorshipAgreement,
@@ -1377,8 +1377,19 @@ export function useApiStore() {
     invalidate('finance');
   };
 
-  const classifyBudgetLine = async (budgetLineId: string, costType?: 'fixed' | 'variable', isMarketing?: boolean) => {
-    await api.put(`/finance/budget-lines/${budgetLineId}/classify`, { costType, isMarketing });
+  /** Create a branch budget envelope under a canonical subcategory. */
+  const createBudgetLine = async (input: BudgetLineInput) => {
+    await api.post('/finance/budget-lines', input);
+    await reloadBudgetLines();
+    invalidate('finance');
+  };
+
+  /** Rename, reclassify the cost type of, or retire a budget envelope. */
+  const updateBudgetLine = async (
+    budgetLineId: string,
+    patch: { name?: string; costType?: 'fixed' | 'variable'; isActive?: boolean; channelId?: string | null },
+  ) => {
+    await api.patch(`/finance/budget-lines/${budgetLineId}`, patch);
     await reloadBudgetLines();
     invalidate('finance');
   };
@@ -1605,7 +1616,7 @@ export function useApiStore() {
     listUserPositions, assignUserPosition, removeUserPosition, viewEffectivePermissions,
     // BOS Analytics
     getExecutiveDashboard, getMarketingFunnel, getStudentAnalytics, getDecisionWarnings,
-    getProfitDistribution, withdrawProfitDistribution, classifyBudgetLine,
+    getProfitDistribution, withdrawProfitDistribution, createBudgetLine, updateBudgetLine,
     // 1.0.0 Operations
     addDonor, editDonor, addFundingCampaign, recordDonation, addScholarship, awardScholarship,
     addSponsorship, generateImpactReport,

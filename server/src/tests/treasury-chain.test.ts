@@ -93,9 +93,9 @@ describe('Budget → salary chain (previously unreachable on fresh install)', ()
       await supertest(app).post('/api/finance/treasury/deposit').set(authHeader(owner)).send({ amount: 30000 });
     }
 
-    // The teacher pay-salary route reads the budget line with purpose
+    // The teacher pay-salary route reads the branch's teacher payroll envelope
     // 'teacher_salary' for the teacher's branch (seeded by the budget catalog).
-    const salaryLine = db.prepare("SELECT * FROM budget_lines WHERE purpose = 'teacher_salary' AND branch_id = ? LIMIT 1").get(DEFAULT_BRANCH) as { id: string } | undefined;
+    const salaryLine = db.prepare("SELECT * FROM budget_lines WHERE payroll_target = 'teacher' AND branch_id = ? LIMIT 1").get(DEFAULT_BRANCH) as { id: string } | undefined;
     expect(salaryLine).toBeDefined();
 
     const charge = await supertest(app).post(`/api/finance/budget-lines/${salaryLine!.id}/charge`).set(authHeader(owner)).send({ amount: 20000 });

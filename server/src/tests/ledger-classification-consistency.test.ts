@@ -52,11 +52,21 @@ let app: express.Express;
 const authHeader = (u: TokenPayload) => ({ Authorization: `Bearer ${signToken(u)}` });
 
 let seq = 0;
-function tx(type: string, category: string, amount: number, branch = BRANCH, date = TODAY) {
+function tx(
+  type: string,
+  category: string,
+  amount: number,
+  branch = BRANCH,
+  date = TODAY,
+  financeCategoryId: string | null = null,
+) {
+  // Owner drawings are identified by their canonical taxonomy node, which is
+  // what every surface classifies against.
+  const node = financeCategoryId ?? (category === 'profit_distribution' ? 'sub_owner_drawings' : null);
   db.prepare(
-    `INSERT INTO financial_transactions (id,type,category,amount,date,description,branch_id)
-     VALUES (?,?,?,?,?,?,?)`
-  ).run(`lc_tx_${++seq}`, type, category, amount, date, `${category} fixture`, branch);
+    `INSERT INTO financial_transactions (id,type,category,finance_category_id,amount,date,description,branch_id)
+     VALUES (?,?,?,?,?,?,?,?)`
+  ).run(`lc_tx_${++seq}`, type, category, node, amount, date, `${category} fixture`, branch);
 }
 
 beforeAll(async () => {
@@ -92,7 +102,7 @@ describe('classification rule', () => {
   });
 
   it('treats owner drawings as neither income nor expense', () => {
-    const row = { type: 'expense', category: 'profit_distribution' };
+    const row = { type: 'expense', category: 'owner_drawing', financeCategoryId: 'sub_owner_drawings' };
     expect(isOperatingExpense(row)).toBe(false);
     expect(isOperatingIncome(row)).toBe(false);
     expect(isEquityTransfer(row)).toBe(true);
@@ -119,12 +129,12 @@ describe('classification rule', () => {
       { type: 'income', category: 'fee' },
       { type: 'income', category: 'capital_injection' },
       { type: 'expense', category: 'salary' },
-      { type: 'expense', category: 'profit_distribution' },
+      { type: 'expense', category: 'owner_drawing', financeCategoryId: 'sub_owner_drawings' },
       { type: 'expense', category: 'capital_injection' },
       { type: 'income', category: 'profit_distribution' },
     ];
     for (const c of cases) {
-      tx(c.type, c.category, 10);
+      tx(c.type, c.category, 10, BRANCH, TODAY, (c as { financeCategoryId?: string }).financeCategoryId ?? null);
       const id = `lc_tx_${seq}`;
       const inSql = (sql: string) =>
         Number((db.prepare(`SELECT COUNT(*) c FROM financial_transactions WHERE id=? AND ${sql}`).get(id) as any).c) === 1;

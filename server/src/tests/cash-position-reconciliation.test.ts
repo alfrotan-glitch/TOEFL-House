@@ -136,8 +136,8 @@ describe('cash-position reconciliation', () => {
     // operational expenses are paid FROM a line, so an expense row written
     // without decrementing it overstates what the institute can still spend.
     db.prepare(
-      `INSERT OR REPLACE INTO budget_lines (id, name, purpose, allocated_amount, current_amount, branch_id, cost_type)
-       VALUES ('br_line', 'Test Line', 'rent', 0, 10000, ?, 'fixed')`,
+      `INSERT OR REPLACE INTO budget_lines (id, name, category_id, allocated_amount, current_amount, branch_id, cost_type)
+       VALUES ('br_line', 'Test Line', 'sub_rent', 0, 10000, ?, 'fixed')`,
     ).run(BRANCH);
     db.prepare(
       `INSERT INTO financial_transactions (id, type, category, amount, date, description, reference_id, operator_name, branch_id)
@@ -162,8 +162,8 @@ describe('cash-position reconciliation', () => {
 
   it('DETECTS the inverse: a line decremented with no expense recorded', () => {
     db.prepare(
-      `INSERT OR REPLACE INTO budget_lines (id, name, purpose, allocated_amount, current_amount, branch_id, cost_type)
-       VALUES ('br_line2', 'Test Line 2', 'rent', 0, 3000, ?, 'fixed')`,
+      `INSERT OR REPLACE INTO budget_lines (id, name, category_id, allocated_amount, current_amount, branch_id, cost_type)
+       VALUES ('br_line2', 'Test Line 2', 'sub_rent', 0, 3000, ?, 'fixed')`,
     ).run(BRANCH);
     db.prepare(
       `INSERT INTO financial_transactions (id, type, category, amount, date, description, reference_id, operator_name, branch_id)

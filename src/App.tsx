@@ -307,7 +307,7 @@ function AuthenticatedApp() {
       case 'finance':
         return (
           <FinanceView
-            budgetLines={store.budgetLines} financeCategories={store.financeCategories} expenseRequests={store.expenseRequests} transactions={store.transactions}
+            budgetLines={store.budgetLines} financeCategories={store.financeCategories} createBudgetLine={store.createBudgetLine} expenseRequests={store.expenseRequests} transactions={store.transactions}
             mainAccountBalance={store.mainAccountBalance} savingBalance={store.savingBalance} activeRole={activeRole}
             chargeBudget={store.chargeBudget} createExpenseRequest={store.createExpenseRequest} recordOperationalPayment={store.recordOperationalPayment}
             getExpenseReport={store.getExpenseReport} updateExpenseAutoApproveThreshold={store.updateExpenseAutoApproveThreshold}

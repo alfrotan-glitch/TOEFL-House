@@ -3,15 +3,15 @@ import {
   CAPITAL_INJECTION_CATEGORY,
   OPERATING_EXPENSE_SQL,
   OPERATING_INCOME_SQL,
-  PROFIT_DISTRIBUTION_CATEGORY,
-  classifyExpenseCategory,
+  OWNER_DRAWINGS_CATEGORY_ID,
+  classifyExpenseRow,
   isCapitalExpenditure,
   isNonExpenseCashMovement,
   isOperatingExpense,
   isOperatingIncome,
 } from '../core/finance/ledger-classification.js';
 import { db } from '../db/connection.js';
-import { CATEGORY_NAME, SUBCATEGORY_PARENT, classificationOf } from '../core/finance/category-taxonomy.js';
+import { CATEGORY_NAME, SUBCATEGORY_PARENT, classificationOf, isSubcategoryId } from '../core/finance/category-taxonomy.js';
 import { assertTextLengths, TEXT_LIMITS } from '../utils/textInput.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource, hasLegacyRole } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
@@ -30,14 +30,17 @@ financeRouter.use(authenticate);
 
 // ── Performance Optimization: Prepared Statements ──────────────────────────
 const stmtGetBudgetLineById = db.prepare('SELECT * FROM budget_lines WHERE id = ?');
-const stmtUpdateBudgetLineClassify = db.prepare('UPDATE budget_lines SET cost_type = ?, is_marketing = ? WHERE id = ?');
 const stmtUpdateBudgetLineCharge = db.prepare('UPDATE budget_lines SET current_amount = current_amount + ?, allocated_amount = allocated_amount + ? WHERE id = ?');
 const stmtUpdateBudgetLineClear = db.prepare('UPDATE budget_lines SET current_amount = 0 WHERE id = ?');
 const stmtUpdateBudgetLineAddAmount = db.prepare('UPDATE budget_lines SET current_amount = current_amount + ? WHERE id = ?');
 const stmtUpdateBudgetLineSubAmount = db.prepare('UPDATE budget_lines SET current_amount = current_amount - ? WHERE id = ?');
 
+// `finance_category_id` is the accounting authority. Transfers (budget charge,
+// month-end, capital injection) pass NULL: they are not expenses.
 const stmtInsertFinTx = db.prepare(
-  `INSERT INTO financial_transactions (id, type, category, amount, date, description, reference_id, operator_name, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  `INSERT INTO financial_transactions
+     (id, type, category, finance_category_id, amount, date, description, reference_id, operator_name, branch_id)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
 
 // Canonical order is DATA (`sort_order`), not an accident of `ORDER BY id`.
@@ -162,31 +165,30 @@ function requireBudgetLine(req: import('express').Request, budgetLineId: string)
 /**
  * Serialise a budget line WITH its place in the canonical hierarchy.
  *
- * The frontend must never derive an accounting category. It receives the
- * resolved category id, the resolved parent, the display names and — critically
- * — the accounting `classification`, all computed here from the taxonomy the
- * database enforces. `mappingStatus` tells the UI when a legacy line still
- * needs a human decision instead of silently pretending it is classified.
+ * The browser must never derive an accounting category. It receives the
+ * resolved subcategory, its parent, the display names and — critically — the
+ * accounting `classification`, all computed here from the taxonomy the database
+ * enforces.
  */
 function mapBudgetLine(row: any) {
   if (!row) return row;
-  const categoryId: string | null = row.category_id ?? null;
-  const parentId = categoryId ? (SUBCATEGORY_PARENT.get(categoryId) ?? null) : null;
-  // A line attached at CATEGORY level (an ambiguous legacy row) is its own
-  // top-level node and has no subcategory yet.
-  const isSubcategory = !!categoryId && SUBCATEGORY_PARENT.has(categoryId);
-  const topCategoryId = isSubcategory ? parentId : categoryId;
+  const subcategoryId: string | null = row.category_id ?? null;
+  const parentId = subcategoryId ? (SUBCATEGORY_PARENT.get(subcategoryId) ?? null) : null;
   return {
-    id: row.id, name: row.name, allocatedAmount: row.allocated_amount, currentAmount: row.current_amount,
-    branchId: row.branch_id, costType: row.cost_type, isMarketing: !!row.is_marketing, purpose: row.purpose,
-    categoryId,
-    subcategoryId: isSubcategory ? categoryId : null,
-    subcategoryName: isSubcategory ? (CATEGORY_NAME.get(categoryId) ?? null) : null,
-    parentCategoryId: topCategoryId,
-    parentCategoryName: topCategoryId ? (CATEGORY_NAME.get(topCategoryId) ?? null) : null,
-    classification: classificationOf(categoryId),
-    mappingStatus: row.mapping_status ?? 'needs_review',
+    id: row.id,
+    name: row.name,
+    allocatedAmount: row.allocated_amount,
+    currentAmount: row.current_amount,
+    branchId: row.branch_id,
+    costType: row.cost_type,
+    icon: row.icon,
+    subcategoryId,
+    subcategoryName: subcategoryId ? (CATEGORY_NAME.get(subcategoryId) ?? null) : null,
+    categoryId: parentId,
+    categoryName: parentId ? (CATEGORY_NAME.get(parentId) ?? null) : null,
+    classification: classificationOf(subcategoryId),
     channelId: row.channel_id ?? null,
+    payrollTarget: row.payroll_target ?? null,
     sortOrder: row.sort_order ?? 0,
     isActive: row.is_active == null ? true : !!row.is_active,
   };
@@ -227,13 +229,17 @@ function normalizeExpenseMeta(body: any) {
 function payFromBudgetLine(opts: {
   budgetLine: any; amount: number; title: string; date: string; operatorName: string; branchId: string; requestId: string; paymentMethod: string;
 }) {
-  const category = opts.budgetLine.purpose || 'utility';
+  // The ledger row inherits the budget line's canonical node. `category` is the
+  // readable label; `finance_category_id` is the accounting authority. They are
+  // written together from one source and can never disagree.
+  const categoryId: string = opts.budgetLine.category_id;
+  const category = categoryId;
   const methodLabel = opts.paymentMethod === 'card' ? 'card' : opts.paymentMethod === 'bank_transfer' ? 'bank transfer' : 'cash';
   
   const updated = db.prepare('UPDATE budget_lines SET current_amount = current_amount - ? WHERE id = ? AND current_amount >= ?').run(opts.amount, opts.budgetLine.id, opts.amount);
   if (updated.changes !== 1) throw new HttpError(409, `Insufficient budget on "${opts.budgetLine.name}" or the balance changed. Please retry.`);
   stmtInsertFinTx.run(
-    id('tx'), 'expense', category, opts.amount, opts.date,
+    id('tx'), 'expense', category, categoryId, opts.amount, opts.date,
     `Expense "${opts.title}" from ${opts.budgetLine.name} (${methodLabel})`,
     opts.requestId, opts.operatorName, opts.branchId
   );
@@ -491,21 +497,129 @@ financeRouter.get(
   })
 );
 
-financeRouter.put(
-  '/budget-lines/:id/classify',
-  requirePermission('Budget.Allocate', 'Budget.Edit', 'Expense.Approve'),
+/**
+ * POST /api/finance/budget-lines — create a branch budget envelope.
+ *
+ * The taxonomy is complete and organization-wide; the BUDGET is sparse and
+ * deliberate. Rather than provisioning forty-five zero-value rows per branch so
+ * the catalogue "looks complete", a branch carries only the envelopes it
+ * actually funds, and an authorised user creates the rest here.
+ *
+ * The subcategory is validated against the canonical taxonomy server-side. The
+ * browser proposes; the server decides.
+ */
+financeRouter.post(
+  '/budget-lines',
+  requirePermission('Budget.Allocate', 'Budget.Edit'),
   ah(async (req, res) => {
-    const budgetLine = requireBudgetLine(req, req.params.id);
-    const { costType, isMarketing } = req.body as { costType?: 'fixed' | 'variable'; isMarketing?: boolean };
+    const user = getUserContext(req);
+    const { subcategoryId, name, costType, channelId, branchId: bodyBranch } = req.body as {
+      subcategoryId?: string; name?: string; costType?: 'fixed' | 'variable';
+      channelId?: string | null; branchId?: string;
+    };
+
+    if (!isSubcategoryId(subcategoryId)) {
+      throw new HttpError(400, 'A valid finance subcategory is required.');
+    }
+    const trimmedName = String(name ?? '').trim();
+    if (!trimmedName) throw new HttpError(400, 'A budget line name is required.');
+    assertTextLengths([[trimmedName, 'Budget line name', TEXT_LIMITS.line]]);
     if (costType && !['fixed', 'variable'].includes(costType)) throw new HttpError(400, 'Invalid cost type.');
-    
-    stmtUpdateBudgetLineClassify.run(
-      costType ?? budgetLine.cost_type,
-      isMarketing != null ? (isMarketing ? 1 : 0) : budgetLine.is_marketing,
-      req.params.id
+
+    const branchId = bodyBranch || user.branchId;
+    if (!canAccessBranchResource(req, branchId)) throw new HttpError(403, 'Budget line belongs to another branch.');
+    if (!db.prepare('SELECT 1 FROM branches WHERE id = ? AND is_active = 1').get(branchId)) {
+      throw new HttpError(404, 'Branch not found or inactive.');
+    }
+    if (channelId) {
+      const channel = db.prepare('SELECT category_id FROM finance_category_channels WHERE id = ? AND is_active = 1')
+        .get(channelId) as { category_id: string } | undefined;
+      if (!channel) throw new HttpError(404, 'Channel not found.');
+      if (channel.category_id !== subcategoryId) throw new HttpError(400, 'Channel does not belong to the selected subcategory.');
+    }
+
+    // Ordering is data, not alphabetical accident: a new envelope sorts after
+    // everything the branch already has.
+    const nextOrder = Number(
+      (db.prepare('SELECT COALESCE(MAX(sort_order), 0) + 10 AS n FROM budget_lines WHERE branch_id = ?')
+        .get(branchId) as { n: number }).n,
     );
-    writeAudit(req, `Classified budget line "${budgetLine.name}" as ${costType === 'variable' ? 'variable' : 'fixed'} cost`);
-    res.json({ ok: true });
+
+    const newId = id('bl');
+    try {
+      db.prepare(`
+        INSERT INTO budget_lines
+          (id, name, current_amount, allocated_amount, icon, cost_type, branch_id,
+           category_id, channel_id, sort_order, is_active, payroll_target)
+        VALUES (?, ?, 0, 0, NULL, ?, ?, ?, ?, ?, 1, NULL)
+      `).run(newId, trimmedName, costType ?? 'variable', branchId, subcategoryId, channelId ?? null, nextOrder);
+    } catch (err: unknown) {
+      // The unique index is on (branch_id, category_id, name): two envelopes
+      // under one subcategory are legitimate, two with the same NAME are not.
+      if (String((err as { message?: string })?.message || '').includes('UNIQUE')) {
+        throw new HttpError(409, `A budget line named "${trimmedName}" already exists under that subcategory for this branch.`);
+      }
+      throw err;
+    }
+
+    writeAudit(req, `Created budget line "${trimmedName}" under ${CATEGORY_NAME.get(subcategoryId!) ?? subcategoryId}`);
+    res.status(201).json(mapBudgetLine(stmtGetBudgetLineById.get(newId)));
+  })
+);
+
+/**
+ * PATCH /api/finance/budget-lines/:id — rename, reclassify cost type, retire.
+ *
+ * Cost type is a budgeting property (is this a recurring commitment?), not an
+ * accounting one — the accounting treatment belongs to the subcategory and is
+ * not editable here, precisely so there is only ever one authority for it.
+ *
+ * A budget line is never DELETED: `expense_requests` and the ledger reference
+ * it, so retirement is `isActive = false`. It disappears from every picker and
+ * keeps resolving for history.
+ */
+financeRouter.patch(
+  '/budget-lines/:id',
+  requirePermission('Budget.Allocate', 'Budget.Edit'),
+  ah(async (req, res) => {
+    const line = requireBudgetLine(req, req.params.id);
+    const { name, costType, isActive, channelId } = req.body as {
+      name?: string; costType?: 'fixed' | 'variable'; isActive?: boolean; channelId?: string | null;
+    };
+
+    if (costType && !['fixed', 'variable'].includes(costType)) throw new HttpError(400, 'Invalid cost type.');
+    let nextName = line.name as string;
+    if (name != null) {
+      nextName = String(name).trim();
+      if (!nextName) throw new HttpError(400, 'A budget line name is required.');
+      assertTextLengths([[nextName, 'Budget line name', TEXT_LIMITS.line]]);
+    }
+    if (isActive === false && line.payroll_target) {
+      // Retiring a payroll envelope would make payroll answer 500 on the next
+      // salary run, with no way back through the UI.
+      throw new HttpError(409, 'A payroll budget line cannot be retired; payroll depends on it.');
+    }
+    if (channelId) {
+      const channel = db.prepare('SELECT category_id FROM finance_category_channels WHERE id = ? AND is_active = 1')
+        .get(channelId) as { category_id: string } | undefined;
+      if (!channel) throw new HttpError(404, 'Channel not found.');
+      if (channel.category_id !== line.category_id) throw new HttpError(400, 'Channel does not belong to this budget line\'s subcategory.');
+    }
+
+    db.prepare(`
+      UPDATE budget_lines
+         SET name = ?, cost_type = ?, is_active = ?, channel_id = ?
+       WHERE id = ?
+    `).run(
+      nextName,
+      costType ?? line.cost_type,
+      isActive == null ? line.is_active : (isActive ? 1 : 0),
+      channelId === undefined ? line.channel_id : channelId,
+      line.id,
+    );
+
+    writeAudit(req, `Updated budget line "${nextName}"`);
+    res.json(mapBudgetLine(stmtGetBudgetLineById.get(line.id)));
   })
 );
 
@@ -523,7 +637,7 @@ financeRouter.post(
       if (!decrementMainBalanceIfSufficient('organization', 'global', amount)) throw new HttpError(409, 'Insufficient organization treasury balance or the balance changed.');
       stmtUpdateBudgetLineCharge.run(amount, amount, budgetLine.id);
       stmtInsertFinTx.run(
-        id('tx'), 'budget_charge', 'utility', amount, date,
+        id('tx'), 'budget_charge', 'budget_allocation', null, amount, date,
         `Budget charge for line "${budgetLine.name}" from the central finance account`,
         budgetLine.id, user.fullName, budgetLine.branch_id || user.branchId
       );
@@ -553,7 +667,7 @@ financeRouter.post(
         stmtUpdateBudgetLineClear.run(budgetLine.id);
         incrementMainBalance('organization', 'global', unusedAmount);
         stmtInsertFinTx.run(
-          id('tx'), 'budget_charge', 'utility', unusedAmount, date,
+          id('tx'), 'budget_charge', 'budget_return', null, unusedAmount, date,
           `Month-end settlement: returning unused budget from line "${budgetLine.name}" to the main account`,
           budgetLine.id, user.fullName, user.branchId
         );
@@ -571,7 +685,7 @@ financeRouter.post(
         stmtUpdateBudgetLineClear.run(budgetLine.id);
         stmtUpdateBudgetLineAddAmount.run(unusedAmount, targetBudgetLineId);
         stmtInsertFinTx.run(
-          id('tx'), 'saving_transfer', 'utility', unusedAmount, date,
+          id('tx'), 'saving_transfer', 'budget_transfer', null, unusedAmount, date,
           `Month-end settlement: transferring remaining budget from "${budgetLine.name}" to budget line "${targetLine.name}"`,
           budgetLine.id, user.fullName, user.branchId
         );
@@ -613,7 +727,7 @@ financeRouter.post(
     const tx = db.transaction(() => {
       incrementMainBalance('organization', 'global', amount);
       stmtInsertFinTx.run(
-        id('tx'), 'income', 'capital_injection', amount, date,
+        id('tx'), 'income', 'capital_injection', null, amount, date,
         notes ? `Capital injection into central treasury — ${notes}` : 'Capital injection into central treasury',
         null, user.fullName, user.branchId
       );
@@ -806,7 +920,7 @@ financeRouter.get(
     const filtered = allRequests.filter(er => er.status === 'approved' && er.date.startsWith(datePattern));
 
     interface ExpenseReportRow {
-      budgetLineId: string; budgetLineName: string; purpose: string; costType: string;
+      budgetLineId: string; budgetLineName: string; costType: string;
       totalAmount: number; count: number;
       categoryId: string | null; categoryName: string | null;
       subcategoryId: string | null; subcategoryName: string | null;
@@ -819,15 +933,14 @@ financeRouter.get(
       const bl = stmtGetBudgetLineById.get(er.budget_line_id) as any;
       const bId = er.budget_line_id || 'unknown';
       const bName = bl?.name || 'Unknown';
-      const purpose = bl?.purpose || 'other';
       const costType = bl?.cost_type || 'variable';
 
       if (!rowsMap.has(bId)) {
         const mapped = mapBudgetLine(bl);
         rowsMap.set(bId, {
-          budgetLineId: bId, budgetLineName: bName, purpose, costType, totalAmount: 0, count: 0,
-          categoryId: mapped?.parentCategoryId ?? null,
-          categoryName: mapped?.parentCategoryName ?? null,
+          budgetLineId: bId, budgetLineName: bName, costType, totalAmount: 0, count: 0,
+          categoryId: mapped?.categoryId ?? null,
+          categoryName: mapped?.categoryName ?? null,
           subcategoryId: mapped?.subcategoryId ?? null,
           subcategoryName: mapped?.subcategoryName ?? null,
           // Resolved from the budget line's canonical node, never from its name.
@@ -1020,7 +1133,15 @@ financeRouter.get(
     const { from, to } = req.query as { from?: string; to?: string };
 
     // Safe Dynamic SQL for Date Range PnL using bound parameters
-    let sql = `SELECT type, category, COALESCE(SUM(amount), 0) AS total FROM financial_transactions WHERE 1=1`;
+    // One canonical NODE is one line. Grouping by the label as well would split
+    // a subcategory across two rows whenever two writers chose different words
+    // for the same thing; grouping by the label INSTEAD would merge two
+    // treatments that happen to share one. `COALESCE` lets income — which has
+    // no node, because the taxonomy models the expense side — group by its
+    // billing category as before.
+    let sql = `SELECT type, COALESCE(finance_category_id, category) AS group_key, MIN(category) AS category,
+                      finance_category_id, COALESCE(SUM(amount), 0) AS total
+                 FROM financial_transactions WHERE 1=1`;
     const params: unknown[] = [];
     
     if (!isAll) { 
@@ -1036,7 +1157,9 @@ financeRouter.get(
       params.push(to); 
     }
     
-    sql += ' GROUP BY type, category ORDER BY type, category';
+    // Grouped by the canonical NODE as well as the label, so two rows that
+    // share a label but not a treatment can never be summed together.
+    sql += ' GROUP BY type, group_key ORDER BY type, group_key';
     
     const finalByCategory = db.prepare(sql).all(...params) as any[];
 
@@ -1073,7 +1196,7 @@ financeRouter.get(
         // Owner drawings keep their own line as well as counting towards the
         // non-expense total: the existing `transfers.profitDistribution`
         // contract is relied on by /reports/overview and the P&L print-out.
-        if (row.category === PROFIT_DISTRIBUTION_CATEGORY) profitDistribution += row.total;
+        if (row.finance_category_id === OWNER_DRAWINGS_CATEGORY_ID) profitDistribution += row.total;
       }
       else if (row.type === 'budget_charge') budgetCharged += row.total;
       else if (row.type === 'saving_transfer') savingTransferred += row.total;
@@ -1091,9 +1214,12 @@ financeRouter.get(
       // the UI can group the statement without re-deriving accounting rules.
       byCategory: finalByCategory.map((r) => ({
         type: r.type,
-        category: r.category,
+        // Display name resolved from the taxonomy, so the statement reads
+        // "Rent Expense" rather than a node id.
+        category: (r.finance_category_id ? CATEGORY_NAME.get(r.finance_category_id) : null) ?? r.category,
+        categoryId: r.finance_category_id ?? null,
         total: r.total,
-        classification: r.type === 'expense' ? classifyExpenseCategory(r.category) : null,
+        classification: r.type === 'expense' ? classifyExpenseRow(r) : null,
       })),
       // NOT part of the trading result. Reported, never hidden.
       nonOperating: {

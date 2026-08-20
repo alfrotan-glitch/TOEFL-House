@@ -79,8 +79,8 @@ beforeAll(async () => {
      VALUES (?, ?, ?, 'owner', ?, ?, 1, 0)`,
   ).run('u_payroll_rev', 'payroll_rev', 'Payroll Rev Owner', BRANCH, await hashPassword('x'));
   db.prepare(
-    `INSERT OR IGNORE INTO budget_lines (id, name, purpose, allocated_amount, current_amount, branch_id)
-     VALUES (?, 'Teacher Salaries', 'teacher_salary', 500000, 500000, ?)`,
+    `INSERT OR IGNORE INTO budget_lines (id, name, category_id, allocated_amount, current_amount, branch_id, payroll_target)
+     VALUES (?, 'Teacher Salaries', 'sub_salaries_wages', 500000, 500000, ?, 'teacher')`,
   ).run(BUDGET_ID, BRANCH);
   syncLegacyUserRoles(db);
   app = createApp();
@@ -259,8 +259,8 @@ describe('budget lines cannot go negative', () => {
   it('rejects inserting a budget line that is already negative', () => {
     expect(() =>
       db.prepare(
-        `INSERT INTO budget_lines (id, name, purpose, allocated_amount, current_amount, branch_id)
-         VALUES ('bl_negative_probe', 'Negative', 'misc', 0, -1, ?)`,
+        `INSERT INTO budget_lines (id, name, category_id, allocated_amount, current_amount, branch_id)
+         VALUES ('bl_negative_probe', 'Negative', 'sub_miscellaneous', 0, -1, ?)`,
       ).run(BRANCH),
     ).toThrow(/cannot be negative/i);
   });

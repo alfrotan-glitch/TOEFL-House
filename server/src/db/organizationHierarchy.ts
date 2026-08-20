@@ -14,11 +14,7 @@ import { ensureFinanceAccount } from '../utils/financeAccounts.js';
  *   Branch:       Main Branch / TH-MB-001 / id "1" (FK compatibility)
  */
 import type Database from 'better-sqlite3';
-import {
-  CANONICAL_CATEGORIES,
-  LEGACY_PURPOSE_MAP,
-  type BudgetLineMappingStatus,
-} from '../core/finance/category-taxonomy.js';
+import { PAYROLL_ENVELOPES, payrollEnvelopeId } from '../core/finance/category-taxonomy.js';
 import { seedFinanceCategoryCatalog } from './financeCategoryCatalog.js';
 
 export const FIXED_ORG_ID = 'org_toefl_house';
@@ -89,247 +85,72 @@ function ensureBranchColumns(db: Database.Database): void {
   );
 }
 
-interface BudgetLineSeed {
-  key: string;
-  name: string;
-  icon: string;
-  costType: 'fixed' | 'variable';
-  purpose: string;
-  marketing?: boolean;
-  /** Canonical node this envelope belongs to. NULL = could not be decided. */
-  categoryId: string | null;
-  mappingStatus: BudgetLineMappingStatus;
-  sortOrder: number;
-}
-
 /**
- * The legacy catalogue, preserved verbatim.
+ * Provision the budget lines a branch STRUCTURALLY REQUIRES — nothing more.
  *
- * These 17 purposes are load-bearing: payroll looks up `teacher_salary` and
- * `employee_salary` by purpose, and every historical ledger row carries one of
- * these strings as its category. They are NOT renamed, NOT merged and NOT
- * deleted — the upgrade attaches each one to the canonical taxonomy instead.
+ * That is exactly two: the teacher and employee payroll envelopes. Payroll
+ * cannot run without one to debit (`pay-salary` answers 500 "…budget line is
+ * not configured"), so their absence is a broken branch, not an empty budget.
  *
- * `categoryId` / `mappingStatus` are read from the single legacy map so a
- * branch created through the API after the upgrade gets exactly the mapping
- * migration 077 applied to the branches that already existed.
- */
-const LEGACY_BUDGET_LINE_ORDER = [
-  'teacher_salary', 'employee_salary', 'rent', 'electricity', 'water', 'gas', 'internet',
-  'cleaning', 'maintenance', 'printing', 'kitchen', 'misc', 'equipment',
-  'marketing', 'transport', 'purchases', 'reserve',
-] as const;
-
-const LEGACY_BUDGET_LINE_PRESENTATION: Record<
-  (typeof LEGACY_BUDGET_LINE_ORDER)[number],
-  { name: string; icon: string; costType: 'fixed' | 'variable'; marketing?: boolean }
-> = {
-  teacher_salary: { name: 'Teacher Salaries', icon: 'GraduationCap', costType: 'fixed' },
-  employee_salary: { name: 'Employee Salaries', icon: 'Users', costType: 'fixed' },
-  rent: { name: 'Rent', icon: 'Building2', costType: 'fixed' },
-  electricity: { name: 'Electricity', icon: 'Zap', costType: 'fixed' },
-  water: { name: 'Water', icon: 'Droplets', costType: 'fixed' },
-  gas: { name: 'Gas', icon: 'Flame', costType: 'fixed' },
-  internet: { name: 'Internet', icon: 'Wifi', costType: 'fixed' },
-  cleaning: { name: 'Cleaning & Hygiene', icon: 'Sparkles', costType: 'fixed' },
-  maintenance: { name: 'Maintenance & Repairs', icon: 'Wrench', costType: 'variable' },
-  printing: { name: 'Printing', icon: 'Printer', costType: 'variable' },
-  kitchen: { name: 'Kitchen & Refreshments', icon: 'Coffee', costType: 'variable' },
-  misc: { name: 'Miscellaneous', icon: 'MoreHorizontal', costType: 'variable' },
-  equipment: { name: 'Equipment', icon: 'Monitor', costType: 'variable' },
-  marketing: { name: 'Marketing', icon: 'Megaphone', costType: 'variable', marketing: true },
-  transport: { name: 'Transport', icon: 'Car', costType: 'variable' },
-  purchases: { name: 'General Purchases', icon: 'ShoppingCart', costType: 'variable' },
-  reserve: { name: 'Reserve', icon: 'ShieldCheck', costType: 'fixed' },
-};
-
-const DEFAULT_BUDGET_LINES: BudgetLineSeed[] = LEGACY_BUDGET_LINE_ORDER.map((purpose, index) => {
-  const presentation = LEGACY_BUDGET_LINE_PRESENTATION[purpose];
-  const mapping = LEGACY_PURPOSE_MAP[purpose];
-  return {
-    key: purpose,
-    name: presentation.name,
-    icon: presentation.icon,
-    costType: presentation.costType,
-    purpose,
-    marketing: presentation.marketing,
-    categoryId: mapping.categoryId,
-    mappingStatus: mapping.status,
-    sortOrder: (index + 1) * 10,
-  };
-});
-
-/**
- * Presentation for the canonical subcategories that have no legacy counterpart.
+ * Everything else is created deliberately through `POST /finance/budget-lines`.
+ * The taxonomy is complete and organization-wide; the budget is sparse and
+ * branch-specific. A branch that never pays a taxi fare should not carry a
+ * Taxi & Transportation envelope, and forty-five zero-value rows would make the
+ * Budgets screen a catalogue of things nobody spends money on.
  *
- * `fixed` here means a contractual, recurring commitment (a lease, a licence, a
- * subscription); `variable` means discretionary or usage-driven. The
- * distinction only feeds the BOS break-even display and is operator-editable
- * through `PUT /finance/budget-lines/:id/classify`, so nothing depends on it
- * being right on day one — but leaving it uniformly wrong would be sloppy.
- */
-const CANONICAL_LINE_PRESENTATION: Record<string, { icon: string; costType: 'fixed' | 'variable'; marketing?: boolean }> = {
-  sub_staff_benefits: { icon: 'HeartHandshake', costType: 'fixed' },
-  sub_staff_training: { icon: 'BookOpenCheck', costType: 'variable' },
-  sub_recruitment: { icon: 'UserPlus', costType: 'variable' },
-  sub_telephone: { icon: 'Phone', costType: 'fixed' },
-  sub_security: { icon: 'ShieldCheck', costType: 'fixed' },
-  sub_office_supplies: { icon: 'Package', costType: 'variable' },
-  sub_stationery: { icon: 'PenLine', costType: 'variable' },
-  sub_postage_courier: { icon: 'Mail', costType: 'variable' },
-  sub_software_subscriptions: { icon: 'AppWindow', costType: 'fixed' },
-  sub_legal_professional: { icon: 'Scale', costType: 'variable' },
-  sub_insurance: { icon: 'ShieldPlus', costType: 'fixed' },
-  sub_licenses_permits: { icon: 'BadgeCheck', costType: 'fixed' },
-  sub_teaching_materials: { icon: 'NotebookPen', costType: 'variable' },
-  sub_books_educational: { icon: 'BookMarked', costType: 'variable' },
-  sub_examination_testing: { icon: 'ClipboardCheck', costType: 'variable' },
-  sub_student_activities: { icon: 'PartyPopper', costType: 'variable' },
-  sub_teacher_training: { icon: 'GraduationCap', costType: 'variable' },
-  sub_digital_advertising: { icon: 'MousePointerClick', costType: 'variable', marketing: true },
-  sub_traditional_advertising: { icon: 'Newspaper', costType: 'variable', marketing: true },
-  sub_promotional_materials: { icon: 'Gift', costType: 'variable', marketing: true },
-  sub_fuel: { icon: 'Fuel', costType: 'variable' },
-  sub_taxi_transportation: { icon: 'Car', costType: 'variable' },
-  sub_delivery_courier: { icon: 'Truck', costType: 'variable' },
-  sub_travel_accommodation: { icon: 'Plane', costType: 'variable' },
-  sub_bank_payment_fees: { icon: 'Landmark', costType: 'variable' },
-  sub_taxes_duties: { icon: 'Receipt', costType: 'fixed' },
-  sub_tax_clearance: { icon: 'FileCheck', costType: 'variable' },
-  sub_it_equipment: { icon: 'Monitor', costType: 'variable' },
-  sub_office_equipment: { icon: 'Printer', costType: 'variable' },
-  sub_furniture_fixtures: { icon: 'Armchair', costType: 'variable' },
-  sub_vehicles: { icon: 'CarFront', costType: 'variable' },
-  sub_other_fixed_assets: { icon: 'Boxes', costType: 'variable' },
-  sub_salary_advances: { icon: 'HandCoins', costType: 'variable' },
-  sub_refunds: { icon: 'Undo2', costType: 'variable' },
-  sub_owner_drawings: { icon: 'Wallet', costType: 'variable' },
-  sub_charitable_contributions: { icon: 'HeartHandshake', costType: 'variable' },
-};
-
-/** Subcategories already served by a legacy budget line — never duplicated. */
-const SUBCATEGORIES_COVERED_BY_LEGACY: ReadonlySet<string> = new Set(
-  Object.values(LEGACY_PURPOSE_MAP)
-    .filter((m) => m.status === 'mapped' && m.categoryId)
-    .map((m) => m.categoryId as string),
-);
-
-/**
- * One default budget line per canonical subcategory that the legacy catalogue
- * does not already cover.
- *
- * Without these the taxonomy would be decorative: there would be no envelope to
- * book "Tax Clearance Fees" or "Vehicles" against, so the operator could not
- * record the very spend the model was created to classify. They are created
- * with zero allocation, so they change no balance, no reconciliation figure and
- * no report total until somebody funds one.
- *
- * The purpose IS the canonical subcategory id, so a ledger row written from one
- * of these lines carries a category string the classification authority can
- * resolve directly.
- */
-const CANONICAL_BUDGET_LINES: BudgetLineSeed[] = CANONICAL_CATEGORIES.flatMap((category, categoryIndex) =>
-  category.children
-    .filter((sub) => !SUBCATEGORIES_COVERED_BY_LEGACY.has(sub.id))
-    .map((sub, subIndex) => {
-      const presentation = CANONICAL_LINE_PRESENTATION[sub.id] ?? { icon: 'Circle', costType: 'variable' as const };
-      return {
-        key: sub.id,
-        name: sub.name,
-        icon: presentation.icon,
-        costType: presentation.costType,
-        purpose: sub.id,
-        marketing: presentation.marketing,
-        categoryId: sub.id,
-        mappingStatus: 'mapped' as BudgetLineMappingStatus,
-        // Legacy lines occupy 10..170; canonical lines sort after them, grouped
-        // by their category's canonical position.
-        sortOrder: 1000 + (categoryIndex + 1) * 100 + (subIndex + 1),
-      };
-    }),
-);
-
-/** The full per-branch catalogue: legacy envelopes plus canonical coverage. */
-const BRANCH_BUDGET_LINE_CATALOG: BudgetLineSeed[] = [...DEFAULT_BUDGET_LINES, ...CANONICAL_BUDGET_LINES];
-
-/**
- * Provision the default budget lines for ONE branch.
- *
- * This used to run only as part of the boot-time catalogue sweep, so a branch
- * created through the API had no budget lines until the next restart. The
- * branch looked fine — it had a finance account and accepted students — but
- * payroll failed with "Teacher salary budget line is not configured." and no
- * expense could be charged. Branch creation now calls this directly, so a new
- * branch is fully operational the moment it exists.
- *
- * Idempotent: each insert is guarded by NOT EXISTS on (branch_id, purpose),
- * so calling it for an already-provisioned branch is a no-op.
+ * Idempotent: guarded by NOT EXISTS on (branch_id, payroll_target), so calling
+ * it for an already-provisioned branch is a no-op and never disturbs an
+ * envelope an operator has renamed or funded.
  */
 export function ensureBranchBudgetLines(db: Database.Database, branchId: string): void {
   if (!tableExists(db, 'budget_lines') || !tableExists(db, 'branches')) return;
-  // The taxonomy is a foreign key target for `budget_lines.category_id`, so it
-  // must exist before any line is written.
+  // The taxonomy is the foreign-key target for `category_id`, so it must exist
+  // before any budget line is written.
   seedFinanceCategoryCatalog(db);
-  const insert = budgetLineInsert(db);
+
+  const columns = new Set(
+    (db.prepare('PRAGMA table_info(budget_lines)').all() as Array<{ name: string }>).map((c) => c.name),
+  );
+  // Migration 079 is what introduces `payroll_target`. On the very first boot of
+  // an older database this function can run (through the branch-creation route)
+  // before that migration has been applied; provisioning is simply deferred to
+  // the post-migration sweep rather than crashing the request.
+  if (!columns.has('payroll_target') || !columns.has('category_id')) return;
+
+  const insert = db.prepare(`
+    INSERT INTO budget_lines
+      (id, name, current_amount, allocated_amount, icon, cost_type, branch_id,
+       category_id, sort_order, is_active, payroll_target)
+    SELECT ?, ?, 0, 0, ?, ?, ?, ?, ?, 1, ?
+    WHERE NOT EXISTS (
+      SELECT 1 FROM budget_lines WHERE branch_id = ? AND payroll_target = ?
+    )
+  `);
+
   const seed = db.transaction(() => {
-    for (const line of BRANCH_BUDGET_LINE_CATALOG) {
+    for (const envelope of PAYROLL_ENVELOPES) {
       insert.run(
-        `budget_${line.key}_${branchId}`,
-        line.name,
-        line.icon,
-        line.costType,
-        line.marketing ? 1 : 0,
-        line.purpose,
+        payrollEnvelopeId(envelope.target, branchId),
+        envelope.name,
+        envelope.icon,
+        envelope.costType,
         branchId,
-        line.categoryId,
-        line.sortOrder,
-        line.mappingStatus,
+        envelope.categoryId,
+        envelope.sortOrder,
+        envelope.target,
         branchId,
-        line.purpose,
+        envelope.target,
       );
     }
   });
   seed();
 }
 
-function budgetLineInsert(db: Database.Database) {
-  return db.prepare(`
-    INSERT INTO budget_lines
-      (id, name, current_amount, allocated_amount, icon, cost_type, is_marketing, purpose, branch_id,
-       category_id, sort_order, mapping_status, is_active)
-    SELECT ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, 1
-    WHERE NOT EXISTS (
-      SELECT 1 FROM budget_lines WHERE branch_id = ? AND purpose = ?
-    )
-  `);
-}
-
+/** Provision every active branch. Runs on boot; idempotent. */
 function ensureBudgetLineCatalog(db: Database.Database): void {
   if (!tableExists(db, 'budget_lines') || !tableExists(db, 'branches')) return;
-  seedFinanceCategoryCatalog(db);
-  const insert = budgetLineInsert(db);
   const branches = db.prepare(`SELECT id FROM branches WHERE is_active = 1`).all() as Array<{ id: string }>;
-  const seed = db.transaction(() => {
-    for (const branch of branches) {
-      for (const line of BRANCH_BUDGET_LINE_CATALOG) {
-        insert.run(
-          `budget_${line.key}_${branch.id}`,
-          line.name,
-          line.icon,
-          line.costType,
-          line.marketing ? 1 : 0,
-          line.purpose,
-          branch.id,
-          line.categoryId,
-          line.sortOrder,
-          line.mappingStatus,
-          branch.id,
-          line.purpose,
-        );
-      }
-    }
-  });
-  seed();
+  for (const branch of branches) ensureBranchBudgetLines(db, branch.id);
 }
 
 /**

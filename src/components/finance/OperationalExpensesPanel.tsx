@@ -12,13 +12,6 @@ const EXPENSE_KIND_LABELS: Record<ExpenseKind, string> = {
   other: 'Other / miscellaneous',
 };
 
-// The hard-coded `OPERATIONAL_PURPOSES` allow-list that used to live here is
-// gone. It pinned fourteen legacy purpose strings into the browser, so:
-//   · every budget line outside the list was unreachable from this screen, and
-//   · every new canonical subcategory would have stayed invisible until
-//     somebody remembered to edit a frontend constant.
-// The picker is now driven entirely by the server's taxonomy.
-
 interface Props {
   budgetLines: BudgetLine[];
   /** Canonical taxonomy from GET /finance/categories. */
@@ -107,7 +100,6 @@ export default function OperationalExpensesPanel({
   };
 
   // Every expense request against a known budget line belongs on this screen.
-  // Filtering by a browser-side purpose allow-list silently hid real spend.
   const recentOps = expenseRequests.filter((r) => budgetLines.some((b) => b.id === r.budgetLineId));
 
   return (
@@ -117,9 +109,9 @@ export default function OperationalExpensesPanel({
         <div className="space-y-1">
           <p className="font-extrabold text-amber-900">Direct operational expense payment</p>
           <p className="text-amber-800 leading-relaxed">
-            Record electricity, water, gas, internet, rent, maintenance, purchases, kitchen, cleaning, and transport here.
-            Amounts at or under the auto-approve threshold ({formatAFN(expenseAutoApproveThreshold)}) are paid immediately
-            from the budget line; larger amounts require owner approval (unless your role is owner). All balances come from the database.
+            Choose the category, subcategory and budget line the money comes out of. Amounts at or under the
+            auto-approve threshold ({formatAFN(expenseAutoApproveThreshold)}) are paid immediately from that line;
+            larger amounts require owner approval (unless your role is owner). All balances come from the database.
           </p>
         </div>
       </div>

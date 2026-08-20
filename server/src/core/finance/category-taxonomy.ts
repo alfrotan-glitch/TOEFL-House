@@ -1,49 +1,46 @@
 /**
- * Finance category taxonomy — THE canonical, hierarchical expense model.
+ * Finance category taxonomy — THE canonical, hierarchical accounting model.
  * ============================================================================
  *
- * WHY THIS MODULE EXISTS
- * ----------------------
- * Before this module the ERP had no finance category entity at all. What the
- * product called a "finance category" was one of three unrelated things:
+ * This module is the ONLY definition of what a finance category is. It is read
+ * by
  *
- *   1. `budget_lines`                   flat, per-branch, keyed by `purpose`
- *   2. `financial_transactions.category` free TEXT, no CHECK, no FK
- *   3. `payments.category`               student BILLING categories (fee/book/…)
- *
- * (3) is a different bounded context and is not touched here.
- *
- * The taxonomy below is the single source of truth used by
- *
- *   · `db/migrations/077_finance_category_hierarchy.sql` (via the seeder)
- *   · `db/organizationHierarchy.ts`   (fresh install + every branch)
+ *   · `db/financeCategoryCatalog.ts`  (seeds `finance_categories` + channels)
+ *   · `db/organizationHierarchy.ts`   (branch provisioning)
  *   · `core/finance/ledger-classification.ts` (P&L / cash flow / reports)
  *   · `routes/finance.routes.ts`      (GET /finance/categories)
  *   · the test-suite
  *
  * so a change lands in exactly one place instead of five.
  *
- * DESIGN RULES ENCODED HERE
- * -------------------------
- * · IDs are STABLE CODES, never display names. Renaming "Rent Expense" to
- *   "Premises Rent" must not orphan a single budget line or ledger row.
- * · Exactly two levels: category → subcategory. A budget line is the third
- *   level and lives in `budget_lines`, so a category definition is never
- *   duplicated inside a budget line.
+ * THE MODEL
+ * ---------
+ *   TAXONOMY   Category → Subcategory → Channel
+ *              Organization-wide, complete, immutable in shape.
+ *
+ *   BUDGET     Branch → Budget Line → Allocation
+ *              Sparse and deliberate. A budget line names one envelope of money
+ *              under one SUBCATEGORY. A subcategory existing does NOT imply
+ *              that any branch funds it, and the system never invents envelopes
+ *              to make the taxonomy look complete.
+ *
+ *   LEDGER     `financial_transactions.finance_category_id` is a foreign key
+ *              into this taxonomy. Accounting classification is resolved by
+ *              joining `finance_categories.classification` — never by matching
+ *              a category name or any other string.
+ *
+ * RULES ENCODED HERE
+ * ------------------
+ * · IDs are STABLE CODES, never display names. Renaming "Rent Expense" must not
+ *   orphan a budget line or a ledger row.
+ * · Exactly two taxonomy levels. A budget line is the third level and lives in
+ *   `budget_lines`, so a category is never redefined inside a budget line.
  * · Every node carries an explicit ACCOUNTING CLASSIFICATION. Nothing is
  *   "assumed to be an operating expense".
  * · Facebook is a CHANNEL under Marketing & Promotion → Digital Advertising.
  *   It is deliberately NOT an accounting category — see CANONICAL_CHANNELS.
  */
 
-/**
- * The three accounting treatments the business must be able to tell apart.
- *
- * `operating_expense`         hits the trading result (P&L cost)
- * `capital_expenditure`       buys a fixed asset — cash out, NOT a P&L cost
- * `non_expense_cash_movement` advances, refunds, owner draws, charity — cash
- *                             moves but no operating cost is incurred
- */
 export type FinanceCategoryClassification =
   | 'operating_expense'
   | 'capital_expenditure'
@@ -200,10 +197,11 @@ export const CANONICAL_CATEGORIES: readonly CanonicalCategory[] = [
 /**
  * Channels / vendors.
  *
- * PRODUCT RULE: "Facebook" is a MARKETING CHANNEL, not an accounting category.
- * A separate "Facebook Advertising" ledger category would fragment the
- * marketing spend line and make Digital Advertising unauditable, so the
- * platform is modelled one level BELOW the subcategory instead.
+ * PRODUCT RULE: a platform such as Facebook is a MARKETING CHANNEL, not an
+ * accounting category. Giving each platform its own ledger category would
+ * fragment marketing spend and make Digital Advertising unauditable, so
+ * platforms are modelled one level BELOW the subcategory instead — which also
+ * means adding a platform is data entry, not an accounting change.
  */
 export const CANONICAL_CHANNELS: ReadonlyArray<{
   id: string;
@@ -211,139 +209,6 @@ export const CANONICAL_CHANNELS: ReadonlyArray<{
   name: string;
   kind: 'channel' | 'vendor';
 }> = [{ id: 'chn_facebook', categoryId: 'sub_digital_advertising', name: 'Facebook', kind: 'channel' }] as const;
-
-/**
- * How a legacy budget line maps onto the canonical taxonomy.
- *
- * `mapped`           → `categoryId` is a SUBCATEGORY. Unambiguous.
- * `needs_review`     → `categoryId` is a CATEGORY (the accounting treatment is
- *                      certain, the subcategory is not) or NULL (not even the
- *                      parent could be established without guessing). Surfaced
- *                      to the operator; never silently invented.
- * `out_of_taxonomy`  → deliberately outside the canonical model.
- */
-export type BudgetLineMappingStatus = 'mapped' | 'needs_review' | 'out_of_taxonomy';
-
-export const BUDGET_LINE_MAPPING_STATUSES: readonly BudgetLineMappingStatus[] = [
-  'mapped',
-  'needs_review',
-  'out_of_taxonomy',
-] as const;
-
-export interface LegacyPurposeMapping {
-  /** Canonical node this legacy purpose resolves to. NULL = undecidable. */
-  categoryId: string | null;
-  status: BudgetLineMappingStatus;
-  /** Why this mapping is safe — or why it could not be decided. */
-  rationale: string;
-}
-
-/**
- * Deterministic legacy `budget_lines.purpose` → canonical node mapping.
- *
- * Every entry is justified. Nothing here was decided because two names looked
- * alike: `electricity`, `water` and `gas` all fold under ONE subcategory
- * (Utilities) yet remain THREE separate budget lines, because merging them
- * would destroy three independently funded envelopes.
- */
-export const LEGACY_PURPOSE_MAP: Readonly<Record<string, LegacyPurposeMapping>> = {
-  teacher_salary: {
-    categoryId: 'sub_salaries_wages',
-    status: 'mapped',
-    rationale: 'Teacher payroll is a wage cost.',
-  },
-  employee_salary: {
-    categoryId: 'sub_salaries_wages',
-    status: 'mapped',
-    rationale: 'Staff payroll is a wage cost. Kept as a SEPARATE budget line from teacher payroll — same subcategory, distinct envelope.',
-  },
-  rent: { categoryId: 'sub_rent', status: 'mapped', rationale: 'Premises rent.' },
-  electricity: { categoryId: 'sub_utilities', status: 'mapped', rationale: 'Utility supply.' },
-  water: { categoryId: 'sub_utilities', status: 'mapped', rationale: 'Utility supply.' },
-  gas: { categoryId: 'sub_utilities', status: 'mapped', rationale: 'Utility supply.' },
-  internet: {
-    categoryId: 'sub_internet_communication',
-    status: 'mapped',
-    rationale: 'Connectivity, distinct from Telephone Expenses.',
-  },
-  printing: { categoryId: 'sub_printing', status: 'mapped', rationale: 'Print production cost.' },
-  maintenance: {
-    categoryId: 'sub_repair_maintenance',
-    status: 'mapped',
-    rationale: 'Legacy name "Maintenance & Repairs" is the same scope as Repair & Maintenance.',
-  },
-  cleaning: { categoryId: 'sub_cleaning_sanitation', status: 'mapped', rationale: 'Cleaning & hygiene of the premises.' },
-  kitchen: {
-    categoryId: 'sub_food_catering',
-    status: 'mapped',
-    rationale: 'Legacy "Kitchen & Refreshments" is catering spend.',
-  },
-  misc: { categoryId: 'sub_miscellaneous', status: 'mapped', rationale: 'Residual operating spend.' },
-  equipment: {
-    // FINALIZATION AUDIT, 2026-08-20. A repository-wide sweep of every
-    // `purpose='equipment'` reference at the pre-migration commit (14b9cc8)
-    // returns exactly THREE hits, and only one of them carries any meaning:
-    //
-    //   002_add_budget_purpose.sql:24   `b8 → 'equipment'`  (no name, no label)
-    //   organizationHierarchy.ts:101    name 'Equipment', icon `Monitor`,
-    //                                   cost_type 'variable'
-    //   OperationalExpensesPanel.tsx:14 membership in a hard-coded allow-list
-    //
-    // There is NO expense request, NO ledger row, NO report, NO business rule,
-    // NO description, NO Dari original (migration 005 renames ten purposes and
-    // this is not one of them) and NO test fixture anywhere that references it.
-    //
-    // So the entire case for "IT" rests on a single artefact: the `Monitor`
-    // icon. That is suggestive — every one of the seventeen legacy icons is a
-    // literal depiction of its line (Printer→printing, Coffee→kitchen,
-    // Car→transport, Droplets→water, Flame→gas, Wrench→maintenance…), so the
-    // author's iconography is a deliberate signal rather than decoration. But a
-    // consistency argument ABOUT that same icon is not a second, independent
-    // piece of evidence, and "Equipment" as a bare noun covers desks, boards
-    // and projectors just as naturally as computers.
-    //
-    // The ACCOUNTING TREATMENT is settled and unaffected: whichever subcategory
-    // wins, both candidates live under Capital Expenditure, so the line is
-    // classified `capital_expenditure` either way and no P&L figure depends on
-    // the outcome. Only the subcategory is open, so only the subcategory is
-    // left unasserted.
-    categoryId: 'cat_capital_expenditure',
-    status: 'needs_review',
-    rationale:
-      'Capital Expenditure is certain (both candidate subcategories sit under it, so the classification is unaffected). ' +
-      'IT Equipment vs Office Equipment rests on ONE artefact — the seed catalogue `Monitor` icon — and a single signal is ' +
-      'not enough to assert a subcategory. Owner decision required.',
-  },
-  marketing: {
-    // The row carries no channel information (`is_marketing = 1` only), and the
-    // target taxonomy splits marketing three ways. The CATEGORY is certain, the
-    // SUBCATEGORY is not, so the subcategory is left for a human.
-    categoryId: 'cat_marketing_promotion',
-    status: 'needs_review',
-    rationale: 'Accounting treatment is certain (operating expense, Marketing & Promotion) but Digital vs Traditional vs Promotional cannot be established from the data.',
-  },
-  transport: {
-    categoryId: 'cat_transport_logistics',
-    status: 'needs_review',
-    rationale: 'Category certain; Fuel vs Taxi vs Delivery vs Travel is not recorded anywhere in the model.',
-  },
-  purchases: {
-    // "General Purchases" could sit under Office & Administration, Academic &
-    // Student Operations or Food & General Operations. Not even the parent is
-    // decidable, so nothing is asserted.
-    categoryId: null,
-    status: 'needs_review',
-    rationale: 'Neither the category nor the subcategory can be established: Office Supplies, Teaching Materials and Miscellaneous are all consistent with the data.',
-  },
-  reserve: {
-    // A contingency fund, not an expense classification. The BOS profit
-    // withdrawal rule already depends on a reserve target, so the line stays
-    // fully operational — it is simply outside the expense taxonomy.
-    categoryId: null,
-    status: 'out_of_taxonomy',
-    rationale: 'Contingency reserve. The canonical taxonomy has no equivalent node and inventing one would misstate it as spend.',
-  },
-};
 
 /** Category ids of every canonical node, for fast membership checks. */
 export const CANONICAL_CATEGORY_IDS: ReadonlySet<string> = new Set(
@@ -419,4 +284,68 @@ export function canonicalCategoryRows(): CanonicalCategoryRow[] {
 export function classificationOf(categoryId: string | null | undefined): FinanceCategoryClassification {
   if (!categoryId) return 'operating_expense';
   return CATEGORY_CLASSIFICATION.get(categoryId) ?? 'operating_expense';
+}
+
+// ── Payroll envelopes ───────────────────────────────────────────────────────
+/**
+ * Which payroll run a budget line funds.
+ *
+ * "This envelope funds teacher payroll" is a business relationship, so it is
+ * modelled as one rather than inferred from a name. The database allows at most
+ * one envelope per (branch, target), and teacher and employee budgets stay
+ * SEPARATE: two envelopes with independent balances that happen to share the
+ * Salaries & Wages subcategory.
+ */
+export type PayrollTarget = 'teacher' | 'employee';
+
+export const PAYROLL_TARGETS: readonly PayrollTarget[] = ['teacher', 'employee'] as const;
+
+export interface PayrollEnvelope {
+  target: PayrollTarget;
+  name: string;
+  categoryId: string;
+  icon: string;
+  costType: 'fixed' | 'variable';
+  sortOrder: number;
+}
+
+/**
+ * The ONLY budget lines a branch is provisioned with.
+ *
+ * Payroll cannot run without an envelope to debit — `pay-salary` answers 500
+ * "…budget line is not configured" — so these two are a structural requirement,
+ * not a convenience. Everything else is created deliberately by an authorised
+ * user through `POST /finance/budget-lines`, because a branch that never pays a
+ * taxi fare should not carry a Taxi & Transportation envelope.
+ */
+export const PAYROLL_ENVELOPES: readonly PayrollEnvelope[] = [
+  { target: 'teacher', name: 'Teacher Salaries', categoryId: 'sub_salaries_wages', icon: 'GraduationCap', costType: 'fixed', sortOrder: 10 },
+  { target: 'employee', name: 'Employee Salaries', categoryId: 'sub_salaries_wages', icon: 'Users', costType: 'fixed', sortOrder: 20 },
+] as const;
+
+/** Deterministic id for a branch's payroll envelope. */
+export function payrollEnvelopeId(target: PayrollTarget, branchId: string): string {
+  return `bl_payroll_${target}_${branchId}`;
+}
+
+/**
+ * Canonical ledger node for a payroll payment.
+ *
+ * A genuine ADVANCE can exceed salary already earned, so it is a receivable
+ * against future pay — cash out, but not an operating cost. A full or partial
+ * payment settles salary that has already accrued and is a wage expense. Only
+ * the EMPLOYEE path can produce a genuine advance; see `teachers.routes.ts`.
+ */
+export function payrollLedgerCategoryId(isGenuineAdvance: boolean): string {
+  return isGenuineAdvance ? 'sub_salary_advances' : 'sub_salaries_wages';
+}
+
+/** Every SUBCATEGORY id — the only nodes a budget line may attach to. */
+export const SUBCATEGORY_IDS: ReadonlySet<string> = new Set(
+  CANONICAL_CATEGORIES.flatMap((c) => c.children.map((s) => s.id)),
+);
+
+/** True when the id names a subcategory (and therefore a legal budget-line parent). */
+export function isSubcategoryId(id: string | null | undefined): boolean {
+  return !!id && SUBCATEGORY_IDS.has(id);
 }

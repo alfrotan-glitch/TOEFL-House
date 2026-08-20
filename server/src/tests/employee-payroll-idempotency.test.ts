@@ -23,6 +23,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
+import { NON_EXPENSE_CASH_MOVEMENT_SQL, OPERATING_EXPENSE_SQL } from '../core/finance/ledger-classification.js';
 import { today, id as mkId } from '../utils/ids.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
 import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
@@ -62,8 +63,11 @@ const pay = (eid: string, body: Record<string, unknown>, key?: string) => {
 
 const ledgerRows = (eid: string) =>
   db.prepare('SELECT * FROM employee_salary_ledger WHERE employee_id = ? ORDER BY paid_at').all(eid) as Array<Record<string, unknown>>;
+// Every payroll ledger row for this employee, whatever its accounting
+// treatment. Filtering on `category = 'salary'` would silently drop genuine
+// advances, which now carry their own canonical node.
 const txRows = (eid: string) =>
-  db.prepare("SELECT * FROM financial_transactions WHERE reference_id = ? AND category = 'salary'").all(eid) as Array<Record<string, unknown>>;
+  db.prepare("SELECT * FROM financial_transactions WHERE reference_id = ? AND type = 'expense'").all(eid) as Array<Record<string, unknown>>;
 const paidTotal = (eid: string) => txRows(eid).reduce((sum, r) => sum + Number(r.amount), 0);
 const budgetNow = () => Number((db.prepare('SELECT current_amount c FROM budget_lines WHERE id = ?').get(budgetLineId) as { c: number }).c);
 const setBudget = (v: number) => db.prepare('UPDATE budget_lines SET current_amount = ? WHERE id = ?').run(v, budgetLineId);
@@ -81,12 +85,12 @@ beforeAll(async () => {
 
   budgetLineId = mkId('bl');
   db.prepare(
-    `INSERT INTO budget_lines (id, name, allocated_amount, current_amount, purpose, branch_id) VALUES (?, ?, ?, ?, ?, ?)`,
-  ).run(budgetLineId, 'employee_salary', BUDGET, BUDGET, 'employee_salary', BRANCH);
+    `INSERT INTO budget_lines (id, name, allocated_amount, current_amount, category_id, payroll_target, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(budgetLineId, 'Employee Salaries', BUDGET, BUDGET, 'sub_salaries_wages', 'employee', BRANCH);
   const tb = mkId('bl');
   db.prepare(
-    `INSERT INTO budget_lines (id, name, allocated_amount, current_amount, purpose, branch_id) VALUES (?, ?, ?, ?, ?, ?)`,
-  ).run(tb, 'teacher_salary', BUDGET, BUDGET, 'teacher_salary', BRANCH);
+    `INSERT INTO budget_lines (id, name, allocated_amount, current_amount, category_id, payroll_target, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(tb, 'Teacher Salaries', BUDGET, BUDGET, 'sub_salaries_wages', 'teacher', BRANCH);
 
   app = express();
   app.use(express.json());
@@ -414,5 +418,42 @@ describe('T-1 · financial reconciliation', () => {
           AND NOT EXISTS (SELECT 1 FROM employee_salary_ledger l WHERE l.transaction_id = ft.id)`,
     ).all(BRANCH);
     expect(orphans).toEqual([]);
+  });
+});
+
+describe('employee payroll classifies a genuine advance as a receivable', () => {
+  /**
+   * An employee advance is UNCAPPED — it may exceed salary already earned — so
+   * it is money lent against future pay, not a wage cost. Full and partial
+   * payments settle salary that has already accrued and stay operating expense.
+   * The teacher path has no equivalent: its "advance" was capped at the period's
+   * remaining due, which made it a partial payment wearing the wrong label, and
+   * the concept was removed there rather than reinterpreted.
+   */
+  it('books an advance under Salary Advances and a partial under Salaries & Wages', async () => {
+    const e = mkEmployee('epi_treatment');
+    await pay(e, { monthName: 'Jadi 1405', amountPaid: 900, paymentType: 'partial' });
+    await pay(e, { monthName: 'Jadi 1405', amountPaid: 700, paymentType: 'advance' });
+
+    const rows = db.prepare(
+      "SELECT amount, category, finance_category_id FROM financial_transactions WHERE reference_id = ? AND type='expense' ORDER BY amount DESC",
+    ).all(e) as Array<{ amount: number; category: string; finance_category_id: string }>;
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ amount: 900, category: 'salary', finance_category_id: 'sub_salaries_wages' });
+    expect(rows[1]).toMatchObject({ amount: 700, category: 'salary_advance', finance_category_id: 'sub_salary_advances' });
+  });
+
+  it('keeps the advance out of operating expense while the partial stays in', async () => {
+    const e = mkEmployee('epi_pnl');
+    await pay(e, { monthName: 'Dalw 1405', amountPaid: 400, paymentType: 'partial' });
+    await pay(e, { monthName: 'Dalw 1405', amountPaid: 600, paymentType: 'advance' });
+
+    const sum = (predicate: string) => Number((db.prepare(
+      `SELECT COALESCE(SUM(amount),0) v FROM financial_transactions WHERE reference_id = ? AND ${predicate}`,
+    ).get(e) as { v: number }).v);
+
+    expect(sum(OPERATING_EXPENSE_SQL)).toBe(400);
+    expect(sum(NON_EXPENSE_CASH_MOVEMENT_SQL)).toBe(600);
   });
 });

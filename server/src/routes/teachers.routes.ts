@@ -22,6 +22,7 @@ import {
   CONTRACT_TYPES,
 } from '../core/payroll/class-payroll.js';
 import { jalaliPeriodLabel } from '../utils/jalali.js';
+import { payrollLedgerCategoryId } from '../core/finance/category-taxonomy.js';
 import { resolveIdempotency, isUniqueViolation } from '../utils/idempotency.js';
 
 export const teachersRouter = Router();
@@ -47,7 +48,7 @@ interface EmployeeRow {
 }
 
 interface BudgetRow {
-  id: string; name: string; current_amount: number; purpose: string | null;
+  id: string; name: string; current_amount: number; payroll_target: string | null;
 }
 
 // ── Performance Optimization: Prepared Statements ──────────────────────────
@@ -88,9 +89,21 @@ const stmtGetBranchName = db.prepare('SELECT name FROM branches WHERE id = ?');
 const stmtInsertTeacherBranchHistory = db.prepare('INSERT INTO teacher_branch_history (id, teacher_id, from_branch_id, to_branch_id, effective_date, reason, operator_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)');
 
 // Payroll & Finance Statements
-const stmtGetBudgetByPurpose = db.prepare('SELECT * FROM budget_lines WHERE purpose = ? AND branch_id = ?');
+// The payroll envelope is resolved through the BUSINESS RELATIONSHIP
+// (`payroll_target`), not through a display-derived string. The database allows
+// at most one teacher and one employee envelope per branch, so this is a
+// single-row lookup by construction.
+const stmtGetPayrollBudgetLine = db.prepare(
+  'SELECT * FROM budget_lines WHERE payroll_target = ? AND branch_id = ? AND is_active = 1',
+);
 const stmtUpdateBudgetAmount = db.prepare('UPDATE budget_lines SET current_amount = current_amount - ? WHERE id = ?');
-const stmtInsertFinTx = db.prepare(`INSERT INTO financial_transactions (id, type, category, amount, date, description, reference_id, operator_name, branch_id) VALUES (?, 'expense', 'salary', ?, ?, ?, ?, ?, ?)`);
+// `finance_category_id` is the accounting authority; `category` is the
+// human-readable label beside it. They are written together and always agree.
+const stmtInsertFinTx = db.prepare(
+  `INSERT INTO financial_transactions
+     (id, type, category, finance_category_id, amount, date, description, reference_id, operator_name, branch_id)
+   VALUES (?, 'expense', ?, ?, ?, ?, ?, ?, ?, ?)`,
+);
 const stmtInsertSalaryLedger = db.prepare(`INSERT INTO teacher_salary_ledger (id, teacher_id, period_key, period_label, due_amount, paid_amount, payment_type, transaction_id, notes, branch_id, operator_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 const stmtInsertCompensationHistory = db.prepare('INSERT INTO teacher_compensation_history (id, teacher_id, effective_from, base_salary, salary_type, contract_type, default_skill_rate, reason, operator_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
 const stmtInsertEvaluation = db.prepare(`INSERT INTO teacher_evaluations (id, teacher_id, evaluator_id, date, score, criteria, notes) VALUES (?, ?, ?, ?, ?, ?, ?)`);
@@ -456,12 +469,22 @@ teachersRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(asy
   const teacher = requireTeacher(req, req.params.id);
   if (teacher.status === 'inactive') throw new HttpError(400, 'Cannot pay salary to an inactive teacher.');
 
-  const { monthName, amountPaid, paymentType } = req.body as { monthName: string; amountPaid?: number; paymentType?: 'full' | 'partial' | 'advance' };
+  const { monthName, amountPaid, paymentType } = req.body as { monthName: string; amountPaid?: number; paymentType?: 'full' | 'partial' };
   if (!monthName) throw new HttpError(400, 'Month is required.');
   const periodKey = toPeriodKey(monthName);
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(periodKey)) throw new HttpError(400, 'Month must be a Shamsi period such as 1405-05 or "اسد 1405".');
   const type = paymentType || 'full';
-  if (!['full','partial','advance'].includes(type)) throw new HttpError(400, 'Invalid payment type.');
+  // 'advance' is deliberately NOT accepted on the teacher path.
+  //
+  // It never meant what it said: the amount is capped at `remaining` — the
+  // salary already accrued for the period — so a teacher "advance" was always a
+  // PARTIAL PAYMENT of earned salary, i.e. an ordinary wage expense. Keeping the
+  // label would have forced a choice between two wrong answers: book earned
+  // salary as a receivable, or leave two payment types that mean the same thing
+  // and classify differently. The concept is removed instead of reinterpreted.
+  if (!['full', 'partial'].includes(type)) {
+    throw new HttpError(400, "Invalid payment type. Teacher payroll accepts 'full' or 'partial'; a teacher payment is always against salary already earned.");
+  }
 
   // T-3: same treatment as the employee path. `amountPaid` is optional here
   // (omitting it means "pay the full remaining balance"), so null/undefined
@@ -521,8 +544,8 @@ teachersRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(asy
       if (type === 'full' && Math.abs(resolvedAmount - remaining) > 0.0001) throw new HttpError(400, 'Full payment must settle the entire remaining balance.');
 
       const payrollBranchId = teacherBranchAsOf(db, freshTeacher.id, `${periodKey}-31`, freshTeacher.branch_id);
-      const budgetLine = stmtGetBudgetByPurpose.get('teacher_salary', payrollBranchId) as BudgetRow | undefined;
-      if (!budgetLine) throw new HttpError(500, 'Teacher salary budget line is not configured.');
+      const budgetLine = stmtGetPayrollBudgetLine.get('teacher', payrollBranchId) as BudgetRow | undefined;
+      if (!budgetLine) throw new HttpError(500, 'Teacher payroll budget line is not configured for this branch.');
       const updated = db.prepare('UPDATE budget_lines SET current_amount = current_amount - ? WHERE id = ? AND current_amount >= ?').run(resolvedAmount, budgetLine.id, resolvedAmount);
       if (updated.changes !== 1) throw new HttpError(409, 'Insufficient salary budget or concurrent budget update.');
 
@@ -534,7 +557,11 @@ teachersRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(asy
       // raw client string, so the ledger reads consistently regardless of
       // whether the caller sent '1405-05', 'Asad 1405' or a legacy '2026-08'.
       const periodLabel = jalaliPeriodLabel(periodKey);
-      stmtInsertFinTx.run(txId, resolvedAmount, date, `Paid ${finalPaymentType} salary for ${periodLabel} to teacher ${freshTeacher.full_name}`, freshTeacher.id, user.fullName, payrollBranchId);
+      stmtInsertFinTx.run(
+        txId, 'salary', payrollLedgerCategoryId(false), resolvedAmount, date,
+        `Paid ${finalPaymentType} salary for ${periodLabel} to teacher ${freshTeacher.full_name}`,
+        freshTeacher.id, user.fullName, payrollBranchId,
+      );
       stmtInsertSalaryLedgerWithIdempotency.run(ledgerId, freshTeacher.id, periodKey, periodLabel, adjustedDue, resolvedAmount, finalPaymentType, txId, JSON.stringify(dueInfo.breakdown), payrollBranchId, user.fullName, idempotencyKey);
 
       db.exec('COMMIT');
@@ -580,8 +607,8 @@ teachersRouter.post('/:id/payroll/:ledgerId/void', requirePermission('Payroll.Ed
     const freshLedger = stmtGetSalaryLedger.get(req.params.ledgerId, teacher.id) as any;
     if (!freshLedger || freshLedger.status !== 'posted') throw new HttpError(409, 'Salary payment is no longer posted.');
     const payrollBranchId = freshLedger.branch_id;
-    const budgetLine = stmtGetBudgetByPurpose.get('teacher_salary', payrollBranchId) as BudgetRow | undefined;
-    if (!budgetLine) throw new HttpError(500, 'Teacher salary budget line is not configured.');
+    const budgetLine = stmtGetPayrollBudgetLine.get('teacher', payrollBranchId) as BudgetRow | undefined;
+    if (!budgetLine) throw new HttpError(500, 'Teacher payroll budget line is not configured for this branch.');
     const reversalTxId = id('tx');
     stmtUpdateBudgetAmount.run(-Number(freshLedger.paid_amount), budgetLine.id);
     // CONTRA ENTRY — the amount must be NEGATIVE.
@@ -596,7 +623,11 @@ teachersRouter.post('/:id/payroll/:ledgerId/void', requirePermission('Payroll.Ed
     // in this system (student refunds via recordIncome, book-sale contra
     // revenue), so this row now matches its siblings and every SUM() over
     // financial_transactions nets out without needing to know about voids.
-    stmtInsertFinTx.run(reversalTxId, -Number(freshLedger.paid_amount), today(), `Voided teacher salary payment ${freshLedger.id}: ${reason}`, freshLedger.id, user.fullName, payrollBranchId);
+    stmtInsertFinTx.run(
+      reversalTxId, 'salary', payrollLedgerCategoryId(false), -Number(freshLedger.paid_amount), today(),
+      `Voided teacher salary payment ${freshLedger.id}: ${reason}`,
+      freshLedger.id, user.fullName, payrollBranchId,
+    );
     stmtVoidSalaryLedger.run(user.fullName, reason, freshLedger.id);
     db.exec('COMMIT');
     writeAudit(req, `Voided teacher salary payment ${freshLedger.id} for ${teacher.full_name}: ${reason}`);
@@ -767,8 +798,8 @@ employeesRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(as
         return { amountPaid: Number(replay.paid_amount), ledgerId: replay.id, replayed: true, remainingBudget: null as number | null };
       }
 
-      const budgetLine = stmtGetBudgetByPurpose.get('employee_salary', employee.branch_id) as BudgetRow | undefined;
-      if (!budgetLine) throw new HttpError(500, 'Employee salary budget line is not configured.');
+      const budgetLine = stmtGetPayrollBudgetLine.get('employee', employee.branch_id) as BudgetRow | undefined;
+      if (!budgetLine) throw new HttpError(500, 'Employee payroll budget line is not configured for this branch.');
       // Conditional debit: the balance is re-checked by the database in the
       // same statement that spends it, so two concurrent payments cannot both
       // pass a stale read.
@@ -778,7 +809,20 @@ employeesRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(as
 
       const txId = id('tx');
       const ledgerId = id('esl');
-      stmtInsertFinTx.run(txId, resolvedAmount, date, `Paid ${typeLabel} for ${monthName} to employee ${employee.full_name} (${employee.role})`, employee.id, user.fullName, employee.branch_id);
+      // An employee advance is UNCAPPED — it may exceed salary already earned,
+      // which makes it a receivable against future pay rather than a wage cost.
+      // That is the one payroll case the canonical taxonomy classifies as a
+      // Non-Expense Cash Movement, and the only reason the concept survives here
+      // while the teacher path lost it.
+      const isGenuineAdvance = type === 'advance';
+      stmtInsertFinTx.run(
+        txId,
+        isGenuineAdvance ? 'salary_advance' : 'salary',
+        payrollLedgerCategoryId(isGenuineAdvance),
+        resolvedAmount, date,
+        `Paid ${typeLabel} for ${monthName} to employee ${employee.full_name} (${employee.role})`,
+        employee.id, user.fullName, employee.branch_id,
+      );
       // The canonical financial trail this endpoint never had. `uq_employee_salary_full_period`
       // replaces the old description-LIKE guard for full payments.
       stmtInsertEmployeeSalaryLedger.run(ledgerId, employee.id, periodKey, periodLabel, resolvedAmount, type, txId, null, employee.branch_id, user.fullName, idempotencyKey);

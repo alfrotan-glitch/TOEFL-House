@@ -24,13 +24,11 @@ interface CascadeProps {
  *
  * WHY A CASCADE RATHER THAN ONE LONG LIST
  * ---------------------------------------
- * The flat list this replaces was filtered by a HARD-CODED set of fourteen
- * purpose strings living in the browser
- * (`OPERATIONAL_PURPOSES = new Set(['rent','electricity', …])`). Any budget line
- * outside that set was unreachable from the UI, and any new canonical
- * subcategory would have been invisible until somebody remembered to edit a
- * frontend constant. The cascade is driven entirely by what the server sends,
- * so the browser cannot invent, omit or misfile a category.
+ * A branch can hold many envelopes across ten categories, and picking the wrong
+ * one misstates the accounts rather than merely looking untidy. Narrowing by
+ * category and then by subcategory makes the accounting destination an explicit
+ * choice instead of a scroll. Every option comes from the server, so the browser
+ * cannot invent, omit or misfile a category.
  *
  * The selected line's accounting treatment is displayed, not inferred: an
  * operator about to book a laptop must be able to see that it will not land in
@@ -61,15 +59,13 @@ export function BudgetLineCascade({
     activeCategory?.groups.find((s) => s.lines.some((l) => l.id === value)) || null;
 
   const selectCategoryFirstLine = (categoryId: string) => {
-    const group = groups.find((g) => (g.categoryId ?? '__unclassified__') === categoryId);
-    const first = group?.groups[0]?.lines[0];
-    onChange(first ? first.id : '');
+    const group = groups.find((g) => g.categoryId === categoryId);
+    onChange(group?.groups[0]?.lines[0]?.id ?? '');
   };
 
-  const selectSubcategoryFirstLine = (subcategoryKey: string) => {
-    const sub = activeCategory?.groups.find((s) => (s.subcategoryId ?? '__none__') === subcategoryKey);
-    const first = sub?.lines[0];
-    onChange(first ? first.id : '');
+  const selectSubcategoryFirstLine = (subcategoryId: string) => {
+    const sub = activeCategory?.groups.find((s) => s.subcategoryId === subcategoryId);
+    onChange(sub?.lines[0]?.id ?? '');
   };
 
   const selectClass =
@@ -78,7 +74,7 @@ export function BudgetLineCascade({
   if (groups.length === 0) {
     return (
       <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-        No budget lines are available for this branch yet.
+        This branch has no budget lines yet. Create one from the Budgets tab.
       </p>
     );
   }
@@ -91,12 +87,12 @@ export function BudgetLineCascade({
           id={`${idPrefix}-category`}
           className={selectClass}
           disabled={disabled}
-          value={activeCategory ? (activeCategory.categoryId ?? '__unclassified__') : ''}
+          value={activeCategory?.categoryId ?? ''}
           onChange={(e) => selectCategoryFirstLine(e.target.value)}
         >
           <option value="" disabled>Select a category…</option>
           {groups.map((g) => (
-            <option key={g.categoryId ?? '__unclassified__'} value={g.categoryId ?? '__unclassified__'}>
+            <option key={g.categoryId} value={g.categoryId}>
               {g.categoryName} — {CLASSIFICATION_SHORT[g.classification]}
             </option>
           ))}
@@ -109,12 +105,12 @@ export function BudgetLineCascade({
           id={`${idPrefix}-subcategory`}
           className={selectClass}
           disabled={disabled || !activeCategory}
-          value={activeSubcategory ? (activeSubcategory.subcategoryId ?? '__none__') : ''}
+          value={activeSubcategory?.subcategoryId ?? ''}
           onChange={(e) => selectSubcategoryFirstLine(e.target.value)}
         >
           <option value="" disabled>Select a subcategory…</option>
           {(activeCategory?.groups ?? []).map((s) => (
-            <option key={s.subcategoryId ?? '__none__'} value={s.subcategoryId ?? '__none__'}>
+            <option key={s.subcategoryId} value={s.subcategoryId}>
               {s.subcategoryName}
             </option>
           ))}
@@ -148,9 +144,6 @@ export function BudgetLineCascade({
             <span className="text-slate-500">
               This spend is recorded as cash out but is <strong>not</strong> an operating expense in the P&amp;L.
             </span>
-          )}
-          {selected.mappingStatus === 'needs_review' && (
-            <span className="text-amber-700">Subcategory still needs an owner decision.</span>
           )}
         </div>
       )}
@@ -206,7 +199,7 @@ export function GroupedBudgetLineSelect({
           if (!lines.length) return null;
           return (
             <optgroup
-              key={`${group.categoryId ?? 'unclassified'}-${sub.subcategoryId ?? 'none'}`}
+              key={`${group.categoryId}-${sub.subcategoryId}`}
               label={`${group.categoryName} › ${sub.subcategoryName}`}
             >
               {lines.map((line) => (

@@ -20,9 +20,11 @@ import {
   CAPITAL_INJECTION_CATEGORY,
   OPERATING_EXPENSE_SQL,
   OPERATING_INCOME_SQL,
-  PROFIT_DISTRIBUTION_CATEGORY,
-  classifyExpenseCategory,
+  OWNER_DRAWINGS_CATEGORY_ID,
+  classifyExpenseRow,
+  operatingIncomeSql,
 } from '../core/finance/ledger-classification.js';
+import { CATEGORY_NAME } from '../core/finance/category-taxonomy.js';
 import { db } from '../db/connection.js';
 import { authenticate, requirePermission, resolveBranchScope } from '../middleware/auth.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
@@ -145,30 +147,34 @@ reportsRouter.get(
       -- visitor when the payment has no student link.
       LEFT JOIN placement_assessment_attempts pa ON p.idempotency_key = 'placement:' || pa.id
       LEFT JOIN visitors v ON v.id = pa.visitor_id
-      WHERE ${OPERATING_INCOME_SQL.replace(/\btype\b/g, 'ft.type').replace(/\bcategory\b/g, 'ft.category')}
+      WHERE ${operatingIncomeSql('ft')}
         AND ft.date >= ? AND ft.date <= ?
         ${scopeSql('ft')}${incomeGenderClause}
       GROUP BY ft.category ORDER BY ft.category`;
     const income = genderSplit(incomeSql, [from, to, ...scopeParam, ...genderParam]);
 
     // ── Financial: EXPENSE-SIDE rows, split by accounting treatment ──
-    // This used to be `category != 'profit_distribution'`, a private copy of
-    // one third of the classification rule. It therefore counted fixed-asset
-    // purchases and salary advances as ordinary operating cost. The rule now
-    // comes from the single authority, and the two non-operating treatments are
-    // REPORTED SEPARATELY rather than silently dropped.
+    // The rule comes from the single classification authority, and the two
+    // non-operating treatments are REPORTED SEPARATELY rather than silently
+    // dropped: a fixed-asset purchase and a salary advance are real money
+    // leaving the branch, they are simply not trading cost.
     const expenseSideRows = (isAll
-      ? db.prepare(`SELECT category, COALESCE(SUM(amount),0) AS total FROM financial_transactions
-          WHERE type = 'expense' AND date >= ? AND date <= ?
-          GROUP BY category ORDER BY category`).all(from, to)
-      : db.prepare(`SELECT category, COALESCE(SUM(amount),0) AS total FROM financial_transactions
-          WHERE type = 'expense' AND date >= ? AND date <= ? AND branch_id = ?
-          GROUP BY category ORDER BY category`).all(from, to, branchId)) as Array<{ category: string; total: number }>;
+      // One canonical node is one line — see the same rule in /finance/pnl.
+      ? db.prepare(`SELECT MIN(category) AS category, finance_category_id, COALESCE(SUM(amount),0) AS total
+                      FROM financial_transactions
+                     WHERE type = 'expense' AND date >= ? AND date <= ?
+                     GROUP BY COALESCE(finance_category_id, category) ORDER BY 1`).all(from, to)
+      : db.prepare(`SELECT MIN(category) AS category, finance_category_id, COALESCE(SUM(amount),0) AS total
+                      FROM financial_transactions
+                     WHERE type = 'expense' AND date >= ? AND date <= ? AND branch_id = ?
+                     GROUP BY COALESCE(finance_category_id, category) ORDER BY 1`).all(from, to, branchId)) as Array<
+            { category: string; finance_category_id: string | null; total: number }>;
 
     const classified = expenseSideRows.map((r) => ({
-      category: r.category,
+      // Reported under the canonical NAME, resolved server-side.
+      category: (r.finance_category_id ? CATEGORY_NAME.get(r.finance_category_id) : null) ?? r.category,
       total: Number(r.total || 0),
-      classification: classifyExpenseCategory(r.category),
+      classification: classifyExpenseRow({ type: 'expense', finance_category_id: r.finance_category_id }),
     }));
     const totalFor = (classification: string) =>
       classified.filter((r) => r.classification === classification).reduce((sum, r) => sum + r.total, 0);
@@ -197,15 +203,15 @@ reportsRouter.get(
       ? db.prepare(`SELECT type, category, COALESCE(SUM(amount),0) AS total FROM financial_transactions
           WHERE date >= ? AND date <= ? AND (
             (type = 'income' AND category = '${CAPITAL_INJECTION_CATEGORY}') OR
-            (type = 'expense' AND category = '${PROFIT_DISTRIBUTION_CATEGORY}') OR
+            (type = 'expense' AND finance_category_id = '${OWNER_DRAWINGS_CATEGORY_ID}') OR
             type = 'budget_charge' OR type = 'saving_transfer')
-          GROUP BY type, category`).all(from, to)
+          GROUP BY type, category, finance_category_id`).all(from, to)
       : db.prepare(`SELECT type, category, COALESCE(SUM(amount),0) AS total FROM financial_transactions
           WHERE date >= ? AND date <= ? AND branch_id = ? AND (
             (type = 'income' AND category = '${CAPITAL_INJECTION_CATEGORY}') OR
-            (type = 'expense' AND category = '${PROFIT_DISTRIBUTION_CATEGORY}') OR
+            (type = 'expense' AND finance_category_id = '${OWNER_DRAWINGS_CATEGORY_ID}') OR
             type = 'budget_charge' OR type = 'saving_transfer')
-          GROUP BY type, category`).all(from, to, branchId)) as Array<{ type: string; category: string; total: number }>;
+          GROUP BY type, category, finance_category_id`).all(from, to, branchId)) as Array<{ type: string; category: string; finance_category_id: string | null; total: number }>;
     const transfers = {
       capitalInjection: 0,
       profitDistribution: 0,
@@ -215,7 +221,7 @@ reportsRouter.get(
     for (const r of transferRows) {
       const v = Number(r.total || 0);
       if (r.type === 'income' && r.category === CAPITAL_INJECTION_CATEGORY) transfers.capitalInjection += v;
-      else if (r.type === 'expense' && r.category === PROFIT_DISTRIBUTION_CATEGORY) transfers.profitDistribution += v;
+      else if (r.type === 'expense' && r.finance_category_id === OWNER_DRAWINGS_CATEGORY_ID) transfers.profitDistribution += v;
       else if (r.type === 'budget_charge') transfers.budgetCharged += v;
       else if (r.type === 'saving_transfer') transfers.savingTransferred += v;
     }

@@ -110,8 +110,8 @@ describe('payroll history survives partial payment and reversal', () => {
   function fundSalaryBudget(amount: number) {
     const lineId = `budget_teacher_salary_${BRANCH}`;
     db.prepare(
-      `INSERT OR IGNORE INTO budget_lines (id, name, current_amount, allocated_amount, purpose, branch_id)
-       VALUES (?, 'Teacher Salaries', 0, 0, 'teacher_salary', ?)`
+      `INSERT OR IGNORE INTO budget_lines (id, name, current_amount, allocated_amount, category_id, payroll_target, branch_id)
+       VALUES (?, 'Teacher Salaries', 0, 0, 'sub_salaries_wages', 'teacher', ?)`
     ).run(lineId, BRANCH);
     db.prepare('UPDATE budget_lines SET current_amount = current_amount + ? WHERE id = ?').run(amount, lineId);
   }

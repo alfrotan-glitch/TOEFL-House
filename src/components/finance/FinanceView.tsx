@@ -6,7 +6,7 @@
 import React, { useEffect, useState } from 'react';
 import { CalendarCheck } from 'lucide-react';
 import type {
-  BudgetLine, FinanceCategory, ExpenseRequest, FinancialTransaction, UserRole,
+  BudgetLine, BudgetLineInput, FinanceCategory, ExpenseRequest, FinancialTransaction, UserRole,
   ExpenseKind, OperationalPaymentInput, ExpenseReport, Invoice, Student, FinanceConfig, FinanceDashboard,
 } from '../../types';
 import { formatAFN } from '../../utils/format';
@@ -33,6 +33,7 @@ export interface FinanceViewProps {
   savingBalance: number;
   activeRole: UserRole;
   chargeBudget: (budgetLineId: string, amount: number) => void;
+  createBudgetLine: (input: BudgetLineInput) => Promise<void>;
   createExpenseRequest: (
     title: string,
     amount: number,
@@ -93,7 +94,7 @@ export default function FinanceView(props: FinanceViewProps) {
   const invalidate = useInvalidate();
   const {
     budgetLines, financeCategories, expenseRequests, transactions, mainAccountBalance, savingBalance, activeRole,
-    chargeBudget, createExpenseRequest, recordOperationalPayment, getExpenseReport,
+    chargeBudget, createBudgetLine, createExpenseRequest, recordOperationalPayment, getExpenseReport,
     updateExpenseAutoApproveThreshold, expenseAutoApproveThreshold,
     invoices, students, financeConfig, createInvoice, issueInvoice, payInvoice, cancelInvoice, updateFinanceConfig,
     processExpenseApproval, processMonthEnd, updateSavingSettings, savingPercent, runSavingEngine,
@@ -265,7 +266,7 @@ export default function FinanceView(props: FinanceViewProps) {
         />
       )}
       {financeTab === 'budgets' && (
-        <BudgetsPanel budgetLines={budgetLines} financeCategories={financeCategories} canView={canViewBudget} canAllocate={canAllocateBudget} onCharge={setChargingBudgetLine} />
+        <BudgetsPanel budgetLines={budgetLines} financeCategories={financeCategories} canView={canViewBudget} canAllocate={canAllocateBudget} onCharge={setChargingBudgetLine} createBudgetLine={createBudgetLine} />
       )}
       {financeTab === 'expenses' && (
         <ExpenseRequestsPanel

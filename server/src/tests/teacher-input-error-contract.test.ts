@@ -124,11 +124,11 @@ beforeAll(async () => {
   owner = { userId: 'tec_owner', username: 'tec_owner', role: 'owner' as never, branchId: BRANCH, fullName: 'TEC Owner' };
 
   empBudgetId = mkId('bl');
-  db.prepare('INSERT INTO budget_lines (id, name, allocated_amount, current_amount, purpose, branch_id) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(empBudgetId, 'employee_salary', START_BUDGET, START_BUDGET, 'employee_salary', BRANCH);
+  db.prepare('INSERT INTO budget_lines (id, name, allocated_amount, current_amount, category_id, payroll_target, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(empBudgetId, 'Employee Salaries', START_BUDGET, START_BUDGET, 'sub_salaries_wages', 'employee', BRANCH);
   teachBudgetId = mkId('bl');
-  db.prepare('INSERT INTO budget_lines (id, name, allocated_amount, current_amount, purpose, branch_id) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(teachBudgetId, 'teacher_salary', START_BUDGET, START_BUDGET, 'teacher_salary', BRANCH);
+  db.prepare('INSERT INTO budget_lines (id, name, allocated_amount, current_amount, category_id, payroll_target, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(teachBudgetId, 'Teacher Salaries', START_BUDGET, START_BUDGET, 'sub_salaries_wages', 'teacher', BRANCH);
 
   app = express();
   app.use(express.json());

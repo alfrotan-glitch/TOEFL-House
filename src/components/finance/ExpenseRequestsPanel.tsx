@@ -135,7 +135,7 @@ export default function ExpenseRequestsPanel({
                         {bl ? (
                           <>
                             <span className="block text-[10px] font-semibold text-slate-400">
-                              {[bl.parentCategoryName, bl.subcategoryName].filter(Boolean).join(' › ') || '—'}
+                              {[bl.categoryName, bl.subcategoryName].filter(Boolean).join(' › ') || '—'}
                             </span>
                             {bl.name}
                           </>

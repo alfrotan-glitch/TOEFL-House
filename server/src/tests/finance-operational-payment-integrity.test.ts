@@ -82,8 +82,8 @@ const opPay = (u: string, body: Record<string, unknown>) =>
 
 const setLine = (lineId: string, branchId: string, amount: number) =>
   db.prepare(
-    `INSERT OR REPLACE INTO budget_lines (id, name, allocated_amount, current_amount, purpose, branch_id)
-     VALUES (?, 'utility', ?, ?, 'utility', ?)`,
+    `INSERT OR REPLACE INTO budget_lines (id, name, allocated_amount, current_amount, category_id, branch_id)
+     VALUES (?, 'Utilities', ?, ?, 'sub_utilities', ?)`,
   ).run(lineId, amount, amount, branchId);
 
 beforeAll(async () => {

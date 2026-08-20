@@ -4,27 +4,22 @@
  * DEFECT CLASS: setup work that only happens at boot, while the thing it sets
  * up can be created at runtime.
  *
- * Default budget lines were provisioned solely by `ensureBudgetLineCatalog()`,
- * which runs during application bootstrap. A branch created through
+ * Budget lines were provisioned solely by `ensureBudgetLineCatalog()`, which
+ * runs during application bootstrap. A branch created through
  * `POST /api/branches` therefore got its finance account and savings account
- * but **no budget lines at all** until someone restarted the server.
- *
- * Reproduced against the live API on a greenfield database:
- *
- *     POST /api/branches            -> 201, finance_accounts row created
- *     GET  /finance/budget-lines    -> 0 lines
- *     POST /teachers/:id/pay-salary -> 409 "Teacher salary budget line is not configured."
- *     (restart the server)
- *     GET  /finance/budget-lines    -> 17 lines
- *
- * The branch looked healthy — it accepted students and payments — but payroll
- * and every expense were silently impossible. On a greenfield deployment,
- * where creating the second branch is a day-one action, that is a live
- * blocker rather than a theoretical one.
+ * but **no budget lines at all** until someone restarted the server, and
+ * payroll answered 500 "…budget line is not configured".
  *
  * Fixed at the correct layer: the single-branch provisioning step is exported
- * and called by branch creation, rather than duplicating the catalogue or
- * asking operators to restart.
+ * and called by branch creation.
+ *
+ * WHAT PROVISIONING MEANS NOW
+ * ---------------------------
+ * Exactly TWO envelopes: the teacher and employee payroll budgets. They are a
+ * structural requirement — payroll cannot debit an envelope that does not
+ * exist. Everything else is created deliberately through
+ * `POST /finance/budget-lines`, because the taxonomy being complete does not
+ * mean every branch funds all forty-five subcategories.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import fs from 'node:fs';
@@ -36,7 +31,7 @@ import { ensureBranchBudgetLines } from '../db/organizationHierarchy.js';
 const routesDir = path.join(path.resolve(fileURLToPath(new URL('.', import.meta.url)), '..'), 'routes');
 const branchRouteSource = fs.readFileSync(path.join(routesDir, 'branches.routes.ts'), 'utf8');
 
-const PURPOSES_REQUIRED = ['teacher_salary', 'employee_salary', 'rent'];
+const PAYROLL_TARGETS_REQUIRED = ['teacher', 'employee'];
 
 function createBranchRow(id: string): void {
   db.prepare(
@@ -53,30 +48,54 @@ beforeAll(() => {
 });
 
 describe('a new branch is financially operational without a restart', () => {
-  it('provisioning creates the full default budget-line catalogue', () => {
+  it('provisioning creates the payroll envelopes and NOTHING else', () => {
     const branchId = 'br_test_provision';
     createBranchRow(branchId);
     expect(lineCount(branchId)).toBe(0);
 
     ensureBranchBudgetLines(db, branchId);
 
-    // The exact count is the catalogue size; asserting > 0 would pass even if
-    // only one line were created.
-    expect(lineCount(branchId)).toBeGreaterThanOrEqual(17);
+    // Exactly two. A branch must not be born owning forty-five zero-value
+    // envelopes for spend it may never make.
+    expect(lineCount(branchId)).toBe(2);
   });
 
-  it('provisions the purposes payroll and expenses actually look up', () => {
-    const branchId = 'br_test_purposes';
+  it('provisions the envelopes payroll actually resolves against', () => {
+    const branchId = 'br_test_payroll_targets';
     createBranchRow(branchId);
     ensureBranchBudgetLines(db, branchId);
 
-    for (const purpose of PURPOSES_REQUIRED) {
-      const row = db.prepare('SELECT id FROM budget_lines WHERE branch_id = ? AND purpose = ?')
-        .get(branchId, purpose);
-      // teacher_salary is the one whose absence produced
-      // "Teacher salary budget line is not configured."
-      expect(row, `missing budget line for purpose ${purpose}`).toBeDefined();
+    for (const target of PAYROLL_TARGETS_REQUIRED) {
+      const row = db.prepare(
+        'SELECT id, category_id FROM budget_lines WHERE branch_id = ? AND payroll_target = ?',
+      ).get(branchId, target) as { id: string; category_id: string } | undefined;
+      // Absence of the teacher envelope is what produced
+      // "Teacher payroll budget line is not configured for this branch."
+      expect(row, `missing payroll envelope for ${target}`).toBeDefined();
+      // Both sit under Salaries & Wages while remaining separate budgets.
+      expect(row!.category_id).toBe('sub_salaries_wages');
     }
+  });
+
+  it('keeps teacher and employee payroll budgets separate', () => {
+    const branchId = 'br_test_separate_payroll';
+    createBranchRow(branchId);
+    ensureBranchBudgetLines(db, branchId);
+    const ids = (db.prepare('SELECT id FROM budget_lines WHERE branch_id = ?').all(branchId) as Array<{ id: string }>)
+      .map((r) => r.id);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it('refuses a second payroll envelope of the same kind for one branch', () => {
+    const branchId = 'br_test_payroll_unique';
+    createBranchRow(branchId);
+    ensureBranchBudgetLines(db, branchId);
+    expect(() =>
+      db.prepare(
+        `INSERT INTO budget_lines (id, name, branch_id, category_id, payroll_target)
+         VALUES ('bl_dupe_payroll', 'Second teacher payroll', ?, 'sub_salaries_wages', 'teacher')`,
+      ).run(branchId),
+    ).toThrow();
   });
 
   it('is idempotent — provisioning twice does not duplicate lines', () => {

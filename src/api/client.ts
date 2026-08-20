@@ -22,7 +22,7 @@ export function onUnauthorized(listener: UnauthorizedListener) {
 }
 
 const BOOLEAN_FIELDS = new Set([
-  'read', 'isChapter', 'examFeePaid', 'certificateIssued', 'isActive', 'mustChangePassword', 'autoApproved', 'isMarketing',
+  'read', 'isChapter', 'examFeePaid', 'certificateIssued', 'isActive', 'mustChangePassword', 'autoApproved',
 ]);
 
 function toCamel(key: string): string {

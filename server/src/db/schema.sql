@@ -1196,25 +1196,45 @@ CREATE INDEX IF NOT EXISTS idx_finance_channels_category ON finance_category_cha
 CREATE UNIQUE INDEX IF NOT EXISTS uq_finance_channels_name
   ON finance_category_channels(category_id, name COLLATE NOCASE);
 
-CREATE TABLE IF NOT EXISTS budget_lines ( 
-  id               TEXT PRIMARY KEY, 
-  name             TEXT NOT NULL, 
-  current_amount   REAL NOT NULL DEFAULT 0, 
-  allocated_amount REAL NOT NULL DEFAULT 0, 
-  icon             TEXT, 
-  cost_type        TEXT NOT NULL DEFAULT 'fixed' CHECK (cost_type IN ('fixed','variable')), 
-  is_marketing     INTEGER NOT NULL DEFAULT 0, 
-  purpose          TEXT, 
+-- A BUDGET LINE is the third level of the hierarchy and a BRANCH-LEVEL
+-- ALLOCATION: an envelope of money under one canonical subcategory. The
+-- taxonomy is complete and organization-wide; the budget is sparse and
+-- deliberate. A subcategory existing does NOT imply that every branch funds it.
+--
+-- Column notes (kept OUT of the statement body on purpose — see the last one):
+--   category_id     mandatory in practice: migration 079 installs triggers that
+--                   reject a line without a SUBCATEGORY, which is what makes an
+--                   unclassifiable budget line unrepresentable rather than
+--                   merely discouraged.
+--   payroll_target  which payroll run this envelope funds. A business
+--                   relationship, not a lookup key of convenience: teacher and
+--                   employee payroll are separate budgets, and migration 079
+--                   allows at most one of each per branch.
+--   is_marketing    MIGRATION SCAFFOLD ONLY. Migration 003 is append-only and
+--                   the release gate replays it against a blank database, so it
+--                   inserts into this column and the column must exist for the
+--                   chain to run. Migration 079 DROPS it and no running
+--                   application ever sees it.
+--
+-- Nothing may be commented INSIDE this statement body: SQLite implements
+-- `ALTER TABLE … DROP COLUMN` by rewriting the stored CREATE text, and a
+-- comment adjacent to a dropped column is left behind as dangling syntax
+-- ("error in table budget_lines after drop column: incomplete input").
+CREATE TABLE IF NOT EXISTS budget_lines (
+  id               TEXT PRIMARY KEY,
+  name             TEXT NOT NULL,
+  current_amount   REAL NOT NULL DEFAULT 0,
+  allocated_amount REAL NOT NULL DEFAULT 0,
+  icon             TEXT,
+  cost_type        TEXT NOT NULL DEFAULT 'fixed' CHECK (cost_type IN ('fixed','variable')),
+  is_marketing     INTEGER NOT NULL DEFAULT 0,
   branch_id        TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
-  -- Third level of the hierarchy: which canonical node this envelope belongs to.
-  -- Nullable on purpose — a legacy line whose meaning could not be established
-  -- without guessing keeps NULL and is reported, never silently invented.
   category_id      TEXT REFERENCES finance_categories(id) ON DELETE RESTRICT,
   channel_id       TEXT REFERENCES finance_category_channels(id) ON DELETE SET NULL,
   sort_order       INTEGER NOT NULL DEFAULT 0,
   is_active        INTEGER NOT NULL DEFAULT 1,
-  mapping_status   TEXT NOT NULL DEFAULT 'needs_review'
-); 
+  payroll_target   TEXT CHECK (payroll_target IS NULL OR payroll_target IN ('teacher','employee'))
+);
 
 CREATE TABLE IF NOT EXISTS expense_requests ( 
   id                   TEXT PRIMARY KEY, 
@@ -1294,7 +1314,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_idempotency ON payments(idempotenc
 CREATE TABLE IF NOT EXISTS financial_transactions ( 
   id            TEXT PRIMARY KEY, 
   type          TEXT NOT NULL CHECK (type IN ('income','expense','saving_transfer','budget_charge')), 
+  -- Human-readable label. For INCOME rows this is the billing vocabulary
+  -- (fee/book/exam/placement/donation/…), which the expense taxonomy does not
+  -- model. It is NEVER the accounting authority — see `finance_category_id`.
   category      TEXT NOT NULL, 
+  -- THE accounting authority for expense-side rows: a real foreign key into the
+  -- canonical taxonomy. Classification is resolved by joining
+  -- `finance_categories.classification`, never by matching text. NULL on income
+  -- and on treasury/budget transfers, which are not expenses.
+  finance_category_id TEXT REFERENCES finance_categories(id) ON DELETE RESTRICT, 
   amount        REAL NOT NULL, 
   date          TEXT NOT NULL, 
   description   TEXT, 
@@ -1306,12 +1334,12 @@ CREATE TABLE IF NOT EXISTS financial_transactions (
 ); 
 
 CREATE INDEX IF NOT EXISTS idx_budget_lines_branch   ON budget_lines(branch_id); 
--- Indexes on the hierarchy columns live in migration 077, NOT here.
+-- Indexes over the hierarchy columns live in migrations 077/079, NOT here.
 -- schema.sql runs BEFORE migrations, and on an EXISTING database
 -- `CREATE TABLE IF NOT EXISTS budget_lines` is a no-op — so an index over
 -- `category_id` would be created against a table that has not gained the column
 -- yet and boot would die with "no such column: category_id". Proven on a
--- simulated legacy upgrade before this comment was written. 
+-- simulated upgrade before this comment was written. 
 CREATE INDEX IF NOT EXISTS idx_fin_tx_branch         ON financial_transactions(branch_id); 
 CREATE INDEX IF NOT EXISTS idx_fin_tx_date           ON financial_transactions(date); 
 CREATE INDEX IF NOT EXISTS idx_fin_tx_type           ON financial_transactions(type); 

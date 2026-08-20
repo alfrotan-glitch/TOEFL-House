@@ -73,15 +73,22 @@ const stmtFixedTotal = db.prepare(`SELECT COALESCE(SUM(allocated_amount),0) as f
 // total can never exceed the figure the calculate endpoint published.
 const stmtPeriodDistributed = db.prepare(
   `SELECT COALESCE(SUM(amount),0) as distributed FROM financial_transactions
-    WHERE category='profit_distribution' AND date BETWEEN ? AND ? AND branch_id=?`
+    WHERE finance_category_id='sub_owner_drawings' AND date BETWEEN ? AND ? AND branch_id=?`
 );
 const stmtVariableTotal = db.prepare(`SELECT COALESCE(SUM(allocated_amount),0) as variableTotal FROM budget_lines WHERE branch_id=? AND cost_type='variable'`);
-const stmtTeacherCost = db.prepare(`SELECT COALESCE(SUM(amount),0) as teacherCost FROM financial_transactions WHERE category='salary' AND type='expense' AND date BETWEEN ? AND ? AND branch_id=?`);
+const stmtTeacherCost = db.prepare(`SELECT COALESCE(SUM(amount),0) as teacherCost FROM financial_transactions WHERE finance_category_id='sub_salaries_wages' AND type='expense' AND date BETWEEN ? AND ? AND branch_id=?`);
 
+// Marketing spend is answered by the TAXONOMY.
+//
+// Joining the canonical tree means "marketing" is defined in exactly one place:
+// anything filed under a Marketing & Promotion subcategory counts, including
+// subcategories added later. A per-budget-line flag would be a second opinion
+// about the same fact, free to drift from the first.
 const stmtMarketingCost = db.prepare(
-  `SELECT COALESCE(SUM(amount),0) as c FROM financial_transactions 
-   WHERE type='expense' AND reference_id IN (SELECT id FROM budget_lines WHERE branch_id=? AND is_marketing=1) 
-   AND date BETWEEN ? AND ?`
+  `SELECT COALESCE(SUM(ft.amount),0) as c FROM financial_transactions ft
+   JOIN finance_categories sub ON sub.id = ft.finance_category_id
+   WHERE ft.type='expense' AND ft.branch_id=? AND sub.parent_id='cat_marketing_promotion'
+   AND ft.date BETWEEN ? AND ?`
 );
 
 // Outstanding = what the student actually OWES. Two corrections:
@@ -152,8 +159,8 @@ const stmtLowClasses = db.prepare(`
 const stmtUnderperformingTeachers = db.prepare(`SELECT full_name, performance_score FROM teachers WHERE branch_id=? AND status='active' AND performance_score < 80`);
 
 const stmtInsertFinTx = db.prepare(
-  `INSERT INTO financial_transactions (id, type, category, amount, date, description, reference_id, operator_name, branch_id)
-   VALUES (?, 'expense', 'profit_distribution', ?, ?, ?, ?, ?, ?)`
+  `INSERT INTO financial_transactions (id, type, category, finance_category_id, amount, date, description, reference_id, operator_name, branch_id)
+   VALUES (?, 'expense', 'owner_drawing', 'sub_owner_drawings', ?, ?, ?, ?, ?, ?)`
 );
 
 // NEW: Profitability Analytics Statements

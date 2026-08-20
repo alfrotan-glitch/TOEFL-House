@@ -2,7 +2,7 @@
  * BOS — management profit withdrawal integrity.
  *
  * `POST /api/bos/profit-distribution/withdraw` is the only money mutator in the
- * BOS router: it decrements branch cash and books a `profit_distribution`
+ * BOS router: it decrements branch cash and books an owner-drawing
  * expense. It had no dedicated test coverage.
  *
  * BOS-1 (the defect this suite is written against):
@@ -64,7 +64,7 @@ const mainBalance = () =>
 
 const withdrawnTotal = () =>
   (db.prepare(
-    "SELECT COALESCE(SUM(amount),0) s FROM financial_transactions WHERE category='profit_distribution' AND branch_id=?",
+    "SELECT COALESCE(SUM(amount),0) s FROM financial_transactions WHERE finance_category_id='sub_owner_drawings' AND branch_id=?",
   ).get(BR) as { s: number }).s;
 
 const calculate = async () =>
@@ -109,7 +109,7 @@ beforeAll(async () => {
   // Small fixed cost so the 6-month reserve target is easily met and the
   // reserve guard is never the thing under test.
   db.prepare(
-    "INSERT OR IGNORE INTO budget_lines (id,name,allocated_amount,cost_type,branch_id) VALUES ('bos_bl','Rent',1000,'fixed',?)",
+    "INSERT OR IGNORE INTO budget_lines (id,name,allocated_amount,cost_type,category_id,branch_id) VALUES ('bos_bl','Rent',1000,'fixed','sub_rent',?)",
   ).run(BR);
   app = createApp();
 });
@@ -249,7 +249,7 @@ describe('BOS · withdrawal authorization and input validation', () => {
     // Identify the row by its own id: ids are UUIDs, so ordering by id is not
     // insertion order and would compare different rows.
     const before = db
-      .prepare("SELECT id, amount, date FROM financial_transactions WHERE category='profit_distribution' AND branch_id=?")
+      .prepare("SELECT id, amount, date FROM financial_transactions WHERE finance_category_id='sub_owner_drawings' AND branch_id=?")
       .all(BR) as Array<{ id: string; amount: number; date: string }>;
     expect(before).toHaveLength(1);
 
@@ -260,7 +260,7 @@ describe('BOS · withdrawal authorization and input validation', () => {
       .get(before[0].id);
     expect(after).toEqual(before[0]);
     expect(
-      (db.prepare("SELECT COUNT(*) c FROM financial_transactions WHERE category='profit_distribution' AND branch_id=?").get(BR) as { c: number }).c,
+      (db.prepare("SELECT COUNT(*) c FROM financial_transactions WHERE finance_category_id='sub_owner_drawings' AND branch_id=?").get(BR) as { c: number }).c,
     ).toBe(2);
   });
 });

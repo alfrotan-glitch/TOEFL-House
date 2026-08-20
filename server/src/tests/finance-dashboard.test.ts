@@ -86,12 +86,12 @@ beforeAll(async () => {
     VALUES (?, 'income', 'fee', 99999, ?, 'Other branch fee', ?, 'Tester', ?)`).run(id('tx'), date, id('ref'), BRANCH_B);
 
   // Budget: one funded line (charge from a seeded organization treasury).
-  db.prepare(`INSERT OR IGNORE INTO budget_lines (id, name, branch_id, allocated_amount, current_amount, purpose, cost_type, is_marketing)
-    VALUES (?, 'Utilities', ?, 20000, 15000, 'utility', 'variable', 0)`).run('dash_budget_util', BRANCH_A);
-  db.prepare(`INSERT OR IGNORE INTO budget_lines (id, name, branch_id, allocated_amount, current_amount, purpose, cost_type, is_marketing)
-    VALUES (?, 'Exhausted Line', ?, 5000, 0, 'marketing', 'variable', 1)`).run('dash_budget_exh', BRANCH_A);
-  db.prepare(`INSERT OR IGNORE INTO budget_lines (id, name, branch_id, allocated_amount, current_amount, purpose, cost_type, is_marketing)
-    VALUES (?, 'Other Branch Budget', ?, 7000, 7000, 'utility', 'fixed', 0)`).run('dash_budget_b', BRANCH_B);
+  db.prepare(`INSERT OR IGNORE INTO budget_lines (id, name, branch_id, allocated_amount, current_amount, category_id, cost_type)
+    VALUES (?, 'Utilities', ?, 20000, 15000, 'sub_utilities', 'variable')`).run('dash_budget_util', BRANCH_A);
+  db.prepare(`INSERT OR IGNORE INTO budget_lines (id, name, branch_id, allocated_amount, current_amount, category_id, cost_type)
+    VALUES (?, 'Exhausted Line', ?, 5000, 0, 'sub_digital_advertising', 'variable')`).run('dash_budget_exh', BRANCH_A);
+  db.prepare(`INSERT OR IGNORE INTO budget_lines (id, name, branch_id, allocated_amount, current_amount, category_id, cost_type)
+    VALUES (?, 'Other Branch Budget', ?, 7000, 7000, 'sub_utilities', 'fixed')`).run('dash_budget_b', BRANCH_B);
 
   // Pending approval in branch A.
   db.prepare(`INSERT INTO expense_requests (id, title, amount, budget_line_id, requester, status, date, branch_id, expense_kind, payment_method, auto_approved, requester_user_id, approved_by_user_id)
