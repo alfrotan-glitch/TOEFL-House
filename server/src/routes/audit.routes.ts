@@ -1,6 +1,12 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
-import { authenticate, authorize, denyPermissionless, resolveBranchScope } from '../middleware/auth.js';
+import {
+  authenticate,
+  authorize,
+  canAccessBranchResource,
+  denyPermissionless,
+  resolveBranchScope,
+} from '../middleware/auth.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 
 export const auditRouter = Router();
@@ -54,16 +60,41 @@ auditRouter.get(
 export const notificationsRouter = Router();
 notificationsRouter.use(authenticate);
 
-const stmtGetNotifications = db.prepare(
-  `SELECT * FROM notifications 
-   WHERE (user_id = ? OR (user_id IS NULL AND (branch_id = ? OR branch_id IS NULL))) 
+/**
+ * Reads honour the caller's RESOLVED branch scope, not their home branch.
+ *
+ * `users.branch_id` is an identity attribute and authorizes nothing (C-8);
+ * `resolveBranchScope` is the authority, and 74 other route reads already use
+ * it. Scoping on identity here meant an organization-scoped owner could not
+ * reach another branch's notifications at all — including an expense awaiting
+ * their own approval — while the default for everyone else was unchanged.
+ *
+ * The `user_id` clause is retained deliberately. Nothing writes that column
+ * today, so it matches nothing; removing it would silently decide that
+ * notifications are never user-targeted, which is exactly the question left
+ * open as A-9.1.
+ */
+const stmtGetNotificationsScoped = db.prepare(
+  `SELECT * FROM notifications
+   WHERE (user_id = ? OR (user_id IS NULL AND (branch_id = ? OR branch_id IS NULL)))
    ORDER BY date DESC LIMIT 100`
 );
-const stmtGetNotificationById = db.prepare('SELECT * FROM notifications WHERE id = ?');
+const stmtGetNotificationsAllBranches = db.prepare(
+  `SELECT * FROM notifications ORDER BY date DESC LIMIT 100`
+);
+const stmtGetNotificationById = db.prepare(
+  'SELECT id, user_id, branch_id FROM notifications WHERE id = ?'
+);
 const stmtMarkNotificationRead = db.prepare(
   'UPDATE notifications SET read = 1 WHERE id = ? AND (user_id = ? OR user_id IS NULL)'
 );
-// Do not touch global (user_id IS NULL) notifications, as it affects all users.
+/**
+ * Read state is SHARED per notification row: nothing writes `user_id`, so one
+ * row serves everyone who can see it. Whether that is the intended model is
+ * undecided (A-9.1) and this statement does not decide it — it is unchanged.
+ * What changed is that the handler now reports how many rows it marked, so a
+ * call that changes nothing can no longer present itself as a success.
+ */
 const stmtMarkAllUserNotificationsRead = db.prepare(
   'UPDATE notifications SET read = 1 WHERE user_id = ? AND read = 0'
 );
@@ -73,30 +104,40 @@ notificationsRouter.get(
   denyPermissionless,
   ah(async (req, res) => {
     const userId = req.user?.userId;
-    const branchId = req.user?.branchId;
-    if (!userId || !branchId) throw new HttpError(403, 'User context is missing.');
-    
-    // Fetch notifications specifically for this user, or global branch/org notifications
-    const rows = stmtGetNotifications.all(userId, branchId);
+    if (!userId) throw new HttpError(403, 'User context is missing.');
+
+    const scope = resolveBranchScope(req);
+    const rows = scope.isAll
+      ? stmtGetNotificationsAllBranches.all()
+      : stmtGetNotificationsScoped.all(userId, scope.branchId);
     res.json(rows);
   })
 );
 
 notificationsRouter.patch(
   '/:id/read',
+  denyPermissionless,
   ah(async (req, res) => {
     const userId = req.user?.userId;
     if (!userId) throw new HttpError(403, 'User context is missing.');
-    
-    const existing = stmtGetNotificationById.get(req.params.id) as 
-      | { id: string; user_id: string | null } 
+
+    const existing = stmtGetNotificationById.get(req.params.id) as
+      | { id: string; user_id: string | null; branch_id: string | null }
       | undefined;
-      
+
     if (!existing) throw new HttpError(404, 'Notification not found.');
+
+    // A notification belongs to a branch, and marking it read hides it from
+    // everyone who can see it. So the branch is authorized through the same
+    // helper every other cross-branch action uses. Without this the handler
+    // let any authenticated principal suppress another branch's alert.
+    if (existing.branch_id && !canAccessBranchResource(req, existing.branch_id)) {
+      throw new HttpError(403, 'This notification belongs to a branch outside your authorized scope.');
+    }
     if (existing.user_id && existing.user_id !== userId) {
       throw new HttpError(403, 'You do not have permission to modify this notification.');
     }
-    
+
     stmtMarkNotificationRead.run(req.params.id, userId);
     res.json({ ok: true });
   })
@@ -104,12 +145,17 @@ notificationsRouter.patch(
 
 notificationsRouter.post(
   '/read-all',
+  denyPermissionless,
   ah(async (req, res) => {
     const userId = req.user?.userId;
     if (!userId) throw new HttpError(403, 'User context is missing.');
-    // Global notifications (user_id IS NULL) are left untouched to avoid clearing them for everyone else.
-    stmtMarkAllUserNotificationsRead.run(userId);
-    res.json({ ok: true });
+
+    // Reports the number of rows actually marked. The semantics are unchanged
+    // and remain undecided (A-9.1): because nothing writes `user_id`, this
+    // currently matches nothing and answers 0. That is the honest answer, and
+    // it is now visible instead of being hidden behind a bare `{ ok: true }`.
+    const result = stmtMarkAllUserNotificationsRead.run(userId);
+    res.json({ ok: true, marked: result.changes });
   })
 );
 
