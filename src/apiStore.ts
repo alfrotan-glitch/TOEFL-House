@@ -187,23 +187,99 @@ export function useApiStore() {
   }), []);
 
   /**
-   * Marks datasets as changed so dependent tabs refetch on next visit.
-   * Call after any mutation, alongside the immediate reload of the current view.
+   * Dataset version counters — the canonical freshness signal.
+   * ==========================================================================
+   * Evicting a tab from `loadedTabs` only helps a component that is about to
+   * MOUNT. It does nothing for a component that is already on screen holding
+   * its own fetched copy (ClassesView's academic config, SessionsView's rows,
+   * the placement workspace...). Those components stayed stale until the user
+   * pressed F5, which was effectively the only global invalidation in the app.
+   *
+   * Every dataset therefore carries a monotonic version. A consumer puts the
+   * version of the dataset it displays into its fetch effect's dependency list,
+   * so a mutation ANYWHERE — another component, another panel, another tab —
+   * bumps the counter and the consumer refetches from the server. No polling,
+   * no timers, no remounting, no page reload.
+   *
+   * `datasetVersion` is the read side; `invalidate()` is the write side. Both
+   * flow through the dependency map below so the graph is declared once.
+   */
+  const [datasetVersion, setDatasetVersion] = useState<Record<string, number>>({});
+
+  /**
+   * Dataset dependency graph.
+   *
+   * Mutating the key dataset also makes these datasets stale, because their
+   * server-rendered content is derived from it. Declared once here rather than
+   * by having each mutation site remember to notify its consumers.
+   *
+   * Deliberately narrow: an academic-configuration change alters the levels,
+   * rooms, slots and fees that classes/sessions/attendance render, so those are
+   * listed — but a payment does NOT invalidate the academic catalog. Adding an
+   * edge costs every consumer of that dataset a refetch, so edges are only
+   * present where the displayed data genuinely derives from the source.
+   */
+  const DATASET_DEPENDENTS: Record<string, readonly string[]> = useMemo(() => ({
+    // Academic configuration feeds class/session scheduling and the pickers
+    // that classes, visitors and students render.
+    academic:   ['classes', 'sessions', 'attendance'],
+    // Class changes drive the session grid and the attendance register.
+    classes:    ['sessions', 'attendance'],
+    // Enrolling/among students changes class rosters and attendance lists.
+    students:   ['attendance'],
+    // Money movements change balances shown on the student and finance views.
+    payments:   ['finance'],
+    invoices:   ['finance', 'payments'],
+    // Teacher assignment is rendered inside classes and sessions.
+    teachers:   ['classes', 'sessions'],
+    // Placement outcomes change visitor state and conversion eligibility.
+    placement:  ['visitors'],
+    // Offerings are generated from the catalog and consumed by class creation.
+    offerings:  ['classes', 'academic'],
+    // Branch/organization settings change fees and scoping everywhere academic.
+    organization: ['academic'],
+  }), []);
+
+  /** Expand a dataset list to include everything derived from it (1 level, no cycles). */
+  const expandDatasets = useCallback((datasets: string[]): string[] => {
+    const out = new Set<string>();
+    for (const ds of datasets) {
+      out.add(ds);
+      for (const dep of DATASET_DEPENDENTS[ds] ?? []) out.add(dep);
+    }
+    return [...out];
+  }, [DATASET_DEPENDENTS]);
+
+  /**
+   * Marks datasets as changed so dependent tabs refetch on next visit AND any
+   * already-mounted consumer refetches immediately.
+   *
+   * Call after a mutation has SUCCEEDED. A failed mutation must never reach
+   * this function: nothing changed on the server, so nothing should refetch.
    */
   const invalidate = useCallback((...datasets: string[]) => {
+    const affected = expandDatasets(datasets);
     setLoadedTabs((prev) => {
       const next = new Set(prev);
-      for (const ds of datasets) {
+      for (const ds of affected) {
         for (const tab of TAB_DATASETS[ds] ?? []) next.delete(tab);
       }
       // Every backend mutation writes an audit log, so the trail is always stale.
       next.delete('audit');
       return next;
     });
+    // Bump the version of every affected dataset so mounted consumers refetch.
+    // `audit` is always included: every backend mutation writes an audit row, so
+    // a mounted audit log is stale after any successful write anywhere.
+    setDatasetVersion((prev) => {
+      const next = { ...prev };
+      for (const ds of [...affected, 'audit']) next[ds] = (next[ds] ?? 0) + 1;
+      return next;
+    });
     // The roster is cached separately (reloadStudentsLite reuses whatever is in
     // memory), so evicting tabs is not enough — mark it stale too.
-    if (datasets.includes('students')) setRosterStale(true);
-  }, [TAB_DATASETS, setRosterStale]);
+    if (affected.includes('students')) setRosterStale(true);
+  }, [TAB_DATASETS, expandDatasets, setRosterStale]);
   const loadingTabsRef = useRef<Set<string>>(new Set());
 
   // Keep the working branch in sync with the authenticated user's branch by
@@ -705,6 +781,17 @@ export function useApiStore() {
     setIsLoading(true);
     setLoadedTabs(new Set());
     loadingTabsRef.current.clear();
+    // Branch switch / re-login: bump EVERY known dataset so components that are
+    // still mounted refetch under the new scope instead of continuing to show
+    // the previous branch's rows. Bumping (rather than resetting to 0) keeps the
+    // counter monotonic, so a late response from the old branch can still be
+    // recognised as stale by the consumers' request-generation guards.
+    setDatasetVersion((prev) => {
+      const next: Record<string, number> = { ...prev };
+      for (const ds of Object.keys(TAB_DATASETS)) next[ds] = (next[ds] ?? 0) + 1;
+      for (const ds of Object.keys(DATASET_DEPENDENTS)) next[ds] = (next[ds] ?? 0) + 1;
+      return next;
+    });
 
     // Startup should establish only the application shell and scope metadata.
     // Operational collections are hydrated by ensureTabData after the first paint.
@@ -712,7 +799,7 @@ export function useApiStore() {
 
     setLoadedTabs(new Set(['navigation']));
     setIsLoading(false);
-  }, [reloadBranches, reloadCampuses, reloadOrganization]);
+  }, [reloadBranches, reloadCampuses, reloadOrganization, TAB_DATASETS, DATASET_DEPENDENTS]);
 
   useEffect(() => {
     void (async () => {
@@ -1473,6 +1560,10 @@ export function useApiStore() {
     createBranch, updateBranch, deactivateBranch, deleteBranch,
     // Utils
     changeBranch, reloadAll, ensureTabData, ensureFinanceSection, isTabLoading, reloadNotifications, reloadVisitors, reloadFinanceDashboard, reloadDashboardSummary,
+    // Canonical server-state freshness surface. `invalidate` is the single
+    // write side for cache eviction; `datasetVersion` is the read side that
+    // mounted consumers subscribe to. See the dataset dependency graph above.
+    invalidate, datasetVersion,
     studentsAreLite, ensureFullStudents, studentBalances, reloadStudentBalances, studentSummary,
     attendanceSummary, reloadAttendanceSummary,
     // Existing business operations

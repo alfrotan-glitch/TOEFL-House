@@ -125,7 +125,10 @@ describe('apiStore tab cache invalidation', () => {
   it('marks the separately-cached lite roster stale when students change', () => {
     // reloadStudentsLite keeps its own in-memory copy, so evicting tabs alone
     // would not refresh the student pickers on Exams/Books/Visitors.
-    expect(storeSrc).toContain("if (datasets.includes('students')) setRosterStale(true);");
+    // `affected` is the caller's datasets expanded through DATASET_DEPENDENTS, so
+    // the roster is also marked stale when students become stale indirectly
+    // (e.g. an enrolment invalidating a dataset that students derives from).
+    expect(storeSrc).toContain("if (affected.includes('students')) setRosterStale(true);");
     expect(storeSrc).toContain('if (alreadyPopulated && !rosterStaleRef.current) return Promise.resolve();');
     expect(storeSrc).toMatch(/setStudentsAreLite\(true\); setRosterStale\(false\)/);
   });

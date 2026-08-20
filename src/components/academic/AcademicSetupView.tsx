@@ -13,6 +13,7 @@ import ProgramVersionsPanel from './ProgramVersionsPanel';
 import ClassGenerationWizard from './ClassGenerationWizard';
 import OfferingsPanel from './OfferingsPanel';
 import { ShamsiDateInput } from '../common/ShamsiDateInput';
+import { useInvalidate } from '../../state/serverStateFreshness';
 
 /**
  * Canonical workflow order. The union used to be declared in a completely
@@ -88,6 +89,7 @@ export default function AcademicSetupView({ branchId, activeRole, permissionCode
   // canonical permissions, so the UI asks the SAME question rather than
   // re-deriving capability from role names. `owner` is special-cased only
   // because the server grants it a global bypass in `requirePermission`.
+  const invalidate = useInvalidate();
   const hasPermissionCode = (code: string) => activeRole === 'owner' || (permissionCodes?.includes(code) ?? false);
   /** Terms, time slots, rooms, programs, levels — `AcademicSetup.Edit`. */
   const canEditAcademicInfrastructure = hasPermissionCode('AcademicSetup.Edit');
@@ -186,6 +188,12 @@ export default function AcademicSetupView({ branchId, activeRole, permissionCode
       await fn();
       await reload();
       setPanelRefreshKey((k) => k + 1);
+      // Server truth has changed. Publishing it on the canonical channel makes
+      // every other consumer of academic configuration (ClassesView pickers,
+      // SessionsView, attendance) refetch, instead of showing the previous
+      // configuration until the operator pressed F5. Reached only after `fn()`
+      // resolved, so a failed mutation never invalidates.
+      invalidate('academic');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Operation failed');
     } finally { setBusy(false); }

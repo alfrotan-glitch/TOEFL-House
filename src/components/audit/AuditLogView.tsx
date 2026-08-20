@@ -7,6 +7,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Search, RefreshCw } from 'lucide-react';
 import { api } from '../../api/client';
+import { useDatasetVersion } from '../../state/serverStateFreshness';
 import { ShamsiDateInput } from '../common/ShamsiDateInput';
 
 interface AuditLogRow {
@@ -56,9 +57,12 @@ export default function AuditLogView() {
     }
   }, [operatorName, action, dateFrom, dateTo]);
 
+  // Every backend mutation writes an audit row, so the trail is stale after any
+  // successful write anywhere in the app.
+  const auditVersion = useDatasetVersion('audit');
   useEffect(() => {
     void (async () => { setRows([]); setTotal(null); await fetchPage(0, false); })();
-  }, [fetchPage]);
+  }, [fetchPage, auditVersion]);
 
   return (
     <div className="space-y-5 text-left" dir="ltr">

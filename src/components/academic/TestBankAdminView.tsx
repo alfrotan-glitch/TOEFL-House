@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Plus, FileText, Trash2, X, Save, Eye, Archive, CheckCircle2, Upload, Loader2, Mic, BookOpen, PenLine, MessageSquareText } from 'lucide-react';
 import { api } from '../../api/client';
+import { useInvalidate } from '../../state/serverStateFreshness';
 
 interface Question { id?: string; key: string; qtype: string; prompt: string; options: Array<{ key: string; text: string }> | null; answerKey: string; points: number; orderIndex?: number; difficulty?: string | null; sectionKey?: string | null; }
 interface Section { id?: string; key: string; kind: string; title?: string | null; audioUrl?: string | null; transcript?: string | null; body?: string | null; durationSeconds?: number | null; }
@@ -16,6 +17,7 @@ function emptyQuestion(): Question { return { key: '', qtype: 'mcq', prompt: '',
 function emptySection(): Section { return { key: '', kind: 'audio_track', title: '', audioUrl: null, transcript: null, body: null, durationSeconds: null }; }
 
 export default function TestBankAdminView({ triggerToast }: { triggerToast: (m: string, t: 'success' | 'error' | 'info') => void }) {
+  const invalidate = useInvalidate();
   const [tests, setTests] = useState<Test[]>([]);
   const [rubrics, setRubrics] = useState<Rubric[]>([]);
   const [media, setMedia] = useState<Media[]>([]);
@@ -54,6 +56,7 @@ export default function TestBankAdminView({ triggerToast }: { triggerToast: (m: 
       };
       if (isNew) await api.post<Test>('/placement/test-bank', payload);
       else await api.put<Test>(`/placement/test-bank/${editing.id}`, payload);
+      invalidate('placement');
       triggerToast(isNew ? 'Test created.' : 'Test updated (new content version).', 'success');
       setEditing(null); setIsNew(false);
       await load();
@@ -64,6 +67,7 @@ export default function TestBankAdminView({ triggerToast }: { triggerToast: (m: 
   const setStatus = async (t: Test, status: 'active' | 'archived') => {
     try {
       await api.post(`/placement/test-bank/${t.id}/${status === 'active' ? 'activate' : 'archive'}`, {});
+      invalidate('placement');
       triggerToast(status === 'active' ? 'Test activated.' : 'Test archived (history preserved).', 'success');
       await load();
     } catch (e: any) { triggerToast(e?.message || 'Action failed.', 'error'); }
@@ -89,6 +93,7 @@ export default function TestBankAdminView({ triggerToast }: { triggerToast: (m: 
     if (!rubricForm.title) { triggerToast('Rubric title is required.', 'error'); return; }
     try {
       await api.post('/placement/rubrics', { title: rubricForm.title, kind: rubricForm.kind, criteria: rubricForm.criteria });
+      invalidate('placement');
       triggerToast('Rubric created.', 'success');
       setRubricForm({ title: '', kind: 'writing', criteria: [{ key: 'content', label: 'Content', weight: 50, maxScore: 10 }, { key: 'language', label: 'Language', weight: 50, maxScore: 10 }] });
       await load();

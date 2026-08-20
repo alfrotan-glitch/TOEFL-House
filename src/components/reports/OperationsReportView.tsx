@@ -8,6 +8,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Printer, RefreshCw, Users, UserPlus, GraduationCap, FileText, BookOpen, Wallet, TrendingUp, TrendingDown } from 'lucide-react';
 import { api } from '../../api/client';
+import { useDatasetVersion } from '../../state/serverStateFreshness';
 import type { OperationsReport } from '../../types';
 import { formatAFN } from '../../utils/format';
 import { formatJalaliDateTime } from '../../utils/jalali';
@@ -116,9 +117,11 @@ export default function OperationsReportView() {
     }
   }, [period, gender, from, to]);
 
+  // The operations report aggregates students, visitors and classes.
+  const reportVersion = useDatasetVersion('students', 'visitors', 'classes');
   useEffect(() => {
     void (async () => { await load(); })();
-  }, [load]);
+  }, [load, reportVersion]);
 
   const m = report?.meta;
 

@@ -7,6 +7,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Wand2, RefreshCw, Check, AlertCircle, Layers, Play, Loader2, X, Info, DoorOpen, Clock, Users, DollarSign } from 'lucide-react';
 import { api } from '../../api/client';
+import { useInvalidate } from '../../state/serverStateFreshness';
 import { formatAFN } from '../../utils/format';
 
 interface Offering {
@@ -47,6 +48,7 @@ const inputCls = 'w-full text-sm border border-slate-200 rounded-xl px-3 py-2.5 
 const labelCls = 'block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1.5';
 
 export default function ClassGenerationWizard({ branchId }: { branchId?: string }) {
+  const invalidate = useInvalidate();
   const [offerings, setOfferings] = useState<Offering[]>([]);
   const [offeringId, setOfferingId] = useState('');
   const [genderPolicy, setGenderPolicy] = useState<'female' | 'male' | 'mixed'>('mixed');
@@ -121,6 +123,8 @@ export default function ClassGenerationWizard({ branchId }: { branchId?: string 
       const normalized: RunResponse = { run: res?.run, items: Array.isArray(res?.items) ? res.items : [] };
       setRun(normalized);
       setPreview(null);
+      // A draft run persists class-generation rows server-side.
+      invalidate('classes');
       setMsg(`Draft saved successfully: ${normalized.items.length} class section${normalized.items.length === 1 ? '' : 's'}. Review the room/slot allocation before publishing.`);
     } catch (err: unknown) { setError(err instanceof Error ? err.message : 'Draft creation failed'); }
     finally { setBusy(null); }
@@ -134,6 +138,9 @@ export default function ClassGenerationWizard({ branchId }: { branchId?: string 
       const items = Array.isArray(res?.items) ? res.items : [];
       setRun({ run: res?.run, items });
       const createdCount = items.filter((i) => i.status === 'created').length;
+      // Publishing creates live classes, which the classes/sessions/attendance
+      // views all render.
+      invalidate('classes');
       setMsg(`Published successfully: ${createdCount} live class section${createdCount === 1 ? '' : 's'} created.`);
       await loadInitialData();
     } catch (err: unknown) { setError(err instanceof Error ? err.message : 'Publish failed'); }

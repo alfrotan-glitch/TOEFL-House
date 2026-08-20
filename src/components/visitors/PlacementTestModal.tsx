@@ -3,6 +3,7 @@ import {
   Award, CheckCircle2, Clock3, FileText, Loader2, MessageSquareText, Save, Sparkles, X, BookOpen, ShieldCheck, Pause, Play, SkipForward, Timer, AlertTriangle, Mic, Square
 } from 'lucide-react';
 import { api } from '../../api/client';
+import { useInvalidate } from '../../state/serverStateFreshness';
 import type { Visitor } from '../../types';
 
 type ComponentType = 'skill_scores' | 'written_test' | 'interview' | 'level_assessment' | 'custom_score' | 'content_test';
@@ -53,6 +54,7 @@ function fmtRemaining(sec: number|null|undefined): string {
 }
 
 export default function PlacementTestModal({ visitor, onClose, onCompleted, triggerToast }: Props) {
+  const invalidate = useInvalidate();
   const [profile,setProfile]=useState<PlacementProfile|null>(null);
   const [requirement,setRequirement]=useState<Requirement|null>(null);
   const [attempt,setAttempt]=useState<Attempt|null>(null);
@@ -123,6 +125,7 @@ export default function PlacementTestModal({ visitor, onClose, onCompleted, trig
     if (!attempt) return;
     try {
       const res = await api.put<any>(`/placement/visitors/${visitor.id}/placement/attempts/${attempt.id}/tests/${component.key}/start`, {});
+      invalidate('placement');
       triggerToast(`${component.label} timer started (${res.timeLimitSeconds}s).`,'info');
       await loadWorkspace();
     } catch(err:any){ triggerToast(err?.message || 'Could not start the timer.','error'); }
@@ -150,6 +153,7 @@ export default function PlacementTestModal({ visitor, onClose, onCompleted, trig
     setSubmittingContent(component.key);
     try{
       const res=await api.put<any>(`/placement/visitors/${visitor.id}/placement/attempts/${attempt.id}/tests/${component.key}/responses`,{answers});
+      invalidate('placement');
       setContentAutoScore(prev=>({...prev,[component.key]:{earned:res.autoScore,max:res.maxScore,complete:res.complete,answered:res.answered}}));
       setContentFeedback(prev=>({...prev,[component.key]:res.feedback||{}}));
       await loadWorkspace();
@@ -162,6 +166,7 @@ export default function PlacementTestModal({ visitor, onClose, onCompleted, trig
     setStarting(true);
     try {
       await api.post<any>(`/placement/visitors/${visitor.id}/placement/attempts`, {});
+      invalidate('placement');
       triggerToast('Placement attempt started.','success');
       await loadWorkspace();
     } catch(err:any){ triggerToast(err?.message || 'Could not start the assessment.','error'); }
@@ -172,6 +177,7 @@ export default function PlacementTestModal({ visitor, onClose, onCompleted, trig
     setSkipping(true);
     try {
       await api.post<any>(`/placement/visitors/${visitor.id}/placement/attempts`, { skip: true, reason: 'Candidate opted to skip optional placement.' });
+      invalidate('placement');
       triggerToast('Placement skipped (exemption recorded).','success');
       await onCompleted();
     } catch(err:any){ triggerToast(err?.message || 'Could not record the skip.','error'); }
@@ -198,6 +204,7 @@ export default function PlacementTestModal({ visitor, onClose, onCompleted, trig
       }
       else payload.score=Number(draft.score);
       const results=await api.put<AttemptResult[]>(`/placement/visitors/${visitor.id}/placement/attempts/${attempt!.id}/components/${component.key}`,payload);
+      invalidate('placement');
       await loadWorkspace();
       triggerToast(`${component.label} saved.`,'success');
       void results;
@@ -210,6 +217,7 @@ export default function PlacementTestModal({ visitor, onClose, onCompleted, trig
     setCompleting(true);
     try{
       const result=await api.post<any>(`/placement/visitors/${visitor.id}/placement/attempts/${attempt.id}/complete`,{notes:null});
+      invalidate('placement');
       // The pass/fail verdict is decided server-side; the UI only reports it.
       // A failed sitting is still a recorded result, so it is surfaced as a
       // warning rather than a success — never as a silent green "completed".
@@ -231,6 +239,7 @@ export default function PlacementTestModal({ visitor, onClose, onCompleted, trig
     setPausing(true);
     try{
       await api.post<any>(`/placement/visitors/${visitor.id}/placement/attempts/${attempt.id}/pause`, { reason: 'Paused by operator' });
+      invalidate('placement');
       triggerToast('Attempt paused.','info');
       await loadWorkspace();
     }catch(err:any){triggerToast(err?.message||'Could not pause.','error');}
@@ -242,6 +251,7 @@ export default function PlacementTestModal({ visitor, onClose, onCompleted, trig
     setPausing(true);
     try{
       await api.post<any>(`/placement/visitors/${visitor.id}/placement/attempts/${attempt.id}/resume`, {});
+      invalidate('placement');
       triggerToast('Attempt resumed — deadlines extended.','info');
       await loadWorkspace();
     }catch(err:any){triggerToast(err?.message||'Could not resume.','error');}

@@ -12,6 +12,7 @@ import type {
 import { formatAFN } from '../../utils/format';
 import { getRoleLabel } from '../../config/roles';
 import { api } from '../../api/client';
+import { useInvalidate } from '../../state/serverStateFreshness';
 import FinanceModals from './FinanceModals';
 import BudgetsPanel from './BudgetsPanel';
 import ExpenseRequestsPanel from './ExpenseRequestsPanel';
@@ -88,6 +89,7 @@ const TABS: { id: FinanceTab; label: string; ownerOnly?: boolean }[] = [
 ];
 
 export default function FinanceView(props: FinanceViewProps) {
+  const invalidate = useInvalidate();
   const {
     budgetLines, expenseRequests, transactions, mainAccountBalance, savingBalance, activeRole,
     chargeBudget, createExpenseRequest, recordOperationalPayment, getExpenseReport,
@@ -146,6 +148,7 @@ export default function FinanceView(props: FinanceViewProps) {
     setDepositError(null);
     try {
       await api.post('/finance/treasury/deposit', { amount: depositAmount, notes: depositNotes || undefined });
+      invalidate('finance');
       setShowDepositModal(false);
       setDepositAmount(0);
       setDepositNotes('');

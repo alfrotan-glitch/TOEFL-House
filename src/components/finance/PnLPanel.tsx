@@ -7,6 +7,7 @@
 import React, { useEffect, useState } from 'react';
 import { TrendingUp, TrendingDown, Printer } from 'lucide-react';
 import { api } from '../../api/client';
+import { useDatasetVersion } from '../../state/serverStateFreshness';
 import { formatAFN } from '../../utils/format';
 import { formatJalaliDateTime } from '../../utils/jalali';
 import { brandPrintHeaderHtml } from '../../config/branding';
@@ -33,6 +34,7 @@ export default function PnLPanel({ selectedYear, selectedMonth }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const financeVersion = useDatasetVersion('finance', 'payments', 'invoices');
   useEffect(() => {
     void (async () => {
       setLoading(true);
@@ -50,7 +52,7 @@ export default function PnLPanel({ selectedYear, selectedMonth }: Props) {
         setLoading(false);
       }
     })();
-  }, [selectedYear, selectedMonth]);
+  }, [selectedYear, selectedMonth, financeVersion]);
 
   if (loading && !pnl) {
     return <div className="py-16 text-center text-xs text-slate-400 font-semibold">Loading the P&L report…</div>;

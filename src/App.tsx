@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from './contexts/useAuth';
 import { useApiStore } from './apiStore';
+import { ServerStateFreshnessProvider } from './state/serverStateFreshness';
 import { api } from './api/client';
 import type { UserRole } from './types';
 
@@ -392,7 +393,12 @@ function AuthenticatedApp() {
   }
 
   // ── Render ──────────────────────────────────────────────────────────
+  // The freshness provider wraps the whole workspace so any view — however
+  // deeply nested — can invalidate a dataset after a successful mutation and
+  // subscribe to datasets it renders. The store itself stays a single instance
+  // owned here; only the invalidation surface is shared.
   return (
+    <ServerStateFreshnessProvider value={{ invalidate: store.invalidate, datasetVersion: store.datasetVersion }}>
     <div className="flex h-screen w-screen overflow-hidden font-sans select-none bg-ambient" dir="ltr">
       {store.isTabLoading && !store.isLoading && (
         <div className="fixed top-20 right-4 z-50 flex items-center gap-2 rounded-full border border-slate-200 bg-white/95 px-3 py-2 text-xs font-semibold text-slate-600 shadow-lg backdrop-blur" role="status" aria-live="polite">
@@ -489,6 +495,7 @@ function AuthenticatedApp() {
         </div>
       )}
     </div>
+    </ServerStateFreshnessProvider>
   );
 }
 

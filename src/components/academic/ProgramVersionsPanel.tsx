@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {GitBranch, Plus, RefreshCw, Upload, AlertCircle, BookOpen, Loader2, Check, X, Layers, Filter, Zap, Trash2} from 'lucide-react';
 import {api} from '../../api/client';
+import { useInvalidate } from '../../state/serverStateFreshness';
 
 interface Program { id: string; name: string; isActive?: boolean; }
 interface ProgramVersion {
@@ -44,6 +45,7 @@ const labelCls = "block text-[10px] font-bold text-slate-500 uppercase tracking-
  * AcademicSetupView), which is what makes the reload happen.
  */
 export default function ProgramVersionsPanel({ branchId: _branchId }: { branchId?: string } = {}) {
+  const invalidate = useInvalidate();
   const [programs, setPrograms] = useState<Program[]>([]);
   const [versions, setVersions] = useState<ProgramVersion[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -123,6 +125,11 @@ export default function ProgramVersionsPanel({ branchId: _branchId }: { branchId
       await fn();
       setMsg(successMsg);
       if (selectedId) await loadTree(selectedId);
+      // Program versions, subjects, modules and placement/promotion rules are
+      // academic configuration: publishing the change lets class generation,
+      // offerings and the classes pickers refetch instead of going stale.
+      // Only runs after `fn()` resolved — a rejected mutation invalidates nothing.
+      invalidate('academic');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Operation failed');
     } finally {

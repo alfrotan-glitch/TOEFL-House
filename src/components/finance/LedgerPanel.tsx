@@ -16,6 +16,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Printer } from 'lucide-react';
 import type { FinancialTransaction } from '../../types';
 import { api } from '../../api/client';
+import { useDatasetVersion } from '../../state/serverStateFreshness';
 import { formatAFN } from '../../utils/format';
 
 const PAGE_SIZE = 500;
@@ -74,13 +75,16 @@ export default function LedgerPanel({ selectedYear, selectedMonth, timeFrame, se
   }, [selectedYear, selectedMonth, timeFrame]);
 
   // Fetch page 0 whenever the period filter changes; load-more appends.
+  // Ledger rows and the P&L summary are derived from payments, invoices and
+  // expenses that other views mutate; subscribing keeps them server-accurate.
+  const financeVersion = useDatasetVersion('finance', 'payments', 'invoices');
   useEffect(() => {
     void (async () => {
       setRows([]);
       setTotal(null);
       await fetchPage(0, false);
     })();
-  }, [fetchPage]);
+  }, [fetchPage, financeVersion]);
 
   const loadMore = () => { void fetchPage(rows.length, true); };
 

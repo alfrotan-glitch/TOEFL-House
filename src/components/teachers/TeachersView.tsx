@@ -18,6 +18,7 @@ import {EmployeeDirectoryPanel} from './EmployeeDirectoryPanel';
 import TeacherProfileDrawer from './TeacherProfileDrawer'; // Added Profile Drawer
 import {formatAFN} from '../../utils/format';
 import {api} from '../../api/client';
+import { useInvalidate } from '../../state/serverStateFreshness';
 
 interface TeachersViewProps {
   teachers: Teacher[];
@@ -53,6 +54,7 @@ export default function TeachersView({
   addEmployee, editEmployee, deleteEmployee, transferEmployee, payEmployeeSalary,
   skills, classTeacherSkills, assignTeacherSkill, editTeacherSkillRate, removeTeacherSkill, triggerToast
 }: TeachersViewProps) {
+  const invalidate = useInvalidate();
   const [activeCategory, setActiveCategory] = useState<'teachers' | 'employees'>('teachers');
   const [hrSearch, setHrSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
@@ -156,8 +158,9 @@ export default function TeachersView({
       await api.post(`/teachers/${evaluatingTeacher.id}/evaluation`, { score, notes });
       triggerToast('Evaluation submitted successfully.', 'success'); 
       setEvaluatingTeacher(null);
-      // Dispatch event to refresh data globally
-      if (typeof window !== 'undefined') window.dispatchEvent(new Event('erp-teachers-refresh'));
+      // Canonical invalidation: the previous `erp-teachers-refresh` window event
+      // had no listener anywhere in the app, so nothing ever refreshed.
+      invalidate('teachers');
     } catch (err: any) { 
       triggerToast(err?.response?.data?.error || 'Evaluation failed.', 'error'); 
     }

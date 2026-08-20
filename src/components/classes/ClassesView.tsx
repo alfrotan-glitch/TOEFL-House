@@ -14,6 +14,7 @@ import { formatAFN } from '../../utils/format';
 import { ClassDirectoryPanel } from './ClassDirectoryPanel';
 import { ClassDetailDrawer } from './ClassDetailDrawer'; // NEW: LMS Drawer
 import { api } from '../../api/client';
+import { useDatasetVersion } from '../../state/serverStateFreshness';
 import { ShamsiDateInput } from '../common/ShamsiDateInput';
 
 interface ClassesViewProps {
@@ -155,9 +156,15 @@ export default function ClassesView({
       });
   }, [branchId]);
 
+  // Subscribes to the `academic` dataset: adding a room, term, slot, level or
+  // program in Academic Setup bumps that version and this picker data refetches
+  // from the server. Previously this effect only depended on `loadAcademicConfig`
+  // (i.e. `branchId`), so an academic change made elsewhere stayed invisible
+  // here until a full page reload.
+  const academicVersion = useDatasetVersion('academic');
   useEffect(() => {
     void (async () => { await loadAcademicConfig(); })();
-  }, [loadAcademicConfig]);
+  }, [loadAcademicConfig, academicVersion]);
 
   // Reset the skill-assignment form whenever a different class is selected,
   // by adjusting state during render (no setState-in-effect).

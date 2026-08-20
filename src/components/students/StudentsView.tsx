@@ -4,6 +4,7 @@
  * TOEFL House ERP — Student Management & Tuition Portal
  */
 import {api} from '../../api/client';
+import { useInvalidate } from '../../state/serverStateFreshness';
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {GraduationCap, Search, Filter, Eye, CreditCard, UserPlus, Users, RotateCcw, X, Download} from 'lucide-react';
 import {Student, Class, Payment, UserRole, Exam, ExamResult, Attendance, Branch, Visitor, StudentBalanceRow, AttendanceSummaryRow, StudentSummary } from '../../types';
@@ -46,6 +47,7 @@ export default function StudentsView({
   addStudentManual, updateStudentStatus, updateStudent, enrollStudentSemester, issueStudentCard, books = [],
   studentSummary = null
 }: StudentsViewProps) {
+  const invalidate = useInvalidate();
   const { educationalSections } = useAcademicOptions(classes, activeBranchId);
   const [subTab, setSubTab] = useState<'list' | 'add'>('list');
   const [searchTerm, setSearchTerm] = useState('');
@@ -244,7 +246,7 @@ export default function StudentsView({
       }, undefined, { 'Idempotency-Key': idem });
       triggerToast('Payment recorded successfully.', 'success');
       setPaymentStudent(null);
-      window.dispatchEvent(new Event('erp-students-refresh'));
+      invalidate('students', 'payments');
     } catch (err: any) {
       triggerToast(err.response?.data?.error || 'Payment failed.', 'error');
     } finally {
@@ -259,7 +261,7 @@ export default function StudentsView({
       triggerToast('Enrolled in extra class successfully.', 'success');
       setShowExtraClassModal(false);
       setExtraClassId(''); setExtraClassPaidNow(0);
-      window.dispatchEvent(new Event('erp-students-refresh'));
+      invalidate('students', 'payments');
     } catch (err: any) {
       triggerToast(err.response?.data?.error || 'Enrollment failed.', 'error');
     }
@@ -284,7 +286,7 @@ export default function StudentsView({
       await api.post(`/students/${refundStudent.id}/refund`, { amount: refundAmount, reason: refundReason });
       triggerToast('Refund processed.', 'success');
       setRefundStudent(null);
-      window.dispatchEvent(new Event('erp-students-refresh'));
+      invalidate('students', 'payments');
     } catch (err: any) {
       triggerToast(err.response?.data?.error || 'Refund failed.', 'error');
     }

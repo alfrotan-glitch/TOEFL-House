@@ -5,6 +5,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {CalendarDays, Plus, CheckCircle2, Ban, BookOpenCheck, Users, ClipboardCheck, Trash2, Loader2, AlertTriangle, ChevronLeft, ChevronRight, School, Sparkles} from 'lucide-react';
 import {api} from '../../api/client';
+import { useInvalidate } from '../../state/serverStateFreshness';
 import {Class, Student, Teacher, Session, UserRole, Skill, ClassTeacherSkill} from '../../types';
 import Toast from '../common/Toast';
 import { formatJalali } from '../../utils/jalali';
@@ -111,6 +112,7 @@ export default function SessionsView({
   activeRole,
   activeBranchId,
 }: SessionsViewProps) {
+  const invalidate = useInvalidate();
   const canManage = ['owner', 'manager', 'registrar', 'head_of_department', 'teacher'].includes(activeRole);
 
   const [localSessions, setLocalSessions] = useState<Session[]>(sessionsProp);
@@ -298,6 +300,7 @@ export default function SessionsView({
     setSavingRosterId(entry.id);
     try {
       await api.patch(`/sessions/${selectedSession.id}/roster/${entry.id}`, { status: next });
+      invalidate('attendance');
     } catch {
       setRoster((rs) => rs.map((r) => (r.id === entry.id ? { ...r, attendanceStatus: prev } : r)));
       notify('Failed to save attendance.', 'error');
@@ -317,6 +320,7 @@ export default function SessionsView({
     }
     try {
       await api.patch(`/sessions/${selectedSession.id}/status`, { status });
+      invalidate('sessions');
       await refreshSessions();
       notify(status === 'completed' ? 'Session completed.' : 'Session cancelled.', 'success');
     } catch {
@@ -352,6 +356,7 @@ export default function SessionsView({
         teacherId: createTeacherId || selectedClass?.teacherId,
         skillId: createSkillId || undefined,
       });
+      invalidate('sessions');
       await refreshSessions();
       setShowCreate(false);
       setCreateTopic('');
@@ -377,6 +382,7 @@ export default function SessionsView({
         skillIds: selectedSkillIds.length ? selectedSkillIds : undefined,
         teacherId: selectedClass?.teacherId || undefined,
       });
+      invalidate('sessions');
       await refreshSessions();
       setShowGenerate(false);
       setGenerateSkillIds(null);
@@ -401,6 +407,7 @@ export default function SessionsView({
     if (!selectedSession) return;
     try {
       const res = await api.post<{ added?: number }>(`/sessions/${selectedSession.id}/sync-roster`, {});
+      invalidate('attendance');
       await loadDetail(selectedSession.id, selectedSession.classId);
       notify(
         res && typeof res.added === 'number'
@@ -422,6 +429,7 @@ export default function SessionsView({
         description: hwDesc || undefined,
         dueDate: hwDue,
       });
+      invalidate('sessions');
       const fresh = await api.get<HomeworkItem[]>(`/sessions/${selectedSession.id}/homework`);
       setHomework(fresh);
       setHwTitle('');
@@ -437,6 +445,7 @@ export default function SessionsView({
     if (!selectedSession) return;
     try {
       await api.delete(`/sessions/${selectedSession.id}/homework/${hwId}`);
+      invalidate('sessions');
       setHomework((h) => h.filter((x) => x.id !== hwId));
     } catch {
       notify('Failed to remove homework.', 'error');

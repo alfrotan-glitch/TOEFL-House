@@ -6,6 +6,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {Layers, Plus, RefreshCw, Link2, Archive, Check, Loader2, Users, DollarSign, X, AlertCircle} from 'lucide-react';
 import {api} from '../../api/client';
+import { useInvalidate } from '../../state/serverStateFreshness';
 import {formatAFN} from '../../utils/format';
 
 interface Offering { id: string; name: string; code?: string | null; status: string; programId?: string | null; programName?: string | null; programVersionId?: string | null; versionLabel?: string | null; levelId?: string | null; levelName?: string | null; academicTermId?: string | null; termName?: string | null; branchId: string; capacityTotal: number; feeSnapshot: number; classCount: number; enrolledCount: number; }
@@ -20,6 +21,7 @@ const inputCls = 'w-full text-sm border border-slate-200 rounded-xl px-3 py-2.5 
 const labelCls = 'block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1.5';
 
 export default function OfferingsPanel({ branchId, onChange }: { branchId?: string; onChange?: () => void }) {
+  const invalidate = useInvalidate();
   const [items, setItems] = useState<Offering[]>([]);
   const [programs, setPrograms] = useState<Program[]>([]);
   const [versions, setVersions] = useState<ProgramVersion[]>([]);
@@ -85,6 +87,9 @@ export default function OfferingsPanel({ branchId, onChange }: { branchId?: stri
     setActionLoading('create'); setError('');
     try {
       await api.post('/offerings', { ...form, branchId, code: form.code || null, status: form.status });
+      // Offerings feed class creation and the academic catalog; see the dataset
+      // dependency graph in apiStore.
+      invalidate('offerings');
       onChange?.();
       setShowForm(false);
       setForm({ name: '', code: '', programId: '', programVersionId: '', levelId: '', academicTermId: '', status: 'draft' });
@@ -93,8 +98,8 @@ export default function OfferingsPanel({ branchId, onChange }: { branchId?: stri
     finally { setActionLoading(null); }
   };
 
-  const setStatus = async (id: string, status: string) => { setActionLoading(`status-${id}`); try { await api.patch(`/offerings/${id}`, { status }); await load(); } catch (err: unknown) { setError(err instanceof Error ? err.message : 'Update failed'); } finally { setActionLoading(null); } };
-  const linkClass = async () => { if (!linkOfferingId || !linkClassId) return; setActionLoading(`link-${linkOfferingId}`); try { await api.post(`/offerings/${linkOfferingId}/link-class`, { classId: linkClassId }); setLinkOfferingId(null); setLinkClassId(''); await load(); } catch (err: unknown) { setError(err instanceof Error ? err.message : 'Link failed'); } finally { setActionLoading(null); } };
+  const setStatus = async (id: string, status: string) => { setActionLoading(`status-${id}`); try { await api.patch(`/offerings/${id}`, { status }); invalidate('offerings'); await load(); } catch (err: unknown) { setError(err instanceof Error ? err.message : 'Update failed'); } finally { setActionLoading(null); } };
+  const linkClass = async () => { if (!linkOfferingId || !linkClassId) return; setActionLoading(`link-${linkOfferingId}`); try { await api.post(`/offerings/${linkOfferingId}/link-class`, { classId: linkClassId }); invalidate('offerings', 'classes'); setLinkOfferingId(null); setLinkClassId(''); await load(); } catch (err: unknown) { setError(err instanceof Error ? err.message : 'Link failed'); } finally { setActionLoading(null); } };
 
   if (!branchId) return <div className="text-center py-12 bg-slate-50 rounded-2xl border border-dashed border-slate-200"><Layers className="w-8 h-8 text-slate-300 mx-auto mb-2" /><p className="text-xs text-slate-400">Select a branch to manage course offerings.</p></div>;
 
