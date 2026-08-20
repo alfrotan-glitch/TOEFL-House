@@ -13,7 +13,19 @@
  */
 import { describe, it, expect } from 'vitest';
 import { JSDOM } from 'jsdom';
-import { buildFeeBillHtml, type FeeBillData } from '../../../src/utils/feeBillTemplate.js';
+import { buildFeeBillDocument, type FeeBillData } from '../../../src/utils/feeBillTemplate.js';
+import { buildPrintDocument } from '../../../src/design-system/print.js';
+
+/**
+ * The receipt now goes through the shared print shell, so the assertions run
+ * against the document the operator actually gets — page rule included — rather
+ * than against the fragment this module contributes to it.
+ */
+const buildFeeBillHtml = (
+  data: FeeBillData,
+  issuer: Parameters<typeof buildFeeBillDocument>[1],
+  money: (n: number) => string,
+) => buildPrintDocument(buildFeeBillDocument(data, issuer, money));
 import { resolveDocumentIssuer } from '../../../src/config/documentIssuer.js';
 import { BRAND_NAME, BRAND_SLOGAN, BRAND_LOGO_URL } from '../../../src/config/branding.js';
 import type { Branch } from '../../../src/types.js';

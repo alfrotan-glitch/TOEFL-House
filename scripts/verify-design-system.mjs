@@ -51,23 +51,6 @@ const DIRECTIONAL = [
  */
 const EXEMPT_FILES = new Set([path.join(SRC, 'index.css')]);
 
-/**
- * Print sites not yet migrated onto the print authority.
- *
- * These build complete, bespoke documents — an ID card, an enrolment slip, a
- * certificate — rather than reports, so moving them is a design job, not a
- * mechanical one. They are listed BY NAME rather than matched by a pattern so
- * the remaining work stays visible: a pattern exemption would also silently
- * excuse the next component that bypasses the shell.
- *
- * Removing a name from this list is the migration's definition of done.
- */
-const PENDING_PRINT_MIGRATION = new Set([
-  path.join(SRC, 'components', 'teachers', 'TeachersModals.tsx'),
-  path.join(SRC, 'components', 'visitors', 'ConvertToStudentModal.tsx'),
-  path.join(SRC, 'utils', 'certificateTemplates.ts'),
-]);
-
 function sourceFiles(dir) {
   const out = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -107,13 +90,20 @@ for (const file of files) {
     }
   }
 
-  // Printing goes through the print authority.
+  // Printing goes through the print authority — with no exemptions.
   //
-  // Six components used to call window.open and write their own <style>, which
-  // produced documents with no @page, no repeated table headers, no page
-  // numbers and hard-coded left alignment. One shell fixes all of that at once,
-  // and only stays fixed if nothing bypasses it.
-  if (!file.startsWith(DESIGN_SYSTEM) && !PENDING_PRINT_MIGRATION.has(file)) {
+  // A component that calls window.open and writes its own <style> produces a
+  // document with no @page, no repeated table headers, no page numbers and
+  // hard-coded physical alignment. One shell fixes all of that at once, and
+  // only stays fixed if nothing bypasses it.
+  //
+  // This check carried a named exemption list while three bespoke documents —
+  // the ID card, the registration receipt and the salary slip — were still
+  // being migrated. All three now build through the authority, so the list is
+  // gone rather than left empty: an empty exemption list is an invitation.
+  // A document that genuinely needs different paper asks for it by name
+  // (`paper: 'receipt80' | 'card'`), which keeps paper the shell's decision.
+  if (!file.startsWith(DESIGN_SYSTEM)) {
     const printWindow = /window\.open\s*\(\s*['"`]{2}|window\.open\s*\(\s*['"`]\s*['"`]/g;
     let pm;
     while ((pm = printWindow.exec(text)) !== null) {

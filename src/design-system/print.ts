@@ -37,14 +37,28 @@ export function escapeHtml(value: unknown): string {
  * Written with LOGICAL alignment (`start`/`end`) so a right-to-left document
  * mirrors without a second stylesheet, exactly as the screen does.
  */
-const PRINT_STYLESHEET = `
-  /* Paper is a fixed size with real margins; the browser default is not a
-     design decision. The footer sits inside the bottom margin. */
-  @page {
-    size: A4;
-    margin: 16mm 14mm 18mm 14mm;
-  }
+/**
+ * The paper a document is printed on.
+ *
+ * Paper is the shell's concern, not the caller's — but there is genuinely more
+ * than one kind. A registration receipt is issued on an 80mm till roll and an
+ * ID card is a card; printing either on A4 with report margins is as wrong as
+ * printing a report on a till roll. Each is named here so the set stays small
+ * and reviewable, rather than letting callers pass arbitrary CSS.
+ */
+export type PrintPaper = 'a4' | 'receipt80' | 'card';
 
+const PAGE_RULES: Record<PrintPaper, string> = {
+  // Reports and multi-page documents. The footer sits inside the bottom margin.
+  a4: '@page { size: A4; margin: 16mm 14mm 18mm 14mm; }',
+  // Continuous till roll: the height is whatever the content needs, so a short
+  // receipt is not paginated onto a second sheet.
+  receipt80: '@page { size: 80mm auto; margin: 6mm; }',
+  // A single card, centred on a sheet the operator then cuts.
+  card: '@page { size: A4; margin: 12mm; }',
+};
+
+const PRINT_STYLESHEET = `
   * { box-sizing: border-box; }
 
   body {
@@ -146,6 +160,8 @@ export interface PrintDocumentOptions {
   extraCss?: string;
   /** Suppresses the running footer for single-sheet artifacts. */
   hideFooter?: boolean;
+  /** Paper this document is printed on. Defaults to A4. */
+  paper?: PrintPaper;
 }
 
 /**
@@ -176,6 +192,7 @@ export function buildPrintDocument(options: PrintDocumentOptions): string {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${escapeHtml(options.title)}</title>
+<style>${PAGE_RULES[options.paper ?? 'a4']}</style>
 <style>${PRINT_STYLESHEET}</style>
 ${options.extraCss ? `<style>${options.extraCss}</style>` : ''}
 </head>

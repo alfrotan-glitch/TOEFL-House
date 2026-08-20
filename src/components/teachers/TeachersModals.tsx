@@ -7,7 +7,8 @@ import {ShieldAlert, Award, Sparkles, Check, Plus, X, ClipboardCheck} from 'luci
 import {Teacher, Employee, BudgetLine, Skill, ClassTeacherSkill, Class as ClassType} from '../../types';
 import type {TeacherSalaryStatus} from '../../apiStore';
 import {formatAFN} from '../../utils/format';
-import {recentJalaliPeriods, jalaliPeriodLabel} from '../../utils/jalali';
+import {recentJalaliPeriods, jalaliPeriodLabel, formatJalali} from '../../utils/jalali';
+import {printPayslip} from '../../utils/payslipDocument';
 import {ShamsiDate} from '../common/ShamsiDate';
 import { BRAND_NAME } from '../../config/branding';
 
@@ -112,7 +113,7 @@ export default function TeachersModals(props: TeachersModalsProps) {
     amountPaid, setAmountPaid, selectedMonth, setSelectedMonth,
     handlePayTeacherSalaryConfirm, handlePayEmployeeSalaryConfirm,
     evaluatingTeacher, setEvaluatingTeacher, handleEvaluateSubmit,
-    printedPayslip, setPrintedPayslip
+    printedPayslip, setPrintedPayslip, triggerToast
   } = props;
 
   const payrollMonthOptions = getPayrollMonthOptions();
@@ -436,16 +437,14 @@ export default function TeachersModals(props: TeachersModalsProps) {
             <div className="flex gap-2 justify-end border-t border-slate-100 pt-4">
               <button onClick={() => setPrintedPayslip(null)} className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 cursor-pointer">Close</button>
               <button onClick={() => {
-                const printContents = document.getElementById('printed-staff-payslip-area')?.innerHTML;
-                if (printContents) {
-                  const printWindow = window.open('', '_blank');
-                  if (printWindow) {
-                    printWindow.document.write(`<html><head><title>Salary Slip</title><style>body{font-family:sans-serif;padding:20px;direction:rtl;}.flex{display:flex;justify-content:space-between;}.font-mono{font-family:monospace;}.font-bold{font-weight:bold;}.text-end{text-align:right;}</style></head><body>${printContents}</body></html>`);
-                    printWindow.document.close();
-                    printWindow.focus();
-                    setTimeout(() => printWindow.print(), 250);
-                  }
-                }
+                const opened = printPayslip({
+                  ...printedPayslip,
+                  monthLabel: jalaliPeriodLabel(printedPayslip.month),
+                  dateLabel: formatJalali(printedPayslip.date, 'long'),
+                  baseSalaryLabel: formatAFN(printedPayslip.baseSalary),
+                  amountLabel: formatAFN(printedPayslip.amount),
+                });
+                if (!opened) triggerToast('The print window was blocked by the browser. Allow pop-ups for this site and try again.', 'error');
               }} className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-xl cursor-pointer shadow-md flex items-center gap-1.5"><Award className="w-4 h-4" /> Print Slip</button>
             </div>
           </div>

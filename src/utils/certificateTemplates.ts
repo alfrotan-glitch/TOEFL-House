@@ -1,17 +1,9 @@
 import QRCode from 'qrcode';
 import { Student } from '../types';
 import { BRAND_NAME, BRAND_NAME_DARI, BRAND_SLOGAN, brandLogoAbsoluteUrl } from '../config/branding';
+import { openPrintDocument, type PrintDocumentOptions } from '../design-system/print';
 
 export type PrintLang = 'en' | 'dari';
-
-function openPrintWindow(): Window | null {
-  const w = window.open('', '_blank');
-  if (!w) {
-    alert('Please allow pop-ups in your browser to print.');
-    return null;
-  }
-  return w;
-}
 
 /** Brand rose palette (the only brand accent — with white and black text). */
 export const BRAND_ROSE = '#e11d48';
@@ -37,14 +29,20 @@ function esc(s: string | null | undefined): string {
 /** Student ID card print — brand rose + white + black, with photo, real QR
  *  (verification/tracking), office phone, WhatsApp and social handles.
  *  Default English; pass lang: 'dari' for local copies. */
-export async function printStudentIdCard(
+/**
+ * Builds the student ID card as print-document options.
+ *
+ * Separated from opening the window so the card can be asserted in a test; a
+ * popup cannot be reviewed by eye. Paper is `card` — the card is laid out on a
+ * sheet the operator cuts — and the page rule comes from the print authority,
+ * which is what this document previously had none of: with no `@page` at all,
+ * paper size and margins were whatever the browser chose.
+ */
+export async function buildStudentIdCardDocument(
   student: Student,
   design: IdCardDesign,
   lang: PrintLang = 'en'
-): Promise<void> {
-  const printWindow = openPrintWindow();
-  if (!printWindow) return;
-
+): Promise<PrintDocumentOptions> {
   const { customMotto, showQrCode, photo, officePhone, whatsapp, socials } = design;
   const dir = lang === 'dari' ? 'rtl' : 'ltr';
   const labels =
@@ -105,12 +103,7 @@ export async function printStudentIdCard(
   if (socials?.instagram) contacts.push(esc(socials.instagram));
   if (socials?.website) contacts.push(`${esc(labels.web)}: ${esc(socials.website)}`);
 
-  const html = `<!DOCTYPE html>
-<html lang="${lang === 'dari' ? 'fa' : 'en'}" dir="${dir}">
-<head>
-  <meta charset="utf-8" />
-  <title>ID — ${esc(student.fullName)}</title>
-  <style>
+  const cardCss = `
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: system-ui, Tahoma, sans-serif; background: #f1f5f9; display: flex; justify-content: center; padding: 32px; color: #111; }
     .card { width: 360px; border-radius: 18px; background: #fff; border: 1px solid #fecdd3; box-shadow: 0 12px 30px rgba(76,5,25,0.18); overflow: hidden; }
@@ -133,9 +126,9 @@ export async function printStudentIdCard(
     .contact { font-size: 9.5px; color: #334155; line-height: 1.6; }
     .contact b { color: #111; }
     @media print { body { background: #fff; padding: 0; } .card { box-shadow: none; } }
-  </style>
-</head>
-<body>
+  `;
+
+  const cardHtml = `
   <div class="card">
     <div class="head">
       <div>
@@ -160,11 +153,27 @@ export async function printStudentIdCard(
       </div>
       ${showQrCode && qrDataUrl ? `<div><div class="qr"><img src="${qrDataUrl}" alt="QR" /></div><div class="qr-hint">${labels.scan}</div></div>` : ''}
     </div>
-  </div>
-  <script>window.onload = function(){ window.print(); }</script>
-</body>
-</html>`;
+  </div>`;
 
-  printWindow.document.write(html);
-  printWindow.document.close();
+  return {
+    title: `ID — ${student.fullName}`,
+    lang: lang === 'dari' ? 'fa' : 'en',
+    dir,
+    paper: 'card',
+    hideFooter: true,
+    extraCss: cardCss,
+    bodyHtml: cardHtml,
+  };
+}
+
+/**
+ * Prints the student ID card. Returns false when the popup was blocked, so the
+ * caller can say so rather than appearing to do nothing.
+ */
+export async function printStudentIdCard(
+  student: Student,
+  design: IdCardDesign,
+  lang: PrintLang = 'en'
+): Promise<boolean> {
+  return openPrintDocument(await buildStudentIdCardDocument(student, design, lang));
 }

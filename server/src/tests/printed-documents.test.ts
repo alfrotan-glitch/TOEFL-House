@@ -38,10 +38,18 @@ describe('printed documents use authoritative branding', () => {
     // The regression: a hand-typed institute name in the receipt header.
     expect(template).not.toMatch(/<h1>\s*TOEFL HOUSE\s*<\/h1>/i);
 
-    // And the modal must call the extracted builder, not rebuild the document.
+    // The receipt is built through the print authority, so the template names
+    // the paper it needs rather than writing its own @page rule.
+    expect(template).toContain("paper: 'receipt80'");
+    expect(template).not.toContain('@page');
+    expect(template).not.toContain('<!DOCTYPE html>');
+
+    // And the modal must call the extracted builder, not rebuild the document
+    // or open a window of its own.
     const modal = read('src/components/visitors/ConvertToStudentModal.tsx');
-    expect(modal).toContain('buildFeeBillHtml');
+    expect(modal).toContain('printFeeBill');
     expect(modal).not.toContain('<!DOCTYPE html>');
+    expect(modal).not.toContain('window.open');
   });
 
   it('the shared print header emits the logo, brand name and exact slogan', () => {

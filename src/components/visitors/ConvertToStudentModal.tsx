@@ -9,7 +9,7 @@ import { Visitor, Class, Branch, ConversionEligibility } from '../../types';
 import { formatAFN } from '../../utils/format';
 import { Banknote, CreditCard, Building2, Receipt, CheckCircle2, AlertCircle, Printer, Loader2, X, Award, ShieldAlert } from 'lucide-react';
 import { BRAND_NAME } from '../../config/branding';
-import { buildFeeBillHtml } from '../../utils/feeBillTemplate';
+import { printFeeBill } from '../../utils/feeBillTemplate';
 import { resolveDocumentIssuer } from '../../config/documentIssuer';
 
 type PaymentMethod = 'cash' | 'card' | 'bank_transfer';
@@ -189,10 +189,7 @@ export default function ConvertToStudentModal({
 
   const handlePrintReceipt = () => {
     if (!receiptRef.current) return;
-    const printWindow = window.open('', '_blank', 'width=460,height=680');
-    if (!printWindow) return triggerToast('Please allow popups to print the receipt.', 'error');
-    
-    printWindow.document.write(buildFeeBillHtml(
+    const opened = printFeeBill(
       {
         receiptNumber: result?.receiptNumber || null,
         studentName: convertingVisitor.fullName,
@@ -209,10 +206,8 @@ export default function ConvertToStudentModal({
       },
       resolveDocumentIssuer(branches.find((b) => b.id === (conversionBranchId || convertingVisitor.branchId || activeBranchId))),
       formatAFN,
-    ));
-    printWindow.document.close();
-    printWindow.focus();
-    setTimeout(() => printWindow.print(), 250);
+    );
+    if (!opened) triggerToast('Please allow popups to print the receipt.', 'error');
   };
 
   // ── Success / Receipt View ──

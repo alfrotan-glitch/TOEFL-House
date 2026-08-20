@@ -12,6 +12,7 @@
  */
 import { BRAND_NAME, BRAND_SLOGAN, brandPrintHeaderHtml } from '../config/branding';
 import type { DocumentIssuer } from '../config/documentIssuer';
+import { openPrintDocument, type PrintDocumentOptions } from '../design-system/print';
 
 export interface FeeBillData {
   receiptNumber: string | null;
@@ -38,36 +39,49 @@ function esc(value: unknown): string {
 }
 
 /**
- * Builds the complete printable document.
+ * Builds the receipt as print-document options.
  *
  * `issuer` carries the branch's own name/address/phone/email. Every line is
  * optional: a branch with nothing configured still produces a valid, correctly
  * laid-out receipt rather than blank rows or the word "null".
+ *
+ * Paper is `receipt80` — a continuous 80mm till roll — so a short receipt is
+ * not paginated onto a second sheet. The page rule comes from the print
+ * authority rather than from a `<style>` block written here, so this document
+ * gains direction handling and loses nothing: the shell owns paper, this module
+ * owns the receipt's own look.
  */
-export function buildFeeBillHtml(data: FeeBillData, issuer: DocumentIssuer, formatMoney: (n: number) => string): string {
+export function buildFeeBillDocument(
+  data: FeeBillData,
+  issuer: DocumentIssuer,
+  formatMoney: (n: number) => string,
+): PrintDocumentOptions {
   const row = (label: string, value: string, cls = '') =>
     `<div class="row ${cls}"><span class="label">${esc(label)}</span><span class="value">${esc(value)}</span></div>`;
 
-  return `<!DOCTYPE html><html><head><meta charset="utf-8" /><title>Receipt ${esc(data.receiptNumber || '')}</title>
-      <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Courier New', monospace; font-size: 12px; padding: 20px; max-width: 380px; margin: 0 auto; color: #1e293b; }
-        .row { display: flex; justify-content: space-between; padding: 4px 0; gap: 12px; }
-        .label { color: #64748b; } .value { font-weight: 700; text-align: right; word-break: break-word; }
-        .divider { border-top: 1px dashed #cbd5e1; margin: 8px 0; }
-        .total-row { font-size: 14px; font-weight: 800; }
-        .footer { text-align: center; margin-top: 16px; padding-top: 12px; border-top: 2px dashed #94a3b8; font-size: 10px; color: #94a3b8; }
-        /* Printing rules. Without these the browser applied screen margins and
-           could paginate a short receipt across two sheets, and the logo was
-           dropped entirely because backgrounds/images are not printed by
-           default in some engines. */
-        @page { size: 80mm auto; margin: 6mm; }
-        @media print {
-          body { max-width: none; padding: 0; }
-          .th-brand-header img { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          .row, .footer { page-break-inside: avoid; }
-        }
-      </style></head><body>
+  return {
+    title: `Receipt ${data.receiptNumber || ''}`.trim(),
+    paper: 'receipt80',
+    hideFooter: true,
+    extraCss: `
+      body { font-family: 'Courier New', monospace; font-size: 12px; max-width: 380px; margin: 0 auto; color: #1e293b; }
+      .row { display: flex; justify-content: space-between; padding: 4px 0; gap: 12px; }
+      .label { color: #64748b; }
+      /* Logical alignment: a Persian/Dari receipt mirrors without a second
+         stylesheet, exactly as the screen does. */
+      .value { font-weight: 700; text-align: end; word-break: break-word; }
+      .divider { border-top: 1px dashed #cbd5e1; margin: 8px 0; }
+      .total-row { font-size: 14px; font-weight: 800; }
+      .footer { text-align: center; margin-top: 16px; padding-top: 12px; border-top: 2px dashed #94a3b8; font-size: 10px; color: #94a3b8; }
+      @media print {
+        body { max-width: none; padding: 0; }
+        /* Backgrounds and images are not printed by default in some engines,
+           which drops the logo entirely. */
+        .th-brand-header img { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .row, .footer { page-break-inside: avoid; }
+      }
+    `,
+    bodyHtml: `
         ${brandPrintHeaderHtml('Registration Receipt', issuer)}
         ${row('Receipt #', data.receiptNumber || '-')}
         ${row('Date', data.issueDate)}
@@ -87,5 +101,15 @@ export function buildFeeBillHtml(data: FeeBillData, issuer: DocumentIssuer, form
         ${row('Payment Method', data.paymentMethodLabel)}
         ${data.remaining > 0 ? `<div class="divider"></div>${row('Remaining', `${formatMoney(data.remaining)} AFN`)}` : ''}
         <div class="footer"><p>Thank you for choosing ${esc(BRAND_NAME)}!</p><p style="margin-top:2px;">${esc(BRAND_SLOGAN)}</p><p style="margin-top:4px;">This is a system-generated receipt.</p></div>
-      </body></html>`;
+    `,
+  };
+}
+
+/** Opens the receipt in a print window. Returns false when a popup is blocked. */
+export function printFeeBill(
+  data: FeeBillData,
+  issuer: DocumentIssuer,
+  formatMoney: (n: number) => string,
+): boolean {
+  return openPrintDocument(buildFeeBillDocument(data, issuer, formatMoney));
 }
