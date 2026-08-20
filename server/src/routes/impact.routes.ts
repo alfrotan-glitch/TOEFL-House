@@ -26,6 +26,7 @@ import { id, today } from '../utils/ids.js';
 import { addNotification } from '../utils/notifications.js';
 import { eventBus } from '../core/events/event-bus.js';
 import { ATTENDED_EQUIVALENT_STATUSES } from '../core/academic/attendance-policy-service.js';
+import { periodBoundariesForKey } from '../core/calendar/periods.js';
 
 export const impactRouter = Router();
 impactRouter.use(authenticate);
@@ -169,9 +170,26 @@ impactRouter.post(
     const user = getUserContext(req);
     const { period, donorId, campaignId, narrative } = req.body;
     
-    if (!period) throw new HttpError(400, 'Report period is required (e.g. "2026-Q2").');
+    if (!period) throw new HttpError(400, 'Report period is required (e.g. "1405-Q2").');
     const branchId = user.branchId;
-    const { from, to } = periodBounds(period);
+    // The one period authority. Resolving 'YYYY-Qn'/'YYYY-MM'/'YYYY' here in the
+    // GREGORIAN calendar, while Finance and reporting resolve the same shapes in
+    // Shamsi, makes a donor report and a ledger report for the same named period
+    // cover different days.
+    let from: string;
+    let to: string;
+    try {
+      const span = periodBoundariesForKey(String(period));
+      from = span.from;
+      to = span.to;
+    } catch (error) {
+      throw new HttpError(
+        400,
+        `Report period must be a Shamsi key such as 1405-05 (month), 1405-Q2 (quarter) or 1405 (year). ${
+          error instanceof Error ? error.message : ''
+        }`.trim(),
+      );
+    }
 
     const totalEnrolled = (stmtCountTotalEnrolled.get(branchId) as any).totalEnrolled;
     const enrolledInPeriod = (stmtCountEnrolledInPeriod.get(branchId, from, to) as any).enrolledInPeriod;
@@ -341,37 +359,6 @@ impactRouter.get(
 // §5 — INTERNAL HELPERS
 // ============================================================================
 
-function periodBounds(period: string): { from: string; to: string } {
-  const quarterMatch = period.match(/^(\d{4})-Q([1-4])$/i);
-  if (quarterMatch) {
-    const year = quarterMatch[1];
-    const q = Number(quarterMatch[2]);
-    const startMonth = (q - 1) * 3 + 1;
-    const endMonth = q * 3;
-    const lastDay = new Date(Number(year), endMonth, 0).getDate();
-    return {
-      from: `${year}-${String(startMonth).padStart(2, '0')}-01`,
-      to: `${year}-${String(endMonth).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`,
-    };
-  }
-
-  const monthMatch = period.match(/^(\d{4})-(\d{2})$/);
-  if (monthMatch) {
-    const year = Number(monthMatch[1]);
-    const month = Number(monthMatch[2]);
-    const lastDay = new Date(year, month, 0).getDate();
-    return {
-      from: `${period}-01`,
-      to: `${period}-${String(lastDay).padStart(2, '0')}`,
-    };
-  }
-
-  if (/^\d{4}$/.test(period)) {
-    return { from: `${period}-01-01`, to: `${period}-12-31` };
-  }
-
-  throw new HttpError(400, 'Invalid period format. Use "YYYY-Qn", "YYYY-MM", or "YYYY".');
-}
 
 function buildDefaultNarrative(
   period: string,

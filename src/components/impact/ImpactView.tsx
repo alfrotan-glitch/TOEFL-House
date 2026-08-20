@@ -1,9 +1,20 @@
-import { text } from '../../design-system/styles';
-import React from 'react';
+import { text, control } from '../../design-system/styles';
+import React, { useState } from 'react';
 import { Heart, FileText, TrendingUp } from 'lucide-react';
+import { recentJalaliPeriods, jalaliPeriodLabel } from '../../utils/jalali';
 
 export default function ImpactView({ reports, generateReport }: any) {
   const r = reports || [];
+  /**
+   * The period is chosen, not assumed. Posting a hard-coded '2026-Q1' sends a
+   * GREGORIAN key, which the server refuses: impact reports resolve their
+   * period through the Shamsi calendar authority like every other report.
+   * Offering real Shamsi months from the calendar helper lets the operator
+   * generate a report for any recent period, and the key cannot disagree with
+   * what the server accepts.
+   */
+  const periodOptions = recentJalaliPeriods(12, 0);
+  const [period, setPeriod] = useState<string>(periodOptions[0]);
   return (
     <div className="space-y-6">
       <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
@@ -36,9 +47,22 @@ export default function ImpactView({ reports, generateReport }: any) {
       <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-bold text-slate-900">Impact reports</h2>
-          <button onClick={() => generateReport && generateReport('2026-Q1')} className="flex items-center gap-2 px-4 py-2 bg-pink-600 hover:bg-pink-700 text-white text-sm font-bold rounded-xl cursor-pointer">
-            <FileText className="w-4 h-4" /> Generate new report
-          </button>
+          <div className="flex items-center gap-2">
+            <label htmlFor="impact-period" className="sr-only">Report period</label>
+            <select
+              id="impact-period"
+              value={period}
+              onChange={(e) => setPeriod(e.target.value)}
+              className={control.select}
+            >
+              {periodOptions.map((key) => (
+                <option key={key} value={key}>{jalaliPeriodLabel(key)}</option>
+              ))}
+            </select>
+            <button onClick={() => generateReport && generateReport(period)} className="flex items-center gap-2 px-4 py-2 bg-pink-600 hover:bg-pink-700 text-white text-sm font-bold rounded-xl cursor-pointer">
+              <FileText className="w-4 h-4" /> Generate new report
+            </button>
+          </div>
         </div>
         {r.length === 0 ? (
           <p className="text-center text-slate-400 py-12">No reports generated yet.</p>

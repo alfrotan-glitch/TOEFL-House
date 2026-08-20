@@ -162,10 +162,46 @@ export function periodBoundaries(
  *   quarter '1405-Q2'
  *   year    '1405'
  */
+/**
+ * How far a period key's Shamsi year may sit from the current one.
+ *
+ * This is a sanity bound, not a business rule. Its job is to catch a GREGORIAN
+ * year handed to a Shamsi resolver: the two calendars are ~621 years apart, so
+ * '2026-Q1' read as Shamsi resolves to 2647-03-21..2647-06-21 — a real span,
+ * silently wrong by six centuries, returning zeroes for every metric with no
+ * error to notice. LAW 6 forbids that substitution.
+ *
+ * A century in each direction is far wider than any period an ERP reports on
+ * and far narrower than the calendar offset, so it separates the two cases
+ * decisively without constraining legitimate use.
+ */
+const MAX_YEARS_FROM_CURRENT = 100;
+
+/**
+ * Rejects a year the system cannot plausibly be operating in.
+ *
+ * Derived from today rather than hard-coded, so it stays correct as years pass
+ * and needs no epoch constant of its own.
+ */
+function assertPlausibleJalaliYear(jy: number, key: string): void {
+  const [currentJy] = (() => {
+    const t = today();
+    const j = gregorianToJalali(Number(t.slice(0, 4)), Number(t.slice(5, 7)), Number(t.slice(8, 10)));
+    return [j.jy] as const;
+  })();
+  if (Math.abs(jy - currentJy) > MAX_YEARS_FROM_CURRENT) {
+    throw new RangeError(
+      `Period key '${key}' names Shamsi year ${jy}, which is more than ${MAX_YEARS_FROM_CURRENT} years from the current Shamsi year ${currentJy}. ` +
+        `A Gregorian year (e.g. 2026) is not a Shamsi year — the current Shamsi year is ${currentJy}.`,
+    );
+  }
+}
+
 export function periodBoundariesForKey(key: string): PeriodBoundaries {
   const yearOnly = /^(\d{3,4})$/.exec(key);
   if (yearOnly) {
     const jy = Number(yearOnly[1]);
+    assertPlausibleJalaliYear(jy, key);
     const from = jalaliToIso(jy, 1, 1);
     const periodEnd = jalaliToIso(jy, 12, isJalaliLeapYear(jy) ? 30 : 29);
     return { period: 'year', from, to: periodEnd, periodKey: String(jy), periodEnd };
@@ -174,6 +210,7 @@ export function periodBoundariesForKey(key: string): PeriodBoundaries {
   const quarter = /^(\d{3,4})-Q([1-4])$/.exec(key);
   if (quarter) {
     const jy = Number(quarter[1]);
+    assertPlausibleJalaliYear(jy, key);
     const q = Number(quarter[2]);
     const firstMonth = (q - 1) * 3 + 1;
     const lastMonth = firstMonth + 2;
@@ -186,6 +223,7 @@ export function periodBoundariesForKey(key: string): PeriodBoundaries {
   if (month) {
     const jy = Number(month[1]);
     const jm = Number(month[2]);
+    assertPlausibleJalaliYear(jy, key);
     if (jm < 1 || jm > 12) throw new RangeError(`Invalid Shamsi month in period key '${key}'.`);
     const from = jalaliToIso(jy, jm, 1);
     const periodEnd = jalaliToIso(jy, jm, jalaliMonthLength(jy, jm));
