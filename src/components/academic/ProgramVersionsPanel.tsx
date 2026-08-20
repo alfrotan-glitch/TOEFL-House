@@ -274,11 +274,18 @@ export default function ProgramVersionsPanel({ branchId: _branchId }: { branchId
         </div>
       </div>
 
-      {/* Main Content Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      {/* Main Content Grid.
+          The 4/8 split is driven by THIS panel's own width, not the viewport.
+          The panel already renders inside the page's 8/12 column, so a
+          viewport-based `lg:` split fired while the panel itself was only a few
+          hundred pixels wide and squeezed the editor into ~190px. Splitting only
+          once the panel really has room (@3xl = 48rem) lets the version list
+          stack above the editor on narrow panels instead of competing with it. */}
+      <div className="@container">
+      <div className="grid grid-cols-1 @3xl:grid-cols-12 gap-6">
         
         {/* Left: Versions List */}
-        <div className="lg:col-span-4 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden h-fit sticky top-4">
+        <div className="@3xl:col-span-4 min-w-0 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden h-fit @3xl:sticky @3xl:top-4">
           <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 text-xs font-extrabold text-slate-600 uppercase tracking-wider">All Versions</div>
           <div className="max-h-[calc(100vh-12rem)] overflow-y-auto">
             {versions.length === 0 ? (
@@ -305,7 +312,7 @@ export default function ProgramVersionsPanel({ branchId: _branchId }: { branchId
             breakpoint fired at ~44% of the available width and packed 12-column
             rows into a few hundred pixels — the overlap operators reported.
             `overflow-visible` was masking it rather than fixing it. */}
-        <div className="@container lg:col-span-8 bg-white rounded-2xl border border-slate-200 shadow-sm p-6 min-h-[400px] min-w-0">
+        <div className="@container @3xl:col-span-8 bg-white rounded-2xl border border-slate-200 shadow-sm p-6 min-h-[400px] min-w-0">
           {!tree ? (
             <div className="flex flex-col items-center justify-center h-full text-center text-slate-400 py-12">
               <BookOpen className="w-10 h-10 mb-3" />
@@ -528,7 +535,7 @@ export default function ProgramVersionsPanel({ branchId: _branchId }: { branchId
                     </div>
                   </div>
                   
-                  <form className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+                  <form className="grid grid-cols-1 @md:grid-cols-2 @3xl:grid-cols-4 gap-3 mb-4">
                     <div>
                       <label className={labelCls}>Rule Name</label>
                       <input className={inputCls} value={placeForm.name} onChange={(e) => setPlaceForm({ ...placeForm, name: e.target.value })} placeholder="e.g. Beginner Band" />
@@ -548,7 +555,7 @@ export default function ProgramVersionsPanel({ branchId: _branchId }: { branchId
                         {levels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
                       </select>
                     </div>
-                    <div className="lg:col-span-4 flex justify-end">
+                    <div className="@3xl:col-span-4 flex justify-end">
                       <button type="button" disabled={busy} onClick={addPlacement} className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-xs font-bold disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1">
                         <Plus className="w-3 h-3" /> Add Rule
                       </button>
@@ -579,6 +586,7 @@ export default function ProgramVersionsPanel({ branchId: _branchId }: { branchId
             </div>
           )}
         </div>
+      </div>
       </div>
 
       {/* Publish Modal */}

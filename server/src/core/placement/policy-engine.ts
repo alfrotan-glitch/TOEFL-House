@@ -22,6 +22,27 @@ import { stmtProfile, stmtGlobalProfile, stmtAnyProfileForVersion, stmtProgramVe
  * consumers (`evaluateEnrollmentEligibility`, attempt routes, tests) keep their
  * current contract.
  */
+/**
+ * INVARIANT — "no placement profile" means NOT_REQUIRED (opt-in assessment).
+ * ---------------------------------------------------------------------------
+ * This is derived from the implementation, not assumed. Evidence:
+ *
+ *  1. Creating a program version (`POST /catalog/program-versions`) does NOT
+ *     create a placement profile. No route, seed or migration backfills one, so
+ *     a version with no profile is the normal starting state rather than an
+ *     unfinished one.
+ *  2. `GET /academic/program-versions/:id/placement-profile` answers the
+ *     question directly when no row exists: it returns
+ *     `{ configured: false, required: false, enabled: false }`. The canonical
+ *     read path therefore already declares "absent profile ⇒ not required".
+ *  3. `placement_assessment_profiles.enabled` defaults to 1 and `required` to 0
+ *     (migration 037): the row itself opts a program IN to assessment.
+ *
+ * Therefore placement is OPT-IN per program version, and requiring an explicit
+ * policy for every version would block enrollment across programs that never
+ * assess. What must NOT collapse into this case is a policy that exists but
+ * fails to resolve for a given candidate — see `CONFIGURATION_ERROR`.
+ */
 export type PlacementDecision =
   /** A profile was found and explicitly demands assessment. */
   | 'REQUIRED'

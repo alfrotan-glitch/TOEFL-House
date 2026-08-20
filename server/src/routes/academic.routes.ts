@@ -6,7 +6,7 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { assertTextLengths, TEXT_LIMITS } from '../utils/textInput.js';
-import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
+import { authenticate, authorize, requirePermission, denyPermissionless, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { assertMoney, assertPerformanceScore } from '../utils/money.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
@@ -17,6 +17,15 @@ import { validatePolicyComponents, validateDecisionRules } from '../core/placeme
 
 export const academicRouter = Router();
 academicRouter.use(authenticate);
+// Academic configuration is branch-wide operational data (calendar, rooms,
+// slots, fees, programs). Several reads below carry no permission gate of their
+// own, which let a permissionless principal — notably the `student` portal
+// role, whose position deliberately grants `permissions: {}` — read the whole
+// branch's configuration. `denyPermissionless` is the project's existing guard
+// for exactly this (see audit.routes.ts and branches.routes.ts): it admits any
+// position holding at least one permission and rejects self-service principals.
+// It grants nobody new access; it only closes the permissionless read path.
+academicRouter.use(denyPermissionless);
 academicRouter.get('/defaults', authorize('owner', 'manager'), ah(async (_req, res) => {
   res.json({
     levelDurationMonths: ACADEMIC_DEFAULTS.levelDurationMonths,
