@@ -14,7 +14,7 @@ import type { UserRole } from '../../utils/auth.js';
 export interface EffectivePermission {
   code: string; 
   scope: PermissionScope; 
-  source: 'role' | 'override' | 'delegation' | 'legacy';
+  source: 'role' | 'override' | 'delegation';
   scopeId: string | null;
 }
 
@@ -67,13 +67,11 @@ interface RbacStatements {
   getPermId: Database.Statement;
   getLegacyUsers: Database.Statement;
   insertUserRole: Database.Statement;
-  hasUserRole: Database.Statement;
   getPrimaryUserRole: Database.Statement;
   getUserRbacPerms: Database.Statement;
   getDelegations: Database.Statement;
   getOverrides: Database.Statement;
   getUserRoles: Database.Statement;
-  getLegacyUser: Database.Statement;
 }
 
 const stmtCache = new WeakMap<Database.Database, RbacStatements>();
@@ -92,7 +90,6 @@ function getStmts(db: Database.Database): RbacStatements {
     
     getLegacyUsers: db.prepare('SELECT id, role, branch_id FROM users WHERE is_active = 1'),
     insertUserRole: db.prepare(`INSERT OR IGNORE INTO user_roles (id, user_id, role_id, scope_type, scope_id, is_primary, assigned_by, assigned_at) VALUES (?, ?, ?, ?, ?, 1, ?, datetime('now'))`),
-    hasUserRole: db.prepare('SELECT id FROM user_roles WHERE user_id = ? LIMIT 1'),
     getPrimaryUserRole: db.prepare(`SELECT ur.id, r.code AS roleCode, ur.scope_type AS scopeType, ur.scope_id AS scopeId FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = ? AND ur.is_primary = 1 LIMIT 1`),
     
     getUserRbacPerms: db.prepare(`
@@ -119,7 +116,6 @@ function getStmts(db: Database.Database): RbacStatements {
       WHERE ur.user_id = ? AND r.is_active = 1
         AND (ur.expires_at IS NULL OR ur.expires_at > datetime('now'))
     `),
-    getLegacyUser: db.prepare('SELECT role FROM users WHERE id = ?'),
   };
   
   stmtCache.set(db, stmts);
@@ -239,27 +235,6 @@ export function resolveUserPermissions(db: Database.Database, userId: string): E
       grants.push({ code: row.code, scope: narrowerScope(row.scope, row.user_scope), source: 'role', scopeId: row.user_scope_id });
     }
 
-    // Compatibility safeguard: a legacy user may authenticate before the RBAC
-    // synchronization pass has materialized user_roles. In that transient state
-    // the effective role must still carry its defined permissions; an empty
-    // user_roles join must never silently turn an entitled user into a deny-all
-    // principal. Explicit RBAC assignments remain authoritative once present.
-    // If the user HAS assignments but every one is inactive/deactivated, the
-    // principal is intentionally permissionless (deactivation is meaningful).
-    const hasAnyAssignment = !!stmts.hasUserRole.get(userId);
-    if (rows.length === 0 && !hasAnyAssignment) {
-      const user = stmts.getLegacyUser.get(userId) as { role: string } | undefined;
-      if (user) {
-        const roleCode = LEGACY_ROLE_MAP[user.role as UserRole] || user.role;
-        const def = ROLE_DEFINITIONS.find((r) => r.code === roleCode);
-        if (def) {
-          for (const [code, scope] of Object.entries(def.permissions)) {
-            if (scope) grants.push({ code, scope, source: 'legacy', scopeId: null });
-          }
-        }
-      }
-    }
-
     const dels = stmts.getDelegations.all(userId) as {
       code: string; scope: PermissionScope; delegation_scope: PermissionScope; delegation_scope_id: string | null;
     }[];
@@ -280,14 +255,6 @@ export function resolveUserPermissions(db: Database.Database, userId: string): E
     return grants;
   }
 
-  const user = stmts.getLegacyUser.get(userId) as { role: string } | undefined;
-  if (user) {
-    const roleCode = LEGACY_ROLE_MAP[user.role as UserRole] || user.role;
-    const def = ROLE_DEFINITIONS.find((r) => r.code === roleCode);
-    if (def) for (const [code, scope] of Object.entries(def.permissions)) {
-      if (scope) grants.push({ code, scope, source: 'legacy', scopeId: null });
-    }
-  }
   return grants;
 }
 
@@ -300,38 +267,6 @@ export function buildRbacContext(db: Database.Database, user: {
   
   if (rbacSchemaExists(db)) {
     roles = stmts.getUserRoles.all(user.id) as RbacUserContext['roles'];
-  }
-  
-  // The legacy fallback exists for ONE transient state: a user who authenticates
-  // before syncLegacyUserRoles() has materialized their user_roles rows. It must
-  // never fire for a user whose assignments exist but are currently expired —
-  // that user has been deliberately time-limited, and expiry must revoke.
-  //
-  // RBAC-1, reproduced live over HTTP before this guard existed: a campus-scoped
-  // owner whose grant lapsed was handed a SYNTHESIZED organization-scoped owner
-  // role, because getUserRoles() correctly filters on `expires_at` and returns
-  // zero rows, which this branch read as "legacy user". isGlobalOwner() then
-  // returned true and every authorize()/requirePermission() short-circuit
-  // opened. Expiring the grant WIDENED access from one campus to all branches
-  // (GET /students/:id in another campus went 403 -> 200).
-  //
-  // `hasUserRole` is deliberately unfiltered by expiry: it answers "has this
-  // user ever been assigned a role?", which is exactly the question that
-  // separates a genuine legacy user from a lapsed one. resolveUserPermissions()
-  // above already gates its own legacy fallback on the same statement, so this
-  // makes role resolution agree with permission resolution instead of
-  // contradicting it.
-  const hasAnyAssignment = rbacSchemaExists(db) && !!stmts.hasUserRole.get(user.id);
-  if (roles.length === 0 && !hasAnyAssignment) {
-    const roleCode = LEGACY_ROLE_MAP[user.role as UserRole] || user.role;
-    const def = ROLE_DEFINITIONS.find((r) => r.code === roleCode);
-    roles = [{ 
-      roleId: 'legacy', 
-      roleCode, 
-      roleName: def?.name || user.role,
-      scopeType: roleCode === 'owner' ? 'organization' : 'branch',
-      scopeId: roleCode === 'owner' ? null : user.branch_id 
-    }];
   }
   
   return {
@@ -416,7 +351,10 @@ export function canAccessBranch(db: Database.Database, ctx: RbacUserContext, bra
     if (role.scopeType === 'campus' && role.scopeId && role.scopeId === branch.campusId) return true;
   }
 
-  return ctx.branchId === branchId;
+  // No home-branch fallback. `users.branch_id` records where a person is
+  // based; it does not authorize anything. Access comes from an assignment
+  // and nowhere else, so revoking the assignment revokes the access.
+  return false;
 }
 
 export function canAccessAllBranches(ctx: RbacUserContext): boolean {

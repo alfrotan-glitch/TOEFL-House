@@ -19,8 +19,10 @@
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import type { Request } from 'express';
+import { randomUUID } from 'node:crypto';
 import { writeAudit } from '../middleware/audit.js';
 import { db } from '../db/connection.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 
 /** A request shaped like the ones Express hands the route handlers. */
 function fakeRequest(over: Partial<Request> & { user?: unknown }): Request {
@@ -45,6 +47,21 @@ function lastAuditBranch(action: string): string | null {
 beforeAll(() => {
   db.prepare("INSERT OR IGNORE INTO branches (id, name, code, is_active) VALUES ('home_branch','Home','H-1',1)").run();
   db.prepare("INSERT OR IGNORE INTO branches (id, name, code, is_active) VALUES ('west_branch','West','W-1',1)").run();
+
+  // writeAudit only accepts a target branch the caller is authorized for, and
+  // authorization comes from an assignment. The operator therefore needs a real
+  // organization-scoped owner grant, not just a 'role' string on the request.
+  bootstrapRbacCatalog(db);
+  db.prepare(
+    `INSERT OR REPLACE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
+     VALUES ('u_owner', 'owner', 'Owner', 'owner', 'home_branch', 'test-hash', 1, 0)`,
+  ).run();
+  const ownerRole = db.prepare("SELECT id FROM roles WHERE code = 'owner'").get() as { id: string };
+  db.prepare("DELETE FROM user_roles WHERE user_id = 'u_owner'").run();
+  db.prepare(
+    `INSERT INTO user_roles (id, user_id, role_id, scope_type, scope_id, is_primary, assigned_by)
+     VALUES (?, 'u_owner', ?, 'organization', NULL, 1, 'test')`,
+  ).run(randomUUID(), ownerRole.id);
 });
 
 describe('audit rows are attributed to the branch the action targets', () => {

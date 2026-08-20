@@ -1,47 +1,24 @@
 /**
- * `canAccessBranch()` home-branch fallback — ACCEPTED / DOCUMENTED BEHAVIOUR.
+ * Branch access comes from an assignment, and from nothing else.
  *
- * The function ends with:
+ * `canAccessBranch()` used to end with:
  *
  *     return ctx.branchId === branchId;
  *
- * so a user always "matches" their own `users.branch_id` even when every RBAC
- * grant has expired. That looks alarming in isolation, so it was investigated
- * adversarially rather than assumed safe OR assumed broken.
+ * so a principal always "matched" their own `users.branch_id` even when every
+ * RBAC grant had expired or been deleted. It was defended as a row filter
+ * rather than a grant, on the grounds that a permission guard always runs
+ * first — which was true of every call site, but made the function itself
+ * answer the authorization question wrongly and left the system one
+ * unguarded call site away from a cross-branch read.
  *
- * WHAT users.branch_id MEANS
- * --------------------------
- * `users.branch_id` is `TEXT NOT NULL REFERENCES branches(id)`: every user has
- * exactly one home branch. It is an IDENTITY attribute (which branch this
- * person belongs to), not an authorization grant.
+ * `users.branch_id` is an IDENTITY attribute: it records which branch a person
+ * belongs to. It is not an authorization grant, so it no longer behaves like
+ * one. Access is derived from `user_roles` scope alone, which is what makes
+ * revocation and expiry actually revoke.
  *
- * WHAT canAccessBranch ACTUALLY DECIDES
- * -------------------------------------
- * Every one of its ~20 call sites is a SECONDARY row-scoping check that runs
- * AFTER a route guard (`requirePermission(...)` / `authorize(...)`) has already
- * decided whether the caller may perform the action at all. It answers "may
- * this principal see rows belonging to branch X?", never "may this principal
- * act?". It is a ROW FILTER, not a grant.
- *
- * PROVEN LIVE OVER HTTP (fresh DB, real server, manager whose home branch is
- * the branch under test):
- *
- *   ACTIVE grant   list=200 readHomeStudent=200 classes=200 finance=200 create=201
- *   EXPIRED grant  list=403 readHomeStudent=403 classes=403 finance=403 create=403
- *
- * With the grant expired the principal holds perms=0, so the permission guard
- * denies first and the home-branch line is never reached as an authorization
- * decision. Resolver trace for the same two states:
- *
- *   ACTIVE   perms=71 roles=1 globalOwner=false canAccessBranch(HOME)=true
- *   EXPIRED  perms= 0 roles=0 globalOwner=false canAccessBranch(HOME)=true
- *
- * `canAccessBranch(HOME)=true` in both rows is exactly the point: it is not the
- * thing that grants access, which is why the endpoints still return 403.
- *
- * This suite locks that invariant so the fallback cannot silently become an
- * authorization path — if anyone ever calls canAccessBranch WITHOUT a
- * permission guard in front of it, the HTTP cases below start failing.
+ * This suite locks that in at both levels: the resolver returns the right
+ * answer on its own, AND the guarded endpoint still denies.
  */
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { randomUUID } from 'node:crypto';
@@ -112,39 +89,41 @@ beforeAll(async () => {
 
 beforeEach(() => setGrant('hbi_mgr', null));
 
-describe('home-branch fallback is a row filter, not an authorization grant', () => {
+describe('branch access derives from assignment scope only', () => {
   it('an ACTIVE branch grant reaches the guarded home-branch endpoint', async () => {
     const res = await supertest(app).get('/guarded').set(bearer('hbi_mgr'));
     expect(res.status).toBe(200);
   });
 
-  it('an EXPIRED grant is refused at the permission gate, despite the home-branch match', async () => {
+  it('an EXPIRED grant revokes at the resolver AND at the endpoint', async () => {
     setGrant('hbi_mgr', PAST);
 
     const ctx = ctxOf('hbi_mgr');
-    // The fallback still reports true for the user's own branch...
-    expect(canAccessBranch(db, ctx, HOME)).toBe(true);
-    // ...but the principal holds no permissions and is not an owner...
+    // The resolver itself now says no — including for the home branch.
+    expect(canAccessBranch(db, ctx, HOME)).toBe(false);
     expect(ctx.permissionCodes.size).toBe(0);
     expect(ctx.roles).toHaveLength(0);
     expect(isGlobalOwner(ctx)).toBe(false);
-    // ...so the endpoint is unreachable. This is the invariant that matters.
+
     const res = await supertest(app).get('/guarded').set(bearer('hbi_mgr'));
     expect(res.status).toBe(403);
   });
 
-  it('a DELETED grant (legacy fallback) keeps documented legacy behaviour', async () => {
-    // No assignment history at all is the transient state syncLegacyUserRoles()
-    // repairs; the legacy role legitimately applies and access is restored.
+  it('DELETING every assignment actually revokes', async () => {
+    // This is the defect that made revocation a no-op: with user_roles empty
+    // the resolver re-granted the whole role from the users.role string, so
+    // removing a person's assignments left their access untouched.
     db.prepare("DELETE FROM user_roles WHERE user_id = 'hbi_mgr'").run();
     const ctx = ctxOf('hbi_mgr');
-    expect(ctx.permissionCodes.size).toBeGreaterThan(0);
+    expect(ctx.permissionCodes.size).toBe(0);
+    expect(ctx.roles).toHaveLength(0);
+    expect(canAccessBranch(db, ctx, HOME)).toBe(false);
 
     const res = await supertest(app).get('/guarded').set(bearer('hbi_mgr'));
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
   });
 
-  it('the home-branch fallback never widens access to a FOREIGN branch', async () => {
+  it('never grants a FOREIGN branch, active or expired', async () => {
     db.prepare("INSERT OR IGNORE INTO branches (id, name, location, campus_id) VALUES ('hbi_other', 'Other', 'Kabul', NULL)").run();
     const active = ctxOf('hbi_mgr');
     expect(canAccessBranch(db, active, 'hbi_other')).toBe(false);

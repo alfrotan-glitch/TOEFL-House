@@ -48,6 +48,14 @@ describe('Phase 1 RBAC scope invariants', () => {
       VALUES (?, ?, ?, 'campus', ?, 1, 'test')`).run('ur_campus_scope', 'rbac_campus_manager', managerRole.id, 'rbac_campus_a');
 
     seedUser('rbac_teacher', 'teacher', BRANCH_A);
+    // Authority comes from an assignment and nothing else, so the teacher gets
+    // a real one. Previously this user had no user_roles row at all and was
+    // carried entirely by the users.role fallback.
+    db.prepare('DELETE FROM user_roles WHERE user_id = ?').run('rbac_teacher');
+    db.prepare(`INSERT INTO user_roles (id, user_id, role_id, scope_type, scope_id, is_primary, assigned_by)
+      VALUES (?, ?, ?, 'branch', ?, 1, 'test')`).run(
+        'ur_teacher_scope', 'rbac_teacher',
+        (db.prepare('SELECT id FROM roles WHERE code = ?').get('teacher') as { id: string }).id, BRANCH_A);
     db.prepare(`INSERT OR REPLACE INTO teachers
       (id, full_name, branch_id, joined_date, user_id)
       VALUES (?, ?, ?, ?, ?)`).run('rbac_teacher_profile', 'RBAC Teacher', BRANCH_A, '2026-01-01', 'rbac_teacher');

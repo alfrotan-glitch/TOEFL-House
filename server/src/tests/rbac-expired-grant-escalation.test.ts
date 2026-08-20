@@ -125,14 +125,10 @@ describe('RBAC-1 · an expired grant must revoke, never escalate', () => {
     expect(ctx.permissionCodes.size).toBe(0);
     expect(ctx.roles).toHaveLength(0);
 
-    // NOTE on the home branch: `canAccessBranch` ends with
-    // `return ctx.branchId === branchId`, so a user always matches their own
-    // `users.branch_id` regardless of grants. Verified PRE-EXISTING on unfixed
-    // code with an expired branch-scoped manager (perms=0, globalOwner=false,
-    // homeBranch=true), so it is neither caused by nor in scope for this fix.
-    // What matters here is that the expired principal carries NO permissions,
-    // which is what every route guard actually consults.
-    expect(canAccessBranch(db, ctx, 'RBX_B1')).toBe(true);
+    // The home branch is denied too. `users.branch_id` records where a person
+    // is based; it never authorized anything, and canAccessBranch no longer
+    // pretends otherwise. An expired grant now revokes uniformly.
+    expect(canAccessBranch(db, ctx, 'RBX_B1')).toBe(false);
   });
 
   it('3 · a not-yet-active (future) assignment leaves the principal permissionless', () => {
@@ -246,15 +242,18 @@ describe('RBAC-1 · an expired grant must revoke, never escalate', () => {
     expect(res.status).toBe(403);
   });
 
-  it('10 · a genuine legacy user with NO assignment history keeps documented behaviour', () => {
-    // Legacy support must survive the fix. This user has never had a row in
-    // user_roles, which is the transient state syncLegacyUserRoles() repairs.
+  it('10 · a user with NO assignment holds nothing, whatever users.role says', () => {
+    // This is the escalation that the users.role fallback used to allow: the
+    // row says 'owner', and with no assignment the resolver used to synthesize
+    // an organization-scoped owner from that string alone. A denormalized
+    // column is not an authority.
     expect(db.prepare("SELECT COUNT(*) c FROM user_roles WHERE user_id = 'rbx_legacy'").get()).toEqual({ c: 0 });
+    expect(db.prepare("SELECT role FROM users WHERE id = 'rbx_legacy'").get()).toEqual({ role: 'owner' });
 
     const ctx = ctxOf('rbx_legacy');
-    expect(ctx.permissionCodes.size).toBeGreaterThan(0);
-    expect(ctx.roles[0].roleCode).toBe('owner');
-    expect(isGlobalOwner(ctx)).toBe(true);
-    expect(resolveUserPermissions(db, 'rbx_legacy').every((p) => p.source === 'legacy')).toBe(true);
+    expect(ctx.permissionCodes.size).toBe(0);
+    expect(ctx.roles).toHaveLength(0);
+    expect(isGlobalOwner(ctx)).toBe(false);
+    expect(resolveUserPermissions(db, 'rbx_legacy')).toEqual([]);
   });
 });
