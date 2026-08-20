@@ -3,8 +3,8 @@
  * ======================================================
  * Real approve/reject actions wired to the backend's role-checked,
  * event-emitting workflow engine (server/src/routes/workflows.routes.ts).
- * Previously this screen only displayed instances/automations with no
- * way to act on them — every approval had to happen outside the app.
+ * Displaying instances/automations without a way to act on them would push
+ * every approval outside the app.
  *
  * @license Apache-2.0
  */

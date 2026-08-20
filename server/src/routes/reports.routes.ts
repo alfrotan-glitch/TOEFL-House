@@ -52,10 +52,10 @@ const MAX_RANGE_DAYS = 366;
 /**
  * Resolves the reporting period.
  *
- * This used to do its own Gregorian arithmetic — `${ym}-01` to the last day of
- * the Gregorian month — while Finance, payroll and the dashboard resolved a
- * SHAMSI month through the calendar authority. The two never coincide: on
- * every day sampled, the spans differed (2026-08-20 gave 2026-07-23..2026-08-22
+ * Delegated to the calendar authority rather than computed here. Doing its own
+ * Gregorian arithmetic — `${ym}-01` to the last day of the Gregorian month —
+ * while Finance, payroll and the dashboard resolve a SHAMSI month makes the two
+ * never coincide: on every day sampled, the spans differed (2026-08-20 gave 2026-07-23..2026-08-22
  * here versus 2026-08-01..2026-08-31 there). That is the same misattribution
  * the calendar authority was created to fix, still live in the main financial
  * report because this endpoint was never migrated onto it.

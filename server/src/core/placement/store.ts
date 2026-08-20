@@ -325,10 +325,10 @@ export function mapProfile(profile: any, version: any, levels: any[], rules: any
 }
 
 export function mapAttempt(attempt: any) {
-  // The raw column is destructured OUT here and never re-attached. Previously
-  // this function sanitised `snapshot` and then spread `...attempt` over the
-  // result, which re-added the untouched `snapshot_json` string — so every
-  // answer key shipped to the client anyway (certification finding C-4).
+  // The raw column is destructured OUT here and never re-attached. Sanitising
+  // `snapshot` and then spreading `...attempt` over the result would re-add the
+  // untouched `snapshot_json` string, shipping every answer key to the client
+  // (certification finding C-4).
   // `stmtAttempt` and `stmtCurrentAttempt` are `SELECT *`, so the raw column is
   // present on most rows reaching this serializer.
   const { snapshot_json: rawSnapshot, ...row } = attempt ?? {};

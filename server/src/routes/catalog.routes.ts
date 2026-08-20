@@ -290,10 +290,10 @@ catalogRouter.get('/branch-profile/:branchId', requirePermission('AcademicSetup.
  * Fee fields on a branch profile are MONEY, so they are validated by the same
  * canonical authority Finance uses (`assertMoney`) rather than a second,
  * divergent validator. Configuration is the right place to reject a bad
- * amount: previously `-100`, `0.001`, `1e20` and even the text `"abc"` were
- * written straight into REAL NOT NULL columns, and `resolveFee()` (which only
- * checks Number.isFinite) then handed them to the money writers. A sub-cent
- * fee surfaced as a HTTP 500 at payment time — "payment amount must have at
+ * amount. Unvalidated, `-100`, `0.001`, `1e20` and even the text `"abc"` reach
+ * the stored columns, and `resolveFee()` (which only checks Number.isFinite)
+ * then hands them to the money writers. A sub-cent fee surfaces as a HTTP 500
+ * at payment time — "payment amount must have at
  * most two decimal places" — long after the bad value was already persisted.
  *
  * Invalid configuration must never become authoritative money.

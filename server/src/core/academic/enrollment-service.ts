@@ -266,7 +266,7 @@ export class EnrollmentService {
    * capacity, it is a seat, and a student cannot hold two seats in one class.
    * Closed rows (transferred / dropped / withdrawn / completed / graduated)
    * are history and are intentionally NOT covered, so a student may legitimately
-   * re-enroll in a class they previously left or repeat.
+   * re-enroll in a class they left earlier, or repeat one.
    *
    * Before remediation this rule existed only as an inline check in
    * `students.routes.ts`, keyed on `status='active'` alone. Every other writer
@@ -346,9 +346,9 @@ export class EnrollmentService {
     }
 
     // ── DUPLICATE GATE (single enforcement point for every enrollment path) ──
-    // Only the extra-class route used to check this, so `journey/enrollments`
-    // — which funnels through this method — could stack unlimited active
-    // enrollments for one student in one class (audit E-2).
+    // Enforced here rather than per route: checked at only one of the routes,
+    // `journey/enrollments` — which funnels through this method — could stack
+    // unlimited active enrollments for one student in one class (audit E-2).
     this.assertNoDuplicateClassEnrollment(input.studentId, input.classId, input.semesterName ?? null);
 
     // ── PLACEMENT GATE (single enforcement point for every enrollment path) ──
@@ -359,9 +359,10 @@ export class EnrollmentService {
     //
     // UNCONDITIONAL. There is deliberately no opt-out parameter.
     //
-    // A `skipPlacementGate` flag used to exist for the visitor conversion
-    // route, justified by the claim that conversion "evaluates the identical
-    // placement rule" moments earlier. That claim was false, and the gap was
+    // A `skipPlacementGate` flag is deliberately not offered to the visitor
+    // conversion route. The justification would be that conversion "evaluates
+    // the identical placement rule" moments earlier. That claim is false, and
+    // the gap it opens is
     // exploitable (audit V-1): the route read the program off the VISITOR,
     // while this method resolves it from the CLASS's level. Clearing
     // `visitors.program_version_id` with an ordinary Lead.Edit PATCH therefore
@@ -400,9 +401,9 @@ export class EnrollmentService {
       // The student_semesters row is a derived projection (attendance /
       // gradebook). EnrollmentService is the single writer: it is created
       // here, in the same transaction as the enrollments row, so the two can
-      // never drift. Callers that previously inserted a semester row
-      // themselves (visitor conversion, waitlist conversion, manual student
-      // registration) now rely on this.
+      // never drift. No caller inserts a semester row itself — visitor
+      // conversion, waitlist conversion and manual student registration all
+      // rely on this.
       if (input.classId && initialStatus === 'active' && input.writeSemester !== false) {
         this.stmtInsertNewSemester.run(makeId('ss'), input.studentId, input.semesterName || 'Current Semester', input.classId);
       }

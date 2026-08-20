@@ -52,18 +52,21 @@ export const CONTRACT_TYPES = ['fixed', 'per_skill', 'per_session', 'hybrid', 'p
 
 export type TeacherSalaryModel = (typeof CONTRACT_TYPES)[number];
 
-/** Legacy values that predate the vocabulary alignment, mapped to the real
- *  five so historical rows keep computing instead of silently paying 0. */
-const LEGACY_MODEL_ALIASES: Record<string, TeacherSalaryModel> = {
-  hybrid_skill: 'hybrid',
-  hybrid_level: 'per_level',
-};
-
-/** Normalises any stored/incoming value to one of the five contract types. */
+/**
+ * Narrows a stored value to one of the five contract types.
+ *
+ * Both columns that can supply one — `teachers.salary_type` and
+ * `teacher_compensation_history.salary_type` — carry a CHECK for exactly these
+ * five, so an out-of-vocabulary value cannot be stored and this is a total
+ * function over what the database can hold. `'fixed'` is the answer for the
+ * remaining cases (NULL, or a value read from somewhere unconstrained) because
+ * paying a base salary is the safe reading; the alternative, computing 0, pays
+ * a teacher nothing without saying why.
+ */
 export function normalizeContractType(value: unknown): TeacherSalaryModel {
   const raw = String(value ?? '').trim();
   if ((CONTRACT_TYPES as readonly string[]).includes(raw)) return raw as TeacherSalaryModel;
-  return LEGACY_MODEL_ALIASES[raw] ?? 'fixed';
+  return 'fixed';
 }
 
 /** True when the contract's compensation rule pays per recorded Skill. */
@@ -490,12 +493,12 @@ export function toPeriodKey(monthName: string): string {
   if (numeric && Number(numeric[2]) >= 1 && Number(numeric[2]) <= 12) {
     const year = Number(numeric[1]);
     const month = String(numeric[2]).padStart(2, '0');
-    // A four-digit year in the Gregorian range is legacy input: convert it.
+    // A four-digit year in the Gregorian range is a Gregorian date: convert it.
     if (year >= 1800) return isoToJalaliPeriodKey(`${year}-${month}-01`) ?? '';
     return `${year}-${month}`;
   }
 
-  // Legacy Gregorian month name.
+  // Gregorian month name.
   const gregorian = s.match(/^(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})$/i);
   if (gregorian) {
     const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];

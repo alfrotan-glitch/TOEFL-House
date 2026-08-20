@@ -106,10 +106,10 @@ export interface StudentBalanceRow extends StudentBalance {
 /**
  * Balances for a page of the roster, in one query.
  *
- * The roster endpoint used to inline its own copy of this SQL. That copy
- * silently diverged: it summed only `status = 'active'` semesters while
- * getStudentBalance('all') summed every semester, so completing a semester
- * made the list and the profile disagree. Both scopes are legitimate
+ * The roster endpoint calls this rather than inlining its own copy of the SQL.
+ * A second copy diverges silently: summing only `status = 'active'` semesters
+ * while getStudentBalance('all') sums every semester makes the list and the
+ * profile disagree the moment a semester completes. Both scopes are legitimate
  * questions, but they must come from ONE definition — this one.
  *
  * `scope` matches getStudentBalance exactly, so a row here always equals

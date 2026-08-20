@@ -46,8 +46,8 @@ const RULE_CATEGORY_META: ReadonlyArray<{ id: RuleCategory; label: string; manag
 
 /**
  * Generic Rule Engine ownership boundary. Domain-owned policies remain in
- * their domain services/catalogs even if their historical rows still exist in
- * rule_definitions for backward compatibility.
+ * their domain services/catalogs; a `rule_definitions` row in one of those
+ * categories is descriptive and is not the authority.
  */
 const CATEGORIES: RuleCategory[] = RULE_CATEGORY_META.map((item) => item.id);
 

@@ -41,6 +41,16 @@ import {
   type TeacherSalaryModel,
 } from '../core/payroll/class-payroll.js';
 import { jalaliMonthToGregorianRange } from '../utils/jalali.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const repoRootForContracts = path.resolve(
+  fileURLToPath(new URL('.', import.meta.url)),
+  '..',
+  '..',
+  '..',
+);
 
 /** Payroll periods are Hijri Shamsi months. Asad 1405 spans
  *  2026-07-23..2026-08-22, inside every seeded class window below. */
@@ -542,5 +552,85 @@ describe('Phase 12 — historical integrity', () => {
     // month (Saratan 1405) must not see it.
     expect(computeTeacherDueAmount(db, teacher, '1405-04').due).toBe(0);
     expect(computeTeacherDueAmount(db, teacher, '1405-05').due).toBe(1000);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// ONE SALARY-TYPE VOCABULARY, ENFORCED BY BOTH COLUMNS THAT CARRY IT
+// ══════════════════════════════════════════════════════════════════════════
+/**
+ * `normalizeContractType` carried an alias map (`hybrid_skill` -> `hybrid`,
+ * `hybrid_level` -> `per_level`) described as values that predate the
+ * vocabulary alignment. Neither alias was reachable: `teachers.salary_type`
+ * CHECKs the canonical five, and the API rejects `hybrid_skill` with 400 (the
+ * test above). The map was dead in the only path that fed it.
+ *
+ * It was not provably dead in the other one. Payroll reads
+ * `compensation?.salary_type || teacher.salary_type`, and
+ * `teacher_compensation_history.salary_type` had NO CHECK — so the history
+ * table was the one place an out-of-vocabulary value could have lived. The
+ * CHECK is now on both columns, which is what makes deleting the map safe
+ * rather than merely tidy.
+ */
+describe('salary type is one vocabulary in every column that stores it', () => {
+  const FIVE = [...FIVE_CONTRACTS] as string[];
+  const PROBE_TEACHER = 'tch_vocab_probe';
+  beforeAll(() => {
+    seedTeacher(PROBE_TEACHER, 'fixed', 10000, 0);
+  });
+
+  it('teachers.salary_type admits exactly the five contract types', () => {
+    const sql = (
+      db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='teachers'").get() as {
+        sql: string;
+      }
+    ).sql;
+    for (const t of FIVE) expect(sql).toContain(`'${t}'`);
+    expect(sql).toMatch(/salary_type[\s\S]*?CHECK/);
+  });
+
+  it('teacher_compensation_history.salary_type carries the same CHECK', () => {
+    const sql = (
+      db
+        .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='teacher_compensation_history'")
+        .get() as { sql: string }
+    ).sql;
+    expect(sql).toMatch(/salary_type[\s\S]*?CHECK/);
+    for (const t of FIVE) expect(sql).toContain(`'${t}'`);
+  });
+
+  it('the history table refuses a value outside the vocabulary', () => {
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO teacher_compensation_history (id, teacher_id, effective_from, base_salary, salary_type)
+           VALUES ('tch_probe', ?, '2026-01-01', 1000, 'hybrid_skill')`,
+        )
+        .run(PROBE_TEACHER),
+    ).toThrow(/CHECK constraint failed/);
+  });
+
+  it('the history table accepts every canonical value', () => {
+    for (const t of FIVE) {
+      db.prepare(
+        `INSERT OR REPLACE INTO teacher_compensation_history (id, teacher_id, effective_from, base_salary, salary_type)
+         VALUES (?, ?, '2026-01-01', 1000, ?)`,
+      ).run(`tch_ok_${t}`, PROBE_TEACHER, t);
+    }
+    const stored = db
+      .prepare('SELECT DISTINCT salary_type FROM teacher_compensation_history WHERE id LIKE ?')
+      .all('tch_ok_%')
+      .map((r) => (r as { salary_type: string }).salary_type)
+      .sort();
+    expect(stored).toEqual([...FIVE].sort());
+  });
+
+  it('no alias map survives in the payroll module', () => {
+    const src = fs.readFileSync(
+      path.join(repoRootForContracts, 'server', 'src', 'core', 'payroll', 'class-payroll.ts'),
+      'utf8',
+    );
+    expect(src).not.toContain('LEGACY_MODEL_ALIASES');
+    expect(src).not.toContain('hybrid_skill');
   });
 });

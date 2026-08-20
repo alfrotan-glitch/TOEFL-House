@@ -6,7 +6,7 @@
  * Scope handling: branch-scoped queries bind branch_id; organization-scoped
  * queries pass NO parameters at all. Passing `undefined` to a prepared
  * statement with zero placeholders throws "Too many parameter values" in
- * better-sqlite3 — this used to break the owner (branchId=all) path.
+ * better-sqlite3, which would break the owner (branchId=all) path.
  */
 import { db } from '../db/connection.js';
 import { OPERATING_INCOME_SQL, OWNER_DRAWING_SQL } from '../core/finance/ledger-classification.js';

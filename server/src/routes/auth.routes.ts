@@ -199,8 +199,9 @@ authRouter.get(
 /**
  * Student self-service login: student code + PORTAL SECRET.
  *
- * SPA-1 — this endpoint used to accept `studentCode + fullName` and
- * auto-provision an account on first contact. Neither factor is a secret:
+ * SPA-1 — this endpoint requires a portal secret. Accepting
+ * `studentCode + fullName` and auto-provisioning on first contact would
+ * authenticate nobody: neither factor is a secret.
  * `student_code` is issued from a sequential counter (utils/receipt.ts,
  * `student_code_counter`, base 1000) and a student's full name is public to
  * classmates and staff, so knowing a classmate's name was enough to walk the
@@ -304,7 +305,7 @@ authRouter.post(
   '/logout',
   ah(async (req, res) => {
     // Revoke the session server-side: bumping session_version invalidates every
-    // previously issued JWT for this user (authenticate() compares versions),
+    // JWT issued to this user before it (authenticate() compares versions),
     // so a captured token cannot outlive an explicit logout.
     const header = req.headers.authorization;
     const bearerToken = header?.startsWith('Bearer ') ? header.slice('Bearer '.length) : null;

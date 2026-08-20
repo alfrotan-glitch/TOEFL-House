@@ -116,7 +116,7 @@ export function evaluateDecision(opts: {
     }
   }
 
-  // 2) Score-band rules (legacy placement_rules, optionally with conditions_json).
+  // 2) Score-band rules (placement_rules, optionally with conditions_json).
   const sorted = [...(rules || [])].sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
   for (const rule of sorted) {
     const bandOk = percentage != null && percentage >= Number(rule.min_score) && percentage <= Number(rule.max_score);

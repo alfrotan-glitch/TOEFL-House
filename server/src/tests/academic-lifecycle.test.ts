@@ -25,7 +25,7 @@ import { getEnrollmentService } from '../core/academic/enrollment-service.js';
 import {
   assertClassTransition,
   assertEnrollmentTransition,
-  deriveLegacyClassStatus,
+  deriveCoarseClassStatus,
   CLASS_TRANSITIONS,
   CLASS_STAGES,
 } from '../core/academic/lifecycle-engine.js';
@@ -246,7 +246,7 @@ describe('Enrollment Lifecycle Engine', () => {
 });
 
 describe('lifecycle-engine.ts — pure unit tests', () => {
-  it('deriveLegacyClassStatus maps every stage to a valid legacy value', () => {
+  it('deriveCoarseClassStatus maps every stage to a valid legacy value', () => {
     const expected: Record<string, string> = {
       draft: 'draft',
       scheduled: 'active',
@@ -261,7 +261,7 @@ describe('lifecycle-engine.ts — pure unit tests', () => {
       cancelled: 'cancelled',
     };
     for (const stage of CLASS_STAGES) {
-      expect(deriveLegacyClassStatus(stage)).toBe(expected[stage]);
+      expect(deriveCoarseClassStatus(stage)).toBe(expected[stage]);
     }
   });
 

@@ -241,7 +241,7 @@ export function evaluateEnrollmentEligibility(
  * while the conversion gate tested for `'exempt'`, a value nothing ever wrote
  * and the CHECK would have rejected. `'waived'` is the canonical term because
  * it is the one the database schema actually allows; `'exempt'` is accepted
- * defensively on read so any legacy row or external caller still resolves.
+ * defensively on read so an external caller using that term still resolves.
  */
 export const WAIVED_STATUS = 'waived' as const;
 

@@ -331,9 +331,9 @@ invoicesRouter.post(
 
     const date = today();
 
-    // Duplicate protection. Previously this only ran when the CLIENT supplied a
-    // key, so an unkeyed double-click / retry storm recorded one payment and one
-    // income row per request. An explicit key still wins; otherwise a fingerprint
+    // Duplicate protection, applied whether or not the CLIENT supplies a key.
+    // Keyed-only, an unkeyed double-click or retry storm records one payment
+    // and one income row per request. An explicit key still wins; otherwise a fingerprint
     // of the payment intent within a short window collapses retries. A genuinely
     // distinct later instalment (or one sent with its own key) still succeeds.
     const replayPayment = (existing: any) => {

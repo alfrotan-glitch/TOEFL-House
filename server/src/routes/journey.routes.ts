@@ -137,10 +137,10 @@ journeyRouter.post(
       throw new HttpError(400, 'Unsupported or missing eventType for manual append.');
     }
 
-    // Profile status mirror. This used to be a second, unvalidated writer of
-    // students.status: it accepted 'suspended' (which the status endpoint
-    // explicitly refuses because suspension must defer enrollments), skipped
-    // every transition rule, and silently ignored unknown values. It now
+    // Profile status mirror. Writing students.status directly here would make
+    // this a second, unvalidated writer: it would accept 'suspended' (which the
+    // status endpoint refuses, because suspension must defer enrollments), skip
+    // every transition rule, and ignore unknown values silently. It instead
     // delegates to the single guarded authority — audit STU-C1.
     const applyStatus = (to: StudentStatus) => {
       const from = (isStudentStatus(student.status) ? student.status : 'active') as StudentStatus;

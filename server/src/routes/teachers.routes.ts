@@ -117,11 +117,12 @@ const stmtUpdateUserBranchById = db.prepare('UPDATE users SET branch_id = ? WHER
 const stmtSoftDeleteEmployee = db.prepare("UPDATE employees SET status = 'inactive' WHERE id = ?");
 
 // ── EMPLOYEE PAYROLL LEDGER (teacher audit T-1) ────────────────────────────
-// Employee salary payment previously wrote ONLY a raw financial_transactions
-// expense row, with no ledger, no idempotency and no reconcilable trail. Its
-// sole duplicate guard was a `description LIKE '%full salary%<month>%'` string
-// match that covered `full` only and was a check-then-act under concurrency.
-// These statements mirror the hardened teacher payroll path exactly.
+// Employee salary payment writes a ledger row, not merely a raw
+// financial_transactions expense. Without one there is no idempotency and no
+// reconcilable trail, and the only available duplicate guard is a
+// `description LIKE '%full salary%<month>%'` string match — which covers
+// `full` only and is a check-then-act under concurrency.
+// These statements mirror the teacher payroll path exactly.
 const stmtGetEmployeeSalaryByIdempotency = db.prepare(
   'SELECT id, employee_id, period_key, paid_amount, payment_type, transaction_id, branch_id, status FROM employee_salary_ledger WHERE idempotency_key = ?'
 );
@@ -371,8 +372,8 @@ teachersRouter.get('/:id/computed-salary', requirePermission('Payroll.View'), ah
   // (skillCount / targetSkills / shortfall / excess) for EVERY contract
   // type, alongside the separately-visible fixed and Skill pay components.
   const dueInfo = computeTeacherDueAmount(db, teacher, periodKey);
-  // Lifetime assignment count is kept for backward compatibility with
-  // existing clients that read `totalSkillAssignments`.
+  // Lifetime assignment count, reported alongside the period figures because
+  // clients read `totalSkillAssignments` as a career total, not a period one.
   const totalSkillAssignments = (stmtCountSkillsForTeacher.get(teacher.id) as { c: number }).c;
   res.json({ ...dueInfo, totalSkillAssignments });
 }));
@@ -440,8 +441,8 @@ teachersRouter.get('/:id/evaluations', requirePermission('Teacher.View'), ah(asy
 
 teachersRouter.get('/:id/salary-status', requirePermission('Payroll.Edit', 'Payroll.View', 'Teacher.View'), ah(async (req, res) => {
   const teacher = requireTeacher(req, req.params.id);
-  // Periods are Hijri Shamsi months (e.g. '1405-05' = اسد ۱۴۰۵). Legacy
-  // Gregorian input is converted by toPeriodKey, so old clients keep working.
+  // Periods are Hijri Shamsi months (e.g. '1405-05' = اسد ۱۴۰۵). Gregorian
+  // input is converted by toPeriodKey, so either form resolves to one period.
   const monthName = String((req.query as any).month || currentJalaliPeriodKey());
   const periodKey = toPeriodKey(monthName);
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(periodKey)) throw new HttpError(400, 'Month must be a Shamsi period such as 1405-05 or "اسد 1405".');
@@ -497,11 +498,11 @@ teachersRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(asy
 
   // Idempotency is ALWAYS applied, never only when the caller remembers a key.
   //
-  // Payroll previously honoured an explicit Idempotency-Key and did nothing at
-  // all without one: six concurrent identical un-keyed 1,000 AFN partials
-  // created SIX ledger rows and six expense entries. This is the same defect
-  // class already fixed for student payments — a double-click, a refresh or a
-  // retry double-pays a teacher, bounded only by the period's due amount.
+  // Honouring only an explicit Idempotency-Key protects nothing: six
+  // concurrent identical un-keyed 1,000 AFN partials create SIX ledger rows and
+  // six expense entries. This is the same defect class the student payment path
+  // guards against — a double-click, a refresh or a retry double-pays a
+  // teacher, bounded only by the period's due amount.
   //
   // When no key is supplied a fingerprint of the business intent is derived,
   // so retries of the same intent collapse while a genuinely later, distinct
@@ -555,7 +556,7 @@ teachersRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(asy
       const date = today();
       // Persist the canonical Shamsi label (e.g. 'اسد ۱۴۰۵') rather than the
       // raw client string, so the ledger reads consistently regardless of
-      // whether the caller sent '1405-05', 'Asad 1405' or a legacy '2026-08'.
+      // whether the caller sent '1405-05', 'Asad 1405' or a Gregorian '2026-08'.
       const periodLabel = jalaliPeriodLabel(periodKey);
       stmtInsertFinTx.run(
         txId, 'salary', payrollLedgerCategoryId(false), resolvedAmount, date,
@@ -752,16 +753,17 @@ employeesRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(as
   // It returns '' for anything it cannot parse; falling back to the raw label
   // keeps unparseable-but-distinct months distinct. Collapsing them to a shared
   // '' would make two different months look like retries of each other and
-  // refuse the second, legitimate payment. This endpoint has never constrained
-  // the month format, so nothing previously accepted is rejected now.
+  // refuse the second, legitimate payment. This endpoint does not constrain the
+  // month format, so an unparseable label is passed through rather than
+  // rejected.
   const periodKey = toPeriodKey(monthName) || String(monthName).trim();
 
   // ── SERVER-SIDE IDEMPOTENCY (teacher audit T-1) ──────────────────────────
   // Always applied, never only when the caller remembers a key — the same
-  // model the teacher payroll path uses. Previously this endpoint had NO
-  // idempotency at all and ignored an explicit Idempotency-Key header
-  // outright: six concurrent identical 1,000 AFN partials produced six
-  // payments and six expense rows (reproduced live on a fresh database).
+  // model the teacher payroll path uses. Without it — and ignoring an explicit
+  // Idempotency-Key header — six concurrent identical 1,000 AFN partials
+  // produce six payments and six expense rows (reproduced live on a fresh
+  // database).
   //
   // The derived fingerprint collapses retries of the SAME intent while
   // leaving genuinely distinct payments alone: a different amount, a
@@ -783,9 +785,8 @@ employeesRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(as
 
   const result = (() => {
     // BEGIN IMMEDIATE takes the write lock up front so the replay check, the
-    // budget debit and both inserts are one atomic unit — matching the
-    // teacher path. Previously the budget read happened outside the
-    // transaction entirely.
+    // budget debit and both inserts are one atomic unit — matching the teacher
+    // path. A budget read outside the transaction is not covered by that lock.
     db.exec('BEGIN IMMEDIATE');
     try {
       const replay = stmtGetEmployeeSalaryByIdempotency.get(idempotencyKey) as

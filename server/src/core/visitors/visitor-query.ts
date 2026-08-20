@@ -71,11 +71,11 @@ export interface VisitorSummary {
   /**
    * Lead count per `source` over the whole scoped population.
    *
-   * The Channel-performance panel used to count sources inside the loaded page,
-   * so it under-reported every channel and, because the UI only knew four
-   * source keys, silently displayed walk_in/referral/event/organic/facebook
-   * leads as "Other". Returning the real distribution lets the UI render every
-   * channel the server actually stores.
+   * Counted over the whole population, not inside the loaded page. Counting the
+   * page under-reports every channel, and because the UI knows only four source
+   * keys it then displays walk_in/referral/event/organic/facebook leads as
+   * "Other". Returning the real distribution lets the UI render every channel
+   * the server actually stores.
    */
   bySource: Array<{ source: string; count: number }>;
   /**
@@ -97,10 +97,10 @@ export interface VisitorSummary {
 /**
  * Lifecycle predicates come from the shared authority (core/visitors/lead-lifecycle.ts).
  *
- * They used to be declared privately here. That was correct for this module but
- * left the Dashboard, BOS and reports each carrying their own copy, and the
- * copies disagreed: on identical data this module reported 225 open leads while
- * the Dashboard reported 226, because only this one treated closed-lost as
+ * Declaring them privately here would be correct for this module but would
+ * leave the Dashboard, BOS and reports each carrying their own copy, and copies
+ * disagree: on identical data one such copy reported 225 open leads while the
+ * Dashboard reported 226, because only one treated closed-lost as
  * terminal. One question must have one implementation.
  */
 const LOST_SQL = LEAD_CLOSED_SQL;

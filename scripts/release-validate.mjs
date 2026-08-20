@@ -93,6 +93,7 @@ run('protocol integrity', 'npm run audit:protocol');
 run('registry audit', 'npm run audit:registries');
 run('design system audit', 'npm run audit:design-system');
 run('logging audit', 'npm run audit:logging');
+run('source cleanliness audit', 'npm run audit:cleanliness');
 
 console.log('\nBuild');
 run('frontend production build', 'npm run build', { slow: true });

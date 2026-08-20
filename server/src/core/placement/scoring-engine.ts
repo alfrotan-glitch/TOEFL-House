@@ -21,9 +21,9 @@ export function autoScoreQuestion(q: any, response: unknown): AutoScoreResult {
     const given = String(response ?? '').trim().toLowerCase();
     const score = expected && given === expected ? Number(q.points || 0) : 0;
     // The feedback string is returned to the client and persisted on the
-    // response row, so it must never echo the expected answer. It previously
-    // returned `Expected: <answer_key>`, which handed the candidate the key for
-    // every question they got wrong — one wrong pass through the exam revealed
+    // response row, so it must never echo the expected answer. Returning
+    // `Expected: <answer_key>` would hand the candidate the key for every
+    // question they got wrong — one wrong pass through the exam would reveal
     // the whole paper (certification finding C-4).
     return { score, feedback: score > 0 ? 'Correct' : 'Incorrect' };
   }

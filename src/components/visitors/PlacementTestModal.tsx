@@ -20,11 +20,11 @@ interface Requirement { mode:string; decision?:PlacementDecision; reason?:string
 /**
  * Human-readable presentation for each placement decision.
  *
- * A single "Placement not required" panel used to be shown for five very
- * different situations, three of which are configuration faults rather than
- * business decisions — a green tick told the operator everything was fine while
- * the enrollment gate was actually blocking the candidate. Raw machine reasons
- * ('no_policy') were also surfaced verbatim.
+ * One panel per decision. Collapsing all five into a single "Placement not
+ * required" hides that three of them are configuration faults rather than
+ * business decisions — a green tick tells the operator everything is fine while
+ * the enrollment gate is actually blocking the candidate. Raw machine reasons
+ * ('no_policy') are translated here rather than surfaced verbatim.
  */
 const DECISION_PRESENTATION: Record<PlacementDecision, { tone:'ok'|'warn'|'error'; title:string; body:string }> = {
   NOT_REQUIRED: { tone:'ok', title:'Placement not required',

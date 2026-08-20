@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
- * LEGACY CONFIGURATION DATA AUDIT — strictly READ-ONLY.
+ * CONFIGURATION DATA INTEGRITY AUDIT — strictly READ-ONLY.
  *
- * Closing CFG-1..CFG-4 fixed the WRITE paths. It did not touch rows that were
- * already stored. This tool inventories that legacy state so the two remaining
- * data-state risks can be resolved or explicitly bounded:
+ * Validating a write path governs what can be stored from now on; it says
+ * nothing about what a given database already holds. This tool inspects a
+ * deployment's stored configuration against the current authorities and
+ * inventories anything the product would refuse to write today:
  *
  *   RISK 1  branch_academic_profiles rows holding a fee the new validation
  *           would now reject (negative, sub-cent, non-finite, TEXT/BLOB,
@@ -19,12 +20,12 @@
  *
  * Usage (the tsx loader is required because it imports the real TypeScript
  * authorities rather than copying their rules):
- *   npx tsx scripts/legacy-config-data-audit.mjs [--db path/to/erp.sqlite] [--json]
- *   npm run audit:legacy-config -- --db /path/to/erp.sqlite
+ *   npx tsx scripts/config-data-integrity-audit.mjs [--db path/to/erp.sqlite] [--json]
+ *   npm run audit:config-data -- --db /path/to/erp.sqlite
  *
  * Exit codes:
- *   0  no malformed legacy data found
- *   1  malformed legacy data found — a business decision is required
+ *   0  no malformed configuration found
+ *   1  malformed configuration found — a business decision is required
  *   2  the database could not be opened
  */
 import { existsSync } from 'node:fs';
@@ -41,7 +42,7 @@ const dbPath = path.resolve(arg('--db', process.env.DB_PATH || './data/erp.sqlit
 
 if (!existsSync(dbPath)) {
   console.error(`\nNo database at ${dbPath}`);
-  console.error('Point the audit at a real deployment:\n  node scripts/legacy-config-data-audit.mjs --db /path/to/erp.sqlite\n');
+  console.error('Point the audit at a real deployment:\n  node scripts/config-data-integrity-audit.mjs --db /path/to/erp.sqlite\n');
   process.exit(2);
 }
 
@@ -59,7 +60,7 @@ const { ORDINARY_MAX, CATEGORY_MAX } = await import(
 const has = (table) =>
   !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table);
 
-// ── RISK 1 · legacy fee configuration ───────────────────────────────────────
+// ── RISK 1 · stored fee configuration ───────────────────────────────────────
 const FEE_FIELDS = [
   ['placement_test_fee', 'placementTestFee', 'placement test fee'],
   ['registration_fee', 'registrationFee', 'registration fee'],
@@ -125,7 +126,7 @@ if (has('branch_academic_profiles')) {
   }
 }
 
-// ── RISK 2 · legacy discount state ──────────────────────────────────────────
+// ── RISK 2 · stored discount state ──────────────────────────────────────────
 const discountFindings = [];
 let overCeiling = 0;
 
@@ -258,7 +259,7 @@ if (asJson) {
 
 const dirty = feeFindings.length + discountFindings.length;
 if (dirty) {
-  console.error(`Malformed or unauthorized legacy state found (${dirty} finding(s)).`);
+  console.error(`Malformed or unauthorized stored configuration found (${dirty} finding(s)).`);
   console.error('This tool does NOT repair data. Classify each finding and obtain the business decision.');
 }
 process.exit(dirty ? 1 : 0);

@@ -139,9 +139,9 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
   // ==========================================================================
   // ACADEMIC SETUP — ONE CANONICAL AUTHORITY PER OPERATION
   // ==========================================================================
-  // `AcademicSetup.Edit` used to gate four genuinely different concerns at
+  // `AcademicSetup.Edit` alone would gate four genuinely different concerns at
   // once: curriculum authoring, placement policy, promotion thresholds and fee
-  // configuration. That single code was too coarse to grant safely, which is
+  // configuration. A single code that coarse cannot be granted safely, which is
   // why the General Manager could save a placement PROFILE (role-gated in
   // academic.routes) yet receive 403 creating a program VERSION (permission-
   // gated in catalog.routes) from the very same screen.

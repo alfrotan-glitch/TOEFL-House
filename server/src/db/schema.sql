@@ -996,7 +996,9 @@ CREATE TABLE IF NOT EXISTS teacher_compensation_history (
   teacher_id TEXT NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
   effective_from TEXT NOT NULL,
   base_salary INTEGER NOT NULL DEFAULT 0,
-  salary_type TEXT NOT NULL,
+  salary_type TEXT NOT NULL CHECK (salary_type IN (
+                       'fixed','per_skill','per_session','hybrid','per_level'
+                     )),
   contract_type TEXT,
   default_skill_rate INTEGER NOT NULL DEFAULT 0,
   reason TEXT,

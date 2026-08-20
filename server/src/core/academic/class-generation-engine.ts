@@ -4,7 +4,7 @@
  */
 import type Database from 'better-sqlite3';
 import { id as makeId } from '../../utils/ids.js';
-import { deriveLegacyClassStatus } from './lifecycle-engine.js';
+import { deriveCoarseClassStatus } from './lifecycle-engine.js';
 import { ACADEMIC_DEFAULTS } from '../configuration/policy-catalog.js';
 
 export interface GenerationParams {
@@ -198,7 +198,7 @@ export class ClassGenerationEngine {
             slot ? `${slot.start_time}-${slot.end_time}` : null,
             startDate,
             endDateStr,
-            deriveLegacyClassStatus('scheduled'),
+            deriveCoarseClassStatus('scheduled'),
             'scheduled',
             item.fee,
             run.branch_id,

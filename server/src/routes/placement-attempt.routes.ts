@@ -85,10 +85,10 @@ placementAttemptRouter.post('/visitors/:visitorId/placement/attempts', authorize
   if (requirement.mode === 'optional' && req.body?.skip === true) {
     const reason = String(req.body?.reason || 'Candidate opted to skip optional placement.').trim().slice(0, 500);
     // Canonical waiver status is 'waived' — the only value the visitors
-    // placement_status CHECK permits. The conversion gate previously looked for
-    // 'exempt', a value nothing ever wrote, which made this audited skip a dead
-    // end (the candidate could never be enrolled). Both boundaries now resolve
-    // the term through the shared domain policy.
+    // placement_status CHECK permits. A conversion gate looking for 'exempt' —
+    // a value nothing writes — would make this audited skip a dead end, with the
+    // candidate never enrollable. Both boundaries resolve the term through the
+    // shared domain policy.
     db.prepare(`UPDATE visitors SET placement_status=?, placement_status_at=datetime('now'), placement_requirement_mode='optional', placement_score=? WHERE id=?`)
       .run(WAIVED_STATUS, JSON.stringify({ mode: 'optional', skipped: true, waived: true, reason, at: nowIso(), by: user.userId }), visitor.id);
     writeAudit(req, `Placement exempted (optional skip) for ${visitor.full_name}`, { newValue: JSON.stringify({ mode: 'optional', reason, operatorId: user.userId }) });
@@ -569,10 +569,9 @@ placementAttemptRouter.post('/maintenance/expire', authorize('owner', 'general_m
   const user = getUserContext(req);
   const now = nowIso();
   let expiredCount = 0;
-  // Branch scope is mandatory for this sweep. It used to run unfiltered, so a
-  // manager at ANY branch expired live attempts across every other branch —
-  // the only cross-branch mutation in the subsystem (certification finding
-  // C-3). `resolveBranchScope` is the established convention: it silently
+  // Branch scope is mandatory for this sweep. Unfiltered, a manager at ANY
+  // branch expires live attempts across every other branch — which would be the
+  // only cross-branch mutation in the subsystem (certification finding C-3). `resolveBranchScope` is the established convention: it silently
   // re-scopes a foreign ?branchId= to the caller's own branch, and only grants
   // isAll to a role that genuinely holds all-branch access.
   const scope = resolveBranchScope(req);

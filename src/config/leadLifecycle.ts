@@ -77,10 +77,11 @@ export const LEAD_BUCKET_BADGE: Record<LeadLifecycleBucket, string> = {
 /**
  * Placement status, surfaced where a counselor can act on it (audit UX-10).
  *
- * `placementStatus` previously reached the UI in exactly one place — a button
- * label reading "Assessment Workspace" / "Re-assess" — so nobody could answer
- * "who still needs assessing?" without opening leads one at a time. Since
- * placement gates enrolment (UX-3), that state belongs in the list.
+ * Surfaced in the list, not only behind a button label reading "Assessment
+ * Workspace" / "Re-assess": with `placementStatus` reaching the UI in one place
+ * only, nobody can answer "who still needs assessing?" without opening leads
+ * one at a time. Since placement gates enrolment (UX-3), that state belongs in
+ * the list.
  *
  * Values mirror the schema CHECK on visitors.placement_status:
  * not_started | scheduled | in_progress | completed | waived.

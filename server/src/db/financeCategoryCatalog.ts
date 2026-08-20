@@ -4,10 +4,8 @@
  * Lives in its own module because TWO callers need it and neither may import
  * the other:
  *
- *   · `db/migrate.ts`               — migration 078 must have the taxonomy rows
- *                                     in place before its explicit legacy
- *                                     mapping can reference them by foreign key
- *   · `db/organizationHierarchy.ts` — every boot, fresh or upgraded
+ *   · `db/organizationHierarchy.ts` — every boot
+ *   · `db/seed.ts`                  — installing a development dataset
  *
  * The rows themselves come from `core/finance/category-taxonomy.ts`, the single
  * source of truth the ledger classifier and the test-suite also read. Writing

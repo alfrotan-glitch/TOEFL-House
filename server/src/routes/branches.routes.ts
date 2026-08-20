@@ -415,10 +415,10 @@ branchesRouter.post(
     );
 
     ensureFinanceAccount('branch', newId);
-    // Budget lines used to be provisioned only by the boot-time catalogue
-    // sweep, so a branch created here had a finance account and accepted
-    // students but could not run payroll ("Teacher salary budget line is not
-    // configured.") or charge any expense until the server was restarted.
+    // Budget lines are provisioned here, not left to the boot-time catalogue
+    // sweep. Without this a branch created at runtime has a finance account and
+    // accepts students but cannot run payroll ("Teacher salary budget line is
+    // not configured.") or charge any expense until the server is restarted.
     // Provision them with the branch so it is operational immediately.
     ensureBranchBudgetLines(db, newId);
 

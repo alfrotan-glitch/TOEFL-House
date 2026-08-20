@@ -6,8 +6,8 @@
  * rebrand touches a single file.
  *
  * Never substitute an icon, an initial, a coloured circle or a redrawn mark
- * for this component — printed student ID cards used to show a hand-made "TH"
- * circle because no shared logo component existed.
+ * for this component. Without a shared logo component, printed student ID cards
+ * fall back to a hand-made "TH" circle.
  */
 import { BRAND_LOGO_URL, BRAND_NAME, BRAND_SLOGAN } from '../../config/branding';
 

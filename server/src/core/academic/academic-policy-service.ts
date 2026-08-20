@@ -12,7 +12,7 @@
  *     rule, min attendance %, max consecutive absences.
  *   - gradebook-service.ts (Phase 4): letter grade bands.
  *   - promotion-engine.ts (Phase 5): score/attendance/subject thresholds,
- *     resolved across FOUR pre-existing, previously-disconnected layers
+ *     resolved across FOUR disconnected layers
  *     (promotion_rules, levels.pass_mark, branch_academic_profiles, the
  *     generic rule engine).
  *
@@ -50,7 +50,7 @@ import { getAttendancePolicy, type AttendancePolicy, type PolicyScope } from './
 import { getLetterGradeBands, type LetterGradeBand } from './gradebook-service.js';
 
 // ============================================================================
-// New policy categories (blueprint-named, previously nonexistent)
+// Policy categories, named by the academic blueprint
 // ============================================================================
 
 export interface RetakePolicy {

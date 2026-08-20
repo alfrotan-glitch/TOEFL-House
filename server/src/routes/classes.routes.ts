@@ -11,7 +11,7 @@ import { id, today } from '../utils/ids.js';
 import { getJourneyEngine } from '../core/journey/journey-engine.js';
 import { JourneyEventType } from '../core/journey/event-types.js';
 import { getClassLifecycleService } from '../core/academic/class-lifecycle-service.js';
-import { CLASS_TRANSITIONS, deriveLegacyClassStatus, type ClassStage, type GradeLockStage } from '../core/academic/lifecycle-engine.js';
+import { CLASS_TRANSITIONS, deriveCoarseClassStatus, type ClassStage, type GradeLockStage } from '../core/academic/lifecycle-engine.js';
 import { getGradeLockService } from '../core/academic/grade-lock-service.js';
 
 const gradeLockService = getGradeLockService(db);
@@ -255,7 +255,7 @@ const stmtGetClassRoster = db.prepare(`
   WHERE ss.class_id = ? AND ss.status = 'active'
 `);
 
-// Legacy Attendance Statements
+// Day-level attendance writes (see the attendance router at the foot of this file)
 const stmtInsertAttendance = db.prepare(
   `INSERT INTO attendance (id, date, target_id, target_type, status, class_id, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?)`
 );
@@ -312,7 +312,18 @@ function requireClass(req: import('express').Request, classId: string): ClassRow
 }
 
 /**
- * @deprecated Legacy attendance router — kept for backward compatibility only.
+ * The day-level attendance API, mounted at `/api/attendance`.
+ *
+ * Attendance has two writing surfaces over ONE fact table. The session roster
+ * (`sessions.routes.ts`) is the structured one: it marks a roster, computes a
+ * weight from the attendance policy, can trigger an auto-drop, and mirrors each
+ * mark into `attendance` carrying its `session_id`. This router writes the rows
+ * that belong to no session — day-level marks, and teacher attendance, which
+ * has no roster at all — leaving `session_id` NULL.
+ *
+ * The table is the query surface for both: two metrics in the report catalog
+ * and the impact report read it directly. Neither writer is redundant and
+ * neither is a compatibility shim.
  */
 export const attendanceRouter = Router();
 attendanceRouter.use(authenticate);
@@ -424,10 +435,10 @@ classesRouter.post(
     if (!userBranchId) throw new HttpError(403, 'User branch context is missing.');
 
     let resolvedLevelLabel = level || '';
-    // Without a levelId this is the raw client value and used to be written
-    // straight to classes.fee: 'abc', -6000 and 1e15 were all stored. With a
-    // levelId it is replaced by the level's fee below, which is now validated
-    // at its own source.
+    // Without a levelId this is the raw client value, so it passes through
+    // assertMoney before reaching classes.fee — unvalidated, 'abc', -6000 and
+    // 1e15 all reach the column. With a levelId it is replaced by the level's
+    // fee below, which is validated at its own source.
     let resolvedFee = fee == null ? 0 : assertMoney(fee, 'class fee');
     let resolvedSchedule = scheduleTime || null;
     const resolvedBranch = branchId || userBranchId;
@@ -494,7 +505,7 @@ classesRouter.post(
     // Pass activationDate to create it already-activated in one step, or
     // asDraft: true for the blueprint's not-yet-published Draft state.
     const initialStage: ClassStage = activationDate ? 'activated' : (req.body?.asDraft ? 'draft' : 'scheduled');
-    const initialStatus = deriveLegacyClassStatus(initialStage);
+    const initialStatus = deriveCoarseClassStatus(initialStage);
 
     stmtInsertClass.run(
       newId, name, teacherId || null, programId || null, levelId || null, resolvedLevelLabel,
@@ -577,14 +588,13 @@ classesRouter.put(
         stmtUpdateClassGender.run(requestedGender, req.params.id);
       }
 
-      // Backward compatibility: this endpoint historically accepted a raw
-      // `status` field. `status` is now a derived projection of
-      // `lifecycle_stage` (see lifecycle-engine.ts) written only by
-      // ClassLifecycleService, so route the two unambiguous legacy values
-      // through a guarded transition instead of writing `status` directly.
-      // status: 'active'/'draft' from legacy callers is a deliberate no-op —
-      // 'active' maps to six different lifecycle stages, so there's no
-      // single correct target; use /:id/schedule, /:id/activate, etc.
+      // This endpoint accepts a raw `status` field, which is a coarse
+      // projection of `lifecycle_stage` (see lifecycle-engine.ts) written only
+      // by ClassLifecycleService. The two unambiguous values are therefore
+      // routed through a guarded transition rather than written directly.
+      // status: 'active'/'draft' is a deliberate no-op — 'active' maps to six
+      // different lifecycle stages, so there is no single correct target;
+      // use /:id/schedule, /:id/activate, etc.
       if (status && status !== existing.status) {
         const legacyTargetStage: Partial<Record<string, ClassStage>> = { cancelled: 'cancelled', completed: 'completed' };
         const targetStage = legacyTargetStage[status];
@@ -713,8 +723,9 @@ classesRouter.post(
       stmtUpdateSemestersMerge.run(targetClassId, sourceId);
       stmtDeleteFutureSourceRosters.run(source.id, source.id);
       // `movedStudents` is reported from the rows this UPDATE actually touched,
-      // not from the pre-flight count. The two used to be different numbers
-      // (audit E-3: reported 2, moved 1) which made the API response untrue.
+      // not from the pre-flight count. The two can differ (audit E-3: reported
+      // 2, moved 1), and reporting the pre-flight number makes the response a
+      // claim the database does not support.
       const movedRows = stmtUpdateEnrollmentsMerge.run(target.id, source.id).changes;
 
       const targetSessions = stmtGetFutureTargetSessions.all(target.id) as { id: string }[];
@@ -1147,7 +1158,8 @@ classesRouter.post('/:id/complete-semester', authorize('owner', 'general_manager
   const grades = stmtGetGradesByClass.all(cls.id) as GradeRow[];
 
   // Same computation the live gradebook preview uses (Gradebook Engine,
-  // Phase 4) — this used to be duplicated inline here.
+  // Phase 4), called rather than reimplemented, so the printed sheet and the
+  // on-screen preview cannot disagree.
   const computedGrades = computeClassGrades(
     students.map(s => ({ id: s.id })),
     assessments.map(a => ({ id: a.id, weight: a.weight, max_score: a.max_score, makeup_for_assessment_id: a.makeup_for_assessment_id })),
@@ -1325,7 +1337,7 @@ classesRouter.get('/:id/promotion/pending-review', authorize('owner', 'general_m
 }));
 
 // ============================================================================
-// §5 — LEGACY ATTENDANCE (deprecated — use sessions roster instead)
+// §5 — DAY-LEVEL ATTENDANCE (session-scoped marking lives in sessions.routes)
 // ============================================================================
 
 attendanceRouter.post(

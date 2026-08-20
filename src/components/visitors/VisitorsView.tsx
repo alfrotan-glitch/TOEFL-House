@@ -149,11 +149,11 @@ export default function VisitorsView({
    *
    * `advanceVisitorStage` sends `fromStage` as an optimistic-concurrency token
    * (audit V-7), so a double-click or a colleague working the same lead is
-   * correctly rejected with 409. The click handler used to be
-   * `onClick={() => advanceVisitorStage(v.id)}` — no await, no catch — so that
-   * rejection became an unhandled promise: the card did not move and nothing
-   * was said. Users read that as a broken button and clicked again, which is
-   * precisely what produces the next 409.
+   * correctly rejected with 409. A bare
+   * `onClick={() => advanceVisitorStage(v.id)}` — no await, no catch — turns
+   * that rejection into an unhandled promise: the card does not move and
+   * nothing is said. Users read that as a broken button and click again, which
+   * is precisely what produces the next 409.
    *
    * `advancing` also disables the button in flight, removing the double-click
    * that causes the conflict in the first place.
@@ -179,9 +179,8 @@ export default function VisitorsView({
   /**
    * Headline figures come from the server (UX-1).
    *
-   * These were previously counted from the loaded page: with 250 leads the
-   * conversion tile read 27% against a true 11%. Nothing here recomputes a
-   * population — the view renders what /visitors/summary returned. `stats` is
+   * Counted from the loaded page instead, with 250 leads the conversion tile
+   * reads 27% against a true 11%. Nothing here recomputes a population — the view renders what /visitors/summary returned. `stats` is
    * null until the first response lands so the UI can show a placeholder
    * instead of a confident zero.
    */

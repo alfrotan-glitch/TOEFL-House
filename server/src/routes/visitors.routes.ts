@@ -442,11 +442,10 @@ visitorsRouter.get('/pipeline', requirePermission('Lead.View'), ah(async (req, r
 visitorsRouter.post('/', requirePermission('Lead.Create'), ah(async (req, res) => {
   const user = getUserContext(req);
   const { gender, source, campaignId, stage, assignedTo, branchId, programVersionId } = req.body;
-  // Name the field that is ACTUALLY missing. This previously threw
+  // Name the field that is ACTUALLY missing. Throwing
   // "Full name, gender, and source are required." while testing only gender and
-  // source, so a request that supplied a full name was told the full name was
-  // missing — the exact class of unactionable message the UX-2 fix set out to
-  // remove. (`fullName` itself is validated by `requiredText` below, which
+  // source tells a request that supplied a full name that the full name is
+  // missing — the exact class of unactionable message UX-2 set out to remove. (`fullName` itself is validated by `requiredText` below, which
   // raises its own precise error.)
   if (!gender) throw new HttpError(400, 'Gender is required.');
   if (!source) throw new HttpError(400, 'Lead source is required.');
@@ -526,9 +525,9 @@ visitorsRouter.patch('/:id', requirePermission('Lead.Edit'), ah(async (req, res)
   if (f.source !== undefined) assertVisitorSource(f.source);
   if (f.gender !== undefined) assertVisitorGender(f.gender);
   if (f.followUpStatus !== undefined) assertFollowUpStatus(f.followUpStatus);
-  // V-4: the SAME normalization authority CREATE uses. Previously PATCH
-  // validated enums but nothing else, so a 100,000-character name, a
-  // non-string phone and "9999-99-99" as a date were all accepted and stored.
+  // V-4: the SAME normalization authority CREATE uses. Validating enums alone
+  // lets a 100,000-character name, a non-string phone and "9999-99-99" as a
+  // date through to storage.
   const text = normalizeVisitorText(f as Record<string, unknown>);
   if (f.nextContactDate !== undefined) assertOptionalIsoDate(f.nextContactDate, 'Next contact date');
   if (f.dob !== undefined) assertOptionalIsoDate(f.dob, 'Date of birth');
@@ -553,9 +552,9 @@ visitorsRouter.patch('/:id', requirePermission('Lead.Edit'), ah(async (req, res)
     merge('dob', 'dob'), merge('schoolOrUniversity', 'school_or_university'), merge('emergencyContactName', 'emergency_contact_name'),
     merge('emergencyContactPhone', 'emergency_contact_phone'), f.programVersionId !== undefined ? f.programVersionId : existing.program_version_id, req.params.id
   );
-  // V-8: record WHAT changed. The audit previously wrote
-  // `old_value=NULL, new_value=NULL`, so the V-1 exploit step — detaching a
-  // placement-governed program — was indistinguishable from any other edit.
+  // V-8: record WHAT changed. An audit row carrying
+  // `old_value=NULL, new_value=NULL` makes the V-1 exploit step — detaching a
+  // placement-governed program — indistinguishable from any other edit.
   // Contact/free-text values are redacted to a length marker: the forensic
   // question is which field moved, not the lead's phone number.
   const diff = buildAuditDiff([
@@ -637,9 +636,9 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
   // Idempotency check
   if (visitor.status === 'registered') throw new HttpError(409, 'This visitor has already been converted.');
   // V-6: closure means the same thing at every endpoint. The stage workflow
-  // refuses `lost -> inquiry`, yet conversion used to rewrite the stage
-  // straight to 'enrollment', silently resurrecting a closed lead. Reopening
-  // is a deliberate, audited act — it must not be a side effect of converting.
+  // refuses `lost -> inquiry`, so conversion must not rewrite the stage
+  // straight to 'enrollment' and silently resurrect a closed lead. Reopening
+  // is a deliberate, audited act — never a side effect of converting.
   if (visitor.stage === 'lost') {
     throw new HttpError(409, 'This lead is closed (lost). Reopen it before converting.');
   }
@@ -680,12 +679,12 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
   // single placement authority for every enrollment path, and it resolves the
   // governing program from the CLASS's level rather than from the visitor row.
   //
-  // This route used to run its own copy of the rule inside
-  // `if (effectiveProgramVersionId)`. Because that condition reads the
-  // visitor's program, detaching it with a Lead.Edit PATCH skipped the check
-  // entirely (audit V-1) — a candidate with a completed 'failed' attempt was
-  // enrolled into the program version they had failed. A second implementation
-  // of an invariant is a second answer to it.
+  // Running a second copy of the rule here, inside
+  // `if (effectiveProgramVersionId)`, is what audit V-1 exploited: that
+  // condition reads the visitor's program, so detaching it with a Lead.Edit
+  // PATCH skipped the check entirely and a candidate with a completed 'failed'
+  // attempt was enrolled into the program version they had failed. A second
+  // implementation of an invariant is a second answer to it.
   //
   // The requirement mode is still denormalised onto the visitor for reporting,
   // resolved the same way the authority resolves it: class level first.
@@ -717,10 +716,10 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
   const discountRule = evaluateRules({ category: 'discount', branchId: studentBranchId, data: { discountPercent: requestedDiscount, leadSource: visitor.source }, dryRun: false });
   // The rule engine IS the discount authority — `rule_default_discount_cap`
   // holds the institutional ceiling and is editable at runtime by an admin.
-  // This line used to re-cap the engine's answer at a hardcoded 30, so raising
-  // the configured cap to 50% silently had no effect here: the engine returned
-  // 50 and the route quietly clamped it back to 30. A policy that cannot be
-  // changed from the place it is configured is not a policy.
+  // Re-capping the engine's answer at a hardcoded 30 here would make raising
+  // the configured cap to 50% silently ineffective: the engine returns 50 and
+  // the route clamps it back to 30. A policy that cannot be changed from the
+  // place it is configured is not a policy.
   // CFG-1: the rule engine's answer is a candidate, not an authorization. A
   // visitor being converted has no student row yet, so ordinary policy
   // (<= 20%) governs; an exception must be authorized after conversion.

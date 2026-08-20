@@ -284,9 +284,8 @@ classTeacherSkillsRouter.put(
       if (duplicate) throw new HttpError(409, 'Another class-scoped assignment already exists for this teacher and skill.');
     }
 
-    // Backward compatible: a request with only monthlyRate (the original
-    // contract) behaves exactly as before — every other field is
-    // preserved unchanged via the ?? fallback.
+    // PATCH semantics: a request carrying only monthlyRate leaves every other
+    // field unchanged via the ?? fallback.
     stmtUpdateCtsFull.run(
       nextRate,
       nextType,

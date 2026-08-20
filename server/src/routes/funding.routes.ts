@@ -336,7 +336,7 @@ fundingRouter.post(
     const donationDate = date || today();
     const newId = id('dn');
 
-    // Duplicate protection: a double-click / retry previously recorded one
+    // Duplicate protection: unguarded, a double-click or retry records one
     // donation and one income row per click. Explicit client key wins;
     // otherwise a fingerprint of the donation intent within a short window
     // collapses retries. A genuinely repeated gift (later, or explicitly
@@ -463,9 +463,9 @@ fundingRouter.post(
     requireFundingBranchAccess(req, scholarship.branch_id);
     if (scholarship.status !== 'active') throw new HttpError(409, 'This scholarship is no longer active.');
 
-    // Both operands are coerced explicitly: a legacy row written before the
-    // budget was validated can still hold a non-numeric total, and a NaN
-    // comparison silently approves every award.
+    // Both operands are coerced explicitly: a row written outside the validated
+    // budget path can hold a non-numeric total, and a NaN comparison silently
+    // approves every award.
     const totalBudgetValue = Number(scholarship.total_budget);
     const allocatedValue = Number(scholarship.allocated_amount) || 0;
     if (!Number.isFinite(totalBudgetValue)) {
@@ -565,10 +565,10 @@ fundingRouter.patch(
       throw new HttpError(400, 'Invalid sponsorship status.');
     }
 
-    // SPL-1: `completed` and `terminated` are TERMINAL. The handler previously
-    // wrote whichever of the three values arrived, so
-    // `active -> terminated -> active` silently resurrected a closed
-    // commitment, and a money edit could rewrite a historical agreement.
+    // SPL-1: `completed` and `terminated` are TERMINAL. Writing whichever of
+    // the three values arrives would let `active -> terminated -> active`
+    // silently resurrect a closed commitment, and would let a money edit
+    // rewrite a settled agreement.
     //
     // Renewal is expressed the way this module already expresses it: POST a
     // NEW agreement. There is no reactivation endpoint to reuse and inventing

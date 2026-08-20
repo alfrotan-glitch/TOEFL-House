@@ -90,8 +90,8 @@ export default function AddVisitorForm({
     return () => { cancelled = true; clearTimeout(t); };
   }, [phone, tazkiraNo, hasDupSignal, checkDuplicateLeads]);
 
-  // Local calendar date, matching the server's `today()`. Used to stop a future
-  // date of birth being enterable at all.
+  // Local calendar date, matching the server's `today()`, so a future date of
+  // birth cannot be entered at all.
   const todayIso = new Date().toLocaleDateString('en-CA');
 
   const inputCls = "w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/10 font-medium transition-all";

@@ -3,10 +3,10 @@
  *
  * WHAT THIS FILE DELIBERATELY DOES NOT DO
  * ----------------------------------------------------------------------------
- * It does not compute tuition balances. It used to export
- * `computeStudentBalance`, which re-derived "how much has this student paid"
- * in the browser from the loaded `payments` array. That created a second
- * source of financial truth which disagreed with the server:
+ * It does not compute tuition balances, and deliberately exports no
+ * `computeStudentBalance`. Re-deriving "how much has this student paid" in the
+ * browser from the loaded `payments` array creates a second source of financial
+ * truth, and it disagrees with the server:
  *
  *   - the payments array is ONE PAGE, so any student whose payments fell
  *     outside the page appeared to owe their full fee, and

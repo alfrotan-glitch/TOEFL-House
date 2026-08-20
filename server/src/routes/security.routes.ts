@@ -60,10 +60,10 @@ function callerIsGlobalOwner(req: import('express').Request): boolean {
 /**
  * A grant may never widen scope beyond the granter's own reach.
  *
- * Previously only `scopeType === 'branch'` was validated, so 'organization'
- * and 'campus' sailed past: a branch manager with delegated Role.Edit granted
- * an ORGANIZATION-scoped assignment (HTTP 201), which canAccessAllBranches
- * reads as access to every branch. Anything wider than a branch the caller can
+ * Validating only `scopeType === 'branch'` lets 'organization' and 'campus'
+ * sail past: a branch manager with delegated Role.Edit can then grant an
+ * ORGANIZATION-scoped assignment (HTTP 201), which canAccessAllBranches reads
+ * as access to every branch. Anything wider than a branch the caller can
  * already reach is now owner-only.
  */
 function requireScopedAssignment(req: import('express').Request, scopeType: string | undefined, scopeId: string | null | undefined) {

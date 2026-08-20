@@ -52,8 +52,8 @@ export function assertPlacementEligibleForClass(
 
   const requirement = resolvePlacementRequirement(programVersionId, branchId, cls.level_id);
   // Fail CLOSED on configuration faults. A missing/unresolvable profile is not
-  // a business waiver, and previously fell through this check and admitted the
-  // student without any assessment.
+  // a business waiver. Falling through this check would admit the student
+  // without any assessment.
   if (!isAuthoritativeDecision(requirement)) {
     throw new HttpError(
       409,

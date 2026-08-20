@@ -3,7 +3,7 @@
  * ============================================================================
  * THE single normalization/validation authority for Student profile input.
  *
- * It exists because validation was previously split and inconsistent:
+ * It exists because validation is otherwise split and inconsistent:
  *
  *  - STU-H1: `POST /students/manual` validated text lengths, gender and class
  *    references; `PATCH /students/:id` validated essentially nothing and

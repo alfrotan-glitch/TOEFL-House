@@ -48,7 +48,7 @@ import classesRouter from '../routes/classes.routes.js';
 import studentsRouter from '../routes/students.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { deriveLegacyClassStatus, type ClassStage } from '../core/academic/lifecycle-engine.js';
+import { deriveCoarseClassStatus, type ClassStage } from '../core/academic/lifecycle-engine.js';
 import { getStudentBalance } from '../utils/studentBalance.js';
 
 const BRANCH = 'prl_branch';
@@ -80,7 +80,7 @@ function seedCase(key: string, stage: ClassStage, branchId = BRANCH) {
   db.prepare(
     `INSERT OR IGNORE INTO classes (id, name, level, branch_id, status, lifecycle_stage, capacity, fee)
      VALUES (?, ?, 'A1', ?, ?, ?, 10, 20000)`
-  ).run(classId, `Class ${key}`, branchId, deriveLegacyClassStatus(stage), stage);
+  ).run(classId, `Class ${key}`, branchId, deriveCoarseClassStatus(stage), stage);
   db.prepare(
     `INSERT OR IGNORE INTO students (id, student_code, full_name, status, registration_date, branch_id, gender, phone)
      VALUES (?, ?, ?, 'active', ?, ?, 'male', ?)`

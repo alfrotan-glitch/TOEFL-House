@@ -81,17 +81,17 @@ export const CLASS_TRANSITIONS: Readonly<Record<ClassStage, readonly ClassStage[
   cancelled: [],
 };
 
-export type LegacyClassStatus = 'draft' | 'active' | 'completed' | 'cancelled';
+export type CoarseClassStatus = 'draft' | 'active' | 'completed' | 'cancelled';
 
 /**
- * Legacy `classes.status` (the 4-value enum the frontend and most of the
- * backend already read via `status === 'active'`) is a DERIVED, coarse
- * projection of `lifecycle_stage`. This is the single source of truth for
+ * `classes.status` (the 4-value enum the frontend and most of the backend read
+ * via `status === 'active'`) is a DERIVED, coarse projection of
+ * `lifecycle_stage`. This is the single source of truth for
  * that mapping — every write site (ClassLifecycleService, classes.routes.ts,
  * class-generation-engine.ts) must go through this function rather than
  * writing `status` independently, or the two columns will drift.
  */
-export function deriveLegacyClassStatus(stage: ClassStage): LegacyClassStatus {
+export function deriveCoarseClassStatus(stage: ClassStage): CoarseClassStatus {
   if (stage === 'draft') return 'draft';
   if (stage === 'cancelled') return 'cancelled';
   if (stage === 'completed' || stage === 'archived') return 'completed';

@@ -102,11 +102,11 @@ export default function StudentsView({
 
   // Finance map from SERVER-aggregated balances.
   //
-  // This used to reduce the loaded `payments` array. That array is one page:
-  // with 6,000 payments and a 2,000-row cap, two thirds never reached the
-  // browser, and every student outside the first page was displayed as owing
-  // their FULL fee despite having paid. The server now sums all payments per
-  // student in SQL, using the same authoritative rule as studentBalance.
+  // Not reduced from the loaded `payments` array: that array is one page, so
+  // with 6,000 payments and a 2,000-row cap two thirds never reach the browser
+  // and every student outside the first page displays as owing their FULL fee
+  // despite having paid. The server sums all payments per student in SQL, using
+  // the same authoritative rule as studentBalance.
   const financeByStudent = useMemo(() => {
     const map = new Map<string, { total: number; paid: number; debt: number }>();
     for (const b of studentBalances) {
@@ -190,10 +190,10 @@ export default function StudentsView({
   /**
    * CSV export (audit STU-H2).
    *
-   * This used to serialise `filteredStudents` — the loaded page — so an export
-   * of a 2,162-student branch silently produced 2,000 rows, including
-   * financial columns. It now asks the server to build the file over the FULL
-   * filtered dataset, using the authoritative balance definition.
+   * Serialising `filteredStudents` — the loaded page — makes an export of a
+   * 2,162-student branch silently produce 2,000 rows, financial columns
+   * included. This asks the server to build the file over the FULL filtered
+   * dataset, using the authoritative balance definition.
    */
   const [exporting, setExporting] = useState(false);
   const exportCsv = async () => {

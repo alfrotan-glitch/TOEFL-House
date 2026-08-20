@@ -17,11 +17,10 @@ import { ShamsiDateInput } from '../common/ShamsiDateInput';
 import { useInvalidate } from '../../state/serverStateFreshness';
 
 /**
- * Canonical workflow order. The union used to be declared in a completely
- * different order from the order operators actually meet the steps in
- * ('catalog' first, 'terms' last), which made the type a misleading guide to
- * the workflow. It is now derived from a single ordered list so the type, the
- * navigation and the phase numbering cannot drift apart again.
+ * Canonical workflow order, derived from a single ordered list so the type, the
+ * navigation and the phase numbering cannot drift apart. Declared by hand the
+ * union drifts from the order operators actually meet the steps in ('catalog'
+ * first, 'terms' last), which makes the type a misleading guide to the workflow.
  *
  * Phase meaning:
  *   1 Infrastructure  — the branch calendar and physical capacity.
@@ -236,10 +235,10 @@ export default function AcademicSetupView({ branchId, activeRole, permissionCode
     phase2Complete && offeringCount > 0 && schedulableTerms.length > 0 && activeSlots.length > 0 && activeRooms.length > 0;
 
   // Only the FIRST load replaces the page. `run()` calls reload() after every
-  // mutation, and this branch used to blank the whole screen each time —
-  // adding one term made the entire Control Center disappear and re-appear.
-  // Subsequent reloads keep the page on screen; `busy` drives a local
-  // indicator instead.
+  // mutation, so gating this branch on `loading` alone blanks the whole screen
+  // each time — adding one term makes the entire Control Center disappear and
+  // re-appear. Subsequent reloads keep the page on screen; `busy` drives a
+  // local indicator instead.
   if (loading && !hasLoadedOnce) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] text-slate-400 gap-3">

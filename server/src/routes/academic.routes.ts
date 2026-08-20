@@ -770,8 +770,8 @@ academicRouter.put(
 
     // PATCH-style semantics: a field that is not supplied stays unchanged.
     //
-    // Previously this used `startDate !== undefined ? startDate : existing`,
-    // which looks safe but is not: the edit form always sends its whole state
+    // `startDate !== undefined ? startDate : existing` looks safe but is not:
+    // the edit form always sends its whole state
     // object, and its date inputs hold `''` when the form was hydrated without
     // them. `'' !== undefined` is true, so the empty string won a real stored
     // date and editing only a term's NAME silently erased its calendar,

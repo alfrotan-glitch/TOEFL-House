@@ -300,9 +300,8 @@ export function hasRole(ctx: RbacUserContext, roleCode: string): boolean {
  *
  * The owner model itself is intentional (documented in the permission catalog
  * and in middleware/auth.ts) — it is the *scoped* grant that must not confer
- * it. Both the real seeded owner and the legacy-role fallback are
- * organization-scoped, so requiring organization scope preserves every
- * legitimate owner while closing the escalation.
+ * it. Every legitimate owner grant is organization-scoped, so requiring
+ * organization scope preserves all of them while closing the escalation.
  */
 export function isGlobalOwner(ctx: RbacUserContext): boolean {
   return ctx.roles.some((r) => r.roleCode === 'owner' && r.scopeType === 'organization');

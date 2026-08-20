@@ -7,14 +7,14 @@
  * "SqliteError: CHECK constraint failed: classes" (classes.routes.ts always
  * inserted status='scheduled', a value the old 3-value CHECK never allowed,
  * and /:id/activate gated on that same unreachable value). Replaces the
- * previously dead activation gate with the full 11-stage blueprint
+ * unreachable activation gate with the full 11-stage blueprint
  * lifecycle: Draft → Scheduled → Enrollment Open → Enrollment Closed →
  * Activated → In Progress → Suspended → Grading → Completed → Archived /
  * Cancelled.
  *
- * `classes.status` remains a derived, backward-compatible 4-value
+ * `classes.status` is a derived, coarse 4-value
  * ('draft'|'active'|'completed'|'cancelled') projection of
- * `lifecycle_stage` (see deriveLegacyClassStatus in lifecycle-engine.ts) so
+ * `lifecycle_stage` (see deriveCoarseClassStatus in lifecycle-engine.ts) so
  * every existing `status === 'active'` frontend/backend filter keeps
  * working unchanged. This service is the only place that should write
  * `lifecycle_stage`; every write pairs it with the derived `status` in the
@@ -29,7 +29,7 @@ import type Database from 'better-sqlite3';
 import { eventBus } from '../events/event-bus.js';
 import { HttpError } from '../../middleware/errorHandler.js';
 import { today } from '../../utils/ids.js';
-import { assertClassTransition, deriveLegacyClassStatus, type ClassStage } from './lifecycle-engine.js';
+import { assertClassTransition, deriveCoarseClassStatus, type ClassStage } from './lifecycle-engine.js';
 import { ACTIVE_ENROLLMENT_STATUSES } from './class-capacity.js';
 import { createLogger } from '../observability/logger.js';
 const log = createLogger('class-lifecycle-service');
@@ -178,7 +178,7 @@ export class ClassLifecycleService {
       }
     }
 
-    const nextStatus = deriveLegacyClassStatus(to);
+    const nextStatus = deriveCoarseClassStatus(to);
 
     this.db.transaction(() => {
       if (to === 'activated') {

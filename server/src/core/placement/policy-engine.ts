@@ -182,15 +182,15 @@ export function resolvePolicyForVisitor(visitor: any, targetLevelId?: string | n
   const requirement = resolvePlacementRequirement(visitor.program_version_id, visitor.branch_id, targetLevelId);
   // Take the profile from the resolver so this view uses exactly the same
   // hierarchy (branch → program branch → global) as the enrollment gate.
-  // Re-deriving it here previously missed the owning-branch tier and could show
-  // "not configured" for a policy the gate was actually enforcing.
+  // Re-deriving it here would miss the owning-branch tier and could show
+  // "not configured" for a policy the gate is actually enforcing.
   const profile = requirement.profile;
   return { version, profile, rules, requirement };
 }
 
 /**
  * Validate policy component configs (used by the academic placement-profile
- * PUT). Extends the legacy validator with the new policy fields.
+ * PUT). Covers the component fields and the policy fields together.
  */
 export function validatePolicyComponents(rawComponents: any[], versionBranchId: string): { components: PolicyComponent[]; method: string; sections: string[] } {
   if (!Array.isArray(rawComponents) || rawComponents.length === 0) throw new HttpError(400, 'At least one assessment component is required when placement is enabled.');

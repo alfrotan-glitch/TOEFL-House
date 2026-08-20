@@ -128,9 +128,9 @@ export function buildDashboardSummary(
   const activeTeachers = countOf(db, `SELECT COUNT(*) AS c FROM teachers WHERE COALESCE(status, 'active') = 'active'${s.sql}`, s.params);
 
   // Lead buckets come from the shared lifecycle authority
-  // (core/visitors/lead-lifecycle.ts). This module previously defined
-  // `pendingLeads` as an ALLOW-LIST — `status IN ('visited','follow_up')` —
-  // which had two faults:
+  // (core/visitors/lead-lifecycle.ts) rather than being defined here. Defining
+  // `pendingLeads` locally as an ALLOW-LIST — `status IN ('visited','follow_up')`
+  // — has two faults:
   //   1. it counted a closed-lost lead as still pending, so this endpoint
   //      reported 226 open leads where the Visitors screen reported 225;
   //   2. an allow-list silently drops any row whose status is neither value,
@@ -171,10 +171,10 @@ export function buildDashboardSummary(
 
   const rows = db
     .prepare(
-      // OPERATING activity only. This previously summed every income/expense
-      // row, so an owner capital injection appeared as revenue and an owner
-      // drawing as cost. Live proof before the fix: a day with a 100,000
-      // capital injection and a 50,000 drawing rendered as
+      // OPERATING activity only. Summing every income/expense row would show an
+      // owner capital injection as revenue and an owner drawing as cost. Live
+      // proof of that reading: a day with a 100,000 capital injection and a
+      // 50,000 drawing renders as
       // income 100,000 / expense 50,000 here while /finance/pnl and
       // /reports/overview both reported 0 / 0 for the same day and branch.
       // Equity movements are real and are reported by those surfaces under

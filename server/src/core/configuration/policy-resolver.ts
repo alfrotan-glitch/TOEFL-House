@@ -23,8 +23,8 @@ const PROFILE_COLUMNS: Record<FeeKey, string> = {
  * stored value that is not usable money is not returned.
  *
  * CFG-2 validates the write path, so no new malformed fee can be stored. Rows
- * written before that fix are untouched by it, and the previous guard here was
- * only `Number.isFinite` — which let legacy values through:
+ * written before that fix are untouched by it, and a `Number.isFinite` guard
+ * here would let these through:
  *   -100  -> returned as-is (Finance rejected it late, as a 500)
  *   1e20  -> returned as-is (rejected late)
  *   0.001 -> returned as-is and ACCEPTED by Finance, silently
@@ -32,7 +32,7 @@ const PROFILE_COLUMNS: Record<FeeKey, string> = {
  * A value that `assertMoney` cannot accept, or that would be silently rounded
  * into a DIFFERENT fee, is treated as unusable configuration and falls back to
  * the system default. Failing to the documented default is safe and visible;
- * charging a corrupt amount is neither. `scripts/legacy-config-data-audit.mjs`
+ * charging a corrupt amount is neither. `scripts/config-data-integrity-audit.mjs`
  * inventories any row in this state so it can be corrected at the source.
  */
 export function resolveFee(db: BetterSqlite3.Database, branchId: string | null | undefined, key: FeeKey): number {
@@ -44,7 +44,7 @@ export function resolveFee(db: BetterSqlite3.Database, branchId: string | null |
   try {
     // A stored value is not operator input, so it is SETTLED to the canonical
     // unit rather than refused: a read path that throws is worse than one that
-    // rounds a legacy row to the nearest afghani.
+    // rounds a stored row to the nearest afghani.
     const settled = assertComputedMoney(row.value, key);
     // But a non-zero fee that settles to nothing is not a rounding artifact —
     // it is a corrupt configuration, and charging 0 would silently make the

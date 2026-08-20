@@ -117,9 +117,9 @@ const stmtInsertPayment = db.prepare(
  * Idempotency replay lookup, SCOPED TO THE STUDENT.
  *
  * The key alone is not sufficient. A client-supplied `Idempotency-Key` is
- * attacker- and bug-controlled, and reusing one across two students used to
- * return the FIRST student's receipt for the SECOND student's genuine payment
- * — the second charge was silently swallowed and never booked (proven: two
+ * attacker- and bug-controlled. Matched on the key alone, reusing one across
+ * two students returns the FIRST student's receipt for the SECOND student's
+ * genuine payment — the second charge is silently swallowed, never booked (proven: two
  * payable 700 AFN charges, one key, second student left with zero payments and
  * the first student's receipt number). Matching on student_id as well means a
  * replay can only ever return that same student's own earlier payment.
@@ -256,9 +256,9 @@ function requireStudent(req: import('express').Request, studentId: string): Stud
  * and the audit entry can never diverge between the two paths again.
  *
  * Graduation additionally CLOSES the student's open enrollments (audit
- * STU-H4). Previously `status='graduated'` touched only the profile column,
- * leaving `enrollments.status='active'` behind — and because
- * `countActiveStudentsInClass()` counts active enrollments, the graduate kept
+ * STU-H4). Touching only the profile column leaves
+ * `enrollments.status='active'` behind — and because
+ * `countActiveStudentsInClass()` counts active enrollments, the graduate keeps
  * occupying a seat forever. Live evidence: a paying applicant was refused with
  * "Selected class is full." while one of the three seats was held by a
  * graduate. Closing the enrollment is the correct fix; the capacity predicate
@@ -369,11 +369,11 @@ paymentsRouter.get('/', requirePermission('Payment.View'), ah(async (req, res) =
 /**
  * Per-student tuition balances, aggregated in SQL.
  *
- * The roster used to derive every student's paid/owed figure by downloading
- * the payments list and reducing it client-side. That list is one page: with
- * 6,000 payments and a 2,000-row cap, two thirds never reached the browser and
- * those students were displayed as owing their FULL fee despite having paid.
- * It was also 379 KB of payload to compute a handful of numbers.
+ * Deriving each student's paid/owed figure by downloading the payments list and
+ * reducing it client-side does not work: that list is one page, so with 6,000
+ * payments and a 2,000-row cap two thirds never reach the browser and those
+ * students display as owing their FULL fee despite having paid. It is also
+ * 379 KB of payload to compute a handful of numbers.
  *
  * This returns one small row per student, summed over ALL their payments using
  * the same authoritative rule as utils/studentBalance (fee + installment +
@@ -388,9 +388,9 @@ paymentsRouter.get('/balances', requirePermission('Payment.View'), ah(async (req
     defaultPageSize: DEFAULT_PAGE_SIZE,
     maxPageSize: MAX_PAGE_SIZE,
   });
-  // Delegates to the single authoritative definition. This endpoint used to
-  // inline its own SQL, which summed only active semesters while the profile
-  // summed all of them — the same student showed two different debts.
+  // Delegates to the single authoritative definition rather than inlining its
+  // own SQL. A local copy summing only active semesters, while the profile sums
+  // all of them, shows the same student two different debts.
   res.json(getStudentBalancesPage(db, { branchId: isAll ? null : branchId, scope: 'all', limit, offset }));
 }));
 
@@ -411,10 +411,10 @@ studentsRouter.get('/search', requirePermission('Student.View'), ah(async (req, 
 
 /**
  * THE shared filter definition for the student roster, search and export
- * (audit STU-H2). Previously the roster and the search endpoint each carried
- * their own copy of this WHERE clause, and the CSV export had no server-side
- * filter at all — it reduced whatever page the browser happened to hold.
- * One builder means the three surfaces can never disagree about what
+ * (audit STU-H2). Separate copies of this WHERE clause in the roster and the
+ * search endpoint — with the CSV export having no server-side filter at all and
+ * reducing whatever page the browser happened to hold — is three answers to one
+ * question. One builder means the three surfaces can never disagree about what
  * "the current filter" means.
  *
  * Branch scoping is applied here, so no caller can forget it.
@@ -437,9 +437,9 @@ function buildStudentListWhere(
     for (let i = 0; i < 7; i++) params.push(like);
   }
   if (status) {
-    // Reject rather than silently ignore. An unrecognised value used to be
-    // dropped, so `?status=' OR '1'='1` (and any typo) returned the UNFILTERED
-    // page: callers could not tell "no matches" from "filter discarded".
+    // Reject rather than silently ignore. Dropping an unrecognised value makes
+    // `?status=' OR '1'='1` (and any typo) return the UNFILTERED page, and the
+    // caller cannot tell "no matches" from "filter discarded".
     assertStudentStatus(status);
     where.push('status = ?');
     params.push(status);
@@ -456,9 +456,9 @@ function buildStudentListWhere(
  *
  * Mirrors `GET /visitors/summary`, which the Visitors tab already uses. Every
  * figure is computed in SQL over the FULL filtered set — never derived from
- * the page the browser happens to hold. The Students tab previously captioned
- * its list "2000 of 2000" against a true 2,162 because both numbers came from
- * the truncated array.
+ * the page the browser happens to hold. Counted from the loaded array instead,
+ * the Students tab captions its list "2000 of 2000" against a true 2,162,
+ * because both numbers come from the same truncation.
  */
 studentsRouter.get('/summary', requirePermission('Student.View'), ah(async (req, res) => {
   const { branchId, isAll } = resolveBranchScope(req);
@@ -488,10 +488,10 @@ studentsRouter.get('/summary', requirePermission('Student.View'), ah(async (req,
 /**
  * Server-side CSV export over the FULL filtered dataset (audit STU-H2).
  *
- * The UI used to build the CSV from `filteredStudents` — the loaded page —
- * so an export of a 2,162-student branch silently produced 2,000 rows, with
- * financial columns (Total Fee / Paid / Debt). Offline management records were
- * quietly incomplete with nothing indicating truncation.
+ * Built in the UI from `filteredStudents` — the loaded page — an export of a
+ * 2,162-student branch silently produces 2,000 rows, financial columns
+ * (Total Fee / Paid / Debt) included. Offline management records are then
+ * incomplete with nothing indicating truncation.
  *
  * This endpoint applies exactly the same filters as the roster (shared via
  * buildStudentListWhere) and streams every matching row, joining the

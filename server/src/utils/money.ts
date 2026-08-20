@@ -25,7 +25,7 @@ import { HttpError } from '../middleware/errorHandler.js';
  * The old two-decimal storage was therefore a representation the business
  * never used, and holding it in a REAL made every total a floating-point sum.
  * A displayed total could differ from the sum of its displayed parts while
- * both were "correct" — the defect previously tracked as TR-2.
+ * both were "correct" — the defect tracked as TR-2, now closed.
  *
  * TWO DISTINCT OPERATIONS, deliberately not merged:
  *
@@ -168,9 +168,9 @@ const MAX_SEAT_COUNT = 100000;
 /**
  * Performance-score boundary (teacher audit T-2).
  *
- * `PUT /api/teachers/:id` previously did
- * `Math.max(0, Math.min(100, Number(performanceScore)))`, which is a CLAMP, not
- * a validation. Three consequences, all reproduced live:
+ * `Math.max(0, Math.min(100, Number(performanceScore)))` is a CLAMP, not a
+ * validation. Applied at `PUT /api/teachers/:id` it has three consequences,
+ * all reproduced live:
  *   - `5000` returned 200 and silently stored 100
  *   - `-20`  returned 200 and silently stored 0
  *   - `'abc'` became NaN and reached the database, surfacing as HTTP 500
@@ -229,10 +229,10 @@ export function assertPerformanceScore(
 const MAX_DAY_OFFSET = 100_000_000;
 
 /**
- * A whole number of days used to offset a date (finding INV-1).
+ * A whole number of days, for offsetting a date (finding INV-1).
  *
- * `invoice_due_days` previously accepted anything passing `Number(x) >= 0`, so
- * 1e20 was stored happily and then broke every invoice creation and issue with
+ * `invoice_due_days` accepting anything that passes `Number(x) >= 0` stores
+ * 1e20 happily and then breaks every invoice creation and issue with
  * HTTP 500 "Invalid time value" — a persistent denial of service that only an
  * owner/manager could clear. Rejecting at the write keeps the failure visible
  * and local.

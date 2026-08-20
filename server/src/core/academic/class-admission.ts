@@ -2,8 +2,8 @@
  * Class admission rules — the single domain authority for "may this student
  * occupy a seat in this class?" checks that are not capacity and not placement.
  *
- * Why this module exists (enrollment audit E-1): the gender policy used to be
- * enforced only inside `classes.routes.ts`. Route-level enforcement meant every
+ * Why this module exists (enrollment audit E-1): the gender policy is a domain
+ * rule, so it lives with the domain rather than in `classes.routes.ts`. Route-level enforcement meant every
  * new write path had to remember to repeat it, and one did not — the
  * transfer-request approval path (`POST /api/enrollments/:id/transfer-requests`)
  * called `EnrollmentService.transfer()` directly and therefore admitted a male
@@ -66,7 +66,7 @@ export function assertClassGenderAllows(
  * (`ACTIVE_ENROLLMENT_STATUSES`): if a row counts against class capacity it is
  * a seat. Closed rows (transferred / dropped / withdrawn / completed /
  * graduated) are history and are deliberately not constrained, so repeating a
- * class the student previously left stays legal.
+ * class the student left earlier stays legal.
  *
  * Backed by the partial UNIQUE index in migration 074 so the invariant holds
  * under a race; this function turns that constraint into a clean 409 instead of

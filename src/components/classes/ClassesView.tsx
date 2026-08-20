@@ -159,9 +159,9 @@ export default function ClassesView({
 
   // Subscribes to the `academic` dataset: adding a room, term, slot, level or
   // program in Academic Setup bumps that version and this picker data refetches
-  // from the server. Previously this effect only depended on `loadAcademicConfig`
-  // (i.e. `branchId`), so an academic change made elsewhere stayed invisible
-  // here until a full page reload.
+  // from the server. Depending on `loadAcademicConfig` alone (i.e. `branchId`)
+  // leaves an academic change made elsewhere invisible here until a full page
+  // reload.
   const academicVersion = useDatasetVersion('academic');
   useEffect(() => {
     void (async () => { await loadAcademicConfig(); })();
