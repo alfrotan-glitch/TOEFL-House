@@ -1,0 +1,20 @@
+# Canonical Authority Registry
+
+One row per critical concept. "Authority" means: if two places disagree, this one wins.
+
+Validated by `npm run audit:registries` — every path in the Storage / Rules / API columns
+must exist, and every `Test` must name a real test file.
+
+| Concept | Storage authority | Business-rule authority | API authority | UI consumer(s) | Reporting consumer(s) | Test authority | Status |
+|---|---|---|---|---|---|---|---|
+| Finance category taxonomy | `finance_categories` | `server/src/core/finance/category-taxonomy.ts` | `GET /api/finance/categories` | `src/components/finance/BudgetsPanel.tsx`, `BudgetLinePicker.tsx` | `reports.routes.ts` | `server/src/tests/finance-taxonomy.test.ts` | AUTHORITATIVE |
+| Marketing channel / vendor | `finance_category_channels` | `server/src/core/finance/category-taxonomy.ts` | `GET /api/finance/categories` | `src/components/finance/BudgetsPanel.tsx` | `server/src/routes/bos.routes.ts` | `server/src/tests/finance-taxonomy.test.ts` | AUTHORITATIVE |
+| Accounting classification | `finance_categories.classification` | `server/src/core/finance/ledger-classification.ts` | `GET /api/finance/pnl` | `src/components/finance/PnLPanel.tsx` | `reports.routes.ts`, `dashboard-summary.ts` | `server/src/tests/finance-accounting-classification.test.ts` | AUTHORITATIVE |
+| Branch budget allocation | `budget_lines` | `server/src/routes/finance.routes.ts` | `GET/POST/PATCH /api/finance/budget-lines` | `src/components/finance/BudgetsPanel.tsx` | `GET /api/finance/dashboard` | `server/src/tests/finance-taxonomy.test.ts` | AUTHORITATIVE |
+| Payroll envelope | `budget_lines.payroll_target` | `server/src/routes/teachers.routes.ts` | `POST /api/teachers/:id/pay-salary` | `src/components/teachers/TeachersView.tsx` | `server/src/routes/bos.routes.ts` | `server/src/tests/payroll.test.ts` | AUTHORITATIVE |
+| Ledger entry | `financial_transactions` | `server/src/utils/income.ts` (income), `finance.routes.ts` (expense) | `GET /api/finance/transactions` | `src/components/finance/LedgerPanel.tsx` | `reports.routes.ts` | `server/src/tests/financial-integrity.test.ts` | AUTHORITATIVE |
+| Cash position | `finance_accounts` | `server/src/utils/financeAccounts.ts` | `GET /api/finance/overview` | `src/components/finance/FinanceDashboardPanel.tsx` | `GET /api/reports/overview` | `server/src/tests/cash-position-reconciliation.test.ts` | AUTHORITATIVE |
+| Period boundaries (Jalali) | — (derived) | `server/src/core/calendar/periods.ts` | consumed internally | `src/utils/jalali.ts` | `reports.routes.ts` | `server/src/tests/jalali-calendar.test.ts` | AUTHORITATIVE |
+| Monetary precision | DB triggers (`trg_*_money_scale_*`) | `server/src/utils/money.ts` | all money endpoints | `src/utils/format.ts` | all | `server/src/tests/money-boundary-property.test.ts` | AUTHORITATIVE |
+| Permission decision | `permissions`, `role_permissions`, `permission_overrides` | `server/src/core/rbac/rbac-service.ts` | `server/src/middleware/auth.ts` | `src/apiStore.ts` | — | `server/src/tests/rbac-scope.test.ts` | AUTHORITATIVE |
+| Branch scope of a request | — (derived from identity) | `server/src/middleware/auth.ts` (`resolveBranchScope`) | every scoped endpoint | — | all reports | `server/src/tests/branch-scoping.test.ts` | AUTHORITATIVE |

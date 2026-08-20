@@ -84,6 +84,10 @@ run('frontend lint', 'npm run lint');
 run('server lint (eslint + tsc)', 'npm run lint', { cwd: path.join(root, 'server') });
 run('product integrity audit', 'npm run audit:product');
 run('high-assurance static audit', 'npm run audit:static');
+// Engineering Protocol §6: the registries are the proof, not the prose. A stale
+// registry — a renamed module, a deleted test, an invariant with no enforcement
+// point — fails the release, exactly as a broken test would.
+run('registry audit', 'npm run audit:registries');
 
 console.log('\nBuild');
 run('frontend production build', 'npm run build', { slow: true });
