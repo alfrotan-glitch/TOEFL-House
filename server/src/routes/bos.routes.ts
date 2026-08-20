@@ -14,9 +14,11 @@ import { assertMoney, assertComputedMoney } from '../utils/money.js';
 import {
   periodBoundaries,
   periodBoundariesForKey,
+  previousMonthKey,
   REPORTING_PERIODS,
   type ReportingPeriod,
 } from '../core/calendar/periods.js';
+import { isoToJalaliPeriodKey } from '../utils/jalali.js';
 import { computeProfitDistribution } from '../core/finance/profit-distribution.js';
 import { TREASURY_DEFAULTS } from '../core/configuration/policy-catalog.js';
 
@@ -254,10 +256,11 @@ bosRouter.get(
     const savingBalance = financeAccount.savingBalance;
 
     const newThisMonth = (stmtNewStudentsCount.get(from, to, branchId) as any).count;
-    const prevMonthDate = new Date(`${from}T00:00:00`);
-    prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
-    const prevPeriod = prevMonthDate.toISOString().slice(0, 7);
-    const newLastMonth = (stmtNewStudentsCount.get(`${prevPeriod}-01`, `${prevPeriod}-31`, branchId) as any).count;
+    // "Last month" is the previous SHAMSI month. Stepping back one Gregorian
+    // month from a Shamsi month's start lands in a window that is neither
+    // month — on 2026-08-20 that is 2026-06, overlapping two Shamsi months.
+    const previous = periodBoundariesForKey(previousMonthKey(isoToJalaliPeriodKey(from) ?? period));
+    const newLastMonth = (stmtNewStudentsCount.get(previous.from, previous.to, branchId) as any).count;
 
     const classAvgRow = stmtClassAvgSize.get(branchId) as any;
 

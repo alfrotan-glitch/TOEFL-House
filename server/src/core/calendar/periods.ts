@@ -196,6 +196,29 @@ export function periodBoundariesForKey(key: string): PeriodBoundaries {
 }
 
 /**
+ * The Shamsi month key immediately before `key`.
+ *
+ * "Compared with last month" is a real question the executive dashboard asks,
+ * and answering it by subtracting one GREGORIAN month from a Shamsi month's
+ * start date produces a span that is neither month: on 2026-08-20 the current
+ * Shamsi month starts 2026-07-23, and stepping back a Gregorian month lands in
+ * 2026-06, a window overlapping two different Shamsi months.
+ *
+ * Shamsi months are 29, 30 or 31 days and the length depends on the year, so
+ * the step is taken in Shamsi month numbers rather than in days.
+ */
+export function previousMonthKey(key: string): string {
+  const month = /^(\d{3,4})-(\d{1,2})$/.exec(key);
+  if (!month) {
+    throw new RangeError(`Expected a Shamsi month key such as 1405-05, received '${key}'.`);
+  }
+  const jy = Number(month[1]);
+  const jm = Number(month[2]);
+  if (jm < 1 || jm > 12) throw new RangeError(`Invalid Shamsi month in period key '${key}'.`);
+  return jm === 1 ? `${jy - 1}-12` : `${jy}-${pad2(jm - 1)}`;
+}
+
+/**
  * The inclusive Gregorian span of the Shamsi month containing `todayStr`,
  * NOT truncated at today. Use this for "the whole current month" questions
  * (payroll, month-end); use `periodBoundaries('month')` for month-to-date.

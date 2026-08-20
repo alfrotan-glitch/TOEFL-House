@@ -42,7 +42,7 @@ import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { bosRouter } from '../routes/bos.routes.js';
-import { periodBoundaries } from '../core/calendar/periods.js';
+import { addDays, periodBoundaries, periodBoundariesForKey, previousMonthKey } from '../core/calendar/periods.js';
 import { TREASURY_DEFAULTS } from '../core/configuration/policy-catalog.js';
 import { computeProfitDistribution, resolveDistributionTier } from '../core/finance/profit-distribution.js';
 
@@ -324,5 +324,53 @@ describe('publish and enforce cannot be different numbers', () => {
 
     // And the ceiling is now closed rather than replenished (BOS-1).
     expect((await calculate()).maxWithdrawable).toBe(0);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// "LAST MONTH" IS THE PREVIOUS SHAMSI MONTH
+// ══════════════════════════════════════════════════════════════════════════
+/**
+ * The executive dashboard compares new students this month against last month.
+ * It derived "last month" by taking the period's start date and stepping back
+ * one GREGORIAN month. Once the period start became a Shamsi month start, that
+ * lands in a window belonging to neither month: on 2026-08-20 the Shamsi month
+ * starts 2026-07-23, and stepping back one Gregorian month gives 2026-06 —
+ * overlapping two different Shamsi months and sharing a boundary with neither.
+ *
+ * Shamsi months are 29, 30 or 31 days depending on the year, so the step has to
+ * be taken in month numbers, not in days.
+ */
+describe('previousMonthKey steps in Shamsi months', () => {
+  it('steps back within a year', () => {
+    expect(previousMonthKey('1405-05')).toBe('1405-04');
+    expect(previousMonthKey('1405-12')).toBe('1405-11');
+  });
+
+  it('crosses the year boundary to month 12, not month 0', () => {
+    expect(previousMonthKey('1405-01')).toBe('1404-12');
+  });
+
+  it('rejects anything that is not a Shamsi month key', () => {
+    for (const bad of ['1405', '1405-Q2', '2026-08-01', '1405-13', 'nonsense']) {
+      expect(() => previousMonthKey(bad)).toThrow();
+    }
+  });
+
+  it('the previous month abuts the current one with no gap and no overlap', () => {
+    const current = periodBoundaries('month', today());
+    const previous = periodBoundariesForKey(previousMonthKey(current.periodKey));
+    // The previous month's full end is the day before this month's start.
+    expect(addDays(previous.periodEnd, 1)).toBe(current.from);
+  });
+
+  it('the dashboard compares against a span that is a real Shamsi month', async () => {
+    const body = (
+      await supertest(app).get(`/api/bos/executive-dashboard?branchId=${BR}`).set(auth(OWNER))
+    ).body;
+    // The endpoint reports its own period; the comparison window must be the
+    // month immediately before it.
+    const current = periodBoundaries('month', today());
+    expect(body.period).toBe(current.periodKey);
   });
 });
