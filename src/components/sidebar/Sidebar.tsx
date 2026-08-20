@@ -25,13 +25,12 @@ export interface SidebarProps {
   currentBranchName: string;
   isOpen: boolean;
   onClose: () => void;
-  permissionCodes?: string[];
   tabAccess?: Record<string, boolean>;
 }
 
 export default function Sidebar({
   currentTab, setCurrentTab, activeRole, onLogout, activeBranchId, changeBranch,
-  canPickBranch, branches, campuses = [], currentBranchName, isOpen, onClose, permissionCodes, tabAccess,
+  canPickBranch, branches, campuses = [], currentBranchName, isOpen, onClose, tabAccess,
 }: SidebarProps) {
   // Default to false (collapsed) to maximize workspace
   const [isPinned, setIsPinned] = useState<boolean>(() => {
@@ -49,7 +48,7 @@ export default function Sidebar({
 
   const {
     visibleSections, searchQuery, setSearchQuery, toggleSection, isSectionOpen,
-  } = useSidebar(activeRole, currentTab, permissionCodes, tabAccess);
+  } = useSidebar(currentTab, tabAccess);
 
   // Expanded if pinned or currently hovering
   const isExpanded = isPinned || isHovering;

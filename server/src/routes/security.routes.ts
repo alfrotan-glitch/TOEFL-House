@@ -3,7 +3,12 @@ import { db } from '../db/connection.js';
 import { authenticate, requirePermission, canAccessBranchResource } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
-import { resolveUserPermissions, isGlobalOwner } from '../core/rbac/rbac-service.js';
+import {
+  resolveUserPermissions,
+  isGlobalOwner,
+  effectivePermissionCodes,
+  effectiveTabAccess,
+} from '../core/rbac/rbac-service.js';
 import { TAB_PERMISSION_MAP, ROLE_CODES } from '../core/rbac/permission-catalog.js';
 import { id } from '../utils/ids.js';
 
@@ -325,10 +330,10 @@ securityRouter.get('/tab-permissions', ah(async (_req, res) => {
 securityRouter.get('/me/permissions', ah(async (req, res) => {
   if (req.rbac) {
     return res.json({
-      permissions: req.rbac.permissions, 
-      permissionCodes: req.rbac.permissionCodes, 
+      permissions: req.rbac.permissions,
+      permissionCodes: effectivePermissionCodes(req.rbac),
       roles: req.rbac.roles,
-      tabAccess: Object.fromEntries(Object.entries(TAB_PERMISSION_MAP).map(([tab, perm]) => [tab, req.rbac!.permissionCodes.has(perm)])),
+      tabAccess: effectiveTabAccess(req.rbac),
     });
   }
   res.json({ permissions: [], permissionCodes: [], roles: [], tabAccess: {} });

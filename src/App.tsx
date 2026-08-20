@@ -148,13 +148,13 @@ function AuthenticatedApp() {
   const activeBranchId = store.settings.currentBranchId;
   // ── RBAC + role-based tab guard ─────────────────────────────────────
   const isTabAllowed = useCallback(
-    (tab: string) => canAccessTab(tab, activeRole, user?.permissions, user?.tabAccess),
-    [activeRole, user?.permissions, user?.tabAccess]
+    (tab: string) => canAccessTab(tab, user?.tabAccess),
+    [user?.tabAccess]
   );
 
   const effectiveTab = isTabAllowed(currentTab)
     ? currentTab
-    : firstAllowedTab(activeRole, user?.permissions, user?.tabAccess);
+    : firstAllowedTab(user?.tabAccess);
 
   const currentPageLabel = useMemo(() => {
     for (const section of NAVIGATION_SECTIONS) {
@@ -411,7 +411,7 @@ function AuthenticatedApp() {
         currentTab={effectiveTab} setCurrentTab={handleTabChange} activeRole={activeRole} onLogout={logout}
         activeBranchId={activeBranchId} changeBranch={store.changeBranch} canPickBranch={activeRole === 'owner' || activeRole === 'general_manager'}
         branches={store.settings.branches} campuses={store.settings.campuses || store.campuses || []} currentBranchName={store.currentBranchName}
-        isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} permissionCodes={user?.permissions ? Array.from(user.permissions) : undefined} tabAccess={user?.tabAccess}
+        isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} tabAccess={user?.tabAccess}
       />
 
       {isSidebarOpen && <div className="lg:hidden fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-40" onClick={() => setIsSidebarOpen(false)} aria-hidden="true" />}

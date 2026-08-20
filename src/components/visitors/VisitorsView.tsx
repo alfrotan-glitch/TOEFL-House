@@ -94,9 +94,9 @@ export default function VisitorsView({
   // them to everyone, so a counselor filled in a class, fee and payment method
   // before being told "You do not have permission to perform this operation."
   // These flags mirror the exact permission codes the routes require.
-  const canCreateLead = hasPermission(permissionCodes, 'Lead.Create', activeRole);
-  const canEditLead = hasPermission(permissionCodes, 'Lead.Edit', activeRole);
-  const canConvertLead = hasPermission(permissionCodes, 'Lead.Convert', activeRole);
+  const canCreateLead = hasPermission(permissionCodes, 'Lead.Create');
+  const canEditLead = hasPermission(permissionCodes, 'Lead.Edit');
+  const canConvertLead = hasPermission(permissionCodes, 'Lead.Convert');
 
   /**
    * Push the current search/filters to the server (UX-1).

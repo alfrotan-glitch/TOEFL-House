@@ -61,7 +61,6 @@ export interface NavItemConfig {
   label: string;
   icon: NavIconKey;
   /** Roles allowed to see and open this item. */
-  roles: AppRole[];
   badge?: string;
   badgeTone?: NavBadgeTone;
   /** Optional short description for tooltips / search. */

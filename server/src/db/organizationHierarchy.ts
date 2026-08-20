@@ -2,15 +2,19 @@ import { ensureFinanceAccount } from '../utils/financeAccounts.js';
 /**
  * Ensures the fixed Organization → Campus → Branch hierarchy exists.
  *
- * This runs after schema.sql and migrations so it works for:
- *   - fresh databases (seed may also insert the same rows via INSERT OR IGNORE)
- *   - legacy databases upgraded by migration 007
- *   - databases that partially applied hierarchy DDL
+ * Runs on every boot, after the canonical schema is applied. It is idempotent —
+ * every write is an INSERT OR IGNORE or a targeted backfill — so a database that
+ * already has the hierarchy is left untouched, and one seeded by `seed.ts`
+ * (which inserts the same rows) does not conflict.
  *
  * Fixed constants (product requirement):
  *   Organization: The TOEFL House
  *   Campus:       Kabul Campus / KBL
- *   Branch:       Main Branch / TH-MB-001 / id "1" (FK compatibility)
+ *   Branch:       Main Branch / TH-MB-001 / id "1"
+ *
+ * The main branch's id is the literal "1" because rows across the schema carry
+ * it as a foreign key default; it is a value the data depends on, not a
+ * sequence position.
  */
 import type Database from 'better-sqlite3';
 import { PAYROLL_ENVELOPES, payrollEnvelopeId } from '../core/finance/category-taxonomy.js';
@@ -38,52 +42,6 @@ function tableExists(db: Database.Database, name: string): boolean {
     .prepare(`SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = ?`)
     .get(name) as { ok: number } | undefined;
   return !!row;
-}
-
-/**
- * Safely checks if a column exists in a specific table.
- */
-function columnExists(db: Database.Database, table: string, column: string): boolean {
-  // PRAGMA table_info doesn't support parameterized table names directly,
-  // so we validate the table name strictly to prevent SQL injection in DDL.
-  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(table)) {
-    throw new Error(`Invalid table name format: ${table}`);
-  }
-  
-  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
-  return cols.some((c) => c.name === column);
-}
-
-/**
- * Dynamically adds missing columns to the 'branches' table for legacy databases.
- */
-function ensureBranchColumns(db: Database.Database): void {
-  if (!tableExists(db, 'branches')) return;
-
-  const additions: Array<[string, string]> = [
-    ['campus_id', 'TEXT'],
-    ['code', 'TEXT'],
-    ['address', 'TEXT'],
-    ['postal_code', 'TEXT'],
-    ['phone', 'TEXT'],
-    ['email', 'TEXT'],
-    ['description', 'TEXT'],
-    ['created_at', "TEXT DEFAULT (datetime('now'))"],
-    ['updated_at', "TEXT DEFAULT (datetime('now'))"],
-  ];
-
-  for (const [col, typeSql] of additions) {
-    if (columnExists(db, 'branches', col)) continue;
-    db.exec(`ALTER TABLE branches ADD COLUMN ${col} ${typeSql}`);
-  }
-
-  // Create necessary indexes if they don't exist
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_branches_campus ON branches(campus_id)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_branches_active ON branches(is_active)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_branches_code ON branches(code)`);
-  db.exec(
-    `CREATE UNIQUE INDEX IF NOT EXISTS idx_branches_code_unique ON branches(code) WHERE code IS NOT NULL`
-  );
 }
 
 /**
@@ -167,20 +125,17 @@ export function ensureOrganizationHierarchy(db: Database.Database): void {
 
   log.info('🔄 Ensuring organization hierarchy exists...');
 
-  // Wrap the entire operation in a transaction.
-  // If any step fails, all changes are rolled back, preventing partial updates.
-  const migrate = db.transaction(() => {
-    // 1. Ensure columns exist before attempting to insert/update them
-    ensureBranchColumns(db);
-
-    // 2. Ensure Organization exists
+  // One transaction: a partially-built hierarchy is worse than none, because
+  // the missing half is invisible to every later INSERT OR IGNORE.
+  const ensureHierarchy = db.transaction(() => {
+    // 1. Ensure Organization exists
     db.prepare(
       `INSERT OR IGNORE INTO organizations (id, name) VALUES (?, ?)`
     ).run(FIXED_ORG_ID, FIXED_ORG_NAME);
 
     db.prepare(`UPDATE organizations SET name = ? WHERE id = ?`).run(FIXED_ORG_NAME, FIXED_ORG_ID);
 
-    // 3. Ensure Campus exists
+    // 2. Ensure Campus exists
     db.prepare(
       `INSERT OR IGNORE INTO campuses (
          id, organization_id, name, code, address, postal_code, phone, email, description, is_active
@@ -195,7 +150,7 @@ export function ensureOrganizationHierarchy(db: Database.Database): void {
       'Primary campus of The TOEFL House in Kabul'
     );
 
-    // 4. Ensure Branch exists
+    // 3. Ensure Branch exists
     db.prepare(
       `INSERT OR IGNORE INTO branches (
          id, campus_id, name, code, location, address, postal_code, phone, email, description, is_active
@@ -211,7 +166,7 @@ export function ensureOrganizationHierarchy(db: Database.Database): void {
       'Main operational branch under Kabul Campus'
     );
 
-    // 5. Backfill / normalize main branch and any branch missing campus/code
+    // 4. Backfill / normalize main branch and any branch missing campus/code
     db.prepare(
       `UPDATE branches SET
          campus_id   = COALESCE(campus_id, ?),
@@ -253,17 +208,13 @@ export function ensureOrganizationHierarchy(db: Database.Database): void {
       DEFAULT_BRANCH_ID
     );
 
-    // 6. Ensure default branch has a saving account
-
-    // Budget catalog must be seeded after branches exist because migration 003 runs before hierarchy creation on fresh databases.
-    // `ensureBudgetLineCatalog` seeds the canonical taxonomy first — budget
-    // lines carry a foreign key into it.
+    // 5. Budget lines carry a foreign key into the finance category taxonomy,
+    //    so `ensureBudgetLineCatalog` seeds that taxonomy before the lines.
     ensureBudgetLineCatalog(db);
   });
 
-  // Execute the transaction safely
   try {
-    migrate();
+    ensureHierarchy();
     log.info('✅ Organization hierarchy ensured successfully.');
   } catch (error) {
     log.error('❌ Failed to ensure organization hierarchy:', error);

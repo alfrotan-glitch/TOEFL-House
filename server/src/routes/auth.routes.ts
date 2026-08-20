@@ -2,11 +2,14 @@ import { Router } from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { db } from '../db/connection.js';
 import { hashPassword, verifyPassword, signToken, verifyToken, resolveJwtExpiresInSeconds } from '../utils/auth.js';
-import { isGlobalOwner } from '../core/rbac/rbac-service.js';
 import { authenticate, readSessionCookie } from '../middleware/auth.js';
-import { hasRole } from '../core/rbac/rbac-service.js';
-import { buildRbacContext, type RbacUserContext } from '../core/rbac/rbac-service.js';
-import { TAB_PERMISSION_MAP } from '../core/rbac/permission-catalog.js';
+import {
+  buildRbacContext,
+  effectivePermissionCodes,
+  effectiveTabAccess,
+  hasRole,
+  type RbacUserContext,
+} from '../core/rbac/rbac-service.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 
@@ -156,19 +159,14 @@ authRouter.post(
       id: row.id, username: row.username, full_name: row.full_name, branch_id: row.branch_id,
     });
     
-    const tabAccess: Record<string, boolean> = {};
-    for (const [tab, perm] of Object.entries(TAB_PERMISSION_MAP)) {
-      tabAccess[tab] = rbac.permissionCodes.has(perm) || isGlobalOwner(rbac);
-    }
-    
     res.json({
       ...(process.env.NODE_ENV === 'production' ? {} : { token }),
       user: {
         id: row.id, username: row.username, fullName: row.full_name, email: row.email,
         role: rbac.primaryRole, branchId: row.branch_id, mustChangePassword: !!row.must_change_password,
-        permissions: Array.from(rbac.permissionCodes), 
-        roles: rbac.roles, 
-        tabAccess,
+        permissions: effectivePermissionCodes(rbac),
+        roles: rbac.roles,
+        tabAccess: effectiveTabAccess(rbac),
       },
     });
   })
@@ -188,17 +186,12 @@ authRouter.get(
       id: row.id, username: row.username, full_name: row.full_name, branch_id: row.branch_id,
     });
     
-    const tabAccess: Record<string, boolean> = {};
-    for (const [tab, perm] of Object.entries(TAB_PERMISSION_MAP)) {
-      tabAccess[tab] = rbac.permissionCodes.has(perm) || isGlobalOwner(rbac);
-    }
-    
     res.json({
       id: row.id, username: row.username, fullName: row.full_name, email: row.email,
       role: rbac.primaryRole, branchId: row.branch_id, mustChangePassword: !!row.must_change_password,
-      permissions: Array.from(rbac.permissionCodes), 
-      roles: rbac.roles, 
-      tabAccess,
+      permissions: effectivePermissionCodes(rbac),
+      roles: rbac.roles,
+      tabAccess: effectiveTabAccess(rbac),
     });
   })
 );

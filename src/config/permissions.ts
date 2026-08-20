@@ -1,85 +1,54 @@
-import type { AppRole, AppTabId } from '../types/navigation';
 import { NAVIGATION_SECTIONS } from './navigation';
+import type { AppTabId } from '../types/navigation';
 
 /**
- * Derives a map of TabId -> AppRole[] directly from the navigation config.
+ * Access questions have exactly one answer: the server's.
+ *
+ * `tabAccess` and `permissions` arrive resolved on the session payload —
+ * `/auth/login` and `/auth/me` both compute them through
+ * `effectiveTabAccess` / `effectivePermissionCodes`, which already apply the
+ * owner bypass. The client's job is to read that answer, not to reconstruct it.
+ *
+ * These helpers decide what to OFFER. They are not a security boundary: every
+ * route re-authorizes server-side, so a wrong answer here is a usability bug,
+ * not a hole. That is precisely why it must not be computed a second way — a
+ * second computation drifts silently and nobody notices until an operator
+ * cannot find a screen.
  */
-export const TAB_ACCESS: Record<AppTabId, AppRole[]> = (() => {
-  const map = {} as Record<AppTabId, AppRole[]>;
+
+/**
+ * May this tab be shown?
+ *
+ * An unknown tab, or a session with no resolved access map, answers false.
+ * Absence is a denial rather than a reason to guess.
+ */
+export function canAccessTab(tab: string, tabAccess?: Record<string, boolean>): boolean {
+  return tabAccess ? tabAccess[tab] === true : false;
+}
+
+/**
+ * The first tab this user may open, in sidebar order, for redirecting away from
+ * a tab they cannot see.
+ */
+export function firstAllowedTab(tabAccess?: Record<string, boolean>): AppTabId {
   for (const section of NAVIGATION_SECTIONS) {
     for (const item of section.items) {
-      if (!map[item.id]) {
-        map[item.id] = item.roles;
-      }
+      if (canAccessTab(item.id, tabAccess)) return item.id;
     }
   }
-  return map;
-})();
-
-/**
- * Legacy role compatibility helper. Modern tab access comes from the backend `tabAccess` map.
- */
-function hasCode(codes: string[] | Set<string> | undefined, code: string): boolean {
-  if (!codes) return false;
-  if (codes instanceof Set) return codes.has(code);
-  if (Array.isArray(codes)) return codes.includes(code);
-  return false;
+  return 'dashboard';
 }
 
 /**
- * Core Access Guard.
- * Determines if a user can access a specific tab based on context, permissions, or role.
- */
-export function canAccessTab(
-  tab: string,
-  role: string,
-  permissionCodes?: string[] | Set<string>,
-  tabAccess?: Record<string, boolean>
-): boolean {
-  // 1. Highest priority: Explicit tab access map from backend context
-  if (tabAccess && tab in tabAccess) {
-    return !!tabAccess[tab];
-  }
-
-  // 2. Modern RBAC is authoritative whenever the backend supplied a permission set.
-  // An empty set is an intentional deny rather than a reason to fall back to UI roles.
-  if (permissionCodes !== undefined) {
-    return tabAccess ? !!tabAccess[tab] : false;
-  }
-
-  // 3. Role metadata is only a compatibility path for pre-RBAC payloads.
-  if (role === 'owner') return true;
-  const allowedRoles = TAB_ACCESS[tab as AppTabId];
-  return allowedRoles ? allowedRoles.includes(role as AppRole) : false;
-}
-
-/**
- * Finds the first tab the user is allowed to view.
- * Used for redirecting users away from restricted pages.
- */
-export function firstAllowedTab(
-  role: string,
-  permissionCodes?: string[] | Set<string>,
-  tabAccess?: Record<string, boolean>
-): AppTabId {
-  for (const section of NAVIGATION_SECTIONS) {
-    for (const item of section.items) {
-      if (canAccessTab(item.id, role, permissionCodes, tabAccess)) {
-        return item.id;
-      }
-    }
-  }
-  return 'dashboard'; // Absolute fallback
-}
-
-/**
- * Generic permission checker for conditional rendering inside components.
+ * Does this user hold a permission? Used for conditional controls inside a
+ * screen (a Create button, a Delete action).
  */
 export function hasPermission(
   permissionCodes: string[] | Set<string> | undefined,
   code: string,
-  role?: string
 ): boolean {
-  if (role === 'owner') return true;
-  return hasCode(permissionCodes, code);
+  if (!permissionCodes) return false;
+  return permissionCodes instanceof Set
+    ? permissionCodes.has(code)
+    : permissionCodes.includes(code);
 }

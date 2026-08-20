@@ -6,6 +6,7 @@ import type Database from 'better-sqlite3';
 import {
   PERMISSION_CATALOG,
   ROLE_DEFINITIONS,
+  TAB_PERMISSION_MAP,
   type PermissionScope,
   type RoleCode,
 } from './permission-catalog.js';
@@ -317,6 +318,41 @@ export function hasPermission(ctx: RbacUserContext, code: string): boolean {
 
 export function hasAnyPermission(ctx: RbacUserContext, codes: string[]): boolean {
   return codes.some((c) => ctx.permissionCodes.has(c));
+}
+
+/**
+ * What this principal may actually do, as the API reports it to a client.
+ *
+ * This differs from `ctx.permissionCodes` for exactly one principal. The
+ * catalog withholds four destructive codes from the owner's stored grant
+ * (`Attendance.Edit`, `Grade.Edit`, `Student.Delete`, `Payment.Delete`) so the
+ * audit record shows them as a deliberate omission — but `authorize()` and
+ * `requirePermission()` both bypass a global owner outright, so the owner can
+ * perform them. Reporting the stored set would tell the UI something the server
+ * does not believe, and the UI would hide controls the API accepts.
+ *
+ * Effective access is therefore resolved here, once. Callers serialize the
+ * result; they do not re-apply the owner rule themselves.
+ */
+export function effectivePermissionCodes(ctx: RbacUserContext): string[] {
+  if (isGlobalOwner(ctx)) return PERMISSION_CATALOG.map((p) => p.code);
+  return Array.from(ctx.permissionCodes);
+}
+
+/**
+ * Which top-level screens this principal may open.
+ *
+ * Derived from `effectivePermissionCodes` rather than from `permissionCodes`,
+ * so tab visibility cannot disagree with the permission list shipped beside it
+ * in the same response. A tab absent from `TAB_PERMISSION_MAP` would be absent
+ * here too and would read as `undefined` — false — at every call site, so
+ * `tab-access-authority.test.ts` requires every routed tab to be mapped.
+ */
+export function effectiveTabAccess(ctx: RbacUserContext): Record<string, boolean> {
+  const granted = new Set(effectivePermissionCodes(ctx));
+  return Object.fromEntries(
+    Object.entries(TAB_PERMISSION_MAP).map(([tab, perm]) => [tab, granted.has(perm)]),
+  );
 }
 
 export function getPermissionScope(ctx: RbacUserContext, code: string): PermissionScope | null {

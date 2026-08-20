@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { NAVIGATION_SECTIONS } from '../config/navigation';
 import { canAccessTab } from '../config/permissions';
-import type { AppRole, NavSectionConfig } from '../types/navigation';
+import type { NavSectionConfig } from '../types/navigation';
 function buildDefaultOpenMap(): Record<string, boolean> {
   const map: Record<string, boolean> = {};
   for (const section of NAVIGATION_SECTIONS) {
@@ -10,12 +10,7 @@ function buildDefaultOpenMap(): Record<string, boolean> {
   return map;
 }
 
-export function useSidebar(
-  activeRole: AppRole, // FIX: Strict type safety instead of string
-  currentTab: string,
-  permissionCodes?: string[] | Set<string>, // FIX: Support Set for O(1) performance
-  tabAccess?: Record<string, boolean>
-) {
+export function useSidebar(currentTab: string, tabAccess?: Record<string, boolean>) {
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(buildDefaultOpenMap);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -28,8 +23,8 @@ export function useSidebar(
     
     return NAVIGATION_SECTIONS.map((section) => {
       const items = section.items.filter((item) => {
-        // Check permissions first
-        if (!canAccessTab(item.id, activeRole, permissionCodes, tabAccess)) return false;
+        // Visibility is the server's answer, keyed by item id.
+        if (!canAccessTab(item.id, tabAccess)) return false;
         
         // If no search query, show all allowed items
         if (!q) return true;
@@ -47,7 +42,7 @@ export function useSidebar(
       
       return { ...section, items };
     }).filter((section) => section.items.length > 0);
-  }, [activeRole, searchQuery, permissionCodes, tabAccess]);
+  }, [searchQuery, tabAccess]);
 
   const isSectionOpen = useCallback((section: NavSectionConfig) => {
     // Auto-expand if user is searching or if the current tab is inside this section
@@ -56,8 +51,8 @@ export function useSidebar(
     return openSections[section.id] !== false;
   }, [openSections, currentTab, searchQuery]);
   const checkTabAccess = useCallback(
-    (tab: string) => canAccessTab(tab, activeRole, permissionCodes, tabAccess),
-    [activeRole, permissionCodes, tabAccess]
+    (tab: string) => canAccessTab(tab, tabAccess),
+    [tabAccess]
   );
 
   return {

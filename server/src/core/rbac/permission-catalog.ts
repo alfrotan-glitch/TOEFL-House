@@ -181,6 +181,7 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
   { code: 'AcademicSetup.Edit', resource: 'AcademicSetup', action: 'Edit', description: 'Edit academic infrastructure (terms, slots, rooms, programs, levels)', category: 'security' },
   { code: 'Curriculum.Author', resource: 'Curriculum', action: 'Author', description: 'Create and publish program versions, subjects and modules', category: 'security' },
   { code: 'Curriculum.PlacementPolicy', resource: 'Curriculum', action: 'PlacementPolicy', description: 'Configure placement assessment policy and placement banding rules', category: 'security' },
+  { code: 'Curriculum.TestBank', resource: 'Curriculum', action: 'TestBank', description: 'Author placement test-bank content: tests, sections, questions, rubrics, audio', category: 'security' },
   { code: 'Report.View', resource: 'Report', action: 'View', description: 'View operational and financial reports', category: 'reporting' },
 ];
 export type PermissionCode = typeof PERMISSION_CATALOG[number]['code'];
@@ -212,7 +213,7 @@ export const ROLE_DEFINITIONS: RoleDef[] = [
       'Attendance.View','Attendance.Edit','Exam.View','Exam.Create','Exam.Edit','Exam.Publish','Grade.View','Grade.Edit','Promotion.Approve',
       'Certificate.Issue','Certificate.Print','Teacher.View','Teacher.Edit','Teacher.Create','Teacher.Delete','Employee.View','Employee.Edit','Payroll.View','Payroll.Edit',
       'Payment.View','Payment.Create','Invoice.View','Invoice.Create','Discount.View','Expense.View','Expense.Create','Expense.Approve','Budget.View','Budget.Edit','Budget.Allocate','Finance.Report','Refund.Approve','Report.View','Impact.View',
-      'Book.View','Book.Sell','Workflow.View','Workflow.Trigger','Workflow.Approve','Workflow.Reject','Workflow.Cancel','Waitlist.View','Waitlist.Manage','Enrollment.FreezeRequest','Enrollment.TransferRequest','Rule.View','Audit.View','Settings.View','Branch.View','AcademicSetup.View',
+      'Book.View','Book.Sell','Workflow.View','Workflow.Trigger','Workflow.Approve','Workflow.Reject','Workflow.Cancel','Waitlist.View','Waitlist.Manage','Enrollment.FreezeRequest','Enrollment.TransferRequest','Rule.View','Audit.View','Settings.View','Branch.View','AcademicSetup.View','Curriculum.TestBank',
       // Academic Setup authority, encoding access general_manager already
       // exercised through authorize('owner','general_manager') and Class.Create.
       // See the AcademicSetup block in PERMISSION_CATALOG for the evidence.
@@ -225,7 +226,7 @@ export const ROLE_DEFINITIONS: RoleDef[] = [
     permissions: pick([
       'Dashboard.View','Student.View','Class.View','Class.Edit','Class.Assign','Session.View','Session.Create','Session.Edit',
       'Attendance.View','Attendance.Edit','Exam.View','Exam.Create','Exam.Edit','Exam.Publish','Grade.View','Grade.Edit','Waitlist.View','Waitlist.Manage','Enrollment.FreezeRequest','Enrollment.TransferRequest',
-      'Promotion.Approve','Certificate.Issue','Certificate.Print','Teacher.View','Report.View',
+      'Promotion.Approve','Certificate.Issue','Certificate.Print','Teacher.View','Report.View','Curriculum.TestBank',
     ], 'department'),
   },
   {
@@ -302,4 +303,5 @@ export const TAB_PERMISSION_MAP: Record<string, PermissionCode> = {
   settings: 'Settings.View',
   'academic-setup': 'AcademicSetup.View',
   'operations-report': 'Report.View',
+  'test-bank': 'Curriculum.TestBank',
 };

@@ -92,7 +92,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user]);
   const canAccessTab = useCallback((tabId: string) => {
     if (!user) return false;
-    return checkTabAccess(tabId, user.role, user.permissions, user.tabAccess);
+    return checkTabAccess(tabId, user.tabAccess);
   }, [user]);
 
   const value: AuthContextValue = { user, isLoading, login, logout, changePassword, refreshUser, can, canAccessTab };
