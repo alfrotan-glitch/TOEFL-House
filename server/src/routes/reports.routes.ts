@@ -16,7 +16,13 @@
  */
 import { Router } from 'express';
 import { LEAD_CONVERTED_SQL } from '../core/visitors/lead-lifecycle.js';
-import { OPERATING_EXPENSE_SQL, OPERATING_INCOME_SQL } from '../core/finance/ledger-classification.js';
+import {
+  CAPITAL_INJECTION_CATEGORY,
+  OPERATING_EXPENSE_SQL,
+  OPERATING_INCOME_SQL,
+  PROFIT_DISTRIBUTION_CATEGORY,
+  classifyExpenseCategory,
+} from '../core/finance/ledger-classification.js';
 import { db } from '../db/connection.js';
 import { authenticate, requirePermission, resolveBranchScope } from '../middleware/auth.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
@@ -139,37 +145,65 @@ reportsRouter.get(
       -- visitor when the payment has no student link.
       LEFT JOIN placement_assessment_attempts pa ON p.idempotency_key = 'placement:' || pa.id
       LEFT JOIN visitors v ON v.id = pa.visitor_id
-      WHERE ft.type = 'income' AND ft.category != 'capital_injection'
+      WHERE ${OPERATING_INCOME_SQL.replace(/\btype\b/g, 'ft.type').replace(/\bcategory\b/g, 'ft.category')}
         AND ft.date >= ? AND ft.date <= ?
         ${scopeSql('ft')}${incomeGenderClause}
       GROUP BY ft.category ORDER BY ft.category`;
     const income = genderSplit(incomeSql, [from, to, ...scopeParam, ...genderParam]);
 
-    // ── Financial: operating expenses by category ──
-    const expenseRows = (isAll
+    // ── Financial: EXPENSE-SIDE rows, split by accounting treatment ──
+    // This used to be `category != 'profit_distribution'`, a private copy of
+    // one third of the classification rule. It therefore counted fixed-asset
+    // purchases and salary advances as ordinary operating cost. The rule now
+    // comes from the single authority, and the two non-operating treatments are
+    // REPORTED SEPARATELY rather than silently dropped.
+    const expenseSideRows = (isAll
       ? db.prepare(`SELECT category, COALESCE(SUM(amount),0) AS total FROM financial_transactions
-          WHERE type = 'expense' AND category != 'profit_distribution' AND date >= ? AND date <= ?
+          WHERE type = 'expense' AND date >= ? AND date <= ?
           GROUP BY category ORDER BY category`).all(from, to)
       : db.prepare(`SELECT category, COALESCE(SUM(amount),0) AS total FROM financial_transactions
-          WHERE type = 'expense' AND category != 'profit_distribution' AND date >= ? AND date <= ? AND branch_id = ?
+          WHERE type = 'expense' AND date >= ? AND date <= ? AND branch_id = ?
           GROUP BY category ORDER BY category`).all(from, to, branchId)) as Array<{ category: string; total: number }>;
+
+    const classified = expenseSideRows.map((r) => ({
+      category: r.category,
+      total: Number(r.total || 0),
+      classification: classifyExpenseCategory(r.category),
+    }));
+    const totalFor = (classification: string) =>
+      classified.filter((r) => r.classification === classification).reduce((sum, r) => sum + r.total, 0);
+
     const expense = {
-      total: expenseRows.reduce((s, r) => s + Number(r.total || 0), 0),
-      byCategory: expenseRows.map((r) => ({ category: r.category, total: Number(r.total || 0) })),
+      total: totalFor('operating_expense'),
+      byCategory: classified
+        .filter((r) => r.classification === 'operating_expense')
+        .map((r) => ({ category: r.category, total: r.total })),
+    };
+    const capitalExpenditure = {
+      total: totalFor('capital_expenditure'),
+      byCategory: classified
+        .filter((r) => r.classification === 'capital_expenditure')
+        .map((r) => ({ category: r.category, total: r.total })),
+    };
+    const nonExpenseCashMovements = {
+      total: totalFor('non_expense_cash_movement'),
+      byCategory: classified
+        .filter((r) => r.classification === 'non_expense_cash_movement')
+        .map((r) => ({ category: r.category, total: r.total })),
     };
 
     // ── Financial: transfers (capital / distributions / budget / savings) ──
     const transferRows = (isAll
       ? db.prepare(`SELECT type, category, COALESCE(SUM(amount),0) AS total FROM financial_transactions
           WHERE date >= ? AND date <= ? AND (
-            (type = 'income' AND category = 'capital_injection') OR
-            (type = 'expense' AND category = 'profit_distribution') OR
+            (type = 'income' AND category = '${CAPITAL_INJECTION_CATEGORY}') OR
+            (type = 'expense' AND category = '${PROFIT_DISTRIBUTION_CATEGORY}') OR
             type = 'budget_charge' OR type = 'saving_transfer')
           GROUP BY type, category`).all(from, to)
       : db.prepare(`SELECT type, category, COALESCE(SUM(amount),0) AS total FROM financial_transactions
           WHERE date >= ? AND date <= ? AND branch_id = ? AND (
-            (type = 'income' AND category = 'capital_injection') OR
-            (type = 'expense' AND category = 'profit_distribution') OR
+            (type = 'income' AND category = '${CAPITAL_INJECTION_CATEGORY}') OR
+            (type = 'expense' AND category = '${PROFIT_DISTRIBUTION_CATEGORY}') OR
             type = 'budget_charge' OR type = 'saving_transfer')
           GROUP BY type, category`).all(from, to, branchId)) as Array<{ type: string; category: string; total: number }>;
     const transfers = {
@@ -180,8 +214,8 @@ reportsRouter.get(
     };
     for (const r of transferRows) {
       const v = Number(r.total || 0);
-      if (r.type === 'income' && r.category === 'capital_injection') transfers.capitalInjection += v;
-      else if (r.type === 'expense' && r.category === 'profit_distribution') transfers.profitDistribution += v;
+      if (r.type === 'income' && r.category === CAPITAL_INJECTION_CATEGORY) transfers.capitalInjection += v;
+      else if (r.type === 'expense' && r.category === PROFIT_DISTRIBUTION_CATEGORY) transfers.profitDistribution += v;
       else if (r.type === 'budget_charge') transfers.budgetCharged += v;
       else if (r.type === 'saving_transfer') transfers.savingTransferred += v;
     }
@@ -431,6 +465,11 @@ reportsRouter.get(
         income,
         expense,
         net: income.total - expense.total,
+        // Cash out that is NOT trading cost. Surfaced so a reader can still see
+        // the money leave — the requirement is that it must not be counted as
+        // operating expense, not that it must be hidden.
+        capitalExpenditure,
+        nonExpenseCashMovements,
         previous,
         transfers,
         balances: {

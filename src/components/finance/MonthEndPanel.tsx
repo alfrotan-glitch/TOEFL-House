@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { ShieldAlert } from 'lucide-react';
-import type { BudgetLine } from '../../types';
-import { formatAFN } from '../../utils/format';
+import type { BudgetLine, FinanceCategory } from '../../types';
+import { GroupedBudgetLineSelect } from './BudgetLinePicker';
 
 interface Props {
   budgetLines: BudgetLine[];
+  financeCategories: FinanceCategory[];
   isOwner: boolean;
   savingPercent: number;
   processMonthEnd: (budgetLineId: string, decision: 'return' | 'transfer', targetBudgetLineId?: string) => Promise<void>;
@@ -12,8 +13,8 @@ interface Props {
   runSavingEngine: () => Promise<void>;
 }
 
-export default function MonthEndPanel({ budgetLines, isOwner, savingPercent, processMonthEnd, updateSavingSettings, runSavingEngine }: Props) {
-  const [closeBudgetLineId, setCloseBudgetLineId] = useState(budgetLines[0]?.id || '');
+export default function MonthEndPanel({ budgetLines, financeCategories, isOwner, savingPercent, processMonthEnd, updateSavingSettings, runSavingEngine }: Props) {
+  const [closeBudgetLineId, setCloseBudgetLineId] = useState('');
   const [closeDecision, setCloseDecision] = useState<'return' | 'transfer'>('return');
   const [closeTargetLineId, setCloseTargetLineId] = useState('');
   const [percentDraft, setPercentDraft] = useState(savingPercent);
@@ -52,9 +53,13 @@ export default function MonthEndPanel({ budgetLines, isOwner, savingPercent, pro
           <form onSubmit={handleSubmit} className="space-y-4 text-xs max-w-xl">
             <div className="space-y-1">
               <label className="block text-slate-600 font-medium">Select budget line:</label>
-              <select value={closeBudgetLineId} onChange={(e) => setCloseBudgetLineId(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 cursor-pointer">
-                {budgetLines.map((b) => <option key={b.id} value={b.id}>{b.name} (remaining: {formatAFN(b.currentAmount)})</option>)}
-              </select>
+              <GroupedBudgetLineSelect
+                budgetLines={budgetLines}
+                financeCategories={financeCategories}
+                value={closeBudgetLineId}
+                onChange={setCloseBudgetLineId}
+                placeholder="Select a budget line…"
+              />
             </div>
             <div className="space-y-2">
               <label className="block text-slate-600 font-medium">Settlement decision:</label>
@@ -70,10 +75,14 @@ export default function MonthEndPanel({ budgetLines, isOwner, savingPercent, pro
             {closeDecision === 'transfer' && (
               <div className="space-y-1">
                 <label className="block text-slate-600 font-medium">Transfer target line:</label>
-                <select value={closeTargetLineId} onChange={(e) => setCloseTargetLineId(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 cursor-pointer" required>
-                  <option value="">Select…</option>
-                  {budgetLines.filter((b) => b.id !== closeBudgetLineId).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                </select>
+                <GroupedBudgetLineSelect
+                  budgetLines={budgetLines}
+                  financeCategories={financeCategories}
+                  value={closeTargetLineId}
+                  onChange={setCloseTargetLineId}
+                  excludeId={closeBudgetLineId}
+                  required
+                />
               </div>
             )}
             <button type="submit" disabled={processing} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-4 rounded-lg">Execute month-end settlement</button>

@@ -1,6 +1,17 @@
 import { Router } from 'express';
-import { CAPITAL_INJECTION_CATEGORY, PROFIT_DISTRIBUTION_CATEGORY, isOperatingExpense, isOperatingIncome } from '../core/finance/ledger-classification.js';
+import {
+  CAPITAL_INJECTION_CATEGORY,
+  OPERATING_EXPENSE_SQL,
+  OPERATING_INCOME_SQL,
+  PROFIT_DISTRIBUTION_CATEGORY,
+  classifyExpenseCategory,
+  isCapitalExpenditure,
+  isNonExpenseCashMovement,
+  isOperatingExpense,
+  isOperatingIncome,
+} from '../core/finance/ledger-classification.js';
 import { db } from '../db/connection.js';
+import { CATEGORY_NAME, SUBCATEGORY_PARENT, classificationOf } from '../core/finance/category-taxonomy.js';
 import { assertTextLengths, TEXT_LIMITS } from '../utils/textInput.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource, hasLegacyRole } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
@@ -29,7 +40,11 @@ const stmtInsertFinTx = db.prepare(
   `INSERT INTO financial_transactions (id, type, category, amount, date, description, reference_id, operator_name, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
 
-const stmtGetAllBudgetLines = db.prepare('SELECT * FROM budget_lines ORDER BY id');
+// Canonical order is DATA (`sort_order`), not an accident of `ORDER BY id`.
+// `id` is a slug, so the old ordering put "Water" between "Transport" and
+// "Teacher Salaries" and reshuffled itself whenever a line was renamed.
+const BUDGET_LINE_ORDER_SQL = 'ORDER BY sort_order, name COLLATE NOCASE, id';
+const stmtGetAllBudgetLines = db.prepare(`SELECT * FROM budget_lines ${BUDGET_LINE_ORDER_SQL}`);
 
 // ── Finance command-center statements (GET /dashboard) ──────────────────────
 // Prepared once at module load, like every other statement in this file. These
@@ -37,14 +52,27 @@ const stmtGetAllBudgetLines = db.prepare('SELECT * FROM budget_lines ORDER BY id
 // the finance landing page was the only place that skipped the convention.
 // Each has an all-branch and a branch-scoped variant so branch isolation stays
 // in the SQL rather than in string interpolation.
-const stmtDashLedgerTotalsAll = db.prepare(
-  `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type = ? AND date >= ? AND date <= ?`
+// OPERATING activity only.
+//
+// These were `WHERE type = ?` with no category filter, so the Finance command
+// centre counted an owner drawing as an expense and (after the canonical
+// taxonomy) would have counted a laptop purchase as one too — while
+// `/finance/pnl` and `/reports/overview` reported 0 for the same day, branch
+// and money. Four surfaces, one rule: `core/finance/ledger-classification`.
+const stmtDashOperatingIncomeAll = db.prepare(
+  `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE ${OPERATING_INCOME_SQL} AND date >= ? AND date <= ?`
 );
-const stmtDashLedgerTotalsBranch = db.prepare(
-  `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type = ? AND branch_id = ? AND date >= ? AND date <= ?`
+const stmtDashOperatingIncomeBranch = db.prepare(
+  `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE ${OPERATING_INCOME_SQL} AND branch_id = ? AND date >= ? AND date <= ?`
 );
-const stmtDashBudgetAll = db.prepare('SELECT id, name, allocated_amount, current_amount FROM budget_lines ORDER BY name');
-const stmtDashBudgetBranch = db.prepare('SELECT id, name, allocated_amount, current_amount FROM budget_lines WHERE branch_id = ? ORDER BY name');
+const stmtDashOperatingExpenseAll = db.prepare(
+  `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE ${OPERATING_EXPENSE_SQL} AND date >= ? AND date <= ?`
+);
+const stmtDashOperatingExpenseBranch = db.prepare(
+  `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE ${OPERATING_EXPENSE_SQL} AND branch_id = ? AND date >= ? AND date <= ?`
+);
+const stmtDashBudgetAll = db.prepare('SELECT id, name, allocated_amount, current_amount FROM budget_lines ORDER BY sort_order, name COLLATE NOCASE, id');
+const stmtDashBudgetBranch = db.prepare('SELECT id, name, allocated_amount, current_amount FROM budget_lines WHERE branch_id = ? ORDER BY sort_order, name COLLATE NOCASE, id');
 const INVOICE_RECEIVABLE_SQL = `SELECT i.id, i.net_amount, i.status, i.due_date, i.branch_id,
             (SELECT COALESCE(SUM(p.amount),0) FROM payments p WHERE p.invoice_id = i.id AND p.status = 'completed') AS paid
           FROM invoices i`;
@@ -60,13 +88,24 @@ const stmtDashPendingAll = db.prepare(`SELECT id, title, amount, requester, date
 const stmtDashPendingBranch = db.prepare(`SELECT id, title, amount, requester, date FROM expense_requests WHERE status = 'pending' AND branch_id = ? ORDER BY date DESC`);
 const stmtDashRecentAll = db.prepare(`SELECT id, date, type, category, amount, description, operator_name, branch_id FROM financial_transactions ORDER BY date DESC, rowid DESC LIMIT 10`);
 const stmtDashRecentBranch = db.prepare(`SELECT id, date, type, category, amount, description, operator_name, branch_id FROM financial_transactions WHERE branch_id = ? ORDER BY date DESC, rowid DESC LIMIT 10`);
+// Same operating-activity rule as the totals above, so the 14-day chart and the
+// headline figures above it can never tell two different stories.
 const TREND_SQL = `SELECT date,
-            COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END),0) AS income,
-            COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END),0) AS expense
+            COALESCE(SUM(CASE WHEN ${OPERATING_INCOME_SQL}  THEN amount ELSE 0 END),0) AS income,
+            COALESCE(SUM(CASE WHEN ${OPERATING_EXPENSE_SQL} THEN amount ELSE 0 END),0) AS expense
           FROM financial_transactions`;
 const stmtDashTrendAll = db.prepare(`${TREND_SQL} WHERE date >= ? GROUP BY date ORDER BY date`);
 const stmtDashTrendBranch = db.prepare(`${TREND_SQL} WHERE branch_id = ? AND date >= ? GROUP BY date ORDER BY date`);
-const stmtGetBudgetLinesByBranch = db.prepare('SELECT * FROM budget_lines WHERE branch_id = ? ORDER BY id');
+const stmtGetBudgetLinesByBranch = db.prepare(`SELECT * FROM budget_lines WHERE branch_id = ? ${BUDGET_LINE_ORDER_SQL}`);
+
+const stmtGetFinanceCategories = db.prepare(
+  `SELECT id, parent_id, name, level, classification, sort_order, is_active
+   FROM finance_categories WHERE is_active = 1 ORDER BY sort_order, name COLLATE NOCASE, id`
+);
+const stmtGetFinanceChannels = db.prepare(
+  `SELECT id, category_id, name, kind, sort_order, is_active
+   FROM finance_category_channels WHERE is_active = 1 ORDER BY sort_order, name COLLATE NOCASE, id`
+);
 
 const stmtGetAllExpenseRequests = db.prepare('SELECT * FROM expense_requests ORDER BY date DESC');
 const stmtGetExpenseRequestsByBranch = db.prepare('SELECT * FROM expense_requests WHERE branch_id = ? ORDER BY date DESC');
@@ -84,12 +123,15 @@ const stmtUpdateExpenseRequestRejected = db.prepare(
 const stmtGetAllTransactions = db.prepare('SELECT * FROM financial_transactions ORDER BY date DESC, rowid DESC LIMIT 500');
 const stmtGetTransactionsByBranch = db.prepare('SELECT * FROM financial_transactions WHERE branch_id = ? ORDER BY date DESC, rowid DESC LIMIT 500');
 
-const stmtGetIncomeTotalAll = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM financial_transactions WHERE type = 'income'`);
-const stmtGetIncomeTotalByBranch = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM financial_transactions WHERE type = 'income' AND branch_id = ?`);
-const stmtGetExpenseTotalAll = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM financial_transactions WHERE type = 'expense'`);
-const stmtGetExpenseTotalByBranch = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM financial_transactions WHERE type = 'expense' AND branch_id = ?`);
-const stmtGetTodayIncomeTotalAll = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM financial_transactions WHERE type = 'income' AND date = ?`);
-const stmtGetTodayIncomeTotalByBranch = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM financial_transactions WHERE type = 'income' AND date = ? AND branch_id = ?`);
+// `/finance/overview` publishes income / expense / net. Those are the same
+// three numbers `/finance/pnl` publishes, so they have to obey the same rule —
+// otherwise the Finance header and the P&L tab disagree about the same money.
+const stmtGetIncomeTotalAll = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM financial_transactions WHERE ${OPERATING_INCOME_SQL}`);
+const stmtGetIncomeTotalByBranch = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM financial_transactions WHERE ${OPERATING_INCOME_SQL} AND branch_id = ?`);
+const stmtGetExpenseTotalAll = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM financial_transactions WHERE ${OPERATING_EXPENSE_SQL}`);
+const stmtGetExpenseTotalByBranch = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM financial_transactions WHERE ${OPERATING_EXPENSE_SQL} AND branch_id = ?`);
+const stmtGetTodayIncomeTotalAll = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM financial_transactions WHERE ${OPERATING_INCOME_SQL} AND date = ?`);
+const stmtGetTodayIncomeTotalByBranch = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM financial_transactions WHERE ${OPERATING_INCOME_SQL} AND date = ? AND branch_id = ?`);
 const stmtGetTodaySavedTotalAll = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM financial_transactions WHERE type = 'saving_transfer' AND date = ?`);
 const stmtGetTodaySavedTotalByBranch = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM financial_transactions WHERE type = 'saving_transfer' AND date = ? AND branch_id = ?`);
 
@@ -117,11 +159,36 @@ function requireBudgetLine(req: import('express').Request, budgetLineId: string)
   return row;
 }
 
+/**
+ * Serialise a budget line WITH its place in the canonical hierarchy.
+ *
+ * The frontend must never derive an accounting category. It receives the
+ * resolved category id, the resolved parent, the display names and — critically
+ * — the accounting `classification`, all computed here from the taxonomy the
+ * database enforces. `mappingStatus` tells the UI when a legacy line still
+ * needs a human decision instead of silently pretending it is classified.
+ */
 function mapBudgetLine(row: any) {
   if (!row) return row;
+  const categoryId: string | null = row.category_id ?? null;
+  const parentId = categoryId ? (SUBCATEGORY_PARENT.get(categoryId) ?? null) : null;
+  // A line attached at CATEGORY level (an ambiguous legacy row) is its own
+  // top-level node and has no subcategory yet.
+  const isSubcategory = !!categoryId && SUBCATEGORY_PARENT.has(categoryId);
+  const topCategoryId = isSubcategory ? parentId : categoryId;
   return {
     id: row.id, name: row.name, allocatedAmount: row.allocated_amount, currentAmount: row.current_amount,
     branchId: row.branch_id, costType: row.cost_type, isMarketing: !!row.is_marketing, purpose: row.purpose,
+    categoryId,
+    subcategoryId: isSubcategory ? categoryId : null,
+    subcategoryName: isSubcategory ? (CATEGORY_NAME.get(categoryId) ?? null) : null,
+    parentCategoryId: topCategoryId,
+    parentCategoryName: topCategoryId ? (CATEGORY_NAME.get(topCategoryId) ?? null) : null,
+    classification: classificationOf(categoryId),
+    mappingStatus: row.mapping_status ?? 'needs_review',
+    channelId: row.channel_id ?? null,
+    sortOrder: row.sort_order ?? 0,
+    isActive: row.is_active == null ? true : !!row.is_active,
   };
 }
 
@@ -224,9 +291,9 @@ financeRouter.get(
 
     // Ledger movement helpers — bound parameters only, never string concatenation.
     const ledgerTotals = (type: 'income' | 'expense', from: string, to: string) => {
-      const row = (isAll
-        ? stmtDashLedgerTotalsAll.get(type, from, to)
-        : stmtDashLedgerTotalsBranch.get(type, branchId, from, to)) as { v: number };
+      const all = type === 'income' ? stmtDashOperatingIncomeAll : stmtDashOperatingExpenseAll;
+      const branch = type === 'income' ? stmtDashOperatingIncomeBranch : stmtDashOperatingExpenseBranch;
+      const row = (isAll ? all.get(from, to) : branch.get(branchId, from, to)) as { v: number };
       return Number(row.v || 0);
     };
 
@@ -356,6 +423,60 @@ financeRouter.get(
       },
       trend,
     });
+  })
+);
+
+// ---------- Canonical finance category taxonomy ----------
+/**
+ * GET /api/finance/categories — the canonical Category → Subcategory tree,
+ * with the channels/vendors that sit below a subcategory.
+ *
+ * This endpoint exists so the frontend NEVER invents, guesses or locally
+ * derives an accounting category. It renders exactly what the database holds,
+ * in the order the database holds it, with the accounting classification the
+ * server resolved. "Facebook" arrives as a CHANNEL of Digital Advertising, not
+ * as a category, which is the whole point of the model.
+ */
+financeRouter.get(
+  '/categories',
+  requirePermission('Budget.View', 'Ledger.View', 'Finance.Report', 'Expense.View'),
+  ah(async (_req, res) => {
+    const rows = stmtGetFinanceCategories.all() as Array<{
+      id: string; parent_id: string | null; name: string; level: string;
+      classification: string; sort_order: number; is_active: number;
+    }>;
+    const channels = stmtGetFinanceChannels.all() as Array<{
+      id: string; category_id: string; name: string; kind: string; sort_order: number; is_active: number;
+    }>;
+
+    const channelsByCategory = new Map<string, Array<{ id: string; name: string; kind: string }>>();
+    for (const channel of channels) {
+      const list = channelsByCategory.get(channel.category_id) ?? [];
+      list.push({ id: channel.id, name: channel.name, kind: channel.kind });
+      channelsByCategory.set(channel.category_id, list);
+    }
+
+    const categories = rows.filter((r) => r.level === 'category').map((category) => ({
+      id: category.id,
+      name: category.name,
+      classification: category.classification,
+      sortOrder: category.sort_order,
+      isActive: !!category.is_active,
+      channels: channelsByCategory.get(category.id) ?? [],
+      subcategories: rows
+        .filter((r) => r.parent_id === category.id)
+        .map((sub) => ({
+          id: sub.id,
+          name: sub.name,
+          parentId: category.id,
+          classification: sub.classification,
+          sortOrder: sub.sort_order,
+          isActive: !!sub.is_active,
+          channels: channelsByCategory.get(sub.id) ?? [],
+        })),
+    }));
+
+    res.json({ categories });
   })
 );
 
@@ -669,7 +790,14 @@ financeRouter.get(
     
     const filtered = allRequests.filter(er => er.status === 'approved' && er.date.startsWith(datePattern));
 
-    const rowsMap = new Map<string, { budgetLineId: string; budgetLineName: string; purpose: string; costType: string; totalAmount: number; count: number }>();
+    interface ExpenseReportRow {
+      budgetLineId: string; budgetLineName: string; purpose: string; costType: string;
+      totalAmount: number; count: number;
+      categoryId: string | null; categoryName: string | null;
+      subcategoryId: string | null; subcategoryName: string | null;
+      classification: string;
+    }
+    const rowsMap = new Map<string, ExpenseReportRow>();
     const byKindMap = new Map<string, { kind: string; total: number; count: number }>();
 
     for (const er of filtered) {
@@ -678,8 +806,19 @@ financeRouter.get(
       const bName = bl?.name || 'Unknown';
       const purpose = bl?.purpose || 'other';
       const costType = bl?.cost_type || 'variable';
-      
-      if (!rowsMap.has(bId)) rowsMap.set(bId, { budgetLineId: bId, budgetLineName: bName, purpose, costType, totalAmount: 0, count: 0 });
+
+      if (!rowsMap.has(bId)) {
+        const mapped = mapBudgetLine(bl);
+        rowsMap.set(bId, {
+          budgetLineId: bId, budgetLineName: bName, purpose, costType, totalAmount: 0, count: 0,
+          categoryId: mapped?.parentCategoryId ?? null,
+          categoryName: mapped?.parentCategoryName ?? null,
+          subcategoryId: mapped?.subcategoryId ?? null,
+          subcategoryName: mapped?.subcategoryName ?? null,
+          // Resolved from the budget line's canonical node, never from its name.
+          classification: mapped?.classification ?? 'operating_expense',
+        });
+      }
       const r = rowsMap.get(bId)!;
       r.totalAmount += er.amount;
       r.count++;
@@ -693,10 +832,23 @@ financeRouter.get(
 
     const rows = Array.from(rowsMap.values()).sort((a, b) => b.totalAmount - a.totalAmount);
     const byKind = Array.from(byKindMap.values()).sort((a, b) => b.total - a.total);
-    const totalExpense = rows.reduce((s, r) => s + r.totalAmount, 0);
+
+    // `totalExpense` is the OPERATING total. A fixed-asset purchase and a
+    // salary advance are cash out but not operating cost, so they are reported
+    // on their own lines instead of inflating the expense figure a manager
+    // budgets against. `totalCashOut` preserves the old "everything" number for
+    // anyone who needs it.
+    const sumWhere = (predicate: (r: ExpenseReportRow) => boolean) =>
+      rows.filter(predicate).reduce((sum, r) => sum + r.totalAmount, 0);
+    const totalExpense = sumWhere((r) => r.classification === 'operating_expense');
+    const totalCapitalExpenditure = sumWhere((r) => r.classification === 'capital_expenditure');
+    const totalNonExpenseCashMovement = sumWhere((r) => r.classification === 'non_expense_cash_movement');
 
     res.json({
       year, month, rows, totalExpense, byKind,
+      totalCapitalExpenditure,
+      totalNonExpenseCashMovement,
+      totalCashOut: totalExpense + totalCapitalExpenditure + totalNonExpenseCashMovement,
       autoApproveThreshold: getNumberSetting('expense_auto_approve_threshold', SYSTEM_DEFAULTS.expenseAutoApproveThreshold),
     });
   })
@@ -875,15 +1027,21 @@ financeRouter.get(
 
     // Operating P&L accounting semantics (single source of truth):
     //  - income: type='income' EXCEPT capital injections (balance-sheet funding).
-    //  - expense: type='expense' EXCEPT profit distributions (owner draws).
+    //  - expense: type='expense' EXCEPT everything the canonical taxonomy
+    //    classifies as capital expenditure or a non-expense cash movement.
+    //    Before the taxonomy existed the only exclusion was owner drawings, so
+    //    a laptop purchase and a salary advance both landed in operating cost.
     //  - budget_charge and saving_transfer are balance-sheet transfers between
     //    treasury/saving/budget accounts, never operating income or expense.
-    //  - refunds are already recorded as negative income (contra-revenue) and
-    //    therefore reduce operating income.
+    //  - student refunds are already recorded as negative income
+    //    (contra-revenue) and therefore reduce operating income; that mechanism
+    //    is unchanged.
     let income = 0;
     let expense = 0;
     let capitalInjection = 0;
     let profitDistribution = 0;
+    let capitalExpenditure = 0;
+    let nonExpenseCashMovement = 0;
     let budgetCharged = 0;
     let savingTransferred = 0;
 
@@ -893,8 +1051,15 @@ financeRouter.get(
       // places and miss the fourth.
       if (row.type === 'income' && row.category === CAPITAL_INJECTION_CATEGORY) capitalInjection += row.total;
       else if (isOperatingIncome(row)) income += row.total;
-      else if (row.type === 'expense' && row.category === PROFIT_DISTRIBUTION_CATEGORY) profitDistribution += row.total;
       else if (isOperatingExpense(row)) expense += row.total;
+      else if (isCapitalExpenditure(row)) capitalExpenditure += row.total;
+      else if (isNonExpenseCashMovement(row)) {
+        nonExpenseCashMovement += row.total;
+        // Owner drawings keep their own line as well as counting towards the
+        // non-expense total: the existing `transfers.profitDistribution`
+        // contract is relied on by /reports/overview and the P&L print-out.
+        if (row.category === PROFIT_DISTRIBUTION_CATEGORY) profitDistribution += row.total;
+      }
       else if (row.type === 'budget_charge') budgetCharged += row.total;
       else if (row.type === 'saving_transfer') savingTransferred += row.total;
     }
@@ -907,7 +1072,19 @@ financeRouter.get(
       income, 
       expense, 
       net: income - expense,
-      byCategory: finalByCategory.map((r) => ({ type: r.type, category: r.category, total: r.total })),
+      // Every expense row is tagged with the treatment the server resolved, so
+      // the UI can group the statement without re-deriving accounting rules.
+      byCategory: finalByCategory.map((r) => ({
+        type: r.type,
+        category: r.category,
+        total: r.total,
+        classification: r.type === 'expense' ? classifyExpenseCategory(r.category) : null,
+      })),
+      // NOT part of the trading result. Reported, never hidden.
+      nonOperating: {
+        capitalExpenditure,
+        nonExpenseCashMovement,
+      },
       transfers: {
         capitalInjection,
         profitDistribution,

@@ -11,6 +11,8 @@ import { useDatasetVersion } from '../../state/serverStateFreshness';
 import { formatAFN } from '../../utils/format';
 import { formatJalaliDateTime } from '../../utils/jalali';
 import { brandPrintHeaderHtml } from '../../config/branding';
+import type { FinanceCategoryClassification } from '../../types';
+import { CLASSIFICATION_BADGE, CLASSIFICATION_LABEL } from './financeCategoryGrouping';
 
 interface PnlPayload {
   from: string | null;
@@ -20,7 +22,9 @@ interface PnlPayload {
   income: number;
   expense: number;
   net: number;
-  byCategory: { type: string; category: string; total: number }[];
+  byCategory: { type: string; category: string; total: number; classification: FinanceCategoryClassification | null }[];
+  /** Cash out that is NOT trading cost. Resolved by the server, never here. */
+  nonOperating?: { capitalExpenditure: number; nonExpenseCashMovement: number };
   transfers: { capitalInjection: number; profitDistribution: number; budgetCharged: number; savingTransferred: number };
 }
 
@@ -66,7 +70,19 @@ export default function PnLPanel({ selectedYear, selectedMonth }: Props) {
   }
 
   const incomeRows = pnl.byCategory.filter((r) => r.type === 'income');
-  const expenseRows = pnl.byCategory.filter((r) => r.type === 'expense');
+  // Only OPERATING expense rows belong in the expense statement. Capital
+  // expenditure and non-expense cash movements are real money leaving the
+  // business, but they are not trading cost — they get their own block below so
+  // the reader can see both facts at once.
+  const expenseRows = pnl.byCategory.filter(
+    (r) => r.type === 'expense' && (r.classification ?? 'operating_expense') === 'operating_expense',
+  );
+  const capexRows = pnl.byCategory.filter((r) => r.type === 'expense' && r.classification === 'capital_expenditure');
+  const nonExpenseRows = pnl.byCategory.filter(
+    (r) => r.type === 'expense' && r.classification === 'non_expense_cash_movement',
+  );
+  const capexTotal = pnl.nonOperating?.capitalExpenditure ?? capexRows.reduce((s2, r) => s2 + r.total, 0);
+  const nonExpenseTotal = pnl.nonOperating?.nonExpenseCashMovement ?? nonExpenseRows.reduce((s2, r) => s2 + r.total, 0);
   const periodLabel = selectedMonth === 'all' ? selectedYear : `${selectedYear}-${selectedMonth}`;
   const hasTransfers = pnl.transfers.capitalInjection + pnl.transfers.profitDistribution + pnl.transfers.budgetCharged + pnl.transfers.savingTransferred > 0;
 
@@ -90,8 +106,10 @@ export default function PnLPanel({ selectedYear, selectedMonth }: Props) {
       ${brandPrintHeaderHtml('Profit &amp; Loss (operating)')}
       <div class="meta">Period: <b>${periodLabel}</b> · Scope: <b>${pnl.scope}</b> · Generated: <b>${formatJalaliDateTime(new Date().toISOString())}</b> · Source: server ledger</div>
       <h2>Income</h2><table>${rows(incomeRows)}<tr class="total"><td>Total income</td><td class="num">${formatAFN(pnl.income)}</td></tr></table>
-      <h2>Expenses</h2><table>${rows(expenseRows)}<tr class="total"><td>Total expenses</td><td class="num">${formatAFN(pnl.expense)}</td></tr></table>
+      <h2>Operating expenses</h2><table>${rows(expenseRows)}<tr class="total"><td>Total operating expenses</td><td class="num">${formatAFN(pnl.expense)}</td></tr></table>
       <p class="net">Net (operating): ${formatAFN(pnl.net)}</p>
+      ${capexRows.length ? `<h2>Capital expenditure (not an operating expense)</h2><table>${rows(capexRows)}<tr class="total"><td>Total capital expenditure</td><td class="num">${formatAFN(capexTotal)}</td></tr></table>` : ''}
+      ${nonExpenseRows.length ? `<h2>Non-expense cash movements (not an operating expense)</h2><table>${rows(nonExpenseRows)}<tr class="total"><td>Total non-expense cash movements</td><td class="num">${formatAFN(nonExpenseTotal)}</td></tr></table>` : ''}
       ${hasTransfers ? `<h2>Capital &amp; transfers (not operating)</h2><table>
         ${pnl.transfers.capitalInjection ? `<tr><td>Capital injected</td><td class="num">${formatAFN(pnl.transfers.capitalInjection)}</td></tr>` : ''}
         ${pnl.transfers.profitDistribution ? `<tr><td>Profit distributions</td><td class="num">${formatAFN(pnl.transfers.profitDistribution)}</td></tr>` : ''}
@@ -149,7 +167,7 @@ export default function PnLPanel({ selectedYear, selectedMonth }: Props) {
           )}
         </div>
         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-3">
-          <h4 className="text-sm font-extrabold text-slate-900 flex items-center gap-2"><TrendingDown className="w-4 h-4 text-rose-600" /> Expenses by category</h4>
+          <h4 className="text-sm font-extrabold text-slate-900 flex items-center gap-2"><TrendingDown className="w-4 h-4 text-rose-600" /> Operating expenses by category</h4>
           {expenseRows.length === 0 ? <p className="text-xs text-slate-400 py-6 text-center">No expenses in this period.</p> : (
             <div className="space-y-2">{expenseRows.map((r) => (
               <div key={r.category} className="flex justify-between items-center text-xs border-b border-slate-50 pb-2">
@@ -160,6 +178,51 @@ export default function PnLPanel({ selectedYear, selectedMonth }: Props) {
           )}
         </div>
       </div>
+
+      {(capexRows.length > 0 || nonExpenseRows.length > 0) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {capexRows.length > 0 && (
+            <div className="bg-white border border-sky-200 rounded-2xl p-5 shadow-sm space-y-3">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <h4 className="text-sm font-extrabold text-slate-900">Capital expenditure</h4>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${CLASSIFICATION_BADGE.capital_expenditure}`}>
+                  {CLASSIFICATION_LABEL.capital_expenditure}
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-500">Fixed assets bought in this period. Cash out — deliberately excluded from operating expenses.</p>
+              <div className="space-y-2">{capexRows.map((r) => (
+                <div key={r.category} className="flex justify-between items-center text-xs border-b border-slate-50 pb-2">
+                  <span className="font-bold text-slate-700 capitalize">{r.category.replace(/_/g, ' ')}</span>
+                  <span className="font-mono font-bold text-sky-700">{formatAFN(r.total)}</span>
+                </div>
+              ))}</div>
+              <div className="flex justify-between text-xs font-extrabold pt-1">
+                <span>Total</span><span className="font-mono text-sky-700">{formatAFN(capexTotal)}</span>
+              </div>
+            </div>
+          )}
+          {nonExpenseRows.length > 0 && (
+            <div className="bg-white border border-violet-200 rounded-2xl p-5 shadow-sm space-y-3">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <h4 className="text-sm font-extrabold text-slate-900">Non-expense cash movements</h4>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${CLASSIFICATION_BADGE.non_expense_cash_movement}`}>
+                  {CLASSIFICATION_LABEL.non_expense_cash_movement}
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-500">Salary advances, refunds, owner&apos;s drawings and charitable contributions. Cash moves; no operating cost is incurred.</p>
+              <div className="space-y-2">{nonExpenseRows.map((r) => (
+                <div key={r.category} className="flex justify-between items-center text-xs border-b border-slate-50 pb-2">
+                  <span className="font-bold text-slate-700 capitalize">{r.category.replace(/_/g, ' ')}</span>
+                  <span className="font-mono font-bold text-violet-700">{formatAFN(r.total)}</span>
+                </div>
+              ))}</div>
+              <div className="flex justify-between text-xs font-extrabold pt-1">
+                <span>Total</span><span className="font-mono text-violet-700">{formatAFN(nonExpenseTotal)}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {hasTransfers && (
         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">

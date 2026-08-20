@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { Receipt, ShoppingCart, FileText } from 'lucide-react';
-import type { BudgetLine, ExpenseRequest, ExpenseKind, OperationalPaymentInput, ExpenseReport } from '../../types';
+import type { BudgetLine, ExpenseRequest, ExpenseKind, FinanceCategory, OperationalPaymentInput, ExpenseReport } from '../../types';
 import { formatAFN } from '../../utils/format';
+import { BudgetLineCascade } from './BudgetLinePicker';
+import { CLASSIFICATION_BADGE, CLASSIFICATION_LABEL, budgetLinePath } from './financeCategoryGrouping';
 
 const EXPENSE_KIND_LABELS: Record<ExpenseKind, string> = {
   recurring_bill: 'Recurring bill (utilities)',
@@ -10,13 +12,17 @@ const EXPENSE_KIND_LABELS: Record<ExpenseKind, string> = {
   other: 'Other / miscellaneous',
 };
 
-const OPERATIONAL_PURPOSES = new Set([
-  'rent', 'electricity', 'internet', 'water', 'gas', 'kitchen', 'equipment',
-  'printing', 'marketing', 'maintenance', 'purchases', 'cleaning', 'transport', 'misc',
-]);
+// The hard-coded `OPERATIONAL_PURPOSES` allow-list that used to live here is
+// gone. It pinned fourteen legacy purpose strings into the browser, so:
+//   · every budget line outside the list was unreachable from this screen, and
+//   · every new canonical subcategory would have stayed invisible until
+//     somebody remembered to edit a frontend constant.
+// The picker is now driven entirely by the server's taxonomy.
 
 interface Props {
   budgetLines: BudgetLine[];
+  /** Canonical taxonomy from GET /finance/categories. */
+  financeCategories: FinanceCategory[];
   expenseRequests: ExpenseRequest[];
   expenseAutoApproveThreshold: number;
   selectedYear: string;
@@ -29,6 +35,7 @@ interface Props {
 
 export default function OperationalExpensesPanel({
   budgetLines,
+  financeCategories,
   expenseRequests,
   expenseAutoApproveThreshold,
   selectedYear,
@@ -38,8 +45,6 @@ export default function OperationalExpensesPanel({
   getExpenseReport,
   updateExpenseAutoApproveThreshold,
 }: Props) {
-  const operationalBudgetLines = budgetLines.filter((b) => b.purpose && OPERATIONAL_PURPOSES.has(b.purpose));
-
   const [opsTitle, setOpsTitle] = useState('');
   const [opsAmount, setOpsAmount] = useState(0);
   const [opsBudgetLineId, setOpsBudgetLineId] = useState('');
@@ -56,9 +61,9 @@ export default function OperationalExpensesPanel({
 
   const handleOpsPaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const lineId = opsBudgetLineId || operationalBudgetLines[0]?.id;
+    const lineId = opsBudgetLineId;
     if (!opsTitle.trim() || opsAmount <= 0 || !lineId) {
-      alert('Title, amount, and budget line are required.');
+      alert('Title, amount, and a budget line are required.');
       return;
     }
     setOpsSubmitting(true);
@@ -101,10 +106,9 @@ export default function OperationalExpensesPanel({
     }
   };
 
-  const recentOps = expenseRequests.filter((r) => {
-    const bl = budgetLines.find((b) => b.id === r.budgetLineId);
-    return bl?.purpose && OPERATIONAL_PURPOSES.has(bl.purpose);
-  });
+  // Every expense request against a known budget line belongs on this screen.
+  // Filtering by a browser-side purpose allow-list silently hid real spend.
+  const recentOps = expenseRequests.filter((r) => budgetLines.some((b) => b.id === r.budgetLineId));
 
   return (
     <div className="space-y-6">
@@ -163,24 +167,13 @@ export default function OperationalExpensesPanel({
                 </select>
               </div>
             </div>
-            <div className="space-y-1">
-              <label className="block text-slate-600 font-medium">Budget line:</label>
-              <select
-                value={opsBudgetLineId || operationalBudgetLines[0]?.id || ''}
-                onChange={(e) => setOpsBudgetLineId(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 cursor-pointer"
-              >
-                {operationalBudgetLines.length === 0 ? (
-                  <option value="">No operational budget lines defined</option>
-                ) : (
-                  operationalBudgetLines.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name} — remaining: {formatAFN(b.currentAmount)}
-                    </option>
-                  ))
-                )}
-              </select>
-            </div>
+            <BudgetLineCascade
+              budgetLines={budgetLines}
+              financeCategories={financeCategories}
+              value={opsBudgetLineId}
+              onChange={setOpsBudgetLineId}
+              idPrefix="ops"
+            />
             <div className="space-y-1">
               <label className="block text-slate-600 font-medium">Expense type:</label>
               <select
@@ -237,7 +230,7 @@ export default function OperationalExpensesPanel({
             )}
             <button
               type="submit"
-              disabled={opsSubmitting || operationalBudgetLines.length === 0}
+              disabled={opsSubmitting || budgetLines.length === 0}
               className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-lg transition-colors cursor-pointer shadow-sm"
             >
               {opsSubmitting ? 'Saving...' : 'Record payment'}
@@ -295,15 +288,15 @@ export default function OperationalExpensesPanel({
                     {report.month !== 'all' ? ` / month ${report.month}` : ' (full year)'}
                   </span>
                   <span className="font-mono font-extrabold text-rose-700 text-sm">
-                    Total expenses: {formatAFN(report.totalExpense)}
+                    Operating expenses: {formatAFN(report.totalExpense)}
                   </span>
                 </div>
                 <div className="overflow-x-auto text-xs">
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="border-b border-slate-100 text-slate-500">
-                        <th className="py-2 px-2 font-bold">Budget line</th>
-                        <th className="py-2 px-2 font-bold">Cost type</th>
+                        <th className="py-2 px-2 font-bold">Category → Subcategory → Budget line</th>
+                        <th className="py-2 px-2 font-bold">Treatment</th>
                         <th className="py-2 px-2 font-bold text-center">Count</th>
                         <th className="py-2 px-2 font-bold text-left">Total amount</th>
                       </tr>
@@ -318,16 +311,26 @@ export default function OperationalExpensesPanel({
                       ) : (
                         report.rows.map((r) => (
                           <tr key={r.budgetLineId}>
-                            <td className="py-2.5 px-2 font-bold text-slate-800">{r.budgetLineName}</td>
-                            <td className="py-2.5 px-2 text-slate-500">
+                            <td className="py-2.5 px-2 font-bold text-slate-800">
+                              {r.categoryName ? (
+                                <span className="block text-[10px] font-semibold text-slate-400">
+                                  {r.categoryName}
+                                  {r.subcategoryName ? ` › ${r.subcategoryName}` : ''}
+                                </span>
+                              ) : null}
+                              {r.budgetLineName}
+                            </td>
+                            <td className="py-2.5 px-2 text-slate-500 space-y-1">
                               <span
-                                className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                                  r.costType === 'fixed' ? 'bg-slate-100 text-slate-600' : 'bg-amber-50 text-amber-700'
+                                className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold border ${
+                                  CLASSIFICATION_BADGE[r.classification ?? 'operating_expense']
                                 }`}
                               >
+                                {CLASSIFICATION_LABEL[r.classification ?? 'operating_expense']}
+                              </span>
+                              <span className="block text-[10px] text-slate-400">
                                 {r.costType === 'fixed' ? 'Fixed' : 'Variable'}
                               </span>
-                              <span className="mr-1.5 text-[10px] text-slate-400">{r.purpose}</span>
                             </td>
                             <td className="py-2.5 px-2 text-center font-mono">{r.count}</td>
                             <td className="py-2.5 px-2 text-left font-mono font-bold text-rose-600">
@@ -339,6 +342,25 @@ export default function OperationalExpensesPanel({
                     </tbody>
                   </table>
                 </div>
+                {(!!report.totalCapitalExpenditure || !!report.totalNonExpenseCashMovement) && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
+                    <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2">
+                      <p className="font-bold text-sky-800">Capital expenditure</p>
+                      <p className="font-mono text-sky-900">{formatAFN(report.totalCapitalExpenditure || 0)}</p>
+                      <p className="text-[10px] text-sky-700 mt-0.5">Fixed assets — cash out, not operating cost.</p>
+                    </div>
+                    <div className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2">
+                      <p className="font-bold text-violet-800">Non-expense cash movements</p>
+                      <p className="font-mono text-violet-900">{formatAFN(report.totalNonExpenseCashMovement || 0)}</p>
+                      <p className="text-[10px] text-violet-700 mt-0.5">Advances, refunds, drawings, contributions.</p>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                      <p className="font-bold text-slate-700">Total cash out</p>
+                      <p className="font-mono text-slate-900">{formatAFN(report.totalCashOut || report.totalExpense)}</p>
+                      <p className="text-[10px] text-slate-500 mt-0.5">All three treatments combined.</p>
+                    </div>
+                  </div>
+                )}
                 {report.byKind && report.byKind.length > 0 && (
                   <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-100">
                     {report.byKind.map((k) => (
@@ -372,7 +394,7 @@ export default function OperationalExpensesPanel({
                     <div className="min-w-0">
                       <p className="font-bold text-slate-800 break-words">{r.title}</p>
                       <p className="text-[10px] text-slate-400 mt-0.5">
-                        {bl?.name || '—'} · {r.date}
+                        {bl ? budgetLinePath(bl) : '—'} · {r.date}
                         {r.billPeriod ? ` · period: ${r.billPeriod}` : ''}
                         {r.expenseKind ? ` · ${EXPENSE_KIND_LABELS[r.expenseKind] || r.expenseKind}` : ''}
                       </p>

@@ -250,8 +250,17 @@ export default function TeachersView({
     };
   }, [teachers, employees, hrSearch, statusFilter]);
 
-  const teacherBudget = budgetLines.find(b => (b as any).purpose === 'teacher_salary') || budgetLines.find(b => b.id === 'b1');
-  const employeeBudget = budgetLines.find(b => (b as any).purpose === 'employee_salary') || budgetLines.find(b => b.id === 'b2');
+  // `purpose` is the stable business key the backend also looks payroll up by
+  // (`SELECT * FROM budget_lines WHERE purpose = ? AND branch_id = ?`).
+  //
+  // Two fallbacks used to follow these lines, each comparing the budget line's
+  // primary key against a LEGACY DEMO-SEED IDENTIFIER. Migration 002 replaced
+  // those identifiers with `purpose` years ago and the current seeder writes
+  // `budget_teacher_salary_<branchId>`, so on every database created since then
+  // the fallback could only ever match the wrong row or nothing at all — a
+  // hard-coded identifier masquerading as resilience. Both are gone.
+  const teacherBudget = budgetLines.find((b) => b.purpose === 'teacher_salary');
+  const employeeBudget = budgetLines.find((b) => b.purpose === 'employee_salary');
   const activeTeacherCount = teachers.filter((x) => (x.status || 'active') === 'active').length;
   const activeEmployeeCount = employees.filter((x) => (x.status || 'active') === 'active').length;
 

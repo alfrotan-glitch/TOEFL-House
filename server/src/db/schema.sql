@@ -1140,6 +1140,62 @@ CREATE TABLE IF NOT EXISTS finance_accounts (
   UNIQUE(scope_type, scope_id)
 );
 
+-- ── Canonical hierarchical finance category taxonomy (migration 077) ────────
+-- Two levels only: category → subcategory. A BUDGET LINE is the third level and
+-- lives in `budget_lines`, so a category definition is never duplicated inside
+-- a budget line. Ids are STABLE CODES; `name` is display only and must never be
+-- used as a business identifier.
+--
+-- `classification` is what stops a fixed-asset purchase, a salary advance or an
+-- owner drawing from being counted as ordinary operating cost. It is enforced
+-- here rather than inferred anywhere downstream.
+CREATE TABLE IF NOT EXISTS finance_categories (
+  id              TEXT PRIMARY KEY,
+  parent_id       TEXT REFERENCES finance_categories(id) ON DELETE RESTRICT,
+  name            TEXT NOT NULL,
+  level           TEXT NOT NULL CHECK (level IN ('category','subcategory')),
+  classification  TEXT NOT NULL CHECK (classification IN ('operating_expense','capital_expenditure','non_expense_cash_movement')),
+  sort_order      INTEGER NOT NULL DEFAULT 0,
+  is_active       INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
+  is_system       INTEGER NOT NULL DEFAULT 1 CHECK (is_system IN (0,1)),
+  organization_id TEXT NOT NULL DEFAULT 'org_toefl_house',
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK ((level = 'category' AND parent_id IS NULL) OR (level = 'subcategory' AND parent_id IS NOT NULL)),
+  CHECK (parent_id IS NULL OR parent_id <> id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_finance_categories_parent ON finance_categories(parent_id);
+CREATE INDEX IF NOT EXISTS idx_finance_categories_org    ON finance_categories(organization_id, is_active);
+CREATE INDEX IF NOT EXISTS idx_finance_categories_order  ON finance_categories(parent_id, sort_order);
+-- Two PARTIAL indexes rather than one over `IFNULL(parent_id,'')`, for two
+-- reasons: SQLite treats every NULL in a unique index as distinct, so a single
+-- plain index would not constrain top-level categories at all; and an
+-- EXPRESSION index reports a NULL column name to `PRAGMA index_info`, which the
+-- fresh-schema preflight (rightly) rejects as unverifiable.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_finance_categories_root_name
+  ON finance_categories(organization_id, name COLLATE NOCASE) WHERE parent_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_finance_categories_child_name
+  ON finance_categories(organization_id, parent_id, name COLLATE NOCASE) WHERE parent_id IS NOT NULL;
+
+-- Channels / vendors sit BELOW a subcategory. This is where Facebook belongs:
+-- a marketing platform is a channel of Digital Advertising, never an accounting
+-- category of its own.
+CREATE TABLE IF NOT EXISTS finance_category_channels (
+  id          TEXT PRIMARY KEY,
+  category_id TEXT NOT NULL REFERENCES finance_categories(id) ON DELETE RESTRICT,
+  name        TEXT NOT NULL,
+  kind        TEXT NOT NULL DEFAULT 'channel' CHECK (kind IN ('channel','vendor')),
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  is_active   INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
+  is_system   INTEGER NOT NULL DEFAULT 0 CHECK (is_system IN (0,1)),
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_finance_channels_category ON finance_category_channels(category_id, sort_order);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_finance_channels_name
+  ON finance_category_channels(category_id, name COLLATE NOCASE);
+
 CREATE TABLE IF NOT EXISTS budget_lines ( 
   id               TEXT PRIMARY KEY, 
   name             TEXT NOT NULL, 
@@ -1149,7 +1205,15 @@ CREATE TABLE IF NOT EXISTS budget_lines (
   cost_type        TEXT NOT NULL DEFAULT 'fixed' CHECK (cost_type IN ('fixed','variable')), 
   is_marketing     INTEGER NOT NULL DEFAULT 0, 
   purpose          TEXT, 
-  branch_id        TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT 
+  branch_id        TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  -- Third level of the hierarchy: which canonical node this envelope belongs to.
+  -- Nullable on purpose — a legacy line whose meaning could not be established
+  -- without guessing keeps NULL and is reported, never silently invented.
+  category_id      TEXT REFERENCES finance_categories(id) ON DELETE RESTRICT,
+  channel_id       TEXT REFERENCES finance_category_channels(id) ON DELETE SET NULL,
+  sort_order       INTEGER NOT NULL DEFAULT 0,
+  is_active        INTEGER NOT NULL DEFAULT 1,
+  mapping_status   TEXT NOT NULL DEFAULT 'needs_review'
 ); 
 
 CREATE TABLE IF NOT EXISTS expense_requests ( 
@@ -1242,6 +1306,12 @@ CREATE TABLE IF NOT EXISTS financial_transactions (
 ); 
 
 CREATE INDEX IF NOT EXISTS idx_budget_lines_branch   ON budget_lines(branch_id); 
+-- Indexes on the hierarchy columns live in migration 077, NOT here.
+-- schema.sql runs BEFORE migrations, and on an EXISTING database
+-- `CREATE TABLE IF NOT EXISTS budget_lines` is a no-op — so an index over
+-- `category_id` would be created against a table that has not gained the column
+-- yet and boot would die with "no such column: category_id". Proven on a
+-- simulated legacy upgrade before this comment was written. 
 CREATE INDEX IF NOT EXISTS idx_fin_tx_branch         ON financial_transactions(branch_id); 
 CREATE INDEX IF NOT EXISTS idx_fin_tx_date           ON financial_transactions(date); 
 CREATE INDEX IF NOT EXISTS idx_fin_tx_type           ON financial_transactions(type); 

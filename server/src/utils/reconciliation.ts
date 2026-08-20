@@ -9,7 +9,7 @@
  * better-sqlite3 — this used to break the owner (branchId=all) path.
  */
 import { db } from '../db/connection.js';
-import { OPERATING_INCOME_SQL } from '../core/finance/ledger-classification.js';
+import { OPERATING_INCOME_SQL, PROFIT_DISTRIBUTION_CATEGORY } from '../core/finance/ledger-classification.js';
 
 export interface ReconciliationResult {
   scope: 'organization' | 'branch';
@@ -117,11 +117,24 @@ export function computeReconciliation(opts: { branchId: string | null; isAll: bo
   // Hence, per branch:
   //     main_balance   = SUM(operating income) - SUM(saving_transfer)
   //     saving_balance = SUM(saving_transfer)
+  //   * an OWNER DRAWING (`expense`/`profit_distribution`, written by
+  //     `bos.routes.ts`) is the one expense path that debits BRANCH CASH
+  //     directly instead of a budget line, so it has to come off expected main.
   const operatingIncomeSql = `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE ${OPERATING_INCOME_SQL}`;
   const savingSql = `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type='saving_transfer'`;
+  // Owner drawings are a NON-EXPENSE CASH MOVEMENT paid straight out of branch
+  // cash. Reconciliation modelled expected cash as `income - savings` only, so
+  // every profit withdrawal opened a permanent cashVariance equal to the amount
+  // withdrawn and reported the branch as unhealthy forever. Proven on a fresh
+  // database: a 5,000 AFN withdrawal produced cashVariance -5,000 and
+  // budgetVariance +5,000 with nothing actually wrong.
+  const ownerDrawingSql =
+    `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions ` +
+    `WHERE type='expense' AND category='${PROFIT_DISTRIBUTION_CATEGORY}'`;
   const operatingIncome = scalarValue(operatingIncomeSql, 'AND branch_id = ?', boundBranchId);
   const expectedSaving = scalarValue(savingSql, 'AND branch_id = ?', boundBranchId);
-  const expectedMain = Math.round((operatingIncome - expectedSaving) * 100) / 100;
+  const ownerDrawings = scalarValue(ownerDrawingSql, 'AND branch_id = ?', boundBranchId);
+  const expectedMain = Math.round((operatingIncome - expectedSaving - ownerDrawings) * 100) / 100;
 
   const acctSql = `SELECT COALESCE(SUM(main_balance),0) AS main, COALESCE(SUM(saving_balance),0) AS saving FROM finance_accounts WHERE scope_type = 'branch'`;
   const acctRow = (boundBranchId === null
@@ -143,8 +156,14 @@ export function computeReconciliation(opts: { branchId: string | null; isAll: bo
   //
   // budget_charge rows carry the funded line in reference_id; expense rows are
   // matched by branch, which is the same granularity the lines are held at.
+  //
+  // The spend side must count only expense rows that actually CAME OUT OF a
+  // budget line. Owner drawings do not: they debit branch cash. Counting them
+  // here made every profit withdrawal look like unexplained budget spend.
   const budgetChargedSql = `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type='budget_charge'`;
-  const budgetSpentSql = `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type='expense'`;
+  const budgetSpentSql =
+    `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions ` +
+    `WHERE type='expense' AND category<>'${PROFIT_DISTRIBUTION_CATEGORY}'`;
   const budgetCharged = scalarValue(budgetChargedSql, 'AND branch_id = ?', boundBranchId);
   const budgetSpent = scalarValue(budgetSpentSql, 'AND branch_id = ?', boundBranchId);
   const expectedBudget = Math.round((budgetCharged - budgetSpent) * 100) / 100;

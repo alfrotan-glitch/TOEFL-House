@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { Check, X } from 'lucide-react';
-import type { BudgetLine, ExpenseRequest } from '../../types';
+import type { BudgetLine, ExpenseRequest, FinanceCategory } from '../../types';
 import { formatAFN } from '../../utils/format';
+import { BudgetLineCascade } from './BudgetLinePicker';
 
 interface Props {
   budgetLines: BudgetLine[];
+  financeCategories: FinanceCategory[];
   expenseRequests: ExpenseRequest[];
   isManager: boolean;
   isOwner: boolean;
@@ -14,6 +16,7 @@ interface Props {
 
 export default function ExpenseRequestsPanel({
   budgetLines,
+  financeCategories,
   expenseRequests,
   isManager,
   isOwner,
@@ -22,7 +25,10 @@ export default function ExpenseRequestsPanel({
 }: Props) {
   const [reqTitle, setReqTitle] = useState('');
   const [reqAmount, setReqAmount] = useState(0);
-  const [reqBudgetLineId, setReqBudgetLineId] = useState(budgetLines[0]?.id || '');
+  // Starts EMPTY. Defaulting to `budgetLines[0]` meant the first line in an
+  // arbitrary sort order was pre-selected, so a distracted user could file an
+  // expense against whichever category happened to sort first.
+  const [reqBudgetLineId, setReqBudgetLineId] = useState('');
 
   const [reqError, setReqError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -77,20 +83,13 @@ export default function ExpenseRequestsPanel({
                 required
               />
             </div>
-            <div className="space-y-1">
-              <label className="block text-slate-600 font-medium">Assign to budget line:</label>
-              <select
-                value={reqBudgetLineId}
-                onChange={(e) => setReqBudgetLineId(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 cursor-pointer"
-              >
-                {budgetLines.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name} (bal: {formatAFN(b.currentAmount)})
-                  </option>
-                ))}
-              </select>
-            </div>
+            <BudgetLineCascade
+              budgetLines={budgetLines}
+              financeCategories={financeCategories}
+              value={reqBudgetLineId}
+              onChange={setReqBudgetLineId}
+              idPrefix="req"
+            />
             <button
               type="submit"
               disabled={submitting}
@@ -112,7 +111,7 @@ export default function ExpenseRequestsPanel({
               <tr className="border-b border-slate-100 text-slate-500">
                 <th className="py-2.5 px-3 font-bold text-slate-700">Title</th>
                 <th className="py-2.5 px-3 font-bold text-slate-700">Amount</th>
-                <th className="py-2.5 px-3 font-bold text-slate-700">Budget line</th>
+                <th className="py-2.5 px-3 font-bold text-slate-700">Category → Subcategory → Budget line</th>
                 <th className="py-2.5 px-3 font-bold text-slate-700">Requester</th>
                 <th className="py-2.5 px-3 font-bold text-slate-700 text-center">Status</th>
                 {isOwner && <th className="py-2.5 px-3 font-bold text-slate-700 text-left">Action</th>}
@@ -132,7 +131,16 @@ export default function ExpenseRequestsPanel({
                     <tr key={req.id} className="border-b border-slate-50">
                       <td className="py-3 px-3 font-bold text-slate-800">{req.title}</td>
                       <td className="py-3 px-3 font-mono">{formatAFN(req.amount)}</td>
-                      <td className="py-3 px-3 text-indigo-600 font-medium">{bl ? bl.name : 'Unknown'}</td>
+                      <td className="py-3 px-3 text-indigo-600 font-medium">
+                        {bl ? (
+                          <>
+                            <span className="block text-[10px] font-semibold text-slate-400">
+                              {[bl.parentCategoryName, bl.subcategoryName].filter(Boolean).join(' › ') || '—'}
+                            </span>
+                            {bl.name}
+                          </>
+                        ) : 'Unknown'}
+                      </td>
                       <td className="py-3 px-3 text-slate-500">{req.requester}</td>
                       <td className="py-3 px-3 text-center">
                         <span

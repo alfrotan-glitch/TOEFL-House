@@ -20,7 +20,7 @@ import { api } from './api/client';
 import { useAuth } from './contexts/useAuth';
 import {
   Student, Teacher, Employee, Partner, Class, Visitor, Attendance, Payment, Book, BookSale,
-  Exam, ExamResult, BudgetLine, ExpenseRequest, FinancialTransaction, AuditLog, Notification,
+  Exam, ExamResult, BudgetLine, FinanceCategory, ExpenseRequest, FinancialTransaction, AuditLog, Notification,
   Skill, ClassTeacherSkill, OperationalPaymentInput, ExpenseReport, ExpenseKind, Invoice, FinanceConfig, FinanceDashboard,
   // 1.0.0 types
   Donor, FundingCampaign, Donation, Scholarship, ScholarshipAward, SponsorshipAgreement,
@@ -111,6 +111,10 @@ export function useApiStore() {
   const [exams, setExams] = useState<Exam[]>([]);
   const [examResults, setExamResults] = useState<ExamResult[]>([]);
   const [budgetLines, setBudgetLines] = useState<BudgetLine[]>([]);
+  // Canonical Category → Subcategory tree, fetched from the server. The UI must
+  // never invent or locally derive an accounting category, so this is the ONLY
+  // source the Finance panels group by.
+  const [financeCategories, setFinanceCategories] = useState<FinanceCategory[]>([]);
   const [expenseRequests, setExpenseRequests] = useState<ExpenseRequest[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [financeConfig, setFinanceConfig] = useState<FinanceConfig | null>(null);
@@ -483,6 +487,20 @@ export function useApiStore() {
     () => (canSeeFinance ? api.get<BudgetLine[]>('/finance/budget-lines', bq).then(setBudgetLines) : Promise.resolve()),
     [bq, canSeeFinance]
   );
+  /**
+   * The taxonomy is organization-level and identical for every branch, but it
+   * is refetched alongside budget lines rather than cached forever: a stale
+   * category cache is exactly how a renamed or retired subcategory keeps
+   * appearing in the picker after an upgrade.
+   */
+  const reloadFinanceCategories = useCallback(
+    () => (canSeeFinance
+      ? api.get<{ categories: FinanceCategory[] }>('/finance/categories')
+          .then((r) => setFinanceCategories(r.categories || []))
+          .catch(() => setFinanceCategories([]))
+      : Promise.resolve()),
+    [canSeeFinance]
+  );
   const reloadExpenseRequests = useCallback(
     () => (canSeeFinance ? api.get<ExpenseRequest[]>('/finance/expense-requests', bq).then(setExpenseRequests) : Promise.resolve()),
     [bq, canSeeFinance]
@@ -744,16 +762,16 @@ export function useApiStore() {
     try {
       switch (section) {
         case 'overview':
-          await Promise.all([reloadFinanceOverview(), reloadBudgetLines(), reloadFinanceDashboard()]);
+          await Promise.all([reloadFinanceOverview(), reloadBudgetLines(), reloadFinanceCategories(), reloadFinanceDashboard()]);
           break;
         case 'budgets':
-          await reloadBudgetLines();
+          await Promise.all([reloadBudgetLines(), reloadFinanceCategories()]);
           break;
         case 'expenses':
-          await Promise.all([reloadExpenseRequests(), reloadBudgetLines()]);
+          await Promise.all([reloadExpenseRequests(), reloadBudgetLines(), reloadFinanceCategories()]);
           break;
         case 'ops':
-          await Promise.all([reloadExpenseRequests(), reloadBudgetLines()]);
+          await Promise.all([reloadExpenseRequests(), reloadBudgetLines(), reloadFinanceCategories()]);
           break;
         case 'invoices':
           await Promise.all([reloadInvoices(), reloadFinanceConfig(), reloadStudents()]);
@@ -766,7 +784,7 @@ export function useApiStore() {
           await reloadFinanceReconciliation();
           break;
         case 'closing':
-          await Promise.all([reloadBudgetLines(), reloadFinanceOverview()]);
+          await Promise.all([reloadBudgetLines(), reloadFinanceCategories(), reloadFinanceOverview()]);
           break;
         default:
           break;
@@ -775,7 +793,7 @@ export function useApiStore() {
       loadingTabsRef.current.delete(key);
       setIsTabLoading(false);
     }
-  }, [reloadBudgetLines, reloadExpenseRequests, reloadFinanceConfig, reloadFinanceOverview, reloadFinanceDashboard, reloadFinanceReconciliation, reloadInvoices, reloadStudents, reloadTransactions, user]);
+  }, [reloadBudgetLines, reloadFinanceCategories, reloadExpenseRequests, reloadFinanceConfig, reloadFinanceOverview, reloadFinanceDashboard, reloadFinanceReconciliation, reloadInvoices, reloadStudents, reloadTransactions, user]);
 
   const reloadAll = useCallback(async () => {
     setIsLoading(true);
@@ -1544,7 +1562,7 @@ export function useApiStore() {
   return {
     // Raw values
     students, teachers, employees, partners, classes, visitors, visitorSummary, visitorQuery, attendance, payments,
-    books, bookSales, exams, examResults, budgetLines, expenseRequests, invoices, financeConfig, transactions, auditLogs, financeReconciliation, financeDashboard, dashboardSummary,
+    books, bookSales, exams, examResults, budgetLines, financeCategories, reloadFinanceCategories, expenseRequests, invoices, financeConfig, transactions, auditLogs, financeReconciliation, financeDashboard, dashboardSummary,
     savingBalance, mainAccountBalance, expenseAutoApproveThreshold, notifications, settings, currentBranchName, isLoading,
     skills, classTeacherSkills, branches, campuses, organization,
     // 1.0.0 values

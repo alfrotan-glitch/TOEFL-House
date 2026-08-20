@@ -621,6 +621,50 @@ export interface Partner {
 
 export type ExpenseKind = 'recurring_bill' | 'one_time_purchase' | 'maintenance' | 'other';
 
+/**
+ * The three accounting treatments the Finance UI must keep visually distinct.
+ * Mirrors `server/src/core/finance/category-taxonomy.ts`; the SERVER is the
+ * authority and always sends the resolved value — the frontend never derives it.
+ */
+export type FinanceCategoryClassification =
+  | 'operating_expense'
+  | 'capital_expenditure'
+  | 'non_expense_cash_movement';
+
+/**
+ * Whether a budget line's place in the canonical taxonomy is settled.
+ * `needs_review` means the upgrade could not establish the subcategory (or the
+ * category) without guessing and deliberately did not invent one.
+ */
+export type BudgetLineMappingStatus = 'mapped' | 'needs_review' | 'out_of_taxonomy';
+
+/** A channel or vendor BELOW a subcategory — e.g. Facebook under Digital Advertising. */
+export interface FinanceCategoryChannel {
+  id: string;
+  name: string;
+  kind: 'channel' | 'vendor';
+}
+
+export interface FinanceSubcategory {
+  id: string;
+  name: string;
+  parentId: string;
+  classification: FinanceCategoryClassification;
+  sortOrder: number;
+  isActive: boolean;
+  channels: FinanceCategoryChannel[];
+}
+
+export interface FinanceCategory {
+  id: string;
+  name: string;
+  classification: FinanceCategoryClassification;
+  sortOrder: number;
+  isActive: boolean;
+  channels: FinanceCategoryChannel[];
+  subcategories: FinanceSubcategory[];
+}
+
 export interface BudgetLine {
   id: string;
   name: string;
@@ -631,6 +675,18 @@ export interface BudgetLine {
   isMarketing: boolean;
   purpose?: string;
   branchId: string;
+  /** Canonical node this envelope belongs to (subcategory, or category when unresolved). */
+  categoryId?: string | null;
+  subcategoryId?: string | null;
+  subcategoryName?: string | null;
+  parentCategoryId?: string | null;
+  parentCategoryName?: string | null;
+  /** Server-resolved accounting treatment. Never computed in the browser. */
+  classification?: FinanceCategoryClassification;
+  mappingStatus?: BudgetLineMappingStatus;
+  channelId?: string | null;
+  sortOrder?: number;
+  isActive?: boolean;
 }
 
 export interface ExpenseRequest {
@@ -673,13 +729,22 @@ export interface ExpenseReportRow {
   totalAmount: number;
   count: number;
   costType: 'fixed' | 'variable';
+  categoryId?: string | null;
+  categoryName?: string | null;
+  subcategoryId?: string | null;
+  subcategoryName?: string | null;
+  classification?: FinanceCategoryClassification;
 }
 
 export interface ExpenseReport {
   year: string;
   month: string | 'all';
   rows: ExpenseReportRow[];
+  /** OPERATING expense only — capex and non-expense movements are separate. */
   totalExpense: number;
+  totalCapitalExpenditure?: number;
+  totalNonExpenseCashMovement?: number;
+  totalCashOut?: number;
   byKind: { kind: string; total: number; count: number }[];
 }
 

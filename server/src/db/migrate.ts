@@ -16,6 +16,7 @@ import type Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { seedFinanceCategoryCatalog } from './financeCategoryCatalog.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -232,6 +233,35 @@ function backupBeforeMigrations(db: Database.Database, pendingCount: number): vo
   }
 }
 
+/**
+ * Apply already-split statements with the runner's idempotency tolerance.
+ *
+ * Exported so tests can replay a migration file EXACTLY the way production
+ * does, rather than approximating it with a bare `db.exec()` that would blow up
+ * on a re-run for reasons production never sees.
+ */
+function applyStatements(db: Database.Database, statements: string[]): void {
+  for (const statement of statements) {
+    try {
+      db.exec(statement);
+    } catch (err: unknown) {
+      const msg = String((err as { message?: string })?.message || err);
+      if (isSafeIdempotentError(db, statement, msg)) {
+        console.log(`  ℹ already satisfied because the target column already exists (${msg})`);
+        continue;
+      }
+      // Log the fatal statement before throwing to help debugging
+      console.error(`  ❌ Fatal SQL Error in statement:\n${statement}\n`);
+      throw err instanceof Error ? err : new Error(msg);
+    }
+  }
+}
+
+/** Apply one migration FILE's SQL exactly as the runner would. */
+export function applyMigrationSql(db: Database.Database, sql: string): void {
+  applyStatements(db, splitStatements(sql));
+}
+
 export function runMigrations(db: Database.Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -296,20 +326,17 @@ export function runMigrations(db: Database.Database): void {
           upgradeLegacyVisitorStageConstraint(db);
         }
 
-        for (const statement of statements) {
-          try {
-            db.exec(statement);
-          } catch (err: any) {
-            const msg = String(err?.message || err);
-            if (isSafeIdempotentError(db, statement, msg)) {
-              console.log(`  ℹ already satisfied because the target column already exists (${msg})`);
-              continue;
-            }
-            // Log the fatal statement before throwing to help debugging
-            console.error(`  ❌ Fatal SQL Error in statement:\n${statement}\n`);
-            throw err instanceof Error ? err : new Error(msg);
-          }
+        // 078 attaches every existing budget line to the canonical finance
+        // taxonomy with a FOREIGN KEY, so the 55 canonical nodes must exist
+        // before its first UPDATE runs. They are written from the single
+        // TypeScript source of truth rather than being spelled out a second
+        // time in SQL, which is why this needs a hook rather than an INSERT
+        // block inside the migration file.
+        if (version === '078_finance_category_legacy_mapping') {
+          seedFinanceCategoryCatalog(db);
         }
+
+        applyStatements(db, statements);
 
         // Validate before commit so an integrity failure rolls back the entire migration.
         validateDatabaseIntegrity(db);

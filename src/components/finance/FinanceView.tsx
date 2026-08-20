@@ -6,7 +6,7 @@
 import React, { useEffect, useState } from 'react';
 import { CalendarCheck } from 'lucide-react';
 import type {
-  BudgetLine, ExpenseRequest, FinancialTransaction, UserRole,
+  BudgetLine, FinanceCategory, ExpenseRequest, FinancialTransaction, UserRole,
   ExpenseKind, OperationalPaymentInput, ExpenseReport, Invoice, Student, FinanceConfig, FinanceDashboard,
 } from '../../types';
 import { formatAFN } from '../../utils/format';
@@ -26,6 +26,7 @@ import { BRAND_NAME } from '../../config/branding';
 
 export interface FinanceViewProps {
   budgetLines: BudgetLine[];
+  financeCategories: FinanceCategory[];
   expenseRequests: ExpenseRequest[];
   transactions: FinancialTransaction[];
   mainAccountBalance: number;
@@ -91,7 +92,7 @@ const TABS: { id: FinanceTab; label: string; ownerOnly?: boolean }[] = [
 export default function FinanceView(props: FinanceViewProps) {
   const invalidate = useInvalidate();
   const {
-    budgetLines, expenseRequests, transactions, mainAccountBalance, savingBalance, activeRole,
+    budgetLines, financeCategories, expenseRequests, transactions, mainAccountBalance, savingBalance, activeRole,
     chargeBudget, createExpenseRequest, recordOperationalPayment, getExpenseReport,
     updateExpenseAutoApproveThreshold, expenseAutoApproveThreshold,
     invoices, students, financeConfig, createInvoice, issueInvoice, payInvoice, cancelInvoice, updateFinanceConfig,
@@ -264,11 +265,12 @@ export default function FinanceView(props: FinanceViewProps) {
         />
       )}
       {financeTab === 'budgets' && (
-        <BudgetsPanel budgetLines={budgetLines} canView={canViewBudget} canAllocate={canAllocateBudget} onCharge={setChargingBudgetLine} />
+        <BudgetsPanel budgetLines={budgetLines} financeCategories={financeCategories} canView={canViewBudget} canAllocate={canAllocateBudget} onCharge={setChargingBudgetLine} />
       )}
       {financeTab === 'expenses' && (
         <ExpenseRequestsPanel
           budgetLines={budgetLines}
+          financeCategories={financeCategories}
           expenseRequests={expenseRequests}
           isManager={isManager}
           isOwner={canControlFinance}
@@ -279,6 +281,7 @@ export default function FinanceView(props: FinanceViewProps) {
       {financeTab === 'ops' && (
         <OperationalExpensesPanel
           budgetLines={budgetLines}
+          financeCategories={financeCategories}
           expenseRequests={expenseRequests}
           expenseAutoApproveThreshold={expenseAutoApproveThreshold}
           selectedYear={selectedYear}
@@ -346,6 +349,7 @@ export default function FinanceView(props: FinanceViewProps) {
       {financeTab === 'closing' && canSeeClosing && (
         <MonthEndPanel
           budgetLines={budgetLines}
+          financeCategories={financeCategories}
           isOwner={canControlFinance}
           savingPercent={savingPercent}
           processMonthEnd={processMonthEnd}
