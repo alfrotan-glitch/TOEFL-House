@@ -3,6 +3,7 @@
  * Finance shell — tabs only. Panel bodies live in sibling files.
  * All balances and lists come from API / database props (no hardcoded figures).
  */
+import { text } from '../../design-system/styles';
 import React, { useEffect, useState } from 'react';
 import { CalendarCheck } from 'lucide-react';
 import type {
@@ -163,11 +164,11 @@ export default function FinanceView(props: FinanceViewProps) {
   };
 
   return (
-    <div className="space-y-6 font-sans text-left" dir="ltr" id="finance-view-root">
+    <div className="space-y-6 font-sans text-start" id="finance-view-root">
       <div className="flex flex-col sm:flex-row items-center justify-between border-b border-slate-200 pb-4 gap-4">
         <div>
           <h2 className="text-xl font-extrabold text-slate-900">Central Finance &amp; Treasury ({BRAND_NAME})</h2>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className={text.hint}>
             Budgets, operational expenses, invoices, approvals, savings, and general ledger — all figures from the database.
           </p>
         </div>
@@ -362,7 +363,7 @@ export default function FinanceView(props: FinanceViewProps) {
       {budgetActionError && (
         <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-xs font-semibold text-rose-700" role="alert">
           {budgetActionError}
-          <button type="button" onClick={() => setBudgetActionError(null)} className="ml-2 text-rose-500 hover:text-rose-700 font-bold cursor-pointer">×</button>
+          <button type="button" onClick={() => setBudgetActionError(null)} className="ms-2 text-rose-500 hover:text-rose-700 font-bold cursor-pointer">×</button>
         </div>
       )}
 

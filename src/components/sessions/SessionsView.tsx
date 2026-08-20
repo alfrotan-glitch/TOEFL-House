@@ -2,6 +2,7 @@
  * Sessions — class-first timetable.
  * Flow: select class → weekly schedule → open session (skill + teacher + attendance).
  */
+import { text } from '../../design-system/styles';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {CalendarDays, Plus, CheckCircle2, Ban, BookOpenCheck, Users, ClipboardCheck, Trash2, Loader2, AlertTriangle, ChevronLeft, ChevronRight, School, Sparkles} from 'lucide-react';
 import {api} from '../../api/client';
@@ -465,7 +466,7 @@ export default function SessionsView({
 
 
   return (
-    <div className="space-y-5 text-left font-sans" dir="ltr">
+    <div className="space-y-5 text-start font-sans">
       {/* Header */}
       <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
@@ -518,14 +519,14 @@ export default function SessionsView({
                     setSelectedClassId(s.classId);
                     setSelectedId(s.id);
                   }}
-                  className={`rounded-xl border px-3 py-2 text-left text-[11px] ${
+                  className={`rounded-xl border px-3 py-2 text-start text-[11px] ${
                     open ? 'border-emerald-300 bg-white shadow-sm' : 'border-slate-200 bg-white/80 text-slate-500'
                   }`}
                 >
                   <span className="font-mono font-bold">{s.startTime}</span>
                   <span className="mx-1 text-slate-300">·</span>
                   <span className="font-bold text-slate-800">{cls?.name || s.className || 'Class'}</span>
-                  {!open && <span className="ml-1 text-[9px] text-amber-600">locked</span>}
+                  {!open && <span className="ms-1 text-[9px] text-amber-600">locked</span>}
                 </button>
               );
             })}
@@ -589,7 +590,7 @@ export default function SessionsView({
               <ChevronLeft className="h-4 w-4" /> Prev week
             </button>
             <div className="text-center">
-              <p className="text-sm font-extrabold text-slate-900">{weekLabel}</p>
+              <p className={text.value}>{weekLabel}</p>
               <button
                 type="button"
                 onClick={() => setWeekAnchor(startOfWeek(new Date()))}
@@ -643,7 +644,7 @@ export default function SessionsView({
                             key={s.id}
                             type="button"
                             onClick={() => setSelectedId(s.id)}
-                            className={`w-full rounded-xl border px-2 py-1.5 text-left transition ${
+                            className={`w-full rounded-xl border px-2 py-1.5 text-start transition ${
                               selectedId === s.id
                                 ? 'border-indigo-400 bg-indigo-600 text-white shadow-sm'
                                 : 'border-slate-100 bg-slate-50 hover:border-indigo-200'
@@ -654,7 +655,7 @@ export default function SessionsView({
                             </p>
                             {sk && (
                               <p className={`text-[10px] font-bold ${selectedId === s.id ? 'text-indigo-100' : 'text-indigo-700'}`}>
-                                <Sparkles className="mr-0.5 inline h-2.5 w-2.5" />
+                                <Sparkles className="me-0.5 inline h-2.5 w-2.5" />
                                 {sk}
                               </p>
                             )}
@@ -716,7 +717,7 @@ export default function SessionsView({
                     {canManage && selectedSession.status === 'scheduled' && (
                       <div className="flex flex-col items-end gap-1">
                         {!canCompleteSession && (
-                          <p className="text-[10px] text-amber-200 text-right">
+                          <p className="text-[10px] text-amber-200 text-end">
                             Complete opens at {sessionStartLabel(selectedSession)}
                           </p>
                         )}
@@ -783,7 +784,7 @@ export default function SessionsView({
                             type="button"
                             disabled={!canManage || !canMarkAttendance || savingRosterId === entry.id}
                             onClick={() => cycleAttendance(entry)}
-                            className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-left hover:border-indigo-200 disabled:opacity-60"
+                            className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-start hover:border-indigo-200 disabled:opacity-60"
                           >
                             <div>
                               <p className="text-xs font-bold text-slate-800">{entry.studentName}</p>
@@ -819,7 +820,7 @@ export default function SessionsView({
                         >
                           <div>
                             <p className="text-xs font-bold text-slate-800">{hw.title}</p>
-                            <p className="text-[10px] text-slate-400">Due {hw.dueDate}</p>
+                            <p className={text.meta}>Due {hw.dueDate}</p>
                           </div>
                           {canManage && (
                             <button type="button" onClick={() => handleDeleteHomework(hw.id)} className="text-rose-500">
@@ -891,7 +892,7 @@ export default function SessionsView({
       {showGenerate && selectedClass && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-xl">
-            <h3 className="text-sm font-extrabold text-slate-900">Build weekly timetable</h3>
+            <h3 className={text.value}>Build weekly timetable</h3>
             <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
               Creates Saturday–Thursday meetings for <strong>{selectedClass.name}</strong>.
               Uses class schedule times when set. Conflicts are skipped automatically.
@@ -958,7 +959,7 @@ export default function SessionsView({
       {showCreate && selectedClassId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm">
           <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-xl">
-            <h3 className="text-sm font-extrabold text-slate-900">Add meeting</h3>
+            <h3 className={text.value}>Add meeting</h3>
             <p className="mt-0.5 text-[11px] text-slate-500">{selectedClass?.name}</p>
             <form onSubmit={handleCreate} className="mt-4 space-y-3 text-xs">
               <div>

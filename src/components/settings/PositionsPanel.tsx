@@ -5,6 +5,7 @@
  * immediately stops it from contributing permissions to every assigned user
  * (enforced server-side at request time).
  */
+import { control, text } from '../../design-system/styles';
 import React, { useEffect, useState, useCallback } from 'react';
 import { Plus, Pencil, Power, X, Check, ShieldCheck, ChevronDown, ChevronRight } from 'lucide-react';
 
@@ -152,9 +153,9 @@ export default function PositionsPanel(props: Props) {
           <div className="pt-2 border-t border-slate-100">
             <div className="flex items-center justify-between mb-2">
               <span className="text-slate-600 font-bold">Permissions</span>
-              <span className="text-[10px] text-slate-400">{selectedPerms.size} selected</span>
+              <span className={text.meta}>{selectedPerms.size} selected</span>
             </div>
-            <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
+            <div className="max-h-64 overflow-y-auto space-y-2 pe-1">
               {byCategory().map(([cat, perms]) => (
                 <div key={cat} className="border border-slate-100 rounded-xl bg-white">
                   <button type="button" onClick={() => setExpanded((s) => ({ ...s, [`new:${cat}`]: !s[`new:${cat}`] }))} className="w-full flex items-center justify-between px-3 py-2 text-[10px] font-black text-slate-500 uppercase tracking-wide cursor-pointer">
@@ -201,7 +202,7 @@ export default function PositionsPanel(props: Props) {
                 {!p.isActive && <span className="text-[9px] bg-rose-100 text-rose-600 px-1.5 py-0.5 rounded font-bold">Inactive</span>}
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="text-[10px] text-slate-400">{p.permissions.length} permissions</span>
+                <span className={text.meta}>{p.permissions.length} permissions</span>
                 <button onClick={() => openEdit(p)} className="text-indigo-600 hover:text-indigo-800 cursor-pointer p-1.5" title="Edit position & permissions"><Pencil className="w-3.5 h-3.5" /></button>
                 <button onClick={() => void toggleActive(p)} disabled={busy} className={`p-1.5 rounded-lg cursor-pointer disabled:opacity-40 ${p.isActive ? 'text-rose-500 hover:bg-rose-50' : 'text-emerald-600 hover:bg-emerald-50'}`} title={p.isActive ? 'Deactivate' : 'Activate'}>
                   <Power className="w-3.5 h-3.5" />
@@ -226,19 +227,19 @@ export default function PositionsPanel(props: Props) {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
                 <label className="block text-slate-600 font-bold">Name:</label>
-                <input value={editName} onChange={(e) => setEditName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2" required />
+                <input value={editName} onChange={(e) => setEditName(e.target.value)} className={control.input} required />
               </div>
               <div className="space-y-1">
                 <label className="block text-slate-600 font-bold">Description:</label>
-                <input value={editDescription} onChange={(e) => setEditDescription(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2" />
+                <input value={editDescription} onChange={(e) => setEditDescription(e.target.value)} className={control.input} />
               </div>
             </div>
             <div className="border-t border-slate-100 pt-3">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-slate-600 font-bold">Permissions</span>
-                <span className="text-[10px] text-slate-400">{selectedPerms.size} selected</span>
+                <span className={text.meta}>{selectedPerms.size} selected</span>
               </div>
-              <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
+              <div className="max-h-64 overflow-y-auto space-y-2 pe-1">
                 {byCategory().map(([cat, perms]) => (
                   <div key={cat} className="border border-slate-100 rounded-xl bg-white">
                     <button type="button" onClick={() => setExpanded((s) => ({ ...s, [`edit:${cat}`]: !s[`edit:${cat}`] }))} className="w-full flex items-center justify-between px-3 py-2 text-[10px] font-black text-slate-500 uppercase tracking-wide cursor-pointer">

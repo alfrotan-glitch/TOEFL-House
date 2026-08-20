@@ -202,7 +202,7 @@ export default function AddStudentForm({
         ))}
       </div>
 
-      <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-left" dir="ltr">
+      <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-start">
         
         {/* STEP 1: IDENTITY & CONTACT */}
         {step === 1 && (

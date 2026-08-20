@@ -126,7 +126,7 @@ export default function WorkflowsView({
   };
 
   return (
-    <div className="space-y-6" dir="ltr">
+    <div className="space-y-6">
       <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-xl flex items-center justify-center">
@@ -168,7 +168,7 @@ export default function WorkflowsView({
               <button
                 key={x.id}
                 onClick={() => setSelectedId(x.id === selectedId ? null : x.id)}
-                className="w-full text-left bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-center justify-between hover:border-slate-300 transition-colors"
+                className="w-full text-start bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-center justify-between hover:border-slate-300 transition-colors"
               >
                 <div>
                   <h3 className="font-bold text-slate-900">{x.entityType} — {x.entityId}</h3>

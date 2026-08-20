@@ -1,6 +1,7 @@
 /**
  * @license SPDX-License-Identifier: Apache-2.0
  */
+import { text } from '../../design-system/styles';
 import React, { useState, useMemo, useEffect } from 'react';
 import { Award, Plus, Check, Sparkles, AlertCircle, Bookmark, User, UserPlus, CreditCard, ClipboardList, CalendarDays, Trash2, Edit3, X, History, CalendarCheck, Printer, Edit } from 'lucide-react';
 import { Exam, ExamResult, Student, Visitor, UserRole } from '../../types';
@@ -196,7 +197,7 @@ export default function ExamsView({
   const sortedResults = useMemo(() => [...examResults].reverse(), [examResults]);
 
   return (
-    <div className="space-y-6 font-sans text-left" dir="ltr" id="exams-view-root">
+    <div className="space-y-6 font-sans text-start" id="exams-view-root">
       
       {/* ========================================================================
           ENTERPRISE CERTIFICATE PRINT LAYOUT (World-Class Design)
@@ -213,10 +214,10 @@ export default function ExamsView({
             <div className="absolute inset-6 border-2 border-rose-500/70 rounded-md pointer-events-none"></div>
             
             {/* Corner Ornaments */}
-            <div className="absolute top-8 left-8 w-12 h-12 border-t-4 border-l-4 border-rose-600/80 pointer-events-none"></div>
-            <div className="absolute top-8 right-8 w-12 h-12 border-t-4 border-r-4 border-rose-600/80 pointer-events-none"></div>
-            <div className="absolute bottom-8 left-8 w-12 h-12 border-b-4 border-l-4 border-rose-600/80 pointer-events-none"></div>
-            <div className="absolute bottom-8 right-8 w-12 h-12 border-b-4 border-r-4 border-rose-600/80 pointer-events-none"></div>
+            <div className="absolute top-8 start-8 w-12 h-12 border-t-4 border-l-4 border-rose-600/80 pointer-events-none"></div>
+            <div className="absolute top-8 end-8 w-12 h-12 border-t-4 border-r-4 border-rose-600/80 pointer-events-none"></div>
+            <div className="absolute bottom-8 start-8 w-12 h-12 border-b-4 border-l-4 border-rose-600/80 pointer-events-none"></div>
+            <div className="absolute bottom-8 end-8 w-12 h-12 border-b-4 border-r-4 border-rose-600/80 pointer-events-none"></div>
             
             {/* Content Wrapper */}
             <div className="relative z-10 flex flex-col items-center justify-between h-full py-10 px-16 text-center">
@@ -259,7 +260,7 @@ export default function ExamsView({
               {/* Footer */}
               <footer className="w-full flex justify-between items-end px-8 mt-4">
                 {/* Date */}
-                <div className="text-left">
+                <div className="text-start">
                   <div className="w-40 border-b border-slate-400 mb-1"></div>
                   <p className="text-[10px] font-serif text-slate-500 uppercase tracking-wider">Date of Issue</p>
                   <p className="text-sm font-serif font-bold text-slate-700">
@@ -278,8 +279,8 @@ export default function ExamsView({
                 </div>
 
                 {/* Certificate Number */}
-                <div className="text-right">
-                  <div className="w-40 border-b border-slate-400 mb-1 ml-auto"></div>
+                <div className="text-end">
+                  <div className="w-40 border-b border-slate-400 mb-1 ms-auto"></div>
                   <p className="text-[10px] font-serif text-slate-500 uppercase tracking-wider">Certificate No</p>
                   <p className="text-sm font-serif font-bold text-slate-700">
                     {printingResult.certificateNo || 'N/A'}
@@ -293,7 +294,7 @@ export default function ExamsView({
       <div className="flex flex-col sm:flex-row items-center justify-between border-b border-slate-200 pb-4 gap-4 no-print">
         <div>
           <h2 className="text-xl font-extrabold text-slate-900">Standardized Exams & Certificates</h2>
-          <p className="text-xs text-slate-500 mt-1">Manage exam events, enroll candidates, collect fees, and enter 4-skill scores</p>
+          <p className={text.hint}>Manage exam events, enroll candidates, collect fees, and enter 4-skill scores</p>
         </div>
         {canManage && (
           <button onClick={openCreateForm} className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs px-4 py-2.5 rounded-xl cursor-pointer shadow-sm transition-all">
@@ -310,14 +311,14 @@ export default function ExamsView({
           </div>
           <form onSubmit={handleSaveExam} className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
             <div className="sm:col-span-2">
-              <label className="block text-slate-600 mb-1 font-medium">Exam title:</label>
+              <label className={text.label}>Exam title:</label>
               <input type="text" placeholder="e.g. TOEFL Simulation July - 2026" value={examTitle} onChange={(e) => setExamTitle(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500/30 focus:outline-none" required disabled={isProcessing} />
             </div>
             <div>
               <ShamsiDateInput label="Exam date" value={examDate} onChange={setExamDate} disabled={isProcessing} />
             </div>
             <div>
-              <label className="block text-slate-600 mb-1 font-medium">Registration fee (AFN):</label>
+              <label className={text.label}>Registration fee (AFN):</label>
               <input type="number" value={examFee} onChange={(e) => setExamFee(Number(e.target.value))} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono focus:ring-2 focus:ring-indigo-500/30 focus:outline-none" min={0} disabled={isProcessing} />
             </div>
             <div className="sm:col-span-3 flex gap-2 justify-end pt-2 border-t border-slate-100">
@@ -377,14 +378,14 @@ export default function ExamsView({
 
           {activeTab === 'events' ? (
             <div className="overflow-x-auto text-xs">
-              <table className="w-full text-left border-collapse">
+              <table className="w-full text-start border-collapse">
                 <thead>
                   <tr className="border-b border-slate-100 text-slate-500">
                     <th className="py-2.5 px-3 font-bold text-slate-700">Title</th>
                     <th className="py-2.5 px-3 font-bold text-slate-700">Date</th>
                     <th className="py-2.5 px-3 font-bold text-slate-700 text-center">Fee</th>
                     <th className="py-2.5 px-3 font-bold text-slate-700 text-center">Enrolled</th>
-                    {canManage && <th className="py-2.5 px-3 font-bold text-slate-700 text-right">Actions</th>}
+                    {canManage && <th className="py-2.5 px-3 font-bold text-slate-700 text-end">Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50 text-slate-600">
@@ -402,8 +403,8 @@ export default function ExamsView({
                           </span>
                         </td>
                         {canManage && (
-                          <td className="py-3 px-3 text-right">
-                            <button onClick={() => openEditForm(exam)} className="p-1.5 text-slate-500 hover:bg-slate-100 hover:text-indigo-600 rounded-md mr-1 cursor-pointer"><Edit3 className="w-3.5 h-3.5" /></button>
+                          <td className="py-3 px-3 text-end">
+                            <button onClick={() => openEditForm(exam)} className="p-1.5 text-slate-500 hover:bg-slate-100 hover:text-indigo-600 rounded-md me-1 cursor-pointer"><Edit3 className="w-3.5 h-3.5" /></button>
                             <button onClick={() => handleDeleteExam(exam.id)} className="p-1.5 text-slate-500 hover:bg-rose-50 hover:text-rose-600 rounded-md cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
                           </td>
                         )}
@@ -415,14 +416,14 @@ export default function ExamsView({
             </div>
           ) : (
             <div className="overflow-x-auto text-xs">
-              <table className="w-full text-left border-collapse">
+              <table className="w-full text-start border-collapse">
                 <thead>
                   <tr className="border-b border-slate-100 text-slate-500">
                     <th className="py-2.5 px-3 font-bold text-slate-700">Candidate</th>
                     <th className="py-2.5 px-3 font-bold text-slate-700">Exam Date</th>
                     <th className="py-2.5 px-3 font-bold text-slate-700 text-center">Total Score</th>
                     <th className="py-2.5 px-3 font-bold text-slate-700 text-center">Fee Status</th>
-                    <th className="py-2.5 px-3 font-bold text-slate-700 text-right">Certificate</th>
+                    <th className="py-2.5 px-3 font-bold text-slate-700 text-end">Certificate</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50 text-slate-600">
@@ -460,7 +461,7 @@ export default function ExamsView({
                               {result.examFeePaid ? 'Paid' : 'Outstanding'}
                             </span>
                           </td>
-                          <td className="py-3 px-3 text-right">
+                          <td className="py-3 px-3 text-end">
                             {hasCertificate ? (
                               <div className="flex items-center justify-end gap-2">
                                 <div className="inline-flex items-center gap-1 text-[10px] bg-amber-50 text-amber-800 font-mono px-2 py-1 rounded border border-amber-200/60 font-semibold shadow-inner">
@@ -475,7 +476,7 @@ export default function ExamsView({
                               <span className="text-[10px] text-slate-400 italic">No certificate</span>
                             )}
                             {canCorrect && result.score > 0 && (
-                              <button onClick={() => openCorrectModal(result)} className="p-1.5 text-slate-500 hover:bg-amber-50 hover:text-amber-600 rounded-md ml-2 cursor-pointer" title="Correct Score">
+                              <button onClick={() => openCorrectModal(result)} className="p-1.5 text-slate-500 hover:bg-amber-50 hover:text-amber-600 rounded-md ms-2 cursor-pointer" title="Correct Score">
                                 <Edit className="w-3.5 h-3.5" />
                               </button>
                             )}

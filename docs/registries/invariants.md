@@ -40,3 +40,5 @@ Validated by `npm run audit:registries`.
 | Every stored amount is a whole number of AFN | database | INTEGER money columns + `trg_*_money_scale_*` | `server/src/tests/money-boundary-property.test.ts` | `must be a whole number of AFN` |
 | Operator-supplied money is never silently rounded | application | `server/src/utils/money.ts` (`assertMoney`) | `server/src/tests/money-boundary-property.test.ts` | HTTP 400 |
 | A single amount cannot exceed MAX_SAFE_INTEGER/100, so aggregates stay exact | application | `server/src/utils/money.ts` (`MAX_MONEY`) | `server/src/tests/money-boundary-property.test.ts` | HTTP 400 |
+| No application code uses a physical direction utility | build | `scripts/verify-design-system.mjs` | provoked: `ml-4`/`pr-2`/`text-left` reported with their logical replacements | release gate fails |
+| Only the DirectionProvider pins text direction | build | `scripts/verify-design-system.mjs` | provoked: a view setting `dir="rtl"` is reported | release gate fails |

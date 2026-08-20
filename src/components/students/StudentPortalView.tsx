@@ -5,6 +5,7 @@
  * attendance and the option to print their own ID card. No edit actions and
  * no navigation to any administrative module.
  */
+import { text } from '../../design-system/styles';
 import React, { useEffect, useState } from 'react';
 import { GraduationCap, CreditCard, Calendar, Printer, LogOut, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { api } from '../../api/client';
@@ -86,7 +87,7 @@ export default function StudentPortalView() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans" dir="ltr">
+    <div className="min-h-screen bg-slate-50 font-sans">
       <header className="bg-gradient-to-r from-rose-900 to-rose-600 text-white px-6 py-5 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center"><GraduationCap className="w-5 h-5" /></div>
@@ -157,7 +158,7 @@ export default function StudentPortalView() {
               <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${rate === null ? 'bg-slate-100 text-slate-500' : rate >= 85 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
                 {rate === null ? 'No records yet' : `${rate}% present`}
               </span>
-              <span className="text-[10px] text-slate-400">{myAttendance.length} sessions recorded</span>
+              <span className={text.meta}>{myAttendance.length} sessions recorded</span>
             </div>
             <div className="flex flex-wrap gap-1">
               {myAttendance.slice(-20).map((a) => (

@@ -112,8 +112,8 @@ export default function UserPositionsPanel(props: Props) {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <span className="font-extrabold text-slate-800">{u.fullName}</span>
-                  <span className="font-mono text-[9px] text-slate-400 ml-2">{u.username}</span>
-                  {!u.isActive && <span className="text-[9px] bg-rose-100 text-rose-600 px-1.5 py-0.5 rounded font-bold ml-1">Inactive</span>}
+                  <span className="font-mono text-[9px] text-slate-400 ms-2">{u.username}</span>
+                  {!u.isActive && <span className="text-[9px] bg-rose-100 text-rose-600 px-1.5 py-0.5 rounded font-bold ms-1">Inactive</span>}
                 </div>
                 <button onClick={() => setAssigning(assigning === u.id ? null : u.id)} className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer bg-indigo-50 px-3 py-1.5 rounded-lg flex items-center gap-1">
                   <UserPlus className="w-3.5 h-3.5" /> {assigning === u.id ? 'Cancel' : 'Assign position'}

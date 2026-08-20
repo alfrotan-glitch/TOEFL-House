@@ -1,3 +1,4 @@
+import { text } from '../../design-system/styles';
 import React, { useState } from 'react';
 import { ShieldAlert } from 'lucide-react';
 import type { BudgetLine, FinanceCategory } from '../../types';
@@ -46,8 +47,8 @@ export default function MonthEndPanel({ budgetLines, financeCategories, isOwner,
       )}
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
         <div>
-          <h3 className="text-sm font-extrabold text-slate-900">Month-end budget settlement</h3>
-          <p className="text-xs text-slate-500 mt-1">Unused balances return to main account or transfer to another line. Amounts from database.</p>
+          <h3 className={text.value}>Month-end budget settlement</h3>
+          <p className={text.hint}>Unused balances return to main account or transfer to another line. Amounts from database.</p>
         </div>
         {isOwner ? (
           <form onSubmit={handleSubmit} className="space-y-4 text-xs max-w-xl">
@@ -65,11 +66,11 @@ export default function MonthEndPanel({ budgetLines, financeCategories, isOwner,
               <label className="block text-slate-600 font-medium">Settlement decision:</label>
               <label className={`border rounded-xl p-3 flex items-center gap-2 cursor-pointer ${closeDecision === 'return' ? 'border-indigo-600 bg-indigo-50/10' : 'border-slate-200'}`}>
                 <input type="radio" checked={closeDecision === 'return'} onChange={() => setCloseDecision('return')} />
-                <div><p className="font-bold text-slate-900">Return to main account</p><p className="text-[10px] text-slate-400">Refund unused amount to central capital</p></div>
+                <div><p className="font-bold text-slate-900">Return to main account</p><p className={text.meta}>Refund unused amount to central capital</p></div>
               </label>
               <label className={`border rounded-xl p-3 flex items-center gap-2 cursor-pointer ${closeDecision === 'transfer' ? 'border-indigo-600 bg-indigo-50/10' : 'border-slate-200'}`}>
                 <input type="radio" checked={closeDecision === 'transfer'} onChange={() => setCloseDecision('transfer')} />
-                <div><p className="font-bold text-slate-900">Transfer surplus</p><p className="text-[10px] text-slate-400">Move remaining balance to another budget line</p></div>
+                <div><p className="font-bold text-slate-900">Transfer surplus</p><p className={text.meta}>Move remaining balance to another budget line</p></div>
               </label>
             </div>
             {closeDecision === 'transfer' && (
@@ -95,8 +96,8 @@ export default function MonthEndPanel({ budgetLines, financeCategories, isOwner,
       </div>
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
         <div>
-          <h3 className="text-sm font-extrabold text-slate-900">Daily savings engine settings</h3>
-          <p className="text-xs text-slate-500 mt-1">Configured percentage of daily gross income. Stored in system_settings.</p>
+          <h3 className={text.value}>Daily savings engine settings</h3>
+          <p className={text.hint}>Configured percentage of daily gross income. Stored in system_settings.</p>
         </div>
         {isOwner ? (
           <div className="space-y-3 text-xs max-w-md">

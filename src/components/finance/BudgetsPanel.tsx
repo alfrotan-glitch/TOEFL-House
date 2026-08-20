@@ -1,3 +1,4 @@
+import { text } from '../../design-system/styles';
 import React, { useMemo, useState } from 'react';
 import { Plus } from 'lucide-react';
 import type { BudgetLine, BudgetLineInput, FinanceCategory } from '../../types';
@@ -123,7 +124,7 @@ export default function BudgetsPanel({
 
       {canView && creating && canAllocate && (
         <form onSubmit={submit} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-3">
-          <h3 className="text-sm font-extrabold text-slate-900">New budget line</h3>
+          <h3 className={text.value}>New budget line</h3>
           {error && (
             <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-700">
               {error}
@@ -213,7 +214,7 @@ export default function BudgetsPanel({
         <section key={group.categoryId} className="space-y-3">
           <header className="flex items-center justify-between gap-3 flex-wrap border-b border-slate-100 pb-2">
             <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="text-sm font-extrabold text-slate-900">{group.categoryName}</h3>
+              <h3 className={text.value}>{group.categoryName}</h3>
               <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${CLASSIFICATION_BADGE[group.classification]}`}>
                 {CLASSIFICATION_LABEL[group.classification]}
               </span>

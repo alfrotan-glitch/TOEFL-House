@@ -75,7 +75,7 @@ export default function OperationsWorkQueue({ visitors, invoices, classes, stude
           {items.map(item => {
             const Icon = item.icon;
             return (
-              <button key={item.id} onClick={() => onNavigate?.(item.tab)} className="flex items-center gap-3 rounded-2xl border border-slate-200/70 bg-white px-3.5 py-3 text-left hover:border-indigo-200 hover:bg-indigo-50/40 transition-colors">
+              <button key={item.id} onClick={() => onNavigate?.(item.tab)} className="flex items-center gap-3 rounded-2xl border border-slate-200/70 bg-white px-3.5 py-3 text-start hover:border-indigo-200 hover:bg-indigo-50/40 transition-colors">
                 <span className="h-9 w-9 rounded-xl bg-slate-100 flex items-center justify-center shrink-0"><Icon className="w-4 h-4 text-slate-600" /></span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-xs font-extrabold text-slate-900 truncate">{item.title}</span>

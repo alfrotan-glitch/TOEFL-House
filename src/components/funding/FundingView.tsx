@@ -314,7 +314,7 @@ export default function FundingView({
   ];
 
   return (
-    <div className="space-y-6 font-sans text-left" dir="ltr" id="funding-view-root">
+    <div className="space-y-6 font-sans text-start" id="funding-view-root">
       {/* ============ Treasury Command Band (distinctive opening) ============ */}
       <div className="relative overflow-hidden rounded-2xl bg-slate-900 text-white">
         {/* layered ledger-line texture + soft glow, not blobs */}
@@ -357,10 +357,10 @@ export default function FundingView({
               <p className="text-[10px] font-bold tracking-widest uppercase text-slate-400">Total Capital Raised</p>
               <p className="text-4xl md:text-5xl font-black font-mono tabular-nums text-emerald-400 leading-none mt-1">
                 {treasury.totalRaised.toLocaleString('en-US')}
-                <span className="text-base font-bold text-slate-500 ml-1.5">AFN</span>
+                <span className="text-base font-bold text-slate-500 ms-1.5">AFN</span>
               </p>
             </div>
-            <div className="flex items-center gap-6 sm:gap-7 sm:border-l sm:border-white/15 sm:pl-8">
+            <div className="flex items-center gap-6 sm:gap-7 sm:border-s sm:border-white/15 sm:ps-8">
               <div>
                 <p className="text-[10px] font-bold tracking-widest uppercase text-slate-400">Donors</p>
                 <p className="text-2xl font-black font-mono tabular-nums mt-0.5">{donors.length}</p>
@@ -464,20 +464,20 @@ export default function FundingView({
                 placeholder="Search donors by name or email…"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-3 pr-9 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/10 font-semibold"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl ps-3 pe-9 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/10 font-semibold"
               />
-              <Search className="w-4 h-4 text-slate-400 absolute right-3 top-2.5" />
+              <Search className="w-4 h-4 text-slate-400 absolute end-3 top-2.5" />
             </div>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-xs text-left border-collapse">
+            <table className="w-full text-xs text-start border-collapse">
               <thead>
                 <tr className="border-b border-slate-100 text-slate-500 font-bold">
                   <th className="py-2.5 px-3 text-slate-700">Donor</th>
                   <th className="py-2.5 px-3 text-slate-700">Type</th>
                   <th className="py-2.5 px-3 text-slate-700">Contact</th>
                   <th className="py-2.5 px-3 text-slate-700">Total Donated</th>
-                  {canManage && <th className="py-2.5 px-3 text-slate-700 text-left">Actions</th>}
+                  {canManage && <th className="py-2.5 px-3 text-slate-700 text-start">Actions</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50 text-slate-600">
@@ -499,7 +499,7 @@ export default function FundingView({
                         <span className="font-black font-mono tabular-nums text-emerald-700">{fmt(donatedBy(d.id))}</span>
                       </td>
                       {canManage && (
-                        <td className="py-3 px-3 text-left">
+                        <td className="py-3 px-3 text-start">
                           <button onClick={() => openEditDonor(d)} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-indigo-600 cursor-pointer transition-colors" title="Edit donor">
                             <Edit className="w-4 h-4" />
                           </button>
@@ -551,7 +551,7 @@ export default function FundingView({
             <ReceiptText className="w-5 h-5 text-emerald-600" /> Donation Ledger
           </h3>
           <div className="overflow-x-auto">
-            <table className="w-full text-xs text-left border-collapse">
+            <table className="w-full text-xs text-start border-collapse">
               <thead>
                 <tr className="border-b border-slate-100 text-slate-500 font-bold">
                   <th className="py-2.5 px-3 text-slate-700">Receipt</th>
@@ -559,7 +559,7 @@ export default function FundingView({
                   <th className="py-2.5 px-3 text-slate-700">Campaign</th>
                   <th className="py-2.5 px-3 text-slate-700">Restriction</th>
                   <th className="py-2.5 px-3 text-slate-700">Date</th>
-                  <th className="py-2.5 px-3 text-slate-700 text-left">Amount</th>
+                  <th className="py-2.5 px-3 text-slate-700 text-start">Amount</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50 text-slate-600">
@@ -573,7 +573,7 @@ export default function FundingView({
                       <td className="py-3 px-3 text-slate-500">{campaigns.find((c) => c.id === dn.campaignId)?.name || 'General fund'}</td>
                       <td className="py-3 px-3"><RestrictedBadge restricted={dn.restricted} /></td>
                       <td className="py-3 px-3 font-mono text-slate-400">{dn.date}</td>
-                      <td className="py-3 px-3 text-left">
+                      <td className="py-3 px-3 text-start">
                         <span className="font-black font-mono tabular-nums text-emerald-700">+{dn.amount.toLocaleString('en-US')}</span>
                       </td>
                     </tr>
@@ -634,14 +634,14 @@ export default function FundingView({
               <BadgeCheck className="w-5 h-5 text-indigo-600" /> Scholarship Awards
             </h3>
             <div className="overflow-x-auto">
-              <table className="w-full text-xs text-left border-collapse">
+              <table className="w-full text-xs text-start border-collapse">
                 <thead>
                   <tr className="border-b border-slate-100 text-slate-500 font-bold">
                     <th className="py-2.5 px-3 text-slate-700">Student</th>
                     <th className="py-2.5 px-3 text-slate-700">Scholarship</th>
                     <th className="py-2.5 px-3 text-slate-700">Semester</th>
                     <th className="py-2.5 px-3 text-slate-700">Award Date</th>
-                    <th className="py-2.5 px-3 text-slate-700 text-left">Amount</th>
+                    <th className="py-2.5 px-3 text-slate-700 text-start">Amount</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50 text-slate-600">
@@ -654,7 +654,7 @@ export default function FundingView({
                         <td className="py-3 px-3 text-slate-500">{scholarships.find((s) => s.id === a.scholarshipId)?.name || '—'}</td>
                         <td className="py-3 px-3 text-slate-500">{a.semester || '—'}</td>
                         <td className="py-3 px-3 font-mono text-slate-400">{a.awardDate}</td>
-                        <td className="py-3 px-3 text-left font-black font-mono tabular-nums text-indigo-700">{fmt(a.amount)}</td>
+                        <td className="py-3 px-3 text-start font-black font-mono tabular-nums text-indigo-700">{fmt(a.amount)}</td>
                       </tr>
                     ))
                   )}
@@ -672,7 +672,7 @@ export default function FundingView({
             <HeartHandshake className="w-5 h-5 text-emerald-600" /> Sponsorship Agreements
           </h3>
           <div className="overflow-x-auto">
-            <table className="w-full text-xs text-left border-collapse">
+            <table className="w-full text-xs text-start border-collapse">
               <thead>
                 <tr className="border-b border-slate-100 text-slate-500 font-bold">
                   <th className="py-2.5 px-3 text-slate-700">Sponsor</th>

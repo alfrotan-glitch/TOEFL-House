@@ -5,6 +5,7 @@
  * document is self-contained (Report ID, period, filters, generated-by,
  * position, timestamp) so it is understandable without ERP access.
  */
+import { text } from '../../design-system/styles';
 import React, { useEffect, useState, useCallback } from 'react';
 import { Printer, RefreshCw, Users, UserPlus, GraduationCap, FileText, BookOpen, Wallet, TrendingUp, TrendingDown } from 'lucide-react';
 import { api } from '../../api/client';
@@ -126,11 +127,11 @@ export default function OperationsReportView() {
   const m = report?.meta;
 
   return (
-    <div className="space-y-6 text-left font-sans" dir="ltr">
+    <div className="space-y-6 text-start font-sans">
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
           <h2 className="text-xl font-extrabold text-slate-900">Operations &amp; Financial Report</h2>
-          <p className="text-xs text-slate-500 mt-1">Server-computed from the authoritative database; printable and traceable.</p>
+          <p className={text.hint}>Server-computed from the authoritative database; printable and traceable.</p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
           <div className="space-y-1">

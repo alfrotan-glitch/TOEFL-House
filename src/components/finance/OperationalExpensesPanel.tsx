@@ -1,3 +1,4 @@
+import { text } from '../../design-system/styles';
 import React, { useState } from 'react';
 import { Receipt, ShoppingCart, FileText } from 'lucide-react';
 import type { BudgetLine, ExpenseRequest, ExpenseKind, FinanceCategory, OperationalPaymentInput, ExpenseReport } from '../../types';
@@ -284,13 +285,13 @@ export default function OperationalExpensesPanel({
                   </span>
                 </div>
                 <div className="overflow-x-auto text-xs">
-                  <table className="w-full text-left border-collapse">
+                  <table className="w-full text-start border-collapse">
                     <thead>
                       <tr className="border-b border-slate-100 text-slate-500">
                         <th className="py-2 px-2 font-bold">Category → Subcategory → Budget line</th>
                         <th className="py-2 px-2 font-bold">Treatment</th>
                         <th className="py-2 px-2 font-bold text-center">Count</th>
-                        <th className="py-2 px-2 font-bold text-left">Total amount</th>
+                        <th className="py-2 px-2 font-bold text-start">Total amount</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
@@ -325,7 +326,7 @@ export default function OperationalExpensesPanel({
                               </span>
                             </td>
                             <td className="py-2.5 px-2 text-center font-mono">{r.count}</td>
-                            <td className="py-2.5 px-2 text-left font-mono font-bold text-rose-600">
+                            <td className="py-2.5 px-2 text-start font-mono font-bold text-rose-600">
                               {formatAFN(r.totalAmount)}
                             </td>
                           </tr>
@@ -374,7 +375,7 @@ export default function OperationalExpensesPanel({
           </div>
 
           <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-3">
-            <h3 className="text-sm font-extrabold text-slate-900">Recent operational expenses</h3>
+            <h3 className={text.value}>Recent operational expenses</h3>
             <div className="space-y-2 max-h-72 overflow-y-auto">
               {recentOps.slice(0, 15).map((r) => {
                 const bl = budgetLines.find((b) => b.id === r.budgetLineId);
@@ -391,7 +392,7 @@ export default function OperationalExpensesPanel({
                         {r.expenseKind ? ` · ${EXPENSE_KIND_LABELS[r.expenseKind] || r.expenseKind}` : ''}
                       </p>
                     </div>
-                    <div className="text-left shrink-0">
+                    <div className="text-start shrink-0">
                       <p className="font-mono font-bold text-slate-800">{formatAFN(r.amount)}</p>
                       <span
                         className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${

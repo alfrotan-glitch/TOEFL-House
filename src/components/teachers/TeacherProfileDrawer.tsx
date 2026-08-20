@@ -32,7 +32,7 @@ export default function TeacherProfileDrawer({
         
         {/* Header */}
         <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-6 text-white relative">
-          <button onClick={onClose} className="absolute top-4 right-4 p-2 bg-white/20 hover:bg-white/30 rounded-full cursor-pointer">
+          <button onClick={onClose} className="absolute top-4 end-4 p-2 bg-white/20 hover:bg-white/30 rounded-full cursor-pointer">
             <X className="w-5 h-5" />
           </button>
           <div className="flex items-center gap-4">

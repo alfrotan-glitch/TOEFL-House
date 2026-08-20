@@ -109,7 +109,7 @@ export default function GlobalSearch({ open, onClose, onNavigate }: Props) {
               <div className="space-y-1">
                 {items.map(item => {
                   const globalIndex = results.findIndex((result) => result.entity === item.entity && result.id === item.id);
-                  return (<button key={`${item.entity}-${item.id}`} id={`global-search-option-${globalIndex}`} role="option" aria-selected={globalIndex === activeIndex} onMouseEnter={() => setActiveIndex(globalIndex)} onClick={() => { onNavigate(item.tab); onClose(); }} className={`flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left ${globalIndex === activeIndex ? 'bg-indigo-50 ring-1 ring-indigo-100' : 'hover:bg-indigo-50/60'}`}>
+                  return (<button key={`${item.entity}-${item.id}`} id={`global-search-option-${globalIndex}`} role="option" aria-selected={globalIndex === activeIndex} onMouseEnter={() => setActiveIndex(globalIndex)} onClick={() => { onNavigate(item.tab); onClose(); }} className={`flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-start ${globalIndex === activeIndex ? 'bg-indigo-50 ring-1 ring-indigo-100' : 'hover:bg-indigo-50/60'}`}>
                     <div className="min-w-0 flex-1"><p className="truncate text-xs font-black text-slate-900">{item.title}</p><p className="truncate text-[11px] text-slate-500">{item.subtitle || 'No secondary identifier'}{item.meta ? ` · ${item.meta}` : ''}</p></div>
                     <ArrowRight className="h-4 w-4 shrink-0 text-slate-300" />
                   </button>);

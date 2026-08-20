@@ -5,6 +5,7 @@
  * Fee / schedule / capacity from config are read-only rules, not free fields.
  */
 
+import { control, text } from '../../design-system/styles';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Plus, X, Trash2, Save, UserCog,
@@ -357,7 +358,7 @@ export default function ClassesView({
   };
 
   return (
-    <div className="space-y-5 font-sans text-left" dir="ltr">
+    <div className="space-y-5 font-sans text-start">
       <div className="flex flex-col sm:flex-row items-center justify-between border-b border-slate-200 pb-4 gap-4">
         <div>
           <h2 className="text-xl font-extrabold text-slate-900">Class schedule management</h2>
@@ -378,7 +379,7 @@ export default function ClassesView({
               </button>
             ))}
           </div>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className={text.hint}>
             Classes use Academic Setup rules (level, fee, time slot, room). Those fields are not editable here.
           </p>
         </div>
@@ -419,23 +420,23 @@ export default function ClassesView({
             </div>
 
             <div>
-              <label className="block text-slate-600 mb-1 font-medium">Class title:</label>
+              <label className={text.label}>Class title:</label>
               <input
                 type="text"
                 placeholder="e.g. GE-Starter-Morning"
                 value={className}
                 onChange={(e) => setClassName(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2"
+                className={control.input}
                 required
               />
             </div>
 
             <div>
-              <label className="block text-slate-600 mb-1 font-medium">Class teacher:</label>
+              <label className={text.label}>Class teacher:</label>
               <select
                 value={teacherId}
                 onChange={(e) => setTeacherId(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2"
+                className={control.input}
                 required
               >
                 <option value="">Select…</option>
@@ -451,7 +452,7 @@ export default function ClassesView({
 
             {acadPrograms.length > 0 && (
               <div>
-                <label className="block text-slate-600 mb-1 font-medium">Program:</label>
+                <label className={text.label}>Program:</label>
                 <select
                   value={selectedProgramId}
                   onChange={(e) => {
@@ -460,7 +461,7 @@ export default function ClassesView({
                     setLevel('');
                     setFee(0);
                   }}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2"
+                  className={control.input}
                 >
                   <option value="">All programs</option>
                   {acadPrograms.map((p) => (
@@ -473,7 +474,7 @@ export default function ClassesView({
             )}
 
             <div>
-              <label className="block text-slate-600 mb-1 font-medium">Level *:</label>
+              <label className={text.label}>Level *:</label>
               {acadLevels.length === 0 ? (
                 <p className="text-[11px] text-rose-600 bg-rose-50 border border-rose-100 rounded-lg px-2 py-2">
                   No levels configured. Open Academic Setup and add a program with levels.
@@ -494,7 +495,7 @@ export default function ClassesView({
                       setFee(0);
                     }
                   }}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2"
+                  className={control.input}
                   required
                 >
                   <option value="">Select level…</option>
@@ -510,7 +511,7 @@ export default function ClassesView({
             </div>
 
             <div>
-              <label className="block text-slate-600 mb-1 font-medium">Time slot:</label>
+              <label className={text.label}>Time slot:</label>
               {acadSlots.length === 0 ? (
                 <p className="text-[11px] text-slate-500">No time slots in Academic Setup for this branch.</p>
               ) : (
@@ -523,7 +524,7 @@ export default function ClassesView({
                     if (s) setScheduleTime(`${s.startTime}-${s.endTime}`);
                     else setScheduleTime('');
                   }}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2"
+                  className={control.input}
                 >
                   <option value="">Select time slot…</option>
                   {acadSlots.map((s) => (
@@ -536,7 +537,7 @@ export default function ClassesView({
             </div>
 
             <div>
-              <label className="block text-slate-600 mb-1 font-medium">Room:</label>
+              <label className={text.label}>Room:</label>
               {acadRooms.length === 0 ? (
                 <p className="text-[11px] text-slate-500">No rooms in Academic Setup for this branch.</p>
               ) : (
@@ -548,7 +549,7 @@ export default function ClassesView({
                     const r = acadRooms.find((x) => x.id === id);
                     if (r?.capacity) setCapacity(r.capacity);
                   }}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2"
+                  className={control.input}
                 >
                   <option value="">Select room…</option>
                   {acadRooms.map((r) => (
@@ -561,7 +562,7 @@ export default function ClassesView({
             </div>
 
             <div>
-              <label className="block text-slate-600 mb-1 font-medium">
+              <label className={text.label}>
                 Capacity — from room (read-only):
               </label>
               <input
@@ -573,7 +574,7 @@ export default function ClassesView({
             </div>
 
             <div>
-              <label className="block text-slate-600 mb-1 font-medium">Class type (gender policy):</label>
+              <label className={text.label}>Class type (gender policy):</label>
               <select
                 value={genderPolicy}
                 onChange={(e) => setGenderPolicy(e.target.value as 'female' | 'male' | 'mixed')}
@@ -587,7 +588,7 @@ export default function ClassesView({
             </div>
 
             <div>
-              <label className="block text-slate-600 mb-1 font-medium">
+              <label className={text.label}>
                 Class hours — from time slot (read-only):
               </label>
               <input
@@ -599,23 +600,23 @@ export default function ClassesView({
             </div>
 
             <div>
-              <label className="block text-slate-600 mb-1 font-medium">Start date:</label>
+              <label className={text.label}>Start date:</label>
               <ShamsiDateInput value={startDate} onChange={(v) => setStartDate(v)} />
             </div>
 
             <div>
-              <label className="block text-slate-600 mb-1 font-medium">Activation date:</label>
+              <label className={text.label}>Activation date:</label>
               <ShamsiDateInput value={activationDate} onChange={(v) => setActivationDate(v)} />
               <p className="text-[10px] text-slate-400 mt-0.5">Class becomes operational on this date. Payroll only counts after activation.</p>
             </div>
 
             <div>
-              <label className="block text-slate-600 mb-1 font-medium">End date:</label>
+              <label className={text.label}>End date:</label>
               <ShamsiDateInput value={endDate} onChange={(v) => setEndDate(v)} />
             </div>
 
             <div className="sm:col-span-2">
-              <label className="block text-slate-600 mb-1 font-medium">
+              <label className={text.label}>
                 Official fee (AFN) — Academic rule (not editable):
               </label>
               <input
@@ -727,7 +728,7 @@ export default function ClassesView({
                   Enrolled: <strong>{mergeSourceMeta.enrolled}</strong> · Min viable:{' '}
                   <strong>{mergeSourceMeta.minViableSize}</strong>
                   {mergeSourceMeta.underMin && (
-                    <span className="ml-2 text-amber-700 font-bold">Below minimum — merge recommended</span>
+                    <span className="ms-2 text-amber-700 font-bold">Below minimum — merge recommended</span>
                   )}
                 </p>
               </div>
@@ -795,21 +796,21 @@ export default function ClassesView({
             </div>
             <form onSubmit={handleEditClassSubmit} className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="sm:col-span-2">
-                <label className="block text-slate-600 mb-1 font-medium">Class title:</label>
+                <label className={text.label}>Class title:</label>
                 <input
                   type="text"
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2"
+                  className={control.input}
                   required
                 />
               </div>
               <div>
-                <label className="block text-slate-600 mb-1 font-medium">Teacher:</label>
+                <label className={text.label}>Teacher:</label>
                 <select
                   value={editTeacherId}
                   onChange={(e) => setEditTeacherId(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2"
+                  className={control.input}
                 >
                   <option value="">Select…</option>
                   {teachers.map((t) => (
@@ -820,18 +821,18 @@ export default function ClassesView({
                 </select>
               </div>
               <div>
-                <label className="block text-slate-600 mb-1 font-medium">Status:</label>
+                <label className={text.label}>Status:</label>
                 <select
                   value={editStatus}
                   onChange={(e) => setEditStatus(e.target.value as 'active' | 'completed')}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2"
+                  className={control.input}
                 >
                   <option value="active">Active</option>
                   <option value="completed">Completed</option>
                 </select>
               </div>
               <div>
-                <label className="block text-slate-600 mb-1 font-medium">Level — rule (read-only):</label>
+                <label className={text.label}>Level — rule (read-only):</label>
                 <input
                   type="text"
                   value={editLevel}
@@ -840,7 +841,7 @@ export default function ClassesView({
                 />
               </div>
               <div>
-                <label className="block text-slate-600 mb-1 font-medium">Fee — rule (read-only):</label>
+                <label className={text.label}>Fee — rule (read-only):</label>
                 <input
                   type="number"
                   value={editFee}
@@ -849,7 +850,7 @@ export default function ClassesView({
                 />
               </div>
               <div>
-                <label className="block text-slate-600 mb-1 font-medium">Hours — rule (read-only):</label>
+                <label className={text.label}>Hours — rule (read-only):</label>
                 <input
                   type="text"
                   value={editScheduleTime}
@@ -858,7 +859,7 @@ export default function ClassesView({
                 />
               </div>
               <div>
-                <label className="block text-slate-600 mb-1 font-medium">Capacity — rule (read-only):</label>
+                <label className={text.label}>Capacity — rule (read-only):</label>
                 <input
                   type="number"
                   value={editCapacity}
@@ -880,11 +881,11 @@ export default function ClassesView({
               </div>
 
               <div>
-                <label className="block text-slate-600 mb-1 font-medium">Start date:</label>
+                <label className={text.label}>Start date:</label>
                 <ShamsiDateInput value={editStartDate} onChange={(v) => setEditStartDate(v)} />
               </div>
               <div>
-                <label className="block text-slate-600 mb-1 font-medium">End date:</label>
+                <label className={text.label}>End date:</label>
                 <ShamsiDateInput value={editEndDate} onChange={(v) => setEditEndDate(v)} />
               </div>
               <p className="sm:col-span-2 text-[10px] text-slate-400">

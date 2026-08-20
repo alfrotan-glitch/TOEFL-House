@@ -28,7 +28,7 @@ export default function SidebarBrand({ isExpanded, isPinned, onTogglePin }: Side
       {isExpanded && (
         <button 
           onClick={onTogglePin} 
-          className={`absolute top-1/2 -translate-y-1/2 p-1.5 rounded-md transition-all duration-200 ${isPinned ? 'right-3 text-indigo-400 bg-indigo-500/10' : 'right-3 text-slate-500 hover:text-slate-200 hover:bg-white/5'}`}
+          className={`absolute top-1/2 -translate-y-1/2 p-1.5 rounded-md transition-all duration-200 ${isPinned ? 'end-3 text-indigo-400 bg-indigo-500/10' : 'end-3 text-slate-500 hover:text-slate-200 hover:bg-white/5'}`}
           aria-label={isPinned ? "Unpin sidebar" : "Pin sidebar open"}
           title={isPinned ? "Unpin sidebar" : "Pin sidebar open"}
         >

@@ -1,6 +1,7 @@
 /**
  * TOEFL House ERP — Rule Version History Modal
  */
+import { text } from '../../design-system/styles';
 import React, { useEffect, useState } from 'react';
 import { X, RotateCcw, AlertTriangle, History, Loader2, Filter } from 'lucide-react';
 import type { BusinessRule, BusinessRuleVersion } from '../../types';
@@ -44,7 +45,7 @@ export default function RuleVersionHistoryModal({ rule, getBusinessRuleVersions,
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4 animate-in fade-in duration-200" dir="ltr" onClick={onClose}>
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={onClose}>
       <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col border border-slate-200" onClick={e => e.stopPropagation()}>
         
         <div className="p-5 border-b border-slate-100 flex items-center justify-between shrink-0 bg-slate-50 rounded-t-3xl">
@@ -76,8 +77,8 @@ export default function RuleVersionHistoryModal({ rule, getBusinessRuleVersions,
               <p className="text-sm text-slate-400">No version history available.</p>
             </div>
           ) : (
-            <div className="relative pl-8 space-y-6">
-              <div className="absolute left-3 top-2 bottom-2 w-0.5 bg-slate-200"></div>
+            <div className="relative ps-8 space-y-6">
+              <div className="absolute start-3 top-2 bottom-2 w-0.5 bg-slate-200"></div>
               
               {versions.slice().sort((a, b) => b.version - a.version).map(v => {
                 const isCurrent = v.version === rule.version;
@@ -90,7 +91,7 @@ export default function RuleVersionHistoryModal({ rule, getBusinessRuleVersions,
                     <div className={`bg-slate-50 border rounded-2xl p-4 transition-all ${isCurrent ? 'border-emerald-200 shadow-sm' : 'border-slate-200'}`}>
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-2">
-                          <span className="text-sm font-extrabold text-slate-900">Version {v.version}</span>
+                          <span className={text.value}>Version {v.version}</span>
                           {isCurrent && <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 rounded-full px-2 py-0.5">Current</span>}
                           {!v.isActive && !isCurrent && <span className="text-[10px] font-bold bg-slate-200 text-slate-500 rounded-full px-2 py-0.5">Inactive</span>}
                         </div>

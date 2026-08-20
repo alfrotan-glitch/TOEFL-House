@@ -1,3 +1,4 @@
+import { text } from '../../design-system/styles';
 import React from 'react';
 import { Heart, FileText, TrendingUp } from 'lucide-react';
 
@@ -46,7 +47,7 @@ export default function ImpactView({ reports, generateReport }: any) {
             {r.map((x: any) => (
               <div key={x.id} className="bg-slate-50 border border-slate-200 rounded-xl p-4">
                 <h3 className="font-bold text-slate-900">{x.title}</h3>
-                <p className="text-xs text-slate-500 mt-1">{x.period}</p>
+                <p className={text.hint}>{x.period}</p>
               </div>
             ))}
           </div>

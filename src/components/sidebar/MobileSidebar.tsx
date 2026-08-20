@@ -51,7 +51,7 @@ export default function MobileSidebar({
 
   return (
     <aside 
-      className="lg:hidden fixed inset-y-0 left-0 w-72 z-50 flex flex-col bg-[#0c0a12] text-slate-300 border-r border-white/[0.06] shadow-2xl animate-in slide-in-from-left duration-300"
+      className="lg:hidden fixed inset-y-0 start-0 w-72 z-50 flex flex-col bg-[#0c0a12] text-slate-300 border-e border-white/[0.06] shadow-2xl animate-in slide-in-from-left duration-300"
       role="dialog"
       aria-modal="true"
       aria-label="Mobile navigation menu"
@@ -72,7 +72,7 @@ export default function MobileSidebar({
         <button
           type="button"
           onClick={onClose}
-          className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-400/50"
+          className="absolute end-3 top-1/2 -translate-y-1/2 p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-400/50"
           aria-label="Close menu"
         >
           <X className="w-5 h-5" />

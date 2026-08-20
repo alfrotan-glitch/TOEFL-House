@@ -24,13 +24,13 @@ export default function SidebarItem({ item, isActive, onSelect, isExpanded }: Si
           isActive ? 'bg-indigo-500/10 text-indigo-400 shadow-sm' : 'text-slate-500 hover:bg-slate-800/50 hover:text-slate-200'
         }`}
       >
-        {isActive && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-6 rounded-r-full bg-indigo-500" aria-hidden="true" />}
+        {isActive && <span className="absolute start-0 top-1/2 -translate-y-1/2 w-[3px] h-6 rounded-r-full bg-indigo-500" aria-hidden="true" />}
         <span className={`transition-transform duration-200 ${isActive ? 'scale-110' : 'group-hover:scale-110'}`} aria-hidden="true">
           {renderNavIcon(item.icon)}
         </span>
         
         {/* Premium Tooltip */}
-        <span className="absolute left-14 top-1/2 -translate-y-1/2 bg-slate-900 text-white text-xs font-semibold px-2 py-1 rounded-md opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-200 whitespace-nowrap shadow-xl z-50 border border-white/10">
+        <span className="absolute start-14 top-1/2 -translate-y-1/2 bg-slate-900 text-white text-xs font-semibold px-2 py-1 rounded-md opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-200 whitespace-nowrap shadow-xl z-50 border border-white/10">
           {item.label}
         </span>
       </button>
@@ -47,11 +47,11 @@ export default function SidebarItem({ item, isActive, onSelect, isExpanded }: Si
         isActive ? 'bg-indigo-500/10 text-indigo-300 shadow-sm' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100'
       }`}
     >
-      {isActive && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-6 rounded-r-full bg-indigo-500" aria-hidden="true" />}
+      {isActive && <span className="absolute start-0 top-1/2 -translate-y-1/2 w-[3px] h-6 rounded-r-full bg-indigo-500" aria-hidden="true" />}
       <span className={`transition-transform duration-200 ${isActive ? 'scale-110 text-indigo-400' : 'group-hover:scale-110'}`} aria-hidden="true">
         {renderNavIcon(item.icon)}
       </span>
-      <span className="flex-1 text-left truncate">{item.label}</span>
+      <span className="flex-1 text-start truncate">{item.label}</span>
       {item.badge && <span className={`${badgeClass} text-[8px] font-black px-1.5 py-0.5 rounded-full tracking-wider shrink-0`}>{item.badge}</span>}
     </button>
   );

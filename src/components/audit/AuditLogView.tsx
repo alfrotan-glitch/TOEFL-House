@@ -4,6 +4,7 @@
  * date-range filters plus paging; the server applies filters in SQL and
  * returns the total, so the full immutable history stays navigable at scale.
  */
+import { text } from '../../design-system/styles';
 import React, { useEffect, useState, useCallback } from 'react';
 import { Search, RefreshCw } from 'lucide-react';
 import { api } from '../../api/client';
@@ -65,11 +66,11 @@ export default function AuditLogView() {
   }, [fetchPage, auditVersion]);
 
   return (
-    <div className="space-y-5 text-left" dir="ltr">
+    <div className="space-y-5 text-start">
       <div className="flex flex-col md:flex-row gap-3 items-start md:items-end justify-between">
         <div>
           <h2 className="text-xl font-extrabold text-slate-900">Audit Log</h2>
-          <p className="text-xs text-slate-500 mt-1">Append-only, searchable change history for financial and operational actions.</p>
+          <p className={text.hint}>Append-only, searchable change history for financial and operational actions.</p>
         </div>
         <button type="button" onClick={() => void fetchPage(0, false)} className="px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold cursor-pointer flex items-center gap-1.5"><RefreshCw className="w-3.5 h-3.5" /> Refresh</button>
       </div>
@@ -100,7 +101,7 @@ export default function AuditLogView() {
         </div>
         {error && <div className="px-5 py-3 text-[11px] font-semibold text-rose-700 bg-rose-50 border-b border-rose-100">{error}</div>}
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          <table className="w-full text-start text-xs">
             <thead>
               <tr className="border-b border-slate-100 text-slate-500">
                 <th className="py-2.5 px-4 font-bold">Date / Time</th>

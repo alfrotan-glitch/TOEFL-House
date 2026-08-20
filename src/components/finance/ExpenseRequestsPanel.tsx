@@ -1,3 +1,4 @@
+import { text } from '../../design-system/styles';
 import React, { useState } from 'react';
 import { Check, X } from 'lucide-react';
 import type { BudgetLine, ExpenseRequest, FinanceCategory } from '../../types';
@@ -104,9 +105,9 @@ export default function ExpenseRequestsPanel({
       <div
         className={`${isManager ? 'lg:col-span-8' : 'lg:col-span-12'} bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4`}
       >
-        <h3 className="text-sm font-extrabold text-slate-900">Expense requests & approval outcomes</h3>
+        <h3 className={text.value}>Expense requests & approval outcomes</h3>
         <div className="overflow-x-auto text-xs">
-          <table className="w-full text-left border-collapse">
+          <table className="w-full text-start border-collapse">
             <thead>
               <tr className="border-b border-slate-100 text-slate-500">
                 <th className="py-2.5 px-3 font-bold text-slate-700">Title</th>
@@ -114,7 +115,7 @@ export default function ExpenseRequestsPanel({
                 <th className="py-2.5 px-3 font-bold text-slate-700">Category → Subcategory → Budget line</th>
                 <th className="py-2.5 px-3 font-bold text-slate-700">Requester</th>
                 <th className="py-2.5 px-3 font-bold text-slate-700 text-center">Status</th>
-                {isOwner && <th className="py-2.5 px-3 font-bold text-slate-700 text-left">Action</th>}
+                {isOwner && <th className="py-2.5 px-3 font-bold text-slate-700 text-start">Action</th>}
               </tr>
             </thead>
             <tbody>
@@ -160,7 +161,7 @@ export default function ExpenseRequestsPanel({
                         </span>
                       </td>
                       {isOwner && (
-                        <td className="py-3 px-3 text-left">
+                        <td className="py-3 px-3 text-start">
                           {req.status === 'pending' && (
                             <div className="flex gap-1 justify-end">
                               <button

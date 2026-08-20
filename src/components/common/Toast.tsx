@@ -46,14 +46,13 @@ export default function Toast({ message, type, onClose, duration = 4000 }: Toast
 
   return (
     <div 
-      className={`fixed bottom-5 left-5 z-50 flex items-center gap-3 px-4 py-3 rounded-2xl border shadow-lg max-w-sm font-sans text-left ${styles.bg} animate-in slide-in-from-bottom-5 duration-300`}
-      dir="ltr"
+      className={`fixed bottom-5 start-5 z-50 flex items-center gap-3 px-4 py-3 rounded-2xl border shadow-lg max-w-sm font-sans text-start ${styles.bg} animate-in slide-in-from-bottom-5 duration-300`}
     >
       {styles.icon}
       <span className="text-xs font-bold leading-relaxed">{message}</span>
       <button 
         onClick={onClose} 
-        className="p-1 hover:bg-black/5 rounded-lg text-slate-400 hover:text-slate-600 transition-colors cursor-pointer mr-auto"
+        className="p-1 hover:bg-black/5 rounded-lg text-slate-400 hover:text-slate-600 transition-colors cursor-pointer me-auto"
       >
         <X className="w-3.5 h-3.5" />
       </button>

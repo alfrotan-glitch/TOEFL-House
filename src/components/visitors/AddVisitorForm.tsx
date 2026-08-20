@@ -128,7 +128,7 @@ export default function AddVisitorForm({
   };
 
   return (
-    <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xl max-w-2xl mx-auto animate-in fade-in duration-200 text-left" dir="ltr">
+    <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xl max-w-2xl mx-auto animate-in fade-in duration-200 text-start">
       <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-3">
         <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
           <UserPlus className="w-5 h-5 text-indigo-600 stroke-[2.5]" />
@@ -178,7 +178,7 @@ export default function AddVisitorForm({
         </div>
         <div>
           <label className={labelCls}>Phone (preferably WhatsApp) *</label>
-          <input type="tel" placeholder="e.g. 0729112233" maxLength={60} value={phone} onChange={(e) => setPhone(e.target.value)} className={`${inputCls} font-mono text-left`} required />
+          <input type="tel" placeholder="e.g. 0729112233" maxLength={60} value={phone} onChange={(e) => setPhone(e.target.value)} className={`${inputCls} font-mono text-start`} required />
         </div>
         <div>
           <label className={labelCls}>Gender</label>
@@ -245,18 +245,18 @@ export default function AddVisitorForm({
 
         {showAdvanced && (
           <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-5 animate-in fade-in duration-200">
-            <div><label className={labelCls}>Email (optional)</label><input type="email" placeholder="name@example.com" maxLength={254} value={email} onChange={(e) => setEmail(e.target.value)} className={`${inputCls} font-mono text-left`} /></div>
+            <div><label className={labelCls}>Email (optional)</label><input type="email" placeholder="name@example.com" maxLength={254} value={email} onChange={(e) => setEmail(e.target.value)} className={`${inputCls} font-mono text-start`} /></div>
             <div><label className={labelCls}>Father's name</label><input type="text" placeholder="e.g. Mohammad Zaman" maxLength={200} value={fatherName} onChange={(e) => setFatherName(e.target.value)} className={inputCls} /></div>
             <div><label className={labelCls}>Tazkira number</label><input type="text" placeholder="e.g. 1234-5678-901" maxLength={60} value={tazkiraNo} onChange={(e) => setTazkiraNo(e.target.value)} className={`${inputCls} font-mono`} /></div>
             {/* UX-5: the server validates this with assertOptionalIsoDate, so a
                 free-text "24" is rejected. A date input makes the only accepted
                 format the only enterable one. */}
             <div><label className={labelCls}>Date of birth</label><input type="date" max={todayIso} value={dob} onChange={(e) => setDob(e.target.value)} className={inputCls} /><p className="mt-1 text-[10px] text-slate-400">Optional — format YYYY-MM-DD.</p></div>
-            <div><label className={labelCls}>WhatsApp (if different)</label><input type="tel" placeholder="e.g. 0722334455" maxLength={60} value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} className={`${inputCls} font-mono text-left`} /></div>
+            <div><label className={labelCls}>WhatsApp (if different)</label><input type="tel" placeholder="e.g. 0722334455" maxLength={60} value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} className={`${inputCls} font-mono text-start`} /></div>
             <div><label className={labelCls}>School / university</label><input type="text" placeholder="e.g. Kabul Polytechnic" maxLength={500} value={schoolOrUniversity} onChange={(e) => setSchoolOrUniversity(e.target.value)} className={inputCls} /></div>
             <div className="sm:col-span-2"><label className={labelCls}>Region, district & address</label><input type="text" placeholder="e.g. Kabul, District 6, Baraki" maxLength={500} value={addressRegion} onChange={(e) => setAddressRegion(e.target.value)} className={inputCls} /></div>
             <div><label className={labelCls}>Emergency contact name</label><input type="text" placeholder="e.g. Abdul Rahim" maxLength={200} value={emergencyContactName} onChange={(e) => setEmergencyContactName(e.target.value)} className={inputCls} /></div>
-            <div><label className={labelCls}>Emergency phone</label><input type="tel" placeholder="e.g. 0799112233" maxLength={60} value={emergencyContactPhone} onChange={(e) => setEmergencyContactPhone(e.target.value)} className={`${inputCls} font-mono text-left`} /></div>
+            <div><label className={labelCls}>Emergency phone</label><input type="tel" placeholder="e.g. 0799112233" maxLength={60} value={emergencyContactPhone} onChange={(e) => setEmergencyContactPhone(e.target.value)} className={`${inputCls} font-mono text-start`} /></div>
           </div>
         )}
 

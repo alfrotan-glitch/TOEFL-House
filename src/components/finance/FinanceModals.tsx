@@ -1,3 +1,4 @@
+import { text } from '../../design-system/styles';
 import React, { useCallback, useState } from 'react';
 import { FileText, Check } from 'lucide-react';
 import { BudgetLine, FinancialTransaction } from '../../types';
@@ -91,7 +92,7 @@ export default function FinanceModals({
               </div>
 
               <div>
-                <label className="block text-slate-600 font-medium mb-1">Amount to transfer from main account (AFN):</label>
+                <label className={text.label}>Amount to transfer from main account (AFN):</label>
                 <input
                   type="number"
                   value={chargeAmount}
@@ -155,7 +156,7 @@ export default function FinanceModals({
                     <FileText className="w-5 h-5 text-indigo-600" />
                     Official statement of income & expenses
                   </h3>
-                  <p className="text-[10px] text-slate-400">{BRAND_NAME} Treasury • Financial report</p>
+                  <p className={text.meta}>{BRAND_NAME} Treasury • Financial report</p>
                 </div>
                 <button 
                   onClick={() => setShowReportModal(false)} 
@@ -166,7 +167,7 @@ export default function FinanceModals({
               </div>
 
               {/* Printable Area content */}
-              <div className="flex-1 overflow-y-auto space-y-6 pr-1 pl-2 scrollbar-thin">
+              <div className="flex-1 overflow-y-auto space-y-6 pe-1 ps-2 scrollbar-thin">
                 {/* Info Fields */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
                   <div>
@@ -203,17 +204,17 @@ export default function FinanceModals({
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="border border-slate-200/80 rounded-2xl p-4 bg-emerald-50/20 text-left space-y-1">
+                    <div className="border border-slate-200/80 rounded-2xl p-4 bg-emerald-50/20 text-start space-y-1">
                       <p className="text-[10px] text-emerald-600 font-bold">Total income (credit)</p>
                       <p className="text-base font-black text-emerald-700 font-mono">+{formatAFN(reportIncome)}</p>
                     </div>
 
-                    <div className="border border-slate-200/80 rounded-2xl p-4 bg-rose-50/20 text-left space-y-1">
+                    <div className="border border-slate-200/80 rounded-2xl p-4 bg-rose-50/20 text-start space-y-1">
                       <p className="text-[10px] text-rose-500 font-bold">Total expenses (debit)</p>
                       <p className="text-base font-black text-rose-600 font-mono">-{formatAFN(reportExpense)}</p>
                     </div>
 
-                    <div className="border border-indigo-100 rounded-2xl p-4 bg-indigo-50/30 text-left space-y-1">
+                    <div className="border border-indigo-100 rounded-2xl p-4 bg-indigo-50/30 text-start space-y-1">
                       <p className="text-[10px] text-indigo-600 font-bold">Net profit / surplus</p>
                       <p className={`text-base font-black font-mono ${reportNet >= 0 ? 'text-indigo-700' : 'text-rose-600'}`}>
                         {formatAFN(reportNet)}
@@ -226,12 +227,12 @@ export default function FinanceModals({
                 <div className="space-y-2">
                   <h4 className="font-bold text-slate-900 border-b border-slate-100 pb-1.5 text-xs">
                     Period line items
-                    <span className="ml-1.5 font-semibold text-slate-400">
+                    <span className="ms-1.5 font-semibold text-slate-400">
                       (most recent {reportTransactions.length}; totals above cover the full period)
                     </span>
                   </h4>
                   <div className="border border-slate-150 rounded-xl overflow-hidden">
-                    <table className="w-full text-left border-collapse text-[11px]">
+                    <table className="w-full text-start border-collapse text-[11px]">
                       <thead>
                         <tr className="bg-slate-50 border-b border-slate-150 text-slate-500">
                           <th className="py-2 px-3 font-bold text-slate-700">Description</th>
@@ -263,13 +264,13 @@ export default function FinanceModals({
                 {/* Report Signatures (Treasury standards) */}
                 <div className="grid grid-cols-2 gap-4 pt-4 border-t border-dashed border-slate-200">
                   <div className="text-center p-3 border border-slate-100 rounded-xl">
-                    <p className="text-[10px] text-slate-400">Finance approval</p>
+                    <p className={text.meta}>Finance approval</p>
                     <div className="h-10 flex items-center justify-center">
                       <span className="font-mono text-[10px] text-slate-300">Finance Manager</span>
                     </div>
                   </div>
                   <div className="text-center p-3 border border-slate-100 rounded-xl">
-                    <p className="text-[10px] text-slate-400">Owner endorsement</p>
+                    <p className={text.meta}>Owner endorsement</p>
                     <div className="h-10 flex items-center justify-center">
                       <span className="font-mono text-[10px] text-slate-300">Authorized Owner Signatory</span>
                     </div>

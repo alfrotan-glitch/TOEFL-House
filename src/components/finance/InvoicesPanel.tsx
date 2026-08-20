@@ -270,7 +270,7 @@ export default function InvoicesPanel({
                         {inv.dueDate ? ` · due ${inv.dueDate}` : ''}
                       </p>
                     </div>
-                    <div className="text-left">
+                    <div className="text-start">
                       <p className="font-mono font-extrabold text-slate-900">{formatAFN(inv.netAmount)}</p>
                       <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${STATUS_STYLE[inv.status] || ''}`}>
                         {inv.status}

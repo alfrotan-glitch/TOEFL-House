@@ -75,12 +75,12 @@ export default function LoginView() {
   );
 
   return (
-    <div dir="ltr" lang="en" className="min-h-screen w-full flex font-sans bg-slate-50 text-slate-900">
+    <div lang="en" className="min-h-screen w-full flex font-sans bg-slate-50 text-slate-900">
       {/* ═══════════════ LEFT — living brand surface ═══════════════ */}
       <div className="relative hidden lg:flex lg:w-[54%] xl:w-[58%] flex-col justify-between overflow-hidden bg-gradient-to-br from-[#2a0410] via-[#4c0519] to-[#3d0714] p-10 xl:p-14">
         {/* ambient glows */}
         <div className="pointer-events-none absolute -top-24 -left-24 w-[28rem] h-[28rem] rounded-full bg-rose-500/20 blur-[120px]" />
-        <div className="pointer-events-none absolute bottom-[-10rem] right-[-6rem] w-[26rem] h-[26rem] rounded-full bg-red-700/20 blur-[120px]" />
+        <div className="pointer-events-none absolute bottom-[-10rem] end-[-6rem] w-[26rem] h-[26rem] rounded-full bg-red-700/20 blur-[120px]" />
         {/* faint ledger texture */}
         <div className="pointer-events-none absolute inset-0 bg-ledger opacity-[0.5]" />
 
@@ -171,10 +171,10 @@ export default function LoginView() {
             <div>
               <label className="label" htmlFor="username">{studentMode ? 'Student Code' : 'Username'}</label>
               <div className="relative">
-                <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <User className="w-4 h-4 text-slate-400 absolute start-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   id="username"
-                  className="input pl-10"
+                  className="input ps-10"
                   style={{ paddingLeft: '2.5rem' }}
                   autoComplete="username"
                   placeholder={studentMode ? 'e.g. TH-001001' : 'ahmad.frotan'}
@@ -188,10 +188,10 @@ export default function LoginView() {
               <div>
                 <label className="label" htmlFor="studentPassword">Password</label>
                 <div className="relative">
-                  <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <Lock className="w-4 h-4 text-slate-400 absolute start-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     id="studentPassword"
-                    className="input pl-10"
+                    className="input ps-10"
                     style={{ paddingLeft: '2.5rem' }}
                     type={showPw ? 'text' : 'password'}
                     autoComplete="current-password"
@@ -212,7 +212,7 @@ export default function LoginView() {
                 </button>
               </div>
               <div className="relative">
-                <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <Lock className="w-4 h-4 text-slate-400 absolute start-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   id="password"
                   type={showPw ? 'text' : 'password'}
@@ -226,7 +226,7 @@ export default function LoginView() {
                 <button
                   type="button"
                   onClick={() => setShowPw((s) => !s)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                  className="absolute end-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
                   aria-label={showPw ? 'Hide password' : 'Show password'}
                 >
                   {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}

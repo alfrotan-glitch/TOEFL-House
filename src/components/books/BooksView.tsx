@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { text } from '../../design-system/styles';
 import React, { useState } from 'react';
 import {BookOpen, ShoppingBag, Plus, Sparkles, ClipboardList, TrendingUp, Calendar, Trash2, X, CheckCircle2, AlertCircle, Edit, Info, Search, History, Printer, CreditCard, RotateCcw, BarChart3, AlertTriangle} from 'lucide-react';
 import {Book, BookSale, Student, UserRole} from '../../types';
@@ -317,12 +318,12 @@ export default function BooksView({
   })();
 
   return (
-    <div className="space-y-6 font-sans text-left relative" dir="ltr" id="books-view-root">
+    <div className="space-y-6 font-sans text-start relative" id="books-view-root">
       
       {/* Toast Notification HUD */}
       {toast && (
         <div 
-          className={`fixed top-4 left-4 z-50 flex items-center gap-3 px-5 py-3 rounded-2xl shadow-xl border animate-in slide-in-from-left duration-300 ${
+          className={`fixed top-4 start-4 z-50 flex items-center gap-3 px-5 py-3 rounded-2xl shadow-xl border animate-in slide-in-from-left duration-300 ${
             toast.type === 'success' 
               ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
               : toast.type === 'error' 
@@ -348,7 +349,7 @@ export default function BooksView({
             <BookOpen className="w-6 h-6 text-indigo-600" />
             Bookstore & inventory
           </h2>
-          <p className="text-xs text-slate-500 mt-1">Catalog, sales, restock, discounts, and receipts — all data from your inventory</p>
+          <p className={text.hint}>Catalog, sales, restock, discounts, and receipts — all data from your inventory</p>
         </div>
       </div>
 
@@ -395,7 +396,7 @@ export default function BooksView({
           <div className="space-y-0.5">
             <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">Active bookstore stock</p>
             <p className="text-base font-black text-slate-900 font-mono">
-              {totalCopiesInStock} copies <span className="text-[10px] text-slate-400">({totalDistinctBooks} titles)</span>
+              {totalCopiesInStock} copies <span className={text.meta}>({totalDistinctBooks} titles)</span>
             </p>
           </div>
         </div>
@@ -467,7 +468,7 @@ export default function BooksView({
           {/* Critical Inventory Alert Banner */}
           {criticalBooks.length > 0 && (
             <div className="bg-rose-50/80 border border-rose-200/60 rounded-3xl p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 animate-in slide-in-from-top-4 duration-300">
-              <div className="flex gap-3.5 text-left">
+              <div className="flex gap-3.5 text-start">
                 <div className="p-3 bg-rose-100 text-rose-600 rounded-2xl h-fit">
                   <AlertTriangle className="w-5 h-5 text-rose-600 stroke-[2.5] animate-bounce" />
                 </div>
@@ -504,13 +505,13 @@ export default function BooksView({
             <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-3">
               <div className="flex flex-col sm:flex-row gap-3">
                 <div className="flex-1 relative">
-                  <Search className="w-4 h-4 text-slate-400 absolute right-3 top-3" />
+                  <Search className="w-4 h-4 text-slate-400 absolute end-3 top-3" />
                   <input
                     type="text"
                     placeholder="Search books & chapters…"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl pr-9 pl-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:bg-white"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl pe-9 ps-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:bg-white"
                   />
                 </div>
                 
@@ -580,7 +581,7 @@ export default function BooksView({
                             </div>
                             
                             <h4 className="font-bold text-slate-900 text-xs sm:text-sm mt-1">{book.title}</h4>
-                            <div className="space-y-0.5 text-left">
+                            <div className="space-y-0.5 text-start">
                               <p className="text-xs font-semibold text-indigo-600 font-mono mt-1">Unit sale price: {formatAFN(book.price)}</p>
                               {isOwnerOrManager && (
                                 <p className="text-[10px] font-medium text-slate-400 font-mono">Unit purchase: {formatAFN(purchaseVal)}</p>
@@ -594,7 +595,7 @@ export default function BooksView({
                             </div>
                           </div>
                           
-                          <div className="text-left">
+                          <div className="text-start">
                             <p className="text-[10px] text-slate-400 font-semibold">Stock:</p>
                             <p className={`text-sm font-extrabold font-mono mt-0.5 ${isLowStock ? 'text-rose-600' : 'text-slate-800'}`}>
                               {book.stock} units
@@ -692,7 +693,7 @@ export default function BooksView({
                 </span>
               </div>
               <div className="overflow-x-auto text-xs">
-                <table className="w-full text-left border-collapse">
+                <table className="w-full text-start border-collapse">
                   <thead>
                     <tr className="border-b border-slate-100 text-slate-500">
                       <th className="py-2 px-3 font-bold text-slate-700">Book / chapter</th>
@@ -1069,7 +1070,7 @@ export default function BooksView({
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
           {/* Header Action Bar */}
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-indigo-50/40 border border-indigo-100 rounded-2xl p-4">
-            <div className="space-y-0.5 text-left">
+            <div className="space-y-0.5 text-start">
               <h3 className="font-extrabold text-slate-900 text-sm">Inventory profit & asset dashboard</h3>
               <p className="text-[10px] text-slate-500 font-semibold">Live ROI, payment mix, and management reporting</p>
             </div>
@@ -1186,7 +1187,7 @@ export default function BooksView({
                 </div>
               </div>
 
-              <div className="text-[10px] text-slate-400 leading-relaxed text-left pt-0.5">
+              <div className="text-[10px] text-slate-400 leading-relaxed text-start pt-0.5">
                 * Books with 5 units or fewer are marked “Low stock” so print orders can be placed before semesters start.
               </div>
             </div>
@@ -1200,7 +1201,7 @@ export default function BooksView({
             </h3>
 
             <div className="overflow-x-auto text-xs">
-              <table className="w-full text-left border-collapse">
+              <table className="w-full text-start border-collapse">
                 <thead className="bg-slate-50 text-slate-500">
                   <tr className="border-b border-slate-200">
                     <th className="py-2.5 px-3 font-bold text-slate-700">Product name</th>

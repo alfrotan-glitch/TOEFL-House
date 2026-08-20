@@ -1,6 +1,7 @@
 /**
  * @license SPDX-License-Identifier: Apache-2.0
  */
+import { control, text } from '../../design-system/styles';
 import React, { useState } from 'react';
 import {ShieldAlert, Award, Sparkles, Check, Plus, X, ClipboardCheck} from 'lucide-react';
 import {Teacher, Employee, BudgetLine, Skill, ClassTeacherSkill, Class as ClassType} from '../../types';
@@ -146,19 +147,19 @@ export default function TeachersModals(props: TeachersModalsProps) {
             </div>
             <form onSubmit={handleEditTeacherSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
               <div className="sm:col-span-2">
-                <label className="block text-slate-600 font-semibold mb-1">Full Name:</label>
-                <input type="text" value={editTFullName} onChange={(e) => setEditTFullName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2" required />
+                <label className={text.label}>Full Name:</label>
+                <input type="text" value={editTFullName} onChange={(e) => setEditTFullName(e.target.value)} className={control.input} required />
               </div>
               <div>
-                <label className="block text-slate-600 font-semibold mb-1">Phone:</label>
-                <input type="tel" value={editTPhone} onChange={(e) => setEditTPhone(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono text-left" required />
+                <label className={text.label}>Phone:</label>
+                <input type="tel" value={editTPhone} onChange={(e) => setEditTPhone(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono text-start" required />
               </div>
               <div>
-                <label className="block text-slate-600 font-semibold mb-1">Email:</label>
-                <input type="email" value={editTEmail} onChange={(e) => setEditTEmail(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono text-left" />
+                <label className={text.label}>Email:</label>
+                <input type="email" value={editTEmail} onChange={(e) => setEditTEmail(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono text-start" />
               </div>
               <div className="sm:col-span-2">
-                <label className="block text-slate-600 font-semibold mb-1">Contract / Salary Model:</label>
+                <label className={text.label}>Contract / Salary Model:</label>
                 <select value={editTSalaryType} onChange={(e) => setEditTSalaryType(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 cursor-pointer font-bold">
                   <option value="fixed">Fixed Monthly Salary</option>
                   <option value="per_skill">Per Skill (Count × Default Rate)</option>
@@ -168,24 +169,24 @@ export default function TeachersModals(props: TeachersModalsProps) {
                 </select>
               </div>
               <div>
-                <label className="block text-slate-600 font-semibold mb-1">Base Salary (AFN):</label>
+                <label className={text.label}>Base Salary (AFN):</label>
                 <input type="number" value={editTBaseSalary} onChange={(e) => setEditTBaseSalary(Number(e.target.value))} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono" min={0} required />
               </div>
               <div>
-                <label className="block text-slate-600 font-semibold mb-1">Default Skill Rate (AFN):</label>
+                <label className={text.label}>Default Skill Rate (AFN):</label>
                 <input type="number" value={editTDefaultSkillRate} onChange={(e) => setEditTDefaultSkillRate(Number(e.target.value))} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono" min={0} />
                 <p className="text-[9px] text-slate-400 mt-1">Used in 'Per Skill' or 'Per Session' if specific class rate is not set.</p>
               </div>
               <div>
-                <label className="block text-slate-600 font-semibold mb-1">Specialty:</label>
-                <input type="text" value={editTSpecialization} onChange={(e) => setEditTSpecialization(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2" />
+                <label className={text.label}>Specialty:</label>
+                <input type="text" value={editTSpecialization} onChange={(e) => setEditTSpecialization(e.target.value)} className={control.input} />
               </div>
               <div>
-                <label className="block text-slate-600 font-semibold mb-1">Qualification:</label>
-                <input type="text" value={editTQualification} onChange={(e) => setEditTQualification(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2" />
+                <label className={text.label}>Qualification:</label>
+                <input type="text" value={editTQualification} onChange={(e) => setEditTQualification(e.target.value)} className={control.input} />
               </div>
               <div>
-                <label className="block text-slate-600 font-semibold mb-1">Contract Type:</label>
+                <label className={text.label}>Contract Type:</label>
                 <select value={editTContractType} onChange={(e) => setEditTContractType(e.target.value as any)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 cursor-pointer">
                   <option value="monthly">Monthly (Full-time)</option>
                   <option value="hourly">Hourly (Part-time)</option>
@@ -193,7 +194,7 @@ export default function TeachersModals(props: TeachersModalsProps) {
                 </select>
               </div>
               <div>
-                <label className="block text-slate-600 font-semibold mb-1">Status:</label>
+                <label className={text.label}>Status:</label>
                 <select value={editTStatus} onChange={(e) => setEditTStatus(e.target.value as any)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 cursor-pointer">
                   <option value="active">Active</option>
                   <option value="inactive">Inactive</option>
@@ -218,16 +219,16 @@ export default function TeachersModals(props: TeachersModalsProps) {
               <button onClick={() => setEditingEmployee(null)} className="text-slate-400 hover:text-slate-700"><X className="w-4 h-4" /></button>
             </div>
             <form onSubmit={handleEditEmployeeSubmit} className="grid grid-cols-1 gap-3 text-xs">
-              <div><label className="block text-slate-600 font-semibold mb-1">Full Name:</label><input type="text" value={editEFullName} onChange={(e) => setEditEFullName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2" required /></div>
+              <div><label className={text.label}>Full Name:</label><input type="text" value={editEFullName} onChange={(e) => setEditEFullName(e.target.value)} className={control.input} required /></div>
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="block text-slate-600 font-semibold mb-1">Phone:</label><input type="tel" value={editEPhone} onChange={(e) => setEditEPhone(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono text-left" required /></div>
-                <div><label className="block text-slate-600 font-semibold mb-1">Email:</label><input type="email" value={editEEmail} onChange={(e) => setEditEEmail(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono text-left" /></div>
+                <div><label className={text.label}>Phone:</label><input type="tel" value={editEPhone} onChange={(e) => setEditEPhone(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono text-start" required /></div>
+                <div><label className={text.label}>Email:</label><input type="email" value={editEEmail} onChange={(e) => setEditEEmail(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono text-start" /></div>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="block text-slate-600 font-semibold mb-1">Role:</label><input type="text" value={editERole} onChange={(e) => setEditERole(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2" required /></div>
-                <div><label className="block text-slate-600 font-semibold mb-1">Base Salary (AFN):</label><input type="number" value={editEBaseSalary} onChange={(e) => setEditEBaseSalary(Number(e.target.value))} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono" min={0} required /></div>
+                <div><label className={text.label}>Role:</label><input type="text" value={editERole} onChange={(e) => setEditERole(e.target.value)} className={control.input} required /></div>
+                <div><label className={text.label}>Base Salary (AFN):</label><input type="number" value={editEBaseSalary} onChange={(e) => setEditEBaseSalary(Number(e.target.value))} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono" min={0} required /></div>
               </div>
-              <div><label className="block text-slate-600 font-semibold mb-1">Status:</label><select value={editEStatus} onChange={(e) => setEditEStatus(e.target.value as any)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 cursor-pointer"><option value="active">Active</option><option value="inactive">Inactive</option></select></div>
+              <div><label className={text.label}>Status:</label><select value={editEStatus} onChange={(e) => setEditEStatus(e.target.value as any)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 cursor-pointer"><option value="active">Active</option><option value="inactive">Inactive</option></select></div>
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
                 <button type="button" onClick={() => setEditingEmployee(null)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2 px-4 rounded-lg cursor-pointer">Cancel</button>
                 <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-5 rounded-lg cursor-pointer shadow-sm">Save Changes</button>
@@ -288,19 +289,19 @@ export default function TeachersModals(props: TeachersModalsProps) {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-slate-600 font-medium mb-1">Payment Type:</label>
+                <label className={text.label}>Payment Type:</label>
                 <select value={paymentType} onChange={(e) => handleTeacherPaymentTypeChange(e.target.value as any)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 cursor-pointer font-bold">
                   <option value="full">Full Salary</option><option value="partial">Partial</option><option value="advance">Advance</option>
                 </select>
               </div>
               <div>
-                <label className="block text-slate-600 font-medium mb-1">Amount (AFN):</label>
+                <label className={text.label}>Amount (AFN):</label>
                 <input type="number" value={amountPaid} onChange={(e) => setAmountPaid(Number(e.target.value))} disabled={paymentType === 'full'} className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono font-bold ${paymentType === 'full' ? 'opacity-70 cursor-not-allowed bg-slate-100' : ''}`} min={1} />
               </div>
             </div>
 
             <div>
-              <label className="block text-slate-600 font-medium mb-1">For Work Month:</label>
+              <label className={text.label}>For Work Month:</label>
               <select value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 cursor-pointer">
                 {monthOptions.map((m) => <option key={m} value={m}>{jalaliPeriodLabel(m)}</option>)}
               </select>
@@ -329,18 +330,18 @@ export default function TeachersModals(props: TeachersModalsProps) {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-slate-600 font-medium mb-1">Payment Type:</label>
+                <label className={text.label}>Payment Type:</label>
                 <select value={paymentType} onChange={(e) => handleEmployeePaymentTypeChange(e.target.value as any)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 cursor-pointer font-bold">
                   <option value="full">Full Salary</option><option value="partial">Partial</option><option value="advance">Advance</option>
                 </select>
               </div>
               <div>
-                <label className="block text-slate-600 font-medium mb-1">Amount (AFN):</label>
+                <label className={text.label}>Amount (AFN):</label>
                 <input type="number" value={amountPaid} onChange={(e) => setAmountPaid(Number(e.target.value))} disabled={paymentType === 'full'} className={`w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono font-bold ${paymentType === 'full' ? 'opacity-70 cursor-not-allowed bg-slate-100' : ''}`} min={1} />
               </div>
             </div>
             <div>
-              <label className="block text-slate-600 font-medium mb-1">For Work Month:</label>
+              <label className={text.label}>For Work Month:</label>
               <select value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 cursor-pointer">
                 {monthOptions.map((m) => <option key={m} value={m}>{jalaliPeriodLabel(m)}</option>)}
               </select>
@@ -360,7 +361,7 @@ export default function TeachersModals(props: TeachersModalsProps) {
             <div className="flex justify-between items-center border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
                 <ClipboardCheck className="w-5 h-5 text-indigo-600" />
-                <div><h3 className="font-extrabold text-slate-900 text-sm">Teacher Evaluation (100 Points)</h3><p className="text-[10px] text-slate-400">Evaluating: {evaluatingTeacher.fullName}</p></div>
+                <div><h3 className="font-extrabold text-slate-900 text-sm">Teacher Evaluation (100 Points)</h3><p className={text.meta}>Evaluating: {evaluatingTeacher.fullName}</p></div>
               </div>
               <button onClick={() => setEvaluatingTeacher(null)} className="text-slate-400 hover:text-slate-700"><X className="w-4 h-4" /></button>
             </div>
@@ -385,8 +386,8 @@ export default function TeachersModals(props: TeachersModalsProps) {
                 <span className="font-mono font-black text-emerald-700 text-lg">{totalEvalScore} / 100</span>
               </div>
               <div>
-                <label className="block text-slate-600 font-semibold mb-1">Appraisal Notes (Optional):</label>
-                <textarea value={evalNotes} onChange={(e) => setEvalNotes(e.target.value)} rows={2} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2" placeholder="Strengths, areas to improve..."></textarea>
+                <label className={text.label}>Appraisal Notes (Optional):</label>
+                <textarea value={evalNotes} onChange={(e) => setEvalNotes(e.target.value)} rows={2} className={control.input} placeholder="Strengths, areas to improve..."></textarea>
               </div>
               <div className="bg-amber-50 p-2 rounded-lg border border-amber-100 text-[10px] text-amber-800">
                 All three criteria must be scored — the appraisal is 100 points total and is recorded in full.
@@ -408,10 +409,10 @@ export default function TeachersModals(props: TeachersModalsProps) {
               <h4 className="font-extrabold text-slate-900 text-sm flex items-center gap-2"><Check className="w-4 h-4 text-emerald-500" /> Salary Slip Issued</h4>
               <button onClick={() => setPrintedPayslip(null)} className="p-1.5 bg-slate-50 hover:bg-slate-100 text-slate-400 rounded-xl cursor-pointer"><X className="w-4 h-4" /></button>
             </div>
-            <div id="printed-staff-payslip-area" className="bg-white border-2 border-dashed border-slate-300 rounded-2xl p-6 space-y-6 text-slate-800 relative select-text" dir="ltr">
+            <div id="printed-staff-payslip-area" className="bg-white border-2 border-dashed border-slate-300 rounded-2xl p-6 space-y-6 text-slate-800 relative select-text">
               <div className="flex flex-col sm:flex-row justify-between items-center pb-4 border-b-2 border-slate-200 gap-4">
-                <div className="text-center sm:text-left space-y-1"><h3 className="font-black text-slate-950 text-base">{BRAND_NAME}</h3><p className="text-[10px] text-slate-400 font-bold">Finance calculation, salary payment, and central treasury</p></div>
-                <div className="text-center sm:text-left space-y-1 font-mono text-[10px] text-slate-500"><p className="font-bold text-slate-900 text-xs">Receipt No: {printedPayslip.serialNo}</p><p>Date: <ShamsiDate value={printedPayslip.date} format="long" /></p></div>
+                <div className="text-center sm:text-start space-y-1"><h3 className="font-black text-slate-950 text-base">{BRAND_NAME}</h3><p className="text-[10px] text-slate-400 font-bold">Finance calculation, salary payment, and central treasury</p></div>
+                <div className="text-center sm:text-start space-y-1 font-mono text-[10px] text-slate-500"><p className="font-bold text-slate-900 text-xs">Receipt No: {printedPayslip.serialNo}</p><p>Date: <ShamsiDate value={printedPayslip.date} format="long" /></p></div>
               </div>
               <div className="bg-slate-50 border border-slate-100 rounded-xl p-2.5 text-center font-black text-slate-900 text-xs tracking-wider">Official monthly salary settlement slip</div>
               <div className="grid grid-cols-2 gap-4 text-[11px]">
@@ -439,7 +440,7 @@ export default function TeachersModals(props: TeachersModalsProps) {
                 if (printContents) {
                   const printWindow = window.open('', '_blank');
                   if (printWindow) {
-                    printWindow.document.write(`<html><head><title>Salary Slip</title><style>body{font-family:sans-serif;padding:20px;direction:rtl;}.flex{display:flex;justify-content:space-between;}.font-mono{font-family:monospace;}.font-bold{font-weight:bold;}.text-right{text-align:right;}</style></head><body>${printContents}</body></html>`);
+                    printWindow.document.write(`<html><head><title>Salary Slip</title><style>body{font-family:sans-serif;padding:20px;direction:rtl;}.flex{display:flex;justify-content:space-between;}.font-mono{font-family:monospace;}.font-bold{font-weight:bold;}.text-end{text-align:right;}</style></head><body>${printContents}</body></html>`);
                     printWindow.document.close();
                     printWindow.focus();
                     setTimeout(() => printWindow.print(), 250);
@@ -487,7 +488,7 @@ export function TeacherSkillAssignmentModal({ teacher, classes, skills, assignme
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto" dir="ltr">
+    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg my-8 text-xs">
         <div className="flex justify-between items-center p-5 border-b border-slate-100">
           <div><h3 className="font-extrabold text-slate-900 text-sm flex items-center gap-1.5"><Sparkles className="w-4 h-4 text-violet-500" /> Teaching Skills & Rates</h3><p className="text-[10px] text-slate-400 mt-1">Teacher: {teacher.fullName} — Leave rate blank to use default ({formatAFN(teacher.defaultSkillRate || 0)}).</p></div>
@@ -504,7 +505,7 @@ export function TeacherSkillAssignmentModal({ teacher, classes, skills, assignme
                     <div><p className="font-bold text-slate-800">{skill?.name || 'Unknown'}</p><p className="text-[10px] text-slate-400 mt-0.5">Class: {cls?.name || 'Unknown'}</p></div>
                     <div className="flex items-center gap-2">
                       {editingRateId === a.id ? (
-                        <><input type="number" value={editingRateValue} onChange={(e) => setEditingRateValue(Number(e.target.value))} className="w-24 bg-white border border-indigo-200 rounded-lg px-2 py-1 font-mono text-left" autoFocus /><button onClick={() => { onEditRate(a.id, editingRateValue); setEditingRateId(null); }} className="text-emerald-600 hover:text-emerald-700 cursor-pointer font-bold">✓</button></>
+                        <><input type="number" value={editingRateValue} onChange={(e) => setEditingRateValue(Number(e.target.value))} className="w-24 bg-white border border-indigo-200 rounded-lg px-2 py-1 font-mono text-start" autoFocus /><button onClick={() => { onEditRate(a.id, editingRateValue); setEditingRateId(null); }} className="text-emerald-600 hover:text-emerald-700 cursor-pointer font-bold">✓</button></>
                       ) : (
                         <><span className="font-mono font-extrabold text-slate-900">{formatAFN(a.monthlyRate)}</span><button onClick={() => { setEditingRateId(a.id); setEditingRateValue(a.monthlyRate); }} className="text-indigo-500 hover:text-indigo-700 cursor-pointer"><Check className="w-3.5 h-3.5" /></button></>
                       )}

@@ -67,7 +67,7 @@ export default function RuleTestPanel({ categories, evaluateBusinessRules, onClo
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4 animate-in fade-in duration-200" dir="ltr" onClick={onClose}>
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={onClose}>
       <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col border border-slate-200" onClick={e => e.stopPropagation()}>
         
         <div className="p-5 border-b border-slate-100 flex items-center justify-between shrink-0 bg-slate-50 rounded-t-3xl">
@@ -126,7 +126,7 @@ export default function RuleTestPanel({ categories, evaluateBusinessRules, onClo
 
               <div>
                 <h4 className="text-[11px] font-extrabold text-slate-500 uppercase mb-2 flex items-center gap-1"><Braces className="w-3 h-3" /> Final Output</h4>
-                <pre className="text-xs font-mono bg-white border border-slate-200 rounded-xl p-4 overflow-x-auto text-indigo-900" dir="ltr">{JSON.stringify(result.finalOutputs, null, 2)}</pre>
+                <pre className="text-xs font-mono bg-white border border-slate-200 rounded-xl p-4 overflow-x-auto text-indigo-900">{JSON.stringify(result.finalOutputs, null, 2)}</pre>
               </div>
 
               {result.warnings.length > 0 && (

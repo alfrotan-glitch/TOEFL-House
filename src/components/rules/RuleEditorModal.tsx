@@ -62,7 +62,7 @@ export default function RuleEditorModal({ category, existingRule, onSave, onClos
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4 animate-in fade-in duration-200" dir="ltr" onClick={onClose}>
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={onClose}>
       <div className="bg-white rounded-3xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col border border-slate-200" onClick={e => e.stopPropagation()}>
         
         <div className="p-6 border-b border-slate-100 flex items-center justify-between shrink-0 bg-slate-50 rounded-t-3xl">
@@ -139,7 +139,7 @@ export default function RuleEditorModal({ category, existingRule, onSave, onClos
                     <input className="flex-1 text-xs border border-slate-200 rounded-lg px-2 py-2 font-mono bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400" placeholder="target_key (e.g. discountPercent)" value={act.targetKey} onChange={e => updateAction(idx, { targetKey: e.target.value })} />
                     <button onClick={() => setActions(prev => prev.filter((_, i) => i !== idx))} className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg shrink-0 cursor-pointer transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
                   </div>
-                  <div className="pl-2 border-l-2 border-emerald-200 ml-1 space-y-2">
+                  <div className="ps-2 border-l-2 border-emerald-200 ms-1 space-y-2">
                     {(act.type === 'set_value' || act.type === 'add_discount') && (
                       <input className="w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400" placeholder="Value (number, text, true/false)" value={act.value !== undefined ? String(act.value) : ''} onChange={e => updateAction(idx, { value: coerceValue(e.target.value) })} />
                     )}

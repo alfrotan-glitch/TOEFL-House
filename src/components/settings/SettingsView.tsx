@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { text } from '../../design-system/styles';
 import React, { useState, useCallback } from 'react';
 import {Building2, Database, Edit, Trash2, Plus, X, User, HeartHandshake, Tag, KeyRound, UserPlus, CheckCircle2, MapPin, ShieldCheck} from 'lucide-react';
 import PositionsPanel, { PositionRow, PermissionDef } from './PositionsPanel';
@@ -368,7 +369,7 @@ export default function SettingsView({
   const isOwner = activeRole === 'owner';
 
   return (
-    <div className="space-y-6 font-sans text-left" dir="ltr" id="settings-view-root">
+    <div className="space-y-6 font-sans text-start" id="settings-view-root">
       {partnerError && (
         <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-xs font-semibold text-rose-700" role="alert">
           {partnerError}
@@ -377,14 +378,14 @@ export default function SettingsView({
       {/* Header */}
       <div className="border-b border-slate-200 pb-4">
         <h2 className="text-xl font-extrabold text-slate-900">Core settings & branch configuration</h2>
-        <p className="text-xs text-slate-500 mt-1">Organization, access, and system administration</p>
+        <p className={text.hint}>Organization, access, and system administration</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Side: General and savings */}
         <div className="lg:col-span-6 space-y-6">
           <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-5 shadow-sm space-y-2">
-            <p className="text-sm font-extrabold text-slate-900">Finance policy lives in Finance Desk</p>
+            <p className={text.value}>Finance policy lives in Finance Desk</p>
             <p className="text-xs text-slate-600 leading-relaxed">Cash, savings, expense approval thresholds, invoices, and month-end controls are owned by Finance Desk. This area intentionally exposes no duplicate finance configuration.</p>
           </div>
 
@@ -404,7 +405,7 @@ export default function SettingsView({
           <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-3">
             <div className="flex items-center gap-2">
               <Database className="w-5 h-5 text-indigo-600" />
-              <h3 className="text-sm font-extrabold text-slate-900">Backup integration</h3>
+              <h3 className={text.value}>Backup integration</h3>
             </div>
             <p className="text-xs text-slate-500 leading-relaxed">Backup is deployment-managed. This screen does not claim a backup succeeded unless a configured storage target confirms it.</p>
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">Backup target is not configured.</div>
@@ -459,7 +460,7 @@ export default function SettingsView({
               </form>
           )}
 
-          <div className="space-y-3 max-h-[520px] overflow-y-auto pr-0.5">
+          <div className="space-y-3 max-h-[520px] overflow-y-auto pe-0.5">
             {campuses.length === 0 ? (
               <p className="text-xs text-slate-400 italic">No campuses configured.</p>
             ) : campuses.map((c) => {
@@ -470,7 +471,7 @@ export default function SettingsView({
                   <button
                     type="button"
                     onClick={() => setExpandedCampusId(open ? '' : c.id)}
-                    className="w-full text-left bg-slate-50 hover:bg-slate-100/80 px-3.5 py-3 flex items-start justify-between gap-2"
+                    className="w-full text-start bg-slate-50 hover:bg-slate-100/80 px-3.5 py-3 flex items-start justify-between gap-2"
                   >
                     <div className="min-w-0">
                       <p className="font-extrabold text-slate-900 text-xs">
@@ -652,7 +653,7 @@ export default function SettingsView({
               <HeartHandshake className="w-5 h-5 text-indigo-600" />
               Owners board & equity partners
             </h3>
-            <p className="text-xs text-slate-500 mt-1">Senior owners and each partner’s equity share</p>
+            <p className={text.hint}>Senior owners and each partner’s equity share</p>
           </div>
           {isOwner && !showAddForm && !editingPartnerId && (
             <button
@@ -726,7 +727,7 @@ export default function SettingsView({
                   type="text"
                   value={partnerPhone}
                   onChange={(e) => setPartnerPhone(e.target.value)}
-                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 focus:ring-1 focus:ring-indigo-500 font-mono text-left"
+                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 focus:ring-1 focus:ring-indigo-500 font-mono text-start"
                   required
                 />
               </div>
@@ -737,7 +738,7 @@ export default function SettingsView({
                   type="email"
                   value={partnerEmail}
                   onChange={(e) => setPartnerEmail(e.target.value)}
-                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 focus:ring-1 focus:ring-indigo-500 font-mono text-left"
+                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 focus:ring-1 focus:ring-indigo-500 font-mono text-start"
                   required
                 />
               </div>
@@ -790,7 +791,7 @@ export default function SettingsView({
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {partners.map((p) => (
             <div key={p.id} className="bg-slate-50 border border-slate-150 rounded-2xl p-4 flex flex-col justify-between space-y-4 relative overflow-hidden">
-              <div className="absolute top-0 left-0 bg-indigo-600 text-white font-mono font-black text-xs px-3.5 py-1.5 rounded-br-2xl">
+              <div className="absolute top-0 start-0 bg-indigo-600 text-white font-mono font-black text-xs px-3.5 py-1.5 rounded-br-2xl">
                 {p.sharePercent}%
               </div>
               <div className="space-y-1.5 pt-2">
@@ -863,11 +864,11 @@ export default function SettingsView({
                 </div>
                 <div className="space-y-1">
                   <label className="block text-slate-600 font-bold">Username:</label>
-                  <input type="text" value={newUsername} onChange={(e) => setNewUsername(e.target.value)} className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 font-mono text-left" placeholder="e.g. ahmad.karimi" required />
+                  <input type="text" value={newUsername} onChange={(e) => setNewUsername(e.target.value)} className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 font-mono text-start" placeholder="e.g. ahmad.karimi" required />
                 </div>
                 <div className="space-y-1">
                   <label className="block text-slate-600 font-bold">Temporary password:</label>
-                  <input type="text" value={newTempPassword} onChange={(e) => setNewTempPassword(e.target.value)} className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 font-mono text-left" placeholder="At least 12 characters" required />
+                  <input type="text" value={newTempPassword} onChange={(e) => setNewTempPassword(e.target.value)} className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 font-mono text-start" placeholder="At least 12 characters" required />
                 </div>
                 <div className="sm:col-span-2 flex gap-2 justify-end pt-2 border-t border-slate-100">
                   <button type="button" onClick={() => setShowAddUserForm(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg font-bold">Cancel</button>
@@ -903,7 +904,7 @@ export default function SettingsView({
                         value={resetTempPassword}
                         onChange={(e) => setResetTempPassword(e.target.value)}
                         placeholder="New temporary password"
-                        className="bg-white border border-indigo-200 rounded-lg px-2 py-1.5 font-mono text-left w-32"
+                        className="bg-white border border-indigo-200 rounded-lg px-2 py-1.5 font-mono text-start w-32"
                         autoFocus
                       />
                       <button onClick={() => handleResetPassword(u.id)} className="text-emerald-600 hover:text-emerald-700 cursor-pointer" title="Save">
@@ -931,7 +932,7 @@ export default function SettingsView({
           <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-5">
             <div className="flex items-center gap-1.5 border-b border-slate-50 pb-2.5">
               <ShieldCheck className="w-5 h-5 text-indigo-600" />
-              <h3 className="text-sm font-extrabold text-slate-900">Positions &amp; access control</h3>
+              <h3 className={text.value}>Positions &amp; access control</h3>
             </div>
             {positionError && <div className="rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-[11px] font-semibold text-rose-700">{positionError}</div>}
             <PositionsPanel

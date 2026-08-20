@@ -291,7 +291,7 @@ export default function DashboardView({
                 { label: 'Finance', tab: 'finance', icon: Wallet },
                 { label: 'Academic setup', tab: 'academic-setup', icon: GraduationCap },
               ] as const).map(({ label, tab, icon: Icon }) => (
-                <button key={tab} type="button" onClick={() => onNavigate?.(tab)} className="group rounded-2xl border border-white/10 bg-white/[0.07] hover:bg-white/[0.13] px-3 py-3 text-left transition-colors">
+                <button key={tab} type="button" onClick={() => onNavigate?.(tab)} className="group rounded-2xl border border-white/10 bg-white/[0.07] hover:bg-white/[0.13] px-3 py-3 text-start transition-colors">
                   <Icon className="w-4 h-4 text-indigo-300 group-hover:text-white" />
                   <span className="mt-2 block text-[11px] font-extrabold">{label}</span>
                 </button>
@@ -628,7 +628,7 @@ export default function DashboardView({
                   </div>
                   Recent System Activity
                 </h3>
-                <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                <div className="space-y-4 max-h-[400px] overflow-y-auto pe-2 custom-scrollbar">
                   {auditLogs.length === 0 ? <p className="text-slate-400 text-center py-8 text-sm font-medium">No recent activity logged.</p> :
                     auditLogs.slice(0, 10).map((log) => (
                       <div key={log.id} className="flex items-start gap-4 pb-4 border-b border-slate-100/80 last:border-0">
@@ -650,7 +650,7 @@ export default function DashboardView({
 
         {/* Premium Toast Notification */}
         {toast && (
-          <div className={`fixed bottom-8 left-1/2 -translate-x-1/2 z-50 rounded-2xl px-6 py-4 text-white shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-bottom-8 duration-500 backdrop-blur-md ${
+          <div className={`fixed bottom-8 start-1/2 -translate-x-1/2 z-50 rounded-2xl px-6 py-4 text-white shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-bottom-8 duration-500 backdrop-blur-md ${
             toast.type === 'success' ? 'bg-emerald-600/90 border border-emerald-400/30' : toast.type === 'error' ? 'bg-rose-600/90 border border-rose-400/30' : 'bg-indigo-600/90 border border-indigo-400/30'
           }`}>
             {toast.type === 'success' ? <CheckCircle2 className="w-5 h-5" strokeWidth={2.5} /> : toast.type === 'error' ? <AlertTriangle className="w-5 h-5" strokeWidth={2.5} /> : <Activity className="w-5 h-5" strokeWidth={2.5} />}

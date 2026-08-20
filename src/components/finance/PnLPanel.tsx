@@ -4,6 +4,7 @@
  * capital/transfer semantics). The frontend never recomputes financial
  * truth from partial store data; the server is the single source.
  */
+import { text } from '../../design-system/styles';
 import React, { useEffect, useState } from 'react';
 import { TrendingUp, TrendingDown, Printer } from 'lucide-react';
 import { api } from '../../api/client';
@@ -184,7 +185,7 @@ export default function PnLPanel({ selectedYear, selectedMonth }: Props) {
           {capexRows.length > 0 && (
             <div className="bg-white border border-sky-200 rounded-2xl p-5 shadow-sm space-y-3">
               <div className="flex items-center justify-between gap-2 flex-wrap">
-                <h4 className="text-sm font-extrabold text-slate-900">Capital expenditure</h4>
+                <h4 className={text.value}>Capital expenditure</h4>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${CLASSIFICATION_BADGE.capital_expenditure}`}>
                   {CLASSIFICATION_LABEL.capital_expenditure}
                 </span>
@@ -204,7 +205,7 @@ export default function PnLPanel({ selectedYear, selectedMonth }: Props) {
           {nonExpenseRows.length > 0 && (
             <div className="bg-white border border-violet-200 rounded-2xl p-5 shadow-sm space-y-3">
               <div className="flex items-center justify-between gap-2 flex-wrap">
-                <h4 className="text-sm font-extrabold text-slate-900">Non-expense cash movements</h4>
+                <h4 className={text.value}>Non-expense cash movements</h4>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${CLASSIFICATION_BADGE.non_expense_cash_movement}`}>
                   {CLASSIFICATION_LABEL.non_expense_cash_movement}
                 </span>

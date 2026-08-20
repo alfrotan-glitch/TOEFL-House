@@ -217,7 +217,7 @@ export default function VisitorDeskPanel({
 
         {/* Inner Tabs */}
         <div className="flex border-b border-slate-150 text-[11px] font-extrabold px-6 shrink-0">
-          <button onClick={() => setDeskTab('details')} className={`pb-2.5 pr-4 transition-all cursor-pointer ${deskTab === 'details' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-slate-500'}`}>Profile & Follow-up</button>
+          <button onClick={() => setDeskTab('details')} className={`pb-2.5 pe-4 transition-all cursor-pointer ${deskTab === 'details' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-slate-500'}`}>Profile & Follow-up</button>
           <button onClick={() => setDeskTab('logs')} className={`pb-2.5 px-4 transition-all cursor-pointer flex items-center gap-1 ${deskTab === 'logs' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-slate-500'}`}><PhoneCall className="w-3.5 h-3.5" /> Call History ({visitor.followUpHistory?.length || 0})</button>
         </div>
 
@@ -267,12 +267,12 @@ export default function VisitorDeskPanel({
                     <div><label className="block text-slate-500 font-bold text-[10px] mb-0.5">Father's name:</label><input type="text" value={visitor.fatherName || ''} onChange={(e) => updateVisitor(visitor.id, { fatherName: e.target.value })} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px]" placeholder="e.g. Abdul Khaliq" /></div>
                     <div><label className="block text-slate-500 font-bold text-[10px] mb-0.5">Tazkira no.:</label><input type="text" value={visitor.tazkiraNo || ''} onChange={(e) => updateVisitor(visitor.id, { tazkiraNo: e.target.value })} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 font-mono text-[11px]" placeholder="Tazkira no." /></div>
                     <div><label className="block text-slate-500 font-bold text-[10px] mb-0.5">Date of birth / age:</label><input type="text" value={visitor.dob || ''} onChange={(e) => updateVisitor(visitor.id, { dob: e.target.value })} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px]" placeholder="1381/05/12" /></div>
-                    <div><label className="block text-slate-500 font-bold text-[10px] mb-0.5">WhatsApp:</label><input type="tel" value={visitor.whatsapp || ''} onChange={(e) => updateVisitor(visitor.id, { whatsapp: e.target.value })} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 font-mono text-[11px] text-left" placeholder="07xxxxxxx" /></div>
-                    <div><label className="block text-slate-500 font-bold text-[10px] mb-0.5">Email:</label><input type="email" value={visitor.email || ''} onChange={(e) => updateVisitor(visitor.id, { email: e.target.value })} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 font-mono text-[11px] text-left" placeholder="name@example.com" /></div>
+                    <div><label className="block text-slate-500 font-bold text-[10px] mb-0.5">WhatsApp:</label><input type="tel" value={visitor.whatsapp || ''} onChange={(e) => updateVisitor(visitor.id, { whatsapp: e.target.value })} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 font-mono text-[11px] text-start" placeholder="07xxxxxxx" /></div>
+                    <div><label className="block text-slate-500 font-bold text-[10px] mb-0.5">Email:</label><input type="email" value={visitor.email || ''} onChange={(e) => updateVisitor(visitor.id, { email: e.target.value })} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 font-mono text-[11px] text-start" placeholder="name@example.com" /></div>
                     <div><label className="block text-slate-500 font-bold text-[10px] mb-0.5">School / university:</label><input type="text" value={visitor.schoolOrUniversity || ''} onChange={(e) => updateVisitor(visitor.id, { schoolOrUniversity: e.target.value })} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px]" placeholder="School or university" /></div>
                     <div className="sm:col-span-2"><label className="block text-slate-500 font-bold text-[10px] mb-0.5">Home address:</label><input type="text" value={visitor.addressRegion || ''} onChange={(e) => updateVisitor(visitor.id, { addressRegion: e.target.value })} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px]" placeholder="Full address" /></div>
                     <div><label className="block text-slate-500 font-bold text-[10px] mb-0.5">Emergency contact name:</label><input type="text" value={visitor.emergencyContactName || ''} onChange={(e) => updateVisitor(visitor.id, { emergencyContactName: e.target.value })} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px]" placeholder="Father or brother name" /></div>
-                    <div><label className="block text-slate-500 font-bold text-[10px] mb-0.5">Emergency phone:</label><input type="tel" value={visitor.emergencyContactPhone || ''} onChange={(e) => updateVisitor(visitor.id, { emergencyContactPhone: e.target.value })} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 font-mono text-[11px] text-left" placeholder="07xxxxxxx" /></div>
+                    <div><label className="block text-slate-500 font-bold text-[10px] mb-0.5">Emergency phone:</label><input type="tel" value={visitor.emergencyContactPhone || ''} onChange={(e) => updateVisitor(visitor.id, { emergencyContactPhone: e.target.value })} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 font-mono text-[11px] text-start" placeholder="07xxxxxxx" /></div>
                   </div>
                 </div>
 
@@ -312,7 +312,7 @@ export default function VisitorDeskPanel({
 
               <div className="space-y-3">
                 <h5 className="font-black text-slate-400 text-[10px] uppercase tracking-wider">Follow-up history:</h5>
-                <div className="space-y-2 max-h-60 overflow-y-auto pr-0.5">
+                <div className="space-y-2 max-h-60 overflow-y-auto pe-0.5">
                   {(!visitor.followUpHistory || visitor.followUpHistory.length === 0) ? (
                     <p className="text-[11px] text-slate-400 italic text-center py-8 bg-slate-50/50 rounded-xl">No follow-ups yet.</p>
                   ) : (

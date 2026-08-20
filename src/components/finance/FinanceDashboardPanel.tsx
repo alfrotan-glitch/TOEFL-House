@@ -5,6 +5,7 @@
  * approvals, reconciliation health, a 14-day trend and a role-aware
  * "how to work" playbook. No figures are computed client-side.
  */
+import { text } from '../../design-system/styles';
 import React from 'react';
 import {
   Wallet, PiggyBank, TrendingUp, TrendingDown, Receipt, AlertTriangle,
@@ -51,7 +52,7 @@ export default function FinanceDashboardPanel(props: FinanceDashboardPanelProps)
   if (loading && !dashboard) {
     return (
       <div className="flex items-center justify-center py-16 text-xs text-slate-400 font-semibold">
-        <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> Loading the finance command center…
+        <RefreshCw className="w-4 h-4 me-2 animate-spin" /> Loading the finance command center…
       </div>
     );
   }
@@ -59,7 +60,7 @@ export default function FinanceDashboardPanel(props: FinanceDashboardPanelProps)
   if (!dashboard) {
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-xs text-slate-500">
-        The finance dashboard could not be loaded. <button type="button" onClick={onRefresh} className="text-indigo-600 font-bold cursor-pointer ml-1">Retry</button>
+        The finance dashboard could not be loaded. <button type="button" onClick={onRefresh} className="text-indigo-600 font-bold cursor-pointer ms-1">Retry</button>
       </div>
     );
   }
@@ -92,7 +93,7 @@ export default function FinanceDashboardPanel(props: FinanceDashboardPanelProps)
               <div key={item.id} className="flex items-center justify-between gap-3 bg-white border border-amber-100 rounded-xl px-3 py-2">
                 <div className="min-w-0">
                   <div className="text-[11px] font-bold text-slate-800 truncate">{item.title}</div>
-                  <div className="text-[10px] text-slate-400">{item.requester} · {item.date}</div>
+                  <div className={text.meta}>{item.requester} · {item.date}</div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <span className="text-[11px] font-mono font-extrabold text-slate-900">{formatAFN(item.amount)}</span>
@@ -168,7 +169,7 @@ export default function FinanceDashboardPanel(props: FinanceDashboardPanelProps)
         <div className="flex items-center gap-2 text-[11px] text-slate-500">
           <Landmark className="w-4 h-4 text-indigo-600" />
           <span className="font-bold text-slate-700">{roleLabel}</span> — viewing <span className="font-bold text-indigo-700">{scopeLabel}</span>
-          <button type="button" onClick={onRefresh} className="ml-1 px-2 py-1 rounded-lg bg-white border border-slate-200 hover:border-indigo-300 text-[10px] font-bold text-slate-500 hover:text-indigo-700 cursor-pointer flex items-center gap-1"><RefreshCw className="w-3 h-3" /> Refresh</button>
+          <button type="button" onClick={onRefresh} className="ms-1 px-2 py-1 rounded-lg bg-white border border-slate-200 hover:border-indigo-300 text-[10px] font-bold text-slate-500 hover:text-indigo-700 cursor-pointer flex items-center gap-1"><RefreshCw className="w-3 h-3" /> Refresh</button>
         </div>
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={() => onGo('invoices')} className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold cursor-pointer flex items-center gap-1.5"><Receipt className="w-3.5 h-3.5" /> Record payment</button>

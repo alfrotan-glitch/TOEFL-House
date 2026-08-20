@@ -107,7 +107,6 @@ function DefaultFallback({
   return (
     <div
       className="min-h-screen w-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-rose-50/30 to-slate-100 p-4"
-      dir="ltr"
     >
       <div className="max-w-2xl w-full bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden">
         {/* Header */}

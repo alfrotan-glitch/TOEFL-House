@@ -246,7 +246,7 @@ function TestEditor({ test, isNew, rubrics, setTest, onCancel, onSave, saving }:
 
       {/* Sections */}
       <div className="mt-5">
-        <div className="flex items-center justify-between"><label className={labelCls}>Sections / tracks / passages</label><button onClick={() => set({ sections: [...test.sections, emptySection()] })} className="text-[10px] font-black text-indigo-600"><Plus className="w-3 h-3 inline mr-0.5" /> Add section</button></div>
+        <div className="flex items-center justify-between"><label className={labelCls}>Sections / tracks / passages</label><button onClick={() => set({ sections: [...test.sections, emptySection()] })} className="text-[10px] font-black text-indigo-600"><Plus className="w-3 h-3 inline me-0.5" /> Add section</button></div>
         <div className="space-y-2">
           {(test.sections || []).map((s: Section, i: number) => (
             <div key={i} className="rounded-xl border border-slate-100 bg-slate-50 p-3 grid grid-cols-1 md:grid-cols-6 gap-2">
@@ -265,7 +265,7 @@ function TestEditor({ test, isNew, rubrics, setTest, onCancel, onSave, saving }:
 
       {/* Questions */}
       <div className="mt-5">
-        <div className="flex items-center justify-between"><label className={labelCls}>Questions</label><button onClick={() => set({ questions: [...test.questions, emptyQuestion()] })} className="text-[10px] font-black text-indigo-600"><Plus className="w-3 h-3 inline mr-0.5" /> Add question</button></div>
+        <div className="flex items-center justify-between"><label className={labelCls}>Questions</label><button onClick={() => set({ questions: [...test.questions, emptyQuestion()] })} className="text-[10px] font-black text-indigo-600"><Plus className="w-3 h-3 inline me-0.5" /> Add question</button></div>
         <div className="space-y-2">
           {(test.questions || []).map((q: Question, i: number) => (
             <div key={i} className="rounded-xl border border-slate-100 bg-slate-50 p-3 space-y-2">

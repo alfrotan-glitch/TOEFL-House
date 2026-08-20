@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { control, text } from '../../design-system/styles';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Visitor, Class, Branch, ConversionEligibility } from '../../types';
 import { formatAFN } from '../../utils/format';
@@ -219,11 +220,11 @@ export default function ConvertToStudentModal({
     const statusStyle = STATUS_COLORS[result.status || 'issued'] || STATUS_COLORS.issued;
     return (
       <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-200" id="convert-receipt-modal">
-        <div className="bg-white border border-slate-200 rounded-2xl shadow-xl w-full max-w-sm text-xs space-y-4 text-left" dir="ltr">
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-xl w-full max-w-sm text-xs space-y-4 text-start">
           <div className="flex justify-between items-center border-b border-slate-100 pb-3 px-5 pt-5">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center"><CheckCircle2 size={18} className="text-emerald-600" /></div>
-              <div><h3 className="font-extrabold text-slate-900 text-sm">Enrollment Complete</h3><p className="text-[10px] text-slate-400">Student registered & invoice created</p></div>
+              <div><h3 className="font-extrabold text-slate-900 text-sm">Enrollment Complete</h3><p className={text.meta}>Student registered & invoice created</p></div>
             </div>
             <button onClick={onClose} className="text-slate-400 hover:text-slate-600 cursor-pointer"><X size={16} /></button>
           </div>
@@ -231,13 +232,13 @@ export default function ConvertToStudentModal({
           <div ref={receiptRef} className="mx-5 bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
             <div className="text-center pb-2.5 border-b border-dashed border-slate-300">
               <p className="font-black text-slate-900 text-sm tracking-wide">{BRAND_NAME}</p>
-              <p className="text-[10px] text-slate-400">Registration Receipt</p>
+              <p className={text.meta}>Registration Receipt</p>
             </div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
-              <div className="text-slate-500">Receipt #</div><div className="font-mono font-bold text-right">{result.receiptNumber}</div>
-              <div className="text-slate-500">Student Code</div><div className="font-mono font-bold text-right">{result.studentCode}</div>
-              <div className="text-slate-500">Invoice #</div><div className="font-mono font-bold text-right">{result.invoiceNumber}</div>
-              <div className="text-slate-500">Date</div><div className="font-mono text-right">{new Date().toISOString().slice(0, 10)}</div>
+              <div className="text-slate-500">Receipt #</div><div className="font-mono font-bold text-end">{result.receiptNumber}</div>
+              <div className="text-slate-500">Student Code</div><div className="font-mono font-bold text-end">{result.studentCode}</div>
+              <div className="text-slate-500">Invoice #</div><div className="font-mono font-bold text-end">{result.invoiceNumber}</div>
+              <div className="text-slate-500">Date</div><div className="font-mono text-end">{new Date().toISOString().slice(0, 10)}</div>
             </div>
             <div className="border-t border-dashed border-slate-300 pt-2.5 space-y-1.5 text-[11px]">
               <div className="flex justify-between text-slate-500"><span>Student</span><span className="font-bold text-slate-800">{convertingVisitor.fullName}</span></div>
@@ -274,7 +275,7 @@ export default function ConvertToStudentModal({
 
   return (
     <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-200" id="convert-visitor-modal">
-      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xl w-full max-w-md text-xs space-y-4 text-left" dir="ltr">
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xl w-full max-w-md text-xs space-y-4 text-start">
         <div className="flex justify-between items-start border-b border-slate-100 pb-2.5">
           <div><h3 className="font-extrabold text-slate-900 text-sm">Finalize enrollment</h3><p className="text-[10px] text-slate-400 mt-0.5">Convert {convertingVisitor.fullName} to student — invoice & payment in one step</p></div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 cursor-pointer"><X size={16} /></button>
@@ -318,7 +319,7 @@ export default function ConvertToStudentModal({
           ) : null}
 
           <div>
-            <label className="block text-slate-600 font-medium mb-1">Assign to class:</label>
+            <label className={text.label}>Assign to class:</label>
             <select
               value={classId}
               onChange={(e) => {
@@ -355,11 +356,11 @@ export default function ConvertToStudentModal({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-slate-600 font-medium mb-1">Gross tuition (AFN):</label>
+              <label className={text.label}>Gross tuition (AFN):</label>
               <input type="number" value={semesterFee} onChange={(e) => setSemesterFee(Number(e.target.value))} className={inputCls} min={0} required />
             </div>
             <div>
-              <label className="block text-slate-600 font-medium mb-1">Discount (%):</label>
+              <label className={text.label}>Discount (%):</label>
               <input type="number" value={discountPercent} onChange={(e) => setDiscountPercent(Number(e.target.value))} className={inputCls} min={0} max={100} />
             </div>
           </div>
@@ -374,11 +375,11 @@ export default function ConvertToStudentModal({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-slate-600 font-medium mb-1">Amount paid today (AFN):</label>
+              <label className={text.label}>Amount paid today (AFN):</label>
               <input type="number" value={amountPaid} onChange={(e) => setAmountPaid(Number(e.target.value))} className={inputCls} min={0} required />
             </div>
             <div>
-              <label className="block text-slate-600 font-medium mb-1">Payment method:</label>
+              <label className={text.label}>Payment method:</label>
               <div className="flex gap-1.5 mt-0.5">
                 {PAYMENT_METHODS.map((pm) => (
                   <button key={pm.value} type="button" onClick={() => setPaymentMethod(pm.value)}
@@ -391,15 +392,15 @@ export default function ConvertToStudentModal({
           </div>
 
           <div>
-            <label className="block text-slate-600 font-medium mb-1">Registration branch:</label>
+            <label className={text.label}>Registration branch:</label>
             <select value={conversionBranchId || convertingVisitor.branchId || activeBranchId} onChange={(e) => setConversionBranchId(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 cursor-pointer text-slate-800 font-bold focus:outline-none">
               {branches && branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
           </div>
 
           <div>
-            <label className="block text-slate-600 font-medium mb-1">Enrollment admin notes:</label>
-            <input type="text" placeholder="e.g. Fee paid in full at reception in cash." value={convNotes} onChange={(e) => setConvNotes(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2" />
+            <label className={text.label}>Enrollment admin notes:</label>
+            <input type="text" placeholder="e.g. Fee paid in full at reception in cash." value={convNotes} onChange={(e) => setConvNotes(e.target.value)} className={control.input} />
           </div>
 
           {safeAmountPaid > netAmount && netAmount > 0 && (

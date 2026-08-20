@@ -145,7 +145,7 @@ export default function BusinessOperatingSystemView({
   ];
 
   return (
-    <div className="space-y-6 text-left animate-in fade-in duration-500" dir="ltr">
+    <div className="space-y-6 text-start animate-in fade-in duration-500">
       
       {/* System Warnings */}
       {warnings.length > 0 && (
@@ -232,7 +232,7 @@ export default function BusinessOperatingSystemView({
         
         <div className="relative w-full h-3 bg-slate-200/70 rounded-full overflow-hidden">
           <div
-            className={`absolute top-0 left-0 h-full rounded-full transition-all duration-1000 ease-out ${
+            className={`absolute top-0 start-0 h-full rounded-full transition-all duration-1000 ease-out ${
               isPastBreakEven 
                 ? 'bg-gradient-to-r from-emerald-400 to-emerald-600 shadow-[0_0_10px_rgba(16,185,129,0.4)]' 
                 : 'bg-gradient-to-r from-amber-400 to-amber-600 shadow-[0_0_10px_rgba(245,158,11,0.4)]'
@@ -442,21 +442,21 @@ export default function BusinessOperatingSystemView({
             <table className="w-full text-xs min-w-[400px]">
               <thead>
                 <tr className="text-slate-500 border-b border-slate-200/70">
-                  <th className="text-left font-bold pb-3 pl-2 uppercase tracking-wider text-[10px]">Source</th>
+                  <th className="text-start font-bold pb-3 ps-2 uppercase tracking-wider text-[10px]">Source</th>
                   <th className="text-center font-bold pb-3 uppercase tracking-wider text-[10px]">Leads</th>
                   <th className="text-center font-bold pb-3 uppercase tracking-wider text-[10px]">Tests</th>
                   <th className="text-center font-bold pb-3 uppercase tracking-wider text-[10px]">Enrolls</th>
-                  <th className="text-right font-bold pb-3 pr-2 uppercase tracking-wider text-[10px]">Revenue</th>
+                  <th className="text-end font-bold pb-3 pe-2 uppercase tracking-wider text-[10px]">Revenue</th>
                 </tr>
               </thead>
               <tbody>
                 {funnel.funnel.map((f) => (
                   <tr key={f.source} className="border-b border-slate-100/80 hover:bg-slate-50/50 transition-colors group">
-                    <td className="py-3 pl-2 font-bold text-slate-800">{f.source}</td>
+                    <td className="py-3 ps-2 font-bold text-slate-800">{f.source}</td>
                     <td className="text-center font-mono text-slate-600 tabular-nums">{f.leads}</td>
                     <td className="text-center font-mono text-slate-600 tabular-nums">{f.placementTests}</td>
                     <td className="text-center font-mono font-bold text-indigo-600 tabular-nums">{f.registrations}</td>
-                    <td className="text-right font-mono font-bold text-emerald-600 pr-2 tabular-nums">{formatAFN(f.revenue)}</td>
+                    <td className="text-end font-mono font-bold text-emerald-600 pe-2 tabular-nums">{formatAFN(f.revenue)}</td>
                   </tr>
                 ))}
               </tbody>

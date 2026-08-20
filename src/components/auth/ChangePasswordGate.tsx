@@ -33,7 +33,7 @@ export default function ChangePasswordGate() {
   };
 
   return (
-    <div className="flex h-screen w-screen items-center justify-center bg-slate-900 font-sans select-none" dir="ltr">
+    <div className="flex h-screen w-screen items-center justify-center bg-slate-900 font-sans select-none">
       <div className="w-full max-w-sm mx-4">
         <form
           onSubmit={handleSubmit}

@@ -60,7 +60,7 @@ export default function Sidebar({
   };
 
   // Premium Midnight Glass shell
-  const shellClass = `flex flex-col h-full z-30 bg-[#0c0a12] text-slate-300 border-r border-white/[0.06] shadow-2xl shadow-black/50 transition-all duration-300 ease-in-out ${isExpanded ? 'w-64' : 'w-[76px]'}`;
+  const shellClass = `flex flex-col h-full z-30 bg-[#0c0a12] text-slate-300 border-e border-white/[0.06] shadow-2xl shadow-black/50 transition-all duration-300 ease-in-out ${isExpanded ? 'w-64' : 'w-[76px]'}`;
 
   return (
     <>

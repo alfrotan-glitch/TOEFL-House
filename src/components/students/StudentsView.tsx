@@ -3,6 +3,7 @@
  *
  * TOEFL House ERP — Student Management & Tuition Portal
  */
+import { text } from '../../design-system/styles';
 import {api} from '../../api/client';
 import { useInvalidate } from '../../state/serverStateFreshness';
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
@@ -299,12 +300,12 @@ export default function StudentsView({
   const btnDanger = "px-4 py-2 bg-rose-600 text-white rounded-lg font-semibold hover:bg-rose-700 cursor-pointer shadow-sm text-xs";
 
   return (
-    <div className="space-y-6 font-sans text-left" dir="ltr">
+    <div className="space-y-6 font-sans text-start">
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-center justify-between border-b border-slate-200 pb-4 gap-4">
         <div>
           <h2 className="text-xl font-extrabold text-slate-900 flex items-center gap-2"><GraduationCap className="w-6 h-6 text-indigo-600" /> Student Management</h2>
-          <p className="text-xs text-slate-500 mt-1">Registration, smart payments, and concurrent enrollments</p>
+          <p className={text.hint}>Registration, smart payments, and concurrent enrollments</p>
         </div>
         <div className="flex gap-2 bg-slate-100 p-1 rounded-xl border border-slate-200">
           <button onClick={() => { setSubTab('list'); setSelectedStudent(null); }} className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg cursor-pointer ${subTab === 'list' ? 'bg-white text-indigo-600' : 'text-slate-600'}`}><Users className="w-4 h-4" /> List</button>
@@ -317,8 +318,8 @@ export default function StudentsView({
           {/* Search & Filter */}
           <div className="flex flex-col sm:flex-row items-center gap-3">
             <div className="relative flex-1 w-full">
-              <input type="text" placeholder="Search by name, code, phone…" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-3 pr-10 py-2.5 text-xs focus:outline-none font-semibold" />
-              <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-3.5" />
+              <input type="text" placeholder="Search by name, code, phone…" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl ps-3 pe-10 py-2.5 text-xs focus:outline-none font-semibold" />
+              <Search className="w-4 h-4 text-slate-400 absolute end-3.5 top-3.5" />
             </div>
             <div className="flex flex-wrap items-center gap-1.5 text-xs font-bold">
               <Filter className="w-4 h-4 text-slate-400" />
@@ -330,7 +331,7 @@ export default function StudentsView({
                 {classes.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
               <button type="button" onClick={exportCsv} disabled={exporting} aria-busy={exporting}
-                className="ml-1 px-3 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold text-xs cursor-pointer flex items-center gap-1">
+                className="ms-1 px-3 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold text-xs cursor-pointer flex items-center gap-1">
                 <Download className="w-3.5 h-3.5" /> {exporting ? 'Exporting…' : 'Export CSV'}
               </button>
             </div>
@@ -343,9 +344,9 @@ export default function StudentsView({
 
           {/* Table */}
           <div className="overflow-x-auto">
-            <table className="w-full text-xs text-left border-collapse">
+            <table className="w-full text-xs text-start border-collapse">
               <thead><tr className="border-b border-slate-100 text-slate-500 font-bold">
-                <th className="py-3 px-4">Code</th><th className="py-3 px-4">Full Name</th><th className="py-3 px-4">Phone</th><th className="py-3 px-4 text-center">Status</th><th className="py-3 px-4 text-center">Debt</th><th className="py-3 px-4 text-left">Actions</th>
+                <th className="py-3 px-4">Code</th><th className="py-3 px-4">Full Name</th><th className="py-3 px-4">Phone</th><th className="py-3 px-4 text-center">Status</th><th className="py-3 px-4 text-center">Debt</th><th className="py-3 px-4 text-start">Actions</th>
               </tr></thead>
               <tbody className="divide-y divide-slate-50 text-slate-600 font-semibold">
                 {(searchResults !== null ? searchResults : filteredStudents).map((student) => {
@@ -359,7 +360,7 @@ export default function StudentsView({
                       <td className="py-3.5 px-4 text-center">
                         {fin.debt <= 0 ? <span className="text-emerald-600 font-bold">Paid ✅</span> : <span className="text-amber-700 bg-amber-50 px-2 py-1 rounded-full text-[10px] font-bold">{formatAFN(fin.debt)}</span>}
                       </td>
-                      <td className="py-3.5 px-4 text-left" onClick={(e) => e.stopPropagation()}>
+                      <td className="py-3.5 px-4 text-start" onClick={(e) => e.stopPropagation()}>
                         <div className="flex gap-1.5">
                           <button onClick={() => setSelectedStudent(student)} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-indigo-600 cursor-pointer" title="View Profile"><Eye className="w-4 h-4" /></button>
                           {isRegistrar && (
@@ -421,9 +422,9 @@ export default function StudentsView({
               <button onClick={() => setPaymentStudent(null)} className="text-slate-400 font-bold cursor-pointer">✕</button>
             </div>
             
-            <form onSubmit={handleSmartPayment} className="space-y-3 text-left">
+            <form onSubmit={handleSmartPayment} className="space-y-3 text-start">
               <div>
-                <label className="block text-slate-600 font-medium mb-1">Payment Category:</label>
+                <label className={text.label}>Payment Category:</label>
                 <select value={payCategory} onChange={(e) => { setPayCategory(e.target.value as any); setPayAmount(0); setPayReason(''); }} className={inputCls}>
                   <option value="fee">Class Tuition Fee</option>
                   <option value="installment">Settle Installment</option>
@@ -436,7 +437,7 @@ export default function StudentsView({
               {/* Dynamic Fields based on Category */}
               {payCategory === 'fee' && (
                 <div>
-                  <label className="block text-slate-600 font-medium mb-1">Select Semester:</label>
+                  <label className={text.label}>Select Semester:</label>
                   <select value={paySemesterId} onChange={(e) => { setPaySemesterId(e.target.value); const sem = paymentStudent.semesters?.find(s => s.id === e.target.value); if (sem) { const fin = getStudentFinance(paymentStudent.id); setPayAmount(fin.debt); } }} className={inputCls} required>
                     <option value="">-- Select Semester --</option>
                     {paymentStudent.semesters?.map(sem => <option key={sem.id} value={sem.id}>{sem.semesterName} ({formatAFN(sem.feeAmount)})</option>)}
@@ -446,7 +447,7 @@ export default function StudentsView({
 
               {payCategory === 'installment' && (
                 <div>
-                  <label className="block text-slate-600 font-medium mb-1">Select Installment:</label>
+                  <label className={text.label}>Select Installment:</label>
                   <select value={payInstallmentId} onChange={(e) => { setPayInstallmentId(e.target.value); const inst = paymentStudent.installmentPlan?.find(i => i.id === e.target.value); if (inst) setPayAmount(inst.amount); }} className={inputCls} required>
                     <option value="">-- Pending Installments --</option>
                     {paymentStudent.installmentPlan?.filter(i => i.status !== 'paid').map(inst => <option key={inst.id} value={inst.id}>{inst.dueDate} - {formatAFN(inst.amount)}</option>)}
@@ -456,7 +457,7 @@ export default function StudentsView({
 
               {payCategory === 'other' && (
                 <div>
-                  <label className="block text-slate-600 font-medium mb-1">Reason for this charge:</label>
+                  <label className={text.label}>Reason for this charge:</label>
                   <input
                     type="text"
                     value={payReason}
@@ -475,7 +476,7 @@ export default function StudentsView({
 
               {payCategory === 'book' && (
                 <div>
-                  <label className="block text-slate-600 font-medium mb-1">Select Book:</label>
+                  <label className={text.label}>Select Book:</label>
                   <select value={payBookId} onChange={(e) => { setPayBookId(e.target.value); const b = books.find(b => b.id === e.target.value); if (b) setPayAmount(b.price); }} className={inputCls} required>
                     <option value="">-- Select Book --</option>
                     {books.map(b => <option key={b.id} value={b.id}>{b.title} (Stock: {b.stock}) - {formatAFN(b.price)}</option>)}
@@ -484,7 +485,7 @@ export default function StudentsView({
               )}
 
               <div>
-                <label className="block text-slate-600 font-medium mb-1">Payment method:</label>
+                <label className={text.label}>Payment method:</label>
                 <select value={payMethod} onChange={(e) => setPayMethod(e.target.value as 'cash' | 'card' | 'bank_transfer')} className={inputCls}>
                   <option value="cash">Cash</option>
                   <option value="card">Card</option>
@@ -514,7 +515,7 @@ export default function StudentsView({
               })()}
 
               <div>
-                <label className="block text-slate-600 font-medium mb-1">Amount (AFN):</label>
+                <label className={text.label}>Amount (AFN):</label>
                 <input
                   type="number"
                   value={payAmount}
@@ -551,7 +552,7 @@ export default function StudentsView({
               {classes.filter(c => c.status === 'active' && c.branchId === activeStudentInfo?.branchId).map(c => <option key={c.id} value={c.id}>{c.name} ({c.level}) - Fee: {formatAFN(c.fee)}</option>)}
             </select>
             <div>
-              <label className="block text-slate-600 font-medium mb-1">Pay Now (AFN):</label>
+              <label className={text.label}>Pay Now (AFN):</label>
               <input type="number" value={extraClassPaidNow} onChange={(e) => setExtraClassPaidNow(Number(e.target.value))} className={`${inputCls} font-mono`} min={0} />
             </div>
             <div className="flex gap-2 justify-end pt-3 border-t">

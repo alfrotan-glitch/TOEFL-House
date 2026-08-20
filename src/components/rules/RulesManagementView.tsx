@@ -120,7 +120,7 @@ export default function RulesManagementView({
   };
 
   return (
-    <div className="space-y-6 font-sans text-left bg-slate-50 min-h-screen p-4 md:p-8" dir="ltr">
+    <div className="space-y-6 font-sans text-start bg-slate-50 min-h-screen p-4 md:p-8">
       
       <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm flex flex-col md:flex-row justify-between items-center gap-4">
         <div className="flex items-center gap-4">

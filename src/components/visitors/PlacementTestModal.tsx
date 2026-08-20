@@ -335,7 +335,7 @@ export default function PlacementTestModal({ visitor, onClose, onCompleted, trig
                 const auto = contentAutoScore[r.component_key];
                 const isActive = r.status==='pending'||r.status==='in_progress';
                 return (
-                  <button key={r.component_key} onClick={()=>setActiveKey(r.component_key)} className={`text-left rounded-xl border p-3 transition ${activeKey===r.component_key?'border-indigo-400 bg-indigo-50/50 shadow-sm':'border-slate-200 bg-white hover:border-slate-300'}`}>
+                  <button key={r.component_key} onClick={()=>setActiveKey(r.component_key)} className={`text-start rounded-xl border p-3 transition ${activeKey===r.component_key?'border-indigo-400 bg-indigo-50/50 shadow-sm':'border-slate-200 bg-white hover:border-slate-300'}`}>
                     <div className="flex items-center justify-between gap-2">
                       <span className="flex items-center gap-1.5 text-[11px] font-black text-slate-700">{componentIcon[r.component_type]}<span className="truncate">{r.label}</span></span>
                       <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase ${r.status==='completed'?'bg-emerald-100 text-emerald-700':r.status==='waived'?'bg-slate-100 text-slate-500':r.status==='timed_out'||timedOut?'bg-rose-100 text-rose-700':isActive?'bg-indigo-100 text-indigo-700':'bg-slate-100 text-slate-400'}`}>{r.status==='timed_out'||timedOut?'timed out':r.status}</span>
@@ -343,7 +343,7 @@ export default function PlacementTestModal({ visitor, onClose, onCompleted, trig
                     <div className="mt-2 flex items-center gap-2 text-[10px] text-slate-500">
                       {r.deadline_at ? <span className={`flex items-center gap-1 font-mono font-bold ${timedOut?'text-rose-600':remaining!=null&&remaining<120?'text-amber-600':'text-slate-600'}`}><Timer className="w-3 h-3"/>{fmtRemaining(remaining)}</span> : <span className="flex items-center gap-1"><Clock3 className="w-3 h-3"/>no timer</span>}
                       {auto && <span className="text-slate-400">{auto.answered}/{auto.max? (auto.max/ (auto.earned?1:1)):0}</span>}
-                      {c && <span className="ml-auto font-bold">{r.score ?? '–'}/{c.maxScore}</span>}
+                      {c && <span className="ms-auto font-bold">{r.score ?? '–'}/{c.maxScore}</span>}
                     </div>
                   </button>
                 );

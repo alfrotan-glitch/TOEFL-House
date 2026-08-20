@@ -213,7 +213,7 @@ export default function StudentProfileDrawer({
   };
 
   return (
-    <div className="space-y-6 text-sm text-left animate-in fade-in slide-in-from-bottom-4 duration-300">
+    <div className="space-y-6 text-sm text-start animate-in fade-in slide-in-from-bottom-4 duration-300">
       
       {/* Header Info & Actions */}
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between border-b border-slate-200 pb-4 gap-3">
@@ -310,7 +310,7 @@ export default function StudentProfileDrawer({
           <div className="grid grid-cols-3 text-[10px] text-slate-500 font-bold">
             <div><span className="block text-slate-400">Total</span><span className="font-mono text-slate-800 text-xs">{formatAFN(Number(totalTuition||0))}</span></div>
             <div className="text-center"><span className="block text-slate-400">Paid</span><span className="font-mono text-emerald-600 text-xs">{formatAFN(Number(totalPaidFees||0))}</span></div>
-            <div className="text-right"><span className="block text-slate-400">Due</span><span className={`font-mono text-xs ${remainingDebt > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>{formatAFN(Number(remainingDebt||0))}</span></div>
+            <div className="text-end"><span className="block text-slate-400">Due</span><span className={`font-mono text-xs ${remainingDebt > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>{formatAFN(Number(remainingDebt||0))}</span></div>
           </div>
         </div>
 
@@ -383,7 +383,7 @@ export default function StudentProfileDrawer({
               )}
 
               {/* Payment History */}
-              <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
+              <div className="space-y-2 max-h-48 overflow-y-auto pe-2">
                 {payments.filter(p => p.studentId === student.id).map(pay => (
                   <div key={pay.id} className="flex justify-between items-center text-[11px] bg-slate-50 border border-slate-100 p-2.5 rounded-xl">
                     <div><p className="font-black text-slate-800 text-[10px]">{pay.category === 'fee' ? 'Tuition' : pay.category === 'refund' ? 'Refund' : pay.category}</p><p className="text-[9px] text-slate-400 font-mono">{pay.date} • {pay.receiptNumber}</p></div>

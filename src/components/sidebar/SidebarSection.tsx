@@ -39,7 +39,7 @@ export default function SidebarSection({ section, isOpen, onToggle, currentTab, 
         aria-expanded={isOpen}
         className="group w-full flex items-center gap-2 px-3 py-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-slate-500 hover:text-slate-300 transition-colors cursor-pointer focus:outline-none rounded-md"
       >
-        <span className="flex-1 text-left truncate">
+        <span className="flex-1 text-start truncate">
           {section.mark ? `${section.mark} ` : ''}
           {section.label}
         </span>

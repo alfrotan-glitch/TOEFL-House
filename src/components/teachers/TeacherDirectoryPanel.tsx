@@ -52,7 +52,7 @@ export function TeacherDirectoryPanel({
                       <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-400">Not evaluated</span>
                     )}
                   </div>
-                  <p className="text-[10px] text-slate-400 mt-1 ml-9">
+                  <p className="text-[10px] text-slate-400 mt-1 ms-9">
                     {(teacher.status || 'active').toUpperCase()}
                     {teacher.specialization ? ` · ${teacher.specialization}` : ''}
                   </p>
@@ -66,11 +66,11 @@ export function TeacherDirectoryPanel({
                 </span>
               </div>
 
-              <div className="space-y-1 text-[11px] text-slate-600 pl-9">
+              <div className="space-y-1 text-[11px] text-slate-600 ps-9">
                 {teacher.phone && <p className="flex items-center gap-1.5"><Phone className="w-3 h-3 text-slate-400" />{teacher.phone}</p>}
               </div>
 
-              <div className="flex items-center justify-between border-t border-slate-100 pt-3 pl-9" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between border-t border-slate-100 pt-3 ps-9" onClick={(e) => e.stopPropagation()}>
                 <div>
                   <p className="text-[10px] text-slate-400 font-semibold">Monthly Total</p>
                   <p className="text-sm font-extrabold text-indigo-700 font-mono">

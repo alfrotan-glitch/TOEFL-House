@@ -4,6 +4,7 @@
  * Class Detail Drawer (LMS Core)
  * Manages Roster, Gradebook, and Class Lifecycle (Activation & Completion).
  */
+import { control, text } from '../../design-system/styles';
 import React, { useState, useEffect, useCallback } from 'react';
 import {X, Settings, Plus, Save, Lock, Play, CheckCircle, Loader2} from 'lucide-react';
 import {Class} from '../../types';
@@ -167,7 +168,7 @@ export function ClassDetailDrawer({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/50 backdrop-blur-sm" dir="ltr">
+    <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/50 backdrop-blur-sm">
       <div className="bg-slate-50 w-full max-w-5xl h-full shadow-2xl flex flex-col animate-in slide-in-from-right duration-300">
         
         {/* Header */}
@@ -179,7 +180,7 @@ export function ClassDetailDrawer({
                 {classData.status}
               </span>
             </div>
-            <p className="text-xs text-slate-500 mt-1">
+            <p className={text.hint}>
               Level: {classData.level} · Fee: {classData.fee} AFN · Schedule: {classData.scheduleTime || 'N/A'}
             </p>
           </div>
@@ -227,12 +228,12 @@ export function ClassDetailDrawer({
                   {showAssessmentForm && (
                     <form onSubmit={handleCreateAssessment} className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-1 md:grid-cols-4 gap-3 items-end text-xs">
                       <div className="md:col-span-2">
-                        <label className="block text-slate-600 mb-1 font-medium">Title (e.g., Midterm Exam)</label>
-                        <input type="text" value={newAssessment.title} onChange={e => setNewAssessment({...newAssessment, title: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2" required />
+                        <label className={text.label}>Title (e.g., Midterm Exam)</label>
+                        <input type="text" value={newAssessment.title} onChange={e => setNewAssessment({...newAssessment, title: e.target.value})} className={control.input} required />
                       </div>
                       <div>
-                        <label className="block text-slate-600 mb-1 font-medium">Type</label>
-                        <select value={newAssessment.type} onChange={e => setNewAssessment({...newAssessment, type: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                        <label className={text.label}>Type</label>
+                        <select value={newAssessment.type} onChange={e => setNewAssessment({...newAssessment, type: e.target.value})} className={control.input}>
                           <option value="midterm">Midterm</option>
                           <option value="final">Final</option>
                           <option value="assignment">Assignment</option>
@@ -240,12 +241,12 @@ export function ClassDetailDrawer({
                         </select>
                       </div>
                       <div>
-                        <label className="block text-slate-600 mb-1 font-medium">Weight (%)</label>
-                        <input type="number" min={0} max={100} value={newAssessment.weight} onChange={e => setNewAssessment({...newAssessment, weight: Number(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2" required />
+                        <label className={text.label}>Weight (%)</label>
+                        <input type="number" min={0} max={100} value={newAssessment.weight} onChange={e => setNewAssessment({...newAssessment, weight: Number(e.target.value)})} className={control.input} required />
                       </div>
                       <div>
-                        <label className="block text-slate-600 mb-1 font-medium">Max Score</label>
-                        <input type="number" min={1} value={newAssessment.maxScore} onChange={e => setNewAssessment({...newAssessment, maxScore: Number(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2" required />
+                        <label className={text.label}>Max Score</label>
+                        <input type="number" min={1} value={newAssessment.maxScore} onChange={e => setNewAssessment({...newAssessment, maxScore: Number(e.target.value)})} className={control.input} required />
                       </div>
                       <div className="md:col-span-4 flex justify-end gap-2 pt-2 border-t border-slate-100 mt-2">
                         <button type="button" onClick={() => setShowAssessmentForm(false)} className="px-4 py-2 bg-slate-100 text-slate-600 rounded-lg font-semibold">Cancel</button>
@@ -258,10 +259,10 @@ export function ClassDetailDrawer({
 
                   <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
                     <div className="overflow-x-auto">
-                      <table className="w-full text-xs text-left border-collapse">
+                      <table className="w-full text-xs text-start border-collapse">
                         <thead className="bg-slate-50 border-b border-slate-200">
                           <tr>
-                            <th className="py-3 px-4 font-bold text-slate-700 sticky left-0 bg-slate-50 z-10">Student</th>
+                            <th className="py-3 px-4 font-bold text-slate-700 sticky start-0 bg-slate-50 z-10">Student</th>
                             {assessments.map(a => (
                               <th key={a.id} className="py-3 px-4 font-bold text-slate-700 text-center min-w-[120px]">
                                 {a.title}<br/>
@@ -281,7 +282,7 @@ export function ClassDetailDrawer({
                           ) : (
                             students.map(student => (
                               <tr key={student.id} className="hover:bg-slate-50/50">
-                                <td className="py-3 px-4 font-medium text-slate-800 sticky left-0 bg-white z-10">
+                                <td className="py-3 px-4 font-medium text-slate-800 sticky start-0 bg-white z-10">
                                   {student.full_name}
                                   <span className="block text-[10px] text-slate-400 font-mono">{student.student_code}</span>
                                 </td>
@@ -322,7 +323,7 @@ export function ClassDetailDrawer({
               {/* ROSTER TAB */}
               {activeTab === 'roster' && (
                 <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-                  <table className="w-full text-xs text-left">
+                  <table className="w-full text-xs text-start">
                     <thead className="bg-slate-50 border-b border-slate-200">
                       <tr>
                         <th className="py-3 px-4 font-bold text-slate-700">Student Name</th>

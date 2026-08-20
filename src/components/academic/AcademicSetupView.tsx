@@ -1,6 +1,7 @@
 /**
  * Academic Setup — Premium 3-Phase Wizard Hub
  */
+import { text } from '../../design-system/styles';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   BookOpen, Clock, DoorOpen, Layers, Plus, RefreshCw, CalendarRange,
@@ -249,7 +250,7 @@ export default function AcademicSetupView({ branchId, activeRole, permissionCode
   }
 
   return (
-    <div className="space-y-6 font-sans text-left bg-slate-50 min-h-screen p-4 md:p-8" dir="ltr">
+    <div className="space-y-6 font-sans text-start bg-slate-50 min-h-screen p-4 md:p-8">
       
       {/* Header */}
       <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-center gap-4">
@@ -321,7 +322,7 @@ export default function AcademicSetupView({ branchId, activeRole, permissionCode
             <div className="space-y-4">
               <div>
                 <h2 className="text-lg font-extrabold text-slate-900">Academic Terms & Calendar</h2>
-                <p className="text-xs text-slate-500 mt-1">Define semesters (e.g., Fall 2026) and their start/end dates. Sessions are auto-generated only within these dates.</p>
+                <p className={text.hint}>Define semesters (e.g., Fall 2026) and their start/end dates. Sessions are auto-generated only within these dates.</p>
               </div>
               <form className="bg-slate-50 border border-slate-200 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs items-end"
                 onSubmit={(e) => { e.preventDefault(); run(async () => { await api.post('/academic/terms', termForm); setTermForm(INITIAL_TERM_FORM); }); }}>
@@ -352,7 +353,7 @@ export default function AcademicSetupView({ branchId, activeRole, permissionCode
                       </>
                     ) : (
                       <>
-                        <div className="flex-1"><p className="font-bold">{tm.name} <span className="font-mono text-indigo-600">({tm.code})</span></p><p className="text-[10px] text-slate-500">Year {tm.year}{tm.startDate || tm.endDate ? ` · ${tm.startDate || '—'} → ${tm.endDate || '—'}` : ''}{!tm.endDate && <span className="ml-1 text-amber-600 font-bold">· no end date: sessions are unbounded</span>}</p></div>
+                        <div className="flex-1"><p className="font-bold">{tm.name} <span className="font-mono text-indigo-600">({tm.code})</span></p><p className="text-[10px] text-slate-500">Year {tm.year}{tm.startDate || tm.endDate ? ` · ${tm.startDate || '—'} → ${tm.endDate || '—'}` : ''}{!tm.endDate && <span className="ms-1 text-amber-600 font-bold">· no end date: sessions are unbounded</span>}</p></div>
                         <ToggleActive active={tm.isActive} disabled={busy} onToggle={() => run(async () => { await api.put(`/academic/terms/${tm.id}`, { isActive: !tm.isActive }); })} />
                         <button type="button" className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg" onClick={() => { setEditTermId(tm.id); setEditTerm({ year: tm.year, code: tm.code, name: tm.name, startDate: tm.startDate || '', endDate: tm.endDate || '' }); }}><Pencil className="w-3.5 h-3.5" /></button>
                       </>
@@ -365,7 +366,7 @@ export default function AcademicSetupView({ branchId, activeRole, permissionCode
 
           {tab === 'slots' && (
             <div className="space-y-4">
-              <div><h2 className="text-lg font-extrabold text-slate-900">Timetable Slots</h2><p className="text-xs text-slate-500 mt-1">Define class time slots (e.g., Sat-Wed 08:00-10:00) used for scheduling.</p></div>
+              <div><h2 className="text-lg font-extrabold text-slate-900">Timetable Slots</h2><p className={text.hint}>Define class time slots (e.g., Sat-Wed 08:00-10:00) used for scheduling.</p></div>
               <form className="bg-slate-50 border border-slate-200 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs items-end"
                 onSubmit={(e) => { e.preventDefault(); run(async () => { await api.post('/academic/time-slots', slotForm); setSlotForm({ code: '', label: '', startTime: '08:00', endTime: '09:30' }); }); }}>
                 <p className="col-span-2 sm:col-span-5 font-extrabold text-slate-800">New time slot</p>
@@ -403,7 +404,7 @@ export default function AcademicSetupView({ branchId, activeRole, permissionCode
 
           {tab === 'rooms' && (
             <div className="space-y-4">
-              <div><h2 className="text-lg font-extrabold text-slate-900">Physical Rooms</h2><p className="text-xs text-slate-500 mt-1">Define classrooms and their capacity. Classes are assigned to these rooms automatically.</p></div>
+              <div><h2 className="text-lg font-extrabold text-slate-900">Physical Rooms</h2><p className={text.hint}>Define classrooms and their capacity. Classes are assigned to these rooms automatically.</p></div>
               <form className="bg-slate-50 border border-slate-200 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs items-end"
                 onSubmit={(e) => { e.preventDefault(); run(async () => { await api.post('/academic/rooms', roomForm); setRoomForm({ code: '', name: '', capacity: 20 }); }); }}>
                 <p className="col-span-2 sm:col-span-4 font-extrabold text-slate-800">New room</p>
@@ -439,7 +440,7 @@ export default function AcademicSetupView({ branchId, activeRole, permissionCode
 
           {tab === 'catalog' && (
             <div className="space-y-4">
-              <div><h2 className="text-lg font-extrabold text-slate-900">Programs & Levels</h2><p className="text-xs text-slate-500 mt-1">Create educational programs (e.g., TOEFL Prep) and their levels (Beginner, Advanced).</p></div>
+              <div><h2 className="text-lg font-extrabold text-slate-900">Programs & Levels</h2><p className={text.hint}>Create educational programs (e.g., TOEFL Prep) and their levels (Beginner, Advanced).</p></div>
               <form className="bg-slate-50 border border-slate-200 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs items-end"
                 onSubmit={(e) => { e.preventDefault(); run(async () => { await api.post('/academic/programs', { name: progName, code: progCode || undefined, description: progDesc || undefined }); setProgName(''); setProgCode(''); setProgDesc(''); }); }}>
                 <div className="sm:col-span-4 font-extrabold text-slate-800 flex items-center gap-1.5"><Plus className="w-3.5 h-3.5 text-indigo-600" /> New program</div>
@@ -506,7 +507,7 @@ export default function AcademicSetupView({ branchId, activeRole, permissionCode
                                 ) : (
                                   <div className="flex flex-wrap items-center gap-2">
                                     <div className="flex-1 min-w-[220px]">
-                                      <p className="font-bold text-slate-900 break-words"><span className="text-slate-400 mr-1">{l.order}.</span>{l.name} {l.code ? <span className="font-mono text-indigo-600">({l.code})</span> : null}</p>
+                                      <p className="font-bold text-slate-900 break-words"><span className="text-slate-400 me-1">{l.order}.</span>{l.name} {l.code ? <span className="font-mono text-indigo-600">({l.code})</span> : null}</p>
                                       <p className="text-[10px] text-slate-500 mt-0.5 break-words leading-relaxed">{l.durationMonths} mo · catalog {formatAFN(l.defaultFee)} · pass {l.passMark}% · min class {(l as any).minViableSize ?? 5}</p>
                                     </div>
                                     <div className="flex items-center gap-1.5 bg-emerald-50/80 border border-emerald-100 rounded-lg px-2 py-1">

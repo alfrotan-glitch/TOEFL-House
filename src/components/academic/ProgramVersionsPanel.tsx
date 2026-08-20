@@ -1,3 +1,4 @@
+import { text } from '../../design-system/styles';
 import React, { useCallback, useEffect, useState } from 'react';
 import {GitBranch, Plus, RefreshCw, Upload, AlertCircle, BookOpen, Loader2, Check, X, Layers, Filter, Zap, Trash2} from 'lucide-react';
 import {api} from '../../api/client';
@@ -240,7 +241,7 @@ export default function ProgramVersionsPanel({ branchId: _branchId }: { branchId
         </div>
         <div className="flex-1">
           <h3 className="text-base font-extrabold text-slate-900">Curriculum Versions & Rules</h3>
-          <p className="text-xs text-slate-500 mt-1">Define placement, promotion, and fee rules for each curriculum version.</p>
+          <p className={text.hint}>Define placement, promotion, and fee rules for each curriculum version.</p>
         </div>
         <button type="button" onClick={loadInitialData} className="p-2 rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50 cursor-pointer">
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
@@ -300,7 +301,7 @@ export default function ProgramVersionsPanel({ branchId: _branchId }: { branchId
             ) : (
               versions.map((v) => (
                 <button key={v.id} type="button" onClick={() => loadTree(v.id)}
-                  className={`w-full text-left px-4 py-3 border-b border-slate-50 text-xs hover:bg-slate-50 transition-colors ${selectedId === v.id ? 'bg-indigo-50 border-l-4 border-l-indigo-600' : ''}`}>
+                  className={`w-full text-start px-4 py-3 border-b border-slate-50 text-xs hover:bg-slate-50 transition-colors ${selectedId === v.id ? 'bg-indigo-50 border-l-4 border-l-indigo-600' : ''}`}>
                   <div className="font-bold text-slate-800">{v.program_name || 'Program'}</div>
                   <div className="flex items-center gap-2 mt-1">
                     <span className="font-mono text-slate-500">{v.version_label}</span>
@@ -332,7 +333,7 @@ export default function ProgramVersionsPanel({ branchId: _branchId }: { branchId
               <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-4">
                 <div>
                   <p className="text-lg font-extrabold text-slate-900">{tree.version.program_name} — {tree.version.version_label}</p>
-                  <p className="text-xs text-slate-500 mt-1">Status: <span className="font-bold capitalize">{tree.version.status}</span> · {tree.levels?.length || 0} Levels attached</p>
+                  <p className={text.hint}>Status: <span className="font-bold capitalize">{tree.version.status}</span> · {tree.levels?.length || 0} Levels attached</p>
                   {/* Effective dates, publication state and authorship were already
                       returned by the API (getVersionTree does `SELECT pv.*`) but were
                       never rendered, so the operator could not tell WHEN a version
@@ -384,7 +385,7 @@ export default function ProgramVersionsPanel({ branchId: _branchId }: { branchId
                 {/* Placement Assessment Policy */}
                 <div className="bg-indigo-50/30 border border-indigo-100 rounded-xl p-5">
                   <div className="flex items-center justify-between gap-4 mb-4">
-                    <div className="flex items-center gap-2"><div className="p-2 bg-indigo-100 rounded-lg"><Zap className="w-4 h-4 text-indigo-700" /></div><div><h4 className="text-sm font-extrabold text-slate-900">Placement Assessment Blueprint</h4><p className="text-[11px] text-slate-500">This program version owns the complete assessment workflow used for every candidate.</p></div></div>
+                    <div className="flex items-center gap-2"><div className="p-2 bg-indigo-100 rounded-lg"><Zap className="w-4 h-4 text-indigo-700" /></div><div><h4 className={text.value}>Placement Assessment Blueprint</h4><p className="text-[11px] text-slate-500">This program version owns the complete assessment workflow used for every candidate.</p></div></div>
                     <label className="flex items-center gap-2 text-xs font-bold whitespace-nowrap"><input type="checkbox" checked={placementConfig.enabled} onChange={e=>setPlacementConfig((c:any)=>({...c,enabled:e.target.checked}))}/> Enabled</label>
                   </div>
                   <div className="grid grid-cols-1 @md:grid-cols-2 @4xl:grid-cols-3 gap-3 mb-5">
@@ -434,10 +435,10 @@ export default function ProgramVersionsPanel({ branchId: _branchId }: { branchId
                             </select>
                           </div>
                         )}
-                        {c.type === 'skill_scores' && <div className="mt-3 flex flex-wrap gap-2">{['grammar','vocabulary','reading','listening','writing','speaking'].map((skill:string)=><label key={skill} className="px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-[10px] font-bold"><input type="checkbox" className="mr-1.5" checked={(c.skills || []).includes(skill)} onChange={e=>updatePlacementComponent(index,{skills:e.target.checked ? [...new Set([...(c.skills || []),skill])] : (c.skills || []).filter((x:string)=>x!==skill)})}/>{skill}</label>)}</div>}
+                        {c.type === 'skill_scores' && <div className="mt-3 flex flex-wrap gap-2">{['grammar','vocabulary','reading','listening','writing','speaking'].map((skill:string)=><label key={skill} className="px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-[10px] font-bold"><input type="checkbox" className="me-1.5" checked={(c.skills || []).includes(skill)} onChange={e=>updatePlacementComponent(index,{skills:e.target.checked ? [...new Set([...(c.skills || []),skill])] : (c.skills || []).filter((x:string)=>x!==skill)})}/>{skill}</label>)}</div>}
                       </div>
                     ))}
-                    <button type="button" onClick={addPlacementComponent} className="w-full py-3 rounded-xl border border-dashed border-indigo-300 text-indigo-700 bg-indigo-50/40 hover:bg-indigo-50 text-xs font-black"><Plus className="w-3.5 h-3.5 inline mr-1"/> Add assessment section</button>
+                    <button type="button" onClick={addPlacementComponent} className="w-full py-3 rounded-xl border border-dashed border-indigo-300 text-indigo-700 bg-indigo-50/40 hover:bg-indigo-50 text-xs font-black"><Plus className="w-3.5 h-3.5 inline me-1"/> Add assessment section</button>
                     <div className="text-[11px] text-slate-500">Weights must total exactly 100%. All sections are saved into a candidate snapshot when the assessment starts.</div>
                   </div>
 
@@ -445,7 +446,7 @@ export default function ProgramVersionsPanel({ branchId: _branchId }: { branchId
                   <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
                     <div className="flex items-center justify-between mb-2">
                       <div className="text-[11px] font-black text-slate-600 uppercase tracking-wide">Conditional placement rules (IF component score THEN level)</div>
-                      <button type="button" onClick={()=>setPlacementConfig((c:any)=>({...c,decisionRules:[...(c.decisionRules||[]),{levelId:'',label:'rule '+( (c.decisionRules||[]).length+1),when:[{componentKey:(c.components||[])[0]?.key||'',field:'score',op:'gte',value:60}]}]}))} className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-[10px] font-black"><Plus className="w-3 h-3 inline mr-1"/>Add rule</button>
+                      <button type="button" onClick={()=>setPlacementConfig((c:any)=>({...c,decisionRules:[...(c.decisionRules||[]),{levelId:'',label:'rule '+( (c.decisionRules||[]).length+1),when:[{componentKey:(c.components||[])[0]?.key||'',field:'score',op:'gte',value:60}]}]}))} className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-[10px] font-black"><Plus className="w-3 h-3 inline me-1"/>Add rule</button>
                     </div>
                     {(!placementConfig.decisionRules || placementConfig.decisionRules.length === 0) && <p className="text-[11px] text-slate-400">No conditional rules — score bands (below) apply.</p>}
                     <div className="space-y-3">
@@ -483,7 +484,7 @@ export default function ProgramVersionsPanel({ branchId: _branchId }: { branchId
                   <div className="flex items-center gap-2 mb-4">
                     <div className="p-2 bg-emerald-100 rounded-lg"><Zap className="w-4 h-4 text-emerald-700" /></div>
                     <div>
-                      <h4 className="text-sm font-extrabold text-slate-900">Promotion Rules</h4>
+                      <h4 className={text.value}>Promotion Rules</h4>
                       <p className="text-[11px] text-slate-500">Define criteria for passing a level and moving to the next.</p>
                     </div>
                   </div>
@@ -537,7 +538,7 @@ export default function ProgramVersionsPanel({ branchId: _branchId }: { branchId
                   <div className="flex items-center gap-2 mb-4">
                     <div className="p-2 bg-indigo-100 rounded-lg"><Filter className="w-4 h-4 text-indigo-700" /></div>
                     <div>
-                      <h4 className="text-sm font-extrabold text-slate-900">Placement Rules</h4>
+                      <h4 className={text.value}>Placement Rules</h4>
                       <p className="text-[11px] text-slate-500">Map placement test scores to recommended levels.</p>
                     </div>
                   </div>
@@ -583,7 +584,7 @@ export default function ProgramVersionsPanel({ branchId: _branchId }: { branchId
                   <div className="flex items-start gap-3">
                     <div className="p-2 bg-amber-100 rounded-lg text-amber-700 font-black">$</div>
                     <div>
-                      <h4 className="text-sm font-extrabold text-slate-900">Fee configuration has one owner</h4>
+                      <h4 className={text.value}>Fee configuration has one owner</h4>
                       <p className="text-[11px] text-slate-600 mt-1 leading-relaxed">Program and level fees are configured in the Academic Catalog. Branch overrides are managed on each Level. This version screen intentionally does not create a second fee-rule registry.</p>
                     </div>
                   </div>

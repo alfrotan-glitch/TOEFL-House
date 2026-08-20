@@ -1,3 +1,4 @@
+import { text } from '../../design-system/styles';
 import React from 'react';
 import { Trash2, X, AlertCircle, Edit, Info, History, Printer, RotateCcw, TrendingDown, Plus } from 'lucide-react';
 import { Book, BookSale } from '../../types';
@@ -76,12 +77,12 @@ export default function BooksModals(props: BooksModalsProps) {
       {/* Editing Dialog Modal */}
       {editingBook && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto animate-in fade-in duration-150">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full border border-slate-100 shadow-xl space-y-4 animate-in zoom-in-95 duration-200 text-left">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full border border-slate-100 shadow-xl space-y-4 animate-in zoom-in-95 duration-200 text-start">
             <h3 className="font-extrabold text-slate-900 text-sm border-b border-slate-100 pb-3 flex items-center gap-1.5">
               <Edit className="w-4 h-4 text-indigo-600" />
               Edit book / chapter
             </h3>
-            <form onSubmit={handleEditBookSubmit} className="space-y-4 text-xs text-left">
+            <form onSubmit={handleEditBookSubmit} className="space-y-4 text-xs text-start">
               <div className="space-y-1">
                 <label className="block text-slate-600 font-semibold">Product title:</label>
                 <input
@@ -164,7 +165,7 @@ export default function BooksModals(props: BooksModalsProps) {
       {/* Replenishment History Dialog Modal */}
       {selectedBookHistory && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto animate-in fade-in duration-150">
-          <div className="bg-white rounded-3xl p-6 max-w-lg w-full border border-slate-100 shadow-2xl space-y-4 animate-in zoom-in-95 duration-200 text-left">
+          <div className="bg-white rounded-3xl p-6 max-w-lg w-full border border-slate-100 shadow-2xl space-y-4 animate-in zoom-in-95 duration-200 text-start">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
                 <History className="w-5 h-5 text-indigo-600" />
@@ -193,7 +194,7 @@ export default function BooksModals(props: BooksModalsProps) {
 
             <div className="border border-slate-150 rounded-2xl overflow-hidden bg-slate-50/40">
               <div className="max-h-60 overflow-y-auto">
-                <table className="w-full text-left text-xs">
+                <table className="w-full text-start text-xs">
                   <thead className="bg-slate-100 text-slate-500">
                     <tr>
                       <th className="py-2.5 px-3 font-bold">#</th>
@@ -240,7 +241,7 @@ export default function BooksModals(props: BooksModalsProps) {
       {/* Professional Printable Receipt Modal */}
       {selectedSaleReceipt && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto animate-in fade-in duration-150">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full border border-slate-100 shadow-2xl space-y-5 animate-in zoom-in-95 duration-200 text-left">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full border border-slate-100 shadow-2xl space-y-5 animate-in zoom-in-95 duration-200 text-start">
             
             {/* Header Dialog */}
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
@@ -401,7 +402,7 @@ export default function BooksModals(props: BooksModalsProps) {
       {/* Modern Interactive Deletion Confirmation Modal */}
       {bookToDelete && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto animate-in fade-in duration-150">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full border border-slate-100 shadow-2xl space-y-4 animate-in zoom-in-95 duration-200 text-left">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full border border-slate-100 shadow-2xl space-y-4 animate-in zoom-in-95 duration-200 text-start">
             <div className="flex items-center gap-3 text-rose-600 border-b border-slate-100 pb-3">
               <AlertCircle className="w-5 h-5 stroke-[2.5]" />
               <h3 className="font-extrabold text-slate-900 text-sm">Confirm delete book / booklet</h3>
@@ -442,7 +443,7 @@ export default function BooksModals(props: BooksModalsProps) {
       {/* Refund Sale Confirmation Modal */}
       {saleToRefund && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto animate-in fade-in duration-150">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full border border-slate-100 shadow-2xl space-y-4 animate-in zoom-in-95 duration-200 text-left">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full border border-slate-100 shadow-2xl space-y-4 animate-in zoom-in-95 duration-200 text-start">
             <div className="flex items-center gap-3 text-rose-600 border-b border-slate-100 pb-3">
               <TrendingDown className="w-5 h-5 stroke-[2.5]" />
               <h3 className="font-extrabold text-slate-900 text-sm">Refund & void sale invoice</h3>
@@ -490,7 +491,7 @@ export default function BooksModals(props: BooksModalsProps) {
 
       {/* Quick Restock Interactive Popover Modal */}
       {restockingBook && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto animate-in fade-in duration-150 text-left">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto animate-in fade-in duration-150 text-start">
           <div className="bg-white rounded-3xl p-6 max-w-md w-full border border-slate-100 shadow-2xl space-y-4 animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2 text-emerald-600">
@@ -515,14 +516,14 @@ export default function BooksModals(props: BooksModalsProps) {
               </div>
             </div>
 
-            <form onSubmit={handleQuickRestockSubmit} className="space-y-4 text-xs text-left">
+            <form onSubmit={handleQuickRestockSubmit} className="space-y-4 text-xs text-start">
               <div className="space-y-1.5">
                 <label className="block text-slate-600 font-semibold">New units to add to stock:</label>
                 <input
                   type="number"
                   value={quickRestockQty}
                   onChange={(e) => setQuickRestockQty(Math.max(1, Number(e.target.value)))}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/10 text-left text-sm font-bold text-slate-800"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/10 text-start text-sm font-bold text-slate-800"
                   min={1}
                   required
                 />
@@ -569,14 +570,14 @@ export default function BooksModals(props: BooksModalsProps) {
 
       {/* Comprehensive Printable Inventory Audit Report Modal */}
       {showAuditModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto animate-in fade-in duration-150 text-left">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto animate-in fade-in duration-150 text-start">
           <div className="bg-white rounded-3xl p-6 max-w-4xl w-full border border-slate-100 shadow-2xl space-y-5 animate-in zoom-in-95 duration-200">
             
             {/* Header Dialog */}
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
                 <Printer className="w-5 h-5 text-indigo-600" />
-                <span className="text-sm font-extrabold text-slate-900">Inventory audit report preview</span>
+                <span className={text.value}>Inventory audit report preview</span>
               </div>
               <button 
                 onClick={() => setShowAuditModal(false)}
@@ -604,7 +605,7 @@ export default function BooksModals(props: BooksModalsProps) {
               </div>
 
               {/* High-level Totals Grid */}
-              <div className="grid grid-cols-4 gap-4 text-left">
+              <div className="grid grid-cols-4 gap-4 text-start">
                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
                   <span className="text-[10px] text-slate-400 font-bold">Total SKUs:</span>
                   <p className="text-sm font-black text-slate-800 mt-1 font-mono">{books.length} titles</p>
@@ -625,7 +626,7 @@ export default function BooksModals(props: BooksModalsProps) {
 
               {/* Inventory Table */}
               <div className="border border-slate-200 rounded-xl overflow-hidden">
-                <table className="w-full text-left text-[11px] border-collapse">
+                <table className="w-full text-start text-[11px] border-collapse">
                   <thead className="bg-slate-100 text-slate-600 border-b border-slate-200 font-bold">
                     <tr>
                       <th className="py-2 px-3">Product title</th>

@@ -131,7 +131,7 @@ export default function StudentJourneyTimeline({ studentId }: Props) {
       <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-xl p-3 flex items-center gap-2">
         <AlertCircle className="w-4 h-4" />
         {error}
-        <button type="button" onClick={load} className="ml-auto font-bold underline">Retry</button>
+        <button type="button" onClick={load} className="ms-auto font-bold underline">Retry</button>
       </div>
     );
   }
@@ -206,7 +206,7 @@ export default function StudentJourneyTimeline({ studentId }: Props) {
           <p className="text-xs text-slate-400 italic">No journey events yet.</p>
         </div>
       ) : (
-        <ol className="relative border-s-2 border-slate-100 ms-3 space-y-0 max-h-96 overflow-y-auto pr-2 py-2">
+        <ol className="relative border-s-2 border-slate-100 ms-3 space-y-0 max-h-96 overflow-y-auto pe-2 py-2">
           {timeline.map((item) => {
             const { Icon, color, bg } = getEventVisuals(item.eventType);
             const chips = payloadChips(item);

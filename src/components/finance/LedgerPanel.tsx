@@ -12,6 +12,7 @@
  * safe-looking direction — understated, plausible, and silently drifting
  * further from reality with every transaction added.
  */
+import { text } from '../../design-system/styles';
 import React, { useEffect, useState, useCallback } from 'react';
 import { Printer } from 'lucide-react';
 import type { FinancialTransaction } from '../../types';
@@ -107,10 +108,10 @@ export default function LedgerPanel({ selectedYear, selectedMonth, timeFrame, se
 
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-extrabold text-slate-900">General ledger</h3>
+          <h3 className={text.value}>General ledger</h3>
           <button type="button" onClick={() => { window.print(); }} className="text-[10px] font-bold text-slate-500 hover:text-slate-700 flex items-center gap-1 cursor-pointer"><Printer className="w-3 h-3" /> Print</button>
         </div>
-        <p className="text-[10px] text-slate-400">
+        <p className={text.meta}>
           Data from the database only. {total !== null ? `Showing ${rows.length} of ${total} transactions in this period.` : ''}
         </p>
         <div className="flex flex-wrap gap-4 text-xs">
@@ -128,7 +129,7 @@ export default function LedgerPanel({ selectedYear, selectedMonth, timeFrame, se
         </div>
         {error && <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-700">{error}</div>}
         <div className="overflow-x-auto text-xs">
-          <table className="w-full text-left border-collapse">
+          <table className="w-full text-start border-collapse">
             <thead>
               <tr className="border-b border-slate-100 text-slate-500">
                 <th className="py-2.5 px-3 font-bold">Txn ID</th>

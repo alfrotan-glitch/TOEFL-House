@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import App from './App';
 import { AuthProvider } from './contexts/AuthProvider';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { DirectionProvider } from './design-system/direction';
 import './index.css';
 
 // ── DOM Root Resolution ─────────────────────────────────────────────
@@ -19,10 +20,12 @@ if (!rootElement) {
 
 createRoot(rootElement).render(
   <StrictMode>
-    <ErrorBoundary>
-      <AuthProvider>
-        <App />
-      </AuthProvider>
-    </ErrorBoundary>
+    <DirectionProvider>
+      <ErrorBoundary>
+        <AuthProvider>
+          <App />
+        </AuthProvider>
+      </ErrorBoundary>
+    </DirectionProvider>
   </StrictMode>
 );

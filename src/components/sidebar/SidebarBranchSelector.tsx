@@ -32,7 +32,7 @@ export default function SidebarBranchSelector({
           id={selectId}
           value={activeBranchId}
           onChange={(e) => changeBranch(e.target.value)}
-          className="w-full text-xs bg-slate-800/50 border border-white/[0.06] rounded-lg pl-3 pr-9 py-2 font-semibold text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500/30 cursor-pointer transition-colors appearance-none [&>option]:bg-slate-800 [&>option]:text-slate-200 truncate"
+          className="w-full text-xs bg-slate-800/50 border border-white/[0.06] rounded-lg ps-3 pe-9 py-2 font-semibold text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500/30 cursor-pointer transition-colors appearance-none [&>option]:bg-slate-800 [&>option]:text-slate-200 truncate"
           aria-label="Select active branch"
         >
           {branches
@@ -51,7 +51,7 @@ export default function SidebarBranchSelector({
             })}
         </select>
         <ChevronDown 
-          className="w-4 h-4 text-slate-500 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" 
+          className="w-4 h-4 text-slate-500 absolute end-2.5 top-1/2 -translate-y-1/2 pointer-events-none" 
           aria-hidden="true" 
         />
       </div>
