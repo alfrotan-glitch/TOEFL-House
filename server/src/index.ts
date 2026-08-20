@@ -66,7 +66,9 @@ import searchRouter from './routes/search.routes.js';
 import { reportsRouter } from './routes/reports.routes.js';
 import { dashboardRouter } from './routes/dashboard.routes.js';
 import { createLogger } from './core/observability/logger.js';
+import { createAutomatedDatabaseBackupService } from './core/operations/database-backup.js';
 const log = createLogger('index');
+const backupService = createAutomatedDatabaseBackupService(db);
 
 // ============================================================================
 // §1 — INITIALIZATION
@@ -85,6 +87,9 @@ async function bootstrap(): Promise<void> {
   log.info('Seeding default rules and workflows…');
   seedDefaultRules();
   seedDefaultWorkflowDefinitions();
+
+  log.info('Checking automated database backups…');
+  await backupService.start();
   
   log.info('Starting Event Bus and registering handlers…');
   registerEventHandlers();
@@ -144,11 +149,19 @@ app.use((req: Request, _res: Response, next: NextFunction) => {
 app.get('/api/health', (_req: Request, res: Response) => {
   try {
     db.prepare('SELECT 1').get();
-    const ready = isApplicationReady && !startupFailure;
+    const backup = backupService.getStatus();
+    const ready = isApplicationReady && !startupFailure && backup.healthy;
+    const state = ready
+      ? 'ready'
+      : startupFailure
+        ? 'failed'
+        : isApplicationReady && !backup.healthy
+          ? 'degraded'
+          : 'bootstrapping';
     res.status(ready ? 200 : 503).json({
       ok: ready, ready, service: 'toefl-house-erp-server', version: '2.0.0',
-      database: 'connected', state: ready ? 'ready' : startupFailure ? 'failed' : 'bootstrapping',
-      error: startupFailure, time: new Date().toISOString(),
+      database: 'connected', backup, state,
+      error: startupFailure || backup.lastError, time: new Date().toISOString(),
     });
   } catch (_err) {
     res.status(503).json({ ok: false, ready: false, service: 'toefl-house-erp-server', database: 'disconnected', state: 'failed', error: 'Database is not responding' });
@@ -156,8 +169,15 @@ app.get('/api/health', (_req: Request, res: Response) => {
 });
 
 app.get('/api/ready', (_req: Request, res: Response) => {
-  const ready = isApplicationReady && !startupFailure;
-  res.status(ready ? 200 : 503).json({ ok: ready, ready, state: startupFailure ? 'failed' : 'bootstrapping', error: startupFailure });
+  const backup = backupService.getStatus();
+  const ready = isApplicationReady && !startupFailure && backup.healthy;
+  res.status(ready ? 200 : 503).json({
+    ok: ready,
+    ready,
+    state: startupFailure ? 'failed' : isApplicationReady && !backup.healthy ? 'degraded' : ready ? 'ready' : 'bootstrapping',
+    error: startupFailure || backup.lastError,
+    backup,
+  });
 });
 
 // ============================================================================
@@ -279,38 +299,40 @@ async function start(): Promise<void> {
     const message = err instanceof Error ? (err.stack || err.message) : String(err);
     startupFailure = message;
     isApplicationReady = false;
-    log.error('❌ Fatal error during startup:', message);
+    process.exitCode = 1;
+    log.error('❌ Fatal error during startup:', err);
+    await backupService.stop();
     if (server) {
       try { server.close(); } catch { /* listener may already be closed */ }
     }
-    setTimeout(() => {
-      try { db.close(); } catch { /* database may already be closed during shutdown */ }
-      process.exit(1);
-    }, 1500).unref();
+    try { db.close(); } catch { /* database may already be closed during shutdown */ }
   }
 }
 
 function setupGracefulShutdown() {
   let isShuttingDown = false;
 
-  const shutdown = (signal: string) => {
+  const shutdown = async (signal: string) => {
     if (isShuttingDown) return;
     isShuttingDown = true;
 
     log.info(`\n${signal} received. Shutting down gracefully...`);
+    const backupStop = backupService.stop();
 
     if (!server) {
+      await backupStop;
       try { db.close(); } catch { /* already closed */ }
       process.exit(0);
       return;
     }
 
-    server.close((err) => {
+    server.close(async (err) => {
       if (err) {
         log.error('Error during server close:', err);
         process.exit(1);
       }
-      
+
+      await backupStop;
       log.info('HTTP server closed.');
       try {
         db.close();
@@ -329,8 +351,8 @@ function setupGracefulShutdown() {
     }, 10000).unref();
   };
 
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => { void shutdown('SIGINT'); });
+  process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
 }
 
 process.on('unhandledRejection', (reason, promise) => {

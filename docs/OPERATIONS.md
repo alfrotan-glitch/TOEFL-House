@@ -24,13 +24,16 @@ npm ci --no-audit --no-fund
 ```ini
 PORT=4000
 DB_PATH=./data/erp.sqlite
+BACKUP_LOCAL_DIR=./data/backups
+BACKUP_EXTERNAL_DIR=E:\TOEFL-House-Backups   # REQUIRED: another drive or UNC share
 JWT_SECRET=<at least 32 random characters>
 CORS_ORIGIN=https://your-frontend-origin      # REQUIRED in production
 NODE_ENV=production
 ```
 
-Both `JWT_SECRET` (<32 chars) and a missing `CORS_ORIGIN` abort startup in
-production **by design** — a deployment cannot silently come up insecure.
+A short `JWT_SECRET`, missing production `CORS_ORIGIN`, or missing/invalid
+`BACKUP_EXTERNAL_DIR` aborts startup **by design** — a deployment cannot
+silently come up insecure or without its required recoverability path.
 
 Create the owner account. The seed refuses to invent credentials:
 
@@ -79,43 +82,83 @@ This diffs the live database against the canonical schema — every table,
 index, trigger and column — and reports anything missing or unexpected. It is
 read-only.
 
-## 3. Backup
+## 3. Automated backup
 
-> **There is no automatic backup.** The only automatic snapshot in the product
-> was taken by the migration runner, which no longer exists. Scheduled backups
-> are currently the operator's responsibility, and a backup policy is an open
-> decision (assumption A-11 / risk TR-5 in `docs/registries/`).
+Automated backups are a startup requirement. Configure both destinations in
+`server/.env`:
 
-Take a `VACUUM INTO` snapshot — **do not** `cp` a live SQLite file, which can
-copy a torn page or miss the WAL:
-
-```bash
-cd server
-node -e "require('better-sqlite3')(process.env.DB_PATH||'./data/erp.sqlite') \
-  .prepare('VACUUM INTO ?').run('/backups/erp-'+new Date().toISOString().replace(/[:.]/g,'-')+'.sqlite')"
+```ini
+BACKUP_LOCAL_DIR=./data/backups
+# Use another physical Windows drive:
+BACKUP_EXTERNAL_DIR=E:\TOEFL-House-Backups
+# Or use a UNC network share instead:
+# BACKUP_EXTERNAL_DIR=\\backup-pc\TOEFL-House-Backups
 ```
 
-`VACUUM INTO` produces a consistent, self-contained database and **cannot run
-inside a transaction** — which is precisely what guarantees a snapshot never
-captures a half-finished write.
+The external destination is mandatory. On Windows it must be a UNC path or a
+different drive from the local snapshots. A folder elsewhere on the database's
+own drive does not protect against drive loss and is rejected. The backend also
+refuses to start when the destination is missing, is still the template
+placeholder, resolves to the local directory, or is not writable.
 
-Write snapshots to a different disk from the database. A snapshot beside the
-database protects against a bad write, not against losing the volume.
+At startup the backup service verifies the newest matching local/external daily
+pair. If no verified pair is less than 24 hours old, startup creates one before
+the HTTP listener opens. The next attempt is due 24 hours from the last backup,
+then every 24 hours while the process runs.
+
+Each run uses SQLite's online backup API; it never copies the live `.sqlite`,
+`-wal`, or `-shm` files. Before publishing a snapshot name, the service opens
+both destination copies and requires:
+
+- `PRAGMA integrity_check = ok`;
+- zero `PRAGMA foreign_key_check` rows;
+- a non-empty regular file; and
+- identical SHA-256 and byte length for local and external copies.
+
+A run is successful only after both copies pass. A copy failure removes the
+incomplete run, records an error, and returns health/readiness as HTTP 503. The
+backend never reports a local-only copy as backup success. Inspect
+`server/logs/backend-startup.log` for the detailed failure.
+
+Snapshots are stored under `daily`, `weekly`, and `monthly` subdirectories at
+both destinations. Grandfather-father-son retention keeps one verified pair per
+calendar bucket:
+
+| Tier | Retained |
+|---|---:|
+| Daily | 7 |
+| Weekly (ISO week) | 4 |
+| Monthly | 12 |
+
+The current week's and month's files are refreshed by the daily run; after the
+bucket closes, the latest verified snapshot in that bucket remains. Unknown
+operator-created files are not deleted by retention.
+
+Check backup health without authentication:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:4000/api/health |
+  Select-Object -ExpandProperty backup
+```
+
+Expect `healthy: true`, `state: healthy`, a `lastSuccessAt` timestamp, and a
+`nextAttemptAt` timestamp.
 
 ## 4. Restore
 
-1. Stop the server.
-2. Copy the snapshot over the live database path:
-   ```bash
-   cp /backups/erp-<timestamp>.sqlite server/data/erp.sqlite
-   rm -f server/data/erp.sqlite-wal server/data/erp.sqlite-shm
+1. Stop the backend and confirm no `node.exe` process still has the database open.
+2. Choose a snapshot from either configured destination. Copy it over the live
+   database and remove stale WAL sidecars:
+   ```powershell
+   Copy-Item -LiteralPath 'E:\TOEFL-House-Backups\daily\daily__<snapshot>.sqlite' `
+     -Destination '.\server\data\erp.sqlite' -Force
+   Remove-Item '.\server\data\erp.sqlite-wal','./server/data/erp.sqlite-shm' `
+     -Force -ErrorAction SilentlyContinue
    ```
 3. Verify before starting:
-   ```bash
-   cd server && node -e "
-     const db=require('better-sqlite3')('./data/erp.sqlite');
-     console.log(db.pragma('integrity_check')[0].integrity_check);
-     console.log('fk violations:', db.pragma('foreign_key_check').length);"
+   ```powershell
+   Set-Location server
+   node -e "const D=require('better-sqlite3');const d=new D('./data/erp.sqlite',{readonly:true});console.log(d.pragma('integrity_check',{simple:true}));console.log('fk violations:',d.pragma('foreign_key_check').length);d.close()"
    ```
    Expect `ok` and `0`.
 4. Start the server. The canonical schema is re-applied automatically, so a
@@ -162,7 +205,8 @@ the other two checks can see a line that drifts from its ledger.
 
 - **Single-process SQLite.** One writer. Fine for one institute; there is no
   horizontal scaling story. Do not run two server processes against one file.
-- **Backups are local by default.** Ship `server/data/backups/` off-host.
-- **CI is not active.** `ci/github-actions-ci.yml` must be copied to
-  `.github/workflows/ci.yml` by someone with the `workflows` permission. Until
-  then every gate is manual — see `ci/README.md`.
+- **Backup availability depends on the configured external device/share.** A
+  scheduled external failure makes readiness unhealthy until a later verified
+  pair succeeds; it is never downgraded to local-only success.
+- **CI is active.** `.github/workflows/ci.yml` runs the project release
+  validation authority.

@@ -29,3 +29,4 @@ must exist, and every `Test` must name a real test file.
 | Reporting period | — (derived) | `server/src/core/calendar/periods.ts` (`periodBoundaries`) | every report endpoint | date pickers | every report | `server/src/tests/reporting-catalog.test.ts` | AUTHORITATIVE |
 | Printed document layout | — | `src/design-system/print.ts` | — | report and finance print actions | printed reports | `server/src/tests/print-document.test.ts` | AUTHORITATIVE |
 | Runtime log output | — | `server/src/core/observability/logger.ts` | — | — | — | `server/src/tests/logging-authority.test.ts` | AUTHORITATIVE |
+| Automated database backup | live `DB_PATH`; managed snapshots under configured local/external GFS directories | `server/src/core/operations/database-backup.ts` | backup state in `GET /api/health` and `GET /api/ready` | Windows launcher/readiness diagnostics | `docs/OPERATIONS.md` | `server/src/tests/database-backup.test.ts` | AUTHORITATIVE |

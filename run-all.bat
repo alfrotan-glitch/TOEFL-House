@@ -31,7 +31,7 @@ for /f "tokens=5" %%P in ('netstat -ano -p tcp ^| findstr /R /C:":%BACKEND_PORT%
 
 start "TOEFL House - Backend" cmd /k "%~dp0run-backend.bat"
 
-echo [INFO] Waiting for backend readiness endpoint (up to 120 seconds)...
+echo [INFO] Waiting for database and required-backup readiness (up to 120 seconds)...
 set "BACKEND_READY="
 for /l %%I in (1,1,120) do (
   powershell -NoProfile -Command "try { $r=Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:%BACKEND_PORT%/api/health' -TimeoutSec 2; if ($r.StatusCode -eq 200) { exit 0 } } catch {} ; exit 1" >nul 2>&1
@@ -56,6 +56,6 @@ echo [3/3] Starting frontend...
 start "TOEFL House - Frontend" cmd /k "%~dp0run-frontend.bat"
 
 echo.
-echo [SUCCESS] Backend is healthy and frontend has been launched.
+echo [SUCCESS] Backend is healthy, required backups are verified, and frontend has been launched.
 timeout /t 4 /nobreak >nul
 endlocal

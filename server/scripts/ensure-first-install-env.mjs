@@ -21,10 +21,6 @@ const PLACEHOLDER_JWT_SECRETS = new Set([
 
 const required = (name, fallback) => process.env[name]?.trim() || fallback;
 
-function escapeReplacement(value) {
-  return value.replace(/[$\\]/g, '\\$&');
-}
-
 function readEnvValue(content, name) {
   const match = new RegExp(`^${name}=(.*)$`, 'm').exec(content);
   return match?.[1]?.trim() ?? '';
@@ -43,6 +39,14 @@ const values = {
   PORT: required('PORT', '4000'),
   JWT_EXPIRES_IN: required('JWT_EXPIRES_IN', '12h'),
   DB_PATH: required('DB_PATH', './data/erp.sqlite'),
+  BACKUP_LOCAL_DIR: required(
+    'BACKUP_LOCAL_DIR',
+    readEnvValue(contentSource, 'BACKUP_LOCAL_DIR') || './data/backups',
+  ),
+  BACKUP_EXTERNAL_DIR: required(
+    'BACKUP_EXTERNAL_DIR',
+    readEnvValue(contentSource, 'BACKUP_EXTERNAL_DIR') || 'REQUIRED_EXTERNAL_DRIVE_OR_NETWORK_PATH',
+  ),
   CORS_ORIGIN: required('CORS_ORIGIN', 'http://localhost:3000'),
   SEED_OWNER_USERNAME: required('SEED_OWNER_USERNAME', 'owner'),
   SEED_OWNER_PASSWORD: ownerPasswordGenerated ? ownerPassword : existingOwnerPassword,
@@ -51,10 +55,12 @@ const values = {
 };
 
 for (const [name, value] of Object.entries(values)) {
-  const line = `${name}=${escapeReplacement(value)}`;
+  const line = `${name}=${value}`;
   const pattern = new RegExp(`^${name}=.*$`, 'm');
   if (pattern.test(content)) {
-    content = content.replace(pattern, line);
+    // A callback replacement keeps Windows backslashes and dollar signs
+    // literal; replacement-string syntax would reinterpret them on every run.
+    content = content.replace(pattern, () => line);
   } else {
     content += `\n${line}\n`;
   }
@@ -63,8 +69,13 @@ for (const [name, value] of Object.entries(values)) {
 writeFileSync(envPath, content.replace(/\n{3,}/g, '\n\n'), { encoding: 'utf8', mode: 0o600 });
 
 console.log('[SUCCESS] server/.env is ready.');
+const externalDestinationMissing = /REQUIRED_EXTERNAL/i.test(values.BACKUP_EXTERNAL_DIR);
+if (externalDestinationMissing) {
+  console.error('[ACTION REQUIRED] Set BACKUP_EXTERNAL_DIR in server/.env to another Windows drive or a UNC network share before starting the backend.');
+}
 if (ownerPasswordGenerated) {
   console.log(`OWNER_USERNAME=${values.SEED_OWNER_USERNAME}`);
   console.log(`OWNER_PASSWORD=${values.SEED_OWNER_PASSWORD}`);
   console.log('Save these first-install credentials securely. The owner must change the password after first login.');
 }
+if (externalDestinationMissing) process.exitCode = 2;

@@ -14,11 +14,14 @@ if (Test-Path ".env") {
     $portLine = Get-Content ".env" | Where-Object { $_ -match '^PORT=' } | Select-Object -First 1
     if ($portLine) { [int]::TryParse(($portLine -replace '^PORT=',''), [ref]$port) | Out-Null }
 }
-$listener = Get-NetTCPConnection -LocalAddress '127.0.0.1' -LocalPort $port -State Listen -ErrorAction SilentlyContinue
+$listener = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($listener) {
     throw "Port $port is already in use by PID $($listener.OwningProcess). Stop the existing TOEFL House ERP backend before starting another instance."
 }
-if (-not (Test-Path ".env")) { npm run bootstrap:env }
+if (-not (Test-Path ".env")) {
+    npm run bootstrap:env
+    if ($LASTEXITCODE -ne 0) { throw "Environment bootstrap requires operator action. Review server\.env and the message above." }
+}
 if (-not (Test-Path "data")) { New-Item -ItemType Directory -Path "data" | Out-Null }
 if (-not (Test-Path "logs")) { New-Item -ItemType Directory -Path "logs" | Out-Null }
 if (Test-Path "logs\backend-startup.log") { Remove-Item "logs\backend-startup.log" -Force -ErrorAction SilentlyContinue }
