@@ -4,27 +4,48 @@ import { authenticate, authorize, canAccessBranchResource } from '../middleware/
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id } from '../utils/ids.js';
-import { hashPassword, type UserRole } from '../utils/auth.js';
-import { syncPrimaryUserRole } from '../core/rbac/rbac-service.js';
+import { hashPassword } from '../utils/auth.js';
+import { assignPrimaryRole } from '../core/rbac/rbac-service.js';
+import { ROLE_CODES, type RoleCode } from '../core/rbac/permission-catalog.js';
 
 export const usersRouter = Router();
 usersRouter.use(authenticate);
 
-const ALLOWED_ROLES: UserRole[] = ['owner', 'manager', 'finance', 'registrar', 'teacher', 'head_of_department', 'counselor', 'donor_manager', 'student'];
+/**
+ * Positions this endpoint may assign, named by canonical role code. `data_entry`
+ * is deliberately absent: it exists in the catalog but is not offered as an
+ * account type here.
+ */
+const ALLOWED_ROLES: RoleCode[] = ['owner', 'general_manager', 'finance_manager', 'receptionist', 'teacher', 'head_of_department', 'counselor', 'donor_manager', 'student'];
 
+/**
+ * A user's position is read from their primary assignment, because that is
+ * where it lives. There is no role column to read it from.
+ */
 const stmtGetAllUsers = db.prepare(
-  `SELECT id, username, full_name, email, role, branch_id, is_active, must_change_password, created_at, last_login_at FROM users ORDER BY created_at DESC`
+  `SELECT u.id, u.username, u.full_name, u.email, u.branch_id, u.is_active, u.must_change_password,
+          u.created_at, u.last_login_at, r.code AS role
+     FROM users u
+     LEFT JOIN user_roles ur ON ur.user_id = u.id AND ur.is_primary = 1
+     LEFT JOIN roles r ON r.id = ur.role_id
+    ORDER BY u.created_at DESC`
 );
 
-const stmtGetUserById = db.prepare('SELECT id, full_name, role, branch_id, is_active FROM users WHERE id = ?');
+const stmtGetUserById = db.prepare(
+  `SELECT u.id, u.full_name, u.branch_id, u.is_active, r.code AS role
+     FROM users u
+     LEFT JOIN user_roles ur ON ur.user_id = u.id AND ur.is_primary = 1
+     LEFT JOIN roles r ON r.id = ur.role_id
+    WHERE u.id = ?`
+);
 const stmtCheckUsernameExists = db.prepare('SELECT id FROM users WHERE username = ?');
 
 const stmtInsertUser = db.prepare(
-  `INSERT INTO users (id, username, password_hash, full_name, email, role, branch_id, campus_id, linked_teacher_id, linked_employee_id, linked_partner_id, linked_student_id, is_active, must_change_password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`
+  `INSERT INTO users (id, username, password_hash, full_name, email, branch_id, campus_id, linked_teacher_id, linked_employee_id, linked_partner_id, linked_student_id, is_active, must_change_password) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`
 );
 
 const stmtUpdateUser = db.prepare(
-  `UPDATE users SET full_name = COALESCE(?, full_name), email = COALESCE(?, email), role = COALESCE(?, role), branch_id = COALESCE(?, branch_id), is_active = COALESCE(?, is_active) WHERE id = ?`
+  `UPDATE users SET full_name = COALESCE(?, full_name), email = COALESCE(?, email), branch_id = COALESCE(?, branch_id), is_active = COALESCE(?, is_active) WHERE id = ?`
 );
 // campus_id follows the branch whenever it changes (set inside the PATCH handler).
 
@@ -93,8 +114,8 @@ usersRouter.post(
     // plaintext and there is still exactly one authentication authority.
     const mustChangePassword = role === 'student' ? 0 : 1;
     const createTx = db.transaction(() => {
-      stmtInsertUser.run(newId, username, passwordHash, fullName, email || null, role, branchId, campusId, linkedTeacherId || null, linkedEmployeeId || null, linkedPartnerId || null, linkedStudentId || null, mustChangePassword);
-      syncPrimaryUserRole(db, newId, role as UserRole, String(branchId), req.user!.userId);
+      stmtInsertUser.run(newId, username, passwordHash, fullName, email || null, branchId, campusId, linkedTeacherId || null, linkedEmployeeId || null, linkedPartnerId || null, linkedStudentId || null, mustChangePassword);
+      assignPrimaryRole(db, newId, role as RoleCode, String(branchId), req.user!.userId);
     });
     createTx();
     
@@ -107,7 +128,7 @@ usersRouter.patch(
   '/:id',
   authorize('owner'),
   ah(async (req, res) => {
-    const target = stmtGetUserById.get(req.params.id) as { id: string; full_name: string; role: UserRole; branch_id: string; is_active: number } | undefined;
+    const target = stmtGetUserById.get(req.params.id) as { id: string; full_name: string; role: RoleCode | null; branch_id: string; is_active: number } | undefined;
     if (!target) throw new HttpError(404, 'User not found.');
 
     const { fullName, email, role, branchId, isActive } = req.body;
@@ -118,18 +139,18 @@ usersRouter.patch(
     }
     if (branchId != null && !canAccessBranchResource(req, String(branchId))) throw new HttpError(403, 'Target branch is outside your authorized scope.');
 
-    const nextRole = (role ?? target.role) as UserRole;
+    const nextRole = (role ?? target.role) as RoleCode | null;
     const nextBranchId = String(branchId ?? target.branch_id);
     if (!canAccessBranchResource(req, nextBranchId)) throw new HttpError(403, 'Target branch is outside your authorized scope.');
     const updateTx = db.transaction(() => {
-      const result = stmtUpdateUser.run(fullName ?? null, email ?? null, role ?? null, branchId ?? null, typeof isActive === 'boolean' ? (isActive ? 1 : 0) : null, req.params.id);
+      const result = stmtUpdateUser.run(fullName ?? null, email ?? null, branchId ?? null, typeof isActive === 'boolean' ? (isActive ? 1 : 0) : null, req.params.id);
       if (result.changes !== 1) throw new HttpError(409, 'User update was not applied.');
       // Keep campus_id in sync with the branch.
       if (branchId != null) {
         const campus = (db.prepare('SELECT campus_id FROM branches WHERE id = ?').get(String(branchId)) as { campus_id?: string | null } | undefined)?.campus_id ?? null;
         db.prepare('UPDATE users SET campus_id = ? WHERE id = ?').run(campus, req.params.id);
       }
-      if (role || branchId) syncPrimaryUserRole(db, req.params.id, nextRole, nextBranchId, req.user!.userId);
+      if ((role || branchId) && nextRole) assignPrimaryRole(db, req.params.id, nextRole, nextBranchId, req.user!.userId);
       // SPA-1: portal accounts now have a real password flow, so the
       // must_change_password quarantine applies to them exactly as it does to
       // staff. Clearing it here would silently cancel a forced rotation

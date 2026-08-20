@@ -6,6 +6,7 @@
  * a branch manager cannot grant a 100% first-degree or sponsorship discount,
  * cannot exceed a category maximum, and cannot reach another branch.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
@@ -14,7 +15,7 @@ import { ensureOrganizationHierarchy, FIXED_ORG_ID } from '../db/organizationHie
 import { today } from '../utils/ids.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
 import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { discountAuthorizationsRouter } from '../routes/discount-authorizations.routes.js';
 
 const BR_A = 'dauth_branch_a';
@@ -28,8 +29,8 @@ function createApp() {
   return app;
 }
 
-function tok(userId: string, role: string, branchId: string): TokenPayload {
-  return { userId, username: userId, role: role as TokenPayload['role'], branchId, fullName: userId };
+function tok(userId: string, role: string, branchId: string): TokenPayload & { role: string } {
+  return { role, userId, username: userId, branchId, fullName: userId };
 }
 const auth = (u: TokenPayload) => ({ Authorization: `Bearer ${signToken(u)}` });
 
@@ -61,11 +62,12 @@ beforeAll(async () => {
   const pw = await hashPassword('testpass123');
   for (const u of [OWNER, MGR_A, MGR_B]) {
     db.prepare(
-      `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-       VALUES (?,?,?,?,?,?,1,0)`,
-    ).run(u.userId, u.username, u.fullName, u.role, u.branchId, pw);
+      `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+       VALUES (?, ?, ?, ?, ?, 1, 0)`,
+    ).run(u.userId, u.username, u.fullName, u.branchId, pw);
+    assignRole(u.userId, u.role, u.branchId);
   }
-  syncLegacyUserRoles(db);
+
   app = createApp();
 });
 

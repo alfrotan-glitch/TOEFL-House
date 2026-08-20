@@ -103,7 +103,7 @@ const stmtGetStudentEnrollmentForClass = db.prepare(`SELECT id FROM enrollments 
 /** Safely extracts user context */
 function getUserContext(req: import('express').Request) {
   const user = req.user;
-  if (!user?.userId || !user?.role || !user?.fullName) {
+  if (!user?.userId || !user?.fullName) {
     throw new HttpError(403, 'User context is missing for session operation.');
   }
   return user;

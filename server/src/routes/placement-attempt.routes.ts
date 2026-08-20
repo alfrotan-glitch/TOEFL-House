@@ -7,6 +7,7 @@ import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { authorize, requirePermission, canAccessBranchResource, resolveBranchScope } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
+import { hasAnyRole } from '../core/rbac/rbac-service.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
 import { nextReceiptNumber } from '../utils/receipt.js';
@@ -310,8 +311,8 @@ placementAttemptRouter.put('/visitors/:visitorId/placement/attempts/:attemptId/c
 
   const status = req.body?.status === 'waived' ? 'waived' : 'completed';
   if (status === 'waived') {
-    const role = String(req.user?.role || '');
-    if (component.required && !['owner', 'manager'].includes(role)) throw new HttpError(403, 'Only management can waive a required assessment section.');
+    const canWaive = !!req.rbac && hasAnyRole(req.rbac, ['owner', 'general_manager']);
+    if (component.required && !canWaive) throw new HttpError(403, 'Only management can waive a required assessment section.');
     if (!String(req.body?.notes || '').trim()) throw new HttpError(400, 'A reason is required when waiving an assessment section.');
     upsertResult({ attemptId: attempt.id, key: component.key, type: component.type, label: component.label, status: 'waived', score: null, maxScore: component.maxScore, weight: component.weight, selectedLevelId, notes: req.body?.notes || null, evaluatorUserId: user.userId, payloadJson: JSON.stringify({ waived: true }) });
     res.json(stmtResults.all(attempt.id));
@@ -395,7 +396,7 @@ placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/
       const paymentId = id('pay');
       const receiptNumber = nextReceiptNumber();
       stmtInsertPlacementFeePayment.run(paymentId, placementFee, date, `Placement assessment fee — ${visitor.full_name}`, receiptNumber, visitor.branch_id, `placement:${attempt.id}`);
-      recordIncome({ category: 'placement', amount: placementFee, date, description: `Placement assessment fee for ${visitor.full_name}`, referenceId: attempt.id, paymentId, operatorName: user.fullName, operatorRole: user.role ?? null, branchId: visitor.branch_id });
+      recordIncome({ category: 'placement', amount: placementFee, date, description: `Placement assessment fee for ${visitor.full_name}`, referenceId: attempt.id, paymentId, operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null, branchId: visitor.branch_id });
       feeReceipt = receiptNumber;
       feePaymentId = paymentId;
     }

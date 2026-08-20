@@ -433,7 +433,7 @@ reportsRouter.get(
     // ── Report header / metadata ──
     const seq = incrementNumberSetting('report_sequence', 1, 0);
     const reportId = `REP-${from.replace(/-/g, '').slice(0, 6)}-${String(seq).padStart(6, '0')}`;
-    const position = req.rbac?.roles?.[0]?.roleName || req.user?.role || 'Unknown';
+    const position = req.rbac?.roles?.[0]?.roleName || req.rbac?.primaryRole || 'Unknown';
     let branchName: string | null = null;
     let campusName: string | null = null;
     if (branchId) {

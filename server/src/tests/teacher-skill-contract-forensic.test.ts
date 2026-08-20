@@ -25,12 +25,13 @@
  * This suite is the executable proof for Phases 4, 5, 6, 7, 10, 11, 12, 13
  * and 16 of the Teacher subsystem forensic audit.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { teachersRouter } from '../routes/teachers.routes.js';
 import { classTeacherSkillsRouter } from '../routes/skills.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
@@ -61,7 +62,6 @@ function makeUser(o: Partial<TokenPayload> & { userId: string }): TokenPayload {
   return {
     userId: o.userId,
     username: o.username || o.userId,
-    role: o.role || 'manager',
     branchId: o.branchId || BRANCH,
     fullName: o.fullName || 'Skill Audit User',
   };
@@ -119,21 +119,24 @@ beforeAll(async () => {
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(OTHER_BRANCH, 'Other Branch', 'Loc2');
   const pw = await hashPassword('x');
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES (?, ?, ?, 'manager', ?, ?, 1, 0)`
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES (?, ?, ?, ?, ?, 1, 0)`
   ).run('u_skill_mgr', 'skill_mgr', 'Skill Mgr', BRANCH, pw);
+  assignRole('u_skill_mgr', 'manager', BRANCH);
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES (?, ?, ?, 'manager', ?, ?, 1, 0)`
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES (?, ?, ?, ?, ?, 1, 0)`
   ).run('u_skill_mgr2', 'skill_mgr2', 'Other Mgr', OTHER_BRANCH, pw);
+  assignRole('u_skill_mgr2', 'manager', OTHER_BRANCH);
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES (?, ?, ?, 'registrar', ?, ?, 1, 0)`
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES (?, ?, ?, ?, ?, 1, 0)`
   ).run('u_skill_reg', 'skill_reg', 'Skill Registrar', BRANCH, pw);
-  syncLegacyUserRoles(db);
-  manager = makeUser({ userId: 'u_skill_mgr', role: 'manager', branchId: BRANCH });
-  otherManager = makeUser({ userId: 'u_skill_mgr2', role: 'manager', branchId: OTHER_BRANCH });
-  registrar = makeUser({ userId: 'u_skill_reg', role: 'registrar', branchId: BRANCH });
+  assignRole('u_skill_reg', 'registrar', BRANCH);
+
+  manager = makeUser({ userId: 'u_skill_mgr', branchId: BRANCH });
+  otherManager = makeUser({ userId: 'u_skill_mgr2', branchId: OTHER_BRANCH });
+  registrar = makeUser({ userId: 'u_skill_reg', branchId: BRANCH });
   app = createApp();
 
   seedSkill('sk_read', 'Reading');

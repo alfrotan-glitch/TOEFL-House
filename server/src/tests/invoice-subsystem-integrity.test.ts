@@ -21,6 +21,7 @@
  *   - an overdue UNPAID invoice may be cancelled
  *   - no maximum line quantity exists (assertMoney bounds the resulting total)
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
@@ -29,7 +30,7 @@ import { ensureOrganizationHierarchy, FIXED_ORG_ID } from '../db/organizationHie
 import { today } from '../utils/ids.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
 import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { invoicesRouter } from '../routes/invoices.routes.js';
 import { setSetting } from '../utils/settings.js';
 import { SYSTEM_DEFAULTS } from '../core/configuration/policy-catalog.js';
@@ -45,10 +46,9 @@ function createApp() {
   return app;
 }
 
-const tok = (userId: string, role: string, branchId: string): TokenPayload => ({
+const tok = (userId: string, role: string, branchId: string): TokenPayload & { role: string } => ({ role,
   userId,
   username: userId,
-  role: role as TokenPayload['role'],
   branchId,
   fullName: userId,
 });
@@ -106,11 +106,12 @@ beforeAll(async () => {
   const pw = await hashPassword('testpass123');
   for (const u of [OWNER, FINANCE, MANAGER, REGISTRAR, FINANCE_B]) {
     db.prepare(
-      `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-       VALUES (?,?,?,?,?,?,1,0)`,
-    ).run(u.userId, u.username, u.fullName, u.role, u.branchId, pw);
+      `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+       VALUES (?, ?, ?, ?, ?, 1, 0)`,
+    ).run(u.userId, u.username, u.fullName, u.branchId, pw);
+    assignRole(u.userId, u.role, u.branchId);
   }
-  syncLegacyUserRoles(db);
+
   seedStudent('invt_stu_a', BR_A);
   seedStudent('invt_stu_b', BR_B);
   seedStudent('invt_stu_susp', BR_A, 'suspended');

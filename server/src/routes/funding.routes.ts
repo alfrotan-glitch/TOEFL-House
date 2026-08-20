@@ -370,7 +370,7 @@ fundingRouter.post(
       recordIncome({
         category: 'donation', amount: donationAmount, date: donationDate,
         description: `Donation received from ${donor.full_name}${campaignId ? ' (campaign)' : ''}${restricted ? ' [RESTRICTED]' : ''}`,
-        referenceId: newId, operatorName: user.fullName, operatorRole: user.role ?? null, branchId: user.branchId,
+        referenceId: newId, operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null, branchId: user.branchId,
       });
       return eventBus.emit('donation.received', 'donation', newId, 
       { donorId, donorName: donor.full_name, amount: donationAmount, campaignId, restricted: !!restricted }, 

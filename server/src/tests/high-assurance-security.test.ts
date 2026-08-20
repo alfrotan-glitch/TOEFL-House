@@ -4,7 +4,7 @@ import { signToken, verifyToken } from '../utils/auth.js';
 
 describe('high-assurance security invariants', () => {
   it('issues and verifies a session-versioned token', () => {
-    const token = signToken({ userId: 'u1', username: 'test', role: 'owner', branchId: 'b1', fullName: 'Test' });
+    const token = signToken({ userId: 'u1', username: 'test', branchId: 'b1', fullName: 'Test' });
     expect(verifyToken(token)?.sessionVersion).toBe(1);
   });
 

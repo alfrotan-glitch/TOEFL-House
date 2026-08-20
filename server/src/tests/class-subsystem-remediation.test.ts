@@ -33,13 +33,14 @@
  * Raw INSERT/UPDATE is used ONLY to age fixtures into states the API cannot
  * reach directly, never to fake a result production code should produce.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { today, id as mkId } from '../utils/ids.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import classesRouter from '../routes/classes.routes.js';
 import { studentsRouter } from '../routes/students.routes.js';
 import { enrollmentRouter } from '../routes/enrollment.routes.js';
@@ -59,7 +60,7 @@ function createApp() {
 }
 function makeUser(o: { userId: string; role?: string }): TokenPayload {
   return {
-    userId: o.userId, username: o.userId, role: (o.role || 'registrar') as never,
+    userId: o.userId, username: o.userId,
     branchId: BRANCH, fullName: 'Class Remediation User',
   };
 }
@@ -104,14 +105,15 @@ beforeAll(async () => {
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?,?,?)').run(BRANCH, 'Class Branch', 'Loc');
   for (const [uid, role] of [['u_cls_owner', 'owner'], ['u_cls_reg', 'registrar'], ['u_cls_hod', 'head_of_department']]) {
     db.prepare(
-      `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-       VALUES (?,?,?,?,?,?,1,0)`
-    ).run(uid, uid, uid, role, BRANCH, await hashPassword('x'));
+      `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+       VALUES (?, ?, ?, ?, ?, 1, 0)`
+    ).run(uid, uid, uid, BRANCH, await hashPassword('x'));
+    assignRole(uid, role, BRANCH);
   }
-  syncLegacyUserRoles(db);
-  owner = makeUser({ userId: 'u_cls_owner', role: 'owner' });
-  reg = makeUser({ userId: 'u_cls_reg', role: 'registrar' });
-  hod = makeUser({ userId: 'u_cls_hod', role: 'head_of_department' });
+
+  owner = makeUser({ userId: 'u_cls_owner' });
+  reg = makeUser({ userId: 'u_cls_reg' });
+  hod = makeUser({ userId: 'u_cls_hod' });
   app = createApp();
 });
 
@@ -640,11 +642,12 @@ describe('H-1 — object-level branch isolation on every class endpoint', () => 
   beforeAll(async () => {
     db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?,?,?)').run(OTHER, 'Other Branch', 'L');
     db.prepare(
-      `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-       VALUES (?,?,?,'manager',?,?,1,0)`
+      `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+       VALUES (?, ?, ?, ?, ?, 1, 0)`
     ).run('u_cls_foreign', 'u_cls_foreign', 'Foreign Manager', OTHER, await hashPassword('x'));
-    syncLegacyUserRoles(db);
-    foreignUser = { userId: 'u_cls_foreign', username: 'u_cls_foreign', role: 'manager' as never, branchId: OTHER, fullName: 'Foreign Manager' };
+    assignRole('u_cls_foreign', 'manager', OTHER);
+
+    foreignUser = { userId: 'u_cls_foreign', username: 'u_cls_foreign', branchId: OTHER, fullName: 'Foreign Manager' };
   });
 
   it('a manager from another branch is refused on every class WRITER (403, no mutation)', async () => {

@@ -11,12 +11,13 @@
  *  4. Student → GET /api/academic/resolve-fee (branch-only guard).
  *  5. Reception → GET /api/sessions analytics (permission check).
  */
+import { assignRole } from './support/identity.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import sessionsRouter from '../routes/sessions.routes.js';
 import enrollmentRouter from '../routes/enrollment.routes.js';
 import academicRouter from '../routes/academic.routes.js';
@@ -51,16 +52,16 @@ describe('Release-gate forensic — untested student/unauthorized surfaces', () 
     bootstrapRbacCatalog(db);
     db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(BRANCH_A, 'RG Branch', 'L');
     for (const [uid, uname, role] of [['rg_owner', 'rg_owner', 'owner'], ['rg_reg', 'rg_reg', 'registrar']] as const) {
-      await db.prepare(`INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password) VALUES (?, ?, ?, ?, ?, ?, 1, 0)`)
-        .run(uid, uname, 'RG ' + role, role, BRANCH_A, await hashPassword('x'));
+      await db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES (?, ?, ?, ?, ?, 1, 0)`)
+        .run(uid, uname, 'RG ' + role, BRANCH_A, await hashPassword('x'));
+      assignRole(uid, role, BRANCH_A);
     }
-    await db.prepare(`INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password) VALUES ('rg_stu', 'rg_stu', 'RG Student', 'student', ?, ?, 1, 0)`).run(BRANCH_A, await hashPassword('x'));
-    const stuRole = db.prepare("SELECT id FROM roles WHERE code='student'").get() as { id: string };
-    db.prepare(`INSERT OR IGNORE INTO user_roles (id, user_id, role_id, scope_type, scope_id, is_primary, assigned_by) VALUES (?, 'rg_stu', ?, 'branch', ?, 1, 'system')`).run(id('ur'), stuRole.id, BRANCH_A);
-    syncLegacyUserRoles(db);
-    owner = { userId: 'rg_owner', username: 'rg_owner', role: 'owner', branchId: BRANCH_A, fullName: 'RG Owner' };
-    registrar = { userId: 'rg_reg', username: 'rg_reg', role: 'registrar', branchId: BRANCH_A, fullName: 'RG Registrar' };
-    studentTok = { userId: 'rg_stu', username: 'rg_stu', role: 'student', branchId: BRANCH_A, fullName: 'RG Student' };
+    await db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES ('rg_stu', 'rg_stu', 'RG Student', ?, ?, 1, 0)`).run(BRANCH_A, await hashPassword('x'));
+    assignRole('rg_stu', 'student', BRANCH_A);
+
+    owner = { userId: 'rg_owner', username: 'rg_owner', branchId: BRANCH_A, fullName: 'RG Owner' };
+    registrar = { userId: 'rg_reg', username: 'rg_reg', branchId: BRANCH_A, fullName: 'RG Registrar' };
+    studentTok = { userId: 'rg_stu', username: 'rg_stu', branchId: BRANCH_A, fullName: 'RG Student' };
     app = createApp();
 
     // Seed: class, teacher, session, students, roster, enrollment.
@@ -109,8 +110,8 @@ describe('Release-gate forensic — cross-writer financial duplication', () => {
 
   beforeAll(async () => {
     app = createApp();
-    owner = { userId: 'rg_owner', username: 'rg_owner', role: 'owner', branchId: BRANCH_A, fullName: 'RG Owner' };
-    registrar = { userId: 'rg_reg', username: 'rg_reg', role: 'registrar', branchId: BRANCH_A, fullName: 'RG Registrar' };
+    owner = { userId: 'rg_owner', username: 'rg_owner', branchId: BRANCH_A, fullName: 'RG Owner' };
+    registrar = { userId: 'rg_reg', username: 'rg_reg', branchId: BRANCH_A, fullName: 'RG Registrar' };
     // Seed a book.
     db.prepare(`INSERT OR IGNORE INTO books (id, title, price, purchase_price, stock, is_chapter, branch_id) VALUES ('rg_book', 'RG Book', 250, 100, 5, 0, ?)`).run(BRANCH_A);
   });

@@ -6,12 +6,13 @@
  * actual implementation. The first test documents a financial defect that
  * this suite then locks closed.
  */
+import { assignRole } from './support/identity.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import visitorsRouter from '../routes/visitors.routes.js';
 import placementRouter from '../routes/placement.routes.js';
 import { studentsRouter } from '../routes/students.routes.js';
@@ -90,21 +91,20 @@ describe('Placement final hardening', () => {
       ['pha_reg', 'pha_reg', 'registrar'], ['pha_fin', 'pha_fin', 'finance'],
       ['pha_tea', 'pha_tea', 'teacher'], ['pha_cou', 'pha_cou', 'counselor'],
     ] as const) {
-      await db.prepare(`INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password) VALUES (?, ?, ?, ?, ?, ?, 1, 0)`)
-        .run(uid, uname, 'PHA ' + role, role, BRANCH_A, await hashPassword('x'));
+      await db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES (?, ?, ?, ?, ?, 1, 0)`)
+        .run(uid, uname, 'PHA ' + role, BRANCH_A, await hashPassword('x'));
+      assignRole(uid, role, BRANCH_A);
     }
-    await db.prepare(`INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password) VALUES ('pha_stu', 'pha_stu', 'PHA Student', 'student', ?, ?, 1, 0)`).run(BRANCH_A, await hashPassword('x'));
-    const stuRole = db.prepare("SELECT id FROM roles WHERE code='student'").get() as { id: string };
-    db.prepare(`INSERT OR IGNORE INTO user_roles (id, user_id, role_id, scope_type, scope_id, is_primary, assigned_by) VALUES (?, 'pha_stu', ?, 'branch', ?, 1, 'system')`).run(id('ur'), stuRole.id, BRANCH_A);
-    syncLegacyUserRoles(db);
+    await db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES ('pha_stu', 'pha_stu', 'PHA Student', ?, ?, 1, 0)`).run(BRANCH_A, await hashPassword('x'));
+    assignRole('pha_stu', 'student', BRANCH_A);
 
-    owner = { userId: 'pha_owner', username: 'pha_owner', role: 'owner', branchId: BRANCH_A, fullName: 'PHA Owner' };
-    manager = { userId: 'pha_mgr', username: 'pha_mgr', role: 'manager', branchId: BRANCH_A, fullName: 'PHA Manager' };
-    registrar = { userId: 'pha_reg', username: 'pha_reg', role: 'registrar', branchId: BRANCH_A, fullName: 'PHA Registrar' };
-    finance = { userId: 'pha_fin', username: 'pha_fin', role: 'finance', branchId: BRANCH_A, fullName: 'PHA Finance' };
-    teacher = { userId: 'pha_tea', username: 'pha_tea', role: 'teacher', branchId: BRANCH_A, fullName: 'PHA Teacher' };
-    counselor = { userId: 'pha_cou', username: 'pha_cou', role: 'counselor', branchId: BRANCH_A, fullName: 'PHA Counselor' };
-    studentTok = { userId: 'pha_stu', username: 'pha_stu', role: 'student', branchId: BRANCH_A, fullName: 'PHA Student' };
+    owner = { userId: 'pha_owner', username: 'pha_owner', branchId: BRANCH_A, fullName: 'PHA Owner' };
+    manager = { userId: 'pha_mgr', username: 'pha_mgr', branchId: BRANCH_A, fullName: 'PHA Manager' };
+    registrar = { userId: 'pha_reg', username: 'pha_reg', branchId: BRANCH_A, fullName: 'PHA Registrar' };
+    finance = { userId: 'pha_fin', username: 'pha_fin', branchId: BRANCH_A, fullName: 'PHA Finance' };
+    teacher = { userId: 'pha_tea', username: 'pha_tea', branchId: BRANCH_A, fullName: 'PHA Teacher' };
+    counselor = { userId: 'pha_cou', username: 'pha_cou', branchId: BRANCH_A, fullName: 'PHA Counselor' };
+    studentTok = { userId: 'pha_stu', username: 'pha_stu', branchId: BRANCH_A, fullName: 'PHA Student' };
 
     app = createApp();
   });
@@ -175,11 +175,11 @@ describe('Placement final hardening', () => {
     // View
     for (const u of allowed) {
       const res = await supertest(app).get('/api/placement/visitors/pha_v_rbac/placement').set(authHeader(u));
-      expect(res.status, `${u.role} view`).toBe(200);
+      expect(res.status, `${u.username} view`).toBe(200);
     }
     for (const u of denied) {
       const res = await supertest(app).get('/api/placement/visitors/pha_v_rbac/placement').set(authHeader(u));
-      expect(res.status, `${u.role} view`).toBe(403);
+      expect(res.status, `${u.username} view`).toBe(403);
     }
     // Start + score + complete by a receptionist (registrar) is the canonical flow.
     const start = await supertest(app).post('/api/placement/visitors/pha_v_rbac/placement/attempts').set(authHeader(registrar)).send({});

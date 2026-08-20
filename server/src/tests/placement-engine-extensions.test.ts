@@ -2,12 +2,13 @@
  * Placement Engine extensions — speaking audio responses, rubric-driven
  * manual scoring, expiry maintenance sweep.
  */
+import { assignRole } from './support/identity.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import visitorsRouter from '../routes/visitors.routes.js';
 import placementRouter from '../routes/placement.routes.js';
 import academicRouter from '../routes/academic.routes.js';
@@ -66,18 +67,19 @@ describe('Placement Engine extensions (speaking audio, rubric scoring, expiry sw
       [MANAGER_B, 'ext-manager-b', 'manager', BRANCH_B],
       [REGISTRAR, 'ext-registrar', 'registrar', BRANCH],
     ] as const) {
-      db.prepare(`INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password) VALUES (?, ?, ?, ?, ?, ?, 1, 0)`)
-        .run(u, username, 'Ext User', role, branch, await hashPassword('testpass123'));
+      db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES (?, ?, ?, ?, ?, 1, 0)`)
+        .run(u, username, 'Ext User', branch, await hashPassword('testpass123'));
+      assignRole(u, role, branch);
     }
-    syncLegacyUserRoles(db);
+
     db.prepare(`INSERT OR IGNORE INTO programs (id, name, duration_months, branch_id, is_active) VALUES (?, ?, 12, ?, 1)`).run(PROGRAM, 'Ext Program', BRANCH);
     db.prepare(`INSERT OR IGNORE INTO program_versions (id, program_id, version_label, version_number, status, is_default) VALUES (?, ?, 'v1', 1, 'published', 1)`).run(VERSION, PROGRAM);
     db.prepare(`INSERT OR IGNORE INTO levels (id, program_id, name, "order", program_version_id, code, is_active) VALUES (?, ?, 'A1', 1, ?, 'A1', 1)`).run(LEVEL_A1, PROGRAM, VERSION);
     db.prepare(`INSERT OR IGNORE INTO levels (id, program_id, name, "order", program_version_id, code, is_active) VALUES (?, ?, 'B1', 2, ?, 'B1', 1)`).run(LEVEL_B1, PROGRAM, VERSION);
-    owner = { userId: OWNER, username: 'ext-owner', role: 'owner', branchId: BRANCH, fullName: 'Ext Owner' };
-    manager = { userId: MANAGER, username: 'ext-manager', role: 'manager', branchId: BRANCH, fullName: 'Ext Manager' };
-    managerB = { userId: MANAGER_B, username: 'ext-manager-b', role: 'manager', branchId: BRANCH_B, fullName: 'Ext Manager B' };
-    registrar = { userId: REGISTRAR, username: 'ext-registrar', role: 'registrar', branchId: BRANCH, fullName: 'Ext Registrar' };
+    owner = { userId: OWNER, username: 'ext-owner', branchId: BRANCH, fullName: 'Ext Owner' };
+    manager = { userId: MANAGER, username: 'ext-manager', branchId: BRANCH, fullName: 'Ext Manager' };
+    managerB = { userId: MANAGER_B, username: 'ext-manager-b', branchId: BRANCH_B, fullName: 'Ext Manager B' };
+    registrar = { userId: REGISTRAR, username: 'ext-registrar', branchId: BRANCH, fullName: 'Ext Registrar' };
     app = createApp();
 
     // Media: one in branch A, one in branch B.

@@ -34,6 +34,7 @@
  *  Data integrity
  *  11. Invoices persist student_name / student_code at creation.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
@@ -41,7 +42,7 @@ import { db, initSchema } from '../db/connection.js';
 import { ensureOrganizationHierarchy, FIXED_ORG_ID } from '../db/organizationHierarchy.js';
 import { id, today } from '../utils/ids.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { authRouter } from '../routes/auth.routes.js';
 import { studentsRouter, paymentsRouter } from '../routes/students.routes.js';
 import { financeRouter } from '../routes/finance.routes.js';
@@ -84,8 +85,7 @@ function createApp() {
 
 function makeUser(overrides: Partial<TokenPayload> & { userId: string }): TokenPayload {
   return {
-    userId: overrides.userId, username: overrides.username || overrides.userId,
-    role: overrides.role || 'owner', branchId: overrides.branchId || BRANCH, fullName: 'Hardening User',
+    userId: overrides.userId, username: overrides.username || overrides.userId, branchId: overrides.branchId || BRANCH, fullName: 'Hardening User',
     sessionVersion: overrides.sessionVersion ?? 1,
   };
 }
@@ -101,9 +101,10 @@ let registrar: TokenPayload;
 let student: TokenPayload;
 
 async function seedUser(uid: string, uname: string, role: string) {
-  await db.prepare(`INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-    VALUES (?, ?, ?, ?, ?, ?, 1, 0)`)
-    .run(uid, uname, 'Hardening ' + role, role, BRANCH, await hashPassword('x'));
+  await db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+    VALUES (?, ?, ?, ?, ?, 1, 0)`)
+    .run(uid, uname, 'Hardening ' + role, BRANCH, await hashPassword('x'));
+  assignRole(uid, role, BRANCH);
 }
 
 function seedStudent(sid: string, name: string, gender: string, code: string) {
@@ -121,22 +122,20 @@ beforeAll(async () => {
   await seedUser('u_h_fin', 'h_fin', 'finance');
   await seedUser('u_h_mgr', 'h_mgr', 'manager');
   await seedUser('u_h_reg', 'h_reg', 'registrar');
-  syncLegacyUserRoles(db);
 
-  owner = makeUser({ userId: 'u_h_owner', role: 'owner', branchId: BRANCH });
-  finance = makeUser({ userId: 'u_h_fin', role: 'finance', branchId: BRANCH });
-  manager = makeUser({ userId: 'u_h_mgr', role: 'manager', branchId: BRANCH });
-  registrar = makeUser({ userId: 'u_h_reg', role: 'registrar', branchId: BRANCH });
+  owner = makeUser({ userId: 'u_h_owner', branchId: BRANCH });
+  finance = makeUser({ userId: 'u_h_fin', branchId: BRANCH });
+  manager = makeUser({ userId: 'u_h_mgr', branchId: BRANCH });
+  registrar = makeUser({ userId: 'u_h_reg', branchId: BRANCH });
 
   // Students: one male, one female + a portal account for the male.
   seedStudent('h_stu_m', 'Hardening Male', 'male', 'TH-H-001001');
   seedStudent('h_stu_f', 'Hardening Female', 'female', 'TH-H-001002');
-  db.prepare(`INSERT INTO users (id, username, password_hash, full_name, role, branch_id, linked_student_id, is_active, must_change_password, session_version)
-    VALUES (?, 'stu_h_m', ?, 'Hardening Male', 'student', ?, 'h_stu_m', 1, 0, 1)`)
+  db.prepare(`INSERT INTO users ( id, username, password_hash, full_name, branch_id, linked_student_id, is_active, must_change_password, session_version )
+    VALUES (?, 'stu_h_m', ?, 'Hardening Male', ?, 'h_stu_m', 1, 0, 1)`)
     .run('u_h_student', await hashPassword('irrelevant'), BRANCH);
-  db.prepare(`INSERT INTO user_roles (id, user_id, role_id, scope_type, scope_id, is_primary, assigned_by)
-    SELECT ?, u.id, r.id, 'branch', ?, 1, 'system' FROM users u, roles r WHERE u.username = 'stu_h_m' AND r.code = 'student'`).run(id('ur'), BRANCH);
-  student = makeUser({ userId: 'u_h_student', role: 'student', branchId: BRANCH });
+  assignRole('u_h_student', 'student', BRANCH);
+  student = makeUser({ userId: 'u_h_student', branchId: BRANCH });
 
   // Financial seed: treasury capital, student payment (income), budget charge, expense.
   db.prepare(`INSERT INTO financial_transactions (id, type, category, amount, date, description, operator_name, branch_id)
@@ -241,8 +240,8 @@ describe('Receptionist ≠ Finance', () => {
 
   beforeAll(async () => {
     await seedUser('u_h_recep', 'h_recep', 'registrar');
-    syncLegacyUserRoles(db);
-    receptionist = makeUser({ userId: 'u_h_recep', role: 'registrar', branchId: BRANCH });
+
+    receptionist = makeUser({ userId: 'u_h_recep', branchId: BRANCH });
   });
 
   it('receptionist can collect a student payment (creates income)', async () => {
@@ -362,7 +361,7 @@ describe('Reporting endpoint', () => {
 
 describe('Logout revokes the session', () => {
   it('invalidates the token after logout (session_version bump)', async () => {
-    const user = makeUser({ userId: 'u_h_owner', role: 'owner', branchId: BRANCH, username: 'h_owner' });
+    const user = makeUser({ userId: 'u_h_owner', branchId: BRANCH, username: 'h_owner' });
     const token = signToken({ ...user, sessionVersion: (db.prepare('SELECT session_version v FROM users WHERE id = ?').get('u_h_owner') as { v: number }).v });
     const logout = await supertest(app).post('/api/auth/logout').set('Authorization', `Bearer ${token}`);
     expect(logout.status).toBe(200);
@@ -377,7 +376,7 @@ describe('Multiple positions per user', () => {
     const roleRow = db.prepare("SELECT id FROM roles WHERE code = 'finance_manager'").get() as { id: string };
     // Re-sign the owner token: the logout test bumped session_version.
     const currentVersion = (db.prepare('SELECT session_version v FROM users WHERE id = ?').get('u_h_owner') as { v: number }).v;
-    const freshOwner = makeUser({ userId: 'u_h_owner', role: 'owner', branchId: BRANCH, username: 'h_owner', sessionVersion: currentVersion });
+    const freshOwner = makeUser({ userId: 'u_h_owner', branchId: BRANCH, username: 'h_owner', sessionVersion: currentVersion });
     const assign = await supertest(app)
       .post('/api/security/users/u_h_reg/roles')
       .set(authHeader(freshOwner))

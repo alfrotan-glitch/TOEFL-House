@@ -12,12 +12,13 @@
  *  5. identity uniqueness + IDOR + branch isolation (control tests that must
  *     PASS — proving the surrounding protections work)
  */
+import { assignRole } from './support/identity.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import studentsRouter, { paymentsRouter } from '../routes/students.routes.js';
 import { auditRouter } from '../routes/audit.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
@@ -56,19 +57,19 @@ describe('Student subsystem deep audit', () => {
       ['stu_reg', 'stu_reg', 'registrar'], ['stu_fin', 'stu_fin', 'finance'],
       ['stu_tea', 'stu_tea', 'teacher'],
     ] as const) {
-      await db.prepare(`INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password) VALUES (?, ?, ?, ?, ?, ?, 1, 0)`)
-        .run(uid, uname, 'Stu ' + role, role, BRANCH_A, await hashPassword('x'));
+      await db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES (?, ?, ?, ?, ?, 1, 0)`)
+        .run(uid, uname, 'Stu ' + role, BRANCH_A, await hashPassword('x'));
+      assignRole(uid, role, BRANCH_A);
     }
-    await db.prepare(`INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password) VALUES ('stu_stu', 'stu_stu', 'Stu Student', 'student', ?, ?, 1, 0)`).run(BRANCH_A, await hashPassword('x'));
-    const stuRole = db.prepare("SELECT id FROM roles WHERE code='student'").get() as { id: string };
-    db.prepare(`INSERT OR IGNORE INTO user_roles (id, user_id, role_id, scope_type, scope_id, is_primary, assigned_by) VALUES (?, 'stu_stu', ?, 'branch', ?, 1, 'system')`).run(id('ur'), stuRole.id, BRANCH_A);
-    syncLegacyUserRoles(db);
-    owner = { userId: 'stu_owner', username: 'stu_owner', role: 'owner', branchId: BRANCH_A, fullName: 'Stu Owner' };
-    manager = { userId: 'stu_mgr', username: 'stu_mgr', role: 'manager', branchId: BRANCH_A, fullName: 'Stu Manager' };
-    registrar = { userId: 'stu_reg', username: 'stu_reg', role: 'registrar', branchId: BRANCH_A, fullName: 'Stu Registrar' };
-    finance = { userId: 'stu_fin', username: 'stu_fin', role: 'finance', branchId: BRANCH_A, fullName: 'Stu Finance' };
-    teacher = { userId: 'stu_tea', username: 'stu_tea', role: 'teacher', branchId: BRANCH_A, fullName: 'Stu Teacher' };
-    studentTok = { userId: 'stu_stu', username: 'stu_stu', role: 'student', branchId: BRANCH_A, fullName: 'Stu Student' };
+    await db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES ('stu_stu', 'stu_stu', 'Stu Student', ?, ?, 1, 0)`).run(BRANCH_A, await hashPassword('x'));
+    assignRole('stu_stu', 'student', BRANCH_A);
+
+    owner = { userId: 'stu_owner', username: 'stu_owner', branchId: BRANCH_A, fullName: 'Stu Owner' };
+    manager = { userId: 'stu_mgr', username: 'stu_mgr', branchId: BRANCH_A, fullName: 'Stu Manager' };
+    registrar = { userId: 'stu_reg', username: 'stu_reg', branchId: BRANCH_A, fullName: 'Stu Registrar' };
+    finance = { userId: 'stu_fin', username: 'stu_fin', branchId: BRANCH_A, fullName: 'Stu Finance' };
+    teacher = { userId: 'stu_tea', username: 'stu_tea', branchId: BRANCH_A, fullName: 'Stu Teacher' };
+    studentTok = { userId: 'stu_stu', username: 'stu_stu', branchId: BRANCH_A, fullName: 'Stu Student' };
     app = createApp();
   });
 

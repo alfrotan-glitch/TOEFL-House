@@ -9,13 +9,14 @@
  * — a foreign key into the taxonomy — so there is one authority and the six
  * surfaces below cannot hold different opinions about the same money.
  */
+import { assignRole } from './support/identity.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { ensureBranchBudgetLines } from '../db/organizationHierarchy.js';
 import { hashPassword, signToken, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { financeRouter } from '../routes/finance.routes.js';
 import { reportsRouter } from '../routes/reports.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
@@ -69,11 +70,12 @@ beforeAll(async () => {
   }
   const pwd = await hashPassword('Str0ng!Pass2026');
   db.prepare(
-    `INSERT OR IGNORE INTO users (id,username,password_hash,full_name,role,branch_id,must_change_password)
-     VALUES ('facc_own','facc_own',?,'Owner','owner',?,0)`,
+    `INSERT OR IGNORE INTO users ( id, username, password_hash, full_name, branch_id, must_change_password )
+     VALUES ('facc_own', 'facc_own', ?, 'Owner', ?, 0)`,
   ).run(pwd, BRANCH);
-  syncLegacyUserRoles(db);
-  owner = { userId: 'facc_own', username: 'facc_own', role: 'owner', branchId: BRANCH, fullName: 'Owner' } as TokenPayload;
+  assignRole('facc_own', 'owner', BRANCH);
+
+  owner = { userId: 'facc_own', username: 'facc_own', branchId: BRANCH, fullName: 'Owner' } as TokenPayload;
 
   app = express();
   app.use(express.json());

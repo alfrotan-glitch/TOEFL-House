@@ -271,7 +271,7 @@ export function assertVisitorBranchAccess(req: import('express').Request, visito
 
 export function getUserContext(req: import('express').Request) {
   const user = req.user;
-  if (!user?.userId || !user?.branchId || !user?.fullName || !user?.role) throw new HttpError(403, 'User context missing.');
+  if (!user?.userId || !user?.branchId || !user?.fullName) throw new HttpError(403, 'User context missing.');
   return user;
 }
 

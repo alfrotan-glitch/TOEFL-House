@@ -4,12 +4,11 @@
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import {
-  PERMISSION_CATALOG, 
-  ROLE_DEFINITIONS, 
-  LEGACY_ROLE_MAP, 
+  PERMISSION_CATALOG,
+  ROLE_DEFINITIONS,
   type PermissionScope,
+  type RoleCode,
 } from './permission-catalog.js';
-import type { UserRole } from '../../utils/auth.js';
 
 export interface EffectivePermission {
   code: string; 
@@ -19,20 +18,26 @@ export interface EffectivePermission {
 }
 
 export interface RbacUserContext {
-  userId: string; 
-  username: string; 
-  fullName: string; 
-  legacyRole: string; 
+  userId: string;
+  username: string;
+  fullName: string;
   branchId: string;
   permissions: EffectivePermission[];
   permissionCodes: Set<string>; // O(1) lookup performance
-  roles: { 
-    roleId: string; 
-    roleCode: string; 
-    roleName: string; 
-    scopeType: PermissionScope; 
-    scopeId: string | null 
+  roles: {
+    roleId: string;
+    roleCode: string;
+    roleName: string;
+    scopeType: PermissionScope;
+    scopeId: string | null;
+    isPrimary?: number;
   }[];
+  /**
+   * The principal's primary position, for display and for audit attribution.
+   * Derived from the assignments — it is a label, never an authorization
+   * input. Null when the principal holds no live assignment.
+   */
+  primaryRole: string | null;
 }
 
 // ── Performance: Schema Existence Memoization ──────────────────────────────
@@ -65,7 +70,6 @@ interface RbacStatements {
   getRolePerms: Database.Statement;
   deleteRolePerm: Database.Statement;
   getPermId: Database.Statement;
-  getLegacyUsers: Database.Statement;
   insertUserRole: Database.Statement;
   getPrimaryUserRole: Database.Statement;
   getUserRbacPerms: Database.Statement;
@@ -88,7 +92,6 @@ function getStmts(db: Database.Database): RbacStatements {
     deleteRolePerm: db.prepare('DELETE FROM role_permissions WHERE id = ?'),
     getPermId: db.prepare('SELECT id FROM permissions WHERE code = ?'),
     
-    getLegacyUsers: db.prepare('SELECT id, role, branch_id FROM users WHERE is_active = 1'),
     insertUserRole: db.prepare(`INSERT OR IGNORE INTO user_roles (id, user_id, role_id, scope_type, scope_id, is_primary, assigned_by, assigned_at) VALUES (?, ?, ?, ?, ?, 1, ?, datetime('now'))`),
     getPrimaryUserRole: db.prepare(`SELECT ur.id, r.code AS roleCode, ur.scope_type AS scopeType, ur.scope_id AS scopeId FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = ? AND ur.is_primary = 1 LIMIT 1`),
     
@@ -111,10 +114,12 @@ function getStmts(db: Database.Database): RbacStatements {
       WHERE o.user_id = ? AND (o.expires_at IS NULL OR o.expires_at > datetime('now'))
     `),
     getUserRoles: db.prepare(`
-      SELECT ur.role_id AS roleId, r.code AS roleCode, r.name AS roleName, ur.scope_type AS scopeType, ur.scope_id AS scopeId
+      SELECT ur.role_id AS roleId, r.code AS roleCode, r.name AS roleName, ur.scope_type AS scopeType,
+             ur.scope_id AS scopeId, ur.is_primary AS isPrimary
       FROM user_roles ur JOIN roles r ON r.id = ur.role_id
       WHERE ur.user_id = ? AND r.is_active = 1
         AND (ur.expires_at IS NULL OR ur.expires_at > datetime('now'))
+      ORDER BY ur.is_primary DESC
     `),
   };
   
@@ -161,52 +166,43 @@ export function bootstrapRbacCatalog(db: Database.Database): void {
   tx();
 }
 
-/** Synchronize users.role with exactly one primary RBAC role; preserve secondary grants. */
-export function syncPrimaryUserRole(db: Database.Database, userId: string, legacyRole: UserRole, branchId: string, assignedBy = 'system'): void {
-  if (!rbacSchemaExists(db)) return;
+/**
+ * Assigns a principal's PRIMARY position.
+ *
+ * This is the only way a role is granted outside the security API. It is an
+ * explicit command taking a canonical role code — there is no derivation from
+ * any column on the user record, because a person's positions live in
+ * `user_roles` and nowhere else.
+ *
+ * Secondary assignments are left untouched: holding several positions is a
+ * supported arrangement, and re-stating someone's primary posting must not
+ * quietly strip the others.
+ */
+export function assignPrimaryRole(
+  db: Database.Database,
+  userId: string,
+  roleCode: RoleCode,
+  branchId: string | null,
+  assignedBy = 'system',
+): void {
   const stmts = getStmts(db);
-  const roleCode = LEGACY_ROLE_MAP[legacyRole] || legacyRole;
   const role = stmts.getRoleId.get(roleCode) as { id: string } | undefined;
   if (!role) throw new Error(`RBAC role '${roleCode}' is not configured.`);
+
+  // The owner is an organization-wide position; every other role is scoped to
+  // a branch, and a branch-scoped assignment without a branch is meaningless.
+  const scopeType: PermissionScope = roleCode === 'owner' ? 'organization' : 'branch';
+  const scopeId = roleCode === 'owner' ? null : branchId;
+  if (scopeType === 'branch' && !scopeId) {
+    throw new Error(`Role '${roleCode}' is branch-scoped and requires a branch.`);
+  }
+
   const tx = db.transaction(() => {
     db.prepare('UPDATE user_roles SET is_primary = 0 WHERE user_id = ?').run(userId);
-    db.prepare('DELETE FROM user_roles WHERE user_id = ? AND role_id = ? AND is_primary = 0').run(userId, role.id);
-    stmts.insertUserRole.run(randomUUID(), userId, role.id, roleCode === 'owner' ? 'organization' : 'branch', roleCode === 'owner' ? null : branchId, assignedBy);
+    db.prepare('DELETE FROM user_roles WHERE user_id = ? AND role_id = ?').run(userId, role.id);
+    stmts.insertUserRole.run(randomUUID(), userId, role.id, scopeType, scopeId, assignedBy);
     db.prepare('UPDATE user_roles SET is_primary = 1 WHERE user_id = ? AND role_id = ?').run(userId, role.id);
   });
-  tx();
-}
-
-export function syncLegacyUserRoles(db: Database.Database): void {
-  if (!rbacSchemaExists(db)) return;
-  const stmts = getStmts(db);
-  const users = stmts.getLegacyUsers.all() as { id: string; role: string; branch_id: string }[];
-
-  const tx = db.transaction(() => {
-    for (const u of users) {
-      const roleCode = LEGACY_ROLE_MAP[u.role as UserRole] || u.role;
-      const role = stmts.getRoleId.get(roleCode) as { id: string } | undefined;
-      if (!role) continue;
-
-      const desiredScopeType: PermissionScope = roleCode === 'owner' ? 'organization' : 'branch';
-      const desiredScopeId = roleCode === 'owner' ? null : u.branch_id;
-      const primary = stmts.getPrimaryUserRole.get(u.id) as { id: string; roleCode: string; scopeType: string; scopeId: string | null } | undefined;
-
-      if (!primary) {
-        stmts.insertUserRole.run(randomUUID(), u.id, role.id, desiredScopeType, desiredScopeId, 'system');
-        continue;
-      }
-
-      // Converge the canonical primary RBAC identity with users.role and branch scope.
-      // Secondary roles/delegations remain intact.
-      if (primary.roleCode !== roleCode || primary.scopeType !== desiredScopeType || (primary.scopeId ?? null) !== (desiredScopeId ?? null)) {
-        db.prepare('UPDATE user_roles SET is_primary = 0 WHERE user_id = ?').run(u.id);
-        db.prepare('DELETE FROM user_roles WHERE user_id = ? AND role_id = ? AND is_primary = 0').run(u.id, role.id);
-        stmts.insertUserRole.run(randomUUID(), u.id, role.id, desiredScopeType, desiredScopeId, 'system');
-      }
-    }
-  });
-
   tx();
 }
 
@@ -259,7 +255,7 @@ export function resolveUserPermissions(db: Database.Database, userId: string): E
 }
 
 export function buildRbacContext(db: Database.Database, user: {
-  id: string; username: string; full_name: string; role: string; branch_id: string;
+  id: string; username: string; full_name: string; branch_id: string;
 }): RbacUserContext {
   const stmts = getStmts(db);
   const permissions = resolveUserPermissions(db, user.id);
@@ -269,11 +265,13 @@ export function buildRbacContext(db: Database.Database, user: {
     roles = stmts.getUserRoles.all(user.id) as RbacUserContext['roles'];
   }
   
+  const primaryRole = roles.find((r) => r.isPrimary)?.roleCode ?? roles[0]?.roleCode ?? null;
+
   return {
+    primaryRole,
     userId: user.id, 
     username: user.username, 
     fullName: user.full_name, 
-    legacyRole: user.role,
     branchId: user.branch_id, 
     permissions, 
     permissionCodes: new Set(permissions.map((p) => p.code)), 

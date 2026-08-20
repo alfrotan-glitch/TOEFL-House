@@ -77,7 +77,7 @@ export default function DashboardView({
 }: DashboardViewProps) {
   const { user } = useAuth();
   const role = activeRole as string;
-  const isAuthorized = role === 'owner' || role === 'manager';
+  const isAuthorized = role === 'owner' || role === 'general_manager';
 
   const [mainTab, setMainTab] = useState<'overview' | 'bos' | 'analytics'>('overview');
   const [timeframe, setTimeframe] = useState<'today' | 'month' | 'year'>('month');

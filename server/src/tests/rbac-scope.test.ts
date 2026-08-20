@@ -1,3 +1,4 @@
+import { assignRole } from './support/identity.js';
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { db, initSchema } from '../db/connection.js';
 import { ensureOrganizationHierarchy, FIXED_ORG_ID } from '../db/organizationHierarchy.js';
@@ -11,9 +12,10 @@ const BRANCH_C = 'rbac_scope_c';
 function seedUser(userId: string, role: string, branchId: string) {
   db.prepare(`
     INSERT OR REPLACE INTO users
-      (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-    VALUES (?, ?, ?, ?, ?, 'test-hash', 1, 0)
-  `).run(userId, userId, userId, role, branchId);
+      ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+    VALUES (?, ?, ?, ?, 'test-hash', 1, 0)
+  `).run(userId, userId, userId, branchId);
+  assignRole(userId, role, branchId);
 }
 
 describe('Phase 1 RBAC scope invariants', () => {
@@ -76,36 +78,36 @@ describe('Phase 1 RBAC scope invariants', () => {
   });
 
   it('organization scope grants all branches to owner', () => {
-    const ctx = buildRbacContext(db, { id: 'rbac_owner', username: 'owner', full_name: 'Owner', role: 'owner', branch_id: BRANCH_A });
+    const ctx = buildRbacContext(db, { id: 'rbac_owner', username: 'owner', full_name: 'Owner', branch_id: BRANCH_A });
     expect(canAccessAllBranches(ctx)).toBe(true);
     expect(canAccessBranch(db, ctx, BRANCH_A)).toBe(true);
     expect(canAccessBranch(db, ctx, BRANCH_B)).toBe(true);
   });
 
   it('branch scope denies manager cross-branch access', () => {
-    const ctx = buildRbacContext(db, { id: 'rbac_manager', username: 'manager', full_name: 'Manager', role: 'manager', branch_id: BRANCH_A });
+    const ctx = buildRbacContext(db, { id: 'rbac_manager', username: 'manager', full_name: 'Manager', branch_id: BRANCH_A });
     expect(canAccessBranch(db, ctx, BRANCH_A)).toBe(true);
     expect(canAccessBranch(db, ctx, BRANCH_B)).toBe(false);
     expect(canAccessAllBranches(ctx)).toBe(false);
   });
 
   it('campus scope permits branches in the assigned campus only', () => {
-    const ctx = buildRbacContext(db, { id: 'rbac_campus_manager', username: 'campus', full_name: 'Campus Manager', role: 'manager', branch_id: BRANCH_A });
+    const ctx = buildRbacContext(db, { id: 'rbac_campus_manager', username: 'campus', full_name: 'Campus Manager', branch_id: BRANCH_A });
     expect(canAccessBranch(db, ctx, BRANCH_A)).toBe(true);
     expect(canAccessBranch(db, ctx, BRANCH_C)).toBe(true);
     expect(canAccessBranch(db, ctx, BRANCH_B)).toBe(false);
   });
 
   it('teacher own-class scope allows only the assigned class', () => {
-    const ctx = buildRbacContext(db, { id: 'rbac_teacher', username: 'teacher', full_name: 'Teacher', role: 'teacher', branch_id: BRANCH_A });
-    const req = { user: { userId: 'rbac_teacher', username: 'teacher', fullName: 'Teacher', role: 'teacher', branchId: BRANCH_A }, rbac: ctx } as any;
+    const ctx = buildRbacContext(db, { id: 'rbac_teacher', username: 'teacher', full_name: 'Teacher', branch_id: BRANCH_A });
+    const req = { user: { userId: 'rbac_teacher', username: 'teacher', fullName: 'Teacher', branchId: BRANCH_A }, rbac: ctx } as any;
     expect(canAccessClass(req, 'rbac_class_own')).toBe(true);
     expect(canAccessClass(req, 'rbac_class_other')).toBe(false);
   });
 
   it('manager class access follows branch scope instead of the manager role name', () => {
-    const ctx = buildRbacContext(db, { id: 'rbac_manager', username: 'manager', full_name: 'Manager', role: 'manager', branch_id: BRANCH_A });
-    const req = { user: { userId: 'rbac_manager', username: 'manager', fullName: 'Manager', role: 'manager', branchId: BRANCH_A }, rbac: ctx } as any;
+    const ctx = buildRbacContext(db, { id: 'rbac_manager', username: 'manager', full_name: 'Manager', branch_id: BRANCH_A });
+    const req = { user: { userId: 'rbac_manager', username: 'manager', fullName: 'Manager', branchId: BRANCH_A }, rbac: ctx } as any;
     expect(canAccessClass(req, 'rbac_class_own')).toBe(true);
   });
 

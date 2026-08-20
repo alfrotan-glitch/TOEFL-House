@@ -16,12 +16,13 @@
  * "expected to fail but passed" error) the moment a fix lands, which is the
  * signal to flip it to a normal assertion.
  */
+import { assignRole } from './support/identity.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { visitorsRouter } from '../routes/visitors.routes.js';
 import { searchRouter } from '../routes/search.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
@@ -82,18 +83,21 @@ beforeAll(async () => {
   seedPlacementRequiredProgram();
 
   const pwd = await hashPassword('Str0ng!Pass2026');
-  const insU = db.prepare(`INSERT OR IGNORE INTO users (id,username,password_hash,full_name,role,branch_id,must_change_password)
-                           VALUES (?,?,?,?,?,?,0)`);
-  insU.run('vsa_own', 'vsa_own', pwd, 'Owner', 'owner', BRANCH_A);
-  insU.run('vsa_reg', 'vsa_reg', pwd, 'Registrar A', 'registrar', BRANCH_A);
-  insU.run('vsa_cou', 'vsa_cou', pwd, 'Counselor A', 'counselor', BRANCH_A);
-  insU.run('vsa_tea', 'vsa_tea', pwd, 'Teacher A', 'teacher', BRANCH_A);
-  syncLegacyUserRoles(db);
+  const insU = db.prepare(`INSERT OR IGNORE INTO users (id, username, password_hash, full_name, branch_id, must_change_password)
+                           VALUES (?, ?, ?, ?, ?, 0)`);
+  insU.run('vsa_own', 'vsa_own', pwd, 'Owner', BRANCH_A);
+  assignRole('vsa_own', 'owner', BRANCH_A)
+  insU.run('vsa_reg', 'vsa_reg', pwd, 'Registrar A', BRANCH_A);
+  assignRole('vsa_reg', 'registrar', BRANCH_A)
+  insU.run('vsa_cou', 'vsa_cou', pwd, 'Counselor A', BRANCH_A);
+  assignRole('vsa_cou', 'counselor', BRANCH_A)
+  insU.run('vsa_tea', 'vsa_tea', pwd, 'Teacher A', BRANCH_A);
+  assignRole('vsa_tea', 'teacher', BRANCH_A)
 
-  owner = { userId: 'vsa_own', username: 'vsa_own', role: 'owner', branchId: BRANCH_A, fullName: 'Owner' } as TokenPayload;
-  registrarA = { userId: 'vsa_reg', username: 'vsa_reg', role: 'registrar', branchId: BRANCH_A, fullName: 'Registrar A' } as TokenPayload;
-  counselorA = { userId: 'vsa_cou', username: 'vsa_cou', role: 'counselor', branchId: BRANCH_A, fullName: 'Counselor A' } as TokenPayload;
-  teacherA = { userId: 'vsa_tea', username: 'vsa_tea', role: 'teacher', branchId: BRANCH_A, fullName: 'Teacher A' } as TokenPayload;
+  owner = { userId: 'vsa_own', username: 'vsa_own', branchId: BRANCH_A, fullName: 'Owner' } as TokenPayload;
+  registrarA = { userId: 'vsa_reg', username: 'vsa_reg', branchId: BRANCH_A, fullName: 'Registrar A' } as TokenPayload;
+  counselorA = { userId: 'vsa_cou', username: 'vsa_cou', branchId: BRANCH_A, fullName: 'Counselor A' } as TokenPayload;
+  teacherA = { userId: 'vsa_tea', username: 'vsa_tea', branchId: BRANCH_A, fullName: 'Teacher A' } as TokenPayload;
 
   app = express();
   app.use(express.json());

@@ -95,7 +95,7 @@ export default function SettingsView({
   // Organization hierarchy form state
   const campuses: Campus[] = settings.campuses || [];
   const branchesList: Branch[] = settings.branches || [];
-  const canConfigureOrg = activeRole === 'owner' || activeRole === 'manager';
+  const canConfigureOrg = activeRole === 'owner' || activeRole === 'general_manager';
   const [campusForm, setCampusForm] = useState({
     name: '', code: '', address: '', postalCode: '', phone: '', email: '', description: '', isActive: true,
   });

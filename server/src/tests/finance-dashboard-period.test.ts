@@ -10,12 +10,13 @@
  * The fixtures are dated relative to the REAL current Shamsi period, so the
  * suite keeps testing the boundary no matter when it runs.
  */
+import { assignRole } from './support/identity.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { financeRouter } from '../routes/finance.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 import { periodBoundaries } from '../core/calendar/periods.js';
@@ -81,12 +82,14 @@ beforeAll(async () => {
     VALUES ('fdp_pay_b','fdp_stu_b',333_000,?,'cash','completed','other','R-FDP-B1',?,hex(randomblob(16)))`).run(TODAY, BRANCH_B);
 
   const pwd = await hashPassword('Str0ng!Pass2026');
-  const insU = db.prepare(`INSERT OR IGNORE INTO users (id,username,password_hash,full_name,role,branch_id,must_change_password) VALUES (?,?,?,?,?,?,0)`);
-  insU.run('fdp_owner', 'fdp_owner', pwd, 'Owner', 'owner', BRANCH_A);
-  insU.run('fdp_fin', 'fdp_fin', pwd, 'Fin A', 'finance', BRANCH_A);
-  syncLegacyUserRoles(db);
-  owner = { userId: 'fdp_owner', username: 'fdp_owner', role: 'owner', branchId: BRANCH_A, fullName: 'Owner' } as TokenPayload;
-  financeA = { userId: 'fdp_fin', username: 'fdp_fin', role: 'finance', branchId: BRANCH_A, fullName: 'Fin A' } as TokenPayload;
+  const insU = db.prepare(`INSERT OR IGNORE INTO users (id,username,password_hash,full_name,branch_id,must_change_password) VALUES (?,?,?,?,?,0)`);
+  insU.run('fdp_owner', 'fdp_owner', pwd, 'Owner', BRANCH_A);
+  assignRole('fdp_owner', 'owner', BRANCH_A);
+  insU.run('fdp_fin', 'fdp_fin', pwd, 'Fin A', BRANCH_A);
+  assignRole('fdp_fin', 'finance', BRANCH_A);
+
+  owner = { userId: 'fdp_owner', username: 'fdp_owner', branchId: BRANCH_A, fullName: 'Owner' } as TokenPayload;
+  financeA = { userId: 'fdp_fin', username: 'fdp_fin', branchId: BRANCH_A, fullName: 'Fin A' } as TokenPayload;
 
   app = express();
   app.use(express.json());

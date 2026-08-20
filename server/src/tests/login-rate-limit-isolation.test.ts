@@ -11,12 +11,13 @@
  * asserted here, including the counter-invariant that a *correct* password for
  * a *different* account keeps working while another account is locked out.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { hashPassword } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { authRouter } from '../routes/auth.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 
@@ -32,11 +33,11 @@ beforeAll(async () => {
   const hash = await hashPassword(GOOD_PASSWORD);
   for (const [id, username] of [['u_rl_alice', 'rl_alice'], ['u_rl_bob', 'rl_bob']]) {
     db.prepare(
-      `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-       VALUES (?, ?, ?, 'registrar', ?, ?, 1, 0)`,
+      `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+       VALUES (?, ?, ?, ?, ?, 1, 0)`,
     ).run(id, username, username, BRANCH, hash);
+    assignRole(id, 'registrar', BRANCH);
   }
-  syncLegacyUserRoles(db);
 
   app = express();
   app.use(express.json());

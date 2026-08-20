@@ -88,7 +88,7 @@ export default function WorkflowsView({
   const canActOnCurrentStep =
     !!currentStepDef &&
     !TERMINAL_STATUSES.includes(detail!.status) &&
-    (activeRole === currentStepDef.role || activeRole === 'owner' || activeRole === 'manager');
+    (activeRole === currentStepDef.role || activeRole === 'owner' || activeRole === 'general_manager');
 
   const handleApprove = async () => {
     if (!selectedId) return;

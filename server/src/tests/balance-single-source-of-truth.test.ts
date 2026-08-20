@@ -22,12 +22,13 @@
  * them, and that the HTTP surfaces actually carry the figures so no client has
  * a reason to recompute.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { studentsRouter, paymentsRouter } from '../routes/students.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 import { getStudentBalance, getStudentBalancesPage, deriveBalance } from '../utils/studentBalance.js';
@@ -44,7 +45,7 @@ function createApp() {
   return app;
 }
 const user = (): TokenPayload => ({
-  userId: 'u_sot', username: 'sot', role: 'manager', branchId: BRANCH, fullName: 'SoT Mgr',
+  userId: 'u_sot', username: 'sot', branchId: BRANCH, fullName: 'SoT Mgr',
 });
 const auth = () => ({ Authorization: `Bearer ${signToken(user())}` });
 
@@ -71,14 +72,15 @@ beforeAll(async () => {
   bootstrapRbacCatalog(db);
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(BRANCH, 'SoT Branch', 'Loc');
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES (?, ?, ?, 'manager', ?, ?, 1, 0)`,
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES (?, ?, ?, ?, ?, 1, 0)`,
   ).run('u_sot', 'sot', 'SoT Mgr', BRANCH, await hashPassword('x'));
+  assignRole('u_sot', 'manager', BRANCH);
   db.prepare(
     `INSERT OR IGNORE INTO classes (id,name,level,branch_id,status,lifecycle_stage,schedule_time,fee)
      VALUES (?,?,'A1',?,'active','in_progress','08:00',1000)`,
   ).run(CLASS_ID, 'SoT Class', BRANCH);
-  syncLegacyUserRoles(db);
+
   app = createApp();
 });
 

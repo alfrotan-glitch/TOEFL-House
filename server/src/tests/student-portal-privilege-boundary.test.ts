@@ -21,6 +21,7 @@
  *   POST /students/:id/refund         -> 403
  *   GET  /payments|/invoices|/finance|/classes|/teachers|/bos|/security|/users -> 403
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
@@ -35,7 +36,7 @@ import teachersRouter from '../routes/teachers.routes.js';
 import bosRouter from '../routes/bos.routes.js';
 import securityRouter from '../routes/security.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { ROLE_DEFINITIONS } from '../core/rbac/permission-catalog.js';
 
 const BRANCH = 'spp_branch';
@@ -70,12 +71,13 @@ beforeAll(() => {
      VALUES ('spp_s_other', 'TH-SPP-2', 'Portal Other', 'active', ?, ?, 'male', '0700222002')`
   ).run(today(), BRANCH);
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password, linked_student_id, session_version)
-     VALUES ('spp_u', 'stu_TH-SPP-1', 'Portal Self', 'student', ?, 'unusable', 1, 0, 'spp_s_self', 1)`
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password, linked_student_id, session_version )
+     VALUES ('spp_u', 'stu_TH-SPP-1', 'Portal Self', ?, 'unusable', 1, 0, 'spp_s_self', 1)`
   ).run(BRANCH);
-  syncLegacyUserRoles(db);
+  assignRole('spp_u', 'student', BRANCH);
+
   portalToken = signToken({
-    userId: 'spp_u', username: 'stu_TH-SPP-1', role: 'student',
+    userId: 'spp_u', username: 'stu_TH-SPP-1',
     branchId: BRANCH, fullName: 'Portal Self', sessionVersion: 1,
   } as TokenPayload);
   app = createApp();

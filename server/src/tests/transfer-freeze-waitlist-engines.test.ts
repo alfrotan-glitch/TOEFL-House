@@ -3,6 +3,7 @@
  * ============================================================================
  * Mirrors the app/RBAC-bootstrap pattern established in Phases 1-8.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
@@ -13,7 +14,7 @@ import enrollmentRouter from '../routes/enrollment.routes.js';
 import classesRouter from '../routes/classes.routes.js';
 import waitlistRouter from '../routes/waitlist.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { getClassLifecycleService } from '../core/academic/class-lifecycle-service.js';
 import { getEnrollmentService } from '../core/academic/enrollment-service.js';
 import { createRule } from '../core/configuration/rule-engine.js';
@@ -34,8 +35,7 @@ function createApp() {
 
 function makeUser(overrides: Partial<TokenPayload> & { userId: string }): TokenPayload {
   return {
-    userId: overrides.userId, username: overrides.username || overrides.userId,
-    role: overrides.role || 'manager', branchId: overrides.branchId || BRANCH, fullName: overrides.fullName || 'Test User',
+    userId: overrides.userId, username: overrides.username || overrides.userId, branchId: overrides.branchId || BRANCH, fullName: overrides.fullName || 'Test User',
   };
 }
 function authHeader(user: TokenPayload): { Authorization: string } {
@@ -43,13 +43,14 @@ function authHeader(user: TokenPayload): { Authorization: string } {
 }
 async function seedUser(userId: string, role: string, branchId: string, username: string) {
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password) VALUES (?, ?, ?, ?, ?, ?, 1, 0)`
-  ).run(userId, username, `Test ${role}`, role, branchId, await hashPassword('testpass123'));
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES (?, ?, ?, ?, ?, 1, 0)`
+  ).run(userId, username, `Test ${role}`, branchId, await hashPassword('testpass123'));
+  assignRole(userId, role, branchId);
 }
 
 async function ensureScopedManager(userId: string, branchId: string, username: string) {
   await seedUser(userId, 'manager', branchId, username);
-  syncLegacyUserRoles(db);
+
 }
 let studentCounter = 0;
 function seedStudent(overrides: { gender?: string } = {}): string {
@@ -70,8 +71,8 @@ beforeAll(async () => {
   bootstrapRbacCatalog(db);
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(BRANCH, 'P9 Branch', 'Loc');
   await seedUser('u_p9_manager', 'manager', BRANCH, 'p9_manager');
-  syncLegacyUserRoles(db);
-  manager = makeUser({ userId: 'u_p9_manager', role: 'manager', branchId: BRANCH });
+
+  manager = makeUser({ userId: 'u_p9_manager', branchId: BRANCH });
   app = createApp();
   enrollmentService = getEnrollmentService(db);
 });
@@ -215,7 +216,7 @@ describe('Transfer Engine', () => {
     // Classes in the strict branch must be created by a manager scoped to it
     // (branch isolation blocks the default branch-A manager).
     await ensureScopedManager('u_p9_manager_strict1', strictBranch, 'p9_manager_strict1');
-    const strictManager = makeUser({ userId: 'u_p9_manager_strict1', role: 'manager', branchId: strictBranch });
+    const strictManager = makeUser({ userId: 'u_p9_manager_strict1', branchId: strictBranch });
     const fromRes = await supertest(app).post('/api/classes').set(authHeader(strictManager)).send({ name: 'Strict From', level: 'A1', branchId: strictBranch, capacity: 10 });
     const toRes = await supertest(app).post('/api/classes').set(authHeader(strictManager)).send({ name: 'Strict To', level: 'A1', branchId: strictBranch, capacity: 10 });
     const svc = getClassLifecycleService(db);
@@ -263,7 +264,7 @@ describe('Transfer Engine', () => {
     // Classes in the strict branch must be created by a manager scoped to it
     // (branch isolation blocks the default branch-A manager).
     await ensureScopedManager('u_p9_manager_strict2', strictBranch2, 'p9_manager_strict2');
-    const strictManager = makeUser({ userId: 'u_p9_manager_strict2', role: 'manager', branchId: strictBranch2 });
+    const strictManager = makeUser({ userId: 'u_p9_manager_strict2', branchId: strictBranch2 });
     const fromRes = await supertest(app).post('/api/classes').set(authHeader(strictManager)).send({ name: 'Strict From 2', level: 'A1', branchId: strictBranch2, capacity: 10 });
     const toRes = await supertest(app).post('/api/classes').set(authHeader(strictManager)).send({ name: 'Strict To 2', level: 'A1', branchId: strictBranch2, capacity: 10 });
     const svc = getClassLifecycleService(db);

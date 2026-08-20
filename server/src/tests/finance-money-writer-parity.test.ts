@@ -46,13 +46,14 @@
  * 56000.00 -> 55000.00). Only the main/saving split shifts, which is
  * `recordIncome`'s documented savings-reclaim behaviour, not asymmetry.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { today } from '../utils/ids.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { invoicesRouter } from '../routes/invoices.routes.js';
 import { fundingRouter } from '../routes/funding.routes.js';
 import { studentsRouter } from '../routes/students.routes.js';
@@ -137,12 +138,13 @@ beforeAll(async () => {
   ).run(CAMPAIGN, DONOR, today(), BR);
   for (const [uid, role] of [['fmwp_own', 'owner'], ['fmwp_fin', 'finance']] as const) {
     db.prepare(
-      `INSERT OR REPLACE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-       VALUES (?, ?, ?, ?, ?, ?, 1, 0)`,
-    ).run(uid, uid, uid, role, BR, pw);
-    U[uid] = { userId: uid, username: uid, role: role as never, branchId: BR, fullName: uid };
+      `INSERT OR REPLACE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+       VALUES (?, ?, ?, ?, ?, 1, 0)`,
+    ).run(uid, uid, uid, BR, pw);
+    assignRole(uid, role, BR);
+    U[uid] = { userId: uid, username: uid, branchId: BR, fullName: uid };
   }
-  syncLegacyUserRoles(db);
+
   app = express();
   app.use(express.json());
   app.use('/api/invoices', invoicesRouter);

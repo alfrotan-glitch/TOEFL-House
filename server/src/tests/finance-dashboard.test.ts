@@ -17,13 +17,14 @@
  * Scope: a finance manager must only ever see their own branch; the owner
  * sees the whole organization.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { id, today } from '../utils/ids.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { financeRouter } from '../routes/finance.routes.js';
 import { invoicesRouter } from '../routes/invoices.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
@@ -42,8 +43,7 @@ function createApp() {
 
 function makeUser(overrides: Partial<TokenPayload> & { userId: string }): TokenPayload {
   return {
-    userId: overrides.userId, username: overrides.username || overrides.userId,
-    role: overrides.role || 'finance', branchId: overrides.branchId || BRANCH_A, fullName: 'Dashboard Test User',
+    userId: overrides.userId, username: overrides.username || overrides.userId, branchId: overrides.branchId || BRANCH_A, fullName: 'Dashboard Test User',
   };
 }
 function authHeader(user: TokenPayload): { Authorization: string } {
@@ -66,14 +66,14 @@ beforeAll(async () => {
     ['u_dash_fin_b', 'dash_fin_b', 'finance', BRANCH_B],
     ['u_dash_owner', 'dash_owner', 'owner', BRANCH_A],
   ] as const) {
-    await db.prepare(`INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password) VALUES (?, ?, ?, ?, ?, ?, 1, 0)`)
-      .run(uid, uname, 'Dashboard ' + role, role, branch, await hashPassword('x'));
+    await db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES (?, ?, ?, ?, ?, 1, 0)`)
+      .run(uid, uname, 'Dashboard ' + role, branch, await hashPassword('x'));
+    assignRole(uid, role, branch);
   }
-  syncLegacyUserRoles(db);
 
-  financeA = makeUser({ userId: 'u_dash_fin_a', role: 'finance', branchId: BRANCH_A });
-  financeB = makeUser({ userId: 'u_dash_fin_b', role: 'finance', branchId: BRANCH_B });
-  owner = makeUser({ userId: 'u_dash_owner', role: 'owner', branchId: BRANCH_A });
+  financeA = makeUser({ userId: 'u_dash_fin_a', branchId: BRANCH_A });
+  financeB = makeUser({ userId: 'u_dash_fin_b', branchId: BRANCH_B });
+  owner = makeUser({ userId: 'u_dash_owner', branchId: BRANCH_A });
 
   // Seed ledger movement for branch A: one income + one expense today.
   const date = today();

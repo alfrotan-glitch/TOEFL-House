@@ -14,13 +14,14 @@
  *    payroll to general_manager and finance_manager, but the catalog denied
  *    Teacher.Create / Employee.* / Payroll.* to those roles — broken workflow.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { today } from '../utils/ids.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { usersRouter } from '../routes/users.routes.js';
 import { studentsRouter } from '../routes/students.routes.js';
 import { searchRouter } from '../routes/search.routes.js';
@@ -43,8 +44,7 @@ function createApp() {
 
 function makeUser(overrides: Partial<TokenPayload> & { userId: string }): TokenPayload {
   return {
-    userId: overrides.userId, username: overrides.username || overrides.userId,
-    role: overrides.role || 'owner', branchId: overrides.branchId || BRANCH, fullName: 'Audit Test User',
+    userId: overrides.userId, username: overrides.username || overrides.userId, branchId: overrides.branchId || BRANCH, fullName: 'Audit Test User',
   };
 }
 function authHeader(user: TokenPayload): { Authorization: string } {
@@ -62,21 +62,22 @@ beforeAll(async () => {
   bootstrapRbacCatalog(db);
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(BRANCH, 'Audit Branch', 'Loc');
   for (const [uid, uname, role] of [['u_ar_owner', 'ar_owner', 'owner'], ['u_ar_mgr', 'ar_mgr', 'manager'], ['u_ar_fin', 'ar_fin', 'finance'], ['u_ar_reg', 'ar_reg', 'registrar']]) {
-    db.prepare(`INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password) VALUES (?, ?, ?, ?, ?, ?, 1, 0)`)
-      .run(uid, uname, 'Audit ' + role, role, BRANCH, await hashPassword('x'));
+    db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES (?, ?, ?, ?, ?, 1, 0)`)
+      .run(uid, uname, 'Audit ' + role, BRANCH, await hashPassword('x'));
+    assignRole(uid, role, BRANCH);
   }
-  syncLegacyUserRoles(db);
-  owner = makeUser({ userId: 'u_ar_owner', role: 'owner', branchId: BRANCH });
-  manager = makeUser({ userId: 'u_ar_mgr', role: 'manager', branchId: BRANCH });
-  finance = makeUser({ userId: 'u_ar_fin', role: 'finance', branchId: BRANCH });
-  registrar = makeUser({ userId: 'u_ar_reg', role: 'registrar', branchId: BRANCH });
+
+  owner = makeUser({ userId: 'u_ar_owner', branchId: BRANCH });
+  manager = makeUser({ userId: 'u_ar_mgr', branchId: BRANCH });
+  finance = makeUser({ userId: 'u_ar_fin', branchId: BRANCH });
+  registrar = makeUser({ userId: 'u_ar_reg', branchId: BRANCH });
   app = createApp();
 });
 
 describe('User creation via API (RBAC param fix)', () => {
   it('creates a manager user and assigns the RBAC role', async () => {
     const res = await supertest(app).post('/api/users').set(authHeader(owner)).send({
-      username: 'new_manager', tempPassword: 'Temp-Pass-12345', fullName: 'New Manager', role: 'manager', branchId: BRANCH,
+      username: 'new_manager', tempPassword: 'Temp-Pass-12345', fullName: 'New Manager', role: 'general_manager', branchId: BRANCH,
     });
     expect(res.status).toBe(201);
     const row = db.prepare('SELECT * FROM users WHERE username = ?').get('new_manager') as any;

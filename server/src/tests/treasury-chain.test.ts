@@ -8,13 +8,14 @@
  *
  *   deposit capital → charge budget line → pay teacher salary
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { id, today } from '../utils/ids.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { financeRouter } from '../routes/finance.routes.js';
 import { teachersRouter } from '../routes/teachers.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
@@ -34,8 +35,7 @@ function createApp() {
 
 function makeUser(overrides: Partial<TokenPayload> & { userId: string }): TokenPayload {
   return {
-    userId: overrides.userId, username: overrides.username || overrides.userId,
-    role: overrides.role || 'owner', branchId: overrides.branchId || BRANCH, fullName: 'Treasury Test User',
+    userId: overrides.userId, username: overrides.username || overrides.userId, branchId: overrides.branchId || BRANCH, fullName: 'Treasury Test User',
   };
 }
 function authHeader(user: TokenPayload): { Authorization: string } {
@@ -50,13 +50,15 @@ beforeAll(async () => {
   initSchema();
   bootstrapRbacCatalog(db);
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(BRANCH, 'Treasury Branch', 'Loc');
-  await db.prepare(`INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password) VALUES (?, ?, ?, 'owner', ?, ?, 1, 0)`)
+  await db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES (?, ?, ?, ?, ?, 1, 0)`)
     .run('u_tr_owner', 'tr_owner', 'Treasury Owner', BRANCH, await hashPassword('x'));
-  await db.prepare(`INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password) VALUES (?, ?, ?, 'manager', ?, ?, 1, 0)`)
+  assignRole('u_tr_owner', 'owner', BRANCH);
+  await db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES (?, ?, ?, ?, ?, 1, 0)`)
     .run('u_tr_mgr', 'tr_mgr', 'Treasury Mgr', BRANCH, await hashPassword('x'));
-  syncLegacyUserRoles(db);
-  owner = makeUser({ userId: 'u_tr_owner', role: 'owner', branchId: BRANCH });
-  manager = makeUser({ userId: 'u_tr_mgr', role: 'manager', branchId: BRANCH });
+  assignRole('u_tr_mgr', 'manager', BRANCH);
+
+  owner = makeUser({ userId: 'u_tr_owner', branchId: BRANCH });
+  manager = makeUser({ userId: 'u_tr_mgr', branchId: BRANCH });
   app = createApp();
 });
 

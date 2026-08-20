@@ -20,6 +20,7 @@
  * This suite locks that in at both levels: the resolver returns the right
  * answer on its own, AND the guarded endpoint still denies.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
@@ -39,9 +40,7 @@ const HOME = 'hbi_home';
 const PAST = '2020-01-01 00:00:00';
 
 const userRow = (id: string) =>
-  db.prepare('SELECT id, username, full_name, role, branch_id FROM users WHERE id = ?').get(id) as {
-    id: string; username: string; full_name: string; role: string; branch_id: string;
-  };
+  db.prepare('SELECT id, username, full_name, branch_id FROM users WHERE id = ?').get(id) as { id: string; username: string; full_name: string; branch_id: string };
 const ctxOf = (id: string) => buildRbacContext(db, userRow(id));
 const roleId = (code: string) => (db.prepare('SELECT id FROM roles WHERE code = ?').get(code) as { id: string }).id;
 
@@ -57,7 +56,7 @@ let app: express.Express;
 const bearer = (id: string) => {
   const u = userRow(id);
   const payload = {
-    userId: u.id, username: u.username, role: u.role, branchId: u.branch_id,
+    userId: u.id, username: u.username, branchId: u.branch_id,
     fullName: u.full_name, sessionVersion: 1,
   } as unknown as TokenPayload;
   return { Authorization: `Bearer ${signToken(payload)}` };
@@ -72,9 +71,10 @@ beforeAll(async () => {
 
   const pw = await hashPassword('pw');
   db.prepare(
-    `INSERT OR REPLACE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES ('hbi_mgr', 'hbi_mgr', 'HBI Manager', 'manager', ?, ?, 1, 0)`,
+    `INSERT OR REPLACE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES ('hbi_mgr', 'hbi_mgr', 'HBI Manager', ?, ?, 1, 0)`,
   ).run(HOME, pw);
+  assignRole('hbi_mgr', 'manager', HOME);
 
   // The real guard shape used across the codebase: permission gate first, then
   // the branch row-scoping check.

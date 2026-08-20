@@ -3,10 +3,9 @@ import { db } from '../db/connection.js';
 import { authenticate, requirePermission, canAccessBranchResource } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
-import { resolveUserPermissions, syncPrimaryUserRole, isGlobalOwner } from '../core/rbac/rbac-service.js';
-import { TAB_PERMISSION_MAP, LEGACY_ROLE_MAP } from '../core/rbac/permission-catalog.js';
+import { resolveUserPermissions, isGlobalOwner } from '../core/rbac/rbac-service.js';
+import { TAB_PERMISSION_MAP, ROLE_CODES } from '../core/rbac/permission-catalog.js';
 import { id } from '../utils/ids.js';
-import type { UserRole } from '../utils/auth.js';
 
 export const securityRouter = Router();
 securityRouter.use(authenticate);
@@ -30,28 +29,6 @@ const stmtGetUserRoles = db.prepare(`SELECT ur.id, ur.role_id AS roleId, r.code 
 const stmtGetUserByIdSimple = db.prepare('SELECT id, branch_id AS branchId FROM users WHERE id = ?');
 const stmtInsertUserRole = db.prepare(`INSERT INTO user_roles (id, user_id, role_id, scope_type, scope_id, is_primary, assigned_by, assigned_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)`);
 const stmtDeleteUserRole = db.prepare('DELETE FROM user_roles WHERE id = ? AND user_id = ?');
-/**
- * Values the `users.role` column accepts. Deliberately NOT the canonical role
- * vocabulary — `roles.code` uses 'general_manager' where this column uses
- * 'manager'. The previous name for this set claimed the opposite.
- */
-const USERS_ROLE_COLUMN_VALUES = new Set([
-  'owner', 'manager', 'finance', 'registrar', 'teacher', 'head_of_department', 'counselor', 'donor_manager',
-]);
-
-/**
- * Translates a canonical role code back to the `users.role` column value, so
- * assigning someone's primary position through this API keeps the denormalized
- * profile column consistent. This is the only direction that still needs the
- * legacy map; nothing in the authorization path does.
- */
-function usersRoleColumnValueFor(roleCode: string): UserRole | null {
-  for (const [columnValue, canonical] of Object.entries(LEGACY_ROLE_MAP)) {
-    if (canonical === roleCode && USERS_ROLE_COLUMN_VALUES.has(columnValue)) return columnValue as UserRole;
-  }
-  return USERS_ROLE_COLUMN_VALUES.has(roleCode) ? roleCode as UserRole : null;
-}
-
 
 const stmtGetPermId = db.prepare('SELECT id FROM permissions WHERE code = ?');
 const stmtGetPermIdById = db.prepare('SELECT id, code FROM permissions WHERE id = ?');
@@ -265,9 +242,8 @@ securityRouter.post('/users/:userId/roles', requirePermission('User.Edit', 'Role
   if (role.code === 'owner' && !callerIsGlobalOwner(req)) {
     throw new HttpError(403, 'Only a global owner may grant the owner role.');
   }
-  const primaryUsersRoleValue = isPrimary ? usersRoleColumnValueFor(role.code) : null;
   if (isPrimary) {
-    if (!primaryUsersRoleValue) {
+    if (!(ROLE_CODES as readonly string[]).includes(role.code)) {
       throw new HttpError(400, 'Only canonical identity roles can be assigned as primary.');
     }
     if ((scopeType || 'branch') !== (role.code === 'owner' ? 'organization' : 'branch')) {
@@ -278,10 +254,9 @@ securityRouter.post('/users/:userId/roles', requirePermission('User.Edit', 'Role
   const tx = db.transaction(() => {
     if (isPrimary) {
       db.prepare('UPDATE user_roles SET is_primary = 0 WHERE user_id = ?').run(req.params.userId);
-      db.prepare('UPDATE users SET role = ?, session_version = session_version + 1 WHERE id = ?').run(
-        primaryUsersRoleValue,
-        req.params.userId
-      );
+      // Changing someone's primary position must invalidate their live
+      // sessions, or the old context keeps answering until the token expires.
+      db.prepare('UPDATE users SET session_version = session_version + 1 WHERE id = ?').run(req.params.userId);
     }
     const newId = id('ur');
     stmtInsertUserRole.run(newId, req.params.userId, roleId, scopeType || 'branch', scopeId ?? null, isPrimary ? 1 : 0, user.userId, expiresAt ?? null);

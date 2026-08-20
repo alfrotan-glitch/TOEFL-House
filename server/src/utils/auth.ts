@@ -33,31 +33,14 @@ export function assertJwtSecretConfigured(): void {
 
 
 /**
- * The values `users.role` may hold. This mirrors the CHECK constraint on that
- * column exactly — 'staff' and 'partner' used to appear here and in the token
- * allow-list, but the database has never accepted either, so they were values
- * no user could actually have.
- *
- * This is a profile attribute, not an authorization input: what a principal
- * may do comes from `user_roles`. See docs/registries/canonical-authority.md.
+ * The session token identifies the bearer. It carries no role and no
+ * permission: those are resolved server-side from `user_roles` on every
+ * request, so a token cannot assert authority it was not granted, and a
+ * revoked assignment takes effect immediately rather than at token expiry.
  */
-export type UserRole =
-  | 'owner' | 'manager' | 'finance' | 'registrar'
-  | 'teacher' | 'head_of_department' | 'counselor'
-  | 'donor_manager' | 'student';
-
-/** Every role signToken may emit — single source of truth for the
- *  role allow-list in isTokenPayload (drift here would silently break
- *  authentication for that role at runtime). */
-export const KNOWN_USER_ROLES: readonly UserRole[] = [
-  'owner', 'manager', 'finance', 'registrar', 'teacher',
-  'head_of_department', 'counselor', 'donor_manager', 'student',
-];
-
 export interface TokenPayload {
   userId: string;
   username: string;
-  role: UserRole;
   branchId: string;
   fullName: string;
   sessionVersion?: number;
@@ -85,9 +68,7 @@ function isTokenPayload(value: unknown): value is TokenPayload {
     typeof payload.username === 'string' &&
     typeof payload.branchId === 'string' &&
     typeof payload.fullName === 'string' &&
-    typeof payload.sessionVersion === 'number' && Number.isInteger(payload.sessionVersion) && payload.sessionVersion >= 1 &&
-    typeof payload.role === 'string' &&
-    (KNOWN_USER_ROLES as readonly string[]).includes(payload.role);
+    typeof payload.sessionVersion === 'number' && Number.isInteger(payload.sessionVersion) && payload.sessionVersion >= 1;
 }
 
 export function verifyToken(token: string): TokenPayload | null {

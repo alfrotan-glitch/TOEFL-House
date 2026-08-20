@@ -31,6 +31,7 @@
  * teacher writers use. No new business rule: the accepted range is whatever
  * assertMoney already defines for every other salary field in this codebase.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
@@ -38,7 +39,7 @@ import Database from 'better-sqlite3';
 import { db, initSchema } from '../db/connection.js';
 import { today } from '../utils/ids.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { teachersRouter, employeesRouter } from '../routes/teachers.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 
@@ -88,11 +89,12 @@ beforeAll(async () => {
   bootstrapRbacCatalog(db);
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(BRANCH, 'ESV Branch', 'Kabul');
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES ('esv_owner', 'esv_owner', 'ESV Owner', 'owner', ?, ?, 1, 0)`,
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES ('esv_owner', 'esv_owner', 'ESV Owner', ?, ?, 1, 0)`,
   ).run(BRANCH, await hashPassword('pw'));
-  syncLegacyUserRoles(db);
-  owner = { userId: 'esv_owner', username: 'esv_owner', role: 'owner' as never, branchId: BRANCH, fullName: 'ESV Owner' };
+  assignRole('esv_owner', 'owner', BRANCH);
+
+  owner = { userId: 'esv_owner', username: 'esv_owner', branchId: BRANCH, fullName: 'ESV Owner' };
   app = express();
   app.use(express.json());
   app.use('/api/teachers', teachersRouter);

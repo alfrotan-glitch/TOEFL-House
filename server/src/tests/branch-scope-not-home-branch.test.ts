@@ -31,12 +31,13 @@
  * The direction of the fix matters: it GRANTS access that scope already
  * allows, so the tests below must also prove no new cross-branch leak.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeEach } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { ensureOrganizationHierarchy, FIXED_ORG_ID } from '../db/organizationHierarchy.js';
 import impactRouter from '../routes/impact.routes.js';
 import { classTeacherSkillsRouter } from '../routes/skills.routes.js';
@@ -56,7 +57,7 @@ function createApp() {
   return app;
 }
 const auth = (userId: string, role: string, branchId: string) =>
-  `Bearer ${signToken({ userId, username: userId, role, branchId, fullName: userId } as TokenPayload)}`;
+  `Bearer ${signToken({ userId, username: userId, branchId, fullName: userId } as TokenPayload)}`;
 
 let app: express.Express;
 
@@ -74,14 +75,15 @@ beforeEach(async () => {
   }
 
   const pw = await hashPassword('x');
-  const mkUser = (id: string, role: string, branch: string) =>
+  const mkUser = (id: string, role: string, branch: string) => {
     db.prepare(
-      `INSERT OR REPLACE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-       VALUES (?, ?, ?, ?, ?, ?, 1, 0)`,
-    ).run(id, id, id, role, branch, pw);
+      `INSERT OR REPLACE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+       VALUES (?, ?, ?, ?, ?, 1, 0)`,
+    ).run(id, id, id, branch, pw);
+    assignRole(id, role, branch);
+  };
   mkUser('f7_owner', 'owner', HOME);       // organization-wide authority
   mkUser('f7_manager', 'manager', HOME);   // branch-limited authority
-  syncLegacyUserRoles(db);
 
   const mkStudent = (id: string, branch: string, phone: string) =>
     db.prepare(

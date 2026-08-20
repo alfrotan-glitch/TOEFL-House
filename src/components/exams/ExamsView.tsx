@@ -191,8 +191,8 @@ export default function ExamsView({
     }
   };
 
-  const canManage = activeRole === 'registrar' || activeRole === 'owner' || activeRole === 'manager';
-  const canCorrect = activeRole === 'owner' || activeRole === 'manager';
+  const canManage = activeRole === 'receptionist' || activeRole === 'owner' || activeRole === 'general_manager';
+  const canCorrect = activeRole === 'owner' || activeRole === 'general_manager';
   const sortedResults = useMemo(() => [...examResults].reverse(), [examResults]);
 
   return (

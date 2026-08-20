@@ -37,6 +37,7 @@
  * report anything before the class is locked (`completed`/`archived`). These
  * tests hold the write path to exactly the same authority.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
@@ -46,7 +47,7 @@ import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
 import classesRouter from '../routes/classes.routes.js';
 import studentsRouter from '../routes/students.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { deriveLegacyClassStatus, type ClassStage } from '../core/academic/lifecycle-engine.js';
 import { getStudentBalance } from '../utils/studentBalance.js';
 
@@ -102,16 +103,18 @@ beforeAll(async () => {
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(OTHER_BRANCH, 'PRL Other', 'Loc');
   const hash = await hashPassword('testpass123');
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES (?, ?, ?, 'head_of_department', ?, ?, 1, 0)`
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES (?, ?, ?, ?, ?, 1, 0)`
   ).run('u_prl_hod', 'prl_hod', 'PRL HOD', BRANCH, hash);
+  assignRole('u_prl_hod', 'head_of_department', BRANCH);
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES (?, ?, ?, 'head_of_department', ?, ?, 1, 0)`
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES (?, ?, ?, ?, ?, 1, 0)`
   ).run('u_prl_hod_other', 'prl_hod_other', 'PRL HOD Other', OTHER_BRANCH, hash);
-  syncLegacyUserRoles(db);
-  hod = { userId: 'u_prl_hod', username: 'prl_hod', role: 'head_of_department', branchId: BRANCH, fullName: 'PRL HOD' } as TokenPayload;
-  otherHod = { userId: 'u_prl_hod_other', username: 'prl_hod_other', role: 'head_of_department', branchId: OTHER_BRANCH, fullName: 'PRL HOD Other' } as TokenPayload;
+  assignRole('u_prl_hod_other', 'head_of_department', OTHER_BRANCH);
+
+  hod = { userId: 'u_prl_hod', username: 'prl_hod', branchId: BRANCH, fullName: 'PRL HOD' } as TokenPayload;
+  otherHod = { userId: 'u_prl_hod_other', username: 'prl_hod_other', branchId: OTHER_BRANCH, fullName: 'PRL HOD Other' } as TokenPayload;
   app = createApp();
 });
 

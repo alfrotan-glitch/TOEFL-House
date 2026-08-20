@@ -9,12 +9,13 @@
  * setPlacementProfile) is guarded by typecheck/build; this suite guards the
  * API contract it depends on.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { academicRouter } from '../routes/academic.routes.js';
 import { catalogRouter } from '../routes/catalog.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
@@ -32,8 +33,7 @@ function createApp() {
 
 function makeUser(overrides: Partial<TokenPayload> & { userId: string }): TokenPayload {
   return {
-    userId: overrides.userId, username: overrides.username || overrides.userId,
-    role: overrides.role || 'owner', branchId: overrides.branchId || BRANCH, fullName: 'Publish Test User',
+    userId: overrides.userId, username: overrides.username || overrides.userId, branchId: overrides.branchId || BRANCH, fullName: 'Publish Test User',
   };
 }
 function authHeader(user: TokenPayload): { Authorization: string } {
@@ -47,10 +47,11 @@ beforeAll(async () => {
   initSchema();
   bootstrapRbacCatalog(db);
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(BRANCH, 'Publish Branch', 'Loc');
-  await db.prepare(`INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password) VALUES (?, ?, ?, 'owner', ?, ?, 1, 0)`)
+  await db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES (?, ?, ?, ?, ?, 1, 0)`)
     .run('u_pub_owner', 'pub_owner', 'Publish Owner', BRANCH, await hashPassword('x'));
-  syncLegacyUserRoles(db);
-  owner = makeUser({ userId: 'u_pub_owner', role: 'owner', branchId: BRANCH });
+  assignRole('u_pub_owner', 'owner', BRANCH);
+
+  owner = makeUser({ userId: 'u_pub_owner', branchId: BRANCH });
   app = createApp();
 });
 

@@ -28,12 +28,13 @@
  * The invariant is derived, not invented: `/operational-payments` and
  * `/decide` already book to the budget line's branch.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { financeRouter } from '../routes/finance.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 import { incrementMainBalance } from '../utils/financeAccounts.js';
@@ -92,12 +93,13 @@ beforeAll(async () => {
     ['feri_fin_a', 'finance', BR_A],
   ] as const) {
     db.prepare(
-      `INSERT OR REPLACE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-       VALUES (?, ?, ?, ?, ?, ?, 1, 0)`,
-    ).run(uid, uid, uid, role, br, pw);
-    users[uid] = { userId: uid, username: uid, role: role as never, branchId: br, fullName: uid };
+      `INSERT OR REPLACE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+       VALUES (?, ?, ?, ?, ?, 1, 0)`,
+    ).run(uid, uid, uid, br, pw);
+    assignRole(uid, role, br);
+    users[uid] = { userId: uid, username: uid, branchId: br, fullName: uid };
   }
-  syncLegacyUserRoles(db);
+
   incrementMainBalance('organization', 'global', 5_000_000);
 
   app = express();

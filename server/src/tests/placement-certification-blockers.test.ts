@@ -18,12 +18,13 @@
  * The C-1 cases deliberately drive the ALTERNATE paths, not the conversion
  * route, because the conversion route was already gated when these were found.
  */
+import { assignRole } from './support/identity.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import visitorsRouter from '../routes/visitors.routes.js';
 import placementRouter from '../routes/placement.routes.js';
 import academicRouter from '../routes/academic.routes.js';
@@ -114,12 +115,14 @@ beforeAll(async () => {
   db.prepare(`INSERT OR REPLACE INTO branch_academic_profiles (branch_id, placement_test_fee) VALUES (?, 300)`).run(BRANCH);
 
   const pwd = await hashPassword('Str0ng!Pass2026');
-  const insertUser = db.prepare(`INSERT OR IGNORE INTO users (id, username, password_hash, full_name, role, branch_id, must_change_password) VALUES (?, ?, ?, ?, ?, ?, 0)`);
-  insertUser.run('cb_owner', 'cb_owner', pwd, 'Owner', 'owner', BRANCH);
-  insertUser.run('cb_mgr_b', 'cb_mgr_b', pwd, 'Manager B', 'manager', BRANCH_B);
-  syncLegacyUserRoles(db);
-  owner = { userId: 'cb_owner', username: 'cb_owner', role: 'owner', branchId: BRANCH, fullName: 'Owner' } as TokenPayload;
-  managerB = { userId: 'cb_mgr_b', username: 'cb_mgr_b', role: 'manager', branchId: BRANCH_B, fullName: 'Manager B' } as TokenPayload;
+  const insertUser = db.prepare(`INSERT OR IGNORE INTO users (id, username, password_hash, full_name, branch_id, must_change_password) VALUES (?, ?, ?, ?, ?, 0)`);
+  insertUser.run('cb_owner', 'cb_owner', pwd, 'Owner', BRANCH);
+  assignRole('cb_owner', 'owner', BRANCH)
+  insertUser.run('cb_mgr_b', 'cb_mgr_b', pwd, 'Manager B', BRANCH_B);
+  assignRole('cb_mgr_b', 'manager', BRANCH_B)
+
+  owner = { userId: 'cb_owner', username: 'cb_owner', branchId: BRANCH, fullName: 'Owner' } as TokenPayload;
+  managerB = { userId: 'cb_mgr_b', username: 'cb_mgr_b', branchId: BRANCH_B, fullName: 'Manager B' } as TokenPayload;
 
   await putProfile({});
 });

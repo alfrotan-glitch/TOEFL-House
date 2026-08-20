@@ -11,13 +11,14 @@
  *    revenue there (the operator must already have access to it), even when
  *    the operator's JWT branch differs.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { id, today } from '../utils/ids.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { booksRouter } from '../routes/books.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 
@@ -34,8 +35,7 @@ function createApp() {
 
 function makeUser(overrides: Partial<TokenPayload> & { userId: string }): TokenPayload {
   return {
-    userId: overrides.userId, username: overrides.username || overrides.userId,
-    role: overrides.role || 'manager', branchId: overrides.branchId || BRANCH_A, fullName: 'Book Test User',
+    userId: overrides.userId, username: overrides.username || overrides.userId, branchId: overrides.branchId || BRANCH_A, fullName: 'Book Test User',
   };
 }
 function authHeader(user: TokenPayload): { Authorization: string } {
@@ -51,13 +51,15 @@ beforeAll(async () => {
   bootstrapRbacCatalog(db);
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(BRANCH_A, 'Book Branch A', 'Loc');
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(BRANCH_B, 'Book Branch B', 'Loc');
-  await db.prepare(`INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password) VALUES (?, ?, ?, 'manager', ?, ?, 1, 0)`)
+  await db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES (?, ?, ?, ?, ?, 1, 0)`)
     .run('u_bk_mgr_a', 'bk_mgr_a', 'Book Mgr A', BRANCH_A, await hashPassword('x'));
-  await db.prepare(`INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password) VALUES (?, ?, ?, 'owner', ?, ?, 1, 0)`)
+  assignRole('u_bk_mgr_a', 'manager', BRANCH_A);
+  await db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES (?, ?, ?, ?, ?, 1, 0)`)
     .run('u_bk_owner', 'bk_owner', 'Book Owner', BRANCH_A, await hashPassword('x'));
-  syncLegacyUserRoles(db);
-  managerA = makeUser({ userId: 'u_bk_mgr_a', role: 'manager', branchId: BRANCH_A });
-  owner = makeUser({ userId: 'u_bk_owner', role: 'owner', branchId: BRANCH_A });
+  assignRole('u_bk_owner', 'owner', BRANCH_A);
+
+  managerA = makeUser({ userId: 'u_bk_mgr_a', branchId: BRANCH_A });
+  owner = makeUser({ userId: 'u_bk_owner', branchId: BRANCH_A });
   app = createApp();
 });
 

@@ -23,12 +23,13 @@
  * `student` portal position, whose role deliberately carries `permissions: {}`
  * — could read the whole branch's academic configuration.
  */
+import { assignRole } from './support/identity.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import academicRouter from '../routes/academic.routes.js';
 import { catalogRouter } from '../routes/catalog.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
@@ -53,7 +54,6 @@ function tokenFor(userId: string) {
   return signToken({
     userId,
     username: userId,
-    role: ACTORS[userId],
     branchId: BRANCH,
     fullName: userId,
     sessionVersion: 1,
@@ -78,12 +78,12 @@ beforeAll(() => {
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(BRANCH, BRANCH, 'loc');
   for (const [userId, role] of Object.entries(ACTORS)) {
     db.prepare(
-      `INSERT OR IGNORE INTO users (id, username, password_hash, full_name, role, branch_id, is_active, session_version, must_change_password)
-       VALUES (?, ?, 'x', ?, ?, ?, 1, 1, 0)`
-    ).run(userId, userId, userId, role, BRANCH);
+      `INSERT OR IGNORE INTO users ( id, username, password_hash, full_name, branch_id, is_active, session_version, must_change_password )
+       VALUES (?, ?, 'x', ?, ?, 1, 1, 0)`
+    ).run(userId, userId, userId, BRANCH);
+    assignRole(userId, role, BRANCH);
   }
   bootstrapRbacCatalog(db);
-  syncLegacyUserRoles(db);
 
   db.prepare('INSERT OR IGNORE INTO programs (id, name, branch_id) VALUES (?, ?, ?)').run(PROGRAM, 'Prog', BRANCH);
   db.prepare(

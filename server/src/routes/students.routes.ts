@@ -197,7 +197,7 @@ function assertStudentStatus(value: string): void {
 
 function getUserContext(req: import('express').Request) {
   const user = req.user;
-  if (!user?.userId || !user?.branchId || !user?.fullName || !user?.role) throw new HttpError(403, 'User context missing.');
+  if (!user?.userId || !user?.branchId || !user?.fullName) throw new HttpError(403, 'User context missing.');
   return user;
 }
 
@@ -334,7 +334,6 @@ function mapStudents(rows: StudentRow[]) {
  * If they do, enrollment is blocked unless overridden by finance/owner.
  */
 function checkAcademicHold(req: import('express').Request, studentId: string) {
-  const role = req.user?.role;
   const canOverride = !!req.rbac && hasAnyRole(req.rbac, ['owner', 'general_manager', 'finance_manager']);
   if (canOverride) return;
 
@@ -736,7 +735,7 @@ studentsRouter.post('/manual', requirePermission('Student.Create'), ah(async (re
       // explicit to the database rather than leaving the column NULL (which
       // silently disables uq_payments_idempotency).
       stmtInsertSimplePayment.run(pid, newId, paidNow, regDate, 'cash', 'fee', 'Class fee payment', receiptNumber, studentBranchId, `register:${newId}`);
-      recordIncome({ category: 'fee', amount: paidNow, date: regDate, description: `Registration fee for ${fullName}`, referenceId: newId, paymentId: pid, operatorName: user.fullName, operatorRole: user.role ?? null, branchId: studentBranchId });
+      recordIncome({ category: 'fee', amount: paidNow, date: regDate, description: `Registration fee for ${fullName}`, referenceId: newId, paymentId: pid, operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null, branchId: studentBranchId });
     }
     stmtInsertRegistration.run(id('reg'), newId, classId || null, regDate, paidNow, receiptNumber, resolvedTuition - netTuitionDue, studentBranchId, 'manual', 'Current Semester');
     // Enrollment (and its capacity check) happens in the same transaction so
@@ -854,7 +853,7 @@ studentsRouter.post('/:id/enroll-class', requirePermission('Class.Assign', 'Stud
       // uq_enrollment_active_seat_per_class (074) — verified live, 5 concurrent
       // submits yield exactly 1x201 and 4x409 "Already enrolled in this class."
       stmtInsertPayment.run(pid, student.id, paidNow, date, 'cash', 'fee', `Extra class fee: ${cls.name}`, nextReceiptNumber(), student.branch_id, null, null, null, `extra-class:${enrollId}`);
-      recordIncome({ category: 'fee', amount: paidNow, date, description: `Extra class fee from ${student.full_name}`, referenceId: student.id, paymentId: pid, operatorName: user.fullName, operatorRole: user.role ?? null, branchId: student.branch_id });
+      recordIncome({ category: 'fee', amount: paidNow, date, description: `Extra class fee from ${student.full_name}`, referenceId: student.id, paymentId: pid, operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null, branchId: student.branch_id });
     }
 
     if (netFee - paidNow > 0) {
@@ -1093,7 +1092,7 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
     const ledgerDescription = adHoc
       ? `${category === 'other' ? 'Ad-hoc charge' : `${category} charge`} for ${student.full_name}: ${String(notes).trim()}`
       : `Received ${category} payment from ${student.full_name}`;
-    recordIncome({ category, amount: resolvedAmount, date, description: ledgerDescription, referenceId: student.id, paymentId: payId, operatorName: user.fullName, operatorRole: user.role ?? null, branchId: student.branch_id });
+    recordIncome({ category, amount: resolvedAmount, date, description: ledgerDescription, referenceId: student.id, paymentId: payId, operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null, branchId: student.branch_id });
   });
   try {
     tx();
@@ -1166,7 +1165,7 @@ studentsRouter.post('/:id/refund', requirePermission('Refund.Approve'), ah(async
     const refundable = Math.max(0, paid - refunded);
     if (refundAmount > refundable) throw new HttpError(400, `Refund exceeds the refundable balance of ${refundable} AFN.`);
     stmtInsertSimplePayment.run(payId, student.id, -refundAmount, date, 'cash', 'refund', String(reason).trim(), rc, student.branch_id, idempotencyKey);
-    recordIncome({ category: 'refund', amount: -refundAmount, date, description: `Refund issued to ${student.full_name}`, referenceId: student.id, paymentId: payId, operatorName: user.fullName, operatorRole: user.role ?? null, branchId: student.branch_id });
+    recordIncome({ category: 'refund', amount: -refundAmount, date, description: `Refund issued to ${student.full_name}`, referenceId: student.id, paymentId: payId, operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null, branchId: student.branch_id });
   });
   try {
     tx();
@@ -1248,7 +1247,7 @@ studentsRouter.post('/:id/enroll-semester', requirePermission('Class.Assign', 'S
       // payment cannot legitimately repeat. A NULL here would disable
       // uq_payments_idempotency for the row.
       stmtInsertPayment.run(semPayId, student.id, paidNow, date, 'cash', 'fee', `Semester fee for ${semesterName}`, rc, student.branch_id, semesterName, null, null, `enroll-semester:${student.id}:${semesterName}`);
-      recordIncome({ category: 'fee', amount: paidNow, date, description: `Received ${semesterName} fee from ${student.full_name}`, referenceId: student.id, paymentId: semPayId, operatorName: user.fullName, operatorRole: user.role ?? null, branchId: student.branch_id });
+      recordIncome({ category: 'fee', amount: paidNow, date, description: `Received ${semesterName} fee from ${student.full_name}`, referenceId: student.id, paymentId: semPayId, operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null, branchId: student.branch_id });
     }
     // Enrollment happens in the same transaction (see manual-add above).
     // writeSemester:false because the explicit semester row above carries the
@@ -1287,7 +1286,7 @@ studentsRouter.post('/:id/issue-card', requirePermission('Student.Print', 'Payme
     if (isFirstIssuance && cardFee > 0) {
       const pid = id('pay');
       stmtInsertSimplePayment.run(pid, student.id, cardFee, date, 'cash', 'card', 'ID Card Issuance', nextReceiptNumber(), student.branch_id, cardFeeIdempotencyKey);
-      recordIncome({ category: 'card', amount: cardFee, date, description: `ID card fee for ${student.full_name}`, referenceId: student.id, paymentId: pid, operatorName: user.fullName, operatorRole: user.role ?? null, branchId: student.branch_id });
+      recordIncome({ category: 'card', amount: cardFee, date, description: `ID card fee for ${student.full_name}`, referenceId: student.id, paymentId: pid, operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null, branchId: student.branch_id });
     }
   });
   try {

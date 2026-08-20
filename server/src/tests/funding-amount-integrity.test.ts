@@ -47,6 +47,7 @@
  * non-finite values, non-numeric types and sub-cent precision are rejected —
  * exactly what assertMoney enforces.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
@@ -54,7 +55,7 @@ import { db, initSchema } from '../db/connection.js';
 import { ensureOrganizationHierarchy, FIXED_ORG_ID } from '../db/organizationHierarchy.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
 import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { fundingRouter } from '../routes/funding.routes.js';
 
 const BR = 'fnd_branch';
@@ -68,10 +69,9 @@ function createApp() {
   return app;
 }
 
-const tok = (userId: string, role: string, branchId = BR): TokenPayload => ({
+const tok = (userId: string, role: string, branchId = BR): TokenPayload & { role: string } => ({ role,
   userId,
   username: userId,
-  role: role as TokenPayload['role'],
   branchId,
   fullName: userId,
 });
@@ -118,10 +118,11 @@ beforeAll(async () => {
     .run(BR, BR, 'Loc', 'fnd_campus');
   const pw = await hashPassword('testpass123');
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES (?,?,?,?,?,?,1,0)`,
-  ).run(OWNER.userId, OWNER.username, OWNER.fullName, OWNER.role, OWNER.branchId, pw);
-  syncLegacyUserRoles(db);
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES (?, ?, ?, ?, ?, 1, 0)`,
+  ).run(OWNER.userId, OWNER.username, OWNER.fullName, OWNER.branchId, pw);
+  assignRole(OWNER.userId, OWNER.role, OWNER.branchId);
+
   db.prepare('INSERT OR IGNORE INTO donors (id, full_name, type) VALUES (?,?,?)').run(DONOR, 'FND Donor', 'individual');
   db.prepare(
     "INSERT OR REPLACE INTO finance_accounts (id,scope_type,scope_id,main_balance,saving_balance) VALUES ('fa_fnd','branch',?,100000,10000)",

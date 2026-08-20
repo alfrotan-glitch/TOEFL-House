@@ -56,7 +56,7 @@ const DOMAIN_OWNED_RULE_CATEGORIES = new Set<RuleCategory>(['fee', 'promotion', 
 /** Safely extracts user context required for rule mutations/evaluations */
 function getUserContext(req: import('express').Request) {
   const user = req.user;
-  if (!user?.userId || !user?.branchId || !user?.fullName || !user?.role) {
+  if (!user?.userId || !user?.branchId || !user?.fullName) {
     throw new HttpError(403, 'User context is missing for rule operation.');
   }
   return user;

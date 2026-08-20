@@ -15,6 +15,7 @@
  *   8. Invoice List — Branch A finance does NOT see Branch B invoices
  *   9. Owner — CAN cross branches; branch-scoped manager is denied; campus-scoped manager is limited to its campus
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { db, initSchema } from '../db/connection.js';
 import { ensureOrganizationHierarchy, FIXED_ORG_ID } from '../db/organizationHierarchy.js';
@@ -25,7 +26,7 @@ import supertest from 'supertest';
 import { studentsRouter } from '../routes/students.routes.js';
 import { invoicesRouter } from '../routes/invoices.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const BRANCH_A = 'iso_branch_a';
@@ -47,7 +48,6 @@ function makeUser(overrides: Partial<TokenPayload> & { userId: string }): TokenP
   return {
     userId: overrides.userId,
     username: overrides.username || overrides.userId,
-    role: overrides.role || 'registrar',
     branchId: overrides.branchId || BRANCH_A,
     fullName: overrides.fullName || 'Test User',
   };
@@ -75,9 +75,10 @@ function seedBranches() {
  */
 async function seedUser(userId: string, role: string, branchId: string, username: string) {
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES (?, ?, ?, ?, ?, ?, 1, 0)`
-  ).run(userId, username, `Test ${role}`, role, branchId, await hashPassword('testpass123'));
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES (?, ?, ?, ?, ?, 1, 0)`
+  ).run(userId, username, `Test ${role}`, branchId, await hashPassword('testpass123'));
+  assignRole(userId, role, branchId);
 }
 
 function seedStudent(studentId: string, branchId: string, name: string) {
@@ -134,7 +135,7 @@ describe('Branch Isolation — HTTP Integration (CRIT-05, CRIT-06, CRIT-07)', ()
     await seedUser('u_iso_mgr_campus', 'manager', BRANCH_A, 'mgr_campus');
 
     // Sync legacy roles → user_roles table
-    syncLegacyUserRoles(db);
+
     const managerRole = db.prepare('SELECT id FROM roles WHERE code = ?').get('general_manager') as { id: string };
     db.prepare('UPDATE user_roles SET scope_type = ?, scope_id = ? WHERE user_id = ? AND role_id = ?').run('campus', 'iso_campus_a', 'u_iso_mgr_campus', managerRole.id);
 
@@ -149,13 +150,13 @@ describe('Branch Isolation — HTTP Integration (CRIT-05, CRIT-06, CRIT-07)', ()
 
     app = createApp();
 
-    registrarA  = makeUser({ userId: 'u_iso_reg_a', role: 'registrar', branchId: BRANCH_A });
-    registrarB  = makeUser({ userId: 'u_iso_reg_b', role: 'registrar', branchId: BRANCH_B });
-    financeA    = makeUser({ userId: 'u_iso_fin_a', role: 'finance',   branchId: BRANCH_A });
-    financeB    = makeUser({ userId: 'u_iso_fin_b', role: 'finance',   branchId: BRANCH_B });
-    ownerUser   = makeUser({ userId: 'u_iso_owner',  role: 'owner',    branchId: BRANCH_A });
-    managerA    = makeUser({ userId: 'u_iso_mgr_a',  role: 'manager',   branchId: BRANCH_A });
-    campusManager = makeUser({ userId: 'u_iso_mgr_campus', role: 'manager', branchId: BRANCH_A });
+    registrarA  = makeUser({ userId: 'u_iso_reg_a', branchId: BRANCH_A });
+    registrarB  = makeUser({ userId: 'u_iso_reg_b', branchId: BRANCH_B });
+    financeA    = makeUser({ userId: 'u_iso_fin_a',   branchId: BRANCH_A });
+    financeB    = makeUser({ userId: 'u_iso_fin_b',   branchId: BRANCH_B });
+    ownerUser   = makeUser({ userId: 'u_iso_owner',    branchId: BRANCH_A });
+    managerA    = makeUser({ userId: 'u_iso_mgr_a',   branchId: BRANCH_A });
+    campusManager = makeUser({ userId: 'u_iso_mgr_campus', branchId: BRANCH_A });
   });
 
   afterAll(() => {

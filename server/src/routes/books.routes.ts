@@ -265,7 +265,7 @@ booksRouter.post(
         date,
         description: `Sold ${saleQuantity} copies of "${book.title}" to ${customerName || 'Walk-in customer'} (${methodLabel}${finalDiscount > 0 ? ` - with discount ${finalDiscount} AFN` : ''})`,
         referenceId: book.id,
-        operatorName: user.fullName, operatorRole: user.role ?? null,
+        operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null,
         branchId: saleBranchId,
       });
     });
@@ -325,7 +325,7 @@ booksRouter.post(
         date,
         description: `Contra-revenue refund for book sale ${sale.id}`,
         referenceId: sale.id,
-        operatorName: user.fullName, operatorRole: user.role ?? null,
+        operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null,
         branchId: saleBranchId,
       });
     })();

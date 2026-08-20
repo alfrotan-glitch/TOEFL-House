@@ -57,7 +57,7 @@ const stmtGetStudentById = db.prepare('SELECT * FROM students WHERE id = ?');
 /** Safely extract user context required for mutations */
 function getUserContext(req: import('express').Request) {
   const user = req.user;
-  if (!user?.branchId || !user?.fullName || !user?.role) {
+  if (!user?.branchId || !user?.fullName) {
     throw new HttpError(403, 'User context is missing for invoice operation.');
   }
   return user;
@@ -393,7 +393,7 @@ invoicesRouter.post(
       recordIncome({
         category: 'fee', amount: payAmount, date,
         description: `Invoice ${row.invoice_number || row.id} payment — ${student?.full_name || row.student_id}`,
-        referenceId: row.id, paymentId: payId, operatorName: user.fullName, operatorRole: user.role ?? null, branchId: row.branch_id,
+        referenceId: row.id, paymentId: payId, operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null, branchId: row.branch_id,
       });
 
       const newPaid = paidSoFar + payAmount;

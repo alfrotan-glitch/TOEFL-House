@@ -14,12 +14,13 @@
  *   - reporting: actual-activity placement report
  *   - RBAC + branch isolation on the new routes
  */
+import { assignRole } from './support/identity.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import visitorsRouter from '../routes/visitors.routes.js';
 import placementRouter from '../routes/placement.routes.js';
 import academicRouter from '../routes/academic.routes.js';
@@ -80,20 +81,21 @@ describe('Placement Assessment Engine lifecycle', () => {
       [MANAGER_B, 'engine-manager-b', 'manager', BRANCH_B],
       [REGISTRAR, 'engine-registrar', 'registrar', BRANCH],
     ] as const) {
-      db.prepare(`INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password) VALUES (?, ?, ?, ?, ?, ?, 1, 0)`)
-        .run(u, username, 'Engine User', role, branch, await hashPassword('testpass123'));
+      db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES (?, ?, ?, ?, ?, 1, 0)`)
+        .run(u, username, 'Engine User', branch, await hashPassword('testpass123'));
+      assignRole(u, role, branch);
     }
-    syncLegacyUserRoles(db);
+
     db.prepare(`INSERT OR IGNORE INTO programs (id, name, duration_months, branch_id, is_active) VALUES (?, ?, 12, ?, 1)`).run(PROGRAM, 'Engine Program', BRANCH);
     db.prepare(`INSERT OR IGNORE INTO program_versions (id, program_id, version_label, version_number, status, is_default) VALUES (?, ?, 'v1', 1, 'published', 1)`).run(VERSION, PROGRAM);
     db.prepare(`INSERT OR IGNORE INTO levels (id, program_id, name, "order", program_version_id, code, is_active) VALUES (?, ?, 'A1 Beginner', 1, ?, 'A1', 1)`).run(LEVEL_A1, PROGRAM, VERSION);
     db.prepare(`INSERT OR IGNORE INTO levels (id, program_id, name, "order", program_version_id, code, is_active) VALUES (?, ?, 'B1 Intermediate', 2, ?, 'B1', 1)`).run(LEVEL_B1, PROGRAM, VERSION);
     db.prepare(`INSERT OR REPLACE INTO placement_rules (id, program_version_id, branch_id, name, min_score, max_score, recommended_level_id, recommended_level_code, sort_order, is_active) VALUES (?, ?, NULL, 'A1 band', 0, 59, ?, 'A1', 1, 1)`).run(id('prl'), VERSION, LEVEL_A1);
     db.prepare(`INSERT OR REPLACE INTO placement_rules (id, program_version_id, branch_id, name, min_score, max_score, recommended_level_id, recommended_level_code, sort_order, is_active) VALUES (?, ?, NULL, 'B1 band', 60, 100, ?, 'B1', 2, 1)`).run(id('prl'), VERSION, LEVEL_B1);
-    owner = { userId: OWNER, username: 'engine-owner', role: 'owner', branchId: BRANCH, fullName: 'Engine Owner' };
-    manager = { userId: MANAGER, username: 'engine-manager', role: 'manager', branchId: BRANCH, fullName: 'Engine Manager' };
-    managerB = { userId: MANAGER_B, username: 'engine-manager-b', role: 'manager', branchId: BRANCH_B, fullName: 'Engine Manager B' };
-    registrar = { userId: REGISTRAR, username: 'engine-registrar', role: 'registrar', branchId: BRANCH, fullName: 'Engine Registrar' };
+    owner = { userId: OWNER, username: 'engine-owner', branchId: BRANCH, fullName: 'Engine Owner' };
+    manager = { userId: MANAGER, username: 'engine-manager', branchId: BRANCH, fullName: 'Engine Manager' };
+    managerB = { userId: MANAGER_B, username: 'engine-manager-b', branchId: BRANCH_B, fullName: 'Engine Manager B' };
+    registrar = { userId: REGISTRAR, username: 'engine-registrar', branchId: BRANCH, fullName: 'Engine Registrar' };
     makeVisitor(VISITOR, 'V-20001');
     app = createApp();
   });

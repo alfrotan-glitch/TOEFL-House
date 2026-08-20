@@ -10,12 +10,13 @@
  * count a page, filter locally, present a form that cannot succeed — is
  * expressed here as "the server hands the UI a correct answer directly".
  */
+import { assignRole } from './support/identity.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { visitorsRouter } from '../routes/visitors.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 import { today } from '../utils/ids.js';
@@ -91,20 +92,24 @@ beforeAll(async () => {
   seedPrograms();
 
   const pwd = await hashPassword('Str0ng!Pass2026');
-  const insU = db.prepare(`INSERT OR IGNORE INTO users (id,username,password_hash,full_name,role,branch_id,must_change_password)
-                           VALUES (?,?,?,?,?,?,0)`);
-  insU.run('vux_own', 'vux_own', pwd, 'Owner', 'owner', BRANCH_A);
-  insU.run('vux_reg', 'vux_reg', pwd, 'Registrar A', 'registrar', BRANCH_A);
-  insU.run('vux_cou', 'vux_cou', pwd, 'Counselor A', 'counselor', BRANCH_A);
-  insU.run('vux_regb', 'vux_regb', pwd, 'Registrar B', 'registrar', BRANCH_B);
-  insU.run('vux_tea', 'vux_tea', pwd, 'Teacher A', 'teacher', BRANCH_A);
-  syncLegacyUserRoles(db);
+  const insU = db.prepare(`INSERT OR IGNORE INTO users (id,username,password_hash,full_name,branch_id,must_change_password)
+                           VALUES (?,?,?,?,?,0)`);
+  insU.run('vux_own', 'vux_own', pwd, 'Owner', BRANCH_A);
+  assignRole('vux_own', 'owner', BRANCH_A);
+  insU.run('vux_reg', 'vux_reg', pwd, 'Registrar A', BRANCH_A);
+  assignRole('vux_reg', 'registrar', BRANCH_A);
+  insU.run('vux_cou', 'vux_cou', pwd, 'Counselor A', BRANCH_A);
+  assignRole('vux_cou', 'counselor', BRANCH_A);
+  insU.run('vux_regb', 'vux_regb', pwd, 'Registrar B', BRANCH_B);
+  assignRole('vux_regb', 'registrar', BRANCH_B);
+  insU.run('vux_tea', 'vux_tea', pwd, 'Teacher A', BRANCH_A);
+  assignRole('vux_tea', 'teacher', BRANCH_A);
 
-  owner = { userId: 'vux_own', username: 'vux_own', role: 'owner', branchId: BRANCH_A, fullName: 'Owner' } as TokenPayload;
-  registrarA = { userId: 'vux_reg', username: 'vux_reg', role: 'registrar', branchId: BRANCH_A, fullName: 'Registrar A' } as TokenPayload;
-  counselorA = { userId: 'vux_cou', username: 'vux_cou', role: 'counselor', branchId: BRANCH_A, fullName: 'Counselor A' } as TokenPayload;
-  registrarB = { userId: 'vux_regb', username: 'vux_regb', role: 'registrar', branchId: BRANCH_B, fullName: 'Registrar B' } as TokenPayload;
-  teacherA = { userId: 'vux_tea', username: 'vux_tea', role: 'teacher', branchId: BRANCH_A, fullName: 'Teacher A' } as TokenPayload;
+  owner = { userId: 'vux_own', username: 'vux_own', branchId: BRANCH_A, fullName: 'Owner' } as TokenPayload;
+  registrarA = { userId: 'vux_reg', username: 'vux_reg', branchId: BRANCH_A, fullName: 'Registrar A' } as TokenPayload;
+  counselorA = { userId: 'vux_cou', username: 'vux_cou', branchId: BRANCH_A, fullName: 'Counselor A' } as TokenPayload;
+  registrarB = { userId: 'vux_regb', username: 'vux_regb', branchId: BRANCH_B, fullName: 'Registrar B' } as TokenPayload;
+  teacherA = { userId: 'vux_tea', username: 'vux_tea', branchId: BRANCH_A, fullName: 'Teacher A' } as TokenPayload;
 
   app = express();
   app.use(express.json());
@@ -642,13 +647,14 @@ describe('UX-9 — possible-duplicate lookup warns without blocking', () => {
                 VALUES ('vux_rp_view', ?, ?, 'branch')`).run(roleId, viewPerm!.id);
 
     const pwd = await hashPassword('Str0ng!Pass2026');
-    db.prepare(`INSERT OR IGNORE INTO users (id,username,password_hash,full_name,role,branch_id,must_change_password)
-                VALUES ('vux_vo','vux_vo',?,'View Only','registrar',?,0)`).run(pwd, BRANCH_A);
+    db.prepare(`INSERT OR IGNORE INTO users ( id, username, password_hash, full_name, branch_id, must_change_password )
+                VALUES ('vux_vo', 'vux_vo', ?, 'View Only', ?, 0)`).run(pwd, BRANCH_A);
+    assignRole('vux_vo', 'registrar', BRANCH_A);
     db.prepare(`DELETE FROM user_roles WHERE user_id = 'vux_vo'`).run();
     db.prepare(`INSERT INTO user_roles (id, user_id, role_id, scope_type, scope_id, is_primary, assigned_by, assigned_at)
                 VALUES ('vux_ur_vo','vux_vo',?, 'branch', ?, 1, 'vux_own', datetime('now'))`).run(roleId, BRANCH_A);
 
-    const viewOnly = { userId: 'vux_vo', username: 'vux_vo', role: 'registrar', branchId: BRANCH_A, fullName: 'View Only' } as TokenPayload;
+    const viewOnly = { userId: 'vux_vo', username: 'vux_vo', branchId: BRANCH_A, fullName: 'View Only' } as TokenPayload;
 
     // Can read the list (Lead.View)…
     const list = await supertest(app).get('/api/visitors?limit=1').set(authHeader(viewOnly));

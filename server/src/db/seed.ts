@@ -18,7 +18,7 @@ import {
   ensureOrganizationHierarchy,
 } from './organizationHierarchy.js';
 import { hashPassword } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog, assignPrimaryRole } from '../core/rbac/rbac-service.js';
 import { seedDefaultWorkflowDefinitions } from '../utils/workflowSeeds.js';
 
 const required = (name: string): string => {
@@ -113,9 +113,10 @@ const bootstrap = db.transaction(() => {
     if (passwordWasGeneratedForFirstInstall) {
       db.prepare(`
         UPDATE users
-        SET password_hash = ?, must_change_password = 1, full_name = ?, email = ?, role = 'owner', branch_id = ?
+        SET password_hash = ?, must_change_password = 1, full_name = ?, email = ?, branch_id = ?
         WHERE id = ?
       `).run(passwordHash, ownerName, ownerEmail, branch.id, existingOwner.id);
+      assignPrimaryRole(db, existingOwner.id, 'owner', null, 'bootstrap');
       return { action: 'credentials-reset' as const, userId: existingOwner.id };
     }
     return { action: 'existing' as const, userId: existingOwner.id };
@@ -124,16 +125,18 @@ const bootstrap = db.transaction(() => {
   const userId = randomUUID();
   db.prepare(`
     INSERT INTO users (
-      id, username, password_hash, full_name, email, role, branch_id,
+      id, username, password_hash, full_name, email, branch_id,
       is_active, must_change_password
-    ) VALUES (?, ?, ?, ?, ?, 'owner', ?, 1, 1)
+    ) VALUES (?, ?, ?, ?, ?, ?, 1, 1)
   `).run(userId, ownerUsername, passwordHash, ownerName, ownerEmail, branch.id);
+
+  // The account's authority is the assignment, not anything on the user row.
+  assignPrimaryRole(db, userId, 'owner', null, 'bootstrap');
 
   return { action: 'created' as const, userId };
 });
 
 const result = bootstrap();
-syncLegacyUserRoles(db);
 
 if (passwordWasGeneratedForFirstInstall) {
   const envPath = resolve(process.cwd(), '.env');

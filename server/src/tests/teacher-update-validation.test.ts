@@ -26,13 +26,14 @@
  * accept). There is no create/update divergence to close, and choosing a new
  * upper bound for a workload target would be inventing a business rule.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { today } from '../utils/ids.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { teachersRouter } from '../routes/teachers.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 import { assertMoney, assertPerformanceScore } from '../utils/money.js';
@@ -86,11 +87,12 @@ beforeAll(async () => {
   bootstrapRbacCatalog(db);
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(BRANCH, 'TUV Branch', 'Kabul');
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES ('tuv_owner', 'tuv_owner', 'TUV Owner', 'owner', ?, ?, 1, 0)`,
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES ('tuv_owner', 'tuv_owner', 'TUV Owner', ?, ?, 1, 0)`,
   ).run(BRANCH, await hashPassword('pw'));
-  syncLegacyUserRoles(db);
-  owner = { userId: 'tuv_owner', username: 'tuv_owner', role: 'owner' as never, branchId: BRANCH, fullName: 'TUV Owner' };
+  assignRole('tuv_owner', 'owner', BRANCH);
+
+  owner = { userId: 'tuv_owner', username: 'tuv_owner', branchId: BRANCH, fullName: 'TUV Owner' };
   app = express();
   app.use(express.json());
   app.use('/api/teachers', teachersRouter);

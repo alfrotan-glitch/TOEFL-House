@@ -27,6 +27,7 @@
  * That last property is the one that makes this policy safe to ship: "initial"
  * must mean initial.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
@@ -37,7 +38,7 @@ import authRouter from '../routes/auth.routes.js';
 import usersRouter from '../routes/users.routes.js';
 import studentsRouter from '../routes/students.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { hashPassword } from '../utils/auth.js';
 
 const BRANCH_A = 'spn_branch_a';
@@ -71,11 +72,12 @@ beforeAll(async () => {
     db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(b, b, 'Loc');
   }
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES ('spn_owner', 'spn_owner', 'Owner', 'owner', ?, ?, 1, 0)`
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES ('spn_owner', 'spn_owner', 'Owner', ?, ?, 1, 0)`
   ).run(BRANCH_A, await hashPassword('owner-pass-123456'));
-  syncLegacyUserRoles(db);
-  owner = { userId: 'spn_owner', username: 'spn_owner', role: 'owner', branchId: BRANCH_A, fullName: 'Owner' } as TokenPayload;
+  assignRole('spn_owner', 'owner', BRANCH_A);
+
+  owner = { userId: 'spn_owner', username: 'spn_owner', branchId: BRANCH_A, fullName: 'Owner' } as TokenPayload;
 
   seedStudent('spn_stu_a', 'TH-SPN-001', 'Ahmad Rahimi', BRANCH_A, '0700666001');
   seedStudent('spn_stu_b', 'TH-SPN-002', 'Sara Noori', BRANCH_A, '0700666002');

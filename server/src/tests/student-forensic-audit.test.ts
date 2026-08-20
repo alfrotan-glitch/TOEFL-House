@@ -16,12 +16,13 @@
  *  7. Fee/installment/book categories are inherently deduplicated server-side
  *     (control: double-click on 'fee' → 409).
  */
+import { assignRole } from './support/identity.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import studentsRouter from '../routes/students.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
@@ -50,16 +51,16 @@ describe('Student forensic audit', () => {
     db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(BRANCH_A, 'FA Branch A', 'A');
     db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(BRANCH_B, 'FA Branch B', 'B');
     for (const [uid, uname, role] of [['fa_owner', 'fa_owner', 'owner'], ['fa_reg', 'fa_reg', 'registrar']] as const) {
-      await db.prepare(`INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password) VALUES (?, ?, ?, ?, ?, ?, 1, 0)`)
-        .run(uid, uname, 'FA ' + role, role, BRANCH_A, await hashPassword('x'));
+      await db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES (?, ?, ?, ?, ?, 1, 0)`)
+        .run(uid, uname, 'FA ' + role, BRANCH_A, await hashPassword('x'));
+      assignRole(uid, role, BRANCH_A);
     }
-    await db.prepare(`INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password) VALUES ('fa_stu', 'fa_stu', 'FA Student', 'student', ?, ?, 1, 0)`).run(BRANCH_A, await hashPassword('x'));
-    const stuRole = db.prepare("SELECT id FROM roles WHERE code='student'").get() as { id: string };
-    db.prepare(`INSERT OR IGNORE INTO user_roles (id, user_id, role_id, scope_type, scope_id, is_primary, assigned_by) VALUES (?, 'fa_stu', ?, 'branch', ?, 1, 'system')`).run(id('ur'), stuRole.id, BRANCH_A);
-    syncLegacyUserRoles(db);
-    owner = { userId: 'fa_owner', username: 'fa_owner', role: 'owner', branchId: BRANCH_A, fullName: 'FA Owner' };
-    registrar = { userId: 'fa_reg', username: 'fa_reg', role: 'registrar', branchId: BRANCH_A, fullName: 'FA Registrar' };
-    studentTok = { userId: 'fa_stu', username: 'fa_stu', role: 'student', branchId: BRANCH_A, fullName: 'FA Student' };
+    await db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES ('fa_stu', 'fa_stu', 'FA Student', ?, ?, 1, 0)`).run(BRANCH_A, await hashPassword('x'));
+    assignRole('fa_stu', 'student', BRANCH_A);
+
+    owner = { userId: 'fa_owner', username: 'fa_owner', branchId: BRANCH_A, fullName: 'FA Owner' };
+    registrar = { userId: 'fa_reg', username: 'fa_reg', branchId: BRANCH_A, fullName: 'FA Registrar' };
+    studentTok = { userId: 'fa_stu', username: 'fa_stu', branchId: BRANCH_A, fullName: 'FA Student' };
     app = createApp();
   });
 

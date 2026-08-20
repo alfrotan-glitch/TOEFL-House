@@ -22,6 +22,7 @@
  * legacy-role fallback are organization-scoped, so this preserves every
  * legitimate owner.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -46,7 +47,7 @@ function ctxWithRole(userId: string, roleCode: string, scopeType: string, scopeI
      VALUES (?, ?, ?, ?, ?, 1)`,
   ).run(`ur_${userId}_${scopeType}`, userId, role.id, scopeType, scopeId);
   return buildRbacContext(db, {
-    id: userId, username: userId, full_name: userId, role: 'teacher', branch_id: BRANCH_A,
+    id: userId, username: userId, full_name: userId, branch_id: BRANCH_A,
   });
 }
 
@@ -65,9 +66,10 @@ beforeAll(() => {
   db.prepare(`INSERT OR IGNORE INTO branches (id, campus_id, name, location) VALUES (?, ?, 'Scope Branch B', 'B')`).run(BRANCH_B, CAMPUS_B);
   for (const uid of ['u_scope_campus_owner', 'u_scope_branch_owner', 'u_scope_org_owner']) {
     db.prepare(
-      `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-       VALUES (?, ?, ?, 'teacher', ?, 'x', 1, 0)`,
+      `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+       VALUES (?, ?, ?, ?, 'x', 1, 0)`,
     ).run(uid, uid, uid, BRANCH_A);
+    assignRole(uid, 'teacher', BRANCH_A);
   }
 });
 

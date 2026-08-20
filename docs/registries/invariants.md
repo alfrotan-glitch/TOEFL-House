@@ -30,10 +30,11 @@ Validated by `npm run audit:registries`.
 | Requester and approver of an expense must differ | application | `server/src/routes/finance.routes.ts` | `server/src/tests/finance-expense-request-integrity.test.ts` | 403 |
 | Permissions come only from a live `user_roles` assignment | application | `server/src/core/rbac/rbac-service.ts` (`resolveUserPermissions`) | `server/src/tests/rbac-single-authority.test.ts` | principal resolves to zero permissions |
 | Deleting a user's assignments revokes their access | application | `server/src/core/rbac/rbac-service.ts` | `server/src/tests/rbac-home-branch-invariant.test.ts` | guarded endpoint returns 403 |
-| `users.role` never grants a permission, a role or a scope | application | `server/src/core/rbac/rbac-service.ts` | `server/src/tests/rbac-single-authority.test.ts` | `isGlobalOwner` stays false |
+| There is no role column on `users` at all | database | `server/src/db/schema.sql` | `server/src/tests/rbac-single-authority.test.ts` | `no such column: role` |
+| The session token carries no role or permission claim | application | `server/src/utils/auth.ts` (`TokenPayload`) | `server/src/tests/rbac-single-authority.test.ts` | a forged claim is ignored; authority is re-resolved per request |
 | `users.branch_id` never authorizes branch access | application | `server/src/core/rbac/rbac-service.ts` (`canAccessBranch`) | `server/src/tests/rbac-single-authority.test.ts` | access denied without a matching scope |
 | An expired assignment grants nothing | application | `server/src/core/rbac/rbac-service.ts` | `server/src/tests/rbac-expired-grant-escalation.test.ts` | 403 |
 | A user has at most one primary role assignment | database | `trg_user_roles_single_primary` | `server/src/tests/rbac-single-authority.test.ts` | `SqliteError: user may have only one primary role` |
 | Authorization guards name canonical role codes only | application + compiler | `RoleCode` derived from `ROLE_CODES` in `server/src/core/rbac/permission-catalog.ts` | `server/src/tests/rbac-scope.test.ts` | unknown role name fails to compile |
 | A workflow step naming an unknown role is reported, not silently denied | application | `server/src/routes/workflows.routes.ts` (`assertKnownStepRole`) | `server/src/tests/event-bus.test.ts` | 409 naming the bad role and step |
-| `users.role` accepts only values the database CHECK allows | database + types | `users.role` CHECK, `UserRole` in `server/src/utils/auth.ts` | `server/src/tests/rbac-single-authority.test.ts` | CHECK constraint rejects the write |
+

@@ -4,11 +4,12 @@
  * Regression coverage for branch/campus/global configuration boundaries that
  * are not covered by the P0 isolation suite.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
 import { id } from '../utils/ids.js';
 import { academicRouter } from '../routes/academic.routes.js';
@@ -27,8 +28,8 @@ const CAMPUS_A = 'p1_campus_a';
 const CAMPUS_B = 'p1_campus_b';
 const ORG = 'org_toefl_house';
 
-function token(userId: string, role: TokenPayload['role'], branchId: string): TokenPayload {
-  return { userId, username: userId, role, branchId, fullName: role === 'owner' ? 'P1 Owner' : 'P1 Manager' };
+function token(userId: string, role: string, branchId: string): TokenPayload {
+  return { userId, username: userId, branchId, fullName: role === 'owner' ? 'P1 Owner' : 'P1 Manager' };
 }
 
 function auth(user: TokenPayload) {
@@ -37,9 +38,10 @@ function auth(user: TokenPayload) {
 
 async function seedUser(userId: string, role: string, branchId: string) {
   db.prepare(`INSERT OR IGNORE INTO users
-    (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-    VALUES (?, ?, ?, ?, ?, ?, 1, 0)`)
-    .run(userId, userId, role === 'owner' ? 'P1 Owner' : 'P1 Manager', role, branchId, await hashPassword('p1-test-password'));
+    ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+    VALUES (?, ?, ?, ?, ?, 1, 0)`)
+    .run(userId, userId, role === 'owner' ? 'P1 Owner' : 'P1 Manager', branchId, await hashPassword('p1-test-password'));
+  assignRole(userId, role, branchId);
 }
 
 function app() {
@@ -82,7 +84,6 @@ describe('Phase 2 P1 — scope hardening', () => {
 
     await seedUser('p1_manager', 'manager', A);
     await seedUser('p1_owner', 'owner', A);
-    syncLegacyUserRoles(db);
 
     const programA = 'p1_program_a';
     const programB = 'p1_program_b';

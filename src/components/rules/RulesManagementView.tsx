@@ -47,7 +47,7 @@ export default function RulesManagementView({
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const canEdit = activeRole === 'owner' || activeRole === 'manager';
+  const canEdit = activeRole === 'owner' || activeRole === 'general_manager';
   const canDeleteOrRollback = activeRole === 'owner';
 
   const rules = useMemo(() => businessRules[activeCategory] || [], [businessRules, activeCategory]);

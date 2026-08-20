@@ -76,12 +76,15 @@ const VISITOR_PAGE_SIZE = 25;
 
 export function useApiStore() {
   const { user } = useAuth();
-  const legacyCanPickBranch = user?.role === 'owner' || user?.role === 'manager';
-  const canPickBranch = user?.tabAccess?.settings ?? legacyCanPickBranch;
-  const canSeeFinance = user?.tabAccess?.finance ?? ['owner', 'manager', 'finance'].includes(user?.role || '');
-  const canSeeVisitors = user?.tabAccess?.visitors ?? ['owner', 'manager', 'registrar', 'counselor'].includes(user?.role || '');
-  const canSeeAuditLog = user?.tabAccess?.audit ?? ['owner', 'manager'].includes(user?.role || '');
-  const canManageFunding = user?.tabAccess?.funding ?? ['owner', 'manager', 'donor_manager'].includes(user?.role || '');
+  // Tab visibility is the server's decision (`tabAccess`, derived from resolved
+  // permissions). There is deliberately no role-name fallback: reconstructing
+  // authorization from a role string in the browser is a second authority, and
+  // it disagreed with the server the moment either side changed.
+  const canPickBranch = user?.tabAccess?.settings ?? false;
+  const canSeeFinance = user?.tabAccess?.finance ?? false;
+  const canSeeVisitors = user?.tabAccess?.visitors ?? false;
+  const canSeeAuditLog = user?.tabAccess?.audit ?? false;
+  const canManageFunding = user?.tabAccess?.funding ?? false;
 
   const [branches, setBranches] = useState<Branch[]>([]);
   const [campuses, setCampuses] = useState<Campus[]>([]);
@@ -839,7 +842,7 @@ export function useApiStore() {
 
   const settings = {
     currentBranchId,
-    currentRoleId: user?.role || 'registrar',
+    currentRoleId: user?.role || 'receptionist',
     dailySavingPercent,
     branches,
     campuses,

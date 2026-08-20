@@ -358,9 +358,12 @@ workflowsRouter.post('/instances/:id/reject', requirePermission('Workflow.Reject
   
   const steps = parseSteps(definition.steps);
   const currentStepDef = steps.find(s => s.order === instance.current_step);
-  const userRole = req.user!.role;
-  
-  if (currentStepDef && userRole !== currentStepDef.role && userRole !== 'owner' && userRole !== 'manager') {
+  const userRole = req.rbac?.primaryRole ?? 'none';
+
+  if (currentStepDef
+      && !requestHasRole(req, String(currentStepDef.role) as RoleCode)
+      && !requestHasRole(req, 'owner')
+      && !requestHasRole(req, 'general_manager')) {
     throw new HttpError(403, `Role "${userRole}" is not authorized to reject step ${instance.current_step}.`);
   }
   
@@ -432,7 +435,6 @@ workflowsRouter.get('/instances/:id/history', requirePermission('Workflow.View')
 // ============================================================================
 
 workflowsRouter.get('/pending', ah(async (req, res) => {
-  const userRole = req.user!.role;
   const branchId = req.user!.branchId;
   
   if (!branchId) return res.json([]);

@@ -96,7 +96,7 @@ export class GradeLockService {
    * explicit unlock() path).
    */
   canEditGrades(stage: GradeLockStage, role: string): boolean {
-    if (['owner', 'manager', 'head_of_department'].includes(role)) {
+    if (['owner', 'general_manager', 'head_of_department'].includes(role)) {
       return stage !== 'locked';
     }
     return isTeacherEditableStage(stage);

@@ -251,8 +251,8 @@ export default function BooksView({
     }
   };
 
-  const isAuthorizedToManage = activeRole === 'owner' || activeRole === 'manager' || activeRole === 'registrar' || activeRole === 'finance';
-  const isOwnerOrManager = activeRole === 'owner' || activeRole === 'manager';
+  const isAuthorizedToManage = activeRole === 'owner' || activeRole === 'general_manager' || activeRole === 'receptionist' || activeRole === 'finance_manager';
+  const isOwnerOrManager = activeRole === 'owner' || activeRole === 'general_manager';
 
   // Dynamic Metrics & Totals
   const totalDistinctBooks = books.length;

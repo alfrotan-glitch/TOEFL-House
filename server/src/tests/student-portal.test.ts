@@ -14,6 +14,7 @@
  *     read other students. The whole-DB /api/students/search endpoint must
  *     return { rows, total } with pagination at any dataset size.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
@@ -21,7 +22,7 @@ import { db, initSchema } from '../db/connection.js';
 import { ensureOrganizationHierarchy, FIXED_ORG_ID } from '../db/organizationHierarchy.js';
 import { id, today } from '../utils/ids.js';
 import { signToken, hashPassword } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { authRouter } from '../routes/auth.routes.js';
 import { studentsRouter } from '../routes/students.routes.js';
 import { usersRouter } from '../routes/users.routes.js';
@@ -67,12 +68,12 @@ beforeAll(async () => {
 
   // Owner account (must_change_password = 0 so no quarantine).
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password, session_version)
-     VALUES (?, 'portal_owner', 'Portal Owner', 'owner', ?, ?, 1, 0, 1)`
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password, session_version )
+     VALUES (?, 'portal_owner', 'Portal Owner', ?, ?, 1, 0, 1)`
   ).run('u_portal_owner', BRANCH, await hashPassword('owner-pass-12345'));
-  syncLegacyUserRoles(db);
+  assignRole('u_portal_owner', 'owner', BRANCH);
 
-  ownerToken = signToken({ userId: 'u_portal_owner', username: 'portal_owner', role: 'owner', branchId: BRANCH, fullName: 'Portal Owner', sessionVersion: 1 });
+  ownerToken = signToken({ userId: 'u_portal_owner', username: 'portal_owner', branchId: BRANCH, fullName: 'Portal Owner', sessionVersion: 1 });
 
   seedStudent('stu_portal_1', BRANCH, 'Ali Ahmad Portal', 'TH-P-001001');
   seedStudent('stu_portal_2', BRANCH, 'Maryam Karimi Portal', 'TH-P-001002');
@@ -97,7 +98,7 @@ describe('Account creation — RangeError regression (rbac-service sync)', () =>
     expect(res.status).toBe(201);
     expect(res.body.id).toBeTruthy();
 
-    const row = db.prepare('SELECT campus_id, role, branch_id FROM users WHERE id = ?').get(res.body.id) as
+    const row = db.prepare('SELECT u.campus_id, (SELECT r.code FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = u.id AND ur.is_primary = 1) AS role, u.branch_id FROM users u WHERE u.id = ?').get(res.body.id) as
       | { campus_id: string | null; role: string; branch_id: string } | undefined;
     expect(row).toBeTruthy();
     expect(row!.campus_id).toBe(CAMPUS); // bound to the branch's campus
@@ -119,7 +120,7 @@ describe('Account creation — RangeError regression (rbac-service sync)', () =>
       });
     expect(res.status).toBe(201);
 
-    const row = db.prepare('SELECT campus_id, role, linked_student_id FROM users WHERE id = ?').get(res.body.id) as
+    const row = db.prepare('SELECT u.campus_id, (SELECT r.code FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = u.id AND ur.is_primary = 1) AS role, u.linked_student_id FROM users u WHERE u.id = ?').get(res.body.id) as
       | { campus_id: string | null; role: string; linked_student_id: string | null } | undefined;
     expect(row).toBeTruthy();
     expect(row!.role).toBe('student');
@@ -236,7 +237,7 @@ describe('Student portal login (student code + secret)', () => {
   });
 
   it('has a portal user row linked to the student', () => {
-    const row = db.prepare('SELECT username, role, linked_student_id FROM users WHERE linked_student_id = ?').get('stu_portal_2') as
+    const row = db.prepare('SELECT u.username, (SELECT r.code FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = u.id AND ur.is_primary = 1) AS role, u.linked_student_id FROM users u WHERE u.linked_student_id = ?').get('stu_portal_2') as
       | { username: string; role: string; linked_student_id: string } | undefined;
     expect(row).toBeTruthy();
     expect(row!.role).toBe('student');

@@ -7,6 +7,7 @@
  * cannot rot. Where the finding was "already safe", the test locks the
  * property in place rather than asserting a fix.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
@@ -16,7 +17,7 @@ import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
 import studentsRouter from '../routes/students.routes.js';
 import workflowsRouter from '../routes/workflows.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { resolveAuthorizedDiscount } from '../core/configuration/discount-authority.js';
 import { getFinanceAccount } from '../utils/financeAccounts.js';
 import { computeReconciliation } from '../utils/reconciliation.js';
@@ -40,9 +41,10 @@ let hod: TokenPayload;
 
 async function seedUser(uid: string, role: string, branchId = BRANCH) {
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES (?, ?, ?, ?, ?, ?, 1, 0)`
-  ).run(uid, uid, `User ${uid}`, role, branchId, await hashPassword('testpass123'));
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES (?, ?, ?, ?, ?, 1, 0)`
+  ).run(uid, uid, `User ${uid}`, branchId, await hashPassword('testpass123'));
+  assignRole(uid, role, branchId);
 }
 
 beforeAll(async () => {
@@ -51,9 +53,9 @@ beforeAll(async () => {
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(BRANCH, 'Closure', 'Loc');
   await seedUser('u_clo_owner', 'owner');
   await seedUser('u_clo_hod', 'head_of_department');
-  syncLegacyUserRoles(db);
-  owner = { userId: 'u_clo_owner', username: 'u_clo_owner', role: 'owner', branchId: BRANCH, fullName: 'Owner' } as TokenPayload;
-  hod = { userId: 'u_clo_hod', username: 'u_clo_hod', role: 'head_of_department', branchId: BRANCH, fullName: 'HOD' } as TokenPayload;
+
+  owner = { userId: 'u_clo_owner', username: 'u_clo_owner', branchId: BRANCH, fullName: 'Owner' } as TokenPayload;
+  hod = { userId: 'u_clo_hod', username: 'u_clo_hod', branchId: BRANCH, fullName: 'HOD' } as TokenPayload;
   app = createApp();
 });
 

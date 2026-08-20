@@ -19,6 +19,7 @@
  * No cap rule exists anywhere in this codebase, its data or its tests, so none
  * is invented here; see docs/TEACHER_SUBSYSTEM_AUDIT_2026-08-18.md.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
@@ -26,7 +27,7 @@ import { db, initSchema } from '../db/connection.js';
 import { NON_EXPENSE_CASH_MOVEMENT_SQL, OPERATING_EXPENSE_SQL } from '../core/finance/ledger-classification.js';
 import { today, id as mkId } from '../utils/ids.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { teachersRouter, employeesRouter } from '../routes/teachers.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 
@@ -77,11 +78,12 @@ beforeAll(async () => {
   bootstrapRbacCatalog(db);
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(BRANCH, 'EPI Branch', 'Kabul');
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES ('epi_owner', 'epi_owner', 'EPI Owner', 'owner', ?, ?, 1, 0)`,
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES ('epi_owner', 'epi_owner', 'EPI Owner', ?, ?, 1, 0)`,
   ).run(BRANCH, await hashPassword('pw'));
-  syncLegacyUserRoles(db);
-  owner = { userId: 'epi_owner', username: 'epi_owner', role: 'owner' as never, branchId: BRANCH, fullName: 'EPI Owner' };
+  assignRole('epi_owner', 'owner', BRANCH);
+
+  owner = { userId: 'epi_owner', username: 'epi_owner', branchId: BRANCH, fullName: 'EPI Owner' };
 
   budgetLineId = mkId('bl');
   db.prepare(

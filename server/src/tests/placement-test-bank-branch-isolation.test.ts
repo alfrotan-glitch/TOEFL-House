@@ -38,6 +38,7 @@
  * helper placement-attempt.routes.ts already uses. No new validator, and the
  * `branch_id IS NULL` = global-template semantics are preserved.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
@@ -45,7 +46,7 @@ import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
 import placementRouter from '../routes/placement.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 
 const B1 = 'ptb_branch_one';
 const B2 = 'ptb_branch_two';
@@ -67,9 +68,10 @@ let owner: TokenPayload;
 
 async function seedUser(uid: string, role: string, branchId: string) {
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES (?, ?, ?, ?, ?, ?, 1, 0)`
-  ).run(uid, uid, `User ${uid}`, role, branchId, await hashPassword('testpass123'));
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES (?, ?, ?, ?, ?, 1, 0)`
+  ).run(uid, uid, `User ${uid}`, branchId, await hashPassword('testpass123'));
+  assignRole(uid, role, branchId);
 }
 
 /** A test owned by B1, created through the real HTTP route. */
@@ -96,10 +98,10 @@ beforeAll(async () => {
   await seedUser('u_ptb_m1', 'manager', B1);
   await seedUser('u_ptb_m2', 'manager', B2);
   await seedUser('u_ptb_owner', 'owner', B1);
-  syncLegacyUserRoles(db);
-  mgr1 = { userId: 'u_ptb_m1', username: 'u_ptb_m1', role: 'manager', branchId: B1, fullName: 'Mgr One' } as TokenPayload;
-  mgr2 = { userId: 'u_ptb_m2', username: 'u_ptb_m2', role: 'manager', branchId: B2, fullName: 'Mgr Two' } as TokenPayload;
-  owner = { userId: 'u_ptb_owner', username: 'u_ptb_owner', role: 'owner', branchId: B1, fullName: 'Owner' } as TokenPayload;
+
+  mgr1 = { userId: 'u_ptb_m1', username: 'u_ptb_m1', branchId: B1, fullName: 'Mgr One' } as TokenPayload;
+  mgr2 = { userId: 'u_ptb_m2', username: 'u_ptb_m2', branchId: B2, fullName: 'Mgr Two' } as TokenPayload;
+  owner = { userId: 'u_ptb_owner', username: 'u_ptb_owner', branchId: B1, fullName: 'Owner' } as TokenPayload;
   app = createApp();
 });
 

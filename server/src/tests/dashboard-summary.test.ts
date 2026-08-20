@@ -15,12 +15,13 @@
  * The fixtures deliberately exceed every page limit in the system, because a
  * fixture that fits inside one page cannot detect the defect class at all.
  */
+import { assignRole } from './support/identity.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { dashboardRouter } from '../routes/dashboard.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 import { periodBoundaries, buildDashboardSummary } from '../core/dashboard/dashboard-summary.js';
@@ -122,14 +123,17 @@ beforeAll(async () => {
   })();
 
   const pwd = await hashPassword('Str0ng!Pass2026');
-  const insU = db.prepare(`INSERT OR IGNORE INTO users (id,username,password_hash,full_name,role,branch_id,must_change_password) VALUES (?,?,?,?,?,?,0)`);
-  insU.run('ds_owner', 'ds_owner', pwd, 'Owner', 'owner', BRANCH);
-  insU.run('ds_mgr_b', 'ds_mgr_b', pwd, 'Mgr B', 'manager', BRANCH_B);
-  insU.run('ds_teach', 'ds_teach', pwd, 'Teach', 'teacher', BRANCH);
-  syncLegacyUserRoles(db);
-  owner = { userId: 'ds_owner', username: 'ds_owner', role: 'owner', branchId: BRANCH, fullName: 'Owner' } as TokenPayload;
-  managerB = { userId: 'ds_mgr_b', username: 'ds_mgr_b', role: 'manager', branchId: BRANCH_B, fullName: 'Mgr B' } as TokenPayload;
-  teacher = { userId: 'ds_teach', username: 'ds_teach', role: 'teacher', branchId: BRANCH, fullName: 'Teach' } as TokenPayload;
+  const insU = db.prepare(`INSERT OR IGNORE INTO users (id,username,password_hash,full_name,branch_id,must_change_password) VALUES (?,?,?,?,?,0)`);
+  insU.run('ds_owner', 'ds_owner', pwd, 'Owner', BRANCH);
+  assignRole('ds_owner', 'owner', BRANCH);
+  insU.run('ds_mgr_b', 'ds_mgr_b', pwd, 'Mgr B', BRANCH_B);
+  assignRole('ds_mgr_b', 'manager', BRANCH_B);
+  insU.run('ds_teach', 'ds_teach', pwd, 'Teach', BRANCH);
+  assignRole('ds_teach', 'teacher', BRANCH);
+
+  owner = { userId: 'ds_owner', username: 'ds_owner', branchId: BRANCH, fullName: 'Owner' } as TokenPayload;
+  managerB = { userId: 'ds_mgr_b', username: 'ds_mgr_b', branchId: BRANCH_B, fullName: 'Mgr B' } as TokenPayload;
+  teacher = { userId: 'ds_teach', username: 'ds_teach', branchId: BRANCH, fullName: 'Teach' } as TokenPayload;
 });
 
 describe('D-1 — conversion rate is computed over the whole population', () => {

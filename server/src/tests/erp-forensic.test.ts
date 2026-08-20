@@ -17,12 +17,13 @@
  *  6. Concurrent certificate issuance cannot double-charge (score>0 guard).
  *  7. Notification isolation for the student role (re-verify).
  */
+import { assignRole } from './support/identity.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import visitorsRouter from '../routes/visitors.routes.js';
 import placementRouter from '../routes/placement.routes.js';
 import studentsRouter from '../routes/students.routes.js';
@@ -72,14 +73,15 @@ describe('ERP cross-system forensic audit', () => {
       ['xf_owner', 'xf_owner', 'owner'], ['xf_mgr', 'xf_mgr', 'manager'],
       ['xf_reg', 'xf_reg', 'registrar'], ['xf_tea', 'xf_tea', 'teacher'],
     ] as const) {
-      await db.prepare(`INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password) VALUES (?, ?, ?, ?, ?, ?, 1, 0)`)
-        .run(uid, uname, 'XF ' + role, role, BRANCH_A, await hashPassword('x'));
+      await db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES (?, ?, ?, ?, ?, 1, 0)`)
+        .run(uid, uname, 'XF ' + role, BRANCH_A, await hashPassword('x'));
+      assignRole(uid, role, BRANCH_A);
     }
-    syncLegacyUserRoles(db);
-    owner = { userId: 'xf_owner', username: 'xf_owner', role: 'owner', branchId: BRANCH_A, fullName: 'XF Owner' };
-    manager = { userId: 'xf_mgr', username: 'xf_mgr', role: 'manager', branchId: BRANCH_A, fullName: 'XF Manager' };
-    registrar = { userId: 'xf_reg', username: 'xf_reg', role: 'registrar', branchId: BRANCH_A, fullName: 'XF Registrar' };
-    teacher = { userId: 'xf_tea', username: 'xf_tea', role: 'teacher', branchId: BRANCH_A, fullName: 'XF Teacher' };
+
+    owner = { userId: 'xf_owner', username: 'xf_owner', branchId: BRANCH_A, fullName: 'XF Owner' };
+    manager = { userId: 'xf_mgr', username: 'xf_mgr', branchId: BRANCH_A, fullName: 'XF Manager' };
+    registrar = { userId: 'xf_reg', username: 'xf_reg', branchId: BRANCH_A, fullName: 'XF Registrar' };
+    teacher = { userId: 'xf_tea', username: 'xf_tea', branchId: BRANCH_A, fullName: 'XF Teacher' };
     app = createApp();
   });
 
@@ -201,7 +203,7 @@ describe('ERP forensic — concurrency + scale (second suite)', () => {
   beforeAll(async () => {
     // Reuse the same app/db from the first suite via a fresh minimal app.
     app = createApp();
-    owner = { userId: 'xf_owner', username: 'xf_owner', role: 'owner', branchId: BRANCH_A, fullName: 'XF Owner' };
+    owner = { userId: 'xf_owner', username: 'xf_owner', branchId: BRANCH_A, fullName: 'XF Owner' };
   });
 
   it('concurrency: 10 parallel manual diploma payments on a fresh student → exactly one succeeds', async () => {

@@ -6,12 +6,13 @@
  * API is unreachable except for the auth endpoints needed to change the
  * password. After a successful change, normal access resumes.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { authRouter } from '../routes/auth.routes.js';
 import { studentsRouter } from '../routes/students.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
@@ -41,12 +42,12 @@ describe('Password-change quarantine', () => {
     const userId = 'u_quarantine';
     const passwordHash = await hashPassword('initial-pass-123');
     db.prepare(
-      `INSERT OR REPLACE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password, session_version)
-       VALUES (?, 'quarantine_user', 'Quarantine User', 'manager', ?, ?, 1, 1, 1)`
+      `INSERT OR REPLACE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password, session_version )
+       VALUES (?, 'quarantine_user', 'Quarantine User', ?, ?, 1, 1, 1)`
     ).run(userId, BRANCH, passwordHash);
-    syncLegacyUserRoles(db);
+    assignRole(userId, 'manager', BRANCH);
 
-    const token = signToken({ userId, username: 'quarantine_user', role: 'manager', branchId: BRANCH, fullName: 'Quarantine User', sessionVersion: 1 });
+    const token = signToken({ userId, username: 'quarantine_user', branchId: BRANCH, fullName: 'Quarantine User', sessionVersion: 1 });
 
     // Quarantined: business endpoints are blocked.
     const blocked = await supertest(app).get('/api/students').set('Authorization', `Bearer ${token}`);
@@ -67,7 +68,7 @@ describe('Password-change quarantine', () => {
     // the old token is revoked. Sign a fresh token with the new version.
     const row = db.prepare('SELECT session_version, must_change_password FROM users WHERE id = ?').get(userId) as { session_version: number; must_change_password: number };
     expect(row.must_change_password).toBe(0);
-    const freshToken = signToken({ userId, username: 'quarantine_user', role: 'manager', branchId: BRANCH, fullName: 'Quarantine User', sessionVersion: row.session_version });
+    const freshToken = signToken({ userId, username: 'quarantine_user', branchId: BRANCH, fullName: 'Quarantine User', sessionVersion: row.session_version });
 
     const unlocked = await supertest(app).get('/api/students').set('Authorization', `Bearer ${freshToken}`);
     expect(unlocked.status).toBe(200);
@@ -76,11 +77,12 @@ describe('Password-change quarantine', () => {
   it('rejects an incorrect current password during quarantine', async () => {
     const userId = 'u_quarantine_2';
     db.prepare(
-      `INSERT OR REPLACE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password, session_version)
-       VALUES (?, 'quarantine_user_2', 'Quarantine User 2', 'manager', ?, ?, 1, 1, 1)`
+      `INSERT OR REPLACE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password, session_version )
+       VALUES (?, 'quarantine_user_2', 'Quarantine User 2', ?, ?, 1, 1, 1)`
     ).run(userId, BRANCH, await hashPassword('initial-pass-123'));
-    syncLegacyUserRoles(db);
-    const token = signToken({ userId, username: 'quarantine_user_2', role: 'manager', branchId: BRANCH, fullName: 'Quarantine User 2', sessionVersion: 1 });
+    assignRole(userId, 'manager', BRANCH);
+
+    const token = signToken({ userId, username: 'quarantine_user_2', branchId: BRANCH, fullName: 'Quarantine User 2', sessionVersion: 1 });
 
     const res = await supertest(app).post('/api/auth/change-password').set('Authorization', `Bearer ${token}`).send({
       currentPassword: 'wrong-password', newPassword: 'new-strong-password-456',

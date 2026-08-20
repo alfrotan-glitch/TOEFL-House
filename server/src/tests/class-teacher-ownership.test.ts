@@ -28,12 +28,13 @@
  * These tests drive real HTTP through the real router, because the pre-existing
  * unit test on canAccessClass passed throughout the vulnerable period.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeEach } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import classesRouter from '../routes/classes.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 import { today } from '../utils/ids.js';
@@ -55,7 +56,7 @@ function createApp() {
 }
 
 const token = (userId: string, role: string) =>
-  `Bearer ${signToken({ userId, username: userId, role, branchId: BRANCH, fullName: userId } as TokenPayload)}`;
+  `Bearer ${signToken({ userId, username: userId, branchId: BRANCH, fullName: userId } as TokenPayload)}`;
 
 let app: express.Express;
 
@@ -75,16 +76,17 @@ beforeEach(async () => {
   mkTeacher(T_OTHER, '0700110002');
 
   // Two teacher users, each linked to their own teacher profile, same branch.
-  const mkUser = (id: string, role: string, linkedTeacher: string | null) =>
+  const mkUser = (id: string, role: string, linkedTeacher: string | null) => {
     db.prepare(
       `INSERT OR REPLACE INTO users
-         (id, username, full_name, role, branch_id, password_hash, linked_teacher_id, is_active, must_change_password)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0)`,
-    ).run(id, id, id, role, BRANCH, pw, linkedTeacher);
+         ( id, username, full_name, branch_id, password_hash, linked_teacher_id, is_active, must_change_password )
+       VALUES (?, ?, ?, ?, ?, ?, 1, 0)`,
+    ).run(id, id, id, BRANCH, pw, linkedTeacher);
+    assignRole(id, role, BRANCH);
+  };
   mkUser('cto_u_own', 'teacher', T_OWN);
   mkUser('cto_u_other', 'teacher', T_OTHER);
   mkUser('cto_u_manager', 'manager', null);
-  syncLegacyUserRoles(db);
 
   const mkClass = (id: string, teacher: string) =>
     db.prepare(

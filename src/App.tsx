@@ -409,7 +409,7 @@ function AuthenticatedApp() {
 
       <Sidebar
         currentTab={effectiveTab} setCurrentTab={handleTabChange} activeRole={activeRole} onLogout={logout}
-        activeBranchId={activeBranchId} changeBranch={store.changeBranch} canPickBranch={activeRole === 'owner' || activeRole === 'manager'}
+        activeBranchId={activeBranchId} changeBranch={store.changeBranch} canPickBranch={activeRole === 'owner' || activeRole === 'general_manager'}
         branches={store.settings.branches} campuses={store.settings.campuses || store.campuses || []} currentBranchName={store.currentBranchName}
         isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} permissionCodes={user?.permissions ? Array.from(user.permissions) : undefined} tabAccess={user?.tabAccess}
       />

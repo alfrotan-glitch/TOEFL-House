@@ -10,13 +10,14 @@
  *
  * The rule these tests encode: the browser proposes, the server decides.
  */
+import { assignRole } from './support/identity.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { ensureBranchBudgetLines } from '../db/organizationHierarchy.js';
 import { hashPassword, signToken, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { financeRouter } from '../routes/finance.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 
@@ -38,24 +39,27 @@ beforeAll(async () => {
   }
   const pwd = await hashPassword('Str0ng!Pass2026');
   db.prepare(
-    `INSERT OR IGNORE INTO users (id,username,password_hash,full_name,role,branch_id,must_change_password)
-     VALUES ('bla_own','bla_own',?,'Owner','owner',?,0)`,
+    `INSERT OR IGNORE INTO users ( id, username, password_hash, full_name, branch_id, must_change_password )
+     VALUES ('bla_own', 'bla_own', ?, 'Owner', ?, 0)`,
   ).run(pwd, HOME);
+  assignRole('bla_own', 'owner', HOME);
   db.prepare(
-    `INSERT OR IGNORE INTO users (id,username,password_hash,full_name,role,branch_id,must_change_password)
-     VALUES ('bla_mgr','bla_mgr',?,'Manager','manager',?,0)`,
+    `INSERT OR IGNORE INTO users ( id, username, password_hash, full_name, branch_id, must_change_password )
+     VALUES ('bla_mgr', 'bla_mgr', ?, 'Manager', ?, 0)`,
   ).run(pwd, HOME);
+  assignRole('bla_mgr', 'manager', HOME);
   db.prepare(
-    `INSERT OR IGNORE INTO users (id,username,password_hash,full_name,role,branch_id,must_change_password)
-     VALUES ('bla_fin','bla_fin',?,'Finance Desk','finance',?,0)`,
+    `INSERT OR IGNORE INTO users ( id, username, password_hash, full_name, branch_id, must_change_password )
+     VALUES ('bla_fin', 'bla_fin', ?, 'Finance Desk', ?, 0)`,
   ).run(pwd, HOME);
-  syncLegacyUserRoles(db);
-  owner = { userId: 'bla_own', username: 'bla_own', role: 'owner', branchId: HOME, fullName: 'Owner' } as TokenPayload;
+  assignRole('bla_fin', 'finance', HOME);
+
+  owner = { userId: 'bla_own', username: 'bla_own', branchId: HOME, fullName: 'Owner' } as TokenPayload;
   // Branch-scoped, WITH allocation authority.
-  manager = { userId: 'bla_mgr', username: 'bla_mgr', role: 'manager', branchId: HOME, fullName: 'Manager' } as TokenPayload;
+  manager = { userId: 'bla_mgr', username: 'bla_mgr', branchId: HOME, fullName: 'Manager' } as TokenPayload;
   // Branch-scoped, WITHOUT allocation authority — the finance desk is explicitly
   // "payments & ledger; no treasury allocation" in the permission catalogue.
-  financeDesk = { userId: 'bla_fin', username: 'bla_fin', role: 'finance', branchId: HOME, fullName: 'Finance Desk' } as TokenPayload;
+  financeDesk = { userId: 'bla_fin', username: 'bla_fin', branchId: HOME, fullName: 'Finance Desk' } as TokenPayload;
 
   app = express();
   app.use(express.json());

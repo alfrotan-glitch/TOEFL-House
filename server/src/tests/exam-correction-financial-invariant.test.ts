@@ -24,6 +24,7 @@
  * a correction cycle must not MINT, DESTROY, DUPLICATE or REVERSE money, and
  * the ledger must stay reconciled.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
@@ -32,7 +33,7 @@ import { today } from '../utils/ids.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
 import examsRouter from '../routes/exams.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { getFinanceAccount } from '../utils/financeAccounts.js';
 import { computeReconciliation } from '../utils/reconciliation.js';
 import { seedDefaultRules } from '../core/configuration/rule-engine.js';
@@ -68,10 +69,11 @@ beforeAll(async () => {
   seedDefaultRules();
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(BRANCH, 'Exam Branch', 'Loc');
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES ('exm_owner', 'exm_owner', 'Exam Owner', 'owner', ?, ?, 1, 0)`
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES ('exm_owner', 'exm_owner', 'Exam Owner', ?, ?, 1, 0)`
   ).run(BRANCH, await hashPassword('testpass123'));
-  syncLegacyUserRoles(db);
+  assignRole('exm_owner', 'owner', BRANCH);
+
   db.prepare(
     `INSERT OR IGNORE INTO students (id, student_code, full_name, status, registration_date, branch_id, gender, phone)
      VALUES ('exm_stu', 'TH-EXM-1', 'Exam Student', 'active', ?, ?, 'male', '0700555001')`
@@ -90,7 +92,7 @@ beforeAll(async () => {
     `INSERT OR IGNORE INTO exam_results (id, exam_id, student_id, candidate_name, score, status, exam_fee_paid, certificate_issued, branch_id)
      VALUES ('exm_res', 'exm_exam', 'exm_stu', 'Exam Student', 0, 'pending', 1, 0, ?)`
   ).run(BRANCH);
-  owner = { userId: 'exm_owner', username: 'exm_owner', role: 'owner', branchId: BRANCH, fullName: 'Exam Owner' } as TokenPayload;
+  owner = { userId: 'exm_owner', username: 'exm_owner', branchId: BRANCH, fullName: 'Exam Owner' } as TokenPayload;
   app = createApp();
 });
 

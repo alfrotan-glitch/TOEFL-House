@@ -217,7 +217,7 @@ function assertBranchTargetAccess(req: import('express').Request, branchId: stri
 /** Safely extract user context */
 export function getUserContext(req: import('express').Request) {
   const user = req.user;
-  if (!user?.userId || !user?.branchId || !user?.fullName || !user?.role) throw new HttpError(403, 'User context missing.');
+  if (!user?.userId || !user?.branchId || !user?.fullName) throw new HttpError(403, 'User context missing.');
   return user;
 }
 
@@ -768,7 +768,7 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
       // on the visitor makes that invariant explicit at the database level
       // instead of depending only on the enclosing uniqueness check.
       stmtInsertConvertedPayment.run(paymentId, newStudentId, invoiceId, paidNow, date, resolvedPaymentMethod, `Registration payment for ${classItem.name}`, receiptNumber, studentBranchId, `visitor-convert:${visitor.id}`);
-      recordIncome({ category: 'fee', amount: paidNow, date, description: `Registration fee for ${visitor.full_name} (${studentCode})`, referenceId: invoiceId, operatorName: user.fullName, operatorRole: user.role ?? null, branchId: studentBranchId, paymentId });
+      recordIncome({ category: 'fee', amount: paidNow, date, description: `Registration fee for ${visitor.full_name} (${studentCode})`, referenceId: invoiceId, operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null, branchId: studentBranchId, paymentId });
     }
 
     journey.appendEvent({ studentId: newStudentId, eventType: JourneyEventType.STUDENT_REGISTERED, occurredAt: date, branchId: studentBranchId, actorUserId: user.userId, actorName: user.fullName, payload: { studentCode, fromVisitorId: visitor.id, classId, source: visitor.source } });

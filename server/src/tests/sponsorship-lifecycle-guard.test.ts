@@ -22,6 +22,7 @@
  * (proven in system-closure-authorities.test.ts). This guard is about
  * lifecycle integrity and auditability of the funding record itself.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
@@ -30,7 +31,7 @@ import { today } from '../utils/ids.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
 import fundingRouter from '../routes/funding.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { resolveAuthorizedDiscount } from '../core/configuration/discount-authority.js';
 
 const BRANCH_A = 'spl_branch_a';
@@ -69,21 +70,23 @@ beforeAll(async () => {
   }
   const hash = await hashPassword('testpass123');
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES ('spl_u_a', 'spl_u_a', 'Owner A', 'owner', ?, ?, 1, 0)`
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES ('spl_u_a', 'spl_u_a', 'Owner A', ?, ?, 1, 0)`
   ).run(BRANCH_A, hash);
+  assignRole('spl_u_a', 'owner', BRANCH_A);
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES ('spl_u_b', 'spl_u_b', 'Manager B', 'manager', ?, ?, 1, 0)`
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES ('spl_u_b', 'spl_u_b', 'Manager B', ?, ?, 1, 0)`
   ).run(BRANCH_B, hash);
-  syncLegacyUserRoles(db);
+  assignRole('spl_u_b', 'manager', BRANCH_B);
+
   db.prepare(`INSERT OR IGNORE INTO donors (id, full_name) VALUES ('spl_donor', 'SPL Donor')`).run();
   db.prepare(
     `INSERT OR IGNORE INTO students (id, student_code, full_name, status, registration_date, branch_id, gender, phone)
      VALUES ('spl_student', 'TH-SPL-1', 'SPL Student', 'active', ?, ?, 'male', '0700444001')`
   ).run(today(), BRANCH_A);
-  ownerA = { userId: 'spl_u_a', username: 'spl_u_a', role: 'owner', branchId: BRANCH_A, fullName: 'Owner A' } as TokenPayload;
-  ownerB = { userId: 'spl_u_b', username: 'spl_u_b', role: 'manager', branchId: BRANCH_B, fullName: 'Manager B' } as TokenPayload;
+  ownerA = { userId: 'spl_u_a', username: 'spl_u_a', branchId: BRANCH_A, fullName: 'Owner A' } as TokenPayload;
+  ownerB = { userId: 'spl_u_b', username: 'spl_u_b', branchId: BRANCH_B, fullName: 'Manager B' } as TokenPayload;
   app = createApp();
 });
 

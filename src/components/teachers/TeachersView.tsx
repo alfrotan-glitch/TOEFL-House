@@ -102,8 +102,8 @@ export default function TeachersView({
   const [salaryStatusLoading, setSalaryStatusLoading] = useState<boolean>(false);
   const [evaluatingTeacher, setEvaluatingTeacher] = useState<Teacher | null>(null);
 
-  const isOwnerOrFinance = activeRole === 'owner' || activeRole === 'finance' || activeRole === 'manager';
-  const isOwnerOrManager = activeRole === 'owner' || activeRole === 'manager';
+  const isOwnerOrFinance = activeRole === 'owner' || activeRole === 'finance_manager' || activeRole === 'general_manager';
+  const isOwnerOrManager = activeRole === 'owner' || activeRole === 'general_manager';
 
   const handleCreateTeacher = async (e: React.FormEvent) => {
     e.preventDefault();

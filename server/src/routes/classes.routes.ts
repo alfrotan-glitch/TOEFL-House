@@ -1090,7 +1090,7 @@ classesRouter.put('/:id/grades', authorize('owner', 'general_manager', 'head_of_
       const assessment = assessmentMap.get(g.assessmentId);
       if (!assessment) throw new HttpError(400, `Invalid assessmentId: ${g.assessmentId}`);
 
-      if (!gradeLockService.canEditGrades(assessment.lock_status, user?.role || '')) {
+      if (!gradeLockService.canEditGrades(assessment.lock_status, req.rbac?.primaryRole || '')) {
         throw new HttpError(
           409,
           assessment.lock_status === 'locked'

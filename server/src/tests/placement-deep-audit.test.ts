@@ -7,12 +7,13 @@
  * immutability, score boundaries, retake policy, concurrency, reporting
  * integration, conversion gate and permission matrix.
  */
+import { assignRole } from './support/identity.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import visitorsRouter from '../routes/visitors.routes.js';
 import placementRouter from '../routes/placement.routes.js';
 import { studentsRouter } from '../routes/students.routes.js';
@@ -91,19 +92,19 @@ describe('Placement Exam deep audit', () => {
     db.prepare(`INSERT OR IGNORE INTO branch_academic_profiles (branch_id, placement_test_fee) VALUES (?, 300)`).run(BRANCH_A);
 
     for (const [uid, uname, role] of [[USER, 'pda_owner', 'owner'], ['pda_reg', 'pda_reg', 'registrar'], ['pda_fin', 'pda_fin', 'finance'], ['pda_tea', 'pda_tea', 'teacher']] as const) {
-      await db.prepare(`INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password) VALUES (?, ?, ?, ?, ?, ?, 1, 0)`)
-        .run(uid, uname, 'PDA ' + role, role, BRANCH_A, await hashPassword('x'));
+      await db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES (?, ?, ?, ?, ?, 1, 0)`)
+        .run(uid, uname, 'PDA ' + role, BRANCH_A, await hashPassword('x'));
+      assignRole(uid, role, BRANCH_A);
     }
-    syncLegacyUserRoles(db);
-    owner = { userId: USER, username: 'pda_owner', role: 'owner', branchId: BRANCH_A, fullName: 'PDA Owner' };
-    registrar = { userId: 'pda_reg', username: 'pda_reg', role: 'registrar', branchId: BRANCH_A, fullName: 'PDA Registrar' };
-    finance = { userId: 'pda_fin', username: 'pda_fin', role: 'finance', branchId: BRANCH_A, fullName: 'PDA Finance' };
-    teacher = { userId: 'pda_tea', username: 'pda_tea', role: 'teacher', branchId: BRANCH_A, fullName: 'PDA Teacher' };
-    await db.prepare(`INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password) VALUES ('pda_stu', 'pda_stu', 'PDA Student', 'student', ?, ?, 1, 0)`).run(BRANCH_A, await hashPassword('x'));
-    const stuRole = db.prepare("SELECT id FROM roles WHERE code='student'").get() as { id: string };
-    db.prepare(`INSERT OR IGNORE INTO user_roles (id, user_id, role_id, scope_type, scope_id, is_primary, assigned_by) VALUES (?, 'pda_stu', ?, 'branch', ?, 1, 'system')`).run(id('ur'), stuRole.id, BRANCH_A);
-    syncLegacyUserRoles(db);
-    studentTok = { userId: 'pda_stu', username: 'pda_stu', role: 'student', branchId: BRANCH_A, fullName: 'PDA Student' };
+
+    owner = { userId: USER, username: 'pda_owner', branchId: BRANCH_A, fullName: 'PDA Owner' };
+    registrar = { userId: 'pda_reg', username: 'pda_reg', branchId: BRANCH_A, fullName: 'PDA Registrar' };
+    finance = { userId: 'pda_fin', username: 'pda_fin', branchId: BRANCH_A, fullName: 'PDA Finance' };
+    teacher = { userId: 'pda_tea', username: 'pda_tea', branchId: BRANCH_A, fullName: 'PDA Teacher' };
+    await db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES ('pda_stu', 'pda_stu', 'PDA Student', ?, ?, 1, 0)`).run(BRANCH_A, await hashPassword('x'));
+    assignRole('pda_stu', 'student', BRANCH_A);
+
+    studentTok = { userId: 'pda_stu', username: 'pda_stu', branchId: BRANCH_A, fullName: 'PDA Student' };
 
     app = createApp();
   });

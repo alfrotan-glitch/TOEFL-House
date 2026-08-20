@@ -28,6 +28,7 @@
  * income row standing. Refunds are the Finance subsystem's authority and
  * inventing one here would be a second, parallel refund path.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
@@ -36,7 +37,7 @@ import { ensureOrganizationHierarchy, FIXED_ORG_ID } from '../db/organizationHie
 import { today } from '../utils/ids.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
 import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { seedDefaultRules } from '../core/configuration/rule-engine.js';
 import { examsRouter } from '../routes/exams.routes.js';
 
@@ -54,10 +55,9 @@ function createApp() {
   return app;
 }
 
-const tok = (userId: string, role: string): TokenPayload => ({
+const tok = (userId: string, role: string): TokenPayload & { role: string } => ({ role,
   userId,
   username: userId,
-  role: role as TokenPayload['role'],
   branchId: BR,
   fullName: userId,
 });
@@ -117,11 +117,12 @@ beforeAll(async () => {
   const pw = await hashPassword('testpass123');
   for (const u of [OWNER, MANAGER, REGISTRAR]) {
     db.prepare(
-      `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-       VALUES (?,?,?,?,?,?,1,0)`,
-    ).run(u.userId, u.username, u.fullName, u.role, u.branchId, pw);
+      `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+       VALUES (?, ?, ?, ?, ?, 1, 0)`,
+    ).run(u.userId, u.username, u.fullName, u.branchId, pw);
+    assignRole(u.userId, u.role, u.branchId);
   }
-  syncLegacyUserRoles(db);
+
   db.prepare(
     `INSERT OR REPLACE INTO branch_academic_profiles
        (branch_id, placement_test_fee, registration_fee, card_fee, diploma_fee, default_pass_mark, default_min_attendance, updated_at)

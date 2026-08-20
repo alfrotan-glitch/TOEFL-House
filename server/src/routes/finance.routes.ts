@@ -141,7 +141,7 @@ const stmtGetTodaySavedTotalByBranch = db.prepare(`SELECT COALESCE(SUM(amount), 
 /** Safely extract user context required for financial mutations */
 function getUserContext(req: import('express').Request) {
   const user = req.user;
-  if (!user?.branchId || !user?.fullName || !user?.role) {
+  if (!user?.branchId || !user?.fullName) {
     throw new HttpError(403, 'User context is missing for financial operation.');
   }
   return user;

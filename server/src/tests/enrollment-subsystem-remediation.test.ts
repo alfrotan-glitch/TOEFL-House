@@ -24,13 +24,14 @@
  * directly (e.g. forcing an enrollment to 'pending'), never to fake a result
  * the production code is supposed to produce.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { today } from '../utils/ids.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { studentsRouter } from '../routes/students.routes.js';
 import { journeyRouter } from '../routes/journey.routes.js';
 import classesRouter from '../routes/classes.routes.js';
@@ -54,7 +55,7 @@ function createApp() {
 }
 function makeUser(o: Partial<TokenPayload> & { userId: string }): TokenPayload {
   return {
-    userId: o.userId, username: o.username || o.userId, role: o.role || 'registrar',
+    userId: o.userId, username: o.username || o.userId,
     branchId: o.branchId || BRANCH, fullName: 'Enrollment Test User',
   };
 }
@@ -112,16 +113,18 @@ beforeAll(async () => {
     db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(b, n, 'Loc');
   }
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES (?, ?, ?, 'registrar', ?, ?, 1, 0)`
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES (?, ?, ?, ?, ?, 1, 0)`
   ).run('u_enr_reg', 'enr_reg', 'Enr Reg', BRANCH, await hashPassword('x'));
+  assignRole('u_enr_reg', 'registrar', BRANCH);
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES (?, ?, ?, 'owner', ?, ?, 1, 0)`
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES (?, ?, ?, ?, ?, 1, 0)`
   ).run('u_enr_owner', 'enr_owner', 'Enr Owner', BRANCH, await hashPassword('x'));
-  syncLegacyUserRoles(db);
-  reg = makeUser({ userId: 'u_enr_reg', role: 'registrar', branchId: BRANCH });
-  owner = makeUser({ userId: 'u_enr_owner', role: 'owner', branchId: BRANCH });
+  assignRole('u_enr_owner', 'owner', BRANCH);
+
+  reg = makeUser({ userId: 'u_enr_reg', branchId: BRANCH });
+  owner = makeUser({ userId: 'u_enr_owner', branchId: BRANCH });
   app = createApp();
 });
 

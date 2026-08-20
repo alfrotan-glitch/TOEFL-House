@@ -237,7 +237,7 @@ examsRouter.post(
           date,
           description: `Exam fee for ${exam.title} from ${candidateName}`,
           referenceId: exam.id,
-          operatorName: user.fullName, operatorRole: user.role ?? null,
+          operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null,
           branchId: exam.branch_id,
         });
       }
@@ -331,7 +331,7 @@ examsRouter.patch(
           date,
           description: `Diploma fee for ${result.candidate_name} (${certNo})`,
           referenceId: result.student_id || result.visitor_id,
-          operatorName: user.fullName, operatorRole: user.role ?? null,
+          operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null,
           branchId: exam.branch_id,
         });
       }
@@ -415,7 +415,7 @@ examsRouter.put(
               description: `Diploma fee for ${result.candidate_name} (${certNo}) — issued on score correction`,
               referenceId: result.student_id,
               operatorName: user.fullName,
-              operatorRole: user.role ?? null,
+              operatorRole: req.rbac?.primaryRole ?? null,
               branchId: exam.branch_id,
             });
           }

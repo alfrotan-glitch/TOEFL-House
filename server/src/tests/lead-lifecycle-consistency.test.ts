@@ -14,12 +14,13 @@
  * They also pin the domain rule itself, because the rule is subtle:
  * `stage` and `status` are independent axes and must not be collapsed.
  */
+import { assignRole } from './support/identity.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { visitorsRouter } from '../routes/visitors.routes.js';
 import { dashboardRouter } from '../routes/dashboard.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
@@ -65,10 +66,11 @@ beforeAll(async () => {
   db.prepare(`INSERT OR IGNORE INTO branches (id,name,location) VALUES (?, 'LLC A', 'T')`).run(BRANCH);
   db.prepare(`INSERT OR IGNORE INTO branches (id,name,location) VALUES (?, 'LLC B', 'T')`).run(BRANCH_B);
   const pwd = await hashPassword('Str0ng!Pass2026');
-  db.prepare(`INSERT OR IGNORE INTO users (id,username,password_hash,full_name,role,branch_id,must_change_password)
-              VALUES ('llc_own','llc_own',?,'Owner','owner',?,0)`).run(pwd, BRANCH);
-  syncLegacyUserRoles(db);
-  owner = { userId: 'llc_own', username: 'llc_own', role: 'owner', branchId: BRANCH, fullName: 'Owner' } as TokenPayload;
+  db.prepare(`INSERT OR IGNORE INTO users ( id, username, password_hash, full_name, branch_id, must_change_password )
+              VALUES ('llc_own', 'llc_own', ?, 'Owner', ?, 0)`).run(pwd, BRANCH);
+  assignRole('llc_own', 'owner', BRANCH);
+
+  owner = { userId: 'llc_own', username: 'llc_own', branchId: BRANCH, fullName: 'Owner' } as TokenPayload;
 
   app = express();
   app.use(express.json());

@@ -128,7 +128,7 @@ export default function ClassesView({
   const [editingRateFor, setEditingRateFor] = useState<string | null>(null);
   const [editingRateValue, setEditingRateValue] = useState<number | ''>('');
 
-  const isOwnerOrManager = activeRole === 'owner' || activeRole === 'manager';
+  const isOwnerOrManager = activeRole === 'owner' || activeRole === 'general_manager';
   const canManageSkillTeachers = ['owner', 'manager', 'head_of_department'].includes(activeRole);
   const isTeacherOrAdmin = ['owner', 'manager', 'registrar', 'head_of_department', 'teacher'].includes(activeRole);
 

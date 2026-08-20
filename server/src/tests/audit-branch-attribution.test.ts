@@ -17,6 +17,7 @@
  * The fix resolves the target branch centrally in writeAudit, and only when the
  * caller is authorized for it, so attribution cannot be forged.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import type { Request } from 'express';
 import { randomUUID } from 'node:crypto';
@@ -36,7 +37,7 @@ function fakeRequest(over: Partial<Request> & { user?: unknown }): Request {
   } as unknown as Request;
 }
 
-const OWNER = { userId: 'u_owner', username: 'owner', fullName: 'Owner', role: 'owner' as const, branchId: 'home_branch' };
+const OWNER = { userId: 'u_owner', username: 'owner', fullName: 'Owner', branchId: 'home_branch' };
 
 function lastAuditBranch(action: string): string | null {
   const row = db.prepare('SELECT branch_id FROM audit_logs WHERE action = ? ORDER BY rowid DESC LIMIT 1')
@@ -53,9 +54,10 @@ beforeAll(() => {
   // organization-scoped owner grant, not just a 'role' string on the request.
   bootstrapRbacCatalog(db);
   db.prepare(
-    `INSERT OR REPLACE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES ('u_owner', 'owner', 'Owner', 'owner', 'home_branch', 'test-hash', 1, 0)`,
+    `INSERT OR REPLACE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES ('u_owner', 'owner', 'Owner', 'home_branch', 'test-hash', 1, 0)`,
   ).run();
+  assignRole('u_owner', 'owner', 'home_branch');
   const ownerRole = db.prepare("SELECT id FROM roles WHERE code = 'owner'").get() as { id: string };
   db.prepare("DELETE FROM user_roles WHERE user_id = 'u_owner'").run();
   db.prepare(
@@ -100,7 +102,7 @@ describe('audit rows are attributed to the branch the action targets', () => {
 
   it('does not let an unauthorized branch forge attribution', () => {
     const action = `test-forge-${Date.now()}`;
-    const registrar = { userId: 'u_reg', username: 'reg', fullName: 'Reg', role: 'registrar' as const, branchId: 'home_branch' };
+    const registrar = { userId: 'u_reg', username: 'reg', fullName: 'Reg', branchId: 'home_branch' };
     writeAudit(fakeRequest({ user: registrar, body: { branchId: 'west_branch' } }), action);
     // A branch-scoped user cannot file events against a branch they cannot access.
     expect(lastAuditBranch(action)).toBe('home_branch');

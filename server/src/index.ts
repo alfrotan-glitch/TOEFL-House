@@ -15,7 +15,7 @@ import rateLimit from 'express-rate-limit';
 
 // ── Database ──────────────────────────────────────────────────────────────
 import { initSchema, db } from './db/connection.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from './core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from './core/rbac/rbac-service.js';
 import { bootstrapAcademicCatalog } from './core/academic/bootstrap-catalog.js';
 
 // ── Core Engines ──────────────────────────────────────────────────────────
@@ -77,7 +77,6 @@ async function bootstrap(): Promise<void> {
   initSchema();
   
   bootstrapRbacCatalog(db);
-  syncLegacyUserRoles(db);
   
   bootstrapAcademicCatalog(db);
   

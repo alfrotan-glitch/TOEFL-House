@@ -22,12 +22,13 @@
  *
  * These tests drive the real HTTP route with realistic status values.
  */
+import { assignRole } from './support/identity.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { examsRouter } from '../routes/exams.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 import { today } from '../utils/ids.js';
@@ -61,10 +62,11 @@ beforeAll(async () => {
   db.prepare(`INSERT OR IGNORE INTO branches (id,name,location) VALUES (?, 'EXV A', 'T')`).run(BRANCH);
   db.prepare(`INSERT OR IGNORE INTO branches (id,name,location) VALUES (?, 'EXV B', 'T')`).run(BRANCH_B);
   const pwd = await hashPassword('Str0ng!Pass2026');
-  db.prepare(`INSERT OR IGNORE INTO users (id,username,password_hash,full_name,role,branch_id,must_change_password)
-              VALUES ('exv_reg','exv_reg',?,'Registrar','registrar',?,0)`).run(pwd, BRANCH);
-  syncLegacyUserRoles(db);
-  registrar = { userId: 'exv_reg', username: 'exv_reg', role: 'registrar', branchId: BRANCH, fullName: 'Registrar' } as TokenPayload;
+  db.prepare(`INSERT OR IGNORE INTO users ( id, username, password_hash, full_name, branch_id, must_change_password )
+              VALUES ('exv_reg', 'exv_reg', ?, 'Registrar', ?, 0)`).run(pwd, BRANCH);
+  assignRole('exv_reg', 'registrar', BRANCH);
+
+  registrar = { userId: 'exv_reg', username: 'exv_reg', branchId: BRANCH, fullName: 'Registrar' } as TokenPayload;
 
   app = express();
   app.use(express.json());

@@ -9,13 +9,14 @@
  * 4. The default page size (no pagination params) covers the full manageable
  *    roster instead of the old 50-row cap.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { id, today } from '../utils/ids.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { studentsRouter } from '../routes/students.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 
@@ -29,7 +30,7 @@ function createApp() {
   return app;
 }
 function makeUser(o: Partial<TokenPayload> & { userId: string }): TokenPayload {
-  return { userId: o.userId, username: o.username || o.userId, role: o.role || 'registrar', branchId: o.branchId || BRANCH, fullName: 'List Test User' };
+  return { userId: o.userId, username: o.username || o.userId, branchId: o.branchId || BRANCH, fullName: 'List Test User' };
 }
 function authHeader(u: TokenPayload) { return { Authorization: `Bearer ${signToken(u)}` }; }
 
@@ -48,10 +49,11 @@ beforeAll(async () => {
   initSchema();
   bootstrapRbacCatalog(db);
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(BRANCH, 'List Branch', 'Loc');
-  await db.prepare(`INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password) VALUES (?, ?, ?, 'registrar', ?, ?, 1, 0)`)
+  await db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES (?, ?, ?, ?, ?, 1, 0)`)
     .run('u_list_reg', 'list_reg', 'List Reg', BRANCH, await hashPassword('x'));
-  syncLegacyUserRoles(db);
-  reg = makeUser({ userId: 'u_list_reg', role: 'registrar', branchId: BRANCH });
+  assignRole('u_list_reg', 'registrar', BRANCH);
+
+  reg = makeUser({ userId: 'u_list_reg', branchId: BRANCH });
   app = createApp();
 
   const ali = seedStudent('TH-1001', 'Ali Ahmadi', { phone: '0700111222', tazkira: 'TAZ-111', whatsapp: '0799111222', email: 'ali@example.com', father: 'Mohammad' });

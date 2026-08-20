@@ -20,6 +20,7 @@
  *   -100 reject · 0 accept · 0.001 -> rounds to 0 · 1e6 accept
  *   1e15 reject (precision) · "500" accept · "abc"/bool/array/object reject
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
@@ -27,7 +28,7 @@ import { db, initSchema } from '../db/connection.js';
 import { ensureOrganizationHierarchy, FIXED_ORG_ID } from '../db/organizationHierarchy.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
 import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import catalogRouter from '../routes/catalog.routes.js';
 import { resolveFee } from '../core/configuration/policy-resolver.js';
 
@@ -41,8 +42,8 @@ function createApp() {
   app.use(errorHandler);
   return app;
 }
-const OWNER: TokenPayload = { userId: 'bpf_owner', username: 'bpf_owner', role: 'owner', branchId: BR_A, fullName: 'BPF Owner' };
-const MGR_A: TokenPayload = { userId: 'bpf_mgr_a', username: 'bpf_mgr_a', role: 'manager', branchId: BR_A, fullName: 'BPF Manager A' };
+const OWNER: TokenPayload = { userId: 'bpf_owner', username: 'bpf_owner', branchId: BR_A, fullName: 'BPF Owner' };
+const MGR_A: TokenPayload = { userId: 'bpf_mgr_a', username: 'bpf_mgr_a', branchId: BR_A, fullName: 'BPF Manager A' };
 const auth = (u: TokenPayload) => ({ Authorization: `Bearer ${signToken(u)}` });
 
 let app: ReturnType<typeof createApp>;
@@ -70,14 +71,16 @@ beforeAll(async () => {
       .run(b, b, 'Loc', 'bpf_campus');
   }
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES (?,?,?,?,?,?,1,0)`,
-  ).run(OWNER.userId, OWNER.username, OWNER.fullName, 'owner', BR_A, await hashPassword('testpass123'));
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES (?, ?, ?, ?, ?, 1, 0)`,
+  ).run(OWNER.userId, OWNER.username, OWNER.fullName, BR_A, await hashPassword('testpass123'));
+  assignRole(OWNER.userId, 'owner', BR_A);
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES (?,?,?,?,?,?,1,0)`,
-  ).run(MGR_A.userId, MGR_A.username, MGR_A.fullName, 'manager', BR_A, await hashPassword('testpass123'));
-  syncLegacyUserRoles(db);
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES (?, ?, ?, ?, ?, 1, 0)`,
+  ).run(MGR_A.userId, MGR_A.username, MGR_A.fullName, BR_A, await hashPassword('testpass123'));
+  assignRole(MGR_A.userId, 'manager', BR_A);
+
   app = createApp();
 });
 

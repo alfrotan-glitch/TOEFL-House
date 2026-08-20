@@ -13,12 +13,13 @@
  * The counter-invariant is asserted too: request idempotency must never block
  * a genuinely distinct business event (two real instalments of equal amount).
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { invoicesRouter } from '../routes/invoices.routes.js';
 import { fundingRouter } from '../routes/funding.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
@@ -38,7 +39,7 @@ function createApp() {
   return app;
 }
 function user(): TokenPayload {
-  return { userId: 'u_mw_idem', username: 'mw_idem', role: 'manager', branchId: BRANCH, fullName: 'MW Idem Mgr' };
+  return { userId: 'u_mw_idem', username: 'mw_idem', branchId: BRANCH, fullName: 'MW Idem Mgr' };
 }
 function auth() {
   return { Authorization: `Bearer ${signToken(user())}` };
@@ -53,10 +54,11 @@ beforeAll(async () => {
   db.prepare(`INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, 'MW Idem Branch', 'Loc')`).run(BRANCH);
   const pw = await hashPassword('x');
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES ('u_mw_idem', 'mw_idem', 'MW Idem Mgr', 'manager', ?, ?, 1, 0)`,
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES ('u_mw_idem', 'mw_idem', 'MW Idem Mgr', ?, ?, 1, 0)`,
   ).run(BRANCH, pw);
-  syncLegacyUserRoles(db);
+  assignRole('u_mw_idem', 'manager', BRANCH);
+
   db.prepare(
     `INSERT OR IGNORE INTO students (id, student_code, full_name, gender, phone, status, registration_date, branch_id)
      VALUES (?, 'MW-0001', 'MW Idem Student', 'male', '0700000111', 'active', ?, ?)`,

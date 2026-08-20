@@ -17,12 +17,13 @@
  * legitimate distinct business events (two real installments, two explicitly
  * keyed payments, different amounts).
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { studentsRouter } from '../routes/students.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 import { resolveIdempotency, IDEMPOTENCY_WINDOW_SECONDS } from '../utils/idempotency.js';
@@ -38,7 +39,7 @@ function createApp() {
   return app;
 }
 function user(): TokenPayload {
-  return { userId: 'u_fin_idem', username: 'fin_idem', role: 'manager', branchId: BRANCH, fullName: 'Fin Idem Mgr' };
+  return { userId: 'u_fin_idem', username: 'fin_idem', branchId: BRANCH, fullName: 'Fin Idem Mgr' };
 }
 function auth() {
   return { Authorization: `Bearer ${signToken(user())}` };
@@ -75,10 +76,11 @@ beforeAll(async () => {
   bootstrapRbacCatalog(db);
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(BRANCH, 'Fin Idem Branch', 'Loc');
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES (?, ?, ?, 'manager', ?, ?, 1, 0)`
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES (?, ?, ?, ?, ?, 1, 0)`
   ).run('u_fin_idem', 'fin_idem', 'Fin Idem Mgr', BRANCH, await hashPassword('x'));
-  syncLegacyUserRoles(db);
+  assignRole('u_fin_idem', 'manager', BRANCH);
+
   app = createApp();
 });
 

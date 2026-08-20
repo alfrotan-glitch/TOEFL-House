@@ -22,12 +22,13 @@
  *   - Historical immutability: editing the test bank never changes completed
  *     attempts (snapshot holds original questions + keys at start time).
  */
+import { assignRole } from './support/identity.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import visitorsRouter from '../routes/visitors.routes.js';
 import placementRouter from '../routes/placement.routes.js';
 import academicRouter from '../routes/academic.routes.js';
@@ -89,10 +90,10 @@ describe('Placement content-driven lifecycle (test bank → responses → scorin
       [MANAGER_B, 'content-manager-b', 'manager', BRANCH_B],
       [REGISTRAR, 'content-registrar', 'registrar', BRANCH],
     ] as const) {
-      db.prepare(`INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password) VALUES (?, ?, ?, ?, ?, ?, 1, 0)`)
-        .run(u, username, 'Content User', role, branch, await hashPassword('testpass123'));
+      db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES (?, ?, ?, ?, ?, 1, 0)`)
+        .run(u, username, 'Content User', branch, await hashPassword('testpass123'));
+      assignRole(u, role, branch);
     }
-    syncLegacyUserRoles(db);
 
     db.prepare(`INSERT OR IGNORE INTO programs (id, name, duration_months, branch_id, is_active) VALUES (?, ?, 12, ?, 1)`).run(PROGRAM, 'Content Program', BRANCH);
     db.prepare(`INSERT OR IGNORE INTO program_versions (id, program_id, version_label, version_number, status, is_default) VALUES (?, ?, 'v1', 1, 'published', 1)`).run(VERSION, PROGRAM);
@@ -107,11 +108,11 @@ describe('Placement content-driven lifecycle (test bank → responses → scorin
     db.prepare(`INSERT INTO visitors (id, serial_no, full_name, phone, gender, source, visit_date, status, branch_id, interested_course, program_version_id, placement_status) VALUES (?, ?, 'Branch B Candidate', '0700000101', 'male', 'social', ?, 'visited', ?, 'Content Program', ?, 'not_started')`)
       .run(VISITOR_B, 'V-10002', today(), BRANCH_B, VERSION);
 
-    owner = { userId: OWNER, username: 'content-owner', role: 'owner', branchId: BRANCH, fullName: 'Content Owner' };
-    ownerB = { userId: OWNER_B, username: 'content-owner-b', role: 'owner', branchId: BRANCH_B, fullName: 'Content Owner B' };
-    manager = { userId: MANAGER, username: 'content-manager', role: 'manager', branchId: BRANCH, fullName: 'Content Manager' };
-    managerB = { userId: MANAGER_B, username: 'content-manager-b', role: 'manager', branchId: BRANCH_B, fullName: 'Content Manager B' };
-    registrar = { userId: REGISTRAR, username: 'content-registrar', role: 'registrar', branchId: BRANCH, fullName: 'Content Registrar' };
+    owner = { userId: OWNER, username: 'content-owner', branchId: BRANCH, fullName: 'Content Owner' };
+    ownerB = { userId: OWNER_B, username: 'content-owner-b', branchId: BRANCH_B, fullName: 'Content Owner B' };
+    manager = { userId: MANAGER, username: 'content-manager', branchId: BRANCH, fullName: 'Content Manager' };
+    managerB = { userId: MANAGER_B, username: 'content-manager-b', branchId: BRANCH_B, fullName: 'Content Manager B' };
+    registrar = { userId: REGISTRAR, username: 'content-registrar', branchId: BRANCH, fullName: 'Content Registrar' };
     visitorId = VISITOR;
     visitorBId = VISITOR_B;
     app = createApp();

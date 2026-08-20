@@ -2,6 +2,7 @@
 Integration test: Branch Scoping (Audit §6.3)
 Verifies that resolveBranchScope locks branch-scoped users and only permits cross-branch access through explicit RBAC scope.
 */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { resolveBranchScope } from '../middleware/auth.js';
@@ -37,9 +38,10 @@ beforeAll(() => {
   for (const [role, grant] of Object.entries(PRINCIPALS)) {
     const id = userIdFor(role);
     db.prepare(
-      `INSERT OR REPLACE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-       VALUES (?, ?, ?, ?, 'b1', 'test-hash', 1, 0)`,
-    ).run(id, id, id, role);
+      `INSERT OR REPLACE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+       VALUES (?, ?, ?, 'b1', 'test-hash', 1, 0)`,
+    ).run(id, id, id);
+    assignRole(id, role, 'b1');
     const roleRow = db.prepare('SELECT id FROM roles WHERE code = ?').get(grant.roleCode) as { id: string };
     db.prepare('DELETE FROM user_roles WHERE user_id = ?').run(id);
     db.prepare(
@@ -54,7 +56,6 @@ function mockReq(role: string, branchId: string, queryBranchId?: string) {
     user: {
       userId: userIdFor(role),
       username: userIdFor(role),
-      role,
       branchId,
       fullName: 'Test User',
     },

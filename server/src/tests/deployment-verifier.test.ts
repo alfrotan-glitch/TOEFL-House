@@ -83,10 +83,10 @@ describe('deployment verifier', { timeout: 60_000 }, () => {
   });
 
   it('FAILS when a canonical index is missing', () => {
-    const file = sabotage((db) => db.exec('DROP INDEX IF EXISTS idx_users_role'));
+    const file = sabotage((db) => db.exec('DROP INDEX IF EXISTS idx_users_branch'));
     const { code, out } = run(file);
     expect(code).toBe(1);
-    expect(out).toContain('idx_users_role');
+    expect(out).toContain('idx_users_branch');
   });
 
   it('FAILS when a financial integrity trigger is missing', () => {

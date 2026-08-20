@@ -13,12 +13,13 @@
  *  4. Ledger endpoint honors explicit from/to (period isolation).
  *  5. Discount aggregation: report exposes gross/discount/net from invoices.
  */
+import { assignRole } from './support/identity.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { reportsRouter } from '../routes/reports.routes.js';
 import { financeRouter } from '../routes/finance.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
@@ -44,9 +45,10 @@ describe('Reporting financial forensic', () => {
     initSchema();
     bootstrapRbacCatalog(db);
     db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(BRANCH, 'Rep Branch', 'L');
-    await db.prepare(`INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password) VALUES ('rep_owner', 'rep_owner', 'Rep Owner', 'owner', ?, ?, 1, 0)`).run(BRANCH, await hashPassword('x'));
-    syncLegacyUserRoles(db);
-    owner = { userId: 'rep_owner', username: 'rep_owner', role: 'owner', branchId: BRANCH, fullName: 'Rep Owner' };
+    await db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES ('rep_owner', 'rep_owner', 'Rep Owner', ?, ?, 1, 0)`).run(BRANCH, await hashPassword('x'));
+    assignRole('rep_owner', 'owner', BRANCH);
+
+    owner = { userId: 'rep_owner', username: 'rep_owner', branchId: BRANCH, fullName: 'Rep Owner' };
     app = createApp();
 
     // Seed ledger rows: 1000 income in June, 500 income in July, 200 expense in June.
@@ -115,7 +117,7 @@ describe('Reporting forensic — new required metrics + period consistency', () 
 
   beforeAll(async () => {
     app = createApp();
-    owner = { userId: 'rep_owner', username: 'rep_owner', role: 'owner', branchId: BRANCH, fullName: 'Rep Owner' };
+    owner = { userId: 'rep_owner', username: 'rep_owner', branchId: BRANCH, fullName: 'Rep Owner' };
     // Seed an invoice with discount + partial payment (outstanding), and a book sale.
     db.prepare(`INSERT OR IGNORE INTO students (id, student_code, full_name, status, registration_date, branch_id, gender, phone)
       VALUES ('rep_stu', 'TH-REP-1', 'Rep Student', 'active', '2026-06-01', ?, 'male', '0700111888')`).run(BRANCH);

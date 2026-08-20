@@ -29,13 +29,14 @@
  * number 1..100; payment still accepts any amount greater than zero. Only the
  * enforcement layer moved from the database back to the HTTP boundary.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { today, id as mkId } from '../utils/ids.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { teachersRouter, employeesRouter } from '../routes/teachers.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 
@@ -117,11 +118,12 @@ beforeAll(async () => {
   bootstrapRbacCatalog(db);
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(BRANCH, 'TEC Branch', 'Kabul');
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES ('tec_owner', 'tec_owner', 'TEC Owner', 'owner', ?, ?, 1, 0)`,
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES ('tec_owner', 'tec_owner', 'TEC Owner', ?, ?, 1, 0)`,
   ).run(BRANCH, await hashPassword('pw'));
-  syncLegacyUserRoles(db);
-  owner = { userId: 'tec_owner', username: 'tec_owner', role: 'owner' as never, branchId: BRANCH, fullName: 'TEC Owner' };
+  assignRole('tec_owner', 'owner', BRANCH);
+
+  owner = { userId: 'tec_owner', username: 'tec_owner', branchId: BRANCH, fullName: 'TEC Owner' };
 
   empBudgetId = mkId('bl');
   db.prepare('INSERT INTO budget_lines (id, name, allocated_amount, current_amount, category_id, payroll_target, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?)')

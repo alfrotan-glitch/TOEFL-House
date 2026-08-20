@@ -20,12 +20,13 @@
  *   `AND current_amount >= ?`; two do not. Migration 065 puts the floor in the
  *   database so every writer is subject to it.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { teachersRouter } from '../routes/teachers.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 
@@ -40,7 +41,7 @@ function createApp() {
   return app;
 }
 const user = (): TokenPayload => ({
-  userId: 'u_payroll_rev', username: 'payroll_rev', role: 'owner',
+  userId: 'u_payroll_rev', username: 'payroll_rev',
   branchId: BRANCH, fullName: 'Payroll Rev Owner',
 });
 const auth = () => ({ Authorization: `Bearer ${signToken(user())}` });
@@ -75,14 +76,15 @@ beforeAll(async () => {
   bootstrapRbacCatalog(db);
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(BRANCH, 'Payroll Rev Branch', 'Loc');
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES (?, ?, ?, 'owner', ?, ?, 1, 0)`,
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES (?, ?, ?, ?, ?, 1, 0)`,
   ).run('u_payroll_rev', 'payroll_rev', 'Payroll Rev Owner', BRANCH, await hashPassword('x'));
+  assignRole('u_payroll_rev', 'owner', BRANCH);
   db.prepare(
     `INSERT OR IGNORE INTO budget_lines (id, name, category_id, allocated_amount, current_amount, branch_id, payroll_target)
      VALUES (?, 'Teacher Salaries', 'sub_salaries_wages', 500000, 500000, ?, 'teacher')`,
   ).run(BUDGET_ID, BRANCH);
-  syncLegacyUserRoles(db);
+
   app = createApp();
 });
 

@@ -26,6 +26,7 @@
  * assertMoney). It is reused here rather than adding a second integer
  * validator.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
@@ -34,7 +35,7 @@ import { ensureOrganizationHierarchy, FIXED_ORG_ID } from '../db/organizationHie
 import { today } from '../utils/ids.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
 import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { booksRouter } from '../routes/books.routes.js';
 
 const BR = 'bkq_branch';
@@ -47,10 +48,9 @@ function createApp() {
   return app;
 }
 
-const tok = (userId: string, role: string, branchId = BR): TokenPayload => ({
+const tok = (userId: string, role: string, branchId = BR): TokenPayload & { role: string } => ({ role,
   userId,
   username: userId,
-  role: role as TokenPayload['role'],
   branchId,
   fullName: userId,
 });
@@ -97,11 +97,12 @@ beforeAll(async () => {
   const pw = await hashPassword('testpass123');
   for (const u of [OWNER, MANAGER]) {
     db.prepare(
-      `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-       VALUES (?,?,?,?,?,?,1,0)`,
-    ).run(u.userId, u.username, u.fullName, u.role, u.branchId, pw);
+      `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+       VALUES (?, ?, ?, ?, ?, 1, 0)`,
+    ).run(u.userId, u.username, u.fullName, u.branchId, pw);
+    assignRole(u.userId, u.role, u.branchId);
   }
-  syncLegacyUserRoles(db);
+
   db.prepare(
     "INSERT OR REPLACE INTO finance_accounts (id,scope_type,scope_id,main_balance,saving_balance) VALUES ('fa_bkq','branch',?,100000,10000)",
   ).run(BR);
@@ -272,10 +273,10 @@ describe('BOOKS · refund integrity (locking behaviour proven safe)', () => {
       .run(OTHER, OTHER, 'Loc', 'bkq_campus');
     const foreignManager = tok('bkq_mgr_other', 'manager', OTHER);
     db.prepare(
-      `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-       VALUES (?,?,?,?,?,?,1,0)`,
-    ).run(foreignManager.userId, foreignManager.username, foreignManager.fullName, 'manager', OTHER, 'x');
-    syncLegacyUserRoles(db);
+      `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+       VALUES (?, ?, ?, ?, ?, 1, 0)`,
+    ).run(foreignManager.userId, foreignManager.username, foreignManager.fullName, OTHER, 'x');
+    assignRole(foreignManager.userId, 'manager', OTHER);
 
     const bookId = await makeBook(100, 10);
     const sale = await supertest(app)
@@ -296,10 +297,10 @@ describe('BOOKS · refund integrity (locking behaviour proven safe)', () => {
   it('a registrar may sell but may not refund', async () => {
     const registrar = tok('bkq_reg', 'registrar');
     db.prepare(
-      `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-       VALUES (?,?,?,?,?,?,1,0)`,
-    ).run(registrar.userId, registrar.username, registrar.fullName, 'registrar', BR, 'x');
-    syncLegacyUserRoles(db);
+      `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+       VALUES (?, ?, ?, ?, ?, 1, 0)`,
+    ).run(registrar.userId, registrar.username, registrar.fullName, BR, 'x');
+    assignRole(registrar.userId, 'registrar', BR);
 
     const bookId = await makeBook(100, 10);
     const sale = await supertest(app)

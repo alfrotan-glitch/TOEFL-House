@@ -13,12 +13,13 @@
  * caller. Verified live over HTTP before writing this — with a lead present, an
  * owner receives the `Visitor` entity and a teacher receives nothing.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { hashPassword, signToken, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import searchRouter from '../routes/search.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 
@@ -26,11 +27,9 @@ const BR = 'sep_b1';
 let app: express.Express;
 
 const bearer = (id: string) => {
-  const u = db.prepare('SELECT id, username, full_name, role, branch_id FROM users WHERE id = ?').get(id) as {
-    id: string; username: string; full_name: string; role: string; branch_id: string;
-  };
+  const u = db.prepare('SELECT id, username, full_name, branch_id FROM users WHERE id = ?').get(id) as { id: string; username: string; full_name: string; branch_id: string };
   const payload = {
-    userId: u.id, username: u.username, role: u.role, branchId: u.branch_id,
+    userId: u.id, username: u.username, branchId: u.branch_id,
     fullName: u.full_name, sessionVersion: 1,
   } as unknown as TokenPayload;
   return { Authorization: `Bearer ${signToken(payload)}` };
@@ -50,14 +49,15 @@ beforeAll(async () => {
 
   const pw = await hashPassword('pw');
   db.prepare(
-    `INSERT OR REPLACE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES ('sep_owner', 'sep_owner', 'SEP Owner', 'owner', ?, ?, 1, 0)`,
+    `INSERT OR REPLACE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES ('sep_owner', 'sep_owner', 'SEP Owner', ?, ?, 1, 0)`,
   ).run(BR, pw);
+  assignRole('sep_owner', 'owner', BR);
   db.prepare(
-    `INSERT OR REPLACE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password, linked_teacher_id)
-     VALUES ('sep_teacher', 'sep_teacher', 'SEP Teacher', 'teacher', ?, ?, 1, 0, NULL)`,
+    `INSERT OR REPLACE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password, linked_teacher_id )
+     VALUES ('sep_teacher', 'sep_teacher', 'SEP Teacher', ?, ?, 1, 0, NULL)`,
   ).run(BR, pw);
-  syncLegacyUserRoles(db);
+  assignRole('sep_teacher', 'teacher', BR);
 
   // A lead only a Lead.View holder may see.
   db.prepare(

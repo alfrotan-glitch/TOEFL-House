@@ -25,12 +25,13 @@
  * amounts, known statuses), and read it through parseJsonArray(), which
  * degrades to "no installments" rather than crashing.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeEach } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import studentsRouter from '../routes/students.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 import { today } from '../utils/ids.js';
@@ -47,7 +48,7 @@ function createApp() {
 }
 const auth = () => ({
   Authorization: `Bearer ${signToken({
-    userId: 'u_inst', username: 'u_inst', role: 'manager', branchId: BRANCH, fullName: 'Inst Mgr',
+    userId: 'u_inst', username: 'u_inst', branchId: BRANCH, fullName: 'Inst Mgr',
   } as TokenPayload)}`,
 });
 
@@ -59,10 +60,11 @@ beforeEach(async () => {
   db.prepare(`INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, 'Loc')`).run(BRANCH, BRANCH);
   const pw = await hashPassword('x');
   db.prepare(
-    `INSERT OR REPLACE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES ('u_inst','u_inst','Inst Mgr','manager',?,?,1,0)`,
+    `INSERT OR REPLACE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES ('u_inst', 'u_inst', 'Inst Mgr', ?, ?, 1, 0)`,
   ).run(BRANCH, pw);
-  syncLegacyUserRoles(db);
+  assignRole('u_inst', 'manager', BRANCH);
+
   db.prepare(
     `INSERT OR REPLACE INTO students (id, student_code, full_name, gender, phone, status, registration_date, branch_id, discount_percent)
      VALUES (?, 'INST-1', 'Installment Student', 'male', '0700440001', 'active', ?, ?, 0)`,

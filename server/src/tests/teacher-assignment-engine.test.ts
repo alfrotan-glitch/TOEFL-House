@@ -3,6 +3,7 @@
  * ============================================================================
  * Mirrors the app/RBAC-bootstrap pattern established in Phases 1-7.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
@@ -13,7 +14,7 @@ import { classTeacherSkillsRouter, skillsRouter } from '../routes/skills.routes.
 import sessionsRouter from '../routes/sessions.routes.js';
 import classesRouter from '../routes/classes.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { getClassLifecycleService } from '../core/academic/class-lifecycle-service.js';
 import { computeTeacherDueAmount } from '../core/payroll/class-payroll.js';
 
@@ -32,8 +33,7 @@ function createApp() {
 
 function makeUser(overrides: Partial<TokenPayload> & { userId: string }): TokenPayload {
   return {
-    userId: overrides.userId, username: overrides.username || overrides.userId,
-    role: overrides.role || 'manager', branchId: overrides.branchId || BRANCH, fullName: overrides.fullName || 'Test User',
+    userId: overrides.userId, username: overrides.username || overrides.userId, branchId: overrides.branchId || BRANCH, fullName: overrides.fullName || 'Test User',
   };
 }
 function authHeader(user: TokenPayload): { Authorization: string } {
@@ -41,8 +41,9 @@ function authHeader(user: TokenPayload): { Authorization: string } {
 }
 async function seedUser(userId: string, role: string, branchId: string, username: string) {
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password) VALUES (?, ?, ?, ?, ?, ?, 1, 0)`
-  ).run(userId, username, `Test ${role}`, role, branchId, await hashPassword('testpass123'));
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES (?, ?, ?, ?, ?, 1, 0)`
+  ).run(userId, username, `Test ${role}`, branchId, await hashPassword('testpass123'));
+  assignRole(userId, role, branchId);
 }
 function seedTeacher(teacherId: string, branchId: string, name: string, salaryType = 'per_skill') {
   db.prepare(
@@ -61,8 +62,8 @@ beforeAll(async () => {
   bootstrapRbacCatalog(db);
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(BRANCH, 'TA Branch', 'Loc');
   await seedUser('u_ta_manager', 'manager', BRANCH, 'ta_manager');
-  syncLegacyUserRoles(db);
-  manager = makeUser({ userId: 'u_ta_manager', role: 'manager', branchId: BRANCH });
+
+  manager = makeUser({ userId: 'u_ta_manager', branchId: BRANCH });
   app = createApp();
 });
 

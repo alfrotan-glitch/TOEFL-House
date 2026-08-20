@@ -9,12 +9,13 @@
  * aggregate that forgets its `branch_id` predicate and silently reports
  * organization-wide money on a branch dashboard.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { financeRouter } from '../routes/finance.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 import { today } from '../utils/ids.js';
@@ -37,7 +38,7 @@ function createApp() {
   return app;
 }
 function userFor(branchId: string, id: string): TokenPayload {
-  return { userId: id, username: id, role: 'manager', branchId, fullName: `Mgr ${branchId}` };
+  return { userId: id, username: id, branchId, fullName: `Mgr ${branchId}` };
 }
 function auth(u: TokenPayload) {
   return { Authorization: `Bearer ${signToken(u)}` };
@@ -58,10 +59,10 @@ beforeAll(async () => {
 
   const pw = await hashPassword('x');
   for (const [uid, br] of [['u_iso2_a', BR_A], ['u_iso2_b', BR_B]]) {
-    db.prepare(`INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-                VALUES (?, ?, ?, 'manager', ?, ?, 1, 0)`).run(uid, uid, uid, br, pw);
+    db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+                VALUES (?, ?, ?, ?, ?, 1, 0)`).run(uid, uid, uid, br, pw);
+    assignRole(uid, 'manager', br);
   }
-  syncLegacyUserRoles(db);
 
   // Ledger rows with unmistakable amounts per branch.
   const ins = db.prepare(

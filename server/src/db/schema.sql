@@ -122,10 +122,6 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash        TEXT NOT NULL,
   full_name            TEXT NOT NULL,
   email                TEXT,
-  role                 TEXT NOT NULL CHECK (role IN (
-                         'owner','manager','finance','registrar','teacher',
-                         'head_of_department','counselor','donor_manager','student'
-                       )),
   branch_id            TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
   campus_id            TEXT REFERENCES campuses(id) ON DELETE SET NULL,
   linked_teacher_id    TEXT,
@@ -141,7 +137,6 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE INDEX IF NOT EXISTS idx_users_branch         ON users(branch_id);
 CREATE INDEX IF NOT EXISTS idx_users_campus         ON users(campus_id);
 CREATE INDEX IF NOT EXISTS idx_users_linked_student ON users(linked_student_id);
-CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 
 CREATE TABLE IF NOT EXISTS roles ( 
   id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL, description TEXT, 

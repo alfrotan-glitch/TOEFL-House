@@ -26,12 +26,13 @@
  * full-ledger sum, and must NOT vary with pagination. A frontend that consumes
  * it then cannot silently drift.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeEach } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import financeRouter from '../routes/finance.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 
@@ -55,7 +56,7 @@ function createApp() {
 }
 const auth = () => ({
   Authorization: `Bearer ${signToken({
-    userId: 'u_lpt', username: 'u_lpt', role: 'owner', branchId: BRANCH, fullName: 'Ledger Owner',
+    userId: 'u_lpt', username: 'u_lpt', branchId: BRANCH, fullName: 'Ledger Owner',
   } as TokenPayload)}`,
 });
 
@@ -67,10 +68,10 @@ beforeEach(async () => {
   db.prepare(`INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, 'Loc')`).run(BRANCH, BRANCH);
   const pw = await hashPassword('x');
   db.prepare(
-    `INSERT OR REPLACE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES ('u_lpt','u_lpt','Ledger Owner','owner',?,?,1,0)`,
+    `INSERT OR REPLACE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES ('u_lpt', 'u_lpt', 'Ledger Owner', ?, ?, 1, 0)`,
   ).run(BRANCH, pw);
-  syncLegacyUserRoles(db);
+  assignRole('u_lpt', 'owner', BRANCH);
 
   db.prepare(`DELETE FROM financial_transactions WHERE id LIKE 'lpt_%'`).run();
   const ins = db.prepare(

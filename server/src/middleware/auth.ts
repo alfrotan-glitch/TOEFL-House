@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
-import { verifyToken, TokenPayload, UserRole } from '../utils/auth.js';
+import { verifyToken, TokenPayload } from '../utils/auth.js';
 import { db } from '../db/connection.js';
 import { buildRbacContext, hasPermission, hasAnyPermission, hasAnyRole, hasRole, isGlobalOwner, canAccessBranch, canAccessAllBranches, type RbacUserContext } from '../core/rbac/rbac-service.js';
 import type { RoleCode } from '../core/rbac/permission-catalog.js';
@@ -16,7 +16,7 @@ declare global {
 
 // ── Performance Optimization ───────────────────────────────────────────────
 const getActiveUserStmt = db.prepare(
-  'SELECT id, username, full_name, role, branch_id, session_version, must_change_password FROM users WHERE id = ? AND is_active = 1'
+  'SELECT id, username, full_name, branch_id, session_version, must_change_password FROM users WHERE id = ? AND is_active = 1'
 );
 
 // While a user's password is flagged as must-change (first install, forced
@@ -70,7 +70,7 @@ export function authenticate(req: Request, res: Response, next: NextFunction) {
     }
 
     const row = getActiveUserStmt.get(decodedToken.userId) as
-      | { id: string; username: string; full_name: string; role: string; branch_id: string; session_version: number; must_change_password: number }
+      | { id: string; username: string; full_name: string; branch_id: string; session_version: number; must_change_password: number }
       | undefined;
 
     if (!row) {
@@ -90,7 +90,6 @@ export function authenticate(req: Request, res: Response, next: NextFunction) {
       userId: row.id,
       username: row.username,
       fullName: row.full_name,
-      role: row.role as UserRole,
       branchId: row.branch_id,
       sessionVersion: row.session_version,
     };
@@ -183,7 +182,6 @@ export function canAccessBranchResource(req: Request, branchId: string): boolean
     id: req.user.userId,
     username: req.user.username,
     full_name: req.user.fullName,
-    role: req.user.role,
     branch_id: req.user.branchId,
   });
   return canAccessBranch(db, context, branchId);
@@ -196,7 +194,7 @@ export function resolveBranchScope(req: Request): { branchId: string | null; isA
   const requested = typeof req.query.branchId === 'string' ? req.query.branchId : undefined;
 
   const context = req.rbac ?? buildRbacContext(db, {
-    id: user.userId, username: user.username, full_name: user.fullName, role: user.role, branch_id: user.branchId,
+    id: user.userId, username: user.username, full_name: user.fullName, branch_id: user.branchId,
   });
 
   if (requested === 'all') {

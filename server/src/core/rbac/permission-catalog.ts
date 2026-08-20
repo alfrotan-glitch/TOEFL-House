@@ -1,7 +1,6 @@
 /**
  * TOEFL House ERP — Permission Catalog
  */
-import type { UserRole } from '../../utils/auth.js';
 
 export type PermissionScope = 'organization' | 'campus' | 'branch' | 'department' | 'program' | 'class' | 'own';
 
@@ -184,17 +183,6 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
   { code: 'Curriculum.PlacementPolicy', resource: 'Curriculum', action: 'PlacementPolicy', description: 'Configure placement assessment policy and placement banding rules', category: 'security' },
   { code: 'Report.View', resource: 'Report', action: 'View', description: 'View operational and financial reports', category: 'reporting' },
 ];
-export const LEGACY_ROLE_MAP: Record<UserRole, string> = {
-  owner: 'owner', 
-  manager: 'general_manager', 
-  finance: 'finance_manager',
-  registrar: 'receptionist', 
-  teacher: 'teacher', 
-  head_of_department: 'head_of_department',
-  counselor: 'counselor', 
-  donor_manager: 'donor_manager',
-  student: 'student',
-};
 export type PermissionCode = typeof PERMISSION_CATALOG[number]['code'];
 function allPerms(scope: PermissionScope, exclude: PermissionCode[] = []): Record<string, PermissionScope> {
   return Object.fromEntries(

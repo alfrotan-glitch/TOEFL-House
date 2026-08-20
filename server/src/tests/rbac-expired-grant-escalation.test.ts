@@ -37,6 +37,7 @@
  * with no assignment history at all keeps the documented legacy behaviour — that
  * path is exercised below so the fix cannot silently delete legacy support.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
@@ -58,9 +59,7 @@ const PAST = '2020-01-01 00:00:00';
 const FUTURE = '2099-01-01 00:00:00';
 
 const userRow = (id: string) =>
-  db.prepare('SELECT id, username, full_name, role, branch_id FROM users WHERE id = ?').get(id) as {
-    id: string; username: string; full_name: string; role: string; branch_id: string;
-  };
+  db.prepare('SELECT id, username, full_name, branch_id FROM users WHERE id = ?').get(id) as { id: string; username: string; full_name: string; branch_id: string };
 
 const ctxOf = (id: string) => buildRbacContext(db, userRow(id));
 const roleId = (code: string) => (db.prepare('SELECT id FROM roles WHERE code = ?').get(code) as { id: string }).id;
@@ -92,9 +91,10 @@ beforeAll(async () => {
     ['rbx_legacy', 'owner', 'RBX_B1'],
   ] as const) {
     db.prepare(
-      `INSERT OR REPLACE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-       VALUES (?, ?, ?, ?, ?, ?, 1, 0)`,
-    ).run(id, id, id.toUpperCase(), role, branch, pw);
+      `INSERT OR REPLACE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+       VALUES (?, ?, ?, ?, ?, 1, 0)`,
+    ).run(id, id, id.toUpperCase(), branch, pw);
+    assignRole(id, role, branch);
   }
 });
 
@@ -175,10 +175,10 @@ describe('RBAC-1 · an expired grant must revoke, never escalate', () => {
     expect(isGlobalOwner(after)).toBe(false);
   });
 
-  it('6 · users.role=owner + expired explicit grant must NOT resolve to organization owner', () => {
-    // The precise escalation vector: the legacy column still says 'owner', so a
-    // fallback keyed only on "no active roles" hands back organization scope.
-    expect(userRow('rbx_owner').role).toBe('owner');
+  it('6 · an expired explicit owner grant must NOT resolve to organization owner', () => {
+    // The precise escalation vector: a fallback keyed only on "no active roles"
+    // used to hand back organization scope. There is no longer anything to fall
+    // back to, and the expired grant must simply not count.
     setGrants('rbx_owner', [{ role: 'owner', scopeType: 'campus', scopeId: 'rbx_c1', expiresAt: PAST }]);
     const ctx = ctxOf('rbx_owner');
 
@@ -207,7 +207,7 @@ describe('RBAC-1 · an expired grant must revoke, never escalate', () => {
   const bearer = (id: string) => {
     const u = userRow(id);
     const payload: TokenPayload = {
-      userId: u.id, username: u.username, role: u.role as never,
+      userId: u.id, username: u.username,
       branchId: u.branch_id, fullName: u.full_name, sessionVersion: 1,
     } as TokenPayload;
     return { Authorization: `Bearer ${signToken(payload)}` };
@@ -242,13 +242,12 @@ describe('RBAC-1 · an expired grant must revoke, never escalate', () => {
     expect(res.status).toBe(403);
   });
 
-  it('10 · a user with NO assignment holds nothing, whatever users.role says', () => {
+  it('10 · a user with NO assignment holds nothing at all', () => {
     // This is the escalation that the users.role fallback used to allow: the
     // row says 'owner', and with no assignment the resolver used to synthesize
     // an organization-scoped owner from that string alone. A denormalized
     // column is not an authority.
     expect(db.prepare("SELECT COUNT(*) c FROM user_roles WHERE user_id = 'rbx_legacy'").get()).toEqual({ c: 0 });
-    expect(db.prepare("SELECT role FROM users WHERE id = 'rbx_legacy'").get()).toEqual({ role: 'owner' });
 
     const ctx = ctxOf('rbx_legacy');
     expect(ctx.permissionCodes.size).toBe(0);

@@ -87,7 +87,7 @@ const studentLoginLimiter = rateLimit({
 
 // ── Performance Optimization: Prepared Statements ──────────────────────────
 const stmtGetUserByUsername = db.prepare('SELECT * FROM users WHERE username = ?');
-const stmtGetUserByIdSafe = db.prepare('SELECT id, username, full_name, email, role, branch_id, must_change_password, session_version FROM users WHERE id = ?');
+const stmtGetUserByIdSafe = db.prepare('SELECT id, username, full_name, email, branch_id, must_change_password, session_version FROM users WHERE id = ?');
 const stmtGetUserByIdFull = db.prepare('SELECT * FROM users WHERE id = ?');
 const stmtUpdateLastLogin = db.prepare("UPDATE users SET last_login_at = datetime('now') WHERE id = ?");
 const stmtUpdatePassword = db.prepare("UPDATE users SET password_hash = ?, must_change_password = 0, session_version = session_version + 1 WHERE id = ?");
@@ -101,14 +101,13 @@ interface UserRow {
   password_hash: string;
   full_name: string;
   email: string | null;
-  role: 'owner' | 'manager' | 'finance' | 'registrar' | 'teacher' | 'head_of_department' | 'counselor' | 'donor_manager';
   branch_id: string;
   is_active: number;
   must_change_password: number;
   session_version: number;
 }
 
-function buildRequiredRbacContext(row: Pick<UserRow, 'id' | 'username' | 'full_name' | 'role' | 'branch_id'>): RbacUserContext {
+function buildRequiredRbacContext(row: Pick<UserRow, 'id' | 'username' | 'full_name' | 'branch_id'>): RbacUserContext {
   try {
     return buildRbacContext(db, row);
   } catch {
@@ -142,7 +141,6 @@ authRouter.post(
     const token = signToken({
       userId: row.id,
       username: row.username,
-      role: row.role,
       branchId: row.branch_id,
       fullName: row.full_name,
       sessionVersion: row.session_version,
@@ -151,11 +149,11 @@ authRouter.post(
     stmtUpdateLastLogin.run(row.id);
     setSessionCookie(res, token);
 
-    req.user = { userId: row.id, username: row.username, role: row.role, branchId: row.branch_id, fullName: row.full_name, sessionVersion: row.session_version };
+    req.user = { userId: row.id, username: row.username, branchId: row.branch_id, fullName: row.full_name, sessionVersion: row.session_version };
     writeAudit(req, 'User logged in');
 
     const rbac = buildRequiredRbacContext({
-      id: row.id, username: row.username, full_name: row.full_name, role: row.role, branch_id: row.branch_id,
+      id: row.id, username: row.username, full_name: row.full_name, branch_id: row.branch_id,
     });
     
     const tabAccess: Record<string, boolean> = {};
@@ -167,7 +165,7 @@ authRouter.post(
       ...(process.env.NODE_ENV === 'production' ? {} : { token }),
       user: {
         id: row.id, username: row.username, fullName: row.full_name, email: row.email,
-        role: row.role, branchId: row.branch_id, mustChangePassword: !!row.must_change_password,
+        role: rbac.primaryRole, branchId: row.branch_id, mustChangePassword: !!row.must_change_password,
         permissions: Array.from(rbac.permissionCodes), 
         roles: rbac.roles, 
         tabAccess,
@@ -181,13 +179,13 @@ authRouter.get(
   authenticate,
   ah(async (req, res) => {
     const row = stmtGetUserByIdSafe.get(req.user!.userId) as
-      | { id: string; username: string; full_name: string; email: string | null; role: string; branch_id: string; must_change_password: number }
+      | { id: string; username: string; full_name: string; email: string | null; branch_id: string; must_change_password: number }
       | undefined;
       
     if (!row) throw new HttpError(404, 'User not found.');
     
     const rbac = req.rbac || buildRequiredRbacContext({
-      id: row.id, username: row.username, full_name: row.full_name, role: row.role as UserRow['role'], branch_id: row.branch_id,
+      id: row.id, username: row.username, full_name: row.full_name, branch_id: row.branch_id,
     });
     
     const tabAccess: Record<string, boolean> = {};
@@ -197,7 +195,7 @@ authRouter.get(
     
     res.json({
       id: row.id, username: row.username, fullName: row.full_name, email: row.email,
-      role: row.role, branchId: row.branch_id, mustChangePassword: !!row.must_change_password,
+      role: rbac.primaryRole, branchId: row.branch_id, mustChangePassword: !!row.must_change_password,
       permissions: Array.from(rbac.permissionCodes), 
       roles: rbac.roles, 
       tabAccess,
@@ -254,7 +252,10 @@ authRouter.post(
     // Look the portal account up before branching, so every failure mode below
     // costs one password verification and returns the same 401.
     const user = student
-      ? (db.prepare(`SELECT * FROM users WHERE linked_student_id = ? AND role = 'student'`).get(student.id) as
+      ? (db.prepare(`SELECT u.* FROM users u
+             JOIN user_roles ur ON ur.user_id = u.id
+             JOIN roles r ON r.id = ur.role_id AND r.code = 'student'
+            WHERE u.linked_student_id = ?`).get(student.id) as
           | { id: string; username: string; full_name: string; role: string; branch_id: string; password_hash: string; is_active: number; session_version: number; must_change_password: number }
           | undefined)
       : undefined;
@@ -276,7 +277,7 @@ authRouter.post(
     }
 
     const token = signToken({
-      userId: user!.id, username: user!.username, role: 'student', branchId: user!.branch_id,
+      userId: user!.id, username: user!.username, branchId: user!.branch_id,
       fullName: user!.full_name, sessionVersion: user!.session_version,
     });
     db.prepare("UPDATE users SET last_login_at = datetime('now') WHERE id = ?").run(user!.id);
@@ -285,7 +286,7 @@ authRouter.post(
     // Operator attribution for a real authentication event. The secret is
     // never part of the audit payload.
     req.user = {
-      userId: user!.id, username: user!.username, role: 'student' as UserRow['role'],
+      userId: user!.id, username: user!.username,
       branchId: user!.branch_id, fullName: user!.full_name, sessionVersion: user!.session_version,
     };
     writeAudit(req, 'Student portal login', { branchId: user!.branch_id });
@@ -349,7 +350,7 @@ authRouter.post(
     stmtUpdatePassword.run(newHash, row.id);
     const nextSessionVersion = row.session_version + 1;
     const renewedToken = signToken({
-      userId: row.id, username: row.username, role: row.role, branchId: row.branch_id,
+      userId: row.id, username: row.username, branchId: row.branch_id,
       fullName: row.full_name, sessionVersion: nextSessionVersion,
     });
     setSessionCookie(res, renewedToken);

@@ -3,16 +3,14 @@
  * Tab ids must match AuthenticatedApp switch cases in App.tsx.
  */
 
-export type AppRole =
-  | 'owner'
-  | 'manager'
-  | 'finance'
-  | 'registrar'
-  | 'teacher'
-  | 'head_of_department'
-  | 'counselor'
-  | 'donor_manager'
-  | 'student';
+import type { UserRole } from '../types';
+
+/**
+ * Navigation speaks the same role vocabulary as everything else. This was a
+ * second, separately maintained list of role names; two lists of one concept
+ * drift, and this pair already had.
+ */
+export type AppRole = UserRole;
 
 /** Implemented application tabs (must stay in sync with App.tsx routing). */
 export type AppTabId =

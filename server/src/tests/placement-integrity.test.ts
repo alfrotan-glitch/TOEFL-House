@@ -17,12 +17,13 @@
  * one fee per attempt under parallel completion, score bounds, server
  * authority over client-supplied values, branch isolation and role separation.
  */
+import { assignRole } from './support/identity.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import visitorsRouter from '../routes/visitors.routes.js';
 import placementRouter from '../routes/placement.routes.js';
 import academicRouter from '../routes/academic.routes.js';
@@ -113,16 +114,20 @@ beforeAll(async () => {
   db.prepare(`INSERT OR REPLACE INTO branch_academic_profiles (branch_id, placement_test_fee) VALUES (?, 300)`).run(BRANCH);
 
   const pwd = await hashPassword('Str0ng!Pass2026');
-  const insertUser = db.prepare(`INSERT OR IGNORE INTO users (id, username, password_hash, full_name, role, branch_id, must_change_password) VALUES (?, ?, ?, ?, ?, ?, 0)`);
-  insertUser.run('pint_owner', 'pint_owner', pwd, 'Owner', 'owner', BRANCH);
-  insertUser.run('pint_manager', 'pint_manager', pwd, 'Manager', 'manager', BRANCH);
-  insertUser.run('pint_registrar', 'pint_registrar', pwd, 'Registrar', 'registrar', BRANCH);
-  insertUser.run('pint_manager_b', 'pint_manager_b', pwd, 'Manager B', 'manager', BRANCH_B);
-  syncLegacyUserRoles(db);
-  owner = { userId: 'pint_owner', username: 'pint_owner', role: 'owner', branchId: BRANCH, fullName: 'Owner' } as TokenPayload;
-  manager = { userId: 'pint_manager', username: 'pint_manager', role: 'manager', branchId: BRANCH, fullName: 'Manager' } as TokenPayload;
-  registrar = { userId: 'pint_registrar', username: 'pint_registrar', role: 'registrar', branchId: BRANCH, fullName: 'Registrar' } as TokenPayload;
-  managerB = { userId: 'pint_manager_b', username: 'pint_manager_b', role: 'manager', branchId: BRANCH_B, fullName: 'Manager B' } as TokenPayload;
+  const insertUser = db.prepare(`INSERT OR IGNORE INTO users (id, username, password_hash, full_name, branch_id, must_change_password) VALUES (?, ?, ?, ?, ?, 0)`);
+  insertUser.run('pint_owner', 'pint_owner', pwd, 'Owner', BRANCH);
+  assignRole('pint_owner', 'owner', BRANCH)
+  insertUser.run('pint_manager', 'pint_manager', pwd, 'Manager', BRANCH);
+  assignRole('pint_manager', 'manager', BRANCH)
+  insertUser.run('pint_registrar', 'pint_registrar', pwd, 'Registrar', BRANCH);
+  assignRole('pint_registrar', 'registrar', BRANCH)
+  insertUser.run('pint_manager_b', 'pint_manager_b', pwd, 'Manager B', BRANCH_B);
+  assignRole('pint_manager_b', 'manager', BRANCH_B)
+
+  owner = { userId: 'pint_owner', username: 'pint_owner', branchId: BRANCH, fullName: 'Owner' } as TokenPayload;
+  manager = { userId: 'pint_manager', username: 'pint_manager', branchId: BRANCH, fullName: 'Manager' } as TokenPayload;
+  registrar = { userId: 'pint_registrar', username: 'pint_registrar', branchId: BRANCH, fullName: 'Registrar' } as TokenPayload;
+  managerB = { userId: 'pint_manager_b', username: 'pint_manager_b', branchId: BRANCH_B, fullName: 'Manager B' } as TokenPayload;
 });
 
 describe('Placement integrity — P-1: policy compliance is enforced, not merely computed', () => {

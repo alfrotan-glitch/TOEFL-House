@@ -1,9 +1,10 @@
+import { assignRole } from './support/identity.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import visitorsRouter from '../routes/visitors.routes.js';
 import placementRouter from '../routes/placement.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
@@ -38,9 +39,9 @@ describe('Unified Placement Assessment Workspace', () => {
     initSchema();
     bootstrapRbacCatalog(db);
     db.prepare(`INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)`).run(BRANCH, 'Placement Branch', 'Test');
-    db.prepare(`INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password) VALUES (?, ?, ?, 'owner', ?, ?, 1, 0)`)
+    db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES (?, ?, ?, ?, ?, 1, 0)`)
       .run(USER, 'placement-owner', 'Placement Owner', BRANCH, await hashPassword('testpass123'));
-    syncLegacyUserRoles(db);
+    assignRole(USER, 'owner', BRANCH);
 
     db.prepare(`INSERT OR IGNORE INTO programs (id, name, duration_months, branch_id, is_active) VALUES (?, ?, 12, ?, 1)`)
       .run(PROGRAM, 'Placement Program', BRANCH);
@@ -60,7 +61,7 @@ describe('Unified Placement Assessment Workspace', () => {
     db.prepare(`INSERT INTO visitors (id, serial_no, full_name, phone, gender, source, visit_date, status, branch_id, interested_course, program_version_id, placement_status) VALUES (?, ?, 'Placement Candidate', '0700000000', 'male', 'social', ?, 'visited', ?, 'Placement Program', ?, 'not_started')`)
       .run('placement_workspace_visitor', 'V-9988', today(), BRANCH, VERSION);
     visitorId = 'placement_workspace_visitor';
-    owner = { userId: USER, username: 'placement-owner', role: 'owner', branchId: BRANCH, fullName: 'Placement Owner' };
+    owner = { userId: USER, username: 'placement-owner', branchId: BRANCH, fullName: 'Placement Owner' };
     app = createApp();
   });
 
@@ -133,7 +134,7 @@ describe('Placement integrity hardening', () => {
 
   beforeAll(() => {
     integrityApp = createApp();
-    integrityOwner = { userId: USER, username: 'placement-owner', role: 'owner', branchId: BRANCH, fullName: 'Placement Owner' };
+    integrityOwner = { userId: USER, username: 'placement-owner', branchId: BRANCH, fullName: 'Placement Owner' };
   });
 
   it('rejects incomplete skill scoring instead of silently recording zeros', async () => {

@@ -1,10 +1,12 @@
 /**
  * `user_roles` is the only authority for what a principal may do.
  * ============================================================================
- * The system carries a denormalized `users.role` string alongside the
- * `user_roles` / `roles` / `permissions` tables. Until this suite existed, that
- * string was not merely denormalized — it was a second authority, and two
- * authorities for one concept is a defect by definition.
+ * The system used to carry a denormalized `users.role` string alongside the
+ * `user_roles` / `roles` / `permissions` tables. That string was not merely
+ * redundant — it was a second authority, and two authorities for one concept
+ * is a defect by definition. The column has since been removed outright, so
+ * the property is now structural as well as behavioural, and this suite
+ * asserts both.
  *
  * Both failures below were reproduced before they were fixed:
  *
@@ -23,6 +25,7 @@
  * it. `users.role` is a profile attribute and `users.branch_id` is an identity
  * attribute; neither authorizes anything.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { db, initSchema } from '../db/connection.js';
@@ -48,7 +51,6 @@ const ctxOf = () =>
     id: USER,
     username: USER,
     full_name: 'Authority Probe',
-    role: (db.prepare('SELECT role FROM users WHERE id = ?').get(USER) as { role: string }).role,
     branch_id: HOME,
   });
 
@@ -77,17 +79,32 @@ beforeAll(() => {
     ).run(b, b, 'Kabul', 'auth_campus');
   }
   db.prepare(
-    `INSERT OR REPLACE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES (?, ?, 'Authority Probe', 'manager', ?, 'test-hash', 1, 0)`,
+    `INSERT OR REPLACE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES (?, ?, 'Authority Probe', ?, 'test-hash', 1, 0)`,
   ).run(USER, USER, HOME);
+  assignRole(USER, 'manager', HOME);
 });
 
 beforeEach(() => {
   db.prepare('DELETE FROM user_roles WHERE user_id = ?').run(USER);
-  db.prepare("UPDATE users SET role = 'manager' WHERE id = ?").run(USER);
 });
 
 describe('user_roles is the sole authority', () => {
+  it('the users table has no role column at all', () => {
+    // The strongest form of single-source-of-truth: the second authority is
+    // not merely unused, it is unrepresentable.
+    const columns = (db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>).map((c) => c.name);
+    expect(columns).not.toContain('role');
+    expect(columns).toContain('branch_id');
+  });
+
+  it('no index survives over a role column', () => {
+    const idx = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='users'")
+      .all() as Array<{ name: string }>;
+    expect(idx.map((i) => i.name)).not.toContain('idx_users_role');
+  });
+
   it('an assignment is what grants permissions', () => {
     assign('general_manager', 'branch', HOME);
     const ctx = ctxOf();
@@ -108,10 +125,8 @@ describe('user_roles is the sole authority', () => {
     expect(resolveUserPermissions(db, USER)).toEqual([]);
   });
 
-  it('users.role cannot grant a permission on its own', () => {
-    // No assignment at all; the column claims the most privileged position.
-    db.prepare("UPDATE users SET role = 'owner' WHERE id = ?").run(USER);
-
+  it('a user record alone grants nothing', () => {
+    // The user exists and is active. No assignment, therefore no authority.
     const ctx = ctxOf();
     expect(ctx.permissionCodes.size).toBe(0);
     expect(ctx.roles).toEqual([]);
@@ -121,9 +136,8 @@ describe('user_roles is the sole authority', () => {
     expect(canAccessBranch(db, ctx, FOREIGN)).toBe(false);
   });
 
-  it('users.role cannot widen an assignment that already exists', () => {
+  it('an assignment cannot be widened from outside user_roles', () => {
     assign('general_manager', 'branch', HOME);
-    db.prepare("UPDATE users SET role = 'owner' WHERE id = ?").run(USER);
 
     const ctx = ctxOf();
     expect(isGlobalOwner(ctx)).toBe(false);

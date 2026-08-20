@@ -21,12 +21,13 @@
  *   - the in-transaction re-read, which is the one that holds under
  *     concurrency (all racing requests pass the pre-check simultaneously).
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { studentsRouter } from '../routes/students.routes.js';
 import { invoicesRouter } from '../routes/invoices.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
@@ -36,7 +37,7 @@ let app: express.Express;
 let seq = 0;
 
 function user(): TokenPayload {
-  return { userId: 'u_overpay', username: 'overpay_mgr', role: 'manager', branchId: BRANCH, fullName: 'Overpay Mgr' };
+  return { userId: 'u_overpay', username: 'overpay_mgr', branchId: BRANCH, fullName: 'Overpay Mgr' };
 }
 const auth = () => ({ Authorization: `Bearer ${signToken(user())}` });
 
@@ -87,10 +88,10 @@ beforeAll(async () => {
   bootstrapRbacCatalog(db);
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(BRANCH, 'Overpay Branch', 'Loc');
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES (?, ?, ?, 'manager', ?, ?, 1, 0)`
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES (?, ?, ?, ?, ?, 1, 0)`
   ).run('u_overpay', 'overpay_mgr', 'Overpay Mgr', BRANCH, await hashPassword('x'));
-  syncLegacyUserRoles(db);
+  assignRole('u_overpay', 'manager', BRANCH);
 
   app = express();
   app.use(express.json());

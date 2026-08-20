@@ -41,12 +41,13 @@
  * via its own 0..100 check, and rejecting them here would invent a business
  * rule this audit has no authority to introduce. See the report's policy note.
  */
+import { assignRole } from './support/identity.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { resolvePromotionCriteria } from '../core/academic/promotion-engine.js';
 import academicRouter from '../routes/academic.routes.js';
 import catalogRouter from '../routes/catalog.routes.js';
@@ -125,13 +126,15 @@ beforeAll(async () => {
 
   const pwd = await hashPassword('Str0ng!Pass2026');
   const ins = db.prepare(
-    'INSERT OR IGNORE INTO users (id, username, password_hash, full_name, role, branch_id, must_change_password) VALUES (?, ?, ?, ?, ?, ?, 0)',
+    'INSERT OR IGNORE INTO users (id, username, password_hash, full_name, branch_id, must_change_password) VALUES (?, ?, ?, ?, ?, 0)',
   );
-  ins.run('pth_owner', 'pth_owner', pwd, 'Owner', 'owner', BRANCH);
-  ins.run('pth_manager', 'pth_manager', pwd, 'Manager', 'manager', BRANCH);
-  syncLegacyUserRoles(db);
-  owner = { userId: 'pth_owner', username: 'pth_owner', role: 'owner', branchId: BRANCH, fullName: 'Owner' } as TokenPayload;
-  manager = { userId: 'pth_manager', username: 'pth_manager', role: 'manager', branchId: BRANCH, fullName: 'Manager' } as TokenPayload;
+  ins.run('pth_owner', 'pth_owner', pwd, 'Owner', BRANCH);
+  assignRole('pth_owner', 'owner', BRANCH)
+  ins.run('pth_manager', 'pth_manager', pwd, 'Manager', BRANCH);
+  assignRole('pth_manager', 'manager', BRANCH)
+
+  owner = { userId: 'pth_owner', username: 'pth_owner', branchId: BRANCH, fullName: 'Owner' } as TokenPayload;
+  manager = { userId: 'pth_manager', username: 'pth_manager', branchId: BRANCH, fullName: 'Manager' } as TokenPayload;
 });
 
 describe('ACFG-1 · Layer 2 — POST /academic/levels validates passMark', () => {

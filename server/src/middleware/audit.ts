@@ -82,7 +82,7 @@ export function writeAudit(
     id: id('log'),
     operator_id: user.userId || null,
     operator_name: user.fullName || 'System',
-    operator_role: user.role || null,
+    operator_role: req.rbac?.primaryRole ?? null,
     action: action,
     date: today(),
     time: nowTimeFa(),

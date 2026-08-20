@@ -85,8 +85,8 @@ export default function StudentsView({
   const [refundAmount, setRefundAmount] = useState(0);
   const [refundReason, setRefundReason] = useState('');
 
-  const isRegistrar = activeRole === 'registrar' || activeRole === 'owner' || activeRole === 'manager';
-  const isOwnerOrManager = activeRole === 'owner' || activeRole === 'manager';
+  const isRegistrar = activeRole === 'receptionist' || activeRole === 'owner' || activeRole === 'general_manager';
+  const isOwnerOrManager = activeRole === 'owner' || activeRole === 'general_manager';
 
   const [classFilter, setClassFilter] = useState<string>('all');
   // Whole-database server search: when any filter/search is active we query

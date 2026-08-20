@@ -17,6 +17,7 @@
  * 7. Receipt / invoice / student-code sequences are collision-safe under
  *    concurrent creation.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
@@ -24,7 +25,7 @@ import { db, initSchema } from '../db/connection.js';
 import { ensureOrganizationHierarchy, FIXED_ORG_ID } from '../db/organizationHierarchy.js';
 import { id, today } from '../utils/ids.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { authRouter } from '../routes/auth.routes.js';
 import { studentsRouter } from '../routes/students.routes.js';
 import { financeRouter } from '../routes/finance.routes.js';
@@ -56,8 +57,7 @@ function createApp() {
 
 function makeUser(overrides: Partial<TokenPayload> & { userId: string }): TokenPayload {
   return {
-    userId: overrides.userId, username: overrides.username || overrides.userId,
-    role: overrides.role || 'owner', branchId: overrides.branchId || BRANCH_A, fullName: 'PLC User',
+    userId: overrides.userId, username: overrides.username || overrides.userId, branchId: overrides.branchId || BRANCH_A, fullName: 'PLC User',
     sessionVersion: overrides.sessionVersion ?? 1,
   };
 }
@@ -71,9 +71,10 @@ let ownerB: TokenPayload;
 let ownerC: TokenPayload;
 
 async function seedUser(uid: string, uname: string, role: string, branch = BRANCH_A) {
-  await db.prepare(`INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-    VALUES (?, ?, ?, ?, ?, ?, 1, 0)`)
-    .run(uid, uname, 'PLC ' + role, role, branch, await hashPassword('x'));
+  await db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+    VALUES (?, ?, ?, ?, ?, 1, 0)`)
+    .run(uid, uname, 'PLC ' + role, branch, await hashPassword('x'));
+  assignRole(uid, role, branch);
 }
 
 beforeAll(async () => {
@@ -89,10 +90,10 @@ beforeAll(async () => {
   await seedUser('u_plc_owner_a', 'plc_owner_a', 'owner');
   await seedUser('u_plc_owner_b', 'plc_owner_b', 'owner');
   await seedUser('u_plc_owner_c', 'plc_owner_c', 'owner');
-  syncLegacyUserRoles(db);
-  ownerA = makeUser({ userId: 'u_plc_owner_a', role: 'owner', branchId: BRANCH_A, username: 'plc_owner_a' });
-  ownerB = makeUser({ userId: 'u_plc_owner_b', role: 'owner', branchId: BRANCH_A, username: 'plc_owner_b' });
-  ownerC = makeUser({ userId: 'u_plc_owner_c', role: 'owner', branchId: BRANCH_A, username: 'plc_owner_c' });
+
+  ownerA = makeUser({ userId: 'u_plc_owner_a', branchId: BRANCH_A, username: 'plc_owner_a' });
+  ownerB = makeUser({ userId: 'u_plc_owner_b', branchId: BRANCH_A, username: 'plc_owner_b' });
+  ownerC = makeUser({ userId: 'u_plc_owner_c', branchId: BRANCH_A, username: 'plc_owner_c' });
 
   // Students + branch cash for payments.
   db.prepare(`INSERT OR IGNORE INTO students (id, student_code, full_name, status, registration_date, branch_id, gender, phone)
@@ -141,7 +142,7 @@ describe('Position lifecycle (create / edit / activate / deactivate)', () => {
   it('assigning the position grants its permissions; deactivating removes them immediately', async () => {
     const token = await freshOwnerToken(ownerA);
     await seedUser('u_plc_fr', 'plc_fr', 'registrar'); // identity role: receptionist
-    syncLegacyUserRoles(db);
+
     const assign = await supertest(app).post('/api/security/users/u_plc_fr/roles').set('Authorization', `Bearer ${token}`).send({ roleId: customRoleId, scopeType: 'branch', scopeId: BRANCH_A });
     expect(assign.status).toBe(201);
 
@@ -171,7 +172,7 @@ describe('Position lifecycle (create / edit / activate / deactivate)', () => {
     await supertest(app).patch(`/api/security/roles/${customRoleId}`).set('Authorization', `Bearer ${token}`).send({ isActive: false });
     // Simulate process restart: catalog bootstrap + legacy role sync run again.
     bootstrapRbacCatalog(db);
-    syncLegacyUserRoles(db);
+
     const row = db.prepare('SELECT is_active FROM roles WHERE id = ?').get(customRoleId) as { is_active: number };
     expect(row.is_active).toBe(0);
   });
@@ -185,8 +186,8 @@ describe('Position lifecycle (create / edit / activate / deactivate)', () => {
 
   it('non-owner cannot create positions', async () => {
     await seedUser('u_plc_mgr', 'plc_mgr', 'manager');
-    syncLegacyUserRoles(db);
-    const mgr = makeUser({ userId: 'u_plc_mgr', role: 'manager', branchId: BRANCH_A });
+
+    const mgr = makeUser({ userId: 'u_plc_mgr', branchId: BRANCH_A });
     const res = await supertest(app).post('/api/security/roles').set(authHeader(mgr)).send({ name: 'Nope' });
     expect(res.status).toBe(403);
   });
@@ -196,7 +197,7 @@ describe('Multiple positions — combine, scope, removal', () => {
   it('finance + reception combined; finance removal drops ledger access; scope stays branch-A', async () => {
     const token = await freshOwnerToken(ownerA);
     await seedUser('u_plc_multi', 'plc_multi', 'registrar');
-    syncLegacyUserRoles(db);
+
     const finRole = db.prepare("SELECT id FROM roles WHERE code = 'finance_manager'").get() as { id: string };
 
     // Assign finance_manager (branch A) on top of receptionist (branch A).
@@ -211,7 +212,7 @@ describe('Multiple positions — combine, scope, removal', () => {
     expect(codes.has('Student.Create')).toBe(true);
 
     // The combined scope must NOT expand: finance(branch A) cannot read branch B students.
-    const multi = makeUser({ userId: 'u_plc_multi', role: 'registrar', branchId: BRANCH_A });
+    const multi = makeUser({ userId: 'u_plc_multi', branchId: BRANCH_A });
     const multiTok = await freshOwnerToken(multi);
     const bStudent = await supertest(app)
       .post('/api/students/manual').set('Authorization', `Bearer ${token}`)
@@ -259,8 +260,8 @@ describe('Female Reception separation + traceability', () => {
 
   beforeAll(async () => {
     await seedUser('u_plc_recep', 'plc_recep', 'registrar');
-    syncLegacyUserRoles(db);
-    receptionist = makeUser({ userId: 'u_plc_recep', role: 'registrar', branchId: BRANCH_A });
+
+    receptionist = makeUser({ userId: 'u_plc_recep', branchId: BRANCH_A });
   });
 
   it('reception collects a payment → income with position traceability (operator_role)', async () => {
@@ -274,7 +275,7 @@ describe('Female Reception separation + traceability', () => {
       operator_name: string; operator_role: string | null; branch_id: string; amount: number; category: string;
     };
     expect(row.operator_name).toBe('PLC registrar');
-    expect(row.operator_role).toBe('registrar');
+    expect(row.operator_role).toBe('receptionist');
     expect(row.branch_id).toBe(BRANCH_A);
     expect(row.amount).toBe(2000);
     expect(row.category).toBe('fee');

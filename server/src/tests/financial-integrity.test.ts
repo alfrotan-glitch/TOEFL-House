@@ -11,6 +11,7 @@
  *  §7  Receipt number uniqueness (atomic counter)
  *  §8  Student code uniqueness (atomic counter)
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
@@ -19,7 +20,7 @@ import { id, today } from '../utils/ids.js';
 import { recordIncome } from '../utils/income.js';
 import { nextReceiptNumber, nextStudentCode } from '../utils/receipt.js';
 import { signToken, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import invoicesRouter from '../routes/invoices.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 
@@ -35,7 +36,7 @@ function invoiceApp() {
 }
 const financeAuth = () => ({
   Authorization: `Bearer ${signToken({
-    userId: 'u_fin_audit', username: 'u_fin_audit', role: 'finance',
+    userId: 'u_fin_audit', username: 'u_fin_audit',
     branchId: BRANCH_ID, fullName: 'Finance Audit',
   } as TokenPayload)}`,
 });
@@ -57,10 +58,11 @@ beforeAll(() => {
 
   bootstrapRbacCatalog(db);
   db.prepare(
-    `INSERT OR REPLACE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES ('u_fin_audit', 'u_fin_audit', 'Finance Audit', 'finance', ?, 'x', 1, 0)`
+    `INSERT OR REPLACE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES ('u_fin_audit', 'u_fin_audit', 'Finance Audit', ?, 'x', 1, 0)`
   ).run(BRANCH_ID);
-  syncLegacyUserRoles(db);
+  assignRole('u_fin_audit', 'finance', BRANCH_ID);
+
 });
 
 afterAll(() => {

@@ -8,8 +8,8 @@ import { createContext } from 'react';
 import { UserRole } from '../types';
 
 export const USER_ROLES = new Set<UserRole>([
-  'owner', 'manager', 'registrar', 'teacher', 'finance', 'counselor', 'donor_manager',
-  'head_of_department', 'student',
+  'owner', 'general_manager', 'receptionist', 'teacher', 'finance_manager', 'counselor',
+  'donor_manager', 'head_of_department', 'data_entry', 'student',
 ]);
 
 export interface AuthUser {

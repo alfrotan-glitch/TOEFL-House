@@ -8,11 +8,12 @@
  * concurrent operations, API validation, database integrity, foreign key integrity,
  * pipeline state integrity, event generation, rule engine interaction, and failure scenarios.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { db, initSchema } from '../db/connection.js';
 import { id, today } from '../utils/ids.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { ensureOrganizationHierarchy } from '../db/organizationHierarchy.js';
 import type Express from 'express';
 import supertest from 'supertest';
@@ -72,7 +73,6 @@ function makeUser(overrides: Partial<TokenPayload> & { userId: string }): TokenP
   return {
     userId: overrides.userId,
     username: overrides.username || overrides.userId,
-    role: overrides.role || 'registrar',
     branchId: overrides.branchId || BRANCH_A,
     fullName: overrides.fullName || 'Test User',
   };
@@ -89,8 +89,9 @@ function seedBranches() {
 
 async function seedUser(userId: string, role: string, branchId: string, username: string, fullName: string) {
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password) VALUES (?, ?, ?, ?, ?, ?, 1, 0)`
-  ).run(userId, username, fullName, role, branchId, await hashPassword('testpass123'));
+    `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES (?, ?, ?, ?, ?, 1, 0)`
+  ).run(userId, username, fullName, branchId, await hashPassword('testpass123'));
+  assignRole(userId, role, branchId);
 }
 
 function seedClass(classId: string, name: string, branchId: string, capacity: number | null = 30, genderPolicy: string = 'mixed', fee: number = 5000) {
@@ -227,16 +228,15 @@ describe('Visitor Module', () => {
     await seedUser('u_owner', 'owner', BRANCH_A, 'owner', 'Test owner');
     await seedUser('u_cns_a', 'counselor', BRANCH_A, 'cns_a', 'Test counselor');
     await seedUser('u_teacher', 'teacher', BRANCH_A, 'teacher', 'Test teacher');
-    syncLegacyUserRoles(db);
 
     app = createApp();
 
-    registrarA = makeUser({ userId: 'u_reg_a', role: 'registrar', branchId: BRANCH_A });
-    registrarB = makeUser({ userId: 'u_reg_b', role: 'registrar', branchId: BRANCH_B });
-    managerA = makeUser({ userId: 'u_mgr_a', role: 'manager', branchId: BRANCH_A });
-    ownerUser = makeUser({ userId: 'u_owner', role: 'owner', branchId: BRANCH_A });
-    counselorA = makeUser({ userId: 'u_cns_a', role: 'counselor', branchId: BRANCH_A });
-    teacherUser = makeUser({ userId: 'u_teacher', role: 'teacher', branchId: BRANCH_A });
+    registrarA = makeUser({ userId: 'u_reg_a', branchId: BRANCH_A });
+    registrarB = makeUser({ userId: 'u_reg_b', branchId: BRANCH_B });
+    managerA = makeUser({ userId: 'u_mgr_a', branchId: BRANCH_A });
+    ownerUser = makeUser({ userId: 'u_owner', branchId: BRANCH_A });
+    counselorA = makeUser({ userId: 'u_cns_a', branchId: BRANCH_A });
+    teacherUser = makeUser({ userId: 'u_teacher', branchId: BRANCH_A });
   });
 
   afterAll(() => {

@@ -14,13 +14,14 @@
  *   4. A missing policy is distinguishable from an explicit waiver, and the
  *      enrollment gate refuses to admit a student on a configuration fault.
  */
+import { assignRole } from './support/identity.js';
 import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import academicRouter from '../routes/academic.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 import {
@@ -50,7 +51,6 @@ function tokenFor(userId: string, role: string, branchId: string) {
   return signToken({
     userId,
     username: userId,
-    role,
     branchId,
     fullName: userId,
     sessionVersion: 1,
@@ -89,11 +89,11 @@ beforeAll(() => {
     db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(b, b, 'loc');
   }
   db.prepare(
-    `INSERT OR IGNORE INTO users (id, username, password_hash, full_name, role, branch_id, is_active, session_version, must_change_password)
-     VALUES (?, ?, 'x', 'Manager', 'manager', ?, 1, 1, 0)`
+    `INSERT OR IGNORE INTO users ( id, username, password_hash, full_name, branch_id, is_active, session_version, must_change_password )
+     VALUES (?, ?, 'x', 'Manager', ?, 1, 1, 0)`
   ).run(MANAGER, MANAGER, BRANCH_MAIN);
+  assignRole(MANAGER, 'manager', BRANCH_MAIN);
   bootstrapRbacCatalog(db);
-  syncLegacyUserRoles(db);
 
   db.prepare('INSERT OR IGNORE INTO programs (id, name, branch_id) VALUES (?, ?, ?)').run(
     PROGRAM, 'Acc Program', BRANCH_MAIN

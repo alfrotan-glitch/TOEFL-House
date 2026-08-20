@@ -17,12 +17,13 @@
  * appearing incidentally inside an unrelated number. Both were false
  * positives; distinctive values disproved them.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { studentsRouter, paymentsRouter } from '../routes/students.routes.js';
 import { invoicesRouter } from '../routes/invoices.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
@@ -46,7 +47,7 @@ function createApp() {
   return app;
 }
 const mgr = (branchId: string, id: string): TokenPayload => ({
-  userId: id, username: id, role: 'manager', branchId, fullName: `Mgr ${branchId}`,
+  userId: id, username: id, branchId, fullName: `Mgr ${branchId}`,
 });
 const auth = (u: TokenPayload) => ({ Authorization: `Bearer ${signToken(u)}` });
 
@@ -64,11 +65,11 @@ beforeAll(async () => {
   const pw = await hashPassword('x');
   for (const [uid, br] of [['u_live_a', BR_A], ['u_live_b', BR_B]]) {
     db.prepare(
-      `INSERT OR REPLACE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-       VALUES (?, ?, ?, 'manager', ?, ?, 1, 0)`,
+      `INSERT OR REPLACE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+       VALUES (?, ?, ?, ?, ?, 1, 0)`,
     ).run(uid, uid, uid, br, pw);
+    assignRole(uid, 'manager', br);
   }
-  syncLegacyUserRoles(db);
 
   // One student per branch, each with a distinctive payment.
   const mkStudent = (id: string, code: string, name: string, phone: string, branch: string) =>

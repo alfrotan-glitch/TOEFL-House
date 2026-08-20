@@ -240,7 +240,7 @@ waitlistRouter.post('/:entryId/cancel', requirePermission('Waitlist.Manage'), ah
     throw new HttpError(409, `Only a 'waiting' or 'offered' entry can be cancelled (this one is '${entry.status}').`);
   }
   // Staff (resolved through canonical RBAC roles, not the mutable
-  // users.role column) may cancel any entry; anyone else may only cancel
+  // canonical role assignment) may cancel any entry; anyone else may only cancel
   // their own request.
   if (!req.user || !requestHasAnyRole(req, ['owner', 'general_manager', 'receptionist', 'head_of_department'])) {
     if (entry.requested_by !== req.user?.userId) throw new HttpError(403, 'You may only cancel your own waitlist request.');

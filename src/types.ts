@@ -15,13 +15,20 @@
 // SHARED KERNEL — Cross-Context Primitives
 // ============================================================================
 
+/**
+ * Canonical role codes — the same vocabulary the server stores in `roles.code`
+ * and resolves from `user_roles`. The UI uses these for presentation and for
+ * choosing what to offer; it never uses them to decide authorization, which is
+ * always the server's answer (`permissions` / `tabAccess`).
+ */
 export type UserRole =
   | 'owner'
-  | 'manager'
-  | 'finance'
-  | 'registrar'
+  | 'general_manager'
+  | 'finance_manager'
+  | 'receptionist'
   | 'teacher'
   | 'head_of_department'
+  | 'data_entry'
   | 'student'
   | 'counselor'
   | 'donor_manager';

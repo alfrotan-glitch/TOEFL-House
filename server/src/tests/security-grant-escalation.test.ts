@@ -48,12 +48,13 @@
  * route — `isGlobalOwner` and `canAccessBranchResource` — rather than adding a
  * parallel notion of who is privileged.
  */
+import { assignRole } from './support/identity.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles, buildRbacContext, isGlobalOwner, canAccessAllBranches } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog, buildRbacContext, isGlobalOwner, canAccessAllBranches } from '../core/rbac/rbac-service.js';
 import securityRouter from '../routes/security.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 import { id } from '../utils/ids.js';
@@ -89,16 +90,19 @@ beforeAll(async () => {
 
   const pwd = await hashPassword('Str0ng!Pass2026');
   const ins = db.prepare(
-    'INSERT OR IGNORE INTO users (id, username, password_hash, full_name, role, branch_id, must_change_password) VALUES (?, ?, ?, ?, ?, ?, 0)',
+    'INSERT OR IGNORE INTO users (id, username, password_hash, full_name, branch_id, must_change_password) VALUES (?, ?, ?, ?, ?, 0)',
   );
-  ins.run('secg_owner', 'secg_owner', pwd, 'Owner', 'owner', BRANCH_A);
-  ins.run('secg_manager', 'secg_manager', pwd, 'Manager', 'manager', BRANCH_A);
-  ins.run('secg_victim', 'secg_victim', pwd, 'Victim', 'registrar', BRANCH_A);
-  ins.run('secg_victim_b', 'secg_victim_b', pwd, 'Victim B', 'registrar', BRANCH_B);
-  syncLegacyUserRoles(db);
+  ins.run('secg_owner', 'secg_owner', pwd, 'Owner', BRANCH_A);
+  assignRole('secg_owner', 'owner', BRANCH_A);
+  ins.run('secg_manager', 'secg_manager', pwd, 'Manager', BRANCH_A);
+  assignRole('secg_manager', 'manager', BRANCH_A);
+  ins.run('secg_victim', 'secg_victim', pwd, 'Victim', BRANCH_A);
+  assignRole('secg_victim', 'registrar', BRANCH_A);
+  ins.run('secg_victim_b', 'secg_victim_b', pwd, 'Victim B', BRANCH_B);
+  assignRole('secg_victim_b', 'registrar', BRANCH_B);
 
-  owner = { userId: 'secg_owner', username: 'secg_owner', role: 'owner', branchId: BRANCH_A, fullName: 'Owner' } as TokenPayload;
-  manager = { userId: 'secg_manager', username: 'secg_manager', role: 'manager', branchId: BRANCH_A, fullName: 'Manager' } as TokenPayload;
+  owner = { userId: 'secg_owner', username: 'secg_owner', branchId: BRANCH_A, fullName: 'Owner' } as TokenPayload;
+  manager = { userId: 'secg_manager', username: 'secg_manager', branchId: BRANCH_A, fullName: 'Manager' } as TokenPayload;
 
   // The supported delegation this suite is written around: a branch manager is
   // given the staff-administration permissions for their own branch.
@@ -123,7 +127,7 @@ describe('SEC-1 · the owner identity role cannot be granted by a non-owner', ()
     expect(res.status).toBe(403);
     const ctx = contextOf('secg_victim');
     expect(isGlobalOwner(ctx)).toBe(false);
-    expect((db.prepare('SELECT role FROM users WHERE id = ?').get('secg_victim') as { role: string }).role).toBe('registrar');
+    expect((db.prepare(`SELECT r.code AS role FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = ? AND ur.is_primary = 1`).get('secg_victim') as { role: string } | undefined)?.role).toBe('receptionist');
   });
 
   it('refuses the same escalation without the isPrimary flag', async () => {

@@ -116,7 +116,7 @@ export default function FinanceView(props: FinanceViewProps) {
   const [depositError, setDepositError] = useState<string | null>(null);
 
   const isOwner = activeRole === 'owner';
-  const isManager = activeRole === 'manager' || isOwner;
+  const isManager = activeRole === 'general_manager' || isOwner;
   /** Budget allocation, month-end, policy — not finance clerk */
   const hasPermissionCode = (code: string) => activeRole === 'owner' || (permissionCodes?.includes(code) ?? false);
   const canViewBudget = hasPermissionCode('Budget.View');

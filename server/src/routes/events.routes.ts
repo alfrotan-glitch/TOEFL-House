@@ -62,11 +62,10 @@ eventsRouter.get(
     } = req.query as Record<string, string>;
 
     const userBranchId = req.user?.branchId;
-    const userRole = req.user?.role;
-    if (!userBranchId || !userRole) throw new HttpError(403, 'User context is missing.');
+    if (!userBranchId) throw new HttpError(403, 'User context is missing.');
 
     const effectiveBranchId = branchId || userBranchId;
-    if (userRole !== 'owner' && !canAccessBranchResource(req, effectiveBranchId)) {
+    if (!(req.rbac && isGlobalOwner(req.rbac)) && !canAccessBranchResource(req, effectiveBranchId)) {
       throw new HttpError(403, 'Requested event branch is outside your access scope.');
     }
     const maxLimit = Math.min(Number(limit) || 50, 200);
@@ -82,7 +81,7 @@ eventsRouter.get(
     if (correlationId) { sql += ' AND correlation_id = ?'; params.push(correlationId); }
 
     // Owner can see all branches; others are scoped
-    if (userRole !== 'owner') {
+    if (!(req.rbac && isGlobalOwner(req.rbac))) {
       sql += ' AND branch_id = ?';
       params.push(effectiveBranchId);
     } else if (branchId) {
@@ -150,23 +149,22 @@ eventsRouter.get(
     const toDate = to || new Date().toISOString();
     
     const userBranchId = req.user?.branchId;
-    const userRole = req.user?.role;
-    if (!userBranchId || !userRole) throw new HttpError(403, 'User context is missing.');
+    if (!userBranchId) throw new HttpError(403, 'User context is missing.');
 
     const effectiveBranchId = branchId || userBranchId;
-    if (userRole !== 'owner' && !canAccessBranchResource(req, effectiveBranchId)) {
+    if (!(req.rbac && isGlobalOwner(req.rbac)) && !canAccessBranchResource(req, effectiveBranchId)) {
       throw new HttpError(403, 'Requested event branch is outside your access scope.');
     }
 
     const counts = eventBus.getEventCounts(
       fromDate, toDate,
-      userRole !== 'owner' ? effectiveBranchId : branchId
+      !(req.rbac && isGlobalOwner(req.rbac)) ? effectiveBranchId : branchId
     );
-    const totalEvents = userRole !== 'owner'
+    const totalEvents = !(req.rbac && isGlobalOwner(req.rbac))
       ? (stmtCountTotalEventsByBranch.get(fromDate, toDate, effectiveBranchId) as any).totalEvents
       : (stmtCountTotalEventsAll.get(fromDate, toDate) as any).totalEvents;
 
-    const unpublishedCount = userRole !== 'owner'
+    const unpublishedCount = !(req.rbac && isGlobalOwner(req.rbac))
       ? (db.prepare('SELECT COUNT(*) as unpublishedCount FROM domain_events WHERE published = 0 AND branch_id = ?').get(effectiveBranchId) as any).unpublishedCount
       : (stmtCountUnpublishedEvents.get() as any).unpublishedCount;
 

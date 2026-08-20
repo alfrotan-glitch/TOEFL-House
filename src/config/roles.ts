@@ -28,9 +28,9 @@ export const ROLE_LABELS: Record<string, string> = {
  */
 export const ALL_ROLES: AppRole[] = [
   'owner',
-  'manager',
-  'finance',
-  'registrar',
+  'general_manager',
+  'finance_manager',
+  'receptionist',
   'teacher',
   'head_of_department',
   'counselor',

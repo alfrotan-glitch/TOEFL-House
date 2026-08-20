@@ -17,12 +17,13 @@
  * treated as complete data), so the rate is now aggregated in SQL over the
  * FULL history by GET /attendance/summary.
  */
+import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeEach } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, syncLegacyUserRoles } from '../core/rbac/rbac-service.js';
+import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { attendanceRouter } from '../routes/classes.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 import { today } from '../utils/ids.js';
@@ -39,7 +40,7 @@ function createApp() {
   return app;
 }
 const mgr = (): TokenPayload => ({
-  userId: 'u_att', username: 'u_att', role: 'manager', branchId: BRANCH, fullName: 'Att Mgr',
+  userId: 'u_att', username: 'u_att', branchId: BRANCH, fullName: 'Att Mgr',
 });
 const auth = () => ({ Authorization: `Bearer ${signToken(mgr())}` });
 
@@ -57,10 +58,10 @@ beforeEach(async () => {
   }
   const pw = await hashPassword('x');
   db.prepare(
-    `INSERT OR REPLACE INTO users (id, username, full_name, role, branch_id, password_hash, is_active, must_change_password)
-     VALUES ('u_att','u_att','Att Mgr','manager',?,?,1,0)`,
+    `INSERT OR REPLACE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
+     VALUES ('u_att', 'u_att', 'Att Mgr', ?, ?, 1, 0)`,
   ).run(BRANCH, pw);
-  syncLegacyUserRoles(db);
+  assignRole('u_att', 'manager', BRANCH);
 
   const d = today();
   const mkStudent = (id: string, phone: string, branch = BRANCH) =>

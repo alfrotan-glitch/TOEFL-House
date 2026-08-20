@@ -137,7 +137,7 @@ const ALLOWED_SALARY_TYPES: readonly string[] = CONTRACT_TYPES;
 /** Safely extract user context */
 function getUserContext(req: import('express').Request) {
   const user = req.user;
-  if (!user?.userId || !user?.branchId || !user?.fullName || !user?.role) throw new HttpError(403, 'User context missing.');
+  if (!user?.userId || !user?.branchId || !user?.fullName) throw new HttpError(403, 'User context missing.');
   return user;
 }
 
