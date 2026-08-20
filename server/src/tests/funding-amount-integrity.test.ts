@@ -8,9 +8,10 @@
  *
  * FND-1 · POST /funding/sponsorships
  *   The handler computed `validatedMonthly = assertMoney(monthlyAmount, ...)`
- *   and then inserted the RAW body value instead. `assertMoney(1.555)` is
- *   1.56, but 1.555 was what landed in `sponsorship_agreements.monthly_amount`
- *   (HTTP 201, stored 1.555). The validated value was computed and discarded,
+ *   and then inserted the RAW body value instead. `assertMoney(1.555)` is 2
+ *   in the canonical whole-afghani unit, but 1.555 was what landed in
+ *   `sponsorship_agreements.monthly_amount` (HTTP 201, stored 1.555). The
+ *   validated value was computed and discarded,
  *   so the column held sub-cent precision the money authority forbids.
  *
  * FND-2 · PATCH /funding/sponsorships/:id
@@ -131,18 +132,14 @@ beforeAll(async () => {
 });
 
 describe('FND-1 · a created sponsorship persists the validated amount', () => {
-  it('stores assertMoney(1.555) = 1.56, not the raw 1.555', async () => {
+  it('refuses a fractional monthly amount rather than storing a different one', async () => {
     const res = await makeSponsorship(1.555);
-    expect(res.status).toBe(201);
-    const row = sponsorshipRow(res.body.id)!;
-    expect(row.monthly_amount).toBe(1.56);
-    expect(row.ty).toBe('real');
+    expect(res.status).toBe(400);
   });
 
-  it('stores assertMoney(2.999) = 3, not the raw 2.999', async () => {
+  it('refuses another fractional monthly amount', async () => {
     const res = await makeSponsorship(2.999);
-    expect(res.status).toBe(201);
-    expect(sponsorshipRow(res.body.id)!.monthly_amount).toBe(3);
+    expect(res.status).toBe(400);
   });
 
   it('stores a numeric string as a number', async () => {
@@ -150,7 +147,7 @@ describe('FND-1 · a created sponsorship persists the validated amount', () => {
     expect(res.status).toBe(201);
     const row = sponsorshipRow(res.body.id)!;
     expect(row.monthly_amount).toBe(750);
-    expect(row.ty).toBe('real');
+    expect(row.ty).toBe('integer');
   });
 
   it('keeps an ordinary amount exactly as given', async () => {
@@ -180,7 +177,7 @@ describe('FND-2 · PATCH /funding/sponsorships/:id validates the monthly amount'
     expect(res.status).toBe(400);
     const row = sponsorshipRow(id)!;
     expect(row.monthly_amount).toBe(1000);
-    expect(row.ty).toBe('real');
+    expect(row.ty).toBe('integer');
   });
 
   it('treats a JSON-untransmittable Infinity (which arrives as null) as an absent field', async () => {
@@ -206,14 +203,13 @@ describe('FND-2 · PATCH /funding/sponsorships/:id validates the monthly amount'
     expect(JSON.stringify(res.body)).not.toContain('SQLite3');
   });
 
-  it('rounds a sub-cent update to the monetary boundary instead of storing it raw', async () => {
+  it('refuses a fractional update instead of storing a different amount', async () => {
     const created = await makeSponsorship(1000);
     const res = await supertest(app)
       .patch(`/api/funding/sponsorships/${created.body.id}`)
       .set(auth(OWNER))
       .send({ monthlyAmount: 1.555 });
-    expect(res.status).toBe(200);
-    expect(sponsorshipRow(created.body.id)!.monthly_amount).toBe(1.56);
+    expect(res.status).toBe(400);
   });
 
   it('still accepts a legitimate amount change', async () => {
@@ -280,7 +276,7 @@ describe('FND-3 · PATCH /funding/campaigns/:id validates the target amount', ()
     expect(res.status).toBe(400);
     const row = campaignRow(id)!;
     expect(row.target_amount).toBe(100000);
-    expect(row.ty).toBe('real');
+    expect(row.ty).toBe('integer');
   });
 
   it('treats a JSON-untransmittable Infinity (which arrives as null) as an absent field', async () => {
@@ -303,14 +299,13 @@ describe('FND-3 · PATCH /funding/campaigns/:id validates the target amount', ()
     expect(JSON.stringify(res.body)).not.toContain('SQLite3');
   });
 
-  it('rounds a sub-cent target to the monetary boundary instead of storing it raw', async () => {
+  it('refuses a fractional target instead of storing a different amount', async () => {
     const created = await makeCampaign(100000);
     const res = await supertest(app)
       .patch(`/api/funding/campaigns/${created.body.id}`)
       .set(auth(OWNER))
       .send({ targetAmount: 1.555 });
-    expect(res.status).toBe(200);
-    expect(campaignRow(created.body.id)!.target_amount).toBe(1.56);
+    expect(res.status).toBe(400);
   });
 
   it('still accepts a legitimate target change', async () => {

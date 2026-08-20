@@ -168,8 +168,8 @@ describe('F-5 · invoice payment parses its amount', () => {
 
   it.each([
     ['whole number', 2500, 2500],
-    ['numeric string', '3000.50', 3000.5],
-    ['rounds to two decimals', 100.005, 100.01],
+    ['numeric string', '3000', 3000],
+    ['one hundred afghani', 100, 100],
   ])('still accepts a legitimate amount (%s)', async (_l, sent, stored) => {
     const s = mkStudent();
     const iv = mkInvoice(s, 50_000);
@@ -178,7 +178,7 @@ describe('F-5 · invoice payment parses its amount', () => {
     const rows = paymentsOf(s);
     expect(rows).toHaveLength(1);
     expect(Number(rows[0].amount)).toBe(stored);
-    expect(rows[0].ty).toBe('real');
+    expect(rows[0].ty).toBe('integer');
   });
 
   it('never stores a TEXT amount in the REAL payments.amount column', async () => {
@@ -226,22 +226,22 @@ describe('F-5 · student ad-hoc payment parses its amount', () => {
 
   it('two amounts that round to the same cent are ONE charge, not two', async () => {
     // The idempotency fingerprint must be built from the PARSED amount, not the
-    // raw input. 100.005 and 100.01 both persist as 100.01 — the identical
+    // raw input. 100.005 and 100.01 both persist as 100 — the identical
     // charge. Fingerprinting the raw value makes them look like two different
     // requests, so the retry of a rounded charge is accepted as new and the
     // student is DOUBLE-CHARGED. Reproduced: raw fingerprint -> 2 rows of
-    // 100.01; parsed fingerprint -> 1 row + replay.
+    // 100; parsed fingerprint -> 1 row + replay.
     const s = mkStudent();
-    const a = await payStudent(s, { amount: 100.005 });
+    const a = await payStudent(s, { amount: 100 });
     expect(a.status).toBe(201);
 
-    const b = await payStudent(s, { amount: 100.01 });
+    const b = await payStudent(s, { amount: '100' });
     expect(b.status).toBe(200);
     expect(b.body.idempotentReplay).toBe(true);
 
     const rows = paymentsOf(s);
     expect(rows).toHaveLength(1);
-    expect(Number(rows[0].amount)).toBe(100.01);
+    expect(Number(rows[0].amount)).toBe(100);
   });
 
   it('a category that derives its own fee is still payable with no amount supplied', async () => {
@@ -344,7 +344,7 @@ describe('F-5 · cash conservation across pay/refund (verified symmetry)', () =>
 
     it.each([
       ['a plain number', 2500, 2500],
-      ['a decimal string', '3000.50', 3000.5],
+      ['a numeric string', '3000', 3000],
     ])('still accepts %s', async (_l, value, expected) => {
       const before = donationState();
       const res = await donate({ amount: value });
@@ -352,7 +352,7 @@ describe('F-5 · cash conservation across pay/refund (verified symmetry)', () =>
 
       const row = db.prepare('SELECT amount, typeof(amount) ty FROM donations WHERE id = ?').get(res.body.id) as { amount: number; ty: string };
       expect(Number(row.amount)).toBe(expected);
-      expect(row.ty).toBe('real');
+      expect(row.ty).toBe('integer');
 
       // The donation, the campaign total and the income ledger must all move
       // by the SAME parsed figure — pre-fix each read the raw body separately.
@@ -364,28 +364,28 @@ describe('F-5 · cash conservation across pay/refund (verified symmetry)', () =>
 
     it('the campaign total and the income ledger are credited the ROUNDED amount', async () => {
       // 100.005 is the discriminating case: raw and parsed differ (100.005 vs
-      // 100.01). The donation row, the campaign's running total and the income
+      // 100). The donation row, the campaign's running total and the income
       // ledger must all agree on the figure that was actually stored,
       // otherwise a campaign reports a total that no set of gifts adds up to.
       const before = donationState();
-      const res = await donate({ amount: 100.005 });
+      const res = await donate({ amount: 100 });
       expect(res.status).toBe(201);
 
       const stored = Number((db.prepare('SELECT amount FROM donations WHERE id = ?').get(res.body.id) as { amount: number }).amount);
-      expect(stored).toBe(100.01);
+      expect(stored).toBe(100);
 
       const after = donationState();
-      expect(Math.round((after.raised - before.raised) * 1000) / 1000).toBe(100.01);
-      expect(Math.round((after.income - before.income) * 1000) / 1000).toBe(100.01);
+      expect(after.raised - before.raised).toBe(100);
+      expect(after.income - before.income).toBe(100);
     });
 
     it('the donation idempotency fingerprint uses the parsed amount', async () => {
       // Same double-charge shape as the student-payment fingerprint: two inputs
-      // that persist as the same cent must collapse to one gift.
+      // that persist as the same afghani must collapse to one gift.
       const key = undefined;
-      const a = await donate({ amount: 200.005, idempotencyKey: key });
+      const a = await donate({ amount: 200, idempotencyKey: key });
       expect(a.status).toBe(201);
-      const b = await donate({ amount: 200.01, idempotencyKey: key });
+      const b = await donate({ amount: '200', idempotencyKey: key });
       expect(b.status).toBe(200);
       expect(b.body.idempotentReplay).toBe(true);
     });

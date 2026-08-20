@@ -163,16 +163,14 @@ describe('PLC-1 · a retake fee that the charge path cannot pay is refused at co
     expect(res.status).toBe(400);
   });
 
-  it('normalises a sub-cent retake fee instead of storing it raw', async () => {
+  it('refuses a sub-unit retake fee instead of storing it raw', async () => {
     const res = await putProfile(policy({ retakeBillable: true, retakeFeeAmount: 0.001 }));
-    expect(res.status).toBe(200);
-    expect(storedRetakeFee()!.fee).toBe(0);
+    expect(res.status).toBe(400);
   });
 
-  it('rounds a fractional retake fee to the monetary boundary', async () => {
+  it('refuses a fractional retake fee', async () => {
     const res = await putProfile(policy({ retakeBillable: true, retakeFeeAmount: 1.555 }));
-    expect(res.status).toBe(200);
-    expect(storedRetakeFee()!.fee).toBe(1.56);
+    expect(res.status).toBe(400);
   });
 
   it('still accepts an ordinary retake fee and a numeric string', async () => {
@@ -222,7 +220,7 @@ describe('PLC-1 · the retake sitting can always be completed and charged', () =
     // The live defect: with retakeFeeAmount 0.001 the completion threw inside
     // its transaction, leaving the attempt in_progress with no payment, and
     // every retry threw again — the candidate could never finish.
-    const res = await putProfile(policy({ retakeBillable: true, retakeFeeAmount: 0.001 }));
+    const res = await putProfile(policy({ retakeBillable: true, retakeFeeAmount: 1 }));
     expect(res.status).toBe(200);
 
     const vid = makeVisitor();

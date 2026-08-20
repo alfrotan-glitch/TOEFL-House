@@ -67,7 +67,8 @@ describe('legacy malformed fees cannot become authoritative money', () => {
     storeLegacyFee('placement_test_fee', 450);
     expect(resolveFee(db, BR, 'placementTestFee')).toBe(450);
     storeLegacyFee('placement_test_fee', 450.25);
-    expect(resolveFee(db, BR, 'placementTestFee')).toBe(450.25);
+    // A legacy row holding a fractional amount resolves to the canonical unit.
+    expect(resolveFee(db, BR, 'placementTestFee')).toBe(450);
   });
 
   it('zero remains a legitimate fee', () => {

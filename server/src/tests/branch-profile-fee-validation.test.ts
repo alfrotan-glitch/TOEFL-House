@@ -122,7 +122,7 @@ describe('CFG-2 · invalid fee values are rejected at the configuration write', 
     ['zero', 0, 0],
     ['integer', 1, 1],
     ['typical fee', 500, 500],
-    ['two decimals', 500.25, 500.25],
+    ['whole fee', 500, 500],
     ['numeric string', '500', 500],
     ['numeric string with decimals', '500.00', 500],
     ['large but supported', 1e6, 1e6],
@@ -169,7 +169,7 @@ describe('CFG-2 · invalid fee values are rejected at the configuration write', 
     const t = db
       .prepare('SELECT typeof(placement_test_fee) AS t FROM branch_academic_profiles WHERE branch_id = ?')
       .get(BR_A) as { t: string };
-    expect(t.t).toBe('real');
+    expect(t.t).toBe('integer');
   });
 });
 

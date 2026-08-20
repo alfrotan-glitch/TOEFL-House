@@ -1,4 +1,4 @@
-import { assertMoney } from './money.js';
+import { assertMoney, assertComputedMoney } from './money.js';
 import { HttpError } from '../middleware/errorHandler.js';
 import { db } from '../db/connection.js';
 import { id, today } from './ids.js';
@@ -120,7 +120,7 @@ export function recordIncome(params: RecordIncomeParams): { savingAmount: number
   const percent = Math.max(0, Math.min(100, rawPercent || 0));
   // Savings are only created from positive operating income. Refunds/reversals
   // are contra-revenue and must never trigger another savings transfer.
-  const savingAmount = normalizedAmount > 0 ? assertMoney((normalizedAmount * percent) / 100, 'saving amount') : 0;
+  const savingAmount = normalizedAmount > 0 ? assertComputedMoney((normalizedAmount * percent) / 100, 'saving amount') : 0;
 
   if (savingAmount > 0) {
     if (!decrementMainBalanceIfSufficient('branch', params.branchId, savingAmount)) {

@@ -90,10 +90,10 @@ CREATE TABLE IF NOT EXISTS system_settings (
 CREATE TABLE IF NOT EXISTS branch_academic_profiles ( 
   branch_id               TEXT PRIMARY KEY REFERENCES branches(id) ON DELETE CASCADE, 
   default_program_version_id TEXT REFERENCES program_versions(id) ON DELETE SET NULL, 
-  placement_test_fee      REAL NOT NULL DEFAULT 0, 
-  registration_fee        REAL NOT NULL DEFAULT 0, 
-  card_fee                REAL NOT NULL DEFAULT 0, 
-  diploma_fee             REAL NOT NULL DEFAULT 0, 
+  placement_test_fee      INTEGER NOT NULL DEFAULT 0, 
+  registration_fee        INTEGER NOT NULL DEFAULT 0, 
+  card_fee                INTEGER NOT NULL DEFAULT 0, 
+  diploma_fee             INTEGER NOT NULL DEFAULT 0, 
   default_pass_mark       REAL NOT NULL DEFAULT 60, 
   default_min_attendance  REAL NOT NULL DEFAULT 75, 
   academic_year_label     TEXT, 
@@ -207,7 +207,7 @@ CREATE TABLE IF NOT EXISTS employees (
   phone       TEXT, 
   email       TEXT, 
   role        TEXT NOT NULL, 
-  base_salary REAL NOT NULL DEFAULT 0, 
+  base_salary INTEGER NOT NULL DEFAULT 0, 
   status      TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','inactive')), 
   branch_id   TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT, 
   joined_date TEXT NOT NULL, 
@@ -242,7 +242,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
   source     TEXT NOT NULL CHECK (source IN ('ads','social','referral','event','organic','other')), 
   start_date TEXT NOT NULL, 
   end_date   TEXT, 
-  budget     REAL NOT NULL DEFAULT 0, 
+  budget     INTEGER NOT NULL DEFAULT 0, 
   status     TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','paused','completed')), 
   branch_id  TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT, 
   created_at TEXT NOT NULL DEFAULT (datetime('now')) 
@@ -387,8 +387,8 @@ CREATE TABLE IF NOT EXISTS student_semesters (
   semester_name TEXT NOT NULL, 
   class_id      TEXT REFERENCES classes(id) ON DELETE SET NULL, 
   enroll_date   TEXT NOT NULL, 
-  fee_amount    REAL NOT NULL DEFAULT 0, 
-  net_fee_amount REAL, 
+  fee_amount    INTEGER NOT NULL DEFAULT 0, 
+  net_fee_amount INTEGER, 
   status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','completed','deferred')), 
   -- Gradebook Engine (Phase 4) — populated once, at complete-semester time,
   -- by the same computeClassGrades() the live gradebook preview uses.
@@ -413,9 +413,9 @@ CREATE TABLE IF NOT EXISTS registrations (
   student_id       TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE, 
   class_id         TEXT REFERENCES classes(id) ON DELETE SET NULL, 
   date             TEXT NOT NULL, 
-  amount_paid      REAL NOT NULL DEFAULT 0, 
+  amount_paid      INTEGER NOT NULL DEFAULT 0, 
   receipt_number   TEXT, 
-  discount_applied REAL NOT NULL DEFAULT 0, 
+  discount_applied INTEGER NOT NULL DEFAULT 0, 
   branch_id        TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT, 
   source           TEXT, 
   semester         TEXT 
@@ -732,7 +732,7 @@ CREATE TABLE IF NOT EXISTS levels (
   program_version_id  TEXT, 
   code                TEXT, 
   duration_months     INTEGER DEFAULT 0, 
-  default_fee         REAL DEFAULT 0, 
+  default_fee         INTEGER DEFAULT 0, 
   pass_mark           REAL DEFAULT 60, 
   is_active           INTEGER DEFAULT 1, 
   min_viable_size     INTEGER DEFAULT 5, 
@@ -744,7 +744,7 @@ CREATE TABLE IF NOT EXISTS level_branch_fees (
   id          TEXT PRIMARY KEY, 
   level_id    TEXT NOT NULL REFERENCES levels(id) ON DELETE CASCADE, 
   branch_id   TEXT NOT NULL REFERENCES branches(id) ON DELETE CASCADE, 
-  fee         REAL NOT NULL, 
+  fee         INTEGER NOT NULL, 
   currency    TEXT NOT NULL DEFAULT 'AFN', 
   effective_from TEXT, 
   effective_to   TEXT, 
@@ -810,7 +810,7 @@ CREATE TABLE IF NOT EXISTS course_offerings (
   name                TEXT NOT NULL, 
   status              TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','open','closed','archived')), 
   capacity_total      INTEGER NOT NULL DEFAULT 0, 
-  fee_snapshot        REAL NOT NULL DEFAULT 0, 
+  fee_snapshot        INTEGER NOT NULL DEFAULT 0, 
   created_at          TEXT NOT NULL DEFAULT (datetime('now')) 
 );
 CREATE INDEX IF NOT EXISTS idx_course_offerings_branch ON course_offerings(branch_id, status);
@@ -835,7 +835,7 @@ CREATE TABLE IF NOT EXISTS classes (
                        )),
   lifecycle_updated_at TEXT,
   cancellation_reason  TEXT,
-  fee                  REAL NOT NULL DEFAULT 0,
+  fee                  INTEGER NOT NULL DEFAULT 0,
   branch_id            TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
   gender_policy        TEXT NOT NULL DEFAULT 'mixed' CHECK (gender_policy IN ('female','male','mixed')),
   room_id              TEXT REFERENCES rooms(id) ON DELETE SET NULL,
@@ -864,7 +864,7 @@ CREATE TABLE IF NOT EXISTS class_teacher_skills (
   class_id        TEXT NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
   teacher_id      TEXT NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
   skill_id        TEXT NOT NULL REFERENCES skills(id) ON DELETE RESTRICT,
-  monthly_rate    REAL NOT NULL DEFAULT 0,
+  monthly_rate    INTEGER NOT NULL DEFAULT 0,
   branch_id       TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
   assignment_type TEXT NOT NULL DEFAULT 'primary' CHECK (assignment_type IN ('primary','assistant','substitute','guest','examiner')),
   start_date      TEXT,
@@ -911,7 +911,7 @@ CREATE TABLE IF NOT EXISTS class_generation_items (
   teacher_id          TEXT REFERENCES teachers(id) ON DELETE SET NULL, 
   capacity            INTEGER NOT NULL DEFAULT 20, 
   min_viable_size     INTEGER NOT NULL DEFAULT 5, 
-  fee                 REAL NOT NULL DEFAULT 0, 
+  fee                 INTEGER NOT NULL DEFAULT 0, 
   proposed_name       TEXT, 
   class_id            TEXT REFERENCES classes(id) ON DELETE SET NULL, 
   status              TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','created','skipped','error')), 
@@ -940,7 +940,7 @@ CREATE TABLE IF NOT EXISTS teachers (
   full_name          TEXT NOT NULL,
   phone              TEXT,
   email              TEXT,
-  base_salary        REAL NOT NULL DEFAULT 0,
+  base_salary        INTEGER NOT NULL DEFAULT 0,
   salary_type        TEXT NOT NULL DEFAULT 'fixed' CHECK (salary_type IN (
                        'fixed','per_skill','per_session','hybrid','per_level'
                      )),
@@ -956,7 +956,7 @@ CREATE TABLE IF NOT EXISTS teachers (
                        'monthly','hourly','per_session'
                      )),
   user_id            TEXT REFERENCES users(id),
-  default_skill_rate REAL NOT NULL DEFAULT 0
+  default_skill_rate INTEGER NOT NULL DEFAULT 0
 , target_skills_per_month INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS idx_teachers_branch ON teachers(branch_id);
 CREATE INDEX IF NOT EXISTS idx_teachers_status ON teachers(status);
@@ -967,7 +967,7 @@ CREATE TABLE IF NOT EXISTS teacher_level_skill_rates (
   level_id     TEXT, 
   level_code   TEXT NOT NULL, 
   skill_id     TEXT REFERENCES skills(id) ON DELETE CASCADE, 
-  rate_per_skill REAL NOT NULL DEFAULT 0, 
+  rate_per_skill INTEGER NOT NULL DEFAULT 0, 
   branch_id    TEXT NOT NULL, 
   UNIQUE(teacher_id, level_code, skill_id) 
 );
@@ -995,10 +995,10 @@ CREATE TABLE IF NOT EXISTS teacher_compensation_history (
   id TEXT PRIMARY KEY,
   teacher_id TEXT NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
   effective_from TEXT NOT NULL,
-  base_salary REAL NOT NULL DEFAULT 0,
+  base_salary INTEGER NOT NULL DEFAULT 0,
   salary_type TEXT NOT NULL,
   contract_type TEXT,
-  default_skill_rate REAL NOT NULL DEFAULT 0,
+  default_skill_rate INTEGER NOT NULL DEFAULT 0,
   reason TEXT,
   operator_user_id TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -1294,7 +1294,7 @@ CREATE TABLE IF NOT EXISTS exams (
   id        TEXT PRIMARY KEY, 
   title     TEXT NOT NULL, 
   date      TEXT NOT NULL, 
-  fee       REAL NOT NULL DEFAULT 0, 
+  fee       INTEGER NOT NULL DEFAULT 0, 
   class_id  TEXT REFERENCES classes(id) ON DELETE SET NULL, 
   type      TEXT NOT NULL DEFAULT 'mock' CHECK (type IN ('placement','midterm','final','mock','certification')), 
   branch_id TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT 
@@ -1366,8 +1366,8 @@ CREATE INDEX IF NOT EXISTS idx_certificates_student  ON certificates(student_id)
 CREATE TABLE IF NOT EXISTS books ( 
   id             TEXT PRIMARY KEY, 
   title          TEXT NOT NULL, 
-  price          REAL NOT NULL DEFAULT 0, 
-  purchase_price REAL, 
+  price          INTEGER NOT NULL DEFAULT 0, 
+  purchase_price INTEGER, 
   stock          INTEGER NOT NULL DEFAULT 0 CHECK (stock >= 0), 
   is_chapter     INTEGER NOT NULL DEFAULT 0, 
   branch_id      TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT, 
@@ -1389,8 +1389,8 @@ CREATE TABLE IF NOT EXISTS book_restock_history (
   book_id        TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE, 
   date           TEXT NOT NULL, 
   quantity       INTEGER NOT NULL, 
-  price          REAL NOT NULL, 
-  purchase_price REAL 
+  price          INTEGER NOT NULL, 
+  purchase_price INTEGER 
 );
 CREATE INDEX IF NOT EXISTS idx_book_restock_book     ON book_restock_history(book_id);
 
@@ -1398,9 +1398,9 @@ CREATE TABLE IF NOT EXISTS book_sales (
   id              TEXT PRIMARY KEY, 
   book_id         TEXT NOT NULL REFERENCES books(id) ON DELETE RESTRICT, 
   quantity        INTEGER NOT NULL, 
-  total_amount    REAL NOT NULL, 
-  discount_amount REAL DEFAULT 0, 
-  net_amount      REAL, 
+  total_amount    INTEGER NOT NULL, 
+  discount_amount INTEGER DEFAULT 0, 
+  net_amount      INTEGER, 
   payment_method  TEXT CHECK (payment_method IN ('cash','card','transfer')), 
   status          TEXT NOT NULL DEFAULT 'completed' CHECK (status IN ('completed','refunded')), 
   date            TEXT NOT NULL, 
@@ -1429,16 +1429,16 @@ WHEN (SELECT branch_id FROM books WHERE id = NEW.book_id) IS NOT NEW.branch_id
 BEGIN SELECT RAISE(ABORT, 'Book sale branch does not match book/student branch'); END;
 CREATE TRIGGER IF NOT EXISTS trg_book_sales_money_scale_insert
 BEFORE INSERT ON book_sales
-WHEN ABS(NEW.total_amount - ROUND(NEW.total_amount, 2)) > 0.0000001
+WHEN NEW.total_amount <> CAST(NEW.total_amount AS INTEGER)
   OR ABS(COALESCE(NEW.discount_amount, 0) - ROUND(COALESCE(NEW.discount_amount, 0), 2)) > 0.0000001
   OR ABS(COALESCE(NEW.net_amount, 0) - ROUND(COALESCE(NEW.net_amount, 0), 2)) > 0.0000001
-BEGIN SELECT RAISE(ABORT, 'book sale monetary values must have at most two decimal places'); END;
+BEGIN SELECT RAISE(ABORT, 'book sale monetary values must be a whole number of AFN'); END;
 CREATE TRIGGER IF NOT EXISTS trg_book_sales_money_scale_update
 BEFORE UPDATE OF total_amount, discount_amount, net_amount ON book_sales
-WHEN ABS(NEW.total_amount - ROUND(NEW.total_amount, 2)) > 0.0000001
+WHEN NEW.total_amount <> CAST(NEW.total_amount AS INTEGER)
   OR ABS(COALESCE(NEW.discount_amount, 0) - ROUND(COALESCE(NEW.discount_amount, 0), 2)) > 0.0000001
   OR ABS(COALESCE(NEW.net_amount, 0) - ROUND(COALESCE(NEW.net_amount, 0), 2)) > 0.0000001
-BEGIN SELECT RAISE(ABORT, 'book sale monetary values must have at most two decimal places'); END;
+BEGIN SELECT RAISE(ABORT, 'book sale monetary values must be a whole number of AFN'); END;
 
 -- ============================================================================
 -- FINANCE
@@ -1451,22 +1451,22 @@ CREATE TABLE IF NOT EXISTS finance_accounts (
   id TEXT PRIMARY KEY,
   scope_type TEXT NOT NULL CHECK (scope_type IN ('organization','branch')),
   scope_id TEXT NOT NULL,
-  main_balance REAL NOT NULL DEFAULT 0 CHECK (main_balance >= 0),
-  saving_balance REAL NOT NULL DEFAULT 0 CHECK (saving_balance >= 0),
+  main_balance INTEGER NOT NULL DEFAULT 0 CHECK (main_balance >= 0),
+  saving_balance INTEGER NOT NULL DEFAULT 0 CHECK (saving_balance >= 0),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(scope_type, scope_id)
 );
 CREATE INDEX IF NOT EXISTS idx_finance_accounts_scope ON finance_accounts(scope_type, scope_id);
 CREATE TRIGGER IF NOT EXISTS trg_finance_accounts_money_scale_insert
 BEFORE INSERT ON finance_accounts
-WHEN ABS(NEW.main_balance - ROUND(NEW.main_balance, 2)) > 0.0000001
-  OR ABS(NEW.saving_balance - ROUND(NEW.saving_balance, 2)) > 0.0000001
-BEGIN SELECT RAISE(ABORT, 'finance account balances must have at most two decimal places'); END;
+WHEN NEW.main_balance <> CAST(NEW.main_balance AS INTEGER)
+  OR NEW.saving_balance <> CAST(NEW.saving_balance AS INTEGER)
+BEGIN SELECT RAISE(ABORT, 'finance account balances must be a whole number of AFN'); END;
 CREATE TRIGGER IF NOT EXISTS trg_finance_accounts_money_scale_update
 BEFORE UPDATE OF main_balance, saving_balance ON finance_accounts
-WHEN ABS(NEW.main_balance - ROUND(NEW.main_balance, 2)) > 0.0000001
-  OR ABS(NEW.saving_balance - ROUND(NEW.saving_balance, 2)) > 0.0000001
-BEGIN SELECT RAISE(ABORT, 'finance account balances must have at most two decimal places'); END;
+WHEN NEW.main_balance <> CAST(NEW.main_balance AS INTEGER)
+  OR NEW.saving_balance <> CAST(NEW.saving_balance AS INTEGER)
+BEGIN SELECT RAISE(ABORT, 'finance account balances must be a whole number of AFN'); END;
 
 CREATE TABLE IF NOT EXISTS finance_categories (
   id              TEXT PRIMARY KEY,
@@ -1540,8 +1540,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_finance_channels_name
 CREATE TABLE IF NOT EXISTS budget_lines (
   id               TEXT PRIMARY KEY,
   name             TEXT NOT NULL,
-  current_amount   REAL NOT NULL DEFAULT 0,
-  allocated_amount REAL NOT NULL DEFAULT 0,
+  current_amount   INTEGER NOT NULL DEFAULT 0,
+  allocated_amount INTEGER NOT NULL DEFAULT 0,
   icon             TEXT,
   cost_type        TEXT NOT NULL DEFAULT 'fixed' CHECK (cost_type IN ('fixed','variable')),
   branch_id        TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
@@ -1608,7 +1608,7 @@ END;
 CREATE TABLE IF NOT EXISTS expense_requests ( 
   id                   TEXT PRIMARY KEY, 
   title                TEXT NOT NULL, 
-  amount               REAL NOT NULL, 
+  amount               INTEGER NOT NULL, 
   budget_line_id       TEXT REFERENCES budget_lines(id) ON DELETE SET NULL, 
   requester            TEXT, 
   status               TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')), 
@@ -1633,12 +1633,12 @@ CREATE INDEX IF NOT EXISTS idx_expense_req_requester_user ON expense_requests(re
 CREATE INDEX IF NOT EXISTS idx_expense_req_status    ON expense_requests(status);
 CREATE TRIGGER IF NOT EXISTS trg_expense_request_money_scale_insert
 BEFORE INSERT ON expense_requests
-WHEN ABS(NEW.amount - ROUND(NEW.amount, 2)) > 0.0000001
-BEGIN SELECT RAISE(ABORT, 'expense amount must have at most two decimal places'); END;
+WHEN NEW.amount <> CAST(NEW.amount AS INTEGER)
+BEGIN SELECT RAISE(ABORT, 'expense amount must be a whole number of AFN'); END;
 
 CREATE TABLE IF NOT EXISTS saving_accounts ( 
   branch_id TEXT PRIMARY KEY REFERENCES branches(id) ON DELETE CASCADE, 
-  balance   REAL NOT NULL DEFAULT 0 
+  balance   INTEGER NOT NULL DEFAULT 0 
 );
 
 CREATE TABLE IF NOT EXISTS fee_rules ( 
@@ -1648,7 +1648,7 @@ CREATE TABLE IF NOT EXISTS fee_rules (
   branch_id           TEXT REFERENCES branches(id) ON DELETE CASCADE, 
   fee_type            TEXT NOT NULL CHECK (fee_type IN ('registration','placement','semester','book','retake','diploma','card','exam','other')), 
   name                TEXT NOT NULL, 
-  amount              REAL NOT NULL DEFAULT 0, 
+  amount              INTEGER NOT NULL DEFAULT 0, 
   currency            TEXT NOT NULL DEFAULT 'AFN', 
   is_optional         INTEGER NOT NULL DEFAULT 0, 
   effective_from      TEXT, 
@@ -1699,9 +1699,9 @@ BEGIN SELECT RAISE(ABORT, 'approved_percent must be between 0 and 100'); END;
 CREATE TABLE IF NOT EXISTS invoices ( 
   id             TEXT PRIMARY KEY, 
   student_id     TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE, 
-  total_amount   REAL NOT NULL DEFAULT 0, 
-  discount_amount REAL NOT NULL DEFAULT 0, 
-  net_amount     REAL NOT NULL DEFAULT 0, 
+  total_amount   INTEGER NOT NULL DEFAULT 0, 
+  discount_amount INTEGER NOT NULL DEFAULT 0, 
+  net_amount     INTEGER NOT NULL DEFAULT 0, 
   status         TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','issued','paid','partial','overdue','cancelled')), 
   issue_date     TEXT NOT NULL, 
   due_date       TEXT, 
@@ -1736,10 +1736,10 @@ WHEN (SELECT branch_id FROM students WHERE id = NEW.student_id) IS NOT NEW.branc
 BEGIN SELECT RAISE(ABORT, 'Invoice branch does not match student branch'); END;
 CREATE TRIGGER IF NOT EXISTS trg_invoices_money_scale_insert
 BEFORE INSERT ON invoices
-WHEN ABS(NEW.total_amount - ROUND(NEW.total_amount, 2)) > 0.0000001
-  OR ABS(NEW.discount_amount - ROUND(NEW.discount_amount, 2)) > 0.0000001
-  OR ABS(NEW.net_amount - ROUND(NEW.net_amount, 2)) > 0.0000001
-BEGIN SELECT RAISE(ABORT, 'invoice monetary values must have at most two decimal places'); END;
+WHEN NEW.total_amount <> CAST(NEW.total_amount AS INTEGER)
+  OR NEW.discount_amount <> CAST(NEW.discount_amount AS INTEGER)
+  OR NEW.net_amount <> CAST(NEW.net_amount AS INTEGER)
+BEGIN SELECT RAISE(ABORT, 'invoice monetary values must be a whole number of AFN'); END;
 CREATE TRIGGER IF NOT EXISTS trg_invoices_nonnegative_insert
 BEFORE INSERT ON invoices
 WHEN NEW.total_amount < 0 OR NEW.discount_amount < 0 OR NEW.net_amount < 0
@@ -1754,23 +1754,23 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   invoice_id  TEXT NOT NULL REFERENCES invoices(id) ON DELETE CASCADE, 
   description TEXT NOT NULL, 
   quantity    INTEGER NOT NULL DEFAULT 1, 
-  unit_price  REAL NOT NULL DEFAULT 0, 
-  amount      REAL NOT NULL DEFAULT 0 
+  unit_price  INTEGER NOT NULL DEFAULT 0, 
+  amount      INTEGER NOT NULL DEFAULT 0 
 );
 CREATE INDEX IF NOT EXISTS idx_invoice_items_inv     ON invoice_items(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id);
 CREATE TRIGGER IF NOT EXISTS trg_invoice_items_money_scale_insert
 BEFORE INSERT ON invoice_items
-WHEN ABS(NEW.unit_price - ROUND(NEW.unit_price, 2)) > 0.0000001
-  OR ABS(NEW.amount - ROUND(NEW.amount, 2)) > 0.0000001
-BEGIN SELECT RAISE(ABORT, 'invoice item monetary values must have at most two decimal places'); END;
+WHEN NEW.unit_price <> CAST(NEW.unit_price AS INTEGER)
+  OR NEW.amount <> CAST(NEW.amount AS INTEGER)
+BEGIN SELECT RAISE(ABORT, 'invoice item monetary values must be a whole number of AFN'); END;
 
 CREATE TABLE IF NOT EXISTS payments ( 
   id             TEXT PRIMARY KEY, 
   student_id     TEXT REFERENCES students(id) ON DELETE SET NULL, 
   invoice_id     TEXT REFERENCES invoices(id) ON DELETE SET NULL, 
   book_id        TEXT REFERENCES books(id) ON DELETE SET NULL, -- ADDED for smart payments 
-  amount         REAL NOT NULL, 
+  amount         INTEGER NOT NULL, 
   date           TEXT NOT NULL, 
   payment_method TEXT NOT NULL CHECK (payment_method IN ('cash','card','bank_transfer')), 
   status         TEXT NOT NULL DEFAULT 'completed' CHECK (status IN ('completed','pending','failed','refunded')), 
@@ -1819,12 +1819,12 @@ BEGIN
 END;
 CREATE TRIGGER IF NOT EXISTS trg_payments_money_scale_insert
 BEFORE INSERT ON payments
-WHEN ABS(NEW.amount - ROUND(NEW.amount, 2)) > 0.0000001
-BEGIN SELECT RAISE(ABORT, 'payment amount must have at most two decimal places'); END;
+WHEN NEW.amount <> CAST(NEW.amount AS INTEGER)
+BEGIN SELECT RAISE(ABORT, 'payment amount must be a whole number of AFN'); END;
 CREATE TRIGGER IF NOT EXISTS trg_payments_money_scale_update
 BEFORE UPDATE OF amount ON payments
-WHEN ABS(NEW.amount - ROUND(NEW.amount, 2)) > 0.0000001
-BEGIN SELECT RAISE(ABORT, 'payment amount must have at most two decimal places'); END;
+WHEN NEW.amount <> CAST(NEW.amount AS INTEGER)
+BEGIN SELECT RAISE(ABORT, 'payment amount must be a whole number of AFN'); END;
 
 CREATE TABLE IF NOT EXISTS financial_transactions ( 
   id            TEXT PRIMARY KEY, 
@@ -1838,7 +1838,7 @@ CREATE TABLE IF NOT EXISTS financial_transactions (
   -- `finance_categories.classification`, never by matching text. NULL on income
   -- and on treasury/budget transfers, which are not expenses.
   finance_category_id TEXT REFERENCES finance_categories(id) ON DELETE RESTRICT, 
-  amount        REAL NOT NULL, 
+  amount        INTEGER NOT NULL, 
   date          TEXT NOT NULL, 
   description   TEXT, 
   reference_id  TEXT, 
@@ -1858,12 +1858,12 @@ CREATE INDEX IF NOT EXISTS idx_fin_tx_payment        ON financial_transactions(p
 CREATE INDEX IF NOT EXISTS idx_fin_tx_type           ON financial_transactions(type);
 CREATE TRIGGER IF NOT EXISTS trg_fin_tx_money_scale_insert
 BEFORE INSERT ON financial_transactions
-WHEN ABS(NEW.amount - ROUND(NEW.amount, 2)) > 0.0000001
-BEGIN SELECT RAISE(ABORT, 'financial transaction amount must have at most two decimal places'); END;
+WHEN NEW.amount <> CAST(NEW.amount AS INTEGER)
+BEGIN SELECT RAISE(ABORT, 'financial transaction amount must be a whole number of AFN'); END;
 CREATE TRIGGER IF NOT EXISTS trg_fin_tx_money_scale_update
 BEFORE UPDATE OF amount ON financial_transactions
-WHEN ABS(NEW.amount - ROUND(NEW.amount, 2)) > 0.0000001
-BEGIN SELECT RAISE(ABORT, 'financial transaction amount must have at most two decimal places'); END;
+WHEN NEW.amount <> CAST(NEW.amount AS INTEGER)
+BEGIN SELECT RAISE(ABORT, 'financial transaction amount must be a whole number of AFN'); END;
 
 -- ============================================================================
 -- PAYROLL
@@ -1875,8 +1875,8 @@ CREATE TABLE IF NOT EXISTS teacher_salary_ledger (
   teacher_id      TEXT NOT NULL REFERENCES teachers(id) ON DELETE CASCADE, 
   period_key      TEXT NOT NULL, 
   period_label    TEXT NOT NULL, 
-  due_amount      REAL NOT NULL DEFAULT 0, 
-  paid_amount     REAL NOT NULL DEFAULT 0, 
+  due_amount      INTEGER NOT NULL DEFAULT 0, 
+  paid_amount     INTEGER NOT NULL DEFAULT 0, 
   payment_type    TEXT NOT NULL CHECK (payment_type IN ('full','partial','advance')), 
   transaction_id  TEXT, 
   notes           TEXT, 
@@ -1907,16 +1907,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_teacher_salary_idempotency
 ON teacher_salary_ledger(idempotency_key) WHERE idempotency_key IS NOT NULL;
 CREATE TRIGGER IF NOT EXISTS trg_teacher_salary_money_scale_insert
 BEFORE INSERT ON teacher_salary_ledger
-WHEN ABS(NEW.due_amount - ROUND(NEW.due_amount, 2)) > 0.0000001
-  OR ABS(NEW.paid_amount - ROUND(NEW.paid_amount, 2)) > 0.0000001
-BEGIN SELECT RAISE(ABORT, 'teacher salary monetary values must have at most two decimal places'); END;
+WHEN NEW.due_amount <> CAST(NEW.due_amount AS INTEGER)
+  OR NEW.paid_amount <> CAST(NEW.paid_amount AS INTEGER)
+BEGIN SELECT RAISE(ABORT, 'teacher salary monetary values must be a whole number of AFN'); END;
 
 CREATE TABLE IF NOT EXISTS employee_salary_ledger (
   id              TEXT PRIMARY KEY,
   employee_id     TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
   period_key      TEXT NOT NULL,
   period_label    TEXT NOT NULL,
-  paid_amount     REAL NOT NULL DEFAULT 0,
+  paid_amount     INTEGER NOT NULL DEFAULT 0,
   payment_type    TEXT NOT NULL CHECK (payment_type IN ('full','partial','advance')),
   transaction_id  TEXT,
   notes           TEXT,
@@ -1960,8 +1960,8 @@ CREATE TABLE IF NOT EXISTS funding_campaigns (
   name          TEXT NOT NULL, 
   description   TEXT, 
   donor_id      TEXT REFERENCES donors(id) ON DELETE SET NULL, 
-  target_amount REAL NOT NULL DEFAULT 0, 
-  raised_amount REAL NOT NULL DEFAULT 0, 
+  target_amount INTEGER NOT NULL DEFAULT 0, 
+  raised_amount INTEGER NOT NULL DEFAULT 0, 
   start_date    TEXT NOT NULL, 
   end_date      TEXT, 
   status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','completed','cancelled')), 
@@ -1974,7 +1974,7 @@ CREATE TABLE IF NOT EXISTS donations (
   id               TEXT PRIMARY KEY, 
   campaign_id      TEXT REFERENCES funding_campaigns(id) ON DELETE SET NULL, 
   donor_id         TEXT NOT NULL REFERENCES donors(id) ON DELETE RESTRICT, 
-  amount           REAL NOT NULL, 
+  amount           INTEGER NOT NULL, 
   date             TEXT NOT NULL, 
   restricted       INTEGER NOT NULL DEFAULT 0, 
   restriction_note TEXT, 
@@ -1990,16 +1990,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_donations_idempotency
 ON donations(idempotency_key) WHERE idempotency_key IS NOT NULL;
 CREATE TRIGGER IF NOT EXISTS trg_donations_money_scale_insert
 BEFORE INSERT ON donations
-WHEN ABS(NEW.amount - ROUND(NEW.amount, 2)) > 0.0000001
-BEGIN SELECT RAISE(ABORT, 'donation amount must have at most two decimal places'); END;
+WHEN NEW.amount <> CAST(NEW.amount AS INTEGER)
+BEGIN SELECT RAISE(ABORT, 'donation amount must be a whole number of AFN'); END;
 
 CREATE TABLE IF NOT EXISTS scholarships ( 
   id               TEXT PRIMARY KEY, 
   name             TEXT NOT NULL, 
   donor_id         TEXT REFERENCES donors(id) ON DELETE SET NULL, 
   campaign_id      TEXT REFERENCES funding_campaigns(id) ON DELETE SET NULL, 
-  total_budget     REAL NOT NULL DEFAULT 0, 
-  allocated_amount REAL NOT NULL DEFAULT 0, 
+  total_budget     INTEGER NOT NULL DEFAULT 0, 
+  allocated_amount INTEGER NOT NULL DEFAULT 0, 
   criteria         TEXT, 
   status           TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','exhausted','closed')), 
   branch_id        TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT, 
@@ -2011,7 +2011,7 @@ CREATE TABLE IF NOT EXISTS scholarship_awards (
   id             TEXT PRIMARY KEY, 
   scholarship_id TEXT NOT NULL REFERENCES scholarships(id) ON DELETE CASCADE, 
   student_id     TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE, 
-  amount         REAL NOT NULL, 
+  amount         INTEGER NOT NULL, 
   award_date     TEXT NOT NULL, 
   semester       TEXT, 
   notes          TEXT, 
@@ -2026,15 +2026,15 @@ WHEN (SELECT branch_id FROM scholarships WHERE id = NEW.scholarship_id) IS NOT N
 BEGIN SELECT RAISE(ABORT, 'Scholarship award branch does not match scholarship/student branch'); END;
 CREATE TRIGGER IF NOT EXISTS trg_scholarship_awards_money_scale_insert
 BEFORE INSERT ON scholarship_awards
-WHEN ABS(NEW.amount - ROUND(NEW.amount, 2)) > 0.0000001
-BEGIN SELECT RAISE(ABORT, 'scholarship amount must have at most two decimal places'); END;
+WHEN NEW.amount <> CAST(NEW.amount AS INTEGER)
+BEGIN SELECT RAISE(ABORT, 'scholarship amount must be a whole number of AFN'); END;
 
 CREATE TABLE IF NOT EXISTS sponsorship_agreements ( 
   id             TEXT PRIMARY KEY, 
   donor_id       TEXT NOT NULL REFERENCES donors(id) ON DELETE RESTRICT, 
   student_id     TEXT REFERENCES students(id) ON DELETE SET NULL, 
   program_id     TEXT REFERENCES programs(id) ON DELETE SET NULL, 
-  monthly_amount REAL NOT NULL DEFAULT 0, 
+  monthly_amount INTEGER NOT NULL DEFAULT 0, 
   start_date     TEXT NOT NULL, 
   end_date       TEXT NOT NULL, 
   status         TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','completed','terminated')), 

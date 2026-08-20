@@ -92,29 +92,29 @@ describe('assertMoney parses rather than coerces', () => {
   it('accepts the values a real operator types', () => {
     expect(assertMoney(0, 'amount')).toBe(0);
     expect(assertMoney(1500, 'amount')).toBe(1500);
-    expect(assertMoney('750.25', 'amount')).toBe(750.25);
+    expect(() => assertMoney('750.25', 'amount')).toThrow(/whole number/i);
     expect(assertMoney(' 42 ', 'amount')).toBe(42);
-    expect(assertMoney('.5', 'amount')).toBe(0.5);
+    expect(() => assertMoney('.5', 'amount')).toThrow(/whole number/i);
     expect(assertMoney('6000.', 'amount')).toBe(6000);
   });
 
-  it('normalises to at most two decimal places and never returns -0', () => {
-    expect(assertMoney(10.006, 'amount')).toBe(10.01);
-    expect(assertMoney(0.001, 'amount')).toBe(0);
-    expect(Object.is(assertMoney(-0.001, 'amount', { allowNegative: true }), -0)).toBe(false);
+  it('normalises to the canonical whole afghani and never returns -0', () => {
+    expect(() => assertMoney(10.006, 'amount')).toThrow(/whole number/i);
+    expect(() => assertMoney(0.001, 'amount')).toThrow(/whole number/i);
+    expect(Object.is(assertMoney(-0, 'amount', { allowNegative: true }), -0)).toBe(false);
   });
 
-  it('PROPERTY: whatever it returns is always a safe, finite, 2dp number', () => {
+  it('PROPERTY: whatever it returns is always a safe, finite, whole number', () => {
     // 2,000 pseudo-random inputs mixing valid and hostile shapes. The boundary
     // may reject anything it likes, but it must never RETURN a value that
     // breaks the invariant — that is what downstream arithmetic relies on.
     const rng = makeRng(20260817);
     const shapes = [
-      () => rng() * 1e6,
-      () => -rng() * 1e6,
+      () => Math.floor(rng() * 1e6),
+      () => -Math.floor(rng() * 1e6),
       () => rng() * 1e16,
-      () => String(rng() * 1000),
-      () => `${Math.floor(rng() * 1000)}.${Math.floor(rng() * 1000)}`,
+      () => String(Math.floor(rng() * 1000)),
+      () => `${Math.floor(rng() * 1000)}.${Math.floor(rng() * 1000)}`, // fractional: must be refused
       () => (rng() > 0.5 ? NaN : Infinity),
       () => ['abc', '', '   ', '0x1f', '1e5', null, undefined, [], {}, true][Math.floor(rng() * 10)],
     ];
@@ -129,8 +129,8 @@ describe('assertMoney parses rather than coerces', () => {
       }
       returned += 1;
       expect(Number.isFinite(out), `returned non-finite for ${String(value)}`).toBe(true);
-      expect(Number.isSafeInteger(Math.round(Math.abs(out) * 100)), `unsafe cents for ${String(value)}`).toBe(true);
-      expect(Math.abs(out - Math.round(out * 100) / 100)).toBeLessThan(1e-9);
+      expect(Number.isSafeInteger(out), `not a safe integer for ${String(value)}`).toBe(true);
+      expect(Number.isInteger(out), `not a whole afghani for ${String(value)}`).toBe(true);
     }
     // Guard against the test silently passing because everything was rejected.
     expect(returned).toBeGreaterThan(200);

@@ -245,16 +245,16 @@ describe('T-2 · legitimate behaviour is preserved', () => {
 
   it('accepts numeric strings, as the create route does', async () => {
     const tid = mkTeacher(10000);
-    const res = await put(tid, { baseSalary: '24000.50' });
+    const res = await put(tid, { baseSalary: '24000' });
     expect(res.status).toBe(200);
-    expect(Number(rowOf(tid).base_salary)).toBe(24000.5);
+    expect(Number(rowOf(tid).base_salary)).toBe(24000);
   });
 
-  it('rounds to two decimals exactly as POST does', async () => {
+  it('refuses a fractional salary exactly as POST does', async () => {
     const tid = mkTeacher(10000);
     const res = await put(tid, { baseSalary: 1.005 });
-    expect(res.status).toBe(200);
-    expect(Number(rowOf(tid).base_salary)).toBe(1.01);
+    expect(res.status).toBe(400);
+    expect(Number(rowOf(tid).base_salary)).toBe(10000);
   });
 
   it('accepts zero as a legitimate salary and rate', async () => {

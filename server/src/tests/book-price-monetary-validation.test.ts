@@ -57,7 +57,7 @@ describe('book price monetary validation', () => {
 
   it('accepts ordinary prices and a zero price', () => {
     expect(resolvePrice(1200)).toBe(1200);
-    expect(resolvePrice('750.25')).toBe(750.25);
+    expect(() => resolvePrice('750.25')).toThrow(/whole number/i);
     expect(resolvePrice(0)).toBe(0);
   });
 

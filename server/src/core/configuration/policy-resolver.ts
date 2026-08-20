@@ -1,6 +1,6 @@
 import type BetterSqlite3 from 'better-sqlite3';
 import { SYSTEM_DEFAULTS } from './policy-catalog.js';
-import { assertMoney } from '../../utils/money.js';
+import { assertMoney, assertComputedMoney } from '../../utils/money.js';
 
 export type FeeKey = 'placementTestFee' | 'registrationFee' | 'cardIssuanceFee' | 'diplomaFee';
 
@@ -42,10 +42,15 @@ export function resolveFee(db: BetterSqlite3.Database, branchId: string | null |
   const row = db.prepare(`SELECT ${column} AS value FROM branch_academic_profiles WHERE branch_id = ?`).get(branchId) as { value?: number | null } | undefined;
   if (row?.value == null) return fallback;
   try {
-    const money = assertMoney(row.value, key);
-    // Reject rather than silently charge a rounded amount (0.001 -> 0).
-    if (typeof row.value === 'number' && row.value !== money) return fallback;
-    return money;
+    // A stored value is not operator input, so it is SETTLED to the canonical
+    // unit rather than refused: a read path that throws is worse than one that
+    // rounds a legacy row to the nearest afghani.
+    const settled = assertComputedMoney(row.value, key);
+    // But a non-zero fee that settles to nothing is not a rounding artifact —
+    // it is a corrupt configuration, and charging 0 would silently make the
+    // service free. That falls back to the configured default instead.
+    if (Number(row.value) > 0 && settled === 0) return fallback;
+    return settled;
   } catch {
     return fallback;
   }

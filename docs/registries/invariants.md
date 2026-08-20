@@ -37,4 +37,6 @@ Validated by `npm run audit:registries`.
 | A user has at most one primary role assignment | database | `trg_user_roles_single_primary` | `server/src/tests/rbac-single-authority.test.ts` | `SqliteError: user may have only one primary role` |
 | Authorization guards name canonical role codes only | application + compiler | `RoleCode` derived from `ROLE_CODES` in `server/src/core/rbac/permission-catalog.ts` | `server/src/tests/rbac-scope.test.ts` | unknown role name fails to compile |
 | A workflow step naming an unknown role is reported, not silently denied | application | `server/src/routes/workflows.routes.ts` (`assertKnownStepRole`) | `server/src/tests/event-bus.test.ts` | 409 naming the bad role and step |
-
+| Every stored amount is a whole number of AFN | database | INTEGER money columns + `trg_*_money_scale_*` | `server/src/tests/money-boundary-property.test.ts` | `must be a whole number of AFN` |
+| Operator-supplied money is never silently rounded | application | `server/src/utils/money.ts` (`assertMoney`) | `server/src/tests/money-boundary-property.test.ts` | HTTP 400 |
+| A single amount cannot exceed MAX_SAFE_INTEGER/100, so aggregates stay exact | application | `server/src/utils/money.ts` (`MAX_MONEY`) | `server/src/tests/money-boundary-property.test.ts` | HTTP 400 |

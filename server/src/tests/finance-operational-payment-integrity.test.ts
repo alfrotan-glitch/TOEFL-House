@@ -253,16 +253,15 @@ describe('F-2 · the amount is parsed, never coerced', () => {
 
   it.each([
     ['whole number', 1500, 1500],
-    ['numeric string', '2400.50', 2400.5],
-    ['two decimals', 999.99, 999.99],
-    ['rounds to two decimals', 100.005, 100.01],
+    ['numeric string', '2400', 2400],
+    ['one hundred afghani', 100, 100],
   ])('still pays a legitimate amount (%s)', async (_label, sent, expected) => {
     setLine(LINE_A, BR_A, 50_000);
     const before = budgetOf(LINE_A);
     const title = `F2 legit ${String(sent)}`;
     const res = await opPay('fopi_owner', { title, amount: sent, budgetLineId: LINE_A });
     expect(res.status).toBe(201);
-    expect(before - budgetOf(LINE_A)).toBeCloseTo(expected, 2);
+    expect(before - budgetOf(LINE_A)).toBe(expected);
     expect(Number(ledgerRowsFor(title)[0].amount)).toBe(expected);
     expect(Number(requestRow(title)?.amount)).toBe(expected);
   });
@@ -308,15 +307,15 @@ describe('F-1/F-2 · reconciliation of a mixed run', () => {
 
     await opPay('fopi_owner', { title: 'mix a1', amount: 100, budgetLineId: LINE_A });
     await opPay('fopi_owner', { title: 'mix b1', amount: 250, budgetLineId: LINE_B });
-    await opPay('fopi_owner', { title: 'mix b2', amount: 325.75, budgetLineId: LINE_B });
+    await opPay('fopi_owner', { title: 'mix b2', amount: 326, budgetLineId: LINE_B });
     // Rejected attempts must contribute nothing to either side.
     await opPay('fopi_owner', { title: 'mix bad', amount: 'abc', budgetLineId: LINE_B });
     await opPay('fopi_owner', { title: 'mix bad2', amount: [999], budgetLineId: LINE_B });
 
     // Budget drained per branch == expense recorded per branch.
-    expect(aBudget - budgetOf(LINE_A)).toBeCloseTo(100, 2);
-    expect(bBudget - budgetOf(LINE_B)).toBeCloseTo(575.75, 2);
-    expect(expenseTotalOf(BR_A) - aBefore).toBeCloseTo(100, 2);
-    expect(expenseTotalOf(BR_B) - bBefore).toBeCloseTo(575.75, 2);
+    expect(aBudget - budgetOf(LINE_A)).toBe(100);
+    expect(bBudget - budgetOf(LINE_B)).toBe(576);
+    expect(expenseTotalOf(BR_A) - aBefore).toBe(100);
+    expect(expenseTotalOf(BR_B) - bBefore).toBe(576);
   });
 });

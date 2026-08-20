@@ -65,7 +65,7 @@ describe('funding money validation', () => {
 
   it('accepts ordinary funding amounts', () => {
     expect(assertMoney(50_000, 'scholarship budget')).toBe(50_000);
-    expect(assertMoney('2500.50', 'monthly sponsorship amount')).toBe(2500.5);
+    expect(() => assertMoney('2500.50', 'monthly sponsorship amount')).toThrow(/whole number/i);
   });
 });
 

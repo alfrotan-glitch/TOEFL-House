@@ -431,10 +431,10 @@ describe('C-3 — PUT /:id validates fee and capacity', () => {
   it('LEGITIMATE fee and capacity updates still work', async () => {
     const cid = makeClass('c3_ok', 10, { fee: 5000 });
     const res = await supertest(app).put(`/api/classes/${cid}`).set(authHeader(owner))
-      .send({ fee: 7500.5, capacity: 25, minViableSize: 4 });
+      .send({ fee: 7501, capacity: 25, minViableSize: 4 });
     expect(res.status).toBe(200);
     const row = clsRow(cid);
-    expect(row.fee).toBe(7500.5);
+    expect(row.fee).toBe(7501);
     expect(row.capacity).toBe(25);
     expect(row.min_viable_size).toBe(4);
   });

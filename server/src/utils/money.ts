@@ -1,41 +1,108 @@
 import { HttpError } from '../middleware/errorHandler.js';
 
-/** High-assurance monetary boundary validation while preserving current AFN
- *  schema compatibility.
+/**
+ * THE money boundary for this system.
+ * ============================================================================
+ * CANONICAL REPRESENTATION: a whole number of Afghani, held as a JavaScript
+ * integer. AFN is the only currency (decision D-11) and there is no exchange
+ * rate, no second currency and no sub-unit anywhere in the domain.
  *
- *  Throws HttpError(400): a malformed amount is INVALID CLIENT INPUT, not a
- *  server fault. Previously this threw a plain Error, so posting an invoice
- *  line without unitPrice returned 500 — which hides a user-correctable
- *  mistake behind an alarming "server error" and pollutes error monitoring.
+ * WHY WHOLE AFN, not two decimal places or minor units. This is not a
+ * preference; it is what the system already does, established from three
+ * independent places:
  *
- *  TYPE DISCIPLINE (added after auditing the boundary itself)
- *  ---------------------------------------------------------
- *  The original implementation delegated straight to `Number(value)`, which is
- *  a coercion, not a parse, and quietly accepted values that are not amounts:
+ *   1. Every amount is DISPLAYED with no decimals — `formatAFN` in
+ *      src/utils/format.ts uses maximumFractionDigits: 0, so a sub-unit has
+ *      never been visible to any user.
+ *   2. Every computation that PRODUCES money already rounds to a whole
+ *      afghani before storing it: percentage discounts
+ *      (`Math.round((fee * percent) / 100)`), payroll
+ *      (`Math.round(baseSalary * perfMultiplier)`), the BOS withdrawal
+ *      allowance, and book purchase pricing.
+ *   3. Nothing in the schema, the routes or the UI refers to the pul
+ *      sub-unit.
  *
- *      assertMoney('')      -> 0        Number('')     === 0
- *      assertMoney('   ')   -> 0        whitespace     === 0
- *      assertMoney(null)    -> 0        Number(null)   === 0
- *      assertMoney([])      -> 0        Number([])     === 0
- *      assertMoney([5])     -> 5        single-element array unwraps
- *      assertMoney(true)    -> 1        booleans are numeric in JS
- *      assertMoney('0x10')  -> 16       hex literals parse
+ * The old two-decimal storage was therefore a representation the business
+ * never used, and holding it in a REAL made every total a floating-point sum.
+ * A displayed total could differ from the sum of its displayed parts while
+ * both were "correct" — the defect previously tracked as TR-2.
  *
- *  Every one of those turns a client mistake into a silent, plausible-looking
- *  charge — an empty form field becoming a legitimate 0 AFN is exactly how a
- *  free enrolment gets written without anyone deciding to grant one. This is
- *  the same fail-open class as the `NaN < 0` guards found in the routes, just
- *  one layer deeper, so it is fixed here rather than in each caller.
+ * TWO DISTINCT OPERATIONS, deliberately not merged:
  *
- *  Accepted now: a finite `number`, or a `string` that is a plain decimal
- *  numeral (optionally signed, optional single decimal point, surrounding
- *  whitespace tolerated). Everything else is refused. `undefined`/`null` are
- *  refused too: a caller that wants "missing means zero" must say so
- *  explicitly with `?? 0`, which is visible at the call site.
+ *   assertMoney()         validates OPERATOR INPUT. A fractional amount is
+ *                         REJECTED, never silently rounded. Quietly turning a
+ *                         typed 24000.50 into 24001 stores a figure nobody
+ *                         entered, which is the silent-substitution failure
+ *                         LAW 6 forbids. This extends the policy the fee and
+ *                         invoice writers already applied ("reject rather than
+ *                         silently round") to every money boundary.
+ *
+ *   assertComputedMoney() canonicalises a value the SYSTEM derived — a
+ *                         percentage discount, a payroll multiple, a profit
+ *                         share. Those are genuinely fractional before they
+ *                         are settled, so they round, half away from zero,
+ *                         exactly once, here.
+ *
+ * Rounding therefore has exactly one implementation and one legitimate
+ * trigger. A caller that rounds money itself is creating a second authority.
+ *
+ * Throws HttpError(400): a malformed amount is INVALID CLIENT INPUT, not a
+ * server fault.
+ *
+ * TYPE DISCIPLINE
+ * ---------------
+ * `Number(value)` is a coercion, not a parse, and quietly accepts values that
+ * are not amounts:
+ *
+ *     Number('')      === 0        Number(null) === 0
+ *     Number('   ')   === 0        Number([])   === 0
+ *     Number([5])     === 5        Number(true) === 1
+ *     Number('0x10')  === 16
+ *
+ * Every one of those turns a client mistake into a silent, plausible-looking
+ * charge — an empty form field becoming a legitimate 0 AFN is exactly how a
+ * free enrolment gets written without anyone deciding to grant one.
+ *
+ * Accepted: a finite `number`, or a `string` that is a plain decimal numeral
+ * (optionally signed, optional single decimal point, surrounding whitespace
+ * tolerated). Everything else is refused, `undefined`/`null` included: a
+ * caller that wants "missing means zero" must say so with `?? 0`, which is
+ * visible at the call site.
  */
 
 /** A plain decimal numeral: 42, -42, 42.5, .5, 42. — no hex, no exponent, no separators. */
 const DECIMAL_NUMERAL = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
+
+/**
+ * The largest single amount this system will accept.
+ *
+ * The hard technical limit is Number.MAX_SAFE_INTEGER, beyond which integer
+ * arithmetic silently stops being exact — and for money, silently wrong. A
+ * single amount is capped two orders of magnitude below that so AGGREGATES
+ * stay exact too: totals, balances and reconciliation sums add many rows
+ * together, and a ceiling equal to the per-value limit would make the very
+ * first SUM() unsafe. The factor of 100 leaves room for a hundred
+ * maximum-valued rows to sum exactly.
+ *
+ * This is deliberately the same effective ceiling the two-decimal
+ * representation had (it capped values at MAX_SAFE_INTEGER/100 as a
+ * side-effect of scaling by 100). Keeping it means the change of
+ * representation removes no protection that existed before.
+ */
+export const MAX_MONEY = Math.floor(Number.MAX_SAFE_INTEGER / 100);
+
+/**
+ * Rounds to the canonical unit: a whole afghani, half away from zero.
+ *
+ * Half away from zero rather than JavaScript's `Math.round` (which is half
+ * UP, so -0.5 becomes -0) keeps a refund of 0.5 and a charge of 0.5 the same
+ * magnitude. Symmetry matters when a contra entry must exactly reverse an
+ * original.
+ */
+export function roundMoney(n: number): number {
+  const r = n < 0 ? -Math.round(-n) : Math.round(n);
+  return Object.is(r, -0) ? 0 : r;
+}
 
 export function assertMoney(value: unknown, field = 'amount', opts: { allowNegative?: boolean } = {}): number {
   let n: number;
@@ -56,9 +123,28 @@ export function assertMoney(value: unknown, field = 'amount', opts: { allowNegat
 
   if (!Number.isFinite(n)) throw new HttpError(400, `${field} must be a finite number.`);
   if (!opts.allowNegative && n < 0) throw new HttpError(400, `${field} cannot be negative.`);
-  const rounded = Math.round((n + Number.EPSILON) * 100) / 100;
-  if (!Number.isSafeInteger(Math.round(Math.abs(rounded) * 100))) throw new HttpError(400, `${field} exceeds supported monetary precision.`);
-  return Object.is(rounded, -0) ? 0 : rounded;
+  if (!Number.isInteger(n)) throw new HttpError(400, `${field} must be a whole number of AFN.`);
+  if (!Number.isSafeInteger(n) || Math.abs(n) > MAX_MONEY) {
+    throw new HttpError(400, `${field} exceeds supported monetary precision.`);
+  }
+  return Object.is(n, -0) ? 0 : n;
+}
+
+/**
+ * Settles a value the SYSTEM computed into the canonical unit.
+ *
+ * Use only where the fractional part is an artifact of arithmetic the domain
+ * legitimately performs (percentages, multipliers, shares) — never to accept a
+ * fractional figure a person typed.
+ */
+export function assertComputedMoney(value: number, field = 'amount', opts: { allowNegative?: boolean } = {}): number {
+  if (!Number.isFinite(value)) throw new HttpError(400, `${field} must be a finite number.`);
+  if (!opts.allowNegative && value < 0) throw new HttpError(400, `${field} cannot be negative.`);
+  const whole = roundMoney(value);
+  if (!Number.isSafeInteger(whole) || Math.abs(whole) > MAX_MONEY) {
+    throw new HttpError(400, `${field} exceeds supported monetary precision.`);
+  }
+  return whole;
 }
 
 /**

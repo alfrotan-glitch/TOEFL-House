@@ -326,12 +326,9 @@ catalogRouter.put('/branch-profile/:branchId', requirePermission('FeeStructure.E
   const fees: Record<string, number | null> = {};
   for (const [key, label] of FEE_FIELDS) {
     if (b[key] === undefined || b[key] === null) { fees[key] = null; continue; }
-    const money = assertMoney(b[key], label);
-    // Reject rather than silently round a value that is not exact money.
-    if (typeof b[key] === 'number' && (b[key] as number) !== money) {
-      throw new HttpError(400, `${label} must have at most two decimal places.`);
-    }
-    fees[key] = money;
+    // assertMoney rejects a value that is not exact money, so a fee is never
+    // silently substituted with one the operator did not enter.
+    fees[key] = assertMoney(b[key], label);
   }
   const passMark = b.defaultPassMark === undefined || b.defaultPassMark === null
     ? null : assertPercent(b.defaultPassMark, 'default pass mark');

@@ -232,22 +232,22 @@ describe('JRN-1 · malformed and hostile input is refused before anything is wri
     expect(counts()).toEqual(before);
   });
 
-  it('treats a sub-cent discount as zero, matching assertMoney everywhere else', async () => {
+  it('refuses a sub-unit discount, matching assertMoney everywhere else', async () => {
     const sid = makeStudent();
     const res = await enroll(sid, { discountAmount: 0.001 });
-    expect(res.status).toBe(201);
-    expect(invoiceOf(sid)).toMatchObject({ total: FEE, discount: 0, net: FEE });
+    expect(res.status).toBe(400);
+    // Nothing is written: no invoice, so no silent zero-discount enrolment.
+    expect(invoiceOf(sid)).toBeUndefined();
   });
 
   it('a tiny fractional discount is measured against the ceiling, not used to set it', async () => {
     // The ceiling must be derived from what the student is AUTHORIZED for, not
     // from what they asked for. Asking the authority to bound itself by the
     // request collapses the ordinary 20% ceiling to the request's own value,
-    // which turns a legitimate 0.4 AFN discount into a rejection.
+    // A 0.4 AFN discount is not a representable amount and is refused.
     const sid = makeStudent();
     const res = await enroll(sid, { discountAmount: 0.4 });
-    expect(res.status).toBe(201);
-    expect(invoiceOf(sid)).toMatchObject({ total: FEE, discount: 0.4, net: 9999.6 });
+    expect(res.status).toBe(400);
   });
 
   it('a small but real discount well under the ceiling is accepted', async () => {

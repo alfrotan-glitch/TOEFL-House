@@ -188,7 +188,7 @@ describe('T-3 · evaluation still accepts every legitimate score', () => {
   it.each([
     ['minimum 1', 1, 1],
     ['mid 50', 50, 50],
-    ['fractional 87.5', 87.5, 87.5],
+    ['whole 88', 88, 88],
     ['maximum 100', 100, 100],
     ['numeric string "75"', '75', 75],
   ])('accepts %s', async (_label, sent, stored) => {
@@ -249,20 +249,20 @@ describe('T-3 · employee pay-salary returns 4xx, never 500, and moves no money'
     expect(txRows(eid)).toHaveLength(0);
   });
 
-  it('still pays a legitimate amount, including one needing two-decimal rounding', async () => {
+  it('still pays a legitimate amount in the canonical unit', async () => {
     const eid = mkEmployee();
     const before = budgetOf(empBudgetId);
-    const res = await payEmployee(eid, { monthName: 'Asad 1405', amountPaid: 1234.567, paymentType: 'partial' });
+    const res = await payEmployee(eid, { monthName: 'Asad 1405', amountPaid: 1235, paymentType: 'partial' });
     expect(res.status).toBe(201);
-    // 1234.567 rounds to 1234.57 — accepted, not rejected, and the ledger,
-    // the expense row and the budget debit must all agree on the rounded value.
-    expect(res.body.amountPaid).toBe(1234.57);
+    // The ledger, the expense row and the budget debit must all agree on the
+    // canonical amount.
+    expect(res.body.amountPaid).toBe(1235);
     // Float subtraction of two REAL columns is not exact (500000 - 498765.43
     // yields 1234.570000000007), so the DEBIT is compared with a tolerance
     // while the stored ledger and expense values are asserted exactly below.
-    expect(before - budgetOf(empBudgetId)).toBeCloseTo(1234.57, 2);
-    expect(Number(ledgerRows(eid)[0].paid_amount)).toBe(1234.57);
-    expect(Number(txRows(eid)[0].amount)).toBe(1234.57);
+    expect(before - budgetOf(empBudgetId)).toBe(1235);
+    expect(Number(ledgerRows(eid)[0].paid_amount)).toBe(1235);
+    expect(Number(txRows(eid)[0].amount)).toBe(1235);
   });
 
   it('still pays a plain whole amount', async () => {
@@ -299,19 +299,17 @@ describe('T-3 · teacher pay-salary honours the same contract', () => {
   it.each([
     ['explicit zero', 0],
     ['string zero', '0'],
-    ['sub-cent that rounds to zero', 0.001],
+    ['a sub-unit amount', 0.001],
   ])('rejects a zero-value payment (%s) and writes no ledger row', async (_label, value) => {
-    // assertMoney legitimately ROUNDS 0.001 down to 0 (established, test-locked
-    // behaviour in money-boundary-property.test.ts). Parsing alone therefore
-    // does not stop a zero-amount payment — the endpoint's own "greater than
-    // zero" rule is what refuses it, and mutation testing showed nothing
-    // covered that. A zero payment would post a ledger row and an expense row
-    // for no money at all.
+    // A zero payment would post a ledger row and an expense row for no money
+    // at all. Zero is refused by the endpoint's own "greater than zero" rule;
+    // a sub-unit amount is refused earlier still, by the money boundary, since
+    // it is not a representable amount. Either way nothing is written.
     const tid = mkTeacher();
     const before = budgetOf(teachBudgetId);
     const res = await payTeacher(tid, { monthName: '1405-08', amountPaid: value, paymentType: 'partial' });
     expect(res.status).toBe(400);
-    expect(String(res.body.error)).toMatch(/greater than zero/i);
+    expect(String(res.body.error)).toMatch(/greater than zero|whole number/i);
     expect(budgetOf(teachBudgetId)).toBe(before);
     expect(teacherLedgerRows(tid)).toHaveLength(0);
   });

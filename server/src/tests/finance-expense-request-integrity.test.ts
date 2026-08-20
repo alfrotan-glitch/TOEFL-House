@@ -138,15 +138,15 @@ describe('F-3a · the requested amount is parsed, never stored raw', () => {
 
   it.each([
     ['whole number', 300, 300],
-    ['numeric string', '2400.50', 2400.5],
-    ['rounds to two decimals', 100.005, 100.01],
+    ['numeric string', '2400', 2400],
+    ['one hundred afghani', 100, 100],
   ])('accepts a legitimate amount (%s) and stores the parsed number', async (_l, sent, stored) => {
     setLine(LINE_A, BR_A, 50_000);
     const title = `F3a legit ${String(sent)}`;
     const res = await mkReq('feri_owner', { title, amount: sent, budgetLineId: LINE_A });
     expect(res.status).toBe(201);
     expect(Number(rowByTitle(title)?.amount)).toBe(stored);
-    expect(amountClassOf(title)).toBe('real');
+    expect(amountClassOf(title)).toBe('integer');
   });
 
   it.each([['zero', 0], ['negative', -100]])('keeps rejecting a non-positive amount (%s)', async (_l, v) => {
@@ -304,9 +304,9 @@ describe('F-3 · reconciliation across the request lifecycle', () => {
     // Rejected inputs must contribute nothing.
     await mkReq('feri_owner', { title: 'recon bad', amount: '0x10', budgetLineId: LINE_B });
 
-    expect(aB0 - budgetOf(LINE_A)).toBeCloseTo(120, 2);
-    expect(bB0 - budgetOf(LINE_B)).toBeCloseTo(325.25, 2);
-    expect(expenseOf(BR_A) - aExp0).toBeCloseTo(120, 2);
-    expect(expenseOf(BR_B) - bExp0).toBeCloseTo(325.25, 2);
+    expect(aB0 - budgetOf(LINE_A)).toBe(120);
+    expect(bB0 - budgetOf(LINE_B)).toBe(250);
+    expect(expenseOf(BR_A) - aExp0).toBe(120);
+    expect(expenseOf(BR_B) - bExp0).toBe(250);
   });
 });

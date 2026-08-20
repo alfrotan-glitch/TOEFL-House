@@ -45,7 +45,7 @@ describe('exam fee monetary validation', () => {
 
   it('accepts a normal fee unchanged', () => {
     expect(resolveExamFee(1500)).toBe(1500);
-    expect(resolveExamFee('750.25')).toBe(750.25);
+    expect(() => resolveExamFee('750.25')).toThrow(/whole number/i);
   });
 
   it('treats a missing fee as zero rather than throwing', () => {
@@ -54,10 +54,11 @@ describe('exam fee monetary validation', () => {
     expect(resolveExamFee(null)).toBe(0);
   });
 
-  it('rounds sub-cent input to the nearest cent, never to a stray fraction', () => {
-    // Consistent with every other money path: 0.001 is not a chargeable
-    // amount, so it collapses to 0 instead of persisting as a fraction.
-    expect(resolveExamFee(0.001)).toBe(0);
-    expect(resolveExamFee(10.006)).toBe(10.01);
+  it('refuses sub-unit input rather than charging a different amount', () => {
+    // Consistent with every other money path: a fractional fee is not a
+    // representable amount, so it is refused rather than quietly charged as a
+    // different figure.
+    expect(() => resolveExamFee(0.001)).toThrow(/whole number/i);
+    expect(() => resolveExamFee(10.006)).toThrow(/whole number/i);
   });
 });

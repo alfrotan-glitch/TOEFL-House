@@ -16,7 +16,7 @@ import { recordIncome } from '../utils/income.js';
 import { nextReceiptNumber } from '../utils/receipt.js';
 import { nextInvoiceNumber } from '../utils/invoice.js';
 import { SYSTEM_DEFAULTS } from '../core/configuration/policy-catalog.js';
-import { assertMoney, assertDayOffset } from '../utils/money.js';
+import { assertMoney, assertDayOffset, assertComputedMoney } from '../utils/money.js';
 import { resolveIdempotency, isUniqueViolation } from '../utils/idempotency.js';
 
 export const invoicesRouter = Router();
@@ -214,27 +214,16 @@ invoicesRouter.post(
       }
       const quantity = rawQuantity;
       const unitPrice = assertMoney(it.unitPrice, 'unitPrice');
-      // INV-2: assertMoney ROUNDS to two decimals, so a sub-cent unitPrice was
-      // silently stored as a different price (0.001 -> a 0 AFN invoice line,
-      // reported as success). The canonical policy established for fee
-      // configuration — and enforced by the payments/financial_transactions
-      // money-scale triggers — is to REJECT a value that is not exact money
-      // rather than quietly substitute one the operator never entered.
-      if (typeof it.unitPrice === 'number' && it.unitPrice !== unitPrice) {
-        throw new HttpError(400, 'unitPrice must have at most two decimal places.');
-      }
       if (!it.description?.trim()) {
         throw new HttpError(400, 'Each item needs a description and a non-negative unit price.');
       }
-      return { description: it.description.trim(), quantity, unitPrice, amount: assertMoney(quantity * unitPrice, 'invoice line amount') };
+      return { description: it.description.trim(), quantity, unitPrice, amount: assertComputedMoney(quantity * unitPrice, 'invoice line amount') };
     });
 
     const totalAmount = assertMoney(normalized.reduce((sum, it) => sum + it.amount, 0), 'invoice total');
+    // assertMoney refuses a fractional discount outright, so a figure the
+    // operator never entered can never be substituted here.
     const requestedDiscount = assertMoney(discountAmount, 'discount amount');
-    // Same rule as unitPrice: never round a discount into a different figure.
-    if (typeof discountAmount === 'number' && discountAmount !== requestedDiscount) {
-      throw new HttpError(400, 'discount amount must have at most two decimal places.');
-    }
     // A discount larger than the invoice is REJECTED, not capped. Capping
     // turned a mistyped 99999 on a 5,000 invoice into a silent 100% discount
     // (net 0) and reported success — wiping a real tuition obligation with no
@@ -244,7 +233,7 @@ invoicesRouter.post(
       throw new HttpError(400, `Discount cannot exceed the invoice total of ${totalAmount} AFN.`);
     }
     const discount = requestedDiscount;
-    const netAmount = assertMoney(totalAmount - discount, 'invoice net amount');
+    const netAmount = assertComputedMoney(totalAmount - discount, 'invoice net amount');
 
     const dueDays = getNumberSetting('invoice_due_days', SYSTEM_DEFAULTS.invoiceDueDays);
     const issueDate = today();

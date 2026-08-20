@@ -10,7 +10,7 @@ import { id, today } from '../utils/ids.js';
 import { getNumberSetting, setSetting } from '../utils/settings.js';
 import { getFinanceAccount, decrementMainBalanceIfSufficient } from '../utils/financeAccounts.js';
 import { addNotification } from '../utils/notifications.js';
-import { assertMoney } from '../utils/money.js';
+import { assertMoney, assertComputedMoney } from '../utils/money.js';
 
 export const bosRouter = Router();
 bosRouter.use(authenticate, authorize('owner', 'finance_manager', 'general_manager')); // Read-only dashboard access for authorized finance/management roles
@@ -466,19 +466,19 @@ bosRouter.post(
         'distributed this period',
       );
       // Gross profit, i.e. before profit distributions (BOS-1).
-      const profit = assertMoney(revenue - expense + distributed, 'calculated profit', { allowNegative: true });
+      const profit = assertComputedMoney(revenue - expense + distributed, 'calculated profit', { allowNegative: true });
       const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
       const tierPercent = profitDistributionTier(margin);
-      const reserveFundTarget = assertMoney(fixedTotal * 6, 'reserve target');
+      const reserveFundTarget = assertComputedMoney(fixedTotal * 6, 'reserve target');
       const reserveFundBalance = assertMoney(getFinanceAccount('branch', branchId).savingBalance, 'reserve balance');
 
       if (reserveFundBalance < reserveFundTarget) {
         throw new HttpError(409, `Profit withdrawal not allowed: the contingency reserve fund has not yet reached its 6-month target (${Math.round(reserveFundBalance).toLocaleString()} of ${Math.round(reserveFundTarget).toLocaleString()} AFN).`);
       }
 
-      const periodAllowance = Math.max(0, assertMoney((profit * tierPercent) / 100, 'maximum withdrawal', { allowNegative: true }));
+      const periodAllowance = Math.max(0, assertComputedMoney((profit * tierPercent) / 100, 'maximum withdrawal', { allowNegative: true }));
       // The ceiling applies to the PERIOD, not to each request.
-      const maxWithdrawable = Math.max(0, assertMoney(periodAllowance - distributed, 'remaining withdrawal allowance', { allowNegative: true }));
+      const maxWithdrawable = Math.max(0, assertComputedMoney(periodAllowance - distributed, 'remaining withdrawal allowance', { allowNegative: true }));
       if (amount > maxWithdrawable) {
         throw new HttpError(409, `Requested amount exceeds this month's remaining withdrawable limit (${maxWithdrawable.toLocaleString()} AFN of a ${periodAllowance.toLocaleString()} AFN allowance based on a ${Math.round(margin)}% profit margin; ${distributed.toLocaleString()} AFN already distributed).`);
       }

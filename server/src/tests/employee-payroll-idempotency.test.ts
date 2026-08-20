@@ -364,12 +364,12 @@ describe('T-1 · database-level race arbiter', () => {
 describe('T-1 · financial reconciliation', () => {
   it('links every ledger row to exactly one balanced expense transaction', async () => {
     const e = mkEmployee('epi_recon');
-    const r = await pay(e, { monthName: 'Mizan 1405', amountPaid: 1234.5, paymentType: 'partial' });
+    const r = await pay(e, { monthName: 'Mizan 1405', amountPaid: 1235, paymentType: 'partial' });
     expect(r.status).toBe(201);
     const [led] = ledgerRows(e);
     expect(led).toBeTruthy();
     expect(led.period_key).toBe('1405-07');
-    expect(Number(led.paid_amount)).toBe(1234.5);
+    expect(Number(led.paid_amount)).toBe(1235);
     expect(led.payment_type).toBe('partial');
     expect(led.status).toBe('posted');
     expect(led.branch_id).toBe(BRANCH);

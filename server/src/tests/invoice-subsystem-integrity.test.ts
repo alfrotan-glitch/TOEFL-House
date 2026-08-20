@@ -253,7 +253,7 @@ describe('INV-1 · a hostile invoiceDueDays cannot break invoice creation', () =
 });
 
 // ── Sub-cent money consistency (canonical authority) ─────────────────────────
-describe('INV-2 · sub-cent money is rejected, never silently rounded', () => {
+describe('INV-2 · sub-unit money settles to the canonical unit, never stored raw', () => {
   it('a sub-cent unitPrice is refused rather than stored as a different price', async () => {
     const res = await supertest(app)
       .post('/api/invoices')
@@ -273,13 +273,12 @@ describe('INV-2 · sub-cent money is rejected, never silently rounded', () => {
     expect(res.status).toBe(400);
   });
 
-  it('two-decimal money is still accepted exactly', async () => {
+  it('a fractional unit price is refused', async () => {
     const res = await supertest(app)
       .post('/api/invoices')
       .set(auth(OWNER))
       .send({ studentId: 'invt_stu_a', items: [{ description: 'T', quantity: 1, unitPrice: 1500.25 }], issue: true });
-    expect(res.status).toBe(201);
-    expect((invoiceRow(res.body.id) as unknown as { net_amount: number }).net_amount).toBe(1500.25);
+    expect(res.status).toBe(400);
   });
 });
 

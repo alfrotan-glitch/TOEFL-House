@@ -138,7 +138,7 @@ describe('employee salary · PUT rejects every non-amount, exactly as the teache
       expect(String(updated.body?.error ?? '')).not.toMatch(/SQLite|constraint|bind/i);
       // The row must be untouched, and still genuinely numeric.
       expect(rowOf(eid)).toEqual(before);
-      expect(salaryTypeOf(eid)).toBe('real');
+      expect(salaryTypeOf(eid)).toBe('integer');
     });
   }
 
@@ -147,7 +147,7 @@ describe('employee salary · PUT rejects every non-amount, exactly as the teache
     for (const [, value] of NON_AMOUNTS) {
       const eid = mkEmployee(5000);
       await putEmp(eid, { baseSalary: value });
-      expect(salaryTypeOf(eid)).toBe('real');
+      expect(salaryTypeOf(eid)).toBe('integer');
       expect(Number(rowOf(eid).base_salary)).toBe(5000);
     }
   });
@@ -193,16 +193,16 @@ describe('employee salary · POST rejects every non-amount', () => {
 describe('employee salary · legitimate values are preserved', () => {
   it.each([
     ['whole number', 35000, 35000],
-    ['numeric string', '24000.50', 24000.5],
-    ['two-decimal', 12345.67, 12345.67],
-    ['rounds to two decimals', 1.005, 1.01],
+    ['numeric string', '24000', 24000],
+    ['large whole number', 12346, 12346],
+    ['one afghani', 1, 1],
     ['zero is legal', 0, 0],
   ])('accepts %s on PUT', async (_label, sent, stored) => {
     const eid = mkEmployee(10000);
     const res = await putEmp(eid, { baseSalary: sent });
     expect(res.status).toBe(200);
     expect(Number(rowOf(eid).base_salary)).toBe(stored);
-    expect(salaryTypeOf(eid)).toBe('real');
+    expect(salaryTypeOf(eid)).toBe('integer');
     // The API must report the stored numeric value, not the raw request value.
     expect(res.body.baseSalary).toBe(stored);
     expect(typeof res.body.baseSalary).toBe('number');
@@ -210,8 +210,8 @@ describe('employee salary · legitimate values are preserved', () => {
 
   it.each([
     ['whole number', 30000, 30000],
-    ['numeric string', '18000.25', 18000.25],
-    ['rounds to two decimals', 1.005, 1.01],
+    ['numeric string', '18000', 18000],
+    ['one afghani', 1, 1],
     ['zero', 0, 0],
   ])('accepts %s on POST and PERSISTS the parsed number', async (_label, sent, stored) => {
     const res = await postEmp({ baseSalary: sent });
@@ -224,7 +224,7 @@ describe('employee salary · legitimate values are preserved', () => {
     // numeric string would be stored as TEXT while still serialising fine.
     const created = res.body.id as string;
     expect(Number(rowOf(created).base_salary)).toBe(stored);
-    expect(salaryTypeOf(created)).toBe('real');
+    expect(salaryTypeOf(created)).toBe('integer');
   });
 
   it('leaves the salary untouched when baseSalary is omitted', async () => {
@@ -233,7 +233,7 @@ describe('employee salary · legitimate values are preserved', () => {
     expect(res.status).toBe(200);
     expect(rowOf(eid).full_name).toBe('Renamed Only');
     expect(Number(rowOf(eid).base_salary)).toBe(31337);
-    expect(salaryTypeOf(eid)).toBe('real');
+    expect(salaryTypeOf(eid)).toBe('integer');
   });
 
   it('treats an explicit null baseSalary as "leave unchanged"', async () => {
@@ -286,6 +286,6 @@ describe('employee salary · corrupt salaries cannot reach payroll', () => {
     const eid = mkEmployee(8000);
     await putEmp(eid, { baseSalary: 1e15 });
     expect(Number(rowOf(eid).base_salary)).toBe(8000);
-    expect(salaryTypeOf(eid)).toBe('real');
+    expect(salaryTypeOf(eid)).toBe('integer');
   });
 });
