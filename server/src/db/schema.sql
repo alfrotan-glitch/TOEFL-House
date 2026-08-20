@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS academic_holidays (
 -- Identity, staff records and the authorization model. A user may hold several
 -- role assignments; permission resolution is server-side and canonical.
 
-CREATE TABLE IF NOT EXISTS "users" (
+CREATE TABLE IF NOT EXISTS users (
   id                   TEXT PRIMARY KEY,
   username             TEXT NOT NULL UNIQUE,
   password_hash        TEXT NOT NULL,
@@ -254,7 +254,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
 );
 CREATE INDEX IF NOT EXISTS idx_campaigns_branch      ON campaigns(branch_id);
 
-CREATE TABLE IF NOT EXISTS "visitors" (
+CREATE TABLE IF NOT EXISTS visitors (
   id                      TEXT PRIMARY KEY,
   serial_no               TEXT,
   full_name               TEXT NOT NULL,
@@ -452,7 +452,7 @@ CREATE INDEX IF NOT EXISTS idx_sje_type              ON student_journey_events(e
 -- ============================================================================
 -- Placement assessment: profiles, banks, attempts, responses and results.
 
-CREATE TABLE IF NOT EXISTS "placement_assessment_profiles" (
+CREATE TABLE IF NOT EXISTS placement_assessment_profiles (
   id TEXT PRIMARY KEY,
   program_version_id TEXT NOT NULL REFERENCES program_versions(id) ON DELETE CASCADE,
   branch_id TEXT REFERENCES branches(id) ON DELETE CASCADE,
@@ -556,7 +556,7 @@ CREATE TABLE IF NOT EXISTS placement_media (
 );
 CREATE INDEX IF NOT EXISTS idx_placement_media_branch ON placement_media(branch_id, kind);
 
-CREATE TABLE IF NOT EXISTS "placement_assessment_attempts" (
+CREATE TABLE IF NOT EXISTS placement_assessment_attempts (
   id TEXT PRIMARY KEY,
   visitor_id TEXT NOT NULL REFERENCES visitors(id) ON DELETE CASCADE,
   program_version_id TEXT NOT NULL REFERENCES program_versions(id) ON DELETE RESTRICT,
@@ -611,7 +611,7 @@ CREATE TABLE IF NOT EXISTS placement_assessment_responses (
 );
 CREATE INDEX IF NOT EXISTS idx_placement_responses_attempt ON placement_assessment_responses(attempt_id, question_id);
 
-CREATE TABLE IF NOT EXISTS "placement_assessment_results" (
+CREATE TABLE IF NOT EXISTS placement_assessment_results (
   id TEXT PRIMARY KEY,
   attempt_id TEXT NOT NULL REFERENCES placement_assessment_attempts(id) ON DELETE CASCADE,
   component_key TEXT NOT NULL,
@@ -820,7 +820,7 @@ CREATE TABLE IF NOT EXISTS course_offerings (
 );
 CREATE INDEX IF NOT EXISTS idx_course_offerings_branch ON course_offerings(branch_id, status);
 
-CREATE TABLE IF NOT EXISTS "classes" (
+CREATE TABLE IF NOT EXISTS classes (
   id                   TEXT PRIMARY KEY,
   name                 TEXT NOT NULL,
   teacher_id           TEXT REFERENCES teachers(id) ON DELETE SET NULL,
@@ -864,7 +864,7 @@ CREATE INDEX IF NOT EXISTS idx_classes_lifecycle ON classes(lifecycle_stage);
 CREATE INDEX IF NOT EXISTS idx_classes_program   ON classes(program_id);
 CREATE INDEX IF NOT EXISTS idx_classes_teacher   ON classes(teacher_id);
 
-CREATE TABLE IF NOT EXISTS "class_teacher_skills" (
+CREATE TABLE IF NOT EXISTS class_teacher_skills (
   id              TEXT PRIMARY KEY,
   class_id        TEXT NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
   teacher_id      TEXT NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
@@ -940,7 +940,7 @@ CREATE TABLE IF NOT EXISTS promotion_rules (
 );
 CREATE INDEX IF NOT EXISTS idx_promotion_rules_version   ON promotion_rules(program_version_id, is_active);
 
-CREATE TABLE IF NOT EXISTS "teachers" (
+CREATE TABLE IF NOT EXISTS teachers (
   id                 TEXT PRIMARY KEY,
   full_name          TEXT NOT NULL,
   phone              TEXT,
@@ -1032,7 +1032,7 @@ ON teacher_evaluations(teacher_id, date, created_at);
 -- ============================================================================
 -- Enrollment and everything produced by actually running a class.
 
-CREATE TABLE IF NOT EXISTS "enrollments" (
+CREATE TABLE IF NOT EXISTS enrollments (
   id                  TEXT PRIMARY KEY,
   student_id          TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
   program_id          TEXT REFERENCES programs(id) ON DELETE SET NULL,
@@ -1081,7 +1081,7 @@ WHEN (SELECT branch_id FROM students WHERE id = NEW.student_id) IS NOT NEW.branc
    OR (NEW.class_id IS NOT NULL AND (SELECT branch_id FROM classes WHERE id = NEW.class_id) IS NOT NEW.branch_id)
 BEGIN SELECT RAISE(ABORT, 'Enrollment branch does not match student/class branch'); END;
 
-CREATE TABLE IF NOT EXISTS "enrollment_events" (
+CREATE TABLE IF NOT EXISTS enrollment_events (
   id              TEXT PRIMARY KEY,
   enrollment_id   TEXT NOT NULL REFERENCES enrollments(id) ON DELETE CASCADE,
   student_id      TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
@@ -1160,7 +1160,7 @@ CREATE TRIGGER IF NOT EXISTS trg_waitlist_duplicate_position_update BEFORE UPDAT
 CREATE TRIGGER IF NOT EXISTS trg_waitlist_duplicate_student BEFORE INSERT ON class_waitlist WHEN NEW.status IN ('waiting','offered') AND EXISTS (SELECT 1 FROM class_waitlist WHERE class_id = NEW.class_id AND student_id = NEW.student_id AND status IN ('waiting','offered')) BEGIN SELECT RAISE(ABORT, 'student already has an active waitlist entry'); END;
 CREATE TRIGGER IF NOT EXISTS trg_waitlist_duplicate_student_update BEFORE UPDATE OF class_id, student_id, status ON class_waitlist WHEN NEW.status IN ('waiting','offered') AND EXISTS (SELECT 1 FROM class_waitlist WHERE class_id = NEW.class_id AND student_id = NEW.student_id AND id <> NEW.id AND status IN ('waiting','offered')) BEGIN SELECT RAISE(ABORT, 'student already has an active waitlist entry'); END;
 
-CREATE TABLE IF NOT EXISTS "sessions" (
+CREATE TABLE IF NOT EXISTS sessions (
   id                 TEXT PRIMARY KEY,
   class_id           TEXT NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
   date               TEXT NOT NULL,
@@ -1186,7 +1186,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_teacher ON sessions(teacher_id, date);
 CREATE INDEX IF NOT EXISTS idx_teacher_sessions_period
 ON sessions(teacher_id, date, status, branch_id);
 
-CREATE TABLE IF NOT EXISTS "rosters" (
+CREATE TABLE IF NOT EXISTS rosters (
   id                 TEXT PRIMARY KEY,
   session_id         TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   student_id         TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
@@ -1237,7 +1237,7 @@ CREATE TABLE IF NOT EXISTS quizzes (
 );
 CREATE INDEX IF NOT EXISTS idx_quizzes_session ON quizzes(session_id);
 
-CREATE TABLE IF NOT EXISTS "class_assessments" (
+CREATE TABLE IF NOT EXISTS class_assessments (
   id                      TEXT PRIMARY KEY,
   class_id                TEXT NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
   title                   TEXT NOT NULL,
