@@ -31,6 +31,8 @@ import { HttpError } from '../../middleware/errorHandler.js';
 import { today } from '../../utils/ids.js';
 import { assertClassTransition, deriveLegacyClassStatus, type ClassStage } from './lifecycle-engine.js';
 import { ACTIVE_ENROLLMENT_STATUSES } from './class-capacity.js';
+import { createLogger } from '../observability/logger.js';
+const log = createLogger('class-lifecycle-service');
 
 /**
  * ROSTER-DRAIN INVARIANT (class audit C-1) — the single definition.
@@ -196,7 +198,7 @@ export class ClassLifecycleService {
       );
       // Fire-and-forget dispatch: later phases (attendance/payroll gating)
       // can subscribe without this call ever blocking the transition.
-      eventBus.dispatch(event).catch((err) => console.warn('[eventBus] class.lifecycle_changed dispatch failed', err));
+      eventBus.dispatch(event).catch((err) => log.warn('[eventBus] class.lifecycle_changed dispatch failed', err));
 
       if (to === 'activated') {
         const activationEvent = eventBus.emit(
@@ -206,7 +208,7 @@ export class ClassLifecycleService {
           { activationDate: cls.activation_date || today() },
           { operatorId: opts.operatorId ?? null, branchId: cls.branch_id },
         );
-        eventBus.dispatch(activationEvent).catch((err) => console.warn('[eventBus] class.activated dispatch failed', err));
+        eventBus.dispatch(activationEvent).catch((err) => log.warn('[eventBus] class.activated dispatch failed', err));
       }
     })();
 

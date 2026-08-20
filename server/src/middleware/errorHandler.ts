@@ -1,4 +1,6 @@
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
+import { createLogger } from '../core/observability/logger.js';
+const log = createLogger('errorHandler');
 
 /** Wraps an async route handler so thrown errors reach Express's error middleware instead of crashing the process. */
 export function ah(fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown> | unknown): RequestHandler {
@@ -64,8 +66,7 @@ export function errorHandler(err: unknown, req: Request, res: Response, next: Ne
 
   if (status >= 500) {
     // Log the full stack trace for server-side debugging
-    console.error('❌ [ErrorHandler] 500 Internal Server Error:');
-    console.error(err instanceof Error ? err.stack : err);
+    log.error('Unhandled error reached the error handler', err);
     
     // Security: In production, mask the internal error message to prevent info leakage
     return res.status(status).json({

@@ -2,6 +2,8 @@ import type { Request } from 'express';
 import { db } from '../db/connection.js';
 import { id, today, nowTimeFa } from '../utils/ids.js';
 import { canAccessBranchResource } from './auth.js';
+import { createLogger } from '../core/observability/logger.js';
+const log = createLogger('audit');
 
 /**
  * Defines the expected shape of the authenticated user object on the request.
@@ -97,7 +99,7 @@ export function writeAudit(
     insertAuditStmt.run(params);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error('❌ Failed to write audit log:', message);
+    log.error('❌ Failed to write audit log:', message);
     // Never lose the forensic signal silently. Capture the failure in a durable
     // side-channel so operations can reconcile the missing audit record.
     try {
@@ -111,7 +113,7 @@ export function writeAudit(
         JSON.stringify({ oldValue: params.old_value, newValue: params.new_value, path: req.originalUrl })
       );
     } catch (fallbackError) {
-      console.error('❌ CRITICAL: audit failure could not be persisted:', fallbackError);
+      log.error('❌ CRITICAL: audit failure could not be persisted:', fallbackError);
     }
   }
 }

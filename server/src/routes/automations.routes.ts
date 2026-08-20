@@ -23,6 +23,8 @@ import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id } from '../utils/ids.js';
 import { addNotification } from '../utils/notifications.js';
+import { createLogger } from '../core/observability/logger.js';
+const log = createLogger('automations');
 
 export const automationsRouter = Router();
 automationsRouter.use(authenticate);
@@ -440,9 +442,9 @@ export function seedDefaultAutomations(): void {
 
   try {
     seedTx();
-    console.log('✅ Seeded default automations.');
+    log.info('✅ Seeded default automations.');
   } catch (error) {
-    console.error('❌ Failed to seed default automations:', error);
+    log.error('❌ Failed to seed default automations:', error);
   }
 }
 

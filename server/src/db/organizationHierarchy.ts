@@ -16,6 +16,8 @@ import { ensureFinanceAccount } from '../utils/financeAccounts.js';
 import type Database from 'better-sqlite3';
 import { PAYROLL_ENVELOPES, payrollEnvelopeId } from '../core/finance/category-taxonomy.js';
 import { seedFinanceCategoryCatalog } from './financeCategoryCatalog.js';
+import { createLogger } from '../core/observability/logger.js';
+const log = createLogger('organizationHierarchy');
 
 export const FIXED_ORG_ID = 'org_toefl_house';
 export const FIXED_ORG_NAME = 'The TOEFL House';
@@ -160,11 +162,11 @@ function ensureBudgetLineCatalog(db: Database.Database): void {
 export function ensureOrganizationHierarchy(db: Database.Database): void {
   if (!tableExists(db, 'organizations') || !tableExists(db, 'campuses') || !tableExists(db, 'branches')) {
     // schema.sql must run first; if tables are still missing something is wrong upstream
-    console.warn('⚠️ Core hierarchy tables (organizations, campuses, branches) are missing. Skipping hierarchy setup.');
+    log.warn('⚠️ Core hierarchy tables (organizations, campuses, branches) are missing. Skipping hierarchy setup.');
     return;
   }
 
-  console.log('🔄 Ensuring organization hierarchy exists...');
+  log.info('🔄 Ensuring organization hierarchy exists...');
 
   // Wrap the entire operation in a transaction.
   // If any step fails, all changes are rolled back, preventing partial updates.
@@ -269,9 +271,9 @@ export function ensureOrganizationHierarchy(db: Database.Database): void {
   // Execute the transaction safely
   try {
     migrate();
-    console.log('✅ Organization hierarchy ensured successfully.');
+    log.info('✅ Organization hierarchy ensured successfully.');
   } catch (error) {
-    console.error('❌ Failed to ensure organization hierarchy:', error);
+    log.error('❌ Failed to ensure organization hierarchy:', error);
     throw error; // Re-throw to halt startup if hierarchy fails
   }
 }

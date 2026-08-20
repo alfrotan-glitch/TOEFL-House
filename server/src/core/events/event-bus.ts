@@ -28,6 +28,8 @@ Design Principles:
 */
 import { db } from '../../db/connection.js';
 import { randomUUID } from 'node:crypto';
+import { createLogger } from '../observability/logger.js';
+const log = createLogger('event-bus');
 
 // ============================================================================
 // §1 — TYPE DEFINITIONS
@@ -244,7 +246,7 @@ class EventBus {
       (h) => h.eventType === eventType && h.name === name,
     );
     if (exists) {
-      console.warn(`[EventBus] Handler "${name}" already registered for "${eventType}". Skipping.`);
+      log.warn(`[EventBus] Handler "${name}" already registered for "${eventType}". Skipping.`);
       return;
     }
 
@@ -256,7 +258,7 @@ class EventBus {
     if (this.recoveryTimer) return;
     this.recoveryTimer = setInterval(() => {
       void this.flushUnpublished().catch((error) => {
-        console.error('[EventBus] Background recovery failed:', error);
+        log.error('[EventBus] Background recovery failed:', error);
       });
     }, intervalMs);
     this.recoveryTimer.unref();
@@ -387,7 +389,7 @@ class EventBus {
         handlersFailed++;
         error = err instanceof Error ? err.message : String(err);
         if (!registration.optional) {
-          console.error(`[EventBus] Handler "${registration.name}" failed for ${event.id}:`, error);
+          log.error(`[EventBus] Handler "${registration.name}" failed for ${event.id}:`, error);
         }
       }
 
@@ -436,7 +438,7 @@ class EventBus {
     }
 
       if (totalFlushed > 0) {
-        console.log(`[EventBus] Recovered ${totalFlushed} unpublished event(s).`);
+        log.info(`[EventBus] Recovered ${totalFlushed} unpublished event(s).`);
       }
       return totalFlushed;
     } finally {
@@ -534,5 +536,5 @@ export async function initializeEventBus(): Promise<void> {
   eventBus.markHandlersReady();
   await eventBus.flushUnpublished();
   eventBus.startRecovery();
-  console.log('[EventBus] Initialized. Handlers registered:', eventBus.listHandlers().length);
+  log.info('Initialized', { handlers: eventBus.listHandlers().length });
 }

@@ -55,3 +55,6 @@ Validated by `npm run audit:registries`.
 | Printed tables repeat their headers across pages | build + test | `src/design-system/print.ts` | `server/src/tests/print-document.test.ts` | page two is unlabelled |
 | A printed document never fixes text to a physical side | build + test | `src/design-system/print.ts` | `server/src/tests/print-document.test.ts` | `text-align:left/right` absent |
 | No component opens its own print window | build | `scripts/verify-design-system.mjs` | provoked: a new `window.open('')` is reported | release gate fails |
+| No service module writes to console directly | build | `scripts/verify-logging.mjs` | provoked: a `console.log` in a route is reported | release gate fails |
+| A credential-shaped field is never written to a log | application | `server/src/core/observability/logger.ts` (`redact`) | `server/src/tests/logging-authority.test.ts` | value replaced with `[redacted]` |
+| A log line keeps the caller's message even when an error is attached | application | `describeError` uses `errorMessage` | `server/src/tests/logging-authority.test.ts` | message would be overwritten by the exception text |

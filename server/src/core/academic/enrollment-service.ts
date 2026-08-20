@@ -16,6 +16,8 @@ import { assertClassGenderAllows, assertNoDuplicateSeatEnrollment, assertNotAlre
 import { resolvePlacementRequirement, isAuthoritativeDecision } from '../placement/policy-engine.js';
 import { evaluateEnrollmentEligibility } from '../placement/placement-policy.js';
 import { resolveGoverningProgramVersionId, assertPlacementEligibleForClass } from '../placement/enrollment-gate.js';
+import { createLogger } from '../observability/logger.js';
+const log = createLogger('enrollment-service');
 
 export interface EnrollStudentInput {
   studentId: string;
@@ -731,7 +733,7 @@ export class EnrollmentService {
           payload: { fromStatus: from, toStatus: input.to, reason: input.reason ?? null, classId: enrollment.class_id },
         });
       } catch (err) {
-        console.warn('[journey] enrollment status change event failed', err);
+        log.warn('[journey] enrollment status change event failed', err);
       }
     })();
 

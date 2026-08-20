@@ -38,6 +38,8 @@ import {
   STUDENT_STATUSES,
   type StudentStatus,
 } from '../core/students/student-lifecycle.js';
+import { createLogger } from '../core/observability/logger.js';
+const log = createLogger('students');
 
 export const studentsRouter = Router();
 studentsRouter.use(authenticate);
@@ -750,7 +752,7 @@ studentsRouter.post('/manual', requirePermission('Student.Create'), ah(async (re
   try {
     const journey = getJourneyEngine(db);
     journey.appendEvent({ studentId: newId, eventType: JourneyEventType.STUDENT_REGISTERED, occurredAt: regDate, branchId: studentBranchId, actorUserId: user.userId, actorName: user.fullName, payload: { studentCode, fullName } });
-  } catch (err) { console.warn('[journey] failed', err); }
+  } catch (err) { log.warn('[journey] failed', err); }
 
   writeAudit(req, `Registered student ${fullName} (${studentCode})`, { newValue: JSON.stringify({ studentId: newId, branchId: studentBranchId, gender, discountPercent: effDiscount, receipt: receiptNumber }) });
   res.status(201).json({ id: newId, studentCode, receiptNumber });
@@ -865,7 +867,7 @@ studentsRouter.post('/:id/enroll-class', requirePermission('Class.Assign', 'Stud
 
   try {
     getJourneyEngine(db).appendEvent({ studentId: student.id, eventType: JourneyEventType.ENROLLMENT_CREATED, occurredAt: date, branchId: student.branch_id, actorUserId: user.userId, actorName: user.fullName, payload: { classId, className: cls.name, type: 'extra_class', fee: netFee } });
-  } catch (err) { console.warn('[journey] failed', err); }
+  } catch (err) { log.warn('[journey] failed', err); }
 
   writeAudit(req, `Enrolled ${student.full_name} in extra class ${cls.name}`, { newValue: JSON.stringify({ classId, netFee, paidNow }) });
   res.status(201).json({ ok: true, message: 'Successfully enrolled in extra class.' });
@@ -1114,7 +1116,7 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
 
   try {
     getJourneyEngine(db).appendEvent({ studentId: student.id, eventType: JourneyEventType.PAYMENT_RECORDED, occurredAt: date, branchId: student.branch_id, actorUserId: user.userId, actorName: user.fullName, payload: { amount: resolvedAmount, category, receiptNumber: rc } });
-  } catch (err) { console.warn('[journey] failed', err); }
+  } catch (err) { log.warn('[journey] failed', err); }
 
   writeAudit(req, `Recorded ${category} payment ${resolvedAmount} AFN from ${student.full_name}`, { branchId: student.branch_id, newValue: JSON.stringify({ receipt: rc, amount: resolvedAmount, category, paymentId: payId, semester: semName, bookId: bookRefId }) });
   res.status(201).json({ receiptNumber: rc, amountCharged: resolvedAmount });
@@ -1181,7 +1183,7 @@ studentsRouter.post('/:id/refund', requirePermission('Refund.Approve'), ah(async
 
   try {
     getJourneyEngine(db).appendEvent({ studentId: student.id, eventType: JourneyEventType.PAYMENT_RECORDED, occurredAt: date, branchId: student.branch_id, actorUserId: user.userId, actorName: user.fullName, payload: { amount: -refundAmount, category: 'refund', receiptNumber: rc } });
-  } catch (err) { console.warn('[journey] failed', err); }
+  } catch (err) { log.warn('[journey] failed', err); }
 
   writeAudit(req, `Refunded ${refundAmount} AFN to ${student.full_name}`, { branchId: student.branch_id, oldValue: JSON.stringify({ reason: String(reason) }), newValue: JSON.stringify({ receipt: rc, amount: refundAmount, paymentId: payId }) });
   res.status(201).json({ receiptNumber: rc });

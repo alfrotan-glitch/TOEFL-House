@@ -65,6 +65,8 @@ import waitlistRouter from './routes/waitlist.routes.js';
 import searchRouter from './routes/search.routes.js';
 import { reportsRouter } from './routes/reports.routes.js';
 import { dashboardRouter } from './routes/dashboard.routes.js';
+import { createLogger } from './core/observability/logger.js';
+const log = createLogger('index');
 
 // ============================================================================
 // §1 — INITIALIZATION
@@ -73,22 +75,22 @@ import { dashboardRouter } from './routes/dashboard.routes.js';
 async function bootstrap(): Promise<void> {
   assertJwtSecretConfigured();
 
-  console.log('Initializing database…');
+  log.info('Initializing database…');
   initSchema();
   
   bootstrapRbacCatalog(db);
   
   bootstrapAcademicCatalog(db);
   
-  console.log('Seeding default rules and workflows…');
+  log.info('Seeding default rules and workflows…');
   seedDefaultRules();
   seedDefaultWorkflowDefinitions();
   
-  console.log('Starting Event Bus and registering handlers…');
+  log.info('Starting Event Bus and registering handlers…');
   registerEventHandlers();
   await initializeEventBus();
 
-  console.log('✅ Bootstrap complete.');
+  log.info('✅ Bootstrap complete.');
 }
 
 // ============================================================================
@@ -130,7 +132,7 @@ const authLimiter = rateLimit({
 // ── Request logging ───────────────────────────────────────────────────────
 app.use((req: Request, _res: Response, next: NextFunction) => {
   if (process.env.NODE_ENV !== 'production') {
-    console.log(`[API] ${req.method} ${req.path}`);
+    log.info(`[API] ${req.method} ${req.path}`);
   }
   next();
 });
@@ -256,7 +258,7 @@ function listenOnConfiguredPort(): Promise<void> {
     candidate.once('listening', () => {
       candidate.removeListener('error', onError);
       server = candidate;
-      console.log(`[BOOT] HTTP listener active on http://${HOST}:${PORT}`);
+      log.info(`[BOOT] HTTP listener active on http://${HOST}:${PORT}`);
       resolve();
     });
   });
@@ -272,12 +274,12 @@ async function start(): Promise<void> {
     setupGracefulShutdown();
     isApplicationReady = true;
     startupFailure = null;
-    console.log(`✅ TOEFL House ERP ready on http://127.0.0.1:${PORT}`);
+    log.info(`✅ TOEFL House ERP ready on http://127.0.0.1:${PORT}`);
   } catch (err) {
     const message = err instanceof Error ? (err.stack || err.message) : String(err);
     startupFailure = message;
     isApplicationReady = false;
-    console.error('❌ Fatal error during startup:', message);
+    log.error('❌ Fatal error during startup:', message);
     if (server) {
       try { server.close(); } catch { /* listener may already be closed */ }
     }
@@ -295,7 +297,7 @@ function setupGracefulShutdown() {
     if (isShuttingDown) return;
     isShuttingDown = true;
 
-    console.log(`\n${signal} received. Shutting down gracefully...`);
+    log.info(`\n${signal} received. Shutting down gracefully...`);
 
     if (!server) {
       try { db.close(); } catch { /* already closed */ }
@@ -305,16 +307,16 @@ function setupGracefulShutdown() {
 
     server.close((err) => {
       if (err) {
-        console.error('Error during server close:', err);
+        log.error('Error during server close:', err);
         process.exit(1);
       }
       
-      console.log('HTTP server closed.');
+      log.info('HTTP server closed.');
       try {
         db.close();
-        console.log('Database connection closed.');
+        log.info('Database connection closed.');
       } catch (dbErr) {
-        console.error('Error closing database:', dbErr);
+        log.error('Error closing database:', dbErr);
       }
       
       process.exit(0);
@@ -322,7 +324,7 @@ function setupGracefulShutdown() {
 
     // Force kill if graceful shutdown fails after 10 seconds
     setTimeout(() => {
-      console.error('Forcing shutdown after timeout...');
+      log.error('Forcing shutdown after timeout...');
       process.exit(1);
     }, 10000).unref();
   };
@@ -332,11 +334,11 @@ function setupGracefulShutdown() {
 }
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  log.error('Unhandled promise rejection', reason);
 });
 
 process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception:', err);
+  log.error('Uncaught Exception:', err);
   process.exit(1);
 });
 

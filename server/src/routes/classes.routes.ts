@@ -25,6 +25,8 @@ import { assertClassGenderAllows } from '../core/academic/class-admission.js';
 import { ACTIVE_ENROLLMENT_STATUSES } from '../core/academic/class-capacity.js';
 import type { RoleCode } from '../core/rbac/permission-catalog.js';
 import { ACADEMIC_DEFAULTS } from '../core/configuration/policy-catalog.js';
+import { createLogger } from '../core/observability/logger.js';
+const log = createLogger('classes');
 
 const enrollmentServiceForPromotion = getEnrollmentService(db);
 
@@ -1198,7 +1200,7 @@ classesRouter.post('/:id/complete-semester', authorize('owner', 'general_manager
           else if (decision.outcome === 'conditional_pass') enrollmentServiceForPromotion.markConditionalPass(enrollment.id, { reason: decision.reasons.join(' '), actorUserId: user?.userId });
           else if (decision.outcome === 'retake') enrollmentServiceForPromotion.markRetake(enrollment.id, { reason: decision.reasons.join(' '), actorUserId: user?.userId });
           // manual_review: enrollment stays 'active' until a manager resolves it, same as the semester record.
-        } catch (err) { console.warn('[promotion] enrollment transition failed', err); }
+        } catch (err) { log.warn('[promotion] enrollment transition failed', err); }
       }
 
       try {
@@ -1215,7 +1217,7 @@ classesRouter.post('/:id/complete-semester', authorize('owner', 'general_manager
             criteriaSource: criteria.source,
           }
         });
-      } catch (err) { console.warn('[journey] promotion event failed', err); }
+      } catch (err) { log.warn('[journey] promotion event failed', err); }
     }
     
     // Lock the class via the Lifecycle Engine (grading → completed).
@@ -1296,7 +1298,7 @@ classesRouter.post('/:id/promotion/resolve/:studentId', authorize('owner', 'gene
         actorName: user?.fullName,
         payload: { decision: outcome, reasons: reason ? [reason] : [], classId: cls.id, level: cls.level, isManualOverride: true },
       });
-    } catch (err) { console.warn('[journey] manual review event failed', err); }
+    } catch (err) { log.warn('[journey] manual review event failed', err); }
   });
   resolveTx();
 

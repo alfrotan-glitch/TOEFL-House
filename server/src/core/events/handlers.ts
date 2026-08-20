@@ -7,6 +7,8 @@ import { db } from '../../db/connection.js';
 import { eventBus, DomainEvent } from './event-bus.js';
 import { addNotification } from '../../utils/notifications.js';
 import { id } from '../../utils/ids.js';
+import { createLogger } from '../observability/logger.js';
+const log = createLogger('handlers');
 
 // ── Performance: Module-level Prepared Statements ──────────────────────────
 const stmtGetActiveWorkflowDef = db.prepare(
@@ -226,7 +228,7 @@ export function registerEventHandlers(): void {
         stmtUpsertPipelineMetric.run(event.type, event.branchId);
       } catch (err) {
         // Non-critical — analytics should never break event processing
-        console.error('[EventBus] Analytics logging failed:', err);
+        log.error('[EventBus] Analytics logging failed:', err);
       }
     },
     'analytics-event-logger',
@@ -234,5 +236,5 @@ export function registerEventHandlers(): void {
     true
   );
 
-  console.log(`[EventBus] Registered ${eventBus.listHandlers().length} event handlers.`);
+  log.info(`[EventBus] Registered ${eventBus.listHandlers().length} event handlers.`);
 }

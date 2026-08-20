@@ -92,6 +92,7 @@ run('protocol integrity', 'npm run audit:protocol');
 // point — fails the release, exactly as a broken test would.
 run('registry audit', 'npm run audit:registries');
 run('design system audit', 'npm run audit:design-system');
+run('logging audit', 'npm run audit:logging');
 
 console.log('\nBuild');
 run('frontend production build', 'npm run build', { slow: true });

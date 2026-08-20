@@ -17,6 +17,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ensureOrganizationHierarchy } from './organizationHierarchy.js';
 import { setFinanceAccountsDatabase } from '../utils/financeAccounts.js';
+import { createLogger } from '../core/observability/logger.js';
+const log = createLogger('connection');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -73,7 +75,7 @@ export function initSchema(): void {
   try {
     db.exec(schema);
   } catch (error) {
-    console.error('Failed to apply the canonical schema.');
+    log.error('Failed to apply the canonical schema.');
     throw error;
   } finally {
     db.pragma('foreign_keys = ON');
