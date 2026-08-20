@@ -15,8 +15,8 @@ export type NotificationType = 'info' | 'warning' | 'critical' | 'success';
 
 // ── Performance: Compile statement only once at module load ────────────────
 const stmtInsertNotification = db.prepare(
-  `INSERT INTO notifications (id, title, message, date, read, type, branch_id) 
-   VALUES (?, ?, ?, ?, 0, ?, ?)`
+  `INSERT INTO notifications (id, title, message, date, type, branch_id)
+   VALUES (?, ?, ?, ?, ?, ?)`
 );
 
 /**

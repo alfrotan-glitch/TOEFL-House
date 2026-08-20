@@ -15,7 +15,6 @@ Validated by `npm run audit:registries`.
 | A channel belongs to its budget line's own subcategory | database | `trg_budget_lines_channel_matches_category_*` (077) | `server/src/tests/finance-taxonomy.test.ts` | `RAISE(ABORT)` |
 | A budget line balance never goes negative | database | `trg_budget_lines_nonnegative_*` (migration 065) | `server/src/tests/payroll-reversal-integrity.test.ts` | `RAISE(ABORT)` |
 | Cash and savings balances never go negative | database | `CHECK` on `finance_accounts` | `server/src/tests/cash-position-reconciliation.test.ts` | constraint violation |
-| Money is stored to at most 2 decimal places | database | `trg_payments_money_scale_*`, `trg_fin_tx_money_scale_*` | `server/src/tests/money-boundary-property.test.ts` | `RAISE(ABORT)` |
 | Capital expenditure is never operating expense | application | `server/src/core/finance/ledger-classification.ts` | `server/src/tests/finance-accounting-classification.test.ts` | excluded from the P&L expense total |
 | Non-expense cash movements are never operating expense | application | `server/src/core/finance/ledger-classification.ts` | `server/src/tests/finance-accounting-classification.test.ts` | excluded from the P&L expense total |
 | An uncategorised expense still counts as operating cost | application | `COALESCE(..., 'operating_expense')` in `ledger-classification.ts` | `server/src/tests/finance-accounting-classification.test.ts` | conservative default; never silently dropped |
@@ -32,7 +31,8 @@ Validated by `npm run audit:registries`.
 | Deleting a user's assignments revokes their access | application | `server/src/core/rbac/rbac-service.ts` | `server/src/tests/rbac-home-branch-invariant.test.ts` | guarded endpoint returns 403 |
 | There is no role column on `users` at all | database | `server/src/db/schema.sql` | `server/src/tests/rbac-single-authority.test.ts` | `no such column: role` |
 | The session token carries no role or permission claim | application | `server/src/utils/auth.ts` (`TokenPayload`) | `server/src/tests/rbac-single-authority.test.ts` | a forged claim is ignored; authority is re-resolved per request |
-| `users.branch_id` never authorizes branch access | application | `server/src/core/rbac/rbac-service.ts` (`canAccessBranch`) | `server/src/tests/rbac-single-authority.test.ts` | access denied without a matching scope |
+| `users.branch_id` never authorizes branch access | application | `server/src/core/rbac/rbac-service.ts` (`canAccessBranch`) + `server/src/middleware/auth.ts` (`resolveBranchScope`) | `server/src/tests/branch-scoping.test.ts` | 403 when no live assignment authorizes the identity branch |
+| Reading a notification never marks it read for another user | database + application | composite PK on `notification_read_receipts` + authenticated user id in `server/src/routes/audit.routes.ts` | `server/src/tests/notifications-authority.test.ts` | one idempotent receipt for the caller; every other viewer remains unread |
 | An expired assignment grants nothing | application | `server/src/core/rbac/rbac-service.ts` | `server/src/tests/rbac-expired-grant-escalation.test.ts` | 403 |
 | A user has at most one primary role assignment | database | `trg_user_roles_single_primary` | `server/src/tests/rbac-single-authority.test.ts` | `SqliteError: user may have only one primary role` |
 | Authorization guards name canonical role codes only | application + compiler | `RoleCode` derived from `ROLE_CODES` in `server/src/core/rbac/permission-catalog.ts` | `server/src/tests/rbac-scope.test.ts` | unknown role name fails to compile |

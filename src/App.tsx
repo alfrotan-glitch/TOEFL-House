@@ -172,13 +172,22 @@ function AuthenticatedApp() {
   }, []);
 
   const unreadCount = store.notifications.filter((n) => !n.read).length;
+  const notificationBranchNames = useMemo(
+    () => new Map(store.settings.branches.map((branch) => [branch.id, branch.name])),
+    [store.settings.branches],
+  );
 
   // ── Notification helpers ────────────────────────────────────────────
   const handleMarkAllRead = useCallback(async () => {
     try {
-      await api.post('/notifications/read-all');
+      const result = await api.post<{ marked: number }>('/notifications/read-all');
       await store.reloadNotifications();
-      triggerToast('All notifications marked as read', 'success');
+      triggerToast(
+        result.marked === 0
+          ? 'No unread notifications remained'
+          : `${result.marked} notification${result.marked === 1 ? '' : 's'} marked as read`,
+        'success',
+      );
     } catch {
       triggerToast('Failed to mark notifications as read', 'error');
     }
@@ -457,7 +466,10 @@ function AuthenticatedApp() {
                         <div className="flex-1 min-w-0">
                           <p className="font-bold text-slate-800 text-[11px]">{notif.title}</p>
                           <p className="text-[10px] text-slate-500 leading-relaxed mt-0.5 line-clamp-2">{notif.message}</p>
-                          <p className="text-[9px] text-slate-400 font-mono mt-1">{notif.date}</p>
+                          <p className="text-[9px] text-slate-400 font-mono mt-1">
+                            {notif.date}
+                            {notif.branchId && ` · ${notificationBranchNames.get(notif.branchId) ?? notif.branchId}`}
+                          </p>
                         </div>
                       </div>
                     ))

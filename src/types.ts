@@ -1332,8 +1332,8 @@ export interface Notification {
   date: string;
   read: boolean;
   type: EventSeverity;
-  userId?: string;
   link?: string;
+  branchId?: string | null;
 }
 
 export interface AuditLog {

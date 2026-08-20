@@ -21,6 +21,7 @@ const PRINCIPALS: Record<string, { roleCode: string; scopeType: string; scopeId:
   owner: { roleCode: 'owner', scopeType: 'organization', scopeId: null },
   manager: { roleCode: 'general_manager', scopeType: 'branch', scopeId: 'b1' },
   finance: { roleCode: 'finance_manager', scopeType: 'branch', scopeId: 'b1' },
+  misaligned: { roleCode: 'receptionist', scopeType: 'branch', scopeId: 'b2' },
 };
 
 const userIdFor = (role: string) => `bs_${role}`;
@@ -41,7 +42,7 @@ beforeAll(() => {
       `INSERT OR REPLACE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
        VALUES (?, ?, ?, 'b1', 'test-hash', 1, 0)`,
     ).run(id, id, id);
-    assignRole(id, role, 'b1');
+    assignRole(id, grant.roleCode, 'b1');
     const roleRow = db.prepare('SELECT id FROM roles WHERE code = ?').get(grant.roleCode) as { id: string };
     db.prepare('DELETE FROM user_roles WHERE user_id = ?').run(id);
     db.prepare(
@@ -98,5 +99,16 @@ describe('Branch Scoping', () => {
     const scope = resolveBranchScope(mockReq('registrar', 'b1', 'all'));
     expect(scope.branchId).toBe('b1');
     expect(scope.isAll).toBe(false);
+  });
+
+  it('does not treat an unauthorized identity/home branch as a fallback scope', () => {
+    expect(() => resolveBranchScope(mockReq('misaligned', 'b1'))).toThrow(
+      'No authorized branch scope is available',
+    );
+  });
+
+  it('allows a principal to request the branch granted by their assignment', () => {
+    const scope = resolveBranchScope(mockReq('misaligned', 'b1', 'b2'));
+    expect(scope).toEqual({ branchId: 'b2', isAll: false });
   });
 });

@@ -1,42 +1,9 @@
 /**
- * A-9 — notifications obey the canonical authorities.
- * ============================================================================
- * Notifications carry money. Twenty-one of the thirty-eight writers put an AFN
- * figure in the message: "250,000 AFN deducted from the main account",
- * "'Generator fuel' (95,000 AFN) exceeds the auto-approve threshold". So who
- * may read one, and who may act on one, is a Finance and RBAC question, not a
- * cosmetic one.
- *
- * Three defects were found by audit and are pinned here.
- *
- *   SCOPE CAME FROM IDENTITY, NOT AUTHORIZATION
- *     The read filtered on `req.user.branchId` — the operator's HOME branch.
- *     C-8 already established that `users.branch_id` is an identity attribute
- *     that authorizes nothing; `resolveBranchScope` is the authority, and 74
- *     other route reads use it. An organization-scoped owner could not reach
- *     another branch's notifications at all, including an expense awaiting
- *     their own approval.
- *
- *   A MUTATION WITH NO BRANCH CHECK
- *     `PATCH /:id/read` looked a notification up by id and marked it read. Its
- *     only guard was `existing.user_id && existing.user_id !== userId`, and
- *     `user_id` is never written by anything — so the guard could not fire and
- *     any authenticated principal could mark ANY branch's notification read.
- *     Because the row is shared, that hides it from the branch it belonged to.
- *
- *   MUTATORS WERE LESS GUARDED THAN THE READ
- *     `GET /` requires at least one permission (`denyPermissionless`). The two
- *     mutators required none, so a principal who cannot read a notification
- *     could still mark it read.
- *
- * WHAT THIS SUITE DELIBERATELY DOES NOT DECIDE
- *
- * Whether read state is per-user or shared per branch is UNDECIDED and the
- * repository is CONFLICTED on it: the per-id path implements shared state,
- * while the read-all comment states the opposite intent. `POST /read-all`
- * therefore keeps its current semantics and is only made to REPORT what it
- * did, so the defect is visible instead of being a silent success. The tests
- * below assert that truthful reporting — they do not assert a policy.
+ * Notifications carry operational and financial facts, so visibility and read
+ * state are both authorization concerns. This suite proves the owner-approved
+ * policy: the event is branch-visible, each viewer owns an independent read
+ * receipt, and organization-wide principals aggregate their authorized
+ * branches by default.
  */
 import { assignRole } from './support/identity.js';
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
@@ -74,13 +41,14 @@ const tok = (userId: string, branchId: string): TokenPayload => ({
 });
 const auth = (u: TokenPayload) => ({ Authorization: `Bearer ${signToken(u)}` });
 
-/** Organization-scoped. Home branch A. */
+/** Organization-scoped, with branch A as the identity/home attribute. */
 const OWNER = tok('notif_owner', BR_A);
-/** Branch-scoped to A only. */
+/** Two independent viewers with access to branch A. */
 const RECEP_A = tok('notif_recep_a', BR_A);
+const RECEP_A_2 = tok('notif_recep_a_2', BR_A);
 /** Branch-scoped to B only. */
 const RECEP_B = tok('notif_recep_b', BR_B);
-/** Holds a role that carries NO permissions at all. */
+/** Holds a role that carries no permissions. */
 const STUDENT = tok('notif_student', BR_A);
 
 let app: ReturnType<typeof createApp>;
@@ -90,8 +58,20 @@ const listFor = (u: TokenPayload, query = '') =>
 
 const idsIn = (body: unknown) => (body as { id: string }[]).map((n) => n.id).sort();
 
-const readFlag = (nid: string) =>
-  (db.prepare('SELECT read FROM notifications WHERE id = ?').get(nid) as { read: number }).read;
+const receiptCount = (notificationId: string, userId: string) =>
+  (db.prepare(
+    `SELECT COUNT(*) AS c
+       FROM notification_read_receipts
+      WHERE notification_id = ? AND user_id = ?`,
+  ).get(notificationId, userId) as { c: number }).c;
+
+async function readState(user: TokenPayload, notificationId: string, query = ''): Promise<number> {
+  const res = await listFor(user, query);
+  expect(res.status).toBe(200);
+  const row = (res.body as { id: string; read: number }[]).find((item) => item.id === notificationId);
+  expect(row).toBeDefined();
+  return row!.read;
+}
 
 beforeAll(async () => {
   initSchema();
@@ -105,7 +85,7 @@ beforeAll(async () => {
       b, b, 'Kabul', 'notif_campus',
     );
   }
-  for (const u of [OWNER, RECEP_A, RECEP_B, STUDENT]) {
+  for (const u of [OWNER, RECEP_A, RECEP_A_2, RECEP_B, STUDENT]) {
     db.prepare(
       `INSERT OR REPLACE INTO users (id, username, full_name, branch_id, password_hash, is_active, must_change_password)
        VALUES (?,?,?,?,?,1,0)`,
@@ -113,6 +93,7 @@ beforeAll(async () => {
   }
   assignRole(OWNER.userId, 'owner', null);
   assignRole(RECEP_A.userId, 'receptionist', BR_A);
+  assignRole(RECEP_A_2.userId, 'receptionist', BR_A);
   assignRole(RECEP_B.userId, 'receptionist', BR_B);
   assignRole(STUDENT.userId, 'student', BR_A);
 
@@ -124,142 +105,218 @@ beforeEach(() => {
 });
 
 describe('the fixture is genuinely cross-branch', () => {
-  /**
-   * Guards the suite itself. If the roles below ever stopped differing in
-   * reach, every authorization test would pass without proving anything.
-   */
-  it('the receptionists really are confined to different branches', async () => {
-    addNotification('A money event', '10,000 AFN moved', 'info', BR_A);
-    addNotification('B money event', '20,000 AFN moved', 'info', BR_B);
+  it('the receptionists are confined to their assigned branches', async () => {
+    const aId = addNotification('A money event', '10,000 AFN moved', 'info', BR_A);
+    const bId = addNotification('B money event', '20,000 AFN moved', 'info', BR_B);
 
-    const a = await listFor(RECEP_A);
-    const b = await listFor(RECEP_B);
-    expect(a.status).toBe(200);
-    expect(b.status).toBe(200);
-    expect(idsIn(a.body)).not.toEqual(idsIn(b.body));
-    expect(a.body).toHaveLength(1);
-    expect(b.body).toHaveLength(1);
+    expect(idsIn((await listFor(RECEP_A)).body)).toEqual([aId]);
+    expect(idsIn((await listFor(RECEP_B)).body)).toEqual([bId]);
   });
 
-  it('the student role carries no permissions, which is what denyPermissionless tests', () => {
-    const codes = db
-      .prepare(
-        `SELECT COUNT(*) c FROM user_roles ur
-           JOIN role_permissions rp ON rp.role_id = ur.role_id
-          WHERE ur.user_id = ?`,
-      )
-      .get(STUDENT.userId) as { c: number };
+  it('the student role carries no permission, which is what denyPermissionless tests', () => {
+    const codes = db.prepare(
+      `SELECT COUNT(*) c FROM user_roles ur
+         JOIN role_permissions rp ON rp.role_id = ur.role_id
+        WHERE ur.user_id = ?`,
+    ).get(STUDENT.userId) as { c: number };
     expect(codes.c).toBe(0);
   });
 });
 
 describe('reads resolve scope through the canonical authority', () => {
-  it('an authorized owner can reach another branch by asking for it', async () => {
-    addNotification('B expense awaiting approval', '95,000 AFN', 'warning', BR_B);
+  it('an organization-scoped owner aggregates all branches by default', async () => {
+    const aId = addNotification('A event', '1 AFN', 'info', BR_A);
+    const bId = addNotification('B expense awaiting approval', '95,000 AFN', 'warning', BR_B);
+
+    const res = await listFor(OWNER);
+    expect(res.status).toBe(200);
+    expect(idsIn(res.body)).toEqual([aId, bId].sort());
+  });
+
+  it('an owner may still request one branch explicitly', async () => {
+    addNotification('A event', '1 AFN', 'info', BR_A);
+    const bId = addNotification('B event', '2 AFN', 'info', BR_B);
 
     const res = await listFor(OWNER, `?branchId=${BR_B}`);
     expect(res.status).toBe(200);
-    expect(res.body).toHaveLength(1);
-    expect(res.body[0].title).toBe('B expense awaiting approval');
+    expect(idsIn(res.body)).toEqual([bId]);
   });
 
-  it('an owner asking for all branches receives all of them', async () => {
-    addNotification('A event', '1 AFN', 'info', BR_A);
-    addNotification('B event', '2 AFN', 'info', BR_B);
-
-    const res = await listFor(OWNER, '?branchId=all');
-    expect(res.status).toBe(200);
-    expect(res.body).toHaveLength(2);
-  });
-
-  it('a branch-scoped operator asking for another branch is NOT given it', async () => {
-    addNotification('A event', '1 AFN', 'info', BR_A);
+  it('a branch-scoped operator asking for another branch receives only their authorized home scope', async () => {
+    const aId = addNotification('A event', '1 AFN', 'info', BR_A);
     addNotification('B secret', '999,999 AFN', 'critical', BR_B);
 
     const res = await listFor(RECEP_A, `?branchId=${BR_B}`);
     expect(res.status).toBe(200);
-    // Falls back to the caller's own branch rather than honouring the request.
-    expect(res.body.map((n: { title: string }) => n.title)).toEqual(['A event']);
+    expect(idsIn(res.body)).toEqual([aId]);
   });
 
-  it('a branch-scoped operator asking for ALL branches is NOT given them', async () => {
-    addNotification('A event', '1 AFN', 'info', BR_A);
+  it('a branch-scoped operator asking for all branches receives only their authorized home scope', async () => {
+    const aId = addNotification('A event', '1 AFN', 'info', BR_A);
     addNotification('B secret', '999,999 AFN', 'critical', BR_B);
 
     const res = await listFor(RECEP_A, '?branchId=all');
     expect(res.status).toBe(200);
-    expect(res.body.map((n: { title: string }) => n.title)).toEqual(['A event']);
+    expect(idsIn(res.body)).toEqual([aId]);
   });
 
-  it('the default with no query is unchanged — the caller\'s own branch', async () => {
-    addNotification('A event', '1 AFN', 'info', BR_A);
+  it('a branch-scoped operator defaults to their authorized branch', async () => {
+    const aId = addNotification('A event', '1 AFN', 'info', BR_A);
     addNotification('B event', '2 AFN', 'info', BR_B);
 
-    const res = await listFor(RECEP_A);
-    expect(res.body.map((n: { title: string }) => n.title)).toEqual(['A event']);
+    expect(idsIn((await listFor(RECEP_A)).body)).toEqual([aId]);
+  });
+
+  it('global notifications are visible in every authorized scope', async () => {
+    const globalId = addNotification('System maintenance', 'Tonight', 'info');
+    expect(idsIn((await listFor(RECEP_A)).body)).toEqual([globalId]);
+    expect(idsIn((await listFor(RECEP_B)).body)).toEqual([globalId]);
   });
 
   it('a principal with no permissions cannot read notifications', async () => {
     addNotification('A event', '1 AFN', 'info', BR_A);
-    const res = await listFor(STUDENT);
-    expect(res.status).toBe(403);
+    expect((await listFor(STUDENT)).status).toBe(403);
   });
 });
 
-describe('marking one notification read is authorized by branch', () => {
-  it('an operator cannot mark another branch\'s notification read', async () => {
-    const nid = addNotification('B expense awaiting approval', '95,000 AFN', 'warning', BR_B);
+describe('one viewer cannot change another viewer\'s read state', () => {
+  it('marking one notification creates only the caller\'s receipt', async () => {
+    const notificationId = addNotification('A event', '1 AFN', 'info', BR_A);
 
     const res = await supertest(app)
-      .patch(`/api/notifications/${nid}/read`)
+      .patch(`/api/notifications/${notificationId}/read`)
+      .set(auth(RECEP_A));
+
+    expect(res.status).toBe(200);
+    expect(res.body.marked).toBe(1);
+    expect(receiptCount(notificationId, RECEP_A.userId)).toBe(1);
+    expect(receiptCount(notificationId, RECEP_A_2.userId)).toBe(0);
+    expect(await readState(RECEP_A, notificationId)).toBe(1);
+    expect(await readState(RECEP_A_2, notificationId)).toBe(0);
+  });
+
+  it('an organization-scoped owner may read another branch event without clearing it for that branch', async () => {
+    const notificationId = addNotification('B event', '2 AFN', 'info', BR_B);
+    const res = await supertest(app)
+      .patch(`/api/notifications/${notificationId}/read`)
+      .set(auth(OWNER));
+
+    expect(res.status).toBe(200);
+    expect(receiptCount(notificationId, OWNER.userId)).toBe(1);
+    expect(receiptCount(notificationId, RECEP_B.userId)).toBe(0);
+    expect(await readState(OWNER, notificationId)).toBe(1);
+    expect(await readState(RECEP_B, notificationId)).toBe(0);
+  });
+
+  it('marking the same notification twice is idempotent', async () => {
+    const notificationId = addNotification('A event', '1 AFN', 'info', BR_A);
+    const first = await supertest(app)
+      .patch(`/api/notifications/${notificationId}/read`)
+      .set(auth(RECEP_A));
+    const replay = await supertest(app)
+      .patch(`/api/notifications/${notificationId}/read`)
+      .set(auth(RECEP_A));
+
+    expect(first.body.marked).toBe(1);
+    expect(replay.body.marked).toBe(0);
+    expect(receiptCount(notificationId, RECEP_A.userId)).toBe(1);
+  });
+
+  it('two concurrent marks converge on one receipt', async () => {
+    const notificationId = addNotification('A event', '1 AFN', 'info', BR_A);
+    const [left, right] = await Promise.all([
+      supertest(app).patch(`/api/notifications/${notificationId}/read`).set(auth(RECEP_A)),
+      supertest(app).patch(`/api/notifications/${notificationId}/read`).set(auth(RECEP_A)),
+    ]);
+
+    expect([left.status, right.status]).toEqual([200, 200]);
+    expect(left.body.marked + right.body.marked).toBe(1);
+    expect(receiptCount(notificationId, RECEP_A.userId)).toBe(1);
+  });
+
+  it('an operator cannot mark another branch\'s notification read', async () => {
+    const notificationId = addNotification('B expense awaiting approval', '95,000 AFN', 'warning', BR_B);
+    const res = await supertest(app)
+      .patch(`/api/notifications/${notificationId}/read`)
       .set(auth(RECEP_A));
 
     expect(res.status).toBe(403);
-    // The semantic check: the row must be untouched, not merely an error code.
-    expect(readFlag(nid)).toBe(0);
-  });
-
-  it('an operator can mark their own branch\'s notification read', async () => {
-    const nid = addNotification('A event', '1 AFN', 'info', BR_A);
-    const res = await supertest(app).patch(`/api/notifications/${nid}/read`).set(auth(RECEP_A));
-    expect(res.status).toBe(200);
-    expect(readFlag(nid)).toBe(1);
-  });
-
-  it('an organization-scoped owner may mark any branch\'s notification read', async () => {
-    const nid = addNotification('B event', '2 AFN', 'info', BR_B);
-    const res = await supertest(app).patch(`/api/notifications/${nid}/read`).set(auth(OWNER));
-    expect(res.status).toBe(200);
-    expect(readFlag(nid)).toBe(1);
+    expect(receiptCount(notificationId, RECEP_A.userId)).toBe(0);
   });
 
   it('a principal with no permissions cannot mark anything read', async () => {
-    const nid = addNotification('A event', '1 AFN', 'info', BR_A);
-    const res = await supertest(app).patch(`/api/notifications/${nid}/read`).set(auth(STUDENT));
+    const notificationId = addNotification('A event', '1 AFN', 'info', BR_A);
+    const res = await supertest(app)
+      .patch(`/api/notifications/${notificationId}/read`)
+      .set(auth(STUDENT));
     expect(res.status).toBe(403);
-    expect(readFlag(nid)).toBe(0);
+    expect(receiptCount(notificationId, STUDENT.userId)).toBe(0);
   });
 
-  it('an unknown notification is still a 404', async () => {
-    const res = await supertest(app).patch('/api/notifications/nope/read').set(auth(OWNER));
+  it('an unknown notification is a 404 and creates no receipt', async () => {
+    const res = await supertest(app)
+      .patch('/api/notifications/nope/read')
+      .set(auth(OWNER));
     expect(res.status).toBe(404);
+    expect(receiptCount('nope', OWNER.userId)).toBe(0);
   });
 });
 
-describe('read-all reports what it actually did', () => {
-  /**
-   * NOT a policy assertion. Whether read-all should clear shared rows is
-   * undecided (A-9.1), so its behaviour is unchanged here. What is asserted is
-   * that it stops claiming success while changing nothing: the response states
-   * the number of rows it marked, so the gap is visible to a caller and to
-   * this suite rather than hidden behind `{ ok: true }`.
-   */
-  it('states the number of notifications it marked', async () => {
-    addNotification('A event', '1 AFN', 'info', BR_A);
+describe('mark all read is scoped, per-user, and idempotent', () => {
+  it('marks the caller\'s branch and global events, but no foreign branch', async () => {
+    const aId = addNotification('A event', '1 AFN', 'info', BR_A);
+    const bId = addNotification('B event', '2 AFN', 'info', BR_B);
+    const globalId = addNotification('Global event', 'Notice', 'info');
+
     const res = await supertest(app).post('/api/notifications/read-all').set(auth(RECEP_A));
     expect(res.status).toBe(200);
-    expect(res.body).toHaveProperty('marked');
-    expect(typeof res.body.marked).toBe('number');
+    expect(res.body.marked).toBe(2);
+    expect(receiptCount(aId, RECEP_A.userId)).toBe(1);
+    expect(receiptCount(globalId, RECEP_A.userId)).toBe(1);
+    expect(receiptCount(bId, RECEP_A.userId)).toBe(0);
+  });
+
+  it('does not mark the same rows for a second viewer', async () => {
+    const notificationId = addNotification('A event', '1 AFN', 'info', BR_A);
+    await supertest(app).post('/api/notifications/read-all').set(auth(RECEP_A));
+
+    expect(await readState(RECEP_A, notificationId)).toBe(1);
+    expect(await readState(RECEP_A_2, notificationId)).toBe(0);
+  });
+
+  it('cannot be widened to another branch through a query parameter', async () => {
+    const aId = addNotification('A event', '1 AFN', 'info', BR_A);
+    const bId = addNotification('B event', '2 AFN', 'info', BR_B);
+
+    const res = await supertest(app)
+      .post(`/api/notifications/read-all?branchId=${BR_B}`)
+      .set(auth(RECEP_A));
+
+    expect(res.status).toBe(200);
+    expect(res.body.marked).toBe(1);
+    expect(receiptCount(aId, RECEP_A.userId)).toBe(1);
+    expect(receiptCount(bId, RECEP_A.userId)).toBe(0);
+  });
+
+  it('an organization-scoped owner marks every branch by default', async () => {
+    const aId = addNotification('A event', '1 AFN', 'info', BR_A);
+    const bId = addNotification('B event', '2 AFN', 'info', BR_B);
+
+    const res = await supertest(app).post('/api/notifications/read-all').set(auth(OWNER));
+    expect(res.status).toBe(200);
+    expect(res.body.marked).toBe(2);
+    expect(receiptCount(aId, OWNER.userId)).toBe(1);
+    expect(receiptCount(bId, OWNER.userId)).toBe(1);
+    expect(receiptCount(aId, RECEP_A.userId)).toBe(0);
+    expect(receiptCount(bId, RECEP_B.userId)).toBe(0);
+  });
+
+  it('a replay reports zero new receipts', async () => {
+    addNotification('A event', '1 AFN', 'info', BR_A);
+    const first = await supertest(app).post('/api/notifications/read-all').set(auth(RECEP_A));
+    const replay = await supertest(app).post('/api/notifications/read-all').set(auth(RECEP_A));
+    expect(first.body.marked).toBe(1);
+    expect(replay.body.marked).toBe(0);
   });
 
   it('a principal with no permissions cannot call it', async () => {
@@ -268,19 +325,45 @@ describe('read-all reports what it actually did', () => {
   });
 });
 
-describe('no second scoping authority is introduced', () => {
+describe('the database enforces the canonical read-state model', () => {
+  it('stores no shared read flag or unused target user on the event row', () => {
+    const columns = (db.pragma('table_info(notifications)') as { name: string }[]).map((column) => column.name);
+    expect(columns).not.toContain('read');
+    expect(columns).not.toContain('user_id');
+  });
+
+  it('permits at most one receipt per notification and user', () => {
+    const notificationId = addNotification('A event', '1 AFN', 'info', BR_A);
+    db.prepare(
+      'INSERT INTO notification_read_receipts (notification_id, user_id) VALUES (?, ?)',
+    ).run(notificationId, RECEP_A.userId);
+    expect(() => db.prepare(
+      'INSERT INTO notification_read_receipts (notification_id, user_id) VALUES (?, ?)',
+    ).run(notificationId, RECEP_A.userId)).toThrow(/UNIQUE constraint/i);
+  });
+
+  it('deleting an event cascades its receipts', () => {
+    const notificationId = addNotification('A event', '1 AFN', 'info', BR_A);
+    db.prepare(
+      'INSERT INTO notification_read_receipts (notification_id, user_id) VALUES (?, ?)',
+    ).run(notificationId, RECEP_A.userId);
+    db.prepare('DELETE FROM notifications WHERE id = ?').run(notificationId);
+    expect(receiptCount(notificationId, RECEP_A.userId)).toBe(0);
+  });
+});
+
+describe('no second authorization authority is introduced', () => {
   const routerSource = () =>
     fs.readFileSync(path.join(repoRoot, 'server', 'src', 'routes', 'audit.routes.ts'), 'utf8');
 
   it('the notifications router does not scope on the home-branch identity attribute', () => {
-    const src = routerSource();
-    const notifSection = src.slice(src.indexOf('export const notificationsRouter'));
-    // `req.user.branchId` is identity, not authorization (C-8). Reading it here
-    // is what produced the defect this suite pins.
+    const notifSection = routerSource().slice(
+      routerSource().indexOf('export const notificationsRouter'),
+    );
     expect(notifSection).not.toMatch(/req\.user\?\.branchId/);
   });
 
-  it('it consumes the canonical scope and branch-authorization helpers', () => {
+  it('consumes the canonical scope and branch-authorization helpers', () => {
     const notifSection = routerSource().slice(
       routerSource().indexOf('export const notificationsRouter'),
     );
@@ -288,7 +371,7 @@ describe('no second scoping authority is introduced', () => {
     expect(notifSection).toContain('canAccessBranchResource');
   });
 
-  it('every notifications handler is permission-gated like the read', () => {
+  it('every notifications handler is permission-gated', () => {
     const notifSection = routerSource().slice(
       routerSource().indexOf('export const notificationsRouter'),
     );

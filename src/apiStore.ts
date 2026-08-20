@@ -524,12 +524,12 @@ export function useApiStore() {
     () => (canSeeAuditLog ? api.get<AuditLog[]>('/audit-logs', bq).then(setAuditLogs) : Promise.resolve()),
     [bq, canSeeAuditLog]
   );
-  // Branch-scoped like every other read. The server resolves the scope through
-  // `resolveBranchScope`, so the bell follows the branch selector instead of
-  // being pinned to the operator's home branch.
+  // The notifications endpoint chooses its default through the canonical RBAC
+  // scope resolver: organization-wide principals receive every authorized
+  // branch, while branch-scoped principals remain confined to their branch.
   const reloadNotifications = useCallback(
-    () => api.get<Notification[]>('/notifications', bq).then(setNotifications),
-    [bq],
+    () => api.get<Notification[]>('/notifications').then(setNotifications),
+    [],
   );
   const reloadFinanceReconciliation = useCallback(
     () => (canSeeFinance ? api.get<typeof financeReconciliation>('/finance/reconciliation', bq).then(setFinanceReconciliation) : Promise.resolve()),

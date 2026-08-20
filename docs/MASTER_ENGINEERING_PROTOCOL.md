@@ -952,7 +952,7 @@ FACT unless marked otherwise.
 | Topic | Finding | Class | Evidence |
 |---|---|---|---|
 | Currency (§20) | AFN is the only currency; no FX logic anywhere. Confirmed as a requirement by owner decision D-11, not merely observed | FACT + DECISION | `src/utils/format.ts`, `docs/registries/decisions.md` |
-| Precision (§20) | Stored to 2dp (enforced by `assertMoney` + DB triggers); displayed with 0dp | FACT | `server/src/utils/money.ts`, `trg_*_money_scale_*`, `src/utils/format.ts` |
+| Precision (§20) | Stored and displayed as whole AFN. Operator input is rejected if fractional; computed values settle half away from zero | FACT + DECISION | `server/src/utils/money.ts`, INTEGER money columns + `trg_*_money_scale_*`, `src/utils/format.ts`, D-22/D-23 |
 | Calendar (§19) | Solar Hijri is first-class for period arithmetic; storage is single-form ISO-8601 Gregorian; display is localized | FACT | `server/src/core/calendar/periods.ts` (authority), `src/utils/jalali.ts` (display) |
 | UI direction (§26) | Chrome is *currently* uniformly LTR/English (`<html lang="en">`, `dir="ltr"` on every view root); Persian/Dari appears only as *data*. Owner decision D-15 makes bilingual EN + fa/prs with first-class RTL a requirement, so this describes the state to be replaced, not the target | FACT (current state) | `index.html`, `src/App.tsx` |
 | Migration mechanism (§12) | **None.** There is no migration chain. `server/src/db/schema.sql` is the single canonical schema (111 tables · 228 indexes · 64 triggers) and is applied idempotently on every boot | FACT | `server/src/db/schema.sql`, `server/scripts/verify-canonical-schema.mjs` |

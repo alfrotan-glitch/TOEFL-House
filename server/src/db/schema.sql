@@ -2219,19 +2219,26 @@ CREATE TABLE IF NOT EXISTS event_subscriptions (
   created_at TEXT NOT NULL DEFAULT (datetime('now')) 
 );
 
-CREATE TABLE IF NOT EXISTS notifications ( 
-  id        TEXT PRIMARY KEY, 
-  title     TEXT NOT NULL, 
-  message   TEXT, 
-  date      TEXT NOT NULL, 
-  read      INTEGER NOT NULL DEFAULT 0, 
-  type      TEXT NOT NULL DEFAULT 'info' CHECK (type IN ('info','warning','critical','success')), 
-  user_id   TEXT REFERENCES users(id) ON DELETE CASCADE, 
-  link      TEXT, 
-  branch_id TEXT REFERENCES branches(id) ON DELETE CASCADE 
+CREATE TABLE IF NOT EXISTS notifications (
+  id        TEXT PRIMARY KEY,
+  title     TEXT NOT NULL,
+  message   TEXT,
+  date      TEXT NOT NULL,
+  type      TEXT NOT NULL DEFAULT 'info' CHECK (type IN ('info','warning','critical','success')),
+  link      TEXT,
+  branch_id TEXT REFERENCES branches(id) ON DELETE CASCADE
 );
-CREATE INDEX IF NOT EXISTS idx_notifications_branch  ON notifications(branch_id);
-CREATE INDEX IF NOT EXISTS idx_notifications_read    ON notifications(read);
+CREATE INDEX IF NOT EXISTS idx_notifications_branch_date ON notifications(branch_id, date DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_date        ON notifications(date DESC);
+
+CREATE TABLE IF NOT EXISTS notification_read_receipts (
+  notification_id TEXT NOT NULL REFERENCES notifications(id) ON DELETE CASCADE,
+  user_id          TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  read_at          TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (notification_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_notification_read_receipts_user
+  ON notification_read_receipts(user_id);
 
 -- ============================================================================
 -- AUDIT

@@ -3,6 +3,7 @@ import { verifyToken, TokenPayload } from '../utils/auth.js';
 import { db } from '../db/connection.js';
 import { buildRbacContext, hasPermission, hasAnyPermission, hasAnyRole, hasRole, isGlobalOwner, canAccessBranch, canAccessAllBranches, type RbacUserContext } from '../core/rbac/rbac-service.js';
 import type { RoleCode } from '../core/rbac/permission-catalog.js';
+import { HttpError } from './errorHandler.js';
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -171,10 +172,6 @@ export function denyPermissionless(req: Request, res: Response, next: NextFuncti
   return res.status(403).json({ error: 'You do not have permission to perform this operation.' });
 }
 
-/**
- * Resolves the effective branch scope for the current request.
- * SECURITY FIX: Removed hardcoded manager bypass. Only owners or users with explicit RBAC scopes can view other branches.
- */
 /** Central request-level branch resource authorization. */
 export function canAccessBranchResource(req: Request, branchId: string): boolean {
   if (!req.user) return false;
@@ -187,27 +184,46 @@ export function canAccessBranchResource(req: Request, branchId: string): boolean
   return canAccessBranch(db, context, branchId);
 }
 
-export function resolveBranchScope(req: Request): { branchId: string | null; isAll: boolean } {
+interface BranchScopeOptions {
+  /** Use the all-branches scope when no branch was requested and RBAC permits it. */
+  defaultToAllAuthorized?: boolean;
+}
+
+/** Resolves requested/default branch scope exclusively from live RBAC assignments. */
+export function resolveBranchScope(
+  req: Request,
+  options: BranchScopeOptions = {},
+): { branchId: string | null; isAll: boolean } {
   const user = req.user;
   if (!user) return { branchId: null, isAll: false };
 
   const requested = typeof req.query.branchId === 'string' ? req.query.branchId : undefined;
-
   const context = req.rbac ?? buildRbacContext(db, {
     id: user.userId, username: user.username, full_name: user.fullName, branch_id: user.branchId,
   });
 
+  const authorizedHomeScope = (): { branchId: string; isAll: false } => {
+    if (!canAccessBranch(db, context, user.branchId)) {
+      throw new HttpError(403, 'No authorized branch scope is available for this request.');
+    }
+    return { branchId: user.branchId, isAll: false };
+  };
+
   if (requested === 'all') {
     return canAccessAllBranches(context)
       ? { branchId: null, isAll: true }
-      : { branchId: user.branchId, isAll: false };
+      : authorizedHomeScope();
   }
 
-  if (requested && requested !== user.branchId) {
+  if (requested) {
     return canAccessBranch(db, context, requested)
       ? { branchId: requested, isAll: false }
-      : { branchId: user.branchId, isAll: false };
+      : authorizedHomeScope();
   }
 
-  return { branchId: requested || user.branchId, isAll: false };
+  if (options.defaultToAllAuthorized && canAccessAllBranches(context)) {
+    return { branchId: null, isAll: true };
+  }
+
+  return authorizedHomeScope();
 }
