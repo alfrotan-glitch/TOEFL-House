@@ -5,13 +5,29 @@ arithmetic expressions and rejects dangerous inputs.
 */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { db, initSchema } from '../db/connection.js';
-import { seedDefaultRules, evaluateRules } from '../core/configuration/rule-engine.js';
+import { createRule, seedDefaultRules, evaluateRules } from '../core/configuration/rule-engine.js';
 
 beforeAll(() => {
   initSchema();
   seedDefaultRules();
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(
     'b1', 'Test Branch', 'Test Location'
+  );
+  // Exercise the rule engine's generic block action without making a business
+  // rule a second authority for a domain operation such as profit withdrawal.
+  createRule(
+    {
+      name: 'Test-only generic block action',
+      description: 'Verifies block action evaluation.',
+      category: 'academic',
+      conditions: [{ field: 'shouldBlock', operator: 'eq', value: true }],
+      actions: [{ type: 'block', targetKey: '__blocked', message: 'Operation blocked by test rule.' }],
+      priority: 1,
+      isActive: true,
+      scopeBranchId: 'b1',
+      lastModifiedBy: 'test',
+    },
+    'test',
   );
 });
 
@@ -53,14 +69,14 @@ describe('Safe Formula Parser', () => {
     expect(result.finalOutputs.savingAmount).toBe(500);
   });
 
-  it('blocks profit withdrawal when reserve fund is not met', () => {
+  it('evaluates a generic block action', () => {
     const result = evaluateRules({
-      category: 'finance',
+      category: 'academic',
       branchId: 'b1',
-      data: { reserveFundMet: false },
+      data: { shouldBlock: true },
     });
 
     expect(result.isBlocked).toBe(true);
-    expect(result.blockReason).toContain('reserve fund');
+    expect(result.blockReason).toContain('test rule');
   });
 });

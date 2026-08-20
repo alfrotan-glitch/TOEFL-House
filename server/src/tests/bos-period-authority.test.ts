@@ -43,7 +43,7 @@ import { errorHandler } from '../middleware/errorHandler.js';
 import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { bosRouter } from '../routes/bos.routes.js';
 import { addDays, periodBoundaries, periodBoundariesForKey, previousMonthKey } from '../core/calendar/periods.js';
-import { TREASURY_DEFAULTS } from '../core/configuration/policy-catalog.js';
+import { DEFAULT_RULE_CATALOG, TREASURY_DEFAULTS } from '../core/configuration/policy-catalog.js';
 import { computeProfitDistribution, resolveDistributionTier } from '../core/finance/profit-distribution.js';
 
 const BR = 'bos_cal_branch';
@@ -202,31 +202,27 @@ describe('the ceiling accounts for drawings taken earlier in the accounting mont
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-// THE TIER TABLE IS DECLARED POLICY, NOT A CONSTANT IN A ROUTE (A-10)
+// OWNER-APPROVED TREASURY POLICY IS THE SINGLE AUTHORITY (A-10)
 // ══════════════════════════════════════════════════════════════════════════
-/**
- * LAW 7 forbids an unexplained business number. The withdrawal tiers, the
- * six-month reserve multiple and the warning thresholds lived as literals
- * inside `bos.routes.ts` — numbers that decide how much cash leaves the
- * building, findable only by reading the handler.
- *
- * They are now declared in the configuration catalog at exactly the values the
- * route used. This states the policy; it does not decide it. Whether 20% and
- * six months are the RIGHT numbers remains an owner question (A-10) — but it is
- * now a question about a visible, named, changeable default rather than about a
- * hidden constant.
- *
- * These tests pin the values so a change to them is a deliberate, reviewed edit
- * rather than a silent one.
- */
+/** The values below are explicit owner decisions, not inferred defaults. */
 describe('treasury policy is declared, and the tiers behave as declared', () => {
-  it('the declared tiers are the ones the product has always applied', () => {
+  it('declares every owner-approved threshold exactly once', () => {
     expect(TREASURY_DEFAULTS.profitDistributionTiers).toEqual([
-      { minMarginPercent: 30, sharePercent: 20 },
-      { minMarginPercent: 20, sharePercent: 15 },
-      { minMarginPercent: 10, sharePercent: 10 },
+      { minMarginPercent: 30, sharePercent: 15 },
+      { minMarginPercent: 20, sharePercent: 10 },
+      { minMarginPercent: 10, sharePercent: 5 },
     ]);
     expect(TREASURY_DEFAULTS.reserveFundMonths).toBe(6);
+    expect(TREASURY_DEFAULTS.cashReserveWarningMonths).toBe(3);
+    expect(TREASURY_DEFAULTS.teacherPerformanceWarningPercent).toBe(80);
+  });
+
+  it('does not leave an editable rule-engine reserve guard as a second withdrawal authority', () => {
+    expect(
+      DEFAULT_RULE_CATALOG.some((rule) =>
+        rule.conditions.some((condition) => condition.field === 'reserveFundMet'),
+      ),
+    ).toBe(false);
   });
 
   it('bands are ordered highest-first, or the first match would be wrong', () => {
@@ -234,17 +230,16 @@ describe('treasury policy is declared, and the tiers behave as declared', () => 
     expect(mins).toEqual([...mins].sort((a, b) => b - a));
   });
 
-  /** Reproduces the original if/else chain exactly, including its boundaries. */
   it.each([
     [-50, 0],
     [0, 0],
     [9.99, 0],
-    [10, 10],
-    [19.99, 10],
-    [20, 15],
-    [29.99, 15],
-    [30, 20],
-    [100, 20],
+    [10, 5],
+    [19.99, 5],
+    [20, 10],
+    [29.99, 10],
+    [30, 15],
+    [100, 15],
   ])('a %s%% margin earns a %s%% share', (margin, expected) => {
     expect(resolveDistributionTier(margin)).toBe(expected);
   });
@@ -255,7 +250,8 @@ describe('treasury policy is declared, and the tiers behave as declared', () => 
       expense: 150_000,
       distributed: 0,
       fixedTotal: 0,
-      reserveBalance: 0,
+      mainBalance: 0,
+      savingBalance: 0,
     });
     expect(position.profit).toBeLessThan(0);
     expect(position.tierPercent).toBe(0);
@@ -268,7 +264,8 @@ describe('treasury policy is declared, and the tiers behave as declared', () => 
       expense: 0,
       distributed: 0,
       fixedTotal: 10_000,
-      reserveBalance: 0,
+      mainBalance: 0,
+      savingBalance: 0,
     });
     expect(position.reserveFundTarget).toBe(10_000 * TREASURY_DEFAULTS.reserveFundMonths);
   });
@@ -280,11 +277,42 @@ describe('treasury policy is declared, and the tiers behave as declared', () => 
       distributed: 0,
       fixedTotal: 10_000,
     };
-    const short = computeProfitDistribution({ ...base, reserveBalance: 0 });
-    const met = computeProfitDistribution({ ...base, reserveBalance: 10_000_000 });
+    const short = computeProfitDistribution({ ...base, mainBalance: 20_000, savingBalance: 20_000 });
+    const met = computeProfitDistribution({ ...base, mainBalance: 500_000, savingBalance: 500_000 });
     expect(short.periodAllowance).toBeGreaterThan(0);
     expect(short.maxWithdrawable).toBe(0);
     expect(met.maxWithdrawable).toBe(met.periodAllowance);
+  });
+
+  it('caps withdrawal at the liquidity remaining above the reserve', () => {
+    const position = computeProfitDistribution({
+      revenue: 1_000_000,
+      expense: 400_000,
+      distributed: 0,
+      fixedTotal: 100_000,
+      mainBalance: 500_000,
+      savingBalance: 120_000,
+    });
+    expect(position.reserveFundTarget).toBe(600_000);
+    expect(position.totalLiquidity).toBe(620_000);
+    expect(position.liquidityHeadroom).toBe(20_000);
+    expect(position.periodAllowance).toBeGreaterThan(20_000);
+    expect(position.maxWithdrawable).toBe(20_000);
+    expect(position.totalLiquidity - position.maxWithdrawable).toBe(position.reserveFundTarget);
+  });
+
+  it('never publishes more than the main account can actually pay', () => {
+    const position = computeProfitDistribution({
+      revenue: 1_000_000,
+      expense: 400_000,
+      distributed: 0,
+      fixedTotal: 10_000,
+      mainBalance: 5_000,
+      savingBalance: 1_000_000,
+    });
+    expect(position.periodAllowance).toBeGreaterThan(5_000);
+    expect(position.liquidityHeadroom).toBeGreaterThan(5_000);
+    expect(position.maxWithdrawable).toBe(5_000);
   });
 });
 
@@ -292,6 +320,15 @@ describe('treasury policy is declared, and the tiers behave as declared', () => 
 // THE PUBLISHED CEILING IS THE ENFORCED CEILING (§77)
 // ══════════════════════════════════════════════════════════════════════════
 describe('publish and enforce cannot be different numbers', () => {
+  it('does not publish a today, year, or historical ceiling that the month mutation would not enforce', async () => {
+    for (const query of ['timeframe=today', 'timeframe=year', 'period=1405-01']) {
+      const response = await supertest(app)
+        .get(`/api/bos/profit-distribution/calculate?branchId=${BR}&${query}`)
+        .set(auth(OWNER));
+      expect(response.status).toBe(400);
+    }
+  });
+
   it('the route publishes exactly what the authority computes', async () => {
     income(800_000, today());
     const published = await calculate();
@@ -301,7 +338,8 @@ describe('publish and enforce cannot be different numbers', () => {
       expense: 0,
       distributed: 0,
       fixedTotal: 0,
-      reserveBalance: 5_000_000,
+      mainBalance: 5_000_000,
+      savingBalance: 5_000_000,
     });
 
     expect(published.maxWithdrawable).toBe(direct.maxWithdrawable);

@@ -1378,7 +1378,7 @@ export function useApiStore() {
   const getMarketingFunnel = async (timeframe?: string) => api.get<any>('/bos/marketing-funnel', timeframe ? { timeframe } : undefined);
   const getStudentAnalytics = async (timeframe?: string) => api.get<any>('/bos/student-analytics', timeframe ? { timeframe } : undefined);
   const getDecisionWarnings = async () => api.get<any>('/bos/decision-warnings');
-  const getProfitDistribution = async (timeframe?: string) => api.get<any>('/bos/profit-distribution/calculate', timeframe ? { timeframe } : undefined);
+  const getProfitDistribution = async () => api.get<any>('/bos/profit-distribution/calculate');
   
   const withdrawProfitDistribution = async (amount: number, recipientPartnerId?: string, notes?: string) => {
     await api.post('/bos/profit-distribution/withdraw', { amount, recipientPartnerId, notes });

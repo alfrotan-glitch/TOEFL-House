@@ -29,7 +29,9 @@ interface DecisionWarning {
 
 interface ProfitDistributionData {
   period: string; revenue: number; expense: number; profit: number; profitMargin: number; tierPercent: number;
-  reserveFundTarget: number; reserveFundBalance: number; reserveFundMet: boolean; maxWithdrawable: number;
+  reserveFundTarget: number; reserveFundBalance: number; reserveFundMet: boolean;
+  mainBalance: number; savingBalance: number; liquidityHeadroom: number;
+  periodAllowance: number; remainingAllowance: number; maxWithdrawable: number;
 }
 
 // NEW: Profitability interfaces
@@ -41,7 +43,7 @@ interface BusinessOperatingSystemViewProps {
   getMarketingFunnel: (period?: string) => Promise<MarketingFunnelData>;
   getStudentAnalytics: (period?: string) => Promise<StudentAnalyticsData>;
   getDecisionWarnings: () => Promise<{ warnings: DecisionWarning[] }>;
-  getProfitDistribution: (period?: string) => Promise<ProfitDistributionData>;
+  getProfitDistribution: () => Promise<ProfitDistributionData>;
   withdrawProfitDistribution: (amount: number, recipientPartnerId?: string, notes?: string) => Promise<void>;
   isOwner: boolean;
   triggerToast: (message: string, type: 'success' | 'error' | 'info') => void;
@@ -77,7 +79,7 @@ export default function BusinessOperatingSystemView({
     setLoading(true);
     try {
       const [e, f, s, w, p] = await Promise.all([
-        getExecutiveDashboard(timeframe), getMarketingFunnel(timeframe), getStudentAnalytics(timeframe), getDecisionWarnings(), getProfitDistribution(timeframe),
+        getExecutiveDashboard(timeframe), getMarketingFunnel(timeframe), getStudentAnalytics(timeframe), getDecisionWarnings(), getProfitDistribution(),
       ]);
       setExec(e);
       setFunnel(f);
@@ -141,7 +143,7 @@ export default function BusinessOperatingSystemView({
     { label: 'Student Arrears', value: exec.outstandingPayments, icon: AlertTriangle, color: 'text-amber-600 bg-amber-500/10' },
     { label: 'Teacher Salary Cost', value: exec.teacherCost, icon: GraduationCap, color: 'text-violet-600 bg-violet-500/10' },
     { label: 'Marketing Cost', value: exec.marketingCost, icon: Megaphone, color: 'text-pink-600 bg-pink-500/10' },
-    { label: 'Reserve Fund Balance', value: exec.reserveFundBalance, icon: PiggyBank, color: 'text-teal-600 bg-teal-500/10' },
+    { label: 'Total Liquidity Reserve', value: exec.reserveFundBalance, icon: PiggyBank, color: 'text-teal-600 bg-teal-500/10' },
   ];
 
   return (
@@ -336,7 +338,7 @@ export default function BusinessOperatingSystemView({
               <div className="p-2 bg-teal-500/10 rounded-lg">
                 <PiggyBank className="w-5 h-5 text-teal-600" strokeWidth={2.5} />
               </div>
-              <h3 className="text-sm font-extrabold text-slate-900 tracking-tight">Contingency Reserve</h3>
+              <h3 className="text-sm font-extrabold text-slate-900 tracking-tight">Post-withdrawal Liquidity Reserve</h3>
             </div>
             <span className="text-xs font-black text-teal-700 bg-teal-100 px-2.5 py-1 rounded-full border border-teal-200/50">
               {exec.reserveFundProgress}%
@@ -349,7 +351,7 @@ export default function BusinessOperatingSystemView({
             />
           </div>
           <div className="flex justify-between text-[11px] text-slate-600 mt-3 font-mono tabular-nums">
-            <span>Current: <span className="font-bold text-slate-800">{formatAFN(exec.reserveFundBalance)}</span></span>
+            <span>Total liquidity: <span className="font-bold text-slate-800">{formatAFN(exec.reserveFundBalance)}</span></span>
             <span>Target: <span className="font-bold text-slate-800">{formatAFN(exec.reserveFundTarget)}</span></span>
           </div>
         </div>
@@ -362,7 +364,7 @@ export default function BusinessOperatingSystemView({
                 <div className="p-2 bg-indigo-500/10 rounded-lg">
                   <DollarSign className="w-5 h-5 text-indigo-600" strokeWidth={2.5} />
                 </div>
-                <h3 className="text-sm font-extrabold text-slate-900 tracking-tight">Profit Withdrawal</h3>
+                <h3 className="text-sm font-extrabold text-slate-900 tracking-tight">Profit Withdrawal · Current Accounting Month</h3>
               </div>
               
               <div className="grid grid-cols-3 gap-3 mb-4">
@@ -375,7 +377,7 @@ export default function BusinessOperatingSystemView({
                   <p className="font-black text-slate-800 mt-1 text-sm tabular-nums">{profitDist.tierPercent}%</p>
                 </div>
                 <div className={`rounded-xl p-3 text-center border ${profitDist.reserveFundMet ? 'bg-emerald-50/80 border-emerald-200/60' : 'bg-rose-50/80 border-rose-200/60'}`}>
-                  <p className={`font-bold uppercase tracking-wider text-[9px] ${profitDist.reserveFundMet ? 'text-emerald-600' : 'text-rose-600'}`}>Fund</p>
+                  <p className={`font-bold uppercase tracking-wider text-[9px] ${profitDist.reserveFundMet ? 'text-emerald-600' : 'text-rose-600'}`}>Reserve</p>
                   <p className={`font-black mt-1 text-sm ${profitDist.reserveFundMet ? 'text-emerald-700' : 'text-rose-700'}`}>
                     {profitDist.reserveFundMet ? 'Unlocked' : 'Locked'}
                   </p>
@@ -422,7 +424,9 @@ export default function BusinessOperatingSystemView({
             ) : (
               <div className="text-[11px] text-rose-600 bg-rose-50 border border-rose-200/50 rounded-xl px-4 py-3 flex items-center gap-2 font-medium">
                 <AlertTriangle className="w-4 h-4 shrink-0" />
-                Withdrawal locked until reserve fund reaches 6-month target.
+                {profitDist.reserveFundMet
+                  ? 'No amount remains withdrawable under the period, cash, and reserve limits.'
+                  : `Withdrawal locked: total liquidity must reach ${formatAFN(profitDist.reserveFundTarget)}.`}
               </div>
             )}
           </div>

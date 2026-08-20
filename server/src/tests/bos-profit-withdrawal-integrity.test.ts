@@ -73,6 +73,10 @@ const calculate = async () =>
 const withdraw = async (amount: unknown, actor: TokenPayload = OWNER) =>
   supertest(app).post(`/api/bos/profit-distribution/withdraw?branchId=${BR}`).set(auth(actor)).send({ amount });
 
+const warnings = async () =>
+  (await supertest(app).get(`/api/bos/decision-warnings?branchId=${BR}`).set(auth(OWNER))).body
+    .warnings as Array<{ title: string; message: string }>;
+
 /** Rebuild a clean financial period: 200,000 income, 40,000 expense. */
 function resetPeriod() {
   db.prepare('DELETE FROM financial_transactions WHERE branch_id = ?').run(BR);
@@ -117,6 +121,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   resetPeriod();
+  db.prepare('DELETE FROM teachers WHERE branch_id = ?').run(BR);
 });
 
 describe('BOS-1 · the period withdrawal ceiling is cumulative', () => {
@@ -182,6 +187,43 @@ describe('BOS-1 · the period withdrawal ceiling is cumulative', () => {
     expect(mainBalance()).toBe(before);
     expect(withdrawnTotal()).toBe(0);
   });
+
+  it('serializes concurrent requests so only one can consume the published ceiling', async () => {
+    const ceiling = (await calculate()).maxWithdrawable as number;
+    const before = mainBalance();
+
+    const responses = await Promise.all([withdraw(ceiling), withdraw(ceiling)]);
+    expect(responses.map((response) => response.status).sort()).toEqual([201, 409]);
+    expect(withdrawnTotal()).toBe(ceiling);
+    expect(mainBalance()).toBe(before - ceiling);
+  });
+});
+
+describe('BOS · owner-approved warning thresholds', () => {
+  it('warns only below three months of fixed costs', async () => {
+    db.prepare(
+      "UPDATE finance_accounts SET main_balance = 2999 WHERE scope_type='branch' AND scope_id=?",
+    ).run(BR);
+    expect((await warnings()).some((warning) => warning.title.includes('below 3 months'))).toBe(true);
+
+    db.prepare(
+      "UPDATE finance_accounts SET main_balance = 3000 WHERE scope_type='branch' AND scope_id=?",
+    ).run(BR);
+    expect((await warnings()).some((warning) => warning.title.includes('below 3 months'))).toBe(false);
+  });
+
+  it('warns below 80% teacher performance but not at the boundary', async () => {
+    const insert = db.prepare(
+      `INSERT INTO teachers (id, full_name, performance_score, branch_id, joined_date)
+       VALUES (?, ?, ?, ?, ?)`,
+    );
+    insert.run('bos_teacher_low', 'Low Teacher', 79.99, BR, today());
+    insert.run('bos_teacher_boundary', 'Boundary Teacher', 80, BR, today());
+
+    const titles = (await warnings()).map((warning) => warning.title);
+    expect(titles.some((title) => title.includes('Low Teacher') && title.includes('below 80%'))).toBe(true);
+    expect(titles.some((title) => title.includes('Boundary Teacher'))).toBe(false);
+  });
 });
 
 describe('BOS · withdrawal authorization and input validation', () => {
@@ -213,12 +255,39 @@ describe('BOS · withdrawal authorization and input validation', () => {
     expect(withdrawnTotal()).toBe(0);
   });
 
-  it('blocks withdrawal while the contingency reserve is below its target', async () => {
-    db.prepare("UPDATE finance_accounts SET saving_balance = 0 WHERE scope_type='branch' AND scope_id=?").run(BR);
+  it('blocks withdrawal while total branch liquidity is below its reserve target', async () => {
+    db.prepare(
+      "UPDATE finance_accounts SET main_balance = 5000, saving_balance = 0 WHERE scope_type='branch' AND scope_id=?",
+    ).run(BR);
     const before = mainBalance();
     const res = await withdraw(100);
     expect(res.status).toBe(409);
     expect(mainBalance()).toBe(before);
+  });
+
+  it('allows only the liquidity headroom above the post-withdrawal reserve', async () => {
+    // Fixed costs are 1,000 AFN, so the six-month reserve is 6,000 AFN.
+    db.prepare(
+      "UPDATE finance_accounts SET main_balance = 5000, saving_balance = 2000 WHERE scope_type='branch' AND scope_id=?",
+    ).run(BR);
+
+    const published = await calculate();
+    expect(published.reserveFundTarget).toBe(6000);
+    expect(published.reserveFundBalance).toBe(7000);
+    expect(published.liquidityHeadroom).toBe(1000);
+    expect(published.maxWithdrawable).toBe(1000);
+
+    const tooMuch = await withdraw(1001);
+    expect(tooMuch.status).toBe(409);
+    expect(mainBalance()).toBe(5000);
+
+    const exact = await withdraw(1000);
+    expect(exact.status).toBe(201);
+    expect(mainBalance()).toBe(4000);
+    const account = db.prepare(
+      "SELECT main_balance, saving_balance FROM finance_accounts WHERE scope_type='branch' AND scope_id=?",
+    ).get(BR) as { main_balance: number; saving_balance: number };
+    expect(account.main_balance + account.saving_balance).toBe(6000);
   });
 
   it('blocks withdrawal when the profit margin is below the lowest tier', async () => {

@@ -19,7 +19,11 @@ import {
   type ReportingPeriod,
 } from '../core/calendar/periods.js';
 import { isoToJalaliPeriodKey } from '../utils/jalali.js';
-import { computeProfitDistribution } from '../core/finance/profit-distribution.js';
+import {
+  cashReserveWarningThresholdFor,
+  computeProfitDistribution,
+  reserveFundTargetFor,
+} from '../core/finance/profit-distribution.js';
 import { TREASURY_DEFAULTS } from '../core/configuration/policy-catalog.js';
 
 export const bosRouter = Router();
@@ -104,6 +108,33 @@ const stmtPeriodDistributed = db.prepare(
   `SELECT COALESCE(SUM(amount),0) as distributed FROM financial_transactions
     WHERE finance_category_id='sub_owner_drawings' AND date BETWEEN ? AND ? AND branch_id=?`
 );
+
+/**
+ * Loads every input to the current-month withdrawal authority as one unit.
+ * The read endpoint and the enforcing transaction both call this function, so
+ * they cannot silently choose different periods, balances, or cost bases.
+ */
+function currentProfitDistributionPosition(branchId: string) {
+  const { from, to, period } = getTimeBounds(undefined, 'month');
+  const revenue = Number((stmtMonthlyRevenue.get(from, to, branchId) as any).revenue || 0);
+  const expense = Number((stmtMonthlyExpense.get(from, to, branchId) as any).expense || 0);
+  const fixedTotal = Number((stmtFixedTotal.get(branchId) as any).fixedTotal || 0);
+  const distributed = assertMoney(
+    Number((stmtPeriodDistributed.get(from, to, branchId) as any).distributed || 0),
+    'distributed this period',
+  );
+  const account = getFinanceAccount('branch', branchId);
+  const position = computeProfitDistribution({
+    revenue,
+    expense,
+    distributed,
+    fixedTotal,
+    mainBalance: account.mainBalance,
+    savingBalance: account.savingBalance,
+  });
+  return { from, to, period, revenue, expense, fixedTotal, position };
+}
+
 const stmtVariableTotal = db.prepare(`SELECT COALESCE(SUM(allocated_amount),0) as variableTotal FROM budget_lines WHERE branch_id=? AND cost_type='variable'`);
 const stmtTeacherCost = db.prepare(`SELECT COALESCE(SUM(amount),0) as teacherCost FROM financial_transactions WHERE finance_category_id='sub_salaries_wages' AND type='expense' AND date BETWEEN ? AND ? AND branch_id=?`);
 
@@ -185,7 +216,10 @@ const stmtLowClasses = db.prepare(`
   GROUP BY c.id
   HAVING enrolled < c.min_viable_size
 `);
-const stmtUnderperformingTeachers = db.prepare(`SELECT full_name, performance_score FROM teachers WHERE branch_id=? AND status='active' AND performance_score < 80`);
+const stmtUnderperformingTeachers = db.prepare(
+  `SELECT full_name, performance_score FROM teachers
+   WHERE branch_id = ? AND status = 'active' AND performance_score < ?`,
+);
 
 const stmtInsertFinTx = db.prepare(
   `INSERT INTO financial_transactions (id, type, category, finance_category_id, amount, date, description, reference_id, operator_name, branch_id)
@@ -266,7 +300,11 @@ bosRouter.get(
 
     const profit = monthlyRevenue - monthlyExpense;
     const profitMargin = monthlyRevenue > 0 ? (profit / monthlyRevenue) * 100 : 0;
-    const reserveFundTarget = breakEven * 6;
+    const reserveFundTarget = reserveFundTargetFor(breakEven);
+    const reserveFundBalance = assertComputedMoney(
+      mainAccountBalance + savingBalance,
+      'total branch liquidity',
+    );
 
     res.json({
       period,
@@ -279,10 +317,10 @@ bosRouter.get(
       profit,
       profitMargin: Math.round(profitMargin * 10) / 10,
       cashAvailable: mainAccountBalance,
-      cashBalance: mainAccountBalance + savingBalance,
-      reserveFundBalance: savingBalance,
+      cashBalance: reserveFundBalance,
+      reserveFundBalance,
       reserveFundTarget,
-      reserveFundProgress: reserveFundTarget > 0 ? Math.min(100, Math.round((savingBalance / reserveFundTarget) * 100)) : 0,
+      reserveFundProgress: reserveFundTarget > 0 ? Math.min(100, Math.round((reserveFundBalance / reserveFundTarget) * 100)) : 100,
       outstandingPayments: outstandingTuition,
       teacherCost,
       marketingCost,
@@ -389,12 +427,12 @@ bosRouter.get(
     }
 
     const mainAccountBalance = getFinanceAccount('branch', branchId).mainBalance;
-    const monthlyFixed = fixedTotal || 1;
-    if (mainAccountBalance < monthlyFixed * 2) {
+    const cashWarningThreshold = cashReserveWarningThresholdFor(fixedTotal);
+    if (mainAccountBalance < cashWarningThreshold) {
       warnings.push({
         severity: 'critical',
-        title: 'Cash reserve is below two months of fixed costs',
-        message: `Main account balance (${Math.round(mainAccountBalance).toLocaleString()} AFN) is less than twice the monthly fixed costs. Avoid any large capital purchases.`,
+        title: `Cash reserve is below ${TREASURY_DEFAULTS.cashReserveWarningMonths} months of fixed costs`,
+        message: `Main account balance (${Math.round(mainAccountBalance).toLocaleString()} AFN) is below the ${Math.round(cashWarningThreshold).toLocaleString()} AFN cash warning threshold.`,
       });
     }
 
@@ -407,11 +445,14 @@ bosRouter.get(
       });
     }
 
-    const underperformingTeachers = stmtUnderperformingTeachers.all(branchId) as any[];
+    const underperformingTeachers = stmtUnderperformingTeachers.all(
+      branchId,
+      TREASURY_DEFAULTS.teacherPerformanceWarningPercent,
+    ) as any[];
     for (const t of underperformingTeachers) {
       warnings.push({
         severity: 'info',
-        title: `Teacher ${t.full_name} performance is below 80%`,
+        title: `Teacher ${t.full_name} performance is below ${TREASURY_DEFAULTS.teacherPerformanceWarningPercent}%`,
         message: `Current performance score: ${t.performance_score}%. Supplementary training is recommended; if repeated, class assignment review is needed.`,
       });
     }
@@ -426,25 +467,15 @@ bosRouter.get(
   '/profit-distribution/calculate',
   ah(async (req, res) => {
     const branchId = requireBosBranch(req);
-    const { from, to, period } = getTimeBounds(
-      req.query.period as string,
-      req.query.timeframe as string,
-    );
+    if (req.query.period || (req.query.timeframe && req.query.timeframe !== 'month')) {
+      throw new HttpError(400, 'The profit-withdrawal position is always for the current accounting month.');
+    }
 
-    const revenue = (stmtMonthlyRevenue.get(from, to, branchId) as any).revenue;
-    const expense = (stmtMonthlyExpense.get(from, to, branchId) as any).expense;
-    const fixedTotal = (stmtFixedTotal.get(branchId) as any).fixedTotal;
-    const distributed = (stmtPeriodDistributed.get(from, to, branchId) as any).distributed;
-
-    // The same authority the withdraw endpoint enforces with, so the published
-    // ceiling and the honoured ceiling cannot be different numbers.
-    const position = computeProfitDistribution({
-      revenue,
-      expense,
-      distributed,
-      fixedTotal,
-      reserveBalance: getFinanceAccount('branch', branchId).savingBalance,
-    });
+    // A profit withdrawal is a current-month action, not an analytics view.
+    // Publishing a today/year ceiling while enforcing a month ceiling would
+    // show an amount that the mutation does not honour.
+    const { from, to, period, revenue, expense, position } =
+      currentProfitDistributionPosition(branchId);
 
     res.json({
       period,
@@ -454,13 +485,17 @@ bosRouter.get(
       periodTo: to,
       revenue,
       expense,
-      profit: revenue - expense,
+      profit: position.profit,
       profitMargin: Math.round(position.marginPercent * 10) / 10,
       tierPercent: position.tierPercent,
       reserveFundTarget: position.reserveFundTarget,
-      reserveFundBalance: position.reserveFundBalance,
+      reserveFundBalance: position.totalLiquidity,
       reserveFundMet: position.reserveFundMet,
+      mainBalance: position.mainBalance,
+      savingBalance: position.savingBalance,
+      liquidityHeadroom: position.liquidityHeadroom,
       periodAllowance: position.periodAllowance,
+      remainingAllowance: position.remainingAllowance,
       alreadyDistributed: position.distributed,
       maxWithdrawable: position.maxWithdrawable,
     });
@@ -487,40 +522,35 @@ bosRouter.post(
     }
 
     const result = db.transaction(() => {
-      // Recompute every limit under the same write lock as the cash decrement.
-      const { from, to } = getTimeBounds(undefined, 'month');
-      const revenue = Number((stmtMonthlyRevenue.get(from, to, branchId) as any).revenue || 0);
-      const expense = Number((stmtMonthlyExpense.get(from, to, branchId) as any).expense || 0);
-      const fixedTotal = Number((stmtFixedTotal.get(branchId) as any).fixedTotal || 0);
-      const distributed = assertMoney(
-        Number((stmtPeriodDistributed.get(from, to, branchId) as any).distributed || 0),
-        'distributed this period',
-      );
-      // The same authority the calculate endpoint publishes with, so the
-      // enforced ceiling is by construction the ceiling the operator was shown.
-      const position = computeProfitDistribution({
-        revenue,
-        expense,
-        distributed,
-        fixedTotal,
-        reserveBalance: getFinanceAccount('branch', branchId).savingBalance,
-      });
+      // Recompute every limit under the same write lock as the cash decrement,
+      // through the exact input loader used by the published position.
+      const { position } = currentProfitDistributionPosition(branchId);
       const { tierPercent, periodAllowance, maxWithdrawable } = position;
       const margin = position.marginPercent;
 
       if (!position.reserveFundMet) {
-        throw new HttpError(409, `Profit withdrawal not allowed: the contingency reserve fund has not yet reached its ${TREASURY_DEFAULTS.reserveFundMonths}-month target (${Math.round(position.reserveFundBalance).toLocaleString()} of ${Math.round(position.reserveFundTarget).toLocaleString()} AFN).`);
+        throw new HttpError(409, `Profit withdrawal not allowed: total branch liquidity has not reached its ${TREASURY_DEFAULTS.reserveFundMonths}-month minimum (${position.totalLiquidity.toLocaleString()} of ${position.reserveFundTarget.toLocaleString()} AFN).`);
       }
-
-      if (amount > maxWithdrawable) {
-        throw new HttpError(409, `Requested amount exceeds this period's remaining withdrawable limit (${maxWithdrawable.toLocaleString()} AFN of a ${periodAllowance.toLocaleString()} AFN allowance based on a ${Math.round(margin)}% profit margin; ${position.distributed.toLocaleString()} AFN already distributed).`);
+      if (amount > position.liquidityHeadroom) {
+        throw new HttpError(409, `Profit withdrawal not allowed: the branch must retain ${position.reserveFundTarget.toLocaleString()} AFN after withdrawal (${position.liquidityHeadroom.toLocaleString()} AFN liquidity headroom available).`);
       }
-
-      const currentMainBalance = assertMoney(getFinanceAccount('branch', branchId).mainBalance, 'main account balance');
-      if (amount > currentMainBalance) throw new HttpError(409, 'Insufficient cash balance in the main account for this withdrawal.');
+      if (amount > position.remainingAllowance) {
+        throw new HttpError(409, `Requested amount exceeds this period's remaining withdrawable limit (${position.remainingAllowance.toLocaleString()} AFN of a ${periodAllowance.toLocaleString()} AFN allowance based on a ${Math.round(margin)}% profit margin; ${position.distributed.toLocaleString()} AFN already distributed).`);
+      }
+      if (amount > position.mainBalance) {
+        throw new HttpError(409, 'Insufficient cash balance in the main account for this withdrawal.');
+      }
 
       if (!decrementMainBalanceIfSufficient('branch', branchId, amount)) {
         throw new HttpError(409, 'Insufficient branch cash balance or balance changed.');
+      }
+      const postWithdrawalAccount = getFinanceAccount('branch', branchId);
+      const postWithdrawalLiquidity = assertComputedMoney(
+        postWithdrawalAccount.mainBalance + postWithdrawalAccount.savingBalance,
+        'post-withdrawal branch liquidity',
+      );
+      if (postWithdrawalLiquidity < position.reserveFundTarget) {
+        throw new HttpError(409, 'Withdrawal would breach the required contingency reserve.');
       }
       const date = today();
       stmtInsertFinTx.run(
@@ -528,10 +558,15 @@ bosRouter.post(
         `Management profit withdrawal (${tierPercent}% of ${Math.round(margin)}% profit margin)${notes ? ' — ' + notes : ''}`,
         recipientPartnerId, user.fullName, branchId
       );
+      addNotification(
+        'Profit withdrawal recorded',
+        `${amount.toLocaleString()} AFN has been deducted from the main account as a management profit withdrawal.`,
+        'info',
+        branchId,
+      );
       return { maxWithdrawable, margin, tierPercent };
-    })();
+    }).immediate();
 
-    addNotification('Profit withdrawal recorded', `${amount.toLocaleString()} AFN has been deducted from the main account as a management profit withdrawal.`, 'info', branchId);
     writeAudit(req, `Management profit withdrawal of ${amount} AFN (this month's max: ${result.maxWithdrawable} AFN)`);
     res.status(201).json({ ok: true, ...result });
   })

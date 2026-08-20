@@ -1,37 +1,9 @@
 /**
- * THE profit-distribution authority.
- * ============================================================================
- * How much of a period's profit an owner may withdraw, and how much of that
- * remains after what has already been taken.
+ * Canonical owner profit-distribution authority.
  *
- * WHY THIS IS ONE MODULE AND NOT TWO ROUTE HANDLERS
- *
- * The rule was implemented twice: once in `GET /profit-distribution/calculate`,
- * which PUBLISHES the ceiling to the dashboard, and once in
- * `POST /profit-distribution/withdraw`, which ENFORCES it. Two implementations
- * of one rule is LAW 1's definition of failure, and the two had already drifted
- * in a way that matters: `calculate` accepted a caller-supplied period while
- * `withdraw` always used the current month, so the figure on screen could be
- * computed over a different span than the one the server would honour.
- *
- * A published limit that the enforcing path does not share is not a limit. Both
- * endpoints now call `computeProfitDistribution` and neither owns any part of
- * the arithmetic.
- *
- * THE SUBTRACTION IS THE WHOLE POINT (BOS-1)
- *
- * A withdrawal is booked as an expense, so it reduces profit by 100% of itself
- * while the ceiling is only a tier share of profit. Recomputing the ceiling from
- * net profit therefore removes a fraction of each payout from the limit and the
- * limit REPLENISHES: a branch with a published 32,000 AFN maximum paid out
- * 140,630 AFN across ten sequential calls. So the basis is GROSS profit —
- * distributions added back — and the amount already distributed is subtracted
- * from the ceiling instead. The period total can then never exceed the figure
- * that was published.
- *
- * Both halves of that subtraction must be measured over the SAME period, which
- * is why the caller passes figures already scoped by the calendar authority
- * rather than a date range this module would re-interpret.
+ * Both the published position and the enforcing mutation call this module. The
+ * authority computes the period allowance, subtracts prior distributions, and
+ * preserves the owner-approved minimum post-withdrawal liquidity reserve.
  */
 import { TREASURY_DEFAULTS } from '../configuration/policy-catalog.js';
 import { assertComputedMoney, assertMoney } from '../../utils/money.js';
@@ -39,39 +11,41 @@ import { assertComputedMoney, assertMoney } from '../../utils/money.js';
 export interface ProfitDistributionInput {
   /** Operating income for the period. */
   revenue: number;
-  /** Operating expense for the period, INCLUDING owner drawings already taken. */
+  /** Operating expense for the period, including owner drawings already taken. */
   expense: number;
   /** Owner drawings already taken in this period. */
   distributed: number;
-  /** Total monthly FIXED cost, the basis for the reserve target. */
+  /** Total monthly fixed cost, the basis for treasury thresholds. */
   fixedTotal: number;
-  /** Current contingency reserve (savings) balance. */
-  reserveBalance: number;
+  /** Branch cash available for a withdrawal. */
+  mainBalance: number;
+  /** Branch savings included in total liquidity but never debited by a withdrawal. */
+  savingBalance: number;
 }
 
 export interface ProfitDistribution {
-  /** Profit BEFORE distributions — the basis for the tier. */
+  /** Profit before distributions, which is the tier basis. */
   profit: number;
-  /** Profit margin as a percentage of revenue. */
   marginPercent: number;
-  /** Share of profit this margin earns, from the declared tier table. */
   tierPercent: number;
-  /** The period's total allowance, before subtracting what was taken. */
+  /** Total period allowance before prior drawings are subtracted. */
   periodAllowance: number;
+  /** Allowance remaining after prior drawings. */
+  remainingAllowance: number;
   distributed: number;
+  mainBalance: number;
+  savingBalance: number;
+  /** Main cash plus savings before a proposed withdrawal. */
+  totalLiquidity: number;
   reserveFundTarget: number;
-  reserveFundBalance: number;
   reserveFundMet: boolean;
-  /** What may still be withdrawn right now. Zero while the reserve is short. */
+  /** Amount total liquidity can lose while still meeting the reserve target. */
+  liquidityHeadroom: number;
+  /** Executable ceiling after allowance, cash, and reserve limits. */
   maxWithdrawable: number;
 }
 
-/**
- * The share of profit a given margin earns.
- *
- * Bands are read highest-first from the declared table. A margin that reaches
- * no band — including a negative one, i.e. a loss — earns nothing.
- */
+/** Returns the owner-approved profit share for a margin percentage. */
 export function resolveDistributionTier(marginPercent: number): number {
   for (const band of TREASURY_DEFAULTS.profitDistributionTiers) {
     if (marginPercent >= band.minMarginPercent) return band.sharePercent;
@@ -79,7 +53,7 @@ export function resolveDistributionTier(marginPercent: number): number {
   return 0;
 }
 
-/** The reserve a branch must hold before any profit may be withdrawn. */
+/** Minimum total branch liquidity that must remain after a withdrawal. */
 export function reserveFundTargetFor(fixedTotal: number): number {
   return assertComputedMoney(
     fixedTotal * TREASURY_DEFAULTS.reserveFundMonths,
@@ -87,25 +61,29 @@ export function reserveFundTargetFor(fixedTotal: number): number {
   );
 }
 
-/**
- * Resolves the complete distribution position for a period.
- *
- * Pure: it performs no queries and reads no clock, so both endpoints and the
- * tests compute the identical answer from identical inputs.
- */
+/** Main-cash level below which the BOS raises an operational warning. */
+export function cashReserveWarningThresholdFor(fixedTotal: number): number {
+  return assertComputedMoney(
+    fixedTotal * TREASURY_DEFAULTS.cashReserveWarningMonths,
+    'cash reserve warning threshold',
+  );
+}
+
+/** Resolves the complete, executable distribution position for a period. */
 export function computeProfitDistribution(input: ProfitDistributionInput): ProfitDistribution {
   const distributed = assertMoney(input.distributed, 'distributed this period');
   const revenue = assertComputedMoney(input.revenue, 'period revenue', { allowNegative: true });
   const expense = assertComputedMoney(input.expense, 'period expense', { allowNegative: true });
+  const mainBalance = assertMoney(input.mainBalance, 'main account balance');
+  const savingBalance = assertMoney(input.savingBalance, 'saving account balance');
 
-  // Gross profit: distributions are added back so paying one out cannot lower
-  // the tier and re-open the ceiling.
+  // Owner drawings are added back because they are equity transfers, not an
+  // operating cost. Prior drawings are subtracted from the allowance below.
   const profit = assertComputedMoney(revenue - expense + distributed, 'calculated profit', {
     allowNegative: true,
   });
   const marginPercent = revenue > 0 ? (profit / revenue) * 100 : 0;
   const tierPercent = resolveDistributionTier(marginPercent);
-
   const periodAllowance =
     profit > 0
       ? Math.max(
@@ -115,28 +93,42 @@ export function computeProfitDistribution(input: ProfitDistributionInput): Profi
           }),
         )
       : 0;
-
-  const reserveFundTarget = reserveFundTargetFor(input.fixedTotal);
-  const reserveFundBalance = assertMoney(input.reserveBalance, 'reserve balance');
-  const reserveFundMet = reserveFundBalance >= reserveFundTarget;
-
-  const remaining = Math.max(
+  const remainingAllowance = Math.max(
     0,
     assertComputedMoney(periodAllowance - distributed, 'remaining allowance', {
       allowNegative: true,
     }),
   );
 
+  const totalLiquidity = assertComputedMoney(
+    mainBalance + savingBalance,
+    'total branch liquidity',
+  );
+  const reserveFundTarget = reserveFundTargetFor(input.fixedTotal);
+  const liquidityHeadroom = Math.max(
+    0,
+    assertComputedMoney(totalLiquidity - reserveFundTarget, 'liquidity above reserve', {
+      allowNegative: true,
+    }),
+  );
+  const reserveFundMet = totalLiquidity >= reserveFundTarget;
+  const maxWithdrawable = reserveFundMet
+    ? Math.min(remainingAllowance, mainBalance, liquidityHeadroom)
+    : 0;
+
   return {
     profit,
     marginPercent,
     tierPercent,
     periodAllowance,
+    remainingAllowance,
     distributed,
+    mainBalance,
+    savingBalance,
+    totalLiquidity,
     reserveFundTarget,
-    reserveFundBalance,
     reserveFundMet,
-    // The reserve gate closes the ceiling entirely; it does not merely warn.
-    maxWithdrawable: reserveFundMet ? remaining : 0,
+    liquidityHeadroom,
+    maxWithdrawable,
   };
 }
