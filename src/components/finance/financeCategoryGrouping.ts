@@ -52,6 +52,12 @@ export interface BudgetCategoryGroup {
   classification: FinanceCategoryClassification;
   /** True for the synthetic "Unclassified" bucket — never a real category. */
   isUnclassified: boolean;
+  /**
+   * True for the synthetic bucket holding lines that are DELIBERATELY outside
+   * the expense taxonomy (the contingency Reserve). A settled decision, not an
+   * open one — the distinction matters, see `groupBudgetLines`.
+   */
+  isOutOfTaxonomy: boolean;
   groups: BudgetLineGroup[];
   lineCount: number;
   allocated: number;
@@ -108,6 +114,7 @@ export function groupBudgetLines(
       categoryName: category.name,
       classification: category.classification,
       isUnclassified: false,
+      isOutOfTaxonomy: false,
       groups,
       lineCount: lines.length,
       allocated: lines.reduce((sum, l) => sum + (l.allocatedAmount || 0), 0),
@@ -115,20 +122,56 @@ export function groupBudgetLines(
     });
   }
 
+  // Lines with no canonical node fall into ONE OF TWO buckets, and conflating
+  // them is a real misrepresentation:
+  //
+  //   out_of_taxonomy  a SETTLED decision — the contingency Reserve is not an
+  //                    expense classification and deliberately has no node.
+  //   everything else  an OPEN decision the upgrade refused to guess.
+  //
+  // These were previously merged into a single "needs an owner decision" group,
+  // which told the owner that Reserve was waiting on them when it was not.
   const orphans = active.filter((line) => !consumed.has(line.id)).sort(bySortOrder);
-  if (orphans.length) {
-    result.push({
-      categoryId: null,
-      categoryName: 'Unclassified — needs an owner decision',
-      // Their behaviour is unchanged from before the upgrade: still operating
-      // expense. The label is what makes the outstanding decision visible.
-      classification: 'operating_expense',
-      isUnclassified: true,
-      groups: [{ subcategoryId: null, subcategoryName: 'Not mapped to the canonical taxonomy', lines: orphans }],
-      lineCount: orphans.length,
-      allocated: orphans.reduce((sum, l) => sum + (l.allocatedAmount || 0), 0),
-      remaining: orphans.reduce((sum, l) => sum + (l.currentAmount || 0), 0),
-    });
+  const outOfTaxonomy = orphans.filter((line) => line.mappingStatus === 'out_of_taxonomy');
+  const undecided = orphans.filter((line) => line.mappingStatus !== 'out_of_taxonomy');
+
+  const syntheticGroup = (
+    lines: BudgetLine[],
+    categoryName: string,
+    subcategoryName: string,
+    flags: { isUnclassified: boolean; isOutOfTaxonomy: boolean },
+  ): BudgetCategoryGroup => ({
+    categoryId: null,
+    categoryName,
+    // Behaviour is unchanged from before the upgrade: still operating expense.
+    // The LABEL is what carries the meaning, not a reclassification.
+    classification: 'operating_expense',
+    ...flags,
+    groups: [{ subcategoryId: null, subcategoryName, lines }],
+    lineCount: lines.length,
+    allocated: lines.reduce((sum, l) => sum + (l.allocatedAmount || 0), 0),
+    remaining: lines.reduce((sum, l) => sum + (l.currentAmount || 0), 0),
+  });
+
+  if (undecided.length) {
+    result.push(
+      syntheticGroup(
+        undecided,
+        'Unclassified — needs an owner decision',
+        'Not mapped to the canonical taxonomy',
+        { isUnclassified: true, isOutOfTaxonomy: false },
+      ),
+    );
+  }
+  if (outOfTaxonomy.length) {
+    result.push(
+      syntheticGroup(
+        outOfTaxonomy,
+        'Outside the expense taxonomy',
+        'Financial planning / contingency — not an expense category',
+        { isUnclassified: false, isOutOfTaxonomy: true },
+      ),
+    );
   }
 
   return result;

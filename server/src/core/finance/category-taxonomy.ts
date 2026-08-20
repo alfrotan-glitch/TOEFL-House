@@ -280,13 +280,39 @@ export const LEGACY_PURPOSE_MAP: Readonly<Record<string, LegacyPurposeMapping>> 
   },
   misc: { categoryId: 'sub_miscellaneous', status: 'mapped', rationale: 'Residual operating spend.' },
   equipment: {
-    // Owner decision, 2026-08-20, taken from evidence inside the model rather
-    // than from the word "Equipment": the seed catalogue gives this line the
-    // `Monitor` icon (a computer display), which identifies it as TECHNOLOGY
-    // equipment rather than general office furniture.
-    categoryId: 'sub_it_equipment',
-    status: 'mapped',
-    rationale: 'Seed catalogue icon is `Monitor` (computer display) — technology equipment, therefore Capital Expenditure → IT Equipment.',
+    // FINALIZATION AUDIT, 2026-08-20. A repository-wide sweep of every
+    // `purpose='equipment'` reference at the pre-migration commit (14b9cc8)
+    // returns exactly THREE hits, and only one of them carries any meaning:
+    //
+    //   002_add_budget_purpose.sql:24   `b8 → 'equipment'`  (no name, no label)
+    //   organizationHierarchy.ts:101    name 'Equipment', icon `Monitor`,
+    //                                   cost_type 'variable'
+    //   OperationalExpensesPanel.tsx:14 membership in a hard-coded allow-list
+    //
+    // There is NO expense request, NO ledger row, NO report, NO business rule,
+    // NO description, NO Dari original (migration 005 renames ten purposes and
+    // this is not one of them) and NO test fixture anywhere that references it.
+    //
+    // So the entire case for "IT" rests on a single artefact: the `Monitor`
+    // icon. That is suggestive — every one of the seventeen legacy icons is a
+    // literal depiction of its line (Printer→printing, Coffee→kitchen,
+    // Car→transport, Droplets→water, Flame→gas, Wrench→maintenance…), so the
+    // author's iconography is a deliberate signal rather than decoration. But a
+    // consistency argument ABOUT that same icon is not a second, independent
+    // piece of evidence, and "Equipment" as a bare noun covers desks, boards
+    // and projectors just as naturally as computers.
+    //
+    // The ACCOUNTING TREATMENT is settled and unaffected: whichever subcategory
+    // wins, both candidates live under Capital Expenditure, so the line is
+    // classified `capital_expenditure` either way and no P&L figure depends on
+    // the outcome. Only the subcategory is open, so only the subcategory is
+    // left unasserted.
+    categoryId: 'cat_capital_expenditure',
+    status: 'needs_review',
+    rationale:
+      'Capital Expenditure is certain (both candidate subcategories sit under it, so the classification is unaffected). ' +
+      'IT Equipment vs Office Equipment rests on ONE artefact — the seed catalogue `Monitor` icon — and a single signal is ' +
+      'not enough to assert a subcategory. Owner decision required.',
   },
   marketing: {
     // The row carries no channel information (`is_marketing = 1` only), and the

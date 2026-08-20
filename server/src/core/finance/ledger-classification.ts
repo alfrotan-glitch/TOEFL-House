@@ -42,6 +42,15 @@
  *   non_expense_cash_movement   salary advances, refunds, owner drawings,
  *                               charitable contributions
  *
+ * KNOWN LIMIT — read this before trusting the non-expense total.
+ * `POST /employees/:id/pay-salary` and the teacher payroll path write
+ * `payment_type='advance'` rows as `expense` / category `salary`, so a PAYROLL
+ * advance is still an operating expense and is NOT counted here. Only spend
+ * booked against a Non-Expense Cash Movement BUDGET LINE reaches this bucket.
+ * Changing the payroll write path restates payroll and moves the budget
+ * reconciler, so it is deliberately out of scope for the taxonomy migration and
+ * is tracked in docs/finance-category-followups.md (FU-1).
+ *
  * Those sets are DERIVED from the taxonomy rather than typed out again here,
  * so adding a subcategory to `cat_capital_expenditure` automatically keeps it
  * out of operating expense in the P&L, the cash-flow series, `/reports/overview`

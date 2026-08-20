@@ -409,12 +409,16 @@ describe('the explicit SQL mapping and the compiled legacy map agree', () => {
     expect(LEGACY_PURPOSE_MAP.transport.status).toBe('needs_review');
     expect(LEGACY_PURPOSE_MAP.purchases.status).toBe('needs_review');
     expect(LEGACY_PURPOSE_MAP.purchases.categoryId).toBeNull();
+    expect(LEGACY_PURPOSE_MAP.equipment.status).toBe('needs_review');
     expect(LEGACY_PURPOSE_MAP.reserve.status).toBe('out_of_taxonomy');
 
-    // Every ambiguous line keeps the treatment it had before the upgrade.
+    // Every ambiguous line keeps the treatment it had before the upgrade...
     for (const purpose of ['marketing', 'transport', 'purchases', 'reserve']) {
       expect(classificationOf(LEGACY_PURPOSE_MAP[purpose].categoryId)).toBe('operating_expense');
     }
+    // ...except `equipment`, whose TREATMENT is settled even though its
+    // subcategory is not: both candidates sit under Capital Expenditure.
+    expect(classificationOf(LEGACY_PURPOSE_MAP.equipment.categoryId)).toBe('capital_expenditure');
   });
 
   it('marks the review-needed lines in the database so the UI can surface them', () => {
@@ -423,6 +427,7 @@ describe('the explicit SQL mapping and the compiled legacy map agree', () => {
        WHERE branch_id = '1' AND mapping_status <> 'mapped' ORDER BY purpose`,
     ).all() as Array<{ purpose: string; mapping_status: string }>;
     expect(rows).toEqual([
+      { purpose: 'equipment', mapping_status: 'needs_review' },
       { purpose: 'marketing', mapping_status: 'needs_review' },
       { purpose: 'purchases', mapping_status: 'needs_review' },
       { purpose: 'reserve', mapping_status: 'out_of_taxonomy' },

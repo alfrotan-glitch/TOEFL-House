@@ -782,7 +782,22 @@ financeRouter.get(
     const month = String((req.query as any).month || 'all');
     const { branchId, isAll } = resolveBranchScope(req);
 
-    const datePattern = month === 'all' ? `${year}-%` : `${year}-${month.padStart(2, '0')}-%`;
+    // PREFIX for `String.prototype.startsWith`, NOT a SQL LIKE pattern.
+    //
+    // This was `${year}-${month}-%`, a LIKE pattern fed to a JavaScript
+    // `startsWith`, where `%` is an ordinary character. No ISO date can start
+    // with "2026-08-%", so `/finance/expense-report` returned an EMPTY report
+    // for every year and every month, always — including `month=all`
+    // (`${year}-%`). Proven live during the finalization audit: three approved
+    // requests totalling 105,000 AFN dated 2026-08-20 produced
+    // `rows: [], totalExpense: 0`.
+    //
+    // It matters more now than it did before: this endpoint carries the
+    // per-row accounting `classification` and the capital-expenditure /
+    // non-expense splits, so while the filter was broken those figures could
+    // never be observed. The date semantics are otherwise unchanged — the same
+    // prefix match over the same column.
+    const datePattern = month === 'all' ? `${year}-` : `${year}-${month.padStart(2, '0')}-`;
     
     const allRequests = isAll 
       ? stmtGetAllExpenseRequests.all() as any[] 

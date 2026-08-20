@@ -59,12 +59,18 @@ export default function BudgetsPanel({ budgetLines, financeCategories, canView, 
         <section key={group.categoryId ?? '__unclassified__'} className="space-y-3">
           <header className="flex items-center justify-between gap-3 flex-wrap border-b border-slate-100 pb-2">
             <div className="flex items-center gap-2 flex-wrap">
-              <h3 className={`text-sm font-extrabold ${group.isUnclassified ? 'text-amber-800' : 'text-slate-900'}`}>
+              <h3 className={`text-sm font-extrabold ${group.isUnclassified ? 'text-amber-800' : group.isOutOfTaxonomy ? 'text-slate-600' : 'text-slate-900'}`}>
                 {group.categoryName}
               </h3>
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${CLASSIFICATION_BADGE[group.classification]}`}>
-                {CLASSIFICATION_LABEL[group.classification]}
-              </span>
+              {group.isOutOfTaxonomy ? (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border bg-slate-100 text-slate-600 border-slate-200">
+                  Not an expense category
+                </span>
+              ) : (
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${CLASSIFICATION_BADGE[group.classification]}`}>
+                  {CLASSIFICATION_LABEL[group.classification]}
+                </span>
+              )}
               <span className="text-[10px] text-slate-400 font-mono">{group.lineCount} line(s)</span>
             </div>
             <div className="text-[10px] font-mono text-slate-500">
@@ -76,6 +82,14 @@ export default function BudgetsPanel({ budgetLines, financeCategories, canView, 
             <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
               These lines could not be attached to the canonical taxonomy without guessing, so nothing was assumed.
               They still behave exactly as before (operating expense) and are waiting for an owner decision.
+            </p>
+          )}
+
+          {group.isOutOfTaxonomy && (
+            <p className="text-[11px] text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+              A financial-planning envelope, not an expense category — deliberately outside the canonical taxonomy.
+              Nothing is outstanding here. The six-month contingency target is tracked separately against the branch
+              savings account, not against this line.
             </p>
           )}
 

@@ -209,7 +209,15 @@ export default function PnLPanel({ selectedYear, selectedMonth }: Props) {
                   {CLASSIFICATION_LABEL.non_expense_cash_movement}
                 </span>
               </div>
-              <p className="text-[10px] text-slate-500">Salary advances, refunds, owner&apos;s drawings and charitable contributions. Cash moves; no operating cost is incurred.</p>
+              <p className="text-[10px] text-slate-500">
+                Cash moves; no operating cost is incurred. Covers spend booked to the Non-Expense Cash Movement
+                budget lines and owner&apos;s drawings.
+                {' '}
+                <strong className="text-slate-600">
+                  Payroll advances recorded through the Payroll screen are still posted as salary expense and appear above,
+                  not here.
+                </strong>
+              </p>
               <div className="space-y-2">{nonExpenseRows.map((r) => (
                 <div key={r.category} className="flex justify-between items-center text-xs border-b border-slate-50 pb-2">
                   <span className="font-bold text-slate-700 capitalize">{r.category.replace(/_/g, ' ')}</span>

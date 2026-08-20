@@ -107,8 +107,12 @@ describe('the classification authority knows all three treatments', () => {
   });
 
   it('classifies the legacy "equipment" purpose as capital expenditure', () => {
-    // Decided from the seed catalogue's `Monitor` icon, not from the word.
+    // The SUBCATEGORY is an open owner decision (one artefact of evidence is not
+    // enough to choose IT vs Office Equipment), but the TREATMENT is settled:
+    // both candidates sit under Capital Expenditure, so the accounting answer is
+    // the same either way and no report depends on the outcome.
     expect(classifyExpenseCategory('equipment')).toBe('capital_expenditure');
+    expect(classifyExpenseCategory('cat_capital_expenditure')).toBe('capital_expenditure');
   });
 
   it('leaves every ordinary category, and every UNKNOWN category, as operating expense', () => {
@@ -278,11 +282,23 @@ describe('the budget-line API carries the hierarchy, so the browser never derive
       mappingStatus: 'mapped',
     });
 
+    // Legacy "Equipment": treatment settled, subcategory deliberately unasserted.
     const equipment = (res.body as Array<Record<string, unknown>>).find((b) => b.purpose === 'equipment');
     expect(equipment).toMatchObject({
+      parentCategoryId: 'cat_capital_expenditure',
       parentCategoryName: 'Capital Expenditure',
+      subcategoryId: null,
+      subcategoryName: null,
+      classification: 'capital_expenditure',
+      mappingStatus: 'needs_review',
+    });
+
+    // The canonical IT Equipment envelope still exists in its own right.
+    const itEquipment = (res.body as Array<Record<string, unknown>>).find((b) => b.purpose === 'sub_it_equipment');
+    expect(itEquipment).toMatchObject({
       subcategoryName: 'IT Equipment',
       classification: 'capital_expenditure',
+      mappingStatus: 'mapped',
     });
 
     const advances = (res.body as Array<Record<string, unknown>>).find((b) => b.purpose === 'sub_salary_advances');

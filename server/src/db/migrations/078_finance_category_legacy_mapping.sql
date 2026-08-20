@@ -75,13 +75,19 @@ UPDATE budget_lines SET category_id = 'sub_food_catering', mapping_status = 'map
 UPDATE budget_lines SET category_id = 'sub_miscellaneous', mapping_status = 'mapped'
   WHERE purpose = 'misc' AND category_id IS NULL;
 
--- Capital Expenditure → IT Equipment.
--- Decided from evidence INSIDE the model, not from the word "Equipment": the
--- seed catalogue gives this line the `Monitor` icon (a computer display), which
--- identifies it as technology equipment. This is the one mapping that changes
--- an accounting classification (operating expense → capital expenditure), and
--- it is the correct one: a monitor is a fixed asset, not a monthly cost.
-UPDATE budget_lines SET category_id = 'sub_it_equipment', mapping_status = 'mapped'
+-- Capital Expenditure — subcategory NOT decidable.
+--
+-- FINALIZATION AUDIT (2026-08-20): a repository-wide sweep of every
+-- `purpose='equipment'` reference at the pre-migration commit returns three
+-- hits, and only one carries meaning — the seed catalogue's `Monitor` icon.
+-- There is no expense request, no ledger row, no report, no business rule, no
+-- description, no Dari original and no fixture that references it anywhere.
+--
+-- One artefact is not enough to assert IT Equipment over Office Equipment, so
+-- the subcategory is left to a human. The ACCOUNTING TREATMENT is unaffected:
+-- both candidates sit under Capital Expenditure, so the line classifies as
+-- capital expenditure either way and no P&L figure depends on the outcome.
+UPDATE budget_lines SET category_id = 'cat_capital_expenditure', mapping_status = 'needs_review'
   WHERE purpose = 'equipment' AND category_id IS NULL;
 
 -- AMBIGUOUS — parent certain, subcategory NOT decidable from the data.

@@ -192,7 +192,6 @@ describe('the legacy → canonical mapping is explicit and deterministic', () =>
       printing: 'sub_printing',
       kitchen: 'sub_food_catering',
       misc: 'sub_miscellaneous',
-      equipment: 'sub_it_equipment',
     };
     for (const [purpose, categoryId] of Object.entries(expected)) {
       expect(line(db, purpose), purpose).toMatchObject({ category_id: categoryId, mapping_status: 'mapped' });
@@ -215,6 +214,9 @@ describe('the legacy → canonical mapping is explicit and deterministic', () =>
     // Category certain, subcategory not recorded anywhere in the data.
     expect(line(db, 'marketing')).toMatchObject({ category_id: 'cat_marketing_promotion', mapping_status: 'needs_review' });
     expect(line(db, 'transport')).toMatchObject({ category_id: 'cat_transport_logistics', mapping_status: 'needs_review' });
+    // Treatment settled (Capital Expenditure), subcategory left to a human:
+    // one artefact of evidence cannot choose IT vs Office Equipment.
+    expect(line(db, 'equipment')).toMatchObject({ category_id: 'cat_capital_expenditure', mapping_status: 'needs_review' });
     // Not even the parent is decidable — nothing is asserted at all.
     expect(line(db, 'purchases')).toMatchObject({ category_id: null, mapping_status: 'needs_review' });
     // Deliberately outside the expense taxonomy.

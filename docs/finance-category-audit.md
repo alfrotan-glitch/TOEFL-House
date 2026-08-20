@@ -420,8 +420,14 @@ These are reported rather than guessed:
 | Legacy purpose | Why it is ambiguous |
 |---|---|
 | `marketing` "Marketing" | target splits marketing into Digital / Traditional / Promotional Materials; the row carries no channel information |
-| `equipment` "Equipment" | Office & Administration (operating) **or** Capital Expenditure (IT/Office Equipment) — the choice changes P&L classification |
+| `equipment` "Equipment" | IT Equipment **or** Office Equipment — both under Capital Expenditure, so the treatment is settled but the subcategory is not |
 | `purchases` "General Purchases" | Office Supplies / Teaching Materials / Miscellaneous are all plausible |
 | `transport` "Transport" | Fuel / Taxi & Transportation / Delivery & Courier / Travel are all plausible |
 | `reserve` "Reserve" | a contingency fund; **the target taxonomy has no equivalent node at all** |
 | salary **advances** | today an operating expense; the target says non-expense — changing it restates payroll and breaks the budget reconciler |
+
+> **Superseded by the finalization audit (2026-08-20).** Every item above was
+> re-audited before the taxonomy was frozen, with the full evidence inventory
+> and the exact owner decision required recorded in
+> **`docs/finance-category-followups.md`**. Read that file, not this table, for
+> the current state.
