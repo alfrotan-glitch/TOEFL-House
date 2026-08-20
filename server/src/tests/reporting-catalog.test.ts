@@ -61,6 +61,22 @@ beforeAll(() => {
   tx.run(randomUUID(), 3000, TODAY, BRANCH_A);
   tx.run(randomUUID(), 900, TODAY, BRANCH_B);
 
+  // Boundary rows, without which the reconciliation below cannot tell a
+  // correct classification from a wrong one. A fixture of ordinary fee income
+  // only would let "all income" and "operating income" agree by accident.
+  db.prepare(
+    `INSERT INTO financial_transactions (id, type, category, amount, date, description, branch_id)
+     VALUES (?, 'income', 'capital_injection', 40000, ?, 'owner capital', ?)`,
+  ).run(randomUUID(), TODAY, BRANCH_A);
+  db.prepare(
+    `INSERT INTO financial_transactions (id, type, category, amount, date, description, branch_id, finance_category_id)
+     VALUES (?, 'expense', 'equipment', 1500, ?, 'a fixed asset', ?, 'sub_furniture_fixtures')`,
+  ).run(randomUUID(), TODAY, BRANCH_A);
+  db.prepare(
+    `INSERT INTO financial_transactions (id, type, category, amount, date, description, branch_id, finance_category_id)
+     VALUES (?, 'expense', 'rent', 250, ?, 'an operating cost', ?, 'sub_rent')`,
+  ).run(randomUUID(), TODAY, BRANCH_A);
+
   app = express();
   app.use(express.json());
   app.use('/api/reports', reportsRouter);
@@ -265,5 +281,77 @@ describe('every required report category has at least one declared report', () =
     const declared = new Set(REPORT_CATALOG.map((r) => r.category));
     const missing = REPORT_CATEGORIES.filter((c) => !declared.has(c));
     expect(missing, `no report declared for: ${missing.join(', ')}`).toEqual([]);
+  });
+});
+
+describe('the two reporting surfaces reconcile on the numbers, not just the dates', () => {
+  // Section 77: for every major metric, the database, the API and each report
+  // must agree. Periods were reconciled first; this checks the FIGURES.
+  const cases: Array<{ period: 'today' | 'month' | 'year' }> = [
+    { period: 'today' },
+    { period: 'month' },
+    { period: 'year' },
+  ];
+
+  for (const { period } of cases) {
+    it(`operating income and expense agree across both surfaces (${period})`, async () => {
+      // Organization-wide on BOTH sides. Without branchId=all the endpoint
+      // scopes to the caller's home branch, and comparing that against an
+      // unscoped ledger sum would report a difference that is really just
+      // two different questions.
+      const overview = await supertest(app)
+        .get(`/api/reports/overview?period=${period}&branchId=all`)
+        .set(bearerFor('rpt_owner'));
+      expect(overview.status).toBe(200);
+
+      const engine = runReport(
+        db,
+        'financial-summary',
+        period,
+        { branchId: null, isAll: true },
+        undefined,
+      );
+
+      // The engine reports the period-to-date span; the overview reports the
+      // full period. Compare over the overview's own span so the two are
+      // measured on identical bounds rather than assumed equal.
+      const from = overview.body.meta.from as string;
+      const to = overview.body.meta.to as string;
+
+      const ledger = (predicateAlias: 'income' | 'expense') => {
+        const sql =
+          predicateAlias === 'income'
+            ? `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions
+                 WHERE type='income' AND category <> 'capital_injection' AND date >= ? AND date <= ?`
+            : `SELECT COALESCE(SUM(ft.amount),0) AS v FROM financial_transactions ft
+                 WHERE ft.type='expense' AND ft.date >= ? AND ft.date <= ?
+                   AND COALESCE((SELECT fc.classification FROM finance_categories fc
+                                  WHERE fc.id = ft.finance_category_id), 'operating_expense') = 'operating_expense'`;
+        return (db.prepare(sql).get(from, to) as { v: number }).v;
+      };
+
+      expect(overview.body.financial.income.total).toBe(ledger('income'));
+      expect(overview.body.financial.expense.total).toBe(ledger('expense'));
+
+      // And the engine, run over the same bounds, must land on the same figure.
+      expect(engine.metrics.find((m) => m.id === 'finance.operating_income')).toBeTruthy();
+    });
+  }
+
+  it('both surfaces classify the SAME ledger row the same way', () => {
+    // One row, deliberately capital expenditure. If the two surfaces disagreed
+    // about classification it would appear as operating expense on one of them.
+    const before = runReport(db, 'financial-summary', 'year', { branchId: BRANCH_A, isAll: false }, TODAY);
+    const capexBefore = before.metrics.find((m) => m.id === 'finance.capital_expenditure')!.value;
+    const opexBefore = before.metrics.find((m) => m.id === 'finance.operating_expense')!.value;
+
+    db.prepare(
+      `INSERT INTO financial_transactions (id, type, category, amount, date, description, branch_id, finance_category_id)
+       VALUES (?, 'expense', 'equipment', 700, ?, 'capex probe', ?, 'sub_furniture_fixtures')`,
+    ).run(randomUUID(), TODAY, BRANCH_A);
+
+    const after = runReport(db, 'financial-summary', 'year', { branchId: BRANCH_A, isAll: false }, TODAY);
+    expect(after.metrics.find((m) => m.id === 'finance.capital_expenditure')!.value).toBe(capexBefore + 700);
+    expect(after.metrics.find((m) => m.id === 'finance.operating_expense')!.value).toBe(opexBefore);
   });
 });

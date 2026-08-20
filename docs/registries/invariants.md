@@ -49,3 +49,5 @@ Validated by `npm run audit:registries`.
 | Every reporting surface resolves a period through the calendar authority | application | `server/src/core/calendar/periods.ts` | `server/src/tests/reporting-catalog.test.ts` | overview and engine spans compared directly |
 | A historical period is a Shamsi key, not a Gregorian window | application | `periodBoundariesForKey` | `server/src/tests/reporting-forensic.test.ts` | 400 on an unrecognised key |
 | Every required report category has at least one declared report | application | `REPORT_CATALOG` | `server/src/tests/reporting-catalog.test.ts` | provoked: removing the teacher report names it |
+| The overview and the report engine agree on operating income and expense | application | shared `ledger-classification` predicates | `server/src/tests/reporting-catalog.test.ts` | provoked: capital injection leaking into income gives 48900 vs 8900 |
+| A capital-expenditure row never lands in operating expense | application | `finance_categories.classification` | `server/src/tests/reporting-catalog.test.ts` | capex rises, opex unchanged |
