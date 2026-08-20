@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const registryDir = path.join(root, 'docs', 'registries');
 
-const REQUIRED = ['canonical-authority.md', 'invariants.md', 'metrics.md', 'decisions.md'];
+const REQUIRED = ['canonical-authority.md', 'invariants.md', 'metrics.md', 'decisions.md', 'protocol-conflicts.md', 'assumptions.md'];
 
 const failures = [];
 const stats = { files: 0, rows: 0, paths: 0, endpoints: 0 };
@@ -41,8 +41,8 @@ if (!fs.existsSync(registryDir)) {
 for (const name of REQUIRED) {
   if (!fs.existsSync(path.join(registryDir, name))) fail(`docs/registries/${name} is missing.`);
 }
-if (!fs.existsSync(path.join(root, 'docs', 'ENGINEERING_PROTOCOL.md'))) {
-  fail('docs/ENGINEERING_PROTOCOL.md is missing — the registries have no governing document.');
+if (!fs.existsSync(path.join(root, 'docs', 'MASTER_ENGINEERING_PROTOCOL.md'))) {
+  fail('docs/MASTER_ENGINEERING_PROTOCOL.md is missing — the registries have no governing document.');
 }
 if (failures.length) {
   console.error('REGISTRY AUDIT: FAIL');

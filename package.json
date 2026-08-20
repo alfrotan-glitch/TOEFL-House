@@ -19,7 +19,8 @@
     "release:validate": "node scripts/release-validate.mjs",
     "release:validate:quick": "node scripts/release-validate.mjs --quick",
     "audit:bundle": "node scripts/verify-bundle-weight.mjs",
-    "audit:registries": "node scripts/verify-registries.mjs"
+    "audit:registries": "node scripts/verify-registries.mjs",
+    "audit:protocol": "node scripts/verify-protocol.mjs"
   },
   "dependencies": {
     "lucide-react": "1.27.0",

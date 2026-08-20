@@ -84,6 +84,9 @@ run('frontend lint', 'npm run lint');
 run('server lint (eslint + tsc)', 'npm run lint', { cwd: path.join(root, 'server') });
 run('product integrity audit', 'npm run audit:product');
 run('high-assurance static audit', 'npm run audit:static');
+// The Master Engineering Protocol is registered as immutable project policy.
+// A policy that can be edited silently is not policy.
+run('protocol integrity', 'npm run audit:protocol');
 // Engineering Protocol §6: the registries are the proof, not the prose. A stale
 // registry — a renamed module, a deleted test, an invariant with no enforcement
 // point — fails the release, exactly as a broken test would.

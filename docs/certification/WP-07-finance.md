@@ -1,7 +1,14 @@
 # Certification — WP-07 Finance
 
 **Work Package:** WP-07 Finance (finance category taxonomy, budget model, ledger classification)
-**Protocol:** Engineering Protocol v2
+**Protocol:** Engineering Protocol v2 — **SUPERSEDED**
+
+> This certification was issued under the v2 protocol, which has been replaced by
+> `docs/MASTER_ENGINEERING_PROTOCOL.md`. It is kept as an accurate record of what was
+> verified and when; it is **not** rewritten to claim compliance with a protocol that did
+> not exist at the time (§103). WP-07 requires re-certification under the Master
+> Protocol, in particular against §12 (canonical database), §14 (test reset), §24 (design
+> system) and §31 (printing), none of which v2 imposed.
 **Diff under review:** `0d243e9..4b8ad0e` plus the review follow-up in this pass
 **Date:** 2026-08-20
 
