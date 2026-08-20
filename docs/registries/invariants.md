@@ -42,3 +42,7 @@ Validated by `npm run audit:registries`.
 | A single amount cannot exceed MAX_SAFE_INTEGER/100, so aggregates stay exact | application | `server/src/utils/money.ts` (`MAX_MONEY`) | `server/src/tests/money-boundary-property.test.ts` | HTTP 400 |
 | No application code uses a physical direction utility | build | `scripts/verify-design-system.mjs` | provoked: `ml-4`/`pr-2`/`text-left` reported with their logical replacements | release gate fails |
 | Only the DirectionProvider pins text direction | build | `scripts/verify-design-system.mjs` | provoked: a view setting `dir="rtl"` is reported | release gate fails |
+| A report names metric ids and never carries its own SQL | application | `server/src/core/reporting/report-engine.ts` | `server/src/tests/reporting-catalog.test.ts` | unknown metric throws, never returns 0 |
+| The same metric yields the same value in every report | application | `METRIC_CATALOG` single definition | `server/src/tests/reporting-catalog.test.ts` | two reports compared directly |
+| Branch scope is applied by the engine, not by each metric | application | `server/src/core/reporting/report-engine.ts` | `server/src/tests/reporting-catalog.test.ts` | cross-branch totals diverge |
+| A report's own permission is enforced on top of Report.View | application | `server/src/routes/reports.routes.ts` | `server/src/tests/reporting-catalog.test.ts` | 403 |

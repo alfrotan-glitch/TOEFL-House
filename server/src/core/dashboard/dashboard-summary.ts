@@ -42,7 +42,13 @@ import {
 export { periodBoundaries };
 export type { PeriodBoundaries };
 
-export type DashboardPeriod = ReportingPeriod;
+/**
+ * The dashboard's KPI strip presents three headline periods. The calendar
+ * authority resolves five (daily, weekly, monthly, quarterly, annual); this is
+ * a deliberate SUBSET, declared explicitly so that widening the authority does
+ * not silently widen every consumer's contract.
+ */
+export type DashboardPeriod = Extract<ReportingPeriod, 'today' | 'month' | 'year'>;
 
 export interface DashboardScope {
   /** Null when the caller legitimately sees the whole organization. */

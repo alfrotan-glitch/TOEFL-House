@@ -42,7 +42,20 @@ import {
 } from '../../utils/jalali.js';
 import { today } from '../../utils/ids.js';
 
-export type ReportingPeriod = 'today' | 'month' | 'year';
+/**
+ * The reporting periods the system recognises.
+ *
+ * Reporting requires daily, weekly, monthly, quarterly and annual views, and
+ * every one of them is resolved HERE. A report that computed its own month
+ * boundary would disagree with Finance the moment the Shamsi and Gregorian
+ * months diverged — which they do for nine or ten days of every month.
+ */
+export type ReportingPeriod = 'today' | 'week' | 'month' | 'quarter' | 'year';
+
+export const REPORTING_PERIODS: readonly ReportingPeriod[] = ['today', 'week', 'month', 'quarter', 'year'];
+
+/** Shamsi quarters: Hamal-Jawza, Saratan-Sunbula, Mizan-Qaws, Jadi-Hut. */
+const QUARTER_OF_MONTH = (jm: number): number => Math.floor((jm - 1) / 3) + 1;
 
 export interface PeriodBoundaries {
   period: ReportingPeriod;
@@ -77,6 +90,38 @@ export function periodBoundaries(
       to: todayStr,
       periodKey: `${j.jy}-${pad2(j.jm)}-${pad2(j.jd)}`,
       periodEnd: todayStr,
+    };
+  }
+
+  if (period === 'week') {
+    // A Shamsi week begins on Saturday (Shanbe). JS getUTCDay(): 0=Sunday,
+    // so Saturday is 6 and the offset back to the week's start is (day + 1) % 7.
+    const jsDay = new Date(Date.UTC(g.y, g.m - 1, g.d)).getUTCDay();
+    const from = addDays(todayStr, -((jsDay + 1) % 7));
+    const periodEnd = addDays(from, 6);
+    const fg = parseIsoStrict(from);
+    const fj = gregorianToJalali(fg.y, fg.m, fg.d);
+    return {
+      period,
+      from,
+      to: minIso(todayStr, periodEnd),
+      periodKey: `${fj.jy}-W${from}`,
+      periodEnd,
+    };
+  }
+
+  if (period === 'quarter') {
+    const q = QUARTER_OF_MONTH(j.jm);
+    const firstMonth = (q - 1) * 3 + 1;
+    const lastMonth = firstMonth + 2;
+    const from = jalaliToIso(j.jy, firstMonth, 1);
+    const periodEnd = jalaliToIso(j.jy, lastMonth, jalaliMonthLength(j.jy, lastMonth));
+    return {
+      period,
+      from,
+      to: minIso(todayStr, periodEnd),
+      periodKey: `${j.jy}-Q${q}`,
+      periodEnd,
     };
   }
 

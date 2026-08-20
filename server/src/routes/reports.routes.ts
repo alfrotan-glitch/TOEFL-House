@@ -28,6 +28,13 @@ import { CATEGORY_NAME } from '../core/finance/category-taxonomy.js';
 import { db } from '../db/connection.js';
 import { authenticate, requirePermission, resolveBranchScope } from '../middleware/auth.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
+import { REPORT_CATALOG, REPORT_CATEGORIES } from '../core/reporting/report-catalog.js';
+import {
+  runReport,
+  UnknownReportError,
+  UnsupportedPeriodError,
+} from '../core/reporting/report-engine.js';
+import { REPORTING_PERIODS, type ReportingPeriod } from '../core/calendar/periods.js';
 import { getFinanceAccount } from '../utils/financeAccounts.js';
 import { incrementNumberSetting, getNumberSetting } from '../utils/settings.js';
 import { SYSTEM_DEFAULTS } from '../core/configuration/policy-catalog.js';
@@ -507,4 +514,64 @@ reportsRouter.get(
       },
     });
   })
+);
+
+// ── Declared reports ────────────────────────────────────────────────────────
+//
+// The catalog is browsable so the UI does not hard-code a menu of reports that
+// then drifts from what the server can actually produce.
+
+reportsRouter.get(
+  '/catalog',
+  authenticate,
+  requirePermission('Report.View'),
+  ah(async (_req, res) => {
+    res.json({
+      categories: REPORT_CATEGORIES,
+      periods: REPORTING_PERIODS,
+      reports: REPORT_CATALOG.map((r) => ({
+        id: r.id,
+        title: r.title,
+        category: r.category,
+        purpose: r.purpose,
+        periods: r.periods,
+        permission: r.permission,
+      })),
+    });
+  }),
+);
+
+/**
+ * Runs one declared report.
+ *
+ * The report's OWN permission is enforced in addition to Report.View, so a
+ * payroll or audit report is not readable by anyone who can merely open the
+ * reporting screen.
+ */
+reportsRouter.get(
+  '/run/:reportId',
+  authenticate,
+  requirePermission('Report.View'),
+  ah(async (req, res) => {
+    const definition = REPORT_CATALOG.find((r) => r.id === req.params.reportId);
+    if (!definition) throw new HttpError(404, `Unknown report '${req.params.reportId}'.`);
+
+    if (definition.permission !== 'Report.View' && !req.rbac?.permissionCodes.has(definition.permission)) {
+      throw new HttpError(403, `This report requires ${definition.permission}.`);
+    }
+
+    const period = String(req.query.period ?? 'month') as ReportingPeriod;
+    if (!REPORTING_PERIODS.includes(period)) {
+      throw new HttpError(400, `Unknown period '${period}'.`);
+    }
+
+    const scope = resolveBranchScope(req);
+    try {
+      res.json(runReport(db, definition.id, period, scope));
+    } catch (err) {
+      if (err instanceof UnsupportedPeriodError) throw new HttpError(400, err.message);
+      if (err instanceof UnknownReportError) throw new HttpError(404, err.message);
+      throw err;
+    }
+  }),
 );
