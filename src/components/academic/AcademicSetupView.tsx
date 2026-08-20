@@ -84,9 +84,15 @@ export default function AcademicSetupView({ branchId, activeRole, permissionCode
   // program versions, so the two capabilities are tracked separately and the
   // affected controls are disabled with an explanation rather than failing with
   // a bare 403 after the user has filled in a form.
+  // The backend gates every Academic Setup write with one of these three
+  // canonical permissions, so the UI asks the SAME question rather than
+  // re-deriving capability from role names. `owner` is special-cased only
+  // because the server grants it a global bypass in `requirePermission`.
   const hasPermissionCode = (code: string) => activeRole === 'owner' || (permissionCodes?.includes(code) ?? false);
-  const canEditAcademicInfrastructure = activeRole === 'owner' || activeRole === 'manager' || hasPermissionCode('AcademicSetup.Edit');
-  const canEditCatalog = hasPermissionCode('AcademicSetup.Edit');
+  /** Terms, time slots, rooms, programs, levels — `AcademicSetup.Edit`. */
+  const canEditAcademicInfrastructure = hasPermissionCode('AcademicSetup.Edit');
+  /** Program versions, subjects, modules — `Curriculum.Author`. */
+  const canAuthorCurriculum = hasPermissionCode('Curriculum.Author');
   const [tab, setTab] = useState<Tab>('terms');
   // Tracks which heavy panels have been opened at least once, so each mounts
   // lazily but then STAYS mounted instead of refetching on every revisit.
@@ -550,9 +556,9 @@ export default function AcademicSetupView({ branchId, activeRole, permissionCode
               contract is uniform rather than per-panel guesswork; the server
               still derives real scope from the caller's token. */}
           <div hidden={tab !== 'versions'}>
-            {tab === 'versions' && !canEditCatalog && (
+            {tab === 'versions' && !canAuthorCurriculum && (
               <div role="status" className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-800">
-                You can view program versions and edit the placement policy, but creating or publishing a version requires the <span className="font-mono">AcademicSetup.Edit</span> permission. Ask an owner to grant it.
+                You can view program versions and edit the placement policy, but creating or publishing a version requires the <span className="font-mono">Curriculum.Author</span> permission. Ask an owner to grant it.
               </div>
             )}
             {visited.versions && <ProgramVersionsPanel key={`versions-${branchId ?? 'all'}-${panelRefreshKey}`} branchId={branchId} />}

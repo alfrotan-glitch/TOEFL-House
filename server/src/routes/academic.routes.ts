@@ -26,7 +26,7 @@ academicRouter.use(authenticate);
 // position holding at least one permission and rejects self-service principals.
 // It grants nobody new access; it only closes the permissionless read path.
 academicRouter.use(denyPermissionless);
-academicRouter.get('/defaults', authorize('owner', 'manager'), ah(async (_req, res) => {
+academicRouter.get('/defaults', requirePermission('AcademicSetup.Edit'), ah(async (_req, res) => {
   res.json({
     levelDurationMonths: ACADEMIC_DEFAULTS.levelDurationMonths,
     levelDefaultFee: ACADEMIC_DEFAULTS.levelDefaultFee,
@@ -237,7 +237,7 @@ academicRouter.get(
 
 academicRouter.post(
   '/programs',
-  authorize('owner', 'manager'),
+  requirePermission('AcademicSetup.Edit'),
   ah(async (req, res) => {
     const { name, code, description, durationMonths, isActive, branchId } = req.body ?? {};
     if (!name || !String(name).trim()) throw new HttpError(400, 'Program name is required.');
@@ -261,7 +261,7 @@ academicRouter.post(
 
 academicRouter.put(
   '/programs/:id',
-  authorize('owner', 'manager'),
+  requirePermission('AcademicSetup.Edit'),
   ah(async (req, res) => {
     const existing = stmtGetProgramById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Program not found.');
@@ -323,7 +323,7 @@ academicRouter.get(
 
 academicRouter.post(
   '/levels',
-  authorize('owner', 'manager'),
+  requirePermission('AcademicSetup.Edit'),
   ah(async (req, res) => {
     const { programId, name, code, order, durationMonths, defaultFee, passMark, minViableSize, prerequisites, isActive } = req.body ?? {};
     if (!programId) throw new HttpError(400, 'programId is required.');
@@ -365,7 +365,7 @@ academicRouter.post(
 
 academicRouter.put(
   '/levels/:id',
-  authorize('owner', 'manager'),
+  requirePermission('AcademicSetup.Edit'),
   ah(async (req, res) => {
     const existing = stmtGetLevelById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Level not found.');
@@ -430,7 +430,7 @@ academicRouter.get(
 
 academicRouter.put(
   '/level-fees',
-  authorize('owner', 'manager'),
+  requirePermission('AcademicSetup.Edit'),
   ah(async (req, res) => {
     const { levelId, branchId, fee } = req.body ?? {};
     if (!levelId || fee == null) throw new HttpError(400, 'levelId and fee are required.');
@@ -513,7 +513,7 @@ academicRouter.get('/program-versions/:id/placement-profile', ah(async (req, res
   res.json({ configured:true, programVersionId:version.id, programName:version.program_name, versionLabel:version.version_label, required:!!profile.required, enabled:!!profile.enabled, method:profile.method, sections, components, scoringModel:profile.scoring_model || 'weighted_average', allowRetake:!!profile.allow_retake, maxAttempts:profile.max_attempts == null ? null : Number(profile.max_attempts), firstAttemptBillable:profile.first_attempt_billable == null ? true : !!profile.first_attempt_billable, retakeBillable:!!profile.retake_billable, retakeFeeAmount:profile.retake_fee_amount == null ? null : Number(profile.retake_fee_amount), maxScore:Number(profile.max_score), passScore:Number(profile.pass_score), instructions:profile.instructions });
 }));
 
-academicRouter.put('/program-versions/:id/placement-profile', authorize('owner','manager'), ah(async (req, res) => {
+academicRouter.put('/program-versions/:id/placement-profile', requirePermission('Curriculum.PlacementPolicy'), ah(async (req, res) => {
   const version = db.prepare(`SELECT pv.id, pv.status, p.branch_id, p.name AS program_name, pv.version_label FROM program_versions pv JOIN programs p ON p.id = pv.program_id WHERE pv.id = ?`).get(req.params.id) as any;
   if (!version) throw new HttpError(404, 'Program version not found.');
   requireAcademicBranchAccess(req, version.branch_id);
@@ -581,7 +581,7 @@ academicRouter.get(
 
 academicRouter.post(
   '/time-slots',
-  authorize('owner', 'manager'),
+  requirePermission('AcademicSetup.Edit'),
   ah(async (req, res) => {
     const { code, label, startTime, endTime, branchId, sortOrder, isActive } = req.body ?? {};
     if (!code || !label || !startTime || !endTime) {
@@ -611,7 +611,7 @@ academicRouter.post(
 
 academicRouter.put(
   '/time-slots/:id',
-  authorize('owner', 'manager'),
+  requirePermission('AcademicSetup.Edit'),
   ah(async (req, res) => {
     const existing = stmtGetTimeSlotById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Time slot not found.');
@@ -634,7 +634,7 @@ academicRouter.put(
 
 academicRouter.delete(
   '/time-slots/:id',
-  authorize('owner', 'manager'),
+  requirePermission('AcademicSetup.Edit'),
   ah(async (req, res) => {
     const existing = stmtGetTimeSlotById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Time slot not found.');
@@ -658,7 +658,7 @@ academicRouter.get(
 
 academicRouter.post(
   '/rooms',
-  authorize('owner', 'manager'),
+  requirePermission('AcademicSetup.Edit'),
   ah(async (req, res) => {
     const { code, name, capacity, branchId, notes, isActive } = req.body ?? {};
     if (!code || !name) throw new HttpError(400, 'Room code and name are required.');
@@ -685,7 +685,7 @@ academicRouter.post(
 
 academicRouter.put(
   '/rooms/:id',
-  authorize('owner', 'manager'),
+  requirePermission('AcademicSetup.Edit'),
   ah(async (req, res) => {
     const existing = stmtGetRoomById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Room not found.');
@@ -707,7 +707,7 @@ academicRouter.put(
 
 academicRouter.delete(
   '/rooms/:id',
-  authorize('owner', 'manager'),
+  requirePermission('AcademicSetup.Edit'),
   ah(async (req, res) => {
     const existing = stmtGetRoomById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Room not found.');
@@ -731,7 +731,7 @@ academicRouter.get(
 
 academicRouter.post(
   '/terms',
-  authorize('owner', 'manager'),
+  requirePermission('AcademicSetup.Edit'),
   ah(async (req, res) => {
     const { year, code, name, startDate, endDate, branchId, isActive } = req.body ?? {};
     if (!year || !code || !name) throw new HttpError(400, 'year, code, and name are required.');
@@ -761,7 +761,7 @@ academicRouter.post(
 
 academicRouter.put(
   '/terms/:id',
-  authorize('owner', 'manager'),
+  requirePermission('AcademicSetup.Edit'),
   ah(async (req, res) => {
     const existing = stmtGetTermById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Academic term not found.');

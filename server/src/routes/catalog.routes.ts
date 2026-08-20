@@ -88,7 +88,7 @@ catalogRouter.get('/program-versions/:id', requirePermission('AcademicSetup.View
   res.json(tree);
 }));
 
-catalogRouter.post('/program-versions', requirePermission('AcademicSetup.Edit'), ah(async (req, res) => {
+catalogRouter.post('/program-versions', requirePermission('Curriculum.Author'), ah(async (req, res) => {
   const { programId, versionLabel, versionNumber, durationMonths, description, copyFromVersionId } = req.body ?? {};
   if (!programId || !versionLabel) throw new HttpError(400, 'programId and versionLabel are required.');
   
@@ -107,7 +107,7 @@ catalogRouter.post('/program-versions', requirePermission('AcademicSetup.Edit'),
   }
 }));
 
-catalogRouter.post('/program-versions/:id/publish', requirePermission('AcademicSetup.Edit'), ah(async (req, res) => {
+catalogRouter.post('/program-versions/:id/publish', requirePermission('Curriculum.Author'), ah(async (req, res) => {
   try {
     const tree = catalog().publishVersion(req.params.id);
     writeAudit(req, `Published program version ${req.params.id}`);
@@ -119,7 +119,7 @@ catalogRouter.post('/program-versions/:id/publish', requirePermission('AcademicS
 
 // ── Subjects / modules ────────────────────────────────────────────────────
 
-catalogRouter.post('/subjects', requirePermission('AcademicSetup.Edit'), ah(async (req, res) => {
+catalogRouter.post('/subjects', requirePermission('Curriculum.Author'), ah(async (req, res) => {
   const { programVersionId, levelId, code, name, description, hours, sortOrder } = req.body ?? {};
   if (!programVersionId || !code || !name) throw new HttpError(400, 'programVersionId, code, name required.');
   
@@ -129,7 +129,7 @@ catalogRouter.post('/subjects', requirePermission('AcademicSetup.Edit'), ah(asyn
   res.status(201).json(stmtGetSubjectById.get(newId));
 }));
 
-catalogRouter.post('/modules', requirePermission('AcademicSetup.Edit'), ah(async (req, res) => {
+catalogRouter.post('/modules', requirePermission('Curriculum.Author'), ah(async (req, res) => {
   const { subjectId, code, name, description, hours, sortOrder, assessmentType } = req.body ?? {};
   if (!subjectId || !code || !name) throw new HttpError(400, 'subjectId, code, name required.');
   
@@ -149,7 +149,7 @@ catalogRouter.get('/promotion-rules', requirePermission('AcademicSetup.View', 'E
   res.json(rows);
 }));
 
-catalogRouter.post('/promotion-rules', requirePermission('AcademicSetup.Edit', 'Promotion.Approve'), ah(async (req, res) => {
+catalogRouter.post('/promotion-rules', requirePermission('Promotion.Approve'), ah(async (req, res) => {
   const b = req.body ?? {};
   if (!b.programVersionId || !b.name) throw new HttpError(400, 'programVersionId and name required.');
   
@@ -174,7 +174,7 @@ catalogRouter.post('/promotion-rules', requirePermission('AcademicSetup.Edit', '
   res.status(201).json(stmtGetPromotionRuleById.get(newId));
 }));
 
-catalogRouter.post('/placement-rules', requirePermission('AcademicSetup.Edit'), ah(async (req, res) => {
+catalogRouter.post('/placement-rules', requirePermission('Curriculum.PlacementPolicy'), ah(async (req, res) => {
   const b = req.body ?? {};
   if (!b.programVersionId || !b.name) throw new HttpError(400, 'programVersionId and name required.');
   const version = db.prepare(`SELECT pv.id, p.branch_id FROM program_versions pv JOIN programs p ON p.id=pv.program_id WHERE pv.id=?`).get(b.programVersionId) as any;
@@ -218,7 +218,7 @@ catalogRouter.post('/promotion/evaluate', requirePermission('Promotion.Approve',
   }));
 }));
 
-catalogRouter.post('/fee-rules', requirePermission('AcademicSetup.Edit', 'FeeStructure.Edit'), ah(async () => {
+catalogRouter.post('/fee-rules', requirePermission('FeeStructure.Edit'), ah(async () => {
   throw new HttpError(409, 'Fee rules are legacy compatibility data. Configure fees only in the Academic Catalog and branch level fee override screens.');
 }));
 
@@ -236,14 +236,14 @@ catalogRouter.post('/fees/snapshot', requirePermission('Payment.View', 'Invoice.
 
 // ── Class generation ──────────────────────────────────────────────────────
 
-catalogRouter.post('/class-generation/preview', requirePermission('Class.Create', 'AcademicSetup.Edit'), ah(async (req, res) => {
+catalogRouter.post('/class-generation/preview', requirePermission('Class.Create', 'Curriculum.Author'), ah(async (req, res) => {
   if (req.body?.branchId && !canAccessBranchResource(req, String(req.body.branchId))) throw new HttpError(403, 'Branch is outside your authorized scope.');
   const b = req.body ?? {};
   if (!b.branchId || (!b.programVersionId && !b.offeringId)) throw new HttpError(400, 'branchId and either offeringId or programVersionId are required.');
   res.json(classGen().preview(b));
 }));
 
-catalogRouter.post('/class-generation/drafts', requirePermission('Class.Create', 'AcademicSetup.Edit'), ah(async (req, res) => {
+catalogRouter.post('/class-generation/drafts', requirePermission('Class.Create', 'Curriculum.Author'), ah(async (req, res) => {
   if (req.body?.branchId && !canAccessBranchResource(req, String(req.body.branchId))) throw new HttpError(403, 'Branch is outside your authorized scope.');
   const b = req.body ?? {};
   if (!b.branchId || (!b.programVersionId && !b.offeringId)) throw new HttpError(400, 'branchId and either offeringId or programVersionId are required.');
@@ -255,7 +255,7 @@ catalogRouter.post('/class-generation/drafts', requirePermission('Class.Create',
   res.status(201).json(run);
 }));
 
-catalogRouter.post('/class-generation/:runId/publish', requirePermission('Class.Create', 'AcademicSetup.Edit'), ah(async (req, res) => {
+catalogRouter.post('/class-generation/:runId/publish', requirePermission('Class.Create', 'Curriculum.Author'), ah(async (req, res) => {
   const userId = req.user?.userId;
   if (!userId) throw new HttpError(403, 'User context is missing.');
   
@@ -317,7 +317,7 @@ function assertPercent(value: unknown, field: string): number {
   return n;
 }
 
-catalogRouter.put('/branch-profile/:branchId', requirePermission('AcademicSetup.Edit', 'Settings.Edit'), ah(async (req, res) => {
+catalogRouter.put('/branch-profile/:branchId', requirePermission('FeeStructure.Edit', 'Settings.Edit'), ah(async (req, res) => {
   if (!canAccessBranchResource(req, req.params.branchId)) throw new HttpError(403, 'Branch is outside your authorized scope.');
   const b = (req.body ?? {}) as Record<string, unknown>;
 

@@ -116,30 +116,51 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
   { code: 'Branch.View', resource: 'Branch', action: 'View', description: 'View branches', category: 'security' },
   { code: 'Branch.Edit', resource: 'Branch', action: 'Edit', description: 'Edit branches', category: 'security' },
   { code: 'AcademicSetup.View', resource: 'AcademicSetup', action: 'View', description: 'View academic setup', category: 'security' },
-  // AUTHORIZATION SEMANTICS FOR ACADEMIC SETUP (documented deliberately).
+  // ==========================================================================
+  // ACADEMIC SETUP — ONE CANONICAL AUTHORITY PER OPERATION
+  // ==========================================================================
+  // `AcademicSetup.Edit` used to gate four genuinely different concerns at
+  // once: curriculum authoring, placement policy, promotion thresholds and fee
+  // configuration. That single code was too coarse to grant safely, which is
+  // why the General Manager could save a placement PROFILE (role-gated in
+  // academic.routes) yet receive 403 creating a program VERSION (permission-
+  // gated in catalog.routes) from the very same screen.
   //
-  // The Academic Configuration Center is guarded by two different authorities,
-  // and they are NOT interchangeable:
+  // It is therefore split into atomic capabilities, following the granularity
+  // the catalog already uses elsewhere (Student has 9 actions, Class has 5,
+  // and money authority is already separated as `FeeStructure.Edit`):
   //
-  //   • `academic.routes.ts` uses `authorize('owner','manager')` — a LEGACY
-  //     ROLE check. Terms, slots, rooms, programs, levels and the placement
-  //     profile live here, so a General Manager can administer them.
-  //   • `catalog.routes.ts` uses `requirePermission('AcademicSetup.Edit')` —
-  //     a PERMISSION check covering program versions, subjects, modules and
-  //     promotion/placement rules.
+  //   AcademicSetup.Edit             — academic infrastructure: terms, time
+  //                                    slots, rooms, programs, levels.
+  //   Curriculum.Author              — curriculum structure: program versions
+  //                                    (create/publish), subjects, modules.
+  //   Curriculum.PlacementPolicy     — placement assessment profile and the
+  //                                    placement banding rules. These two are
+  //                                    the same decision expressed in two
+  //                                    tables and must never diverge again.
   //
-  // `AcademicSetup.Edit` is currently held by NO shipped role (owner passes via
-  // the global-owner bypass in `authorize`/`requirePermission`, not via a
-  // grant). The observable consequence is that a General Manager can save a
-  // placement policy but receives 403 when creating a program version from the
-  // very same panel.
+  // Deliberately NOT folded into the split:
+  //   • Promotion thresholds keep requiring `Promotion.Approve` — promotion
+  //     authority already exists and is held by general_manager AND
+  //     head_of_department. Reusing it avoids inventing a second authority.
+  //   • Fee rules / branch fee profile keep requiring `FeeStructure.Edit` or
+  //     `Settings.Edit`. Money authority stays where it is.
   //
-  // This is left as an explicit OWNER DECISION rather than being silently
-  // widened here: granting `AcademicSetup.Edit` to `general_manager` would also
-  // hand them promotion-rule and subject/module authority, which is a business
-  // policy change, not a bug fix. The UI no longer pretends otherwise — it
-  // reads real capability and disables what the caller cannot perform.
-  { code: 'AcademicSetup.Edit', resource: 'AcademicSetup', action: 'Edit', description: 'Edit academic setup', category: 'security' },
+  // Grants are derived from behaviour that already shipped, not invented:
+  //   • general_manager receives `AcademicSetup.Edit` and
+  //     `Curriculum.PlacementPolicy` because `authorize('owner','manager')`
+  //     already let it write terms, slots, rooms, programs, levels and the
+  //     placement profile. Encoding that as permissions grants nothing new.
+  //   • general_manager receives `Curriculum.Author` because the same role
+  //     already holds `Class.Create`, which `requirePermission` (OR semantics)
+  //     accepted for class generation from a program version — it could
+  //     already generate classes from curriculum it was forbidden to author.
+  //     This removes the contradiction rather than widening reach.
+  //   • head_of_department, receptionist, teacher, data_entry and student
+  //     receive NONE of these codes; their access is unchanged.
+  { code: 'AcademicSetup.Edit', resource: 'AcademicSetup', action: 'Edit', description: 'Edit academic infrastructure (terms, slots, rooms, programs, levels)', category: 'security' },
+  { code: 'Curriculum.Author', resource: 'Curriculum', action: 'Author', description: 'Create and publish program versions, subjects and modules', category: 'security' },
+  { code: 'Curriculum.PlacementPolicy', resource: 'Curriculum', action: 'PlacementPolicy', description: 'Configure placement assessment policy and placement banding rules', category: 'security' },
   { code: 'Report.View', resource: 'Report', action: 'View', description: 'View operational and financial reports', category: 'reporting' },
 ];
 export const LEGACY_ROLE_MAP: Record<UserRole, string> = {
@@ -185,6 +206,10 @@ export const ROLE_DEFINITIONS: RoleDef[] = [
       'Certificate.Issue','Certificate.Print','Teacher.View','Teacher.Edit','Teacher.Create','Teacher.Delete','Employee.View','Employee.Edit','Payroll.View','Payroll.Edit',
       'Payment.View','Payment.Create','Invoice.View','Invoice.Create','Discount.View','Expense.View','Expense.Create','Expense.Approve','Budget.View','Budget.Edit','Budget.Allocate','Finance.Report','Refund.Approve','Report.View','Impact.View',
       'Book.View','Book.Sell','Workflow.View','Workflow.Trigger','Workflow.Approve','Workflow.Reject','Workflow.Cancel','Waitlist.View','Waitlist.Manage','Enrollment.FreezeRequest','Enrollment.TransferRequest','Rule.View','Audit.View','Settings.View','Branch.View','AcademicSetup.View',
+      // Academic Setup authority, encoding access general_manager already
+      // exercised through authorize('owner','manager') and Class.Create.
+      // See the AcademicSetup block in PERMISSION_CATALOG for the evidence.
+      'AcademicSetup.Edit','Curriculum.Author','Curriculum.PlacementPolicy',
     ], 'branch'),
   },
   {

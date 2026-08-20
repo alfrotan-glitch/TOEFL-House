@@ -186,10 +186,35 @@ describe('Academic Setup — permission-gated authority (catalog.routes)', () =>
     expect(deniedFor(status)).toBe(false);
   });
 
-  it('general manager may NOT create a program version (AcademicSetup.Edit is owner-only)', async () => {
-    expect(
-      await statusOf('asa_manager', 'post', '/api/catalog/program-versions', { programId: PROGRAM, versionLabel: 'v-gm' })
-    ).toBe(403);
+  // RESOLVED INCONSISTENCY. The General Manager could configure a placement
+  // policy but not author the curriculum that policy governs, purely because
+  // one coarse permission gated four different concerns. Curriculum authoring
+  // is now its own capability and the two agree.
+  it('general manager MAY create a program version (Curriculum.Author)', async () => {
+    const status = await statusOf('asa_manager', 'post', '/api/catalog/program-versions', {
+      programId: PROGRAM,
+      versionLabel: 'v-gm',
+    });
+    expect(deniedFor(status)).toBe(false);
+  });
+
+  it('general manager holds placement-policy and curriculum authority consistently', async () => {
+    const profile = await statusOf(
+      'asa_manager', 'put', `/api/academic/program-versions/${VERSION}/placement-profile`, placementProfileBody
+    );
+    const rules = await statusOf('asa_manager', 'post', '/api/catalog/placement-rules', {
+      programVersionId: VERSION, name: 'Band', minScore: 0, maxScore: 40,
+    });
+    const version = await statusOf('asa_manager', 'post', '/api/catalog/program-versions', {
+      programId: PROGRAM, versionLabel: 'v-consistency',
+    });
+    // The whole point: no operation in this group may disagree with the others.
+    expect([deniedFor(profile), deniedFor(rules), deniedFor(version)]).toEqual([false, false, false]);
+  });
+
+  it('fee configuration stays money authority, not curriculum authority', async () => {
+    // Curriculum.Author must NOT unlock the branch fee profile.
+    expect(await statusOf('asa_manager', 'put', '/api/catalog/branch-profile/asa_branch', {})).toBe(403);
   });
 
   it('owner may create a program version', async () => {
@@ -240,8 +265,28 @@ describe('Academic Setup — the permission catalog matches the enforced matrix'
     ).map((r) => r.code);
   }
 
-  it('AcademicSetup.Edit is owner-only (widening it is an explicit owner decision)', () => {
-    expect(rolesHolding('AcademicSetup.Edit')).toEqual(['owner']);
+  it('academic setup authority is split into atomic capabilities', () => {
+    // One coarse code gating curriculum + placement + promotion + fees is what
+    // made the matrix self-contradictory. Each concern is now separable.
+    expect(rolesHolding('AcademicSetup.Edit')).toEqual(['general_manager', 'owner']);
+    expect(rolesHolding('Curriculum.Author')).toEqual(['general_manager', 'owner']);
+    expect(rolesHolding('Curriculum.PlacementPolicy')).toEqual(['general_manager', 'owner']);
+  });
+
+  it('the split did not leak academic authority to any other position', () => {
+    for (const code of ['AcademicSetup.Edit', 'Curriculum.Author', 'Curriculum.PlacementPolicy']) {
+      const holders = rolesHolding(code);
+      for (const role of ['head_of_department', 'receptionist', 'teacher', 'data_entry', 'student', 'counselor', 'finance_manager', 'donor_manager']) {
+        expect(holders).not.toContain(role);
+      }
+    }
+  });
+
+  it('fee and promotion authority were not absorbed into the curriculum split', () => {
+    // Promotion thresholds keep their pre-existing authority, which HoD holds.
+    expect(rolesHolding('Promotion.Approve')).toContain('head_of_department');
+    // Money authority stays owner-only.
+    expect(rolesHolding('FeeStructure.Edit')).toEqual(['owner']);
   });
 
   it('AcademicSetup.View is held by the owner and the general manager', () => {
