@@ -35,6 +35,36 @@ export const ACADEMIC_DEFAULTS = {
   ],
 } as const;
 
+/**
+ * Treasury policy — the thresholds governing owner profit withdrawal.
+ *
+ * These were hard-coded inside `bos.routes.ts` with no stated authority, which
+ * LAW 7 forbids: a business number that decides how much cash leaves the
+ * building must be declared somewhere a reader can find it and an owner can
+ * change it. They are declared here, beside the other policy defaults, at
+ * exactly the values the route already used — this move states the policy, it
+ * does not decide it. Whether 20% and six months are the RIGHT numbers is an
+ * owner question, tracked as A-10.
+ *
+ * `profitDistributionTiers` is a banded table read highest-first, the same
+ * shape as `letterGradeBands` above: the first band whose `minMarginPercent`
+ * the margin reaches supplies the share. A margin below every band — including
+ * a negative margin, i.e. a loss — matches nothing and distributes nothing.
+ */
+export const TREASURY_DEFAULTS = {
+  profitDistributionTiers: [
+    { minMarginPercent: 30, sharePercent: 20 },
+    { minMarginPercent: 20, sharePercent: 15 },
+    { minMarginPercent: 10, sharePercent: 10 },
+  ],
+  /** Contingency reserve target, as a multiple of monthly FIXED costs. */
+  reserveFundMonths: 6,
+  /** Cash below this many months of fixed costs raises an operational warning. */
+  cashReserveWarningMonths: 2,
+  /** Teacher performance below this percentage raises an advisory warning. */
+  teacherPerformanceWarningPercent: 80,
+} as const;
+
 export const PLACEMENT_DEFAULTS = {
   enabled: false,
   required: false,

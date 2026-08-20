@@ -11,6 +11,14 @@ import { getNumberSetting, setSetting } from '../utils/settings.js';
 import { getFinanceAccount, decrementMainBalanceIfSufficient } from '../utils/financeAccounts.js';
 import { addNotification } from '../utils/notifications.js';
 import { assertMoney, assertComputedMoney } from '../utils/money.js';
+import {
+  periodBoundaries,
+  periodBoundariesForKey,
+  REPORTING_PERIODS,
+  type ReportingPeriod,
+} from '../core/calendar/periods.js';
+import { computeProfitDistribution } from '../core/finance/profit-distribution.js';
+import { TREASURY_DEFAULTS } from '../core/configuration/policy-catalog.js';
 
 export const bosRouter = Router();
 bosRouter.use(authenticate, authorize('owner', 'finance_manager', 'general_manager')); // Read-only dashboard access for authorized finance/management roles
@@ -29,28 +37,47 @@ function requireOwner(req: import('express').Request, res: import('express').Res
   next();
 }
 
-// ── Time Bounds Helper (Supports Today, Month, Year) ──────────────────────
+/**
+ * The period a BOS figure covers, resolved by the calendar authority.
+ *
+ * Slicing the ISO date — `${today().slice(0,7)}-01` .. `-31` — yields a
+ * GREGORIAN month, while Finance, payroll, the dashboard and every report
+ * resolve a SHAMSI month through `periodBoundaries` (D-28). Sampled across
+ * eight dates the two windows disagree 8/8 times.
+ *
+ * That was not a reporting inconvenience here. The withdrawable ceiling
+ * subtracts the drawings already taken in the period, and both halves are
+ * queried with this window — so a window that omits part of the accounting
+ * month omits the drawings taken in it and the ceiling re-opens. Proven: a
+ * 50,000 drawing inside the accounting month left the published ceiling at
+ * 200,000 instead of 150,000, and total drawings reached 300,000 against a
+ * 200,000 ceiling.
+ *
+ * A sliced window also runs to the 31st — days into the future — while the
+ * authority stops at today.
+ *
+ * An explicit period is named by its Shamsi key ('1405-05', '1405-Q2', '1405'),
+ * matching how `/reports/overview` names a historical period.
+ */
 function getTimeBounds(period?: string, timeframe?: string) {
-  const todayStr = today();
-  
-  // Explicit period override (e.g., '2024-05' or '2024-05-01')
   if (period) {
-    if (period.length === 10) return { from: period, to: period, period };
-    if (period.length === 7) return { from: `${period}-01`, to: `${period}-31`, period };
-    if (period.length === 4) return { from: `${period}-01-01`, to: `${period}-12-31`, period };
+    try {
+      const explicit = periodBoundariesForKey(period);
+      return { from: explicit.from, to: explicit.to, period: explicit.periodKey };
+    } catch {
+      throw new HttpError(
+        400,
+        'Period must be a Shamsi key such as 1405-05 (month), 1405-Q2 (quarter) or 1405 (year).',
+      );
+    }
   }
 
-  const tf = timeframe || 'month';
-  if (tf === 'today') {
-    return { from: todayStr, to: todayStr, period: todayStr };
+  const requested = timeframe || 'month';
+  if (!(REPORTING_PERIODS as readonly string[]).includes(requested)) {
+    throw new HttpError(400, `Timeframe must be one of: ${REPORTING_PERIODS.join(', ')}.`);
   }
-  if (tf === 'year') {
-    const year = todayStr.slice(0, 4);
-    return { from: `${year}-01-01`, to: `${year}-12-31`, period: year };
-  }
-  // Default to month
-  const month = todayStr.slice(0, 7);
-  return { from: `${month}-01`, to: `${month}-31`, period: month };
+  const bounds = periodBoundaries(requested as ReportingPeriod, today());
+  return { from: bounds.from, to: bounds.to, period: bounds.periodKey };
 }
 
 // ── Performance Optimization: Prepared Statements ──────────────────────────
@@ -391,47 +418,48 @@ bosRouter.get(
 );
 
 // ================= Tiered Profit Distribution =================
-function profitDistributionTier(marginPercent: number): number {
-  if (marginPercent < 10) return 0;
-  if (marginPercent < 20) return 10;
-  if (marginPercent < 30) return 15;
-  return 20;
-}
 
 bosRouter.get(
   '/profit-distribution/calculate',
   ah(async (req, res) => {
     const branchId = requireBosBranch(req);
-    const { from, to } = getTimeBounds(req.query.period as string, req.query.timeframe as string);
+    const { from, to, period } = getTimeBounds(
+      req.query.period as string,
+      req.query.timeframe as string,
+    );
 
     const revenue = (stmtMonthlyRevenue.get(from, to, branchId) as any).revenue;
     const expense = (stmtMonthlyExpense.get(from, to, branchId) as any).expense;
     const fixedTotal = (stmtFixedTotal.get(branchId) as any).fixedTotal;
-
     const distributed = (stmtPeriodDistributed.get(from, to, branchId) as any).distributed;
-    // Gross profit excludes distributions already taken, so paying one out does
-    // not lower the tier and re-open the ceiling (BOS-1).
-    const profit = revenue - expense + distributed;
-    const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
-    const tierPercent = profitDistributionTier(margin);
-    const reserveFundTarget = fixedTotal * 6;
-    const reserveFundBalance = getFinanceAccount('branch', branchId).savingBalance;
-    const reserveMet = reserveFundBalance >= reserveFundTarget;
-    const periodAllowance = profit > 0 ? Math.round((profit * tierPercent) / 100) : 0;
-    // What is still available, not what was available before anything was paid.
-    const maxWithdrawable = reserveMet ? Math.max(0, periodAllowance - distributed) : 0;
+
+    // The same authority the withdraw endpoint enforces with, so the published
+    // ceiling and the honoured ceiling cannot be different numbers.
+    const position = computeProfitDistribution({
+      revenue,
+      expense,
+      distributed,
+      fixedTotal,
+      reserveBalance: getFinanceAccount('branch', branchId).savingBalance,
+    });
 
     res.json({
-      period: req.query.period || today().slice(0, 7),
-      revenue, expense, profit: revenue - expense,
-      profitMargin: Math.round(margin * 10) / 10,
-      tierPercent,
-      reserveFundTarget,
-      reserveFundBalance,
-      reserveFundMet: reserveMet,
-      periodAllowance,
-      alreadyDistributed: distributed,
-      maxWithdrawable,
+      period,
+      // The span is reported so a caller can see which days the figure covers
+      // rather than inferring it from the period name.
+      periodFrom: from,
+      periodTo: to,
+      revenue,
+      expense,
+      profit: revenue - expense,
+      profitMargin: Math.round(position.marginPercent * 10) / 10,
+      tierPercent: position.tierPercent,
+      reserveFundTarget: position.reserveFundTarget,
+      reserveFundBalance: position.reserveFundBalance,
+      reserveFundMet: position.reserveFundMet,
+      periodAllowance: position.periodAllowance,
+      alreadyDistributed: position.distributed,
+      maxWithdrawable: position.maxWithdrawable,
     });
   })
 );
@@ -465,22 +493,24 @@ bosRouter.post(
         Number((stmtPeriodDistributed.get(from, to, branchId) as any).distributed || 0),
         'distributed this period',
       );
-      // Gross profit, i.e. before profit distributions (BOS-1).
-      const profit = assertComputedMoney(revenue - expense + distributed, 'calculated profit', { allowNegative: true });
-      const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
-      const tierPercent = profitDistributionTier(margin);
-      const reserveFundTarget = assertComputedMoney(fixedTotal * 6, 'reserve target');
-      const reserveFundBalance = assertMoney(getFinanceAccount('branch', branchId).savingBalance, 'reserve balance');
+      // The same authority the calculate endpoint publishes with, so the
+      // enforced ceiling is by construction the ceiling the operator was shown.
+      const position = computeProfitDistribution({
+        revenue,
+        expense,
+        distributed,
+        fixedTotal,
+        reserveBalance: getFinanceAccount('branch', branchId).savingBalance,
+      });
+      const { tierPercent, periodAllowance, maxWithdrawable } = position;
+      const margin = position.marginPercent;
 
-      if (reserveFundBalance < reserveFundTarget) {
-        throw new HttpError(409, `Profit withdrawal not allowed: the contingency reserve fund has not yet reached its 6-month target (${Math.round(reserveFundBalance).toLocaleString()} of ${Math.round(reserveFundTarget).toLocaleString()} AFN).`);
+      if (!position.reserveFundMet) {
+        throw new HttpError(409, `Profit withdrawal not allowed: the contingency reserve fund has not yet reached its ${TREASURY_DEFAULTS.reserveFundMonths}-month target (${Math.round(position.reserveFundBalance).toLocaleString()} of ${Math.round(position.reserveFundTarget).toLocaleString()} AFN).`);
       }
 
-      const periodAllowance = Math.max(0, assertComputedMoney((profit * tierPercent) / 100, 'maximum withdrawal', { allowNegative: true }));
-      // The ceiling applies to the PERIOD, not to each request.
-      const maxWithdrawable = Math.max(0, assertComputedMoney(periodAllowance - distributed, 'remaining withdrawal allowance', { allowNegative: true }));
       if (amount > maxWithdrawable) {
-        throw new HttpError(409, `Requested amount exceeds this month's remaining withdrawable limit (${maxWithdrawable.toLocaleString()} AFN of a ${periodAllowance.toLocaleString()} AFN allowance based on a ${Math.round(margin)}% profit margin; ${distributed.toLocaleString()} AFN already distributed).`);
+        throw new HttpError(409, `Requested amount exceeds this period's remaining withdrawable limit (${maxWithdrawable.toLocaleString()} AFN of a ${periodAllowance.toLocaleString()} AFN allowance based on a ${Math.round(margin)}% profit margin; ${position.distributed.toLocaleString()} AFN already distributed).`);
       }
 
       const currentMainBalance = assertMoney(getFinanceAccount('branch', branchId).mainBalance, 'main account balance');
