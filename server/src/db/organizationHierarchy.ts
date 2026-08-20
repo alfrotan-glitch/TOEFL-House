@@ -1,5 +1,4 @@
 import { ensureFinanceAccount } from '../utils/financeAccounts.js';
-// LEGACY_COMPAT_ONLY: saving_accounts remains only for migration/backward compatibility. Runtime uses finance_accounts.
 /**
  * Ensures the fixed Organization → Campus → Branch hierarchy exists.
  *
@@ -255,12 +254,6 @@ export function ensureOrganizationHierarchy(db: Database.Database): void {
     );
 
     // 6. Ensure default branch has a saving account
-    if (tableExists(db, 'saving_accounts')) {
-      db.prepare(
-        `INSERT OR IGNORE INTO saving_accounts (branch_id, balance) VALUES (?, 0)`
-      ).run(DEFAULT_BRANCH_ID);
-      ensureFinanceAccount('branch', DEFAULT_BRANCH_ID);
-    }
 
     // Budget catalog must be seeded after branches exist because migration 003 runs before hierarchy creation on fresh databases.
     // `ensureBudgetLineCatalog` seeds the canonical taxonomy first — budget

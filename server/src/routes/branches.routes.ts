@@ -1,4 +1,3 @@
-// LEGACY_COMPAT_ONLY: saving_accounts remains only for migration/backward compatibility. Runtime uses finance_accounts.
 /**
  * Organization → Campus → Branch configuration API.
  * Branch code is unique system-wide. Active flag gates operational availability.
@@ -38,7 +37,6 @@ const stmtUpdateCampus = db.prepare(
 const stmtDeactivateCampus = db.prepare(`UPDATE campuses SET is_active = 0, updated_at = datetime('now') WHERE id = ?`);
 const stmtDeactivateBranchesByCampus = db.prepare(`UPDATE branches SET is_active = 0, updated_at = datetime('now') WHERE campus_id = ?`);
 const stmtGetBranchIdsByCampus = db.prepare('SELECT id FROM branches WHERE campus_id = ?');
-const stmtDeleteSavingAccount = db.prepare('DELETE FROM saving_accounts WHERE branch_id = ?');
 const stmtDeleteBranch = db.prepare('DELETE FROM branches WHERE id = ?');
 const stmtDeleteCampus = db.prepare('DELETE FROM campuses WHERE id = ?');
 
@@ -47,7 +45,6 @@ const stmtGetBranchById = db.prepare('SELECT * FROM branches WHERE id = ?');
 const stmtInsertBranch = db.prepare(
   `INSERT INTO branches (id, campus_id, name, code, location, address, postal_code, phone, email, description, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
-const stmtInsertSavingAccount = db.prepare('INSERT OR IGNORE INTO saving_accounts (branch_id, balance) VALUES (?, 0)');
 const stmtUpdateBranch = db.prepare(
   `UPDATE branches SET campus_id = ?, name = ?, code = ?, location = ?, address = ?, postal_code = ?, phone = ?, email = ?, description = ?, is_active = ?, updated_at = datetime('now') WHERE id = ?`
 );
@@ -343,7 +340,6 @@ campusesRouter.delete(
     const deleteTx = db.transaction(() => {
       const childBranches = stmtGetBranchIdsByCampus.all(req.params.id) as Array<{ id: string }>;
       for (const b of childBranches) {
-        stmtDeleteSavingAccount.run(b.id);
         stmtDeleteBranch.run(b.id);
       }
       stmtDeleteCampus.run(req.params.id);
@@ -418,7 +414,6 @@ branchesRouter.post(
       description?.trim() || null, isActive === false || isActive === 0 ? 0 : 1
     );
 
-    stmtInsertSavingAccount.run(newId);
     ensureFinanceAccount('branch', newId);
     // Budget lines used to be provisioned only by the boot-time catalogue
     // sweep, so a branch created here had a finance account and accepted
@@ -499,7 +494,6 @@ branchesRouter.delete(
     }
 
     const deleteTx = db.transaction(() => {
-      stmtDeleteSavingAccount.run(req.params.id);
       stmtDeleteBranch.run(req.params.id);
     });
     deleteTx();

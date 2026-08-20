@@ -1636,10 +1636,6 @@ BEFORE INSERT ON expense_requests
 WHEN NEW.amount <> CAST(NEW.amount AS INTEGER)
 BEGIN SELECT RAISE(ABORT, 'expense amount must be a whole number of AFN'); END;
 
-CREATE TABLE IF NOT EXISTS saving_accounts ( 
-  branch_id TEXT PRIMARY KEY REFERENCES branches(id) ON DELETE CASCADE, 
-  balance   INTEGER NOT NULL DEFAULT 0 
-);
 
 CREATE TABLE IF NOT EXISTS fee_rules ( 
   id                  TEXT PRIMARY KEY, 

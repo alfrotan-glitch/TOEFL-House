@@ -1,5 +1,4 @@
 import { ensureFinanceAccount } from '../utils/financeAccounts.js';
-// LEGACY_COMPAT_ONLY: saving_accounts remains only for migration/backward compatibility. Runtime uses finance_accounts.
 /**
  * TOEFL House ERP — Production Bootstrap
  *
@@ -85,10 +84,6 @@ const passwordHash = await hashPassword(ownerPassword);
 const passwordWasGeneratedForFirstInstall = process.env.BOOTSTRAP_OWNER_PASSWORD_GENERATED === '1';
 
 const bootstrap = db.transaction(() => {
-  // Saving account is infrastructure and idempotent.
-  db.prepare(`
-    INSERT OR IGNORE INTO saving_accounts (branch_id, balance) VALUES (?, 0)
-  `).run(branch.id);
   ensureFinanceAccount('branch', branch.id);
 
   const existingOwner = db.prepare(`
