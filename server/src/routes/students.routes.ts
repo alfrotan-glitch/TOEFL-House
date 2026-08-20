@@ -13,6 +13,7 @@ import { hasAnyRole } from '../core/rbac/rbac-service.js';
 import { writeAudit } from '../middleware/audit.js';
 import { assertMoney } from '../utils/money.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
+import { toCsv } from '../utils/csv.js';
 import { id, today } from '../utils/ids.js';
 import { recordIncome } from '../utils/income.js';
 import { getNumberSetting, incrementNumberSetting } from '../utils/settings.js';
@@ -530,27 +531,25 @@ studentsRouter.get('/export', requirePermission('Student.View'), ah(async (req, 
     }
   }
 
-  const esc = (v: unknown) => {
-    const str = v === null || v === undefined ? '' : String(v);
-    return /[",\n\r]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
-  };
+  // The shared serializer, so escaping is defined once. A second inline
+  // implementation is how one export learns to quote an embedded comma and the
+  // other does not.
   const header = ['Code', 'Full Name', 'Phone', 'WhatsApp', 'Father Name', 'Tazkira No', 'Email',
                   'Gender', 'Status', 'Classes', 'Total Fee', 'Paid', 'Debt', 'Registered'];
-  const lines = [header.join(',')];
-  for (const r of rows) {
+  const csvRows = rows.map((r) => {
     const fin = balances.get(r.id) ?? { tuitionDue: 0, tuitionPaid: 0, outstanding: 0 };
-    lines.push([
+    return [
       r.student_code, r.full_name, r.phone, r.whatsapp, r.father_name, r.tazkira_no, r.email,
       r.gender, r.status, classesByStudent.get(r.id) ?? '',
       fin.tuitionDue, fin.tuitionPaid, fin.outstanding, r.registration_date,
-    ].map(esc).join(','));
-  }
+    ];
+  });
 
   writeAudit(req, `Exported ${rows.length} students to CSV`);
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('X-Total-Count', String(rows.length));
   res.setHeader('Content-Disposition', `attachment; filename="students-${today()}.csv"`);
-  res.send(lines.join('\n'));
+  res.send(toCsv(header, csvRows));
 }));
 
 studentsRouter.get('/', requirePermission('Student.View'), ah(async (req, res) => {
@@ -560,10 +559,10 @@ studentsRouter.get('/', requirePermission('Student.View'), ah(async (req, res) =
   // q matches name / code / phone / tazkira / whatsapp / email / father.
   const { whereSql, params } = buildStudentListWhere(req, { branchId, isAll });
 
-  // Authoritative totals (audit STU-H2). The roster used to return a bare
-  // array capped at MAX_PAGE_SIZE with no total, so a client could not tell a
-  // full result from a truncated one: with 2,162 students the UI rendered
-  // 2,000 rows and captioned them "2000 of 2000". These headers mirror the
+  // Authoritative totals (audit STU-H2). A bare array capped at MAX_PAGE_SIZE
+  // with no total leaves a client unable to tell a full result from a
+  // truncated one: with 2,162 students the UI renders 2,000 rows and captions
+  // them "2000 of 2000". These headers mirror the
   // Visitors roster contract (X-Total-Count / X-Unfiltered-Count / X-Page-*),
   // which the frontend already knows how to consume.
   const filteredTotal = (db.prepare(`SELECT COUNT(*) AS c FROM students ${whereSql}`).get(...params) as { c: number }).c;
@@ -632,10 +631,10 @@ studentsRouter.get('/me', authorize('student'), ah(async (req, res) => {
 studentsRouter.get('/:id', requirePermission('Student.View'), ah(async (req, res) => {
   const student = requireStudent(req, req.params.id) as StudentRow;
   // The balance ships WITH the student so no client ever has to re-derive it.
-  // The profile drawer and the student portal each used to recompute tuition
-  // from the paginated payments array, which disagreed with this endpoint the
-  // moment a semester was completed (server counted active semesters only,
-  // client counted all) — the same student showed a 20,000 AFN different debt
+  // Recomputing tuition in the profile drawer or the student portal from the
+  // paginated payments array disagrees with this endpoint the moment a
+  // semester is completed (server counts active semesters only, client counts
+  // all) — the same student shows a 20,000 AFN different debt
   // on the roster and on the profile.
   res.json({
     ...mapStudents([student])[0],
@@ -655,8 +654,8 @@ studentsRouter.post('/manual', requirePermission('Student.Create'), ah(async (re
   // ONE validation authority, shared with PATCH (audit STU-H1). It type-checks,
   // trims and bounds every text field, validates gender against the same
   // allow-list the gender-policy engine enforces, and rejects impossible
-  // calendar dates. PATCH previously performed none of this and persisted
-  // values this path rejects.
+  // calendar dates. A PATCH that skipped this would persist values this path
+  // rejects.
   const input = normalizeStudentInput(req.body as Record<string, unknown>, 'create');
   const {
     fullName = null, phone = null, email = null, notes = null, fatherName = null,
@@ -777,7 +776,7 @@ studentsRouter.post('/:id/enroll-class', requirePermission('Class.Assign', 'Stud
   const classCapacity = Number(cls.capacity ?? 0);
   if (classCapacity > 0 && classEnrollmentCount >= classCapacity) throw new HttpError(409, 'Class is full.');
   
-  // classes.status is a coarse legacy projection of lifecycle_stage (see
+  // classes.status is a coarse projection of lifecycle_stage (see
   // core/academic/lifecycle-engine.ts) — 'scheduled' is a lifecycle_stage
   // value, not a status value, so it can never appear here; the projection
   // already maps it (and five other operating stages) onto 'active'. Use
@@ -787,9 +786,9 @@ studentsRouter.post('/:id/enroll-class', requirePermission('Class.Assign', 'Stud
   }
   
   // Duplicate rule comes from the single domain authority (audit E-2). This
-  // route used to carry its own narrower version keyed on status='active'
-  // only, which disagreed with the capacity predicate about what occupies a
-  // seat; the shared rule covers active|confirmed|pending.
+  // route must not carry its own narrower version keyed on status='active'
+  // alone: that disagrees with the capacity predicate about what occupies a
+  // seat. The shared rule covers active|confirmed|pending.
   assertNotAlreadySeatedInClass(db, student.id, classId);
   
   assertClassGenderAllowsStudent(classId, student.gender);
@@ -886,8 +885,8 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
   const resolvedMethod = ['cash', 'card', 'bank_transfer'].includes(paymentMethod) ? paymentMethod : 'cash';
   const date = today();
   // Idempotency is ALWAYS applied, never only when the client remembers to
-  // send a key: an un-keyed double-click previously created one payment per
-  // click. When no key is supplied a fingerprint of the business intent is
+  // send a key, because an un-keyed double-click otherwise creates one payment
+  // per click. When no key is supplied a fingerprint of the business intent is
   // derived, so retries collapse while a genuinely new later charge (a
   // different time bucket, or an explicit client key) still goes through.
   // F-5: parse ONCE, before the idempotency fingerprint is derived, so the
@@ -1077,9 +1076,8 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
     // The idempotency key is ALWAYS persisted, for every category. It is the
     // only mechanism that serialises concurrent duplicates: the pre-checks
     // above are read-then-write and every concurrent request passes them
-    // simultaneously. Writing NULL here (previously done for guarded
-    // categories) disabled the unique index, because SQLite considers each
-    // NULL distinct.
+    // simultaneously. Writing NULL here for guarded categories would disable
+    // the unique index, because SQLite considers each NULL distinct.
     stmtInsertPayment.run(payId, student.id, resolvedAmount, date, resolvedMethod, category, notes || 'Smart Payment', rc, student.branch_id, semName, null, bookRefId, idempotencyKey);
     if (category === 'book') {
       const updated = stmtUpdateBookStock.run(bookRefId, student.branch_id);
@@ -1307,10 +1305,10 @@ studentsRouter.post('/:id/issue-card', requirePermission('Student.Print', 'Payme
 
 studentsRouter.patch('/:id', requirePermission('Student.Edit'), ah(async (req, res) => {
   const existing = requireStudent(req, req.params.id);
-  // SAME validation authority as CREATE (audit STU-H1). Previously this
-  // handler validated nothing and merged raw body fields straight into the
-  // UPDATE, so gender "martian", a 5,000-character name, a "9999-99-99" date
-  // and `phone: ["x"]` were all accepted and persisted — values the CREATE
+  // SAME validation authority as CREATE (audit STU-H1). A handler that
+  // validated nothing and merged raw body fields straight into the UPDATE
+  // would accept and persist gender "martian", a 5,000-character name, a
+  // "9999-99-99" date and `phone: ["x"]` — values the CREATE
   // path rejects with 400. `mode: 'patch'` validates only the supplied keys,
   // but applies identical rules to them.
   const patchInput = normalizeStudentInput(req.body as Record<string, unknown>, 'patch');
@@ -1397,9 +1395,9 @@ studentsRouter.patch('/:id/status', requirePermission('Student.Edit', 'Student.S
   const existing = requireStudent(req, req.params.id);
   const { status } = req.body;
   // Vocabulary and transition legality both come from the single Student
-  // lifecycle authority (audit STU-C1/C2). Previously this accepted any of
-  // three values from ANY current state, so `graduated → inactive → active`
-  // laundered a terminal state back into an active one.
+  // lifecycle authority (audit STU-C1/C2). Accepting any of three values from
+  // ANY current state would let `graduated → inactive → active` launder a
+  // terminal state back into an active one.
   if (!isStudentStatus(status)) {
     throw new HttpError(400, `Status must be one of: ${STUDENT_STATUSES.join(', ')}.`);
   }

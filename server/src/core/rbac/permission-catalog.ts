@@ -304,4 +304,5 @@ export const TAB_PERMISSION_MAP: Record<string, PermissionCode> = {
   'academic-setup': 'AcademicSetup.View',
   'operations-report': 'Report.View',
   'test-bank': 'Curriculum.TestBank',
+  reports: 'Report.View',
 };

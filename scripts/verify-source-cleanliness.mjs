@@ -40,6 +40,21 @@
 import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
+/**
+ * Characters after which a `/` opens a regular expression rather than dividing.
+ * An empty string covers the start of the file.
+ */
+const REGEX_ALLOWED_AFTER = /^$|[(,=:[!&|?{};+\-*%~^<>/]/;
+
+/**
+ * Keywords after which a `/` also opens a regex — `return /re/`, `case /re/`.
+ * The character test alone is not enough: the last character of `return` is a
+ * letter, which reads as "after a value", i.e. division. Missing this left the
+ * very first file I tested still desynchronized.
+ */
+const REGEX_ALLOWED_AFTER_KEYWORD =
+  /\b(?:return|typeof|instanceof|case|in|of|new|delete|void|do|else|yield|await|throw)\s*$/;
+
 const BANNED = [
   { name: 'legacy', re: /\blegac(?:y|ies)\b/i },
   { name: 'deprecated', re: /\bdeprecat\w*/i },
@@ -67,8 +82,39 @@ function commentMask(src) {
   const mask = new Uint8Array(src.length);
   let i = 0;
   const n = src.length;
+  let prevSignificant = '';
   while (i < n) {
     const c = src[i];
+
+    // A regex literal must be consumed as a unit. `/["]/` contains a quote
+    // character, and treating that quote as the start of a string leaves the
+    // scanner inside a phantom string for the rest of the file — every comment
+    // after it silently unscanned. That blind spot was real: it hid nine
+    // narrative comments in students.routes.ts while this audit reported PASS.
+    //
+    // Whether `/` opens a regex or divides depends on what came before it;
+    // after a value (identifier, literal, closing bracket) it is division,
+    // otherwise it is a regex. That is the standard disambiguation and it is
+    // sufficient here.
+    const regexPosition =
+      REGEX_ALLOWED_AFTER.test(prevSignificant) ||
+      REGEX_ALLOWED_AFTER_KEYWORD.test(src.slice(Math.max(0, i - 12), i));
+    if (c === '/' && src[i + 1] !== '/' && src[i + 1] !== '*' && regexPosition) {
+      i++;
+      let inClass = false;
+      while (i < n) {
+        const r = src[i];
+        if (r === '\\') { i += 2; continue; }
+        if (r === '[') inClass = true;
+        else if (r === ']') inClass = false;
+        else if (r === '/' && !inClass) { i++; break; }
+        else if (r === '\n') break; // unterminated: not a regex after all
+        i++;
+      }
+      prevSignificant = '/';
+      continue;
+    }
+
     if (c === '"' || c === "'" || c === '`') {
       const quote = c;
       i++;
@@ -77,6 +123,7 @@ function commentMask(src) {
         i++;
       }
       i++;
+      prevSignificant = quote;
       continue;
     }
     if (c === '/' && src[i + 1] === '/') {
@@ -95,14 +142,19 @@ function commentMask(src) {
       i += 2;
       continue;
     }
+    if (!/\s/.test(c)) prevSignificant = c;
     i++;
   }
   return mask;
 }
 
 function activeSourceFiles() {
+  // Tracked AND new-but-not-ignored files. `git ls-files` alone lists only
+  // tracked paths, so a brand-new file could introduce narrative and the audit
+  // would report PASS until the commit that added it had already landed —
+  // which is precisely when a gate is supposed to speak.
   const out = execSync(
-    "git ls-files 'server/src/**/*.ts' 'src/**/*.ts' 'src/**/*.tsx'",
+    "git ls-files --cached --others --exclude-standard 'server/src/**/*.ts' 'src/**/*.ts' 'src/**/*.tsx'",
     { encoding: 'utf8' },
   );
   return out

@@ -149,6 +149,13 @@ export const NAVIGATION_SECTIONS: NavSectionConfig[] = [
     defaultOpen: false,
     items: [
       {
+        id: 'reports',
+        label: 'Reports',
+        icon: 'BarChart3',
+        description: 'The declared report catalog — financial, academic, student, payroll, audit',
+        keywords: ['report', 'catalog', 'financial', 'academic', 'payroll', 'audit', 'export', 'csv'],
+      },
+      {
         id: 'operations-report',
         label: 'Operations Report',
         icon: 'BarChart3',

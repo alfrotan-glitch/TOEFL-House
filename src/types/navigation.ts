@@ -31,7 +31,8 @@ export type AppTabId =
   | 'audit'
   | 'settings'
   | 'academic-setup'
-  | 'operations-report';
+  | 'operations-report'
+  | 'reports';
 
 export type NavIconKey =
   | 'LayoutDashboard'

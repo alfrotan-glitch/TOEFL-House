@@ -34,9 +34,9 @@ function esc(s: string | null | undefined): string {
  *
  * Separated from opening the window so the card can be asserted in a test; a
  * popup cannot be reviewed by eye. Paper is `card` — the card is laid out on a
- * sheet the operator cuts — and the page rule comes from the print authority,
- * which is what this document previously had none of: with no `@page` at all,
- * paper size and margins were whatever the browser chose.
+ * sheet the operator cuts — and the page rule comes from the print authority.
+ * With no `@page` at all, paper size and margins are whatever the browser
+ * chooses.
  */
 export async function buildStudentIdCardDocument(
   student: Student,

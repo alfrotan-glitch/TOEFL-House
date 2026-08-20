@@ -29,6 +29,8 @@ import { db } from '../db/connection.js';
 import { authenticate, requirePermission, resolveBranchScope } from '../middleware/auth.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { REPORT_CATALOG, REPORT_CATEGORIES } from '../core/reporting/report-catalog.js';
+import { reportToCsv, reportExportFilename } from '../core/reporting/report-export.js';
+import { writeAudit } from '../middleware/audit.js';
 import {
   runReport,
   UnknownReportError,
@@ -570,5 +572,63 @@ reportsRouter.get(
       if (err instanceof UnknownReportError) throw new HttpError(404, err.message);
       throw err;
     }
+  }),
+);
+
+/**
+ * Exports one declared report.
+ *
+ * Runs the SAME engine call as `/run/:reportId` and serializes its result, so
+ * the file and the screen cannot disagree: there is one execution and two
+ * renderings of it. Re-querying here, or letting the browser assemble a file
+ * from the rendered table, would reintroduce exactly the drift §77 forbids —
+ * and in an artifact that then leaves the system.
+ *
+ * Authorization is identical to running the report, deliberately: an export is
+ * a read of the same numbers, so it must not be reachable by anyone who could
+ * not see them on screen.
+ */
+reportsRouter.get(
+  '/run/:reportId/export',
+  authenticate,
+  requirePermission('Report.View'),
+  ah(async (req, res) => {
+    const definition = REPORT_CATALOG.find((r) => r.id === req.params.reportId);
+    if (!definition) throw new HttpError(404, `Unknown report '${req.params.reportId}'.`);
+
+    if (definition.permission !== 'Report.View' && !req.rbac?.permissionCodes.has(definition.permission)) {
+      throw new HttpError(403, `This report requires ${definition.permission}.`);
+    }
+
+    const format = String(req.query.format ?? 'csv').toLowerCase();
+    if (format !== 'csv') {
+      throw new HttpError(400, `Unsupported export format '${format}'. Only csv is available.`);
+    }
+
+    const period = String(req.query.period ?? 'month') as ReportingPeriod;
+    if (!REPORTING_PERIODS.includes(period)) {
+      throw new HttpError(400, `Unknown period '${period}'.`);
+    }
+
+    const scope = resolveBranchScope(req);
+    let result;
+    try {
+      result = runReport(db, definition.id, period, scope);
+    } catch (err) {
+      if (err instanceof UnsupportedPeriodError) throw new HttpError(400, err.message);
+      if (err instanceof UnknownReportError) throw new HttpError(404, err.message);
+      throw err;
+    }
+
+    const csv = reportToCsv(result, {
+      generatedAt: new Date().toISOString(),
+      generatedBy: req.user?.fullName,
+    });
+
+    writeAudit(req, `Exported report "${result.title}" (${result.boundaries.periodKey}) to CSV`);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('X-Report-Period-Key', result.boundaries.periodKey);
+    res.setHeader('Content-Disposition', `attachment; filename="${reportExportFilename(result)}"`);
+    res.send(csv);
   }),
 );

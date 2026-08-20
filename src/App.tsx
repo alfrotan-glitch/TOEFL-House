@@ -57,6 +57,7 @@ const FundingView = lazy(() => import('./components/funding/FundingView'));
 // ── BC #12: Impact / NGO Reporting ──────────────────────────────────────────
 const ImpactView = lazy(() => import('./components/impact/ImpactView'));
 const OperationsReportView = lazy(() => import('./components/reports/OperationsReportView'));
+const ReportsView = lazy(() => import('./components/reports/ReportsView'));
 
 // ── BC #13: Workflow & Automation ───────────────────────────────────────────
 const WorkflowsView = lazy(() => import('./components/workflows/WorkflowsView'));
@@ -327,6 +328,8 @@ function AuthenticatedApp() {
             addScholarship={store.addScholarship} awardScholarship={store.awardScholarship} addSponsorship={store.addSponsorship}
           />
         );
+      case 'reports':
+        return <ReportsView triggerToast={triggerToast} />;
       case 'operations-report':
         return <OperationsReportView />;
       case 'impact':
