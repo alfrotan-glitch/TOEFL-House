@@ -83,7 +83,7 @@ function requireExam(req: import('express').Request, examId: string): any {
 
 examsRouter.get(
   '/',
-  authorize('registrar', 'manager', 'teacher', 'head_of_department'),
+  authorize('receptionist', 'general_manager', 'teacher', 'head_of_department'),
   ah(async (req, res) => {
     const { branchId, isAll } = resolveBranchScope(req);
     const rows = isAll ? stmtGetAllExams.all() : stmtGetExamsByBranch.all(branchId);
@@ -93,7 +93,7 @@ examsRouter.get(
 
 examsRouter.post(
   '/',
-  authorize('registrar', 'manager', 'head_of_department'),
+  authorize('receptionist', 'general_manager', 'head_of_department'),
   ah(async (req, res) => {
     const { title, date, fee, type } = req.body;
     if (!title || !date) throw new HttpError(400, 'Exam title and date are required.');
@@ -119,7 +119,7 @@ examsRouter.post(
 
 examsRouter.put(
   '/:id',
-  authorize('registrar', 'manager', 'head_of_department'),
+  authorize('receptionist', 'general_manager', 'head_of_department'),
   ah(async (req, res) => {
     const exam = requireExam(req, req.params.id);
     const { title, date, fee, type } = req.body;
@@ -148,7 +148,7 @@ examsRouter.put(
 
 examsRouter.delete(
   '/:id',
-  authorize('registrar', 'manager', 'head_of_department'),
+  authorize('receptionist', 'general_manager', 'head_of_department'),
   ah(async (req, res) => {
     const exam = requireExam(req, req.params.id);
     
@@ -165,7 +165,7 @@ examsRouter.delete(
 
 examsRouter.get(
   '/:id/results',
-  authorize('registrar', 'manager', 'teacher', 'head_of_department'),
+  authorize('receptionist', 'general_manager', 'teacher', 'head_of_department'),
   ah(async (req, res) => {
     requireExam(req, req.params.id);
     res.json(stmtGetResultsByExam.all(req.params.id));
@@ -174,7 +174,7 @@ examsRouter.get(
 
 examsRouter.get(
   '/results/all',
-  authorize('registrar', 'manager', 'teacher', 'head_of_department'),
+  authorize('receptionist', 'general_manager', 'teacher', 'head_of_department'),
   ah(async (req, res) => {
     const { branchId, isAll } = resolveBranchScope(req);
     const rows = isAll ? stmtGetAllResults.all() : stmtGetResultsByBranch.all(branchId);
@@ -188,7 +188,7 @@ examsRouter.get(
 
 examsRouter.post(
   '/:id/enroll',
-  authorize('registrar', 'manager', 'head_of_department'),
+  authorize('receptionist', 'general_manager', 'head_of_department'),
   ah(async (req, res) => {
     const exam = requireExam(req, req.params.id);
     const { studentId, visitorId, feePaid } = req.body as { studentId?: string; visitorId?: string; feePaid: boolean };
@@ -266,7 +266,7 @@ examsRouter.post(
 
 examsRouter.patch(
   '/:id/results/:resultId',
-  authorize('registrar', 'manager', 'head_of_department'),
+  authorize('receptionist', 'general_manager', 'head_of_department'),
   ah(async (req, res) => {
     const exam = requireExam(req, req.params.id);
     
@@ -349,7 +349,7 @@ examsRouter.patch(
 
 examsRouter.put(
   '/:id/results/:resultId/correct',
-  authorize('owner', 'manager'), // Strict access control for score correction
+  authorize('owner', 'general_manager'), // Strict access control for score correction
   ah(async (req, res) => {
     const exam = requireExam(req, req.params.id);
     const result = stmtGetResultById.get(req.params.resultId) as any;

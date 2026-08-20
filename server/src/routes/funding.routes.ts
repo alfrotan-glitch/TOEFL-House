@@ -150,7 +150,7 @@ function requireFundingBranchAccess(req: import('express').Request, branchId: st
 
 fundingRouter.get(
   '/donors',
-  authorize('owner', 'manager', 'finance', 'donor_manager'),
+  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager'),
   ah(async (_req, res) => {
     res.json(stmtGetAllDonors.all());
   })
@@ -158,7 +158,7 @@ fundingRouter.get(
 
 fundingRouter.get(
   '/donors/:id',
-  authorize('owner', 'manager', 'finance', 'donor_manager'),
+  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager'),
   ah(async (req, res) => {
     const donor = stmtGetDonorById.get(req.params.id) as any;
     if (!donor) throw new HttpError(404, 'Donor not found.');
@@ -173,7 +173,7 @@ fundingRouter.get(
 
 fundingRouter.post(
   '/donors',
-  authorize('owner', 'manager', 'donor_manager'),
+  authorize('owner', 'general_manager', 'donor_manager'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const { fullName, type, phone, email, country, notes } = req.body;
@@ -198,7 +198,7 @@ fundingRouter.post(
 
 fundingRouter.put(
   '/donors/:id',
-  authorize('owner', 'manager', 'donor_manager'),
+  authorize('owner', 'general_manager', 'donor_manager'),
   ah(async (req, res) => {
     const existing = stmtGetDonorById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Donor not found.');
@@ -220,7 +220,7 @@ fundingRouter.put(
 
 fundingRouter.get(
   '/campaigns',
-  authorize('owner', 'manager', 'finance', 'donor_manager'),
+  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager'),
   ah(async (req, res) => {
     const { branchId, isAll } = resolveBranchScope(req);
     const rows = isAll ? stmtGetAllCampaigns.all() : stmtGetCampaignsByBranch.all(branchId);
@@ -230,7 +230,7 @@ fundingRouter.get(
 
 fundingRouter.post(
   '/campaigns',
-  authorize('owner', 'manager', 'donor_manager'),
+  authorize('owner', 'general_manager', 'donor_manager'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const { name, description, donorId, targetAmount, startDate, endDate } = req.body;
@@ -256,7 +256,7 @@ fundingRouter.post(
 
 fundingRouter.patch(
   '/campaigns/:id',
-  authorize('owner', 'manager', 'donor_manager'),
+  authorize('owner', 'general_manager', 'donor_manager'),
   ah(async (req, res) => {
     const existing = stmtGetCampaignById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Campaign not found.');
@@ -293,7 +293,7 @@ fundingRouter.patch(
 
 fundingRouter.get(
   '/donations',
-  authorize('owner', 'manager', 'finance', 'donor_manager'),
+  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager'),
   ah(async (req, res) => {
     const { branchId, isAll } = resolveBranchScope(req);
     const rows = isAll ? stmtGetAllDonations.all() : stmtGetDonationsByBranch.all(branchId);
@@ -303,7 +303,7 @@ fundingRouter.get(
 
 fundingRouter.post(
   '/donations',
-  authorize('owner', 'manager', 'finance', 'donor_manager'),
+  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const { campaignId, donorId, amount, date, restricted, restrictionNote } = req.body;
@@ -404,7 +404,7 @@ fundingRouter.post(
 
 fundingRouter.get(
   '/scholarships',
-  authorize('owner', 'manager', 'finance', 'donor_manager', 'registrar'),
+  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager', 'receptionist'),
   ah(async (req, res) => {
     const { branchId, isAll } = resolveBranchScope(req);
     const rows = isAll ? stmtGetAllScholarships.all() : stmtGetScholarshipsByBranch.all(branchId);
@@ -414,7 +414,7 @@ fundingRouter.get(
 
 fundingRouter.post(
   '/scholarships',
-  authorize('owner', 'manager', 'donor_manager'),
+  authorize('owner', 'general_manager', 'donor_manager'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const { name, donorId, campaignId, totalBudget, criteria } = req.body;
@@ -436,7 +436,7 @@ fundingRouter.post(
 
 fundingRouter.get(
   '/scholarships/awards',
-  authorize('owner', 'manager', 'finance', 'donor_manager', 'registrar'),
+  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager', 'receptionist'),
   ah(async (req, res) => {
     const { branchId, isAll } = resolveBranchScope(req);
     const rows = isAll ? stmtGetAllAwards.all() : stmtGetAwardsByBranch.all(branchId);
@@ -446,7 +446,7 @@ fundingRouter.get(
 
 fundingRouter.post(
   '/scholarships/award',
-  authorize('owner', 'manager', 'donor_manager'),
+  authorize('owner', 'general_manager', 'donor_manager'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const { scholarshipId, studentId, amount, awardDate, semester, notes } = req.body;
@@ -511,7 +511,7 @@ fundingRouter.post(
 
 fundingRouter.get(
   '/sponsorships',
-  authorize('owner', 'manager', 'finance', 'donor_manager'),
+  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager'),
   ah(async (req, res) => {
     const { branchId, isAll } = resolveBranchScope(req);
     const rows = isAll ? stmtGetAllSponsorships.all() : stmtGetSponsorshipsByBranch.all(branchId);
@@ -521,7 +521,7 @@ fundingRouter.get(
 
 fundingRouter.post(
   '/sponsorships',
-  authorize('owner', 'manager', 'donor_manager'),
+  authorize('owner', 'general_manager', 'donor_manager'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const { donorId, studentId, programId, monthlyAmount, startDate, endDate } = req.body;
@@ -554,7 +554,7 @@ fundingRouter.post(
 
 fundingRouter.patch(
   '/sponsorships/:id',
-  authorize('owner', 'manager', 'donor_manager'),
+  authorize('owner', 'general_manager', 'donor_manager'),
   ah(async (req, res) => {
     const existing = stmtGetSponsorshipById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Sponsorship agreement not found.');
@@ -614,7 +614,7 @@ fundingRouter.patch(
 
 fundingRouter.get(
   '/summary',
-  authorize('owner', 'manager', 'finance', 'donor_manager'),
+  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager'),
   ah(async (req, res) => {
     const { branchId, isAll } = resolveBranchScope(req);
 

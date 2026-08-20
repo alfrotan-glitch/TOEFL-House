@@ -30,7 +30,7 @@
  */
 import { Router } from 'express';
 import { db } from '../db/connection.js';
-import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource, hasAnyLegacyRole } from '../middleware/auth.js';
+import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource, requestHasAnyRole } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id as makeId, today } from '../utils/ids.js';
@@ -159,7 +159,7 @@ waitlistRouter.get('/', requirePermission('Waitlist.View'), ah(async (req, res) 
 
 /** POST /api/classes/:id/waitlist/:entryId/offer — mark a seat as offered
  *  to this student (a staff action once a seat has actually opened up). */
-waitlistRouter.post('/:entryId/offer', requirePermission('Waitlist.Manage'), authorize('registrar', 'manager', 'head_of_department', 'owner'), ah(async (req, res) => {
+waitlistRouter.post('/:entryId/offer', requirePermission('Waitlist.Manage'), authorize('receptionist', 'general_manager', 'head_of_department', 'owner'), ah(async (req, res) => {
   requireClassForWaitlist(req, req.params.id);
   const entry = stmtGetWaitlistEntryById.get(req.params.entryId) as any;
   if (!entry || entry.class_id !== req.params.id) throw new HttpError(404, 'Waitlist entry not found.');
@@ -179,7 +179,7 @@ waitlistRouter.post('/:entryId/offer', requirePermission('Waitlist.Manage'), aut
  *  (students.routes.ts's extra-enrollment endpoint; EnrollmentService's
  *  transfer()/resume()), including seeding rosters for future sessions so
  *  the student shows up on the attendance sheet immediately. */
-waitlistRouter.post('/:entryId/convert', requirePermission('Waitlist.Manage'), authorize('registrar', 'manager', 'head_of_department', 'owner'), ah(async (req, res) => {
+waitlistRouter.post('/:entryId/convert', requirePermission('Waitlist.Manage'), authorize('receptionist', 'general_manager', 'head_of_department', 'owner'), ah(async (req, res) => {
   const classId = req.params.id;
   const cls = requireClassForWaitlist(req, classId);
   const entry = stmtGetWaitlistEntryById.get(req.params.entryId) as any;
@@ -242,7 +242,7 @@ waitlistRouter.post('/:entryId/cancel', requirePermission('Waitlist.Manage'), ah
   // Staff (resolved through canonical RBAC roles, not the mutable
   // users.role column) may cancel any entry; anyone else may only cancel
   // their own request.
-  if (!req.user || !hasAnyLegacyRole(req, ['owner', 'manager', 'registrar', 'head_of_department'])) {
+  if (!req.user || !requestHasAnyRole(req, ['owner', 'general_manager', 'receptionist', 'head_of_department'])) {
     if (entry.requested_by !== req.user?.userId) throw new HttpError(403, 'You may only cancel your own waitlist request.');
   }
 

@@ -89,7 +89,7 @@ function registerTransition(
   method: (svc: ReturnType<typeof getEnrollmentService>, enrollmentId: string, opts: { reason?: string; actorUserId?: string; actorName?: string }) => unknown,
   auditVerb: string,
 ) {
-  enrollmentRouter.post(`/:id${path}`, authorize('registrar', 'manager', 'head_of_department', 'owner'), ah(async (req, res) => {
+  enrollmentRouter.post(`/:id${path}`, authorize('receptionist', 'general_manager', 'head_of_department', 'owner'), ah(async (req, res) => {
     requireEnrollment(req, req.params.id); // 404 / branch-scope check up front
     const reason = req.body?.reason ?? undefined;
     if (requiresReason && !reason) throw new HttpError(400, 'A reason is required for this transition.');
@@ -287,7 +287,7 @@ enrollmentRouter.post('/:id/transfer-requests', requirePermission('Enrollment.Tr
 
 /** POST /api/enrollments/:id/transfer-requests/:requestId/approve —
  *  manually approves and executes a pending transfer request. */
-enrollmentRouter.post('/:id/transfer-requests/:requestId/approve', authorize('manager', 'head_of_department', 'owner'), ah(async (req, res) => {
+enrollmentRouter.post('/:id/transfer-requests/:requestId/approve', authorize('general_manager', 'head_of_department', 'owner'), ah(async (req, res) => {
   requireEnrollment(req, req.params.id);
   const reqRow = stmtGetTransferRequestById.get(req.params.requestId) as any;
   if (!reqRow || reqRow.enrollment_id !== req.params.id) throw new HttpError(404, 'Transfer request not found.');
@@ -303,7 +303,7 @@ enrollmentRouter.post('/:id/transfer-requests/:requestId/approve', authorize('ma
 
 /** POST /api/enrollments/:id/transfer-requests/:requestId/reject —
  *  rejects a pending transfer request without touching the enrollment. */
-enrollmentRouter.post('/:id/transfer-requests/:requestId/reject', authorize('manager', 'head_of_department', 'owner'), ah(async (req, res) => {
+enrollmentRouter.post('/:id/transfer-requests/:requestId/reject', authorize('general_manager', 'head_of_department', 'owner'), ah(async (req, res) => {
   requireEnrollment(req, req.params.id);
   const reqRow = stmtGetTransferRequestById.get(req.params.requestId) as any;
   if (!reqRow || reqRow.enrollment_id !== req.params.id) throw new HttpError(404, 'Transfer request not found.');

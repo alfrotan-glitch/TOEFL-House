@@ -20,7 +20,7 @@ import { assertMoney, assertDayOffset } from '../utils/money.js';
 import { resolveIdempotency, isUniqueViolation } from '../utils/idempotency.js';
 
 export const invoicesRouter = Router();
-invoicesRouter.use(authenticate, authorize('owner', 'finance', 'manager', 'registrar'));
+invoicesRouter.use(authenticate, authorize('owner', 'finance_manager', 'general_manager', 'receptionist'));
 
 // ── Performance Optimization: Prepared Statements ──────────────────────────
 const stmtGetAllInvoices = db.prepare(
@@ -134,7 +134,7 @@ invoicesRouter.get(
 
 invoicesRouter.put(
   '/config/settings',
-  authorize('manager', 'owner'),
+  authorize('general_manager', 'owner'),
   ah(async (req, res) => {
     const body = req.body as Record<string, unknown>;
     const map: Record<string, string> = {
@@ -310,7 +310,7 @@ invoicesRouter.post(
 // ---------- Record payment against invoice ----------
 invoicesRouter.post(
   '/:id/pay',
-  authorize('finance', 'manager'),
+  authorize('finance_manager', 'general_manager'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const row = stmtGetPlainInvoiceById.get(req.params.id) as any;
@@ -423,7 +423,7 @@ invoicesRouter.post(
 // ---------- Cancel ----------
 invoicesRouter.post(
   '/:id/cancel',
-  authorize('finance', 'manager'),
+  authorize('finance_manager', 'general_manager'),
   ah(async (req, res) => {
     const row = stmtGetPlainInvoiceById.get(req.params.id) as any;
     if (!row) throw new HttpError(404, 'Invoice not found.');

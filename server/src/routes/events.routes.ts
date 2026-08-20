@@ -55,7 +55,7 @@ const stmtCountUnpublishedEvents = db.prepare(
 
 eventsRouter.get(
   '/stream',
-  authorize('owner', 'manager'),
+  authorize('owner', 'general_manager'),
   ah(async (req, res) => {
     const {
       type, aggregateType, aggregateId, correlationId, branchId, limit,
@@ -112,7 +112,7 @@ eventsRouter.get(
 
 eventsRouter.get(
   '/chain/:correlationId',
-  authorize('owner', 'manager'),
+  authorize('owner', 'general_manager'),
   ah(async (req, res) => {
     const chain = eventBus.getCorrelationChain(req.params.correlationId);
     if (chain.length === 0) throw new HttpError(404, 'No events found for this correlation ID.');
@@ -139,7 +139,7 @@ eventsRouter.get(
 
 eventsRouter.get(
   '/stats',
-  authorize('owner', 'manager'),
+  authorize('owner', 'general_manager'),
   ah(async (req, res) => {
     const { from, to, branchId } = req.query as Record<string, string>;
 
@@ -288,7 +288,7 @@ eventsRouter.delete(
 
 eventsRouter.get(
   '/handler-logs',
-  authorize('owner', 'manager'),
+  authorize('owner', 'general_manager'),
   ah(async (req, res) => {
     const { eventId, handler, success, limit } = req.query as Record<string, string>;
     const maxLimit = Math.min(Number(limit) || 50, 200);
@@ -344,7 +344,7 @@ eventsRouter.get(
 
 eventsRouter.get(
   '/types',
-  authorize('owner', 'manager'),
+  authorize('owner', 'general_manager'),
   ah(async (_req, res) => {
     const types: { type: string; category: string; description: string }[] = [
       // CRM / Lead Pipeline

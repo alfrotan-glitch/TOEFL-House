@@ -32,17 +32,26 @@ export function assertJwtSecretConfigured(): void {
 }
 
 
+/**
+ * The values `users.role` may hold. This mirrors the CHECK constraint on that
+ * column exactly — 'staff' and 'partner' used to appear here and in the token
+ * allow-list, but the database has never accepted either, so they were values
+ * no user could actually have.
+ *
+ * This is a profile attribute, not an authorization input: what a principal
+ * may do comes from `user_roles`. See docs/registries/canonical-authority.md.
+ */
 export type UserRole =
   | 'owner' | 'manager' | 'finance' | 'registrar'
   | 'teacher' | 'head_of_department' | 'counselor'
-  | 'donor_manager' | 'student' | 'staff' | 'partner';
+  | 'donor_manager' | 'student';
 
 /** Every role signToken may emit — single source of truth for the
  *  role allow-list in isTokenPayload (drift here would silently break
  *  authentication for that role at runtime). */
 export const KNOWN_USER_ROLES: readonly UserRole[] = [
   'owner', 'manager', 'finance', 'registrar', 'teacher',
-  'head_of_department', 'counselor', 'donor_manager', 'student', 'staff', 'partner',
+  'head_of_department', 'counselor', 'donor_manager', 'student',
 ];
 
 export interface TokenPayload {

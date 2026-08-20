@@ -77,7 +77,7 @@ const stmtGetExecutionLogs = db.prepare(
 /** GET /api/automations — list all automations, optionally filtered by trigger or active status */
 automationsRouter.get(
   '/',
-  authorize('owner', 'manager', 'head_of_department'),
+  authorize('owner', 'general_manager', 'head_of_department'),
   ah(async (req, res) => {
     const { trigger, isActive } = req.query as Record<string, string>;
 
@@ -115,7 +115,7 @@ automationsRouter.get(
 /** GET /api/automations/:id — single automation with execution stats */
 automationsRouter.get(
   '/:id',
-  authorize('owner', 'manager', 'head_of_department'),
+  authorize('owner', 'general_manager', 'head_of_department'),
   ah(async (req, res) => {
     const row = stmtGetAutomationById.get(req.params.id) as any;
     if (!row) throw new HttpError(404, 'Automation not found.');
@@ -319,7 +319,7 @@ automationsRouter.delete(
 /** GET /api/automations/:id/executions — recent execution history for an automation */
 automationsRouter.get(
   '/:id/executions',
-  authorize('owner', 'manager', 'head_of_department'),
+  authorize('owner', 'general_manager', 'head_of_department'),
   ah(async (req, res) => {
     const existing = stmtGetAutomationById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Automation not found.');
@@ -352,7 +352,7 @@ automationsRouter.get(
 
 automationsRouter.post(
   '/:id/test',
-  authorize('owner', 'manager'),
+  authorize('owner', 'general_manager'),
   ah(async (req, res) => {
     const existing = stmtGetAutomationById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Automation not found.');

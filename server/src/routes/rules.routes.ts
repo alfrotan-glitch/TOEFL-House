@@ -16,7 +16,7 @@ Access control:
 @license Apache-2.0
 */
 import { Router } from 'express';
-import { authenticate, authorize, canAccessBranchResource, hasLegacyRole , requirePermission } from '../middleware/auth.js';
+import { authenticate, authorize, canAccessBranchResource, requestHasRole , requirePermission } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import {
@@ -105,7 +105,7 @@ function ruleSnapshot(rule: unknown): string {
   });
 }
 
-rulesRouter.get('/meta', authorize('owner', 'manager', 'finance', 'registrar', 'head_of_department'), ah(async (_req, res) => {
+rulesRouter.get('/meta', authorize('owner', 'general_manager', 'finance_manager', 'receptionist', 'head_of_department'), ah(async (_req, res) => {
   res.json({ categories: RULE_CATEGORY_META });
 }));
 
@@ -116,7 +116,7 @@ rulesRouter.get('/meta', authorize('owner', 'manager', 'finance', 'registrar', '
 /** GET /api/rules?category=fee — list all rules in a category (branch-scoped for the caller unless owner requests all). */
 rulesRouter.get(
   '/',
-  authorize('owner', 'manager', 'finance', 'registrar', 'head_of_department'),
+  authorize('owner', 'general_manager', 'finance_manager', 'receptionist', 'head_of_department'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const category = req.query.category;
@@ -135,7 +135,7 @@ rulesRouter.get(
 /** GET /api/rules/:id — single rule with full detail. */
 rulesRouter.get(
   '/:id',
-  authorize('owner', 'manager', 'finance', 'registrar', 'head_of_department'),
+  authorize('owner', 'general_manager', 'finance_manager', 'receptionist', 'head_of_department'),
   ah(async (req, res) => {
     const rule = getRuleById(req.params.id);
     if (!rule) throw new HttpError(404, 'Rule not found.');
@@ -147,7 +147,7 @@ rulesRouter.get(
 /** GET /api/rules/:id/versions — full version history for rollback UI. */
 rulesRouter.get(
   '/:id/versions',
-  authorize('owner', 'manager'),
+  authorize('owner', 'general_manager'),
   ah(async (req, res) => {
     const rule = getRuleById(req.params.id);
     if (!rule) throw new HttpError(404, 'Rule not found.');
@@ -163,7 +163,7 @@ rulesRouter.get(
 /** POST /api/rules — create a new rule (owner or manager; manager rules are auto-scoped to their branch). */
 rulesRouter.post(
   '/',
-  authorize('owner', 'manager'),
+  authorize('owner', 'general_manager'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const { name, description, category, conditions, actions, priority, isActive, scopeBranchId } = req.body;
@@ -175,7 +175,7 @@ rulesRouter.post(
     if (!Array.isArray(actions) || actions.length === 0) throw new HttpError(400, 'Every rule must have at least one action.');
 
     // Managers may only scope rules to their own branch; owner may set global (null) or any branch.
-    const resolvedScopeBranchId = hasLegacyRole(req, 'manager') ? user.branchId : (scopeBranchId ?? null);
+    const resolvedScopeBranchId = requestHasRole(req, 'general_manager') ? user.branchId : (scopeBranchId ?? null);
 
     const rule = createRule(
       {
@@ -199,7 +199,7 @@ rulesRouter.post(
 /** PATCH /api/rules/:id — update a rule; creates a new version snapshot automatically. */
 rulesRouter.patch(
   '/:id',
-  authorize('owner', 'manager'),
+  authorize('owner', 'general_manager'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const existing = getRuleById(req.params.id);
@@ -208,7 +208,7 @@ rulesRouter.patch(
 
     // Managers may only edit rules belonging to their own branch. Global rules
     // are organization-wide configuration and are owner-managed.
-    if (hasLegacyRole(req, 'manager') && existing.scopeBranchId !== user.branchId) {
+    if (requestHasRole(req, 'general_manager') && existing.scopeBranchId !== user.branchId) {
       throw new HttpError(403, 'You are not allowed to edit rules outside your branch.');
     }
 
@@ -229,7 +229,7 @@ rulesRouter.patch(
         actions,
         priority,
         isActive,
-        scopeBranchId: hasLegacyRole(req, 'manager') ? user.branchId : scopeBranchId,
+        scopeBranchId: requestHasRole(req, 'general_manager') ? user.branchId : scopeBranchId,
       },
       user.fullName
     );
@@ -260,13 +260,13 @@ rulesRouter.post(
 /** PATCH /api/rules/:id/deactivate — soft-delete (owner or manager for their own branch's rules). */
 rulesRouter.patch(
   '/:id/deactivate',
-  authorize('owner', 'manager'),
+  authorize('owner', 'general_manager'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const existing = getRuleById(req.params.id);
     if (!existing) throw new HttpError(404, 'Rule not found.');
     assertRuleManagementCategory(existing.category);
-    if (hasLegacyRole(req, 'manager') && existing.scopeBranchId !== user.branchId) {
+    if (requestHasRole(req, 'general_manager') && existing.scopeBranchId !== user.branchId) {
       throw new HttpError(403, 'You are not allowed to deactivate rules outside your branch.');
     }
     

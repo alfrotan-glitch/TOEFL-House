@@ -380,7 +380,7 @@ teachersRouter.get('/:id/computed-salary', requirePermission('Payroll.View'), ah
 // ============================================================================ 
 // §2 — TEACHER EVALUATION (100-Point System)
 // ============================================================================ 
-teachersRouter.post('/:id/evaluation', authorize('manager', 'head_of_department', 'owner'), ah(async (req, res) => {
+teachersRouter.post('/:id/evaluation', authorize('general_manager', 'head_of_department', 'owner'), ah(async (req, res) => {
   const user = getUserContext(req);
   const teacher = requireTeacher(req, req.params.id);
   const { score, criteria, notes } = req.body;

@@ -13,7 +13,7 @@ import {
 import { db } from '../db/connection.js';
 import { CATEGORY_NAME, SUBCATEGORY_PARENT, classificationOf, isSubcategoryId } from '../core/finance/category-taxonomy.js';
 import { assertTextLengths, TEXT_LIMITS } from '../utils/textInput.js';
-import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource, hasLegacyRole } from '../middleware/auth.js';
+import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource, requestHasRole } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
@@ -850,7 +850,7 @@ financeRouter.post(
 
     const { expenseKind, paymentMethod, billPeriod, notes } = normalizeExpenseMeta(req.body);
     const threshold = getNumberSetting('expense_auto_approve_threshold', SYSTEM_DEFAULTS.expenseAutoApproveThreshold);
-    const shouldAutoPay = !requireApproval && (resolvedAmount <= threshold || hasLegacyRole(req, 'owner'));
+    const shouldAutoPay = !requireApproval && (resolvedAmount <= threshold || requestHasRole(req, 'owner'));
 
     const date = today();
     const newId = id('req');
@@ -1002,7 +1002,7 @@ financeRouter.post(
     const request = stmtGetExpenseRequestById.get(req.params.id) as any;
     if (!request) throw new HttpError(404, 'Request not found.');
     if (request.status !== 'pending') throw new HttpError(409, `Expense request is already ${request.status} and cannot be decided again.`);
-    if (request.requester_user_id && request.requester_user_id === user.userId && !hasLegacyRole(req, 'owner')) throw new HttpError(403, 'Requester and approver must be different users.');
+    if (request.requester_user_id && request.requester_user_id === user.userId && !requestHasRole(req, 'owner')) throw new HttpError(403, 'Requester and approver must be different users.');
     if (!request.branch_id || !canAccessBranchResource(req, request.branch_id)) throw new HttpError(403, 'Expense request belongs to another branch.');
 
     const budgetLine = requireBudgetLine(req, String(request.budget_line_id));

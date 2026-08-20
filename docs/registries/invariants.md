@@ -34,3 +34,6 @@ Validated by `npm run audit:registries`.
 | `users.branch_id` never authorizes branch access | application | `server/src/core/rbac/rbac-service.ts` (`canAccessBranch`) | `server/src/tests/rbac-single-authority.test.ts` | access denied without a matching scope |
 | An expired assignment grants nothing | application | `server/src/core/rbac/rbac-service.ts` | `server/src/tests/rbac-expired-grant-escalation.test.ts` | 403 |
 | A user has at most one primary role assignment | database | `trg_user_roles_single_primary` | `server/src/tests/rbac-single-authority.test.ts` | `SqliteError: user may have only one primary role` |
+| Authorization guards name canonical role codes only | application + compiler | `RoleCode` derived from `ROLE_CODES` in `server/src/core/rbac/permission-catalog.ts` | `server/src/tests/rbac-scope.test.ts` | unknown role name fails to compile |
+| A workflow step naming an unknown role is reported, not silently denied | application | `server/src/routes/workflows.routes.ts` (`assertKnownStepRole`) | `server/src/tests/event-bus.test.ts` | 409 naming the bad role and step |
+| `users.role` accepts only values the database CHECK allows | database + types | `users.role` CHECK, `UserRole` in `server/src/utils/auth.ts` | `server/src/tests/rbac-single-authority.test.ts` | CHECK constraint rejects the write |

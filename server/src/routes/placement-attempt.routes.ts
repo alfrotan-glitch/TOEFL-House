@@ -49,7 +49,7 @@ function parseSnapshot(attempt: any) {
 // ============================================================================
 // §VIEW — profile + requirement mode + attempts + live component timing
 // ============================================================================
-placementAttemptRouter.get('/visitors/:visitorId/placement', authorize('owner', 'registrar', 'manager', 'counselor'), ah(async (req, res) => {
+placementAttemptRouter.get('/visitors/:visitorId/placement', authorize('owner', 'receptionist', 'general_manager', 'counselor'), ah(async (req, res) => {
   const visitor = getVisitorOr404(req.params.visitorId);
   assertVisitorBranchAccess(req, visitor);
   const targetLevelId = typeof req.query.targetLevelId === 'string' ? req.query.targetLevelId : null;
@@ -70,7 +70,7 @@ placementAttemptRouter.get('/visitors/:visitorId/placement', authorize('owner', 
 // ============================================================================
 // §START — policy-mode gate, immutable snapshot, timers, expiry
 // ============================================================================
-placementAttemptRouter.post('/visitors/:visitorId/placement/attempts', authorize('owner', 'registrar', 'manager', 'counselor'), ah(async (req, res) => {
+placementAttemptRouter.post('/visitors/:visitorId/placement/attempts', authorize('owner', 'receptionist', 'general_manager', 'counselor'), ah(async (req, res) => {
   const user = getUserContext(req);
   const visitor = getVisitorOr404(req.params.visitorId);
   assertVisitorBranchAccess(req, visitor);
@@ -180,7 +180,7 @@ placementAttemptRouter.post('/visitors/:visitorId/placement/attempts', authorize
 // ============================================================================
 // §TIMER — start a component's server timer (idempotent)
 // ============================================================================
-placementAttemptRouter.put('/visitors/:visitorId/placement/attempts/:attemptId/tests/:componentKey/start', authorize('owner', 'registrar', 'manager', 'counselor'), ah(async (req, res) => {
+placementAttemptRouter.put('/visitors/:visitorId/placement/attempts/:attemptId/tests/:componentKey/start', authorize('owner', 'receptionist', 'general_manager', 'counselor'), ah(async (req, res) => {
   const user = getUserContext(req);
   const { visitor, attempt } = loadAttemptContext(req, req.params.visitorId, req.params.attemptId);
   assertAttemptEditable(attempt);
@@ -198,7 +198,7 @@ placementAttemptRouter.put('/visitors/:visitorId/placement/attempts/:attemptId/t
 // ============================================================================
 // §RESPONSES — candidate answers + auto-scoring + timing enforcement
 // ============================================================================
-placementAttemptRouter.put('/visitors/:visitorId/placement/attempts/:attemptId/tests/:componentKey/responses', authorize('owner', 'registrar', 'manager', 'counselor'), ah(async (req, res) => {
+placementAttemptRouter.put('/visitors/:visitorId/placement/attempts/:attemptId/tests/:componentKey/responses', authorize('owner', 'receptionist', 'general_manager', 'counselor'), ah(async (req, res) => {
   const user = getUserContext(req);
   const { visitor, attempt } = loadAttemptContext(req, req.params.visitorId, req.params.attemptId);
   assertAttemptEditable(attempt);
@@ -297,7 +297,7 @@ placementAttemptRouter.put('/visitors/:visitorId/placement/attempts/:attemptId/t
 // ============================================================================
 // §COMPONENT SCORE — staff scoring (manual/hybrid) with provenance
 // ============================================================================
-placementAttemptRouter.put('/visitors/:visitorId/placement/attempts/:attemptId/components/:componentKey', authorize('owner', 'registrar', 'manager', 'counselor'), ah(async (req, res) => {
+placementAttemptRouter.put('/visitors/:visitorId/placement/attempts/:attemptId/components/:componentKey', authorize('owner', 'receptionist', 'general_manager', 'counselor'), ah(async (req, res) => {
   const user = getUserContext(req);
   const { visitor, attempt } = loadAttemptContext(req, req.params.visitorId, req.params.attemptId);
   assertAttemptEditable(attempt);
@@ -339,7 +339,7 @@ placementAttemptRouter.put('/visitors/:visitorId/placement/attempts/:attemptId/c
 // ============================================================================
 // §COMPLETE — weighted total → decision engine → recommendation → fee
 // ============================================================================
-placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/complete', authorize('owner', 'registrar', 'manager', 'counselor'), ah(async (req, res) => {
+placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/complete', authorize('owner', 'receptionist', 'general_manager', 'counselor'), ah(async (req, res) => {
   const user = getUserContext(req);
   const { visitor, attempt } = loadAttemptContext(req, req.params.visitorId, req.params.attemptId);
   assertAttemptEditable(attempt);
@@ -423,7 +423,7 @@ placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/
 // ============================================================================
 // §PAUSE / RESUME
 // ============================================================================
-placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/pause', authorize('owner', 'manager', 'counselor'), ah(async (req, res) => {
+placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/pause', authorize('owner', 'general_manager', 'counselor'), ah(async (req, res) => {
   const user = getUserContext(req);
   const { visitor, attempt } = loadAttemptContext(req, req.params.visitorId, req.params.attemptId);
   const { pausedAt } = pauseAttempt(attempt, req.body?.reason || null);
@@ -431,7 +431,7 @@ placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/
   res.json({ ok: true, status: 'paused', pausedAt });
 }));
 
-placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/resume', authorize('owner', 'manager', 'counselor'), ah(async (req, res) => {
+placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/resume', authorize('owner', 'general_manager', 'counselor'), ah(async (req, res) => {
   const user = getUserContext(req);
   const { visitor, attempt } = loadAttemptContext(req, req.params.visitorId, req.params.attemptId);
   const { resumedAt, pauseSeconds } = resumeAttempt(attempt);
@@ -442,7 +442,7 @@ placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/
 // ============================================================================
 // §CANCEL
 // ============================================================================
-placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/cancel', authorize('owner', 'registrar', 'manager', 'counselor'), ah(async (req, res) => {
+placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/cancel', authorize('owner', 'receptionist', 'general_manager', 'counselor'), ah(async (req, res) => {
   const user = getUserContext(req);
   const { visitor, attempt } = loadAttemptContext(req, req.params.visitorId, req.params.attemptId);
   if (!['in_progress', 'paused'].includes(attempt.status)) throw new HttpError(409, 'Only an in-progress placement attempt can be cancelled.');
@@ -459,7 +459,7 @@ placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/
 // ============================================================================
 // §OVERRIDE — authorized manual placement decision (audited)
 // ============================================================================
-placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/override', authorize('owner', 'manager'), ah(async (req, res) => {
+placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/override', authorize('owner', 'general_manager'), ah(async (req, res) => {
   const user = getUserContext(req);
   const { visitor, attempt } = loadAttemptContext(req, req.params.visitorId, req.params.attemptId);
   if (attempt.status !== 'completed') throw new HttpError(409, 'Only a completed placement attempt can be overridden.');
@@ -494,7 +494,7 @@ placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/
 // ============================================================================
 // §SCORE CORRECTION — audited post-completion correction (recomputes decision)
 // ============================================================================
-placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/components/:componentKey/correct', authorize('owner', 'manager'), ah(async (req, res) => {
+placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/components/:componentKey/correct', authorize('owner', 'general_manager'), ah(async (req, res) => {
   const user = getUserContext(req);
   const { visitor, attempt } = loadAttemptContext(req, req.params.visitorId, req.params.attemptId);
   if (attempt.status !== 'completed') throw new HttpError(409, 'Only a completed placement attempt can have scores corrected.');
@@ -555,7 +555,7 @@ placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/
 // ============================================================================
 // §HISTORY
 // ============================================================================
-placementAttemptRouter.get('/visitors/:visitorId/placement/attempts', authorize('owner', 'registrar', 'manager', 'counselor'), ah(async (req, res) => {
+placementAttemptRouter.get('/visitors/:visitorId/placement/attempts', authorize('owner', 'receptionist', 'general_manager', 'counselor'), ah(async (req, res) => {
   const visitor = getVisitorOr404(req.params.visitorId);
   assertVisitorBranchAccess(req, visitor);
   res.json((stmtAttempts.all(visitor.id) as any[]).map((a) => mapAttempt(a)));
@@ -564,7 +564,7 @@ placementAttemptRouter.get('/visitors/:visitorId/placement/attempts', authorize(
 // ============================================================================
 // §MAINTENANCE — on-demand expiry sweep (owner/manager)
 // ============================================================================
-placementAttemptRouter.post('/maintenance/expire', authorize('owner', 'manager'), ah(async (req, res) => {
+placementAttemptRouter.post('/maintenance/expire', authorize('owner', 'general_manager'), ah(async (req, res) => {
   const user = getUserContext(req);
   const now = nowIso();
   let expiredCount = 0;

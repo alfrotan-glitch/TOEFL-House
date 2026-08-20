@@ -7,7 +7,8 @@ and full audit history.
 */
 import { Router } from 'express';
 import { db } from '../db/connection.js';
-import { authenticate, authorize, requirePermission, resolveBranchScope, hasLegacyRole, canAccessBranchResource } from '../middleware/auth.js';
+import { authenticate, authorize, requirePermission, resolveBranchScope, requestHasRole, canAccessBranchResource } from '../middleware/auth.js';
+import { ROLE_CODES, type RoleCode } from '../core/rbac/permission-catalog.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id } from '../utils/ids.js';
@@ -60,6 +61,23 @@ const stmtGetPendingInstances = db.prepare(
 );
 
 // Helper to safely parse JSON
+/**
+ * Workflow step roles are data, so they can name a role that does not exist —
+ * a typo, or a definition written against an older vocabulary. Such a step can
+ * never be satisfied by anyone, which would otherwise surface as an ordinary
+ * "you are not allowed" 403 and send the operator hunting for a permission
+ * problem that is really a broken definition. Say which it is.
+ */
+function assertKnownStepRole(role: string, stepOrder: number): RoleCode {
+  if (!(ROLE_CODES as readonly string[]).includes(role)) {
+    throw new HttpError(
+      409,
+      `Workflow step ${stepOrder} names role "${role}", which is not a role in this system. The workflow definition must be corrected.`,
+    );
+  }
+  return role as RoleCode;
+}
+
 const parseSteps = (stepsJson: string): any[] => {
   try { return JSON.parse(stepsJson) || []; } 
   catch { return []; }
@@ -207,7 +225,7 @@ workflowsRouter.get('/instances/:id', ah(async (req, res) => {
 // §3 — TRIGGER / START A WORKFLOW
 // ============================================================================
 
-workflowsRouter.post('/trigger', requirePermission('Workflow.Trigger'), authorize('owner', 'manager'), ah(async (req, res) => {
+workflowsRouter.post('/trigger', requirePermission('Workflow.Trigger'), authorize('owner', 'general_manager'), ah(async (req, res) => {
   const { definitionId, entityType, entityId, payload } = req.body;
   if (!definitionId || !entityType || !entityId) {
     throw new HttpError(400, 'definitionId, entityType, and entityId are required.');
@@ -273,8 +291,8 @@ workflowsRouter.post('/instances/:id/approve', requirePermission('Workflow.Appro
   const currentStepDef = steps.find(s => s.order === instance.current_step);
   if (!currentStepDef) throw new HttpError(409, `Step ${instance.current_step} not found in definition.`);
   
-  const stepRole = String(currentStepDef.role);
-  if (!hasLegacyRole(req, stepRole as any) && !hasLegacyRole(req, 'owner') && !hasLegacyRole(req, 'manager')) {
+  const stepRole = assertKnownStepRole(String(currentStepDef.role), instance.current_step);
+  if (!requestHasRole(req, stepRole) && !requestHasRole(req, 'owner') && !requestHasRole(req, 'general_manager')) {
     throw new HttpError(403, `Your authorized role set cannot approve workflow step ${instance.current_step}.`);
   }
   
@@ -371,7 +389,7 @@ workflowsRouter.post('/instances/:id/reject', requirePermission('Workflow.Reject
 // §6 — CANCEL WORKFLOW
 // ============================================================================
 
-workflowsRouter.post('/instances/:id/cancel', requirePermission('Workflow.Cancel'), authorize('owner', 'manager'), ah(async (req, res) => {
+workflowsRouter.post('/instances/:id/cancel', requirePermission('Workflow.Cancel'), authorize('owner', 'general_manager'), ah(async (req, res) => {
   const instance = stmtGetInstanceById.get(req.params.id) as InstanceRow | undefined;
   if (!instance) throw new HttpError(404, 'Workflow instance not found.');
   assertBranchAccess(req, instance.branch_id);
@@ -426,7 +444,13 @@ workflowsRouter.get('/pending', ah(async (req, res) => {
   const pending = instances.filter((inst) => {
     const steps = parseSteps(inst.definition_steps);
     const currentStep = steps.find(s => s.order === inst.current_step);
-    return currentStep && (hasLegacyRole(req, String(currentStep.role) as any) || hasLegacyRole(req, 'owner') || hasLegacyRole(req, 'manager'));
+    if (!currentStep) return false;
+    // A listing must not fail because one definition is malformed, so an
+    // unknown role simply matches nobody here; the approve endpoint is where
+    // it is reported.
+    const role = String(currentStep.role);
+    const known = (ROLE_CODES as readonly string[]).includes(role);
+    return (known && requestHasRole(req, role as RoleCode)) || requestHasRole(req, 'owner') || requestHasRole(req, 'general_manager');
   });
   
   res.json(pending.map((inst) => {

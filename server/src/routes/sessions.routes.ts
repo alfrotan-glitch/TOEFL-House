@@ -18,7 +18,7 @@ Access control:
 import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { parsePagination as parsePaginationShared } from '../utils/pagination.js';
-import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource, hasLegacyRole, hasAnyLegacyRole } from '../middleware/auth.js';
+import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource, requestHasRole, requestHasAnyRole } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
@@ -136,13 +136,13 @@ function activeStudentIdsForClass(classId: string): string[] {
 
 function assertCanMarkSession(req: import('express').Request, session: any): void {
   const user = getUserContext(req);
-  if (hasLegacyRole(req, 'owner')) return;
-  if (hasAnyLegacyRole(req, ['manager', 'registrar', 'head_of_department'])) {
+  if (requestHasRole(req, 'owner')) return;
+  if (requestHasAnyRole(req, ['general_manager', 'receptionist', 'head_of_department'])) {
     if (session.branch_id && canAccessBranchResource(req, session.branch_id)) return;
     throw new HttpError(403, 'You do not have access to this session branch.');
   }
   
-  if (hasLegacyRole(req, 'teacher')) {
+  if (requestHasRole(req, 'teacher')) {
     const userRow = stmtGetUserLinkedTeacher.get(user.userId) as { linked_teacher_id?: string } | undefined;
     const linked = userRow?.linked_teacher_id || null;
     if (!linked) throw new HttpError(403, 'Teacher account is not linked to a teacher profile.');
@@ -286,7 +286,7 @@ function mapSessionRow(r: any, classTeacherId?: string | null) {
 
 sessionsRouter.get(
   '/',
-  authorize('registrar', 'manager', 'head_of_department', 'teacher', 'owner', 'finance'),
+  authorize('receptionist', 'general_manager', 'head_of_department', 'teacher', 'owner', 'finance_manager'),
   ah(async (req, res) => {
     const { classId, from, to, status } = req.query as Record<string, string>;
     const { branchId, isAll } = resolveBranchScope(req);
@@ -348,7 +348,7 @@ sessionsRouter.get(
 
 sessionsRouter.post(
   '/generate',
-  authorize('registrar', 'manager', 'head_of_department'),
+  authorize('receptionist', 'general_manager', 'head_of_department'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const { classId, weekStart, weeks = 1, daysOfWeek, startTime, endTime, skillId, skillIds, teacherId } = req.body || {};
@@ -509,7 +509,7 @@ sessionsRouter.post(
 
 sessionsRouter.post(
   '/',
-  authorize('registrar', 'manager', 'head_of_department'),
+  authorize('receptionist', 'general_manager', 'head_of_department'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const { classId, date, startTime, endTime, topic, notes, teacherId, skillId, sessionType, linkedSessionId, roomId } = req.body;
@@ -577,7 +577,7 @@ sessionsRouter.post(
 
 sessionsRouter.put(
   '/:id',
-  authorize('registrar', 'manager', 'head_of_department'),
+  authorize('receptionist', 'general_manager', 'head_of_department'),
   ah(async (req, res) => {
     const existing = requireSession(req, req.params.id);
     const { date, startTime, endTime, topic, notes, teacherId, skillId, roomId } = req.body;
@@ -622,7 +622,7 @@ sessionsRouter.put(
 
 sessionsRouter.patch(
   '/:id/status',
-  authorize('registrar', 'manager', 'head_of_department', 'teacher'),
+  authorize('receptionist', 'general_manager', 'head_of_department', 'teacher'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const existing = requireSession(req, req.params.id);
@@ -651,7 +651,7 @@ sessionsRouter.patch(
 
 sessionsRouter.delete(
   '/:id',
-  authorize('manager', 'head_of_department'),
+  authorize('general_manager', 'head_of_department'),
   ah(async (req, res) => {
     const existing = requireSession(req, req.params.id);
     if (existing.status === 'completed') throw new HttpError(409, 'Cannot delete a completed session.');
@@ -678,7 +678,7 @@ sessionsRouter.delete(
  */
 sessionsRouter.post(
   '/:id/makeup',
-  authorize('registrar', 'manager', 'head_of_department'),
+  authorize('receptionist', 'general_manager', 'head_of_department'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const original = requireSession(req, req.params.id);
@@ -768,7 +768,7 @@ function checkAndApplyAutoDrop(studentId: string, classId: string, policy: Retur
 
 sessionsRouter.post(
   '/:id/roster',
-  authorize('registrar', 'manager', 'head_of_department', 'teacher'),
+  authorize('receptionist', 'general_manager', 'head_of_department', 'teacher'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const session = requireSession(req, req.params.id);
@@ -778,7 +778,7 @@ sessionsRouter.post(
     const cls = stmtGetClassById.get(session.class_id) as any;
     assertClassActivatedForAttendance(cls || {});
 
-    if (session.status === 'completed' && !hasAnyLegacyRole(req, ['manager', 'owner', 'registrar'])) {
+    if (session.status === 'completed' && !requestHasAnyRole(req, ['general_manager', 'owner', 'receptionist'])) {
       throw new HttpError(400, 'Session is completed. Only managers can correct attendance.');
     }
 
@@ -833,7 +833,7 @@ sessionsRouter.post(
 
 sessionsRouter.patch(
   '/:id/roster/:rosterId',
-  authorize('registrar', 'manager', 'head_of_department', 'teacher'),
+  authorize('receptionist', 'general_manager', 'head_of_department', 'teacher'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const session = requireSession(req, req.params.id);
@@ -867,7 +867,7 @@ sessionsRouter.patch(
 
 sessionsRouter.post(
   '/:id/sync-roster',
-  authorize('registrar', 'manager', 'head_of_department'),
+  authorize('receptionist', 'general_manager', 'head_of_department'),
   ah(async (req, res) => {
     const session = requireSession(req, req.params.id);
     if (session.status === 'cancelled') throw new HttpError(400, 'Cannot sync roster on a cancelled session.');
@@ -908,7 +908,7 @@ sessionsRouter.get(
 
 sessionsRouter.post(
   '/:id/homework',
-  authorize('teacher', 'manager', 'head_of_department'),
+  authorize('teacher', 'general_manager', 'head_of_department'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const session = requireSession(req, req.params.id);
@@ -927,7 +927,7 @@ sessionsRouter.post(
 
 sessionsRouter.delete(
   '/:id/homework/:homeworkId',
-  authorize('teacher', 'manager', 'head_of_department'),
+  authorize('teacher', 'general_manager', 'head_of_department'),
   ah(async (req, res) => {
     const session = requireSession(req, req.params.id);
     assertCanMarkSession(req, session);
@@ -959,7 +959,7 @@ sessionsRouter.get(
 
 sessionsRouter.post(
   '/:id/quizzes',
-  authorize('teacher', 'manager', 'head_of_department'),
+  authorize('teacher', 'general_manager', 'head_of_department'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const session = requireSession(req, req.params.id);
@@ -978,7 +978,7 @@ sessionsRouter.post(
 
 sessionsRouter.delete(
   '/:id/quizzes/:quizId',
-  authorize('teacher', 'manager', 'head_of_department'),
+  authorize('teacher', 'general_manager', 'head_of_department'),
   ah(async (req, res) => {
     const session = requireSession(req, req.params.id);
     assertCanMarkSession(req, session);

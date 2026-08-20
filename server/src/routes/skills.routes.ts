@@ -79,7 +79,7 @@ skillsRouter.get(
 /** POST /api/skills — Create a new skill (Manager/HoD only) */
 skillsRouter.post(
   '/',
-  authorize('manager', 'head_of_department'),
+  authorize('general_manager', 'head_of_department'),
   ah(async (req, res) => {
     const { name } = req.body;
     if (!name || !String(name).trim()) throw new HttpError(400, 'Skill name is required.');
@@ -119,7 +119,7 @@ function mapAssignment(row: any) {
 /** GET /api/class-teacher-skills — List assignments with optional filters */
 classTeacherSkillsRouter.get(
   '/',
-  authorize('manager', 'head_of_department', 'registrar', 'finance', 'owner'),
+  authorize('general_manager', 'head_of_department', 'receptionist', 'finance_manager', 'owner'),
   ah(async (req, res) => {
     const { teacherId, classId } = req.query as Record<string, string>;
     const { branchId, isAll } = resolveBranchScope(req);
@@ -146,7 +146,7 @@ Business Rules:
 */
 classTeacherSkillsRouter.post(
   '/',
-  authorize('manager', 'head_of_department'),
+  authorize('general_manager', 'head_of_department'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const { classId, teacherId, skillId, monthlyRate, assignmentType, startDate, endDate, reason, sessionId } = req.body;
@@ -247,7 +247,7 @@ classTeacherSkillsRouter.post(
 /** PUT /api/class-teacher-skills/:id — Update an assignment's rate and/or details */
 classTeacherSkillsRouter.put(
   '/:id',
-  authorize('manager', 'head_of_department'),
+  authorize('general_manager', 'head_of_department'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const existing = stmtGetCtsById.get(req.params.id) as any;
@@ -303,7 +303,7 @@ classTeacherSkillsRouter.put(
 /** DELETE /api/class-teacher-skills/:id — Remove an assignment */
 classTeacherSkillsRouter.delete(
   '/:id',
-  authorize('manager', 'head_of_department'),
+  authorize('general_manager', 'head_of_department'),
   ah(async (req, res) => {
     const existing = stmtGetCtsById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Assignment not found.');
@@ -328,7 +328,7 @@ classTeacherSkillsRouter.delete(
  */
 classTeacherSkillsRouter.post(
   '/:id/substitute',
-  authorize('manager', 'head_of_department'),
+  authorize('general_manager', 'head_of_department'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const original = stmtGetCtsById.get(req.params.id) as any;

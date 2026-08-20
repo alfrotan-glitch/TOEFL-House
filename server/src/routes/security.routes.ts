@@ -30,13 +30,26 @@ const stmtGetUserRoles = db.prepare(`SELECT ur.id, ur.role_id AS roleId, r.code 
 const stmtGetUserByIdSimple = db.prepare('SELECT id, branch_id AS branchId FROM users WHERE id = ?');
 const stmtInsertUserRole = db.prepare(`INSERT INTO user_roles (id, user_id, role_id, scope_type, scope_id, is_primary, assigned_by, assigned_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)`);
 const stmtDeleteUserRole = db.prepare('DELETE FROM user_roles WHERE id = ? AND user_id = ?');
-const CANONICAL_USER_ROLES = new Set(['owner', 'manager', 'finance', 'registrar', 'teacher', 'head_of_department', 'counselor', 'donor_manager']);
-function legacyRoleForCanonicalCode(roleCode: string): UserRole | null {
-  for (const [legacy, canonical] of Object.entries(LEGACY_ROLE_MAP)) {
-    
-if (canonical === roleCode && CANONICAL_USER_ROLES.has(legacy)) return legacy as UserRole;
+/**
+ * Values the `users.role` column accepts. Deliberately NOT the canonical role
+ * vocabulary — `roles.code` uses 'general_manager' where this column uses
+ * 'manager'. The previous name for this set claimed the opposite.
+ */
+const USERS_ROLE_COLUMN_VALUES = new Set([
+  'owner', 'manager', 'finance', 'registrar', 'teacher', 'head_of_department', 'counselor', 'donor_manager',
+]);
+
+/**
+ * Translates a canonical role code back to the `users.role` column value, so
+ * assigning someone's primary position through this API keeps the denormalized
+ * profile column consistent. This is the only direction that still needs the
+ * legacy map; nothing in the authorization path does.
+ */
+function usersRoleColumnValueFor(roleCode: string): UserRole | null {
+  for (const [columnValue, canonical] of Object.entries(LEGACY_ROLE_MAP)) {
+    if (canonical === roleCode && USERS_ROLE_COLUMN_VALUES.has(columnValue)) return columnValue as UserRole;
   }
-  return CANONICAL_USER_ROLES.has(roleCode) ? roleCode as UserRole : null;
+  return USERS_ROLE_COLUMN_VALUES.has(roleCode) ? roleCode as UserRole : null;
 }
 
 
@@ -252,9 +265,9 @@ securityRouter.post('/users/:userId/roles', requirePermission('User.Edit', 'Role
   if (role.code === 'owner' && !callerIsGlobalOwner(req)) {
     throw new HttpError(403, 'Only a global owner may grant the owner role.');
   }
-  const primaryLegacyRole = isPrimary ? legacyRoleForCanonicalCode(role.code) : null;
+  const primaryUsersRoleValue = isPrimary ? usersRoleColumnValueFor(role.code) : null;
   if (isPrimary) {
-    if (!primaryLegacyRole) {
+    if (!primaryUsersRoleValue) {
       throw new HttpError(400, 'Only canonical identity roles can be assigned as primary.');
     }
     if ((scopeType || 'branch') !== (role.code === 'owner' ? 'organization' : 'branch')) {
@@ -266,7 +279,7 @@ securityRouter.post('/users/:userId/roles', requirePermission('User.Edit', 'Role
     if (isPrimary) {
       db.prepare('UPDATE user_roles SET is_primary = 0 WHERE user_id = ?').run(req.params.userId);
       db.prepare('UPDATE users SET role = ?, session_version = session_version + 1 WHERE id = ?').run(
-        primaryLegacyRole,
+        primaryUsersRoleValue,
         req.params.userId
       );
     }

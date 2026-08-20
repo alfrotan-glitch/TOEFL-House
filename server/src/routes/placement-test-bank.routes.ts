@@ -101,13 +101,13 @@ function replaceSections(testId: string, sections: any[]) {
 // ============================================================================
 // §TESTS
 // ============================================================================
-placementTestBankRouter.get('/test-bank', authorize('owner', 'manager', 'head_of_department', 'registrar', 'counselor'), ah(async (req, res) => {
+placementTestBankRouter.get('/test-bank', authorize('owner', 'general_manager', 'head_of_department', 'receptionist', 'counselor'), ah(async (req, res) => {
   const user = getUserContext(req);
   const rows = db.prepare(`SELECT * FROM placement_tests WHERE branch_id IS NULL OR branch_id = ? ORDER BY updated_at DESC`).all(user.branchId) as any[];
   res.json(rows.map((t) => serializeTest(t)));
 }));
 
-placementTestBankRouter.post('/test-bank', authorize('owner', 'manager', 'head_of_department'), ah(async (req, res) => {
+placementTestBankRouter.post('/test-bank', authorize('owner', 'general_manager', 'head_of_department'), ah(async (req, res) => {
   const user = getUserContext(req);
   const { title, testType, instructions, audioUrl, transcript, passage, branchId, questions, sections, difficulty, durationSeconds, rubricId, wordTarget, contentJson } = req.body ?? {};
   if (!title || !String(title).trim()) throw new HttpError(400, 'Test title is required.');
@@ -138,7 +138,7 @@ placementTestBankRouter.post('/test-bank', authorize('owner', 'manager', 'head_o
   res.status(201).json(serializeTest(stmtTestById.get(testId)));
 }));
 
-placementTestBankRouter.put('/test-bank/:id', authorize('owner', 'manager', 'head_of_department'), ah(async (req, res) => {
+placementTestBankRouter.put('/test-bank/:id', authorize('owner', 'general_manager', 'head_of_department'), ah(async (req, res) => {
   const existing = stmtTestById.get(req.params.id) as any;
   if (!existing) throw new HttpError(404, 'Test not found.');
   assertPlacementAssetBranch(req, existing.branch_id);
@@ -176,7 +176,7 @@ placementTestBankRouter.put('/test-bank/:id', authorize('owner', 'manager', 'hea
   res.json(serializeTest(stmtTestById.get(existing.id)));
 }));
 
-placementTestBankRouter.post('/test-bank/:id/activate', authorize('owner', 'manager', 'head_of_department'), ah(async (req, res) => {
+placementTestBankRouter.post('/test-bank/:id/activate', authorize('owner', 'general_manager', 'head_of_department'), ah(async (req, res) => {
   const existing = stmtTestById.get(req.params.id) as any;
   if (!existing) throw new HttpError(404, 'Test not found.');
   assertPlacementAssetBranch(req, existing.branch_id);
@@ -187,7 +187,7 @@ placementTestBankRouter.post('/test-bank/:id/activate', authorize('owner', 'mana
   res.json({ ok: true, version: Number(existing.version) + 1 });
 }));
 
-placementTestBankRouter.post('/test-bank/:id/archive', authorize('owner', 'manager', 'head_of_department'), ah(async (req, res) => {
+placementTestBankRouter.post('/test-bank/:id/archive', authorize('owner', 'general_manager', 'head_of_department'), ah(async (req, res) => {
   const existing = stmtTestById.get(req.params.id) as any;
   if (!existing) throw new HttpError(404, 'Test not found.');
   assertPlacementAssetBranch(req, existing.branch_id);
@@ -197,7 +197,7 @@ placementTestBankRouter.post('/test-bank/:id/archive', authorize('owner', 'manag
 }));
 
 /** Staff preview: full content INCLUDING answer keys (authoring surface only). */
-placementTestBankRouter.get('/test-bank/:id/preview', authorize('owner', 'manager', 'head_of_department'), ah(async (req, res) => {
+placementTestBankRouter.get('/test-bank/:id/preview', authorize('owner', 'general_manager', 'head_of_department'), ah(async (req, res) => {
   const test = stmtTestById.get(req.params.id) as any;
   if (!test) throw new HttpError(404, 'Test not found.');
   assertPlacementAssetBranch(req, test.branch_id);
@@ -207,13 +207,13 @@ placementTestBankRouter.get('/test-bank/:id/preview', authorize('owner', 'manage
 // ============================================================================
 // §RUBRICS (writing / speaking / interview)
 // ============================================================================
-placementTestBankRouter.get('/rubrics', authorize('owner', 'manager', 'head_of_department', 'registrar', 'counselor'), ah(async (req, res) => {
+placementTestBankRouter.get('/rubrics', authorize('owner', 'general_manager', 'head_of_department', 'receptionist', 'counselor'), ah(async (req, res) => {
   const user = getUserContext(req);
   const rows = stmtRubricsByBranch.all(user.branchId) as any[];
   res.json(rows.map((r) => ({ id: r.id, title: r.title, kind: r.kind, criteria: JSON.parse(r.criteria_json || '[]'), branchId: r.branch_id, createdAt: r.created_at, updatedAt: r.updated_at })));
 }));
 
-placementTestBankRouter.post('/rubrics', authorize('owner', 'manager', 'head_of_department'), ah(async (req, res) => {
+placementTestBankRouter.post('/rubrics', authorize('owner', 'general_manager', 'head_of_department'), ah(async (req, res) => {
   const user = getUserContext(req);
   const { title, kind, criteria } = req.body ?? {};
   if (!title || !['writing', 'speaking', 'interview'].includes(kind)) throw new HttpError(400, 'Rubric needs a title and kind (writing/speaking/interview).');
@@ -230,7 +230,7 @@ placementTestBankRouter.post('/rubrics', authorize('owner', 'manager', 'head_of_
   res.status(201).json({ id: rubricId, title, kind, criteria, branchId: user.branchId });
 }));
 
-placementTestBankRouter.put('/rubrics/:id', authorize('owner', 'manager', 'head_of_department'), ah(async (req, res) => {
+placementTestBankRouter.put('/rubrics/:id', authorize('owner', 'general_manager', 'head_of_department'), ah(async (req, res) => {
   const existing = stmtRubricById.get(req.params.id) as any;
   if (!existing) throw new HttpError(404, 'Rubric not found.');
   assertPlacementAssetBranch(req, existing.branch_id);
@@ -257,7 +257,7 @@ const ALLOWED_MIME: Record<string, string> = {
   'image/png': 'png', 'image/jpeg': 'jpg', 'application/pdf': 'pdf',
 };
 
-placementTestBankRouter.post('/media/upload', express.raw({ type: () => true, limit: '30mb' }), authorize('owner', 'manager', 'head_of_department'), ah(async (req, res) => {
+placementTestBankRouter.post('/media/upload', express.raw({ type: () => true, limit: '30mb' }), authorize('owner', 'general_manager', 'head_of_department'), ah(async (req, res) => {
   const user = getUserContext(req);
   const body = req.body as Buffer | undefined;
   const mime = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
@@ -276,12 +276,12 @@ placementTestBankRouter.post('/media/upload', express.raw({ type: () => true, li
   res.status(201).json({ id: mediaId, filename, mime, sizeBytes: body.length, sha256, kind: 'audio', url: `/api/placement/media/${mediaId}/file` });
 }));
 
-placementTestBankRouter.get('/media', authorize('owner', 'manager', 'head_of_department', 'registrar', 'counselor'), ah(async (req, res) => {
+placementTestBankRouter.get('/media', authorize('owner', 'general_manager', 'head_of_department', 'receptionist', 'counselor'), ah(async (req, res) => {
   const user = getUserContext(req);
   res.json((stmtMediaByBranch.all(user.branchId) as any[]).map((m) => ({ id: m.id, filename: m.filename, mime: m.mime, sizeBytes: m.size_bytes, sha256: m.sha256, kind: m.kind, createdAt: m.created_at, url: `/api/placement/media/${m.id}/file` })));
 }));
 
-placementTestBankRouter.get('/media/:id/file', authorize('owner', 'manager', 'head_of_department', 'registrar', 'counselor'), ah(async (req, res) => {
+placementTestBankRouter.get('/media/:id/file', authorize('owner', 'general_manager', 'head_of_department', 'receptionist', 'counselor'), ah(async (req, res) => {
   const media = stmtMediaById.get(req.params.id) as any;
   if (!media) throw new HttpError(404, 'Media not found.');
   const user = getUserContext(req);

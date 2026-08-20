@@ -108,7 +108,7 @@ function getUserContext(req: import('express').Request) {
 
 impactRouter.get(
   '/metrics',
-  authorize('owner', 'manager', 'finance', 'donor_manager', 'registrar'),
+  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager', 'receptionist'),
   ah(async (req, res) => {
     const { branchId, isAll } = resolveBranchScope(req);
     const period = req.query.period as string | undefined;
@@ -123,7 +123,7 @@ impactRouter.get(
 
 impactRouter.post(
   '/metrics',
-  authorize('owner', 'manager', 'donor_manager'),
+  authorize('owner', 'general_manager', 'donor_manager'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const { name, category, targetValue, currentValue, period } = req.body;
@@ -154,7 +154,7 @@ impactRouter.post(
 
 impactRouter.get(
   '/reports',
-  authorize('owner', 'manager', 'finance', 'donor_manager', 'registrar'),
+  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager', 'receptionist'),
   ah(async (req, res) => {
     const { branchId, isAll } = resolveBranchScope(req);
     const rows = isAll ? stmtGetAllReports.all() : stmtGetReportsByBranch.all(branchId);
@@ -164,7 +164,7 @@ impactRouter.get(
 
 impactRouter.post(
   '/reports/generate',
-  authorize('owner', 'manager', 'donor_manager'),
+  authorize('owner', 'general_manager', 'donor_manager'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const { period, donorId, campaignId, narrative } = req.body;
@@ -231,7 +231,7 @@ impactRouter.post(
 
 impactRouter.patch(
   '/reports/:id',
-  authorize('owner', 'manager', 'donor_manager'),
+  authorize('owner', 'general_manager', 'donor_manager'),
   ah(async (req, res) => {
     const existing = stmtGetReportById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Impact report not found.');
@@ -256,7 +256,7 @@ impactRouter.patch(
 
 impactRouter.get(
   '/stories',
-  authorize('owner', 'manager', 'finance', 'donor_manager', 'registrar'),
+  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager', 'receptionist'),
   ah(async (req, res) => {
     const { branchId, isAll } = resolveBranchScope(req);
     const rows = isAll ? stmtGetAllStories.all() : stmtGetStoriesByBranch.all(branchId);
@@ -266,7 +266,7 @@ impactRouter.get(
 
 impactRouter.post(
   '/stories',
-  authorize('owner', 'manager', 'donor_manager'),
+  authorize('owner', 'general_manager', 'donor_manager'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const { studentId, title, content, photoUrl, tags } = req.body;
@@ -296,7 +296,7 @@ impactRouter.post(
 
 impactRouter.get(
   '/summary',
-  authorize('owner', 'manager', 'finance', 'donor_manager', 'registrar'),
+  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager', 'receptionist'),
   ah(async (req, res) => {
     const { branchId, isAll } = resolveBranchScope(req);
 

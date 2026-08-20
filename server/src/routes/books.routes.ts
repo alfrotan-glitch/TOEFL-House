@@ -79,7 +79,7 @@ booksRouter.get(
 // Adding a book with the same title+type in the same branch aggregates stock (restock) instead of duplicating
 booksRouter.post(
   '/',
-  authorize('registrar', 'manager', 'finance'),
+  authorize('receptionist', 'general_manager', 'finance_manager'),
   ah(async (req, res) => {
     const { title, price, stock, isChapter, entryDate, purchasePrice, branchId } = req.body;
     if (!title || price == null || stock == null) throw new HttpError(400, 'Title, price, and quantity are required.');
@@ -127,7 +127,7 @@ booksRouter.post(
 
 booksRouter.put(
   '/:id',
-  authorize('registrar', 'manager', 'finance'),
+  authorize('receptionist', 'general_manager', 'finance_manager'),
   ah(async (req, res) => {
     const existing = requireBook(req, req.params.id);
     const { title, price, stock, isChapter, purchasePrice } = req.body;
@@ -151,7 +151,7 @@ booksRouter.put(
 
 booksRouter.delete(
   '/:id',
-  authorize('manager', 'finance'),
+  authorize('general_manager', 'finance_manager'),
   ah(async (req, res) => {
     const existing = requireBook(req, req.params.id);
     stmtDeleteBook.run(req.params.id);
@@ -171,7 +171,7 @@ booksRouter.get(
 
 booksRouter.post(
   '/:id/sell',
-  authorize('registrar', 'manager', 'finance'),
+  authorize('receptionist', 'general_manager', 'finance_manager'),
   ah(async (req, res) => {
     const book = requireBook(req, req.params.id);
     const { quantity, customerName, studentId, discountAmount, paymentMethod } = req.body;
@@ -291,7 +291,7 @@ booksRouter.post(
 
 booksRouter.post(
   '/sales/:saleId/refund',
-  authorize('manager', 'finance'),
+  authorize('general_manager', 'finance_manager'),
   ah(async (req, res) => {
     const sale = stmtGetSaleById.get(req.params.saleId) as any;
     if (!sale) throw new HttpError(404, 'Sale invoice not found.');

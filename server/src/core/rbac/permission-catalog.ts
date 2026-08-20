@@ -9,8 +9,29 @@ export interface PermissionDef {
   code: string; resource: string; action: string; description: string; category: string;
 }
 
+/**
+ * Every role the system recognises. This tuple is the single source of the
+ * role vocabulary: `RoleCode` is derived from it, `ROLE_DEFINITIONS` is typed
+ * by it, and `authorize()` accepts nothing else. A misspelled role is a
+ * compile error rather than a guard that silently matches no one.
+ */
+export const ROLE_CODES = [
+  'owner',
+  'general_manager',
+  'head_of_department',
+  'finance_manager',
+  'receptionist',
+  'counselor',
+  'teacher',
+  'data_entry',
+  'student',
+  'donor_manager',
+] as const;
+
+export type RoleCode = (typeof ROLE_CODES)[number];
+
 export interface RoleDef {
-  code: string; name: string; description: string; isSystem: boolean; sortOrder: number;
+  code: RoleCode; name: string; description: string; isSystem: boolean; sortOrder: number;
   permissions: Record<string, PermissionScope>;
 }
 
@@ -148,7 +169,7 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
   //
   // Grants are derived from behaviour that already shipped, not invented:
   //   • general_manager receives `AcademicSetup.Edit` and
-  //     `Curriculum.PlacementPolicy` because `authorize('owner','manager')`
+  //     `Curriculum.PlacementPolicy` because `authorize('owner','general_manager')`
   //     already let it write terms, slots, rooms, programs, levels and the
   //     placement profile. Encoding that as permissions grants nothing new.
   //   • general_manager receives `Curriculum.Author` because the same role
@@ -172,8 +193,6 @@ export const LEGACY_ROLE_MAP: Record<UserRole, string> = {
   head_of_department: 'head_of_department',
   counselor: 'counselor', 
   donor_manager: 'donor_manager',
-  staff: 'data_entry', // Added missing mappings
-  partner: 'donor_manager',
   student: 'student',
 };
 export type PermissionCode = typeof PERMISSION_CATALOG[number]['code'];
@@ -207,7 +226,7 @@ export const ROLE_DEFINITIONS: RoleDef[] = [
       'Payment.View','Payment.Create','Invoice.View','Invoice.Create','Discount.View','Expense.View','Expense.Create','Expense.Approve','Budget.View','Budget.Edit','Budget.Allocate','Finance.Report','Refund.Approve','Report.View','Impact.View',
       'Book.View','Book.Sell','Workflow.View','Workflow.Trigger','Workflow.Approve','Workflow.Reject','Workflow.Cancel','Waitlist.View','Waitlist.Manage','Enrollment.FreezeRequest','Enrollment.TransferRequest','Rule.View','Audit.View','Settings.View','Branch.View','AcademicSetup.View',
       // Academic Setup authority, encoding access general_manager already
-      // exercised through authorize('owner','manager') and Class.Create.
+      // exercised through authorize('owner','general_manager') and Class.Create.
       // See the AcademicSetup block in PERMISSION_CATALOG for the evidence.
       'AcademicSetup.Edit','Curriculum.Author','Curriculum.PlacementPolicy',
     ], 'branch'),

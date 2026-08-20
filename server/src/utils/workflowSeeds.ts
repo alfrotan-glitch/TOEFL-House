@@ -6,10 +6,14 @@ startup is safe.
 */
 import { db } from '../db/connection.js';
 import { id } from './ids.js';
+import type { RoleCode } from '../core/rbac/permission-catalog.js';
 
 interface DefaultWorkflowStep {
   order: number;
-  role: string;
+  /** Canonical role code — the same vocabulary as `roles.code`. A workflow
+   *  step that names a role nobody can hold would block the workflow
+   *  permanently, so this is typed rather than free text. */
+  role: RoleCode;
   action: 'review' | 'approve' | 'notify' | 'execute';
   label: string;
   slaHours: number;
@@ -26,18 +30,18 @@ const DEFAULT_WORKFLOWS: DefaultWorkflowDefinition[] = [
     name: 'Budget Expense Approval',
     trigger: 'expense.requested',
     steps: [
-      { order: 1, role: 'manager', action: 'review', label: 'Branch manager review', slaHours: 24 },
+      { order: 1, role: 'general_manager', action: 'review', label: 'Branch manager review', slaHours: 24 },
       { order: 2, role: 'owner', action: 'approve', label: 'Founder final approval', slaHours: 48 },
-      { order: 3, role: 'finance', action: 'execute', label: 'Finance department payment', slaHours: 24 },
+      { order: 3, role: 'finance_manager', action: 'execute', label: 'Finance department payment', slaHours: 24 },
     ],
   },
   {
     name: 'Refund Request',
     trigger: 'payment.refund_requested',
     steps: [
-      { order: 1, role: 'registrar', action: 'review', label: 'Registrar verification', slaHours: 12 },
-      { order: 2, role: 'manager', action: 'approve', label: 'Branch manager approval', slaHours: 24 },
-      { order: 3, role: 'finance', action: 'execute', label: 'Finance refund processing', slaHours: 24 },
+      { order: 1, role: 'receptionist', action: 'review', label: 'Registrar verification', slaHours: 12 },
+      { order: 2, role: 'general_manager', action: 'approve', label: 'Branch manager approval', slaHours: 24 },
+      { order: 3, role: 'finance_manager', action: 'execute', label: 'Finance refund processing', slaHours: 24 },
     ],
   },
   {
@@ -45,25 +49,25 @@ const DEFAULT_WORKFLOWS: DefaultWorkflowDefinition[] = [
     trigger: 'teacher.salary_requested',
     steps: [
       { order: 1, role: 'head_of_department', action: 'review', label: 'Academic head review', slaHours: 24 },
-      { order: 2, role: 'finance', action: 'approve', label: 'Finance approval', slaHours: 24 },
+      { order: 2, role: 'finance_manager', action: 'approve', label: 'Finance approval', slaHours: 24 },
       { order: 3, role: 'owner', action: 'approve', label: 'Founder final approval', slaHours: 48 },
-      { order: 4, role: 'finance', action: 'execute', label: 'Finance payment execution', slaHours: 12 },
+      { order: 4, role: 'finance_manager', action: 'execute', label: 'Finance payment execution', slaHours: 12 },
     ],
   },
   {
     name: 'Student Withdrawal',
     trigger: 'student.withdrawal_requested',
     steps: [
-      { order: 1, role: 'registrar', action: 'review', label: 'Registrar review', slaHours: 24 },
-      { order: 2, role: 'manager', action: 'approve', label: 'Branch manager approval', slaHours: 48 },
-      { order: 3, role: 'finance', action: 'execute', label: 'Finance settlement', slaHours: 24 },
+      { order: 1, role: 'receptionist', action: 'review', label: 'Registrar review', slaHours: 24 },
+      { order: 2, role: 'general_manager', action: 'approve', label: 'Branch manager approval', slaHours: 48 },
+      { order: 3, role: 'finance_manager', action: 'execute', label: 'Finance settlement', slaHours: 24 },
     ],
   },
   {
     name: 'Budget Reallocation',
     trigger: 'budget.reallocation_requested',
     steps: [
-      { order: 1, role: 'finance', action: 'review', label: 'Finance review', slaHours: 24 },
+      { order: 1, role: 'finance_manager', action: 'review', label: 'Finance review', slaHours: 24 },
       { order: 2, role: 'owner', action: 'approve', label: 'Founder approval', slaHours: 48 },
     ],
   },
@@ -71,10 +75,10 @@ const DEFAULT_WORKFLOWS: DefaultWorkflowDefinition[] = [
     name: 'Scholarship Award',
     trigger: 'scholarship.award_requested',
     steps: [
-      { order: 1, role: 'manager', action: 'review', label: 'Manager eligibility review', slaHours: 48 },
+      { order: 1, role: 'general_manager', action: 'review', label: 'Manager eligibility review', slaHours: 48 },
       { order: 2, role: 'donor_manager', action: 'review', label: 'Donor manager verification', slaHours: 48 },
       { order: 3, role: 'owner', action: 'approve', label: 'Founder final approval', slaHours: 72 },
-      { order: 4, role: 'finance', action: 'execute', label: 'Finance payment execution', slaHours: 24 },
+      { order: 4, role: 'finance_manager', action: 'execute', label: 'Finance payment execution', slaHours: 24 },
     ],
   },
 ];

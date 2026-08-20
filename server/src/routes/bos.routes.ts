@@ -13,7 +13,7 @@ import { addNotification } from '../utils/notifications.js';
 import { assertMoney } from '../utils/money.js';
 
 export const bosRouter = Router();
-bosRouter.use(authenticate, authorize('owner', 'finance', 'manager')); // Read-only dashboard access for authorized finance/management roles
+bosRouter.use(authenticate, authorize('owner', 'finance_manager', 'general_manager')); // Read-only dashboard access for authorized finance/management roles
 
 function requireBosBranch(req: import('express').Request): string {
   const { branchId, isAll } = resolveBranchScope(req);

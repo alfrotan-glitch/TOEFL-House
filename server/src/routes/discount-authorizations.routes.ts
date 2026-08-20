@@ -19,7 +19,7 @@ Approval authority per category is defined once, in `discount-authority.ts`
 */
 import { Router } from 'express';
 import { randomUUID } from 'node:crypto';
-import { authenticate, authorize, hasLegacyRole } from '../middleware/auth.js';
+import { authenticate, authorize, requestHasRole } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { db } from '../db/connection.js';
@@ -38,7 +38,7 @@ const CATEGORIES = Object.keys(APPROVER_ROLE) as ExceptionCategory[];
 /** List a student's authorizations (audit surface). */
 discountAuthorizationsRouter.get(
   '/student/:studentId',
-  authorize('owner', 'manager', 'finance'),
+  authorize('owner', 'general_manager', 'finance_manager'),
   ah(async (req, res) => {
     const rows = db
       .prepare(
@@ -57,7 +57,7 @@ discountAuthorizationsRouter.get(
  */
 discountAuthorizationsRouter.post(
   '/',
-  authorize('owner', 'manager'),
+  authorize('owner', 'general_manager'),
   ah(async (req, res) => {
     const user = req.user!;
     const body = req.body as Record<string, unknown>;
@@ -73,7 +73,7 @@ discountAuthorizationsRouter.post(
 
     // Approval authority. The owner may approve anything; a manager may only
     // approve the categories the policy assigns to them.
-    const isOwner = hasLegacyRole(req, 'owner');
+    const isOwner = requestHasRole(req, 'owner');
     if (APPROVER_ROLE[category] === 'owner' && !isOwner) {
       throw new HttpError(403, `${category} requires owner approval.`);
     }
@@ -134,14 +134,14 @@ discountAuthorizationsRouter.post(
  */
 discountAuthorizationsRouter.post(
   '/:id/revoke',
-  authorize('owner', 'manager'),
+  authorize('owner', 'general_manager'),
   ah(async (req, res) => {
     const row = db
       .prepare('SELECT id, category, branch_id FROM student_discount_authorizations WHERE id = ?')
       .get(req.params.id) as { id: string; category: ExceptionCategory; branch_id: string } | undefined;
     if (!row) throw new HttpError(404, 'Authorization not found.');
 
-    const isOwner = hasLegacyRole(req, 'owner');
+    const isOwner = requestHasRole(req, 'owner');
     if (APPROVER_ROLE[row.category] === 'owner' && !isOwner) {
       throw new HttpError(403, `${row.category} may only be revoked by an owner.`);
     }

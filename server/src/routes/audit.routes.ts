@@ -16,7 +16,7 @@ const stmtGetAuditLogsPageByBranch = db.prepare('SELECT * FROM audit_logs WHERE 
 // Only owner & manager can see the full audit trail.
 auditRouter.get(
   '/',
-  authorize('manager'), // authorize() implicitly allows 'owner' as well
+  authorize('general_manager'), // authorize() implicitly allows 'owner' as well
   ah(async (req, res) => {
     const { branchId, isAll } = resolveBranchScope(req);
     const operatorName = typeof req.query.operatorName === 'string' ? req.query.operatorName.trim() : '';

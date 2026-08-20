@@ -396,7 +396,7 @@ branchesRouter.get(
 
 branchesRouter.post(
   '/',
-  authorize('owner', 'manager'),
+  authorize('owner', 'general_manager'),
   ah(async (req, res) => {
     const { name, code, campusId, address, location, postalCode, phone, email, description, isActive } = req.body ?? {};
 
@@ -435,7 +435,7 @@ branchesRouter.post(
 
 branchesRouter.put(
   '/:id',
-  authorize('owner', 'manager'),
+  authorize('owner', 'general_manager'),
   ah(async (req, res) => {
     const existing = stmtGetBranchById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Branch not found.');
@@ -514,7 +514,7 @@ partnersRouter.use(authenticate);
 
 partnersRouter.get(
   '/',
-  authorize('manager'),
+  authorize('general_manager'),
   ah(async (_req, res) => {
     res.json(stmtGetAllPartners.all());
   })

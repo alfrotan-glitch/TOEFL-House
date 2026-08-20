@@ -54,7 +54,7 @@ function requireStudent(req: import('express').Request, studentId: string) {
 /** Full chronological lifecycle timeline. */
 journeyRouter.get(
   '/timeline',
-  authorize('owner', 'manager', 'registrar', 'finance', 'teacher', 'head_of_department'),
+  authorize('owner', 'general_manager', 'receptionist', 'finance_manager', 'teacher', 'head_of_department'),
   ah(async (req, res) => {
     const studentId = req.params.id as string;
     requireStudent(req, studentId);
@@ -68,7 +68,7 @@ journeyRouter.get(
 /** Financial subset of the journey (ledger-style). */
 journeyRouter.get(
   '/finance-timeline',
-  authorize('owner', 'manager', 'registrar', 'finance'),
+  authorize('owner', 'general_manager', 'receptionist', 'finance_manager'),
   ah(async (req, res) => {
     const studentId = req.params.id as string;
     requireStudent(req, studentId);
@@ -82,7 +82,7 @@ journeyRouter.get(
 /** Projected current state from events only. */
 journeyRouter.get(
   '/state',
-  authorize('owner', 'manager', 'registrar', 'finance', 'teacher', 'head_of_department'),
+  authorize('owner', 'general_manager', 'receptionist', 'finance_manager', 'teacher', 'head_of_department'),
   ah(async (req, res) => {
     const studentId = req.params.id as string;
     requireStudent(req, studentId);
@@ -93,7 +93,7 @@ journeyRouter.get(
 /** Combined journey payload for UI drawers. */
 journeyRouter.get(
   '/',
-  authorize('owner', 'manager', 'registrar', 'finance', 'teacher', 'head_of_department'),
+  authorize('owner', 'general_manager', 'receptionist', 'finance_manager', 'teacher', 'head_of_department'),
   ah(async (req, res) => {
     const studentId = req.params.id as string;
     const student = requireStudent(req, studentId);
@@ -115,7 +115,7 @@ journeyRouter.get(
 /** Manual note / status annotation on the journey (append-only). */
 journeyRouter.post(
   '/events',
-  authorize('owner', 'manager', 'registrar'),
+  authorize('owner', 'general_manager', 'receptionist'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const studentId = req.params.id as string;
@@ -190,7 +190,7 @@ journeyRouter.post(
 /** Create enrollment (new / repeat / partial_repeat / resume / jump). */
 journeyRouter.post(
   '/enrollments',
-  authorize('owner', 'manager', 'registrar'),
+  authorize('owner', 'general_manager', 'receptionist'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const studentId = req.params.id as string;

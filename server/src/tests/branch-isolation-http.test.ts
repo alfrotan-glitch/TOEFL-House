@@ -329,7 +329,7 @@ describe('Branch Isolation — HTTP Integration (CRIT-05, CRIT-06, CRIT-07)', ()
         .set(authHeader(registrarA))
         .send({ amount: 1000, paymentMethod: 'cash' });
 
-      // /pay endpoint requires authorize('finance', 'manager') — registrar is rejected
+      // /pay endpoint requires authorize('finance_manager', 'general_manager') — registrar is rejected
       expect(res.status).toBe(403);
     });
 
@@ -344,7 +344,7 @@ describe('Branch Isolation — HTTP Integration (CRIT-05, CRIT-06, CRIT-07)', ()
     });
 
     it('Branch A registrar CAN list invoices (registrar is in invoices authorize list)', async () => {
-      // invoicesRouter has authorize('finance', 'manager', 'registrar') at top level
+      // invoicesRouter has authorize('finance_manager', 'general_manager', 'receptionist') at top level
       const res = await supertest(app)
         .get('/api/invoices/')
         .set(authHeader(registrarA));

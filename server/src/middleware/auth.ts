@@ -2,9 +2,8 @@ import type { Request, Response, NextFunction } from 'express';
 import { verifyToken, TokenPayload, UserRole } from '../utils/auth.js';
 import { db } from '../db/connection.js';
 import { buildRbacContext, hasPermission, hasAnyPermission, hasAnyRole, hasRole, isGlobalOwner, canAccessBranch, canAccessAllBranches, type RbacUserContext } from '../core/rbac/rbac-service.js';
-import { LEGACY_ROLE_MAP } from '../core/rbac/permission-catalog.js';
+import type { RoleCode } from '../core/rbac/permission-catalog.js';
 
-// Removed local Role type to use centralized UserRole from utils/auth.ts
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
@@ -110,18 +109,22 @@ export function authenticate(req: Request, res: Response, next: NextFunction) {
 
 /**
  * Role-based authorization middleware.
+ *
+ * Roles are named by their canonical code — the same value stored in
+ * `roles.code` and referenced by `user_roles`. There is no second role
+ * vocabulary and no translation step: a name that does not exist in the
+ * catalog matches nothing and therefore denies.
  */
-export function hasLegacyRole(req: Request, role: UserRole): boolean {
+export function requestHasRole(req: Request, role: RoleCode): boolean {
   if (!req.rbac) return false;
-  const canonical = LEGACY_ROLE_MAP[role] || role;
-  return hasRole(req.rbac, canonical);
+  return hasRole(req.rbac, role);
 }
 
-export function hasAnyLegacyRole(req: Request, roles: UserRole[]): boolean {
-  return roles.some((role) => hasLegacyRole(req, role));
+export function requestHasAnyRole(req: Request, roles: RoleCode[]): boolean {
+  return roles.some((role) => requestHasRole(req, role));
 }
 
-export function authorize(...roles: UserRole[]) {
+export function authorize(...roles: RoleCode[]) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return res.status(401).json({ error: 'Not authenticated.' });
     // The Course Owner is the application superuser. The permission catalog
@@ -133,7 +136,7 @@ export function authorize(...roles: UserRole[]) {
     // (grade locks, rescore guards, cancellation reasons, etc.) still apply
     // independently of this role check.
     if (req.rbac && isGlobalOwner(req.rbac)) return next();
-    if (hasAnyLegacyRole(req, roles)) return next();
+    if (requestHasAnyRole(req, roles)) return next();
     return res.status(403).json({ error: 'You do not have permission to perform this operation.' });
   };
 }

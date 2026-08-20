@@ -5,7 +5,7 @@
 import type { Request } from 'express';
 import { db } from '../../db/connection.js';
 import { canAccessBranch, getPermissionScope } from './rbac-service.js';
-import { hasLegacyRole } from '../../middleware/auth.js';
+import { requestHasRole } from '../../middleware/auth.js';
 import { HttpError } from '../../middleware/errorHandler.js';
 
 // ── Performance: Module-level Prepared Statements ──────────────────────────
@@ -25,7 +25,7 @@ const stmtIsUserClassTeacher = db.prepare(
 export function isClassTeacherScoped(req: Request): boolean {
   if (!req.rbac) return false;
   const scope = getPermissionScope(req.rbac, 'Class.View');
-  return scope === 'own' || scope === 'class' || hasLegacyRole(req, 'teacher');
+  return scope === 'own' || scope === 'class' || requestHasRole(req, 'teacher');
 }
 
 export function canAccessClass(req: Request, classId: string): boolean {

@@ -1418,7 +1418,7 @@ studentsRouter.patch('/:id/status', requirePermission('Student.Edit', 'Student.S
   res.json({ ok: true });
 }));
 
-studentsRouter.post('/:id/transfer', authorize('registrar', 'manager', 'head_of_department', 'owner'), ah(async (req, res) => {
+studentsRouter.post('/:id/transfer', authorize('receptionist', 'general_manager', 'head_of_department', 'owner'), ah(async (req, res) => {
   const user = getUserContext(req);
   const { toClassId, notes } = req.body || {};
   if (!toClassId) throw new HttpError(400, 'toClassId is required.');
@@ -1444,7 +1444,7 @@ studentsRouter.post('/:id/transfer', authorize('registrar', 'manager', 'head_of_
   }
 }));
 
-studentsRouter.post('/:id/suspend', authorize('registrar', 'manager', 'head_of_department', 'owner'), ah(async (req, res) => {
+studentsRouter.post('/:id/suspend', authorize('receptionist', 'general_manager', 'head_of_department', 'owner'), ah(async (req, res) => {
   const user = getUserContext(req);
   const student = requireStudent(req, req.params.id);
   const { notes } = req.body || {};
@@ -1456,7 +1456,7 @@ studentsRouter.post('/:id/suspend', authorize('registrar', 'manager', 'head_of_d
   } catch (err: any) { throw new HttpError(400, err?.message || 'Suspend failed.'); }
 }));
 
-studentsRouter.post('/:id/resume', authorize('registrar', 'manager', 'head_of_department', 'owner'), ah(async (req, res) => {
+studentsRouter.post('/:id/resume', authorize('receptionist', 'general_manager', 'head_of_department', 'owner'), ah(async (req, res) => {
   const user = getUserContext(req);
   const student = requireStudent(req, req.params.id);
   const { classId, notes } = req.body || {};

@@ -88,7 +88,7 @@ function mapOffering(row: any) {
 
 offeringsRouter.get(
   '/',
-  authorize('registrar', 'manager', 'head_of_department', 'owner', 'teacher'),
+  authorize('receptionist', 'general_manager', 'head_of_department', 'owner', 'teacher'),
   ah(async (req, res) => {
     const { branchId, isAll } = resolveBranchScope(req);
     const { status } = req.query as { status?: string };
@@ -104,7 +104,7 @@ offeringsRouter.get(
 
 offeringsRouter.get(
   '/:id',
-  authorize('registrar', 'manager', 'head_of_department', 'owner', 'teacher'),
+  authorize('receptionist', 'general_manager', 'head_of_department', 'owner', 'teacher'),
   ah(async (req, res) => {
     const row = stmtGetOfferingById.get(req.params.id) as any;
     if (!row) throw new HttpError(404, 'Course offering not found.');
@@ -116,7 +116,7 @@ offeringsRouter.get(
 
 offeringsRouter.post(
   '/',
-  authorize('manager', 'head_of_department', 'registrar', 'owner'),
+  authorize('general_manager', 'head_of_department', 'receptionist', 'owner'),
   ah(async (req, res) => {
     const userBranchId = req.user?.branchId;
     const { programId, programVersionId, levelId, branchId, academicTermId, code, name, status = 'draft' } = req.body || {};
@@ -147,7 +147,7 @@ offeringsRouter.post(
 
 offeringsRouter.patch(
   '/:id',
-  authorize('manager', 'head_of_department', 'registrar', 'owner'),
+  authorize('general_manager', 'head_of_department', 'receptionist', 'owner'),
   ah(async (req, res) => {
     const existing = stmtGetOfferingForUpdate.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Course offering not found.');
@@ -180,7 +180,7 @@ offeringsRouter.patch(
 
 offeringsRouter.post(
   '/:id/link-class',
-  authorize('manager', 'head_of_department', 'registrar', 'owner'),
+  authorize('general_manager', 'head_of_department', 'receptionist', 'owner'),
   ah(async (req, res) => {
     const { classId } = req.body || {};
     if (!classId) throw new HttpError(400, 'classId is required.');
@@ -201,7 +201,7 @@ offeringsRouter.post(
 
 offeringsRouter.delete(
   '/:id',
-  authorize('manager', 'owner'),
+  authorize('general_manager', 'owner'),
   ah(async (req, res) => {
     const existing = stmtGetOfferingForUpdate.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Course offering not found.');

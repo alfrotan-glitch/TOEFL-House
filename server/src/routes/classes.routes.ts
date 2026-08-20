@@ -23,7 +23,7 @@ import { getRetakePolicy, countPriorRetakes, getMakeupPolicy, getFullPolicyProfi
 import { getEnrollmentService } from '../core/academic/enrollment-service.js';
 import { assertClassGenderAllows } from '../core/academic/class-admission.js';
 import { ACTIVE_ENROLLMENT_STATUSES } from '../core/academic/class-capacity.js';
-import type { UserRole } from '../utils/auth.js';
+import type { RoleCode } from '../core/rbac/permission-catalog.js';
 import { ACADEMIC_DEFAULTS } from '../core/configuration/policy-catalog.js';
 
 const enrollmentServiceForPromotion = getEnrollmentService(db);
@@ -736,7 +736,7 @@ classesRouter.post(
 
 classesRouter.get(
   '/:id/merge-candidates',
-  authorize('owner', 'manager', 'registrar', 'head_of_department'),
+  authorize('owner', 'general_manager', 'receptionist', 'head_of_department'),
   ah(async (req, res) => {
     const source = requireClass(req, req.params.id);
     const enrolled = (stmtCountStrictActiveEnrolled.get(source.id) as { c: number }).c;
@@ -792,7 +792,7 @@ function registerLifecycleTransition(
 ) {
   classesRouter.post(
     `/:id${path}`,
-    authorize('owner', 'manager', 'head_of_department'),
+    authorize('owner', 'general_manager', 'head_of_department'),
     ah(async (req, res) => {
       requireClass(req, req.params.id); // 404s + branch-scope check up front
       const reason = req.body?.reason ?? null;
@@ -815,7 +815,7 @@ registerLifecycleTransition('/complete', (s, id, o) => s.complete(id, o), 'Compl
 registerLifecycleTransition('/archive', (s, id, o) => s.archive(id, o), 'Archived');
 registerLifecycleTransition('/cancel', (s, id, o) => s.cancel(id, o), 'Cancelled');
 
-classesRouter.get('/:id/lifecycle', authorize('owner', 'manager', 'head_of_department', 'registrar', 'teacher'), ah(async (req, res) => {
+classesRouter.get('/:id/lifecycle', authorize('owner', 'general_manager', 'head_of_department', 'receptionist', 'teacher'), ah(async (req, res) => {
   const cls = requireClass(req, req.params.id);
   res.json({
     stage: cls.lifecycle_stage,
@@ -836,7 +836,7 @@ classesRouter.get('/:id/lifecycle', authorize('owner', 'manager', 'head_of_depar
  * certificate/make-up policies. Read-only — this is for transparency, not
  * a config-editing surface.
  */
-classesRouter.get('/:id/policy-profile', authorize('owner', 'manager', 'head_of_department'), ah(async (req, res) => {
+classesRouter.get('/:id/policy-profile', authorize('owner', 'general_manager', 'head_of_department'), ah(async (req, res) => {
   const cls = requireClass(req, req.params.id);
   const scope = { programId: cls.program_id, levelId: cls.level_id, classId: cls.id };
   const promotionCriteria = resolvePromotionCriteria(db, { level_id: cls.level_id, branch_id: cls.branch_id, offering_id: cls.offering_id });
@@ -848,7 +848,7 @@ classesRouter.get('/:id/policy-profile', authorize('owner', 'manager', 'head_of_
 // §3 — GRADEBOOK & ASSESSMENTS (LMS CORE)
 // ============================================================================
 
-classesRouter.get('/:id/gradebook', authorize('owner', 'manager', 'head_of_department', 'teacher'), ah(async (req, res) => {
+classesRouter.get('/:id/gradebook', authorize('owner', 'general_manager', 'head_of_department', 'teacher'), ah(async (req, res) => {
   const cls = requireClass(req, req.params.id);
   const students = stmtGetClassRoster.all(cls.id) as RosterRow[];
   const assessments = stmtGetAssessments.all(cls.id) as AssessmentRow[];
@@ -875,7 +875,7 @@ classesRouter.get('/:id/gradebook', authorize('owner', 'manager', 'head_of_depar
   });
 }));
 
-classesRouter.get('/:id/gradebook/history', authorize('owner', 'manager', 'head_of_department', 'teacher'), ah(async (req, res) => {
+classesRouter.get('/:id/gradebook/history', authorize('owner', 'general_manager', 'head_of_department', 'teacher'), ah(async (req, res) => {
   const cls = requireClass(req, req.params.id);
   const { studentId, limit } = req.query as { studentId?: string; limit?: string };
   const rowLimit = Math.min(Number(limit) || 200, 500);
@@ -892,7 +892,7 @@ classesRouter.get('/:id/gradebook/history', authorize('owner', 'manager', 'head_
   })));
 }));
 
-classesRouter.post('/:id/assessments', authorize('owner', 'manager', 'head_of_department'), ah(async (req, res) => {
+classesRouter.post('/:id/assessments', authorize('owner', 'general_manager', 'head_of_department'), ah(async (req, res) => {
   const cls = requireClass(req, req.params.id);
   const {
     title, type, weight, maxScore, date, passingScore, publishDate, dueDate,
@@ -930,7 +930,7 @@ classesRouter.post('/:id/assessments', authorize('owner', 'manager', 'head_of_de
   res.status(201).json({ id: newId });
 }));
 
-classesRouter.put('/:id/assessments/:assessmentId', authorize('owner', 'manager', 'head_of_department'), ah(async (req, res) => {
+classesRouter.put('/:id/assessments/:assessmentId', authorize('owner', 'general_manager', 'head_of_department'), ah(async (req, res) => {
   const cls = requireClass(req, req.params.id);
   const existing = stmtGetAssessmentById.get(req.params.assessmentId, cls.id) as AssessmentRow | undefined;
   if (!existing) throw new HttpError(404, 'Assessment not found.');
@@ -974,7 +974,7 @@ classesRouter.put('/:id/assessments/:assessmentId', authorize('owner', 'manager'
   res.json({ ok: true });
 }));
 
-classesRouter.delete('/:id/assessments/:assessmentId', authorize('owner', 'manager', 'head_of_department'), ah(async (req, res) => {
+classesRouter.delete('/:id/assessments/:assessmentId', authorize('owner', 'general_manager', 'head_of_department'), ah(async (req, res) => {
   const cls = requireClass(req, req.params.id);
   const existing = stmtGetAssessmentById.get(req.params.assessmentId, cls.id) as AssessmentRow | undefined;
   if (!existing) throw new HttpError(404, 'Assessment not found.');
@@ -995,7 +995,7 @@ classesRouter.delete('/:id/assessments/:assessmentId', authorize('owner', 'manag
  * creates a new type:'makeup_exam' assessment linked back to the original
  * via makeup_for_assessment_id, defaulting weight/maxScore from it.
  */
-classesRouter.post('/:id/assessments/:assessmentId/makeup', authorize('owner', 'manager', 'head_of_department'), ah(async (req, res) => {
+classesRouter.post('/:id/assessments/:assessmentId/makeup', authorize('owner', 'general_manager', 'head_of_department'), ah(async (req, res) => {
   const cls = requireClass(req, req.params.id);
   const original = stmtGetAssessmentById.get(req.params.assessmentId, cls.id) as AssessmentRow | undefined;
   if (!original) throw new HttpError(404, 'Assessment not found.');
@@ -1048,7 +1048,7 @@ function registerGradeLockTransition(
   path: string,
   method: (svc: ReturnType<typeof getGradeLockService>, assessmentId: string) => unknown,
   auditVerb: string,
-  roles: UserRole[] = ['owner', 'manager', 'head_of_department'],
+  roles: RoleCode[] = ['owner', 'general_manager', 'head_of_department'],
 ) {
   classesRouter.post(
     `/:id/assessments/:assessmentId${path}`,
@@ -1068,15 +1068,15 @@ function registerGradeLockTransition(
 // Submitting/sending-back is something the teacher who did the grading
 // should be able to do themselves; review/approve/publish/lock are
 // manager-tier actions ("Academic Managers may approve").
-registerGradeLockTransition('/submit', (s, id) => s.submit(id), 'Submitted', ['owner', 'manager', 'head_of_department', 'teacher']);
-registerGradeLockTransition('/send-back', (s, id) => s.sendBackToDraft(id), 'Sent back to draft for', ['owner', 'manager', 'head_of_department']);
-registerGradeLockTransition('/review', (s, id) => s.review(id), 'Reviewed', ['owner', 'manager', 'head_of_department']);
-registerGradeLockTransition('/approve', (s, id) => s.approve(id), 'Approved', ['owner', 'manager', 'head_of_department']);
-registerGradeLockTransition('/publish', (s, id) => s.publish(id), 'Published', ['owner', 'manager', 'head_of_department']);
-registerGradeLockTransition('/lock', (s, id) => s.lock(id), 'Locked', ['owner', 'manager', 'head_of_department']);
-registerGradeLockTransition('/unlock', (s, id) => s.unlock(id), 'Unlocked (administrative override) for', ['owner', 'manager']);
+registerGradeLockTransition('/submit', (s, id) => s.submit(id), 'Submitted', ['owner', 'general_manager', 'head_of_department', 'teacher']);
+registerGradeLockTransition('/send-back', (s, id) => s.sendBackToDraft(id), 'Sent back to draft for', ['owner', 'general_manager', 'head_of_department']);
+registerGradeLockTransition('/review', (s, id) => s.review(id), 'Reviewed', ['owner', 'general_manager', 'head_of_department']);
+registerGradeLockTransition('/approve', (s, id) => s.approve(id), 'Approved', ['owner', 'general_manager', 'head_of_department']);
+registerGradeLockTransition('/publish', (s, id) => s.publish(id), 'Published', ['owner', 'general_manager', 'head_of_department']);
+registerGradeLockTransition('/lock', (s, id) => s.lock(id), 'Locked', ['owner', 'general_manager', 'head_of_department']);
+registerGradeLockTransition('/unlock', (s, id) => s.unlock(id), 'Unlocked (administrative override) for', ['owner', 'general_manager']);
 
-classesRouter.put('/:id/grades', authorize('owner', 'manager', 'head_of_department', 'teacher'), ah(async (req, res) => {
+classesRouter.put('/:id/grades', authorize('owner', 'general_manager', 'head_of_department', 'teacher'), ah(async (req, res) => {
   const cls = requireClass(req, req.params.id);
   const { grades } = req.body as { grades: Array<{ assessmentId: string; studentId: string; score: number; status: string; notes?: string }> };
   if (!Array.isArray(grades)) throw new HttpError(400, 'Grades array is required.');
@@ -1128,7 +1128,7 @@ classesRouter.put('/:id/grades', authorize('owner', 'manager', 'head_of_departme
 // §4 — PROMOTION ENGINE (COMPLETE SEMESTER)
 // ============================================================================
 
-classesRouter.post('/:id/complete-semester', authorize('owner', 'manager', 'head_of_department'), ah(async (req, res) => {
+classesRouter.post('/:id/complete-semester', authorize('owner', 'general_manager', 'head_of_department'), ah(async (req, res) => {
   const cls = requireClass(req, req.params.id);
   
   if (cls.status === 'completed') {
@@ -1240,7 +1240,7 @@ classesRouter.post('/:id/complete-semester', authorize('owner', 'manager', 'head
  * The only path that can ever apply 'drop' — see promotion-engine.ts's
  * ADR AM-25 for why that's never automated.
  */
-classesRouter.post('/:id/promotion/resolve/:studentId', authorize('owner', 'manager', 'head_of_department'), ah(async (req, res) => {
+classesRouter.post('/:id/promotion/resolve/:studentId', authorize('owner', 'general_manager', 'head_of_department'), ah(async (req, res) => {
   const cls = requireClass(req, req.params.id);
   const { outcome, reason } = req.body as { outcome: 'promote' | 'retake' | 'conditional_pass' | 'drop'; reason?: string };
   if (!['promote', 'retake', 'conditional_pass', 'drop'].includes(outcome)) {
@@ -1304,7 +1304,7 @@ classesRouter.post('/:id/promotion/resolve/:studentId', authorize('owner', 'mana
   res.json({ ok: true, outcome });
 }));
 
-classesRouter.get('/:id/promotion/pending-review', authorize('owner', 'manager', 'head_of_department'), ah(async (req, res) => {
+classesRouter.get('/:id/promotion/pending-review', authorize('owner', 'general_manager', 'head_of_department'), ah(async (req, res) => {
   const cls = requireClass(req, req.params.id);
   if (cls.lifecycle_stage !== 'completed' && cls.lifecycle_stage !== 'archived') {
     return res.json({ pending: [] }); // nothing to review before the class is locked
@@ -1328,7 +1328,7 @@ classesRouter.get('/:id/promotion/pending-review', authorize('owner', 'manager',
 
 attendanceRouter.post(
   '/',
-  authorize('registrar', 'manager', 'teacher', 'head_of_department'),
+  authorize('receptionist', 'general_manager', 'teacher', 'head_of_department'),
   ah(async (req, res) => {
     const { date, records } = req.body as {
       date: string;

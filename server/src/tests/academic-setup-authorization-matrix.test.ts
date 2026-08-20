@@ -4,7 +4,7 @@
  * Academic Setup spans TWO authorization authorities, and that split is real
  * rather than accidental:
  *
- *   • `academic.routes.ts`  — legacy `authorize('owner','manager')` role gates.
+ *   • `academic.routes.ts`  — legacy `authorize('owner','general_manager')` role gates.
  *     Terms, slots, rooms, programs, levels, level fees and the placement
  *     profile live here.
  *   • `catalog.routes.ts`   — modern `requirePermission(...)` permission gates.
