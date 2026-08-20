@@ -2,9 +2,9 @@
  * Copies runtime assets that tsc does not emit into dist/ so the production
  * entry point (`npm start` → node dist/index.js) can bootstrap the database.
  *
- * tsc only compiles TypeScript; schema.sql and the SQL migration files are
- * read at runtime via import.meta.url-relative paths (src/db/connection.ts),
- * so without this copy step a production build crashes on startup with
+ * tsc only compiles TypeScript; schema.sql is read at runtime via an
+ * import.meta.url-relative path (src/db/connection.ts), so without this copy
+ * step a production build crashes on startup with
  * "schema.sql not found at dist/db/schema.sql".
  */
 import { cpSync, existsSync, mkdirSync } from 'node:fs';
@@ -23,6 +23,5 @@ if (!existsSync(srcDb)) {
 mkdirSync(distDb, { recursive: true });
 
 cpSync(resolve(srcDb, 'schema.sql'), resolve(distDb, 'schema.sql'));
-cpSync(resolve(srcDb, 'migrations'), resolve(distDb, 'migrations'), { recursive: true });
 
-console.log('✅ Copied schema.sql and migrations/ into dist/db');
+console.log('✅ Copied schema.sql into dist/db');

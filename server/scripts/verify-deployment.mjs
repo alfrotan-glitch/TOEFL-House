@@ -5,14 +5,18 @@
  * Answers, against the REAL database an operator just deployed onto, the
  * questions that cannot be answered from a build environment:
  *
- *   - did every migration actually apply?
- *   - did migration 068's indexes land? (go-live blocker GL-4)
- *   - did migration 069's money guards land?
- *   - did migration 067 leave every branch reconciled?
- *   - is the pre-migration backup on disk?
+ *   - does the live database actually match the canonical schema?
+ *   - are the financial integrity guards present?
+ *   - does every branch reconcile to its ledger?
  *   - is the database structurally intact (FK, integrity)?
  *
- * Read-only: it opens the database in readonly mode and writes nothing.
+ * The schema comparison is direct: the canonical schema is applied to a
+ * throwaway in-memory database and the two shapes are diffed. That is
+ * strictly stronger than asking a bookkeeping table whether it believes the
+ * schema is current, because it inspects the database that actually exists.
+ *
+ * Read-only: it opens the deployed database in readonly mode and writes
+ * nothing.
  *
  *   node scripts/verify-deployment.mjs [path/to/erp.sqlite]
  *
@@ -51,53 +55,72 @@ const check = (name, fn) => {
   }
 };
 
-const migrationsOnDisk = (() => {
-  // `new URL(import.meta.url).pathname` is NOT a filesystem path on Windows:
-  // it yields '/C:/Users/...', which fs.existsSync() can never resolve. Both
-  // candidate directories then looked absent, `migrationsOnDisk` came back
-  // empty, nothing could be reported missing, and this check silently PASSED
-  // on a database with unapplied migrations — the verifier's single most
-  // important job, failing open. Reproduced: a database with 069 deleted from
-  // schema_migrations exited 0 on Windows and 1 on Linux.
-  // fileURLToPath() is the correct conversion on every platform.
-  const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-  const dir = path.join(scriptDir, '..', 'src', 'db', 'migrations');
-  const distDir = path.join(scriptDir, '..', 'dist', 'db', 'migrations');
-  const useDir = fs.existsSync(dir) ? dir : distDir;
-  return fs.existsSync(useDir) ? fs.readdirSync(useDir).filter((f) => f.endsWith('.sql')).sort() : [];
+/**
+ * The canonical schema, materialized in memory for comparison.
+ *
+ * Resolved with fileURLToPath rather than `new URL(...).pathname`: on Windows
+ * the latter yields '/C:/Users/...', which fs can never resolve, so the
+ * reference schema would silently come back empty and every structural check
+ * would pass vacuously — the verifier failing open at exactly the moment it
+ * matters most.
+ */
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const canonical = (() => {
+  const src = path.join(scriptDir, '..', 'src', 'db', 'schema.sql');
+  const dist = path.join(scriptDir, '..', 'dist', 'db', 'schema.sql');
+  const use = fs.existsSync(src) ? src : dist;
+  if (!fs.existsSync(use)) return null;
+  const mem = new Database(':memory:');
+  mem.pragma('foreign_keys = OFF');
+  mem.exec(fs.readFileSync(use, 'utf8'));
+  return mem;
 })();
 
-check('every migration on disk is recorded as applied', () => {
-  const applied = new Set(db.prepare('SELECT version FROM schema_migrations').all().map((r) => r.version));
-  const missing = migrationsOnDisk.map((f) => f.replace(/\.sql$/, '')).filter((v) => !applied.has(v));
-  return { ok: missing.length === 0, detail: missing.length ? `NOT applied: ${missing.join(', ')}` : `${applied.size} applied` };
+const objectsOf = (handle, type) =>
+  new Set(
+    handle
+      .prepare("SELECT name FROM sqlite_master WHERE type = ? AND name NOT LIKE 'sqlite_%'")
+      .all(type)
+      .map((r) => r.name)
+  );
+
+const structural = (type) => () => {
+  if (!canonical) return { ok: false, detail: 'canonical schema.sql could not be located' };
+  const expected = objectsOf(canonical, type);
+  const actual = objectsOf(db, type);
+  const missing = [...expected].filter((n) => !actual.has(n)).sort();
+  return {
+    ok: missing.length === 0,
+    detail: missing.length ? `MISSING ${missing.length}: ${missing.join(', ')}` : `${expected.size} present`,
+  };
+};
+
+check('every canonical table exists', structural('table'));
+check('every canonical index exists', structural('index'));
+check('every canonical trigger exists', structural('trigger'));
+
+check('live database has no table beyond the canonical schema', () => {
+  if (!canonical) return { ok: false, detail: 'canonical schema.sql could not be located' };
+  const expected = objectsOf(canonical, 'table');
+  const extra = [...objectsOf(db, 'table')].filter((n) => !expected.has(n)).sort();
+  return {
+    ok: extra.length === 0,
+    detail: extra.length ? `UNKNOWN tables present: ${extra.join(', ')}` : 'no drift',
+  };
 });
 
-check('GL-4: migration 068 indexes present', () => {
-  const need = ['idx_users_role', 'idx_placement_profile_program_branch'];
-  const missing = need.filter((n) =>
-    db.prepare("SELECT COUNT(*) c FROM sqlite_master WHERE type='index' AND name=?").get(n).c === 0);
-  return { ok: missing.length === 0, detail: missing.length ? `MISSING: ${missing.join(', ')}` : need.join(', ') };
+check('every canonical column exists on every table', () => {
+  if (!canonical) return { ok: false, detail: 'canonical schema.sql could not be located' };
+  const drift = [];
+  for (const table of objectsOf(canonical, 'table')) {
+    const want = canonical.prepare(`PRAGMA table_info(${JSON.stringify(table)})`).all().map((c) => c.name);
+    const have = new Set(db.prepare(`PRAGMA table_info(${JSON.stringify(table)})`).all().map((c) => c.name));
+    for (const column of want) if (!have.has(column)) drift.push(`${table}.${column}`);
+  }
+  return { ok: drift.length === 0, detail: drift.length ? `MISSING: ${drift.join(', ')}` : 'no drift' };
 });
 
-check('users-by-role uses an index rather than scanning', () => {
-  const plan = db.prepare('EXPLAIN QUERY PLAN SELECT * FROM users WHERE role = ?').all('owner')
-    .map((r) => r.detail).join(' ');
-  return { ok: plan.includes('idx_users_role'), detail: plan.trim() };
-});
-
-check('migration 069 money guards present', () => {
-  const need = [
-    'trg_invoices_nonnegative_insert', 'trg_invoices_nonnegative_update',
-    'trg_student_semesters_nonnegative_insert', 'trg_student_semesters_nonnegative_update',
-    'trg_exams_fee_nonnegative_insert', 'trg_exams_fee_nonnegative_update',
-  ];
-  const missing = need.filter((n) =>
-    db.prepare("SELECT COUNT(*) c FROM sqlite_master WHERE type='trigger' AND name=?").get(n).c === 0);
-  return { ok: missing.length === 0, detail: missing.length ? `MISSING: ${missing.join(', ')}` : `${need.length} triggers` };
-});
-
-check('migration 067: every branch reconciles to its ledger', () => {
+check('every branch reconciles to its ledger', () => {
   // Mirrors computeReconciliation: capital_injection credits the organization
   // treasury, not branch cash, so it is excluded from the branch figure.
   const rows = db.prepare(`
@@ -116,13 +139,6 @@ check('migration 067: every branch reconciles to its ledger', () => {
       ? bad.map((b) => `branch ${b.branch}: cash ${b.actual_main} vs ledger ${b.expected_main}`).join('; ')
       : `${rows.length} branch account(s) reconciled`,
   };
-});
-
-check('pre-migration backup exists on disk', () => {
-  const dir = path.join(path.dirname(path.resolve(dbPath)), 'backups');
-  if (!fs.existsSync(dir)) return { ok: false, detail: `no backups directory at ${dir}` };
-  const snaps = fs.readdirSync(dir).filter((f) => f.startsWith('pre-migration-') && f.endsWith('.sqlite'));
-  return { ok: snaps.length > 0, detail: snaps.length ? `${snaps.length} snapshot(s), latest ${snaps.sort().at(-1)}` : 'none found' };
 });
 
 check('foreign key integrity', () => {
@@ -149,4 +165,5 @@ if (failed) {
   console.log('\n  DEPLOYMENT NOT VERIFIED — investigate before putting the system into use.');
 }
 db.close();
+canonical?.close();
 process.exit(failed ? 1 : 0);

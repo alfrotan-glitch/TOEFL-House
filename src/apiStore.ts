@@ -541,7 +541,7 @@ export function useApiStore() {
   // Authoritative Dashboard KPIs. Every population metric (conversion rate,
   // pending leads, active students, per-period intake) and the cash-flow series
   // are computed in SQL server-side. The Dashboard must render these and derive
-  // nothing itself — see docs/DASHBOARD_AUDIT_2026-08-17.md (D-1..D-5).
+  // nothing itself.
   const reloadDashboardSummary = useCallback(
     () => api.get<DashboardSummary>('/dashboard/summary', bq).then(setDashboardSummary).catch(() => setDashboardSummary(null)),
     [bq]

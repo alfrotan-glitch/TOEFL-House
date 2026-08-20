@@ -53,22 +53,41 @@ Run the server from the compiled output, not `tsx`:
 cd server && npm run build && NODE_ENV=production node dist/index.js
 ```
 
-## 2. Migrations
+## 2. Database schema
 
-Migrations run automatically at startup, each in its own transaction, and a
-`VACUUM INTO` snapshot is written first whenever migrations are pending.
+There is no migration chain. `server/src/db/schema.sql` is the single
+canonical representation of the database, and it is applied — idempotently —
+on every server start. An empty database becomes a complete valid one on first
+boot; an existing one is left unchanged.
 
-Verify convergence — a migrated database must be identical to a fresh install:
+Schema changes are made by editing that file. Verify before deploying:
 
 ```bash
 cd server && npm run preflight:fresh-schema
 ```
 
+That proves the schema stands alone, is structurally sound, is idempotent, and
+that no second mechanism capable of altering the shape has been introduced.
+
+After deploying, verify the database an operator actually has:
+
+```bash
+cd server && node scripts/verify-deployment.mjs ./data/erp.sqlite
+```
+
+This diffs the live database against the canonical schema — every table,
+index, trigger and column — and reports anything missing or unexpected. It is
+read-only.
+
 ## 3. Backup
 
-A pre-migration snapshot is automatic. For scheduled backups, take a
-`VACUUM INTO` snapshot — **do not** `cp` a live SQLite file, which can copy a
-torn page or miss the WAL:
+> **There is no automatic backup.** The only automatic snapshot in the product
+> was taken by the migration runner, which no longer exists. Scheduled backups
+> are currently the operator's responsibility, and a backup policy is an open
+> decision (assumption A-11 / risk TR-5 in `docs/registries/`).
+
+Take a `VACUUM INTO` snapshot — **do not** `cp` a live SQLite file, which can
+copy a torn page or miss the WAL:
 
 ```bash
 cd server
@@ -80,9 +99,8 @@ node -e "require('better-sqlite3')(process.env.DB_PATH||'./data/erp.sqlite') \
 inside a transaction** — which is precisely what guarantees a snapshot never
 captures a half-finished write.
 
-Automatic snapshots live in `server/data/backups/` and are pruned to the most
-recent few. **They sit on the same disk as the database**, so they protect
-against a bad migration, not against disk loss. Copy them off-host.
+Write snapshots to a different disk from the database. A snapshot beside the
+database protects against a bad write, not against losing the volume.
 
 ## 4. Restore
 
@@ -100,15 +118,12 @@ against a bad migration, not against disk loss. Copy them off-host.
      console.log('fk violations:', db.pragma('foreign_key_check').length);"
    ```
    Expect `ok` and `0`.
-4. Start the server. Any migrations newer than the snapshot re-apply
-   automatically.
-
-Covered by `server/src/tests/backup-restore.test.ts`, which performs a real
-snapshot → destroy → restore → verify cycle.
+4. Start the server. The canonical schema is re-applied automatically, so a
+   snapshot taken before a schema edit converges on boot.
 
 ## 5. Health verification
 
-After any deploy, restore, or migration:
+After any deploy or restore:
 
 ```bash
 # schema + referential integrity

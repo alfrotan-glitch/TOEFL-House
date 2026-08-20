@@ -5,9 +5,10 @@
  * deliberately structural (schema/date/routing invariants) rather than
  * feature tests, because each one was a whole CLASS of silent failure:
  *
- *   G1. schema.sql must not drift from the migrated schema. A column that
- *       exists only after a migration makes a FRESH INSTALL crash on any
- *       route whose prepared statement selects it.
+ *   G1. schema.sql must be the SOLE schema authority, and the live database
+ *       must equal it. A column reachable only through some second mechanism
+ *       makes a FRESH INSTALL crash on any route whose prepared statement
+ *       selects it.
  *   G2. Payroll's "today" must agree with the `today()` written into date
  *       columns. Using UTC in one place and local time in the other caused a
  *       real off-by-one every evening in Kabul (UTC+04:30).
@@ -28,38 +29,62 @@ const serverRoot = path.resolve(__dirname, '..', '..');
 const repoRoot = path.resolve(serverRoot, '..');
 const schemaPath = path.join(serverRoot, 'src', 'db', 'schema.sql');
 
-/** Tables that only migrations create — legitimately absent from schema.sql. */
-const MIGRATION_ONLY_TABLES = new Set([
-  'schema_migrations',
-  'teacher_branch_history',
-  'teacher_compensation_history',
-]);
-
-describe('G1 — schema.sql must not drift from the migrated schema', () => {
-  it('every migrated column exists in schema.sql (fresh installs must work)', () => {
-    initSchema(); // brings the shared test DB fully up to date
+describe('G1 — schema.sql must be the sole schema authority', () => {
+  it('the live database equals the canonical schema, column for column', () => {
+    initSchema(); // applies the canonical schema to the shared test DB
 
     const fresh = new Database(':memory:');
     try {
+      fresh.pragma('foreign_keys = OFF');
       fresh.exec(fs.readFileSync(schemaPath, 'utf8'));
 
-      const migratedTables = (
+      const liveTables = (
         db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all() as Array<{ name: string }>
       ).map((r) => r.name);
 
       const drift: string[] = [];
-      for (const table of migratedTables) {
-        if (MIGRATION_ONLY_TABLES.has(table)) continue;
+      for (const table of liveTables) {
         const freshCols = new Set(
           (fresh.prepare(`PRAGMA table_info(${JSON.stringify(table)})`).all() as Array<{ name: string }>).map((c) => c.name)
         );
-        if (!freshCols.size) continue; // table introduced by a migration
+        if (!freshCols.size) {
+          drift.push(`table ${table} exists in the database but not in schema.sql`);
+          continue;
+        }
         for (const col of db.prepare(`PRAGMA table_info(${JSON.stringify(table)})`).all() as Array<{ name: string }>) {
           if (!freshCols.has(col.name)) drift.push(`${table}.${col.name}`);
         }
       }
 
-      expect(drift, `schema.sql is missing migrated columns: ${drift.join(', ')}`).toEqual([]);
+      expect(drift, `the database and schema.sql disagree: ${drift.join(', ')}`).toEqual([]);
+    } finally {
+      fresh.close();
+    }
+  });
+
+  it('no second mechanism can change the schema', () => {
+    // Two things that can both alter the shape is duplicate authority (LAW 1).
+    // The migration chain was removed; this fails if one reappears.
+    expect(fs.existsSync(path.join(serverRoot, 'src', 'db', 'migrations'))).toBe(false);
+    expect(fs.existsSync(path.join(serverRoot, 'src', 'db', 'migrate.ts'))).toBe(false);
+    expect(fs.readFileSync(schemaPath, 'utf8')).not.toMatch(/CREATE TABLE[^;]*schema_migrations/i);
+  });
+
+  it('re-applying the canonical schema is a no-op', () => {
+    // connection.ts applies schema.sql on every boot, so a statement without
+    // IF NOT EXISTS would crash the second start of every installation.
+    const fresh = new Database(':memory:');
+    try {
+      const schema = fs.readFileSync(schemaPath, 'utf8');
+      fresh.pragma('foreign_keys = OFF');
+      fresh.exec(schema);
+      const shape = () =>
+        (fresh.prepare("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name").all() as Array<{ name: string }>)
+          .map((r) => r.name)
+          .join(',');
+      const before = shape();
+      expect(() => fresh.exec(schema)).not.toThrow();
+      expect(shape()).toBe(before);
     } finally {
       fresh.close();
     }
@@ -68,6 +93,7 @@ describe('G1 — schema.sql must not drift from the migrated schema', () => {
   it('columns the payroll/finance code selects exist in schema.sql alone', () => {
     const fresh = new Database(':memory:');
     try {
+      fresh.pragma('foreign_keys = OFF');
       fresh.exec(fs.readFileSync(schemaPath, 'utf8'));
       const probes = [
         'SELECT idempotency_key, status, voided_at, voided_by, void_reason FROM teacher_salary_ledger LIMIT 1',

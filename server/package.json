@@ -13,7 +13,7 @@
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "bootstrap:env": "node scripts/ensure-first-install-env.mjs",
     "bootstrap": "npm run bootstrap:env && npm run seed",
-    "preflight:fresh-schema": "node scripts/verify-fresh-schema.mjs",
+    "preflight:fresh-schema": "node scripts/verify-canonical-schema.mjs",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
     "audit:legacy-config": "tsx scripts/legacy-config-data-audit.mjs"
   },

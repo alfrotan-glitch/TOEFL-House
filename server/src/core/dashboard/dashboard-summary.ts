@@ -3,8 +3,8 @@
  *
  * WHY THIS MODULE EXISTS
  * ----------------------
- * The Dashboard audit (docs/DASHBOARD_AUDIT_2026-08-17.md) found that the
- * frontend counted records out of whatever PAGE it happened to have loaded:
+ * Without this module the frontend counts records out of whatever PAGE it
+ * happens to have loaded:
  *
  *   D-1  conversion rate divided by the 100-row visitor page → 50% vs a true 20%
  *   D-2  the 7-day cash-flow chart reduced a 500-row transaction page →

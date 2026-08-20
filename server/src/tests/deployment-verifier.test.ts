@@ -1,11 +1,11 @@
 /**
  * The post-deployment verifier must actually catch a bad deployment.
  * ============================================================================
- * `scripts/verify-deployment.mjs` is how an operator closes go-live blocker GL-4
- * (and confirms 067/069 landed) against the REAL database after deploying.
- * A verifier that only ever says PASS is worse than no verifier, so these
- * tests sabotage a good database in each of the specific ways a deployment can
- * go wrong and assert that each one is reported.
+ * `scripts/verify-deployment.mjs` is how an operator confirms that the
+ * database they just deployed onto really matches the canonical schema. A
+ * verifier that only ever says PASS is worse than no verifier, so these tests
+ * sabotage a good database in each specific way a deployment can go wrong and
+ * assert that each one is reported.
  *
  * Contract:
  *   exit 0  every check passed
@@ -20,7 +20,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runMigrations } from '../db/migrate.js';
 
 const serverRoot = path.resolve(fileURLToPath(new URL('.', import.meta.url)), '..', '..');
 const script = path.join(serverRoot, 'scripts', 'verify-deployment.mjs');
@@ -36,18 +35,13 @@ function run(dbFile: string): { code: number; out: string } {
   }
 }
 
-/** A fully deployed database: schema + every migration + a backup snapshot. */
+/** A correctly deployed database: the canonical schema, nothing else. */
 function buildDeployed(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deployed-'));
   const file = path.join(dir, 'erp.sqlite');
   const db = new Database(file);
   db.exec(schemaSql);
-  runMigrations(db);
   db.close();
-  // runMigrations skips its snapshot under NODE_ENV=test, so create the
-  // artefact the verifier looks for.
-  fs.mkdirSync(path.join(dir, 'backups'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'backups', 'pre-migration-2026-01-01T00-00-00-000Z.sqlite'), '');
   return file;
 }
 
@@ -57,8 +51,6 @@ function sabotage(mutate: (db: Database.Database) => void): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sabotage-'));
   const file = path.join(dir, 'erp.sqlite');
   fs.copyFileSync(src, file);
-  fs.mkdirSync(path.join(dir, 'backups'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'backups', 'pre-migration-2026-01-01T00-00-00-000Z.sqlite'), '');
   const db = new Database(file);
   mutate(db);
   db.close();
@@ -69,21 +61,12 @@ let deployed: string;
 beforeAll(() => { deployed = buildDeployed(); });
 
 /**
- * Timeout note: every case here builds a REAL database (schema + all 75
- * migrations) and then spawns `node scripts/verify-deployment.mjs` as a child
- * process. On an unloaded 2-CPU runner each case takes ~0.55 s, but under CPU
- * contention the same case was measured at ~2.8 s — a 5x slowdown — because the
- * migration run and the subprocess compete for the same two cores.
- *
- * With the global 10 s testTimeout that is close enough to the limit to fail on
- * a busy CI machine, which is exactly what happened (observed: a 412 s suite
- * run versus 160 s here, with "FAILS when a migration on disk was never
- * applied" reporting exit code 0 because the child was killed before it could
- * report). The verifier itself is correct — reproduced directly: it exits 1 and
- * prints "NOT applied: 069_nonnegative_money_guards".
- *
- * The generous suite timeout below removes the environment-sensitivity without
- * weakening a single assertion.
+ * Timeout note: every case here builds a REAL database and then spawns
+ * `node scripts/verify-deployment.mjs` as a child process. Under CPU
+ * contention on a small runner the build and the subprocess compete for the
+ * same cores, and cases measured at ~0.55 s unloaded have been observed at
+ * ~2.8 s. The generous suite timeout removes that environment-sensitivity
+ * without weakening a single assertion.
  */
 describe('deployment verifier', { timeout: 60_000 }, () => {
   it('passes on a correctly deployed database', () => {
@@ -92,23 +75,46 @@ describe('deployment verifier', { timeout: 60_000 }, () => {
     expect(code).toBe(0);
   });
 
-  it('reports GL-4 explicitly so the operator can close it', () => {
-    expect(run(deployed).out).toContain('GL-4: migration 068 indexes present');
+  it('FAILS when a canonical table is missing', () => {
+    const file = sabotage((db) => db.exec('DROP TABLE IF EXISTS notifications'));
+    const { code, out } = run(file);
+    expect(code).toBe(1);
+    expect(out).toContain('notifications');
   });
 
-  it('FAILS when a migration 068 index is missing', () => {
+  it('FAILS when a canonical index is missing', () => {
     const file = sabotage((db) => db.exec('DROP INDEX IF EXISTS idx_users_role'));
     const { code, out } = run(file);
     expect(code).toBe(1);
-    expect(out).toMatch(/FAIL {2}GL-4/);
     expect(out).toContain('idx_users_role');
   });
 
-  it('FAILS when a migration 069 money guard is missing', () => {
+  it('FAILS when a financial integrity trigger is missing', () => {
     const file = sabotage((db) => db.exec('DROP TRIGGER IF EXISTS trg_invoices_nonnegative_insert'));
     const { code, out } = run(file);
     expect(code).toBe(1);
     expect(out).toContain('trg_invoices_nonnegative_insert');
+  });
+
+  it('FAILS when a canonical column is missing from a table', () => {
+    // A column cannot be dropped from under a live index, so the whole table
+    // is rebuilt one column short — exactly what a half-finished hand edit to
+    // a deployed database looks like.
+    const file = sabotage((db) => {
+      db.exec('PRAGMA foreign_keys = OFF');
+      db.exec('DROP TABLE IF EXISTS success_stories');
+      db.exec('CREATE TABLE success_stories (id TEXT PRIMARY KEY)');
+    });
+    const { code, out } = run(file);
+    expect(code).toBe(1);
+    expect(out).toContain('success_stories.');
+  });
+
+  it('FAILS when the database carries a table the canonical schema does not declare', () => {
+    const file = sabotage((db) => db.exec('CREATE TABLE leftover_scratch (id TEXT PRIMARY KEY)'));
+    const { code, out } = run(file);
+    expect(code).toBe(1);
+    expect(out).toContain('leftover_scratch');
   });
 
   it('FAILS when a branch does not reconcile to its ledger', () => {
@@ -121,23 +127,6 @@ describe('deployment verifier', { timeout: 60_000 }, () => {
     expect(code).toBe(1);
     expect(out).toContain('reconciles to its ledger');
     expect(out).toContain('99999');
-  });
-
-  it('FAILS when a migration on disk was never applied', () => {
-    const file = sabotage((db) => db.prepare("DELETE FROM schema_migrations WHERE version LIKE '069%'").run());
-    const { code, out } = run(file);
-    expect(code).toBe(1);
-    expect(out).toContain('NOT applied');
-  });
-
-  it('FAILS when no pre-migration backup exists', () => {
-    const src = buildDeployed();
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nobackup-'));
-    const file = path.join(dir, 'erp.sqlite');
-    fs.copyFileSync(src, file); // deliberately no backups/ directory
-    const { code, out } = run(file);
-    expect(code).toBe(1);
-    expect(out).toContain('backup');
   });
 
   it('exits 2 when the database cannot be read', () => {

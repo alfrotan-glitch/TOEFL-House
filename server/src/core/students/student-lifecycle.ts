@@ -3,7 +3,7 @@
  * ============================================================================
  * THE single authority for the Student profile lifecycle.
  *
- * Audit findings STU-C1 / STU-C2 (docs/STUDENT_SUBSYSTEM_AUDIT_2026-08-18.md):
+ * It exists because the lifecycle previously had more than one writer:
  *
  *  - STU-C1: `students.status` had TWO writers. `PATCH /students/:id/status`
  *    enforced a (partial) rule set while `POST /students/:id/journey/events`

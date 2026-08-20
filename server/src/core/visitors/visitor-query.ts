@@ -4,9 +4,9 @@
  *
  * WHY THIS MODULE EXISTS
  * ----------------------
- * The visitor UX audit (docs/VISITOR_UX_AUDIT_2026-08-17.md, UX-1) found the
- * frontend fetching a hard-coded 100-row page and then computing every headline
- * figure — total leads, conversion rate, pipeline, overdue — from that array,
+ * Without this module the frontend fetches a hard-coded 100-row page and then
+ * computes every headline figure — total leads, conversion rate, pipeline,
+ * overdue — from that array,
  * plus running search and filtering over it in JavaScript. With 250 leads the
  * manager's conversion tile read 27% against a true 11%, and a receptionist
  * searching for lead #101+ was told "No visitors match this search" for a

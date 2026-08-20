@@ -101,20 +101,23 @@ console.log('\nTests');
 run('server test suite', 'npm test', { cwd: path.join(root, 'server'), slow: true });
 
 console.log('\nDatabase');
-run('fresh-schema preflight', 'npm run preflight:fresh-schema', { cwd: path.join(root, 'server'), slow: true });
+run('canonical schema preflight', 'npm run preflight:fresh-schema', { cwd: path.join(root, 'server'), slow: true });
 
-check('fresh install + migrations', () => {
+check('fresh install from canonical schema', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'th-release-'));
   const dbPath = path.join(tmp, 'fresh.sqlite');
   const probe = path.join(tmp, 'probe.mjs');
   fs.writeFileSync(probe, `
     import { db, initSchema } from ${JSON.stringify(path.join(root, 'server', 'src', 'db', 'connection.ts'))};
     initSchema();
-    const migrations = db.prepare('SELECT COUNT(*) c FROM schema_migrations').get().c;
+    // Boot twice: the canonical schema is applied on every start, so a
+    // non-idempotent statement would break the second run of every install.
+    initSchema();
     const tables = db.prepare("SELECT COUNT(*) c FROM sqlite_master WHERE type='table'").get().c;
+    const legacy = db.prepare("SELECT COUNT(*) c FROM sqlite_master WHERE name='schema_migrations'").get().c;
     const integrity = db.pragma('integrity_check')[0].integrity_check;
     const fk = db.pragma('foreign_key_check').length;
-    console.log('RESULT ' + JSON.stringify({ migrations, tables, integrity, fk }));
+    console.log('RESULT ' + JSON.stringify({ tables, legacy, integrity, fk }));
   `);
   const out = execSync(`npx tsx ${JSON.stringify(probe)}`, {
     cwd: path.join(root, 'server'), stdio: 'pipe', encoding: 'utf8',
@@ -125,9 +128,10 @@ check('fresh install + migrations', () => {
   const r = JSON.parse(line.slice('RESULT '.length));
   if (r.integrity !== 'ok') throw new Error(`integrity_check = ${r.integrity}`);
   if (r.fk !== 0) throw new Error(`${r.fk} foreign-key violations`);
-  if (r.migrations < 1) throw new Error('no migrations applied');
+  if (r.tables < 1) throw new Error('canonical schema created no tables');
+  if (r.legacy !== 0) throw new Error('a schema_migrations table reappeared');
   fs.rmSync(tmp, { recursive: true, force: true });
-  return `${r.migrations} migrations, ${r.tables} tables, integrity ok`;
+  return `${r.tables} tables, idempotent re-init, integrity ok`;
 });
 
 check('financial invariants reconcile', () => {

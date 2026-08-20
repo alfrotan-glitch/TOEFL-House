@@ -951,13 +951,13 @@ FACT unless marked otherwise.
 
 | Topic | Finding | Class | Evidence |
 |---|---|---|---|
-| Currency (§20) | AFN is the only currency; no FX logic anywhere | FACT | `src/utils/format.ts` is the only currency formatter |
+| Currency (§20) | AFN is the only currency; no FX logic anywhere. Confirmed as a requirement by owner decision D-11, not merely observed | FACT + DECISION | `src/utils/format.ts`, `docs/registries/decisions.md` |
 | Precision (§20) | Stored to 2dp (enforced by `assertMoney` + DB triggers); displayed with 0dp | FACT | `server/src/utils/money.ts`, `trg_*_money_scale_*`, `src/utils/format.ts` |
 | Calendar (§19) | Solar Hijri is first-class for period arithmetic; storage is single-form ISO-8601 Gregorian; display is localized | FACT | `server/src/core/calendar/periods.ts` (authority), `src/utils/jalali.ts` (display) |
-| UI direction (§26) | Chrome is deliberately and uniformly LTR/English (`<html lang="en">`, `dir="ltr"` on every view root); Persian/Dari appears only as *data* (Jalali month names, Persian digits, branding) | FACT | `index.html`, `src/App.tsx`, 10 frontend + 8 backend files contain Arabic-script literals |
-| Migration mechanism (§12) | 78 forward-only migration files; no `down` scripts; the release gate replays every file against a blank database | FACT | `server/src/db/migrations/`, `server/scripts/verify-fresh-schema.mjs` |
-| Migration backup (§65) | The runner takes a `VACUUM INTO` snapshot before the first pending migration and retains 10 | FACT | `server/src/db/migrate.ts` |
-| Verification commands (§67) | root: `typecheck`, `lint`, `build`, `audit:product`, `audit:static`, `audit:registries`, `audit:protocol`, `audit:bundle`, `release:validate` · server: `lint`, `typecheck`, `test`, `build`, `preflight:fresh-schema`, `seed` | FACT | `package.json`, `server/package.json` |
+| UI direction (§26) | Chrome is *currently* uniformly LTR/English (`<html lang="en">`, `dir="ltr"` on every view root); Persian/Dari appears only as *data*. Owner decision D-15 makes bilingual EN + fa/prs with first-class RTL a requirement, so this describes the state to be replaced, not the target | FACT (current state) | `index.html`, `src/App.tsx` |
+| Migration mechanism (§12) | **None.** There is no migration chain. `server/src/db/schema.sql` is the single canonical schema (111 tables · 228 indexes · 64 triggers) and is applied idempotently on every boot | FACT | `server/src/db/schema.sql`, `server/scripts/verify-canonical-schema.mjs` |
+| Database backup (§65) | **None.** The only automatic snapshot lived in the migration runner and was removed with it. Tracked as assumption A-11 / risk TR-5 | FACT | `docs/registries/assumptions.md` |
+| Verification commands (§67) | root: `typecheck`, `lint`, `build`, `audit:product`, `audit:static`, `audit:registries`, `audit:protocol`, `audit:bundle`, `release:validate` · server: `lint`, `typecheck`, `test`, `build`, `preflight:schema`, `seed` | FACT | `package.json`, `server/package.json` |
 | Domain surface (§9) | 35 route modules, 12 core domains, 20 frontend view areas | FACT | `server/src/routes/`, `server/src/core/`, `src/components/` |
 
 ## §W — WORK PACKAGE MAP (subordinate)

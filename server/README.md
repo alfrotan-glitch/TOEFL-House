@@ -68,15 +68,20 @@ npm start
 
 ---
 
-## Database & Migrations
+## Database
 
 `src/db/schema.sql` is the **single source of truth** for all DDL. Inline
 `CREATE TABLE` blocks are not permitted in application code.
 
-Schema changes go through numbered migrations in `src/db/migrations/`
-(e.g. `001_add_rosters_student_fk.sql`, `002_add_budget_purpose.sql`).
-Migrations run automatically on startup and are tracked in the
-`schema_migrations` table — they are idempotent and safe to re-run.
+There is no migration chain. Schema changes are made by editing that file,
+which is applied idempotently on every startup, so an empty database becomes a
+complete one on first boot and an existing one is left unchanged.
+
+Verify a schema change before deploying it:
+
+```bash
+npm run preflight:fresh-schema
+```
 
 To reseed from scratch:
 

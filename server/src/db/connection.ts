@@ -1,17 +1,20 @@
 import type BetterSqlite3 from 'better-sqlite3';
 /**
- * SQLite connection and schema bootstrap for TOEFL House ERP.
+ * SQLite connection and canonical database initialization.
  *
- * Boot order:
- *   1. schema.sql — CREATE TABLE IF NOT EXISTS (full current shape)
- *   2. migrations — additive changes for legacy databases
- *   3. organization hierarchy defaults
+ * There is no migration chain. `schema.sql` is the single canonical
+ * representation of the database, and initialization is:
+ *
+ *   EMPTY DATABASE -> CANONICAL SCHEMA -> ORGANIZATION HIERARCHY -> READY
+ *
+ * The schema is written with CREATE ... IF NOT EXISTS throughout, so applying
+ * it to an already-initialized database is a no-op and startup stays
+ * idempotent. Schema changes are made by editing schema.sql.
  */
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runMigrations } from './migrate.js';
 import { ensureOrganizationHierarchy } from './organizationHierarchy.js';
 import { setFinanceAccountsDatabase } from '../utils/financeAccounts.js';
 
@@ -30,7 +33,28 @@ db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
 /**
- * Applies schema.sql idempotently, then migrations, then hierarchy seed.
+ * Verifies the database matches the canonical schema and is internally sound.
+ *
+ * Applying the schema is not by itself proof that the result is usable: a
+ * database that predates a schema edit satisfies every `IF NOT EXISTS` while
+ * still missing the new column, and the failure would otherwise surface much
+ * later as a prepared-statement error on an unrelated route. Checking here
+ * fails fast, at startup, with the reason.
+ */
+function verifyCanonicalState(): void {
+  const integrity = db.pragma('integrity_check', { simple: true }) as string;
+  if (integrity !== 'ok') {
+    throw new Error(`SQLite integrity_check failed: ${integrity}`);
+  }
+
+  const violations = db.pragma('foreign_key_check') as unknown[];
+  if (violations.length > 0) {
+    throw new Error(`SQLite foreign_key_check failed with ${violations.length} violation(s)`);
+  }
+}
+
+/**
+ * Applies the canonical schema, then the organization hierarchy defaults.
  * Safe on every process start (fresh or existing database).
  */
 export function initSchema(): void {
@@ -41,34 +65,26 @@ export function initSchema(): void {
 
   const schema = fs.readFileSync(schemaPath, 'utf-8');
 
-  // PRAGMA foreign_keys must be set OUTSIDE a transaction in SQLite
+  // PRAGMA foreign_keys must be set OUTSIDE a transaction in SQLite, and the
+  // canonical schema declares tables in domain order rather than dependency
+  // order, so constraint checking is suspended while the shape is created.
   db.pragma('foreign_keys = OFF');
-  
+
   try {
-    console.log('Applying schema.sql...');
-    // Since schema.sql uses "IF NOT EXISTS" everywhere, we don't need a custom parser 
-    // or benign error checking.
     db.exec(schema);
-    console.log('✅ Schema.sql applied successfully.');
-    
   } catch (error) {
-    console.error('❌ Failed to apply schema.sql.');
+    console.error('Failed to apply the canonical schema.');
     throw error;
   } finally {
-    // Always re-enable foreign keys after schema application
     db.pragma('foreign_keys = ON');
   }
 
-  // Run additive migrations for legacy databases
-  runMigrations(db);
-  
-  // Ensure default organization/campus/branch hierarchy exists
+  verifyCanonicalState();
+
   setFinanceAccountsDatabase(db);
   ensureOrganizationHierarchy(db);
 }
 
-// ============================================================================
-// ============================================================================
-// This ensures that tables exist BEFORE any other module (like settings.ts)
-// tries to run db.prepare() at the module level during import hoisting.
+// Initialization runs at import time so that tables exist BEFORE any other
+// module prepares a statement during import hoisting.
 initSchema();

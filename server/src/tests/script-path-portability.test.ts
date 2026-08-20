@@ -59,17 +59,16 @@ describe('WIN-1 — no script derives a filesystem path from URL.pathname', () =
     });
   }
 
-  it('verify-deployment.mjs uses fileURLToPath and finds all 75 migrations', () => {
+  it('verify-deployment.mjs uses fileURLToPath and resolves the canonical schema', () => {
     const script = path.join(serverRoot, 'scripts', 'verify-deployment.mjs');
     const source = fs.readFileSync(script, 'utf8');
     expect(source).toContain('fileURLToPath');
 
-    // The directory the script resolves must really contain the migrations —
-    // an empty list is what made the check fail open.
-    const migrationsDir = path.join(serverRoot, 'src', 'db', 'migrations');
-    expect(fs.existsSync(migrationsDir)).toBe(true);
-    const sqlFiles = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql'));
-    expect(sqlFiles.length).toBeGreaterThan(0);
+    // The path the script resolves must really exist — a reference schema that
+    // silently comes back empty is what made this check fail open.
+    const schemaPath = path.join(serverRoot, 'src', 'db', 'schema.sql');
+    expect(fs.existsSync(schemaPath)).toBe(true);
+    expect(fs.readFileSync(schemaPath, 'utf8')).toContain('CREATE TABLE');
   });
 });
 

@@ -83,14 +83,34 @@ Run `bootstrap.bat` once, then start the application with `run-all.bat`. The boo
 ## Global workspace search
 Authenticated users can press `Ctrl+K` (or `Cmd+K`) to search Students, Visitors, Teachers, Classes, Invoices and Books within their permitted scope. Results route back to the relevant operational module.
 
+## Engineering standard
+
+`docs/MASTER_ENGINEERING_PROTOCOL.md` is the sole and highest engineering
+authority for this project. It is sealed: `npm run audit:protocol` fails the
+build if the normative body is altered without an authorized revision.
+
+Its supporting registries live in `docs/registries/` — canonical authorities,
+invariants, metrics, decisions, open assumptions and known protocol conflicts.
+`npm run audit:registries` fails the build if a registry references a file or
+endpoint that no longer exists, so they cannot quietly rot.
+
 ## Release gate
 
-The authoritative, evidence-based release status is `docs/RELEASE_GATE.md`
-(verified 2026-08-15: 433/433 backend tests across 40 files, frontend
-typecheck/build PASS with 0/0 lint, fresh-schema preflight PASS, production
-boot and critical workflows smoke-tested, 10k-student scale, concurrent
-multi-user runs and LAN bind verified). Historical audit notes are preserved under
-`docs/audit-history/`.
+```bash
+npm run release:validate
+```
+
+Runs the whole gate: typecheck, lint, product/static/protocol/registry audits,
+both production builds, bundle weight, the server test suite, canonical schema
+preflight, a fresh install from an empty database, financial reconciliation,
+branding checks and release hygiene. Every step must pass; there are no
+advisory steps.
+
+## Database
+
+There is no migration chain. `server/src/db/schema.sql` is the single
+canonical schema and is applied idempotently on every boot. Schema changes are
+made by editing that file. See `docs/OPERATIONS.md`.
 
 ## Reporting
 

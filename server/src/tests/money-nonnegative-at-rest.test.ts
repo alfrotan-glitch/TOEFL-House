@@ -1,10 +1,10 @@
 /**
- * Migration 069 — the database refuses negative money at rest.
+ * The database refuses negative money at rest.
  * ============================================================================
  * Route validation is the first line of defence and it is now in place, but a
  * money column with no constraint is one forgotten `Number()` away from
- * storing a permanently wrong figure. Before this migration the schema
- * accepted, for a perfectly valid student:
+ * storing a permanently wrong figure. Without these guards the schema would
+ * accept, for a perfectly valid student:
  *
  *     INSERT INTO invoices (... total_amount -5000, net_amount -5000 ...)  -> stored
  *     INSERT INTO exams    (... fee -100 ...)                              -> stored
@@ -47,7 +47,7 @@ const insertExam = (fee: number) =>
   db.prepare("INSERT INTO exams (id, title, date, fee, type, branch_id) VALUES (?, 'Probe', '2026-01-01', ?, 'final', ?)")
     .run(`ex_069_${Math.random().toString(36).slice(2, 10)}`, fee, branchId);
 
-describe('migration 069 — negative money is rejected by the database', () => {
+describe('negative money is rejected by the database', () => {
   it('refuses a negative invoice total', () => {
     expect(() => insertInvoice(-5000, 0, -5000)).toThrow(/cannot be negative/i);
   });
