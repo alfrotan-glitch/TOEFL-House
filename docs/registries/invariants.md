@@ -51,3 +51,7 @@ Validated by `npm run audit:registries`.
 | Every required report category has at least one declared report | application | `REPORT_CATALOG` | `server/src/tests/reporting-catalog.test.ts` | provoked: removing the teacher report names it |
 | The overview and the report engine agree on operating income and expense | application | shared `ledger-classification` predicates | `server/src/tests/reporting-catalog.test.ts` | provoked: capital injection leaking into income gives 48900 vs 8900 |
 | A capital-expenditure row never lands in operating expense | application | `finance_categories.classification` | `server/src/tests/reporting-catalog.test.ts` | capex rises, opex unchanged |
+| A printed document declares paper size and margins | build + test | `src/design-system/print.ts` | `server/src/tests/print-document.test.ts` | no `@page` in output |
+| Printed tables repeat their headers across pages | build + test | `src/design-system/print.ts` | `server/src/tests/print-document.test.ts` | page two is unlabelled |
+| A printed document never fixes text to a physical side | build + test | `src/design-system/print.ts` | `server/src/tests/print-document.test.ts` | `text-align:left/right` absent |
+| No component opens its own print window | build | `scripts/verify-design-system.mjs` | provoked: a new `window.open('')` is reported | release gate fails |

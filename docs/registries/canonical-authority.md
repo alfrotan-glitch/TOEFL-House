@@ -25,3 +25,4 @@ must exist, and every `Test` must name a real test file.
 | Reportable metric definition | — (derived) | `server/src/core/reporting/report-catalog.ts` (`METRIC_CATALOG`) | `GET /api/reports/run/:reportId` | reporting views | every report | `server/src/tests/reporting-catalog.test.ts` | AUTHORITATIVE |
 | Report definition | — (declared) | `server/src/core/reporting/report-catalog.ts` (`REPORT_CATALOG`) | `GET /api/reports/catalog` | reporting views | — | `server/src/tests/reporting-catalog.test.ts` | AUTHORITATIVE |
 | Reporting period | — (derived) | `server/src/core/calendar/periods.ts` (`periodBoundaries`) | every report endpoint | date pickers | every report | `server/src/tests/reporting-catalog.test.ts` | AUTHORITATIVE |
+| Printed document layout | — | `src/design-system/print.ts` | — | report and finance print actions | printed reports | `server/src/tests/print-document.test.ts` | AUTHORITATIVE |

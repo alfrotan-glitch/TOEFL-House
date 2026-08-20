@@ -12,6 +12,7 @@ import { useDatasetVersion } from '../../state/serverStateFreshness';
 import { formatAFN } from '../../utils/format';
 import { formatJalaliDateTime } from '../../utils/jalali';
 import { brandPrintHeaderHtml } from '../../config/branding';
+import { openPrintDocument, escapeHtml } from '../../design-system/print';
 import type { FinanceCategoryClassification } from '../../types';
 import { CLASSIFICATION_BADGE, CLASSIFICATION_LABEL } from './financeCategoryGrouping';
 
@@ -88,37 +89,34 @@ export default function PnLPanel({ selectedYear, selectedMonth }: Props) {
   const hasTransfers = pnl.transfers.capitalInjection + pnl.transfers.profitDistribution + pnl.transfers.budgetCharged + pnl.transfers.savingTransferred > 0;
 
   const printReport = () => {
-    const w = window.open('', '_blank', 'width=900,height=700');
-    if (!w) return;
     const rows = (list: { category: string; total: number }[]) => list
-      .map((r) => `<tr><td class="cat">${r.category.replace(/_/g, ' ')}</td><td class="num">${formatAFN(r.total)}</td></tr>`).join('');
-    w.document.write(`<!doctype html><html><head><title>P&amp;L ${periodLabel}</title>
-      <style>
-        body{font-family:Inter,Arial,sans-serif;color:#0f172a;margin:40px}
-        h1{font-size:20px;margin:0 0 4px}h2{font-size:14px;color:#64748b;font-weight:600;margin:24px 0 8px}
-        .meta{font-size:11px;color:#64748b;margin-bottom:24px}
-        table{width:100%;border-collapse:collapse;font-size:12px}
-        td,th{padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:left}
-        .num{text-align:right;font-variant-numeric:tabular-nums}
-        .total{font-weight:800;background:#f8fafc}
-        .net{font-size:16px;font-weight:800}
-        @media print{body{margin:20px}}
-      </style></head><body>
-      ${brandPrintHeaderHtml('Profit &amp; Loss (operating)')}
-      <div class="meta">Period: <b>${periodLabel}</b> · Scope: <b>${pnl.scope}</b> · Generated: <b>${formatJalaliDateTime(new Date().toISOString())}</b> · Source: server ledger</div>
-      <h2>Income</h2><table>${rows(incomeRows)}<tr class="total"><td>Total income</td><td class="num">${formatAFN(pnl.income)}</td></tr></table>
-      <h2>Operating expenses</h2><table>${rows(expenseRows)}<tr class="total"><td>Total operating expenses</td><td class="num">${formatAFN(pnl.expense)}</td></tr></table>
-      <p class="net">Net (operating): ${formatAFN(pnl.net)}</p>
-      ${capexRows.length ? `<h2>Capital expenditure (not an operating expense)</h2><table>${rows(capexRows)}<tr class="total"><td>Total capital expenditure</td><td class="num">${formatAFN(capexTotal)}</td></tr></table>` : ''}
-      ${nonExpenseRows.length ? `<h2>Non-expense cash movements (not an operating expense)</h2><table>${rows(nonExpenseRows)}<tr class="total"><td>Total non-expense cash movements</td><td class="num">${formatAFN(nonExpenseTotal)}</td></tr></table>` : ''}
-      ${hasTransfers ? `<h2>Capital &amp; transfers (not operating)</h2><table>
-        ${pnl.transfers.capitalInjection ? `<tr><td>Capital injected</td><td class="num">${formatAFN(pnl.transfers.capitalInjection)}</td></tr>` : ''}
-        ${pnl.transfers.profitDistribution ? `<tr><td>Profit distributions</td><td class="num">${formatAFN(pnl.transfers.profitDistribution)}</td></tr>` : ''}
-        ${pnl.transfers.budgetCharged ? `<tr><td>Budget charged</td><td class="num">${formatAFN(pnl.transfers.budgetCharged)}</td></tr>` : ''}
-        ${pnl.transfers.savingTransferred ? `<tr><td>Savings transferred</td><td class="num">${formatAFN(pnl.transfers.savingTransferred)}</td></tr>` : ''}
-      </table>` : ''}
-      <script>window.print()</script></body></html>`);
-    w.document.close();
+      .map((r) => `<tr><td>${escapeHtml(r.category.replace(/_/g, ' '))}</td><td class="num">${escapeHtml(formatAFN(r.total))}</td></tr>`).join('');
+    const section = (heading: string, list: { category: string; total: number }[], totalLabel: string, total: number) =>
+      `<h2>${heading}</h2><table><thead><tr><th>Category</th><th class="num">Amount</th></tr></thead>
+       <tbody>${rows(list)}</tbody>
+       <tfoot><tr class="total"><td>${totalLabel}</td><td class="num">${escapeHtml(formatAFN(total))}</td></tr></tfoot></table>`;
+
+    const opened = openPrintDocument({
+      title: `P&L ${periodLabel}`,
+      footerNote: `Profit & Loss · ${periodLabel} · ${pnl.scope}`,
+      signatures: [{ role: 'Prepared by' }, { role: 'Approved by' }],
+      bodyHtml: `
+        ${brandPrintHeaderHtml('Profit &amp; Loss (operating)')}
+        <div class="th-meta">Period: <b>${escapeHtml(periodLabel)}</b> · Scope: <b>${escapeHtml(pnl.scope)}</b> · Generated: <b>${escapeHtml(formatJalaliDateTime(new Date().toISOString()))}</b> · Source: server ledger</div>
+        ${section('Income', incomeRows, 'Total income', pnl.income)}
+        ${section('Operating expenses', expenseRows, 'Total operating expenses', pnl.expense)}
+        <p class="kpi th-keep">Net (operating): ${escapeHtml(formatAFN(pnl.net))}</p>
+        ${capexRows.length ? section('Capital expenditure (not an operating expense)', capexRows, 'Total capital expenditure', capexTotal) : ''}
+        ${nonExpenseRows.length ? section('Non-expense cash movements (not an operating expense)', nonExpenseRows, 'Total non-expense cash movements', nonExpenseTotal) : ''}
+        ${hasTransfers ? `<h2>Capital &amp; transfers (not operating)</h2><table><tbody>
+          ${pnl.transfers.capitalInjection ? `<tr><td>Capital injected</td><td class="num">${escapeHtml(formatAFN(pnl.transfers.capitalInjection))}</td></tr>` : ''}
+          ${pnl.transfers.profitDistribution ? `<tr><td>Profit distributions</td><td class="num">${escapeHtml(formatAFN(pnl.transfers.profitDistribution))}</td></tr>` : ''}
+          ${pnl.transfers.budgetCharged ? `<tr><td>Budget charged</td><td class="num">${escapeHtml(formatAFN(pnl.transfers.budgetCharged))}</td></tr>` : ''}
+          ${pnl.transfers.savingTransferred ? `<tr><td>Savings transferred</td><td class="num">${escapeHtml(formatAFN(pnl.transfers.savingTransferred))}</td></tr>` : ''}
+        </tbody></table>` : ''}
+      `,
+    });
+    if (!opened) window.alert('The print window was blocked by the browser. Allow pop-ups for this site and try again.');
   };
 
   return (

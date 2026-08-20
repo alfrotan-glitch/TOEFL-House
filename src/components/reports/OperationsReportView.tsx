@@ -15,6 +15,7 @@ import { formatAFN } from '../../utils/format';
 import { formatJalaliDateTime } from '../../utils/jalali';
 import { ShamsiDateInput } from '../common/ShamsiDateInput';
 import { BRAND_NAME, brandPrintHeaderHtml } from '../../config/branding';
+import { openPrintDocument } from '../../design-system/print';
 
 type Period = 'today' | 'month' | 'year' | 'range';
 type Gender = 'all' | 'male' | 'female';
@@ -22,30 +23,12 @@ type Gender = 'all' | 'male' | 'female';
 const inputCls = 'border border-slate-200 rounded-lg px-3 py-2 bg-white font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all cursor-pointer text-xs';
 
 function printableReport(report: OperationsReport) {
-  const w = window.open('', '_blank', 'width=1000,height=750');
-  if (!w) return;
   const m = report.meta;
   const f = m.filters;
   const money = (n: number) => n.toLocaleString('en-US') + ' AFN';
   const rows = (list: { category: string; total: number }[]) => list.map((r) =>
     `<tr><td class="cat">${r.category.replace(/_/g, ' ')}</td><td class="num">${money(r.total)}</td></tr>`).join('');
-  w.document.write(`<!doctype html><html><head><title>Report ${m.reportId}</title>
-    <style>
-      body{font-family:Inter,Arial,sans-serif;color:#0f172a;margin:40px;font-size:12px}
-      .brand{font-size:18px;font-weight:800;color:#9f1239;margin-bottom:2px}
-      .title{font-size:16px;font-weight:800;margin:0 0 2px}
-      .meta{font-size:11px;color:#475569;margin-bottom:20px;line-height:1.6}
-      h2{font-size:13px;font-weight:800;margin:22px 0 8px;border-bottom:2px solid #e2e8f0;padding-bottom:4px}
-      table{width:100%;border-collapse:collapse;font-size:11px}
-      td,th{padding:5px 8px;border-bottom:1px solid #e2e8f0;text-align:left}
-      .num{text-align:right;font-variant-numeric:tabular-nums}
-      .total{font-weight:800;background:#f8fafc}
-      .grid{display:flex;gap:24px;flex-wrap:wrap}
-      .grid>div{flex:1;min-width:200px}
-      .kpi{font-size:14px;font-weight:800}
-      .muted{color:#64748b}
-      @media print{body{margin:20px}}
-    </style></head><body>
+  const bodyHtml = `
     ${brandPrintHeaderHtml()}
     <div class="title">Operations &amp; Financial Report — ${m.periodLabel}</div>
     <div class="meta">
@@ -63,7 +46,7 @@ function printableReport(report: OperationsReport) {
     <h2>Income by category</h2>
     <table>${rows(report.financial.income.byCategory)}<tr class="total"><td>Total</td><td class="num">${money(report.financial.income.total)}</td></tr></table>
     ${report.financial.income.byCategory.some((c) => c.male || c.female) ? `<h2>Student income by gender</h2><table>
-      <tr><th>Category</th><th class="num">Male</th><th class="num">Female</th><th class="num">Unclassified</th></tr>
+      <thead><tr><th>Category</th><th class="num">Male</th><th class="num">Female</th><th class="num">Unclassified</th></tr></thead>
       ${report.financial.income.byCategory.filter((c) => c.male || c.female).map((c) => `<tr><td>${c.category.replace(/_/g, ' ')}</td><td class="num">${money(c.male)}</td><td class="num">${money(c.female)}</td><td class="num">${money(c.unclassified)}</td></tr>`).join('')}
     </table>` : ''}
     <h2>Expenses by category</h2>
@@ -76,7 +59,7 @@ function printableReport(report: OperationsReport) {
     </table>` : ''}
     <h2>Operational summary</h2>
     <table>
-      <tr><th>Metric</th><th class="num">Male</th><th class="num">Female</th><th class="num">Total</th></tr>
+      <thead><tr><th>Metric</th><th class="num">Male</th><th class="num">Female</th><th class="num">Total</th></tr></thead>
       ${([
         ['New students', report.operational.newStudents],
         ['Active students', report.operational.activeStudents],
@@ -90,8 +73,17 @@ function printableReport(report: OperationsReport) {
       <tr><td>Books sold</td><td class="num" colspan="3">${report.operational.booksSold.count} (${money(report.operational.booksSold.total)})</td></tr>
     </table>
     <p class="muted" style="margin-top:24px;font-size:10px">Figures are computed from the authoritative database at generation time. Report ID ${m.reportId}.</p>
-    <script>window.print()</script></body></html>`);
-  w.document.close();
+  `;
+
+  const opened = openPrintDocument({
+    title: `Report ${m.reportId}`,
+    footerNote: `${m.type} · ${m.periodLabel} · Report ID ${m.reportId}`,
+    signatures: [{ role: 'Prepared by', name: m.generatedBy.name }, { role: 'Reviewed by' }],
+    bodyHtml,
+  });
+  if (!opened) {
+    window.alert('The print window was blocked by the browser. Allow pop-ups for this site and try again.');
+  }
 }
 
 export default function OperationsReportView() {

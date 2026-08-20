@@ -51,6 +51,23 @@ const DIRECTIONAL = [
  */
 const EXEMPT_FILES = new Set([path.join(SRC, 'index.css')]);
 
+/**
+ * Print sites not yet migrated onto the print authority.
+ *
+ * These build complete, bespoke documents — an ID card, an enrolment slip, a
+ * certificate — rather than reports, so moving them is a design job, not a
+ * mechanical one. They are listed BY NAME rather than matched by a pattern so
+ * the remaining work stays visible: a pattern exemption would also silently
+ * excuse the next component that bypasses the shell.
+ *
+ * Removing a name from this list is the migration's definition of done.
+ */
+const PENDING_PRINT_MIGRATION = new Set([
+  path.join(SRC, 'components', 'teachers', 'TeachersModals.tsx'),
+  path.join(SRC, 'components', 'visitors', 'ConvertToStudentModal.tsx'),
+  path.join(SRC, 'utils', 'certificateTemplates.ts'),
+]);
+
 function sourceFiles(dir) {
   const out = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -86,6 +103,25 @@ for (const file of files) {
       failures.push(
         `${rel}:${line} uses "${m[0]}" — a physical direction. ` +
           `Use "${replacement.replace('$1', m[1] ?? '')}" so the layout mirrors in RTL.`,
+      );
+    }
+  }
+
+  // Printing goes through the print authority.
+  //
+  // Six components used to call window.open and write their own <style>, which
+  // produced documents with no @page, no repeated table headers, no page
+  // numbers and hard-coded left alignment. One shell fixes all of that at once,
+  // and only stays fixed if nothing bypasses it.
+  if (!file.startsWith(DESIGN_SYSTEM) && !PENDING_PRINT_MIGRATION.has(file)) {
+    const printWindow = /window\.open\s*\(\s*['"`]{2}|window\.open\s*\(\s*['"`]\s*['"`]/g;
+    let pm;
+    while ((pm = printWindow.exec(text)) !== null) {
+      const line = text.slice(0, pm.index).split('\n').length;
+      failures.push(
+        `${rel}:${line} opens a blank window to print. Use openPrintDocument() from ` +
+          `src/design-system/print.ts so the document gets @page margins, repeated ` +
+          `table headers, page numbers and logical alignment.`,
       );
     }
   }
