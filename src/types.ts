@@ -20,18 +20,27 @@
  * and resolves from `user_roles`. The UI uses these for presentation and for
  * choosing what to offer; it never uses them to decide authorization, which is
  * always the server's answer (`permissions` / `tabAccess`).
+ *
+ * The array is the declaration and the type derives from it, so the vocabulary
+ * exists once. Anything that needs to enumerate roles at runtime (a Set, a
+ * label map, a dropdown) builds on `USER_ROLE_CODES` rather than retyping it;
+ * `role-vocabulary.test.ts` holds this list identical to the server's
+ * `ROLE_CODES`.
  */
-export type UserRole =
-  | 'owner'
-  | 'general_manager'
-  | 'finance_manager'
-  | 'receptionist'
-  | 'teacher'
-  | 'head_of_department'
-  | 'data_entry'
-  | 'student'
-  | 'counselor'
-  | 'donor_manager';
+export const USER_ROLE_CODES = [
+  'owner',
+  'general_manager',
+  'head_of_department',
+  'finance_manager',
+  'receptionist',
+  'counselor',
+  'teacher',
+  'data_entry',
+  'student',
+  'donor_manager',
+] as const;
+
+export type UserRole = (typeof USER_ROLE_CODES)[number];
 
 export type PipelineStage =
   | 'lead'

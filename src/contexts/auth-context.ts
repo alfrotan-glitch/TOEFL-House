@@ -5,12 +5,9 @@
  * AuthProvider (provider component), useAuth (hook).
  */
 import { createContext } from 'react';
-import { UserRole } from '../types';
+import { USER_ROLE_CODES, UserRole } from '../types';
 
-export const USER_ROLES = new Set<UserRole>([
-  'owner', 'general_manager', 'receptionist', 'teacher', 'finance_manager', 'counselor',
-  'donor_manager', 'head_of_department', 'data_entry', 'student',
-]);
+export const USER_ROLES = new Set<UserRole>(USER_ROLE_CODES);
 
 export interface AuthUser {
   id: string;

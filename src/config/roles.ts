@@ -1,54 +1,63 @@
-import type { AppRole } from '../types/navigation';
+import { USER_ROLE_CODES, type UserRole } from '../types';
 
 /**
- * Maps internal role keys (including legacy aliases) to human-readable labels.
- * This acts as the translation layer for displaying roles in the UI.
+ * Human-readable label for every canonical role code.
+ *
+ * Typed `Record<UserRole, string>` on purpose: the compiler rejects a key that
+ * is not a role and requires an entry for each one, so this map cannot drift
+ * away from the vocabulary the server enforces.
  */
-export const ROLE_LABELS: Record<string, string> = {
-  // Modern RBAC Roles
+export const ROLE_LABELS: Record<UserRole, string> = {
   owner: 'Owner',
-  manager: 'General Manager',
-  finance: 'Finance Manager',
-  registrar: 'Receptionist',
-  teacher: 'Teacher',
-  head_of_department: 'Head of Department',
-  counselor: 'Counselor',
-  donor_manager: 'Donor Manager',
-  student: 'Student',
-  
-  // Legacy Role Aliases (for backward compatibility with older database records)
   general_manager: 'General Manager',
   finance_manager: 'Finance Manager',
   receptionist: 'Receptionist',
+  teacher: 'Teacher',
+  head_of_department: 'Head of Department',
   data_entry: 'Data Entry',
+  student: 'Student',
+  counselor: 'Counselor',
+  donor_manager: 'Donor Manager',
 };
 
 /**
- * The canonical list of active application roles recognized by the system.
+ * Roles the "Add user" form offers, and why the rest are not offered.
+ *
+ * This is a presentation list, never an authorization decision — the server
+ * re-validates the submitted role against its own allow-list before assigning
+ * anything.
+ *
+ *   owner       — the organization superuser is provisioned at bootstrap, not
+ *                 handed out from a form.
+ *   data_entry  — defined in the permission catalog but not offered as an
+ *                 account type, matching the server's `ALLOWED_ROLES`.
+ *   student     — a portal account must be linked to a student record
+ *                 (`linkedStudentId`), which this form does not collect.
+ *
+ * Derived by exclusion from `USER_ROLE_CODES` rather than retyped, so adding a
+ * role to the vocabulary surfaces it here instead of silently omitting it.
  */
-export const ALL_ROLES: AppRole[] = [
+const NOT_OFFERED_AS_ACCOUNT_TYPE: ReadonlySet<UserRole> = new Set<UserRole>([
   'owner',
-  'general_manager',
-  'finance_manager',
-  'receptionist',
-  'teacher',
-  'head_of_department',
-  'counselor',
-  'donor_manager',
-];
+  'data_entry',
+  'student',
+]);
+
+export const ASSIGNABLE_ROLES: UserRole[] = USER_ROLE_CODES.filter(
+  (role) => !NOT_OFFERED_AS_ACCOUNT_TYPE.has(role),
+);
 
 /**
- * Safely retrieves the display label for a given role.
- * Falls back to a title-cased version of the role string if the role is not found in the map.
- * 
- * @param role - The role key (e.g., 'finance_manager')
- * @returns The human-readable label (e.g., 'Finance Manager')
+ * Display label for a role code.
+ *
+ * Accepts `string` because the caller's value often arrives from the API as an
+ * untyped field. An unrecognized code is title-cased rather than dropped, so an
+ * unexpected value stays visible to the operator instead of rendering blank.
  */
 export function getRoleLabel(role: string): string {
-  if (ROLE_LABELS[role]) {
-    return ROLE_LABELS[role];
+  if (role in ROLE_LABELS) {
+    return ROLE_LABELS[role as UserRole];
   }
-  // Fallback: convert 'some_unknown_role' to 'Some Unknown Role'
   return role
     .split('_')
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))

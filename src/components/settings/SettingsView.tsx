@@ -9,7 +9,7 @@ import {Building2, Database, Edit, Trash2, Plus, X, User, HeartHandshake, Tag, K
 import PositionsPanel, { PositionRow, PermissionDef } from './PositionsPanel';
 import UserPositionsPanel, { UserLite } from './UserPositionsPanel';
 import {SystemSettings, Branch, Campus, Partner, UserRole} from '../../types';
-import {ALL_ROLES, getRoleLabel} from '../../config/roles';
+import { ASSIGNABLE_ROLES, getRoleLabel } from '../../config/roles';
 import { BRAND_NAME } from '../../config/branding';
 
 interface UserAccount {
@@ -857,7 +857,7 @@ export default function SettingsView({
                 <div className="space-y-1">
                   <label className="block text-slate-600 font-bold">User role:</label>
                   <select value={newUserRole} onChange={(e) => setNewUserRole(e.target.value)} className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 cursor-pointer">
-                    {ALL_ROLES.filter((role) => role !== 'owner').map((role) => (
+                    {ASSIGNABLE_ROLES.map((role) => (
                       <option key={role} value={role}>{getRoleLabel(role)}</option>
                     ))}
                   </select>

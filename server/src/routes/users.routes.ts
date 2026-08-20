@@ -12,11 +12,18 @@ export const usersRouter = Router();
 usersRouter.use(authenticate);
 
 /**
- * Positions this endpoint may assign, named by canonical role code. `data_entry`
- * is deliberately absent: it exists in the catalog but is not offered as an
- * account type here.
+ * Positions this endpoint may assign, and why the rest are not assignable.
+ *
+ *   data_entry — defined in the permission catalog but not offered as an
+ *                account type here.
+ *
+ * Derived by exclusion from `ROLE_CODES` rather than retyped, so a role added
+ * to the catalog becomes assignable by default and any exception has to be
+ * stated here deliberately.
  */
-const ALLOWED_ROLES: RoleCode[] = ['owner', 'general_manager', 'finance_manager', 'receptionist', 'teacher', 'head_of_department', 'counselor', 'donor_manager', 'student'];
+const NOT_ASSIGNABLE: ReadonlySet<RoleCode> = new Set<RoleCode>(['data_entry']);
+
+const ALLOWED_ROLES: RoleCode[] = ROLE_CODES.filter((role) => !NOT_ASSIGNABLE.has(role));
 
 /**
  * A user's position is read from their primary assignment, because that is
