@@ -23,7 +23,8 @@
     "audit:protocol": "node scripts/verify-protocol.mjs",
     "audit:design-system": "node scripts/verify-design-system.mjs",
     "audit:logging": "node scripts/verify-logging.mjs",
-    "audit:cleanliness": "node scripts/verify-source-cleanliness.mjs"
+    "audit:cleanliness": "node scripts/verify-source-cleanliness.mjs",
+    "audit:deps": "node scripts/verify-server-dependency-isolation.mjs"
   },
   "dependencies": {
     "lucide-react": "1.27.0",

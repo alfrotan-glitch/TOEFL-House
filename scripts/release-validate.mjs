@@ -94,6 +94,7 @@ run('registry audit', 'npm run audit:registries');
 run('design system audit', 'npm run audit:design-system');
 run('logging audit', 'npm run audit:logging');
 run('source cleanliness audit', 'npm run audit:cleanliness');
+run('server dependency isolation', 'npm run audit:deps');
 
 console.log('\nBuild');
 run('frontend production build', 'npm run build', { slow: true });

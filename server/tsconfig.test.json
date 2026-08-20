@@ -12,7 +12,30 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "rootDir": "..",
-    "noEmit": true
+    "noEmit": true,
+    // React resolves from THIS package's dependencies.
+    //
+    // Frontend modules live at ../src, so Node resolution walks up from there —
+    // /src/node_modules, then the repo root — and never reaches
+    // server/node_modules. The backend CI job installs only this package, so
+    // without the mapping every frontend file reachable from a test failed with
+    // "Cannot find module 'react'" while the same command passed locally, where
+    // a root install happened to satisfy it.
+    //
+    // The versions are pinned in package.json to the root package's exact
+    // React, so the suite type-checks and renders the same library production
+    // ships rather than a second, drifting copy.
+    "baseUrl": ".",
+    // Mapped at the DECLARATIONS, not the JavaScript. This config only ever
+    // type-checks (noEmit), and pointing at ./node_modules/react would resolve
+    // the runtime package whose own @types lookup walks up from the importing
+    // file again — landing back outside this package.
+    "paths": {
+      "react": ["./node_modules/@types/react"],
+      "react/*": ["./node_modules/@types/react/*"],
+      "react-dom": ["./node_modules/@types/react-dom"],
+      "react-dom/*": ["./node_modules/@types/react-dom/*"]
+    }
   },
   // Only the specific frontend modules the tests import — pulling in
   // ../src/**/* would drag the whole React app (and require jsx config)
