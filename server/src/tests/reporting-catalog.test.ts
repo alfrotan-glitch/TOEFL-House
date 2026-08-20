@@ -27,7 +27,7 @@ import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { reportsRouter } from '../routes/reports.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 import { seedUser, bearerFor } from './support/identity.js';
-import { METRIC_CATALOG, REPORT_CATALOG, metricById } from '../core/reporting/report-catalog.js';
+import { METRIC_CATALOG, REPORT_CATALOG, REPORT_CATEGORIES, metricById } from '../core/reporting/report-catalog.js';
 import { runReport } from '../core/reporting/report-engine.js';
 import { periodBoundaries, REPORTING_PERIODS } from '../core/calendar/periods.js';
 
@@ -215,5 +215,55 @@ describe('an empty period is reported as empty, not as zero activity', () => {
     const result = runReport(db, 'financial-summary', 'today', scopeA, '2020-01-01');
     expect(result.isEmpty).toBe(true);
     expect(result.metrics.every((m) => m.value === 0)).toBe(true);
+  });
+});
+
+describe('the two reporting paths agree on what a period is', () => {
+  it('/reports/overview resolves the SAME span as the report engine', async () => {
+    // These were different calendars. /reports/overview did its own Gregorian
+    // arithmetic while everything else resolved a Shamsi month, so the two
+    // disagreed on every single day — 2026-08-20 gave 2026-07-23..2026-08-22
+    // in the authority versus 2026-08-01..2026-08-31 in the report. That is the
+    // misattribution the calendar authority exists to prevent.
+    const res = await supertest(app)
+      .get('/api/reports/overview?period=month')
+      .set(bearerFor('rpt_owner'));
+    expect(res.status).toBe(200);
+
+    const expected = periodBoundaries('month');
+    expect(res.body.meta.from).toBe(expected.from);
+    expect(res.body.meta.to).toBe(expected.periodEnd);
+  });
+
+  it('a named period on the overview is labelled with its Shamsi key', async () => {
+    const res = await supertest(app)
+      .get('/api/reports/overview?period=year')
+      .set(bearerFor('rpt_owner'));
+    expect(res.status).toBe(200);
+    expect(res.body.meta.periodLabel).toBe(periodBoundaries('year').periodKey);
+  });
+
+  it('an unknown period is refused rather than silently treated as a month', async () => {
+    const res = await supertest(app)
+      .get('/api/reports/overview?period=fortnight')
+      .set(bearerFor('rpt_owner'));
+    expect(res.status).toBe(400);
+  });
+
+  it('an explicit range is still honoured verbatim', async () => {
+    const res = await supertest(app)
+      .get('/api/reports/overview?period=range&from=2026-01-01&to=2026-01-31')
+      .set(bearerFor('rpt_owner'));
+    expect(res.status).toBe(200);
+    expect(res.body.meta.from).toBe('2026-01-01');
+    expect(res.body.meta.to).toBe('2026-01-31');
+  });
+});
+
+describe('every required report category has at least one declared report', () => {
+  it('covers the categories the product must report on', () => {
+    const declared = new Set(REPORT_CATALOG.map((r) => r.category));
+    const missing = REPORT_CATEGORIES.filter((c) => !declared.has(c));
+    expect(missing, `no report declared for: ${missing.join(', ')}`).toEqual([]);
   });
 });

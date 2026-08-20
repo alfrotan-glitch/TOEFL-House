@@ -46,3 +46,6 @@ Validated by `npm run audit:registries`.
 | The same metric yields the same value in every report | application | `METRIC_CATALOG` single definition | `server/src/tests/reporting-catalog.test.ts` | two reports compared directly |
 | Branch scope is applied by the engine, not by each metric | application | `server/src/core/reporting/report-engine.ts` | `server/src/tests/reporting-catalog.test.ts` | cross-branch totals diverge |
 | A report's own permission is enforced on top of Report.View | application | `server/src/routes/reports.routes.ts` | `server/src/tests/reporting-catalog.test.ts` | 403 |
+| Every reporting surface resolves a period through the calendar authority | application | `server/src/core/calendar/periods.ts` | `server/src/tests/reporting-catalog.test.ts` | overview and engine spans compared directly |
+| A historical period is a Shamsi key, not a Gregorian window | application | `periodBoundariesForKey` | `server/src/tests/reporting-forensic.test.ts` | 400 on an unrecognised key |
+| Every required report category has at least one declared report | application | `REPORT_CATALOG` | `server/src/tests/reporting-catalog.test.ts` | provoked: removing the teacher report names it |

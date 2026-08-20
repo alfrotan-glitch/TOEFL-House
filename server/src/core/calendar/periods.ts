@@ -150,6 +150,52 @@ export function periodBoundaries(
 }
 
 /**
+ * Boundaries for an EXPLICIT historical period, named by its Shamsi key.
+ *
+ * `periodBoundaries` answers "the current month"; this answers "that month".
+ * Historical reporting needs the second, and it must come from the same
+ * authority or a report about a past month would use a different calendar
+ * from a report about this one.
+ *
+ * Keys are Shamsi, matching the `periodKey` this module emits:
+ *   month   '1405-05'
+ *   quarter '1405-Q2'
+ *   year    '1405'
+ */
+export function periodBoundariesForKey(key: string): PeriodBoundaries {
+  const yearOnly = /^(\d{3,4})$/.exec(key);
+  if (yearOnly) {
+    const jy = Number(yearOnly[1]);
+    const from = jalaliToIso(jy, 1, 1);
+    const periodEnd = jalaliToIso(jy, 12, isJalaliLeapYear(jy) ? 30 : 29);
+    return { period: 'year', from, to: periodEnd, periodKey: String(jy), periodEnd };
+  }
+
+  const quarter = /^(\d{3,4})-Q([1-4])$/.exec(key);
+  if (quarter) {
+    const jy = Number(quarter[1]);
+    const q = Number(quarter[2]);
+    const firstMonth = (q - 1) * 3 + 1;
+    const lastMonth = firstMonth + 2;
+    const from = jalaliToIso(jy, firstMonth, 1);
+    const periodEnd = jalaliToIso(jy, lastMonth, jalaliMonthLength(jy, lastMonth));
+    return { period: 'quarter', from, to: periodEnd, periodKey: key, periodEnd };
+  }
+
+  const month = /^(\d{3,4})-(\d{1,2})$/.exec(key);
+  if (month) {
+    const jy = Number(month[1]);
+    const jm = Number(month[2]);
+    if (jm < 1 || jm > 12) throw new RangeError(`Invalid Shamsi month in period key '${key}'.`);
+    const from = jalaliToIso(jy, jm, 1);
+    const periodEnd = jalaliToIso(jy, jm, jalaliMonthLength(jy, jm));
+    return { period: 'month', from, to: periodEnd, periodKey: `${jy}-${pad2(jm)}`, periodEnd };
+  }
+
+  throw new RangeError(`Unrecognised period key '${key}'. Expected a Shamsi key such as 1405-05, 1405-Q2 or 1405.`);
+}
+
+/**
  * The inclusive Gregorian span of the Shamsi month containing `todayStr`,
  * NOT truncated at today. Use this for "the whole current month" questions
  * (payroll, month-end); use `periodBoundaries('month')` for month-to-date.

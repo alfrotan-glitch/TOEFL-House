@@ -34,7 +34,12 @@ import {
   UnknownReportError,
   UnsupportedPeriodError,
 } from '../core/reporting/report-engine.js';
-import { REPORTING_PERIODS, type ReportingPeriod } from '../core/calendar/periods.js';
+import {
+  REPORTING_PERIODS,
+  periodBoundaries,
+  periodBoundariesForKey,
+  type ReportingPeriod,
+} from '../core/calendar/periods.js';
 import { getFinanceAccount } from '../utils/financeAccounts.js';
 import { incrementNumberSetting, getNumberSetting } from '../utils/settings.js';
 import { SYSTEM_DEFAULTS } from '../core/configuration/policy-catalog.js';
@@ -44,68 +49,60 @@ reportsRouter.use(authenticate);
 
 const MAX_RANGE_DAYS = 366;
 
+/**
+ * Resolves the reporting period.
+ *
+ * This used to do its own Gregorian arithmetic — `${ym}-01` to the last day of
+ * the Gregorian month — while Finance, payroll and the dashboard resolved a
+ * SHAMSI month through the calendar authority. The two never coincide: on
+ * every day sampled, the spans differed (2026-08-20 gave 2026-07-23..2026-08-22
+ * here versus 2026-08-01..2026-08-31 there). That is the same misattribution
+ * the calendar authority was created to fix, still live in the main financial
+ * report because this endpoint was never migrated onto it.
+ *
+ * Named periods now come from that one authority. `range` stays as it is:
+ * two explicit Gregorian dates are unambiguous and belong to no calendar.
+ *
+ * The bounds are the FULL period (`periodEnd`), not month-to-date: the label
+ * names a whole period, so a report carrying that label must cover it.
+ */
 function resolvePeriod(query: Record<string, string | undefined>) {
-  const today = new Date();
-  const iso = (d: Date) => d.toISOString().slice(0, 10);
   const period = query.period || 'month';
-  let from: string;
-  let to: string;
-  let periodLabel: string;
 
-  // Period correctness: a calendar period ALWAYS spans the full period (the
-  // label is the period name, so the bounds must match it). Historically the
-  // `to` bound was capped at TODAY even for a past month/year, which silently
-  // pulled later-period transactions into a historical report.
-  const lastDayOfMonth = (ym: string) => {
-    const [y, m] = ym.split('-').map(Number);
-    const d = new Date(Date.UTC(y, m, 0)); // day 0 of next month = last day
-    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
-  };
-
-  switch (period) {
-    case 'today':
-      from = to = iso(today);
-      periodLabel = from;
-      break;
-    case 'quarter': {
-      const y = query.year || String(today.getFullYear());
-      const q = query.quarter || String(Math.floor(today.getMonth() / 3) + 1);
-      if (!/^\d{4}$/.test(y) || !/^[1-4]$/.test(q)) throw new HttpError(400, 'Invalid year or quarter.');
-      const startMonth = (Number(q) - 1) * 3 + 1;
-      from = `${y}-${String(startMonth).padStart(2, '0')}-01`;
-      to = lastDayOfMonth(`${y}-${String(startMonth + 2).padStart(2, '0')}`);
-      periodLabel = `${y} Q${q}`;
-      break;
-    }
-    case 'year': {
-      const y = query.year || String(today.getFullYear());
-      if (!/^\d{4}$/.test(y)) throw new HttpError(400, 'Invalid year.');
-      from = `${y}-01-01`;
-      to = `${y}-12-31`;
-      periodLabel = y;
-      break;
-    }
-    case 'range': {
-      from = typeof query.from === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(query.from) ? query.from : '';
-      to = typeof query.to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(query.to) ? query.to : '';
-      if (!from || !to) throw new HttpError(400, 'Range reports require valid from and to dates (YYYY-MM-DD).');
-      if (from > to) throw new HttpError(400, 'from must not be after to.');
-      const days = Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86400000);
-      if (days > MAX_RANGE_DAYS) throw new HttpError(400, `Range may not exceed ${MAX_RANGE_DAYS} days.`);
-      periodLabel = `${from} → ${to}`;
-      break;
-    }
-    case 'month':
-    default: {
-      const ym = query.month || iso(today).slice(0, 7);
-      if (!/^\d{4}-\d{2}$/.test(ym)) throw new HttpError(400, 'Invalid month (YYYY-MM).');
-      from = `${ym}-01`;
-      to = lastDayOfMonth(ym);
-      periodLabel = ym;
-      break;
-    }
+  if (period === 'range') {
+    const from = typeof query.from === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(query.from) ? query.from : '';
+    const to = typeof query.to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(query.to) ? query.to : '';
+    if (!from || !to) throw new HttpError(400, 'Range reports require valid from and to dates (YYYY-MM-DD).');
+    if (from > to) throw new HttpError(400, 'from must not be after to.');
+    const days = Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86400000);
+    if (days > MAX_RANGE_DAYS) throw new HttpError(400, `Range may not exceed ${MAX_RANGE_DAYS} days.`);
+    return { period, from, to, periodLabel: `${from} → ${to}` };
   }
-  return { period, from, to, periodLabel };
+
+  if (!REPORTING_PERIODS.includes(period as ReportingPeriod)) {
+    throw new HttpError(400, `Unknown period '${period}'.`);
+  }
+
+  // A historical period is named by its Shamsi key ('1405-05', '1405-Q2',
+  // '1405'), resolved by the same authority as the current one — otherwise a
+  // report about a past month would use a different calendar from a report
+  // about this one.
+  const key = typeof query.key === 'string' ? query.key.trim() : '';
+  if (key) {
+    let b;
+    try {
+      b = periodBoundariesForKey(key);
+    } catch (err) {
+      throw new HttpError(400, err instanceof Error ? err.message : `Unrecognised period key '${key}'.`);
+    }
+    if (b.period !== period) {
+      throw new HttpError(400, `Period key '${key}' describes a ${b.period}, not a ${period}.`);
+    }
+    return { period, from: b.from, to: b.periodEnd, periodLabel: b.periodKey };
+  }
+
+  const b = periodBoundaries(period as ReportingPeriod);
+  return { period, from: b.from, to: b.periodEnd, periodLabel: b.periodKey };
 }
 
 /** Sum helper for gender-aware income. */

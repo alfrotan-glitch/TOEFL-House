@@ -3,9 +3,16 @@
  * ============================================================================
  * Reproduces period-correctness and reconciliation defects:
  *
- *  1. Period bounds: /api/reports/overview?period=month&month=2026-06 must
+ *  1. Period bounds: a historical period is named by its Shamsi key
+ *     (?period=month&key=1405-03), resolved by the calendar authority, and must
  *     cover ONLY June 2026 — but resolvePeriod caps `to` at TODAY, so a
- *     historical month includes later data. Same for ?year=2025.
+ *     historical month includes later data. Same for a past year.
+ *
+ *     These originally passed Gregorian keys (?month=2026-06, ?year=2025) and
+ *     the endpoint did its own Gregorian arithmetic. A Gregorian June spans
+ *     TWO Shamsi months, so those bounds disagreed with Finance on every day
+ *     of the year. Expectations below are computed from the authority's own
+ *     boundaries and summed independently in SQL, not copied from the report.
  *  2. Reconciliation: report income total == SUM(fin_tx income) for the SAME
  *     period; report expense == SUM(fin_tx expense); daily→month→quarter→year
  *     consistency.
@@ -13,6 +20,7 @@
  *  4. Ledger endpoint honors explicit from/to (period isolation).
  *  5. Discount aggregation: report exposes gross/discount/net from invoices.
  */
+import { periodBoundariesForKey } from '../core/calendar/periods.js';
 import { assignRole } from './support/identity.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 import express from 'express';
@@ -24,6 +32,10 @@ import { reportsRouter } from '../routes/reports.routes.js';
 import { financeRouter } from '../routes/finance.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 import { id } from '../utils/ids.js';
+
+/** The Shamsi month and quarter the June-2026 fixtures fall inside. */
+const SHAMSI_MONTH = '1405-03';
+const SHAMSI_QUARTER = '1405-Q1';
 
 const BRANCH = 'rep_branch';
 
@@ -67,22 +79,33 @@ describe('Reporting financial forensic', () => {
       VALUES (?, 'income', 'refund', -100, '2026-06-25', 'June refund', 'T', ?)`).run(id('tx'), BRANCH);
   });
 
-  it('DEFECT: historical month report includes data from later months (period bound bug)', async () => {
-    const res = await supertest(app).get('/api/reports/overview?period=month&month=2026-06').set(authHeader(owner));
+  it('a historical month covers exactly its Shamsi span, not a later one', async () => {
+    const b = periodBoundariesForKey(SHAMSI_MONTH);
+    const res = await supertest(app)
+      .get(`/api/reports/overview?period=month&key=${SHAMSI_MONTH}`)
+      .set(authHeader(owner));
     expect(res.status).toBe(200);
-    const income = res.body.financial.income.total;
-    // June alone: fee 1000 + book 300 - refund 100 = 1200. If the bug includes July (500), income = 1700.
-    console.log(`[EVIDENCE] ?month=2026-06 report income = ${income} (expected 1200 if period-correct)`);
-    expect(income).toBe(1200);
+    expect(res.body.meta.from).toBe(b.from);
+    expect(res.body.meta.to).toBe(b.periodEnd);
+
+    // Independently summed from the ledger over the same span, so the report
+    // is checked against the database rather than against itself.
+    const expected = (db.prepare(
+      `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions
+        WHERE type='income' AND category <> 'capital_injection'
+          AND branch_id = ? AND date >= ? AND date <= ?`,
+    ).get(BRANCH, b.from, b.periodEnd) as { v: number }).v;
+
+    expect(res.body.financial.income.total).toBe(expected);
   });
 
-  it('DEFECT: historical year report includes data from later periods', async () => {
-    // request year=2025 → should be 0 income (no 2025 rows). Bug: includes 2026 rows → 1700.
-    const res = await supertest(app).get('/api/reports/overview?period=year&year=2025').set(authHeader(owner));
+  it('a past year reports nothing when every row belongs to a later one', async () => {
+    // Every fixture sits in Shamsi 1405; the year before it must be empty.
+    const res = await supertest(app)
+      .get('/api/reports/overview?period=year&key=1404')
+      .set(authHeader(owner));
     expect(res.status).toBe(200);
-    const income = res.body.financial.income.total;
-    console.log(`[EVIDENCE] ?year=2025 report income = ${income} (expected 0)`);
-    expect(income).toBe(0);
+    expect(res.body.financial.income.total).toBe(0);
   });
 
   it('control: current-month report reconciles with the ledger for the same period', async () => {
@@ -139,7 +162,7 @@ describe('Reporting forensic — new required metrics + period consistency', () 
   });
 
   it('reports discounts and outstanding balances from authoritative sources', async () => {
-    const res = await supertest(app).get('/api/reports/overview?period=month&month=2026-06').set(authHeader(owner));
+    const res = await supertest(app).get(`/api/reports/overview?period=month&key=${SHAMSI_MONTH}`).set(authHeader(owner));
     expect(res.status).toBe(200);
     expect(res.body.financial.discounts.invoiceDiscounts).toBe(500);
     // Outstanding: invoice net 4500 - paid 2000 = 2500.
@@ -149,23 +172,43 @@ describe('Reporting forensic — new required metrics + period consistency', () 
   });
 
   it('reports books sold by title with quantity and net', async () => {
-    const res = await supertest(app).get('/api/reports/overview?period=month&month=2026-06').set(authHeader(owner));
+    const res = await supertest(app).get(`/api/reports/overview?period=month&key=${SHAMSI_MONTH}`).set(authHeader(owner));
     const title = res.body.operational.booksByTitle.find((b: { title: string }) => b.title === 'Rep Title');
     expect(title).toBeTruthy();
     expect(title.quantity).toBe(2);
     expect(title.net).toBe(600);
   });
 
-  it('period consistency: quarterly == sum of its months; annual == sum of quarters', async () => {
-    const q2 = await supertest(app).get('/api/reports/overview?period=quarter&year=2026&quarter=2').set(authHeader(owner));
-    expect(q2.status).toBe(200);
-    // June-only income in Q2: fee 1000 + book 300 - refund 100 + rep book 600 + rep invoice payment 2000 = 3800.
-    const q2Income = q2.body.financial.income.total;
-    const june = await supertest(app).get('/api/reports/overview?period=month&month=2026-06').set(authHeader(owner));
-    const juneIncome = june.body.financial.income.total;
-    console.log(`[EVIDENCE] Q2 income=${q2Income}, June income=${juneIncome}`);
-    expect(q2Income).toBeGreaterThanOrEqual(juneIncome); // Q2 ⊇ June
-    // The June income now includes the 2000 payment + 600 book = 3800 (June-only).
-    expect(juneIncome).toBe(3800);
+  it('a quarter contains its months, and each figure matches the ledger', async () => {
+    // The point of this test is the CONTAINMENT relationship, so it derives
+    // both figures from the calendar authority and checks each against an
+    // independent SQL sum. It previously hard-coded a total computed from a
+    // Gregorian June, which stopped meaning anything once periods became
+    // Shamsi: the 25 June refund falls in the NEXT Shamsi month.
+    const ledgerIncome = (from: string, to: string) =>
+      (db.prepare(
+        `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions
+          WHERE type='income' AND category <> 'capital_injection'
+            AND branch_id = ? AND date >= ? AND date <= ?`,
+      ).get(BRANCH, from, to) as { v: number }).v;
+
+    const qb = periodBoundariesForKey(SHAMSI_QUARTER);
+    const mb = periodBoundariesForKey(SHAMSI_MONTH);
+
+    const q = await supertest(app)
+      .get(`/api/reports/overview?period=quarter&key=${SHAMSI_QUARTER}`)
+      .set(authHeader(owner));
+    const m = await supertest(app)
+      .get(`/api/reports/overview?period=month&key=${SHAMSI_MONTH}`)
+      .set(authHeader(owner));
+    expect(q.status).toBe(200);
+    expect(m.status).toBe(200);
+
+    // The month must sit inside the quarter it belongs to.
+    expect(mb.from >= qb.from && mb.periodEnd <= qb.periodEnd).toBe(true);
+
+    expect(q.body.financial.income.total).toBe(ledgerIncome(qb.from, qb.periodEnd));
+    expect(m.body.financial.income.total).toBe(ledgerIncome(mb.from, mb.periodEnd));
+    expect(q.body.financial.income.total).toBeGreaterThanOrEqual(m.body.financial.income.total);
   });
 });
