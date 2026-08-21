@@ -16,17 +16,17 @@
  * "expected to fail but passed" error) the moment a fix lands, which is the
  * signal to flip it to a normal assertion.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { visitorsRouter } from '../routes/visitors.routes.js';
-import { searchRouter } from '../routes/search.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { today } from '../utils/ids.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { visitorsRouter } from '../../../routes/visitors.routes.js';
+import { searchRouter } from '../../../routes/search.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { today } from '../../../utils/ids.js';
 import Database from 'better-sqlite3';
 
 const BRANCH_A = 'vsa_a';

@@ -17,10 +17,10 @@
  * nothing may be lost from `listEvents`, which audit and state projection use.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
-import { db, initSchema } from '../db/connection.js';
-import { getJourneyEngine } from '../core/journey/journey-engine.js';
-import { JourneyEventType, FINANCIAL_EVENT_TYPES } from '../core/journey/event-types.js';
-import { today } from '../utils/ids.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { getJourneyEngine } from '../../../core/journey/journey-engine.js';
+import { JourneyEventType, FINANCIAL_EVENT_TYPES } from '../../../core/journey/event-types.js';
+import { today } from '../../../utils/ids.js';
 
 const BRANCH = 'tl_branch';
 const STUDENT = 'tl_student';

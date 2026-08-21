@@ -370,19 +370,59 @@ CREATE INDEX IF NOT EXISTS idx_students_household ON students(household_id);
 CREATE INDEX IF NOT EXISTS idx_students_lead         ON students(lead_id);
 CREATE INDEX IF NOT EXISTS idx_students_status       ON students(status);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_students_email ON students(email) WHERE email IS NOT NULL AND email != '';
+CREATE UNIQUE INDEX IF NOT EXISTS uq_students_email_normalized
+  ON students(lower(trim(email))) WHERE email IS NOT NULL AND trim(email) != '';
 CREATE UNIQUE INDEX IF NOT EXISTS uq_students_lead_id ON students(lead_id) WHERE lead_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_students_phone ON students(phone) WHERE phone IS NOT NULL AND phone != '';
 CREATE UNIQUE INDEX IF NOT EXISTS uq_students_phone_normalized
   ON students (
     SUBSTR(
-      REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', ''),
+      REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', ''), '.', ''), '/', ''),
       -9
     )
   )
   WHERE phone IS NOT NULL
     AND TRIM(phone) <> ''
-    AND LENGTH(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', '')) >= 7;
+    AND LENGTH(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', ''), '.', ''), '/', '')) >= 7;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_students_tazkira_no ON students(tazkira_no) WHERE tazkira_no IS NOT NULL AND tazkira_no != '';
+CREATE TRIGGER IF NOT EXISTS trg_students_phone_syntax_insert
+BEFORE INSERT ON students
+WHEN NEW.phone IS NOT NULL AND trim(NEW.phone) <> '' AND (
+  LENGTH(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(NEW.phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', ''), '.', ''), '/', '')) < 7
+  OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(NEW.phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', ''), '.', ''), '/', '') GLOB '*[^0-9]*'
+)
+BEGIN SELECT RAISE(ABORT, 'invalid student phone'); END;
+CREATE TRIGGER IF NOT EXISTS trg_students_phone_syntax_update
+BEFORE UPDATE OF phone ON students
+WHEN NEW.phone IS NOT NULL AND trim(NEW.phone) <> '' AND (
+  LENGTH(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(NEW.phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', ''), '.', ''), '/', '')) < 7
+  OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(NEW.phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', ''), '.', ''), '/', '') GLOB '*[^0-9]*'
+)
+BEGIN SELECT RAISE(ABORT, 'invalid student phone'); END;
+CREATE TRIGGER IF NOT EXISTS trg_students_tazkira_visitor_guard_insert
+BEFORE INSERT ON students
+WHEN NEW.tazkira_no IS NOT NULL AND trim(NEW.tazkira_no) <> '' AND EXISTS (
+  SELECT 1 FROM visitors v WHERE v.tazkira_no = NEW.tazkira_no AND (NEW.lead_id IS NULL OR v.id <> NEW.lead_id)
+)
+BEGIN SELECT RAISE(ABORT, 'student Tazkira conflicts with visitor'); END;
+CREATE TRIGGER IF NOT EXISTS trg_students_tazkira_visitor_guard_update
+BEFORE UPDATE OF tazkira_no, lead_id ON students
+WHEN NEW.tazkira_no IS NOT NULL AND trim(NEW.tazkira_no) <> '' AND EXISTS (
+  SELECT 1 FROM visitors v WHERE v.tazkira_no = NEW.tazkira_no AND (NEW.lead_id IS NULL OR v.id <> NEW.lead_id)
+)
+BEGIN SELECT RAISE(ABORT, 'student Tazkira conflicts with visitor'); END;
+CREATE TRIGGER IF NOT EXISTS trg_visitors_tazkira_student_guard_insert
+BEFORE INSERT ON visitors
+WHEN NEW.tazkira_no IS NOT NULL AND trim(NEW.tazkira_no) <> '' AND EXISTS (
+  SELECT 1 FROM students s WHERE s.tazkira_no = NEW.tazkira_no AND (s.lead_id IS NULL OR s.lead_id <> NEW.id)
+)
+BEGIN SELECT RAISE(ABORT, 'visitor Tazkira conflicts with student'); END;
+CREATE TRIGGER IF NOT EXISTS trg_visitors_tazkira_student_guard_update
+BEFORE UPDATE OF tazkira_no ON visitors
+WHEN NEW.tazkira_no IS NOT NULL AND trim(NEW.tazkira_no) <> '' AND EXISTS (
+  SELECT 1 FROM students s WHERE s.tazkira_no = NEW.tazkira_no AND (s.lead_id IS NULL OR s.lead_id <> NEW.id)
+)
+BEGIN SELECT RAISE(ABORT, 'visitor Tazkira conflicts with student'); END;
 
 CREATE TABLE IF NOT EXISTS student_semesters ( 
   id            TEXT PRIMARY KEY, 
@@ -410,6 +450,26 @@ CREATE TRIGGER IF NOT EXISTS trg_student_semesters_nonnegative_update
 BEFORE UPDATE OF fee_amount, net_fee_amount ON student_semesters
 WHEN NEW.fee_amount < 0 OR (NEW.net_fee_amount IS NOT NULL AND NEW.net_fee_amount < 0)
 BEGIN SELECT RAISE(ABORT, 'semester fee cannot be negative'); END;
+
+-- Exact semester restoration for whole-student suspension. A batch records the
+-- rows this workflow actually deferred, so resume cannot reactivate unrelated
+-- historical semesters that happened to share the same class.
+CREATE TABLE IF NOT EXISTS student_suspension_batches (
+  id           TEXT PRIMARY KEY,
+  student_id   TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  suspended_at TEXT NOT NULL DEFAULT (datetime('now')),
+  resumed_at   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_student_suspension_batches_open
+  ON student_suspension_batches(student_id, resumed_at, suspended_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_student_suspension_batches_one_open
+  ON student_suspension_batches(student_id) WHERE resumed_at IS NULL;
+CREATE TABLE IF NOT EXISTS student_suspension_semesters (
+  batch_id          TEXT NOT NULL REFERENCES student_suspension_batches(id) ON DELETE CASCADE,
+  semester_id       TEXT NOT NULL REFERENCES student_semesters(id) ON DELETE CASCADE,
+  original_class_id TEXT REFERENCES classes(id) ON DELETE SET NULL,
+  PRIMARY KEY (batch_id, semester_id)
+);
 
 CREATE TABLE IF NOT EXISTS registrations ( 
   id               TEXT PRIMARY KEY, 

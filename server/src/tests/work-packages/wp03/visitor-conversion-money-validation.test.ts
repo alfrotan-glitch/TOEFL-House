@@ -25,9 +25,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
-import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertMoney } from '../utils/money.js';
+import { assertMoney } from '../../../utils/money.js';
 
 /** Mirrors how visitors.routes.ts now resolves the two figures. */
 const resolveFee = (semesterFee: unknown, classFee: unknown) =>
@@ -43,7 +42,7 @@ const resolvePaid = (amountPaid: unknown) => assertMoney(amountPaid, 'received f
  * shipped source keeps the regression honest.
  */
 const visitorRouteSource = fs.readFileSync(
-  path.join(path.resolve(fileURLToPath(new URL('.', import.meta.url)), '..'), 'routes', 'visitors.routes.ts'),
+  fileURLToPath(new URL('../../../routes/visitors.routes.ts', import.meta.url)),
   'utf8',
 );
 const overpays = (paid: number, net: number) => paid > net;

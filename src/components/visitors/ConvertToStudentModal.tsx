@@ -80,7 +80,9 @@ export default function ConvertToStudentModal({
   const [discountPercent, setDiscountPercent] = useState<number>(0);
   const [convNotes, setConvNotes] = useState<string>('');
   const [semesterFee, setSemesterFee] = useState<number>(0);
-  const [conversionBranchId, setConversionBranchId] = useState<string>(convertingVisitor.branchId || activeBranchId);
+  // Conversion preserves the lead's owning branch. Branch transfer is a
+  // separate authorized workflow, not an admissions form option.
+  const conversionBranchId = convertingVisitor.branchId || activeBranchId;
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
   const [converting, setConverting] = useState(false);
   const [result, setResult] = useState<ConversionResult | null>(null);
@@ -140,18 +142,27 @@ export default function ConvertToStudentModal({
     [classes, conversionBranchId, convertingVisitor.gender, convertingVisitor.branchId, activeBranchId]
   );
 
-  const recommendedLevel = convertingVisitor.placementScore?.levelRecommendation;
+  const recommendedLevelId = convertingVisitor.placementScore?.recommendation?.levelId
+    ?? convertingVisitor.placementScore?.recommendationLevelId
+    ?? null;
+  const recommendedLevel = convertingVisitor.placementScore?.recommendation?.text
+    ?? convertingVisitor.placementScore?.levelRecommendation
+    ?? recommendedLevelId;
+  const placementTotal = convertingVisitor.placementScore?.total
+    ?? convertingVisitor.placementScore?.totalScore
+    ?? convertingVisitor.placementScore?.percentage
+    ?? null;
 
   const { recommendedClasses, otherClasses } = useMemo(() => {
-    if (!recommendedLevel) return { recommendedClasses: [] as Class[], otherClasses: eligibleClasses };
+    if (!recommendedLevelId && !recommendedLevel) return { recommendedClasses: [] as Class[], otherClasses: eligibleClasses };
     const recommended: Class[] = [];
     const other: Class[] = [];
     for (const c of eligibleClasses) {
-      if (c.level === recommendedLevel) recommended.push(c);
+      if ((recommendedLevelId && c.levelId === recommendedLevelId) || (!recommendedLevelId && c.level === recommendedLevel)) recommended.push(c);
       else other.push(c);
     }
     return { recommendedClasses: recommended, otherClasses: other };
-  }, [eligibleClasses, recommendedLevel]);
+  }, [eligibleClasses, recommendedLevel, recommendedLevelId]);
 
   const netAmount = useMemo(() => {
     const safeFee = Number(semesterFee || 0);
@@ -169,7 +180,7 @@ export default function ConvertToStudentModal({
 
     if (!classId) return triggerToast('Please select a class.', 'error');
     if (eligibility && !eligibility.eligible) return triggerToast(eligibility.reason, 'error');
-    if (safeAmountPaid > netAmount && netAmount > 0) return triggerToast(`Amount paid exceeds the net fee (${formatAFN(netAmount)}).`, 'error');
+    if (safeAmountPaid > netAmount) return triggerToast(`Amount paid exceeds the net fee (${formatAFN(netAmount)}).`, 'error');
 
     const finalBranchId = conversionBranchId || convertingVisitor.branchId || activeBranchId;
     setConverting(true);
@@ -200,7 +211,7 @@ export default function ConvertToStudentModal({
         discountPercent,
         netPayable: Number(result?.netAmount ?? netAmount),
         paidToday: safeAmountPaid,
-        remaining: isPartialPayment ? remainingAfterPayment : 0,
+        remaining: Math.max(0, Number(result?.netAmount ?? netAmount) - safeAmountPaid),
         paymentMethodLabel: METHOD_LABELS[paymentMethod],
         issueDate: new Date().toISOString().slice(0, 10),
       },
@@ -249,7 +260,7 @@ export default function ConvertToStudentModal({
             <div className="border-t border-dashed border-slate-300 pt-2.5 space-y-1.5">
               <div className="flex justify-between font-black text-sm text-slate-900"><span>Net Payable</span><span className="font-mono">{formatAFN(result.netAmount)} AFN</span></div>
               <div className="flex justify-between text-slate-600"><span>Paid Today</span><span className="font-mono font-bold">{formatAFN(safeAmountPaid)} AFN</span></div>
-              {result.status === 'partial' && <div className="flex justify-between text-amber-700 font-bold"><span>Remaining</span><span className="font-mono">{formatAFN(Number(result.netAmount||0) - safeAmountPaid)} AFN</span></div>}
+              {result.status !== 'paid' && <div className="flex justify-between text-amber-700 font-bold"><span>Remaining</span><span className="font-mono">{formatAFN(Math.max(0, Number(result.netAmount || 0) - safeAmountPaid))} AFN</span></div>}
             </div>
             <div className="flex justify-center pt-1">
               <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black ${statusStyle.bg} ${statusStyle.text}`}>{statusStyle.label}</span>
@@ -345,14 +356,14 @@ export default function ConvertToStudentModal({
           {convertingVisitor.placementScore && (
             <div className="bg-emerald-50 border border-emerald-150 rounded-xl p-3 text-[10px] text-emerald-800">
               <span className="font-black block">Placement results attached:</span>
-              Total score: {convertingVisitor.placementScore.total} (recommended: {convertingVisitor.placementScore.levelRecommendation})
+              {placementTotal != null ? `Total score: ${placementTotal}. ` : ''}Recommended: {recommendedLevel || 'Not assigned'}
             </div>
           )}
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className={text.label}>Gross tuition (AFN):</label>
-              <input type="number" value={semesterFee} onChange={(e) => setSemesterFee(Number(e.target.value))} className={inputCls} min={0} required />
+              <label className={text.label}>Configured class tuition (AFN):</label>
+              <input type="number" value={semesterFee} className={`${inputCls} cursor-not-allowed opacity-80`} min={0} readOnly />
             </div>
             <div>
               <label className={text.label}>Discount (%):</label>
@@ -388,9 +399,9 @@ export default function ConvertToStudentModal({
 
           <div>
             <label className={text.label}>Registration branch:</label>
-            <select value={conversionBranchId || convertingVisitor.branchId || activeBranchId} onChange={(e) => setConversionBranchId(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 cursor-pointer text-slate-800 font-bold focus:outline-none">
-              {branches && branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
+            <div className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-800 font-bold">
+              {branches.find((branch) => branch.id === conversionBranchId)?.name || conversionBranchId}
+            </div>
           </div>
 
           <div>
@@ -398,7 +409,7 @@ export default function ConvertToStudentModal({
             <input type="text" placeholder="e.g. Fee paid in full at reception in cash." value={convNotes} onChange={(e) => setConvNotes(e.target.value)} className={control.input} />
           </div>
 
-          {safeAmountPaid > netAmount && netAmount > 0 && (
+          {safeAmountPaid > netAmount && (
             <div className="flex items-center gap-1.5 text-rose-600 text-[10px] font-bold bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
               <AlertCircle size={12} /> Amount paid exceeds net payable fee ({formatAFN(netAmount)})
             </div>
@@ -408,7 +419,7 @@ export default function ConvertToStudentModal({
             <button type="button" onClick={onClose} className="px-4 py-2 bg-slate-100 text-slate-600 rounded-lg font-semibold hover:bg-slate-200 cursor-pointer">Cancel</button>
             <button
               type="submit"
-              disabled={converting || checkingEligibility || blockedForClass || (safeAmountPaid > netAmount && netAmount > 0)}
+              disabled={converting || checkingEligibility || blockedForClass || safeAmountPaid > netAmount}
               title={blockedForClass ? eligibility?.reason : undefined}
               className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-semibold hover:bg-emerald-700 cursor-pointer shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5">
               {converting ? <Loader2 size={14} className="animate-spin" /> : <Receipt size={14} />} {converting ? 'Processing...' : 'Confirm & create invoice'}

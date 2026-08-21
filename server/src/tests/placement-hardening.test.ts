@@ -41,10 +41,12 @@ function createApp() {
 }
 function authHeader(user: TokenPayload) { return { Authorization: `Bearer ${signToken(user)}` }; }
 
+let visitorPhoneSequence = 0;
 function seedVisitor(vid: string, name: string, branch: string, version: string, gender = 'female') {
+  visitorPhoneSequence += 1;
   db.prepare(`INSERT OR IGNORE INTO visitors (id, serial_no, full_name, phone, gender, source, visit_date, status, branch_id, interested_course, program_version_id, placement_status)
     VALUES (?, ?, ?, ?, ?, 'social', ?, 'visited', ?, 'PHA Program', ?, 'not_started')`)
-    .run(vid, `V-${vid.slice(-5)}`, name, `0700${vid.slice(-6)}`, gender, today(), branch, version);
+    .run(vid, `V-${vid.slice(-5)}`, name, `0700${String(visitorPhoneSequence).padStart(6, '0')}`, gender, today(), branch, version);
 }
 function seedStudent(sid: string, name: string, branch: string, leadId: string | null) {
   db.prepare(`INSERT OR IGNORE INTO students (id, student_code, full_name, status, registration_date, branch_id, gender, lead_id)

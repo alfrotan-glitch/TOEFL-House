@@ -181,7 +181,7 @@ describe('C-1 — placement is a server-side invariant on EVERY enrollment path'
     const vid = makeVisitor();
     await sit(vid, 85);
     const res = await supertest(app).post(`/api/visitors/${vid}/convert`).set(authHeader(owner))
-      .send({ classId: CLASS_GATED, amountPaid: 0, semesterFee: 0, branchId: BRANCH, programVersionId: VERSION });
+      .send({ classId: CLASS_GATED, amountPaid: 0, branchId: BRANCH, programVersionId: VERSION });
     expect(res.status).toBe(201);
   });
 

@@ -260,8 +260,9 @@ function AuthenticatedApp() {
             students={store.students} visitors={store.visitors} classes={store.classes} payments={store.payments}
             studentBalances={store.studentBalances} attendanceSummary={store.attendanceSummary}
             studentSummary={store.studentSummary}
-            exams={store.exams} examResults={store.examResults} attendance={store.attendance} activeRole={activeRole}
-            isGlobalOwner={user?.isGlobalOwner ?? false} branches={store.settings.branches} activeBranchId={activeBranchId}
+            exams={store.exams} examResults={store.examResults} attendance={store.attendance}
+            permissionCodes={user?.permissions ? Array.from(user.permissions) : undefined}
+            branches={store.settings.branches} activeBranchId={activeBranchId}
             books={store.books} 
             addStudentManual={store.addStudentManual} updateStudentStatus={store.updateStudentStatus} updateStudent={store.updateStudent}
             recordFeePayment={store.recordFeePayment} enrollStudentSemester={store.enrollStudentSemester} issueStudentCard={store.issueStudentCard}

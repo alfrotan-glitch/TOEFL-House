@@ -93,7 +93,17 @@ entity-side staff links, or a bare Owner label.
 
 ## WP-03 Students & Admissions
 
-14 files · 326 cases
+**C-2 disposition: REPLACED.** The historical inventory was 14 files / 326
+statically counted cases, while the untouched runtime baseline was **331 tests**
+(`student-subsystem-remediation.test.ts` executes 47, not the 42 recorded by the
+static inventory). All fourteen suites were rebased under
+`server/src/tests/work-packages/wp03/`; obsolete manual journey lifecycle writes,
+role-label permission substitutes, invalid-payment fallback, and single-row
+suspension assumptions were replaced with the package's canonical authorities.
+The replacement authority is **15 files / 355 runtime tests**, including the 24-case
+adversarial authority suite.
+
+14 historical files · 331 runtime cases
 
 | File | Cases | Asserted behaviour |
 |---|---:|---|
@@ -111,6 +121,30 @@ entity-side staff links, or a bare Owner label.
 | `visitor-subsystem-audit.test.ts` | 37 | V-1 — placement requirement cannot be evaded by clearing the program · V-2 — duplicate lead prevention · V-3 — visitor serial numbers are unique · V-3 — cross-process serial allocation · V-2 — national ID uniqueness is enforced by the database · V-4 — update validation matches create validation · V-5 — lead data is not readable without Lead.View · V-6 — closure is respected by conversion · V-7 — stage advancement is one step per request · V-8 — visitor edits are forensically reconstructable · Controls — verified-sound behaviour that must not regress |
 | `visitor-ux-remediation.test.ts` | 49 | UX-1 — visitor totals are server-computed, never counted from a page · UX-1/UX-8 — pipeline buckets exclude closed-lost leads · UX-3 — conversion eligibility can be checked without attempting a write · UX-4 — eligibility preview enforces the same authorization as convert · UX-5 — date of birth accepts exactly what the form now offers · UX-2 — server error messages are specific enough to act on · UX-9 — possible-duplicate lookup warns without blocking · UX-10 — placement state can be isolated · UX-14 — required-field errors are actionable |
 | `visitors.test.ts` | 110 | Visitor Module · §1 Visitor Registration · §2 Serial Generation & Uniqueness · §3 Visitor List & Pagination · §4 Branch Isolation & RBAC · §5 Visitor Update · §6 Follow-up Creation & Outcome Handling · §7 Pipeline View · §8 Stage Transition Validation · §9 Placement Test Workflow · §10 CRM Update · §11 Visitor → Student Conversion · §12 Conversion Failure Scenarios · §13 Transaction Rollback · §14 Lead → Student Linkage & Consistency · §15 Database & Foreign Key Integrity · §16 Pipeline State Integrity · §17 Event Generation · §18 Rule Engine Interaction · §19 API Validation · §20 Concurrent Operations · §21 Financial Integrity in Conversion · §22 Payment Method Validation · §23 Data Corruption Prevention |
+
+| Legacy file | Replacement / retirement disposition |
+|---|---|
+| `lead-lifecycle-consistency.test.ts` | Rebased under `work-packages/wp03/`; remains the shared lead-bucket and population-count authority. |
+| `student-balance-consistency.test.ts` | Rebased as a financial-adjacent consumer contract; ledger ownership remains WP-07 and is not certified here. |
+| `student-balances-endpoint.test.ts` | Rebased as the complete-population balance/redaction endpoint contract. |
+| `student-deep-audit.test.ts` | Rebased for retry, card-fee, and transaction controls directly consumed by student admission routes. |
+| `student-financial-idempotency.test.ts` | Rebased for WP-03 payment/refund writer identities; broader finance semantics remain WP-07. |
+| `student-forensic-audit.test.ts` | Rebased for student-route atomicity and concurrency evidence. |
+| `student-list-filters.test.ts` | Rebased as the server-filter and object-scope list contract. |
+| `student-subsystem-remediation.test.ts` | Rebased with obsolete journey status/graduation writers explicitly retired; suspension now exercises the dedicated permissioned multi-enrollment workflow. |
+| `students.test.ts` | Rebased as the list projection/N+1 regression contract. |
+| `timeline-separation.test.ts` | Rebased as the lifecycle-versus-finance chronology separation authority. |
+| `visitor-conversion-money-validation.test.ts` | Rebased as the strict conversion money-boundary contract. |
+| `visitor-subsystem-audit.test.ts` | Rebased for identity, lifecycle, conversion, branch, transaction, and forensic visitor invariants. |
+| `visitor-ux-remediation.test.ts` | Rebased for server totals, eligibility, actionable validation, and permission-aware admissions UX contracts. |
+| `visitors.test.ts` | Rebased as the route integration authority; permissive invalid-payment fallback was retired in favor of explicit rejection. |
+
+**Mapped replacement authority:** fifteen files / 355 executed cases: the fourteen
+rebased requirement suites plus the 24-case adversarial authority. A separate
+mixed-roster finance and resume-dispatch regression contributes one supplemental UI case,
+so the executable `server/src/tests/work-packages/wp03/` directory contains
+**16 files / 356 tests**. The supplemental case is additional evidence and does
+not inflate the C-2 mapped-replacement count.
 
 ## WP-04 Placement
 

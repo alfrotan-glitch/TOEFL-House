@@ -5,15 +5,13 @@ import { nextInvoiceNumber } from '../utils/invoice.js';
  */
 import { Router } from 'express';
 import { db } from '../db/connection.js';
-import { assertTextLengths, TEXT_LIMITS } from '../utils/textInput.js';
+import { assertTextLengths, optionalText, requiredText, TEXT_LIMITS } from '../utils/textInput.js';
 import { parsePagination as parsePaginationShared } from '../utils/pagination.js';
-import { getStudentBalance, getStudentBalancesPage } from '../utils/studentBalance.js';
+import { getStudentBalance, getStudentBalancesByIds, getStudentBalancesPage } from '../utils/studentBalance.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import {
   canAccessAllBranchesForRequirement,
   canAccessBranchForRequirement,
-  hasAnyRole,
-  hasPermission,
   hasPermissionForBranchWithActionScopes,
   isGlobalOwner,
 } from '../core/rbac/rbac-service.js';
@@ -89,7 +87,7 @@ const stmtUpdateBookStock = db.prepare('UPDATE books SET stock = stock - 1 WHERE
 const stmtFindStudentByPhoneKey = db.prepare(
   `SELECT id, full_name FROM students
     WHERE phone IS NOT NULL AND TRIM(phone) <> ''
-      AND SUBSTR(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone,' ',''),'-',''),'(',''),')',''),'+',''), -9) = ?
+      AND SUBSTR(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone,' ',''),'-',''),'(',''),')',''),'+',''),'.',''),'/',''), -9) = ?
     LIMIT 1`
 );
 
@@ -99,8 +97,11 @@ function findStudentByPhoneKey(phone: string | null | undefined): { id: string; 
   if (!key) return undefined;
   return stmtFindStudentByPhoneKey.get(key) as { id: string; full_name: string } | undefined;
 }
-const stmtFindStudentByEmail = db.prepare("SELECT id, full_name FROM students WHERE lower(email) = lower(?) LIMIT 1");
+const stmtFindStudentByEmail = db.prepare("SELECT id, full_name FROM students WHERE lower(trim(email)) = lower(trim(?)) LIMIT 1");
 const stmtFindStudentByTazkira = db.prepare("SELECT id, full_name FROM students WHERE tazkira_no = ? LIMIT 1");
+const stmtFindVisitorByTazkira = db.prepare(
+  "SELECT id, full_name FROM visitors WHERE tazkira_no = ? AND id <> COALESCE(?, '') LIMIT 1",
+);
 const stmtInsertRegistration = db.prepare(
   `INSERT INTO registrations (id, student_id, class_id, date, amount_paid, receipt_number, discount_applied, branch_id, source, semester) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
@@ -173,7 +174,10 @@ const stmtUpdateStudentCard = db.prepare('UPDATE students SET card_design = ?, n
 const stmtUpdateStudentDetails = db.prepare(
   `UPDATE students SET full_name=?, phone=?, email=?, discount_percent=?, gender=?, father_name=?, address_region=?, tazkira_no=?, whatsapp=?, dob=?, school_or_university=?, emergency_contact_name=?, emergency_contact_phone=?, notes=?, placement_score=?, installment_plan=?, card_design=? WHERE id=?`
 );
-const stmtUpdateStudentStatus = db.prepare('UPDATE students SET status = ? WHERE id = ?');
+const stmtUpdateStudentStatus = db.prepare(
+  `UPDATE students SET status = ?
+    WHERE id = ? AND status = ? AND status <> 'suspended'`,
+);
 /**
  * Graduation releases the seat (audit STU-H4). Only enrollments that still
  * occupy capacity are touched — `active|confirmed|pending`, exactly the set
@@ -269,23 +273,12 @@ function requireStudent(
 }
 
 /**
- * THE single writer for `students.status` (audit STU-C1).
+ * Guarded profile-status writer for non-suspension transitions.
  *
- * Both the status endpoint here and `POST /students/:id/journey/events` route
- * through this function, so the transition rules, the enrollment side effects
- * and the audit entry can never diverge between the two paths again.
- *
- * Graduation additionally CLOSES the student's open enrollments (audit
- * STU-H4). Touching only the profile column leaves
- * `enrollments.status='active'` behind — and because
- * `countActiveStudentsInClass()` counts active enrollments, the graduate keeps
- * occupying a seat forever. Live evidence: a paying applicant was refused with
- * "Selected class is full." while one of the three seats was held by a
- * graduate. Closing the enrollment is the correct fix; the capacity predicate
- * itself was right and is deliberately left alone.
- *
- * Runs in a single transaction so a student can never be graduated with their
- * enrollments left half-closed.
+ * Graduation closes open enrollments and semesters because those rows are the
+ * seat-occupancy authority. Suspension and resume remain dedicated enrollment
+ * workflows. The profile and dependent lifecycle rows change in one
+ * transaction so they cannot disagree.
  */
 export function applyStudentStatus(
   req: import('express').Request,
@@ -294,7 +287,10 @@ export function applyStudentStatus(
 ): void {
   const from = student.status;
   db.transaction(() => {
-    stmtUpdateStudentStatus.run(to, student.id);
+    const updated = stmtUpdateStudentStatus.run(to, student.id, from);
+    if (updated.changes !== 1) {
+      throw new HttpError(409, 'Student status changed concurrently; reload before trying again.');
+    }
     if (to === 'graduated') {
       // Free the seat(s). `completed` is the enrollment-lifecycle terminal
       // state for a finished course and is excluded from the capacity count.
@@ -325,13 +321,25 @@ function mapStudentBase(row: StudentRow, includeFinance = true) {
   };
 }
 
-function mayViewStudentFinance(req: import('express').Request): boolean {
-  return !!req.rbac && (isGlobalOwner(req.rbac) || hasPermission(req.rbac, 'Payment.View'));
+function mayViewStudentFinance(req: import('express').Request, branchId: string): boolean {
+  return !!req.rbac && (
+    isGlobalOwner(req.rbac)
+    || hasPermissionForBranchWithActionScopes(
+      db,
+      req.rbac,
+      branchId,
+      ['Payment.View'],
+      ['organization', 'campus', 'branch', 'department'],
+    )
+  );
 }
 
-function mapStudents(rows: StudentRow[], options: { includeFinance?: boolean } = {}) {
+function mapStudents(
+  rows: StudentRow[],
+  options: { includeFinance?: boolean | ((row: StudentRow) => boolean) } = {},
+) {
   if (rows.length === 0) return [];
-  const includeFinance = options.includeFinance !== false;
+  const financeDecision = options.includeFinance ?? true;
   const semesters = stmtGetSemestersBatch.all(JSON.stringify(rows.map(r => r.id))) as any[];
   const byStudent = new Map<string, any[]>();
   for (const s of semesters) {
@@ -343,6 +351,9 @@ function mapStudents(rows: StudentRow[], options: { includeFinance?: boolean } =
   for (const enrollment of primaryEnrollments) enrollmentByStudent.set(enrollment.student_id, enrollment);
 
   return rows.map((row) => {
+    const includeFinance = typeof financeDecision === 'function'
+      ? financeDecision(row)
+      : financeDecision;
     const sems = (byStudent.get(row.id) || []).map((s) => ({
       id: s.id,
       semesterName: s.semester_name,
@@ -369,7 +380,13 @@ function mapStudents(rows: StudentRow[], options: { includeFinance?: boolean } =
  * If they do, enrollment is blocked unless overridden by finance/owner.
  */
 function checkAcademicHold(req: import('express').Request, studentId: string) {
-  const canOverride = !!req.rbac && hasAnyRole(req.rbac, ['owner', 'general_manager', 'finance_manager']);
+  const student = stmtGetStudentById.get(studentId) as { branch_id: string } | undefined;
+  const canOverride = !!req.rbac && !!student && canAccessBranchForRequirement(
+    db,
+    req.rbac,
+    student.branch_id,
+    { roleCodes: ['owner', 'general_manager', 'finance_manager'] },
+  );
   if (canOverride) return;
 
   // Uses the shared authoritative balance so the hold threshold agrees with the
@@ -492,7 +509,10 @@ studentsRouter.get('/search', requirePermission('Student.View'), ah(async (req, 
   const { whereSql, params } = buildStudentListWhere(req, scope);
   const total = (db.prepare(`SELECT COUNT(*) AS c FROM students ${whereSql}`).get(...params) as { c: number }).c;
   const rows = db.prepare(`SELECT * FROM students ${whereSql} ORDER BY registration_date DESC LIMIT ? OFFSET ?`).all(...params, limit, offset) as StudentRow[];
-  res.json({ rows: mapStudents(rows, { includeFinance: mayViewStudentFinance(req) }), total });
+  res.json({
+    rows: mapStudents(rows, { includeFinance: (row) => mayViewStudentFinance(req, row.branch_id) }),
+    total,
+  });
 }));
 
 /**
@@ -586,27 +606,26 @@ studentsRouter.get('/summary', requirePermission('Student.View'), ah(async (req,
  * It is bounded only by the filter, not by a page size.
  */
 studentsRouter.get('/export', requirePermission('Student.View'), ah(async (req, res) => {
-  const { branchId, isAll } = resolveBranchScope(req);
-  // EXACTLY the same filter builder the roster uses — one definition, so an
-  // export can never disagree with the list the operator is looking at.
-  const { whereSql, params } = buildStudentListWhere(req, {
-    branchId, isAll, teacherId: null, ownStudentId: null,
-  });
+  const scope = resolveStudentReadScope(req);
+  // EXACTLY the same filter and object-authority scope the roster uses — one
+  // definition, so an export can never widen a class/own grant to a branch.
+  const { whereSql, params } = buildStudentListWhere(req, scope);
 
   const rows = db.prepare(
     `SELECT id, student_code, full_name, phone, whatsapp, father_name, tazkira_no,
-            email, gender, status, registration_date
+            email, gender, status, registration_date, branch_id
        FROM students ${whereSql}
       ORDER BY registration_date DESC`
   ).all(...params) as StudentRow[];
 
-  // Financial columns require Payment.View in addition to Student.View.
-  const includeFinance = mayViewStudentFinance(req);
+  // Financial columns require Payment.View correlated to every exported row.
+  // A uniform CSV cannot safely mix financial and redacted row schemas, so a
+  // partial multi-branch finance grant receives the redacted export.
+  const includeFinance = rows.length > 0
+    && rows.every((row) => mayViewStudentFinance(req, row.branch_id));
   const balances = new Map<string, { tuitionDue: number; tuitionPaid: number; outstanding: number }>();
   if (includeFinance) {
-    for (const b of getStudentBalancesPage(db, {
-      branchId: isAll ? null : branchId, scope: 'all', limit: rows.length || 1, offset: 0,
-    })) {
+    for (const b of getStudentBalancesByIds(db, rows.map((row) => row.id), 'all')) {
       balances.set(b.studentId, { tuitionDue: b.tuitionDue, tuitionPaid: b.tuitionPaid, outstanding: b.outstanding });
     }
   }
@@ -615,8 +634,9 @@ studentsRouter.get('/export', requirePermission('Student.View'), ah(async (req, 
   if (rows.length) {
     for (const r of db.prepare(
       `SELECT student_id, GROUP_CONCAT(class_id, '; ') AS cls FROM enrollments
-        WHERE status IN ('active','confirmed','pending') GROUP BY student_id`
-    ).all() as Array<{ student_id: string; cls: string }>) {
+        WHERE student_id IN (SELECT value FROM json_each(?))
+          AND status IN ('active','confirmed','pending') GROUP BY student_id`
+    ).all(JSON.stringify(rows.map((row) => row.id))) as Array<{ student_id: string; cls: string }>) {
       classesByStudent.set(r.student_id, r.cls);
     }
   }
@@ -695,7 +715,9 @@ studentsRouter.get('/', requirePermission('Student.View'), ah(async (req, res) =
   const sql = `SELECT * FROM students ${whereSql} ORDER BY registration_date DESC LIMIT ? OFFSET ?`;
   params.push(limit, offset);
   const rows = db.prepare(sql).all(...params) as StudentRow[];
-  res.json(mapStudents(rows, { includeFinance: mayViewStudentFinance(req) }));
+  res.json(mapStudents(rows, {
+    includeFinance: (row) => mayViewStudentFinance(req, row.branch_id),
+  }));
 }));
 
 /**
@@ -726,7 +748,7 @@ studentsRouter.get('/me', authorize('student'), ah(async (req, res) => {
 
 studentsRouter.get('/:id', requirePermission('Student.View'), ah(async (req, res) => {
   const student = requireStudent(req, req.params.id, { objectView: true }) as StudentRow;
-  const mayViewFinance = mayViewStudentFinance(req);
+  const mayViewFinance = mayViewStudentFinance(req, student.branch_id);
   // The balance ships WITH the student so no client ever has to re-derive it.
   // Recomputing tuition in the profile drawer or the student portal from the
   // paginated payments array disagrees with this endpoint the moment a
@@ -749,13 +771,20 @@ studentsRouter.get('/:id', requirePermission('Student.View'), ah(async (req, res
 // ============================================================================
 studentsRouter.post('/manual', requirePermission('Student.Create'), ah(async (req, res) => {
   const user = getUserContext(req);
-  const { discountPercent, classId, tuitionAmount, amountPaidNow, branchId } = req.body;
+  const body = req.body ?? {};
+  const { tuitionAmount, amountPaidNow } = body;
+  const classId = optionalText(body.classId, 'Class id', TEXT_LIMITS.short);
+  const branchId = optionalText(body.branchId, 'Branch id', TEXT_LIMITS.short);
+  const discountPercent = body.discountPercent ?? 0;
+  if (typeof discountPercent !== 'number' || !Number.isFinite(discountPercent)) {
+    throw new HttpError(400, 'Discount must be a finite number.');
+  }
   // ONE validation authority, shared with PATCH (audit STU-H1). It type-checks,
   // trims and bounds every text field, validates gender against the same
   // allow-list the gender-policy engine enforces, and rejects impossible
   // calendar dates. A PATCH that skipped this would persist values this path
   // rejects.
-  const input = normalizeStudentInput(req.body as Record<string, unknown>, 'create');
+  const input = normalizeStudentInput(body, 'create');
   const {
     fullName = null, phone = null, email = null, notes = null, fatherName = null,
     addressRegion = null, tazkiraNo = null, whatsapp = null, schoolOrUniversity = null,
@@ -771,6 +800,9 @@ studentsRouter.post('/manual', requirePermission('Student.Create'), ah(async (re
   if (findStudentByPhoneKey(safePhone)) throw new HttpError(409, 'A student with this phone number already exists.');
   if (safeEmail && stmtFindStudentByEmail.get(safeEmail)) throw new HttpError(409, 'A student with this email already exists.');
   if (safeTazkira && stmtFindStudentByTazkira.get(safeTazkira)) throw new HttpError(409, 'A student with this Tazkira/ID number already exists.');
+  if (safeTazkira && stmtFindVisitorByTazkira.get(safeTazkira, null)) {
+    throw new HttpError(409, 'A visitor with this Tazkira/ID number already exists. Convert that lead instead.');
+  }
 
   let effDiscount = Number(discountPercent ?? 0);
   if (!Number.isFinite(effDiscount) || effDiscount < 0) throw new HttpError(400, 'Discount must be zero or greater.');
@@ -860,14 +892,14 @@ studentsRouter.post('/manual', requirePermission('Student.Create'), ah(async (re
 // §3 — CONCURRENT CLASS ENROLLMENT (Extra Classes)
 // ============================================================================
 
-studentsRouter.post('/:id/enroll-class', requirePermission('Class.Assign', 'Student.Edit'), ah(async (req, res) => {
+studentsRouter.post('/:id/enroll-class', requirePermission('Class.Assign'), ah(async (req, res) => {
   const user = getUserContext(req);
   const student = requireStudent(req, req.params.id);
   // A graduated or suspended student may not take a new class (audit STU-C2).
   assertStudentOperable(student, 'enroll this student in a class');
-  const { classId, amountPaidNow = 0, notes } = req.body || {};
-
-  if (!classId) throw new HttpError(400, 'classId is required.');
+  const { amountPaidNow = 0 } = req.body || {};
+  const classId = requiredText(req.body?.classId, 'Class id', TEXT_LIMITS.short);
+  const notes = optionalText(req.body?.notes, 'Enrollment notes', TEXT_LIMITS.notes);
   const cls = stmtGetClassDetails.get(classId) as any;
   if (!cls) throw new HttpError(404, 'Class not found.');
   if (cls.branch_id !== student.branch_id) throw new HttpError(400, 'Class belongs to another branch.');
@@ -912,7 +944,7 @@ studentsRouter.post('/:id/enroll-class', requirePermission('Class.Assign', 'Stud
   const discount = resolveAuthorizedDiscount(db, student.id, Number(student.discount_percent || 0), { branchId: student.branch_id }).percent;
   const netFee = Math.max(0, baseFee - Math.round(baseFee * discount / 100));
   let paidNow: number;
-  try { paidNow = assertMoney(amountPaidNow || 0, 'amount paid'); }
+  try { paidNow = assertMoney(amountPaidNow ?? 0, 'amount paid'); }
   catch { throw new HttpError(400, 'Amount paid must be zero or greater.'); }
   if (paidNow > netFee) throw new HttpError(400, 'Amount paid cannot exceed the payable fee.');
 
@@ -978,10 +1010,17 @@ studentsRouter.post('/:id/enroll-class', requirePermission('Class.Assign', 'Stud
 studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(async (req, res) => {
   const user = getUserContext(req);
   const student = requireStudent(req, req.params.id);
-  const { category, paymentMethod, notes, semesterId, bookId, installmentId, amount } = req.body;
+  const { category, paymentMethod, amount } = req.body ?? {};
+  const notes = optionalText(req.body?.notes, 'Payment notes', TEXT_LIMITS.notes);
+  const semesterId = optionalText(req.body?.semesterId, 'Semester id', TEXT_LIMITS.short);
+  const bookId = optionalText(req.body?.bookId, 'Book id', TEXT_LIMITS.short);
+  const installmentId = optionalText(req.body?.installmentId, 'Installment id', TEXT_LIMITS.short);
 
   if (!category || !['fee', 'book', 'chapter', 'exam', 'card', 'placement', 'diploma', 'installment', 'other'].includes(category)) throw new HttpError(400, 'Invalid category.');
-  const resolvedMethod = ['cash', 'card', 'bank_transfer'].includes(paymentMethod) ? paymentMethod : 'cash';
+  if (paymentMethod != null && !['cash', 'card', 'bank_transfer'].includes(paymentMethod)) {
+    throw new HttpError(400, 'Invalid payment method.');
+  }
+  const resolvedMethod = paymentMethod ?? 'cash';
   const date = today();
   // Idempotency is ALWAYS applied, never only when the client remembers to
   // send a key, because an un-keyed double-click otherwise creates one payment
@@ -1222,7 +1261,8 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
 studentsRouter.post('/:id/refund', requirePermission('Refund.Approve'), ah(async (req, res) => {
   const user = getUserContext(req);
   const student = requireStudent(req, req.params.id);
-  const { amount, reason } = req.body;
+  const { amount } = req.body ?? {};
+  const reason = requiredText(req.body?.reason, 'Refund reason', TEXT_LIMITS.notes);
   // F-5: a refund moves real money OUT, so the amount must be parsed, not
   // coerced. Reproduced live on a fresh database (student funded first):
   //     true   -> 201, a real -1 AFN refund   (branch cash -1.00)
@@ -1235,7 +1275,6 @@ studentsRouter.post('/:id/refund', requirePermission('Refund.Approve'), ah(async
   try { refundAmount = assertMoney(amount, 'Refund amount'); }
   catch { throw new HttpError(400, 'Refund amount must be positive.'); }
   if (refundAmount <= 0) throw new HttpError(400, 'Refund amount must be positive.');
-  if (!reason || !String(reason).trim()) throw new HttpError(400, 'Refund reason is required.');
   const date = today();
   // Refunds move real money out; the same mandatory idempotency applies.
   const { key: idempotencyKey, candidates: idempotencyCandidates } = resolveIdempotency(req, {
@@ -1290,13 +1329,14 @@ studentsRouter.post('/:id/refund', requirePermission('Refund.Approve'), ah(async
 // §5 — SEMESTER ENROLLMENT & LIFECYCLE
 // ============================================================================
 
-studentsRouter.post('/:id/enroll-semester', requirePermission('Class.Assign', 'Student.Edit'), ah(async (req, res) => {
+studentsRouter.post('/:id/enroll-semester', requirePermission('Class.Assign'), ah(async (req, res) => {
   const user = getUserContext(req);
   const student = requireStudent(req, req.params.id);
   assertStudentOperable(student, 'enroll this student in a semester');
-  const { semesterName, classId, tuitionAmount, amountPaidNow, notes } = req.body ?? {};
-  
-  if (!semesterName || !String(semesterName).trim()) throw new HttpError(400, 'Semester name is required.');
+  const { tuitionAmount, amountPaidNow } = req.body ?? {};
+  const classId = optionalText(req.body?.classId, 'Class id', TEXT_LIMITS.short);
+  const semesterName = requiredText(req.body?.semesterName, 'Semester name', TEXT_LIMITS.name);
+  const notes = optionalText(req.body?.notes, 'Enrollment notes', TEXT_LIMITS.notes);
   if (student.status !== 'active') throw new HttpError(409, 'Only active students can be enrolled.');
   if (classId) {
     const cls = stmtGetClassDetails.get(classId) as any;
@@ -1314,16 +1354,17 @@ studentsRouter.post('/:id/enroll-semester', requirePermission('Class.Assign', 'S
     const cls = stmtGetClassFee.get(classId) as any;
     resolvedTuition = cls ? cls.fee : 0;
   }
-  resolvedTuition = Number(resolvedTuition ?? 0);
-  if (!Number.isFinite(resolvedTuition) || resolvedTuition < 0) throw new HttpError(400, 'Tuition amount must be zero or greater.');
+  try { resolvedTuition = assertMoney(resolvedTuition ?? 0, 'tuition amount'); }
+  catch { throw new HttpError(400, 'Tuition amount must be zero or greater.'); }
   // CFG-1: same re-resolution as enroll-class — a revoked or expired grant
   // must not price a new semester.
   const effectivePercent = resolveAuthorizedDiscount(db, student.id, Math.max(0, Number(student.discount_percent || 0)), { branchId: student.branch_id }).percent;
   const discountAmount = Math.round(resolvedTuition * effectivePercent / 100);
   const netTuition = Math.max(0, resolvedTuition - discountAmount);
-  const paidNow = Number(amountPaidNow ?? 0);
-  if (!Number.isFinite(paidNow) || paidNow < 0) throw new HttpError(400, 'Amount received must be zero or greater.');
-  if (paidNow > netTuition && netTuition > 0) throw new HttpError(400, 'Amount received cannot exceed the payable fee.');
+  let paidNow: number;
+  try { paidNow = assertMoney(amountPaidNow ?? 0, 'amount received'); }
+  catch { throw new HttpError(400, 'Amount received must be zero or greater.'); }
+  if (paidNow > netTuition) throw new HttpError(400, 'Amount received cannot exceed the payable fee.');
 
   const date = today();
   const rc = nextReceiptNumber();
@@ -1345,7 +1386,7 @@ studentsRouter.post('/:id/enroll-semester', requirePermission('Class.Assign', 'S
       // already forbids a second active semester of the same name, so this
       // payment cannot legitimately repeat. A NULL here would disable
       // uq_payments_idempotency for the row.
-      stmtInsertPayment.run(semPayId, student.id, paidNow, date, 'cash', 'fee', `Semester fee for ${semesterName}`, rc, student.branch_id, semesterName, null, null, `enroll-semester:${student.id}:${semesterName}`);
+      stmtInsertPayment.run(semPayId, student.id, paidNow, date, 'cash', 'fee', `Semester fee for ${semesterName}`, rc, student.branch_id, semesterName, null, null, `enroll-semester:${newSemId}`);
       recordIncome({ category: 'fee', amount: paidNow, date, description: `Received ${semesterName} fee from ${student.full_name}`, referenceId: student.id, paymentId: semPayId, operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null, branchId: student.branch_id });
     }
     // Enrollment happens in the same transaction (see manual-add above).
@@ -1359,12 +1400,20 @@ studentsRouter.post('/:id/enroll-semester', requirePermission('Class.Assign', 'S
   res.status(201).json({ ok: true, semesterId: newSemId, receiptNumber: paidNow > 0 ? rc : null });
 }));
 
-studentsRouter.post('/:id/issue-card', requirePermission('Student.Print', 'Payment.Create'), ah(async (req, res) => {
+studentsRouter.post('/:id/issue-card', requirePermission('Student.Print'), ah(async (req, res) => {
   const user = getUserContext(req);
   const student = requireStudent(req, req.params.id);
   // Chargeable service: must not bill a graduated student (audit STU-C2).
   assertStudentOperable(student, 'issue an ID card for this student');
-  const { cardDesign, notes } = req.body;
+  const cardDesign = req.body?.cardDesign;
+  const notes = optionalText(req.body?.notes, 'Card notes', TEXT_LIMITS.notes);
+  if (!cardDesign || typeof cardDesign !== 'object' || Array.isArray(cardDesign)) {
+    throw new HttpError(400, 'Card design must be an object.');
+  }
+  const serializedCardDesign = JSON.stringify(cardDesign);
+  if (serializedCardDesign.length > 3_000_000) {
+    throw new HttpError(400, 'Card design and photo are too large.');
+  }
   const isFirstIssuance = !student.card_design;
   const date = today();
 
@@ -1381,7 +1430,7 @@ studentsRouter.post('/:id/issue-card', requirePermission('Student.Print', 'Payme
   // `cardFeeAlreadyPaid` check winning the race.
   const cardFeeIdempotencyKey = `card-fee:${student.id}`;
   const tx = db.transaction(() => {
-    stmtUpdateStudentCard.run(JSON.stringify(cardDesign), notes ?? student.notes, student.id);
+    stmtUpdateStudentCard.run(serializedCardDesign, notes ?? student.notes, student.id);
     if (isFirstIssuance && cardFee > 0) {
       const pid = id('pay');
       stmtInsertSimplePayment.run(pid, student.id, cardFee, date, 'cash', 'card', 'ID Card Issuance', nextReceiptNumber(), student.branch_id, cardFeeIdempotencyKey);
@@ -1404,19 +1453,20 @@ studentsRouter.post('/:id/issue-card', requirePermission('Student.Print', 'Payme
 
 studentsRouter.patch('/:id', requirePermission('Student.Edit'), ah(async (req, res) => {
   const existing = requireStudent(req, req.params.id);
+  const body = req.body ?? {};
   // SAME validation authority as CREATE (audit STU-H1). A handler that
   // validated nothing and merged raw body fields straight into the UPDATE
   // would accept and persist gender "martian", a 5,000-character name, a
   // "9999-99-99" date and `phone: ["x"]` — values the CREATE
   // path rejects with 400. `mode: 'patch'` validates only the supplied keys,
   // but applies identical rules to them.
-  const patchInput = normalizeStudentInput(req.body as Record<string, unknown>, 'patch');
-  const f: Record<string, unknown> = { ...req.body };
+  const patchInput = normalizeStudentInput(body, 'patch');
+  const f: Record<string, unknown> = { ...body };
   // Substitute the normalized/validated values so the merge below can never
   // reintroduce the raw payload.
   for (const [k, v] of Object.entries(patchInput.text)) f[k] = v;
   if (patchInput.gender !== undefined) f.gender = patchInput.gender;
-  if (req.body?.dob !== undefined) f.dob = patchInput.dob;
+  if (body.dob !== undefined) f.dob = patchInput.dob;
 
   const merge = <K extends keyof StudentRow>(k: string, c: K) => (f[k] !== undefined ? f[k] : existing[c]);
 
@@ -1431,6 +1481,20 @@ studentsRouter.patch('/:id', requirePermission('Student.Edit'), ah(async (req, r
   if (phoneOwner && phoneOwner.id !== existing.id) throw new HttpError(409, 'A student with this phone number already exists.');
   if (emailOwner && emailOwner.id !== existing.id) throw new HttpError(409, 'A student with this email already exists.');
   if (tazkiraOwner && tazkiraOwner.id !== existing.id) throw new HttpError(409, 'A student with this Tazkira/ID number already exists.');
+  if (nextTazkira && stmtFindVisitorByTazkira.get(nextTazkira, existing.lead_id ?? null)) {
+    throw new HttpError(409, 'A visitor with this Tazkira/ID number already exists.');
+  }
+
+  // Placement assessment results and ID-card designs have dedicated writers.
+  // Accepting them through a general profile PATCH bypasses placement evidence
+  // and suppresses the first-issuance card fee respectively.
+  if (f.placementScore !== undefined) {
+    throw new HttpError(400, 'Placement results must be recorded through the placement assessment workflow.');
+  }
+  if (f.cardDesign !== undefined) {
+    throw new HttpError(400, 'ID-card designs must be saved through the issue-card workflow.');
+  }
+
   // Validate the installment plan at the WRITE boundary. It is stored as JSON
   // and later drives real payments, so a malformed plan is corrupt financial
   // data, not a cosmetic problem. Accepting a pre-serialised string here
@@ -1441,17 +1505,19 @@ studentsRouter.patch('/:id', requirePermission('Student.Edit'), ah(async (req, r
     if (!Array.isArray(f.installmentPlan)) {
       throw new HttpError(400, 'installmentPlan must be an array of installments, not a string or object.');
     }
+    if (f.installmentPlan.length > 100 || JSON.stringify(f.installmentPlan).length > 100_000) {
+      throw new HttpError(400, 'installmentPlan is too large.');
+    }
     const seen = new Set<string>();
     for (const item of f.installmentPlan as Array<Record<string, unknown>>) {
       if (!item || typeof item !== 'object') throw new HttpError(400, 'Each installment must be an object.');
-      const instId = typeof item.id === 'string' ? item.id.trim() : '';
-      if (!instId) throw new HttpError(400, 'Each installment needs a non-empty id.');
+      const instId = requiredText(item.id, 'Installment id', TEXT_LIMITS.short);
       // Duplicate ids would make "pay installment X" ambiguous, and marking one
       // paid would silently settle the other.
       if (seen.has(instId)) throw new HttpError(400, `Duplicate installment id "${instId}".`);
       seen.add(instId);
-      const amount = Number(item.amount);
-      if (!Number.isFinite(amount) || amount <= 0) throw new HttpError(400, `Installment "${instId}" must have an amount greater than 0.`);
+      const installmentAmount = assertMoney(item.amount, `Installment "${instId}" amount`);
+      if (installmentAmount <= 0) throw new HttpError(400, `Installment "${instId}" amount must be greater than zero.`);
       if (item.status !== undefined && !['pending', 'paid'].includes(String(item.status))) {
         throw new HttpError(400, `Installment "${instId}" has an invalid status.`);
       }
@@ -1490,9 +1556,9 @@ studentsRouter.patch('/:id', requirePermission('Student.Edit'), ah(async (req, r
   res.json({ ok: true });
 }));
 
-studentsRouter.patch('/:id/status', requirePermission('Student.Edit', 'Student.Suspend'), ah(async (req, res) => {
+studentsRouter.patch('/:id/status', requirePermission('Student.Edit'), ah(async (req, res) => {
   const existing = requireStudent(req, req.params.id);
-  const { status } = req.body;
+  const { status } = req.body ?? {};
   // Vocabulary and transition legality both come from the single Student
   // lifecycle authority (audit STU-C1/C2). Accepting any of three values from
   // ANY current state would let `graduated → inactive → active` launder a
@@ -1506,9 +1572,11 @@ studentsRouter.patch('/:id/status', requirePermission('Student.Edit', 'Student.S
     throw new HttpError(400, 'Use the suspend/resume workflow for suspended status.');
   }
   const from = (isStudentStatus(existing.status) ? existing.status : 'active') as StudentStatus;
-  if (from === 'suspended' && status === 'active') {
-    // Resuming likewise owns enrollment re-activation.
-    throw new HttpError(400, 'Use the suspend/resume workflow to reactivate a suspended student.');
+  if (from === 'suspended') {
+    // A suspended target was already routed to the workflow error above, so
+    // every remaining request would strand enrollment and exact-semester state
+    // behind a different profile status.
+    throw new HttpError(409, 'Resume the suspended student before changing status.');
   }
   assertStudentTransition(from, status);
   if (from === status) return res.json({ ok: true, unchanged: true });
@@ -1516,10 +1584,10 @@ studentsRouter.patch('/:id/status', requirePermission('Student.Edit', 'Student.S
   res.json({ ok: true });
 }));
 
-studentsRouter.post('/:id/transfer', authorize('receptionist', 'general_manager', 'head_of_department', 'owner'), ah(async (req, res) => {
+studentsRouter.post('/:id/transfer', requirePermission('Student.Transfer'), ah(async (req, res) => {
   const user = getUserContext(req);
-  const { toClassId, notes } = req.body || {};
-  if (!toClassId) throw new HttpError(400, 'toClassId is required.');
+  const toClassId = requiredText(req.body?.toClassId, 'Destination class id', TEXT_LIMITS.short);
+  const notes = optionalText(req.body?.notes, 'Transfer notes', TEXT_LIMITS.notes);
   const student = requireStudent(req, req.params.id);
   assertStudentOperable(student, 'transfer this student');
   const targetClass = stmtGetClassDetails.get(toClassId) as any;
@@ -1538,32 +1606,38 @@ studentsRouter.post('/:id/transfer', authorize('receptionist', 'general_manager'
     // genuine server fault as a client error. Pass domain errors through
     // untouched and let the error handler classify anything else.
     if (err instanceof HttpError) throw err;
-    throw new HttpError(400, err instanceof Error ? err.message : 'Transfer failed.');
+    throw err;
   }
 }));
 
-studentsRouter.post('/:id/suspend', authorize('receptionist', 'general_manager', 'head_of_department', 'owner'), ah(async (req, res) => {
+studentsRouter.post('/:id/suspend', requirePermission('Student.Suspend'), ah(async (req, res) => {
   const user = getUserContext(req);
   const student = requireStudent(req, req.params.id);
-  const { notes } = req.body || {};
-  try {
-    const result = getEnrollmentService(db).suspend({ studentId: req.params.id, notes: notes || null, actorUserId: user.userId });
-    stmtUpdateStudentStatus.run('suspended', req.params.id);
-    writeAudit(req, `Suspended student ${student.full_name}`, { newValue: notes || null });
-    res.json({ ok: true, ...result });
-  } catch (err: any) { throw new HttpError(400, err?.message || 'Suspend failed.'); }
+  const notes = optionalText(req.body?.notes, 'Suspension notes', TEXT_LIMITS.notes);
+  const result = getEnrollmentService(db).suspend({
+    studentId: req.params.id,
+    notes,
+    actorUserId: user.userId,
+    actorName: user.fullName,
+  });
+  writeAudit(req, `Suspended student ${student.full_name}`, { newValue: notes || undefined });
+  res.json({ ok: true, ...result });
 }));
 
-studentsRouter.post('/:id/resume', authorize('receptionist', 'general_manager', 'head_of_department', 'owner'), ah(async (req, res) => {
+studentsRouter.post('/:id/resume', requirePermission('Student.Resume'), ah(async (req, res) => {
   const user = getUserContext(req);
   const student = requireStudent(req, req.params.id);
-  const { classId, notes } = req.body || {};
-  try {
-    const result = getEnrollmentService(db).resume({ studentId: req.params.id, classId: classId || null, notes: notes || null, actorUserId: user.userId });
-    stmtUpdateStudentStatus.run('active', req.params.id);
-    writeAudit(req, `Resumed student ${student.full_name}`, { newValue: classId || null });
-    res.json({ ok: true, ...result });
-  } catch (err: any) { throw new HttpError(400, err?.message || 'Resume failed.'); }
+  const classId = optionalText(req.body?.classId, 'Resume class', TEXT_LIMITS.short);
+  const notes = optionalText(req.body?.notes, 'Resume notes', TEXT_LIMITS.notes);
+  const result = getEnrollmentService(db).resume({
+    studentId: req.params.id,
+    classId,
+    notes,
+    actorUserId: user.userId,
+    actorName: user.fullName,
+  });
+  writeAudit(req, `Resumed student ${student.full_name}`, { newValue: classId || undefined });
+  res.json({ ok: true, ...result });
 }));
 
 export default studentsRouter;

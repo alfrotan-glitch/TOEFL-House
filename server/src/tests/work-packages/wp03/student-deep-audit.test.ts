@@ -12,17 +12,17 @@
  *  5. identity uniqueness + IDOR + branch isolation (control tests that must
  *     PASS — proving the surrounding protections work)
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import studentsRouter, { paymentsRouter } from '../routes/students.routes.js';
-import { auditRouter } from '../routes/audit.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { id, today } from '../utils/ids.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import studentsRouter, { paymentsRouter } from '../../../routes/students.routes.js';
+import { auditRouter } from '../../../routes/audit.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { id, today } from '../../../utils/ids.js';
 
 const BRANCH_A = 'stu_branch_a';
 const BRANCH_B = 'stu_branch_b';

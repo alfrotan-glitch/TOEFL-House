@@ -81,8 +81,9 @@ export class EnrollmentService {
   private stmtInsertInvoiceItem: Database.Statement;
   
   private stmtGetActiveEnrollment: Database.Statement;
+  private stmtGetActiveEnrollments: Database.Statement;
   private stmtGetLatestEnrollment: Database.Statement;
-  private stmtGetSuspendedEnrollment: Database.Statement;
+  private stmtGetSuspendedEnrollments: Database.Statement;
   private stmtCompleteEnrollment: Database.Statement;
   private stmtTransferOutEnrollment: Database.Statement;
   private stmtInsertNewEnrollment: Database.Statement;
@@ -96,13 +97,20 @@ export class EnrollmentService {
   private stmtInsertRoster: Database.Statement;
   
   private stmtSuspendEnrollment: Database.Statement;
+  private stmtGetActiveSemesters: Database.Statement;
   private stmtDeferActiveSemesters: Database.Statement;
   private stmtDeferSemesterForClass: Database.Statement;
+  private stmtInsertSuspensionBatch: Database.Statement;
+  private stmtInsertSuspensionSemester: Database.Statement;
+  private stmtGetOpenSuspensionBatch: Database.Statement;
+  private stmtGetSuspensionSemesters: Database.Statement;
+  private stmtActivateDeferredSemesterById: Database.Statement;
+  private stmtCloseSuspensionBatch: Database.Statement;
   private stmtInsertSuspendEvent: Database.Statement;
   
   private stmtResumeEnrollment: Database.Statement;
-  private stmtActivateDeferredSemesters: Database.Statement;
   private stmtInsertResumeEvent: Database.Statement;
+  private stmtSetStudentStatus: Database.Statement;
 
   private stmtGetEnrollmentById: Database.Statement;
   private stmtSetEnrollmentStatus: Database.Statement;
@@ -135,12 +143,17 @@ export class EnrollmentService {
       `INSERT INTO invoice_items (id, invoice_id, description, quantity, unit_price, amount) VALUES (?, ?, ?, 1, ?, ?)`
     );
 
-    this.stmtGetActiveEnrollment = db.prepare(`SELECT * FROM enrollments WHERE student_id = ? AND status = 'active' ORDER BY started_at DESC LIMIT 1`);
+    this.stmtGetActiveEnrollment = db.prepare(`SELECT * FROM enrollments WHERE student_id = ? AND status = 'active' AND enrollment_type <> 'extra' ORDER BY started_at DESC, created_at DESC, id DESC LIMIT 1`);
+    this.stmtGetActiveEnrollments = db.prepare(
+      `SELECT * FROM enrollments WHERE student_id = ? AND status = 'active' ORDER BY started_at ASC, created_at ASC, id ASC`,
+    );
     // Used only to explain *why* a transfer was refused (audit E-1): reporting
     // the most recent enrollment's status turns an opaque 409 into an
     // actionable message.
     this.stmtGetLatestEnrollment = db.prepare(`SELECT * FROM enrollments WHERE student_id = ? ORDER BY created_at DESC, started_at DESC LIMIT 1`);
-    this.stmtGetSuspendedEnrollment = db.prepare(`SELECT * FROM enrollments WHERE student_id = ? AND status = 'suspended' ORDER BY started_at DESC LIMIT 1`);
+    this.stmtGetSuspendedEnrollments = db.prepare(
+      `SELECT * FROM enrollments WHERE student_id = ? AND status = 'suspended' ORDER BY started_at ASC, created_at ASC, id ASC`,
+    );
     this.stmtCompleteEnrollment = db.prepare(`UPDATE enrollments SET status = 'completed', ended_at = datetime('now'), updated_at = datetime('now'), notes = COALESCE(notes, '') || ? WHERE id = ?`);
     this.stmtTransferOutEnrollment = db.prepare(`UPDATE enrollments SET status = 'transferred', ended_at = datetime('now'), updated_at = datetime('now'), notes = COALESCE(notes, '') || ? WHERE id = ?`);
     this.stmtInsertNewEnrollment = db.prepare(
@@ -171,7 +184,28 @@ export class EnrollmentService {
     this.stmtInsertRoster = db.prepare(`INSERT OR IGNORE INTO rosters (id, session_id, student_id, attendance_status) VALUES (?, ?, ?, 'not_marked')`);
 
     this.stmtSuspendEnrollment = db.prepare(`UPDATE enrollments SET status = 'suspended', updated_at = datetime('now'), notes = COALESCE(notes,'') || ? WHERE id = ?`);
+    this.stmtGetActiveSemesters = db.prepare(
+      `SELECT id, class_id FROM student_semesters WHERE student_id = ? AND status = 'active' ORDER BY enroll_date ASC, id ASC`,
+    );
     this.stmtDeferActiveSemesters = db.prepare(`UPDATE student_semesters SET status = 'deferred' WHERE student_id = ? AND status = 'active'`);
+    this.stmtInsertSuspensionBatch = db.prepare(
+      `INSERT INTO student_suspension_batches (id, student_id) VALUES (?, ?)`,
+    );
+    this.stmtInsertSuspensionSemester = db.prepare(
+      `INSERT INTO student_suspension_semesters (batch_id, semester_id, original_class_id) VALUES (?, ?, ?)`,
+    );
+    this.stmtGetOpenSuspensionBatch = db.prepare(
+      `SELECT id FROM student_suspension_batches WHERE student_id = ? AND resumed_at IS NULL ORDER BY suspended_at DESC, id DESC LIMIT 1`,
+    );
+    this.stmtGetSuspensionSemesters = db.prepare(
+      `SELECT semester_id, original_class_id FROM student_suspension_semesters WHERE batch_id = ? ORDER BY semester_id ASC`,
+    );
+    this.stmtActivateDeferredSemesterById = db.prepare(
+      `UPDATE student_semesters SET status = 'active', class_id = ? WHERE id = ? AND status = 'deferred'`,
+    );
+    this.stmtCloseSuspensionBatch = db.prepare(
+      `UPDATE student_suspension_batches SET resumed_at = datetime('now') WHERE id = ? AND resumed_at IS NULL`,
+    );
     // Class-scoped variant used when a single enrollment closes (C-1): the
     // student-wide statement above belongs to suspend(), which defers the
     // student's whole load. Dropping one enrollment must only close that
@@ -180,7 +214,9 @@ export class EnrollmentService {
     this.stmtInsertSuspendEvent = db.prepare(`INSERT INTO enrollment_events (id, enrollment_id, student_id, event_type, from_class_id, to_class_id, notes, actor_user_id) VALUES (?, ?, ?, 'suspended', ?, NULL, ?, ?)`);
 
     this.stmtResumeEnrollment = db.prepare(`UPDATE enrollments SET status = 'active', class_id = ?, updated_at = datetime('now'), ended_at = NULL WHERE id = ?`);
-    this.stmtActivateDeferredSemesters = db.prepare(`UPDATE student_semesters SET status = 'active', class_id = ? WHERE student_id = ? AND status = 'deferred'`);
+    this.stmtSetStudentStatus = db.prepare(
+      'UPDATE students SET status = ? WHERE id = ? AND status = ?',
+    );
     this.stmtInsertResumeEvent = db.prepare(`INSERT INTO enrollment_events (id, enrollment_id, student_id, event_type, from_class_id, to_class_id, notes, actor_user_id) VALUES (?, ?, ?, 'resumed', ?, ?, ?, ?)`);
 
     // Phase 1 — Enrollment Lifecycle Engine: generic transition support.
@@ -214,7 +250,10 @@ export class EnrollmentService {
     if (input.classId) {
       const cls = this.stmtGetClass.get(input.classId) as any;
       if (cls?.level_id) {
-        targetLevelId = targetLevelId || cls.level_id;
+        // The occupied seat determines the placement level. A caller-supplied
+        // first level must never replace a higher class level and manufacture
+        // a first-level exemption.
+        targetLevelId = cls.level_id;
       }
       // The class's level is authoritative; the caller-supplied program is only
       // a fallback. Shared with the conversion route so the two can never
@@ -292,7 +331,15 @@ export class EnrollmentService {
     const student = this.stmtGetStudent.get(input.studentId) as { id: string; branch_id: string; status: string; gender: string } | undefined;
     if (!student) throw new HttpError(404, 'Student not found.');
     if (student.branch_id !== input.branchId) throw new HttpError(400, 'Student and enrollment branch must match.');
-    if (student.status === 'suspended' && input.enrollmentType !== 'resume') throw new HttpError(409, 'Suspended students must be resumed through the lifecycle workflow.');
+    // Graduation is terminal at the domain boundary, not merely at selected
+    // HTTP routes. Journey enrollment and future callers converge here and
+    // must not be able to manufacture an active enrollment for a graduate.
+    if (student.status === 'graduated') {
+      throw new HttpError(409, 'Cannot enroll this student: graduation is a final state.');
+    }
+    if (student.status === 'suspended') {
+      throw new HttpError(409, 'Suspended students must be resumed through the lifecycle workflow.');
+    }
 
     const enrollmentType = input.enrollmentType || 'new';
     let levelCode = input.levelCode ?? null;
@@ -322,6 +369,9 @@ export class EnrollmentService {
       if (!cls) throw new HttpError(404, 'Class not found.');
       if (cls.branch_id !== input.branchId) throw new HttpError(400, 'Class and enrollment branch must match.');
       if (cls.status !== 'active') throw new HttpError(409, 'Selected class is not active.');
+      if (input.levelId && cls.level_id && String(input.levelId) !== String(cls.level_id)) {
+        throw new HttpError(400, 'Class and enrollment level must match.');
+      }
       if (programVersionId) {
         const classLevel = cls.level_id ? this.stmtGetLevel.get(cls.level_id) as any : null;
         const classProgramVersionId = classLevel?.program_version_id || null;
@@ -592,66 +642,189 @@ export class EnrollmentService {
     return { enrollmentId: newEnrollmentId, fromClassId, toClassId: input.toClassId };
   }
 
-  suspend(input: { studentId: string; notes?: string | null; actorUserId?: string | null }) {
-    const active = this.stmtGetActiveEnrollment.get(input.studentId) as any;
-    if (!active) throw new HttpError(409, 'No active enrollment to suspend.');
-
-    this.db.transaction(() => {
-      this.stmtSuspendEnrollment.run(input.notes ? `\n[suspend] ${input.notes}` : '\n[suspend]', active.id);
-      this.stmtDeferActiveSemesters.run(input.studentId);
-
-      if (active.class_id) {
-        this.stmtDeleteFutureRosters.run(input.studentId, active.class_id);
-      }
-
-      this.stmtInsertSuspendEvent.run(makeId('eev'), active.id, input.studentId, active.class_id, input.notes || null, input.actorUserId || null);
-    })();
-
-    return { enrollmentId: active.id, classId: active.class_id };
-  }
-
-  resume(input: { studentId: string; classId?: string | null; notes?: string | null; actorUserId?: string | null; }) {
-    const student = this.stmtGetStudent.get(input.studentId) as { id: string; branch_id: string; status: string } | undefined;
+  suspend(input: { studentId: string; notes?: string | null; actorUserId?: string | null; actorName?: string | null }) {
+    const student = this.stmtGetStudent.get(input.studentId) as
+      | { id: string; branch_id: string; status: string }
+      | undefined;
     if (!student) throw new HttpError(404, 'Student not found.');
-    const suspended = this.stmtGetSuspendedEnrollment.get(input.studentId) as any;
-    if (!suspended) throw new HttpError(409, 'No suspended enrollment to resume.');
+    if (student.status !== 'active') {
+      throw new HttpError(409, `Only an active student can be suspended (current status: '${student.status}').`);
+    }
 
-    const classId = input.classId || suspended.class_id;
-    if (!classId) throw new HttpError(400, 'classId required to resume.');
-    const targetClass = this.stmtGetClass.get(classId) as any;
-    if (!targetClass) throw new HttpError(404, 'Resume class not found.');
-    if (targetClass.branch_id !== student.branch_id) throw new HttpError(400, 'Resume class belongs to another branch.');
-    if (targetClass.status !== 'active') throw new HttpError(400, 'Resume class is not active.');
+    // Only active enrollments can legally transition to suspended under the
+    // enrollment state machine. Refuse the whole operation if any other live
+    // lifecycle row exists instead of leaving a suspended profile with a
+    // pending, reserved, frozen, paused, or retake enrollment behind.
+    const incompatible = this.db.prepare(
+      `SELECT status FROM enrollments WHERE student_id = ?
+        AND status IN ('pending','reserved','confirmed','frozen','paused','suspended','retake','conditional_pass')
+        LIMIT 1`,
+    ).get(input.studentId) as { status: string } | undefined;
+    if (incompatible) {
+      throw new HttpError(409, `Resolve the student's '${incompatible.status}' enrollment before suspension.`);
+    }
+
+    const active = this.stmtGetActiveEnrollments.all(input.studentId) as any[];
+    if (active.length === 0) throw new HttpError(409, 'No active enrollment to suspend.');
 
     this.db.transaction(() => {
-      const currentTargetCount = countActiveStudentsInClass(this.db, classId);
-      const targetCapacity = Number(targetClass.capacity ?? 0);
-      if (targetCapacity > 0 && currentTargetCount >= targetCapacity) throw new HttpError(409, 'Resume class is full.');
-
-      this.stmtResumeEnrollment.run(classId, suspended.id);
-      this.stmtActivateDeferredSemesters.run(classId, input.studentId);
-
-      const futureSessions = this.stmtGetFutureSessions.all(classId) as { id: string }[];
-      for (const s of futureSessions) {
-        this.stmtInsertRoster.run(makeId('ros'), s.id, input.studentId);
+      const suspensionBatchId = makeId('ssb');
+      const activeSemesters = this.stmtGetActiveSemesters.all(input.studentId) as Array<{
+        id: string;
+        class_id: string | null;
+      }>;
+      this.stmtInsertSuspensionBatch.run(suspensionBatchId, input.studentId);
+      for (const semester of activeSemesters) {
+        this.stmtInsertSuspensionSemester.run(suspensionBatchId, semester.id, semester.class_id);
       }
 
-      this.stmtInsertResumeEvent.run(makeId('eev'), suspended.id, input.studentId, suspended.class_id, classId, input.notes || null, input.actorUserId || null);
+      for (const enrollment of active) {
+        assertEnrollmentTransition(enrollment.status as EnrollmentStatus, 'suspended');
+        this.stmtSuspendEnrollment.run(
+          input.notes ? `\n[suspend] ${input.notes}` : '\n[suspend]',
+          enrollment.id,
+        );
+        if (enrollment.class_id) {
+          this.stmtDeleteFutureRosters.run(input.studentId, enrollment.class_id);
+        }
+        this.stmtInsertSuspendEvent.run(
+          makeId('eev'), enrollment.id, input.studentId, enrollment.class_id,
+          input.notes || null, input.actorUserId || null,
+        );
+      }
+      this.stmtDeferActiveSemesters.run(input.studentId);
+      const statusUpdate = this.stmtSetStudentStatus.run('suspended', input.studentId, 'active');
+      if (statusUpdate.changes !== 1) {
+        throw new HttpError(409, 'Student status changed concurrently; reload before suspension.');
+      }
+      this.journey.appendEvent({
+        studentId: input.studentId,
+        eventType: JourneyEventType.STATUS_CHANGED,
+        branchId: student.branch_id,
+        actorUserId: input.actorUserId,
+        actorName: input.actorName,
+        payload: { from: 'active', status: 'suspended', enrollmentIds: active.map((row) => row.id) },
+      });
     })();
 
-    return { enrollmentId: suspended.id, classId };
+    return {
+      enrollmentId: active[0].id,
+      classId: active[0].class_id,
+      enrollmentIds: active.map((row) => row.id),
+    };
+  }
+
+  resume(input: { studentId: string; classId?: string | null; notes?: string | null; actorUserId?: string | null; actorName?: string | null; }) {
+    const student = this.stmtGetStudent.get(input.studentId) as
+      | { id: string; branch_id: string; status: string; gender: string }
+      | undefined;
+    if (!student) throw new HttpError(404, 'Student not found.');
+    if (student.status !== 'suspended') {
+      throw new HttpError(409, `Only a suspended student can be resumed (current status: '${student.status}').`);
+    }
+
+    const suspended = this.stmtGetSuspendedEnrollments.all(input.studentId) as any[];
+    if (suspended.length === 0) throw new HttpError(409, 'No suspended enrollment to resume.');
+    const incompatible = this.db.prepare(
+      `SELECT status FROM enrollments WHERE student_id = ?
+        AND status IN ('pending','reserved','confirmed','active','frozen','paused','retake','conditional_pass')
+        LIMIT 1`,
+    ).get(input.studentId) as { status: string } | undefined;
+    if (incompatible) {
+      throw new HttpError(409, `Resolve the student's '${incompatible.status}' enrollment before resuming suspended enrollments.`);
+    }
+    if (input.classId && suspended.length !== 1) {
+      throw new HttpError(409, 'A resume-class override is only valid when exactly one enrollment is suspended.');
+    }
+
+    const targets = suspended.map((enrollment) => {
+      const classId = input.classId || enrollment.class_id;
+      if (!classId) throw new HttpError(400, 'Every suspended enrollment needs a class before it can resume.');
+      const targetClass = this.stmtGetClass.get(classId) as any;
+      if (!targetClass) throw new HttpError(404, 'Resume class not found.');
+      if (targetClass.branch_id !== student.branch_id) throw new HttpError(400, 'Resume class belongs to another branch.');
+      if (targetClass.status !== 'active') throw new HttpError(400, 'Resume class is not active.');
+      assertClassGenderAllows(targetClass, student.gender);
+      return { enrollment, classId, targetClass };
+    });
+
+    this.db.transaction(() => {
+      const openBatch = this.stmtGetOpenSuspensionBatch.get(input.studentId) as { id: string } | undefined;
+      if (!openBatch) {
+        // Pre-authority rows cannot identify which deferred semesters belonged
+        // to the suspension. Reactivating by student or class would revive
+        // unrelated history, so fail closed until the row is repaired with an
+        // exact suspension mapping.
+        throw new HttpError(409, 'Suspension restoration data is missing; repair the suspension record before resume.');
+      }
+      const suspensionSemesters = this.stmtGetSuspensionSemesters.all(openBatch.id) as Array<{
+        semester_id: string;
+        original_class_id: string | null;
+      }>;
+      const checkedClasses = new Set<string>();
+      for (const target of targets) {
+        // Capacity counts distinct students, not enrollment rows. Multiple
+        // suspended terms for this one student in the same class consume one
+        // seat when resumed together.
+        if (checkedClasses.has(target.classId)) continue;
+        const current = countActiveStudentsInClass(this.db, target.classId);
+        const capacity = Number(target.targetClass.capacity ?? 0);
+        if (capacity > 0 && current >= capacity) {
+          throw new HttpError(409, `Resume class "${target.targetClass.name}" is full.`);
+        }
+        checkedClasses.add(target.classId);
+      }
+
+      for (const { enrollment, classId } of targets) {
+        assertEnrollmentTransition(enrollment.status as EnrollmentStatus, 'active');
+        this.stmtResumeEnrollment.run(classId, enrollment.id);
+
+        const futureSessions = this.stmtGetFutureSessions.all(classId) as { id: string }[];
+        for (const session of futureSessions) {
+          this.stmtInsertRoster.run(makeId('ros'), session.id, input.studentId);
+        }
+        this.stmtInsertResumeEvent.run(
+          makeId('eev'), enrollment.id, input.studentId,
+          enrollment.class_id, classId, input.notes || null, input.actorUserId || null,
+        );
+      }
+
+      const overriddenFromClass = input.classId ? suspended[0].class_id as string | null : undefined;
+      for (const semester of suspensionSemesters) {
+        const restoredClassId = input.classId && semester.original_class_id === overriddenFromClass
+          ? input.classId
+          : semester.original_class_id;
+        this.stmtActivateDeferredSemesterById.run(restoredClassId, semester.semester_id);
+      }
+      this.stmtCloseSuspensionBatch.run(openBatch.id);
+
+      const statusUpdate = this.stmtSetStudentStatus.run('active', input.studentId, 'suspended');
+      if (statusUpdate.changes !== 1) {
+        throw new HttpError(409, 'Student status changed concurrently; reload before resume.');
+      }
+      this.journey.appendEvent({
+        studentId: input.studentId,
+        eventType: JourneyEventType.STATUS_CHANGED,
+        branchId: student.branch_id,
+        actorUserId: input.actorUserId,
+        actorName: input.actorName,
+        payload: { from: 'suspended', status: 'active', enrollmentIds: suspended.map((row) => row.id) },
+      });
+    })();
+
+    return {
+      enrollmentId: suspended[0].id,
+      classId: targets[0].classId,
+      enrollmentIds: suspended.map((row) => row.id),
+    };
   }
 
   // ==========================================================================
-  // Phase 1 — Enrollment Lifecycle Engine (blueprint expansion)
-  // ==========================================================================
-  // enroll()/transfer()/suspend()/resume() above are unchanged in behavior
-  // (aside from transfer() now correctly writing 'transferred' instead of
-  // overloading 'completed' — audited as safe, see lifecycle-engine.ts).
-  // Everything below is additive. Each method validates the transition
-  // against ENROLLMENT_TRANSITIONS, updates status/hold_reason/ended_at,
-  // records an enrollment_events row, and appends a student journey event,
-  // mirroring this service's existing pattern.
+  // Enrollment Lifecycle Engine
+  // ===========================================================================
+  // Each named method validates its transition against ENROLLMENT_TRANSITIONS,
+  // updates status/hold_reason/ended_at, records an enrollment_events row, and
+  // appends the corresponding student journey event.
 
   getById(enrollmentId: string) {
     return this.stmtGetEnrollmentById.get(enrollmentId) as any;

@@ -16,6 +16,13 @@ import ConvertToStudentModal from './ConvertToStudentModal';
 import Toast from '../common/Toast';
 import {useAcademicOptions} from '../../hooks/useAcademicOptions';
 
+function placementTotal(visitor: Visitor): number | null {
+  return visitor.placementScore?.total
+    ?? visitor.placementScore?.totalScore
+    ?? visitor.placementScore?.percentage
+    ?? null;
+}
+
 interface VisitorsViewProps {
   visitors: Visitor[];
   classes: Class[];
@@ -35,7 +42,7 @@ interface VisitorsViewProps {
     followUpStatus: 'high_interest' | 'medium_interest' | 'low_interest' | 'not_answering' | 'no_interest', 
     nextContactDate: string, notes?: string
   ) => Promise<void>;
-  addVisitorFollowUp: (visitorId: string, notes: string, outcome?: string) => Promise<void>;
+  addVisitorFollowUp: (visitorId: string, notes: string, outcome?: string, nextContactDate?: string) => Promise<void>;
   updateVisitor: (visitorId: string, updatedFields: Partial<Visitor>) => Promise<void>;
   reloadVisitors: (query?: VisitorQuery) => Promise<void>;
   /** Server-computed KPIs. Null until the first load resolves. */
@@ -424,7 +431,7 @@ export default function VisitorsView({
                         <tr key={v.id} onClick={() => setSelectedVisitorId(v.id)} className={`hover:bg-indigo-50/15 transition-all cursor-pointer ${selectedVisitorId === v.id ? 'bg-indigo-50/25 border-r-2 border-indigo-600' : ''}`}>
                           <td className="py-3 px-3"><p className="font-extrabold text-slate-800 text-xs sm:text-sm">{v.fullName}</p><p className="text-[10px] text-slate-400 mt-0.5">Visit: {v.visitDate}</p></td>
                           <td className="py-3 px-3"><p className="font-mono font-bold text-slate-700 text-xs">{v.phone}</p><div className="mt-1"><span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border ${src.class}`}>{src.icon} {src.label}</span></div></td>
-                          <td className="py-3 px-3"><div className="flex flex-col gap-1"><span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md w-fit border border-indigo-100">{v.interestedCourse || '—'}</span><span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-semibold border w-fit ${intBadge}`}>{v.followUpStatus?.replace('_', ' ')}</span>{v.placementScore && <span className="inline-flex items-center gap-0.5 text-[9px] text-emerald-700 font-extrabold bg-emerald-50 px-1.5 rounded-md w-fit"><Award className="w-3 h-3" /> {v.placementScore.total} pts</span>}<span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-semibold border w-fit ${PLACEMENT_BADGE[placementKey(v.placementStatus)]}`}>{PLACEMENT_LABEL[placementKey(v.placementStatus)]}</span></div></td>
+                          <td className="py-3 px-3"><div className="flex flex-col gap-1"><span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md w-fit border border-indigo-100">{v.interestedCourse || '—'}</span><span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-semibold border w-fit ${intBadge}`}>{v.followUpStatus?.replace('_', ' ')}</span>{placementTotal(v) != null && <span className="inline-flex items-center gap-0.5 text-[9px] text-emerald-700 font-extrabold bg-emerald-50 px-1.5 rounded-md w-fit"><Award className="w-3 h-3" /> {placementTotal(v)} pts</span>}<span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-semibold border w-fit ${PLACEMENT_BADGE[placementKey(v.placementStatus)]}`}>{PLACEMENT_LABEL[placementKey(v.placementStatus)]}</span></div></td>
                           {/* Row-level overdue marker. The COUNT is server-computed;
                               this only flags the row the user is looking at, using the
                               same local-calendar `todayIso` the server's today() matches. */}
@@ -503,7 +510,7 @@ export default function VisitorsView({
                               </div>
                               <div className="text-[10px] text-slate-500 flex items-center justify-between gap-2">
                                 <span className="truncate">{v.interestedCourse || 'No course interest recorded'}</span>
-                                {v.placementScore && <span className="text-emerald-700 font-black">{v.placementScore.total}/100</span>}
+                                {placementTotal(v) != null && <span className="text-emerald-700 font-black">{placementTotal(v)}/100</span>}
                               </div>
                               <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2" onClick={(e) => e.stopPropagation()}>
                                 <button onClick={() => setSelectedVisitorId(v.id)} className="text-[9px] font-bold text-slate-500 hover:text-indigo-600">Open workspace</button>

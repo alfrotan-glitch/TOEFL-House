@@ -3,8 +3,8 @@ Integration test: Students list — N+1 fix verification (Audit §7.1)
 Verifies that listing students returns semesters correctly via batch query.
 */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { db, initSchema } from '../db/connection.js';
-import { id, today } from '../utils/ids.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { id, today } from '../../../utils/ids.js';
 
 beforeAll(() => {
   initSchema();

@@ -8,22 +8,22 @@
  * concurrent operations, API validation, database integrity, foreign key integrity,
  * pipeline state integrity, event generation, rule engine interaction, and failure scenarios.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { db, initSchema } from '../db/connection.js';
-import { id, today } from '../utils/ids.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { ensureOrganizationHierarchy } from '../db/organizationHierarchy.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { id, today } from '../../../utils/ids.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { ensureOrganizationHierarchy } from '../../../db/organizationHierarchy.js';
 import type Express from 'express';
 import supertest from 'supertest';
 
 // ── Import the Express app after DB setup ──────────────────────────────────
 // We'll build a minimal app that mounts the visitors router
 import express from 'express';
-import { visitorsRouter } from '../routes/visitors.routes.js';
-import placementRouter from '../routes/placement.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
+import { visitorsRouter } from '../../../routes/visitors.routes.js';
+import placementRouter from '../../../routes/placement.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
 
 function createApp() {
   const app = express();
@@ -2024,7 +2024,7 @@ describe('Visitor Module', () => {
       expect(payment.payment_method).toBe('bank_transfer');
     });
 
-    it('should default to cash for invalid payment method', async () => {
+    it('should reject an invalid payment method instead of silently recording cash', async () => {
       const vid = createVisitorDirect({ gender: 'male', branch_id: BRANCH_A });
 
       const res = await supertest(app)
@@ -2032,9 +2032,8 @@ describe('Visitor Module', () => {
         .set(authHeader(registrarA))
         .send({ classId: CLASS_A, amountPaid: 3000, semesterFee: 5000, paymentMethod: 'crypto' });
 
-      expect(res.status).toBe(201);
-      const payment = db.prepare('SELECT * FROM payments WHERE student_id = ?').get(res.body.studentId) as any;
-      expect(payment.payment_method).toBe('cash');
+      expect(res.status).toBe(400);
+      expect(db.prepare('SELECT id FROM students WHERE lead_id = ?').get(vid)).toBeUndefined();
     });
   });
 

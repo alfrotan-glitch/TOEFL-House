@@ -16,7 +16,7 @@ export const validateEmail = (email: string): boolean => {
 };
 
 export const calculateTotalTuitionRaw = (student: Student): number => {
-  return student.semesters?.reduce((acc, s) => acc + s.feeAmount, 0) || 0;
+  return student.semesters?.reduce((acc, s) => acc + (s.feeAmount ?? 0), 0) || 0;
 };
 
 export const calculateTotalTuition = (student: Student): number => {

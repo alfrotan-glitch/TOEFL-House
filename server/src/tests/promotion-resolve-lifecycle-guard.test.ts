@@ -73,7 +73,9 @@ let otherHod: TokenPayload;
 
 /** A class parked directly at `stage`, plus a student holding one unpaid
  *  ACTIVE semester in it. Mirrors the real shape: fee owed, nothing paid. */
+let studentPhoneSequence = 0;
 function seedCase(key: string, stage: ClassStage, branchId = BRANCH) {
+  studentPhoneSequence += 1;
   const classId = `prl_c_${key}`;
   const studentId = `prl_s_${key}`;
   const semesterId = `prl_sem_${key}`;
@@ -84,7 +86,7 @@ function seedCase(key: string, stage: ClassStage, branchId = BRANCH) {
   db.prepare(
     `INSERT OR IGNORE INTO students (id, student_code, full_name, status, registration_date, branch_id, gender, phone)
      VALUES (?, ?, ?, 'active', ?, ?, 'male', ?)`
-  ).run(studentId, `TH-PRL-${key}`, `Student ${key}`, today(), branchId, `0700${key.padStart(6, '0').slice(0, 6)}`);
+  ).run(studentId, `TH-PRL-${key}`, `Student ${key}`, today(), branchId, `0700${String(studentPhoneSequence).padStart(6, '0')}`);
   db.prepare(
     `INSERT OR IGNORE INTO student_semesters (id, student_id, semester_name, class_id, enroll_date, fee_amount, net_fee_amount, status)
      VALUES (?, ?, 'Term 1', ?, ?, 20000, 20000, 'active')`

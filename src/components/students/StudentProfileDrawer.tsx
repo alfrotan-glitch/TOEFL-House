@@ -29,10 +29,20 @@ interface StudentProfileDrawerProps {
   exams: Exam[];
   examResults: ExamResult[];
   classes: Class[];
-  isOwnerOrManager: boolean;
-  isRegistrar: boolean;
+  canEditStudent: boolean;
+  canAssignClass: boolean;
+  canCreatePayment: boolean;
+  canViewFinance: boolean;
+  canApproveRefund: boolean;
+  canSuspendStudent: boolean;
+  canResumeStudent: boolean;
+  canPrintStudent: boolean;
   updateStudent: (studentId: string, updatedFields: Partial<Student>) => void;
-  updateStudentStatus: (studentId: string, status: 'active' | 'inactive' | 'graduated' | 'suspended') => void;
+  updateStudentStatus: (
+    studentId: string,
+    status: 'active' | 'inactive' | 'graduated' | 'suspended',
+    fromStatus?: Student['status'],
+  ) => void;
   issueStudentCard: (
     studentId: string,
     cardDesign: {
@@ -62,7 +72,7 @@ interface StudentProfileDrawerProps {
 const STUDENT_TRANSITIONS: Record<string, readonly string[]> = {
   active: ['active', 'inactive', 'suspended', 'graduated'],
   inactive: ['inactive', 'active', 'graduated'],
-  suspended: ['suspended', 'active', 'inactive'],
+  suspended: ['suspended', 'active'],
   graduated: ['graduated'],
 };
 
@@ -71,9 +81,13 @@ function canTransition(from: string | null | undefined, to: string): boolean {
 }
 
 function terminalHint(from: string | null | undefined): string {
-  return String(from) === 'graduated'
-    ? 'This student has graduated — graduation is a final state.'
-    : `Not allowed from "${from}".`;
+  if (String(from) === 'graduated') {
+    return 'This student has graduated — graduation is a final state.';
+  }
+  if (String(from) === 'suspended') {
+    return 'Resume this student before using ordinary status actions.';
+  }
+  return `Not allowed from "${from}".`;
 }
 
 const STATUS_ACTIONS = [
@@ -85,7 +99,9 @@ const STATUS_ACTIONS = [
 export default function StudentProfileDrawer({
   attendanceSummary,
   student, serverBalance, payments, attendance, exams, examResults, classes,
-  isOwnerOrManager, isRegistrar, updateStudent, updateStudentStatus, issueStudentCard,
+  canEditStudent, canAssignClass, canCreatePayment, canViewFinance, canApproveRefund,
+  canSuspendStudent, canResumeStudent, canPrintStudent,
+  updateStudent, updateStudentStatus, issueStudentCard,
   triggerToast, onOpenEnroll, onOpenExtraClass, onOpenRefund, onPayInstallment
 }: StudentProfileDrawerProps) {
   const [drawerTab, setDrawerTab] = useState<'info' | 'card'>('info');
@@ -103,7 +119,7 @@ export default function StudentProfileDrawer({
     if (statusBusy) return;
     setStatusBusy(true);
     try {
-      await updateStudentStatus(student.id, to);
+      await updateStudentStatus(student.id, to, student.status);
       triggerToast(successMessage ?? `Student marked ${to}.`, 'success');
     } catch (err) {
       triggerToast(err instanceof Error ? err.message : `Could not set status to ${to}.`, 'error');
@@ -230,14 +246,15 @@ export default function StudentProfileDrawer({
         </div>
         
         <div className="flex flex-wrap gap-2 items-center">
-          {isOwnerOrManager && (
+          {canEditStudent && (
             <div className="flex gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
               {/* Lifecycle-aware controls. Graduation is terminal server-side
                   (audit STU-C2), so offering "Active"/"Hold" on a graduated
                   student would only produce a 409. Suspended students must go
                   through the suspend/resume workflow below, not these. */}
               {STATUS_ACTIONS.map(({ to, label, activeClass }) => {
-                const allowed = canTransition(student.status, to);
+                const allowed = canTransition(student.status, to)
+                  && !(student.status === 'suspended' && to === 'active');
                 return (
                   <button
                     key={to}
@@ -252,27 +269,27 @@ export default function StudentProfileDrawer({
               })}
             </div>
           )}
-          {isRegistrar && (
+          {canEditStudent && (
             <button onClick={() => setEditingIdentity((v) => !v)} className="flex items-center gap-1 text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-100 hover:bg-indigo-100 cursor-pointer">
               <Pencil className="w-3 h-3" /> Edit profile
             </button>
           )}
-          {isRegistrar && student.status !== 'suspended' && (
+          {canSuspendStudent && student.status === 'active' && (
             <button disabled={statusBusy} onClick={() => changeStatus('suspended', 'Student suspended.')} className="flex items-center gap-1 text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-amber-50 text-amber-700 border border-amber-100 hover:bg-amber-100 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer">
               <Ban className="w-3 h-3" /> Suspend
             </button>
           )}
-          {isRegistrar && student.status === 'suspended' && (
+          {canResumeStudent && student.status === 'suspended' && (
             <button disabled={statusBusy} onClick={() => changeStatus('active', 'Student resumed.')} className="flex items-center gap-1 text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-100 hover:bg-emerald-100 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer">
               <CheckCircle2 className="w-3 h-3" /> Resume
             </button>
           )}
-          {isRegistrar && (
+          {canAssignClass && (
             <button onClick={onOpenExtraClass} className="flex items-center gap-1 text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-sky-50 text-sky-700 border border-sky-100 hover:bg-sky-100 cursor-pointer">
               <Plus className="w-3 h-3" /> Extra Class
             </button>
           )}
-          {isOwnerOrManager && (
+          {canApproveRefund && (
             <button onClick={onOpenRefund} className="flex items-center gap-1 text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-rose-50 text-rose-700 border border-rose-100 hover:bg-rose-100 cursor-pointer">
               <RotateCcw className="w-3 h-3" /> Refund
             </button>
@@ -301,18 +318,20 @@ export default function StudentProfileDrawer({
       {/* Dashboard Widgets */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Finance Widget */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
-          <div className="flex justify-between items-center mb-2">
-            <span className="font-bold text-slate-700 text-xs flex items-center gap-1"><CreditCard className="w-4 h-4 text-indigo-500" /> Finance</span>
-            <span className="font-mono font-black text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded text-[10px]">{paidPercentage}% Paid</span>
+        {canViewFinance && (
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
+            <div className="flex justify-between items-center mb-2">
+              <span className="font-bold text-slate-700 text-xs flex items-center gap-1"><CreditCard className="w-4 h-4 text-indigo-500" /> Finance</span>
+              <span className="font-mono font-black text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded text-[10px]">{paidPercentage}% Paid</span>
+            </div>
+            <div className="w-full bg-slate-200 rounded-full h-2 mb-3"><div className="bg-indigo-600 h-2 rounded-full" style={{ width: `${paidPercentage}%` }}></div></div>
+            <div className="grid grid-cols-3 text-[10px] text-slate-500 font-bold">
+              <div><span className="block text-slate-400">Total</span><span className="font-mono text-slate-800 text-xs">{formatAFN(Number(totalTuition||0))}</span></div>
+              <div className="text-center"><span className="block text-slate-400">Paid</span><span className="font-mono text-emerald-600 text-xs">{formatAFN(Number(totalPaidFees||0))}</span></div>
+              <div className="text-end"><span className="block text-slate-400">Due</span><span className={`font-mono text-xs ${remainingDebt > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>{formatAFN(Number(remainingDebt||0))}</span></div>
+            </div>
           </div>
-          <div className="w-full bg-slate-200 rounded-full h-2 mb-3"><div className="bg-indigo-600 h-2 rounded-full" style={{ width: `${paidPercentage}%` }}></div></div>
-          <div className="grid grid-cols-3 text-[10px] text-slate-500 font-bold">
-            <div><span className="block text-slate-400">Total</span><span className="font-mono text-slate-800 text-xs">{formatAFN(Number(totalTuition||0))}</span></div>
-            <div className="text-center"><span className="block text-slate-400">Paid</span><span className="font-mono text-emerald-600 text-xs">{formatAFN(Number(totalPaidFees||0))}</span></div>
-            <div className="text-end"><span className="block text-slate-400">Due</span><span className={`font-mono text-xs ${remainingDebt > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>{formatAFN(Number(remainingDebt||0))}</span></div>
-          </div>
-        </div>
+        )}
 
         {/* Attendance Widget */}
         <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
@@ -334,35 +353,36 @@ export default function StudentProfileDrawer({
         </div>
 
         {/* Alerts Widget */}
-        {((attendanceRate !== null && attendanceRate < 85) || remainingDebt > 0) ? (
+        {((attendanceRate !== null && attendanceRate < 85) || (canViewFinance && remainingDebt > 0)) ? (
           <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 shadow-xs flex flex-col justify-center">
             <div className="flex items-center gap-1.5 text-rose-800 mb-1"><AlertCircle className="w-4 h-4 text-rose-600 shrink-0" /><span className="font-extrabold text-[11px]">Alerts Active</span></div>
             <p className="text-[10px] text-rose-700 leading-relaxed font-semibold">
               {attendanceRate !== null && attendanceRate < 85 && `⚠️ Low attendance (${attendanceRate}%). `}
-              {remainingDebt > 0 && `💳 Outstanding debt: ${formatAFN(Number(remainingDebt||0))} AFN.`}
+              {canViewFinance && remainingDebt > 0 && `💳 Outstanding debt: ${formatAFN(Number(remainingDebt||0))} AFN.`}
             </p>
           </div>
         ) : (
           <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 shadow-xs flex flex-col justify-center">
             <div className="flex items-center gap-1.5 text-emerald-800 mb-1"><CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" /><span className="font-extrabold text-[11px]">All Clear</span></div>
-            <p className="text-[10px] text-emerald-700 leading-relaxed font-semibold">Student is in good standing. No academic or financial alerts.</p>
+            <p className="text-[10px] text-emerald-700 leading-relaxed font-semibold">{canViewFinance ? 'Student is in good standing. No academic or financial alerts.' : 'No academic alerts.'}</p>
           </div>
         )}
       </div>
 
       {/* Tabs */}
       <div className="flex bg-slate-100 p-1 rounded-2xl border border-slate-200 w-full max-w-xs mx-auto">
-        <button onClick={() => setDrawerTab('info')} className={`flex-1 text-center py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${drawerTab === 'info' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-600'}`}>Academic & Finance</button>
-        <button onClick={() => setDrawerTab('card')} className={`flex-1 text-center py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${drawerTab === 'card' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-600'}`}>ID Card Studio</button>
+        <button onClick={() => setDrawerTab('info')} className={`flex-1 text-center py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${drawerTab === 'info' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-600'}`}>{canViewFinance ? 'Academic & Finance' : 'Academic'}</button>
+        {canPrintStudent && <button onClick={() => setDrawerTab('card')} className={`flex-1 text-center py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${drawerTab === 'card' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-600'}`}>ID Card Studio</button>}
       </div>
 
-      {drawerTab === 'info' ? (
+      {drawerTab === 'info' || !canPrintStudent ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           
           {/* Left Column: History & Timelines */}
           <div className="space-y-5">
             {/* Installments & Payments */}
-            <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
+            {canViewFinance && (
+              <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
               <h4 className="font-extrabold text-slate-800 text-xs flex items-center gap-1.5 border-b border-slate-100 pb-2 mb-3"><CheckSquare className="w-4 h-4 text-indigo-500" /> Installments & Payments</h4>
               
               {/* Installment Plan */}
@@ -374,8 +394,10 @@ export default function StudentProfileDrawer({
                       <span className="flex-1 text-[11px] font-bold text-slate-700">{formatAFN(Number(inst.amount||0))}</span>
                       {inst.status === 'paid' ? (
                         <span className="text-[9px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-bold">Paid</span>
-                      ) : (
+                      ) : canCreatePayment ? (
                         <button onClick={() => onPayInstallment(inst.id, Number(inst.amount||0))} className="text-[9px] bg-indigo-600 text-white px-2 py-1 rounded-lg font-bold cursor-pointer hover:bg-indigo-700">Settle Now</button>
+                      ) : (
+                        <span className="text-[9px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full font-bold">Pending</span>
                       )}
                     </div>
                   ))}
@@ -392,7 +414,8 @@ export default function StudentProfileDrawer({
                 ))}
                 {payments.filter(p => p.studentId === student.id).length === 0 && <p className="text-[10px] text-slate-400 text-center py-4 italic">No transactions yet.</p>}
               </div>
-            </div>
+              </div>
+            )}
 
             {/* Exam Progress */}
             <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
@@ -423,14 +446,14 @@ export default function StudentProfileDrawer({
                 <div className="col-span-2"><span className="text-slate-400 block">Address</span>{student.addressRegion || 'N/A'}</div>
                 <div className="col-span-2"><span className="text-slate-400 block">Emergency Contact</span>{student.emergencyContactName} - <span className="font-mono">{student.emergencyContactPhone}</span></div>
               </div>
-              {isRegistrar && (
+              {canAssignClass && (
                 <button onClick={onOpenEnroll} className="w-full mt-4 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold py-2 rounded-xl text-[10px] flex items-center justify-center gap-1 border border-indigo-100 cursor-pointer"><Plus className="w-3 h-3" /> Add New Semester</button>
               )}
             </div>
 
             <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
               <h4 className="font-extrabold text-slate-800 text-xs flex items-center gap-1.5 border-b border-slate-100 pb-2 mb-3">Student Journey</h4>
-              <StudentJourneyTimeline studentId={student.id} />
+              <StudentJourneyTimeline studentId={student.id} canViewFinance={canViewFinance} />
             </div>
           </div>
         </div>

@@ -364,7 +364,7 @@ export interface Student {
   status: 'active' | 'inactive' | 'graduated' | 'suspended';
   registrationDate: string;
   branchId: string;
-  discountPercent: number;
+  discountPercent?: number;
   leadId?: string;
   fatherName?: string;
   addressRegion?: string;
@@ -396,9 +396,13 @@ export interface PlacementScore {
   vocabulary?: number;
   reading?: number;
   total?: number | null;
+  totalScore?: number | null;
   percentage?: number | null;
+  outcome?: 'passed' | 'failed' | string;
   levelRecommendation?: string | null;
   recommendationLevelId?: string | null;
+  recommendation?: { levelId?: string | null; text?: string | null; ruleId?: string | null };
+  results?: Array<{ component_key?: string; key?: string; label?: string; score?: number | null; percentage?: number | null }>;
   attemptId?: string;
   method?: string | null;
   date?: string;
@@ -428,7 +432,7 @@ export interface Semester {
   semesterName: string;
   classId?: string;
   enrollDate: string;
-  feeAmount: number;
+  feeAmount?: number;
   netFeeAmount?: number;
   status: 'active' | 'completed' | 'deferred';
   /** Gradebook Engine (Academic Module Phase 4) — populated once, at
@@ -851,7 +855,9 @@ export interface ConversionEligibility {
     | 'lead_lost'
     | 'student_exists'
     | 'class_not_found'
-    | 'class_inactive';
+    | 'class_wrong_branch'
+    | 'class_inactive'
+    | 'placement_policy_unconfigured';
   reason: string;
   requirementMode: string;
   placementStatus: string;

@@ -32,6 +32,7 @@ import { JourneyEventType } from '../core/journey/event-types.js';
 import { nextReceiptNumber, nextStudentCode } from '../utils/receipt.js';
 import { nextInvoiceNumber } from '../utils/invoice.js';
 import { SYSTEM_DEFAULTS } from '../core/configuration/policy-catalog.js';
+import { assertStudentPhoneSyntax, studentPhoneKey } from '../core/students/student-input.js';
 
 export const visitorsRouter = Router();
 visitorsRouter.use(authenticate);
@@ -40,7 +41,7 @@ visitorsRouter.use(authenticate);
 const stmtGetVisitorById = db.prepare('SELECT * FROM visitors WHERE id = ?');
 const stmtFindVisitorByTazkira = db.prepare("SELECT id FROM visitors WHERE tazkira_no = ? LIMIT 1");
 const stmtFindVisitorByTazkiraExcluding = db.prepare("SELECT id FROM visitors WHERE tazkira_no = ? AND id <> ? LIMIT 1");
-const stmtFindStudentByTazkiraNo = db.prepare("SELECT id FROM students WHERE tazkira_no = ? LIMIT 1");
+const stmtFindStudentByTazkiraNo = db.prepare("SELECT id, lead_id FROM students WHERE tazkira_no = ? LIMIT 1");
 const stmtGetProgramVersionForVisitor = db.prepare(`SELECT pv.id, pv.program_id, pv.status, p.name AS program_name, p.branch_id FROM program_versions pv JOIN programs p ON p.id = pv.program_id WHERE pv.id = ?`);
 const stmtGetAllVisitors = db.prepare('SELECT * FROM visitors ORDER BY visit_date DESC LIMIT ? OFFSET ?');
 const stmtGetVisitorsByBranch = db.prepare('SELECT * FROM visitors WHERE branch_id = ? ORDER BY visit_date DESC LIMIT ? OFFSET ?');
@@ -72,7 +73,15 @@ const stmtGetPipelineByBranch = db.prepare('SELECT stage, COUNT(*) as count FROM
 // Convert statements
 const stmtGetClassForConvert = db.prepare('SELECT * FROM classes WHERE id = ?');
 const stmtGetStudentByLeadId = db.prepare('SELECT id FROM students WHERE lead_id = ?');
-const stmtUpdateVisitorConverted = db.prepare("UPDATE visitors SET status = 'registered', stage = 'enrollment' WHERE id = ?");
+const stmtGetStudentByPhoneKey = db.prepare(
+  `SELECT id FROM students
+    WHERE phone IS NOT NULL AND TRIM(phone) <> ''
+      AND SUBSTR(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone,' ',''),'-',''),'(',''),')',''),'+',''),'.',''),'/',''), -9) = ?
+    LIMIT 1`,
+);
+const stmtGetStudentByEmail = db.prepare("SELECT id FROM students WHERE lower(trim(email)) = lower(trim(?)) LIMIT 1");
+const stmtGetStudentByTazkira = db.prepare('SELECT id FROM students WHERE tazkira_no = ? LIMIT 1');
+const stmtUpdateVisitorConverted = db.prepare("UPDATE visitors SET status = 'registered', stage = 'enrollment', placement_requirement_mode = COALESCE(?, placement_requirement_mode) WHERE id = ?");
 const stmtInsertConvertedStudent = db.prepare(
   `INSERT INTO students (id, student_code, full_name, phone, email, qr_code, status, registration_date, branch_id, discount_percent, gender, placement_score, notes, father_name, address_region, tazkira_no, whatsapp, dob, school_or_university, emergency_contact_name, emergency_contact_phone, lead_id) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
@@ -154,8 +163,10 @@ function assertTazkiraAvailable(tazkira: string | null, excludeVisitorId?: strin
     ? stmtFindVisitorByTazkiraExcluding.get(tazkira, excludeVisitorId)
     : stmtFindVisitorByTazkira.get(tazkira);
   if (clash) throw new HttpError(409, 'A visitor with this Tazkira/ID number already exists.');
-  const asStudent = stmtFindStudentByTazkiraNo.get(tazkira);
-  if (asStudent) throw new HttpError(409, 'A student with this Tazkira/ID number already exists.');
+  const asStudent = stmtFindStudentByTazkiraNo.get(tazkira) as { id: string; lead_id: string | null } | undefined;
+  if (asStudent && (!excludeVisitorId || asStudent.lead_id !== excludeVisitorId)) {
+    throw new HttpError(409, 'A student with this Tazkira/ID number already exists.');
+  }
 }
 
 /**
@@ -207,8 +218,11 @@ function assertVisitorStage(stage: string): void {
   if (!(VISITOR_FLOW as readonly string[]).includes(stage)) throw new HttpError(400, `Invalid visitor stage "${stage}".`);
 }
 
-function assertBranchTargetAccess(req: import('express').Request, branchId: string, ownerBranchId: string): void {
-  if (branchId !== ownerBranchId && !canAccessBranchResource(req, branchId)) {
+function assertBranchTargetAccess(req: import('express').Request, branchId: string): void {
+  // A user's home branch is an identity attribute, never an authorization
+  // fallback. The permission supplying this request must itself reach the
+  // target branch (D-60/D-67).
+  if (!canAccessBranchResource(req, branchId)) {
     throw new HttpError(403, 'Target branch is outside your authorized scope.');
   }
 }
@@ -246,12 +260,24 @@ function readVisitorFilters(req: import('express').Request): VisitorFilters {
     const raw = req.query[key];
     return typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : undefined;
   };
+  const status = str('status');
+  const source = str('source');
+  const interest = str('interest');
+  const placement = str('placement');
+  if (status && !['all', 'pending', 'registered', 'lost'].includes(status)) {
+    throw new HttpError(400, 'Invalid visitor status filter.');
+  }
+  if (source && source !== 'all' && !VISITOR_SOURCES.has(source)) {
+    throw new HttpError(400, 'Invalid visitor source filter.');
+  }
+  if (interest && interest !== 'all' && !FOLLOW_UP_STATUSES.has(interest)) {
+    throw new HttpError(400, 'Invalid visitor interest filter.');
+  }
+  if (placement && !['all', 'not_started', 'scheduled', 'in_progress', 'completed', 'waived', 'needs_assessment'].includes(placement)) {
+    throw new HttpError(400, 'Invalid visitor placement filter.');
+  }
   return {
-    search: str('search'),
-    status: str('status'),
-    source: str('source'),
-    interest: str('interest'),
-    placement: str('placement'),
+    search: str('search'), status, source, interest, placement,
     overdueOnly: req.query.overdue === 'true' || req.query.overdue === '1',
   };
 }
@@ -267,12 +293,24 @@ function requireVisitor(req: import('express').Request, visitorId: string): any 
   return visitor;
 }
 
+function parseJsonObject(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value !== 'string' || value.trim() === '') return undefined;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function mapVisitorBase(row: any) {
   return {
     id: row.id, serialNo: row.serial_no, fullName: row.full_name, phone: row.phone, email: row.email, gender: row.gender, source: row.source,
     campaignId: row.campaign_id, stage: row.stage, assignedTo: row.assigned_to, visitDate: row.visit_date, status: row.status, notes: row.notes,
     branchId: row.branch_id, interestedCourse: row.interested_course, followUpStatus: row.follow_up_status, nextContactDate: row.next_contact_date,
-    placementScore: row.placement_score ? JSON.parse(row.placement_score) : undefined, programVersionId: row.program_version_id ?? null, placementMethod: row.placement_method ?? null, placementStatus: row.placement_status ?? 'not_started', fatherName: row.father_name, addressRegion: row.address_region,
+    placementScore: parseJsonObject(row.placement_score), programVersionId: row.program_version_id ?? null, placementMethod: row.placement_method ?? null, placementStatus: row.placement_status ?? 'not_started', fatherName: row.father_name, addressRegion: row.address_region,
     tazkiraNo: row.tazkira_no, whatsapp: row.whatsapp, dob: row.dob, schoolOrUniversity: row.school_or_university,
     emergencyContactName: row.emergency_contact_name, emergencyContactPhone: row.emergency_contact_phone, createdAt: row.created_at,
   };
@@ -441,7 +479,12 @@ visitorsRouter.get('/pipeline', requirePermission('Lead.View'), ah(async (req, r
 // ============================================================================ 
 visitorsRouter.post('/', requirePermission('Lead.Create'), ah(async (req, res) => {
   const user = getUserContext(req);
-  const { gender, source, campaignId, stage, assignedTo, branchId, programVersionId } = req.body;
+  const body = req.body ?? {};
+  const { gender, source, stage } = body;
+  const campaignId = optionalText(body.campaignId, 'Campaign id', TEXT_LIMITS.short);
+  const assignedTo = optionalText(body.assignedTo, 'Assigned user id', TEXT_LIMITS.short);
+  const branchId = optionalText(body.branchId, 'Branch id', TEXT_LIMITS.short);
+  const programVersionId = optionalText(body.programVersionId, 'Program version id', TEXT_LIMITS.short);
   // Name the field that is ACTUALLY missing. Throwing
   // "Full name, gender, and source are required." while testing only gender and
   // source tells a request that supplied a full name that the full name is
@@ -453,19 +496,23 @@ visitorsRouter.post('/', requirePermission('Lead.Create'), ah(async (req, res) =
   assertVisitorSource(source);
   // One normalization/validation authority, shared with PATCH (audit V-4).
   // Type-checks, trims and bounds every text field; throws 400 on a non-string.
-  const text = normalizeVisitorText(req.body as Record<string, unknown>);
-  const fullName = requiredText(req.body?.fullName, 'Full name', TEXT_LIMITS.name);
+  const text = normalizeVisitorText(body);
+  const fullName = requiredText(body.fullName, 'Full name', TEXT_LIMITS.name);
   const { phone = null, email = null, notes = null, interestedCourse = null, fatherName = null,
           addressRegion = null, tazkiraNo = null, whatsapp = null, schoolOrUniversity = null,
           emergencyContactName = null, emergencyContactPhone = null } = text;
-  const followUpStatus = req.body?.followUpStatus;
-  const nextContactDate = assertOptionalIsoDate(req.body?.nextContactDate, 'Next contact date');
-  const dob = assertOptionalIsoDate(req.body?.dob, 'Date of birth');
+  if (phone) assertStudentPhoneSyntax(phone);
+  const followUpStatus = body.followUpStatus;
+  const nextContactDate = assertOptionalIsoDate(body.nextContactDate, 'Next contact date');
+  const dob = assertOptionalIsoDate(body.dob, 'Date of birth');
   // National ID uniqueness — same policy as students (audit V-2).
   assertTazkiraAvailable(tazkiraNo);
   const targetBranchId = branchId || user.branchId;
-  assertBranchTargetAccess(req, targetBranchId, user.branchId);
-  const targetStage = stage || 'lead';
+  assertBranchTargetAccess(req, targetBranchId);
+  if (stage != null && stage !== 'lead') {
+    throw new HttpError(400, 'New visitors must start at the lead stage.');
+  }
+  const targetStage = 'lead';
   let selectedProgramVersionId: string | null = null;
   let resolvedProgramVersionId = programVersionId || null;
   if (!resolvedProgramVersionId) {
@@ -484,7 +531,7 @@ visitorsRouter.post('/', requirePermission('Lead.Create'), ah(async (req, res) =
   if (assignedTo) {
     const assignee = db.prepare('SELECT id, branch_id, status FROM users WHERE id = ?').get(assignedTo) as any;
     if (!assignee || assignee.status === 'inactive') throw new HttpError(400, 'Assigned user is not active.');
-    if (assignee.branch_id !== targetBranchId && !canAccessBranchResource(req, assignee.branch_id)) throw new HttpError(403, 'Assigned user is outside the target branch scope.');
+    if (assignee.branch_id !== targetBranchId) throw new HttpError(400, 'Assigned user must belong to the target branch.');
   }
   if (campaignId) {
     const campaign = db.prepare('SELECT id, branch_id, status FROM campaigns WHERE id = ?').get(campaignId) as any;
@@ -518,40 +565,62 @@ visitorsRouter.post('/', requirePermission('Lead.Create'), ah(async (req, res) =
 // ============================================================================ 
 visitorsRouter.patch('/:id', requirePermission('Lead.Edit'), ah(async (req, res) => {
   const existing = requireVisitor(req, req.params.id);
-  const f = req.body;
+  const f = { ...(req.body ?? {}) } as Record<string, unknown>;
+  for (const [key, label] of [
+    ['campaignId', 'Campaign id'],
+    ['assignedTo', 'Assigned user id'],
+    ['programVersionId', 'Program version id'],
+  ] as const) {
+    if (f[key] !== undefined) f[key] = optionalText(f[key], label, TEXT_LIMITS.short);
+  }
   if (f.stage !== undefined && f.stage !== existing.stage) {
     throw new HttpError(400, 'Stage changes must use the stage workflow endpoint.');
   }
-  if (f.source !== undefined) assertVisitorSource(f.source);
-  if (f.gender !== undefined) assertVisitorGender(f.gender);
-  if (f.followUpStatus !== undefined) assertFollowUpStatus(f.followUpStatus);
+  if (f.source !== undefined) {
+    if (typeof f.source !== 'string') throw new HttpError(400, 'Invalid lead source.');
+    assertVisitorSource(f.source);
+  }
+  if (f.gender !== undefined) {
+    if (typeof f.gender !== 'string') throw new HttpError(400, 'Invalid gender.');
+    assertVisitorGender(f.gender);
+  }
+  if (f.followUpStatus !== undefined) {
+    if (typeof f.followUpStatus !== 'string') throw new HttpError(400, 'Invalid follow-up status.');
+    assertFollowUpStatus(f.followUpStatus);
+  }
   // V-4: the SAME normalization authority CREATE uses. Validating enums alone
   // lets a 100,000-character name, a non-string phone and "9999-99-99" as a
   // date through to storage.
   const text = normalizeVisitorText(f as Record<string, unknown>);
+  if (text.phone) assertStudentPhoneSyntax(text.phone);
   if (f.nextContactDate !== undefined) assertOptionalIsoDate(f.nextContactDate, 'Next contact date');
   if (f.dob !== undefined) assertOptionalIsoDate(f.dob, 'Date of birth');
   if ('tazkiraNo' in text) assertTazkiraAvailable(text.tazkiraNo, existing.id);
   if (f.programVersionId !== undefined && f.programVersionId !== null) { const pv = stmtGetProgramVersionById.get(f.programVersionId) as any; if (!pv) throw new HttpError(404, 'Selected program version not found.'); if (pv.branch_id !== existing.branch_id) throw new HttpError(400, 'Selected program belongs to another branch.'); if (pv.status !== 'published') throw new HttpError(400, 'Selected program version is not published.'); }
-  if (f.assignedTo) { const assignee = db.prepare('SELECT id, branch_id, status FROM users WHERE id = ?').get(f.assignedTo) as any; if (!assignee || assignee.status === 'inactive') throw new HttpError(400, 'Assigned user is not active.'); if (assignee.branch_id !== existing.branch_id && !canAccessBranchResource(req, assignee.branch_id)) throw new HttpError(403, 'Assigned user is outside the visitor branch scope.'); }
+  if (f.assignedTo) { const assignee = db.prepare('SELECT id, branch_id, status FROM users WHERE id = ?').get(f.assignedTo) as any; if (!assignee || assignee.status === 'inactive') throw new HttpError(400, 'Assigned user is not active.'); if (assignee.branch_id !== existing.branch_id) throw new HttpError(400, 'Assigned user must belong to the visitor branch.'); }
   if (f.campaignId) { const campaign = db.prepare('SELECT id, branch_id, status FROM campaigns WHERE id = ?').get(f.campaignId) as any; if (!campaign) throw new HttpError(400, 'Campaign not found.'); if (campaign.branch_id !== existing.branch_id) throw new HttpError(400, 'Campaign does not belong to the visitor branch.'); if (campaign.status !== 'active') throw new HttpError(400, 'Campaign is not active.'); }
-  if (f.programVersionId !== undefined && String(f.programVersionId || '') !== String(existing.program_version_id || '')) {
-    db.transaction(() => {
-      db.prepare(`UPDATE placement_assessment_attempts SET status='cancelled', updated_at=datetime('now'), notes=COALESCE(notes,'') || ? WHERE visitor_id=? AND status='in_progress'`).run(' Program changed; attempt invalidated.', existing.id);
-      db.prepare(`UPDATE visitors SET placement_score=NULL, placement_method=NULL, placement_status='not_started', current_placement_attempt_id=NULL, stage=CASE WHEN stage IN ('placement_booking','placement_fee','placement_completed') THEN 'follow_up' ELSE stage END WHERE id=?`).run(existing.id);
-    })();
-  }
+  const programChanged = f.programVersionId !== undefined
+    && String(f.programVersionId || '') !== String(existing.program_version_id || '');
+  const nextStage = programChanged && ['placement_booking', 'placement_fee', 'placement_completed'].includes(existing.stage)
+    ? 'follow_up'
+    : existing.stage;
   // Normalized values win over the raw body for every text field.
   const merge = (k: string, c: string) => (k in text ? text[k] : f[k] !== undefined ? f[k] : existing[c]);
   
-  stmtUpdateVisitor.run(
-    merge('fullName', 'full_name'), merge('phone', 'phone'), merge('email', 'email'), merge('gender', 'gender'), merge('source', 'source'), 
-    merge('campaignId', 'campaign_id'), merge('stage', 'stage'), merge('assignedTo', 'assigned_to'), merge('notes', 'notes'),
-    merge('interestedCourse', 'interested_course'), merge('followUpStatus', 'follow_up_status'), merge('nextContactDate', 'next_contact_date'),
-    merge('fatherName', 'father_name'), merge('addressRegion', 'address_region'), merge('tazkiraNo', 'tazkira_no'), merge('whatsapp', 'whatsapp'),
-    merge('dob', 'dob'), merge('schoolOrUniversity', 'school_or_university'), merge('emergencyContactName', 'emergency_contact_name'),
-    merge('emergencyContactPhone', 'emergency_contact_phone'), f.programVersionId !== undefined ? f.programVersionId : existing.program_version_id, req.params.id
-  );
+  db.transaction(() => {
+    if (programChanged) {
+      db.prepare(`UPDATE placement_assessment_attempts SET status='cancelled', updated_at=datetime('now'), notes=COALESCE(notes,'') || ? WHERE visitor_id=? AND status='in_progress'`).run(' Program changed; attempt invalidated.', existing.id);
+      db.prepare(`UPDATE visitors SET placement_score=NULL, placement_method=NULL, placement_status='not_started', current_placement_attempt_id=NULL, stage=CASE WHEN stage IN ('placement_booking','placement_fee','placement_completed') THEN 'follow_up' ELSE stage END WHERE id=?`).run(existing.id);
+    }
+    stmtUpdateVisitor.run(
+      merge('fullName', 'full_name'), merge('phone', 'phone'), merge('email', 'email'), merge('gender', 'gender'), merge('source', 'source'),
+      merge('campaignId', 'campaign_id'), nextStage, merge('assignedTo', 'assigned_to'), merge('notes', 'notes'),
+      merge('interestedCourse', 'interested_course'), merge('followUpStatus', 'follow_up_status'), merge('nextContactDate', 'next_contact_date'),
+      merge('fatherName', 'father_name'), merge('addressRegion', 'address_region'), merge('tazkiraNo', 'tazkira_no'), merge('whatsapp', 'whatsapp'),
+      merge('dob', 'dob'), merge('schoolOrUniversity', 'school_or_university'), merge('emergencyContactName', 'emergency_contact_name'),
+      merge('emergencyContactPhone', 'emergency_contact_phone'), f.programVersionId !== undefined ? f.programVersionId : existing.program_version_id, req.params.id
+    );
+  })();
   // V-8: record WHAT changed. An audit row carrying
   // `old_value=NULL, new_value=NULL` makes the V-1 exploit step — detaching a
   // placement-governed program — indistinguishable from any other edit.
@@ -593,15 +662,18 @@ visitorsRouter.patch('/:id', requirePermission('Lead.Edit'), ah(async (req, res)
 visitorsRouter.post('/:id/followups', requirePermission('Lead.Edit'), ah(async (req, res) => {
   const user = getUserContext(req);
   const visitor = requireVisitor(req, req.params.id);
-  const { notes, outcome } = req.body;
-  if (!notes) throw new HttpError(400, 'Follow-up note text is required.');
+  const outcome = req.body?.outcome;
+  const notes = requiredText(req.body?.notes, 'Follow-up note text', TEXT_LIMITS.notes);
   if (outcome != null && !FOLLOW_UP_OUTCOMES.has(outcome)) throw new HttpError(400, 'Invalid follow-up outcome.');
-  if (outcome === 'callback' && !req.body.nextContactDate) throw new HttpError(400, 'Callback follow-ups require a next contact date.');
+  const nextContactDate = req.body?.nextContactDate !== undefined
+    ? assertOptionalIsoDate(req.body.nextContactDate, 'Next contact date')
+    : null;
+  if (outcome === 'callback' && !nextContactDate) throw new HttpError(400, 'Callback follow-ups require a next contact date.');
   const tx = db.transaction(() => {
     stmtInsertFollowup.run(id('f'), visitor.id, today(), notes, user.fullName, outcome || null);
-    if (outcome === 'interested') stmtUpdateVisitorCRM.run(visitor.interested_course, 'high_interest', req.body.nextContactDate ?? visitor.next_contact_date, visitor.stage, null, visitor.id);
+    if (outcome === 'interested') stmtUpdateVisitorCRM.run(visitor.interested_course, 'high_interest', nextContactDate ?? visitor.next_contact_date, visitor.stage, null, visitor.id);
     if (outcome === 'not_interested') stmtUpdateVisitorCRM.run(visitor.interested_course, 'no_interest', null, 'lost', null, visitor.id);
-    if (outcome === 'callback') stmtUpdateVisitorCRM.run(visitor.interested_course, 'medium_interest', req.body.nextContactDate, visitor.stage, null, visitor.id);
+    if (outcome === 'callback') stmtUpdateVisitorCRM.run(visitor.interested_course, 'medium_interest', nextContactDate, visitor.stage, null, visitor.id);
   });
   tx();
   writeAudit(req, `Added follow-up note for visitor ${visitor.full_name}`);
@@ -618,10 +690,22 @@ visitorsRouter.post('/:id/followups', requirePermission('Lead.Edit'), ah(async (
 // ============================================================================ 
 visitorsRouter.patch('/:id/crm', requirePermission('Lead.Edit'), ah(async (req, res) => {
   const visitor = requireVisitor(req, req.params.id);
-  const { interestedCourse, followUpStatus, nextContactDate, notes, stage } = req.body;
+  const body = req.body ?? {};
+  const { followUpStatus, stage } = body;
   if (followUpStatus !== undefined) assertFollowUpStatus(followUpStatus);
   if (stage !== undefined && stage !== visitor.stage) throw new HttpError(400, 'Stage changes must use the stage workflow endpoint.');
-  stmtUpdateVisitorCRM.run(interestedCourse ?? visitor.interested_course, followUpStatus ?? visitor.follow_up_status, nextContactDate ?? visitor.next_contact_date, visitor.stage, notes ?? null, req.params.id);
+  const text = normalizeVisitorText(body);
+  const nextContactDate = body.nextContactDate !== undefined
+    ? assertOptionalIsoDate(body.nextContactDate, 'Next contact date')
+    : visitor.next_contact_date;
+  stmtUpdateVisitorCRM.run(
+    'interestedCourse' in text ? text.interestedCourse : visitor.interested_course,
+    followUpStatus ?? visitor.follow_up_status,
+    nextContactDate,
+    visitor.stage,
+    'notes' in text ? text.notes : null,
+    req.params.id,
+  );
   writeAudit(req, `Updated CRM info for visitor: ${visitor.full_name}`);
   res.json({ ok: true });
 }));
@@ -643,9 +727,24 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
     throw new HttpError(409, 'This lead is closed (lost). Reopen it before converting.');
   }
   if (stmtGetStudentByLeadId.get(visitor.id)) throw new HttpError(409, 'A student record already exists for this visitor.');
+  if (visitor.phone) assertStudentPhoneSyntax(visitor.phone);
+  const visitorPhoneKey = studentPhoneKey(visitor.phone);
+  if (visitorPhoneKey && stmtGetStudentByPhoneKey.get(visitorPhoneKey)) {
+    throw new HttpError(409, 'A student with this phone number already exists. Update the lead identity before conversion.');
+  }
+  if (visitor.email && stmtGetStudentByEmail.get(visitor.email)) {
+    throw new HttpError(409, 'A student with this email address already exists.');
+  }
+  if (visitor.tazkira_no && stmtGetStudentByTazkira.get(visitor.tazkira_no)) {
+    throw new HttpError(409, 'A student with this Tazkira/ID number already exists.');
+  }
 
-  const { classId, amountPaid, discountPercent, notes, semesterFee, branchId, programVersionId, levelId, paymentMethod } = req.body ?? {};
-  if (!classId) throw new HttpError(400, 'Class is required.');
+  const { amountPaid, discountPercent, semesterFee, paymentMethod } = req.body ?? {};
+  const classId = requiredText(req.body?.classId, 'Class', TEXT_LIMITS.short);
+  const branchId = optionalText(req.body?.branchId, 'Branch id', TEXT_LIMITS.short);
+  const programVersionId = optionalText(req.body?.programVersionId, 'Program version id', TEXT_LIMITS.short);
+  const levelId = optionalText(req.body?.levelId, 'Level id', TEXT_LIMITS.short);
+  const notes = optionalText(req.body?.notes, 'Conversion notes', TEXT_LIMITS.notes);
   // `Number(x) < 0` is a coercion, not a validation: NaN < 0 is false, so
   // "abc" sailed through and reached SQLite as a NOT NULL violation. Both
   // figures are money and must clear the same bar as every other monetary
@@ -656,9 +755,15 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
   if (amountPaid == null) throw new HttpError(400, 'Received fee amount is required.');
   const validatedAmountPaid = assertMoney(amountPaid, 'received fee amount');
 
-  const resolvedPaymentMethod = ['cash', 'card', 'bank_transfer'].includes(paymentMethod) ? paymentMethod : 'cash';
+  if (paymentMethod != null && !['cash', 'card', 'bank_transfer'].includes(paymentMethod)) {
+    throw new HttpError(400, 'Payment method must be cash, card, or bank_transfer.');
+  }
+  const resolvedPaymentMethod = paymentMethod || 'cash';
   const requestedStudentBranchId = branchId || visitor.branch_id || user.branchId;
-  assertBranchTargetAccess(req, requestedStudentBranchId, visitor.branch_id || user.branchId);
+  if (visitor.branch_id && requestedStudentBranchId !== visitor.branch_id) {
+    throw new HttpError(400, 'Converted student must remain in the visitor branch.');
+  }
+  assertBranchTargetAccess(req, requestedStudentBranchId);
   const classItem = stmtGetClassForConvert.get(classId) as any;
   if (!classItem) throw new HttpError(404, 'Class not found.');
   const effectiveProgramVersionId = visitor.program_version_id || programVersionId || null;
@@ -688,6 +793,7 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
   //
   // The requirement mode is still denormalised onto the visitor for reporting,
   // resolved the same way the authority resolves it: class level first.
+  let placementRequirementMode: string | null = null;
   {
     const governingProgramVersionId = resolveGoverningProgramVersionId(
       classItem,
@@ -696,7 +802,7 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
     );
     if (governingProgramVersionId) {
       const requirement = resolvePlacementRequirement(governingProgramVersionId, requestedStudentBranchId, classItem.level_id || null);
-      db.prepare(`UPDATE visitors SET placement_requirement_mode=? WHERE id=?`).run(requirement.mode, visitor.id);
+      placementRequirementMode = requirement.mode;
     }
   }
   if (classItem.status && classItem.status !== 'active') throw new HttpError(400, 'Cannot enroll into an inactive class.');
@@ -711,8 +817,20 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
 
   const studentBranchId = requestedStudentBranchId;
   if (classItem.branch_id && classItem.branch_id !== studentBranchId) throw new HttpError(400, 'Selected class does not belong to the target branch.');
-  const grossTuition = assertMoney(semesterFee != null ? semesterFee : classItem.fee != null ? classItem.fee : 0, 'semester fee');
-  const requestedDiscount = Math.max(0, Math.min(100, Number(discountPercent) || 0));
+  const grossTuition = assertMoney(classItem.fee ?? 0, 'configured class fee');
+  if (semesterFee != null) {
+    const submittedFee = assertMoney(semesterFee, 'semester fee');
+    if (submittedFee !== grossTuition) {
+      throw new HttpError(400, `Semester fee must match the configured class fee of ${grossTuition} AFN.`);
+    }
+  }
+  let requestedDiscount = 0;
+  if (discountPercent != null && discountPercent !== '') {
+    if (typeof discountPercent !== 'number' || !Number.isFinite(discountPercent) || discountPercent < 0 || discountPercent > 100) {
+      throw new HttpError(400, 'Discount percent must be a number from 0 to 100.');
+    }
+    requestedDiscount = discountPercent;
+  }
   const discountRule = evaluateRules({ category: 'discount', branchId: studentBranchId, data: { discountPercent: requestedDiscount, leadSource: visitor.source }, dryRun: false });
   // The rule engine IS the discount authority — `rule_default_discount_cap`
   // holds the institutional ceiling and is editable at runtime by an admin.
@@ -725,6 +843,9 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
   // (<= 20%) governs; an exception must be authorized after conversion.
   const ruleDiscount = Math.max(0, Math.min(100, Number(discountRule.finalOutputs.discountPercent ?? requestedDiscount)));
   const effectiveDiscount = resolveAuthorizedDiscount(db, null, ruleDiscount, { branchId: studentBranchId }).percent;
+  if (effectiveDiscount !== requestedDiscount) {
+    throw new HttpError(400, `Requested discount is not authorized. Maximum allowed for this conversion is ${effectiveDiscount}%.`);
+  }
   const netTuition = Math.max(0, Math.round(grossTuition - (grossTuition * effectiveDiscount) / 100));
   const paidNow = validatedAmountPaid;
   // The `&& netTuition > 0` escape hatch let any amount be collected against a
@@ -748,7 +869,7 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
   const journey = getJourneyEngine(db);
 
   const tx = db.transaction(() => {
-    stmtUpdateVisitorConverted.run(visitor.id);
+    stmtUpdateVisitorConverted.run(placementRequirementMode, visitor.id);
     stmtInsertConvertedStudent.run(
       newStudentId, studentCode, visitor.full_name, visitor.phone, visitor.email || null, qrCode, date, studentBranchId, effectiveDiscount, visitor.gender, visitor.placement_score, notes || `Converted from visitor. Class: ${classItem.name}`,
       visitor.father_name, visitor.address_region, visitor.tazkira_no, visitor.whatsapp, visitor.dob, visitor.school_or_university, visitor.emergency_contact_name, visitor.emergency_contact_phone, visitor.id
@@ -779,7 +900,10 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
   });
   tx();
 
-  addNotification('New Registration Successful', `Student ${visitor.full_name} registered in ${classItem.name}. Invoice: ${invoiceNumber}. Fee received: ${paidNow} AFN of ${netTuition} AFN.`, 'success', studentBranchId);
+  // The branch bell is operationally broad; do not turn it into a finance
+  // side-channel for users who lack Payment.View. Invoice and payment figures
+  // remain available on the finance-authorized student record and audit trail.
+  addNotification('New Registration Successful', `Student ${visitor.full_name} registered in ${classItem.name}.`, 'success', studentBranchId);
   writeAudit(req, `Converted visitor ${visitor.full_name} to student ${studentCode}`, { newValue: `studentId=${newStudentId}, invoice=${invoiceNumber}, paid=${paidNow}/${netTuition}` });
 
   res.status(201).json({ studentId: newStudentId, studentCode, receiptNumber, invoiceId, invoiceNumber, netAmount: netTuition, status: invoiceStatus });

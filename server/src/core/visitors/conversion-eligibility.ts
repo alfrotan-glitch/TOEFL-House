@@ -42,6 +42,7 @@ export interface ConversionEligibilityResult {
     | 'lead_lost'
     | 'student_exists'
     | 'class_not_found'
+    | 'class_wrong_branch'
     | 'class_inactive'
     | 'placement_policy_unconfigured';
   /** Operator-facing explanation. Safe to display verbatim. */
@@ -122,13 +123,24 @@ export function evaluateConversionEligibilityForVisitor(
   }
 
   const cls = db
-    .prepare('SELECT id, level_id, status FROM classes WHERE id = ?')
-    .get(classId) as { id: string; level_id: string | null; status: string | null } | undefined;
+    .prepare('SELECT id, level_id, status, branch_id FROM classes WHERE id = ?')
+    .get(classId) as { id: string; level_id: string | null; status: string | null; branch_id: string } | undefined;
   if (!cls) {
     return {
       eligible: false,
       code: 'class_not_found',
       reason: 'Class not found.',
+      requirementMode: 'not_required',
+      placementStatus,
+      placementActionable: false,
+    };
+  }
+  const expectedBranchId = visitor.branch_id ?? branchId ?? null;
+  if (expectedBranchId && cls.branch_id !== expectedBranchId) {
+    return {
+      eligible: false,
+      code: 'class_wrong_branch',
+      reason: 'Selected class belongs to another branch.',
       requirementMode: 'not_required',
       placementStatus,
       placementActionable: false,
@@ -158,7 +170,7 @@ export function evaluateConversionEligibilityForVisitor(
 
   const requirement = resolvePlacementRequirement(
     governingProgramVersionId,
-    branchId ?? visitor.branch_id ?? null,
+    expectedBranchId,
     cls.level_id ?? null
   );
 

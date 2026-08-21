@@ -16,24 +16,24 @@
  * fixtures as false-confidence coverage, so the write paths are exercised the
  * way production callers use them.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { id, today } from '../utils/ids.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { studentsRouter } from '../routes/students.routes.js';
-import { journeyRouter } from '../routes/journey.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { id, today } from '../../../utils/ids.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { studentsRouter } from '../../../routes/students.routes.js';
+import { journeyRouter } from '../../../routes/journey.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
 import {
   STUDENT_TRANSITIONS,
   STUDENT_STATUSES,
   assertStudentTransition,
   type StudentStatus,
-} from '../core/students/student-lifecycle.js';
-import { normalizeStudentInput, studentPhoneKey } from '../core/students/student-input.js';
+} from '../../../core/students/student-lifecycle.js';
+import { normalizeStudentInput, studentPhoneKey } from '../../../core/students/student-input.js';
 
 const BRANCH = 'stu_rem_branch';
 
@@ -55,6 +55,7 @@ function authHeader(u: TokenPayload) { return { Authorization: `Bearer ${signTok
 
 let app: express.Express;
 let reg: TokenPayload;
+let manager: TokenPayload;
 let phoneSeq = 0;
 /** A unique, well-formed Afghan mobile for each fixture. */
 function nextPhone(): string {
@@ -95,8 +96,14 @@ beforeAll(async () => {
      VALUES (?, ?, ?, ?, ?, 1, 0)`
   ).run('u_rem_reg', 'rem_reg', 'Rem Reg', BRANCH, await hashPassword('x'));
   assignRole('u_rem_reg', 'registrar', BRANCH);
+  await db.prepare(
+    `INSERT OR IGNORE INTO users (id, username, full_name, branch_id, password_hash, is_active, must_change_password)
+     VALUES (?, ?, ?, ?, ?, 1, 0)`
+  ).run('u_rem_manager', 'rem_manager', 'Rem Manager', BRANCH, await hashPassword('x'));
+  assignRole('u_rem_manager', 'general_manager', BRANCH);
 
   reg = makeUser({ userId: 'u_rem_reg', branchId: BRANCH });
+  manager = makeUser({ userId: 'u_rem_manager', branchId: BRANCH });
   app = createApp();
 });
 
@@ -225,14 +232,14 @@ describe('STU-C1 — journey/events is not a second status authority', () => {
     expect(statusOf(sid)).toBe('active');
   });
 
-  it('journey status_changed enforces the same transition matrix as the status endpoint', async () => {
+  it('journey status_changed is rejected rather than acting as a second lifecycle command path', async () => {
     const created = await createStudent({ fullName: 'Journey Matrix' });
     const sid = created.body.id as string;
     await supertest(app).patch(`/api/students/${sid}/status`).set(authHeader(reg)).send({ status: 'graduated' });
 
     const res = await supertest(app).post(`/api/students/${sid}/journey/events`).set(authHeader(reg))
       .send({ eventType: 'journey.status_changed', payload: { status: 'active' } });
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(400);
     expect(statusOf(sid)).toBe('graduated');
   });
 
@@ -243,23 +250,24 @@ describe('STU-C1 — journey/events is not a second status authority', () => {
     expect(res.status).toBe(400);
   });
 
-  it('journey graduation performs the SAME side effects as the status endpoint', async () => {
+  it('graduation is owned by the status workflow; manual journey append cannot perform it', async () => {
     makeClass('rem_j_grad', 10);
     const viaJourney = await createStudent({ fullName: 'Grad Journey', classId: 'rem_j_grad' });
     const viaStatus = await createStudent({ fullName: 'Grad Status', classId: 'rem_j_grad' });
 
-    await supertest(app).post(`/api/students/${viaJourney.body.id}/journey/events`).set(authHeader(reg))
+    const rejected = await supertest(app).post(`/api/students/${viaJourney.body.id}/journey/events`).set(authHeader(reg))
       .send({ eventType: 'journey.graduated', payload: {} });
-    await supertest(app).patch(`/api/students/${viaStatus.body.id}/status`).set(authHeader(reg))
+    const accepted = await supertest(app).patch(`/api/students/${viaStatus.body.id}/status`).set(authHeader(reg))
       .send({ status: 'graduated' });
 
     const enr = (sid: string) => db.prepare('SELECT status FROM enrollments WHERE student_id = ?')
       .all(sid).map((r: any) => r.status).sort();
-    expect(statusOf(viaJourney.body.id)).toBe('graduated');
+    expect(rejected.status).toBe(400);
+    expect(accepted.status).toBe(200);
+    expect(statusOf(viaJourney.body.id)).toBe('active');
     expect(statusOf(viaStatus.body.id)).toBe('graduated');
-    // Identical DB state from both writers — the whole point of STU-C1.
-    expect(enr(viaJourney.body.id)).toEqual(enr(viaStatus.body.id));
-    expect(enr(viaJourney.body.id)).toEqual(['completed']);
+    expect(enr(viaJourney.body.id)).toEqual(['active']);
+    expect(enr(viaStatus.body.id)).toEqual(['completed']);
   });
 });
 
@@ -473,15 +481,15 @@ describe('STU-H4 — graduated students release their seat', () => {
     expect(rows[0].ended_at).toBeTruthy();
   });
 
-  it('a suspended student still holds their seat (suspension is temporary)', async () => {
+  it('the authorized suspension workflow defers the enrollment and updates the profile atomically', async () => {
     makeClass('rem_cap3', 3);
     const s = await createStudent({ fullName: 'Suspended Holder', classId: 'rem_cap3' });
     expect(seatsUsed('rem_cap3')).toBe(1);
-    await supertest(app).post(`/api/students/${s.body.id}/suspend`).set(authHeader(reg)).send({});
-    // suspend() defers the enrollment; the seat is intentionally reserved so
-    // resume() can put the student back. Documented behaviour, asserted here
-    // so a future change cannot silently reinterpret it.
+    const response = await supertest(app).post(`/api/students/${s.body.id}/suspend`).set(authHeader(manager)).send({});
+    expect(response.status).toBe(200);
     expect(statusOf(s.body.id)).toBe('suspended');
+    expect((db.prepare('SELECT status FROM enrollments WHERE student_id = ?').get(s.body.id) as { status: string }).status).toBe('suspended');
+    expect(seatsUsed('rem_cap3')).toBe(0);
   });
 
   it('concurrent enrollment at capacity never overbooks (regression guard)', async () => {

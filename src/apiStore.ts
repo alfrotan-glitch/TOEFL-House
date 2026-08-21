@@ -16,7 +16,7 @@
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { api } from './api/client';
+import { api, ApiError } from './api/client';
 import { useAuth } from './contexts/useAuth';
 import {
   Student, Teacher, Employee, Partner, Class, Visitor, Attendance, Payment, Book, BookSale,
@@ -82,6 +82,7 @@ export function useApiStore() {
   // it disagreed with the server the moment either side changed.
   const canPickBranch = user?.tabAccess?.settings ?? false;
   const canSeeFinance = user?.tabAccess?.finance ?? false;
+  const canViewStudentFinance = user?.permissions?.has('Payment.View') ?? false;
   const canSeeVisitors = user?.tabAccess?.visitors ?? false;
   const canSeeAuditLog = user?.tabAccess?.audit ?? false;
   const canManageFunding = user?.tabAccess?.funding ?? false;
@@ -381,8 +382,18 @@ export function useApiStore() {
    * every student outside the first page as owing their full fee.
    */
   const reloadStudentBalances = useCallback(
-    () => api.get<StudentBalanceRow[]>('/payments/balances', bq).then(setStudentBalances),
-    [bq],
+    () => canViewStudentFinance
+      ? api.get<StudentBalanceRow[]>('/payments/balances', bq)
+          .then(setStudentBalances)
+          .catch((error: unknown) => {
+            if (error instanceof ApiError && error.status === 403) {
+              setStudentBalances([]);
+              return;
+            }
+            throw error;
+          })
+      : Promise.resolve(setStudentBalances([])),
+    [bq, canViewStudentFinance],
   );
 
   const reloadTeachers = useCallback(() => api.get<Teacher[]>('/teachers', bq).then(setTeachers), [bq]);
@@ -883,8 +894,8 @@ export function useApiStore() {
     invalidate('visitors');
   };
 
-  const addVisitorFollowUp = async (visitorId: string, notes: string, outcome?: string) => {
-    await api.post(`/visitors/${visitorId}/followups`, { notes, outcome: outcome || null });
+  const addVisitorFollowUp = async (visitorId: string, notes: string, outcome?: string, nextContactDate?: string) => {
+    await api.post(`/visitors/${visitorId}/followups`, { notes, outcome: outcome || null, nextContactDate: nextContactDate || null });
     await reloadVisitors();
     invalidate('visitors');
   };
@@ -934,16 +945,20 @@ export function useApiStore() {
     invalidate('finance', 'payments', 'students');
   };
 
-  const updateStudentStatus = async (studentId: string, status: 'active' | 'inactive' | 'graduated' | 'suspended') => {
+  const updateStudentStatus = async (
+    studentId: string,
+    status: 'active' | 'inactive' | 'graduated' | 'suspended',
+    fromStatus?: Student['status'],
+  ) => {
     if (status === 'suspended') {
       await api.post(`/students/${studentId}/suspend`, {});
+    } else if (fromStatus === 'suspended' && status === 'active') {
+      // Search results may not be present in the cached roster. Carry the
+      // profile's authoritative current status into dispatch so Resume never
+      // degrades into the forbidden ordinary status PATCH on those rows.
+      await api.post(`/students/${studentId}/resume`, {});
     } else {
-      const current = students.find((student) => student.id === studentId);
-      if (current?.status === 'suspended' && status === 'active') {
-        await api.post(`/students/${studentId}/resume`, {});
-      } else {
-        await api.patch(`/students/${studentId}/status`, { status });
-      }
+      await api.patch(`/students/${studentId}/status`, { status });
     }
     await reloadStudents();
     invalidate('students');

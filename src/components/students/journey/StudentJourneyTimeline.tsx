@@ -1,6 +1,6 @@
 /**
- * Student Journey Timeline — lifecycle facts projected from the append-only event store.
- * Redesigned for a premium UI/UX experience with visual cues and chips.
+ * Student Journey Timeline — append-only chronology with current lifecycle and
+ * enrollment facts supplied by their canonical server authorities.
  */
 import React, { useEffect, useState , useCallback} from 'react';
 import {Route, Wallet, Loader2, RefreshCw, UserPlus, CreditCard, GraduationCap, BookOpen, AlertCircle, CheckCircle2, ArrowRightCircle, XCircle, PauseCircle, PlayCircle} from 'lucide-react';
@@ -34,44 +34,46 @@ export interface JourneyState {
     recommendedLevel: string | null;
     passed: boolean | null;
   };
-  finance: {
-    invoicedTotal: number;
-    paidTotal: number;
-    remaining: number;
-    lastPaymentAt: string | null;
-  };
   idCard: { issued: boolean; lastIssuedAt: string | null; reprints: number };
   eventCount: number;
 }
 
+interface FinanceSummary {
+  tuitionDue: number;
+  tuitionPaid: number;
+  outstanding: number;
+  paidPercentage: number;
+}
+
 interface Props {
   studentId: string;
+  canViewFinance: boolean;
 }
 
 // Helper to map event types to icons and colors
 function getEventVisuals(eventType: string): { Icon: React.ElementType, color: string, bg: string } {
   switch (eventType) {
-    case 'STUDENT_REGISTERED': return { Icon: UserPlus, color: 'text-indigo-600', bg: 'bg-indigo-50' };
-    case 'PAYMENT_RECORDED': return { Icon: CreditCard, color: 'text-emerald-600', bg: 'bg-emerald-50' };
-    case 'INVOICE_ISSUED': return { Icon: Wallet, color: 'text-amber-600', bg: 'bg-amber-50' };
-    case 'STUDENT_ENROLLED': return { Icon: ArrowRightCircle, color: 'text-sky-600', bg: 'bg-sky-50' };
-    case 'ID_CARD_ISSUED': return { Icon: BookOpen, color: 'text-purple-600', bg: 'bg-purple-50' };
-    case 'GRADUATED': return { Icon: GraduationCap, color: 'text-rose-600', bg: 'bg-rose-50' };
-    case 'PLACEMENT_PASSED': return { Icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-50' };
-    case 'PLACEMENT_FAILED': return { Icon: XCircle, color: 'text-rose-600', bg: 'bg-rose-50' };
-    case 'STATUS_CHANGED': return { Icon: AlertCircle, color: 'text-slate-600', bg: 'bg-slate-100' };
-    case 'ENROLLMENT_SUSPENDED': return { Icon: PauseCircle, color: 'text-amber-600', bg: 'bg-amber-50' };
-    case 'ENROLLMENT_RESUMED': return { Icon: PlayCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' };
+    case 'journey.student_registered': return { Icon: UserPlus, color: 'text-indigo-600', bg: 'bg-indigo-50' };
+    case 'journey.payment_recorded': return { Icon: CreditCard, color: 'text-emerald-600', bg: 'bg-emerald-50' };
+    case 'journey.invoice_issued': return { Icon: Wallet, color: 'text-amber-600', bg: 'bg-amber-50' };
+    case 'journey.enrollment_created': return { Icon: ArrowRightCircle, color: 'text-sky-600', bg: 'bg-sky-50' };
+    case 'journey.id_card_issued': return { Icon: BookOpen, color: 'text-purple-600', bg: 'bg-purple-50' };
+    case 'journey.graduated': return { Icon: GraduationCap, color: 'text-rose-600', bg: 'bg-rose-50' };
+    case 'journey.placement_passed': return { Icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-50' };
+    case 'journey.placement_failed': return { Icon: XCircle, color: 'text-rose-600', bg: 'bg-rose-50' };
+    case 'journey.status_changed': return { Icon: AlertCircle, color: 'text-slate-600', bg: 'bg-slate-100' };
+    case 'journey.enrollment_status_changed': return { Icon: PauseCircle, color: 'text-amber-600', bg: 'bg-amber-50' };
+    case 'journey.program_started': return { Icon: PlayCircle, color: 'text-emerald-600', bg: 'bg-emerald-50' };
     default: return { Icon: Route, color: 'text-slate-500', bg: 'bg-slate-100' };
   }
 }
 
 // Helper to extract payload data into visual chips
-function payloadChips(item: JourneyTimelineItem): Array<{ label: string, value: string, type?: 'amount' | 'status' }> {
+function payloadChips(item: JourneyTimelineItem, canViewFinance: boolean): Array<{ label: string, value: string, type?: 'amount' | 'status' }> {
   const p = item.payload || {};
   const chips: Array<{ label: string, value: string, type?: 'amount' | 'status' }> = [];
   
-  if (p.amount != null) chips.push({ label: 'Amount', value: formatAFN(Number(p.amount)), type: 'amount' });
+  if (canViewFinance && p.amount != null) chips.push({ label: 'Amount', value: formatAFN(Number(p.amount)), type: 'amount' });
   if (p.category) chips.push({ label: 'Category', value: String(p.category) });
   if (p.label) chips.push({ label: 'Label', value: String(p.label) });
   if (p.classId) chips.push({ label: 'Class', value: String(p.classId) });
@@ -84,12 +86,13 @@ function payloadChips(item: JourneyTimelineItem): Array<{ label: string, value: 
   return chips;
 }
 
-export default function StudentJourneyTimeline({ studentId }: Props) {
+export default function StudentJourneyTimeline({ studentId, canViewFinance }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [state, setState] = useState<JourneyState | null>(null);
   const [lifecycle, setLifecycle] = useState<JourneyTimelineItem[]>([]);
   const [finance, setFinance] = useState<JourneyTimelineItem[]>([]);
+  const [financeSummary, setFinanceSummary] = useState<FinanceSummary | null>(null);
   const [tab, setTab] = useState<'lifecycle' | 'finance'>('lifecycle');
 
   const load = useCallback(async () => {
@@ -100,22 +103,24 @@ export default function StudentJourneyTimeline({ studentId }: Props) {
         state: JourneyState;
         timeline: JourneyTimelineItem[];
         financialTimeline: JourneyTimelineItem[];
+        financeSummary?: FinanceSummary;
       }>(`/students/${studentId}/journey`);
       setState(data.state);
       setLifecycle(data.timeline || []);
-      setFinance(data.financialTimeline || []);
+      setFinance(canViewFinance ? data.financialTimeline || [] : []);
+      setFinanceSummary(canViewFinance ? data.financeSummary ?? null : null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load journey');
     } finally {
       setLoading(false);
     }
-  }, [studentId]);
+  }, [studentId, canViewFinance]);
 
   useEffect(() => {
     void (async () => { await load(); })();
   }, [load]);
 
-  const timeline = tab === 'finance' ? finance : lifecycle;
+  const timeline = canViewFinance && tab === 'finance' ? finance : lifecycle;
 
   if (loading) {
     return (
@@ -164,10 +169,12 @@ export default function StudentJourneyTimeline({ studentId }: Props) {
             <p className="text-slate-400 font-bold uppercase tracking-wide">Program</p>
             <p className="font-extrabold text-slate-900 mt-0.5 break-words">{state.currentProgram || '—'}</p>
           </div>
-          <div className={`border rounded-xl p-2 ${state.finance.remaining > 0 ? 'bg-rose-50/50 border-rose-100' : 'bg-emerald-50/50 border-emerald-100'}`}>
-            <p className={`font-bold uppercase tracking-wide ${state.finance.remaining > 0 ? 'text-rose-500' : 'text-emerald-500'}`}>Balance Due</p>
-            <p className={`font-extrabold mt-0.5 font-mono ${state.finance.remaining > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>{formatAFN(state.finance.remaining)}</p>
-          </div>
+          {canViewFinance && financeSummary && (
+            <div className={`border rounded-xl p-2 ${financeSummary.outstanding > 0 ? 'bg-rose-50/50 border-rose-100' : 'bg-emerald-50/50 border-emerald-100'}`}>
+              <p className={`font-bold uppercase tracking-wide ${financeSummary.outstanding > 0 ? 'text-rose-500' : 'text-emerald-500'}`}>Balance Due</p>
+              <p className={`font-extrabold mt-0.5 font-mono ${financeSummary.outstanding > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>{formatAFN(financeSummary.outstanding)}</p>
+            </div>
+          )}
         </div>
       )}
 
@@ -175,8 +182,8 @@ export default function StudentJourneyTimeline({ studentId }: Props) {
       {state && (
         <div className="text-[10px] text-slate-500 flex flex-wrap gap-2 bg-slate-50 p-2 rounded-lg border border-slate-100">
           <span className="font-bold flex items-center gap-1"><Route className="w-3 h-3" /> {state.eventCount} Events</span>
-          <span className="font-bold flex items-center gap-1"><Wallet className="w-3 h-3" /> Paid: {formatAFN(state.finance.paidTotal)}</span>
-          <span className="font-bold flex items-center gap-1"><CreditCard className="w-3 h-3" /> Invoiced: {formatAFN(state.finance.invoicedTotal)}</span>
+          {canViewFinance && financeSummary && <span className="font-bold flex items-center gap-1"><Wallet className="w-3 h-3" /> Paid: {formatAFN(financeSummary.tuitionPaid)}</span>}
+          {canViewFinance && financeSummary && <span className="font-bold flex items-center gap-1"><CreditCard className="w-3 h-3" /> Due: {formatAFN(financeSummary.tuitionDue)}</span>}
           <span className="font-bold flex items-center gap-1"><BookOpen className="w-3 h-3" /> ID: {state.idCard.issued ? 'Issued' : 'Not Issued'}</span>
         </div>
       )}
@@ -190,13 +197,15 @@ export default function StudentJourneyTimeline({ studentId }: Props) {
         >
           Academic Timeline
         </button>
-        <button
-          type="button"
-          onClick={() => setTab('finance')}
-          className={`flex-1 text-[10px] font-bold px-2 py-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1 ${tab === 'finance' ? 'bg-white text-emerald-600 shadow-xs' : 'text-slate-500'}`}
-        >
-          <Wallet className="w-3 h-3" /> Financial
-        </button>
+        {canViewFinance && (
+          <button
+            type="button"
+            onClick={() => setTab('finance')}
+            className={`flex-1 text-[10px] font-bold px-2 py-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1 ${tab === 'finance' ? 'bg-white text-emerald-600 shadow-xs' : 'text-slate-500'}`}
+          >
+            <Wallet className="w-3 h-3" /> Financial
+          </button>
+        )}
       </div>
 
       {/* Timeline List */}
@@ -209,7 +218,7 @@ export default function StudentJourneyTimeline({ studentId }: Props) {
         <ol className="relative border-s-2 border-slate-100 ms-3 space-y-0 max-h-96 overflow-y-auto pe-2 py-2">
           {timeline.map((item) => {
             const { Icon, color, bg } = getEventVisuals(item.eventType);
-            const chips = payloadChips(item);
+            const chips = payloadChips(item, canViewFinance);
             const dateStr = item.occurredAt ? formatJalaliDateTime(item.occurredAt) : 'Unknown date';
 
             return (

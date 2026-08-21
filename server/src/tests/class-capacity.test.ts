@@ -152,7 +152,7 @@ describe('Route-level capacity enforcement — HTTP', () => {
       .run(v, `V-${Date.now()}`, today(), BRANCH);
 
     const res = await supertest(app).post(`/api/visitors/${v}/convert`).set(authHeader(registrar)).send({
-      classId, amountPaid: 4000, semesterFee: 4000,
+      classId, amountPaid: 4000,
     });
     expect(res.status).toBe(201);
     const studentId = res.body.studentId as string;

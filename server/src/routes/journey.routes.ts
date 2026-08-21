@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
-import { authenticate, authorize, requirePermission } from '../middleware/auth.js';
+import { authenticate, requirePermission } from '../middleware/auth.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { assertMoney } from '../utils/money.js';
 import { getJourneyEngine } from '../core/journey/journey-engine.js';
@@ -10,28 +10,19 @@ import { resolveAuthorizedDiscount } from '../core/configuration/discount-author
 import { assertClassGenderAllowsStudent } from './classes.routes.js';
 import { JourneyEventType } from '../core/journey/event-types.js';
 import { assertStudentAccess } from '../core/rbac/abac.js';
-import { hasPermission, isGlobalOwner } from '../core/rbac/rbac-service.js';
+import { hasPermissionForBranchWithActionScopes, isGlobalOwner } from '../core/rbac/rbac-service.js';
 import { writeAudit } from '../middleware/audit.js';
-// The journey route is NOT a second status authority (audit STU-C1). It
-// delegates every students.status write to the same guarded function the
-// status endpoint uses.
-import { applyStudentStatus } from './students.routes.js';
-import {
-  assertStudentTransition,
-  isStudentStatus,
-  STUDENT_STATUSES,
-  type StudentStatus,
-} from '../core/students/student-lifecycle.js';
+import { optionalText, requiredText, TEXT_LIMITS } from '../utils/textInput.js';
+import { getStudentBalance } from '../utils/studentBalance.js';
 
 export const journeyRouter = Router({ mergeParams: true });
 journeyRouter.use(authenticate);
 
 // ── Performance Optimization: Prepared Statements ──────────────────────────
 const stmtGetStudentCore = db.prepare('SELECT id, full_name, branch_id, status, gender FROM students WHERE id = ?');
-// stmtUpdateStudentStatus / stmtGraduateStudent removed (audit STU-C1): this
-// module no longer writes students.status directly. Both event types now go
-// through applyStudentStatus(), which validates the transition and performs
-// the enrollment side effects.
+// This module does not write students.status. Lifecycle changes use their
+// dedicated student and enrollment workflow authorities; this router appends
+// notes only.
 
 const engine = () => getJourneyEngine(db);
 
@@ -51,16 +42,29 @@ function requireStudent(req: import('express').Request, studentId: string) {
   return row;
 }
 
+function mayViewJourneyFinance(req: import('express').Request, branchId: string): boolean {
+  return !!req.rbac && (
+    isGlobalOwner(req.rbac)
+    || hasPermissionForBranchWithActionScopes(
+      db,
+      req.rbac,
+      branchId,
+      ['Payment.View'],
+      ['organization', 'campus', 'branch', 'department'],
+    )
+  );
+}
+
 /** Full chronological lifecycle timeline. */
 journeyRouter.get(
   '/timeline',
   requirePermission('Student.View'),
   ah(async (req, res) => {
     const studentId = req.params.id as string;
-    requireStudent(req, studentId);
+    const student = requireStudent(req, studentId);
     res.json({
       studentId,
-      timeline: engine().getTimeline(studentId),
+      timeline: engine().getTimeline(studentId, mayViewJourneyFinance(req, student.branch_id)),
     });
   })
 );
@@ -68,10 +72,13 @@ journeyRouter.get(
 /** Financial subset of the journey (ledger-style). */
 journeyRouter.get(
   '/finance-timeline',
-  authorize('owner', 'general_manager', 'receptionist', 'finance_manager'),
+  requirePermission('Payment.View'),
   ah(async (req, res) => {
     const studentId = req.params.id as string;
-    requireStudent(req, studentId);
+    const student = requireStudent(req, studentId);
+    if (!mayViewJourneyFinance(req, student.branch_id)) {
+      throw new HttpError(403, 'Payment.View is not authorized for this student branch.');
+    }
     res.json({
       studentId,
       timeline: engine().getFinancialTimeline(studentId),
@@ -79,7 +86,7 @@ journeyRouter.get(
   })
 );
 
-/** Projected current state from events only. */
+/** Current lifecycle/enrollment state overlaid from canonical owning tables. */
 journeyRouter.get(
   '/state',
   requirePermission('Student.View'),
@@ -98,7 +105,7 @@ journeyRouter.get(
     const studentId = req.params.id as string;
     const student = requireStudent(req, studentId);
     const j = engine();
-    const mayViewFinance = !!req.rbac && (isGlobalOwner(req.rbac) || hasPermission(req.rbac, 'Payment.View'));
+    const mayViewFinance = mayViewJourneyFinance(req, student.branch_id);
     res.json({
       student: {
         id: student.id,
@@ -107,69 +114,57 @@ journeyRouter.get(
         branchId: student.branch_id,
       },
       state: j.getCurrentState(studentId),
-      timeline: j.getTimeline(studentId),
+      timeline: j.getTimeline(studentId, mayViewFinance),
       financialTimeline: mayViewFinance ? j.getFinancialTimeline(studentId) : [],
+      ...(mayViewFinance ? { financeSummary: getStudentBalance(db, studentId, 'all') } : {}),
     });
   })
 );
 
-/** Manual note / status annotation on the journey (append-only). */
+/**
+ * Append an operator note to the journey.
+ *
+ * Status, placement, promotion and graduation facts have dedicated domain
+ * writers. Accepting them here would recreate a shadow command path whose
+ * payload is not backed by the owning workflow. This endpoint therefore owns
+ * one capability only: a bounded, append-only note.
+ */
 journeyRouter.post(
   '/events',
-  authorize('owner', 'general_manager', 'receptionist'),
+  requirePermission('Student.Edit'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const studentId = req.params.id as string;
     const student = requireStudent(req, studentId);
-    const { eventType, payload, occurredAt, enrollmentId } = req.body ?? {};
-
-    const allowed = new Set([
-      JourneyEventType.NOTE_ADDED,
-      JourneyEventType.STATUS_CHANGED,
-      JourneyEventType.PROMOTION_DECIDED,
-      JourneyEventType.PLACEMENT_TEST_RECORDED,
-      JourneyEventType.PLACEMENT_PASSED,
-      JourneyEventType.PLACEMENT_FAILED,
-      JourneyEventType.GRADUATED,
-      JourneyEventType.ALUMNI_ENTERED,
-    ]);
-
-    if (!eventType || !allowed.has(eventType)) {
-      throw new HttpError(400, 'Unsupported or missing eventType for manual append.');
+    const eventType = req.body?.eventType;
+    if (eventType !== JourneyEventType.NOTE_ADDED) {
+      throw new HttpError(400, 'Only journey.note_added may be appended manually.');
     }
 
-    // Profile status mirror. Writing students.status directly here would make
-    // this a second, unvalidated writer: it would accept 'suspended' (which the
-    // status endpoint refuses, because suspension must defer enrollments), skip
-    // every transition rule, and ignore unknown values silently. It instead
-    // delegates to the single guarded authority — audit STU-C1.
-    const applyStatus = (to: StudentStatus) => {
-      const from = (isStudentStatus(student.status) ? student.status : 'active') as StudentStatus;
-      if (to === 'suspended') {
-        throw new HttpError(
-          400,
-          'Use POST /api/students/:id/suspend to suspend a student — suspension must also defer their enrollments.',
-        );
-      }
-      if (from === 'suspended' && to === 'active') {
-        throw new HttpError(
-          400,
-          'Use POST /api/students/:id/resume to reactivate a suspended student.',
-        );
-      }
-      assertStudentTransition(from, to);
-      if (from !== to) applyStudentStatus(req, student, to);
-    };
-
-    if (eventType === JourneyEventType.STATUS_CHANGED && payload?.status) {
-      const st = String(payload.status);
-      if (!isStudentStatus(st)) {
-        throw new HttpError(400, `Status must be one of: ${STUDENT_STATUSES.join(', ')}.`);
-      }
-      applyStatus(st);
+    const rawPayload = req.body?.payload;
+    if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload)) {
+      throw new HttpError(400, 'payload must be an object containing a note.');
     }
-    if (eventType === JourneyEventType.GRADUATED) {
-      applyStatus('graduated');
+    const note = requiredText(rawPayload.note, 'Journey note', TEXT_LIMITS.notes);
+    const enrollmentId = optionalText(req.body?.enrollmentId, 'Enrollment id', TEXT_LIMITS.short);
+    if (enrollmentId) {
+      const owner = db.prepare('SELECT student_id FROM enrollments WHERE id = ?').get(enrollmentId) as
+        | { student_id: string }
+        | undefined;
+      if (!owner) throw new HttpError(404, 'Enrollment not found.');
+      if (owner.student_id !== studentId) {
+        throw new HttpError(409, 'Journey event enrollment belongs to another student.');
+      }
+    }
+
+    let occurredAt: string | undefined;
+    if (req.body?.occurredAt != null && req.body.occurredAt !== '') {
+      const raw = requiredText(req.body.occurredAt, 'Occurred at', 40);
+      const parsed = new Date(raw);
+      if (!Number.isFinite(parsed.getTime())) {
+        throw new HttpError(400, 'Occurred at must be a valid ISO date or timestamp.');
+      }
+      occurredAt = parsed.toISOString();
     }
 
     const item = engine().appendEvent({
@@ -177,13 +172,13 @@ journeyRouter.post(
       eventType,
       occurredAt,
       branchId: student.branch_id,
-      enrollmentId: enrollmentId || null,
-      payload: payload || {},
+      enrollmentId,
+      payload: { note },
       actorUserId: user.userId,
       actorName: user.fullName,
     });
 
-    writeAudit(req, `Journey event ${eventType} for student ${student.full_name}`);
+    writeAudit(req, `Added journey note for student ${student.full_name}`);
     res.status(201).json(item);
   })
 );
@@ -191,19 +186,49 @@ journeyRouter.post(
 /** Create enrollment (new / repeat / partial_repeat / resume / jump). */
 journeyRouter.post(
   '/enrollments',
-  authorize('owner', 'general_manager', 'receptionist'),
+  requirePermission('Class.Assign'),
   ah(async (req, res) => {
     const user = getUserContext(req);
     const studentId = req.params.id as string;
     const student = requireStudent(req, studentId);
     
-    const {
-      programId, programName, semesterName, levelCode, classId,
-      enrollmentType, skillsFocus, notes,
-    } = req.body ?? {};
-
-    const { programVersionId, levelId, autoInvoice, discountAmount } = req.body ?? {};
+    const body = req.body ?? {};
+    const programId = optionalText(body.programId, 'Program id', TEXT_LIMITS.short);
+    const programName = optionalText(body.programName, 'Program name', TEXT_LIMITS.name);
+    const semesterName = optionalText(body.semesterName, 'Semester name', TEXT_LIMITS.name);
+    const levelCode = optionalText(body.levelCode, 'Level code', TEXT_LIMITS.short);
+    const classId = optionalText(body.classId, 'Class id', TEXT_LIMITS.short);
+    const programVersionId = optionalText(body.programVersionId, 'Program version id', TEXT_LIMITS.short);
+    const levelId = optionalText(body.levelId, 'Level id', TEXT_LIMITS.short);
+    const notes = optionalText(body.notes, 'Enrollment notes', TEXT_LIMITS.notes);
+    const enrollmentType = (body.enrollmentType == null
+      ? 'new'
+      : requiredText(body.enrollmentType, 'Enrollment type', 30)) as
+        'new' | 'repeat' | 'partial_repeat' | 'resume' | 'jump' | 'extra';
+    if (!['new', 'repeat', 'partial_repeat', 'resume', 'jump', 'extra'].includes(enrollmentType)) {
+      throw new HttpError(400, 'Invalid enrollment type.');
+    }
+    if (body.autoInvoice != null && typeof body.autoInvoice !== 'boolean') {
+      throw new HttpError(400, 'autoInvoice must be a boolean.');
+    }
+    let skillsFocus: string[] | null = null;
+    if (body.skillsFocus != null) {
+      if (!Array.isArray(body.skillsFocus) || body.skillsFocus.length > 20) {
+        throw new HttpError(400, 'Skills focus must be an array of at most 20 items.');
+      }
+      skillsFocus = body.skillsFocus.map((skill: unknown, index: number) =>
+        requiredText(skill, `Skill ${index + 1}`, TEXT_LIMITS.short));
+    }
     if (classId) assertClassGenderAllowsStudent(classId, student.gender);
+    const classLevel = classId
+      ? db.prepare('SELECT level_id FROM classes WHERE id = ?').get(classId) as { level_id: string | null } | undefined
+      : undefined;
+    if (levelId && classLevel?.level_id && levelId !== classLevel.level_id) {
+      throw new HttpError(400, 'Class and enrollment level must match.');
+    }
+    const effectiveLevelId = classLevel?.level_id ?? levelId ?? null;
+
+    const { autoInvoice, discountAmount } = body;
 
     // JRN-1. This route accepted an absolute AFN discount and handed it to
     // EnrollmentService, whose only bound is `discount <= fee`. A registrar
@@ -229,7 +254,7 @@ journeyRouter.post(
     // different act — there the caller never named an amount.
     const requestedDiscount = discountAmount != null ? assertMoney(discountAmount, 'discount amount') : 0;
     if (requestedDiscount > 0) {
-      const resolvedLevelId = levelId || null;
+      const resolvedLevelId = effectiveLevelId;
       const level = resolvedLevelId
         ? (db.prepare('SELECT program_version_id FROM levels WHERE id = ?').get(resolvedLevelId) as { program_version_id?: string } | undefined)
         : undefined;
@@ -256,12 +281,12 @@ journeyRouter.post(
       programId,
       programName,
       programVersionId: programVersionId || null,
-      levelId: levelId || null,
+      levelId: effectiveLevelId,
       semesterName,
       levelCode,
       classId,
-      enrollmentType: enrollmentType || 'new',
-      skillsFocus: Array.isArray(skillsFocus) ? skillsFocus : null,
+      enrollmentType,
+      skillsFocus,
       notes,
       actorUserId: user.userId,
       actorName: user.fullName,

@@ -19,7 +19,7 @@ interface VisitorDeskPanelProps {
     nextContactDate: string,
     notes?: string
   ) => Promise<void>;
-  addVisitorFollowUp: (visitorId: string, notes: string, outcome?: string) => Promise<void>;
+  addVisitorFollowUp: (visitorId: string, notes: string, outcome?: string, nextContactDate?: string) => Promise<void>;
   updateVisitor: (visitorId: string, updatedFields: Partial<Visitor>) => Promise<void>;
   onOpenPlacementTest: () => void;
   onOpenConvert: () => void;
@@ -72,11 +72,26 @@ export default function VisitorDeskPanel({
   const [deskTab, setDeskTab] = useState<'details' | 'logs'>('details');
   const [followUpInput, setFollowUpInput] = useState<string>('');
   const [followUpOutcome, setFollowUpOutcome] = useState<string>('');
+  const [followUpDate, setFollowUpDate] = useState<string>('');
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [crmCourse, setCrmCourse] = useState(visitor.interestedCourse || '');
   const [crmStatus, setCrmStatus] = useState(visitor.followUpStatus || 'medium_interest');
   const [crmDate, setCrmDate] = useState(visitor.nextContactDate || '');
   const [crmNotes, setCrmNotes] = useState(visitor.notes || '');
+  const profileFromVisitor = (value: Visitor) => ({
+    fatherName: value.fatherName || '',
+    tazkiraNo: value.tazkiraNo || '',
+    dob: value.dob || '',
+    whatsapp: value.whatsapp || '',
+    email: value.email || '',
+    schoolOrUniversity: value.schoolOrUniversity || '',
+    addressRegion: value.addressRegion || '',
+    emergencyContactName: value.emergencyContactName || '',
+    emergencyContactPhone: value.emergencyContactPhone || '',
+  });
+  const [profileDraft, setProfileDraft] = useState(() => profileFromVisitor(visitor));
+  const setProfileField = (field: keyof typeof profileDraft, value: string) =>
+    setProfileDraft((current) => ({ ...current, [field]: value }));
 
   // Sync the editable CRM fields whenever a different visitor is shown, by
   // adjusting state during render (no setState-in-effect).
@@ -88,6 +103,10 @@ export default function VisitorDeskPanel({
     setCrmStatus(visitor.followUpStatus || 'medium_interest');
     setCrmDate(visitor.nextContactDate || '');
     setCrmNotes(visitor.notes || '');
+    setProfileDraft(profileFromVisitor(visitor));
+    setFollowUpInput('');
+    setFollowUpOutcome('');
+    setFollowUpDate('');
   }
 
   const handleSaveCRM = async (e: React.FormEvent) => {
@@ -100,13 +119,27 @@ export default function VisitorDeskPanel({
     }
   };
 
+  const handleSaveProfile = async () => {
+    try {
+      await updateVisitor(visitor.id, profileDraft);
+      triggerToast('Visitor profile updated successfully.', 'success');
+    } catch (err) {
+      triggerToast(err instanceof Error ? err.message : 'Could not save visitor profile.', 'error');
+    }
+  };
+
   const handleAddFollowUpNoteSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!followUpInput.trim()) return;
+    if (followUpOutcome === 'callback' && !followUpDate) {
+      triggerToast('Choose a next contact date for a callback.', 'error');
+      return;
+    }
     try {
-      await addVisitorFollowUp(visitor.id, followUpInput, followUpOutcome || undefined);
+      await addVisitorFollowUp(visitor.id, followUpInput, followUpOutcome || undefined, followUpDate || undefined);
       setFollowUpInput('');
       setFollowUpOutcome('');
+      setFollowUpDate('');
     } catch (err) {
       triggerToast(err instanceof Error ? err.message : 'Could not add follow-up note.', 'error');
     }
@@ -132,6 +165,14 @@ export default function VisitorDeskPanel({
   };
 
   const currentStep = PIPELINE_STEPS.find((s) => s.isCurrent(visitor));
+  const placementTotal = visitor.placementScore?.total
+    ?? visitor.placementScore?.totalScore
+    ?? visitor.placementScore?.percentage
+    ?? null;
+  const placementRecommendation = visitor.placementScore?.levelRecommendation
+    ?? visitor.placementScore?.recommendation?.text
+    ?? visitor.placementScore?.recommendation?.levelId
+    ?? 'Not assigned';
 
   return (
     <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto animate-in fade-in duration-200" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -229,14 +270,15 @@ export default function VisitorDeskPanel({
                 <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3.5 flex items-center gap-3">
                   <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0"><Award className="w-4 h-4 text-emerald-700" /></div>
                   <div className="flex-1">
-                    <p className="font-extrabold text-emerald-900 text-[11px]">Placement completed — {visitor.placementScore.total}/100</p>
-                    <p className="text-[10px] text-emerald-700 mt-0.5">Recommended: <span className="font-black">{visitor.placementScore.levelRecommendation}</span> {visitor.placementScore.examiner ? <> · by {visitor.placementScore.examiner}</> : null}</p>
+                    <p className="font-extrabold text-emerald-900 text-[11px]">Placement completed{placementTotal != null ? ` — ${placementTotal}/100` : ''}</p>
+                    <p className="text-[10px] text-emerald-700 mt-0.5">Recommended: <span className="font-black">{placementRecommendation}</span> {visitor.placementScore.examiner ? <> · by {visitor.placementScore.examiner}</> : null}</p>
                   </div>
                   <button onClick={onOpenPlacementTest} className="px-2.5 py-1.5 bg-white border border-emerald-200 text-emerald-700 rounded-lg text-[10px] font-bold hover:bg-emerald-50 cursor-pointer">Re-test</button>
                 </div>
               )}
 
-              <form onSubmit={handleSaveCRM} className="bg-slate-50/60 border border-slate-150 rounded-2xl p-4 space-y-3 text-xs">
+              <form onSubmit={handleSaveCRM}>
+                <fieldset disabled={!canEditLead} className="bg-slate-50/60 border border-slate-150 rounded-2xl p-4 space-y-3 text-xs disabled:opacity-75">
                 <h5 className="font-extrabold text-slate-800 text-[11px] flex items-center gap-1.5 border-b border-slate-200 pb-2"><UserCog className="w-4 h-4 text-indigo-600" /> Conversion & interest settings</h5>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   <div>
@@ -253,7 +295,7 @@ export default function VisitorDeskPanel({
                   </div>
                   <div>
                     <label className="block text-slate-500 font-bold mb-1">Next follow-up date:</label>
-                    <input type="text" placeholder="YYYY-MM-DD" value={crmDate} onChange={(e) => setCrmDate(e.target.value)} className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-2 focus:outline-none font-bold text-indigo-600 font-mono text-center" />
+                    <input type="date" value={crmDate} onChange={(e) => setCrmDate(e.target.value)} className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-2 focus:outline-none font-bold text-indigo-600 font-mono text-center" />
                   </div>
                   <div>
                     <label className="block text-slate-500 font-bold mb-1">Initial source:</label>
@@ -264,20 +306,24 @@ export default function VisitorDeskPanel({
                 <div className="border-t border-dashed border-slate-200 pt-3 mt-1">
                   <span className="block text-[10px] font-extrabold text-indigo-700 mb-2">Additional identity details:</span>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    <div><label className="block text-slate-500 font-bold text-[10px] mb-0.5">Father's name:</label><input type="text" value={visitor.fatherName || ''} onChange={(e) => updateVisitor(visitor.id, { fatherName: e.target.value })} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px]" placeholder="e.g. Abdul Khaliq" /></div>
-                    <div><label className="block text-slate-500 font-bold text-[10px] mb-0.5">Tazkira no.:</label><input type="text" value={visitor.tazkiraNo || ''} onChange={(e) => updateVisitor(visitor.id, { tazkiraNo: e.target.value })} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 font-mono text-[11px]" placeholder="Tazkira no." /></div>
-                    <div><label className="block text-slate-500 font-bold text-[10px] mb-0.5">Date of birth / age:</label><input type="text" value={visitor.dob || ''} onChange={(e) => updateVisitor(visitor.id, { dob: e.target.value })} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px]" placeholder="1381/05/12" /></div>
-                    <div><label className="block text-slate-500 font-bold text-[10px] mb-0.5">WhatsApp:</label><input type="tel" value={visitor.whatsapp || ''} onChange={(e) => updateVisitor(visitor.id, { whatsapp: e.target.value })} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 font-mono text-[11px] text-start" placeholder="07xxxxxxx" /></div>
-                    <div><label className="block text-slate-500 font-bold text-[10px] mb-0.5">Email:</label><input type="email" value={visitor.email || ''} onChange={(e) => updateVisitor(visitor.id, { email: e.target.value })} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 font-mono text-[11px] text-start" placeholder="name@example.com" /></div>
-                    <div><label className="block text-slate-500 font-bold text-[10px] mb-0.5">School / university:</label><input type="text" value={visitor.schoolOrUniversity || ''} onChange={(e) => updateVisitor(visitor.id, { schoolOrUniversity: e.target.value })} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px]" placeholder="School or university" /></div>
-                    <div className="sm:col-span-2"><label className="block text-slate-500 font-bold text-[10px] mb-0.5">Home address:</label><input type="text" value={visitor.addressRegion || ''} onChange={(e) => updateVisitor(visitor.id, { addressRegion: e.target.value })} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px]" placeholder="Full address" /></div>
-                    <div><label className="block text-slate-500 font-bold text-[10px] mb-0.5">Emergency contact name:</label><input type="text" value={visitor.emergencyContactName || ''} onChange={(e) => updateVisitor(visitor.id, { emergencyContactName: e.target.value })} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px]" placeholder="Father or brother name" /></div>
-                    <div><label className="block text-slate-500 font-bold text-[10px] mb-0.5">Emergency phone:</label><input type="tel" value={visitor.emergencyContactPhone || ''} onChange={(e) => updateVisitor(visitor.id, { emergencyContactPhone: e.target.value })} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 font-mono text-[11px] text-start" placeholder="07xxxxxxx" /></div>
+                    <div><label className="block text-slate-500 font-bold text-[10px] mb-0.5">Father's name:</label><input type="text" value={profileDraft.fatherName} onChange={(e) => setProfileField('fatherName', e.target.value)} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px]" placeholder="e.g. Abdul Khaliq" /></div>
+                    <div><label className="block text-slate-500 font-bold text-[10px] mb-0.5">Tazkira no.:</label><input type="text" value={profileDraft.tazkiraNo} onChange={(e) => setProfileField('tazkiraNo', e.target.value)} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 font-mono text-[11px]" placeholder="Tazkira no." /></div>
+                    <div><label className="block text-slate-500 font-bold text-[10px] mb-0.5">Date of birth:</label><input type="date" value={profileDraft.dob} onChange={(e) => setProfileField('dob', e.target.value)} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px]" /></div>
+                    <div><label className="block text-slate-500 font-bold text-[10px] mb-0.5">WhatsApp:</label><input type="tel" value={profileDraft.whatsapp} onChange={(e) => setProfileField('whatsapp', e.target.value)} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 font-mono text-[11px] text-start" placeholder="07xxxxxxx" /></div>
+                    <div><label className="block text-slate-500 font-bold text-[10px] mb-0.5">Email:</label><input type="email" value={profileDraft.email} onChange={(e) => setProfileField('email', e.target.value)} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 font-mono text-[11px] text-start" placeholder="name@example.com" /></div>
+                    <div><label className="block text-slate-500 font-bold text-[10px] mb-0.5">School / university:</label><input type="text" value={profileDraft.schoolOrUniversity} onChange={(e) => setProfileField('schoolOrUniversity', e.target.value)} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px]" placeholder="School or university" /></div>
+                    <div className="sm:col-span-2"><label className="block text-slate-500 font-bold text-[10px] mb-0.5">Home address:</label><input type="text" value={profileDraft.addressRegion} onChange={(e) => setProfileField('addressRegion', e.target.value)} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px]" placeholder="Full address" /></div>
+                    <div><label className="block text-slate-500 font-bold text-[10px] mb-0.5">Emergency contact name:</label><input type="text" value={profileDraft.emergencyContactName} onChange={(e) => setProfileField('emergencyContactName', e.target.value)} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px]" placeholder="Father or brother name" /></div>
+                    <div><label className="block text-slate-500 font-bold text-[10px] mb-0.5">Emergency phone:</label><input type="tel" value={profileDraft.emergencyContactPhone} onChange={(e) => setProfileField('emergencyContactPhone', e.target.value)} className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 font-mono text-[11px] text-start" placeholder="07xxxxxxx" /></div>
                   </div>
+                  {canEditLead && <div className="flex justify-end mt-2">
+                    <button type="button" onClick={() => void handleSaveProfile()} className="bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 px-3 py-1.5 rounded-lg text-[10px] font-bold cursor-pointer">Save identity details</button>
+                  </div>}
                 </div>
 
                 <div><label className="block text-slate-500 font-bold mb-1">Reception notes:</label><textarea value={crmNotes} onChange={(e) => setCrmNotes(e.target.value)} rows={2} className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-2 focus:outline-none font-semibold text-slate-800" /></div>
-                <div className="flex justify-end"><button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-bold cursor-pointer">Save CRM Changes</button></div>
+                {canEditLead && <div className="flex justify-end"><button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-bold cursor-pointer">Save CRM Changes</button></div>}
+                </fieldset>
               </form>
 
               <div className="space-y-3.5 border-t border-slate-100 pt-4">
@@ -299,16 +345,22 @@ export default function VisitorDeskPanel({
             </div>
           ) : (
             <div className="space-y-4 text-xs">
-              <form onSubmit={handleAddFollowUpNoteSubmit} className="space-y-3.5 bg-slate-50/60 p-4 rounded-2xl border border-slate-150">
+              {canEditLead && <form onSubmit={handleAddFollowUpNoteSubmit} className="space-y-3.5 bg-slate-50/60 p-4 rounded-2xl border border-slate-150">
                 <h5 className="font-extrabold text-slate-800 text-[11px] flex items-center gap-1.5 border-b border-slate-200 pb-1.5"><PhoneCall className="w-4 h-4 text-indigo-600" /> Log follow-up</h5>
                 <div className="flex gap-2">
                   <input type="text" placeholder="New call or follow-up note…" value={followUpInput} onChange={(e) => setFollowUpInput(e.target.value)} className="flex-1 bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 focus:outline-none text-xs font-semibold text-slate-800 shadow-inner" required />
-                  <select value={followUpOutcome} onChange={(e) => setFollowUpOutcome(e.target.value)} className="bg-white border border-slate-200 rounded-xl px-2 py-2 text-[10px] font-bold cursor-pointer text-slate-600 focus:outline-none">
+                  <select value={followUpOutcome} onChange={(e) => { setFollowUpOutcome(e.target.value); if (e.target.value !== 'callback') setFollowUpDate(''); }} className="bg-white border border-slate-200 rounded-xl px-2 py-2 text-[10px] font-bold cursor-pointer text-slate-600 focus:outline-none">
                     <option value="">Outcome…</option><option value="interested">Interested</option><option value="not_interested">Not interested</option><option value="callback">Callback</option><option value="registered">Registered</option>
                   </select>
                   <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-4 rounded-xl cursor-pointer flex items-center justify-center shadow-md"><Plus className="w-4 h-4 stroke-[2.5]" /></button>
                 </div>
-              </form>
+                {followUpOutcome === 'callback' && (
+                  <div>
+                    <label className="block text-slate-500 font-bold text-[10px] mb-1">Next contact date:</label>
+                    <input type="date" value={followUpDate} onChange={(e) => setFollowUpDate(e.target.value)} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-indigo-700" required />
+                  </div>
+                )}
+              </form>}
 
               <div className="space-y-3">
                 <h5 className="font-black text-slate-400 text-[10px] uppercase tracking-wider">Follow-up history:</h5>

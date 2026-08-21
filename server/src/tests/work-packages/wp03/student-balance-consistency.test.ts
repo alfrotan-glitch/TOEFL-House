@@ -22,9 +22,9 @@
  * surface calls. These tests assert the arithmetic AND that the surfaces agree.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { db, initSchema } from '../db/connection.js';
-import { deriveBalance, getStudentBalance, getBranchOutstanding, TUITION_PAYMENT_CATEGORIES } from '../utils/studentBalance.js';
-import { today } from '../utils/ids.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { deriveBalance, getStudentBalance, getBranchOutstanding, TUITION_PAYMENT_CATEGORIES } from '../../../utils/studentBalance.js';
+import { today } from '../../../utils/ids.js';
 
 const BRANCH = 'bal_branch';
 const OTHER_BRANCH = 'bal_branch_other';

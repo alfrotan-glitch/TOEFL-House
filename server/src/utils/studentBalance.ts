@@ -149,6 +149,38 @@ export function getStudentBalancesPage(
   return rows.map((r) => ({ studentId: r.student_id, ...deriveBalance(r.tuition_due, r.tuition_paid) }));
 }
 
+/** Authoritative balances for an explicit, already-authorized student set. */
+export function getStudentBalancesByIds(
+  db: Database,
+  studentIds: readonly string[],
+  scope: BalanceScope = 'all',
+): StudentBalanceRow[] {
+  const ids = [...new Set(studentIds.filter(Boolean))];
+  if (ids.length === 0) return [];
+  const semesterFilter = scope === 'active' ? `WHERE status = 'active'` : '';
+  const rows = db.prepare(
+    `SELECT st.id AS student_id,
+            COALESCE(sem.total, 0) AS tuition_due,
+            COALESCE(paid.total, 0) AS tuition_paid
+       FROM students st
+       LEFT JOIN (
+         SELECT student_id, SUM(COALESCE(net_fee_amount, fee_amount)) AS total
+         FROM student_semesters ${semesterFilter} GROUP BY student_id
+       ) sem ON sem.student_id = st.id
+       LEFT JOIN (
+         SELECT student_id, SUM(amount) AS total
+         FROM payments
+         WHERE status = 'completed' AND category IN (${CATEGORY_SQL})
+         GROUP BY student_id
+       ) paid ON paid.student_id = st.id
+      WHERE st.id IN (SELECT value FROM json_each(?))`,
+  ).all(JSON.stringify(ids)) as Array<{ student_id: string; tuition_due: number; tuition_paid: number }>;
+  return rows.map((row) => ({
+    studentId: row.student_id,
+    ...deriveBalance(row.tuition_due, row.tuition_paid),
+  }));
+}
+
 /**
  * Branch-wide outstanding tuition — the dashboard figure.
  * Sums per-student outstanding (each floored at zero) so one student's credit

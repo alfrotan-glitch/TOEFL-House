@@ -16,16 +16,16 @@
  *  7. Fee/installment/book categories are inherently deduplicated server-side
  *     (control: double-click on 'fee' → 409).
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import studentsRouter from '../routes/students.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { id, today } from '../utils/ids.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import studentsRouter from '../../../routes/students.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { id, today } from '../../../utils/ids.js';
 
 const BRANCH_A = 'fa_branch_a';
 const BRANCH_B = 'fa_branch_b';

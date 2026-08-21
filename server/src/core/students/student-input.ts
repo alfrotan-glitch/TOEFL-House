@@ -72,7 +72,6 @@ export function assertOptionalIsoDate(value: unknown, field: string): string | n
  *  coerced into the string "x" (CREATE rejected this; PATCH did not). */
 function assertStringy(value: unknown, field: string): string | null {
   if (value === undefined || value === null) return null;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   if (typeof value !== 'string') {
     throw new HttpError(400, `${field} must be text.`);
   }
@@ -159,13 +158,21 @@ export function normalizeStudentInput(
     }
   }
 
-  // 4. Gender — same rule both ways. This is the edge that let a male student
+  // 4. Phone identity must be comparable by the same rule that enforces
+  //    uniqueness. Restrict separators to the human formatting the SQL
+  //    backstop can normalize; accepting arbitrary letters or punctuation
+  //    would let the application and unique index compute different people.
+  if (body.phone !== undefined && out.text.phone) {
+    assertStudentPhoneSyntax(out.text.phone);
+  }
+
+  // 5. Gender — same rule both ways. This is the edge that let a male student
   //    into a female-only class and that broke gender-split reporting.
   if (body.gender !== undefined) {
     out.gender = assertStudentGender(body.gender);
   }
 
-  // 5. Date of birth — real calendar dates only, both ways.
+  // 6. Date of birth — real calendar dates only, both ways.
   if (body.dob !== undefined) {
     out.dob = assertOptionalIsoDate(body.dob, 'Date of birth');
   }
@@ -183,4 +190,10 @@ export function normalizeStudentInput(
  */
 export function studentPhoneKey(phone: string | null | undefined): string | null {
   return phoneMatchKey(phone);
+}
+
+export function assertStudentPhoneSyntax(value: string): void {
+  if (!/^[+0-9 ()./-]+$/.test(value) || !studentPhoneKey(value)) {
+    throw new HttpError(400, 'Phone must contain at least 7 digits and only standard phone separators.');
+  }
 }

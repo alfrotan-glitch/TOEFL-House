@@ -14,18 +14,18 @@
  * They also pin the domain rule itself, because the rule is subtle:
  * `stage` and `status` are independent axes and must not be collapsed.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { visitorsRouter } from '../routes/visitors.routes.js';
-import { dashboardRouter } from '../routes/dashboard.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { buildVisitorSummary, queryVisitorPage } from '../core/visitors/visitor-query.js';
-import { buildDashboardSummary } from '../core/dashboard/dashboard-summary.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { visitorsRouter } from '../../../routes/visitors.routes.js';
+import { dashboardRouter } from '../../../routes/dashboard.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { buildVisitorSummary, queryVisitorPage } from '../../../core/visitors/visitor-query.js';
+import { buildDashboardSummary } from '../../../core/dashboard/dashboard-summary.js';
 import {
   leadLifecycleBucket,
   isLeadOpen,
@@ -34,8 +34,8 @@ import {
   LEAD_OPEN_SQL,
   LEAD_CONVERTED_SQL,
   LEAD_CLOSED_SQL,
-} from '../core/visitors/lead-lifecycle.js';
-import { today } from '../utils/ids.js';
+} from '../../../core/visitors/lead-lifecycle.js';
+import { today } from '../../../utils/ids.js';
 
 const BRANCH = 'llc_a';
 const BRANCH_B = 'llc_b';

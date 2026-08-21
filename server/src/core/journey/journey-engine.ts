@@ -1,9 +1,9 @@
 /**
  * Student Journey Engine
  * ----------------------
- * Center of the academic domain: Student is a static profile;
- * lifecycle is an append-only stream of journey events.
- * Current state is always projected from the event history.
+ * Maintains an append-only chronology of student activity. Current lifecycle,
+ * enrollment, placement snapshot, and card facts are overlaid from their
+ * canonical tables so this stream never becomes a competing state authority.
  */
 import type Database from 'better-sqlite3';
 import { id } from '../../utils/ids.js';
@@ -74,12 +74,6 @@ export interface StudentJourneyState {
     passed: boolean | null;
     scores: Record<string, number> | null;
   };
-  finance: {
-    invoicedTotal: number;
-    paidTotal: number;
-    remaining: number;
-    lastPaymentAt: string | null;
-  };
   idCard: {
     issued: boolean;
     lastIssuedAt: string | null;
@@ -103,9 +97,40 @@ export interface StudentJourneyState {
 
 function parsePayload(raw: string): Record<string, unknown> {
   try {
-    return JSON.parse(raw || '{}') as Record<string, unknown>;
+    const parsed = JSON.parse(raw || '{}') as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
   } catch {
     return {};
+  }
+}
+
+const FINANCIAL_PAYLOAD_KEY = /(amount|fee|tuition|balance|paid|payment|invoice|receipt|discount|price|cost)/i;
+
+function redactFinancialValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactFinancialValue);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => !FINANCIAL_PAYLOAD_KEY.test(key))
+      .map(([key, nested]) => [key, redactFinancialValue(nested)]),
+  );
+}
+
+function redactFinancialPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  return redactFinancialValue(payload) as Record<string, unknown>;
+}
+
+function parsePayloadArray(raw: string | null): string[] | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) && parsed.every((value) => typeof value === 'string')
+      ? parsed
+      : null;
+  } catch {
+    return null;
   }
 }
 
@@ -125,6 +150,8 @@ export class StudentJourneyEngine {
   private readonly stmtAppendEvent: Database.Statement;
   private readonly stmtListEvents: Database.Statement;
   private readonly stmtListFinancialEvents: Database.Statement;
+  private readonly stmtGetStudentState: Database.Statement;
+  private readonly stmtGetCurrentEnrollment: Database.Statement;
 
   constructor(private readonly db: Database.Database) {
     this.stmtAppendEvent = db.prepare(
@@ -139,9 +166,21 @@ export class StudentJourneyEngine {
     );
 
     this.stmtListFinancialEvents = db.prepare(
-      `SELECT * FROM student_journey_events 
-       WHERE student_id = ? AND event_type IN (${FINANCIAL_EVENT_SQL_LIST}) 
-       ORDER BY occurred_at ASC, created_at ASC`
+      `SELECT * FROM student_journey_events
+       WHERE student_id = ? AND event_type IN (${FINANCIAL_EVENT_SQL_LIST})
+       ORDER BY occurred_at ASC, created_at ASC, id ASC`
+    );
+    this.stmtGetStudentState = db.prepare(
+      'SELECT status, card_design, placement_score FROM students WHERE id = ?',
+    );
+    this.stmtGetCurrentEnrollment = db.prepare(
+      `SELECT id, program_name, level_code, semester_name, class_id, enrollment_type, skills_focus
+         FROM enrollments
+        WHERE student_id = ?
+          AND enrollment_type <> 'extra'
+          AND status IN ('pending','reserved','confirmed','active','frozen','paused','suspended','retake','conditional_pass')
+        ORDER BY started_at DESC, created_at DESC, id DESC
+        LIMIT 1`,
     );
   }
 
@@ -191,20 +230,23 @@ export class StudentJourneyEngine {
    * presentation split, not a loss of history. Anything needing the full
    * chronology (audit, projection, `getState`) keeps using listEvents.
    */
-  getTimeline(studentId: string): TimelineItem[] {
+  getTimeline(studentId: string, includeFinancialFields = false): TimelineItem[] {
     return this.listEvents(studentId)
       .filter((row) => !FINANCIAL_EVENT_TYPES.has(row.event_type as JourneyEventTypeName))
-      .map((row) => ({
-        id: row.id,
-        eventType: row.event_type,
-        label: JOURNEY_EVENT_LABELS[row.event_type as JourneyEventTypeName] || row.event_type,
-        occurredAt: row.occurred_at,
-        branchId: row.branch_id,
-        enrollmentId: row.enrollment_id,
-        payload: parsePayload(row.payload),
-        actorName: row.actor_name,
-        correlationId: row.correlation_id,
-      }));
+      .map((row) => {
+        const payload = parsePayload(row.payload);
+        return {
+          id: row.id,
+          eventType: row.event_type,
+          label: JOURNEY_EVENT_LABELS[row.event_type as JourneyEventTypeName] || row.event_type,
+          occurredAt: row.occurred_at,
+          branchId: row.branch_id,
+          enrollmentId: row.enrollment_id,
+          payload: includeFinancialFields ? payload : redactFinancialPayload(payload),
+          actorName: row.actor_name,
+          correlationId: row.correlation_id,
+        };
+      });
   }
 
   getFinancialTimeline(studentId: string): TimelineItem[] {
@@ -222,9 +264,7 @@ export class StudentJourneyEngine {
     }));
   }
 
-  /**
-   * Project current lifecycle state purely from the event stream.
-   */
+  /** Project chronology-derived details, then overlay canonical current facts. */
   getCurrentState(studentId: string): StudentJourneyState {
     const events = this.listEvents(studentId);
     const state: StudentJourneyState = {
@@ -238,7 +278,6 @@ export class StudentJourneyEngine {
       enrollmentType: null,
       skillsFocus: null,
       placement: { overall: null, recommendedLevel: null, passed: null, scores: null },
-      finance: { invoicedTotal: 0, paidTotal: 0, remaining: 0, lastPaymentAt: null },
       idCard: { issued: false, lastIssuedAt: null, reprints: 0 },
       books: [],
       lastExam: null,
@@ -292,15 +331,14 @@ export class StudentJourneyEngine {
           state.lifecycleStatus = safeStr(p.status) || state.lifecycleStatus;
           break;
           
+        // Financial events remain in the append-only audit timeline, but money
+        // is not projected here. Invoices/payments and studentBalance are the
+        // canonical financial authorities; an activity stream can be missing a
+        // historical event and must never become a second ledger.
         case JourneyEventType.INVOICE_ISSUED:
-          state.finance.invoicedTotal += safeNum(p.amount, 0);
-          break;
-          
         case JourneyEventType.PAYMENT_RECORDED:
-          state.finance.paidTotal += safeNum(p.amount, 0);
-          state.finance.lastPaymentAt = row.occurred_at;
           break;
-          
+
         case JourneyEventType.ID_CARD_ISSUED:
           state.idCard.issued = true;
           state.idCard.lastIssuedAt = row.occurred_at;
@@ -360,20 +398,85 @@ export class StudentJourneyEngine {
       }
     }
 
-    state.finance.remaining = Math.max(0, state.finance.invoicedTotal - state.finance.paidTotal);
+    // Current facts come from their canonical tables. The event stream is a
+    // chronology, not a shadow status/enrollment database: status changes made
+    // through the dedicated lifecycle routes and historical imports may not
+    // have a corresponding old event.
+    const student = this.stmtGetStudentState.get(studentId) as
+      | { status: string; card_design: string | null; placement_score: string | null }
+      | undefined;
+    if (student) {
+      state.lifecycleStatus = student.status;
+      state.idCard.issued = Boolean(student.card_design);
+      const placement = student.placement_score ? parsePayload(student.placement_score) : {};
+      if (Object.keys(placement).length > 0) {
+        const overall = placement.overall ?? placement.total ?? placement.percentage ?? placement.totalScore;
+        if (typeof overall === 'number' && Number.isFinite(overall)) state.placement.overall = overall;
+        const recommendation = placement.recommendation && typeof placement.recommendation === 'object'
+          ? placement.recommendation as Record<string, unknown>
+          : {};
+        state.placement.recommendedLevel = safeStr(
+          placement.recommendedLevel
+          ?? placement.levelRecommendation
+          ?? recommendation.text
+          ?? recommendation.levelId,
+        ) || state.placement.recommendedLevel;
+        if (typeof placement.passed === 'boolean') {
+          state.placement.passed = placement.passed;
+        } else if (placement.outcome === 'passed' || placement.outcome === 'failed') {
+          state.placement.passed = placement.outcome === 'passed';
+        }
+        if (placement.scores && typeof placement.scores === 'object' && !Array.isArray(placement.scores)) {
+          state.placement.scores = placement.scores as Record<string, number>;
+        } else if (Array.isArray(placement.results)) {
+          const scores = Object.fromEntries(placement.results.flatMap((result, index) => {
+            if (!result || typeof result !== 'object') return [];
+            const row = result as Record<string, unknown>;
+            const value = row.score ?? row.percentage;
+            if (typeof value !== 'number' || !Number.isFinite(value)) return [];
+            const key = safeStr(row.component_key ?? row.key ?? row.label) || `component-${index + 1}`;
+            return [[key, value]];
+          }));
+          if (Object.keys(scores).length > 0) state.placement.scores = scores;
+        }
+      }
+    }
+    const enrollment = this.stmtGetCurrentEnrollment.get(studentId) as
+      | {
+          id: string;
+          program_name: string | null;
+          level_code: string | null;
+          semester_name: string | null;
+          class_id: string | null;
+          enrollment_type: string | null;
+          skills_focus: string | null;
+        }
+      | undefined;
+    if (enrollment) {
+      state.currentEnrollmentId = enrollment.id;
+      state.currentProgram = enrollment.program_name;
+      state.currentLevel = enrollment.level_code;
+      state.currentSemester = enrollment.semester_name;
+      state.currentClassId = enrollment.class_id;
+      state.enrollmentType = enrollment.enrollment_type;
+      const skills = parsePayloadArray(enrollment.skills_focus);
+      state.skillsFocus = skills;
+    } else {
+      state.currentEnrollmentId = null;
+      state.currentProgram = null;
+      state.currentLevel = null;
+      state.currentSemester = null;
+      state.currentClassId = null;
+      state.enrollmentType = null;
+      state.skillsFocus = null;
+    }
     return state;
   }
 
-  // NOTE: `createEnrollment()` was removed here (closure-audit residual risk).
-  // It performed a raw `INSERT INTO enrollments` with no capacity, placement,
-  // gender, duplicate or branch checks and no lifecycle validation — a
-  // complete bypass of every admission invariant. It had zero production
-  // callers (verified by exhaustive search across routes, services, tests and
-  // dynamic dispatch), so it was dead code rather than an active defect, but
-  // leaving it in place meant any future caller would silently become a shadow
-  // enrollment writer. EnrollmentService.enroll() is the single creation
-  // authority; the journey layer records facts via appendEvent() and must not
-  // own an independent INSERT path.
+  // Enrollment creation belongs exclusively to EnrollmentService.enroll(),
+  // where capacity, placement, gender, duplicate, branch and lifecycle guards
+  // execute together. The journey layer records chronology via appendEvent()
+  // and intentionally exposes no independent enrollment INSERT path.
 }
 
 export function getJourneyEngine(db: Database.Database): StudentJourneyEngine {

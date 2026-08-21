@@ -17,17 +17,17 @@
  * legitimate distinct business events (two real installments, two explicitly
  * keyed payments, different amounts).
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { studentsRouter } from '../routes/students.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { resolveIdempotency, IDEMPOTENCY_WINDOW_SECONDS } from '../utils/idempotency.js';
-import { today } from '../utils/ids.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { studentsRouter } from '../../../routes/students.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { resolveIdempotency, IDEMPOTENCY_WINDOW_SECONDS } from '../../../utils/idempotency.js';
+import { today } from '../../../utils/ids.js';
 
 const BRANCH = 'fin_idem_branch';
 
@@ -317,7 +317,7 @@ describe('audit trail reflects one business event, not one per click', () => {
 // ══════════════════════════════════════════════════════════════════════════
 describe('F5 — book sale duplicate protection', () => {
   it('5 concurrent identical sales create ONE sale, ONE stock decrement, ONE income row', async () => {
-    const { booksRouter } = await import('../routes/books.routes.js');
+    const { booksRouter } = await import('../../../routes/books.routes.js');
     const bookApp = express();
     bookApp.use(express.json());
     bookApp.use('/api/books', booksRouter);

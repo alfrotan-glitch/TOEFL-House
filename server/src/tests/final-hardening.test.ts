@@ -107,9 +107,11 @@ async function seedUser(uid: string, uname: string, role: string) {
   assignRole(uid, role, BRANCH);
 }
 
+let studentPhoneSequence = 0;
 function seedStudent(sid: string, name: string, gender: string, code: string) {
+  studentPhoneSequence += 1;
   db.prepare(`INSERT OR IGNORE INTO students (id, student_code, full_name, status, registration_date, branch_id, gender, phone)
-    VALUES (?, ?, ?, 'active', ?, ?, ?, ?)`).run(sid, code, name, today(), BRANCH, gender, `07${code.slice(-8)}`);
+    VALUES (?, ?, ?, 'active', ?, ?, ?, ?)`).run(sid, code, name, today(), BRANCH, gender, `0700${String(studentPhoneSequence).padStart(6, '0')}`);
 }
 
 beforeAll(async () => {

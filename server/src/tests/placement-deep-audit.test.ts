@@ -42,10 +42,12 @@ function createApp() {
 
 function authHeader(user: TokenPayload) { return { Authorization: `Bearer ${signToken(user)}` }; }
 
+let visitorPhoneSequence = 0;
 function seedVisitor(visitorId: string, name: string, branch: string, version: string, gender = 'male') {
+  visitorPhoneSequence += 1;
   db.prepare(`INSERT OR IGNORE INTO visitors (id, serial_no, full_name, phone, gender, source, visit_date, status, branch_id, interested_course, program_version_id, placement_status)
     VALUES (?, ?, ?, ?, ?, 'social', ?, 'visited', ?, 'Placement Program', ?, 'not_started')`)
-    .run(visitorId, `V-${visitorId.slice(-4)}`, name, `0700${visitorId.slice(-6)}`, gender, today(), branch, version);
+    .run(visitorId, `V-${visitorId.slice(-4)}`, name, `0700${String(visitorPhoneSequence).padStart(6, '0')}`, gender, today(), branch, version);
 }
 
 describe('Placement Exam deep audit', () => {

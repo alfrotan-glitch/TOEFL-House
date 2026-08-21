@@ -87,7 +87,7 @@ const completeAttempt = (vid: string, aid: string, as: TokenPayload = owner, bod
   supertest(app).post(`/api/placement/visitors/${vid}/placement/attempts/${aid}/complete`).set(authHeader(as)).send(body);
 const convert = (vid: string, as: TokenPayload = owner) =>
   supertest(app).post(`/api/visitors/${vid}/convert`).set(authHeader(as))
-    .send({ classId: CLASS_ID, amountPaid: 0, semesterFee: 0, branchId: BRANCH, programVersionId: VERSION });
+    .send({ classId: CLASS_ID, amountPaid: 0, branchId: BRANCH, programVersionId: VERSION });
 
 /** Run one full sitting and return the completion response. */
 async function sit(vid: string, score: number) {
