@@ -256,9 +256,17 @@ describe('the legacy budget model has no runtime presence', () => {
     expect(cols).toContain('finance_category_id');
   });
 
-  it('no index or trigger references the removed columns', () => {
+  it('no index or trigger references the removed budget columns', () => {
+    // `purpose` is matched only inside BUDGET objects. `invoices.purpose` is a
+    // live column of a different table — what an invoice bills (owner decision
+    // D-118) — and a bare word match reports it as residue of a model it has
+    // nothing to do with. `is_marketing` and `mapping_status` stay global:
+    // those names belong to the retired model alone.
     const objects = db.prepare(
-      `SELECT name, sql FROM sqlite_master WHERE sql LIKE '%purpose%' OR sql LIKE '%is_marketing%' OR sql LIKE '%mapping_status%'`,
+      `SELECT name, sql FROM sqlite_master
+        WHERE sql LIKE '%is_marketing%'
+           OR sql LIKE '%mapping_status%'
+           OR (sql LIKE '%budget%' AND sql LIKE '%purpose%')`,
     ).all() as Array<{ name: string }>;
     expect(objects.map((o) => o.name)).toEqual([]);
   });

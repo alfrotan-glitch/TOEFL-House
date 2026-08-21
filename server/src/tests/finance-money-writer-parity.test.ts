@@ -88,10 +88,16 @@ function mkStudent(): string {
 }
 function mkInvoice(studentId: string, net: number): string {
   const iid = `fmwp_i${++seq}`;
+  // The document says what it bills (D-118) and carries the line that says
+  // what it is for; the payment boundary refuses a document that says neither.
   db.prepare(
-    `INSERT OR REPLACE INTO invoices (id, student_id, issue_date, due_date, status, total_amount, discount_amount, net_amount, branch_id)
-     VALUES (?, ?, ?, ?, 'issued', ?, 0, ?, ?)`,
+    `INSERT OR REPLACE INTO invoices (id, student_id, issue_date, due_date, status, total_amount, discount_amount, net_amount, branch_id, purpose)
+     VALUES (?, ?, ?, ?, 'issued', ?, 0, ?, ?, 'other')`,
   ).run(iid, studentId, today(), today(), net, net, BR);
+  db.prepare(
+    `INSERT INTO invoice_items (id, invoice_id, description, quantity, unit_price, amount)
+     VALUES (?, ?, 'Ad-hoc charge', 1, ?, ?)`,
+  ).run(`${iid}_it`, iid, net, net);
   return iid;
 }
 

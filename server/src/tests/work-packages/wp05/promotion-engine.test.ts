@@ -139,7 +139,7 @@ describe('Promotion Engine — factor computation', () => {
     expect(hasFinancialHold(db, student)).toBe(false);
 
     db.prepare(
-      `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id) VALUES (?, ?, 100, 100, 'overdue', ?, '2020-01-01', ?)`
+      `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, purpose) VALUES (?, ?, 100, 100, 'overdue', ?, '2020-01-01', ?, 'other')`
     ).run(makeId('inv'), student, today(), BRANCH);
     expect(hasFinancialHold(db, student)).toBe(true);
   });
@@ -234,7 +234,7 @@ describe('Promotion Engine — complete-semester integration', () => {
     const classId = await createActivatedClass('E2E Hold Class');
     const student = 'pe_stu_e2e_hold';
     const { semesterId, enrollmentId } = seedStudentWithRosterAndEnrollment(student, BRANCH, 'E2E Hold Student', classId);
-    db.prepare(`INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id) VALUES (?, ?, 100, 100, 'overdue', ?, '2020-01-01', ?)`)
+    db.prepare(`INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, purpose) VALUES (?, ?, 100, 100, 'overdue', ?, '2020-01-01', ?, 'other')`)
       .run(makeId('inv'), student, today(), BRANCH);
     const a = await supertest(app).post(`/api/classes/${classId}/assessments`).set(authHeader(owner)).send({ title: 'Final', type: 'final', weight: 100 });
     await supertest(app).put(`/api/classes/${classId}/grades`).set(authHeader(owner)).send({ grades: [{ assessmentId: a.body.id, studentId: student, score: 95, status: 'graded' }] });
@@ -256,7 +256,7 @@ describe('Promotion Engine — complete-semester integration', () => {
     const classId = await createActivatedClass('E2E Manual Drop Class');
     const student = 'pe_stu_e2e_drop';
     const { semesterId, enrollmentId } = seedStudentWithRosterAndEnrollment(student, BRANCH, 'E2E Drop Student', classId);
-    db.prepare(`INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id) VALUES (?, ?, 100, 100, 'overdue', ?, '2020-01-01', ?)`)
+    db.prepare(`INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, purpose) VALUES (?, ?, 100, 100, 'overdue', ?, '2020-01-01', ?, 'other')`)
       .run(makeId('inv'), student, today(), BRANCH);
     const a = await supertest(app).post(`/api/classes/${classId}/assessments`).set(authHeader(owner)).send({ title: 'Final', type: 'final', weight: 100 });
     await supertest(app).put(`/api/classes/${classId}/grades`).set(authHeader(owner)).send({ grades: [{ assessmentId: a.body.id, studentId: student, score: 95, status: 'graded' }] });

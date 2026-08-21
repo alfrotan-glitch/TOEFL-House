@@ -184,6 +184,7 @@ describe('discounts cannot exceed the amount they discount', () => {
     const studentId = await newStudent();
     const res = await supertest(app).post('/api/invoices').set(auth()).send({
       studentId,
+      purpose: 'other',
       items: [{ description: 'Tuition', quantity: 1, unitPrice: 5000 }],
       discountAmount: 99999,
     });
@@ -195,6 +196,7 @@ describe('discounts cannot exceed the amount they discount', () => {
     const studentId = await newStudent();
     const res = await supertest(app).post('/api/invoices').set(auth()).send({
       studentId,
+      purpose: 'other',
       items: [{ description: 'Tuition', quantity: 1, unitPrice: 5000 }],
       discountAmount: 500,
     });
@@ -346,7 +348,7 @@ describe('invoice line quantities are validated, not coerced', () => {
   it('rejects a negative quantity instead of substituting 1', async () => {
     const studentId = await newStudent();
     const res = await supertest(app).post('/api/invoices').set(auth())
-      .send({ studentId, items: [{ description: 'Tuition', quantity: -3, unitPrice: 500 }] });
+      .send({ studentId, purpose: 'other', items: [{ description: 'Tuition', quantity: -3, unitPrice: 500 }] });
 
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/quantity/i);
@@ -357,14 +359,14 @@ describe('invoice line quantities are validated, not coerced', () => {
   it('rejects a fractional quantity', async () => {
     const studentId = await newStudent();
     const res = await supertest(app).post('/api/invoices').set(auth())
-      .send({ studentId, items: [{ description: 'Tuition', quantity: 1.5, unitPrice: 500 }] });
+      .send({ studentId, purpose: 'other', items: [{ description: 'Tuition', quantity: 1.5, unitPrice: 500 }] });
     expect(res.status).toBe(400);
   });
 
   it('still accepts a valid multi-unit line and prices it correctly', async () => {
     const studentId = await newStudent();
     const res = await supertest(app).post('/api/invoices').set(auth())
-      .send({ studentId, items: [{ description: 'Books', quantity: 3, unitPrice: 500 }] });
+      .send({ studentId, purpose: 'books', items: [{ description: 'Books', quantity: 3, unitPrice: 500 }] });
     expect(res.status).toBe(201);
     expect(res.body.totalAmount).toBe(1500);
   });

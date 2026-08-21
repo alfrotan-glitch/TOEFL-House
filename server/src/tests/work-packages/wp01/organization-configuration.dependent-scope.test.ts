@@ -126,6 +126,7 @@ describe('WP-01 branch selection cannot widen dependent HTTP consumers', () => {
     const before = (db.prepare('SELECT COUNT(*) c FROM invoices WHERE student_id = ?').get(STUDENT_B) as { c: number }).c;
     const response = await http.post('/api/invoices').set(as(MANAGER_A)).send({
       studentId: STUDENT_B,
+      purpose: 'other',
       items: [{ description: 'cross-branch attack', quantity: 1, unitPrice: 100 }],
     });
     expect([403, 404]).toContain(response.status);

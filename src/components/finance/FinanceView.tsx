@@ -8,8 +8,7 @@ import React, { useEffect, useState } from 'react';
 import { CalendarCheck } from 'lucide-react';
 import type {
   BudgetLine, BudgetLineInput, FinanceCategory, ExpenseRequest, FinancialTransaction, UserRole,
-  ExpenseKind, OperationalPaymentInput, ExpenseReport, Invoice, Student, FinanceConfig, FinanceDashboard,
-} from '../../types';
+  ExpenseKind, OperationalPaymentInput, ExpenseReport, Invoice, Student, FinanceConfig, FinanceDashboard, InvoicePurpose } from '../../types';
 import { formatAFN } from '../../utils/format';
 import { getRoleLabel } from '../../config/roles';
 import { api } from '../../api/client';
@@ -51,6 +50,8 @@ export interface FinanceViewProps {
   financeConfig: FinanceConfig | null;
   createInvoice: (payload: {
     studentId: string;
+    purpose: InvoicePurpose;
+    semesterId?: string;
     items: { description: string; quantity?: number; unitPrice: number }[];
     discountAmount?: number;
     notes?: string;

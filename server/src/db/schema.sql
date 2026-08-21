@@ -2278,7 +2278,20 @@ CREATE TABLE IF NOT EXISTS invoices (
   invoice_number TEXT, 
   issued_by      TEXT, 
   student_name   TEXT, 
-  student_code   TEXT 
+  student_code   TEXT,
+  -- What this document bills (owner decision D-118). An invoice payment
+  -- settles the thing the invoice names; it is never tuition merely because it
+  -- arrived through the invoice system. While every invoice payment was booked
+  -- as `category = 'fee'`, a 3,000 AFN textbooks invoice cut a 10,000 AFN
+  -- tuition debt to 7,000 and a paid tuition invoice settled no term at all.
+  purpose        TEXT NOT NULL CHECK (purpose IN ('tuition','books','exam','other')),
+  -- The tuition obligation this invoice bills. Exactly one, so a partial
+  -- payment never has to be split between obligations by a rule nobody wrote.
+  obligation_id  TEXT REFERENCES student_obligations(id) ON DELETE RESTRICT,
+  CHECK (
+       (purpose =  'tuition' AND obligation_id IS NOT NULL)
+    OR (purpose <> 'tuition' AND obligation_id IS NULL)
+  )
 );
 CREATE INDEX IF NOT EXISTS idx_invoices_branch       ON invoices(branch_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_branch_due_status
@@ -2314,6 +2327,22 @@ CREATE TRIGGER IF NOT EXISTS trg_invoices_nonnegative_update
 BEFORE UPDATE OF total_amount, discount_amount, net_amount ON invoices
 WHEN NEW.total_amount < 0 OR NEW.discount_amount < 0 OR NEW.net_amount < 0
 BEGIN SELECT RAISE(ABORT, 'invoice amounts cannot be negative'); END;
+-- An invoice may only bill a tuition obligation of the student it is addressed
+-- to. Without this, a document could name another student's term and its
+-- payment would settle a debt that student never owed.
+CREATE TRIGGER IF NOT EXISTS trg_invoices_obligation_owner_insert
+BEFORE INSERT ON invoices
+WHEN NEW.obligation_id IS NOT NULL AND (
+     (SELECT student_id FROM student_obligations WHERE id = NEW.obligation_id) IS NOT NEW.student_id
+  OR (SELECT kind       FROM student_obligations WHERE id = NEW.obligation_id) <> 'tuition')
+BEGIN SELECT RAISE(ABORT, 'Invoice obligation must be a tuition obligation of the same student'); END;
+CREATE TRIGGER IF NOT EXISTS trg_invoices_obligation_owner_update
+BEFORE UPDATE OF obligation_id, student_id ON invoices
+WHEN NEW.obligation_id IS NOT NULL AND (
+     (SELECT student_id FROM student_obligations WHERE id = NEW.obligation_id) IS NOT NEW.student_id
+  OR (SELECT kind       FROM student_obligations WHERE id = NEW.obligation_id) <> 'tuition')
+BEGIN SELECT RAISE(ABORT, 'Invoice obligation must be a tuition obligation of the same student'); END;
+CREATE INDEX IF NOT EXISTS idx_invoices_obligation ON invoices(obligation_id);
 
 CREATE TABLE IF NOT EXISTS invoice_items ( 
   id          TEXT PRIMARY KEY, 

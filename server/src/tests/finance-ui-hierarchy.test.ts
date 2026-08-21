@@ -127,7 +127,16 @@ describe('the browser holds no accounting knowledge', () => {
       if (/new Set\(\s*\[\s*'(?:rent|electricity|internet|water|gas|kitchen|equipment|marketing|misc|purchases|transport)'/.test(text)) {
         offenders.push(`${file}: purpose allow-list`);
       }
-      if (/\bpurpose\b/.test(text)) offenders.push(`${file}: reads a legacy purpose`);
+      // Scoped to the RETIRED BUDGET purpose. `invoice.purpose` is a live
+      // server-authored field — what a document bills (owner decision D-118) —
+      // and a bare word match condemns rendering it. What must stay out of the
+      // browser is budget-line accounting knowledge, which is what these two
+      // patterns look for: a purpose read off a budget object, and a comparison
+      // against one of the retired operational purpose strings.
+      if (/budget[A-Za-z]*[^;\n]{0,40}\bpurpose\b/i.test(text)) offenders.push(`${file}: reads a budget purpose`);
+      if (/\bpurpose\s*===?\s*['"](?:teacher_salary|employee_salary|rent|electricity|internet|water|gas|kitchen|equipment|marketing|misc|purchases|transport)['"]/.test(text)) {
+        offenders.push(`${file}: legacy purpose comparison`);
+      }
       if (/\bmappingStatus\b|\bisMarketing\b/.test(text)) offenders.push(`${file}: retired concept`);
       // A classification must never be DERIVED in the browser, only rendered.
       if (/classification\s*=\s*['"]/.test(text)) offenders.push(`${file}: assigns a classification`);

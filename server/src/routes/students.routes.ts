@@ -124,8 +124,14 @@ const stmtInsertEnrollment = db.prepare(
 );
 const stmtGetClassSessions = db.prepare("SELECT id FROM sessions WHERE class_id = ? AND status != 'cancelled'");
 const stmtInsertRoster = db.prepare('INSERT INTO rosters (id, session_id, student_id, attendance_status) VALUES (?, ?, ?, ?)');
+// An extra class creates no `student_semesters` row, so there is no tuition
+// obligation for this document to name and D-118 forbids calling it tuition.
+// It bills its own charge and settles only that.
 const stmtInsertInvoice = db.prepare(
-  `INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, notes, invoice_number, issued_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  `INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, notes, invoice_number, issued_by, purpose) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'other')`
+);
+const stmtInsertExtraClassInvoiceItem = db.prepare(
+  `INSERT INTO invoice_items (id, invoice_id, description, quantity, unit_price, amount) VALUES (?, ?, ?, 1, ?, ?)`
 );
 
 const stmtInsertStudent = db.prepare(
@@ -1016,13 +1022,19 @@ studentsRouter.post('/:id/enroll-class', requirePermission('Class.Assign'), ah(a
       // duplicate-seat guard (assertNotAlreadySeatedInClass) backed by
       // uq_enrollment_active_seat_per_class (074) — verified live, 5 concurrent
       // submits yield exactly 1x201 and 4x409 "Already enrolled in this class."
-      stmtInsertPayment.run(pid, student.id, paidNow, date, 'cash', 'fee', `Extra class fee: ${cls.name}`, nextReceiptNumber(), student.branch_id, null, null, null, `extra-class:${enrollId}`);
-      recordIncome({ category: 'fee', amount: paidNow, date, description: `Extra class fee from ${student.full_name}`, referenceId: student.id, paymentId: pid, operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null, branchId: student.branch_id });
+      // Recorded as what it is. Booked as `fee` it counted as TUITION paid,
+      // and because an extra class charges no term, it paid down other terms'
+      // debt — the WP07-F17 leak arriving through a second door.
+      stmtInsertPayment.run(pid, student.id, paidNow, date, 'cash', 'other', `Extra class fee: ${cls.name}`, nextReceiptNumber(), student.branch_id, null, null, null, `extra-class:${enrollId}`);
+      recordIncome({ category: 'other', amount: paidNow, date, description: `Extra class fee from ${student.full_name}`, referenceId: student.id, paymentId: pid, operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null, branchId: student.branch_id });
     }
 
     if (netFee - paidNow > 0) {
       const invId = id('inv');
       stmtInsertInvoice.run(invId, student.id, baseFee, (baseFee - netFee), netFee, paidNow >= netFee ? 'paid' : 'issued', date, date, student.branch_id, `Fee for extra class: ${cls.name}`, nextInvoiceNumber(student.branch_id), user.fullName);
+      // A document with a net amount and no line said what it cost without
+      // ever saying what it was for, and the payment boundary now refuses one.
+      stmtInsertExtraClassInvoiceItem.run(id('invit'), invId, `Extra class — ${cls.name}`, baseFee, baseFee);
     }
   });
   tx();

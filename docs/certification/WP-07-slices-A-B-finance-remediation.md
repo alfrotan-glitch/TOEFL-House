@@ -403,3 +403,54 @@ claimed:
   are still the behavioural record; the three package suites replace none of
   them);
 - the re-certification burden recorded in `docs/certification/WP-07-finance.md`.
+
+---
+
+# Slice F — the invoice says what it bills (WP07-F17, WP07-F19)
+
+**Date:** 2026-08-21 · **Baseline:** `bb41398` · **Owner decisions executed:** D-118 (recorded → implemented as D-127)
+**Release gate:** 22 passed · 0 failed · 0 skipped · **Server suite:** 2740 passed · 160 known WP-04 skips · 0 failed
+**Schema:** 116 tables · 248 indexes · 125 triggers (stands alone, sound, idempotent, sole authority)
+
+## The defect, proven before repair (§103)
+
+`POST /api/invoices/:id/pay` wrote `category = 'fee'` for every invoice and never
+wrote `semester`. One literal, two opposite money errors:
+
+```
+× a books invoice, paid in full, leaves tuition untouched
+  AssertionError: expected 7000 to be 10000
+× a tuition invoice, paid in full, settles the term it names
+  AssertionError: expected +0 to be 10000
+× a term paid through its invoice cannot be collected a second time at the desk
+  AssertionError: expected 201 to be 400
+```
+
+A 3,000 AFN *Textbooks and stationery* invoice forgave 3,000 AFN of tuition
+receivable. A 10,000 AFN tuition invoice, paid in full, settled no term, so the
+desk would take the same 10,000 AFN again.
+
+## What ATTACK found that no report had (WP07-F19)
+
+Two 6,000 AFN tuition invoices on a 10,000 AFN term were **both** created and
+**both** paid. Each was individually within its own remaining balance and
+nothing looked at the term, so 12,000 AFN was absorbed by a 10,000 AFN term
+(`creditBalance 2000`). Repaired by `tuitionBillingCapacity` (D-128); the second
+invoice is now refused with *"That term has only 4000 AFN left to bill"*.
+
+## What is now true
+
+| Rule | Enforced by |
+|---|---|
+| An invoice declares its purpose; there is no default | `assertInvoicePurpose`, `invoices.purpose NOT NULL CHECK` |
+| A tuition invoice names exactly one obligation; nothing else may name one | table `CHECK`, `trg_invoices_obligation_owner_{insert,update}` |
+| Only a tuition invoice's payment is recorded as `fee` and carries a term | `invoicePaymentAttribution` — the sole resolver |
+| A term may not be billed beyond what it bills | `assertTuitionInvoiceFits` (D-128) |
+| A document with no line items cannot take money | `assertInvoiceHasLines` |
+| The operator chooses the purpose, and the term when it is tuition | `InvoicesPanel.tsx` purpose selector + term selector |
+
+## Scope honesty
+
+* **NOT closed — WP07-F18 (owner question raised, A-18):** the enrolment auto-invoice bills a *mixture* (`registration` + `semester` fees) against a `student_semesters` row inserted with `fee_amount = 0`. Tuition receivable therefore still has two representations depending on which door the student came through. The interim `other` classification is forced and loses nothing today, but the underlying split is an owner decision.
+* **NOT started in this slice:** E1b (cash payments onto `obligation_allocations`), S5, S6.
+* This slice writes the **existing** settlement authority (`payments.semester`, D-116), not a second one. The migration of all cash onto allocations is step 4 and is done once, for every writer.

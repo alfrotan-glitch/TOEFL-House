@@ -958,6 +958,9 @@ export interface RefundablePayment {
   refundableAmount: number;
 }
 
+/** What an invoice bills (owner decision D-118). */
+export type InvoicePurpose = 'tuition' | 'books' | 'exam' | 'other';
+
 export interface Invoice {
   id: string;
   studentId: string;
@@ -974,6 +977,10 @@ export interface Invoice {
   notes?: string;
   invoiceNumber?: string;
   issuedBy?: string;
+  /** What this document bills. A tuition invoice also names the term. */
+  purpose: InvoicePurpose;
+  obligationId?: string;
+  semesterName?: string;
   createdAt?: string;
 }
 

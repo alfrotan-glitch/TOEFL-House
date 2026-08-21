@@ -4,7 +4,7 @@
  */
 import React, { useMemo, useState } from 'react';
 import { FileText, Plus, Check, X, Banknote } from 'lucide-react';
-import type { Invoice, Student, FinanceConfig } from '../../types';
+import type { Invoice, InvoicePurpose, Student, FinanceConfig } from '../../types';
 import { formatAFN } from '../../utils/format';
 
 interface Props {
@@ -13,6 +13,8 @@ interface Props {
   financeConfig: FinanceConfig | null;
   createInvoice: (payload: {
     studentId: string;
+    purpose: InvoicePurpose;
+    semesterId?: string;
     items: { description: string; quantity?: number; unitPrice: number }[];
     discountAmount?: number;
     notes?: string;
@@ -29,6 +31,14 @@ interface Props {
   updateFinanceConfig: (patch: Partial<FinanceConfig>) => Promise<void>;
   isOwner: boolean;
 }
+
+/** A tuition invoice is the only one whose money reduces tuition owed. */
+const PURPOSE_STYLE: Record<string, string> = {
+  tuition: 'bg-indigo-50 text-indigo-700',
+  books: 'bg-teal-50 text-teal-700',
+  exam: 'bg-violet-50 text-violet-700',
+  other: 'bg-slate-100 text-slate-600',
+};
 
 const STATUS_STYLE: Record<string, string> = {
   draft: 'bg-slate-100 text-slate-600',
@@ -51,6 +61,10 @@ export default function InvoicesPanel({
   isOwner,
 }: Props) {
   const [studentId, setStudentId] = useState('');
+  // What the document bills. Tuition additionally names the term it bills, so
+  // the money that answers it settles that term and nothing else (D-118).
+  const [purpose, setPurpose] = useState<InvoicePurpose>('tuition');
+  const [semesterId, setSemesterId] = useState('');
   const [description, setDescription] = useState('Tuition fee');
   const [unitPrice, setUnitPrice] = useState(0);
   const [quantity, setQuantity] = useState(1);
@@ -68,6 +82,12 @@ export default function InvoicesPanel({
     [students]
   );
 
+  /** The terms this student holds, which a tuition invoice may bill. */
+  const billableTerms = useMemo(
+    () => (students.find((s) => s.id === studentId)?.semesters ?? []).filter((t) => t.status !== 'deferred'),
+    [students, studentId],
+  );
+
   const filtered = useMemo(() => {
     if (statusFilter === 'all') return invoices;
     return invoices.filter((i) => i.status === statusFilter);
@@ -79,11 +99,17 @@ export default function InvoicesPanel({
       setMessage('Student, description, and a valid unit price are required.');
       return;
     }
+    if (purpose === 'tuition' && !semesterId) {
+      setMessage('A tuition invoice must name the term it bills.');
+      return;
+    }
     setBusy(true);
     setMessage(null);
     try {
       const inv = await createInvoice({
         studentId,
+        purpose,
+        semesterId: purpose === 'tuition' ? semesterId : undefined,
         items: [{ description: description.trim(), quantity, unitPrice }],
         discountAmount: discount,
         notes: notes || undefined,
@@ -138,6 +164,48 @@ export default function InvoicesPanel({
                 ))}
               </select>
             </div>
+            <div className="space-y-1">
+              <label className="block text-slate-600 font-medium">What this invoice bills</label>
+              <select
+                value={purpose}
+                onChange={(e) => { setPurpose(e.target.value as InvoicePurpose); setSemesterId(''); }}
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 cursor-pointer"
+                required
+              >
+                <option value="tuition">Tuition</option>
+                <option value="books">Books</option>
+                <option value="exam">Exam fee</option>
+                <option value="other">Other</option>
+              </select>
+              <p className="text-[11px] text-slate-500">
+                Only a tuition invoice reduces tuition owed. Books, exam and other invoices settle
+                themselves and leave the student&rsquo;s tuition position untouched.
+              </p>
+            </div>
+            {purpose === 'tuition' && (
+              <div className="space-y-1">
+                <label className="block text-slate-600 font-medium">Term this invoice bills</label>
+                <select
+                  value={semesterId}
+                  onChange={(e) => setSemesterId(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 cursor-pointer"
+                  required
+                  disabled={!studentId}
+                >
+                  <option value="">{studentId ? 'Select term…' : 'Select a student first'}</option>
+                  {billableTerms.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.semesterName} ({t.status})
+                    </option>
+                  ))}
+                </select>
+                {studentId && billableTerms.length === 0 && (
+                  <p className="text-[11px] text-rose-600">
+                    This student holds no term to bill. Enrol them first, or choose another purpose.
+                  </p>
+                )}
+              </div>
+            )}
             <div className="space-y-1">
               <label className="block text-slate-600 font-medium">Line description</label>
               <input
@@ -269,6 +337,10 @@ export default function InvoicesPanel({
                         issued {inv.issueDate}
                         {inv.dueDate ? ` · due ${inv.dueDate}` : ''}
                       </p>
+                      {/* What the money collected here will settle. */}
+                      <span className={`inline-block mt-1 text-[9px] font-black px-1.5 py-0.5 rounded-full ${PURPOSE_STYLE[inv.purpose] || 'bg-slate-100 text-slate-600'}`}>
+                        {inv.purpose === 'tuition' ? `tuition · ${inv.semesterName || 'term'}` : inv.purpose}
+                      </span>
                     </div>
                     <div className="text-start">
                       <p className="font-mono font-extrabold text-slate-900">{formatAFN(inv.netAmount)}</p>

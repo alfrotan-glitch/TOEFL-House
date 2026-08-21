@@ -101,8 +101,8 @@ describe('§A Failure Recovery', () => {
         ).run(payId, studentId, today(), rc, BRANCH_ID);
 
         db.prepare(
-          `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number)
-           VALUES (?, ?, 5000, 5000, 'INVALID_STATUS', ?, '2099-01-01', ?, 'INV-A2-FAIL')`
+          `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number, purpose)
+           VALUES (?, ?, 5000, 5000, 'INVALID_STATUS', ?, '2099-01-01', ?, 'INV-A2-FAIL', 'other')`
         ).run(id('inv'), studentId, today(), BRANCH_ID);
       })();
       expect.unreachable('Should have thrown');
@@ -122,8 +122,8 @@ describe('§A Failure Recovery', () => {
     ).run(studentId, today(), BRANCH_ID);
 
     db.prepare(
-      `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number)
-       VALUES (?, ?, 5000, 5000, 'issued', ?, '2099-01-01', ?, 'INV-A3-001')`
+      `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number, purpose)
+       VALUES (?, ?, 5000, 5000, 'issued', ?, '2099-01-01', ?, 'INV-A3-001', 'other')`
     ).run(invId, studentId, today(), BRANCH_ID);
 
     const regId = id('reg');
@@ -157,8 +157,8 @@ describe('§A Failure Recovery', () => {
     ).run(studentId, today(), BRANCH_ID);
 
     db.prepare(
-      `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number)
-       VALUES (?, ?, 5000, 5000, 'issued', ?, '2099-01-01', ?, 'INV-A4-001')`
+      `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number, purpose)
+       VALUES (?, ?, 5000, 5000, 'issued', ?, '2099-01-01', ?, 'INV-A4-001', 'other')`
     ).run(invId, studentId, today(), BRANCH_ID);
 
     const payId = id('pay');
@@ -199,8 +199,8 @@ describe('§A Failure Recovery', () => {
     ).run(studentId, today(), BRANCH_ID);
 
     db.prepare(
-      `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number)
-       VALUES (?, ?, 5000, 5000, 'issued', ?, '2099-01-01', ?, 'INV-A5-001')`
+      `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number, purpose)
+       VALUES (?, ?, 5000, 5000, 'issued', ?, '2099-01-01', ?, 'INV-A5-001', 'other')`
     ).run(invId, studentId, today(), BRANCH_ID);
 
     try {
@@ -262,8 +262,8 @@ describe('§B Concurrency', () => {
     ).run(studentId, today(), BRANCH_ID);
 
     db.prepare(
-      `INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number)
-       VALUES (?, ?, 1000000, 0, 1000000, 'issued', ?, '2099-01-01', ?, 'INV-B2-001')`
+      `INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number, purpose)
+       VALUES (?, ?, 1000000, 0, 1000000, 'issued', ?, '2099-01-01', ?, 'INV-B2-001', 'other')`
     ).run(invId, studentId, today(), BRANCH_ID);
 
     const paymentIds: string[] = [];
@@ -324,8 +324,8 @@ describe('§B Concurrency', () => {
       const iid = id('inv');
       invIds.push(iid);
       db.prepare(
-        `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number)
-         VALUES (?, ?, 5000, 5000, 'draft', ?, '2099-01-01', ?, ?)`
+        `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number, purpose)
+         VALUES (?, ?, 5000, 5000, 'draft', ?, '2099-01-01', ?, ?, 'other')`
       ).run(iid, studentId, today(), BRANCH_ID, `INV-B4-${String(i).padStart(4, '0')}`);
     }
 
@@ -362,8 +362,8 @@ describe('§C Reconciliation', () => {
         ).run(sid, `TH-C1-${i}`, `Recon Student ${i}`, today(), BRANCH_ID);
 
         db.prepare(
-          `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number)
-           VALUES (?, ?, ?, ?, 'paid', ?, '2099-01-01', ?, ?)`
+          `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number, purpose)
+           VALUES (?, ?, ?, ?, 'paid', ?, '2099-01-01', ?, ?, 'other')`
         ).run(iid, sid, amount, amount, today(), BRANCH_ID, `INV-C1-${String(i).padStart(3, '0')}`);
 
         db.prepare(
@@ -521,8 +521,8 @@ describe('§E Transaction Safety', () => {
     ).run(studentId, today(), BRANCH_ID);
 
     db.prepare(
-      `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number)
-       VALUES (?, ?, 5000, 5000, 'issued', ?, '2099-01-01', ?, 'INV-E2-001')`
+      `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number, purpose)
+       VALUES (?, ?, 5000, 5000, 'issued', ?, '2099-01-01', ?, 'INV-E2-001', 'other')`
     ).run(invId, studentId, today(), BRANCH_ID);
 
     db.transaction(() => {
@@ -567,8 +567,8 @@ describe('§E Transaction Safety', () => {
         const invId = id('inv');
         const payId = id('pay');
         db.prepare(
-          `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number)
-           VALUES (?, ?, 1000, 1000, 'paid', ?, '2099-01-01', ?, 'INV-E3-001')`
+          `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number, purpose)
+           VALUES (?, ?, 1000, 1000, 'paid', ?, '2099-01-01', ?, 'INV-E3-001', 'other')`
         ).run(invId, studentId, today(), BRANCH_ID);
 
         db.prepare(

@@ -168,8 +168,8 @@ beforeAll(async () => {
     VALUES (?, 'h_stu_f', 'Level A1', NULL, ?, 5000, 5000, 'active')`).run(id('sem'), today());
 
   // Invoice with a student (name/code snapshot check).
-  db.prepare(`INSERT OR IGNORE INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number, student_name, student_code)
-    VALUES (?, 'h_stu_f', 8000, 0, 8000, 'issued', ?, ?, ?, 'INV-H-1', 'Hardening Female', 'TH-H-001002')`).run('h_inv', today(), today(), BRANCH);
+  db.prepare(`INSERT OR IGNORE INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number, student_name, student_code, purpose)
+    VALUES (?, 'h_stu_f', 8000, 0, 8000, 'issued', ?, ?, ?, 'INV-H-1', 'Hardening Female', 'TH-H-001002', 'other')`).run('h_inv', today(), today(), BRANCH);
 
   // Audit rows for filter tests.
   db.prepare(`INSERT INTO audit_logs (id, operator_id, operator_name, action, date, time, ip, device, branch_id)
@@ -424,7 +424,7 @@ describe('Invoice student name/code snapshot', () => {
     const res = await supertest(app)
       .post('/api/invoices')
       .set(authHeader(finance))
-      .send({ studentId: 'h_stu_m', items: [{ description: 'Course', unitPrice: 3000 }], issue: true });
+      .send({ studentId: 'h_stu_m', purpose: 'other', items: [{ description: 'Course', unitPrice: 3000 }], issue: true });
     expect(res.status).toBe(201);
     expect(res.body.studentName).toBe('Hardening Male');
     expect(res.body.studentCode).toBe('TH-H-001001');

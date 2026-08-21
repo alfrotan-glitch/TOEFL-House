@@ -19,23 +19,31 @@ import { SYSTEM_DEFAULTS } from '../core/configuration/policy-catalog.js';
 import { assertMoney, assertComputedMoney } from '../utils/money.js';
 import { FINANCE_SETTING_LIST } from '../core/configuration/finance-settings.js';
 import { resolveIdempotency, isUniqueViolation } from '../utils/idempotency.js';
+import {
+  assertInvoicePurpose, resolveInvoiceObligation, assertInvoiceHasLines, invoicePaymentAttribution,
+  assertTuitionInvoiceFits,
+} from '../core/finance/invoicing.js';
 
 export const invoicesRouter = Router();
 invoicesRouter.use(authenticate, authorize('owner', 'finance_manager', 'general_manager', 'receptionist'));
 
 // ── Performance Optimization: Prepared Statements ──────────────────────────
+const INVOICE_SELECT = `SELECT i.*, s.full_name as student_name, s.student_code as student_code,
+         ss.semester_name as semester_name
+    FROM invoices i
+    LEFT JOIN students s ON s.id = i.student_id
+    LEFT JOIN student_obligations o ON o.id = i.obligation_id
+    LEFT JOIN student_semesters ss ON ss.id = o.semester_id`;
 const stmtGetAllInvoices = db.prepare(
-  `SELECT i.*, s.full_name as student_name, s.student_code as student_code FROM invoices i LEFT JOIN students s ON s.id = i.student_id ORDER BY i.issue_date DESC, i.rowid DESC LIMIT 500`
+  `${INVOICE_SELECT} ORDER BY i.issue_date DESC, i.rowid DESC LIMIT 500`
 );
 const stmtGetInvoicesByBranch = db.prepare(
-  `SELECT i.*, s.full_name as student_name, s.student_code as student_code FROM invoices i LEFT JOIN students s ON s.id = i.student_id WHERE i.branch_id = ? ORDER BY i.issue_date DESC, i.rowid DESC LIMIT 500`
+  `${INVOICE_SELECT} WHERE i.branch_id = ? ORDER BY i.issue_date DESC, i.rowid DESC LIMIT 500`
 );
-const stmtGetInvoiceById = db.prepare(
-  `SELECT i.*, s.full_name as student_name, s.student_code as student_code FROM invoices i LEFT JOIN students s ON s.id = i.student_id WHERE i.id = ?`
-);
+const stmtGetInvoiceById = db.prepare(`${INVOICE_SELECT} WHERE i.id = ?`);
 const stmtGetPlainInvoiceById = db.prepare('SELECT * FROM invoices WHERE id = ?');
 const stmtInsertInvoice = db.prepare(
-  `INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, notes, invoice_number, issued_by, student_name, student_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  `INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, notes, invoice_number, issued_by, student_name, student_code, purpose, obligation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
 const stmtInsertInvoiceItem = db.prepare(
   `INSERT INTO invoice_items (id, invoice_id, description, quantity, unit_price, amount) VALUES (?, ?, ?, ?, ?, ?)`
@@ -47,7 +55,7 @@ const stmtGetInvoicePaymentsSum = db.prepare(
   `SELECT COALESCE(SUM(amount), 0) as s FROM payments WHERE invoice_id = ? AND status = 'completed'`
 );
 const stmtInsertPayment = db.prepare(
-  `INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, notes, receipt_number, branch_id, idempotency_key) VALUES (?, ?, ?, ?, ?, ?, 'completed', 'fee', ?, ?, ?, ?)`
+  `INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, semester, notes, receipt_number, branch_id, idempotency_key) VALUES (?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?)`
 );
 const stmtUpdateInvoiceStatus = db.prepare('UPDATE invoices SET status = ? WHERE id = ?');
 const stmtCancelInvoice = db.prepare(`UPDATE invoices SET status = 'cancelled' WHERE id = ?`);
@@ -80,6 +88,9 @@ function mapInvoice(row: any, items: any[] = []) {
     notes: row.notes || undefined,
     invoiceNumber: row.invoice_number || undefined,
     issuedBy: row.issued_by || undefined,
+    purpose: row.purpose,
+    obligationId: row.obligation_id || undefined,
+    semesterName: row.semester_name || undefined,
     createdAt: row.created_at,
     items: items.map((it) => ({
       id: it.id, description: it.description, quantity: it.quantity, unitPrice: it.unit_price, amount: it.amount,
@@ -171,15 +182,20 @@ invoicesRouter.post(
   requirePermission('Invoice.Create'),
   ah(async (req, res) => {
     const user = getUserContext(req);
-    const { studentId, items, discountAmount = 0, notes, issue = false } = req.body as {
+    const { studentId, items, discountAmount = 0, notes, issue = false, purpose, semesterId } = req.body as {
       studentId?: string;
       items?: { description: string; quantity?: number; unitPrice: number }[];
       discountAmount?: number;
       notes?: string;
       issue?: boolean;
+      purpose?: string;
+      semesterId?: string;
     };
 
     if (!studentId) throw new HttpError(400, 'studentId is required.');
+    // What the document bills is decided before anything is written, by the one
+    // authority that decides it (owner decision D-118).
+    const invoicePurpose = assertInvoicePurpose(purpose);
     if (!items || !Array.isArray(items) || items.length === 0) {
       throw new HttpError(400, 'At least one invoice line item is required.');
     }
@@ -235,9 +251,16 @@ invoicesRouter.post(
     const issuedBy = issue ? user.fullName : null;
 
     const tx = db.transaction(() => {
+      // Resolved inside the transaction so a rejected invoice leaves no
+      // obligation behind it.
+      const { obligationId } = resolveInvoiceObligation(db, { studentId, purpose: invoicePurpose, semesterId });
+      // A term bills one amount and every claim on it competes for that amount
+      // (WP07-F19).
+      if (obligationId) assertTuitionInvoiceFits(db, { obligationId, netAmount });
       stmtInsertInvoice.run(
         invoiceId, studentId, totalAmount, discount, netAmount, status, issueDate, dueDate,
-        branchId, notes || null, invoiceNumber, issuedBy, student.full_name, student.student_code
+        branchId, notes || null, invoiceNumber, issuedBy, student.full_name, student.student_code,
+        invoicePurpose, obligationId
       );
       for (const it of normalized) {
         stmtInsertInvoiceItem.run(id('invit'), invoiceId, it.description, it.quantity, it.unitPrice, it.amount);
@@ -367,6 +390,13 @@ invoicesRouter.post(
       throw new HttpError(400, 'Only issued, partial, or overdue invoices can accept payment.');
     }
 
+    // WHAT THIS MONEY SETTLES, decided by the invoice rather than assumed.
+    // Every invoice payment was booked as `category = 'fee'` with no semester,
+    // so a textbooks invoice paid down tuition and a tuition invoice paid down
+    // no term (owner decision D-118, WP07-F17).
+    assertInvoiceHasLines(db, row.id);
+    const attribution = invoicePaymentAttribution(db, row);
+
     const payId = id('pay');
     // Allocated only after the replay check so retries do not burn receipt numbers.
     const rc = nextReceiptNumber();
@@ -393,11 +423,12 @@ invoicesRouter.post(
 
       stmtInsertPayment.run(
         payId, row.student_id, row.id, payAmount, date, resolvedMethod,
+        attribution.category, attribution.semesterName,
         notes || `Payment for invoice ${row.invoice_number || row.id}`, rc, row.branch_id, idempotencyKey || null
       );
 
       recordIncome({
-        category: 'fee', amount: payAmount, date,
+        category: attribution.category, amount: payAmount, date,
         description: `Invoice ${row.invoice_number || row.id} payment — ${student?.full_name || row.student_id}`,
         referenceId: row.id, paymentId: payId, operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null, branchId: row.branch_id,
       });

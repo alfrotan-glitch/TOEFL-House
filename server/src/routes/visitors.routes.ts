@@ -27,6 +27,7 @@ import { resolveFee } from '../core/configuration/policy-resolver.js';
 import { assertClassGenderAllowsStudent } from './classes.routes.js';
 import { getEnrollmentService } from '../core/academic/enrollment-service.js';
 import { countActiveStudentsInClass } from '../core/academic/class-capacity.js';
+import { ensureTuitionObligation } from '../core/finance/obligations.js';
 import { getJourneyEngine } from '../core/journey/journey-engine.js';
 import { JourneyEventType } from '../core/journey/event-types.js';
 import { nextReceiptNumber, nextStudentCode } from '../utils/receipt.js';
@@ -86,9 +87,11 @@ const stmtInsertConvertedStudent = db.prepare(
 );
 const stmtInsertConvertedSemester = db.prepare(`INSERT INTO student_semesters (id, student_id, semester_name, class_id, enroll_date, fee_amount, net_fee_amount) VALUES (?, ?, 'Current Semester', ?, ?, ?, ?)`);
 const stmtInsertConvertedRegistration = db.prepare(`INSERT INTO registrations (id, student_id, class_id, date, amount_paid, receipt_number, discount_applied, branch_id, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-const stmtInsertConvertedInvoice = db.prepare(`INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, notes, invoice_number, issued_by, student_name, student_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+// The conversion invoice bills the term the conversion creates, so its payment
+// settles that term rather than tuition in general (owner decision D-118).
+const stmtInsertConvertedInvoice = db.prepare(`INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, notes, invoice_number, issued_by, student_name, student_code, purpose, obligation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'tuition', ?)`);
 const stmtInsertInvoiceItem = db.prepare(`INSERT INTO invoice_items (id, invoice_id, description, quantity, unit_price, amount) VALUES (?, ?, ?, 1, ?, ?)`);
-const stmtInsertConvertedPayment = db.prepare(`INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, notes, receipt_number, branch_id, idempotency_key) VALUES (?, ?, ?, ?, ?, ?, 'completed', 'fee', ?, ?, ?, ?)`);
+const stmtInsertConvertedPayment = db.prepare(`INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, semester, notes, receipt_number, branch_id, idempotency_key) VALUES (?, ?, ?, ?, ?, ?, 'completed', 'fee', ?, ?, ?, ?, ?)`);
 
 const VISITOR_FLOW = ['lead', 'inquiry', 'follow_up', 'placement_booking', 'placement_fee', 'placement_completed', 'class_fee', 'card_issued', 'book_issued', 'registration', 'enrollment', 'active', 'graduated', 'alumni', 'lost'] as const;
 
@@ -878,10 +881,12 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
       newStudentId, studentCode, visitor.full_name, visitor.phone, visitor.email || null, qrCode, date, studentBranchId, effectiveDiscount, visitor.gender, visitor.placement_score, notes || `Converted from visitor. Class: ${classItem.name}`,
       visitor.father_name, visitor.address_region, visitor.tazkira_no, visitor.whatsapp, visitor.dob, visitor.school_or_university, visitor.emergency_contact_name, visitor.emergency_contact_phone, visitor.id
     );
-    stmtInsertConvertedSemester.run(id('sem'), newStudentId, classId, date, grossTuition, netTuition);
+    const semesterRowId = id('sem');
+    stmtInsertConvertedSemester.run(semesterRowId, newStudentId, classId, date, grossTuition, netTuition);
     stmtInsertConvertedRegistration.run(id('reg'), newStudentId, classId, date, paidNow, receiptNumber, effectiveDiscount, studentBranchId, visitor.source);
-    
-    stmtInsertConvertedInvoice.run(invoiceId, newStudentId, grossTuition, discountAmount, netTuition, invoiceStatus, date, dueDate, studentBranchId, `Registration invoice — ${visitor.full_name}`, invoiceNumber, user.fullName, visitor.full_name, studentCode);
+
+    const conversionObligation = ensureTuitionObligation(db, semesterRowId);
+    stmtInsertConvertedInvoice.run(invoiceId, newStudentId, grossTuition, discountAmount, netTuition, invoiceStatus, date, dueDate, studentBranchId, `Registration invoice — ${visitor.full_name}`, invoiceNumber, user.fullName, visitor.full_name, studentCode, conversionObligation.id);
     stmtInsertInvoiceItem.run(id('invit'), invoiceId, `Tuition fee — ${classItem.name}${effectiveDiscount > 0 ? ` (${effectiveDiscount}% discount)` : ''}`, grossTuition, grossTuition);
     if (discountAmount > 0) stmtInsertInvoiceItem.run(id('invit'), invoiceId, `Discount (${effectiveDiscount}%)`, -discountAmount, -discountAmount);
 
@@ -891,7 +896,9 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
       // per visitor), so this payment can never legitimately repeat. Keying it
       // on the visitor makes that invariant explicit at the database level
       // instead of depending only on the enclosing uniqueness check.
-      stmtInsertConvertedPayment.run(paymentId, newStudentId, invoiceId, paidNow, date, resolvedPaymentMethod, `Registration payment for ${classItem.name}`, receiptNumber, studentBranchId, `visitor-convert:${visitor.id}`);
+      // The term is recorded on the payment, so the money settles the term it
+      // was collected for instead of settling none at all.
+      stmtInsertConvertedPayment.run(paymentId, newStudentId, invoiceId, paidNow, date, resolvedPaymentMethod, conversionObligation.semesterName, `Registration payment for ${classItem.name}`, receiptNumber, studentBranchId, `visitor-convert:${visitor.id}`);
       recordIncome({ category: 'fee', amount: paidNow, date, description: `Registration fee for ${visitor.full_name} (${studentCode})`, referenceId: invoiceId, operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null, branchId: studentBranchId, paymentId });
     }
 

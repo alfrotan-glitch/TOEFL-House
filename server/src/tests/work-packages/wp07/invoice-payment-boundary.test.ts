@@ -33,13 +33,14 @@ app.use(errorHandler);
 let key: string;
 let branch: string;
 let studentId: string;
+let semesterId: string;
 let manager: { Authorization: string };
 
 function issueInvoice(net: number): Promise<string> {
   return supertest(app)
     .post('/api/invoices')
     .set(manager)
-    .send({ studentId, items: [{ description: 'Tuition', quantity: 1, unitPrice: net }], issue: true })
+    .send({ studentId, purpose: 'tuition', semesterId, items: [{ description: 'Tuition', quantity: 1, unitPrice: net }], issue: true })
     .expect(201)
     .then((res) => res.body.id as string);
 }
@@ -60,6 +61,12 @@ beforeEach(() => {
     `INSERT INTO students (id, student_code, full_name, status, registration_date, branch_id, gender)
      VALUES (?, ?, 'Payer', 'active', ?, ?, 'male')`,
   ).run(studentId, `TH-${key.slice(-6)}`, today(), branch);
+  // These invoices bill tuition, so they name the term they bill (D-118).
+  semesterId = `${key}_sem`;
+  db.prepare(
+    `INSERT INTO student_semesters (id, student_id, semester_name, enroll_date, fee_amount, net_fee_amount, status)
+     VALUES (?, ?, 'Boundary Term', ?, 100000, 100000, 'active')`,
+  ).run(semesterId, studentId, today());
   seedUser({ id: `${key}_mgr`, role: 'general_manager', branchId: branch, fullName: 'Manager' });
   manager = bearerFor(`${key}_mgr`);
 });

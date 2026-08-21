@@ -180,22 +180,22 @@ describe('WP-07 · document numbers keep their formats and their one counter', (
 
   it('an invoice number is unique within its branch and free in another', async () => {
     const first = await supertest(app).post('/api/invoices').set(owner)
-      .send({ studentId: studentA, items: [{ description: 'Tuition', unitPrice: 1000 }], issue: true }).expect(201);
+      .send({ studentId: studentA, purpose: 'other', items: [{ description: 'Tuition', unitPrice: 1000 }], issue: true }).expect(201);
     const numberA = first.body.invoiceNumber as string;
     expect(numberA).toMatch(/^INV-\d{4}-\d{5}$/);
 
     // The same string in the same branch is refused by the database.
     expect(() =>
       db.prepare(
-        `INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, branch_id, invoice_number)
-         VALUES (?, ?, 1000, 0, 1000, 'issued', ?, ?, ?)`,
+        `INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, branch_id, invoice_number, purpose)
+         VALUES (?, ?, 1000, 0, 1000, 'issued', ?, ?, ?, 'other')`,
       ).run(`${key}_dupinv`, studentA, today(), branchA, numberA),
     ).toThrow(/UNIQUE/i);
 
     // Uniqueness is scoped to the branch, which is what the counter matches.
     db.prepare(
-      `INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, branch_id, invoice_number)
-       VALUES (?, ?, 1000, 0, 1000, 'issued', ?, ?, ?)`,
+      `INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, branch_id, invoice_number, purpose)
+       VALUES (?, ?, 1000, 0, 1000, 'issued', ?, ?, ?, 'other')`,
     ).run(`${key}_otherbranch`, studentB, today(), branchB, numberA);
     expect((db.prepare('SELECT COUNT(*) c FROM invoices WHERE invoice_number = ?').get(numberA) as { c: number }).c).toBe(2);
   });
@@ -249,8 +249,8 @@ describe('WP-07 · the canonical schema declares each constraint once', () => {
   it('the surviving guard still refuses a cross-branch invoice and payment', () => {
     expect(() =>
       db.prepare(
-        `INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, branch_id)
-         VALUES (?, ?, 500, 0, 500, 'issued', ?, ?)`,
+        `INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, branch_id, purpose)
+         VALUES (?, ?, 500, 0, 500, 'issued', ?, ?, 'other')`,
       ).run(`${key}_xinv`, studentA, today(), branchB),
     ).toThrow(/branch/i);
 

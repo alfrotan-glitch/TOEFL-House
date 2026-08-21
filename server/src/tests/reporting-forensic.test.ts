@@ -144,8 +144,8 @@ describe('Reporting forensic — new required metrics + period consistency', () 
     // Seed an invoice with discount + partial payment (outstanding), and a book sale.
     db.prepare(`INSERT OR IGNORE INTO students (id, student_code, full_name, status, registration_date, branch_id, gender, phone)
       VALUES ('rep_stu', 'TH-REP-1', 'Rep Student', 'active', '2026-06-01', ?, 'male', '0700111888')`).run(BRANCH);
-    db.prepare(`INSERT OR IGNORE INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number)
-      VALUES ('rep_inv', 'rep_stu', 5000, 500, 4500, 'partial', '2026-06-10', '2026-07-10', ?, 'INV-REP-1')`).run(BRANCH);
+    db.prepare(`INSERT OR IGNORE INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number, purpose)
+      VALUES ('rep_inv', 'rep_stu', 5000, 500, 4500, 'partial', '2026-06-10', '2026-07-10', ?, 'INV-REP-1', 'other')`).run(BRANCH);
     const repPayId = id('pay');
     db.prepare(`INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, receipt_number, branch_id, idempotency_key)
      VALUES (?, 'rep_stu', 'rep_inv', 2000, '2026-06-11', 'cash', 'completed', 'fee', 'R-REP-1', ?, hex(randomblob(16)))`).run(repPayId, BRANCH);

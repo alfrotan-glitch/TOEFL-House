@@ -97,7 +97,7 @@ describe('S7: malformed money is a 400, not a 500', () => {
     const res = await supertest(app)
       .post('/api/invoices')
       .set(auth())
-      .send({ studentId: STUDENT, items: [{ description: 'Tuition', quantity: 1, unitPrice: 'abc' }] });
+      .send({ studentId: STUDENT, purpose: 'other', items: [{ description: 'Tuition', quantity: 1, unitPrice: 'abc' }] });
     expect(res.status).toBe(400);
     expect(res.status).not.toBe(500);
   });
@@ -111,7 +111,7 @@ describe('S8: invoice payment cannot be duplicated by retries', () => {
     const created = await supertest(app)
       .post('/api/invoices')
       .set(auth())
-      .send({ studentId: STUDENT, items: [{ description: 'Tuition', quantity: 1, unitPrice: amount }], issue: true });
+      .send({ studentId: STUDENT, purpose: 'other', items: [{ description: 'Tuition', quantity: 1, unitPrice: amount }], issue: true });
     expect(created.status).toBe(201);
     const invId = created.body.id as string;
     await supertest(app).post(`/api/invoices/${invId}/issue`).set(auth()).send({});

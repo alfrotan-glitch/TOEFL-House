@@ -68,17 +68,32 @@ function seedStudent(id: string, branchId: string, status = 'active') {
     `INSERT OR REPLACE INTO students (id, student_code, full_name, status, registration_date, branch_id, gender, phone, discount_percent)
      VALUES (?, ?, ?, ?, ?, ?, 'male', ?, 0)`,
   ).run(id, `TH-INVT-${id}`, `Student ${id}`, status, today(), branchId, `0790${(++seq).toString().padStart(6, '0')}`);
+  // Every invoice here bills tuition, and a tuition invoice names the term it
+  // bills (owner decision D-118), so each student holds one.
+  db.prepare(
+    `INSERT OR REPLACE INTO student_semesters (id, student_id, semester_name, enroll_date, fee_amount, net_fee_amount, status)
+     VALUES (?, ?, 'Invoice Term', ?, 10000, 10000, 'active')`,
+  ).run(`${id}_sem`, id, today());
 }
+
+/** The term a tuition invoice for this student bills. */
+const semesterOf = (studentId: string) => `${studentId}_sem`;
 
 /** Create an invoice through the real route. */
 async function makeInvoice(
   actor: TokenPayload = OWNER,
-  { studentId = 'invt_stu_a', unitPrice = 10000, quantity = 1, discountAmount = 0, issue = true } = {},
+  // This suite exercises the invoice DOCUMENT — numbering, due dates, money
+  // scale, RBAC, overpayment — and creates many invoices for one student. They
+  // bill `other` by default, because a term may not be billed twice over
+  // (WP07-F19) and these cases are not about tuition settlement. The tuition
+  // path with its term is proven in `invoice-purpose-authority.test.ts`.
+  { studentId = 'invt_stu_a', unitPrice = 10000, quantity = 1, discountAmount = 0, issue = true,
+    purpose = 'other' as 'tuition' | 'books' | 'exam' | 'other' } = {},
 ) {
   const res = await supertest(app)
     .post('/api/invoices')
     .set(auth(actor))
-    .send({ studentId, items: [{ description: 'Tuition', quantity, unitPrice }], discountAmount, issue });
+    .send({ studentId, purpose, ...(purpose === 'tuition' ? { semesterId: semesterOf(studentId) } : {}), items: [{ description: 'Charge', quantity, unitPrice }], discountAmount, issue });
   return { status: res.status, id: res.body?.id as string | undefined, body: res.body };
 }
 
@@ -258,7 +273,7 @@ describe('INV-2 · sub-unit money settles to the canonical unit, never stored ra
     const res = await supertest(app)
       .post('/api/invoices')
       .set(auth(OWNER))
-      .send({ studentId: 'invt_stu_a', items: [{ description: 'Sub-cent', quantity: 1, unitPrice: 0.001 }], issue: true });
+      .send({ studentId: 'invt_stu_a', purpose: 'other', items: [{ description: 'Sub-cent', quantity: 1, unitPrice: 0.001 }], issue: true });
 
     // Canonical policy (CFG-2 precedent + the payments money-scale triggers) is
     // REJECT, not round. Rounding turned 0.001 into a zero-value invoice.
@@ -269,7 +284,7 @@ describe('INV-2 · sub-unit money settles to the canonical unit, never stored ra
     const res = await supertest(app)
       .post('/api/invoices')
       .set(auth(OWNER))
-      .send({ studentId: 'invt_stu_a', items: [{ description: 'T', unitPrice: 1000 }], discountAmount: 0.001, issue: true });
+      .send({ studentId: 'invt_stu_a', purpose: 'other', items: [{ description: 'T', unitPrice: 1000 }], discountAmount: 0.001, issue: true });
     expect(res.status).toBe(400);
   });
 
@@ -277,7 +292,7 @@ describe('INV-2 · sub-unit money settles to the canonical unit, never stored ra
     const res = await supertest(app)
       .post('/api/invoices')
       .set(auth(OWNER))
-      .send({ studentId: 'invt_stu_a', items: [{ description: 'T', quantity: 1, unitPrice: 1500.25 }], issue: true });
+      .send({ studentId: 'invt_stu_a', purpose: 'other', items: [{ description: 'T', quantity: 1, unitPrice: 1500.25 }], issue: true });
     expect(res.status).toBe(400);
   });
 });
@@ -307,7 +322,7 @@ describe('invoice authorization matrix', () => {
 
   it('an unauthenticated request cannot read or create', async () => {
     expect((await supertest(app).get('/api/invoices')).status).toBe(401);
-    expect((await supertest(app).post('/api/invoices').send({ studentId: 'invt_stu_a', items: [] })).status).toBe(401);
+    expect((await supertest(app).post('/api/invoices').send({ studentId: 'invt_stu_a', purpose: 'other', items: [] })).status).toBe(401);
   });
 });
 
@@ -329,7 +344,7 @@ describe('invoice branch isolation', () => {
     const res = await supertest(app)
       .post('/api/invoices')
       .set(auth(FINANCE_B))
-      .send({ studentId: 'invt_stu_a', branchId: BR_B, items: [{ description: 'X', unitPrice: 999 }], issue: true });
+      .send({ studentId: 'invt_stu_a', purpose: 'other', branchId: BR_B, items: [{ description: 'X', unitPrice: 999 }], issue: true });
     expect(res.status).toBe(403);
   });
 });
@@ -445,6 +460,7 @@ describe('invoice payment validation', () => {
 describe('invoice creation validation', () => {
   const item = (o: Record<string, unknown>) => ({
     studentId: 'invt_stu_a',
+    purpose: 'other',
     items: [{ description: 'T', quantity: 1, unitPrice: 1000, ...o }],
     issue: true,
   });
@@ -459,11 +475,11 @@ describe('invoice creation validation', () => {
     ['NaN price', item({ unitPrice: NaN })],
     ['Infinity price', item({ unitPrice: Infinity })],
     ['array price', item({ unitPrice: [500] })],
-    ['blank description', { studentId: 'invt_stu_a', items: [{ description: '', unitPrice: 100 }], issue: true }],
-    ['no items', { studentId: 'invt_stu_a', items: [], issue: true }],
-    ['items not an array', { studentId: 'invt_stu_a', items: 'x', issue: true }],
-    ['negative discount', { studentId: 'invt_stu_a', items: [{ description: 'T', unitPrice: 1000 }], discountAmount: -100, issue: true }],
-    ['discount above total', { studentId: 'invt_stu_a', items: [{ description: 'T', unitPrice: 1000 }], discountAmount: 99999, issue: true }],
+    ['blank description', { studentId: 'invt_stu_a', purpose: 'other', items: [{ description: '', unitPrice: 100 }], issue: true }],
+    ['no items', { studentId: 'invt_stu_a', purpose: 'other', items: [], issue: true }],
+    ['items not an array', { studentId: 'invt_stu_a', purpose: 'other', items: 'x', issue: true }],
+    ['negative discount', { studentId: 'invt_stu_a', purpose: 'other', items: [{ description: 'T', unitPrice: 1000 }], discountAmount: -100, issue: true }],
+    ['discount above total', { studentId: 'invt_stu_a', purpose: 'other', items: [{ description: 'T', unitPrice: 1000 }], discountAmount: 99999, issue: true }],
     ['missing studentId', { items: [{ description: 'T', unitPrice: 100 }], issue: true }],
   ])('rejects %s', async (_label, body) => {
     const before = (db.prepare('SELECT COUNT(*) c FROM invoices').get() as { c: number }).c;
@@ -473,15 +489,15 @@ describe('invoice creation validation', () => {
   });
 
   it('rejects an unknown student (404) and a suspended one (409)', async () => {
-    expect((await supertest(app).post('/api/invoices').set(auth(OWNER)).send({ studentId: 'nope', items: [{ description: 'T', unitPrice: 100 }] })).status).toBe(404);
-    expect((await supertest(app).post('/api/invoices').set(auth(OWNER)).send({ studentId: 'invt_stu_susp', items: [{ description: 'T', unitPrice: 100 }] })).status).toBe(409);
+    expect((await supertest(app).post('/api/invoices').set(auth(OWNER)).send({ studentId: 'nope', purpose: 'other', items: [{ description: 'T', unitPrice: 100 }] })).status).toBe(404);
+    expect((await supertest(app).post('/api/invoices').set(auth(OWNER)).send({ studentId: 'invt_stu_susp', purpose: 'other', items: [{ description: 'T', unitPrice: 100 }] })).status).toBe(409);
   });
 
   it('a forged total is ignored — the server recomputes from the line items', async () => {
     const res = await supertest(app)
       .post('/api/invoices')
       .set(auth(OWNER))
-      .send({ studentId: 'invt_stu_a', items: [{ description: 'T', quantity: 2, unitPrice: 1000 }], totalAmount: 1, netAmount: 1, issue: true });
+      .send({ studentId: 'invt_stu_a', purpose: 'other', items: [{ description: 'T', quantity: 2, unitPrice: 1000 }], totalAmount: 1, netAmount: 1, issue: true });
     expect(res.status).toBe(201);
     const row = invoiceRow(res.body.id) as unknown as { total_amount: number; net_amount: number };
     expect(row.total_amount).toBe(2000);
@@ -492,7 +508,7 @@ describe('invoice creation validation', () => {
     const res = await supertest(app)
       .post('/api/invoices')
       .set(auth(OWNER))
-      .send({ studentId: 'invt_stu_a', items: [{ description: 'T', unitPrice: 1000 }], discountAmount: 1000, issue: true });
+      .send({ studentId: 'invt_stu_a', purpose: 'other', items: [{ description: 'T', unitPrice: 1000 }], discountAmount: 1000, issue: true });
     expect(res.status).toBe(201);
     expect((invoiceRow(res.body.id) as unknown as { net_amount: number }).net_amount).toBe(0);
   });

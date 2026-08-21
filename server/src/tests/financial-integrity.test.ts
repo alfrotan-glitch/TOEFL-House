@@ -107,8 +107,8 @@ describe('§1 Transaction Integrity', () => {
       ).run(id('reg'), studentId, date, rc, BRANCH_ID);
 
       db.prepare(
-        `INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number)
-         VALUES (?, ?, 5000, 500, 4500, 'paid', ?, '2099-01-01', ?, 'INV-2099-00001')`
+        `INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number, purpose)
+         VALUES (?, ?, 5000, 500, 4500, 'paid', ?, '2099-01-01', ?, 'INV-2099-00001', 'other')`
       ).run(invoiceId, studentId, date, BRANCH_ID);
 
       db.prepare(
@@ -223,8 +223,8 @@ describe('§3 Financial Reconciliation', () => {
 
     db.transaction(() => {
       db.prepare(
-        `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number)
-         VALUES (?, ?, ?, ?, 'issued', ?, '2099-01-01', ?, 'INV-2099-00002')`
+        `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number, purpose)
+         VALUES (?, ?, ?, ?, 'issued', ?, '2099-01-01', ?, 'INV-2099-00002', 'other')`
       ).run(invoiceId, studentId, amount, amount, date, BRANCH_ID);
 
       db.prepare(
@@ -289,8 +289,8 @@ describe('§4 Invoice State Machine', () => {
        VALUES (?, 'TH-INVST', 'Inv State Student', 'active', ?, ?, 'male')`
     ).run(stuId, today(), BRANCH_ID);
     db.prepare(
-      `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number)
-       VALUES (?, ?, 6000, 6000, 'draft', ?, '2099-01-01', ?, 'INV-2099-00003')`
+      `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number, purpose)
+       VALUES (?, ?, 6000, 6000, 'draft', ?, '2099-01-01', ?, 'INV-2099-00003', 'other')`
     ).run(invId, stuId, today(), BRANCH_ID);
   });
 
@@ -317,8 +317,8 @@ describe('§4 Invoice State Machine', () => {
   it('a paid invoice cannot be cancelled — through the real endpoint', async () => {
     const paidInv = id('inv');
     db.prepare(
-      `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number)
-       VALUES (?, ?, 1000, 1000, 'paid', ?, '2099-01-01', ?, 'INV-2099-00010')`
+      `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number, purpose)
+       VALUES (?, ?, 1000, 1000, 'paid', ?, '2099-01-01', ?, 'INV-2099-00010', 'other')`
     ).run(paidInv, stuId, today(), BRANCH_ID);
 
     const res = await supertest(invoiceApp()).post(`/api/invoices/${paidInv}/cancel`).set(financeAuth());
@@ -330,8 +330,8 @@ describe('§4 Invoice State Machine', () => {
   it('an invoice with payments cannot be cancelled, even when not marked paid', async () => {
     const inv = id('inv');
     db.prepare(
-      `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number)
-       VALUES (?, ?, 1000, 1000, 'partial', ?, '2099-01-01', ?, 'INV-2099-00011')`
+      `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number, purpose)
+       VALUES (?, ?, 1000, 1000, 'partial', ?, '2099-01-01', ?, 'INV-2099-00011', 'other')`
     ).run(inv, stuId, today(), BRANCH_ID);
     db.prepare(
       `INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, receipt_number, branch_id, idempotency_key)
@@ -347,8 +347,8 @@ describe('§4 Invoice State Machine', () => {
   it('a cancelled invoice cannot receive a payment', async () => {
     const inv2 = id('inv');
     db.prepare(
-      `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number)
-       VALUES (?, ?, 1000, 1000, 'cancelled', ?, '2099-01-01', ?, 'INV-2099-00004')`
+      `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number, purpose)
+       VALUES (?, ?, 1000, 1000, 'cancelled', ?, '2099-01-01', ?, 'INV-2099-00004', 'other')`
     ).run(inv2, stuId, today(), BRANCH_ID);
 
     const res = await supertest(invoiceApp())
@@ -361,8 +361,8 @@ describe('§4 Invoice State Machine', () => {
   it('a draft invoice cannot receive a payment', async () => {
     const draft = id('inv');
     db.prepare(
-      `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number)
-       VALUES (?, ?, 1000, 1000, 'draft', ?, '2099-01-01', ?, 'INV-2099-00012')`
+      `INSERT INTO invoices (id, student_id, total_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number, purpose)
+       VALUES (?, ?, 1000, 1000, 'draft', ?, '2099-01-01', ?, 'INV-2099-00012', 'other')`
     ).run(draft, stuId, today(), BRANCH_ID);
 
     const res = await supertest(invoiceApp())
@@ -444,8 +444,8 @@ describe('§6 Discount & Fee Snapshot', () => {
     ).run(stuId, today(), BRANCH_ID);
 
     db.prepare(
-      `INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number)
-       VALUES (?, ?, 5000, 500, 4500, 'issued', ?, '2099-01-01', ?, 'INV-2099-00005')`
+      `INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number, purpose)
+       VALUES (?, ?, 5000, 500, 4500, 'issued', ?, '2099-01-01', ?, 'INV-2099-00005', 'other')`
     ).run(invId, stuId, today(), BRANCH_ID);
 
     const inv = db.prepare('SELECT total_amount, discount_amount, net_amount FROM invoices WHERE id = ?').get(invId) as any;

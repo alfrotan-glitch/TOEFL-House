@@ -133,9 +133,16 @@ export class EnrollmentService {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
     );
     
+    // PURPOSE: `other`, and it is forced rather than chosen (WP07-F18).
+    // `buildFeeSnapshot` puts a registration fee and a semester fee on ONE
+    // document, so this invoice bills a mixture and can name no single tuition
+    // obligation — which owner decision D-118 requires of a tuition invoice.
+    // The semester row this service writes bills 0, so no tuition of its own
+    // goes unsettled by the choice; booking it as `fee`, by contrast, paid down
+    // OTHER terms' debt. Revisit when the owner rules on WP07-F18.
     this.stmtInsertInvoice = db.prepare(
-      `INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, notes, invoice_number, issued_by, created_at)
-       VALUES (?, ?, ?, ?, ?, 'issued', ?, ?, ?, ?, ?, ?, datetime('now'))`
+      `INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, notes, invoice_number, issued_by, purpose, created_at)
+       VALUES (?, ?, ?, ?, ?, 'issued', ?, ?, ?, ?, ?, ?, 'other', datetime('now'))`
     );
     this.stmtInsertInvoiceItem = db.prepare(
       `INSERT INTO invoice_items (id, invoice_id, description, quantity, unit_price, amount) VALUES (?, ?, ?, 1, ?, ?)`

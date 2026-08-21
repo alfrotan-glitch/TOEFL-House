@@ -30,7 +30,7 @@ import {
   Branch, Campus, Organization, TeacherContractType,
   StudentBalanceRow,
   StudentSummary,
-  AttendanceSummaryRow, DashboardSummary, VisitorSummary, VisitorQuery, ConversionEligibility, DuplicateCandidate,} from './types';
+  AttendanceSummaryRow, DashboardSummary, VisitorSummary, VisitorQuery, ConversionEligibility, DuplicateCandidate, InvoicePurpose } from './types';
 
 /** Real due/paid/remaining figures for one teacher/month, mirroring GET /teachers/:id/salary-status. */
 export interface TeacherSalaryStatus {
@@ -1550,6 +1550,8 @@ export function useApiStore() {
 
   const createInvoice = async (payload: {
     studentId: string;
+    purpose: InvoicePurpose;
+    semesterId?: string;
     items: { description: string; quantity?: number; unitPrice: number }[];
     discountAmount?: number;
     notes?: string;

@@ -255,8 +255,14 @@ describe('Visitor Module', () => {
       db.prepare('DELETE FROM audit_logs').run();
       db.prepare('DELETE FROM invoice_items').run();
       db.prepare('DELETE FROM invoices').run();
+      // Conversion bills the term it creates, so the tuition obligation the
+      // invoice names must go before the term it points at
+      // (`student_obligations.semester_id` is ON DELETE RESTRICT).
+      db.prepare('DELETE FROM student_installments').run();
+      db.prepare('DELETE FROM obligation_allocations').run();
       db.prepare("DELETE FROM payments WHERE category = 'refund'").run();
       db.prepare('DELETE FROM payments').run();
+      db.prepare('DELETE FROM student_obligations').run();
       db.prepare('DELETE FROM registrations').run();
       db.prepare('DELETE FROM enrollment_events').run();
       db.prepare('DELETE FROM enrollments').run();

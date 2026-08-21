@@ -38,8 +38,8 @@ beforeAll(() => {
 
 const insertInvoice = (total: number, discount: number, net: number) =>
   db.prepare(
-    `INSERT INTO invoices (id, student_id, invoice_number, total_amount, discount_amount, net_amount, status, branch_id, issue_date)
-     VALUES (?, ?, ?, ?, ?, ?, 'issued', ?, '2026-01-01')`
+    `INSERT INTO invoices (id, student_id, invoice_number, total_amount, discount_amount, net_amount, status, branch_id, issue_date, purpose)
+     VALUES (?, ?, ?, ?, ?, ?, 'issued', ?, '2026-01-01', 'other')`
   ).run(`inv_069_${Math.random().toString(36).slice(2, 10)}`, studentId, `T-${Math.random().toString(36).slice(2, 9)}`,
     total, discount, net, branchId);
 
