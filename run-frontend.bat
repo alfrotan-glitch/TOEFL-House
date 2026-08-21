@@ -18,14 +18,33 @@ if not exist "package.json" (
   exit /b 1
 )
 
-if not exist "node_modules\" (
-  echo [INFO] Installing frontend dependencies...
-  call npm install
+rem The DEV BINARY is the test, not the folder. `vite` is a devDependency, so a
+rem node_modules installed in production mode exists but contains no vite, and a
+rem folder-only check skipped the install and left `npm run dev` to fail with
+rem "'vite' is not recognized". run-backend.bat already checks for tsx.cmd this
+rem way; the frontend now matches it.
+if not exist "node_modules\.bin\vite.cmd" (
+  echo [INFO] Frontend dependencies are missing or incomplete. Installing...
+  if exist "package-lock.json" (
+    call npm ci --include=dev --no-audit --no-fund
+  ) else (
+    call npm install --include=dev --no-audit --no-fund
+  )
   if errorlevel 1 (
-    echo [ERROR] npm install failed.
+    echo [ERROR] Frontend dependency installation failed.
     pause
     exit /b 1
   )
+)
+
+if not exist "node_modules\.bin\vite.cmd" (
+  echo [ERROR] Vite is still missing after installation.
+  echo [ERROR] This usually means npm ran in production mode and skipped
+  echo [ERROR] devDependencies. Check: npm config get omit    ^(must not list "dev"^)
+  echo [ERROR] and that NODE_ENV is not set to "production" in this shell.
+  echo [ERROR] Then delete node_modules and run install-all.bat once.
+  pause
+  exit /b 1
 )
 
 echo [INFO] Starting frontend (Vite)...

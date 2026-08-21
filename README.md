@@ -2,6 +2,24 @@
 
 Production-oriented TOEFL House ERP with a React/Vite frontend and Express/SQLite backend.
 
+## Windows launchers
+
+Every launcher lives in the project root and is a `.bat` file. Double-click it,
+or run it from a terminal opened in the project folder.
+
+| File | What it does |
+|---|---|
+| `run-all.bat` | Starts everything: bootstraps the backend, then opens the backend and frontend in their own windows. **Start here.** |
+| `install-all.bat` | Clean dependency install. Deletes `node_modules` in both packages and reinstalls from the lockfiles. Run this when dependencies are broken. |
+| `bootstrap.bat` | Database-only first install: backend dependencies, `server/.env`, secure first-install credentials, schema and owner account. |
+| `run-backend.bat` | Backend only (API on port 4000). Logs startup to `server/logs/backend-startup.log`. |
+| `run-frontend.bat` | Frontend only (Vite on port 3000). |
+| `run-seed.bat` | Re-runs the database seed. |
+
+Each launcher verifies that the tool it needs is actually installed — the
+backend checks for `tsx`, the frontend checks for `vite` — and installs
+dependencies before starting if it is missing.
+
 ## One-click first installation on Windows
 
 Double-click `run-all.bat`. For database-only first install, run `bootstrap.bat`.
@@ -80,6 +98,34 @@ Backend policy defaults are centralized in `server/src/core/configuration/policy
 
 Run `bootstrap.bat` once, then start the application with `run-all.bat`. The bootstrap creates `server/.env` automatically when needed, generates secure first-install credentials when the template is used, runs the database bootstrap, and prints the Owner credentials once they are generated. `.env.example` is the only environment template shipped with the project.
 
+## Troubleshooting (Windows)
+
+**`'vite' is not recognized as an internal or external command`**
+
+`vite` is a devDependency. If npm installed in production mode, `node_modules`
+exists but contains no `vite`, so `npm run dev` fails. Check both of these in
+the shell you are launching from:
+
+```powershell
+npm config get omit      # must NOT contain "dev"
+echo $env:NODE_ENV       # must NOT be "production"
+```
+
+Then run `install-all.bat` once. `run-frontend.bat` detects this case itself and
+reinstalls with `--include=dev`, so it should not recur.
+
+**`'tsx' is not recognized`** — the backend equivalent. Run `install-all.bat`.
+
+**`EPERM: operation not permitted, fsync` during backend startup**
+
+Fixed. The backup service flushed snapshots through a read-only file handle,
+which Windows refuses. If it reappears, the cause is write permission on the
+backup destination — check the external backup path in `server/.env`.
+
+**Port already in use** — `run-all.bat` refuses to start a second backend. Close
+the existing backend window, or find the owner with
+`netstat -ano | findstr :4000`.
+
 ## Global workspace search
 Authenticated users can press `Ctrl+K` (or `Cmd+K`) to search Students, Visitors, Teachers, Classes, Invoices and Books within their permitted scope. Results route back to the relevant operational module.
 
@@ -100,11 +146,16 @@ endpoint that no longer exists, so they cannot quietly rot.
 npm run release:validate
 ```
 
-Runs the whole gate: typecheck, lint, product/static/protocol/registry audits,
-both production builds, bundle weight, the server test suite, canonical schema
-preflight, a fresh install from an empty database, financial reconciliation,
-branding checks and release hygiene. Every step must pass; there are no
-advisory steps.
+Runs the whole gate — 22 checks: typecheck, lint, product/static/protocol/registry
+audits, both production builds, bundle weight, the server test suite, canonical
+schema preflight, a fresh install from an empty database, financial
+reconciliation, branding checks and release hygiene. Every step must pass; there
+are no advisory steps.
+
+This npm script is the **only** release gate. It is what CI runs
+(`.github/workflows/ci.yml`) and what a release must pass locally. There is no
+separate PowerShell gate script; earlier ones drifted from this list and were
+removed.
 
 ## Database
 

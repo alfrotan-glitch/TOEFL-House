@@ -275,7 +275,7 @@ check('CI workflow is active', () => {
   const active = path.join(root, '.github', 'workflows');
   const files = fs.existsSync(active) ? fs.readdirSync(active).filter((f) => /\.ya?ml$/.test(f)) : [];
   if (files.length === 0) {
-    throw new Error('.github/workflows is empty — ci/github-actions-ci.yml has not been activated, so NO gate runs automatically');
+    throw new Error('.github/workflows is empty — no gate runs automatically on push or pull request');
   }
 
   const scriptsIn = (pkgDir) => {
