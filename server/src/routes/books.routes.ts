@@ -246,10 +246,24 @@ booksRouter.post(
       method,
       actorUserId: user.userId ?? null,
     });
-    const priorSale = db.prepare(
-      `SELECT id FROM book_sales WHERE idempotency_key IN (${saleIdemCandidates.map(() => '?').join(',')}) LIMIT 1`
-    ).get(...saleIdemCandidates) as { id?: string } | undefined;
-    if (priorSale?.id) return res.status(200).json({ id: priorSale.id, idempotentReplay: true });
+    // A replay must be a replay OF THIS SALE. An `Idempotency-Key` is
+    // caller-supplied, so a key already spent on another book or branch would
+    // otherwise answer 200 for a sale that was never recorded here — stock
+    // untouched, no income row, and the operator told it succeeded. Payroll
+    // already applies this rule; so does invoice payment.
+    const findPriorSale = () => db.prepare(
+      `SELECT id, book_id, branch_id FROM book_sales WHERE idempotency_key IN (${saleIdemCandidates.map(() => '?').join(',')}) LIMIT 1`
+    ).get(...saleIdemCandidates) as { id: string; book_id: string; branch_id: string } | undefined;
+    const assertSameSale = (candidate: { book_id: string; branch_id: string }) => {
+      if (candidate.book_id !== book.id || candidate.branch_id !== saleBranchId) {
+        throw new HttpError(409, 'This idempotency key has already been used for a different sale.');
+      }
+    };
+    const priorSale = findPriorSale();
+    if (priorSale?.id) {
+      assertSameSale(priorSale);
+      return res.status(200).json({ id: priorSale.id, idempotentReplay: true });
+    }
     const saleIdempotencyKey = saleIdemCandidates[0];
 
     const saleTx = db.transaction(() => {
@@ -277,8 +291,12 @@ booksRouter.post(
       // above, but only one can win the unique index. Losers replay the
       // winner's sale instead of double-selling.
       if (String((err as { message?: string })?.message ?? '').includes('UNIQUE constraint failed')) {
-        const winner = db.prepare('SELECT id FROM book_sales WHERE idempotency_key = ?').get(saleIdempotencyKey) as { id?: string } | undefined;
-        if (winner?.id) return res.status(200).json({ id: winner.id, idempotentReplay: true });
+        const winner = findPriorSale();
+        if (winner?.id) {
+          assertSameSale(winner);
+          return res.status(200).json({ id: winner.id, idempotentReplay: true });
+        }
+        throw new HttpError(409, 'This idempotency key has already been used for a different sale.');
       }
       throw err;
     }

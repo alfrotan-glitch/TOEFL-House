@@ -349,10 +349,24 @@ fundingRouter.post(
       date: donationDate,
       actorUserId: user.userId ?? null,
     });
-    const priorDonation = db.prepare(
-      `SELECT id, receipt_no FROM donations WHERE idempotency_key IN (${donationIdemCandidates.map(() => '?').join(',')}) LIMIT 1`
-    ).get(...donationIdemCandidates) as { id?: string; receipt_no?: string } | undefined;
-    if (priorDonation?.id) return res.status(200).json({ id: priorDonation.id, receiptNo: priorDonation.receipt_no, idempotentReplay: true });
+    // A replay must be a replay OF THIS GIFT. The key is caller-supplied, so
+    // matching on it alone would hand back another donor's receipt number and
+    // report a gift that was never recorded — on a document a donor keeps.
+    const findPriorDonation = () => db.prepare(
+      `SELECT id, receipt_no, donor_id, campaign_id, amount FROM donations
+        WHERE idempotency_key IN (${donationIdemCandidates.map(() => '?').join(',')}) LIMIT 1`
+    ).get(...donationIdemCandidates) as
+      { id: string; receipt_no: string | null; donor_id: string; campaign_id: string | null; amount: number } | undefined;
+    const assertSameDonation = (candidate: { donor_id: string; campaign_id: string | null; amount: number }) => {
+      if (candidate.donor_id !== donorId || (candidate.campaign_id ?? null) !== (campaignId || null) || Number(candidate.amount) !== donationAmount) {
+        throw new HttpError(409, 'This idempotency key has already been used for a different donation.');
+      }
+    };
+    const priorDonation = findPriorDonation();
+    if (priorDonation?.id) {
+      assertSameDonation(priorDonation);
+      return res.status(200).json({ id: priorDonation.id, receiptNo: priorDonation.receipt_no, idempotentReplay: true });
+    }
     const donationIdemKey = donationIdemCandidates[0];
 
     const receiptNo = nextScopedDocumentNumber('donation_receipt', user.branchId, 'DON');
@@ -385,8 +399,12 @@ fundingRouter.post(
       // above, but only one wins the unique index. Losers replay the
       // winner's donation instead of recording the gift twice.
       if (String((err as { message?: string })?.message ?? '').includes('UNIQUE constraint failed')) {
-        const winner = db.prepare('SELECT id, receipt_no FROM donations WHERE idempotency_key = ?').get(donationIdemKey) as { id?: string; receipt_no?: string } | undefined;
-        if (winner?.id) return res.status(200).json({ id: winner.id, receiptNo: winner.receipt_no, idempotentReplay: true });
+        const winner = findPriorDonation();
+        if (winner?.id) {
+          assertSameDonation(winner);
+          return res.status(200).json({ id: winner.id, receiptNo: winner.receipt_no, idempotentReplay: true });
+        }
+        throw new HttpError(409, 'This idempotency key has already been used for a different donation.');
       }
       throw err;
     }

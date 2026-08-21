@@ -172,6 +172,23 @@ Reviewed cold from the diff, then repaired in the same slice:
 | R-4 | The savings rate had a second, laxer writer with no upper bound | One descriptor-based validation authority, consumed by all three writers |
 | R-5 | An invalid setting was silently skipped behind a 200 | The writer parses and rejects; the response reports what it applied |
 
+## CROSS-PACKAGE DEFECT FOUND AND DELIBERATELY RE-SCOPED (§106)
+
+WP07-F9 is an instance of a class, not a one-off. A sweep of every money writer
+that accepts a caller-supplied `Idempotency-Key` found the same unscoped replay
+in `POST /api/funding/donations` (WP-09) and `POST /api/books/:id/sell`
+(WP-10), and confirmed that payroll (WP-08) already applies the correct rule.
+Rather than silently ignoring defects outside the WP-07 route boundary, the
+slice was deliberately re-scoped to include the cross-cutting rule, which is
+now pinned for all four writers by
+`server/src/tests/idempotency-replay-scope.test.ts` and recorded as **D-109**.
+
+Evidence that the defect was real before the repair: with the two route files
+reverted, that suite fails 5 of 9 — a key spent on donor A returned **200 with
+donor A's receipt number** for a request naming donor B, and a key spent on
+book A returned 200 for a sale of book B with no stock movement and no income
+row. WP-09 and WP-10 remain uncertified; only this rule is fixed in them.
+
 ## INDEPENDENT REVIEW
 
 Performed from the diff, the executed output and the database state rather than
