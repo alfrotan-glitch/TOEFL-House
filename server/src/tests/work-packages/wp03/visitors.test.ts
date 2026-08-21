@@ -57,7 +57,10 @@ function seedPlacementInfrastructure() {
   db.prepare(`INSERT OR IGNORE INTO program_versions (id, program_id, version_label, version_number, status, is_default) VALUES (?, ?, 'v1', 1, 'published', 1)`).run(VT_VERSION, VT_PROGRAM);
   db.prepare(`INSERT OR IGNORE INTO levels (id, program_id, name, "order", program_version_id, code, is_active) VALUES (?, ?, 'A1 Beginner', 1, ?, 'A1', 1)`).run(VT_LEVEL_A, VT_PROGRAM, VT_VERSION);
   db.prepare(`INSERT OR IGNORE INTO levels (id, program_id, name, "order", program_version_id, code, is_active) VALUES (?, ?, 'B1 Intermediate', 2, ?, 'B1', 1)`).run(VT_LEVEL_B, VT_PROGRAM, VT_VERSION);
-  db.prepare(`INSERT OR REPLACE INTO placement_assessment_profiles (id, program_version_id, branch_id, enabled, required, method, components_json, scoring_model, allow_retake, max_score, pass_score, instructions) VALUES (?, ?, ?, 1, 1, 'hybrid', ?, 'weighted_average', 1, 100, 60, 'Complete every configured section.')`)
+  db.prepare(`INSERT OR REPLACE INTO placement_assessment_profiles
+    (id, program_version_id, branch_id, components_json, scoring_model, allow_retake,
+     pass_score, requirement_mode, instructions)
+    VALUES (?, ?, ?, ?, 'weighted_average', 1, 60, 'required', 'Complete every configured section.')`)
     .run(id('pap_vt'), VT_VERSION, BRANCH_A, JSON.stringify(VT_PLACEMENT_COMPONENTS));
 }
 

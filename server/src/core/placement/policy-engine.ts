@@ -1,100 +1,210 @@
-/**
- * Placement Policy Engine — resolves whether a candidate/program/level
- * requires placement, and which components apply. Purely configuration-driven:
- * required / optional / not_required, first-level exemption, level
- * applicability. No hard-coded thresholds or four-skill assumptions.
- */
-import { db } from '../../db/connection.js';
+/** Canonical placement-policy validation and snapshot normalization. */
 import { HttpError } from '../../middleware/errorHandler.js';
-import { stmtProfile, stmtGlobalProfile, stmtAnyProfileForVersion, stmtProgramVersion, stmtVersionLevels, stmtPlacementRules, stmtTestById, type RequirementMode, type PolicyComponent } from './store.js';
+import { assertMoney } from '../../utils/money.js';
+import {
+  stmtAnyProfileForVersion,
+  stmtGlobalProfile,
+  stmtPlacementRules,
+  stmtProfile,
+  stmtProgramVersion,
+  stmtVersionLevels,
+  type PlacementComponentType,
+  type PolicyComponent,
+  type RequirementMode,
+  type ScoringMethod,
+} from './store.js';
 
-/**
- * Typed placement decisions.
- * ---------------------------------------------------------------------------
- * `mode` alone cannot express *why* placement is not being demanded, and the
- * distinction is safety-critical: an administrator choosing "not required" is
- * a deliberate business decision, whereas a missing/unresolvable profile is a
- * configuration fault. Collapsing the two made the enrollment gate fail OPEN —
- * a required policy configured on the program's own branch was silently
- * ignored for a candidate attached to a different branch.
- *
- * `decision` carries that distinction; `mode` is retained verbatim so existing
- * consumers (`evaluateEnrollmentEligibility`, attempt routes, tests) keep their
- * current contract.
- */
-/**
- * INVARIANT — "no placement profile" means NOT_REQUIRED (opt-in assessment).
- * ---------------------------------------------------------------------------
- * This is derived from the implementation, not assumed. Evidence:
- *
- *  1. Creating a program version (`POST /catalog/program-versions`) does NOT
- *     create a placement profile. No route, seed or migration backfills one, so
- *     a version with no profile is the normal starting state rather than an
- *     unfinished one.
- *  2. `GET /academic/program-versions/:id/placement-profile` answers the
- *     question directly when no row exists: it returns
- *     `{ configured: false, required: false, enabled: false }`. The canonical
- *     read path therefore already declares "absent profile ⇒ not required".
- *  3. `placement_assessment_profiles.enabled` defaults to 1 and `required` to 0
- *     (migration 037): the row itself opts a program IN to assessment.
- *
- * Therefore placement is OPT-IN per program version, and requiring an explicit
- * policy for every version would block enrollment across programs that never
- * assess. What must NOT collapse into this case is a policy that exists but
- * fails to resolve for a given candidate — see `CONFIGURATION_ERROR`.
- */
-export type PlacementDecision =
-  /** A profile was found and explicitly demands assessment. */
-  | 'REQUIRED'
-  /** A profile was found and explicitly waives assessment. */
-  | 'NOT_REQUIRED'
-  /** A profile demands assessment, but this candidate qualifies for an exemption. */
-  | 'EXEMPT'
-  /** No profile could be resolved. NOT a business decision — a configuration fault. */
-  | 'CONFIGURATION_ERROR'
-  /** The context itself is structurally unusable (no program selected, dangling version). */
-  | 'INVALID_CONTEXT';
-
-/**
- * Decisions that must never be treated as "the business waived placement".
- *
- * Only CONFIGURATION_ERROR qualifies. INVALID_CONTEXT is deliberately NOT in
- * this set: it means there is no program version in play at all (an ad-hoc
- * class, or a candidate with no curriculum selected), and a placement policy is
- * attached to a program version. With nothing to attach to there is no policy
- * to bypass, and the pre-existing contract — ad-hoc classes are enrollable —
- * is preserved. CONFIGURATION_ERROR is different in kind: a policy demonstrably
- * exists for the governing program version and simply failed to resolve, so
- * proceeding would ignore a rule somebody actually configured.
- */
-const NON_AUTHORITATIVE_DECISIONS: ReadonlySet<PlacementDecision> = new Set<PlacementDecision>([
-  'CONFIGURATION_ERROR',
+const COMPONENT_TYPES = new Set<PlacementComponentType>([
+  'skill_scores', 'written_test', 'interview', 'level_assessment', 'custom_score', 'content_test',
 ]);
+const SKILLS = new Set(['grammar', 'vocabulary', 'reading', 'listening', 'writing', 'speaking']);
+const SCORING_MODELS = new Set(['weighted_average', 'average']);
+const CONDITION_FIELDS = new Set(['score', 'percentage']);
+const CONDITION_OPERATORS = new Set(['gte', 'lte', 'eq']);
 
-/**
- * True when the decision came from a real, resolved policy record. Callers that
- * gate enrollment MUST consult this instead of testing `mode === 'not_required'`.
- */
-export function isAuthoritativeDecision(requirement: PlacementRequirement): boolean {
-  return !NON_AUTHORITATIVE_DECISIONS.has(requirement.decision);
+function finiteNumber(value: unknown, field: string, min?: number, max?: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || (min != null && value < min) || (max != null && value > max)) {
+    const range = min != null || max != null ? ` between ${min ?? '-∞'} and ${max ?? '∞'}` : '';
+    throw new HttpError(400, `${field} must be a finite number${range}.`);
+  }
+  return value;
 }
+
+export function normalizeRequirementMode(value: unknown): RequirementMode {
+  if (value !== 'required' && value !== 'optional' && value !== 'not_required') {
+    throw new HttpError(400, 'requirementMode must be required, optional, or not_required.');
+  }
+  return value;
+}
+
+function scoringMethodFor(type: PlacementComponentType, value: unknown): ScoringMethod {
+  const defaultMethod: ScoringMethod = type === 'content_test' ? 'hybrid' : 'manual';
+  const method = value == null ? defaultMethod : String(value) as ScoringMethod;
+  if (!['auto', 'manual', 'hybrid'].includes(method)) {
+    throw new HttpError(400, 'scoringMethod must be auto, manual, or hybrid.');
+  }
+  if (type !== 'content_test' && method !== 'manual') {
+    throw new HttpError(400, `${type} components use manual scoring.`);
+  }
+  return method;
+}
+
+export function validatePolicyComponents(input: unknown, requirementMode: RequirementMode = 'required'): PolicyComponent[] {
+  if (!Array.isArray(input)) throw new HttpError(400, 'components must be an array.');
+  if (requirementMode !== 'not_required' && input.length === 0) {
+    throw new HttpError(400, 'At least one placement component is required.');
+  }
+  if (requirementMode === 'not_required' && input.length > 0) {
+    throw new HttpError(400, 'A not_required placement policy cannot define assessment components.');
+  }
+
+  const keys = new Set<string>();
+  const components = input.map((raw: any, index): PolicyComponent => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new HttpError(400, `Component ${index + 1} is invalid.`);
+    if (typeof raw.key !== 'string' || typeof raw.label !== 'string') throw new HttpError(400, `Component ${index + 1} key and label must be text.`);
+    const key = raw.key.trim();
+    const label = raw.label.trim();
+    const type = raw.type as PlacementComponentType;
+    if (!key || !/^[A-Za-z0-9_-]{1,80}$/.test(key)) throw new HttpError(400, `Component ${index + 1} requires a valid key.`);
+    if (keys.has(key)) throw new HttpError(400, `Duplicate component key: ${key}.`);
+    keys.add(key);
+    if (!label || label.length > 160) throw new HttpError(400, `Component ${key} requires a label no longer than 160 characters.`);
+    if (!COMPONENT_TYPES.has(type)) throw new HttpError(400, `Unsupported component type for ${key}.`);
+
+    if (raw.required !== undefined && typeof raw.required !== 'boolean') throw new HttpError(400, `${key}.required must be boolean.`);
+    const maxScore = finiteNumber(raw.maxScore, `${key}.maxScore`, 0.000001);
+    const weight = finiteNumber(raw.weight, `${key}.weight`, 0, 100);
+    const order = raw.order == null ? index : finiteNumber(raw.order, `${key}.order`, 0);
+    if (!Number.isSafeInteger(order)) throw new HttpError(400, `${key}.order must be a non-negative integer.`);
+    const minScore = raw.minScore == null ? null : finiteNumber(raw.minScore, `${key}.minScore`, 0, maxScore);
+    const durationMinutes = raw.durationMinutes == null ? undefined : finiteNumber(raw.durationMinutes, `${key}.durationMinutes`, 0.000001);
+    const timeLimitSeconds = raw.timeLimitSeconds == null
+      ? (durationMinutes == null ? null : Math.round(durationMinutes * 60))
+      : finiteNumber(raw.timeLimitSeconds, `${key}.timeLimitSeconds`, 1);
+    if (timeLimitSeconds != null && (!Number.isSafeInteger(timeLimitSeconds) || timeLimitSeconds < 1)) {
+      throw new HttpError(400, `${key}.timeLimitSeconds must be a positive whole number of seconds.`);
+    }
+    const testId = raw.testId == null ? undefined : String(raw.testId).trim();
+    if (type === 'content_test' && !testId) throw new HttpError(400, `Content-test component ${key} requires testId.`);
+    if (type !== 'content_test' && testId) throw new HttpError(400, `Only content-test components may reference testId.`);
+
+    if (raw.instructions !== undefined && raw.instructions !== null && typeof raw.instructions !== 'string') {
+      throw new HttpError(400, `${key}.instructions must be text.`);
+    }
+    if (typeof raw.instructions === 'string' && raw.instructions.length > 2000) {
+      throw new HttpError(400, `${key}.instructions must be no longer than 2000 characters.`);
+    }
+
+    let skills: PolicyComponent['skills'];
+    if (raw.skills != null) {
+      if (type !== 'skill_scores' || !Array.isArray(raw.skills) || raw.skills.length === 0) {
+        throw new HttpError(400, `${key}.skills is only valid as a non-empty skill_scores list.`);
+      }
+      const values = raw.skills.map((skill: unknown) => String(skill));
+      if (new Set(values).size !== values.length || values.some((skill: string) => !SKILLS.has(skill))) {
+        throw new HttpError(400, `${key}.skills contains an invalid or duplicate skill.`);
+      }
+      skills = values as PolicyComponent['skills'];
+    }
+
+    return {
+      key,
+      type,
+      label,
+      required: raw.required !== false,
+      order,
+      weight,
+      maxScore,
+      minScore,
+      scoringMethod: scoringMethodFor(type, raw.scoringMethod),
+      durationMinutes,
+      timeLimitSeconds,
+      instructions: raw.instructions == null ? null : raw.instructions,
+      skills,
+      testId,
+    };
+  });
+
+  const totalWeight = components.reduce((sum, component) => sum + component.weight, 0);
+  if (components.length > 0 && Math.abs(totalWeight - 100) > 0.01) {
+    throw new HttpError(400, `Component weights must total 100; received ${totalWeight}.`);
+  }
+  return components.sort((a, b) => a.order - b.order);
+}
+
+export function validateDecisionRules(input: unknown, components: PolicyComponent[], levelIds: Set<string>) {
+  if (input == null) return [];
+  if (!Array.isArray(input)) throw new HttpError(400, 'decisionRules must be an array.');
+  const componentKeys = new Set(components.map((component) => component.key));
+  return input.map((raw: any, ruleIndex) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new HttpError(400, `Decision rule ${ruleIndex + 1} is invalid.`);
+    const levelId = String(raw.levelId || '').trim();
+    if (!levelIds.has(levelId)) throw new HttpError(400, `Decision rule ${ruleIndex + 1} references a level outside this program.`);
+    if (raw.label !== undefined && raw.label !== null && (typeof raw.label !== 'string' || !raw.label.trim() || raw.label.trim().length > 160)) {
+      throw new HttpError(400, `Decision rule ${ruleIndex + 1} label must be non-empty text no longer than 160 characters.`);
+    }
+    if (!Array.isArray(raw.when) || raw.when.length === 0) throw new HttpError(400, `Decision rule ${ruleIndex + 1} requires conditions.`);
+    const when = raw.when.map((condition: any, conditionIndex: number) => {
+      const componentKey = String(condition?.componentKey || '').trim();
+      const field = String(condition?.field || 'percentage');
+      const op = String(condition?.op || 'gte');
+      if (!componentKeys.has(componentKey)) throw new HttpError(400, `Decision condition references unknown component ${componentKey}.`);
+      if (!CONDITION_FIELDS.has(field) || !CONDITION_OPERATORS.has(op)) throw new HttpError(400, `Decision condition ${conditionIndex + 1} is invalid.`);
+      const value = finiteNumber(condition?.value, `Decision condition ${conditionIndex + 1}.value`);
+      if (field === 'percentage' && (value < 0 || value > 100)) throw new HttpError(400, 'Decision percentages must be between 0 and 100.');
+      const component = components.find((candidate) => candidate.key === componentKey)!;
+      if (field === 'score' && (value < 0 || value > component.maxScore)) throw new HttpError(400, `Decision score for ${componentKey} must be within its component range.`);
+      return { componentKey, field, op, value };
+    });
+    return {
+      levelId,
+      // levelId is the authority. A client-supplied levelCode would duplicate
+      // the level row and could drift; recommendation projections read the
+      // snapshotted level identified above.
+      label: raw.label == null ? undefined : raw.label.trim(),
+      when,
+    };
+  });
+}
+
+export function validateScoringModel(value: unknown): 'weighted_average' | 'average' {
+  const model = value == null ? 'weighted_average' : String(value);
+  if (!SCORING_MODELS.has(model)) throw new HttpError(400, 'scoringModel must be weighted_average or average.');
+  return model as 'weighted_average' | 'average';
+}
+
+export function validatePositiveInteger(value: unknown, field: string, nullable = true, maximum = Number.MAX_SAFE_INTEGER): number | null {
+  if (value == null && nullable) return null;
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1 || value > maximum) {
+    throw new HttpError(400, `${field} must be a positive integer no greater than ${maximum}.`);
+  }
+  return value;
+}
+
+export function validateMoney(value: unknown, field: string, nullable = true): number | null {
+  if ((value == null || value === '') && nullable) return null;
+  return assertMoney(value, field);
+}
+
+export type PlacementDecision = 'REQUIRED' | 'NOT_REQUIRED' | 'EXEMPT' | 'CONFIGURATION_ERROR' | 'INVALID_CONTEXT';
 
 export interface PlacementRequirement {
   mode: RequirementMode;
-  /** Typed decision. See `PlacementDecision`. */
   decision: PlacementDecision;
   profile: any | null;
   reason: string;
   firstLevelExemptApplied: boolean;
-  /** Which tier of the resolution hierarchy supplied the profile, for auditing. */
   policySource: 'branch' | 'program_branch' | 'global' | 'none';
 }
 
-/** Resolve the placement requirement for a program version + branch + target level. */
+export function isAuthoritativeDecision(requirement: PlacementRequirement): boolean {
+  return requirement.decision !== 'CONFIGURATION_ERROR';
+}
+
 export function resolvePlacementRequirement(
   programVersionId: string | null,
   branchId: string | null | undefined,
-  targetLevelId?: string | null
+  targetLevelId?: string | null,
 ): PlacementRequirement {
   if (!programVersionId) {
     return { mode: 'not_required', decision: 'INVALID_CONTEXT', profile: null, reason: 'no_program_selected', firstLevelExemptApplied: false, policySource: 'none' };
@@ -104,19 +214,6 @@ export function resolvePlacementRequirement(
     return { mode: 'not_required', decision: 'INVALID_CONTEXT', profile: null, reason: 'program_version_not_found', firstLevelExemptApplied: false, policySource: 'none' };
   }
 
-  // Deterministic resolution hierarchy, most specific first:
-  //   1. branch      — a profile written for the candidate's own branch.
-  //   2. program_branch — the profile stored against the branch that OWNS the
-  //      program version. `PUT /program-versions/:id/placement-profile` always
-  //      persists `branch_id = programs.branch_id`, so for any candidate whose
-  //      branch differs from the program owner this is the tier that actually
-  //      holds the administrator's configuration. Without it the lookup missed
-  //      and the gate failed open.
-  //   3. global      — a `branch_id IS NULL` profile (no production writer
-  //      currently creates one; retained so an explicitly seeded org-wide
-  //      default still applies).
-  // A less specific tier is consulted only when the more specific one is
-  // absent, so a global default can never override a branch policy.
   let policySource: PlacementRequirement['policySource'] = 'none';
   let profile = (branchId ? stmtProfile.get(programVersionId, branchId) : undefined) as any;
   if (profile) policySource = 'branch';
@@ -129,39 +226,19 @@ export function resolvePlacementRequirement(
     if (profile) policySource = 'global';
   }
   if (!profile) {
-    // Nothing resolved. Two very different situations share this branch:
-    //
-    //  a) The program version has NO placement profile anywhere. Placement was
-    //     simply never made part of this program, which is a legitimate and
-    //     extremely common configuration (most programs do not assess). Calling
-    //     that a fault would block enrollment for every such program, so it
-    //     stays an ordinary 'not_required' outcome.
-    //
-    //  b) Profiles for this version DO exist, but none applies to this
-    //     candidate. Somebody deliberately configured placement and the
-    //     resolution missed — the dangerous case, because the administrator
-    //     believes a policy is in force. This is a configuration fault and the
-    //     enrollment gate must refuse rather than admit silently.
-    const configuredElsewhere = Boolean(stmtAnyProfileForVersion.get(programVersionId));
-    return configuredElsewhere
+    return stmtAnyProfileForVersion.get(programVersionId)
       ? { mode: 'not_required', decision: 'CONFIGURATION_ERROR', profile: null, reason: 'policy_not_applicable_to_branch', firstLevelExemptApplied: false, policySource: 'none' }
       : { mode: 'not_required', decision: 'NOT_REQUIRED', profile: null, reason: 'no_policy_configured', firstLevelExemptApplied: false, policySource: 'none' };
   }
 
-  const mode = String(profile.requirement_mode || (profile.required ? 'required' : 'not_required')) as RequirementMode;
+  const mode = normalizeRequirementMode(profile.requirement_mode);
   if (mode === 'not_required') {
     return { mode, decision: 'NOT_REQUIRED', profile, reason: 'policy_not_required', firstLevelExemptApplied: false, policySource };
   }
-
-  // First-level exemption: target is the program version's first level and the
-  // policy opts into first-level exemption → placement not required.
   if (mode === 'required' && Number(profile.first_level_exempt) === 1 && targetLevelId) {
-    const levels = stmtVersionLevels.all(programVersionId, programVersionId) as any[];
-    const first = levels.filter((l) => Number(l.is_active) !== 0).sort((a, b) => Number(a.order) - Number(b.order))[0];
+    const first = (stmtVersionLevels.all(programVersionId, programVersionId) as any[])
+      .sort((a, b) => Number(a.order) - Number(b.order))[0];
     if (first && String(first.id) === String(targetLevelId)) {
-      // The policy DOES require placement; this candidate is exempt from it.
-      // `mode` stays 'not_required' so the enrollment verdict is unchanged, but
-      // `decision: 'EXEMPT'` preserves the distinction for UI and audit.
       return { mode: 'not_required', decision: 'EXEMPT', profile, reason: 'first_level_exempt', firstLevelExemptApplied: true, policySource };
     }
   }
@@ -175,89 +252,11 @@ export function resolvePlacementRequirement(
   };
 }
 
-/** Full policy view for a visitor (profile + rules + resolved requirement). */
 export function resolvePolicyForVisitor(visitor: any, targetLevelId?: string | null) {
   const version = stmtProgramVersion.get(visitor.program_version_id) as any;
-  const rules = stmtPlacementRules.all(visitor.program_version_id, visitor.branch_id) as any[];
   const requirement = resolvePlacementRequirement(visitor.program_version_id, visitor.branch_id, targetLevelId);
-  // Take the profile from the resolver so this view uses exactly the same
-  // hierarchy (branch → program branch → global) as the enrollment gate.
-  // Re-deriving it here would miss the owning-branch tier and could show
-  // "not configured" for a policy the gate is actually enforcing.
   const profile = requirement.profile;
+  const ruleBranch = profile?.branch_id ?? visitor.branch_id;
+  const rules = version ? stmtPlacementRules.all(visitor.program_version_id, ruleBranch) as any[] : [];
   return { version, profile, rules, requirement };
-}
-
-/**
- * Validate policy component configs (used by the academic placement-profile
- * PUT). Covers the component fields and the policy fields together.
- */
-export function validatePolicyComponents(rawComponents: any[], versionBranchId: string): { components: PolicyComponent[]; method: string; sections: string[] } {
-  if (!Array.isArray(rawComponents) || rawComponents.length === 0) throw new HttpError(400, 'At least one assessment component is required when placement is enabled.');
-  const seen = new Set<string>();
-  let totalWeight = 0;
-  const normalized = rawComponents.map((raw: any, index: number) => {
-    const c: PolicyComponent = {
-      key: String(raw.key || '').trim(),
-      type: String(raw.type || 'custom_score') as PolicyComponent['type'],
-      label: String(raw.label || '').trim(),
-      required: raw.required !== false,
-      enabled: raw.enabled !== false,
-      order: raw.order == null ? index : Number(raw.order),
-      weight: Number(raw.weight),
-      maxScore: Number(raw.maxScore),
-      durationMinutes: raw.durationMinutes == null ? undefined : Number(raw.durationMinutes),
-      timeLimitSeconds: raw.timeLimitSeconds == null ? (raw.durationMinutes == null ? undefined : Number(raw.durationMinutes) * 60) : Number(raw.timeLimitSeconds),
-      minScore: raw.minScore == null ? undefined : Number(raw.minScore),
-      scoringMethod: (['auto', 'manual', 'hybrid'].includes(raw.scoringMethod) ? raw.scoringMethod : raw.type === 'content_test' ? 'hybrid' : 'manual') as PolicyComponent['scoringMethod'],
-      retryPolicy: (['none', 'once', 'unlimited'].includes(raw.retryPolicy) ? raw.retryPolicy : 'none') as PolicyComponent['retryPolicy'],
-      passFail: (['none', 'pass', 'fail'].includes(raw.passFail) ? raw.passFail : 'none') as PolicyComponent['passFail'],
-      skills: Array.isArray(raw.skills) ? raw.skills.map(String) : undefined,
-      instructions: raw.instructions ? String(raw.instructions) : undefined,
-      testId: raw.testId == null ? undefined : String(raw.testId),
-    };
-    if (!c.key || !c.label || seen.has(c.key)) throw new HttpError(400, 'Assessment component keys must be unique and labels are required.');
-    seen.add(c.key);
-    if (!['skill_scores','written_test','interview','level_assessment','custom_score','content_test'].includes(c.type)) throw new HttpError(400, `Unsupported assessment component type: ${c.type}.`);
-    if (c.type === 'content_test') {
-      if (!c.testId) throw new HttpError(400, `Content component ${c.label} requires a testId from the placement test bank.`);
-      const test = db.prepare('SELECT id, status, branch_id FROM placement_tests WHERE id = ?').get(c.testId) as { id: string; status: string; branch_id: string | null } | undefined;
-      if (!test) throw new HttpError(400, `Content component ${c.label} references a test that does not exist.`);
-      if (test.status !== 'active') throw new HttpError(400, `Content component ${c.label} references test "${c.testId}" which is not active.`);
-      if (test.branch_id !== null && test.branch_id !== versionBranchId) throw new HttpError(400, `Content component ${c.label} references a test from another branch.`);
-    }
-    if (!Number.isFinite(c.weight) || c.weight < 0) throw new HttpError(400, `Invalid weight for ${c.label}.`);
-    if (!Number.isFinite(c.maxScore) || c.maxScore <= 0) throw new HttpError(400, `Invalid maximum score for ${c.label}.`);
-    if (c.timeLimitSeconds != null && (!Number.isFinite(c.timeLimitSeconds) || c.timeLimitSeconds < 0)) throw new HttpError(400, `Invalid time limit for ${c.label}.`);
-    if (c.minScore != null && (!Number.isFinite(c.minScore) || c.minScore < 0 || c.minScore > c.maxScore)) throw new HttpError(400, `Invalid minimum score for ${c.label}.`);
-    totalWeight += c.weight;
-    return c;
-  });
-  if (Math.abs(totalWeight - 100) > 0.01) throw new HttpError(400, `Assessment component weights must total 100%. Current total: ${totalWeight}%.`);
-  const types = new Set(normalized.map((c) => c.type));
-  const method = types.size > 1 ? 'hybrid' : (normalized[0]?.type || 'skill_scores');
-  const allowedDerived = new Set(['skill_scores','level_assessment','written_test','interview','hybrid','content_test']);
-  if (!allowedDerived.has(method)) throw new HttpError(400, `Unsupported placement method derived from components: ${method}.`);
-  const sections = Array.from(new Set(normalized.flatMap((c) => c.skills || [])));
-  return { components: normalized, method, sections };
-}
-
-/** Validate conditional decision rules against the component set. */
-export function validateDecisionRules(rulesJson: unknown, components: PolicyComponent[]): any[] {
-  if (rulesJson == null) return [];
-  let rules: any;
-  if (Array.isArray(rulesJson)) rules = rulesJson;
-  else { try { rules = JSON.parse(String(rulesJson)); } catch { throw new HttpError(400, 'decisionRules must be a JSON array.'); } }
-  if (!Array.isArray(rules)) throw new HttpError(400, 'decisionRules must be an array.');
-  const keys = new Set(components.map((c) => c.key));
-  for (const rule of rules) {
-    if (!rule.levelId || !Array.isArray(rule.when) || rule.when.length === 0) throw new HttpError(400, 'Each decision rule needs levelId and a non-empty when[] array.');
-    for (const cond of rule.when) {
-      if (!keys.has(cond.componentKey) || !['score', 'percentage'].includes(cond.field || 'score') || !['gte', 'lte', 'eq'].includes(cond.op)) {
-        throw new HttpError(400, `Invalid decision condition: ${JSON.stringify(cond)}.`);
-      }
-      if (!Number.isFinite(Number(cond.value))) throw new HttpError(400, `Decision condition value must be numeric: ${JSON.stringify(cond)}.`);
-    }
-  }
-  return rules;
 }

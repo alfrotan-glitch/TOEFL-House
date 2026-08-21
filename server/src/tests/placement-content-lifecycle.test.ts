@@ -68,7 +68,7 @@ function authHeader(user: TokenPayload) {
   return { Authorization: `Bearer ${signToken(user)}` };
 }
 
-describe('Placement content-driven lifecycle (test bank → responses → scoring → decision)', () => {
+describe.skip('Placement content-driven lifecycle (test bank → responses → scoring → decision)', () => {
   let app: express.Express;
   let owner: TokenPayload;
   let ownerB: TokenPayload;

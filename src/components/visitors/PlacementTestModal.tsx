@@ -199,7 +199,7 @@ export default function PlacementTestModal({ visitor, onClose, onCompleted, trig
           payload.criteriaScores=criteriaScores;
         } else {
           if(draft.score==null||draft.score===''){triggerToast('Enter a score for the manual section.','error');return;}
-          payload.score=Number(draft.score);
+          payload.manualScore=Number(draft.score);
         }
       }
       else payload.score=Number(draft.score);

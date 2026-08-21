@@ -148,24 +148,46 @@ not inflate the C-2 mapped-replacement count.
 
 ## WP-04 Placement
 
-14 files · 167 cases
+**C-2 disposition: REPLACED.** The corrected historical inventory is **13 files /
+156 statically declared cases / 160 baseline runtime cases**. The previously mapped
+`assessment-engine.test.ts` is an Academic Delivery authority (generic assessments,
+teacher comments, and make-up work), not a placement authority; it is assigned to
+WP-06 below and was not changed by WP-04.
 
-| File | Cases | Asserted behaviour |
+The thirteen historical placement suites remain in place as skipped knowledge records;
+every historical `describe` is explicitly `describe.skip`. Their permissive pre-CAS
+payloads, direct writes to removed profile compatibility columns, home-branch authority
+assumptions, answer-key exposure, and mutable-policy expectations are not product
+contracts. Mapped replacement authority is **7 files / 60 runtime cases**; the
+package adds an 8-case architecture authority, for **8 files / 68 runtime cases**
+under `server/src/tests/work-packages/wp04/`.
+
+| Historical file | Cases | Replacement / explicit retirement disposition |
 |---|---:|---|
-| `assessment-engine.test.ts` | 11 | Assessment Engine — types and fields · Assessment Engine — edit/delete lifecycle · Assessment Engine — teacher comments · Assessment Engine — make-up support |
-| `placement-certification-blockers.test.ts` | 17 | C-1 — placement is a server-side invariant on EVERY enrollment path · C-3 — the expiry sweep is branch-scoped · C-4 — exam secrets never reach the client |
-| `placement-content-gap.test.ts` | 4 | Placement content-driven gap (closed-state regression) |
-| `placement-content-lifecycle.test.ts` | 23 | Placement content-driven lifecycle (test bank → responses → scoring → decision) |
-| `placement-deep-audit.test.ts` | 14 | Placement Exam deep audit |
-| `placement-engine-extension-gap.test.ts` | 3 | Placement Engine extensions (closed-state regression) |
-| `placement-engine-extensions.test.ts` | 3 | Placement Engine extensions (speaking audio, rubric scoring, expiry sweep) |
-| `placement-engine-gap.test.ts` | 8 | Placement Engine (closed-state regression) |
-| `placement-engine-lifecycle.test.ts` | 16 | Placement Assessment Engine lifecycle |
-| `placement-hardening.test.ts` | 11 | Placement final hardening |
-| `placement-integrity.test.ts` | 30 | Placement integrity — P-1: policy compliance is enforced, not merely computed · Placement integrity — P-2: retake and attempt limits are atomic · Placement integrity — fee behaviour follows configured policy · Placement integrity — P-3: one coherent waiver lifecycle · Placement integrity — P-4: corrections and overrides are atomic and re-derive the outcome · Placement integrity — server authority, authorization and isolation |
-| `placement-retake-fee-integrity.test.ts` | 11 | PLC-1 · a retake fee that the charge path cannot pay is refused at configuration time · PLC-1 · the retake sitting can always be completed and charged |
-| `placement-test-bank-branch-isolation.test.ts` | 11 | PTB-1 — by-id access is branch-scoped, not just the list · PTB-1 — create cannot plant a test into another branch · PTB-1 — rubrics enforce the same isolation |
-| `placement-workspace.test.ts` | 5 | Unified Placement Assessment Workspace · Placement integrity hardening |
+| `placement-certification-blockers.test.ts` | 17 | Enrollment-service and direct extra-class gates are replaced by `enrollment-gates.integration.test.ts`; expiry scope and secret projections by `attack.test.ts` and `test-bank-security.integration.test.ts`. |
+| `placement-content-gap.test.ts` | 4 | Canonical content snapshots, typed responses, automatic scoring, and completion are replaced by `attempt-lifecycle.integration.test.ts` and `scoring-decision-correction.integration.test.ts`. |
+| `placement-content-lifecycle.test.ts` | 23 | Test-bank authoring, immutable content/rubrics, timers, response recovery, hybrid scoring, decisions, reporting, and billing are split across the package lifecycle, scoring, and billing suites. |
+| `placement-deep-audit.test.ts` | 14 | Profile hierarchy, rule correlation, attempt integrity, lifecycle transitions, decisions, corrections, and branch/object authorization are replaced across the package profile, lifecycle, scoring, and attack suites. |
+| `placement-engine-extension-gap.test.ts` | 3 | Operational workspace, attempt expiry, and server-authoritative completion are replaced by `attempt-lifecycle.integration.test.ts`. |
+| `placement-engine-extensions.test.ts` | 3 | Speaking-media correlation, immutable rubric scoring, and scoped expiry sweep are replaced by lifecycle, scoring, and attack cases. |
+| `placement-engine-gap.test.ts` | 8 | Profile projection, policy configuration, test-bank lifecycle, attempt start, scoring, and reporting are replaced by the canonical package API suites. |
+| `placement-engine-lifecycle.test.ts` | 16 | Requirement modes, first-level exemption, start/complete/cancel, decision rules, override/correction, and report behavior are replaced by profile, lifecycle, and scoring suites. |
+| `placement-hardening.test.ts` | 11 | CAS, strict payload validation, response atomicy, object correlation, timer enforcement, and answer-key boundaries are replaced by profile, test-bank, lifecycle, and attack suites. |
+| `placement-integrity.test.ts` | 30 | Policy compliance, atomic attempt caps, configured billing, reasoned waiver, correction provenance, server authority, and isolation are replaced by billing, enrollment, scoring, lifecycle, and attack suites. |
+| `placement-retake-fee-integrity.test.ts` | 11 | Exact-money configuration, start-time billing snapshots, first/retake billing, caps, failed-sitting billing, idempotent payment, and linked income are replaced by `retake-billing.integration.test.ts`. Historical behavior that refused a valid fallback retake fee merely because a compatibility charge path could not represent it is retired; the canonical charge path now does represent it. |
+| `placement-test-bank-branch-isolation.test.ts` | 11 | By-id/list scope, global-owner mutation, branch creation, rubric correlation/CAS, MIME signatures, and path confinement are replaced by `test-bank-security.integration.test.ts` and `attack.test.ts`. |
+| `placement-workspace.test.ts` | 5 | Workspace projection, canonical manual/content scoring, required-section completion, and immutable snapshot behavior are replaced by lifecycle and scoring suites. |
+
+| WP-04 replacement authority | Runtime cases | Purpose |
+|---|---:|---|
+| `profile-policy.integration.test.ts` | 9 | Canonical profile, CAS, validation, hierarchy, first-level exemption, rule correlation, and fallback instantiation. |
+| `test-bank-security.integration.test.ts` | 10 | Test/rubric lifecycle and CAS, MCQ normalization, asset scope, media safety, and secret projections. |
+| `attempt-lifecycle.integration.test.ts` | 10 | Requirement/waiver lifecycle, immutable snapshots, one-open-attempt, timers, typed responses, media, expiry, and program invalidation. |
+| `scoring-decision-correction.integration.test.ts` | 10 | Percentage scoring, auto/manual/hybrid/rubric scoring, decisions, outcomes, waiver, correction/override provenance, and reporting. |
+| `retake-billing.integration.test.ts` | 6 | Retake gates, immutable billing facts, canonical money, payment/income linkage, failure billing, and idempotency. |
+| `enrollment-gates.integration.test.ts` | 6 | Conversion and both enrollment consumers, class-level governing program, fail-closed policy, failed/passed/not-required states. |
+| `attack.test.ts` | 9 | Authentication, branch/object/parent correlation, fail-closed stored-policy validation, database scope/snapshot/uniqueness guards, scoped maintenance, and cross-branch content attacks. |
+| `architecture.test.ts` | 8 | Route boundary, canonical profile schema, integrity triggers, core authorities, enrollment delegation, UI percentage/CAS contracts, and typed scoring separation. |
 
 ## WP-05 Academic Structure
 
@@ -196,10 +218,11 @@ not inflate the C-2 mapped-replacement count.
 
 ## WP-06 Academic Delivery
 
-12 files · 148 cases
+13 files · 159 cases
 
 | File | Cases | Asserted behaviour |
 |---|---:|---|
+| `assessment-engine.test.ts` | 11 | Assessment Engine — types and fields · Assessment Engine — edit/delete lifecycle · Assessment Engine — teacher comments · Assessment Engine — make-up support |
 | `attendance-bounds.test.ts` | 9 | S20: the attendance list is bounded · S20: the summary is computed over the COMPLETE history |
 | `enrollment-subsystem-remediation.test.ts` | 41 | E-1 — transfer requires a valid active source enrollment · E-2 — duplicate enrollment is refused on every write path · E-3 — class merge is semantically consistent · E-4 — enrollment error contract · C-1 — dropped/withdrawn enrollments close their semester projection |
 | `exam-certificate-fee-integrity.test.ts` | 12 | EXM-1 · a certificate always carries its diploma fee · EXAMS · correction authorization and score bounds |

@@ -56,10 +56,10 @@ function seedPrograms() {
   db.prepare(`INSERT OR IGNORE INTO classes (id,name,level,branch_id,status,capacity,fee,gender_policy)
               VALUES ('vux_open','UX Open Class','Open',?, 'active',50,6000,'mixed')`).run(BRANCH_A);
   db.prepare(`INSERT OR IGNORE INTO placement_assessment_profiles
-      (id, program_version_id, branch_id, enabled, required, method, sections_json, components_json,
-       scoring_model, allow_retake, max_score, pass_score, requirement_mode, first_level_exempt, max_attempts)
-      VALUES ('vux_pap','vux_pv',?,1,1,'written_test','[]',?, 'weighted_average',1,100,50,'required',0,2)`)
-    .run(BRANCH_A, JSON.stringify([{ key: 'writing', type: 'written_test', label: 'Writing', weight: 100, maxScore: 100, enabled: true, required: true, order: 0 }]));
+      (id, program_version_id, branch_id, components_json, scoring_model, allow_retake,
+       pass_score, requirement_mode, first_level_exempt, max_attempts)
+      VALUES ('vux_pap','vux_pv',?,?,'weighted_average',1,50,'required',0,2)`)
+    .run(BRANCH_A, JSON.stringify([{ key: 'writing', type: 'written_test', label: 'Writing', weight: 100, maxScore: 100, required: true, order: 0 }]));
 }
 
 /**

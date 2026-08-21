@@ -67,13 +67,27 @@ export function enforceComponentTimeout(attemptId: string, componentKey: string,
   }
 }
 
-/** Attempt-level expiry: in_progress attempt past its expires_at → expired. Returns true if just expired. */
+/** Attempt-level wall-clock expiry applies equally while active or paused. */
 export function expireAttemptIfNeeded(attempt: any, now = nowIso()): boolean {
-  if (!attempt || attempt.status !== 'in_progress') return false;
+  if (!attempt || !['in_progress', 'paused'].includes(attempt.status)) return false;
   if (!attempt.expires_at) return false;
   if (isoToSeconds(now)! > (isoToSeconds(attempt.expires_at) ?? Infinity)) {
-    db.prepare(`UPDATE placement_assessment_attempts SET status='expired', completed_at=datetime('now'), updated_at=datetime('now') WHERE id=? AND status='in_progress'`).run(attempt.id);
-    return true;
+    let changed: any;
+    db.transaction(() => {
+      changed = db.prepare(`
+        UPDATE placement_assessment_attempts
+        SET status='expired', completed_at=datetime('now'), paused_at=NULL, updated_at=datetime('now')
+        WHERE id=? AND status IN ('in_progress','paused')
+      `).run(attempt.id);
+      if (Number(changed.changes ?? 0) === 1) {
+        db.prepare(`
+          UPDATE visitors
+          SET placement_status='scheduled', placement_status_at=datetime('now'), current_placement_attempt_id=NULL
+          WHERE id=? AND current_placement_attempt_id=?
+        `).run(attempt.visitor_id, attempt.id);
+      }
+    })();
+    return Number(changed?.changes ?? 0) > 0;
   }
   return false;
 }
@@ -125,34 +139,35 @@ export function pauseAttempt(attempt: any, reason?: string | null): { pausedAt: 
   if (attempt.status !== 'in_progress') throw new HttpError(409, 'Only an in-progress placement attempt can be paused.');
   const pausedAt = nowIso();
   db.transaction(() => {
-    db.prepare(`UPDATE placement_assessment_attempts SET status='paused', paused_at=?, notes=COALESCE(notes,'') || ?, updated_at=datetime('now') WHERE id=?`).run(pausedAt, reason ? ` Paused: ${String(reason).trim().slice(0, 300)}` : '', attempt.id);
+    db.prepare(`UPDATE placement_assessment_attempts SET status='paused', paused_at=?, notes=COALESCE(notes,'') || ?, updated_at=datetime('now') WHERE id=?`).run(pausedAt, reason ? ` Paused: ${reason}` : '', attempt.id);
     db.prepare(`UPDATE placement_assessment_results SET paused_at=?, updated_at=datetime('now') WHERE attempt_id=? AND status IN ('in_progress','pending') AND started_at IS NOT NULL`).run(pausedAt, attempt.id);
   })();
   return { pausedAt };
 }
 
-/** Resume: shift deadlines by the pause span and restore in_progress. */
+/** Resume component timers, but never extend the attempt's wall-clock expiry. */
 export function resumeAttempt(attempt: any): { resumedAt: string; pauseSeconds: number } {
   if (attempt.status !== 'paused') throw new HttpError(409, 'Only a paused placement attempt can be resumed.');
+  if (expireAttemptIfNeeded(attempt)) throw new HttpError(409, 'This placement attempt has expired.');
   const resumedAt = nowIso();
   const pausedSec = isoToSeconds(attempt.paused_at);
   const resumedSec = isoToSeconds(resumedAt);
   const pauseSeconds = pausedSec != null && resumedSec != null ? Math.max(0, resumedSec - pausedSec) : 0;
   db.transaction(() => {
     if (pauseSeconds > 0) {
-      // Extend component deadlines + attempt expiry by the pause span.
       db.prepare(`UPDATE placement_assessment_results
         SET deadline_at = CASE WHEN deadline_at IS NOT NULL THEN datetime(deadline_at, ?) ELSE NULL END,
             paused_at = NULL, updated_at = datetime('now')
         WHERE attempt_id=? AND deadline_at IS NOT NULL`)
         .run(`+${pauseSeconds} seconds`, attempt.id);
-      db.prepare(`UPDATE placement_assessment_attempts
-        SET status='in_progress', resumed_at=?, paused_at=NULL, expires_at=CASE WHEN expires_at IS NOT NULL THEN datetime(expires_at, ?) ELSE NULL END, updated_at=datetime('now')
-        WHERE id=?`).run(resumedAt, `+${pauseSeconds} seconds`, attempt.id);
     } else {
-      db.prepare(`UPDATE placement_assessment_attempts SET status='in_progress', resumed_at=?, paused_at=NULL, updated_at=datetime('now') WHERE id=?`).run(resumedAt, attempt.id);
       db.prepare(`UPDATE placement_assessment_results SET paused_at=NULL, updated_at=datetime('now') WHERE attempt_id=?`).run(attempt.id);
     }
+    db.prepare(`
+      UPDATE placement_assessment_attempts
+      SET status='in_progress', resumed_at=?, paused_at=NULL, updated_at=datetime('now')
+      WHERE id=? AND status='paused'
+    `).run(resumedAt, attempt.id);
   })();
   return { resumedAt, pauseSeconds };
 }

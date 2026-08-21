@@ -514,27 +514,31 @@ CREATE TABLE IF NOT EXISTS placement_assessment_profiles (
   id TEXT PRIMARY KEY,
   program_version_id TEXT NOT NULL REFERENCES program_versions(id) ON DELETE CASCADE,
   branch_id TEXT REFERENCES branches(id) ON DELETE CASCADE,
-  enabled INTEGER NOT NULL DEFAULT 1,
-  required INTEGER NOT NULL DEFAULT 0,
-  method TEXT NOT NULL DEFAULT 'skill_scores' CHECK (method IN ('skill_scores','level_assessment','written_test','interview','hybrid','content_test')),
-  sections_json TEXT NOT NULL DEFAULT '[]',
-  max_score REAL NOT NULL DEFAULT 100,
-  pass_score REAL NOT NULL DEFAULT 60,
+  pass_score REAL NOT NULL DEFAULT 60 CHECK (pass_score >= 0 AND pass_score <= 100),
   instructions TEXT,
-  version INTEGER NOT NULL DEFAULT 1,
+  version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1 AND version = CAST(version AS INTEGER)),
   requirement_mode TEXT NOT NULL DEFAULT 'required' CHECK (requirement_mode IN ('required','optional','not_required')),
-  first_level_exempt INTEGER NOT NULL DEFAULT 0,
-  expires_minutes INTEGER,
-  decision_rules_json TEXT,
+  first_level_exempt INTEGER NOT NULL DEFAULT 0 CHECK (first_level_exempt IN (0,1) AND (first_level_exempt = 0 OR requirement_mode = 'required')),
+  expires_minutes INTEGER CHECK (expires_minutes IS NULL OR (expires_minutes >= 1 AND expires_minutes <= 525600 AND expires_minutes = CAST(expires_minutes AS INTEGER))),
+  decision_rules_json TEXT CHECK (decision_rules_json IS NULL OR (json_valid(decision_rules_json) AND json_type(decision_rules_json) = 'array')),
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-  components_json TEXT NOT NULL DEFAULT '[]',
-  scoring_model TEXT NOT NULL DEFAULT 'weighted_average',
-  allow_retake INTEGER NOT NULL DEFAULT 1, max_attempts INTEGER, first_attempt_billable INTEGER NOT NULL DEFAULT 1, retake_billable INTEGER NOT NULL DEFAULT 0, retake_fee_amount REAL,
+  components_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(components_json) AND json_type(components_json) = 'array'),
+  scoring_model TEXT NOT NULL DEFAULT 'weighted_average' CHECK (scoring_model IN ('weighted_average','average')),
+  allow_retake INTEGER NOT NULL DEFAULT 1 CHECK (allow_retake IN (0,1)),
+  max_attempts INTEGER CHECK (max_attempts IS NULL OR (max_attempts >= 1 AND max_attempts <= 100 AND max_attempts = CAST(max_attempts AS INTEGER))),
+  first_attempt_billable INTEGER NOT NULL DEFAULT 1 CHECK (first_attempt_billable IN (0,1)),
+  retake_billable INTEGER NOT NULL DEFAULT 0 CHECK (retake_billable IN (0,1)),
+  retake_fee_amount REAL CHECK (
+    retake_fee_amount IS NULL OR
+    (retake_fee_amount >= 0 AND retake_fee_amount = CAST(retake_fee_amount AS INTEGER))
+  ),
   UNIQUE(program_version_id, branch_id)
 );
 CREATE INDEX IF NOT EXISTS idx_placement_profile_program_branch
-  ON placement_assessment_profiles(program_version_id, branch_id, enabled);
+  ON placement_assessment_profiles(program_version_id, branch_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_placement_profile_global
+  ON placement_assessment_profiles(program_version_id) WHERE branch_id IS NULL;
 
 CREATE TABLE IF NOT EXISTS placement_tests (
   id            TEXT PRIMARY KEY,
@@ -548,11 +552,11 @@ CREATE TABLE IF NOT EXISTS placement_tests (
   branch_id     TEXT REFERENCES branches(id) ON DELETE SET NULL, -- NULL = global
   created_by    TEXT REFERENCES users(id) ON DELETE SET NULL,
   difficulty    TEXT,
-  duration_seconds INTEGER,
-  version       INTEGER NOT NULL DEFAULT 1,
+  duration_seconds INTEGER CHECK (duration_seconds IS NULL OR (duration_seconds > 0 AND duration_seconds = CAST(duration_seconds AS INTEGER))),
+  version       INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1 AND version = CAST(version AS INTEGER)),
   rubric_id     TEXT REFERENCES placement_rubrics(id) ON DELETE SET NULL,
-  word_target   INTEGER,
-  content_json  TEXT,
+  word_target   INTEGER CHECK (word_target IS NULL OR (word_target > 0 AND word_target = CAST(word_target AS INTEGER))),
+  content_json  TEXT CHECK (content_json IS NULL OR json_valid(content_json)),
   created_at    TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -567,8 +571,8 @@ CREATE TABLE IF NOT EXISTS placement_test_sections (
   audio_url        TEXT,
   transcript       TEXT,
   body             TEXT,
-  duration_seconds INTEGER,
-  order_index      INTEGER NOT NULL DEFAULT 0,
+  duration_seconds INTEGER CHECK (duration_seconds IS NULL OR (duration_seconds > 0 AND duration_seconds = CAST(duration_seconds AS INTEGER))),
+  order_index      INTEGER NOT NULL DEFAULT 0 CHECK (order_index >= 0 AND order_index = CAST(order_index AS INTEGER)),
   UNIQUE(test_id, section_key)
 );
 CREATE INDEX IF NOT EXISTS idx_placement_sections_test ON placement_test_sections(test_id, order_index);
@@ -579,10 +583,10 @@ CREATE TABLE IF NOT EXISTS placement_test_questions (
   question_key TEXT NOT NULL,
   qtype        TEXT NOT NULL CHECK (qtype IN ('mcq','short_answer','essay','speaking')),
   prompt       TEXT NOT NULL,
-  options_json TEXT,
+  options_json TEXT CHECK (options_json IS NULL OR (json_valid(options_json) AND json_type(options_json) = 'array')),
   answer_key   TEXT,
-  points       REAL NOT NULL DEFAULT 1,
-  order_index  INTEGER NOT NULL DEFAULT 0,
+  points       REAL NOT NULL DEFAULT 1 CHECK (points > 0),
+  order_index  INTEGER NOT NULL DEFAULT 0 CHECK (order_index >= 0 AND order_index = CAST(order_index AS INTEGER)),
   difficulty   TEXT,
   section_key  TEXT,
   UNIQUE(test_id, question_key)
@@ -593,9 +597,10 @@ CREATE TABLE IF NOT EXISTS placement_rubrics (
   id            TEXT PRIMARY KEY,
   title         TEXT NOT NULL,
   kind          TEXT NOT NULL CHECK (kind IN ('writing','speaking','interview')),
-  criteria_json TEXT NOT NULL DEFAULT '[]',
+  criteria_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(criteria_json) AND json_type(criteria_json) = 'array'),
   branch_id     TEXT REFERENCES branches(id) ON DELETE SET NULL,
   created_by    TEXT REFERENCES users(id) ON DELETE SET NULL,
+  version       INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1 AND version = CAST(version AS INTEGER)),
   created_at    TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -604,7 +609,7 @@ CREATE TABLE IF NOT EXISTS placement_media (
   id            TEXT PRIMARY KEY,
   filename      TEXT NOT NULL,
   mime          TEXT NOT NULL,
-  size_bytes    INTEGER NOT NULL,
+  size_bytes    INTEGER NOT NULL CHECK (size_bytes > 0 AND size_bytes <= 26214400 AND size_bytes = CAST(size_bytes AS INTEGER)),
   sha256        TEXT NOT NULL,
   storage_path  TEXT NOT NULL,
   kind          TEXT NOT NULL DEFAULT 'audio' CHECK (kind IN ('audio','document','image','other')),
@@ -620,24 +625,24 @@ CREATE TABLE IF NOT EXISTS placement_assessment_attempts (
   program_version_id TEXT NOT NULL REFERENCES program_versions(id) ON DELETE RESTRICT,
   profile_id TEXT NOT NULL REFERENCES placement_assessment_profiles(id) ON DELETE RESTRICT,
   branch_id TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
-  attempt_number INTEGER NOT NULL,
+  attempt_number INTEGER NOT NULL CHECK (attempt_number >= 1 AND attempt_number = CAST(attempt_number AS INTEGER)),
   status TEXT NOT NULL DEFAULT 'in_progress' CHECK (status IN ('in_progress','paused','completed','expired','cancelled')),
   started_at TEXT NOT NULL DEFAULT (datetime('now')),
   completed_at TEXT,
-  total_score REAL,
-  max_score REAL,
-  percentage REAL,
+  total_score REAL CHECK (total_score IS NULL OR (total_score >= 0 AND total_score <= 100)),
+  max_score REAL CHECK (max_score IS NULL OR max_score = 100),
+  percentage REAL CHECK (percentage IS NULL OR (percentage >= 0 AND percentage <= 100)),
   recommended_level_id TEXT REFERENCES levels(id) ON DELETE SET NULL,
   recommendation_text TEXT,
   examiner_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-  snapshot_json TEXT NOT NULL,
+  snapshot_json TEXT NOT NULL CHECK (json_valid(snapshot_json) AND json_type(snapshot_json) = 'object'),
   notes TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   expires_at TEXT,
   paused_at TEXT,
   resumed_at TEXT,
-  policy_version INTEGER NOT NULL DEFAULT 1,
+  policy_version INTEGER NOT NULL DEFAULT 1 CHECK (policy_version >= 1 AND policy_version = CAST(policy_version AS INTEGER)),
   decision_rule_id TEXT,
   override_level_id TEXT REFERENCES levels(id) ON DELETE SET NULL,
   override_reason TEXT,
@@ -657,12 +662,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_placement_open_attempt
 CREATE TABLE IF NOT EXISTS placement_assessment_responses (
   id            TEXT PRIMARY KEY,
   attempt_id    TEXT NOT NULL REFERENCES placement_assessment_attempts(id) ON DELETE CASCADE,
-  test_id       TEXT NOT NULL REFERENCES placement_tests(id) ON DELETE RESTRICT,
-  question_id   TEXT NOT NULL REFERENCES placement_test_questions(id) ON DELETE RESTRICT,
+  -- Test/question identifiers refer to immutable objects captured in the
+  -- attempt snapshot. They deliberately do not reference mutable bank rows.
+  test_id       TEXT NOT NULL,
+  question_id   TEXT NOT NULL,
   question_key  TEXT NOT NULL,
-  response_json TEXT,
-  auto_score    REAL,
-  max_points    REAL NOT NULL DEFAULT 1,
+  response_json TEXT CHECK (response_json IS NULL OR json_valid(response_json)),
+  auto_score    REAL CHECK (auto_score IS NULL OR (auto_score >= 0 AND auto_score <= max_points)),
+  max_points    REAL NOT NULL DEFAULT 1 CHECK (max_points > 0),
   feedback      TEXT,
   answered_at   TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(attempt_id, question_id)
@@ -676,49 +683,240 @@ CREATE TABLE IF NOT EXISTS placement_assessment_results (
   component_type TEXT NOT NULL CHECK (component_type IN ('skill_scores','written_test','interview','level_assessment','custom_score','content_test')),
   label TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','in_progress','completed','waived','timed_out')),
-  score REAL,
-  max_score REAL NOT NULL DEFAULT 100,
-  weight REAL NOT NULL DEFAULT 0,
+  score REAL CHECK (score IS NULL OR (score >= 0 AND score <= max_score)),
+  max_score REAL NOT NULL DEFAULT 100 CHECK (max_score > 0),
+  weight REAL NOT NULL DEFAULT 0 CHECK (weight >= 0 AND weight <= 100),
   selected_level_id TEXT REFERENCES levels(id) ON DELETE SET NULL,
   notes TEXT,
   result_text TEXT,
-  payload_json TEXT,
+  payload_json TEXT CHECK (payload_json IS NULL OR json_valid(payload_json)),
   evaluator_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   completed_at TEXT,
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-  raw_score REAL,
-  percentage REAL,
-  weighted_score REAL,
-  score_version INTEGER NOT NULL DEFAULT 1,
+  raw_score REAL CHECK (raw_score IS NULL OR (raw_score >= 0 AND raw_score <= max_score)),
+  percentage REAL CHECK (percentage IS NULL OR (percentage >= 0 AND percentage <= 100)),
+  weighted_score REAL CHECK (weighted_score IS NULL OR (weighted_score >= 0 AND weighted_score <= weight)),
+  score_version INTEGER NOT NULL DEFAULT 1 CHECK (score_version >= 1 AND score_version = CAST(score_version AS INTEGER)),
   correction_reason TEXT,
+  corrected_by TEXT REFERENCES users(id) ON DELETE SET NULL,
   corrected_at TEXT,
   started_at TEXT,
   deadline_at TEXT,
   submitted_at TEXT,
-  elapsed_seconds INTEGER,
-  timeout_flag INTEGER NOT NULL DEFAULT 0,
+  elapsed_seconds INTEGER CHECK (elapsed_seconds IS NULL OR (elapsed_seconds >= 0 AND elapsed_seconds = CAST(elapsed_seconds AS INTEGER))),
+  timeout_flag INTEGER NOT NULL DEFAULT 0 CHECK (timeout_flag IN (0,1)),
   paused_at TEXT,
   UNIQUE(attempt_id, component_key)
 );
 CREATE INDEX IF NOT EXISTS idx_placement_results_attempt ON placement_assessment_results(attempt_id, status);
 
+-- Placement integrity is correlated to the immutable attempt snapshot and the
+-- attempt's program/branch, not to mutable bank or caller-selected objects.
+CREATE TRIGGER IF NOT EXISTS trg_placement_test_rubric_scope_insert
+BEFORE INSERT ON placement_tests
+WHEN NEW.rubric_id IS NOT NULL
+ AND EXISTS (
+   SELECT 1 FROM placement_rubrics r
+   WHERE r.id = NEW.rubric_id
+     AND ((r.branch_id IS NOT NULL AND r.branch_id IS NOT NEW.branch_id)
+       OR NOT ((NEW.test_type = 'writing' AND r.kind IN ('writing','interview'))
+            OR (NEW.test_type = 'speaking' AND r.kind IN ('speaking','interview'))))
+ )
+BEGIN SELECT RAISE(ABORT, 'placement test rubric scope or kind mismatch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_placement_test_rubric_scope_update
+BEFORE UPDATE OF rubric_id, branch_id, test_type ON placement_tests
+WHEN NEW.rubric_id IS NOT NULL
+ AND EXISTS (
+   SELECT 1 FROM placement_rubrics r
+   WHERE r.id = NEW.rubric_id
+     AND ((r.branch_id IS NOT NULL AND r.branch_id IS NOT NEW.branch_id)
+       OR NOT ((NEW.test_type = 'writing' AND r.kind IN ('writing','interview'))
+            OR (NEW.test_type = 'speaking' AND r.kind IN ('speaking','interview'))))
+ )
+BEGIN SELECT RAISE(ABORT, 'placement test rubric scope or kind mismatch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_placement_rubric_kind_scope_update
+BEFORE UPDATE OF kind ON placement_rubrics
+WHEN EXISTS (
+  SELECT 1 FROM placement_tests t
+  WHERE t.rubric_id = NEW.id
+    AND NOT ((t.test_type = 'writing' AND NEW.kind IN ('writing','interview'))
+          OR (t.test_type = 'speaking' AND NEW.kind IN ('speaking','interview')))
+)
+BEGIN SELECT RAISE(ABORT, 'placement rubric kind conflicts with linked tests'); END;
+CREATE TRIGGER IF NOT EXISTS trg_placement_attempt_scope_insert
+BEFORE INSERT ON placement_assessment_attempts
+WHEN (SELECT branch_id FROM visitors WHERE id = NEW.visitor_id) IS NOT NEW.branch_id
+   OR (SELECT program_version_id FROM visitors WHERE id = NEW.visitor_id) IS NOT NEW.program_version_id
+   OR (SELECT program_version_id FROM placement_assessment_profiles WHERE id = NEW.profile_id) IS NOT NEW.program_version_id
+   OR EXISTS (
+     SELECT 1 FROM placement_assessment_profiles profile
+     JOIN program_versions pv ON pv.id = NEW.program_version_id
+     JOIN programs program ON program.id = pv.program_id
+     WHERE profile.id = NEW.profile_id
+       AND profile.branch_id IS NOT NULL
+       AND profile.branch_id IS NOT NEW.branch_id
+       AND profile.branch_id IS NOT program.branch_id
+   )
+BEGIN SELECT RAISE(ABORT, 'placement attempt scope mismatch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_placement_attempt_scope_update
+BEFORE UPDATE OF visitor_id, program_version_id, profile_id, branch_id ON placement_assessment_attempts
+WHEN (SELECT branch_id FROM visitors WHERE id = NEW.visitor_id) IS NOT NEW.branch_id
+   OR (SELECT program_version_id FROM visitors WHERE id = NEW.visitor_id) IS NOT NEW.program_version_id
+   OR (SELECT program_version_id FROM placement_assessment_profiles WHERE id = NEW.profile_id) IS NOT NEW.program_version_id
+   OR EXISTS (
+     SELECT 1 FROM placement_assessment_profiles profile
+     JOIN program_versions pv ON pv.id = NEW.program_version_id
+     JOIN programs program ON program.id = pv.program_id
+     WHERE profile.id = NEW.profile_id
+       AND profile.branch_id IS NOT NULL
+       AND profile.branch_id IS NOT NEW.branch_id
+       AND profile.branch_id IS NOT program.branch_id
+   )
+BEGIN SELECT RAISE(ABORT, 'placement attempt scope mismatch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_placement_response_snapshot_insert
+BEFORE INSERT ON placement_assessment_responses
+WHEN NOT EXISTS (
+  SELECT 1
+  FROM placement_assessment_attempts a,
+       json_each(json_extract(a.snapshot_json, '$.tests')) snapshot_test,
+       json_each(json_extract(snapshot_test.value, '$.questions')) snapshot_question
+  WHERE a.id = NEW.attempt_id
+    AND json_extract(snapshot_test.value, '$.id') = NEW.test_id
+    AND json_extract(snapshot_question.value, '$.id') = NEW.question_id
+)
+BEGIN SELECT RAISE(ABORT, 'placement response is not in the attempt snapshot'); END;
+CREATE TRIGGER IF NOT EXISTS trg_placement_response_snapshot_update
+BEFORE UPDATE OF attempt_id, test_id, question_id ON placement_assessment_responses
+WHEN NOT EXISTS (
+  SELECT 1
+  FROM placement_assessment_attempts a,
+       json_each(json_extract(a.snapshot_json, '$.tests')) snapshot_test,
+       json_each(json_extract(snapshot_test.value, '$.questions')) snapshot_question
+  WHERE a.id = NEW.attempt_id
+    AND json_extract(snapshot_test.value, '$.id') = NEW.test_id
+    AND json_extract(snapshot_question.value, '$.id') = NEW.question_id
+)
+BEGIN SELECT RAISE(ABORT, 'placement response is not in the attempt snapshot'); END;
+CREATE TRIGGER IF NOT EXISTS trg_placement_result_snapshot_insert
+BEFORE INSERT ON placement_assessment_results
+WHEN NOT EXISTS (
+  SELECT 1
+  FROM placement_assessment_attempts a,
+       json_each(json_extract(a.snapshot_json, '$.components')) component
+  WHERE a.id = NEW.attempt_id
+    AND json_extract(component.value, '$.key') = NEW.component_key
+)
+BEGIN SELECT RAISE(ABORT, 'placement result is not in the attempt snapshot'); END;
+CREATE TRIGGER IF NOT EXISTS trg_placement_result_snapshot_update
+BEFORE UPDATE OF attempt_id, component_key ON placement_assessment_results
+WHEN NOT EXISTS (
+  SELECT 1
+  FROM placement_assessment_attempts a,
+       json_each(json_extract(a.snapshot_json, '$.components')) component
+  WHERE a.id = NEW.attempt_id
+    AND json_extract(component.value, '$.key') = NEW.component_key
+)
+BEGIN SELECT RAISE(ABORT, 'placement result is not in the attempt snapshot'); END;
+CREATE TRIGGER IF NOT EXISTS trg_placement_result_level_scope_insert
+BEFORE INSERT ON placement_assessment_results
+WHEN NEW.selected_level_id IS NOT NULL
+ AND NOT EXISTS (
+   SELECT 1 FROM levels l
+   JOIN program_versions pv ON pv.program_id = l.program_id
+   JOIN placement_assessment_attempts a ON a.program_version_id = pv.id
+   WHERE a.id = NEW.attempt_id AND l.id = NEW.selected_level_id
+ )
+BEGIN SELECT RAISE(ABORT, 'placement result level program mismatch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_placement_result_level_scope_update
+BEFORE UPDATE OF selected_level_id, attempt_id ON placement_assessment_results
+WHEN NEW.selected_level_id IS NOT NULL
+ AND NOT EXISTS (
+   SELECT 1 FROM levels l
+   JOIN program_versions pv ON pv.program_id = l.program_id
+   JOIN placement_assessment_attempts a ON a.program_version_id = pv.id
+   WHERE a.id = NEW.attempt_id AND l.id = NEW.selected_level_id
+ )
+BEGIN SELECT RAISE(ABORT, 'placement result level program mismatch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_placement_attempt_level_scope_update
+BEFORE UPDATE OF recommended_level_id, override_level_id ON placement_assessment_attempts
+WHEN (NEW.recommended_level_id IS NOT NULL OR NEW.override_level_id IS NOT NULL)
+ AND EXISTS (
+   SELECT 1
+   FROM (SELECT NEW.recommended_level_id AS level_id UNION ALL SELECT NEW.override_level_id) selected
+   WHERE selected.level_id IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1 FROM levels l
+       JOIN program_versions pv ON pv.program_id = l.program_id
+       WHERE pv.id = NEW.program_version_id AND l.id = selected.level_id
+     )
+ )
+BEGIN SELECT RAISE(ABORT, 'placement recommendation level program mismatch'); END;
+
 CREATE TABLE IF NOT EXISTS placement_rules ( 
   id                  TEXT PRIMARY KEY, 
   program_version_id  TEXT NOT NULL REFERENCES program_versions(id) ON DELETE CASCADE, 
   name                TEXT NOT NULL, 
-  min_score           REAL NOT NULL DEFAULT 0, 
-  max_score           REAL NOT NULL DEFAULT 120, 
-  recommended_level_id TEXT REFERENCES levels(id) ON DELETE SET NULL, 
-  recommended_level_code TEXT, 
-  branch_id           TEXT REFERENCES branches(id) ON DELETE CASCADE, 
-  sort_order          INTEGER NOT NULL DEFAULT 0, 
-  is_active           INTEGER NOT NULL DEFAULT 1, 
-  version             INTEGER NOT NULL DEFAULT 1, 
-  -- Structured rule conditions for the placement decision engine (migration 058). 
-  conditions_json     TEXT, 
+  min_score           REAL NOT NULL DEFAULT 0 CHECK (min_score >= 0 AND min_score <= 100),
+  max_score           REAL NOT NULL DEFAULT 100 CHECK (max_score >= min_score AND max_score <= 100),
+  recommended_level_id TEXT REFERENCES levels(id) ON DELETE SET NULL,
+  recommended_level_code TEXT,
+  branch_id           TEXT REFERENCES branches(id) ON DELETE CASCADE,
+  sort_order          INTEGER NOT NULL DEFAULT 0,
+  is_active           INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
+  version             INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1 AND version = CAST(version AS INTEGER)),
+  -- Structured rule conditions for the placement decision engine (migration 058).
+  conditions_json     TEXT CHECK (conditions_json IS NULL OR (json_valid(conditions_json) AND json_type(conditions_json) = 'array')),
   created_at          TEXT NOT NULL DEFAULT (datetime('now')) 
 );
 CREATE INDEX IF NOT EXISTS idx_placement_rules_version   ON placement_rules(program_version_id, is_active);
+
+CREATE TRIGGER IF NOT EXISTS trg_placement_rule_branch_scope_insert
+BEFORE INSERT ON placement_rules
+WHEN NEW.branch_id IS NOT NULL
+ AND NEW.branch_id IS NOT (
+   SELECT p.branch_id FROM program_versions pv JOIN programs p ON p.id = pv.program_id
+   WHERE pv.id = NEW.program_version_id
+ )
+BEGIN SELECT RAISE(ABORT, 'placement rule branch program mismatch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_placement_rule_branch_scope_update
+BEFORE UPDATE OF branch_id, program_version_id ON placement_rules
+WHEN NEW.branch_id IS NOT NULL
+ AND NEW.branch_id IS NOT (
+   SELECT p.branch_id FROM program_versions pv JOIN programs p ON p.id = pv.program_id
+   WHERE pv.id = NEW.program_version_id
+ )
+BEGIN SELECT RAISE(ABORT, 'placement rule branch program mismatch'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_placement_rule_level_scope_insert
+BEFORE INSERT ON placement_rules
+WHEN NEW.recommended_level_id IS NOT NULL
+ AND NOT EXISTS (
+   SELECT 1 FROM levels l
+   JOIN program_versions pv ON pv.program_id = l.program_id
+   WHERE pv.id = NEW.program_version_id AND l.id = NEW.recommended_level_id
+ )
+BEGIN SELECT RAISE(ABORT, 'placement rule level program mismatch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_placement_rule_level_scope_update
+BEFORE UPDATE OF recommended_level_id, program_version_id ON placement_rules
+WHEN NEW.recommended_level_id IS NOT NULL
+ AND NOT EXISTS (
+   SELECT 1 FROM levels l
+   JOIN program_versions pv ON pv.program_id = l.program_id
+   WHERE pv.id = NEW.program_version_id AND l.id = NEW.recommended_level_id
+ )
+BEGIN SELECT RAISE(ABORT, 'placement rule level program mismatch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_placement_rule_level_code_insert
+BEFORE INSERT ON placement_rules
+WHEN NEW.recommended_level_id IS NOT NULL
+ AND NEW.recommended_level_code IS NOT NULL
+ AND NEW.recommended_level_code IS NOT (SELECT code FROM levels WHERE id = NEW.recommended_level_id)
+BEGIN SELECT RAISE(ABORT, 'placement rule level code mismatch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_placement_rule_level_code_update
+BEFORE UPDATE OF recommended_level_id, recommended_level_code ON placement_rules
+WHEN NEW.recommended_level_id IS NOT NULL
+ AND NEW.recommended_level_code IS NOT NULL
+ AND NEW.recommended_level_code IS NOT (SELECT code FROM levels WHERE id = NEW.recommended_level_id)
+BEGIN SELECT RAISE(ABORT, 'placement rule level code mismatch'); END;
 
 -- ============================================================================
 -- ACADEMIC STRUCTURE

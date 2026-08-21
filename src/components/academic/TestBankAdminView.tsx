@@ -6,7 +6,7 @@ import { useInvalidate } from '../../state/serverStateFreshness';
 interface Question { id?: string; key: string; qtype: string; prompt: string; options: Array<{ key: string; text: string }> | null; answerKey: string; points: number; orderIndex?: number; difficulty?: string | null; sectionKey?: string | null; }
 interface Section { id?: string; key: string; kind: string; title?: string | null; audioUrl?: string | null; transcript?: string | null; body?: string | null; durationSeconds?: number | null; }
 interface Test { id: string; title: string; testType: string; instructions?: string | null; audioUrl?: string | null; transcript?: string | null; passage?: string | null; status: string; difficulty?: string | null; durationSeconds?: number | null; version?: number; rubricId?: string | null; wordTarget?: number | null; sections: Section[]; questions: Question[]; }
-interface Rubric { id: string; title: string; kind: string; criteria: Array<{ key: string; label: string; weight: number; maxScore: number }>; }
+interface Rubric { id: string; title: string; kind: string; version: number; criteria: Array<{ key: string; label: string; weight: number; maxScore: number }>; }
 interface Media { id: string; filename: string; mime: string; sizeBytes: number; sha256: string; url: string; }
 
 const inputCls = 'w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm bg-white';
@@ -49,6 +49,7 @@ export default function TestBankAdminView({ triggerToast }: { triggerToast: (m: 
       const payload: any = {
         title: editing.title, testType: editing.testType, instructions: editing.instructions || null,
         audioUrl: editing.audioUrl || null, transcript: editing.transcript || null, passage: editing.passage || null,
+        version: editing.version,
         difficulty: editing.difficulty || null, durationSeconds: editing.durationSeconds ?? null,
         rubricId: editing.rubricId || null, wordTarget: editing.wordTarget ?? null,
         sections: editing.sections.filter((s) => s.key).map((s) => ({ key: s.key, kind: s.kind, title: s.title || null, audioUrl: s.audioUrl || null, transcript: s.transcript || null, body: s.body || null, durationSeconds: s.durationSeconds ?? null })),
@@ -66,7 +67,7 @@ export default function TestBankAdminView({ triggerToast }: { triggerToast: (m: 
 
   const setStatus = async (t: Test, status: 'active' | 'archived') => {
     try {
-      await api.post(`/placement/test-bank/${t.id}/${status === 'active' ? 'activate' : 'archive'}`, {});
+      await api.post(`/placement/test-bank/${t.id}/${status === 'active' ? 'activate' : 'archive'}`, { version: t.version });
       invalidate('placement');
       triggerToast(status === 'active' ? 'Test activated.' : 'Test archived (history preserved).', 'success');
       await load();
@@ -232,14 +233,14 @@ function TestEditor({ test, isNew, rubrics, setTest, onCancel, onSave, saving }:
       </div>
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         <div><label className={labelCls}>Title</label><input value={test.title} onChange={(e) => set({ title: e.target.value })} className={inputCls} /></div>
-        <div><label className={labelCls}>Type</label><select value={test.testType} onChange={(e) => set({ testType: e.target.value })} className={inputCls}><option value="listening">Listening</option><option value="reading">Reading</option><option value="writing">Writing</option><option value="speaking">Speaking</option></select></div>
+        <div><label className={labelCls}>Type</label><select value={test.testType} onChange={(e) => { const testType = e.target.value; const rubric = (rubrics || []).find((r: any) => r.id === test.rubricId); const rubricId = rubric && (rubric.kind === testType || rubric.kind === 'interview') && (testType === 'writing' || testType === 'speaking') ? test.rubricId : null; set({ testType, rubricId, wordTarget: testType === 'writing' ? test.wordTarget : null }); }} className={inputCls}><option value="listening">Listening</option><option value="reading">Reading</option><option value="writing">Writing</option><option value="speaking">Speaking</option></select></div>
         <div><label className={labelCls}>Difficulty</label><select value={test.difficulty || ''} onChange={(e) => set({ difficulty: e.target.value || null })} className={inputCls}><option value="">—</option><option value="easy">Easy</option><option value="medium">Medium</option><option value="hard">Hard</option></select></div>
         <div><label className={labelCls}>Duration (seconds)</label><input type="number" value={test.durationSeconds ?? ''} onChange={(e) => set({ durationSeconds: e.target.value === '' ? null : Number(e.target.value) })} className={inputCls} /></div>
       </div>
       <div className="mt-3"><label className={labelCls}>Instructions</label><textarea value={test.instructions || ''} onChange={(e) => set({ instructions: e.target.value })} rows={2} className={inputCls} /></div>
       {(test.testType === 'writing' || test.testType === 'speaking') && (
         <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div><label className={labelCls}>Rubric</label><select value={test.rubricId || ''} onChange={(e) => set({ rubricId: e.target.value || null })} className={inputCls}><option value="">— none —</option>{(rubrics || []).filter((r: any) => r.kind === (test.testType === 'writing' ? 'writing' : 'speaking') || r.kind === 'interview').map((r: any) => <option key={r.id} value={r.id}>{r.title}</option>)}</select></div>
+          <div><label className={labelCls}>Rubric</label><select value={test.rubricId || ''} onChange={(e) => set({ rubricId: e.target.value || null })} className={inputCls}><option value="">— none —</option>{(rubrics || []).filter((r: any) => test.testType === 'writing' ? (r.kind === 'writing' || r.kind === 'interview') : test.testType === 'speaking' ? (r.kind === 'speaking' || r.kind === 'interview') : false).map((r: any) => <option key={r.id} value={r.id}>{r.title}</option>)}</select></div>
           {test.testType === 'writing' && <div><label className={labelCls}>Word target</label><input type="number" value={test.wordTarget ?? ''} onChange={(e) => set({ wordTarget: e.target.value === '' ? null : Number(e.target.value) })} className={inputCls} /></div>}
         </div>
       )}

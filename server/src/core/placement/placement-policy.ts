@@ -43,19 +43,28 @@ export function readRetakePolicy(source: Record<string, unknown> | null | undefi
   const src = (source ?? {}) as Record<string, unknown>;
   // Accept both DB column names (profile row) and camelCase (snapshot profile).
   const pick = (snake: string, camel: string): unknown => (src[snake] !== undefined ? src[snake] : src[camel]);
-  const num = (value: unknown): number | null => {
-    if (value === null || value === undefined || value === '') return null;
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
+  const bool = (value: unknown, fallback: boolean, field: string): boolean => {
+    if (value === undefined || value === null) return fallback;
+    if (value === true || value === 1) return true;
+    if (value === false || value === 0) return false;
+    throw new Error(`Invalid placement policy boolean: ${field}.`);
   };
-  const bool = (value: unknown, fallback: boolean): boolean => (value === undefined || value === null ? fallback : Boolean(Number(value)));
+  const nullableInteger = (value: unknown, field: string, minimum: number, maximum = Number.MAX_SAFE_INTEGER): number | null => {
+    if (value === undefined || value === null) return null;
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < minimum || value > maximum) {
+      throw new Error(`Invalid placement ${field} policy.`);
+    }
+    return value;
+  };
+  const maxAttempts = nullableInteger(pick('max_attempts', 'maxAttempts'), 'maxAttempts', 1, 100);
+  const retakeFeeAmount = nullableInteger(pick('retake_fee_amount', 'retakeFeeAmount'), 'retake fee', 0);
 
   return {
-    allowRetake: bool(pick('allow_retake', 'allowRetake'), true),
-    maxAttempts: num(pick('max_attempts', 'maxAttempts')),
-    firstAttemptBillable: bool(pick('first_attempt_billable', 'firstAttemptBillable'), true),
-    retakeBillable: bool(pick('retake_billable', 'retakeBillable'), false),
-    retakeFeeAmount: num(pick('retake_fee_amount', 'retakeFeeAmount')),
+    allowRetake: bool(pick('allow_retake', 'allowRetake'), true, 'allowRetake'),
+    maxAttempts,
+    firstAttemptBillable: bool(pick('first_attempt_billable', 'firstAttemptBillable'), true, 'firstAttemptBillable'),
+    retakeBillable: bool(pick('retake_billable', 'retakeBillable'), false, 'retakeBillable'),
+    retakeFeeAmount,
   };
 }
 
@@ -154,6 +163,12 @@ export function evaluateConversionEligibility(
   if (requirementMode === 'not_required') return { eligible: true, reason: 'not_required' };
 
   const waived = isWaivedStatus(placementStatus);
+  if (!waived && attempt?.status === 'completed' && attempt.outcome === 'failed') {
+    return {
+      eligible: false,
+      reason: 'The candidate did not meet the placement policy requirements and cannot be enrolled from this result.',
+    };
+  }
   if (requirementMode === 'optional') {
     if (waived) return { eligible: true, reason: 'waived' };
     if (placementStatus !== 'completed') {

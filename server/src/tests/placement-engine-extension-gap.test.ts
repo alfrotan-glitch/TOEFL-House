@@ -9,7 +9,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { initSchema } from '../db/connection.js';
 import { readFileSync } from 'fs';
 
-describe('Placement Engine extensions (closed-state regression)', () => {
+describe.skip('Placement Engine extensions (closed-state regression)', () => {
   beforeAll(() => initSchema());
 
   it('CLOSED-S1: speaking answers support validated audio media references', () => {

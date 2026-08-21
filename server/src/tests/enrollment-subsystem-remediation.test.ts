@@ -288,9 +288,9 @@ describe('E-1 — transfer requires a valid active source enrollment', () => {
     ).run();
     db.prepare(
       `INSERT OR REPLACE INTO placement_assessment_profiles
-         (id, program_version_id, branch_id, enabled, required, requirement_mode, first_level_exempt)
-       VALUES ('e1_pap', 'e1_pv', ?, 1, 1, 'required', 0)`
-    ).run(BRANCH);
+         (id, program_version_id, branch_id, requirement_mode, first_level_exempt, components_json)
+       VALUES ('e1_pap', 'e1_pv', ?, 'required', 0, ?)`
+    ).run(BRANCH, JSON.stringify([{ key: 'placement', type: 'custom_score', label: 'Placement', required: true, weight: 100, maxScore: 100 }]));
 
     makeClass('e1_pl_src', 10);
     makeClass('e1_pl_dst', 10);

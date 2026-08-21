@@ -62,7 +62,6 @@ const stmtInsertFollowup = db.prepare('INSERT INTO visitor_followups (id, visito
 const stmtUpdateVisitorPlacement = db.prepare("UPDATE visitors SET placement_score = ?, placement_method = ?, placement_status = 'completed', stage = ? WHERE id = ?");
 const stmtUpdateVisitorCRM = db.prepare(`UPDATE visitors SET interested_course=?, follow_up_status=?, next_contact_date=?, stage=?, notes=COALESCE(?, notes) WHERE id=?`);
 const stmtUpdateVisitorStage = db.prepare('UPDATE visitors SET stage = ? WHERE id = ? AND stage = ?');
-const stmtGetPlacementProfile = db.prepare(`SELECT pap.*, pv.program_id, p.name AS program_name FROM placement_assessment_profiles pap JOIN program_versions pv ON pv.id = pap.program_version_id JOIN programs p ON p.id = pv.program_id WHERE pap.program_version_id = ? AND (pap.branch_id = ? OR pap.branch_id IS NULL) AND pap.enabled = 1 ORDER BY pap.branch_id IS NOT NULL DESC LIMIT 1`);
 const stmtGetLevelProgramVersion = db.prepare('SELECT program_version_id FROM levels WHERE id = ?');
 const stmtGetProgramVersionById = db.prepare(`SELECT pv.*, p.branch_id, p.name AS program_name FROM program_versions pv JOIN programs p ON p.id = pv.program_id WHERE pv.id = ?`);
 
@@ -609,7 +608,12 @@ visitorsRouter.patch('/:id', requirePermission('Lead.Edit'), ah(async (req, res)
   
   db.transaction(() => {
     if (programChanged) {
-      db.prepare(`UPDATE placement_assessment_attempts SET status='cancelled', updated_at=datetime('now'), notes=COALESCE(notes,'') || ? WHERE visitor_id=? AND status='in_progress'`).run(' Program changed; attempt invalidated.', existing.id);
+      db.prepare(`
+        UPDATE placement_assessment_attempts
+        SET status='cancelled', completed_at=datetime('now'), paused_at=NULL,
+            updated_at=datetime('now'), notes=COALESCE(notes,'') || ?
+        WHERE visitor_id=? AND status IN ('in_progress','paused')
+      `).run(' Program changed; attempt invalidated.', existing.id);
       db.prepare(`UPDATE visitors SET placement_score=NULL, placement_method=NULL, placement_status='not_started', current_placement_attempt_id=NULL, stage=CASE WHEN stage IN ('placement_booking','placement_fee','placement_completed') THEN 'follow_up' ELSE stage END WHERE id=?`).run(existing.id);
     }
     stmtUpdateVisitor.run(

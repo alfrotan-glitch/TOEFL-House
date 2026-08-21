@@ -33,7 +33,7 @@ export interface DecisionEvaluation {
 
 function satisfiesCondition(cond: DecisionCondition, results: any[]): boolean {
   const row = results.find((r) => r.component_key === cond.componentKey && (r.status === 'completed' || r.status === 'waived'));
-  if (!row) return false;
+  if (!row || row.status === 'waived' || row.score == null) return false;
   const actual = cond.field === 'percentage' ? Number(row.percentage ?? (Number(row.score) / Number(row.max_score || 100)) * 100) : Number(row.score);
   if (!Number.isFinite(actual)) return false;
   switch (cond.op) {
@@ -83,12 +83,12 @@ export function evaluateDecision(opts: {
     if (!unmetRequirements.includes(c.key)) unmetRequirements.push(`${c.key} (below minimum score ${c.minScore})`);
   }
 
-  const scored = results.filter((r) => r.status === 'completed' && Number(r.weight) > 0 && r.score != null);
+  const scored = results.filter((r) => r.status === 'completed' && r.score != null && (scoringModel === 'average' || Number(r.weight) > 0));
   const explicitLevels = [...new Set(results.filter((r) => (r.status === 'completed' || r.status === 'waived') && r.selected_level_id).map((r) => String(r.selected_level_id)))];
   const explicitLevel = explicitLevels.length === 1 ? explicitLevels[0] : null;
   const weightTotal = scored.reduce((sum, r) => sum + Number(r.weight), 0);
   const normalizedScores = scored.map((r) => (Number(r.score) / Number(r.max_score || 100)) * 100);
-  const percentage = scored.length > 0 && weightTotal > 0
+  const percentage = scored.length > 0 && (scoringModel === 'average' || weightTotal > 0)
     ? Math.round((scoringModel === 'average'
       ? normalizedScores.reduce((sum, value) => sum + value, 0) / normalizedScores.length
       : (scored.reduce((sum, r) => sum + ((Number(r.score) / Number(r.max_score || 100)) * Number(r.weight)), 0) / weightTotal) * 100) * 100) / 100
@@ -101,6 +101,7 @@ export function evaluateDecision(opts: {
     for (const rule of policyRules) {
       if (matchesConditionalRule(rule, results)) {
         const level = (levels || []).find((l: any) => l.id === rule.levelId);
+        if (!level) throw new HttpError(409, 'A placement decision rule references a level outside the attempt snapshot.');
         const belowPass = percentage < Number(passScore);
         return {
           percentage,
@@ -126,9 +127,12 @@ export function evaluateDecision(opts: {
       try {
         const conds = JSON.parse(rule.conditions_json) as DecisionCondition[];
         condOk = conds.every((cond) => satisfiesCondition(cond, results));
-      } catch { condOk = true; }
+      } catch { condOk = false; }
     }
     if (condOk) {
+      if (rule.recommended_level_id && !(levels || []).some((level: any) => level.id === rule.recommended_level_id)) {
+        throw new HttpError(409, 'A placement score-band rule references a level outside the attempt snapshot.');
+      }
       const belowPass = percentage < Number(passScore);
       return {
         percentage,

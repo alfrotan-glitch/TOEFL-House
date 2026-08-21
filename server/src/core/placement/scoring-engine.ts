@@ -46,7 +46,7 @@ export interface ScoreProvenance {
 export function scoreProvenance(score: number, maxScore: number, weight: number): ScoreProvenance {
   const max = maxScore || 100;
   const percentage = Math.round((score / max) * 10000) / 100;
-  const weightedScore = Math.round(((score / max) * weight) * 10000) / 100;
+  const weightedScore = Math.round(((score / max) * weight) * 100) / 100;
   return { rawScore: Math.round(score * 100) / 100, percentage, weightedScore };
 }
 
@@ -74,16 +74,17 @@ export function scoreComponentBody(component: PolicyComponent, body: any, snapsh
     let manualScore: number;
     let criteria: Record<string, number> | null = null;
     if (body?.criteriaScores && typeof body.criteriaScores === 'object') {
-      if (!test.rubric_id) throw new HttpError(400, 'criteriaScores were provided but the test has no linked rubric.');
-      const rubric = db.prepare('SELECT criteria_json FROM placement_rubrics WHERE id = ?').get(test.rubric_id) as { criteria_json: string } | undefined;
-      if (!rubric) throw new HttpError(409, 'The linked rubric no longer exists.');
-      const rubricCriteria = JSON.parse(rubric.criteria_json || '[]') as Array<{ key: string; weight: number; maxScore: number }>;
-      if (!Array.isArray(rubricCriteria) || rubricCriteria.length === 0) throw new HttpError(409, 'The linked rubric has no criteria.');
+      if (!test.rubric) throw new HttpError(400, 'criteriaScores were provided but the snapshotted test has no linked rubric.');
+      const rubricCriteria = test.rubric.criteria as Array<{ key: string; weight: number; maxScore: number }>;
+      if (!Array.isArray(rubricCriteria) || rubricCriteria.length === 0) throw new HttpError(409, 'The snapshotted rubric has no criteria.');
+      const expectedKeys = new Set(rubricCriteria.map((criterion) => criterion.key));
+      const suppliedKeys = Object.keys(body.criteriaScores);
+      if (suppliedKeys.some((key) => !expectedKeys.has(key))) throw new HttpError(400, 'criteriaScores contains an unknown rubric criterion.');
       criteria = {};
       let weightedSum = 0;
       for (const c of rubricCriteria) {
-        const given = Number(body.criteriaScores[c.key]);
-        if (!Number.isFinite(given)) throw new HttpError(400, `Missing numeric score for rubric criterion "${c.key}".`);
+        const given = body.criteriaScores[c.key];
+        if (typeof given !== 'number' || !Number.isFinite(given)) throw new HttpError(400, `Missing numeric score for rubric criterion "${c.key}".`);
         if (given < 0 || given > Number(c.maxScore)) throw new HttpError(400, `Criterion "${c.key}" score must be between 0 and ${c.maxScore}.`);
         criteria[c.key] = given;
         weightedSum += (given / Number(c.maxScore || 1)) * Number(c.weight || 0);

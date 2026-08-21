@@ -13,7 +13,14 @@ import { ah, HttpError } from '../middleware/errorHandler.js';
 import { assertOptionalIsoDate, assertDateRange } from '../utils/isoDate.js';
 import { id } from '../utils/ids.js';
 import { ACADEMIC_DEFAULTS, PLACEMENT_DEFAULTS } from '../core/configuration/policy-catalog.js';
-import { validatePolicyComponents, validateDecisionRules } from '../core/placement/policy-engine.js';
+import {
+  normalizeRequirementMode,
+  validateDecisionRules,
+  validateMoney,
+  validatePolicyComponents,
+  validatePositiveInteger,
+  validateScoringModel,
+} from '../core/placement/policy-engine.js';
 
 export const academicRouter = Router();
 academicRouter.use(authenticate);
@@ -479,7 +486,23 @@ academicRouter.get(
 
 // ── Placement Assessment Profiles ───────────────────────────────────────────
 const stmtGetPlacementProfiles = db.prepare(`SELECT pap.*, pv.program_id, pv.version_label, p.name AS program_name FROM placement_assessment_profiles pap JOIN program_versions pv ON pv.id = pap.program_version_id JOIN programs p ON p.id = pv.program_id WHERE pap.program_version_id = ? AND (pap.branch_id = ? OR pap.branch_id IS NULL) ORDER BY pap.branch_id IS NOT NULL DESC`);
-const stmtUpsertPlacementProfile = db.prepare(`INSERT INTO placement_assessment_profiles (id, program_version_id, branch_id, enabled, required, method, sections_json, components_json, scoring_model, allow_retake, max_score, pass_score, instructions, requirement_mode, first_level_exempt, expires_minutes, decision_rules_json, max_attempts, first_attempt_billable, retake_billable, retake_fee_amount, version, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now')) ON CONFLICT(program_version_id, branch_id) DO UPDATE SET enabled=excluded.enabled, required=excluded.required, method=excluded.method, sections_json=excluded.sections_json, components_json=excluded.components_json, scoring_model=excluded.scoring_model, allow_retake=excluded.allow_retake, max_score=excluded.max_score, pass_score=excluded.pass_score, instructions=excluded.instructions, requirement_mode=excluded.requirement_mode, first_level_exempt=excluded.first_level_exempt, expires_minutes=excluded.expires_minutes, decision_rules_json=excluded.decision_rules_json, max_attempts=excluded.max_attempts, first_attempt_billable=excluded.first_attempt_billable, retake_billable=excluded.retake_billable, retake_fee_amount=excluded.retake_fee_amount, version=placement_assessment_profiles.version+1, updated_at=datetime('now')`);
+const stmtInsertPlacementProfile = db.prepare(`
+  INSERT INTO placement_assessment_profiles
+    (id, program_version_id, branch_id, components_json, scoring_model,
+     allow_retake, pass_score, instructions, requirement_mode,
+     first_level_exempt, expires_minutes, decision_rules_json, max_attempts,
+     first_attempt_billable, retake_billable, retake_fee_amount, version, updated_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'))
+`);
+const stmtUpdatePlacementProfile = db.prepare(`
+  UPDATE placement_assessment_profiles
+  SET components_json=?, scoring_model=?, allow_retake=?, pass_score=?,
+      instructions=?, requirement_mode=?, first_level_exempt=?, expires_minutes=?,
+      decision_rules_json=?, max_attempts=?, first_attempt_billable=?,
+      retake_billable=?, retake_fee_amount=?, version=version+1,
+      updated_at=datetime('now')
+  WHERE id=? AND version=?
+`);
 
 academicRouter.get('/program-versions/:id/placement-profile', ah(async (req, res) => {
   const version = db.prepare(`SELECT pv.id, pv.status, pv.program_id, p.branch_id, p.name AS program_name, pv.version_label FROM program_versions pv JOIN programs p ON p.id = pv.program_id WHERE pv.id = ?`).get(req.params.id) as any;
@@ -491,81 +514,176 @@ academicRouter.get('/program-versions/:id/placement-profile', ah(async (req, res
     programVersionId: version.id,
     programName: version.program_name,
     versionLabel: version.version_label,
+    version: null,
     required: false,
     enabled: false,
+    requirementMode: 'not_required',
+    firstLevelExempt: false,
+    expiresMinutes: null,
+    decisionRules: [],
     method: PLACEMENT_DEFAULTS.method,
     sections: [...PLACEMENT_DEFAULTS.sections],
     components: [...PLACEMENT_DEFAULTS.components],
     scoringModel: PLACEMENT_DEFAULTS.scoringModel,
     allowRetake: PLACEMENT_DEFAULTS.allowRetake,
-    maxScore: PLACEMENT_DEFAULTS.maxScore,
+    maxAttempts: null,
+    firstAttemptBillable: true,
+    retakeBillable: false,
+    retakeFeeAmount: null,
     passScore: PLACEMENT_DEFAULTS.passScore,
     instructions: null,
   };
   if (!profile) return res.json(defaults);
-  const sections = (() => {
-    try { return JSON.parse(profile.sections_json || '[]'); } catch { return []; }
+  const components = (() => {
+    try { return JSON.parse(profile.components_json || '[]'); } catch { throw new HttpError(500, 'Stored placement components are invalid.'); }
   })();
-  let components = (() => {
-    try { return JSON.parse(profile.components_json || '[]'); } catch { return []; }
+  const decisionRules = (() => {
+    try { return JSON.parse(profile.decision_rules_json || '[]'); } catch { throw new HttpError(500, 'Stored placement decision rules are invalid.'); }
   })();
-  if (!Array.isArray(components) || components.length===0) components=defaults.components;
-  res.json({ configured:true, programVersionId:version.id, programName:version.program_name, versionLabel:version.version_label, required:!!profile.required, enabled:!!profile.enabled, method:profile.method, sections, components, scoringModel:profile.scoring_model || 'weighted_average', allowRetake:!!profile.allow_retake, maxAttempts:profile.max_attempts == null ? null : Number(profile.max_attempts), firstAttemptBillable:profile.first_attempt_billable == null ? true : !!profile.first_attempt_billable, retakeBillable:!!profile.retake_billable, retakeFeeAmount:profile.retake_fee_amount == null ? null : Number(profile.retake_fee_amount), maxScore:Number(profile.max_score), passScore:Number(profile.pass_score), instructions:profile.instructions });
+  const types = new Set(components.map((component: any) => component.type));
+  const method = components.length === 0 ? PLACEMENT_DEFAULTS.method : types.size > 1 ? 'hybrid' : components[0].type;
+  const sections = Array.from(new Set(components.flatMap((component: any) => component.skills ?? [])));
+  res.json({
+    configured: true,
+    version: Number(profile.version),
+    programVersionId: version.id,
+    programName: version.program_name,
+    versionLabel: version.version_label,
+    required: profile.requirement_mode === 'required',
+    enabled: profile.requirement_mode !== 'not_required',
+    requirementMode: profile.requirement_mode,
+    firstLevelExempt: Boolean(profile.first_level_exempt),
+    expiresMinutes: profile.expires_minutes == null ? null : Number(profile.expires_minutes),
+    decisionRules,
+    method,
+    sections,
+    components,
+    scoringModel: profile.scoring_model || 'weighted_average',
+    allowRetake: Boolean(profile.allow_retake),
+    maxAttempts: profile.max_attempts == null ? null : Number(profile.max_attempts),
+    firstAttemptBillable: profile.first_attempt_billable == null ? true : Boolean(profile.first_attempt_billable),
+    retakeBillable: Boolean(profile.retake_billable),
+    retakeFeeAmount: profile.retake_fee_amount == null ? null : Number(profile.retake_fee_amount),
+    passScore: Number(profile.pass_score),
+    instructions: profile.instructions,
+  });
 }));
+
+function placementBoolean(value: unknown, field: string, fallback: boolean): boolean {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value !== 'boolean') throw new HttpError(400, `${field} must be boolean.`);
+  return value;
+}
 
 academicRouter.put('/program-versions/:id/placement-profile', requirePermission('Curriculum.PlacementPolicy'), ah(async (req, res) => {
   const version = db.prepare(`SELECT pv.id, pv.status, p.branch_id, p.name AS program_name, pv.version_label FROM program_versions pv JOIN programs p ON p.id = pv.program_id WHERE pv.id = ?`).get(req.params.id) as any;
   if (!version) throw new HttpError(404, 'Program version not found.');
   requireAcademicBranchAccess(req, version.branch_id);
   const body = req.body ?? {};
-  const requirementMode = String(body.requirementMode || (body.required === true ? 'required' : body.enabled === false ? 'not_required' : 'optional'));
-  if (!['required', 'optional', 'not_required'].includes(requirementMode)) throw new HttpError(400, 'Invalid requirementMode (required/optional/not_required).');
-  const enabled = body.enabled !== false && requirementMode !== 'not_required';
+  const requirementMode = normalizeRequirementMode(body.requirementMode);
+  const enabled = requirementMode !== 'not_required';
   const required = requirementMode === 'required';
-  if (requirementMode === 'required' && !enabled) throw new HttpError(400, 'A required placement assessment must be enabled.');
-  const components = Array.isArray(body.components) ? body.components : [];
-  if (enabled && components.length === 0) throw new HttpError(400, 'At least one assessment component is required when placement is enabled.');
-  if (required && enabled && components.length > 0 && !components.some((c: any) => c?.required !== false)) throw new HttpError(400, 'A required placement profile must contain at least one required assessment section.');
-  const { components: normalized, method, sections } = validatePolicyComponents(components, version.branch_id);
-  const decisionRules = validateDecisionRules(body.decisionRules ?? null, normalized);
-  const scoringModel = String(body.scoringModel || 'weighted_average');
-  if (!['weighted_average', 'average'].includes(scoringModel)) throw new HttpError(400, 'Unsupported placement scoring model.');
-  const maxScore = Number(body.maxScore ?? 100);
-  const passScore = Number(body.passScore ?? 60);
-  if (!Number.isFinite(maxScore) || maxScore <= 0 || !Number.isFinite(passScore) || passScore < 0 || passScore > maxScore) throw new HttpError(400, 'Invalid placement score thresholds.');
-  const expiresMinutes = body.expiresMinutes == null || body.expiresMinutes === '' ? null : Number(body.expiresMinutes);
-  if (expiresMinutes != null && (!Number.isFinite(expiresMinutes) || expiresMinutes <= 0)) throw new HttpError(400, 'Invalid expiresMinutes.');
-  const firstLevelExempt = body.firstLevelExempt === true || body.firstLevelExempt === 1 ? 1 : 0;
-  // Retake + billing policy (migration 070). Omitted fields keep the historical
-  // behaviour: unlimited attempts, first sitting billed, retakes free.
-  const maxAttempts = body.maxAttempts == null || body.maxAttempts === '' ? null : Number(body.maxAttempts);
-  if (maxAttempts != null && (!Number.isInteger(maxAttempts) || maxAttempts < 1)) throw new HttpError(400, 'maxAttempts must be a positive whole number.');
-  // This is not inert configuration: evaluateBilling reads it back on every
-  // retake and the value is charged through recordIncome inside the completion
-  // transaction. `!Number.isFinite(x) || x < 0` is weaker than that charge
-  // boundary, so a fee this endpoint accepted could not actually be paid.
-  // Reproduced live: 0.001 stored fine, then the retake completion threw
-  // "payment amount must have at most two decimal places" (HTTP 500) and rolled
-  // back, leaving the attempt stranded in_progress with no payment — and every
-  // retry failed identically, so the candidate could never finish. 1e15 and
-  // 1e20 stranded it the same way via "exceeds supported monetary precision".
-  // assertMoney is the canonical boundary already used by the level default fee
-  // and level branch fee override in this same file.
-  const retakeFeeAmount = body.retakeFeeAmount == null || body.retakeFeeAmount === ''
+  if (body.enabled !== undefined && placementBoolean(body.enabled, 'enabled', enabled) !== enabled) throw new HttpError(400, 'enabled contradicts requirementMode.');
+  if (body.required !== undefined && placementBoolean(body.required, 'required', required) !== required) throw new HttpError(400, 'required contradicts requirementMode.');
+
+  const normalized = validatePolicyComponents(body.components ?? [], requirementMode);
+  if (required && !normalized.some((component) => component.required)) {
+    throw new HttpError(400, 'A required placement policy needs at least one required component.');
+  }
+  for (const component of normalized) {
+    if (component.type !== 'content_test' || !component.testId) continue;
+    const test = db.prepare('SELECT id, status, branch_id FROM placement_tests WHERE id=?').get(component.testId) as any;
+    if (!test) throw new HttpError(400, `Component ${component.key} references a missing placement test.`);
+    if (test.status !== 'active') throw new HttpError(400, `Component ${component.key} references a test that is not active.`);
+    if (test.branch_id != null && test.branch_id !== version.branch_id) throw new HttpError(400, `Component ${component.key} references a test from another branch.`);
+    const questionTypes = (db.prepare('SELECT qtype FROM placement_test_questions WHERE test_id=?').all(test.id) as Array<{ qtype: string }>).map((question) => question.qtype);
+    if (questionTypes.length === 0) throw new HttpError(400, `Component ${component.key} references a test with no questions.`);
+    const hasAuto = questionTypes.some((type) => type === 'mcq' || type === 'short_answer');
+    const hasManual = questionTypes.some((type) => type === 'essay' || type === 'speaking');
+    const expectedScoring = hasAuto && hasManual ? 'hybrid' : hasManual ? 'manual' : 'auto';
+    if (component.scoringMethod !== expectedScoring) {
+      throw new HttpError(400, `Component ${component.key} scoringMethod must be ${expectedScoring} for the selected test content.`);
+    }
+  }
+  const componentTypes = new Set(normalized.map((component) => component.type));
+  const method = normalized.length === 0 ? PLACEMENT_DEFAULTS.method : componentTypes.size > 1 ? 'hybrid' : normalized[0].type;
+  const sections = Array.from(new Set(normalized.flatMap((component) => component.skills ?? [])));
+  const levelIds = new Set((db.prepare(`
+    SELECT l.id FROM levels l
+    JOIN program_versions pv ON pv.id=? AND pv.program_id=l.program_id
+    WHERE l.is_active=1 AND (l.program_version_id=? OR l.program_version_id IS NULL)
+  `).all(version.id, version.id) as any[]).map((level) => String(level.id)));
+  const decisionRules = validateDecisionRules(body.decisionRules ?? [], normalized, levelIds);
+  const scoringModel = validateScoringModel(body.scoringModel);
+  if (body.maxScore !== undefined) throw new HttpError(400, 'Overall maxScore is derived as 100%; configure each component maxScore instead.');
+  const passScore = body.passScore ?? 60;
+  if (typeof passScore !== 'number' || !Number.isFinite(passScore) || passScore < 0 || passScore > 100) throw new HttpError(400, 'passScore must be between 0 and 100.');
+  const expiresMinutes = body.expiresMinutes == null || body.expiresMinutes === ''
     ? null
-    : assertMoney(body.retakeFeeAmount, 'retakeFeeAmount');
-  const firstAttemptBillable = body.firstAttemptBillable === false || body.firstAttemptBillable === 0 ? 0 : 1;
-  const retakeBillable = body.retakeBillable === true || body.retakeBillable === 1 ? 1 : 0;
+    : validatePositiveInteger(body.expiresMinutes, 'expiresMinutes', false, 525600);
+  const firstLevelExempt = placementBoolean(body.firstLevelExempt, 'firstLevelExempt', false) ? 1 : 0;
+  if (firstLevelExempt && requirementMode !== 'required') throw new HttpError(400, 'firstLevelExempt applies only to a required placement policy.');
+  const allowRetake = placementBoolean(body.allowRetake, 'allowRetake', true);
+  const maxAttempts = validatePositiveInteger(body.maxAttempts, 'maxAttempts', true, 100);
+  const firstAttemptBillable = placementBoolean(body.firstAttemptBillable, 'firstAttemptBillable', true) ? 1 : 0;
+  const retakeBillable = placementBoolean(body.retakeBillable, 'retakeBillable', false) ? 1 : 0;
+  const retakeFeeAmount = validateMoney(body.retakeFeeAmount, 'retakeFeeAmount');
+  if (body.instructions !== undefined && body.instructions !== null && typeof body.instructions !== 'string') {
+    throw new HttpError(400, 'instructions must be text.');
+  }
+  if (typeof body.instructions === 'string' && body.instructions.length > 4000) {
+    throw new HttpError(400, 'instructions must be no longer than 4000 characters.');
+  }
+  const instructions = body.instructions == null || body.instructions.trim() === '' ? null : body.instructions.trim();
 
   const existing = db.prepare(`SELECT * FROM placement_assessment_profiles WHERE program_version_id=? AND branch_id=?`).get(req.params.id, version.branch_id) as any;
-  const args=[existing?.id || id('pap'), req.params.id, version.branch_id, enabled?1:0, required?1:0, method, JSON.stringify(sections), JSON.stringify(normalized), scoringModel, body.allowRetake === false ? 0 : 1, maxScore, passScore, body.instructions ? String(body.instructions).trim() : null, requirementMode, firstLevelExempt, expiresMinutes, decisionRules.length ? JSON.stringify(decisionRules) : null, maxAttempts, firstAttemptBillable, retakeBillable, retakeFeeAmount];
-  stmtUpsertPlacementProfile.run(...args);
-  writeAudit(req, `Updated placement assessment configuration for ${version.program_name} ${version.version_label}`);
-  const row=stmtGetPlacementProfiles.get(req.params.id, version.branch_id) as any;
-  let parsedSections: unknown[]; let parsedComponents: unknown[];
-  try { parsedSections=JSON.parse(row.sections_json||'[]'); } catch { parsedSections=[]; }
-  try { parsedComponents=JSON.parse(row.components_json||'[]'); } catch { parsedComponents=[]; }
-  res.json({ configured:true, programVersionId:req.params.id, programName:version.program_name, versionLabel:version.version_label, required:!!row.required, enabled:!!row.enabled, method:row.method, sections:parsedSections, components:parsedComponents, scoringModel:row.scoring_model || 'weighted_average', allowRetake:!!row.allow_retake, maxAttempts:row.max_attempts == null ? null : Number(row.max_attempts), firstAttemptBillable:row.first_attempt_billable == null ? true : !!row.first_attempt_billable, retakeBillable:!!row.retake_billable, retakeFeeAmount:row.retake_fee_amount == null ? null : Number(row.retake_fee_amount), maxScore:Number(row.max_score), passScore:Number(row.pass_score), instructions:row.instructions });
+  if (existing) {
+    if (body.version !== existing.version) throw new HttpError(409, 'Placement policy changed since it was loaded. Refresh and retry.');
+    const updated = stmtUpdatePlacementProfile.run(
+      JSON.stringify(normalized), scoringModel, allowRetake ? 1 : 0, passScore,
+      instructions, requirementMode, firstLevelExempt, expiresMinutes,
+      JSON.stringify(decisionRules), maxAttempts, firstAttemptBillable,
+      retakeBillable, retakeFeeAmount, existing.id, existing.version,
+    ) as any;
+    if (updated.changes !== 1) throw new HttpError(409, 'Placement policy changed since it was loaded. Refresh and retry.');
+  } else {
+    if (body.version != null) throw new HttpError(409, 'Placement policy state changed. Refresh and retry.');
+    stmtInsertPlacementProfile.run(
+      id('pap'), req.params.id, version.branch_id, JSON.stringify(normalized),
+      scoringModel, allowRetake ? 1 : 0, passScore, instructions, requirementMode,
+      firstLevelExempt, expiresMinutes, JSON.stringify(decisionRules), maxAttempts,
+      firstAttemptBillable, retakeBillable, retakeFeeAmount,
+    );
+  }
+  const row = stmtGetPlacementProfiles.get(req.params.id, version.branch_id) as any;
+  writeAudit(req, `Updated placement assessment configuration for ${version.program_name} ${version.version_label}`, {
+    oldValue: existing ? JSON.stringify({ id: existing.id, version: existing.version, requirementMode: existing.requirement_mode }) : undefined,
+    newValue: JSON.stringify({ id: row.id, version: row.version, requirementMode, components: normalized.map((component) => component.key) }),
+  });
+  res.json({
+    configured: true,
+    version: Number(row.version),
+    programVersionId: req.params.id,
+    programName: version.program_name,
+    versionLabel: version.version_label,
+    required,
+    enabled,
+    requirementMode,
+    firstLevelExempt: Boolean(row.first_level_exempt),
+    expiresMinutes: row.expires_minutes == null ? null : Number(row.expires_minutes),
+    decisionRules,
+    method,
+    sections,
+    components: normalized,
+    scoringModel,
+    allowRetake,
+    maxAttempts,
+    firstAttemptBillable: Boolean(row.first_attempt_billable),
+    retakeBillable: Boolean(row.retake_billable),
+    retakeFeeAmount: row.retake_fee_amount == null ? null : Number(row.retake_fee_amount),
+    passScore,
+    instructions,
+  });
 }));
 
 // ── Time slots ─────────────────────────────────────────────────────────────

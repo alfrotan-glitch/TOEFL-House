@@ -136,8 +136,10 @@ describe('ERP cross-system forensic audit', () => {
   // ── CONTROL: full lifecycle E2E ──────────────────────────────────────────
   it('control: visitor → placement → conversion → student → payment → report → audit preserves identity/branch/finance', async () => {
     // Placement program + profile.
-    db.prepare(`INSERT OR IGNORE INTO placement_assessment_profiles (id, program_version_id, branch_id, enabled, required, method, components_json, scoring_model, allow_retake, max_score, pass_score, instructions)
-      VALUES ('xf_prof', ?, ?, 1, 1, 'hybrid', ?, 'weighted_average', 0, 100, 60, 'req')`)
+    db.prepare(`INSERT OR IGNORE INTO placement_assessment_profiles
+      (id, program_version_id, branch_id, components_json, scoring_model, allow_retake,
+       pass_score, requirement_mode, instructions)
+      VALUES ('xf_prof', ?, ?, ?, 'weighted_average', 0, 60, 'required', 'req')`)
       .run(VERSION, BRANCH_A, JSON.stringify([{ key: 'skills', type: 'skill_scores', label: 'Skills', required: true, weight: 100, maxScore: 100, skills: ['grammar', 'vocabulary', 'reading', 'listening', 'writing', 'speaking'] }]));
     db.prepare(`INSERT OR IGNORE INTO placement_rules (id, program_version_id, name, min_score, max_score, recommended_level_id, recommended_level_code, branch_id, sort_order, is_active)
       VALUES ('xf_rule', ?, 'A1', 0, 100, ?, 'A1', ?, 1, 1)`).run(VERSION, LEVEL_A1, BRANCH_A);

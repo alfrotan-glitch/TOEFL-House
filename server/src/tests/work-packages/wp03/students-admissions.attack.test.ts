@@ -594,8 +594,9 @@ describe('visitor admission and conversion attacks', () => {
     db.prepare(`INSERT INTO levels (id, program_id, name, "order", program_version_id, code, default_fee)
                 VALUES ('wp03_atomic_level', 'wp03_atomic_program', 'Level 2', 2, 'wp03_atomic_version', 'L2', 5000)`).run();
     db.prepare(`INSERT INTO placement_assessment_profiles
-                (id, program_version_id, branch_id, enabled, required, requirement_mode, first_level_exempt)
-                VALUES ('wp03_atomic_profile', 'wp03_atomic_version', ?, 1, 1, 'required', 0)`).run(BRANCH_A);
+                (id, program_version_id, branch_id, requirement_mode, first_level_exempt, components_json)
+                VALUES ('wp03_atomic_profile', 'wp03_atomic_version', ?, 'required', 0, ?)`)
+      .run(BRANCH_A, JSON.stringify([{ key: 'placement', type: 'custom_score', label: 'Placement', required: true, weight: 100, maxScore: 100 }]));
     insertVisitor('wp03_atomic_visitor', BRANCH_A, { phone: '0700003206' });
     insertClass('wp03_atomic_class', BRANCH_A, 5000);
     db.prepare("UPDATE classes SET level_id='wp03_atomic_level', program_id='wp03_atomic_program' WHERE id='wp03_atomic_class'").run();

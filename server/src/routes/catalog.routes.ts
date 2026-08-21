@@ -101,7 +101,7 @@ const stmtGetLevelVersion = db.prepare(
     WHERE l.id = ?`
 );
 const stmtDeletePromotionRule = db.prepare('DELETE FROM promotion_rules WHERE id = ?');
-const stmtDeletePlacementRule = db.prepare('DELETE FROM placement_rules WHERE id = ?');
+const stmtDeletePlacementRule = db.prepare('UPDATE placement_rules SET is_active=0, version=version+1 WHERE id = ? AND is_active=1');
 
 function isOrganizationOwner(req: import('express').Request): boolean {
   return !!req.rbac && isGlobalOwner(req.rbac);
@@ -166,13 +166,6 @@ function assertWholeNumber(value: unknown, field: string, minimum?: number): num
   }
   if (minimum !== undefined && value < minimum) {
     throw new HttpError(400, `${field} must be at least ${minimum}.`);
-  }
-  return value;
-}
-
-function assertFiniteNumber(value: unknown, field: string): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new HttpError(400, `${field} must be a finite number.`);
   }
   return value;
 }
@@ -368,11 +361,15 @@ catalogRouter.post('/placement-rules', requirePermission('Curriculum.PlacementPo
   if (recommendedLevelId !== undefined && recommendedLevelId !== null && typeof recommendedLevelId !== 'string') {
     throw new HttpError(400, 'Recommended level must be a level id.');
   }
+  let recommendedLevelCode = assertOptionalText(b.recommendedLevelCode, 'Recommended level code');
   if (recommendedLevelId) {
-    const level = db.prepare(`SELECT id FROM levels WHERE id=? AND program_version_id=?`).get(recommendedLevelId, b.programVersionId);
-    if (!level) throw new HttpError(400, 'Recommended level must belong to the selected program version.');
+    assertLevelInVersion(recommendedLevelId, b.programVersionId, 'Recommended level');
+    const level = db.prepare('SELECT code FROM levels WHERE id=?').get(recommendedLevelId) as { code: string | null };
+    if (recommendedLevelCode && level.code && recommendedLevelCode !== level.code) {
+      throw new HttpError(400, 'Recommended level code does not match the selected level.');
+    }
+    recommendedLevelCode = level.code ?? recommendedLevelCode;
   }
-  const recommendedLevelCode = assertOptionalText(b.recommendedLevelCode, 'Recommended level code');
   const sortOrder = b.sortOrder == null ? 0 : assertWholeNumber(b.sortOrder, 'Placement-rule sort order');
   const overlap = db.prepare(`SELECT 1 FROM placement_rules WHERE program_version_id=? AND (branch_id=? OR branch_id IS NULL) AND is_active=1 AND NOT (max_score < ? OR min_score > ?) LIMIT 1`).get(b.programVersionId, branchId, minScore, maxScore);
   if (overlap) throw new HttpError(409, 'Placement rule range overlaps an existing active rule.');
@@ -399,8 +396,9 @@ catalogRouter.delete('/placement-rules/:id', requirePermission('Curriculum.Place
   requireVersionScope(req, rule.program_version_id);
   if (rule.branch_id) requireCatalogBranch(req, rule.branch_id);
   else if (!isOrganizationOwner(req)) throw new HttpError(403, 'Only an organization-scoped owner may delete a global placement rule.');
-  stmtDeletePlacementRule.run(rule.id);
-  writeAudit(req, `Deleted placement rule: ${rule.name}`);
+  const retired = stmtDeletePlacementRule.run(rule.id) as any;
+  if (retired.changes !== 1) throw new HttpError(409, 'Placement rule is already retired.');
+  writeAudit(req, `Retired placement rule: ${rule.name}`);
   res.json({ ok: true });
 }));
 
@@ -413,7 +411,7 @@ catalogRouter.post('/placement/recommend', requirePermission('Lead.Edit', 'Stude
   if (version.branch_id !== effectiveBranchId) {
     throw new HttpError(400, 'Placement branch must match the program version branch.');
   }
-  const score = assertFiniteNumber(totalScore, 'totalScore');
+  const score = assertPercent(totalScore, 'totalScore');
   res.json(catalog().recommendLevel(programVersionId, score, effectiveBranchId));
 }));
 

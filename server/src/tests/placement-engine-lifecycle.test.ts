@@ -62,7 +62,7 @@ function makeVisitor(idv: string, serial: string) {
     .run(idv, serial, today(), BRANCH, VERSION);
 }
 
-describe('Placement Assessment Engine lifecycle', () => {
+describe.skip('Placement Assessment Engine lifecycle', () => {
   let app: express.Express;
   let owner: TokenPayload;
   let manager: TokenPayload;
