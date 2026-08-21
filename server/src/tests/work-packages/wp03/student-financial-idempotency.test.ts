@@ -87,6 +87,24 @@ beforeAll(async () => {
 // ══════════════════════════════════════════════════════════════════════════
 // F1/F2 — REPEATED REQUESTS MUST NOT DUPLICATE FINANCIAL TRUTH
 // ══════════════════════════════════════════════════════════════════════════
+
+/**
+ * The payment a refund reverses. Owner decision D-113 makes attribution
+ * mandatory, so a fixture that refunds names the charge it reverses — here, the
+ * student's most recent refundable payment.
+ */
+function latestRefundablePaymentId(studentId: string): string {
+  const row = db
+    .prepare(
+      `SELECT id FROM payments
+        WHERE student_id = ? AND status = 'completed' AND category <> 'refund' AND amount > 0
+        ORDER BY date DESC, rowid DESC LIMIT 1`,
+    )
+    .get(studentId) as { id: string } | undefined;
+  if (!row) throw new Error(`fixture: student ${studentId} has no refundable payment`);
+  return row.id;
+}
+
 describe('F1 — duplicate payment requests', () => {
   it('10 identical un-keyed requests create exactly ONE payment and ONE income row', async () => {
     const sid = await newStudent('Concurrent Payer');
@@ -138,8 +156,10 @@ describe('F2 — duplicate refund requests', () => {
     const sid = await newStudent('Refund Target');
     await supertest(app).post(`/api/students/${sid}/payments`).set(auth()).send({ amount: 5000, category: 'other', notes: 'Ad-hoc test charge' });
 
+    const target = latestRefundablePaymentId(sid);
     const responses = await Promise.all(
-      Array.from({ length: 5 }, () => supertest(app).post(`/api/students/${sid}/refund`).set(auth()).send({ amount: 1000, reason: 'duplicate test' })),
+      Array.from({ length: 5 }, () =>
+        supertest(app).post(`/api/students/${sid}/refund`).set(auth()).send({ amount: 1000, reason: 'duplicate test', paymentId: target })),
     );
     expect(responses.filter((r) => r.status === 201)).toHaveLength(1);
 

@@ -66,6 +66,24 @@ beforeAll(async () => {
 // hold's override list is owner / general_manager / finance_manager. Those two
 // facts agree, so the role may decide promotions but may never waive debt.
 // ---------------------------------------------------------------------------
+
+/**
+ * The payment a refund reverses. Owner decision D-113 makes attribution
+ * mandatory, so a fixture that refunds names the charge it reverses — here, the
+ * student's most recent refundable payment.
+ */
+function latestRefundablePaymentId(studentId: string): string {
+  const row = db
+    .prepare(
+      `SELECT id FROM payments
+        WHERE student_id = ? AND status = 'completed' AND category <> 'refund' AND amount > 0
+        ORDER BY date DESC, rowid DESC LIMIT 1`,
+    )
+    .get(studentId) as { id: string } | undefined;
+  if (!row) throw new Error(`fixture: student ${studentId} has no refundable payment`);
+  return row.id;
+}
+
 describe('CLOSURE-2 — head_of_department is academic-only and cannot waive debt', () => {
   it('holds Promotion.Approve but no financial permission in the catalog', () => {
     const role = ROLE_DEFINITIONS.find((r) => r.code === 'head_of_department');
@@ -173,12 +191,24 @@ describe('CLOSURE-6 — sub-cent and zero amounts never reach a money writer', (
   });
 
   it('rejects a sub-cent refund', async () => {
+    // A refund now names the payment it reverses, so the student needs real
+    // money on file before the amount itself can be the thing under test.
+    const seeded = await supertest(app)
+      .post('/api/students/clo_s_cent/payments')
+      .set(authHeader(owner))
+      .set('Idempotency-Key', 'clo-cent-seed')
+      .send({ amount: 1000, category: 'other', notes: 'refund probe seed' });
+    expect(seeded.status).toBe(201);
+
     const res = await supertest(app)
       .post('/api/students/clo_s_cent/refund')
       .set(authHeader(owner))
       .set('Idempotency-Key', 'clo-cent-refund')
-      .send({ amount: 0.001, reason: 'sub-cent' });
+      .send({ amount: 0.001, reason: 'sub-cent', paymentId: latestRefundablePaymentId('clo_s_cent') });
     expect(res.status).toBe(400);
+    expect(
+      (db.prepare(`SELECT COUNT(*) AS c FROM payments WHERE student_id = 'clo_s_cent' AND category = 'refund'`).get() as { c: number }).c,
+    ).toBe(0);
   });
 });
 
@@ -268,7 +298,7 @@ describe('CLOSURE-12 — financial reconciliation holds after real HTTP activity
       .post('/api/students/clo_s_rec/refund')
       .set(authHeader(owner))
       .set('Idempotency-Key', 'clo-rec-ref')
-      .send({ amount: 400, reason: 'partial' });
+      .send({ amount: 400, reason: 'partial', paymentId: latestRefundablePaymentId('clo_s_rec') });
     expect(refund.status).toBe(201);
 
     const refunded = db
@@ -289,7 +319,7 @@ describe('CLOSURE-12 — financial reconciliation holds after real HTTP activity
       .post('/api/students/clo_s_rec/refund')
       .set(authHeader(owner))
       .set('Idempotency-Key', 'clo-rec-over')
-      .send({ amount: 100000, reason: 'over-refund' });
+      .send({ amount: 100000, reason: 'over-refund', paymentId: latestRefundablePaymentId('clo_s_rec') });
     expect(res.status).toBe(400);
 
     const rec = computeReconciliation({ branchId: BRANCH, isAll: false });

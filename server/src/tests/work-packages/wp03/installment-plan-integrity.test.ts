@@ -69,6 +69,7 @@ beforeEach(async () => {
     `INSERT OR REPLACE INTO students (id, student_code, full_name, gender, phone, status, registration_date, branch_id, discount_percent)
      VALUES (?, 'INST-1', 'Installment Student', 'male', '0700440001', 'active', ?, ?, 0)`,
   ).run(STUDENT, today(), BRANCH);
+  db.prepare(`DELETE FROM payments WHERE student_id = ? AND category = 'refund'`).run(STUDENT);
   db.prepare(`DELETE FROM payments WHERE student_id = ?`).run(STUDENT);
   app = createApp();
 });

@@ -1,4 +1,4 @@
-# Remediation Record — WP-07 Slices A–C · Budget/treasury authority, the invoice payment boundary, and document/authorization integrity
+# Remediation Record — WP-07 Slices A–D · Budget/treasury authority, the invoice payment boundary, document/authorization integrity, and refund attribution
 
 **Work Package:** WP-07 Finance — budget-line movement, savings ledger purity, finance operational settings, invoice payment boundary
 **Protocol:** `docs/MASTER_ENGINEERING_PROTOCOL.md` §§58–74 and §W
@@ -35,6 +35,11 @@ Added in slice B:
 
 - the invoice payment boundary: payment-method validation, idempotency replay
   scope and ordering, and overpayment precision on `POST /api/invoices/:id/pay`.
+
+Added in slice D (owner decisions D-113 and D-114):
+
+- refund attribution: what a refund reverses, what it may not exceed, which
+  semester it re-opens, and which surfaces read it.
 
 Added in slice C:
 
@@ -88,7 +93,7 @@ re-run after the repair.
 | WP07-F12 | A receipt number is not unique at rest | HIGH | the database accepted two payments carrying `R-00099001`, on insert and on update, while the generator's comment promised uniqueness. The receipt is the payer's proof, so an ambiguous number is an unauditable payment (LAW 3) |
 | WP07-F13 | The canonical schema declares the same object twice | MEDIUM | one unique index under two names on `invoices`, one index under two names on `invoice_items`, and two branch-guard trigger pairs each on `invoices` and `payments` where the `IS NOT` pair strictly subsumes the `<>` pair (§12) |
 | WP07-F14 | A discount grant is coerced, undated and its store fails silently | HIGH | `approvedPercent: [10]` granted 10%, `true` granted 1%, `''`/`null` created a 0% authorization record; `effectiveFrom: 'banana'` was stored and silently prevented the grant from ever activating (and `effectiveTo: 'banana'` from ever expiring); and a resolver that could not read the authorization table charged ordinary policy without a word |
-| WP07-F11 | A refund is unattributed, so a non-tuition refund creates tuition debt | HIGH — **OPEN, owner decision required** | proven on a fresh database: tuition 10,000 paid in full, a 2,000 exam fee paid, then a 2,000 refund → the canonical balance authority reports `tuitionPaid 8,000 / outstanding 2,000`. The same authority feeds the roster, the portal, branch outstanding and the enrolment debt-hold, so a refunded exam fee can block a student's enrolment |
+| WP07-F11 | A refund is unattributed, so a non-tuition refund creates tuition debt | HIGH — **RESOLVED in slice D** | proven on a fresh database: tuition 10,000 paid in full, a 2,000 exam fee paid, then a 2,000 refund → the canonical balance authority reported `tuitionPaid 8,000 / outstanding 2,000`. The same authority feeds the roster, the portal, branch outstanding and the enrolment debt-hold, so a refunded exam fee could block a student's enrolment |
 
 ## MODEL
 
@@ -145,14 +150,20 @@ Recorded as **D-101 … D-105** in `docs/registries/decisions.md`.
 | Discount grant parsed; effective window through the canonical ISO-date authority; resolver no longer swallows a store failure | `server/src/routes/discount-authorizations.routes.ts`, `core/configuration/discount-authority.ts` |
 | WP-02 structural case re-expressed by property instead of trigger name (forced by the schema consolidation, D-112) | `server/src/tests/work-packages/wp02/high-assurance-security.test.ts` |
 | Package test authority (documents + authorization) | `server/src/tests/work-packages/wp07/document-and-authorization-integrity.test.ts` (new, 38 cases) |
+| **Slice D** — `payments.refunds_payment_id` (FK, RESTRICT) with attribution and target triggers | `server/src/db/schema.sql` (112 tables · 238 indexes · 117 triggers) |
+| Refund requires `paymentId`, caps at that payment's remainder (re-checked inside the transaction), inherits its semester; `GET /:id/refundable-payments` publishes the remainder | `server/src/routes/students.routes.ts` |
+| Tuition counts a refund only when it reverses a tuition charge | `server/src/utils/studentBalance.ts` |
+| Refund dialog names the payment and shows the server's remainder | `src/components/students/StudentsView.tsx`, `src/types.ts` |
+| Seven fixture suites re-expressed to attribute their refunds (D-115) | WP-03 suites, `final-hardening`, `finance-money-writer-parity`, `system-closure-authorities`, `balance-single-source-of-truth` |
+| Package test authority (refunds) | `server/src/tests/work-packages/wp07/refund-attribution-authority.test.ts` (new, 16 cases) |
 
 ## VERIFY
 
 | Command | Result |
 |---|---|
-| `npx vitest run src/tests/work-packages/wp07` | 85/85 passed |
-| `npx vitest run` (server, full) | **2648 passed · 160 skipped** (the 160 are the explicit WP-04 retirements) · 0 failed |
-| `npm run preflight:fresh-schema` | 112 tables · 237 indexes · 113 triggers; stands alone, sound, idempotent |
+| `npx vitest run src/tests/work-packages/wp07` | 101/101 passed |
+| `npx vitest run` (server, full) | **2675 passed · 160 skipped** (the 160 are the explicit WP-04 retirements) · 0 failed |
+| `npm run preflight:fresh-schema` | 112 tables · 238 indexes · 117 triggers; stands alone, sound, idempotent |
 | `npx tsc --noEmit` (server + frontend) | clean |
 | `npm run release:validate` | **22 passed · 0 failed · 0 skipped** |
 | Reconciliation gate detail | `full money lifecycle · amount/cash/saving/budget all 0` |
@@ -178,6 +189,15 @@ which is accepted); a shared `Idempotency-Key` replayed against a different
 invoice; a keyed retry of a payment that already settled the invoice; and two
 concurrent identical payments (one 201, one 200 replay, one `payments` row,
 reconciliation healthy).
+
+Slice D: a refund naming no payment; a payment id that does not exist; another
+student's payment; a refund of a refund; one afghani over the remainder; the
+exact remainder (accepted) followed by one more (refused); two concurrent
+refunds of one payment (one 201, one 400, 8,000 total, reconciliation healthy);
+a retried keyed refund (replay, one row); an unattributed refund written
+directly to the database (refused by trigger); a charge claiming to reverse
+something (refused); and deletion of a refunded payment (refused by the foreign
+key).
 
 Slice C: a duplicate receipt number by INSERT and by UPDATE; 100 interleaved
 payment/refund allocations from one counter; an invoice number reused inside its
@@ -234,10 +254,10 @@ in this slice's scope:
   the invariant, but payroll is not certified here.
 - The same-agent limitation on independent review remains tracked as TR-4.
 
-## OPEN — OWNER DECISION REQUIRED (WP07-F11, refund attribution)
+## RESOLVED BY OWNER DECISION (WP07-F11, refund attribution)
 
-Slice C stops here rather than guessing. The repository contains two
-contradictory positions and no evidence that resolves them:
+Slice C stopped rather than guessing. The repository contained two
+contradictory positions and no evidence that resolved them:
 
 - `POST /api/students/:id/refund` computes its refundable base from **every**
   completed non-refund payment — tuition, book, exam, card, placement, diploma —
@@ -250,10 +270,18 @@ Both cannot be right. Proven consequence (fresh database): refunding a 2,000 AFN
 exam fee leaves a student who has paid tuition in full showing 2,000 AFN of
 tuition debt, which the enrolment debt-hold then acts on.
 
-Fixing this requires a rule the repository does not contain — what a refund
-attaches to, and what the operator must state when issuing one. §105 forbids
-inventing it, so it is raised to the owner and remains OPEN. Nothing about the
-refund path was changed in this slice.
+Fixing this required a rule the repository did not contain. It was raised under
+§105 and the owner answered on 2026-08-21:
+
+- **D-113** — a refund reverses **the specific payment** being returned; it is
+  capped at that payment's un-refunded remainder and inherits its category;
+- **D-114** — a **tuition** refund names its semester, so only that semester's
+  debt re-opens.
+
+Slice D implements exactly those two rules and nothing more. The refund inherits
+the semester from the payment it reverses rather than accepting one from the
+caller, because two independently supplied facts can disagree and only one of
+them can be right.
 
 ## CERTIFICATION (scope-limited)
 
@@ -261,13 +289,14 @@ refund path was changed in this slice.
 reproduced before repair and is pinned by an executed test; every applicable
 gate passes; no business policy was invented; no schema change was required.
 
-**WP-07 Finance remains NOT CERTIFIED.** Discharged by slice C: document
-numbering and uniqueness at rest, WP-07 duplicate schema authority, and the
-discount-authorization input boundary and failure behaviour. Still outstanding,
-and deliberately not claimed:
+**WP-07 Finance remains NOT CERTIFIED.** Discharged by slices C and D: document
+numbering and uniqueness at rest, WP-07 duplicate schema authority, the
+discount-authorization input boundary and failure behaviour, and refund
+attribution under the owner's two rules. Still outstanding, and deliberately not
+claimed:
 
-- **WP07-F11 refund attribution — BLOCKED on the owner decision above;**
-- payment allocation across semesters and installment plans;
+- payment allocation across semesters and installment plans (which charge a
+  payment settles when none is named — the charge-side counterpart of D-113);
 - invoice creation/issue/cancel lifecycle beyond numbering and the payment path;
 - the WP-07 legacy-test disposition under C-2 (35 inventoried files / 409 cases
   are still the behavioural record; the three package suites replace none of

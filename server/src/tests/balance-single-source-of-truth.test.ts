@@ -84,6 +84,24 @@ beforeAll(async () => {
   app = createApp();
 });
 
+
+/**
+ * The payment a refund reverses. Owner decision D-113 makes attribution
+ * mandatory, so a fixture that refunds must name the charge it is reversing —
+ * here, the student's most recent refundable payment.
+ */
+function latestRefundablePaymentId(studentId: string): string {
+  const row = db
+    .prepare(
+      `SELECT id FROM payments
+        WHERE student_id = ? AND status = 'completed' AND category <> 'refund' AND amount > 0
+        ORDER BY date DESC, rowid DESC LIMIT 1`,
+    )
+    .get(studentId) as { id: string } | undefined;
+  if (!row) throw new Error(`fixture: student ${studentId} has no refundable payment`);
+  return row.id;
+}
+
 describe('the roster page and the single-student read never disagree', () => {
   it('agree after a semester is COMPLETED — the exact state that broke them', async () => {
     const sid = await newStudent('Completed Semester');
@@ -127,7 +145,8 @@ describe('the roster page and the single-student read never disagree', () => {
     await supertest(app).post(`/api/students/${sid}/payments`).set(auth())
       .set('Idempotency-Key', 'sot-pay').send({ amount: 4000, category: 'fee', semesterId, paymentMethod: 'cash' });
     await supertest(app).post(`/api/students/${sid}/refund`).set(auth())
-      .set('Idempotency-Key', 'sot-refund').send({ amount: 1500, reason: 'withdrew from module' });
+      .set('Idempotency-Key', 'sot-refund')
+      .send({ amount: 1500, reason: 'withdrew from module', paymentId: latestRefundablePaymentId(sid) });
 
     const single = getStudentBalance(db, sid, 'all');
     const page = getStudentBalancesPage(db, { branchId: BRANCH, scope: 'all', limit: 500, offset: 0 })

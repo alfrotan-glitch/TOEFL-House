@@ -105,6 +105,24 @@ const CAMPAIGN = 'fmwp_camp';
 const donate = (body: Record<string, unknown>) =>
   supertest(app).post('/api/funding/donations').set(auth('fmwp_fin'))
     .send({ donorId: DONOR, campaignId: CAMPAIGN, date: today(), ...body });
+
+/**
+ * The payment a refund reverses. Owner decision D-113 makes attribution
+ * mandatory, so a fixture that refunds must name the charge it is reversing —
+ * here, the student's most recent refundable payment.
+ */
+function latestRefundablePaymentId(studentId: string): string {
+  const row = db
+    .prepare(
+      `SELECT id FROM payments
+        WHERE student_id = ? AND status = 'completed' AND category <> 'refund' AND amount > 0
+        ORDER BY date DESC, rowid DESC LIMIT 1`,
+    )
+    .get(studentId) as { id: string } | undefined;
+  if (!row) throw new Error(`fixture: student ${studentId} has no refundable payment`);
+  return row.id;
+}
+
 /** Everything a donation is supposed to move, read together. */
 const donationState = () => ({
   donations: Number((db.prepare('SELECT COUNT(*) c FROM donations').get() as { c: number }).c),
@@ -117,7 +135,12 @@ const payInvoice = (iid: string, body: Record<string, unknown>) =>
 const payStudent = (sid: string, body: Record<string, unknown>) =>
   supertest(app).post(`/api/students/${sid}/payments`).set(auth('fmwp_fin')).send({ category: 'other', notes: 'ad-hoc regression charge', ...body });
 const refundStudent = (sid: string, body: Record<string, unknown>) =>
-  supertest(app).post(`/api/students/${sid}/refund`).set(auth('fmwp_own')).send({ reason: 'regression refund', ...body });
+  supertest(app).post(`/api/students/${sid}/refund`).set(auth('fmwp_own')).send({
+    reason: 'regression refund',
+    // A refund names the payment it reverses (owner decision D-113).
+    paymentId: latestRefundablePaymentId(sid),
+    ...body,
+  });
 
 /** A 4xx carrying a human message, never a leaked driver/trigger error. */
 function expectCleanClientError(res: { status: number; body: Record<string, unknown> }) {
@@ -297,7 +320,7 @@ describe('F-5 · student refund parses its amount', () => {
     await payStudent(s, { amount: 1000 });
     const res = await refundStudent(s, { amount: 5000 });
     expect(res.status).toBe(400);
-    expect(String(res.body.error)).toMatch(/refundable balance/i);
+    expect(String(res.body.error)).toMatch(/still refundable on that payment/i);
   });
 });
 

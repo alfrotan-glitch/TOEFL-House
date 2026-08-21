@@ -180,6 +180,24 @@ beforeAll(async () => {
   app = createApp();
 });
 
+
+/**
+ * The payment a refund reverses. Owner decision D-113 makes attribution
+ * mandatory, so a fixture that refunds names the charge it reverses — here, the
+ * student's most recent refundable payment.
+ */
+function latestRefundablePaymentId(studentId: string): string {
+  const row = db
+    .prepare(
+      `SELECT id FROM payments
+        WHERE student_id = ? AND status = 'completed' AND category <> 'refund' AND amount > 0
+        ORDER BY date DESC, rowid DESC LIMIT 1`,
+    )
+    .get(studentId) as { id: string } | undefined;
+  if (!row) throw new Error(`fixture: student ${studentId} has no refundable payment`);
+  return row.id;
+}
+
 describe('Student-role isolation (no branch-wide reads)', () => {
   it('denies every previously open read endpoint to a student principal', async () => {
     const denied = [
@@ -208,32 +226,32 @@ describe('Student-role isolation (no branch-wide reads)', () => {
 
 describe('Owner equivalent unrestricted access + refund flow', () => {
   it('owner can refund (requirePermission owner bypass)', async () => {
-    const res = await supertest(app).post('/api/students/h_stu_m/refund').set(authHeader(owner)).send({ amount: 500, reason: 'Withdrawal of enrollment' });
+    const res = await supertest(app).post('/api/students/h_stu_m/refund').set(authHeader(owner)).send({ amount: 500, reason: 'Withdrawal of enrollment', paymentId: latestRefundablePaymentId('h_stu_m') });
     expect(res.status).toBe(201);
     expect(res.body.receiptNumber).toMatch(/^REF-/);
   });
 
   it('finance and manager can refund; registrar cannot', async () => {
-    const ok = await supertest(app).post('/api/students/h_stu_m/refund').set(authHeader(finance)).send({ amount: 100, reason: 'Overpayment' });
+    const ok = await supertest(app).post('/api/students/h_stu_m/refund').set(authHeader(finance)).send({ amount: 100, reason: 'Overpayment', paymentId: latestRefundablePaymentId('h_stu_m') });
     expect(ok.status).toBe(201);
-    const ok2 = await supertest(app).post('/api/students/h_stu_m/refund').set(authHeader(manager)).send({ amount: 100, reason: 'Overpayment' });
+    const ok2 = await supertest(app).post('/api/students/h_stu_m/refund').set(authHeader(manager)).send({ amount: 100, reason: 'Overpayment', paymentId: latestRefundablePaymentId('h_stu_m') });
     expect(ok2.status).toBe(201);
-    const denied = await supertest(app).post('/api/students/h_stu_m/refund').set(authHeader(registrar)).send({ amount: 100, reason: 'x' });
+    const denied = await supertest(app).post('/api/students/h_stu_m/refund').set(authHeader(registrar)).send({ amount: 100, reason: 'x', paymentId: latestRefundablePaymentId('h_stu_m') });
     expect(denied.status).toBe(403);
   });
 
   it('refund writes a negative income entry (contra-revenue)', async () => {
     const row = db.prepare(`SELECT type, category, amount FROM financial_transactions
-      WHERE description LIKE 'Refund issued to Hardening Male' ORDER BY rowid DESC LIMIT 1`).get() as { type: string; category: string; amount: number };
+      WHERE description LIKE 'Refund issued to Hardening Male%' ORDER BY rowid DESC LIMIT 1`).get() as { type: string; category: string; amount: number };
     expect(row.type).toBe('income');
     expect(row.category).toBe('refund');
     expect(row.amount).toBeLessThan(0);
   });
 
   it('refund respects the refundable balance', async () => {
-    const res = await supertest(app).post('/api/students/h_stu_m/refund').set(authHeader(owner)).send({ amount: 999999, reason: 'Too much' });
+    const res = await supertest(app).post('/api/students/h_stu_m/refund').set(authHeader(owner)).send({ amount: 999999, reason: 'Too much', paymentId: latestRefundablePaymentId('h_stu_m') });
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/refundable balance/i);
+    expect(res.body.error).toMatch(/still refundable on that payment/i);
   });
 });
 
@@ -264,7 +282,7 @@ describe('Receptionist ≠ Finance', () => {
     const reqId = (db.prepare("SELECT id FROM expense_requests WHERE requester = 'recep' ORDER BY rowid DESC LIMIT 1").get() as { id: string }).id;
     const decide = await supertest(app).post(`/api/finance/expense-requests/${reqId}/decide`).set(authHeader(receptionist)).send({ isApproved: true });
     expect(decide.status).toBe(403);
-    const refund = await supertest(app).post('/api/students/h_stu_f/refund').set(authHeader(receptionist)).send({ amount: 10, reason: 'x' });
+    const refund = await supertest(app).post('/api/students/h_stu_f/refund').set(authHeader(receptionist)).send({ amount: 10, reason: 'x', paymentId: latestRefundablePaymentId('h_stu_f') });
     expect(refund.status).toBe(403);
   });
 });

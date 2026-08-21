@@ -931,6 +931,25 @@ export interface FinanceDashboard {
   trend: { date: string; income: number; expense: number }[];
 }
 
+/**
+ * A payment that still has money on it, as resolved by the server.
+ *
+ * `refundableAmount` is server truth: the browser must not subtract refunds
+ * from a page of payments to work it out (LAW 2), and a refund names exactly
+ * one of these rows (owner decision D-113).
+ */
+export interface RefundablePayment {
+  id: string;
+  amount: number;
+  category: string;
+  date: string;
+  semester: string | null;
+  receiptNumber: string | null;
+  paymentMethod: string | null;
+  refundedAmount: number;
+  refundableAmount: number;
+}
+
 export interface Invoice {
   id: string;
   studentId: string;

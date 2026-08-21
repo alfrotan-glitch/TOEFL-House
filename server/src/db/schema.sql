@@ -2345,6 +2345,11 @@ CREATE TABLE IF NOT EXISTS payments (
   receipt_number TEXT, 
   branch_id      TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT, 
   semester       TEXT,
+  -- A refund reverses exactly one payment (owner decision D-113). The named row
+  -- carries the category and the semester the money belongs to, which is what
+  -- keeps a refund of a book, exam or card charge out of the student's TUITION
+  -- position and re-opens only the semester the refunded tuition settled.
+  refunds_payment_id TEXT REFERENCES payments(id) ON DELETE RESTRICT,
   idempotency_key TEXT,
   created_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -2361,6 +2366,37 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_idempotency ON payments(idempotenc
 -- than per branch. Rows with no receipt (internal bookings) are unconstrained.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_receipt_number
   ON payments(receipt_number) WHERE receipt_number IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_payments_refunds ON payments(refunds_payment_id);
+-- Attribution is mandatory in one direction and forbidden in the other: a
+-- refund without a target is unexplainable money, and a charge that claims to
+-- reverse something is not a charge.
+CREATE TRIGGER IF NOT EXISTS trg_payments_refund_attribution_insert
+BEFORE INSERT ON payments
+WHEN (NEW.category = 'refund' AND NEW.refunds_payment_id IS NULL)
+  OR (NEW.category <> 'refund' AND NEW.refunds_payment_id IS NOT NULL)
+BEGIN SELECT RAISE(ABORT, 'a refund must name the payment it reverses, and only a refund may name one'); END;
+CREATE TRIGGER IF NOT EXISTS trg_payments_refund_attribution_update
+BEFORE UPDATE OF category, refunds_payment_id ON payments
+WHEN (NEW.category = 'refund' AND NEW.refunds_payment_id IS NULL)
+  OR (NEW.category <> 'refund' AND NEW.refunds_payment_id IS NOT NULL)
+BEGIN SELECT RAISE(ABORT, 'a refund must name the payment it reverses, and only a refund may name one'); END;
+-- The target must be a real, non-refund payment of the same student and branch,
+-- so a refund cannot be attributed to another student's money or chained onto
+-- another refund.
+CREATE TRIGGER IF NOT EXISTS trg_payments_refund_target_insert
+BEFORE INSERT ON payments
+WHEN NEW.refunds_payment_id IS NOT NULL AND (
+     (SELECT student_id FROM payments WHERE id = NEW.refunds_payment_id) IS NOT NEW.student_id
+  OR (SELECT branch_id  FROM payments WHERE id = NEW.refunds_payment_id) IS NOT NEW.branch_id
+  OR (SELECT category   FROM payments WHERE id = NEW.refunds_payment_id) = 'refund')
+BEGIN SELECT RAISE(ABORT, 'a refund must reverse a non-refund payment of the same student and branch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_payments_refund_target_update
+BEFORE UPDATE OF refunds_payment_id, student_id, branch_id ON payments
+WHEN NEW.refunds_payment_id IS NOT NULL AND (
+     (SELECT student_id FROM payments WHERE id = NEW.refunds_payment_id) IS NOT NEW.student_id
+  OR (SELECT branch_id  FROM payments WHERE id = NEW.refunds_payment_id) IS NOT NEW.branch_id
+  OR (SELECT category   FROM payments WHERE id = NEW.refunds_payment_id) = 'refund')
+BEGIN SELECT RAISE(ABORT, 'a refund must reverse a non-refund payment of the same student and branch'); END;
 CREATE TRIGGER IF NOT EXISTS trg_payments_branch_integrity_insert
 BEFORE INSERT ON payments
 WHEN (NEW.student_id IS NOT NULL AND (SELECT branch_id FROM students WHERE id = NEW.student_id) IS NOT NEW.branch_id)

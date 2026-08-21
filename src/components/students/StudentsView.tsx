@@ -8,7 +8,7 @@ import {api} from '../../api/client';
 import { useInvalidate } from '../../state/serverStateFreshness';
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {GraduationCap, Search, Filter, Eye, CreditCard, UserPlus, Users, RotateCcw, X, Download} from 'lucide-react';
-import {Student, Class, Payment, Exam, ExamResult, Attendance, Branch, Visitor, StudentBalanceRow, AttendanceSummaryRow, StudentSummary } from '../../types';
+import {Student, Class, Payment, Exam, ExamResult, Attendance, Branch, Visitor, StudentBalanceRow, AttendanceSummaryRow, StudentSummary, RefundablePayment } from '../../types';
 import AddStudentForm from './AddStudentForm';
 import StudentProfileDrawer from './StudentProfileDrawer';
 import {formatAFN} from '../../utils/format';
@@ -90,6 +90,11 @@ export default function StudentsView({
   const [refundStudent, setRefundStudent] = useState<Student | null>(null);
   const [refundAmount, setRefundAmount] = useState(0);
   const [refundReason, setRefundReason] = useState('');
+  // A refund reverses one named payment. The list and every figure in it come
+  // from the server: the browser must not work out what is still refundable.
+  const [refundablePayments, setRefundablePayments] = useState<RefundablePayment[] | null>(null);
+  const [refundPaymentId, setRefundPaymentId] = useState('');
+  const [refundLoadError, setRefundLoadError] = useState('');
 
   // Offer controls from the server-resolved permission set. Role labels are
   // presentation metadata and cannot answer capability questions.
@@ -302,11 +307,31 @@ export default function StudentsView({
     }
   };
 
+  const openRefund = async (student: Student) => {
+    setRefundablePayments(null);
+    setRefundPaymentId('');
+    setRefundLoadError('');
+    try {
+      const rows = await api.get<RefundablePayment[]>(`/students/${student.id}/refundable-payments`);
+      setRefundablePayments(rows);
+      if (rows.length === 1) {
+        setRefundPaymentId(rows[0].id);
+        setRefundAmount(rows[0].refundableAmount);
+      }
+    } catch (err: any) {
+      setRefundablePayments([]);
+      setRefundLoadError(err.response?.data?.error || 'Could not load this student\'s payments.');
+    }
+  };
+
+  const selectedRefundPayment = refundablePayments?.find((p) => p.id === refundPaymentId) ?? null;
+
   const handleRefund = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!refundStudent || refundAmount <= 0) return triggerToast('Invalid amount.', 'error');
+    if (!refundPaymentId) return triggerToast('Choose the payment being refunded.', 'error');
     try {
-      await api.post(`/students/${refundStudent.id}/refund`, { amount: refundAmount, reason: refundReason });
+      await api.post(`/students/${refundStudent.id}/refund`, { amount: refundAmount, reason: refundReason, paymentId: refundPaymentId });
       triggerToast('Refund processed.', 'success');
       setRefundStudent(null);
       invalidate('students', 'payments');
@@ -437,7 +462,7 @@ export default function StudentsView({
                 issueStudentCard={issueStudentCard} triggerToast={triggerToast} onClose={() => setSelectedStudent(null)}
                 onOpenEnroll={() => { setEnrollSemesterName(''); setEnrollClassId(''); setEnrollTuitionAmount(0); setEnrollAmountPaidNow(0); setShowEnrollModal(true); }}
                 onOpenExtraClass={() => setShowExtraClassModal(true)}
-                onOpenRefund={() => { setRefundStudent(activeStudentInfo); setRefundAmount(0); setRefundReason(''); }}
+                onOpenRefund={() => { setRefundStudent(activeStudentInfo); setRefundAmount(0); setRefundReason(''); void openRefund(activeStudentInfo); }}
                 onPayInstallment={(instId, amount) => { setPaymentStudent(activeStudentInfo); setPayCategory('installment'); setPayInstallmentId(instId); setPayAmount(amount); }}
               />
             </div>
@@ -626,11 +651,47 @@ export default function StudentsView({
             <h3 className="font-extrabold text-rose-700 text-sm border-b pb-2 flex items-center gap-1"><RotateCcw className="w-4 h-4" /> Process Refund</h3>
             <form onSubmit={handleRefund} className="space-y-3">
               <div className="bg-rose-50 p-3 rounded-lg border border-rose-200 text-rose-800 text-[10px] font-bold">Warning: This deducts from the main account.</div>
-              <input type="number" placeholder="Refund Amount (AFN)" value={refundAmount} onChange={(e) => setRefundAmount(Number(e.target.value))} className={`${inputCls} font-mono`} required min={1} />
+              <div>
+                <label className={`${text.label} block`} htmlFor="refund-payment">Payment being refunded</label>
+                {refundablePayments === null ? (
+                  <p className="text-[10px] text-slate-400 italic py-2">Loading this student's payments…</p>
+                ) : refundablePayments.length === 0 ? (
+                  <p className="text-[10px] text-rose-600 font-bold py-2">{refundLoadError || 'This student has no payment left to refund.'}</p>
+                ) : (
+                  <select
+                    id="refund-payment"
+                    value={refundPaymentId}
+                    onChange={(e) => {
+                      setRefundPaymentId(e.target.value);
+                      const picked = refundablePayments.find((p) => p.id === e.target.value);
+                      setRefundAmount(picked ? picked.refundableAmount : 0);
+                    }}
+                    className={inputCls}
+                    required
+                  >
+                    <option value="">Select the payment…</option>
+                    {refundablePayments.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.date} · {p.category}{p.semester ? ` · ${p.semester}` : ''} · {formatAFN(p.refundableAmount)} refundable{p.receiptNumber ? ` · ${p.receiptNumber}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {selectedRefundPayment && (
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Paid {formatAFN(selectedRefundPayment.amount)}
+                    {selectedRefundPayment.refundedAmount > 0 ? ` · already refunded ${formatAFN(selectedRefundPayment.refundedAmount)}` : ''}
+                    {selectedRefundPayment.semester
+                      ? ` · refunding re-opens the ${selectedRefundPayment.semester} balance`
+                      : ' · not tuition, so no semester debt re-opens'}
+                  </p>
+                )}
+              </div>
+              <input type="number" placeholder="Refund Amount (AFN)" value={refundAmount} onChange={(e) => setRefundAmount(Number(e.target.value))} className={`${inputCls} font-mono`} required min={1} max={selectedRefundPayment?.refundableAmount ?? undefined} disabled={!refundPaymentId} />
               <textarea placeholder="Reason for refund" value={refundReason} onChange={(e) => setRefundReason(e.target.value)} rows={2} className={inputCls} required></textarea>
               <div className="flex gap-2 justify-end pt-3 border-t">
                 <button type="button" onClick={() => setRefundStudent(null)} className={btnSecondary}>Cancel</button>
-                <button type="submit" className={btnDanger}>Approve Refund</button>
+                <button type="submit" className={btnDanger} disabled={!refundPaymentId}>Approve Refund</button>
               </div>
             </form>
           </div>

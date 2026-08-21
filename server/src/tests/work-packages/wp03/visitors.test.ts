@@ -255,6 +255,7 @@ describe('Visitor Module', () => {
       db.prepare('DELETE FROM audit_logs').run();
       db.prepare('DELETE FROM invoice_items').run();
       db.prepare('DELETE FROM invoices').run();
+      db.prepare("DELETE FROM payments WHERE category = 'refund'").run();
       db.prepare('DELETE FROM payments').run();
       db.prepare('DELETE FROM registrations').run();
       db.prepare('DELETE FROM enrollment_events').run();

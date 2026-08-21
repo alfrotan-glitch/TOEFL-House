@@ -20,14 +20,19 @@
  *                   semesters in scope. net_fee_amount is post-discount; the
  *                   gross amount overstates the debt of a discounted student.
  *
- *   TUITION PAID  = SUM(amount) over completed payments whose category is
- *                   'fee', 'installment' or 'refund'.
+ *   TUITION PAID  = SUM(amount) over completed payments that are either a
+ *                   'fee'/'installment' charge, or a refund THAT REVERSES ONE.
  *                   Refunds are stored SIGNED (negative), so including them
  *                   subtracts. Omitting them credits the student with money
  *                   that was handed back.
  *                   Non-tuition categories (book, card, exam, diploma,
  *                   placement, chapter, other) are excluded — they are real
- *                   income but they do not pay down tuition.
+ *                   income but they do not pay down tuition, and neither do
+ *                   the refunds that reverse them. Counting every refund
+ *                   against tuition made a refunded exam fee re-open tuition
+ *                   debt the student did not owe (owner decision D-113:
+ *                   `payments.refunds_payment_id` names what a refund
+ *                   reverses).
  *
  *   OUTSTANDING   = MAX(0, due - paid). Never negative: an over-refunded or
  *                   over-paid student is a credit balance, reported separately
@@ -40,7 +45,11 @@
  */
 import type { Database } from 'better-sqlite3';
 
-/** Payment categories that pay down tuition. Refund is signed-negative. */
+/**
+ * Payment categories that can affect tuition: the two tuition charges, plus
+ * refunds — which count only when the payment they reverse is itself a tuition
+ * charge. `TUITION_PAYMENT_SQL` below is the executable form of that rule.
+ */
 export const TUITION_PAYMENT_CATEGORIES = ['fee', 'installment', 'refund'] as const;
 
 export type BalanceScope = 'all' | 'active';
@@ -74,7 +83,21 @@ export function deriveBalance(tuitionDue: number, tuitionPaid: number): StudentB
   };
 }
 
-const CATEGORY_SQL = TUITION_PAYMENT_CATEGORIES.map((c) => `'${c}'`).join(',');
+/** Charge categories that pay down tuition. */
+const TUITION_CHARGE_SQL = `'fee','installment'`;
+
+/**
+ * A payment counts towards TUITION when it is a tuition charge, or a refund of
+ * one. `refunds_payment_id` is the attribution: it is NOT NULL on every refund
+ * (enforced by `trg_payments_refund_attribution_*`) and NULL on every charge.
+ */
+const TUITION_PAYMENT_SQL = `(
+  category IN (${TUITION_CHARGE_SQL})
+  OR (category = 'refund' AND (
+        SELECT t.category FROM payments t WHERE t.id = payments.refunds_payment_id
+      ) IN (${TUITION_CHARGE_SQL}))
+)`;
+
 
 /** Authoritative single-student balance, read straight from the database. */
 export function getStudentBalance(db: Database, studentId: string, scope: BalanceScope = 'all'): StudentBalance {
@@ -90,7 +113,7 @@ export function getStudentBalance(db: Database, studentId: string, scope: Balanc
     .prepare(
       `SELECT COALESCE(SUM(amount), 0) AS total
        FROM payments
-       WHERE student_id = ? AND status = 'completed' AND category IN (${CATEGORY_SQL})`,
+       WHERE student_id = ? AND status = 'completed' AND ${TUITION_PAYMENT_SQL}`,
     )
     .get(studentId) as { total: number };
 
@@ -136,7 +159,7 @@ export function getStudentBalancesPage(
          LEFT JOIN (
            SELECT student_id, SUM(amount) AS total
            FROM payments
-           WHERE status = 'completed' AND category IN (${CATEGORY_SQL})
+           WHERE status = 'completed' AND ${TUITION_PAYMENT_SQL}
            GROUP BY student_id
          ) paid ON paid.student_id = st.id
          ${branchFilter}
@@ -169,7 +192,7 @@ export function getStudentBalancesByIds(
        LEFT JOIN (
          SELECT student_id, SUM(amount) AS total
          FROM payments
-         WHERE status = 'completed' AND category IN (${CATEGORY_SQL})
+         WHERE status = 'completed' AND ${TUITION_PAYMENT_SQL}
          GROUP BY student_id
        ) paid ON paid.student_id = st.id
       WHERE st.id IN (SELECT value FROM json_each(?))`,
@@ -197,7 +220,7 @@ export function getBranchOutstanding(db: Database, branchId: string): number {
        LEFT JOIN (
          SELECT student_id, SUM(amount) AS total
          FROM payments
-         WHERE status = 'completed' AND category IN (${CATEGORY_SQL})
+         WHERE status = 'completed' AND ${TUITION_PAYMENT_SQL}
          GROUP BY student_id
        ) paid ON paid.student_id = sem.student_id`,
     )

@@ -43,6 +43,9 @@ beforeEach(() => {
   // A sibling suite truncates students/student_semesters wholesale, and vitest
   // shares one database file across suites. Re-seed on every test rather than
   // once, so this suite's outcome never depends on file execution order.
+  // Refunds reference the payment they reverse (ON DELETE RESTRICT), so a
+  // fixture reset removes the reversing rows before the rows they point at.
+  db.prepare(`DELETE FROM payments WHERE id LIKE 'bal_%' AND category = 'refund'`).run();
   db.prepare(`DELETE FROM payments WHERE id LIKE 'bal_%'`).run();
   db.prepare(`DELETE FROM student_semesters WHERE id LIKE 'bal_%'`).run();
   db.prepare(`DELETE FROM students WHERE id LIKE 'bal_%'`).run();
@@ -71,20 +74,22 @@ beforeEach(() => {
       )
       .run(id, student, name, d, net, net, status);
 
-  const mkPayment = (id: string, student: string, amount: number, category: string, branch = BRANCH) =>
+  // A refund names the payment it reverses (owner decision D-113), which is
+  // what keeps a refund of a non-tuition charge out of the tuition position.
+  const mkPayment = (id: string, student: string, amount: number, category: string, branch = BRANCH, reverses: string | null = null) =>
     db
       .prepare(
-        `INSERT OR REPLACE INTO payments (id, student_id, amount, date, payment_method, status, category, receipt_number, branch_id, idempotency_key)
-         VALUES (?, ?, ?, ?, 'cash', 'completed', ?, ?, ?, hex(randomblob(16)))`,
+        `INSERT OR REPLACE INTO payments (id, student_id, amount, date, payment_method, status, category, receipt_number, branch_id, idempotency_key, refunds_payment_id)
+         VALUES (?, ?, ?, ?, 'cash', 'completed', ?, ?, ?, hex(randomblob(16)), ?)`,
       )
-      .run(id, student, amount, d, category, `RC-${id}`, branch);
+      .run(id, student, amount, d, category, `RC-${id}`, branch, reverses);
 
   // Scenario 1: 13,000 tuition; paid 10,000 fee + 3,000 installment; refunded 2,000.
   mkStudent(S_REFUNDED, 'BAL-001');
   mkSemester('bal_sem_1', S_REFUNDED, 'Term A', 13000);
   mkPayment('bal_p1', S_REFUNDED, 10000, 'fee');
   mkPayment('bal_p2', S_REFUNDED, 3000, 'installment');
-  mkPayment('bal_p3', S_REFUNDED, -2000, 'refund'); // stored SIGNED
+  mkPayment('bal_p3', S_REFUNDED, -2000, 'refund', BRANCH, 'bal_p1'); // signed, and attributed to the fee it reverses
 
   // Scenario 2: a completed 10,000 term and an active 13,000 term, 5,000 paid.
   mkStudent(S_TWO_TERMS, 'BAL-002');
@@ -208,6 +213,7 @@ describe('S11: a refund reopens the semester debt it belongs to', () => {
 
   beforeEach(() => {
     const d = today();
+    db.prepare(`DELETE FROM payments WHERE id LIKE 'balsp_%' AND category = 'refund'`).run();
     db.prepare(`DELETE FROM payments WHERE id LIKE 'balsp_%'`).run();
     db.prepare(`DELETE FROM student_semesters WHERE id LIKE 'balsp_%'`).run();
     db.prepare(`DELETE FROM students WHERE id = ?`).run(S_SEM);
@@ -222,23 +228,28 @@ describe('S11: a refund reopens the semester debt it belongs to', () => {
     ).run(S_SEM, SEM_NAME, d);
   });
 
-  /** Mirrors the route's semester-settlement rule. */
+  /**
+   * Mirrors the route's semester-settlement rule. A refund carries the semester
+   * of the payment it reverses (owner decision D-114), so one term's refund can
+   * only ever re-open that term's debt.
+   */
   const paidTowardSemester = () =>
     (db.prepare(`SELECT * FROM payments WHERE student_id = ?`).all(S_SEM) as any[])
       .filter(
         (p) =>
           p.status === 'completed' &&
-          ((p.semester === SEM_NAME && (p.category === 'fee' || p.category === 'installment')) || p.category === 'refund'),
+          p.semester === SEM_NAME &&
+          (p.category === 'fee' || p.category === 'installment' || p.category === 'refund'),
       )
       .reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
-  const addPayment = (id: string, amount: number, category: string, semester: string | null) =>
+  const addPayment = (id: string, amount: number, category: string, semester: string | null, reverses: string | null = null) =>
     db
       .prepare(
-        `INSERT OR REPLACE INTO payments (id, student_id, amount, date, payment_method, status, category, receipt_number, branch_id, semester, idempotency_key)
-         VALUES (?, ?, ?, ?, 'cash', 'completed', ?, ?, ?, ?, hex(randomblob(16)))`,
+        `INSERT OR REPLACE INTO payments (id, student_id, amount, date, payment_method, status, category, receipt_number, branch_id, semester, idempotency_key, refunds_payment_id)
+         VALUES (?, ?, ?, ?, 'cash', 'completed', ?, ?, ?, ?, hex(randomblob(16)), ?)`,
       )
-      .run(id, S_SEM, amount, today(), category, `RC-${id}`, BRANCH, semester);
+      .run(id, S_SEM, amount, today(), category, `RC-${id}`, BRANCH, semester, reverses);
 
   it('a full payment settles the semester', () => {
     addPayment('balsp_p1', 10000, 'fee', SEM_NAME);
@@ -248,7 +259,8 @@ describe('S11: a refund reopens the semester debt it belongs to', () => {
 
   it('refunding 4,000 of a settled semester reopens a 4,000 debt', () => {
     addPayment('balsp_p1', 10000, 'fee', SEM_NAME);
-    addPayment('balsp_p2', -4000, 'refund', null); // refunds carry no semester
+    // The refund names the fee it reverses and inherits that fee's semester.
+    addPayment('balsp_p2', -4000, 'refund', SEM_NAME, 'balsp_p1');
     expect(paidTowardSemester()).toBe(6000);
     const debt = Math.max(0, 10000 - paidTowardSemester());
     expect(debt).toBe(4000);
@@ -266,5 +278,13 @@ describe('S11: a refund reopens the semester debt it belongs to', () => {
     addPayment('balsp_p1', 10000, 'book', SEM_NAME);
     expect(paidTowardSemester()).toBe(0);
     expect(Math.max(0, 10000 - paidTowardSemester())).toBe(10000);
+  });
+
+  it('a refund of a non-tuition purchase never re-opens the semester', () => {
+    addPayment('balsp_p1', 10000, 'fee', SEM_NAME);
+    addPayment('balsp_p2', 2000, 'book', null);
+    addPayment('balsp_p3', -2000, 'refund', null, 'balsp_p2');
+    // The book money never settled the term, so returning it cannot un-settle it.
+    expect(paidTowardSemester()).toBe(10000);
   });
 });

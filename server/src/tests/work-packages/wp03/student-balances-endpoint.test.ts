@@ -50,6 +50,7 @@ beforeEach(async () => {
   bootstrapRbacCatalog(db);
   const d = today();
 
+  db.prepare(`DELETE FROM payments WHERE id LIKE 'balep_%' AND category = 'refund'`).run();
   db.prepare(`DELETE FROM payments WHERE id LIKE 'balep_%'`).run();
   db.prepare(`DELETE FROM student_semesters WHERE id LIKE 'balep_%'`).run();
   db.prepare(`DELETE FROM students WHERE id LIKE 'balep_%'`).run();
@@ -80,19 +81,20 @@ beforeEach(async () => {
       )
       .run(`balep_sem${n}`, `balep_s${n}`, d, net, net);
 
-  const mkPayment = (id: string, n: number, amount: number, category: string) =>
+  // A refund names the payment it reverses (owner decision D-113).
+  const mkPayment = (id: string, n: number, amount: number, category: string, reverses: string | null = null) =>
     db
       .prepare(
-        `INSERT OR REPLACE INTO payments (id, student_id, amount, date, payment_method, status, category, receipt_number, branch_id, idempotency_key)
-         VALUES (?, ?, ?, ?, 'cash', 'completed', ?, ?, ?, hex(randomblob(16)))`,
+        `INSERT OR REPLACE INTO payments (id, student_id, amount, date, payment_method, status, category, receipt_number, branch_id, idempotency_key, refunds_payment_id)
+         VALUES (?, ?, ?, ?, 'cash', 'completed', ?, ?, ?, hex(randomblob(16)), ?)`,
       )
-      .run(id, `balep_s${n}`, amount, d, category, `RC-${id}`, BRANCH);
+      .run(id, `balep_s${n}`, amount, d, category, `RC-${id}`, BRANCH, reverses);
 
   // 1: owes 13,000, paid 10,000 fee + 3,000 installment, refunded 2,000 => owes 2,000
   mkStudent(1); mkSemester(1, 13000);
   mkPayment('balep_p1a', 1, 10000, 'fee');
   mkPayment('balep_p1b', 1, 3000, 'installment');
-  mkPayment('balep_p1c', 1, -2000, 'refund');
+  mkPayment('balep_p1c', 1, -2000, 'refund', 'balep_p1a');
 
   // 2: owes 8,000, bought a 1,500 book (not tuition) => owes 8,000
   mkStudent(2); mkSemester(2, 8000);

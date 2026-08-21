@@ -176,6 +176,32 @@ const stmtHasPaidFixedFee = db.prepare(`
 const stmtInsertSimplePayment = db.prepare(
   `INSERT INTO payments (id, student_id, amount, date, payment_method, status, category, notes, receipt_number, branch_id, idempotency_key) VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?)`
 );
+/**
+ * The refund writer. Separate from the charge writer because a refund carries
+ * two facts a charge does not: the payment it reverses, and the semester that
+ * payment settled (owner decisions D-113 and D-114). Both are written here, not
+ * chosen by the caller, so the attribution cannot disagree with the money.
+ */
+const stmtInsertRefundPayment = db.prepare(
+  `INSERT INTO payments (id, student_id, amount, date, payment_method, status, category, notes, receipt_number, branch_id, idempotency_key, refunds_payment_id, semester)
+   VALUES (?, ?, ?, ?, 'cash', 'completed', 'refund', ?, ?, ?, ?, ?, ?)`
+);
+/** The payment a refund may reverse, with what is left of it. */
+const stmtGetRefundTarget = db.prepare(
+  `SELECT p.id, p.student_id, p.branch_id, p.amount, p.category, p.semester, p.status, p.date, p.receipt_number,
+          COALESCE((SELECT SUM(ABS(r.amount)) FROM payments r
+                     WHERE r.refunds_payment_id = p.id AND r.status = 'completed'), 0) AS refunded
+     FROM payments p WHERE p.id = ?`
+);
+/** Every payment of this student that can still be refunded, and by how much. */
+const stmtListRefundablePayments = db.prepare(
+  `SELECT p.id, p.amount, p.category, p.date, p.semester, p.receipt_number, p.payment_method,
+          COALESCE((SELECT SUM(ABS(r.amount)) FROM payments r
+                     WHERE r.refunds_payment_id = p.id AND r.status = 'completed'), 0) AS refunded
+     FROM payments p
+    WHERE p.student_id = ? AND p.status = 'completed' AND p.category <> 'refund' AND p.amount > 0
+    ORDER BY p.date DESC, p.rowid DESC`
+);
 const stmtUpdateStudentCard = db.prepare('UPDATE students SET card_design = ?, notes = ? WHERE id = ?');
 const stmtUpdateStudentDetails = db.prepare(
   `UPDATE students SET full_name=?, phone=?, email=?, discount_percent=?, gender=?, father_name=?, address_region=?, tazkira_no=?, whatsapp=?, dob=?, school_or_university=?, emergency_contact_name=?, emergency_contact_phone=?, notes=?, placement_score=?, installment_plan=?, card_design=? WHERE id=?`
@@ -1264,28 +1290,81 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
   res.status(201).json({ receiptNumber: rc, amountCharged: resolvedAmount });
 }));
 
+/**
+ * The payments this student still has money against, with the server's own
+ * figure for how much of each is left to refund.
+ *
+ * The refund dialog needs to name a payment (D-113), and it must not work that
+ * figure out for itself: a browser that subtracts refunds from a page of
+ * payments is a second financial authority, and it is wrong the moment a
+ * payment falls outside the page.
+ */
+studentsRouter.get('/:id/refundable-payments', requirePermission('Refund.Approve'), ah(async (req, res) => {
+  const student = requireStudent(req, req.params.id);
+  const rows = stmtListRefundablePayments.all(student.id) as Array<{
+    id: string; amount: number; category: string; date: string; semester: string | null;
+    receipt_number: string | null; payment_method: string | null; refunded: number;
+  }>;
+  res.json(
+    rows
+      .map((r) => ({
+        id: r.id,
+        amount: Number(r.amount),
+        category: r.category,
+        date: r.date,
+        semester: r.semester ?? null,
+        receiptNumber: r.receipt_number,
+        paymentMethod: r.payment_method,
+        refundedAmount: Number(r.refunded),
+        refundableAmount: Math.max(0, Number(r.amount) - Number(r.refunded)),
+      }))
+      .filter((r) => r.refundableAmount > 0),
+  );
+}));
+
+/**
+ * Issue a refund against ONE named payment.
+ *
+ * Owner decisions D-113 and D-114: a refund reverses a specific payment, and a
+ * tuition refund re-opens the debt of the semester that payment settled. The
+ * refund therefore inherits both the target's identity and its semester rather
+ * than accepting either from the caller — an unattributed refund cannot be
+ * explained, and it was proven to create tuition debt out of a refunded exam
+ * fee, which the enrolment debt-hold then acted on.
+ */
 studentsRouter.post('/:id/refund', requirePermission('Refund.Approve'), ah(async (req, res) => {
   const user = getUserContext(req);
   const student = requireStudent(req, req.params.id);
-  const { amount } = req.body ?? {};
+  const { amount, paymentId } = req.body ?? {};
   const reason = requiredText(req.body?.reason, 'Refund reason', TEXT_LIMITS.notes);
-  // F-5: a refund moves real money OUT, so the amount must be parsed, not
-  // coerced. Reproduced live on a fresh database (student funded first):
-  //     true   -> 201, a real -1 AFN refund   (branch cash -1.00)
-  //     [500]  -> 201, a real -500 AFN refund (branch cash -500.00)
-  //     '0x10' -> 201, a real -16 AFN refund
-  //     [[7]]  -> 201, a real -7 AFN refund
-  //     0.001  -> 500, leaking the two-decimal database trigger
-  // The refundable-balance cap still applies afterwards, unchanged.
+  // A refund moves real money out, so the amount is parsed, never coerced:
+  // `true`, `[500]` and `'0x10'` are not amounts.
   let refundAmount: number;
   try { refundAmount = assertMoney(amount, 'Refund amount'); }
   catch { throw new HttpError(400, 'Refund amount must be positive.'); }
   if (refundAmount <= 0) throw new HttpError(400, 'Refund amount must be positive.');
+
+  const targetId = typeof paymentId === 'string' ? paymentId.trim() : '';
+  if (!targetId) throw new HttpError(400, 'A refund must name the payment it reverses (paymentId).');
+  const target = stmtGetRefundTarget.get(targetId) as
+    | { id: string; student_id: string; branch_id: string; amount: number; category: string; semester: string | null; status: string; refunded: number }
+    | undefined;
+  if (!target) throw new HttpError(404, 'The payment being refunded was not found.');
+  if (target.student_id !== student.id) throw new HttpError(403, 'That payment belongs to another student.');
+  if (target.status !== 'completed') throw new HttpError(409, 'Only a completed payment can be refunded.');
+  if (target.category === 'refund') throw new HttpError(400, 'A refund cannot be refunded.');
+  const refundable = Math.max(0, Number(target.amount) - Number(target.refunded));
+  if (refundable <= 0) throw new HttpError(409, 'That payment has already been fully refunded.');
+  if (refundAmount > refundable) {
+    throw new HttpError(400, `Refund exceeds the ${refundable} AFN still refundable on that payment.`);
+  }
+
   const date = today();
   // Refunds move real money out; the same mandatory idempotency applies.
   const { key: idempotencyKey, candidates: idempotencyCandidates } = resolveIdempotency(req, {
     route: 'student-refund',
     studentId: student.id,
+    paymentId: target.id,
     amount: refundAmount,
     reason: String(reason).trim(),
     // Two different operators each issuing a refund of the same amount are
@@ -1300,16 +1379,23 @@ studentsRouter.post('/:id/refund', requirePermission('Refund.Approve'), ah(async
   const payId = id('pay');
 
   const tx = db.transaction(() => {
-    const paid = (stmtGetPaymentsByStudent.all(student.id) as PaymentRow[])
-      .filter((p) => p.status === 'completed' && p.category !== 'refund')
-      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
-    const refunded = (stmtGetPaymentsByStudent.all(student.id) as PaymentRow[])
-      .filter((p) => p.status === 'completed' && p.category === 'refund')
-      .reduce((sum, p) => sum + Math.abs(Number(p.amount || 0)), 0);
-    const refundable = Math.max(0, paid - refunded);
-    if (refundAmount > refundable) throw new HttpError(400, `Refund exceeds the refundable balance of ${refundable} AFN.`);
-    stmtInsertSimplePayment.run(payId, student.id, -refundAmount, date, 'cash', 'refund', String(reason).trim(), rc, student.branch_id, idempotencyKey);
-    recordIncome({ category: 'refund', amount: -refundAmount, date, description: `Refund issued to ${student.full_name}`, referenceId: student.id, paymentId: payId, operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null, branchId: student.branch_id });
+    // Re-read inside the transaction: two refunds racing on one payment must
+    // not both pass the cap they each read before the other committed.
+    const fresh = stmtGetRefundTarget.get(target.id) as { amount: number; refunded: number };
+    const stillRefundable = Math.max(0, Number(fresh.amount) - Number(fresh.refunded));
+    if (refundAmount > stillRefundable) {
+      throw new HttpError(409, `Only ${stillRefundable} AFN remains refundable on that payment.`);
+    }
+    stmtInsertRefundPayment.run(
+      payId, student.id, -refundAmount, date, String(reason).trim(), rc, student.branch_id,
+      idempotencyKey, target.id, target.semester ?? null,
+    );
+    recordIncome({
+      category: 'refund', amount: -refundAmount, date,
+      description: `Refund issued to ${student.full_name} against ${target.category} payment ${target.id}`,
+      referenceId: student.id, paymentId: payId, operatorName: user.fullName,
+      operatorRole: req.rbac?.primaryRole ?? null, branchId: student.branch_id,
+    });
   });
   try {
     tx();
@@ -1324,11 +1410,11 @@ studentsRouter.post('/:id/refund', requirePermission('Refund.Approve'), ah(async
   }
 
   try {
-    getJourneyEngine(db).appendEvent({ studentId: student.id, eventType: JourneyEventType.PAYMENT_RECORDED, occurredAt: date, branchId: student.branch_id, actorUserId: user.userId, actorName: user.fullName, payload: { amount: -refundAmount, category: 'refund', receiptNumber: rc } });
+    getJourneyEngine(db).appendEvent({ studentId: student.id, eventType: JourneyEventType.PAYMENT_RECORDED, occurredAt: date, branchId: student.branch_id, actorUserId: user.userId, actorName: user.fullName, payload: { amount: -refundAmount, category: 'refund', receiptNumber: rc, refundsPaymentId: target.id } });
   } catch (err) { log.warn('[journey] failed', err); }
 
-  writeAudit(req, `Refunded ${refundAmount} AFN to ${student.full_name}`, { branchId: student.branch_id, oldValue: JSON.stringify({ reason: String(reason) }), newValue: JSON.stringify({ receipt: rc, amount: refundAmount, paymentId: payId }) });
-  res.status(201).json({ receiptNumber: rc });
+  writeAudit(req, `Refunded ${refundAmount} AFN to ${student.full_name}`, { branchId: student.branch_id, oldValue: JSON.stringify({ reason: String(reason), refundsPaymentId: target.id, refundsCategory: target.category }), newValue: JSON.stringify({ receipt: rc, amount: refundAmount, paymentId: payId }) });
+  res.status(201).json({ receiptNumber: rc, refundsPaymentId: target.id, refundsCategory: target.category, semester: target.semester ?? null });
 }));
 
 // ============================================================================
