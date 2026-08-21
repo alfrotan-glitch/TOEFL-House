@@ -7,7 +7,7 @@ import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { assertTextLengths, optionalText, requiredText, TEXT_LIMITS } from '../utils/textInput.js';
 import { parsePagination as parsePaginationShared } from '../utils/pagination.js';
-import { getStudentBalance, getStudentBalancesByIds, getStudentBalancesPage } from '../utils/studentBalance.js';
+import { getStudentBalance, getStudentBalancesByIds, getStudentBalancesPage, getSemesterTuitionPaid } from '../utils/studentBalance.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import {
   canAccessAllBranchesForRequirement,
@@ -112,7 +112,7 @@ const stmtGetTransferSourceEnrollment = db.prepare(`
   ORDER BY started_at DESC, created_at DESC, id DESC
   LIMIT 1
 `);
-const stmtGetStudentPaymentsBySemester = db.prepare("SELECT COALESCE(SUM(CASE WHEN category IN ('fee','installment') THEN amount WHEN category = 'refund' THEN amount ELSE 0 END), 0) AS paid FROM payments WHERE student_id = ? AND semester = ? AND status = 'completed'");
+
 
 const stmtInsertEnrollment = db.prepare(
   `INSERT INTO enrollments (id, student_id, program_id, semester_name, level_code, class_id, branch_id, enrollment_type, status, started_at, notes, fee_snapshot_json) VALUES (?, ?, ?, ?, ?, ?, ?, 'extra', 'active', ?, ?, ?)`
@@ -1122,13 +1122,9 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
     if (!semesterId) throw new HttpError(400, 'semesterId is required when paying a class fee.');
     const sem = (stmtGetSemestersByStudent.all(student.id) as any[]).find(s => s.id === semesterId);
     if (!sem) throw new HttpError(404, 'Semester not found.');
-    // Refunds must count against the semester, otherwise a partially refunded
-    // student is treated as fully paid and the academy is unable to collect a
-    // debt they genuinely owe. Refunds are stored signed-negative and are not
-    // tagged with a semester, so they are attributed to the student's tuition.
-    const totalPaidForSem = (stmtGetPaymentsByStudent.all(student.id) as any[])
-      .filter(p => p.status === 'completed' && ((p.semester === sem.semester_name && (p.category === 'fee' || p.category === 'installment')) || p.category === 'refund'))
-      .reduce((acc, p) => acc + Number(p.amount || 0), 0);
+    // One authority for "how much has this semester been paid" — charges and
+    // the refunds that reverse them, both filtered by the semester itself.
+    const totalPaidForSem = getSemesterTuitionPaid(db, student.id, sem.semester_name);
     const semDebt = Math.max(0, Number(sem.net_fee_amount ?? sem.fee_amount) - totalPaidForSem);
     if (semDebt <= 0) throw new HttpError(400, 'This semester is already fully paid.');
     resolvedAmount = semDebt;
@@ -1219,9 +1215,7 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
     if (category === 'fee') {
       const currentSem = (stmtGetSemestersByStudent.all(student.id) as any[]).find((s) => s.id === semesterId);
       if (!currentSem) throw new HttpError(404, 'Semester not found.');
-      const currentPaid = (stmtGetPaymentsByStudent.all(student.id) as PaymentRow[])
-        .filter((p) => p.status === 'completed' && ((p.semester === currentSem.semester_name && (p.category === 'fee' || p.category === 'installment')) || p.category === 'refund'))
-        .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+      const currentPaid = getSemesterTuitionPaid(db, student.id, currentSem.semester_name);
       const currentDebt = Math.max(0, Number(currentSem.net_fee_amount ?? currentSem.fee_amount) - currentPaid);
       if (currentDebt <= 0) throw new HttpError(409, 'This semester is already fully paid.');
       // Authoritative re-read inside the transaction. This is the check that

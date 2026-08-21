@@ -93,6 +93,7 @@ re-run after the repair.
 | WP07-F12 | A receipt number is not unique at rest | HIGH | the database accepted two payments carrying `R-00099001`, on insert and on update, while the generator's comment promised uniqueness. The receipt is the payer's proof, so an ambiguous number is an unauditable payment (LAW 3) |
 | WP07-F13 | The canonical schema declares the same object twice | MEDIUM | one unique index under two names on `invoices`, one index under two names on `invoice_items`, and two branch-guard trigger pairs each on `invoices` and `payments` where the `IS NOT` pair strictly subsumes the `<>` pair (§12) |
 | WP07-F14 | A discount grant is coerced, undated and its store fails silently | HIGH | `approvedPercent: [10]` granted 10%, `true` granted 1%, `''`/`null` created a 0% authorization record; `effectiveFrom: 'banana'` was stored and silently prevented the grant from ever activating (and `effectiveTo: 'banana'` from ever expiring); and a resolver that could not read the authorization table charged ordinary policy without a word |
+| WP07-F15 | A refund of one semester distorts another semester's price | HIGH | proven after D-114 landed: with Term A partially refunded by 2,000, Term B's outstanding read 12,000 instead of 10,000, and after Term B was paid in full the desk accepted a further payment against it (`amountCharged: 1`). Two inline copies of the semester-settlement rule counted every refund against whichever term was being paid |
 | WP07-F11 | A refund is unattributed, so a non-tuition refund creates tuition debt | HIGH — **RESOLVED in slice D** | proven on a fresh database: tuition 10,000 paid in full, a 2,000 exam fee paid, then a 2,000 refund → the canonical balance authority reported `tuitionPaid 8,000 / outstanding 2,000`. The same authority feeds the roster, the portal, branch outstanding and the enrolment debt-hold, so a refunded exam fee could block a student's enrolment |
 
 ## MODEL
@@ -155,14 +156,15 @@ Recorded as **D-101 … D-105** in `docs/registries/decisions.md`.
 | Tuition counts a refund only when it reverses a tuition charge | `server/src/utils/studentBalance.ts` |
 | Refund dialog names the payment and shows the server's remainder | `src/components/students/StudentsView.tsx`, `src/types.ts` |
 | Seven fixture suites re-expressed to attribute their refunds (D-115) | WP-03 suites, `final-hardening`, `finance-money-writer-parity`, `system-closure-authorities`, `balance-single-source-of-truth` |
-| Package test authority (refunds) | `server/src/tests/work-packages/wp07/refund-attribution-authority.test.ts` (new, 16 cases) |
+| One semester-settlement authority (`getSemesterTuitionPaid`) consumed by both payment-desk checks; two inline copies removed | `server/src/utils/studentBalance.ts`, `server/src/routes/students.routes.ts` |
+| Package test authority (refunds + semester settlement) | `server/src/tests/work-packages/wp07/refund-attribution-authority.test.ts` (new, 19 cases) |
 
 ## VERIFY
 
 | Command | Result |
 |---|---|
-| `npx vitest run src/tests/work-packages/wp07` | 101/101 passed |
-| `npx vitest run` (server, full) | **2675 passed · 160 skipped** (the 160 are the explicit WP-04 retirements) · 0 failed |
+| `npx vitest run src/tests/work-packages/wp07` | 104/104 passed |
+| `npx vitest run` (server, full) | **2678 passed · 160 skipped** (the 160 are the explicit WP-04 retirements) · 0 failed |
 | `npm run preflight:fresh-schema` | 112 tables · 238 indexes · 117 triggers; stands alone, sound, idempotent |
 | `npx tsc --noEmit` (server + frontend) | clean |
 | `npm run release:validate` | **22 passed · 0 failed · 0 skipped** |

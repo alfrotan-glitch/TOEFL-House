@@ -120,6 +120,28 @@ export function getStudentBalance(db: Database, studentId: string, scope: Balanc
   return deriveBalance(due.total, paid.total);
 }
 
+/**
+ * Tuition settled against ONE semester.
+ *
+ * The semester is the filter, for both charges and refunds: a refund carries
+ * the semester of the payment it reverses (owner decision D-114), and a refund
+ * of a non-tuition charge carries none. Every caller must come here rather than
+ * filter payments itself — a rule that counts refunds without checking their
+ * semester inflates one term's debt with another term's refund, and the payment
+ * desk then collects against a term that is already settled.
+ */
+export function getSemesterTuitionPaid(db: Database, studentId: string, semesterName: string): number {
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(amount), 0) AS paid
+         FROM payments
+        WHERE student_id = ? AND semester = ? AND status = 'completed'
+          AND category IN ('fee','installment','refund')`,
+    )
+    .get(studentId, semesterName) as { paid: number };
+  return Number(row.paid) || 0;
+}
+
 /** One roster row: a student id plus their authoritative balance. */
 export interface StudentBalanceRow extends StudentBalance {
   studentId: string;

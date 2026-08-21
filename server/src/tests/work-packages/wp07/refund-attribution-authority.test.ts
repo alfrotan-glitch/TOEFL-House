@@ -151,6 +151,62 @@ describe('WP-07 · a refund reverses one named payment', () => {
   });
 });
 
+describe('WP-07 · one semester\'s refund never moves another semester\'s debt', () => {
+  const SECOND = 'Term Two';
+  let secondSemesterId: string;
+
+  beforeEach(() => {
+    secondSemesterId = `${key}_sem2`;
+    db.prepare(
+      `INSERT INTO student_semesters (id, student_id, semester_name, enroll_date, fee_amount, net_fee_amount, status)
+       VALUES (?, ?, ?, ?, 10000, 10000, 'active')`,
+    ).run(secondSemesterId, studentId, SECOND, today());
+  });
+
+  it('WP07-F15 · a refund of term one does not make term two cost more', async () => {
+    await pay({ category: 'fee', amount: 10000, semesterId }).expect(201);
+    const feeOne = paymentsOf().find((p) => p.category === 'fee')!;
+    await refund({ amount: 2000, reason: 'Withdrew from term one', paymentId: feeOne.id }).expect(201);
+
+    // Term two is untouched by term one's refund: it costs 10,000 and, once
+    // paid, refuses another afghani. Counting every refund against whichever
+    // term was being paid made the desk accept money on a settled term.
+    await pay({ category: 'fee', amount: 10000, semesterId: secondSemesterId }).expect(201);
+    const overCollect = await pay({ category: 'fee', amount: 1, semesterId: secondSemesterId });
+    expect(overCollect.status).toBe(400);
+    expect(String(overCollect.body.error)).toMatch(/already fully paid/i);
+  });
+
+  it('term one still shows the debt its own refund re-opened', async () => {
+    await pay({ category: 'fee', amount: 10000, semesterId }).expect(201);
+    const feeOne = paymentsOf().find((p) => p.category === 'fee')!;
+    await refund({ amount: 2000, reason: 'Withdrew from term one', paymentId: feeOne.id }).expect(201);
+
+    // The re-opened 2,000 is collectable again — and only that.
+    const tooMuch = await pay({ category: 'fee', amount: 2001, semesterId });
+    expect(tooMuch.status).toBe(400);
+    await pay({ category: 'fee', amount: 2000, semesterId }).expect(201);
+    expect(paidTowardSemester()).toBe(10000);
+  });
+
+  it('a refund of a non-tuition charge changes no semester at all', async () => {
+    await pay({ category: 'fee', amount: 10000, semesterId }).expect(201);
+    await pay({ category: 'exam', amount: 1500, notes: 'Exam sitting fee' }).expect(201);
+    const exam = paymentsOf().find((p) => p.category === 'exam')!;
+    await refund({ amount: 1500, reason: 'Exam cancelled', paymentId: exam.id }).expect(201);
+
+    for (const sem of [semesterId, secondSemesterId]) {
+      const res = await pay({ category: 'fee', amount: 1, semesterId: sem });
+      if (sem === semesterId) {
+        expect(res.status).toBe(400);
+        expect(String(res.body.error)).toMatch(/already fully paid/i);
+      } else {
+        expect(res.status).toBe(201);
+      }
+    }
+  });
+});
+
 describe('WP-07 · attack · a refund cannot be pointed anywhere else', () => {
   beforeEach(async () => {
     await pay({ category: 'fee', amount: 10000, semesterId }).expect(201);
