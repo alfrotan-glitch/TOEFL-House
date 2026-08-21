@@ -220,6 +220,12 @@ throwaway work.
 
 ---
 
+## 5a. Decision memo
+
+The six questions above are answered with evidence and a recommendation per
+decision in `docs/work-packages/WP-07-payment-allocation-decisions.md`
+(READ-ONLY, awaiting owner approval).
+
 ## 6. Status
 
 - WP07-F16 and WP07-F17 remain **OPEN and unmodified** in the codebase; both are
