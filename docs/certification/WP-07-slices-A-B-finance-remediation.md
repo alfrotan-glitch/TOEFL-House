@@ -273,9 +273,22 @@ the CHARGE side, in two places the repository does not answer:
   tuition or for something else, so every invoice payment is counted as tuition.
 
 Both are money-truth defects with real cash consequences (double collection;
-understated tuition receivable). Both need a rule that cannot be derived from
-repository evidence, so under §105 they are raised rather than guessed. Nothing
-in either path was changed.
+understated tuition receivable). Both needed a rule that cannot be derived from
+repository evidence, so under §105 they were raised rather than guessed.
+
+The owner answered on 2026-08-21 with a business direction (**D-117**, **D-118**)
+and instructed that nothing be implemented until the current model has been
+verified against it. That verification is
+`docs/work-packages/WP-07-payment-allocation-analysis.md`: it establishes what
+already supports the direction, eight structural gaps with evidence (no
+obligation identity; tuition attributed by an ambiguous NAME; the installment
+plan is unnormalized JSON with no enrolment link; invoices carry no purpose or
+obligation; no partial or multi-obligation allocation; four independent
+allocation rules including a BOS reporting heuristic; free-text semesters
+repeated across five tables; fixed fees with no obligation at all), three
+candidate models assessed against the owner's rules, and six questions the owner
+must answer before any schema change. **Nothing in either path was changed, and
+no schema change was made.**
 
 ## RESOLVED BY OWNER DECISION (WP07-F11, refund attribution)
 
