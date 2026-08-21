@@ -36,7 +36,7 @@
 import type { Database } from 'better-sqlite3';
 import { HttpError } from '../../middleware/errorHandler.js';
 import { assertMoney } from '../../utils/money.js';
-import { TUITION_NET_SQL, getSemesterTuitionPaid } from '../../utils/studentBalance.js';
+import { TUITION_NET_SQL, getSemesterTuitionPaid, AID_SOURCE_KINDS_SQL } from '../../utils/studentBalance.js';
 import { id, today } from '../../utils/ids.js';
 import { assertOptionalIsoDate } from '../../utils/isoDate.js';
 
@@ -165,12 +165,12 @@ export function getObligationPosition(db: Database, obligationId: string): Oblig
   };
 }
 
-/** Scholarship money currently applied to one obligation. */
+/** Aid money currently applied to one obligation, whatever the instrument. */
 export function getObligationScholarshipSettled(db: Database, obligationId: string): number {
   const row = db
     .prepare(
       `SELECT COALESCE(SUM(amount), 0) AS total FROM obligation_allocations
-        WHERE obligation_id = ? AND source_kind = 'scholarship' AND status = 'active'`,
+        WHERE obligation_id = ? AND source_kind IN ${AID_SOURCE_KINDS_SQL} AND status = 'active'`,
     )
     .get(obligationId) as { total: number };
   return Number(row.total) || 0;
@@ -184,7 +184,7 @@ export function getStudentScholarshipSettled(db: Database, studentId: string): n
          FROM obligation_allocations a
          JOIN student_obligations o ON o.id = a.obligation_id
         WHERE o.student_id = ? AND o.kind = 'tuition'
-          AND a.source_kind = 'scholarship' AND a.status = 'active'`,
+          AND a.source_kind IN ${AID_SOURCE_KINDS_SQL} AND a.status = 'active'`,
     )
     .get(studentId) as { total: number };
   return Number(row.total) || 0;
@@ -199,7 +199,7 @@ export function getSemesterScholarshipSettled(db: Database, studentId: string, s
          JOIN student_obligations o ON o.id = a.obligation_id
          JOIN student_semesters ss ON ss.id = o.semester_id
         WHERE o.student_id = ? AND ss.semester_name = ?
-          AND a.source_kind = 'scholarship' AND a.status = 'active'`,
+          AND a.source_kind IN ${AID_SOURCE_KINDS_SQL} AND a.status = 'active'`,
     )
     .get(studentId, semesterName) as { total: number };
   return Number(row.total) || 0;
@@ -267,9 +267,14 @@ export function getAwardPosition(db: Database, awardId: string): AwardPosition {
 export function getDonationUnallocated(db: Database, donationId: string): { amount: number; allocated: number; unallocated: number } {
   const donation = db.prepare(`SELECT amount FROM donations WHERE id = ?`).get(donationId) as { amount: number } | undefined;
   if (!donation) throw new HttpError(404, 'Donation not found.');
+  // A donation may be earmarked to a scholarship fund OR to a sponsorship
+  // agreement, and the two compete for the same money. Counting only one lets
+  // the same afghani be committed twice.
   const allocated = Number(
-    (db.prepare(`SELECT COALESCE(SUM(amount),0) AS t FROM scholarship_fundings WHERE donation_id = ?`)
-      .get(donationId) as { t: number }).t,
+    (db.prepare(
+      `SELECT COALESCE((SELECT SUM(amount) FROM scholarship_fundings WHERE donation_id = ?), 0)
+            + COALESCE((SELECT SUM(amount) FROM sponsorship_receipts  WHERE donation_id = ?), 0) AS t`,
+    ).get(donationId, donationId) as { t: number }).t,
   ) || 0;
   const amount = Number(donation.amount) || 0;
   return { amount, allocated, unallocated: Math.max(0, amount - allocated) };
@@ -542,4 +547,173 @@ export function markInstallmentPaid(db: Database, installmentId: string, payment
     .prepare(`UPDATE student_installments SET status = 'paid', paid_payment_id = ? WHERE id = ? AND status = 'pending'`)
     .run(paymentId, installmentId);
   if (updated.changes !== 1) throw new HttpError(409, 'This instalment is no longer payable.');
+}
+
+// ── Sponsorships (owner decision S6) ───────────────────────────────────────
+//
+// A sponsorship agreement is a PROMISE: `monthly_amount` says what a donor
+// intends to give. It settles nothing, because a promise is not money. What
+// settles tuition is a RECEIPT — a donation from the sponsoring donor,
+// earmarked to the agreement — applied to a named tuition obligation.
+//
+// The instrument is separate from a scholarship (they are different concepts),
+// but the settlement is not: both land in `obligation_allocations`, because
+// there is exactly one place where money meets an obligation.
+
+export interface SponsorshipPosition {
+  agreementId: string;
+  donorId: string;
+  studentId: string | null;
+  /** Promised per month. Bounds nothing — the same role `total_budget` plays. */
+  monthlyAmount: number;
+  /** Donation money actually earmarked to this agreement. The only backing. */
+  received: number;
+  /** Applied to tuition obligations by active allocations. */
+  applied: number;
+  /** Still applicable. */
+  available: number;
+  status: 'active' | 'completed' | 'terminated';
+}
+
+export function getSponsorshipPosition(db: Database, agreementId: string): SponsorshipPosition {
+  const agreement = db
+    .prepare(`SELECT id, donor_id, student_id, monthly_amount, status FROM sponsorship_agreements WHERE id = ?`)
+    .get(agreementId) as
+    | { id: string; donor_id: string; student_id: string | null; monthly_amount: number; status: SponsorshipPosition['status'] }
+    | undefined;
+  if (!agreement) throw new HttpError(404, 'Sponsorship agreement not found.');
+
+  const received = Number(
+    (db.prepare(`SELECT COALESCE(SUM(amount),0) AS t FROM sponsorship_receipts WHERE agreement_id = ?`)
+      .get(agreementId) as { t: number }).t,
+  ) || 0;
+  const applied = Number(
+    (db.prepare(
+      `SELECT COALESCE(SUM(amount),0) AS t FROM obligation_allocations
+        WHERE sponsorship_agreement_id = ? AND source_kind = 'sponsorship' AND status = 'active'`,
+    ).get(agreementId) as { t: number }).t,
+  ) || 0;
+
+  return {
+    agreementId,
+    donorId: agreement.donor_id,
+    studentId: agreement.student_id,
+    monthlyAmount: Number(agreement.monthly_amount) || 0,
+    received,
+    applied,
+    available: received - applied,
+    status: agreement.status,
+  };
+}
+
+/**
+ * Earmarks donation money to a sponsorship agreement — the only way an
+ * agreement is backed.
+ *
+ * Bounded by what is left of the donation, which the scholarship funds compete
+ * for too, so one afghani can never back two commitments.
+ */
+export function recordSponsorshipReceipt(
+  db: Database,
+  params: { agreementId: string; donationId: string; amount: number; branchId: string; operatorName: string; date?: string },
+): { receiptId: string } {
+  if (!db.inTransaction) throw new Error('recordSponsorshipReceipt() called outside a transaction.');
+  const amount = assertMoney(params.amount, 'Receipt amount');
+  if (amount <= 0) throw new HttpError(400, 'A receipt amount must be greater than zero.');
+
+  const position = getSponsorshipPosition(db, params.agreementId);
+  if (position.status !== 'active') throw new HttpError(409, 'This sponsorship is no longer active.');
+
+  const donation = getDonationUnallocated(db, params.donationId);
+  if (amount > donation.unallocated) {
+    throw new HttpError(400, `Only ${donation.unallocated} AFN of that donation is still unallocated.`);
+  }
+
+  const receiptId = id('sprc');
+  db.prepare(
+    `INSERT INTO sponsorship_receipts (id, agreement_id, donation_id, amount, branch_id, operator_name, date)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(receiptId, params.agreementId, params.donationId, amount, params.branchId, params.operatorName, params.date ?? today());
+  return { receiptId };
+}
+
+/**
+ * Applies sponsorship money to one tuition obligation.
+ *
+ * Writes no cash and no ledger row, for the same reason a scholarship does not:
+ * the donor's money was recognised when the donation arrived, and recognising
+ * it again as tuition would count one afghani twice and break the derived
+ * branch cash position.
+ *
+ * An agreement that names a student may only settle that student's tuition.
+ * An agreement that names none may settle any student's — the donor sponsored
+ * a programme rather than a person.
+ */
+export function allocateSponsorshipToObligation(
+  db: Database,
+  params: { agreementId: string; obligationId: string; amount: number; operatorName: string; date?: string },
+): { allocationId: string } {
+  if (!db.inTransaction) throw new Error('allocateSponsorshipToObligation() called outside a transaction.');
+  const amount = assertMoney(params.amount, 'Allocation amount');
+  if (amount <= 0) throw new HttpError(400, 'An allocation must be greater than zero.');
+
+  const sponsorship = getSponsorshipPosition(db, params.agreementId);
+  if (sponsorship.status !== 'active') throw new HttpError(409, 'This sponsorship is no longer active.');
+  if (amount > sponsorship.available) {
+    throw new HttpError(
+      400,
+      sponsorship.received === 0
+        ? 'This sponsorship has received no money yet, so it can settle nothing.'
+        : `Only ${sponsorship.available} AFN of this sponsorship is still unapplied.`,
+    );
+  }
+
+  const position = getObligationPosition(db, params.obligationId);
+  if (position.obligation.status !== 'open') throw new HttpError(409, 'This obligation is not open.');
+  if (sponsorship.studentId && position.obligation.studentId !== sponsorship.studentId) {
+    throw new HttpError(403, 'That obligation belongs to a student this sponsorship does not name.');
+  }
+  if (amount > position.outstanding) {
+    throw new HttpError(400, `Only ${position.outstanding} AFN is still outstanding on that obligation.`);
+  }
+
+  const allocationId = id('alloc');
+  db.prepare(
+    `INSERT INTO obligation_allocations
+       (id, obligation_id, amount, source_kind, sponsorship_agreement_id, status, operator_name, date)
+     VALUES (?, ?, ?, 'sponsorship', ?, 'active', ?, ?)`,
+  ).run(allocationId, params.obligationId, amount, params.agreementId, params.operatorName, params.date ?? today());
+  return { allocationId };
+}
+
+/**
+ * Reverses a sponsorship allocation.
+ *
+ * The amount returns to its AGREEMENT — still the donor's money, still
+ * earmarked, immediately re-applicable — and the obligation re-opens by exactly
+ * that amount. It never returns to the student and never becomes cash.
+ */
+export function reverseSponsorshipAllocation(
+  db: Database,
+  params: { allocationId: string; reason: string; operatorName: string },
+): void {
+  if (!db.inTransaction) throw new Error('reverseSponsorshipAllocation() called outside a transaction.');
+  const reason = String(params.reason ?? '').trim();
+  if (reason.length < 8) throw new HttpError(400, 'A reversal reason of at least 8 characters is required.');
+
+  const row = db
+    .prepare(`SELECT id, status, source_kind FROM obligation_allocations WHERE id = ?`)
+    .get(params.allocationId) as { id: string; status: string; source_kind: string } | undefined;
+  if (!row) throw new HttpError(404, 'Allocation not found.');
+  if (row.source_kind !== 'sponsorship') throw new HttpError(400, 'Only a sponsorship allocation is reversed here.');
+  if (row.status !== 'active') throw new HttpError(409, 'This allocation is already reversed.');
+
+  const updated = db
+    .prepare(
+      `UPDATE obligation_allocations
+          SET status = 'reversed', reversed_at = datetime('now'), reversed_by = ?, reversal_reason = ?
+        WHERE id = ? AND status = 'active'`,
+    )
+    .run(params.operatorName, reason, params.allocationId);
+  if (updated.changes !== 1) throw new HttpError(409, 'This allocation is already reversed.');
 }

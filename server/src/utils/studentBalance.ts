@@ -106,7 +106,20 @@ const TUITION_PAYMENT_SQL = `(
 )`;
 
 
-/** Scholarship money applied to any of this student's tuition obligations. */
+/**
+ * SQL fragment: the instruments that settle tuition without moving cash.
+ *
+ * Scholarship and sponsorship money were both recognised as income when the
+ * donation arrived, so applying either settles a term and writes no ledger row
+ * (owner decisions D-120 and S6). `payment` is deliberately absent: cash is
+ * attributed through `payments.semester`, and counting it here as well would
+ * settle every cash term twice. Declared once, here, because three read paths
+ * in this module and three in the obligation authority ask the same question,
+ * and a copy that drifts silently changes what a student owes.
+ */
+export const AID_SOURCE_KINDS_SQL = `('scholarship','sponsorship')`;
+
+/** Aid money applied to any of this student's tuition obligations. */
 function studentScholarshipSettled(db: Database, studentId: string): number {
   const row = db
     .prepare(
@@ -114,7 +127,7 @@ function studentScholarshipSettled(db: Database, studentId: string): number {
          FROM obligation_allocations a
          JOIN student_obligations o ON o.id = a.obligation_id
         WHERE o.student_id = ? AND o.kind = 'tuition'
-          AND a.source_kind = 'scholarship' AND a.status = 'active'`,
+          AND a.source_kind IN ${AID_SOURCE_KINDS_SQL} AND a.status = 'active'`,
     )
     .get(studentId) as { total: number };
   return Number(row.total) || 0;
@@ -181,7 +194,7 @@ export function getSemesterScholarshipSettled(db: Database, studentId: string, s
          JOIN student_obligations o ON o.id = a.obligation_id
          JOIN student_semesters ss ON ss.id = o.semester_id
         WHERE o.student_id = ? AND ss.semester_name = ?
-          AND a.source_kind = 'scholarship' AND a.status = 'active'`,
+          AND a.source_kind IN ${AID_SOURCE_KINDS_SQL} AND a.status = 'active'`,
     )
     .get(studentId, semesterName) as { total: number };
   return Number(row.total) || 0;

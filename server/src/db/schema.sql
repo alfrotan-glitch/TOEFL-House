@@ -2769,9 +2769,13 @@ CREATE TABLE IF NOT EXISTS obligation_allocations (
   id                   TEXT PRIMARY KEY,
   obligation_id        TEXT NOT NULL REFERENCES student_obligations(id) ON DELETE RESTRICT,
   amount               INTEGER NOT NULL CHECK (amount > 0),
-  source_kind          TEXT NOT NULL CHECK (source_kind IN ('payment','scholarship')),
+  source_kind          TEXT NOT NULL CHECK (source_kind IN ('payment','scholarship','sponsorship')),
   payment_id           TEXT REFERENCES payments(id) ON DELETE RESTRICT,
   scholarship_award_id TEXT REFERENCES scholarship_awards(id) ON DELETE RESTRICT,
+  -- A sponsorship is a THIRD instrument, not a scholarship wearing another name
+  -- (owner decision S5 keeps the two concepts apart). It settles through this
+  -- same authority because there is only one place money meets an obligation.
+  sponsorship_agreement_id TEXT REFERENCES sponsorship_agreements(id) ON DELETE RESTRICT,
   status               TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','reversed')),
   reversed_at          TEXT,
   reversed_by          TEXT,
@@ -2780,8 +2784,9 @@ CREATE TABLE IF NOT EXISTS obligation_allocations (
   date                 TEXT NOT NULL,
   created_at           TEXT NOT NULL DEFAULT (datetime('now')),
   CHECK (
-       (source_kind = 'payment'     AND payment_id IS NOT NULL AND scholarship_award_id IS NULL)
-    OR (source_kind = 'scholarship' AND scholarship_award_id IS NOT NULL AND payment_id IS NULL)
+       (source_kind = 'payment'     AND payment_id IS NOT NULL AND scholarship_award_id IS NULL AND sponsorship_agreement_id IS NULL)
+    OR (source_kind = 'scholarship' AND scholarship_award_id IS NOT NULL AND payment_id IS NULL AND sponsorship_agreement_id IS NULL)
+    OR (source_kind = 'sponsorship' AND sponsorship_agreement_id IS NOT NULL AND payment_id IS NULL AND scholarship_award_id IS NULL)
   ),
   CHECK (
        (status = 'active'   AND reversed_at IS NULL)
@@ -2791,6 +2796,7 @@ CREATE TABLE IF NOT EXISTS obligation_allocations (
 CREATE INDEX IF NOT EXISTS idx_allocations_obligation ON obligation_allocations(obligation_id, status);
 CREATE INDEX IF NOT EXISTS idx_allocations_award ON obligation_allocations(scholarship_award_id, status);
 CREATE INDEX IF NOT EXISTS idx_allocations_payment ON obligation_allocations(payment_id, status);
+CREATE INDEX IF NOT EXISTS idx_allocations_sponsorship ON obligation_allocations(sponsorship_agreement_id, status);
 CREATE TRIGGER IF NOT EXISTS trg_allocations_money_scale_insert
 BEFORE INSERT ON obligation_allocations
 WHEN NEW.amount <> CAST(NEW.amount AS INTEGER)
@@ -2810,6 +2816,35 @@ CREATE TABLE IF NOT EXISTS sponsorship_agreements (
 );
 CREATE INDEX IF NOT EXISTS idx_sponsorships_donor    ON sponsorship_agreements(donor_id);
 CREATE INDEX IF NOT EXISTS idx_sponsorships_student  ON sponsorship_agreements(student_id);
+
+-- Money actually RECEIVED under a sponsorship agreement (owner decision S6).
+-- `sponsorship_agreements.monthly_amount` is a promise and settles nothing; a
+-- receipt is a donation from the sponsoring donor, earmarked to the agreement.
+-- The donation is where the income was recognised, which is why applying a
+-- receipt to tuition moves no cash — the same rule that governs scholarships.
+CREATE TABLE IF NOT EXISTS sponsorship_receipts (
+  id            TEXT PRIMARY KEY,
+  agreement_id  TEXT NOT NULL REFERENCES sponsorship_agreements(id) ON DELETE RESTRICT,
+  donation_id   TEXT NOT NULL REFERENCES donations(id) ON DELETE RESTRICT,
+  amount        INTEGER NOT NULL CHECK (amount > 0),
+  branch_id     TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  operator_name TEXT,
+  date          TEXT NOT NULL,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_sponsorship_receipts_agreement ON sponsorship_receipts(agreement_id);
+CREATE INDEX IF NOT EXISTS idx_sponsorship_receipts_donation  ON sponsorship_receipts(donation_id);
+CREATE TRIGGER IF NOT EXISTS trg_sponsorship_receipts_money_scale_insert
+BEFORE INSERT ON sponsorship_receipts
+WHEN NEW.amount <> CAST(NEW.amount AS INTEGER)
+BEGIN SELECT RAISE(ABORT, 'sponsorship receipt amount must be a whole number of AFN'); END;
+-- The money must come from the donor who signed the agreement. Without this a
+-- receipt could book any donor's donation against any sponsorship.
+CREATE TRIGGER IF NOT EXISTS trg_sponsorship_receipts_donor_insert
+BEFORE INSERT ON sponsorship_receipts
+WHEN (SELECT donor_id FROM donations WHERE id = NEW.donation_id)
+  IS NOT (SELECT donor_id FROM sponsorship_agreements WHERE id = NEW.agreement_id)
+BEGIN SELECT RAISE(ABORT, 'a sponsorship receipt must come from the donor who signed the agreement'); END;
 
 CREATE TABLE IF NOT EXISTS impact_metrics ( 
   id            TEXT PRIMARY KEY, 

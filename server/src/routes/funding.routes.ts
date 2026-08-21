@@ -38,6 +38,10 @@ import {
   getObligationPosition,
   listTuitionObligations,
   reverseScholarshipAllocation,
+  getSponsorshipPosition,
+  recordSponsorshipReceipt,
+  allocateSponsorshipToObligation,
+  reverseSponsorshipAllocation,
 } from '../core/finance/obligations.js';
 import { eventBus } from '../core/events/event-bus.js';
 
@@ -912,3 +916,141 @@ fundingRouter.get(
 );
 
 export default fundingRouter;
+
+// ── Sponsorship money (owner decision S6) ──────────────────────────────────
+//
+// `monthly_amount` is a promise and settles nothing. These endpoints record the
+// money that actually arrives under an agreement and apply it to named tuition
+// obligations through the one settlement authority.
+
+/** What an agreement has received, applied and can still apply. */
+fundingRouter.get(
+  '/sponsorships/:id/position',
+  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager'),
+  ah(async (req, res) => {
+    const agreement = stmtGetSponsorshipById.get(req.params.id) as any;
+    if (!agreement) throw new HttpError(404, 'Sponsorship agreement not found.');
+    requireFundingBranchAccess(req, agreement.branch_id);
+    const position = getSponsorshipPosition(db, agreement.id);
+    const receipts = db
+      .prepare(
+        `SELECT r.id, r.donation_id, r.amount, r.date, d.receipt_no
+           FROM sponsorship_receipts r
+           JOIN donations d ON d.id = r.donation_id
+          WHERE r.agreement_id = ? ORDER BY r.date DESC, r.rowid DESC`,
+      )
+      .all(agreement.id);
+    const allocations = db
+      .prepare(
+        `SELECT a.id, a.amount, a.date, a.status, ss.semester_name, o.student_id
+           FROM obligation_allocations a
+           JOIN student_obligations o ON o.id = a.obligation_id
+           JOIN student_semesters ss ON ss.id = o.semester_id
+          WHERE a.sponsorship_agreement_id = ? ORDER BY a.date DESC, a.rowid DESC`,
+      )
+      .all(agreement.id);
+    res.json({ ...position, receipts, allocations });
+  }),
+);
+
+/** Earmark donation money to an agreement. The only way an agreement is backed. */
+fundingRouter.post(
+  '/sponsorships/:id/receipts',
+  authorize('owner', 'general_manager', 'donor_manager'),
+  ah(async (req, res) => {
+    const user = getUserContext(req);
+    const agreement = stmtGetSponsorshipById.get(req.params.id) as any;
+    if (!agreement) throw new HttpError(404, 'Sponsorship agreement not found.');
+    requireFundingBranchAccess(req, agreement.branch_id);
+
+    const { donationId, amount } = req.body as { donationId?: string; amount?: unknown };
+    const donationRef = typeof donationId === 'string' ? donationId.trim() : '';
+    if (!donationRef) throw new HttpError(400, 'A donation must be named (donationId).');
+    const donation = db.prepare('SELECT id, branch_id, donor_id FROM donations WHERE id = ?').get(donationRef) as
+      | { id: string; branch_id: string; donor_id: string }
+      | undefined;
+    if (!donation) throw new HttpError(404, 'Donation not found.');
+    if (donation.branch_id !== agreement.branch_id) {
+      throw new HttpError(400, 'A sponsorship may only be backed by a donation of its own branch.');
+    }
+    if (donation.donor_id !== agreement.donor_id) {
+      throw new HttpError(400, 'A sponsorship receipt must come from the donor who signed the agreement.');
+    }
+
+    let receiptId = '';
+    db.transaction(() => {
+      receiptId = recordSponsorshipReceipt(db, {
+        agreementId: agreement.id,
+        donationId: donation.id,
+        amount: amount as number,
+        branchId: agreement.branch_id,
+        operatorName: user.fullName,
+      }).receiptId;
+    })();
+
+    const position = getSponsorshipPosition(db, agreement.id);
+    writeAudit(req, `Recorded sponsorship receipt on agreement ${agreement.id} (donation ${donation.id}); received ${position.received} AFN in total`, { branchId: agreement.branch_id });
+    res.status(201).json({ id: receiptId, ...position });
+  }),
+);
+
+/** Apply sponsorship money to one tuition obligation. Moves no cash. */
+fundingRouter.post(
+  '/sponsorships/:id/allocations',
+  authorize('owner', 'general_manager', 'donor_manager'),
+  ah(async (req, res) => {
+    const user = getUserContext(req);
+    const agreement = stmtGetSponsorshipById.get(req.params.id) as any;
+    if (!agreement) throw new HttpError(404, 'Sponsorship agreement not found.');
+    requireFundingBranchAccess(req, agreement.branch_id);
+
+    const { obligationId, amount } = req.body as { obligationId?: string; amount?: unknown };
+    const obligationRef = typeof obligationId === 'string' ? obligationId.trim() : '';
+    if (!obligationRef) throw new HttpError(400, 'A tuition obligation must be named (obligationId).');
+
+    let allocationId = '';
+    db.transaction(() => {
+      allocationId = allocateSponsorshipToObligation(db, {
+        agreementId: agreement.id,
+        obligationId: obligationRef,
+        amount: amount as number,
+        operatorName: user.fullName,
+      }).allocationId;
+    })();
+
+    const position = getObligationPosition(db, obligationRef);
+    writeAudit(req, `Applied sponsorship ${agreement.id} to obligation ${obligationRef}`, { branchId: agreement.branch_id });
+    res.status(201).json({ id: allocationId, sponsorship: getSponsorshipPosition(db, agreement.id), obligation: position });
+  }),
+);
+
+/** Reverse a sponsorship allocation. The money returns to its agreement. */
+fundingRouter.post(
+  '/sponsorship-allocations/:id/reverse',
+  authorize('owner', 'general_manager', 'donor_manager'),
+  ah(async (req, res) => {
+    const user = getUserContext(req);
+    const allocation = db
+      .prepare(
+        `SELECT a.id, a.sponsorship_agreement_id, a.obligation_id, sp.branch_id
+           FROM obligation_allocations a
+           JOIN sponsorship_agreements sp ON sp.id = a.sponsorship_agreement_id
+          WHERE a.id = ?`,
+      )
+      .get(req.params.id) as { id: string; sponsorship_agreement_id: string; obligation_id: string; branch_id: string } | undefined;
+    if (!allocation) throw new HttpError(404, 'Allocation not found.');
+    requireFundingBranchAccess(req, allocation.branch_id);
+
+    const { reason } = req.body as { reason?: string };
+    db.transaction(() => {
+      reverseSponsorshipAllocation(db, { allocationId: allocation.id, reason: reason ?? '', operatorName: user.fullName });
+    })();
+
+    writeAudit(req, `Reversed sponsorship allocation ${allocation.id}`, { branchId: allocation.branch_id });
+    res.json({
+      ok: true,
+      sponsorship: getSponsorshipPosition(db, allocation.sponsorship_agreement_id),
+      obligation: getObligationPosition(db, allocation.obligation_id),
+    });
+  }),
+);

@@ -454,3 +454,65 @@ invoice is now refused with *"That term has only 4000 AFN left to bill"*.
 * **NOT closed — WP07-F18 (owner question raised, A-18):** the enrolment auto-invoice bills a *mixture* (`registration` + `semester` fees) against a `student_semesters` row inserted with `fee_amount = 0`. Tuition receivable therefore still has two representations depending on which door the student came through. The interim `other` classification is forced and loses nothing today, but the underlying split is an owner decision.
 * **NOT started in this slice:** E1b (cash payments onto `obligation_allocations`), S5, S6.
 * This slice writes the **existing** settlement authority (`payments.semester`, D-116), not a second one. The migration of all cash onto allocations is step 4 and is done once, for every writer.
+
+---
+
+# Slice G — sponsorship money is real money (S6), and the S5 boundary is guarded
+
+**Date:** 2026-08-21 · **Owner decisions executed:** S6 (→ D-131/D-132/D-133), S5 (→ D-134)
+**Release gate:** 22 passed · 0 failed · 0 skipped · **Server suite:** 2771 passed · 160 known WP-04 skips · 0 failed
+**Schema:** 117 tables · 251 indexes · 127 triggers
+
+## The pre-state, as fact
+
+`grep -rn "sponsorship" server/src --include=*.ts` over the source before this
+slice returns counts, list queries, a create/update route and one event name.
+**No code path read `monthly_amount` for any financial purpose.** An agreement
+promising 5,000 AFN a month reduced no tuition, settled no term and appeared in
+no position. The number existed and meant nothing.
+
+## The model
+
+```
+donation (income recognised here, once)
+   └─ sponsorship_receipts        earmarked to the agreement, by the SIGNING donor
+        └─ obligation_allocations source_kind = 'sponsorship'  → settles a tuition term
+                                  no cash · no ledger row
+```
+
+A third instrument, one settlement authority. `obligation_allocations` gains
+`sponsorship_agreement_id` and a third `source_kind`, with the exactly-one-of
+CHECK extended so an allocation can never name two instruments.
+
+## Rules pinned by executed tests (31 cases)
+
+| Rule | Evidence |
+|---|---|
+| A promise settles nothing | 5,000 AFN/month, no receipts → `400 has received no money yet`; student still owes 12,000 |
+| Received money settles the named term | after a 5,000 receipt + allocation: term settled 5,000, outstanding 7,000 |
+| No cash is created | branch main and saving balances unchanged, ledger row count unchanged, reconciliation healthy |
+| Bounded by what it received | `Only 3000 AFN of this sponsorship is still unapplied` |
+| Bounded by what the term owes | `Only 12000 AFN is still outstanding` |
+| It cannot reach a student it does not name | `403` |
+| The money must be the signing donor's | route check **and** `trg_sponsorship_receipts_donor_insert` |
+| One afghani cannot back two commitments | 5,000 donation, 4,000 to a fund → a 2,000 receipt is refused, 1,000 accepted |
+| A reversal returns money to its agreement, not the student | available back to 12,000, term re-opens to 12,000, second reversal `409` |
+| A terminated agreement receives and settles nothing | `409` on both |
+| Amount coercion is refused at both boundaries | 8 adversarial values × receipt and allocation, nothing written |
+
+## S5 — the boundary the owner ruled on
+
+Both concepts stay, and the difference is now asserted rather than remembered:
+
+* **Discount `SPONSORSHIP`** reduces what the student is **charged**; no donor money exists; owner authorization required.
+* **Sponsorship agreement** leaves the charge untouched and **settles** it with a donor's received money.
+
+Proven: applying a sponsorship leaves `student_semesters.net_fee_amount`
+unchanged and yields exactly one `sponsorship` allocation — the debt is gone
+because it was paid, not because it was reduced.
+
+## Scope honesty
+
+* **Server-complete, operator-incomplete.** The four sponsorship endpoints exist and are proven, but `FundingView.tsx` does not yet expose them: an operator cannot record a receipt or apply a sponsorship from a screen. The scholarship lifecycle (D-124) has its surface; the sponsorship lifecycle does not.
+* **E1b not started** — cash is still attributed by `payments.semester`.
+* **WP07-F18 still open** and awaiting the owner (A-18).
