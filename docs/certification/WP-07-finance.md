@@ -85,3 +85,15 @@ agent that wrote the change. Protocol §5 mitigates that by reviewing from artif
 converting findings into executable gates — three defects and one coverage gap were found
 that way — but it does not eliminate the blind spot, and claiming otherwise would be the
 exact failure the protocol was written to stop.
+
+---
+
+## Subsequent work (added 2026-08-21, does not alter the record above)
+
+`docs/certification/WP-07-slice-A-budget-treasury.md` records a scope-limited
+remediation of the budget-line movement authority, savings-ledger purity,
+finance operational settings and reconciliation precision, performed under the
+Master Protocol. It repairs four proven money defects that post-date this v2
+record and does **not** discharge WP-07's re-certification burden: invoices,
+payments, refunds, discounts, receipts and the C-2 legacy-test disposition
+remain open.

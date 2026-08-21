@@ -25,6 +25,7 @@ import { computeReconciliation } from '../utils/reconciliation.js';
 import { BUDGET_MOVEMENT_CATEGORY, BUDGET_MOVEMENT_TYPE, postBudgetMovement } from '../core/finance/budget-movements.js';
 import { assertMoney } from '../utils/money.js';
 import { SYSTEM_DEFAULTS } from '../core/configuration/policy-catalog.js';
+import { FINANCE_SETTINGS } from '../core/configuration/finance-settings.js';
 
 export const financeRouter = Router();
 financeRouter.use(authenticate);
@@ -71,8 +72,11 @@ const stmtDashOperatingExpenseAll = db.prepare(
 const stmtDashOperatingExpenseBranch = db.prepare(
   `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE ${OPERATING_EXPENSE_SQL} AND branch_id = ? AND date >= ? AND date <= ?`
 );
-const stmtDashBudgetAll = db.prepare('SELECT id, name, allocated_amount, current_amount FROM budget_lines ORDER BY sort_order, name COLLATE NOCASE, id');
-const stmtDashBudgetBranch = db.prepare('SELECT id, name, allocated_amount, current_amount FROM budget_lines WHERE branch_id = ? ORDER BY sort_order, name COLLATE NOCASE, id');
+// Retired lines are excluded, which is only safe because a line holding money
+// cannot be retired (see PATCH /budget-lines/:id): the panel can therefore never
+// hide a funded envelope, and it does not report dead ones as fully utilized.
+const stmtDashBudgetAll = db.prepare('SELECT id, name, allocated_amount, current_amount FROM budget_lines WHERE is_active = 1 ORDER BY sort_order, name COLLATE NOCASE, id');
+const stmtDashBudgetBranch = db.prepare('SELECT id, name, allocated_amount, current_amount FROM budget_lines WHERE branch_id = ? AND is_active = 1 ORDER BY sort_order, name COLLATE NOCASE, id');
 const INVOICE_RECEIVABLE_SQL = `SELECT i.id, i.net_amount, i.status, i.due_date, i.branch_id,
             (SELECT COALESCE(SUM(p.amount),0) FROM payments p WHERE p.invoice_id = i.id AND p.status = 'completed') AS paid
           FROM invoices i`;
@@ -596,6 +600,16 @@ financeRouter.patch(
       // salary run, with no way back through the UI.
       throw new HttpError(409, 'A payroll budget line cannot be retired; payroll depends on it.');
     }
+    if (isActive === false && Number(line.current_amount) > 0) {
+      // Money must not be parked in an envelope nobody can see. Budget figures
+      // and pickers exclude retired lines, while reconciliation still counts
+      // every line, so retiring a funded one hides real money from the people
+      // responsible for it. Settle it first — return it or move it.
+      throw new HttpError(
+        409,
+        `Budget line "${line.name}" still holds ${Number(line.current_amount)} AFN. Return or transfer the remaining balance before retiring it.`,
+      );
+    }
     if (channelId) {
       const channel = db.prepare('SELECT category_id FROM finance_category_channels WHERE id = ? AND is_active = 1')
         .get(channelId) as { category_id: string } | undefined;
@@ -634,6 +648,8 @@ financeRouter.post(
     try { amount = assertMoney(req.body?.amount, 'Charge amount'); }
     catch { throw new HttpError(400, 'A charge amount in whole AFN greater than zero is required.'); }
     if (amount <= 0) throw new HttpError(400, 'A charge amount in whole AFN greater than zero is required.');
+
+    if (!budgetLine.is_active) throw new HttpError(409, 'A retired budget line cannot be funded.');
 
     const date = today();
     const tx = db.transaction(() => {
@@ -1002,11 +1018,13 @@ financeRouter.put(
   '/expense-auto-approve-threshold',
   requirePermission('Budget.Allocate', 'Budget.Edit', 'Expense.Approve'),
   ah(async (req, res) => {
-    const { threshold } = req.body as { threshold?: number };
-    if (threshold == null || threshold < 0) throw new HttpError(400, 'Threshold must be a non-negative number.');
-    setSetting('expense_auto_approve_threshold', String(Math.round(threshold)));
-    writeAudit(req, `Set expense auto-approve threshold to ${Math.round(threshold)} AFN`);
-    res.json({ ok: true, threshold: Math.round(threshold) });
+    // Same authority as the finance configuration form, so the two controls
+    // cannot accept different values for one setting.
+    const setting = FINANCE_SETTINGS.expenseAutoApproveThreshold;
+    const threshold = setting.parse((req.body as { threshold?: unknown }).threshold);
+    setSetting(setting.key, String(threshold));
+    writeAudit(req, `Set expense auto-approve threshold to ${threshold} AFN`);
+    res.json({ ok: true, threshold });
   })
 );
 
@@ -1090,20 +1108,13 @@ financeRouter.put(
   '/saving-engine/settings',
   requirePermission('Budget.Allocate', 'Budget.Edit', 'Expense.Approve'),
   ah(async (req, res) => {
-    // Parse, never coerce: `'abc' < 0` and `'abc' > 100` are both false, so the
-    // old comparison-only check stored the string verbatim and every later read
-    // silently fell back to the default rate while the settings screen showed
-    // the value the operator typed.
-    const raw = (req.body as { percent?: unknown }).percent;
-    const percent = typeof raw === 'number'
-      ? raw
-      : typeof raw === 'string' && /^\d+(\.\d+)?$/.test(raw.trim())
-        ? Number(raw.trim())
-        : Number.NaN;
-    if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
-      throw new HttpError(400, 'Percentage must be a number between 0 and 100.');
-    }
-    setSetting('daily_saving_percent', String(percent));
+    // Parsed by the finance settings authority, so this control and the finance
+    // configuration form apply one rule. A comparison-only guard passes strings
+    // through (`'abc' < 0` is false), after which every read silently falls
+    // back to the default rate while the screen shows what was typed.
+    const setting = FINANCE_SETTINGS.dailySavingPercent;
+    const percent = setting.parse((req.body as { percent?: unknown }).percent);
+    setSetting(setting.key, String(percent));
     writeAudit(req, `Changed daily savings percentage to ${percent}%`);
     res.json({ ok: true, percent });
   })

@@ -16,7 +16,8 @@ import { recordIncome } from '../utils/income.js';
 import { nextReceiptNumber } from '../utils/receipt.js';
 import { nextInvoiceNumber } from '../utils/invoice.js';
 import { SYSTEM_DEFAULTS } from '../core/configuration/policy-catalog.js';
-import { assertMoney, assertDayOffset, assertComputedMoney } from '../utils/money.js';
+import { assertMoney, assertComputedMoney } from '../utils/money.js';
+import { FINANCE_SETTING_LIST } from '../core/configuration/finance-settings.js';
 import { resolveIdempotency, isUniqueViolation } from '../utils/idempotency.js';
 
 export const invoicesRouter = Router();
@@ -137,33 +138,20 @@ invoicesRouter.put(
   authorize('general_manager', 'owner'),
   ah(async (req, res) => {
     const body = req.body as Record<string, unknown>;
-    const map: Record<string, string> = {
-      invoiceDueDays: 'invoice_due_days',
-      expenseAutoApproveThreshold: 'expense_auto_approve_threshold',
-      dailySavingPercent: 'daily_saving_percent',
-    };
-    for (const [jsKey, dbKey] of Object.entries(map)) {
-      if (body[jsKey] == null) continue;
-      if (jsKey === 'invoiceDueDays') {
-        // INV-1: `Number(x) >= 0` accepted 1e20, which is stored fine and only
-        // fails later — `new Date().setDate(getDate() + 1e20)` produces an
-        // Invalid Date and `.toISOString()` throws, so EVERY subsequent invoice
-        // creation and issue returned HTTP 500 "Invalid time value" until an
-        // owner reverted the setting. Validating the day count here keeps the
-        // failure at the configuration write, where it is visible and harmless.
-        //
-        // `assertDayOffset` is the shared whole-number boundary (same type
-        // discipline as assertMoney/assertSeatCount); its ceiling is a
-        // technical one — the largest offset that still yields a valid Date —
-        // deliberately NOT an invented business maximum.
-        setSetting(dbKey, String(assertDayOffset(body[jsKey], 'Invoice due days')));
-        continue;
-      }
-      const n = Number(body[jsKey]);
-      if (Number.isFinite(n) && n >= 0) setSetting(dbKey, String(n));
+    // One validation authority for all three keys
+    // (`core/configuration/finance-settings`). Two rules had drifted here: the
+    // savings rate was accepted with no upper bound, and a value that failed
+    // the check was silently skipped while the response still said `ok`.
+    const applied: Record<string, number> = {};
+    for (const setting of FINANCE_SETTING_LIST) {
+      const provided = body[setting.field];
+      if (provided == null) continue;
+      const parsed = setting.parse(provided);
+      setSetting(setting.key, String(parsed));
+      applied[setting.field] = parsed;
     }
-    writeAudit(req, 'Updated finance configuration settings');
-    res.json({ ok: true });
+    writeAudit(req, `Updated finance configuration settings: ${JSON.stringify(applied)}`);
+    res.json({ ok: true, applied });
   })
 );
 

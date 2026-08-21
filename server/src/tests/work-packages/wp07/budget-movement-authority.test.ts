@@ -29,6 +29,7 @@ import { randomUUID } from 'node:crypto';
 import { db, initSchema } from '../../../db/connection.js';
 import { errorHandler } from '../../../middleware/errorHandler.js';
 import { financeRouter } from '../../../routes/finance.routes.js';
+import { invoicesRouter } from '../../../routes/invoices.routes.js';
 import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
 import { bearerFor, seedUser } from '../../support/identity.js';
 import { computeReconciliation } from '../../../utils/reconciliation.js';
@@ -39,6 +40,7 @@ import { setSetting } from '../../../utils/settings.js';
 const app = express();
 app.use(express.json());
 app.use('/api/finance', financeRouter);
+app.use('/api/invoices', invoicesRouter);
 app.use(errorHandler);
 
 let key: string;
@@ -291,6 +293,53 @@ describe('WP-07 · month-end settlement rejects incoherent instructions', () => 
   });
 });
 
+describe('WP-07 · a retired envelope can neither hold money nor receive it', () => {
+  it('refuses to retire a line that still holds a balance', async () => {
+    makeLine(`${key}_r1`, 'Funded', branchA);
+    await deposit(2000);
+    await charge(`${key}_r1`, 2000).expect(201);
+
+    const res = await supertest(app).patch(`/api/finance/budget-lines/${key}_r1`).set(owner).send({ isActive: false });
+    expect(res.status).toBe(409);
+    expect(String(res.body.error)).toMatch(/still holds 2000 AFN/);
+    expect((db.prepare('SELECT is_active FROM budget_lines WHERE id = ?').get(`${key}_r1`) as { is_active: number }).is_active).toBe(1);
+  });
+
+  it('allows retirement once the balance is settled', async () => {
+    makeLine(`${key}_r2`, 'Settled', branchA);
+    await deposit(2000);
+    await charge(`${key}_r2`, 2000).expect(201);
+    await monthEnd(`${key}_r2`, { decision: 'return' }).expect(200);
+
+    await supertest(app).patch(`/api/finance/budget-lines/${key}_r2`).set(owner).send({ isActive: false }).expect(200);
+    expect(computeReconciliation({ branchId: branchA, isAll: false }).healthy).toBe(true);
+  });
+
+  it('refuses to fund a retired line', async () => {
+    makeLine(`${key}_r3`, 'Retired', branchA, false);
+    await deposit(1000);
+    const res = await charge(`${key}_r3`, 1000);
+    expect(res.status).toBe(409);
+    expect(line(`${key}_r3`).current_amount).toBe(0);
+    // The treasury debit is inside the same transaction, so nothing moved.
+    const treasury = db.prepare(`SELECT main_balance FROM finance_accounts WHERE scope_type='organization'`).get() as { main_balance: number };
+    expect(treasury.main_balance).toBe(1000);
+  });
+
+  it('budget figures cover the operated lines, and a retired line holds nothing to hide', async () => {
+    makeLine(`${key}_r4`, 'Active', branchA);
+    makeLine(`${key}_r5`, 'Retired', branchA, false);
+    await deposit(3000);
+    await charge(`${key}_r4`, 3000).expect(201);
+
+    const dash = await supertest(app).get(`/api/finance/dashboard?branchId=${branchA}`).set(owner).expect(200);
+    expect(dash.body.budget.lines).toBe(1);
+    expect(dash.body.budget.remaining).toBe(3000);
+    // Reconciliation counts every line, retired or not, and still agrees.
+    expect(computeReconciliation({ branchId: branchA, isAll: false }).budgetVariance).toBe(0);
+  });
+});
+
 describe('WP-07 · the movement writer refuses to be used unsafely', () => {
   it('will not write outside a transaction', () => {
     makeLine(`${key}_t`, 'Line', branchA);
@@ -397,5 +446,43 @@ describe('WP-07 · the savings rate is configuration, and it is validated', () =
     ).toThrow(/outside 0-100/i);
     const acct = db.prepare(`SELECT COUNT(*) c FROM financial_transactions WHERE branch_id = ?`).get(branchA) as { c: number };
     expect(acct.c).toBe(0);
+  });
+});
+
+describe('WP-07 · finance operational settings have one validation authority', () => {
+  const read = (key: string) =>
+    (db.prepare('SELECT value FROM system_settings WHERE key = ?').get(key) as { value: string } | undefined)?.value;
+
+  it('every writer of the savings rate applies the same bound', async () => {
+    // The finance configuration form writes the same key as the savings
+    // control. A rate above 100% would sweep more than the payment.
+    const viaForm = await supertest(app).put('/api/invoices/config/settings').set(owner).send({ dailySavingPercent: 500 });
+    expect(viaForm.status).toBe(400);
+    const viaControl = await supertest(app).put('/api/finance/saving-engine/settings').set(owner).send({ percent: 500 });
+    expect(viaControl.status).toBe(400);
+    expect(read('daily_saving_percent')).toBe('5');
+  });
+
+  it('a rejected setting is reported, never silently skipped', async () => {
+    const res = await supertest(app).put('/api/invoices/config/settings').set(owner).send({ expenseAutoApproveThreshold: 'abc' });
+    expect(res.status).toBe(400);
+    const applied = await supertest(app).put('/api/invoices/config/settings').set(owner).send({ expenseAutoApproveThreshold: 7500 }).expect(200);
+    expect(applied.body.applied).toEqual({ expenseAutoApproveThreshold: 7500 });
+    expect(read('expense_auto_approve_threshold')).toBe('7500');
+  });
+
+  it('the threshold control rejects a fractional amount instead of rounding it', async () => {
+    const res = await supertest(app).put('/api/finance/expense-auto-approve-threshold').set(owner).send({ threshold: 1500.4 });
+    expect(res.status).toBe(400);
+    const ok = await supertest(app).put('/api/finance/expense-auto-approve-threshold').set(owner).send({ threshold: 1500 }).expect(200);
+    expect(ok.body.threshold).toBe(1500);
+    expect(read('expense_auto_approve_threshold')).toBe('1500');
+  });
+
+  it('both threshold writers agree on what is valid', async () => {
+    for (const bad of [-1, 'abc', true, [10]]) {
+      expect((await supertest(app).put('/api/finance/expense-auto-approve-threshold').set(owner).send({ threshold: bad })).status).toBe(400);
+      expect((await supertest(app).put('/api/invoices/config/settings').set(owner).send({ expenseAutoApproveThreshold: bad })).status).toBe(400);
+    }
   });
 });

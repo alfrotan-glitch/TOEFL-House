@@ -283,6 +283,16 @@ is re-homed to `server/src/tests/work-packages/wp03/` as WP-03 authority
 
 ## WP-07 Finance
 
+**C-2 disposition: NOT REPLACED.** The 35 inventoried files below remain in
+place and remain the WP-07 behavioural record. `server/src/tests/work-packages/wp07/`
+currently holds one package authority suite —
+`budget-movement-authority.test.ts` (40 cases) — covering the budget-movement,
+savings-ledger and finance-settings concerns remediated in
+`docs/certification/WP-07-slice-A-budget-treasury.md`. It replaces no
+inventoried file: invoices, payments, refunds, discounts and receipts are
+untouched by that slice, so their suites are still authoritative and WP-07's
+C-2 obligation is open.
+
 35 files · 409 cases
 
 | File | Cases | Asserted behaviour |
