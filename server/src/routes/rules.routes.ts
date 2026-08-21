@@ -6,17 +6,20 @@ policies such as fees, promotion, attendance, and academic configuration are
 resolved by their owning domain services and are not exposed as generic rules.
 
 Access control:
-- owner: full access (create/update/deactivate/delete/rollback any rule)
-- manager: may create/update rules scoped to their own branch
-- finance, registrar, head_of_department: read-only + evaluate (needed to compute fees)
-- everyone authenticated: may evaluate rules (read-only, needed by
-  registrar/finance screens to compute the fee/discount for a form)
+- an organization-scoped Owner may manage global rules or any branch rule;
+- a scoped Owner or General Manager may manage only rules in branches reached
+  by live assignments (campus and multi-branch assignments are honored);
+- the declared read roles may inspect authorized generic rules;
+- evaluation requires Rule.View and an authorized branch. It may append matched
+  rule logs unless dryRun is true.
 
 @module routes/rules.routes
 @license Apache-2.0
 */
 import { Router } from 'express';
-import { authenticate, authorize, canAccessBranchResource, requestHasRole , requirePermission } from '../middleware/auth.js';
+import { db } from '../db/connection.js';
+import { authenticate, authorize, canAccessBranchResource, requirePermission } from '../middleware/auth.js';
+import { isGlobalOwner } from '../core/rbac/rbac-service.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import {
@@ -29,6 +32,7 @@ import {
   getRuleById,
   getRuleVersions,
   rollbackRule,
+  validateRuleParts,
   RuleCategory,
 } from '../core/configuration/rule-engine.js';
 
@@ -50,6 +54,7 @@ const RULE_CATEGORY_META: ReadonlyArray<{ id: RuleCategory; label: string; manag
  * categories is descriptive and is not the authority.
  */
 const CATEGORIES: RuleCategory[] = RULE_CATEGORY_META.map((item) => item.id);
+const ALL_RULE_CATEGORIES: RuleCategory[] = ['fee', 'discount', 'promotion', 'attendance', 'payroll', 'scholarship', 'workflow', 'notification', 'finance', 'academic'];
 
 const DOMAIN_OWNED_RULE_CATEGORIES = new Set<RuleCategory>(['fee', 'promotion', 'attendance', 'academic']);
 
@@ -68,15 +73,58 @@ function requireRuleBranchAccess(req: import('express').Request, branchId: strin
   }
 }
 
-function assertValidCategory(category: unknown): asserts category is RuleCategory {
-  if (typeof category !== 'string' || !CATEGORIES.includes(category as RuleCategory)) {
-    throw new HttpError(400, `Invalid rule category. Allowed values: ${CATEGORIES.join(', ')}`);
+function assertKnownCategory(category: unknown): asserts category is RuleCategory {
+  if (typeof category !== 'string' || !ALL_RULE_CATEGORIES.includes(category as RuleCategory)) {
+    throw new HttpError(400, `Invalid rule category. Allowed generic values: ${CATEGORIES.join(', ')}`);
   }
 }
 
 function assertRuleManagementCategory(category: RuleCategory): void {
   if (DOMAIN_OWNED_RULE_CATEGORIES.has(category)) {
     throw new HttpError(409, `The ${category} policy is managed by its domain owner (Academic Control Center or the relevant domain service), not the generic Rule Engine.`);
+  }
+  if (!CATEGORIES.includes(category)) {
+    throw new HttpError(409, `The ${category} category has no generic management contract.`);
+  }
+}
+
+function isOrganizationOwner(req: import('express').Request): boolean {
+  return !!req.rbac && isGlobalOwner(req.rbac);
+}
+
+function assertExistingRuleBranch(branchId: string): void {
+  const branch = db.prepare('SELECT id FROM branches WHERE id = ?').get(branchId);
+  if (!branch) throw new HttpError(400, 'Rule scope branch does not exist.');
+}
+
+function requireRuleMutationAccess(req: import('express').Request, branchId: string | null | undefined): void {
+  if (isOrganizationOwner(req)) {
+    if (branchId) assertExistingRuleBranch(branchId);
+    return;
+  }
+  if (!branchId) throw new HttpError(403, 'Only an organization-scoped owner may mutate a global rule.');
+  assertExistingRuleBranch(branchId);
+  requireRuleBranchAccess(req, branchId);
+}
+
+function resolveCreateScope(req: import('express').Request, requested: unknown, fallbackBranchId: string): string | null {
+  if (isOrganizationOwner(req)) {
+    if (requested === undefined || requested === null || requested === '') return null;
+    if (typeof requested !== 'string') throw new HttpError(400, 'Rule scope branch must be a branch id or null.');
+    requireRuleMutationAccess(req, requested);
+    return requested;
+  }
+  const branchId = requested === undefined || requested === null || requested === '' ? fallbackBranchId : requested;
+  if (typeof branchId !== 'string') throw new HttpError(400, 'Rule scope branch must be a branch id.');
+  requireRuleMutationAccess(req, branchId);
+  return branchId;
+}
+
+function assertValidRuleParts(conditions: unknown, actions: unknown): void {
+  try {
+    validateRuleParts(conditions, actions);
+  } catch (error) {
+    throw new HttpError(400, error instanceof Error ? error.message : 'Invalid rule definition.');
   }
 }
 
@@ -113,7 +161,7 @@ rulesRouter.get('/meta', authorize('owner', 'general_manager', 'finance_manager'
 // §1 — LIST / READ
 // ============================================================================
 
-/** GET /api/rules?category=fee — list all rules in a category (branch-scoped for the caller unless owner requests all). */
+/** GET /api/rules?category=discount&branchId=... — list global fallback plus selected authorized-branch rules. */
 rulesRouter.get(
   '/',
   authorize('owner', 'general_manager', 'finance_manager', 'receptionist', 'head_of_department'),
@@ -124,7 +172,7 @@ rulesRouter.get(
     // Security precedence: deny unauthorized branch access before revealing
     // category validity or domain ownership (same rule as POST /evaluate).
     requireRuleBranchAccess(req, branchId);
-    assertValidCategory(category);
+    assertKnownCategory(category);
     if (DOMAIN_OWNED_RULE_CATEGORIES.has(category)) {
       throw new HttpError(409, `The ${category} policy is domain-owned and is not exposed by the generic Rule Engine.`);
     }
@@ -140,6 +188,7 @@ rulesRouter.get(
     const rule = getRuleById(req.params.id);
     if (!rule) throw new HttpError(404, 'Rule not found.');
     requireRuleBranchAccess(req, rule.scopeBranchId);
+    assertRuleManagementCategory(rule.category);
     res.json(rule);
   })
 );
@@ -152,6 +201,7 @@ rulesRouter.get(
     const rule = getRuleById(req.params.id);
     if (!rule) throw new HttpError(404, 'Rule not found.');
     requireRuleBranchAccess(req, rule.scopeBranchId);
+    assertRuleManagementCategory(rule.category);
     res.json(getRuleVersions(req.params.id));
   })
 );
@@ -160,22 +210,29 @@ rulesRouter.get(
 // §2 — CREATE / UPDATE / DEACTIVATE / DELETE
 // ============================================================================
 
-/** POST /api/rules — create a new rule (owner or manager; manager rules are auto-scoped to their branch). */
+/** POST /api/rules — create a global rule as organization Owner, or an authorized branch rule as a scoped writer. */
 rulesRouter.post(
   '/',
   authorize('owner', 'general_manager'),
   ah(async (req, res) => {
     const user = getUserContext(req);
-    const { name, description, category, conditions, actions, priority, isActive, scopeBranchId } = req.body;
-    
-    if (!name || typeof name !== 'string') throw new HttpError(400, 'Rule name is required.');
-    assertValidCategory(category);
-    assertRuleManagementCategory(category);
-    if (!Array.isArray(conditions)) throw new HttpError(400, 'Rule conditions must be an array (may be empty).');
-    if (!Array.isArray(actions) || actions.length === 0) throw new HttpError(400, 'Every rule must have at least one action.');
+    const { name, description, category, conditions, actions, priority, isActive, scopeBranchId } = req.body ?? {};
 
-    // Managers may only scope rules to their own branch; owner may set global (null) or any branch.
-    const resolvedScopeBranchId = requestHasRole(req, 'general_manager') ? user.branchId : (scopeBranchId ?? null);
+    if (typeof name !== 'string' || !name.trim()) throw new HttpError(400, 'Rule name is required.');
+    assertKnownCategory(category);
+    assertRuleManagementCategory(category);
+    assertValidRuleParts(conditions, actions);
+    if (description !== undefined && typeof description !== 'string') {
+      throw new HttpError(400, 'Rule description must be text.');
+    }
+    if (priority !== undefined && (typeof priority !== 'number' || !Number.isFinite(priority))) {
+      throw new HttpError(400, 'Rule priority must be a finite number.');
+    }
+    if (isActive !== undefined && typeof isActive !== 'boolean') {
+      throw new HttpError(400, 'Rule active state must be a boolean.');
+    }
+
+    const resolvedScopeBranchId = resolveCreateScope(req, scopeBranchId, user.branchId);
 
     const rule = createRule(
       {
@@ -206,18 +263,39 @@ rulesRouter.patch(
     if (!existing) throw new HttpError(404, 'Rule not found.');
     assertRuleManagementCategory(existing.category);
 
-    // Managers may only edit rules belonging to their own branch. Global rules
-    // are organization-wide configuration and are owner-managed.
-    if (requestHasRole(req, 'general_manager') && existing.scopeBranchId !== user.branchId) {
-      throw new HttpError(403, 'You are not allowed to edit rules outside your branch.');
+    requireRuleMutationAccess(req, existing.scopeBranchId);
+
+    const { name, description, conditions, actions, priority, isActive, scopeBranchId } = req.body ?? {};
+    const nextConditions = conditions ?? existing.conditions;
+    const nextActions = actions ?? existing.actions;
+    assertValidRuleParts(nextConditions, nextActions);
+    if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
+      throw new HttpError(400, 'Rule name cannot be empty.');
+    }
+    if (description !== undefined && typeof description !== 'string') {
+      throw new HttpError(400, 'Rule description must be text.');
+    }
+    if (priority !== undefined && (typeof priority !== 'number' || !Number.isFinite(priority))) {
+      throw new HttpError(400, 'Rule priority must be a finite number.');
+    }
+    if (isActive !== undefined && typeof isActive !== 'boolean') {
+      throw new HttpError(400, 'Rule active state must be a boolean.');
     }
 
-    const { name, description, conditions, actions, priority, isActive, scopeBranchId } = req.body;
-    if (conditions !== undefined && !Array.isArray(conditions)) {
-      throw new HttpError(400, 'Rule conditions must be an array.');
-    }
-    if (actions !== undefined && (!Array.isArray(actions) || actions.length === 0)) {
-      throw new HttpError(400, 'Every rule must have at least one action.');
+    let nextScope = existing.scopeBranchId;
+    if (scopeBranchId !== undefined) {
+      if (isOrganizationOwner(req)) {
+        if (scopeBranchId !== null && typeof scopeBranchId !== 'string') {
+          throw new HttpError(400, 'Rule scope branch must be a branch id or null.');
+        }
+        nextScope = scopeBranchId || null;
+      } else {
+        if (typeof scopeBranchId !== 'string' || !scopeBranchId) {
+          throw new HttpError(403, 'Only an organization-scoped owner may make a rule global.');
+        }
+        nextScope = scopeBranchId;
+      }
+      requireRuleMutationAccess(req, nextScope);
     }
 
     const updated = updateRule(
@@ -229,7 +307,7 @@ rulesRouter.patch(
         actions,
         priority,
         isActive,
-        scopeBranchId: requestHasRole(req, 'general_manager') ? user.branchId : scopeBranchId,
+        scopeBranchId: nextScope,
       },
       user.fullName
     );
@@ -238,26 +316,30 @@ rulesRouter.patch(
   })
 );
 
-/** POST /api/rules/:id/rollback — revert a rule to a previous version (owner only). */
+/** POST /api/rules/:id/rollback — an Owner reverts a version within that Owner assignment's effective scope. */
 rulesRouter.post(
   '/:id/rollback',
   authorize('owner'),
   ah(async (req, res) => {
     const user = getUserContext(req);
-    const { version } = req.body;
-    if (typeof version !== 'number') throw new HttpError(400, 'Version number is required.');
-    
+    const { version } = req.body ?? {};
+    if (!Number.isInteger(version) || version < 1) throw new HttpError(400, 'A positive integer version number is required.');
+
     const existing = getRuleById(req.params.id);
     if (!existing) throw new HttpError(404, 'Rule not found.');
     assertRuleManagementCategory(existing.category);
-    
+    requireRuleMutationAccess(req, existing.scopeBranchId);
+    if (!getRuleVersions(req.params.id).some((candidate) => candidate.version === version)) {
+      throw new HttpError(404, `Rule version ${version} was not found.`);
+    }
+
     const restored = rollbackRule(req.params.id, version, user.fullName);
     writeAudit(req, `Rolled back rule "${existing.name}" to version ${version}`, { oldValue: ruleSnapshot(existing), newValue: ruleSnapshot(restored) });
     res.json(restored);
   })
 );
 
-/** PATCH /api/rules/:id/deactivate — soft-delete (owner or manager for their own branch's rules). */
+/** PATCH /api/rules/:id/deactivate — versioned soft-delete within the writer's effective assignment scope. */
 rulesRouter.patch(
   '/:id/deactivate',
   authorize('owner', 'general_manager'),
@@ -266,17 +348,15 @@ rulesRouter.patch(
     const existing = getRuleById(req.params.id);
     if (!existing) throw new HttpError(404, 'Rule not found.');
     assertRuleManagementCategory(existing.category);
-    if (requestHasRole(req, 'general_manager') && existing.scopeBranchId !== user.branchId) {
-      throw new HttpError(403, 'You are not allowed to deactivate rules outside your branch.');
-    }
-    
-    deactivateRule(req.params.id, user.fullName);
-    writeAudit(req, `Deactivated rule: ${existing.name}`, { oldValue: ruleSnapshot(existing), newValue: ruleSnapshot(getRuleById(req.params.id)) });
+    requireRuleMutationAccess(req, existing.scopeBranchId);
+
+    const deactivated = deactivateRule(req.params.id, user.fullName);
+    writeAudit(req, `Deactivated rule: ${existing.name}`, { oldValue: ruleSnapshot(existing), newValue: ruleSnapshot(deactivated) });
     res.json({ ok: true });
   })
 );
 
-/** DELETE /api/rules/:id — permanent delete, owner only. */
+/** DELETE /api/rules/:id — an Owner permanently deletes only within that Owner assignment's effective scope. */
 rulesRouter.delete(
   '/:id',
   authorize('owner'),
@@ -284,6 +364,7 @@ rulesRouter.delete(
     const existing = getRuleById(req.params.id);
     if (!existing) throw new HttpError(404, 'Rule not found.');
     assertRuleManagementCategory(existing.category);
+    requireRuleMutationAccess(req, existing.scopeBranchId);
     deleteRule(req.params.id);
     writeAudit(req, `Permanently deleted rule: ${existing.name}`, { oldValue: ruleSnapshot(existing) });
     res.json({ ok: true });
@@ -291,7 +372,7 @@ rulesRouter.delete(
 );
 
 // ============================================================================
-// §3 — EVALUATION (read-only, used by operational screens)
+// §3 — EVALUATION (operational result plus matched-rule log unless dry-run)
 // ============================================================================
 
 /**
@@ -300,21 +381,28 @@ Body: { category, data, branchId?, dryRun? }
 
 Evaluates all active rules in a category against the given context and
 returns the merged outputs (e.g. { placementTestFee: 0, discountPercent: 15 }).
-Any authenticated user may call this — it's how the registration/finance
-forms compute the correct fee/discount to show before submitting.
+A principal holding Rule.View may call this for an authorized branch. Domain-owned
+categories remain unavailable through this generic adapter.
 */
 rulesRouter.post(
   '/evaluate',
   requirePermission('Rule.View'),
   ah(async (req, res) => {
     const user = getUserContext(req);
-    const { category, data, dryRun } = req.body;
-    
-    const branchId = (req.body.branchId as string) || user.branchId;
+    const { category, data, dryRun, branchId: requestedBranchId } = req.body ?? {};
+    if (requestedBranchId !== undefined &&
+        (typeof requestedBranchId !== 'string' || !requestedBranchId)) {
+      throw new HttpError(400, 'Evaluation branchId must be a branch id.');
+    }
+    if (dryRun !== undefined && typeof dryRun !== 'boolean') {
+      throw new HttpError(400, 'Evaluation dryRun must be a boolean.');
+    }
+
+    const branchId = requestedBranchId || user.branchId;
     // Security precedence: deny unauthorized branch access before revealing
     // domain ownership or validating the supplied rule payload.
     requireRuleBranchAccess(req, branchId);
-    assertValidCategory(category);
+    assertKnownCategory(category);
     if (DOMAIN_OWNED_RULE_CATEGORIES.has(category)) {
       throw new HttpError(409, `The ${category} policy is domain-owned and must be evaluated by its owning domain service.`);
     }
@@ -325,7 +413,7 @@ rulesRouter.post(
       category,
       branchId,
       data: data || {},
-      dryRun: !!dryRun,
+      dryRun: dryRun ?? false,
     });
     
     // Return 200 with the result object regardless of isBlocked,

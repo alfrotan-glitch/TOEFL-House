@@ -143,12 +143,13 @@ export default function AcademicSetupView({ branchId, activeRole, permissionCode
     const isCurrent = () => seq === loadSeq.current;
     setLoading(true);
     setError(null);
+    const query = branchId ? { branchId } : undefined;
     try {
       const [defaults, p, l, s, r, tm, f] = await Promise.all([
         api.get<AcademicDefaults>('/academic/defaults'),
-        api.get<Program[]>('/academic/programs'), api.get<Level[]>('/academic/levels'),
-        api.get<TimeSlot[]>('/academic/time-slots'), api.get<Room[]>('/academic/rooms'),
-        api.get<Term[]>('/academic/terms'), api.get<FeeRow[]>('/academic/level-fees'),
+        api.get<Program[]>('/academic/programs', query), api.get<Level[]>('/academic/levels', query),
+        api.get<TimeSlot[]>('/academic/time-slots', query), api.get<Room[]>('/academic/rooms', query),
+        api.get<Term[]>('/academic/terms', query), api.get<FeeRow[]>('/academic/level-fees', query),
       ]);
       if (!isCurrent()) return;
       setAcademicDefaults(defaults);
@@ -157,17 +158,16 @@ export default function AcademicSetupView({ branchId, activeRole, permissionCode
       setPrograms(Array.isArray(p) ? p : []); setLevels(Array.isArray(l) ? l : []); setSlots(Array.isArray(s) ? s : []); setRooms(Array.isArray(r) ? r : []); setTerms(Array.isArray(tm) ? tm : []); setFees(Array.isArray(f) ? f : []);
       // Offering/version counts gate Phase 3, so they are always read back from
       // the server rather than inferred from local activity.
-      try { const [offs, vers] = await Promise.all([api.get<any[]>('/offerings'), api.get<any[]>('/catalog/program-versions')]); if (!isCurrent()) return; setOfferingCount(Array.isArray(offs) ? offs.length : 0); setVersionCount(Array.isArray(vers) ? vers.length : 0); } catch { if (!isCurrent()) return; setOfferingCount(0); setVersionCount(0); }
+      try { const [offs, vers] = await Promise.all([api.get<any[]>('/offerings', query), api.get<any[]>('/catalog/program-versions', query)]); if (!isCurrent()) return; setOfferingCount(Array.isArray(offs) ? offs.length : 0); setVersionCount(Array.isArray(vers) ? vers.length : 0); } catch { if (!isCurrent()) return; setOfferingCount(0); setVersionCount(0); }
       const draft: Record<string, number> = {}; for (const fee of f) draft[fee.levelId] = fee.fee; setFeeDraft(draft);
       setExpanded((prev) => { const next = { ...prev }; for (const prog of p) { if (next[prog.id] === undefined) next[prog.id] = true; } return next; });
     } catch (err) { if (!isCurrent()) return; setError(err instanceof Error ? err.message : 'Failed to load configuration'); }
     finally { if (isCurrent()) { setLoading(false); setHasLoadedOnce(true); } }
-  }, []);
+  }, [branchId]);
 
-  // Reload whenever the active branch changes. Every endpoint on this page is
-  // scoped server-side from the caller's token/branch context, so the branch is
-  // never sent as a client-controlled parameter; `branchId` is used purely as
-  // the signal that the authoritative scope moved and the cached view is stale.
+  // Reload whenever the active branch changes. The selected branch is sent as
+  // a requested scope, and every endpoint independently authorizes it. The UI
+  // chooses a branch; it never grants access to one.
   useEffect(() => {
     // Clear branch-scoped data immediately so the previous branch's terms,
     // rooms and programs cannot stay on screen during the transition.
@@ -324,7 +324,7 @@ export default function AcademicSetupView({ branchId, activeRole, permissionCode
                 <p className={text.hint}>Define semesters (e.g., Fall 2026) and their start/end dates. Sessions are auto-generated only within these dates.</p>
               </div>
               <form className="bg-slate-50 border border-slate-200 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs items-end"
-                onSubmit={(e) => { e.preventDefault(); run(async () => { await api.post('/academic/terms', termForm); setTermForm(INITIAL_TERM_FORM); }); }}>
+                onSubmit={(e) => { e.preventDefault(); run(async () => { await api.post('/academic/terms', { ...termForm, branchId }); setTermForm(INITIAL_TERM_FORM); }); }}>
                 <p className="col-span-2 sm:col-span-3 font-extrabold text-slate-800">New academic term</p>
                 <input type="number" required value={termForm.year} onChange={(e) => setTermForm({ ...termForm, year: Number(e.target.value) })} className="border border-slate-200 rounded-lg px-2 py-1.5" placeholder="Year" />
                 <input required value={termForm.code} onChange={(e) => setTermForm({ ...termForm, code: e.target.value })} placeholder="Code" className="border border-slate-200 rounded-lg px-2 py-1.5 font-mono" />
@@ -367,7 +367,7 @@ export default function AcademicSetupView({ branchId, activeRole, permissionCode
             <div className="space-y-4">
               <div><h2 className="text-lg font-extrabold text-slate-900">Timetable Slots</h2><p className={text.hint}>Define class time slots (e.g., Sat-Wed 08:00-10:00) used for scheduling.</p></div>
               <form className="bg-slate-50 border border-slate-200 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs items-end"
-                onSubmit={(e) => { e.preventDefault(); run(async () => { await api.post('/academic/time-slots', slotForm); setSlotForm({ code: '', label: '', startTime: '08:00', endTime: '09:30' }); }); }}>
+                onSubmit={(e) => { e.preventDefault(); run(async () => { await api.post('/academic/time-slots', { ...slotForm, branchId }); setSlotForm({ code: '', label: '', startTime: '08:00', endTime: '09:30' }); }); }}>
                 <p className="col-span-2 sm:col-span-5 font-extrabold text-slate-800">New time slot</p>
                 <input required value={slotForm.code} onChange={(e) => setSlotForm({ ...slotForm, code: e.target.value })} placeholder="Code *" className="border border-slate-200 rounded-lg px-2 py-1.5 font-mono" />
                 <input required value={slotForm.label} onChange={(e) => setSlotForm({ ...slotForm, label: e.target.value })} placeholder="Label *" className="border border-slate-200 rounded-lg px-2 py-1.5" />
@@ -405,7 +405,7 @@ export default function AcademicSetupView({ branchId, activeRole, permissionCode
             <div className="space-y-4">
               <div><h2 className="text-lg font-extrabold text-slate-900">Physical Rooms</h2><p className={text.hint}>Define classrooms and their capacity. Classes are assigned to these rooms automatically.</p></div>
               <form className="bg-slate-50 border border-slate-200 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs items-end"
-                onSubmit={(e) => { e.preventDefault(); run(async () => { await api.post('/academic/rooms', roomForm); setRoomForm({ code: '', name: '', capacity: 20 }); }); }}>
+                onSubmit={(e) => { e.preventDefault(); run(async () => { await api.post('/academic/rooms', { ...roomForm, branchId }); setRoomForm({ code: '', name: '', capacity: 20 }); }); }}>
                 <p className="col-span-2 sm:col-span-4 font-extrabold text-slate-800">New room</p>
                 <input required value={roomForm.code} onChange={(e) => setRoomForm({ ...roomForm, code: e.target.value })} placeholder="Code *" className="border border-slate-200 rounded-lg px-2 py-1.5 font-mono" />
                 <input required value={roomForm.name} onChange={(e) => setRoomForm({ ...roomForm, name: e.target.value })} placeholder="Name *" className="border border-slate-200 rounded-lg px-2 py-1.5" />
@@ -441,7 +441,7 @@ export default function AcademicSetupView({ branchId, activeRole, permissionCode
             <div className="space-y-4">
               <div><h2 className="text-lg font-extrabold text-slate-900">Programs & Levels</h2><p className={text.hint}>Create educational programs (e.g., TOEFL Prep) and their levels (Beginner, Advanced).</p></div>
               <form className="bg-slate-50 border border-slate-200 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs items-end"
-                onSubmit={(e) => { e.preventDefault(); run(async () => { await api.post('/academic/programs', { name: progName, code: progCode || undefined, description: progDesc || undefined }); setProgName(''); setProgCode(''); setProgDesc(''); }); }}>
+                onSubmit={(e) => { e.preventDefault(); run(async () => { await api.post('/academic/programs', { name: progName, code: progCode || undefined, description: progDesc || undefined, branchId }); setProgName(''); setProgCode(''); setProgDesc(''); }); }}>
                 <div className="sm:col-span-4 font-extrabold text-slate-800 flex items-center gap-1.5"><Plus className="w-3.5 h-3.5 text-indigo-600" /> New program</div>
                 <input required value={progName} onChange={(e) => setProgName(e.target.value)} placeholder="Name *" className="border border-slate-200 rounded-lg px-2 py-1.5" />
                 <input value={progCode} onChange={(e) => setProgCode(e.target.value)} placeholder="Code" className="border border-slate-200 rounded-lg px-2 py-1.5 font-mono" />
@@ -513,7 +513,7 @@ export default function AcademicSetupView({ branchId, activeRole, permissionCode
                                       <Building2 className="w-3 h-3 text-emerald-600" />
                                       <span className="text-[10px] text-emerald-800 font-bold">Branch fee</span>
                                       <input aria-label="Branch fee override" type="number" className="w-28 border border-emerald-200 rounded px-2 py-0.5 text-[11px] font-mono" value={feeFor(l.id, l.defaultFee)} onChange={(e) => setFeeDraft((d) => ({ ...d, [l.id]: Number(e.target.value) }))} />
-                                      <button title="Save branch-specific fee override" type="button" disabled={busy} className="text-[10px] font-bold text-emerald-700 hover:underline" onClick={() => run(async () => { await api.put('/academic/level-fees', { levelId: l.id, fee: feeFor(l.id, l.defaultFee) }); })}>Save</button>
+                                      <button title="Save branch-specific fee override" type="button" disabled={busy} className="text-[10px] font-bold text-emerald-700 hover:underline" onClick={() => run(async () => { await api.put('/academic/level-fees', { levelId: l.id, fee: feeFor(l.id, l.defaultFee), branchId }); })}>Save</button>
                                     </div>
                                     <ToggleActive active={l.isActive} disabled={busy} onToggle={() => run(async () => { await api.put(`/academic/levels/${l.id}`, { isActive: !l.isActive }); })} />
                                     <button type="button" className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100" onClick={() => { setEditLvlId(l.id); setEditLvl({ name: l.name, code: l.code || '', order: l.order, durationMonths: l.durationMonths, defaultFee: l.defaultFee, passMark: l.passMark, minViableSize: (l as any).minViableSize ?? 5 }); }}><Pencil className="w-3.5 h-3.5" /></button>

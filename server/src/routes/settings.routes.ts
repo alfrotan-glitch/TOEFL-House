@@ -1,34 +1,49 @@
 import { Router } from 'express';
-import { authenticate, authorize, requirePermission } from '../middleware/auth.js';
-import { ah } from '../middleware/errorHandler.js';
-import { getNumberSetting, setSetting } from '../utils/settings.js';
+import { db } from '../db/connection.js';
+import { authenticate, requireGlobalOwner } from '../middleware/auth.js';
+import { ah, HttpError } from '../middleware/errorHandler.js';
+import { getNumberSetting } from '../utils/settings.js';
 import { getFinanceAccount } from '../utils/financeAccounts.js';
 import { SYSTEM_DEFAULTS } from '../core/configuration/policy-catalog.js';
 
 export const systemSettingsRouter = Router();
 systemSettingsRouter.use(authenticate);
 
-// ── Architecture Note: Global Fallback Defaults ────────────────────────────
-// These values act as GLOBAL FALLBACK defaults.
-// The primary source of truth for fees is now the Rule Engine (Business Rules).
-// If a branch-specific rule exists in the Rule Engine, it overrides these values.
-// These settings exist so the system has a baseline if no rule is configured.
+// These persisted values override SYSTEM_DEFAULTS for their owning finance and
+// invoice services. Fees are deliberately absent: fee configuration belongs to
+// the Academic Control Center branch profile, not this system snapshot or the
+// generic Rule Engine.
 
 /**
- * Fee configuration is owned by the Academic Control Center (branch academic profile).
- * System Administration intentionally does not duplicate fee-management controls.
- */
-/**
- * Operational settings snapshot for Settings UI.
- * Balances are organization-level cash settings (see Finance module notes).
+ * Organization-owner operational settings snapshot for the Settings UI.
+ * Cash balances remain branch account facts; the three numeric settings are
+ * consumed by their finance/invoice owners and are not redefined here.
  */
 systemSettingsRouter.get(
   '/system',
-  authorize('owner'),
+  requireGlobalOwner,
   ah(async (req, res) => {
+    const requestedBranchId = req.query.branchId;
+    if (requestedBranchId !== undefined && typeof requestedBranchId !== 'string') {
+      throw new HttpError(400, 'branchId must identify one branch.');
+    }
+    const branchId = requestedBranchId || req.user?.branchId;
+    let cash: { branchId: string; mainAccountBalance: number; savingBalance: number } | undefined;
+    if (branchId) {
+      if (!db.prepare('SELECT id FROM branches WHERE id = ?').get(branchId)) {
+        throw new HttpError(404, 'Branch not found.');
+      }
+      const account = getFinanceAccount('branch', branchId);
+      cash = {
+        branchId,
+        mainAccountBalance: account.mainBalance,
+        savingBalance: account.savingBalance,
+      };
+    }
+
     res.json({
       finance: {
-        ...(req.user?.branchId ? (() => { const a = getFinanceAccount('branch', req.user.branchId); return { mainAccountBalance: a.mainBalance, savingBalance: a.savingBalance }; })() : {}) ,
+        ...cash,
         dailySavingPercent: getNumberSetting('daily_saving_percent', SYSTEM_DEFAULTS.dailySavingPercent),
         expenseAutoApproveThreshold: getNumberSetting('expense_auto_approve_threshold', SYSTEM_DEFAULTS.expenseAutoApproveThreshold),
         invoiceDueDays: getNumberSetting('invoice_due_days', SYSTEM_DEFAULTS.invoiceDueDays),

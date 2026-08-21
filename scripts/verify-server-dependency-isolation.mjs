@@ -103,7 +103,11 @@ const entries = execSync("git ls-files 'server/src/**/*.ts'", {
   .trim()
   .split('\n')
   .filter(Boolean)
-  .map((f) => path.join(repoRoot, f));
+  .map((f) => path.join(repoRoot, f))
+  // `git ls-files` reports an index entry until a working-tree deletion is
+  // staged. Package lifecycle gates must still run while an approved removal
+  // is under review, so only paths that remain actual source files are entries.
+  .filter(isFile);
 
 const visited = new Set();
 const undeclared = new Map(); // package -> Set of importing files

@@ -1,6 +1,7 @@
 import { ACADEMIC_DEFAULTS } from '../configuration/policy-catalog.js';
 import type Database from 'better-sqlite3';
 import { id as makeId } from '../../utils/ids.js';
+import { assertMoney } from '../../utils/money.js';
 
 export interface CreateVersionInput {
   programId: string;
@@ -60,14 +61,14 @@ export class AcademicCatalogService {
   private stmtGetBranchProfile: Database.Statement;
 
   constructor(private db: Database.Database) {
-    this.stmtListAll = db.prepare(`SELECT pv.*, p.name AS program_name FROM program_versions pv JOIN programs p ON p.id = pv.program_id ORDER BY p.name, pv.version_number DESC`);
-    this.stmtListByProgram = db.prepare(`SELECT pv.*, p.name AS program_name FROM program_versions pv JOIN programs p ON p.id = pv.program_id WHERE pv.program_id = ? ORDER BY pv.version_number DESC`);
+    this.stmtListAll = db.prepare(`SELECT pv.*, p.name AS program_name, p.branch_id FROM program_versions pv JOIN programs p ON p.id = pv.program_id ORDER BY p.name, pv.version_number DESC`);
+    this.stmtListByProgram = db.prepare(`SELECT pv.*, p.name AS program_name, p.branch_id FROM program_versions pv JOIN programs p ON p.id = pv.program_id WHERE pv.program_id = ? ORDER BY pv.version_number DESC`);
     // created_by stores a user id. Surfacing the raw UUID in the Versions &
     // Rules pane told the operator nothing, so resolve it to a name here —
     // LEFT JOIN because the author may since have been deleted, and losing the
     // version record over a missing user would be far worse.
     this.stmtGetVersion = db.prepare(
-      `SELECT pv.*, p.name AS program_name, u.full_name AS created_by_name
+      `SELECT pv.*, p.name AS program_name, p.branch_id, u.full_name AS created_by_name
          FROM program_versions pv
          JOIN programs p ON p.id = pv.program_id
          LEFT JOIN users u ON u.id = pv.created_by
@@ -171,11 +172,31 @@ export class AcademicCatalogService {
   createVersion(input: CreateVersionInput) {
     const program = this.stmtGetProgram.get(input.programId) as any;
     if (!program) throw new Error('Program not found');
+    if (typeof input.versionLabel !== 'string' || !input.versionLabel.trim()) {
+      throw new Error('Version label is required.');
+    }
+    if (input.copyFromVersionId) {
+      const source = this.stmtGetVersion.get(input.copyFromVersionId) as { id: string; program_id: string } | undefined;
+      if (!source) throw new Error('Source program version not found.');
+      if (source.program_id !== input.programId) {
+        throw new Error('A program version can only copy another version of the same program.');
+      }
+    }
+    if (input.description !== undefined && input.description !== null && typeof input.description !== 'string') {
+      throw new Error('Version description must be text.');
+    }
 
     let versionNumber = input.versionNumber;
+    if (versionNumber !== undefined && (!Number.isInteger(versionNumber) || versionNumber < 1)) {
+      throw new Error('Version number must be a positive integer.');
+    }
     if (!versionNumber) {
       const max = this.stmtGetMaxVersionNumber.get(input.programId) as { m: number | null };
       versionNumber = (max.m || 0) + 1;
+    }
+    const durationMonths = input.durationMonths ?? program.duration_months ?? 0;
+    if (!Number.isInteger(durationMonths) || durationMonths < 0) {
+      throw new Error('Duration months must be a non-negative integer.');
     }
 
     const newId = makeId('pv');
@@ -183,8 +204,8 @@ export class AcademicCatalogService {
     // Transaction ensures atomicity: if copying fails, no partial version is created.
     const tx = this.db.transaction(() => {
       this.stmtInsertVersion.run(
-        newId, input.programId, input.versionLabel, versionNumber,
-        input.durationMonths ?? program.duration_months ?? 0,
+        newId, input.programId, input.versionLabel.trim(), versionNumber,
+        durationMonths,
         input.description ?? program.description ?? null,
         input.createdBy ?? null
       );
@@ -311,7 +332,13 @@ export class AcademicCatalogService {
       const row = this.stmtGetFeeRuleByType.get(
         feeType, params.branchId, params.programVersionId ?? null, params.levelId ?? null
       ) as any;
-      if (row) fees.push({ feeType: row.fee_type, name: row.name, amount: row.amount });
+      if (row) {
+        fees.push({
+          feeType: row.fee_type,
+          name: row.name,
+          amount: assertMoney(row.amount, `Stored ${row.fee_type} fee`),
+        });
+      }
     };
 
     addFromRules('registration');
@@ -323,7 +350,7 @@ export class AcademicCatalogService {
     if (!fees.some(f => f.feeType === 'semester') && params.levelId) {
       const branchFee = this.stmtGetBranchFee.get(params.levelId, params.branchId) as { fee: number } | undefined;
       const level = this.stmtGetLevelDefaultFee.get(params.levelId) as { name: string; default_fee: number } | undefined;
-      const amount = branchFee?.fee ?? level?.default_fee ?? 0;
+      const amount = assertMoney(branchFee?.fee ?? level?.default_fee ?? 0, 'Stored tuition fee');
       if (amount > 0) {
         fees.push({ feeType: 'semester', name: `Tuition — ${level?.name || 'Level'}`, amount });
       }
@@ -331,12 +358,13 @@ export class AcademicCatalogService {
 
     const profile = this.stmtGetBranchProfile.get(params.branchId) as any;
     if (profile) {
-      if (profile.registration_fee > 0 && !fees.some(f => f.feeType === 'registration')) {
-        fees.push({ feeType: 'registration', name: 'Registration fee', amount: profile.registration_fee });
+      const registrationFee = assertMoney(profile.registration_fee ?? 0, 'Stored registration fee');
+      if (registrationFee > 0 && !fees.some(f => f.feeType === 'registration')) {
+        fees.push({ feeType: 'registration', name: 'Registration fee', amount: registrationFee });
       }
     }
 
-    const total = fees.reduce((s, f) => s + f.amount, 0);
+    const total = assertMoney(fees.reduce((sum, fee) => sum + fee.amount, 0), 'Fee snapshot total');
     return { fees, total, currency: 'AFN', generatedAt: new Date().toISOString() };
   }
 }

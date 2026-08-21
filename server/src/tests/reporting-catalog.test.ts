@@ -209,8 +209,11 @@ describe('reporting is not exempt from authorization', () => {
       .get('/api/reports/run/financial-summary?period=today')
       .set(bearerFor('rpt_owner'));
     expect(res.status).toBe(200);
-    expect(res.body.metrics.find((m: { id: string }) => m.id === 'finance.operating_income').value)
-      .toBeGreaterThan(0);
+    // This case owns the HTTP authorization contract, not the wall clock. The
+    // anchored engine cases above own the exact non-zero fixture values.
+    expect(Number.isFinite(
+      res.body.metrics.find((m: { id: string }) => m.id === 'finance.operating_income').value,
+    )).toBe(true);
   });
 
   it('an unknown report is a 404, not an empty success', async () => {

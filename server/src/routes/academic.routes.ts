@@ -804,9 +804,17 @@ academicRouter.put(
 academicRouter.get(
   '/branch-config',
   ah(async (req, res) => {
-    const { branchId } = resolveBranchScope(req);
-    const programs = stmtGetProgramsActive.all().map(mapProgram);
-    const levels = stmtGetAllLevels.all().map(mapLevel);
+    const { branchId, isAll } = resolveBranchScope(req);
+    if (isAll || !branchId) {
+      throw new HttpError(400, 'Select one branch for the branch configuration snapshot.');
+    }
+    const programRows = stmtGetProgramsActive.all() as any[];
+    const visiblePrograms = programRows.filter((row) => row.branch_id === branchId);
+    const visibleProgramIds = new Set(visiblePrograms.map((row) => row.id));
+    const programs = visiblePrograms.map(mapProgram);
+    const levels = (stmtGetAllLevels.all() as any[])
+      .filter((row) => visibleProgramIds.has(row.program_id))
+      .map(mapLevel);
     const fees = stmtGetFeesByBranch.all(branchId).map(mapFee);
     const timeSlots = stmtGetTimeSlotsByBranch.all(branchId).map(mapSlot);
     const rooms = stmtGetRoomsByBranch.all(branchId).map(mapRoom);

@@ -31,6 +31,28 @@ rebuilt system, or explicitly retired with a reason.
 | `dashboard-branch-isolation.test.ts` | 4 | branch isolation of financial aggregates |
 | `new-branch-operational.test.ts` | 7 | a new branch is financially operational without a restart |
 
+**WP-01 retirement status (2026-08-21): COMPLETE.** The ten files above were
+removed from the active suite after replacement. Their historical names remain
+in this inventory only so the §14 knowledge-transfer record is auditable.
+
+| Retired file | Replacement / explicit retirement outcome |
+|---|---|
+| `academic-config-center-integrity.test.ts` | Term lifecycle, catalog relationships and class-generation branch/transaction guards are re-expressed in `server/src/tests/work-packages/wp01/organization-configuration.api.test.ts` and `organization-configuration.integrity.test.ts`. Placement enrollment enforcement is not a configuration authority and remains assigned to WP-04's inventory rather than duplicated here. |
+| `audit-branch-attribution.test.ts` | Authorized body/query target attribution, `all`, and forged-target fallback are re-expressed in `organization-configuration.dependent-scope.test.ts`. |
+| `branch-isolation-http.test.ts` | Student, payment, invoice, object-id and branch-query attacks are re-expressed in `organization-configuration.dependent-scope.test.ts`; catalog identifier attacks are in `organization-configuration.authorization.test.ts`. |
+| `branch-isolation-live.test.ts` | Real middleware/token collection and mutation isolation is re-expressed in `organization-configuration.dependent-scope.test.ts`. |
+| `branch-profile-fee-validation.test.ts` | Invalid money, partial update, version ownership, historical-money immutability and scope behavior are re-expressed in `organization-configuration.api.test.ts` and `organization-configuration.authorization.test.ts`. Detailed finance-writer behavior remains assigned to WP-07. |
+| `branch-scope-not-home-branch.test.ts` | Assignment reach beyond home branch and denial without assignment reach are re-expressed in `organization-configuration.authorization.test.ts`. Cross-domain teacher/impact behavior remains assigned to its owning packages. |
+| `branch-scoping.test.ts` | Authorized requested scope, organization-wide scope and misaligned-home failure are re-expressed in `organization-configuration.authorization.test.ts` and `organization-configuration.dependent-scope.test.ts`. |
+| `branding-consistency.test.ts` | Brand constants, official asset, no component-local name/mark and no hardcoded issuer phone are re-expressed in `organization-configuration.architecture.test.ts`. |
+| `dashboard-branch-isolation.test.ts` | Branch aggregate and forged-query isolation are re-expressed in `organization-configuration.dependent-scope.test.ts`. |
+| `new-branch-operational.test.ts` | Transactional branch/account/payroll-envelope provisioning, including forced rollback, is re-expressed in `organization-configuration.api.test.ts`; schema uniqueness remains a registered invariant. |
+
+**Replacement authority:** the five files in
+`server/src/tests/work-packages/wp01/` (116 executed cases). These are organized by
+package authority—authorization, API contracts, integrity/transactions,
+dependent scope, and architecture—rather than by historical defect.
+
 ## WP-02 Identity & Access
 
 16 files · 155 cases

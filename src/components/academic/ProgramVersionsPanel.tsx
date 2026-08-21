@@ -38,14 +38,12 @@ const inputCls = "w-full text-xs border border-slate-200 rounded-lg px-3 py-2 fo
 const labelCls = "block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 break-words";
 
 /**
- * `branchId` is accepted for contract parity with the other branch-scoped
- * academic panels. It is intentionally NOT sent to the API: every endpoint this
- * panel calls resolves branch scope server-side from the caller's token, and
- * passing a client-supplied branch would bypass that authority. The parent
- * remounts this panel when the branch changes (see the `key` in
- * AcademicSetupView), which is what makes the reload happen.
+ * The active branch is a requested scope, never an authorization grant. Every
+ * API below validates it against live RBAC before returning or mutating catalog
+ * data, so a campus-scoped operator can select an authorized branch without the
+ * UI silently falling back to `users.branch_id`.
  */
-export default function ProgramVersionsPanel({ branchId: _branchId }: { branchId?: string } = {}) {
+export default function ProgramVersionsPanel({ branchId }: { branchId?: string } = {}) {
   const invalidate = useInvalidate();
   const [programs, setPrograms] = useState<Program[]>([]);
   const [versions, setVersions] = useState<ProgramVersion[]>([]);
@@ -75,10 +73,11 @@ export default function ProgramVersionsPanel({ branchId: _branchId }: { branchId
     setLoadingInit(true);
     setError(null);
     try {
+      const query = branchId ? { branchId } : undefined;
       const [progs, vers, bankTests] = await Promise.all([
-        api.get<Program[]>('/academic/programs'),
-        api.get<ProgramVersion[]>('/catalog/program-versions'),
-        api.get<any[]>('/placement/test-bank').catch(() => []),
+        api.get<Program[]>('/academic/programs', query),
+        api.get<ProgramVersion[]>('/catalog/program-versions', query),
+        api.get<any[]>('/placement/test-bank', query).catch(() => []),
       ]);
       setPrograms(progs || []);
       setVersions(vers || []);
@@ -89,7 +88,7 @@ export default function ProgramVersionsPanel({ branchId: _branchId }: { branchId
     } finally {
       setLoadingInit(false);
     }
-  }, []);
+  }, [branchId]);
 
   const loadTree = useCallback(async (id: string) => {
     setBusy(true); setError(null);
@@ -161,7 +160,7 @@ export default function ProgramVersionsPanel({ branchId: _branchId }: { branchId
     if (!selectedId || !promoForm.name) return;
     await handleApiCall(async () => {
       await api.post('/catalog/promotion-rules', {
-        programVersionId: selectedId, ...promoForm,
+        programVersionId: selectedId, ...promoForm, branchId,
         fromLevelId: promoForm.fromLevelId || null, toLevelId: promoForm.toLevelId || null,
       });
     }, 'Promotion rule added.');
@@ -171,7 +170,7 @@ export default function ProgramVersionsPanel({ branchId: _branchId }: { branchId
     if (!selectedId || !placeForm.name) return;
     await handleApiCall(async () => {
       await api.post('/catalog/placement-rules', {
-        programVersionId: selectedId, ...placeForm,
+        programVersionId: selectedId, ...placeForm, branchId,
         recommendedLevelId: placeForm.recommendedLevelId || null,
       });
     }, 'Placement rule added.');

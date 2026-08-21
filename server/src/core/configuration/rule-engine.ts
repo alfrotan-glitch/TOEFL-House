@@ -66,6 +66,105 @@ export interface RuleEngineResult {
   totalExecutionTimeMs: number;
 }
 
+const RULE_OPERATORS = new Set<RuleOperator>(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'in', 'not_in', 'contains', 'between']);
+const RULE_ACTION_TYPES = new Set<RuleAction['type']>(['set_value', 'add_discount', 'block', 'warn', 'notify', 'trigger_event', 'calculate']);
+const NOTIFICATION_CHANNELS = new Set<NonNullable<RuleAction['channel']>>(['sms', 'email', 'whatsapp', 'internal', 'push']);
+
+function isRuleScalar(value: unknown): value is number | string | boolean {
+  return typeof value === 'string' || typeof value === 'boolean' ||
+    (typeof value === 'number' && Number.isFinite(value));
+}
+
+/** Runtime validation at the business authority, not only at the HTTP adapter. */
+export function validateRuleParts(conditions: unknown, actions: unknown): asserts conditions is RuleCondition[] {
+  if (!Array.isArray(conditions)) throw new Error('Rule conditions must be an array.');
+  if (!Array.isArray(actions) || actions.length === 0) throw new Error('Every rule must have at least one action.');
+
+  for (const [index, candidate] of conditions.entries()) {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+      throw new Error(`Rule condition ${index + 1} must be an object.`);
+    }
+    const condition = candidate as Partial<RuleCondition>;
+    if (typeof condition.field !== 'string' || !condition.field.trim()) {
+      throw new Error(`Rule condition ${index + 1} requires a field.`);
+    }
+    if (typeof condition.operator !== 'string' || !RULE_OPERATORS.has(condition.operator as RuleOperator)) {
+      throw new Error(`Rule condition ${index + 1} has an invalid operator.`);
+    }
+    if (condition.operator === 'between') {
+      if (!Array.isArray(condition.rangeValue) || condition.rangeValue.length !== 2 ||
+          condition.rangeValue.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
+        throw new Error(`Rule condition ${index + 1} requires a finite two-number range.`);
+      }
+      if (condition.rangeValue[0] > condition.rangeValue[1]) {
+        throw new Error(`Rule condition ${index + 1} range minimum cannot exceed its maximum.`);
+      }
+      continue;
+    }
+
+    if (condition.value === undefined) {
+      throw new Error(`Rule condition ${index + 1} requires a value.`);
+    }
+    if (condition.operator === 'in' || condition.operator === 'not_in') {
+      if (!Array.isArray(condition.value)) {
+        throw new Error(`Rule condition ${index + 1} requires an array value.`);
+      }
+      if (condition.value.some((value) =>
+        !(typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value)))
+      )) {
+        throw new Error(`Rule condition ${index + 1} list values must each be a string or finite number.`);
+      }
+      continue;
+    }
+    if (['gt', 'gte', 'lt', 'lte'].includes(condition.operator)) {
+      if (typeof condition.value !== 'number' || !Number.isFinite(condition.value)) {
+        throw new Error(`Rule condition ${index + 1} requires a finite numeric value.`);
+      }
+      continue;
+    }
+    if (condition.operator === 'contains') {
+      if (typeof condition.value !== 'string') {
+        throw new Error(`Rule condition ${index + 1} requires a text value.`);
+      }
+      continue;
+    }
+    if (!isRuleScalar(condition.value)) {
+      throw new Error(`Rule condition ${index + 1} requires a finite scalar value.`);
+    }
+  }
+
+  for (const [index, candidate] of actions.entries()) {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+      throw new Error(`Rule action ${index + 1} must be an object.`);
+    }
+    const action = candidate as Partial<RuleAction>;
+    if (typeof action.type !== 'string' || !RULE_ACTION_TYPES.has(action.type as RuleAction['type'])) {
+      throw new Error(`Rule action ${index + 1} has an invalid type.`);
+    }
+    if (typeof action.targetKey !== 'string' || !action.targetKey.trim()) {
+      throw new Error(`Rule action ${index + 1} requires a target key.`);
+    }
+    if (action.type === 'set_value' && !isRuleScalar(action.value)) {
+      throw new Error(`Rule action ${index + 1} requires a finite scalar value.`);
+    }
+    if (action.type === 'add_discount' && (typeof action.value !== 'number' || !Number.isFinite(action.value))) {
+      throw new Error(`Rule action ${index + 1} requires a finite numeric discount.`);
+    }
+    if (action.type === 'calculate' && (typeof action.formula !== 'string' || !action.formula.trim())) {
+      throw new Error(`Rule action ${index + 1} requires a formula.`);
+    }
+    if (action.type === 'trigger_event' && (typeof action.eventName !== 'string' || !action.eventName.trim())) {
+      throw new Error(`Rule action ${index + 1} requires an event name.`);
+    }
+    if (action.message !== undefined && typeof action.message !== 'string') {
+      throw new Error(`Rule action ${index + 1} message must be text.`);
+    }
+    if (action.type === 'notify' && action.channel !== undefined && !NOTIFICATION_CHANNELS.has(action.channel)) {
+      throw new Error(`Rule action ${index + 1} has an invalid notification channel.`);
+    }
+  }
+}
+
 // ── Performance Optimization: Top-Level Prepared Statements ────────────────
 const stmtGetActiveRules = db.prepare(
   `SELECT * FROM rule_definitions WHERE category = ? AND is_active = 1 AND (scope_branch_id IS NULL OR scope_branch_id = ?) ORDER BY priority DESC, created_at ASC`
@@ -83,7 +182,6 @@ const stmtUpdateRule = db.prepare(
   `UPDATE rule_definitions SET name = ?, description = ?, conditions = ?, actions = ?, priority = ?, is_active = ?, scope_branch_id = ?, version = ?, last_modified_by = ?, last_modified_at = ? WHERE id = ?`
 );
 const stmtGetRuleById = db.prepare('SELECT * FROM rule_definitions WHERE id = ?');
-const stmtDeactivateRule = db.prepare('UPDATE rule_definitions SET is_active = 0, last_modified_by = ?, last_modified_at = ? WHERE id = ?');
 const stmtDeleteRule = db.prepare('DELETE FROM rule_definitions WHERE id = ?');
 const stmtGetRuleVersions = db.prepare('SELECT * FROM rule_versions WHERE rule_id = ? ORDER BY version DESC');
 const stmtGetVersionByNum = db.prepare('SELECT * FROM rule_versions WHERE rule_id = ? AND version = ?');
@@ -121,7 +219,14 @@ function parseUnary(s: ParseState): number {
 function parsePrimary(s: ParseState): number {
   skipWhitespace(s); const ch = s.input[s.pos];
   if (ch === '(') { s.pos++; const result = parseAddSub(s); skipWhitespace(s); if (s.input[s.pos] !== ')') throw new Error('Expected )'); s.pos++; return result; }
-  if (ch !== undefined && /[0-9.]/.test(ch)) { let numStr = ''; while (s.pos < s.input.length && /[0-9.]/.test(s.input[s.pos])) numStr += s.input[s.pos++]; const num = parseFloat(numStr); if (isNaN(num)) throw new Error(`Invalid number: ${numStr}`); return num; }
+  if (ch !== undefined && /[0-9.]/.test(ch)) {
+    let numStr = '';
+    while (s.pos < s.input.length && /[0-9.]/.test(s.input[s.pos])) numStr += s.input[s.pos++];
+    if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(numStr)) throw new Error(`Invalid number: ${numStr}`);
+    const num = Number(numStr);
+    if (!Number.isFinite(num)) throw new Error(`Invalid number: ${numStr}`);
+    return num;
+  }
   if (ch !== undefined && /[a-zA-Z_]/.test(ch)) { let name = ''; while (s.pos < s.input.length && /[a-zA-Z0-9_]/.test(s.input[s.pos])) name += s.input[s.pos++]; if (!(name in s.vars)) throw new Error(`Unknown variable: ${name}`); return s.vars[name]; }
   throw new Error(`Unexpected character: ${ch ?? 'end of input'}`);
 }
@@ -178,18 +283,22 @@ export function evaluateRules(context: RuleContext): RuleEngineResult {
   const warnings: string[] = [];
   let isBlocked = false; 
   let blockReason: string | undefined;
-  let blockingRuleId: string | undefined;
-  
+
   const runningData: RuleContext['data'] = { ...context.data };
 
   for (const row of rows) {
-    let conditions: RuleCondition[]; 
+    let conditions: RuleCondition[];
     let actions: RuleAction[];
-    try { 
-      conditions = JSON.parse(row.conditions); 
-      actions = JSON.parse(row.actions); 
-    } catch { 
-      continue; // Skip malformed rules
+    try {
+      conditions = JSON.parse(row.conditions);
+      actions = JSON.parse(row.actions);
+      validateRuleParts(conditions, actions);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'invalid JSON';
+      // An active malformed rule is configuration corruption, not an ordinary
+      // non-match. Failing closed makes the fault visible and prevents a rule
+      // that operators believe is active from being silently bypassed.
+      throw new Error(`Persisted rule ${row.id} is malformed: ${reason}`, { cause: error });
     }
 
     const matched = conditions.length === 0 || conditions.every(c => evaluateCondition(c, runningData));
@@ -230,7 +339,6 @@ export function evaluateRules(context: RuleContext): RuleEngineResult {
         if (outputs['__blocked'] === true) { 
           isBlocked = true; 
           blockReason = outputs['__blockReason'] as string;
-          blockingRuleId = row.id;
           ruleCausedBlock = true;
         }
         if (typeof outputs['__warning'] === 'string') warnings.push(outputs['__warning']);
@@ -247,8 +355,8 @@ export function evaluateRules(context: RuleContext): RuleEngineResult {
     if (matched && !dryRun) {
       try {
         stmtInsertRuleLog.run(
-          id('rel'), row.id, category, branchId, 
-          isBlocked && blockingRuleId === row.id ? 1 : 0, // Mark as blocked only if THIS rule caused it
+          id('rel'), row.id, category, branchId,
+          1, // only matched rules reach this log write; blocking is part of result_json
           JSON.stringify(context.data), JSON.stringify(finalOutputs)
         );
       } catch { /* Logging failure must never halt the evaluation pipeline */ }
@@ -263,33 +371,45 @@ export function evaluateRules(context: RuleContext): RuleEngineResult {
 
 // ── CRUD Operations ────────────────────────────────────────────────────────
 export function createRule(rule: Omit<RuleDefinition, 'id' | 'version' | 'createdAt' | 'lastModifiedAt'>, operatorName: string): RuleDefinition {
-  const ruleId = id('rule'); const now = new Date().toISOString();
-  stmtInsertRule.run(ruleId, rule.name, rule.description, rule.category, JSON.stringify(rule.conditions), JSON.stringify(rule.actions), rule.priority, rule.isActive ? 1 : 0, rule.scopeBranchId, operatorName, now, now);
-  saveRuleVersion(ruleId, 1, rule.conditions, rule.actions, rule.priority, rule.isActive, operatorName);
-  return { ...rule, id: ruleId, version: 1, createdAt: now, lastModifiedAt: now, lastModifiedBy: operatorName };
+  validateRuleParts(rule.conditions, rule.actions);
+  if (!rule.name.trim()) throw new Error('Rule name is required.');
+  if (!Number.isFinite(rule.priority)) throw new Error('Rule priority must be finite.');
+  const ruleId = id('rule');
+  const now = new Date().toISOString();
+  db.transaction(() => {
+    stmtInsertRule.run(ruleId, rule.name.trim(), rule.description, rule.category, JSON.stringify(rule.conditions), JSON.stringify(rule.actions), rule.priority, rule.isActive ? 1 : 0, rule.scopeBranchId, operatorName, now, now);
+    saveRuleVersion(ruleId, 1, rule.conditions, rule.actions, rule.priority, rule.isActive, operatorName);
+  })();
+  return { ...rule, name: rule.name.trim(), id: ruleId, version: 1, createdAt: now, lastModifiedAt: now, lastModifiedBy: operatorName };
 }
 
 export function updateRule(ruleId: string, updates: Partial<Pick<RuleDefinition, 'name' | 'description' | 'conditions' | 'actions' | 'priority' | 'isActive' | 'scopeBranchId'>>, operatorName: string): RuleDefinition {
   const existing = stmtGetRuleById.get(ruleId) as RuleDefinitionRow | undefined;
   if (!existing) throw new Error(`Rule not found.`);
-  
-  const newVersion = existing.version + 1; 
+
+  const newVersion = existing.version + 1;
   const now = new Date().toISOString();
   const conditions = updates.conditions ?? JSON.parse(existing.conditions);
   const actions = updates.actions ?? JSON.parse(existing.actions);
   const priority = updates.priority ?? existing.priority;
   const isActive = updates.isActive !== undefined ? updates.isActive : !!existing.is_active;
-  
-  stmtUpdateRule.run(
-    updates.name ?? existing.name, updates.description ?? existing.description, JSON.stringify(conditions), JSON.stringify(actions),
-    priority, isActive ? 1 : 0, updates.scopeBranchId !== undefined ? updates.scopeBranchId : existing.scope_branch_id, newVersion, operatorName, now, ruleId
-  );
-  saveRuleVersion(ruleId, newVersion, conditions, actions, priority, isActive, operatorName);
+  const name = updates.name ?? existing.name;
+  validateRuleParts(conditions, actions);
+  if (typeof name !== 'string' || !name.trim()) throw new Error('Rule name is required.');
+  if (!Number.isFinite(priority)) throw new Error('Rule priority must be finite.');
+
+  db.transaction(() => {
+    stmtUpdateRule.run(
+      name.trim(), updates.description ?? existing.description, JSON.stringify(conditions), JSON.stringify(actions),
+      priority, isActive ? 1 : 0, updates.scopeBranchId !== undefined ? updates.scopeBranchId : existing.scope_branch_id, newVersion, operatorName, now, ruleId
+    );
+    saveRuleVersion(ruleId, newVersion, conditions, actions, priority, isActive, operatorName);
+  })();
   return mapRuleRow(stmtGetRuleById.get(ruleId) as RuleDefinitionRow);
 }
 
-export function deactivateRule(ruleId: string, operatorName: string): void {
-  stmtDeactivateRule.run(operatorName, new Date().toISOString(), ruleId);
+export function deactivateRule(ruleId: string, operatorName: string): RuleDefinition {
+  return updateRule(ruleId, { isActive: false }, operatorName);
 }
 
 export function deleteRule(ruleId: string): void { stmtDeleteRule.run(ruleId); }
@@ -345,6 +465,15 @@ function mapRuleRow(row: RuleDefinitionRow): RuleDefinition {
 
 export function seedDefaultRules(): void {
   const ensure = db.transaction(() => {
+    // This historical seed duplicated neither the live settings authority nor
+    // the income writer: evaluateRules() was never called by recordIncome().
+    // Remove the exact obsolete identifier on startup so existing databases
+    // converge with the canonical catalog as well as fresh databases. Foreign
+    // keys cascade its disconnected version/log history. The authoritative
+    // daily_saving_percent setting and income.ts behavior are intentionally
+    // untouched.
+    stmtDeleteRule.run('rule_default_auto_savings');
+
     for (const rule of DEFAULT_RULE_CATALOG) {
       const existing = db.prepare('SELECT id FROM rule_definitions WHERE name = ? LIMIT 1').get(rule.name) as { id: string } | undefined;
       if (existing) continue;

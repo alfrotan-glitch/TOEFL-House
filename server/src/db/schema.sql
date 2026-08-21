@@ -75,12 +75,20 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_branches_code_unique ON branches(code) WHE
 
 CREATE TABLE IF NOT EXISTS partners ( 
   id               TEXT PRIMARY KEY, 
-  full_name        TEXT NOT NULL, 
+  full_name        TEXT NOT NULL CHECK (length(trim(full_name)) > 0),
   phone            TEXT, 
   email            TEXT, 
-  share_percent    REAL NOT NULL DEFAULT 0, 
+  share_percent    REAL NOT NULL DEFAULT 0 CHECK (share_percent >= 0 AND share_percent <= 100),
   role_description TEXT 
 );
+CREATE TRIGGER IF NOT EXISTS trg_partners_total_share_insert
+BEFORE INSERT ON partners
+WHEN (SELECT COALESCE(SUM(share_percent), 0) FROM partners) + NEW.share_percent > 100
+BEGIN SELECT RAISE(ABORT, 'total partner shares cannot exceed 100 percent'); END;
+CREATE TRIGGER IF NOT EXISTS trg_partners_total_share_update
+BEFORE UPDATE OF share_percent ON partners
+WHEN (SELECT COALESCE(SUM(share_percent), 0) FROM partners WHERE id <> OLD.id) + NEW.share_percent > 100
+BEGIN SELECT RAISE(ABORT, 'total partner shares cannot exceed 100 percent'); END;
 
 CREATE TABLE IF NOT EXISTS system_settings ( 
   key   TEXT PRIMARY KEY, 
@@ -2091,12 +2099,12 @@ CREATE TABLE IF NOT EXISTS rule_definitions (
   name             TEXT NOT NULL, 
   description      TEXT NOT NULL DEFAULT '', 
   category         TEXT NOT NULL CHECK (category IN ('fee','discount','promotion','attendance','payroll','scholarship','workflow','notification','finance','academic')), 
-  conditions       TEXT NOT NULL DEFAULT '[]', 
-  actions          TEXT NOT NULL DEFAULT '[]', 
+  conditions       TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(conditions) AND json_type(conditions) = 'array'),
+  actions          TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(actions) AND json_type(actions) = 'array'),
   priority         INTEGER NOT NULL DEFAULT 0, 
-  is_active        INTEGER NOT NULL DEFAULT 1, 
+  is_active        INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
   scope_branch_id  TEXT REFERENCES branches(id) ON DELETE CASCADE, 
-  version          INTEGER NOT NULL DEFAULT 1, 
+  version          INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
   last_modified_by TEXT NOT NULL DEFAULT 'system', 
   last_modified_at TEXT NOT NULL DEFAULT (datetime('now')), 
   created_at       TEXT NOT NULL DEFAULT (datetime('now')) 
@@ -2106,11 +2114,11 @@ CREATE INDEX IF NOT EXISTS idx_rules_category        ON rule_definitions(categor
 CREATE TABLE IF NOT EXISTS rule_versions ( 
   id          TEXT PRIMARY KEY, 
   rule_id     TEXT NOT NULL REFERENCES rule_definitions(id) ON DELETE CASCADE, 
-  version     INTEGER NOT NULL, 
-  conditions  TEXT NOT NULL, 
-  actions     TEXT NOT NULL, 
+  version     INTEGER NOT NULL CHECK (version >= 1),
+  conditions  TEXT NOT NULL CHECK (json_valid(conditions) AND json_type(conditions) = 'array'),
+  actions     TEXT NOT NULL CHECK (json_valid(actions) AND json_type(actions) = 'array'),
   priority    INTEGER NOT NULL, 
-  is_active   INTEGER NOT NULL, 
+  is_active   INTEGER NOT NULL CHECK (is_active IN (0,1)),
   modified_by TEXT NOT NULL, 
   modified_at TEXT NOT NULL DEFAULT (datetime('now')), 
   UNIQUE(rule_id, version) 
@@ -2122,10 +2130,10 @@ CREATE TABLE IF NOT EXISTS rule_evaluation_logs (
   rule_id      TEXT NOT NULL REFERENCES rule_definitions(id) ON DELETE CASCADE, 
   category     TEXT NOT NULL, 
   branch_id    TEXT, 
-  matched      INTEGER NOT NULL, 
-  context_json TEXT NOT NULL, 
-  result_json  TEXT NOT NULL, 
-  dry_run      INTEGER NOT NULL DEFAULT 0, 
+  matched      INTEGER NOT NULL CHECK (matched IN (0,1)),
+  context_json TEXT NOT NULL CHECK (json_valid(context_json)),
+  result_json  TEXT NOT NULL CHECK (json_valid(result_json)),
+  dry_run      INTEGER NOT NULL DEFAULT 0 CHECK (dry_run IN (0,1)),
   evaluated_at TEXT NOT NULL DEFAULT (datetime('now')) 
 );
 

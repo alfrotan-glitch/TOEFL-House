@@ -5,7 +5,7 @@
  * capacity; the offering fee is the authoritative enrollment fee snapshot.
  */
 import { text } from '../../design-system/styles';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Wand2, RefreshCw, Check, AlertCircle, Layers, Play, Loader2, X, Info, DoorOpen, Clock, Users, DollarSign } from 'lucide-react';
 import { api } from '../../api/client';
 import { useInvalidate } from '../../state/serverStateFreshness';
@@ -61,22 +61,31 @@ export default function ClassGenerationWizard({ branchId }: { branchId?: string 
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [showPublishModal, setShowPublishModal] = useState(false);
+  const loadSequence = useRef(0);
 
   const loadInitialData = useCallback(async () => {
-    if (!branchId) return;
+    const sequence = ++loadSequence.current;
+    if (!branchId) {
+      setOfferings([]);
+      setOfferingId('');
+      setLoadingInit(false);
+      return;
+    }
     setLoadingInit(true);
     setError(null);
     try {
       const data = await api.get<Offering[]>(`/offerings?branchId=${encodeURIComponent(branchId)}`);
+      if (sequence !== loadSequence.current) return;
       const list = Array.isArray(data) ? data : [];
       const eligible = list.filter((o) => ['draft', 'open'].includes(o.status));
       setOfferings(eligible);
       setOfferingId((current) => eligible.some((o) => o.id === current) ? current : (eligible[0]?.id || ''));
     } catch (err: unknown) {
+      if (sequence !== loadSequence.current) return;
       setOfferings([]);
       setError(err instanceof Error ? err.message : 'Failed to load course offerings');
     } finally {
-      setLoadingInit(false);
+      if (sequence === loadSequence.current) setLoadingInit(false);
     }
   }, [branchId]);
 

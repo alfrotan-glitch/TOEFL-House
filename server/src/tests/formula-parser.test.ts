@@ -13,8 +13,39 @@ beforeAll(() => {
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(
     'b1', 'Test Branch', 'Test Location'
   );
+  // Formula parsing is tested with an explicit test-only rule. The production
+  // savings authority is system_settings + recordIncome; a disconnected
+  // generic "auto savings" rule would be a second, misleading finance policy.
+  createRule(
+    {
+      name: 'Test-only arithmetic formula',
+      description: 'Verifies arithmetic parsing without claiming finance authority.',
+      category: 'finance',
+      conditions: [{ field: 'transactionType', operator: 'eq', value: 'income' }],
+      actions: [{ type: 'calculate', targetKey: 'savingAmount', formula: 'amount * 0.05' }],
+      priority: 1,
+      isActive: true,
+      scopeBranchId: 'b1',
+      lastModifiedBy: 'test',
+    },
+    'test',
+  );
   // Exercise the rule engine's generic block action without making a business
   // rule a second authority for a domain operation such as profit withdrawal.
+  createRule(
+    {
+      name: 'Test-only malformed numeric formula',
+      description: 'A dotted token must be consumed exactly or rejected.',
+      category: 'finance',
+      conditions: [{ field: 'transactionType', operator: 'eq', value: 'malformed-number' }],
+      actions: [{ type: 'calculate', targetKey: 'malformedAmount', formula: 'amount * 1.2.3' }],
+      priority: 2,
+      isActive: true,
+      scopeBranchId: 'b1',
+      lastModifiedBy: 'test',
+    },
+    'test',
+  );
   createRule(
     {
       name: 'Test-only generic block action',
@@ -36,14 +67,13 @@ afterAll(() => {
 });
 
 describe('Safe Formula Parser', () => {
-  it('evaluates basic arithmetic via the finance savings rule', () => {
+  it('evaluates basic arithmetic through an isolated generic rule', () => {
     const result = evaluateRules({
       category: 'finance',
       branchId: 'b1',
       data: { transactionType: 'income', amount: 10000 },
     });
 
-    // The "Automatic Savings — 5% of Income" rule uses formula: amount * 0.05
     expect(result.finalOutputs.savingAmount).toBe(500);
   });
 
@@ -65,8 +95,17 @@ describe('Safe Formula Parser', () => {
       data: { transactionType: 'income', amount: 10000, nonexistentVar: 999 },
     });
 
-    // Should still work — the savings rule only references "amount"
+    // Unused context fields do not affect the formula's declared variables.
     expect(result.finalOutputs.savingAmount).toBe(500);
+  });
+
+  it('rejects a malformed dotted numeric token instead of accepting its parseFloat prefix', () => {
+    const result = evaluateRules({
+      category: 'finance',
+      branchId: 'b1',
+      data: { transactionType: 'malformed-number', amount: 10 },
+    });
+    expect(result.finalOutputs.malformedAmount).toBe(0);
   });
 
   it('evaluates a generic block action', () => {

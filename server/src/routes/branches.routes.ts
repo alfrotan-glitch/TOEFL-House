@@ -5,8 +5,8 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { ensureBranchBudgetLines } from '../db/organizationHierarchy.js';
-import { authenticate, authorize, denyPermissionless, canAccessBranchResource } from '../middleware/auth.js';
-import { hasRole, isGlobalOwner } from '../core/rbac/rbac-service.js';
+import { authenticate, authorize, denyPermissionless, canAccessBranchResource, requireGlobalOwner } from '../middleware/auth.js';
+import { isGlobalOwner } from '../core/rbac/rbac-service.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id } from '../utils/ids.js';
@@ -39,6 +39,14 @@ const stmtDeactivateBranchesByCampus = db.prepare(`UPDATE branches SET is_active
 const stmtGetBranchIdsByCampus = db.prepare('SELECT id FROM branches WHERE campus_id = ?');
 const stmtDeleteBranch = db.prepare('DELETE FROM branches WHERE id = ?');
 const stmtDeleteCampus = db.prepare('DELETE FROM campuses WHERE id = ?');
+const stmtDeleteBranchBudgetLines = db.prepare('DELETE FROM budget_lines WHERE branch_id = ?');
+const stmtDeleteBranchFinanceAccount = db.prepare("DELETE FROM finance_accounts WHERE scope_type = 'branch' AND scope_id = ?");
+const stmtGetBranchFinanceAccount = db.prepare(
+  "SELECT main_balance, saving_balance FROM finance_accounts WHERE scope_type = 'branch' AND scope_id = ?",
+);
+const stmtGetBranchBudgetBalance = db.prepare(
+  'SELECT COALESCE(SUM(current_amount), 0) AS current_total FROM budget_lines WHERE branch_id = ?',
+);
 
 const stmtGetAllBranches = db.prepare('SELECT * FROM branches ORDER BY name');
 const stmtGetBranchById = db.prepare('SELECT * FROM branches WHERE id = ?');
@@ -69,7 +77,7 @@ const stmtDeletePartner = db.prepare('DELETE FROM partners WHERE id = ?');
 /** Pre-compile dependency checks to avoid dynamic SQL preparation in a loop */
 const BRANCH_DEPENDENT_TABLES = [
   'users', 'students', 'teachers', 'employees', 'classes', 'sessions', 'visitors',
-  'payments', 'invoices', 'budget_lines', 'expense_requests', 'financial_transactions',
+  'payments', 'invoices', 'expense_requests', 'financial_transactions',
   'books', 'book_sales', 'exams', 'exam_results', 'attendance', 'notifications',
   'audit_logs', 'programs', 'campaigns'
 ] as const;
@@ -88,10 +96,19 @@ function ensureOrganization(): void {
   }
 }
 
-function mapCampus(row: any) {
+function mapCampus(row: any, req?: import('express').Request) {
   if (!row) return null;
-  const branchTotal = (stmtCountCampusBranches.get(row.id) as { c: number }).c;
-  const branchActive = (stmtCountActiveCampusBranches.get(row.id) as { c: number }).c;
+  let branchTotal: number;
+  let branchActive: number;
+  if (!req || (req.rbac && isGlobalOwner(req.rbac))) {
+    branchTotal = (stmtCountCampusBranches.get(row.id) as { c: number }).c;
+    branchActive = (stmtCountActiveCampusBranches.get(row.id) as { c: number }).c;
+  } else {
+    const visible = (db.prepare('SELECT id, is_active FROM branches WHERE campus_id = ?').all(row.id) as Array<{ id: string; is_active: number }>)
+      .filter((branch) => canAccessBranchResource(req, branch.id));
+    branchTotal = visible.length;
+    branchActive = visible.filter((branch) => branch.is_active === 1).length;
+  }
   return {
     id: row.id,
     organizationId: row.organization_id,
@@ -130,6 +147,29 @@ function countCampusBranchDependents(campusId: string): number {
     total += countBranchDependents(b.id).reduce((s, x) => s + x.count, 0);
   }
   return total;
+}
+
+function requireEmptyBranchProvisioning(branchId: string): void {
+  const account = stmtGetBranchFinanceAccount.get(branchId) as
+    | { main_balance: number; saving_balance: number }
+    | undefined;
+  const budget = stmtGetBranchBudgetBalance.get(branchId) as { current_total: number };
+  const main = Number(account?.main_balance ?? 0);
+  const saving = Number(account?.saving_balance ?? 0);
+  const envelopes = Number(budget.current_total ?? 0);
+  if (!Number.isFinite(main) || !Number.isFinite(saving) || !Number.isFinite(envelopes) ||
+      main !== 0 || saving !== 0 || envelopes !== 0) {
+    throw new HttpError(409, 'Cannot permanently delete a branch while its cash account or budget envelopes hold funds.');
+  }
+}
+
+function deleteEmptyBranch(branchId: string): void {
+  // Finance accounts are polymorphic and deliberately have no branch foreign
+  // key; budget lines use RESTRICT. Remove only zero-balance provisioning in
+  // the same transaction as the empty branch so no orphan account survives.
+  stmtDeleteBranchBudgetLines.run(branchId);
+  stmtDeleteBranchFinanceAccount.run(branchId);
+  stmtDeleteBranch.run(branchId);
 }
 
 function mapBranch(row: any) {
@@ -171,10 +211,23 @@ function assertUniqueCampusCode(code: string, excludeId?: string): void {
   }
 }
 
-function requireCampusAccess(req: import('express').Request, campusId: string): void {
-  if (!!req.rbac && isGlobalOwner(req.rbac)) return;
+function canAccessCampusResource(req: import('express').Request, campusId: string): boolean {
+  const context = req.rbac;
+  if (!context) return false;
+  if (isGlobalOwner(context)) return true;
+  if (context.roles.some((role) =>
+    role.scopeType === 'organization' || (role.scopeType === 'campus' && role.scopeId === campusId)
+  )) return true;
+
+  // A branch assignment also reaches its parent campus. Checking children is
+  // necessary for that narrower assignment, but cannot be the only campus
+  // test: a directly assigned, newly created campus has no branch yet.
   const branches = db.prepare('SELECT id FROM branches WHERE campus_id = ?').all(campusId) as Array<{ id: string }>;
-  if (!branches.some((b) => canAccessBranchResource(req, b.id))) {
+  return branches.some((branch) => canAccessBranchResource(req, branch.id));
+}
+
+function requireCampusAccess(req: import('express').Request, campusId: string): void {
+  if (!canAccessCampusResource(req, campusId)) {
     throw new HttpError(403, 'Campus is outside your access scope.');
   }
 }
@@ -193,6 +246,31 @@ function requireActiveCampus(campusId: string): void {
   }
 }
 
+function assertPartnerName(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new HttpError(400, 'Partner name is required.');
+  }
+  return value.trim();
+}
+
+function assertPartnerShare(value: unknown): number {
+  const share = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+  if (typeof share !== 'number' || !Number.isFinite(share) || share < 0 || share > 100) {
+    throw new HttpError(400, 'Partner share percent must be a finite number between 0 and 100.');
+  }
+  return share;
+}
+
+function assertPartnerShareTotal(share: number, excludeId?: string): void {
+  const row = excludeId
+    ? db.prepare('SELECT COALESCE(SUM(share_percent), 0) AS total FROM partners WHERE id <> ?').get(excludeId)
+    : db.prepare('SELECT COALESCE(SUM(share_percent), 0) AS total FROM partners').get();
+  const total = Number((row as { total: number }).total) + share;
+  if (!Number.isFinite(total) || total > 100) {
+    throw new HttpError(409, `Total partner shares cannot exceed 100% (proposed total: ${total}%).`);
+  }
+}
+
 // ── Organization ───────────────────────────────────────────────────────────
 
 export const organizationRouter = Router();
@@ -201,11 +279,19 @@ organizationRouter.use(authenticate);
 organizationRouter.get(
   '/',
   denyPermissionless,
-  ah(async (_req, res) => {
+  ah(async (req, res) => {
     ensureOrganization();
     const org = stmtGetOrg.get(FIXED_ORG_ID) as any;
-    const campusCount = (stmtCountCampusesByOrg.get(FIXED_ORG_ID) as { c: number }).c;
-    const branchCount = (stmtCountAllBranches.get() as { c: number }).c;
+    const global = !!req.rbac && isGlobalOwner(req.rbac);
+    const visibleBranches = global
+      ? (stmtGetAllBranches.all() as any[])
+      : (stmtGetAllBranches.all() as any[]).filter((branch) => canAccessBranchResource(req, branch.id));
+    const campusCount = global
+      ? (stmtCountCampusesByOrg.get(FIXED_ORG_ID) as { c: number }).c
+      : (stmtGetAllCampuses.all() as any[]).filter((campus) => canAccessCampusResource(req, campus.id)).length;
+    const branchCount = global
+      ? (stmtCountAllBranches.get() as { c: number }).c
+      : visibleBranches.length;
     res.json({
       id: org.id,
       name: FIXED_ORG_NAME,
@@ -229,12 +315,9 @@ campusesRouter.get(
     const activeOnly = req.query.active === 'true' || req.query.active === '1';
     let rows = (activeOnly ? stmtGetActiveCampuses.all() : stmtGetAllCampuses.all()) as any[];
     if (!req.rbac || !isGlobalOwner(req.rbac)) {
-      rows = rows.filter((r) => {
-        const branches = db.prepare('SELECT id FROM branches WHERE campus_id = ?').all(r.id) as Array<{ id: string }>;
-        return branches.some((b) => canAccessBranchResource(req, b.id));
-      });
+      rows = rows.filter((row) => canAccessCampusResource(req, row.id));
     }
-    res.json(rows.map(mapCampus));
+    res.json(rows.map((row) => mapCampus(row, req)));
   })
 );
 
@@ -244,13 +327,13 @@ campusesRouter.get(
     const row = stmtGetCampusById.get(req.params.id) as any;
     if (!row) throw new HttpError(404, 'Campus not found.');
     requireCampusAccess(req, row.id);
-    res.json(mapCampus(row));
+    res.json(mapCampus(row, req));
   })
 );
 
 campusesRouter.post(
   '/',
-  authorize('owner'),
+  requireGlobalOwner,
   ah(async (req, res) => {
     ensureOrganization();
     const { name, code, address, postalCode, phone, email, description, isActive } = req.body ?? {};
@@ -274,7 +357,7 @@ campusesRouter.post(
 
 campusesRouter.put(
   '/:id',
-  authorize('owner'),
+  requireGlobalOwner,
   ah(async (req, res) => {
     const existing = stmtGetCampusById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Campus not found.');
@@ -291,20 +374,23 @@ campusesRouter.put(
 
     const nextActive = isActive === undefined ? existing.is_active : isActive === false || isActive === 0 ? 0 : 1;
 
-    if (existing.is_active && !nextActive) {
-      stmtDeactivateBranchesByCampus.run(req.params.id);
-    }
+    const updateCampus = db.transaction(() => {
+      if (existing.is_active && !nextActive) {
+        stmtDeactivateBranchesByCampus.run(req.params.id);
+      }
 
-    stmtUpdateCampus.run(
-      name !== undefined ? name.trim() : existing.name,
-      code !== undefined ? code.trim().toUpperCase() : existing.code,
-      address !== undefined ? address?.trim() || null : existing.address,
-      postalCode !== undefined ? postalCode?.trim() || null : existing.postal_code,
-      phone !== undefined ? phone?.trim() || null : existing.phone,
-      email !== undefined ? email?.trim() || null : existing.email,
-      description !== undefined ? description?.trim() || null : existing.description,
-      nextActive, req.params.id
-    );
+      stmtUpdateCampus.run(
+        name !== undefined ? name.trim() : existing.name,
+        code !== undefined ? code.trim().toUpperCase() : existing.code,
+        address !== undefined ? address?.trim() || null : existing.address,
+        postalCode !== undefined ? postalCode?.trim() || null : existing.postal_code,
+        phone !== undefined ? phone?.trim() || null : existing.phone,
+        email !== undefined ? email?.trim() || null : existing.email,
+        description !== undefined ? description?.trim() || null : existing.description,
+        nextActive, req.params.id
+      );
+    });
+    updateCampus();
 
     writeAudit(req, `Updated campus: ${existing.name}`);
     const updated = stmtGetCampusById.get(req.params.id);
@@ -314,7 +400,7 @@ campusesRouter.put(
 
 campusesRouter.delete(
   '/:id',
-  authorize('owner'),
+  requireGlobalOwner,
   ah(async (req, res) => {
     const existing = stmtGetCampusById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Campus not found.');
@@ -322,26 +408,28 @@ campusesRouter.delete(
     const permanent = req.query.permanent === 'true' || req.query.permanent === '1';
 
     if (!permanent) {
-      stmtDeactivateCampus.run(req.params.id);
-      stmtDeactivateBranchesByCampus.run(req.params.id);
+      db.transaction(() => {
+        stmtDeactivateCampus.run(req.params.id);
+        stmtDeactivateBranchesByCampus.run(req.params.id);
+      })();
       writeAudit(req, `Deactivated campus: ${existing.name}`);
       res.json({ ok: true, deleted: false, isActive: false });
       return;
     }
 
     const depCount = countCampusBranchDependents(req.params.id);
-    const branchCount = (stmtCountCampusBranches.get(req.params.id) as { c: number }).c;
+    const childBranches = stmtGetBranchIdsByCampus.all(req.params.id) as Array<{ id: string }>;
+    const branchCount = childBranches.length;
 
     if (depCount > 0) {
       throw new HttpError(409, `Cannot permanently delete campus "${existing.name}": ${depCount} operational record(s) still reference its branches. Deactivate it instead, or remove/reassign the related data first.`);
     }
+    for (const branch of childBranches) requireEmptyBranchProvisioning(branch.id);
 
-    // Safe permanent delete: empty branches under campus, then campus
+    // Safe permanent delete: empty branches and their zero-balance provisioning,
+    // then the campus, all in one transaction.
     const deleteTx = db.transaction(() => {
-      const childBranches = stmtGetBranchIdsByCampus.all(req.params.id) as Array<{ id: string }>;
-      for (const b of childBranches) {
-        stmtDeleteBranch.run(b.id);
-      }
+      for (const branch of childBranches) deleteEmptyBranch(branch.id);
       stmtDeleteCampus.run(req.params.id);
     });
     
@@ -408,19 +496,18 @@ branchesRouter.post(
     if (!resolvedAddress) throw new HttpError(400, 'Branch address is required.');
 
     const newId = id('br');
-    stmtInsertBranch.run(
-      newId, campusId, name.trim(), code.trim().toUpperCase(), resolvedAddress, resolvedAddress,
-      postalCode?.trim() || null, phone?.trim() || null, email?.trim() || null,
-      description?.trim() || null, isActive === false || isActive === 0 ? 0 : 1
-    );
-
-    ensureFinanceAccount('branch', newId);
-    // Budget lines are provisioned here, not left to the boot-time catalogue
-    // sweep. Without this a branch created at runtime has a finance account and
-    // accepts students but cannot run payroll ("Teacher salary budget line is
-    // not configured.") or charge any expense until the server is restarted.
-    // Provision them with the branch so it is operational immediately.
-    ensureBranchBudgetLines(db, newId);
+    // A branch is not operational without its cash account and required payroll
+    // envelopes. Commit all three authorities together so a provisioning error
+    // cannot leave a visible but unusable branch behind.
+    db.transaction(() => {
+      stmtInsertBranch.run(
+        newId, campusId, name.trim(), code.trim().toUpperCase(), resolvedAddress, resolvedAddress,
+        postalCode?.trim() || null, phone?.trim() || null, email?.trim() || null,
+        description?.trim() || null, isActive === false || isActive === 0 ? 0 : 1
+      );
+      ensureFinanceAccount('branch', newId);
+      ensureBranchBudgetLines(db, newId);
+    })();
 
     writeAudit(req, `Created branch: ${name.trim()} (${code.trim().toUpperCase()})`);
     const created = stmtGetBranchById.get(newId);
@@ -477,6 +564,7 @@ branchesRouter.delete(
   ah(async (req, res) => {
     const existing = stmtGetBranchById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Branch not found.');
+    requireBranchAccess(req, existing.id);
 
     const permanent = req.query.permanent === 'true' || req.query.permanent === '1';
 
@@ -493,10 +581,8 @@ branchesRouter.delete(
       throw new HttpError(409, `Cannot permanently delete branch "${existing.name}": operational data still references it (${summary}). Deactivate it instead, or reassign/remove the related records first.`);
     }
 
-    const deleteTx = db.transaction(() => {
-      stmtDeleteBranch.run(req.params.id);
-    });
-    deleteTx();
+    requireEmptyBranchProvisioning(req.params.id);
+    db.transaction(() => deleteEmptyBranch(req.params.id))();
 
     writeAudit(req, `Permanently deleted branch: ${existing.name}`);
     res.json({ ok: true, deleted: true });
@@ -516,31 +602,36 @@ partnersRouter.get(
 
 partnersRouter.post(
   '/',
-  authorize('owner'),
+  requireGlobalOwner,
   ah(async (req, res) => {
-    const { fullName, phone, email, sharePercent, roleDescription } = req.body;
-    if (!fullName || sharePercent == null) throw new HttpError(400, 'Partner name and share percent are required.');
-    
+    const { fullName, phone, email, sharePercent, roleDescription } = req.body ?? {};
+    const normalizedName = assertPartnerName(fullName);
+    const normalizedShare = assertPartnerShare(sharePercent);
+    assertPartnerShareTotal(normalizedShare);
+
     const newId = id('ptn');
-    stmtInsertPartner.run(newId, fullName, phone || null, email || null, sharePercent, roleDescription || null);
-    writeAudit(req, `Added partner: ${fullName} (${sharePercent}%)`);
+    stmtInsertPartner.run(newId, normalizedName, phone || null, email || null, normalizedShare, roleDescription || null);
+    writeAudit(req, `Added partner: ${normalizedName} (${normalizedShare}%)`);
     res.status(201).json({ id: newId });
   })
 );
 
 partnersRouter.put(
   '/:id',
-  authorize('owner'),
+  requireGlobalOwner,
   ah(async (req, res) => {
     const existing = stmtGetPartnerById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Partner not found.');
-    
-    const { fullName, phone, email, sharePercent, roleDescription } = req.body;
+
+    const { fullName, phone, email, sharePercent, roleDescription } = req.body ?? {};
+    const normalizedName = fullName === undefined ? existing.full_name : assertPartnerName(fullName);
+    const normalizedShare = sharePercent === undefined ? existing.share_percent : assertPartnerShare(sharePercent);
+    assertPartnerShareTotal(normalizedShare, req.params.id);
     stmtUpdatePartner.run(
-      fullName ?? existing.full_name,
+      normalizedName,
       phone ?? existing.phone,
       email ?? existing.email,
-      sharePercent ?? existing.share_percent,
+      normalizedShare,
       roleDescription ?? existing.role_description,
       req.params.id
     );
@@ -551,7 +642,7 @@ partnersRouter.put(
 
 partnersRouter.delete(
   '/:id',
-  authorize('owner'),
+  requireGlobalOwner,
   ah(async (req, res) => {
     const existing = stmtGetPartnerById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Partner not found.');

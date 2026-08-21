@@ -29,7 +29,7 @@ export function setSetting(key: string, value: string): void {
 export function getNumberSetting(key: string, fallback: number): number {
   const val = getSetting(key, String(fallback));
   const num = Number(val);
-  return isNaN(num) ? fallback : num;
+  return Number.isFinite(num) ? num : fallback;
 }
 
 /**

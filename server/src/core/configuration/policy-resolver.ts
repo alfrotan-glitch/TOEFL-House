@@ -1,6 +1,6 @@
 import type BetterSqlite3 from 'better-sqlite3';
 import { SYSTEM_DEFAULTS } from './policy-catalog.js';
-import { assertMoney, assertComputedMoney } from '../../utils/money.js';
+import { assertComputedMoney } from '../../utils/money.js';
 
 export type FeeKey = 'placementTestFee' | 'registrationFee' | 'cardIssuanceFee' | 'diplomaFee';
 

@@ -41,15 +41,16 @@ export default function OfferingsPanel({ branchId, onChange }: { branchId?: stri
   const load = useCallback(async () => {
     if (!branchId) return;
     setLoading(true); setError('');
+    const query = { branchId };
     try {
       const [offs, progs, vers, lvls, trms, feeRows, cls] = await Promise.all([
-        api.get<Offering[]>(`/offerings?branchId=${encodeURIComponent(branchId)}`),
-        api.get<Program[]>('/academic/programs'),
-        api.get<ProgramVersion[]>('/catalog/program-versions'),
-        api.get<Level[]>('/academic/levels'),
-        api.get<Term[]>('/academic/terms'),
-        api.get<FeeRow[]>('/academic/level-fees'),
-        api.get<ClassRef[]>(`/classes?branchId=${encodeURIComponent(branchId)}`),
+        api.get<Offering[]>('/offerings', query),
+        api.get<Program[]>('/academic/programs', query),
+        api.get<ProgramVersion[]>('/catalog/program-versions', query),
+        api.get<Level[]>('/academic/levels', query),
+        api.get<Term[]>('/academic/terms', query),
+        api.get<FeeRow[]>('/academic/level-fees', query),
+        api.get<ClassRef[]>('/classes', query),
       ]);
       setItems(Array.isArray(offs) ? offs : []);
       setPrograms(Array.isArray(progs) ? progs : []);

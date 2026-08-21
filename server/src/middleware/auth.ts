@@ -142,6 +142,18 @@ export function authorize(...roles: RoleCode[]) {
 }
 
 /**
+ * Organization-global configuration is stricter than an `owner` role-name
+ * check. A campus- or branch-scoped owner is intentionally not the application
+ * superuser (D-60), so global hierarchy, equity and policy routes use this
+ * guard after `authenticate` rather than silently widening a scoped grant.
+ */
+export function requireGlobalOwner(req: Request, res: Response, next: NextFunction) {
+  if (!req.user) return res.status(401).json({ error: 'Not authenticated.' });
+  if (req.rbac && isGlobalOwner(req.rbac)) return next();
+  return res.status(403).json({ error: 'Only an organization-scoped owner may perform this operation.' });
+}
+
+/**
  * Strict Permission-based authorization middleware.
  */
 export function requirePermission(...codes: string[]) {

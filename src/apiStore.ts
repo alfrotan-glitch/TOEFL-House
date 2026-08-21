@@ -624,7 +624,7 @@ export function useApiStore() {
   };
   
   const reloadSkills = useCallback(() => api.get<Skill[]>('/skills').then(setSkills), []);
-  const reloadProgramVersions = useCallback(() => api.get<any[]>('/catalog/program-versions').then((rows) => setProgramVersions((rows || []).map((r) => ({ id: r.id, name: r.program_name || r.programName || 'Program', versionLabel: r.version_label || r.versionLabel || 'v1', status: r.status })) )), []);
+  const reloadProgramVersions = useCallback(() => api.get<any[]>('/catalog/program-versions', bq).then((rows) => setProgramVersions((rows || []).map((r) => ({ id: r.id, name: r.program_name || r.programName || 'Program', versionLabel: r.version_label || r.versionLabel || 'v1', status: r.status })) )), [bq]);
   const reloadClassTeacherSkills = useCallback(() => api.get<ClassTeacherSkill[]>('/class-teacher-skills').then(setClassTeacherSkills), []);
 
   // ---------- 1.0.0 NEW reloaders ----------
