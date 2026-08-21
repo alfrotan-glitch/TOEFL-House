@@ -232,38 +232,38 @@ const stmtInsertFinTx = db.prepare(
 // held (proven: one 9,999 payment reported as 19,998 across two classes).
 // The correlated subquery picks a single owning semester — matched by name
 // when the payment records one, else the student's most recent active one.
-const stmtRevenueByClass = db.prepare(`
-  SELECT c.name, SUM(p.amount) as revenue
-  FROM payments p
-  JOIN student_semesters ss ON ss.id = (
-    SELECT s2.id FROM student_semesters s2
-    WHERE s2.student_id = p.student_id
-      AND (p.semester IS NULL OR s2.semester_name = p.semester)
-    ORDER BY (s2.status = 'active') DESC, s2.enroll_date DESC
-    LIMIT 1
-  )
+// Revenue is attributed through the settlement authority: a tuition payment
+// names the obligation it settles, the obligation names the term, and the term
+// names the class. Nothing is guessed.
+//
+// A term NAME cannot carry this: `uq_student_semester_active` scopes uniqueness
+// to ACTIVE terms, so a student repeating a term has two terms under one name.
+// Matching by name and preferring the active one handed money paid for a
+// finished class to the class running now (WP07-F22).
+//
+// Only ACTIVE allocations count, so a refunded amount stops being reported as
+// revenue for the class that no longer holds it.
+const REVENUE_BY_ALLOCATION_SQL = `
+  FROM obligation_allocations a
+  JOIN payments p ON p.id = a.payment_id
+  JOIN student_obligations o ON o.id = a.obligation_id
+  JOIN student_semesters ss ON ss.id = o.semester_id
   JOIN classes c ON c.id = ss.class_id
-  WHERE p.category IN ('fee', 'installment') AND p.status = 'completed' 
-  AND c.branch_id = ? AND p.date BETWEEN ? AND ?
+  WHERE a.source_kind = 'payment' AND a.status = 'active'
+    AND p.status = 'completed'
+    AND c.branch_id = ? AND p.date BETWEEN ? AND ?`;
+
+const stmtRevenueByClass = db.prepare(`
+  SELECT c.name, SUM(a.amount) as revenue
+  ${REVENUE_BY_ALLOCATION_SQL}
   GROUP BY c.id
   ORDER BY revenue DESC
-  LIMIT 5
 `);
 
 // Same single-attribution rule as stmtRevenueByClass above.
 const stmtRevenueByTimeSlot = db.prepare(`
-  SELECT COALESCE(c.schedule_time, 'Unknown') as slot, SUM(p.amount) as revenue
-  FROM payments p
-  JOIN student_semesters ss ON ss.id = (
-    SELECT s2.id FROM student_semesters s2
-    WHERE s2.student_id = p.student_id
-      AND (p.semester IS NULL OR s2.semester_name = p.semester)
-    ORDER BY (s2.status = 'active') DESC, s2.enroll_date DESC
-    LIMIT 1
-  )
-  JOIN classes c ON c.id = ss.class_id
-  WHERE p.category IN ('fee', 'installment') AND p.status = 'completed' 
-  AND c.branch_id = ? AND p.date BETWEEN ? AND ?
+  SELECT COALESCE(c.schedule_time, 'Unknown') as slot, SUM(a.amount) as revenue
+  ${REVENUE_BY_ALLOCATION_SQL}
   GROUP BY c.schedule_time
   ORDER BY revenue DESC
 `);

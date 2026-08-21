@@ -683,3 +683,49 @@ route contract and the UI type; behaviour unchanged, two suites re-expressed.
 * **F-18b open** — `reports.routes.ts` open-invoice "outstanding" overlaps the balance authority.
 * **BOS revenue attribution** still guesses a term by name, though E1b now makes an exact attribution possible.
 * **`payments.semester`** is still written for display and refund attribution; retiring it is the agreed follow-on.
+
+---
+
+# Slice K — revenue lands on the class that earned it (WP07-F22)
+
+**Date:** 2026-08-21 · **Decision:** D-146
+**Release gate:** 22 passed · 0 failed · 0 skipped · **Server suite:** 2816 passed · 160 known WP-04 skips · 0 failed
+
+## The defect, proven before repair (§103)
+
+The two BOS revenue reports did not know which term a payment settled, so they
+guessed: match `payments.semester` by NAME, prefer the ACTIVE term, otherwise
+take the student's most recent active one.
+
+A student repeating "Term One" — completed in the Morning Class, running in the
+Evening Class — paid off the **Morning** term. The report credited the whole
+10,000 AFN to the **Evening Class**:
+
+```
+× money paid for a repeated term is not handed to the class running now
+  AssertionError: expected undefined to be 10000
+```
+
+`uq_student_semester_active` scopes uniqueness to ACTIVE terms, so a repeated
+term name is genuinely ambiguous and the tie-break preferred the wrong one every
+time.
+
+## The repair
+
+Both reports read `obligation_allocations` through one shared fragment: the
+payment names the obligation, the obligation names the term, the term names the
+class. This is the attribution E1b (D-141) made possible.
+
+| Case | Result |
+|---|---|
+| Repeated term, completed one paid | Morning 10,000 · Evening 0 |
+| Two terms paid separately | Morning 4,000 · Evening 6,000 |
+| 4,000 refunded of 10,000 | Morning 6,000 (reversed allocations excluded) |
+| Non-tuition charge | reported as class revenue: 0 |
+
+## Residual, recorded not hidden
+
+Both reports still INNER JOIN `classes`, so tuition paid for a term with no
+class attached does not appear in a by-class or by-time-slot total. That is
+inherent to reports grouped by class, but it means neither total is a complete
+revenue figure and neither should be read as one. Not changed here (§106).
