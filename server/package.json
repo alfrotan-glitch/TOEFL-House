@@ -15,7 +15,8 @@
     "bootstrap": "npm run bootstrap:env && npm run seed",
     "preflight:fresh-schema": "node scripts/verify-canonical-schema.mjs",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
-    "audit:config-data": "tsx scripts/config-data-integrity-audit.mjs"
+    "audit:config-data": "tsx scripts/config-data-integrity-audit.mjs",
+    "audit:mutation": "node scripts/run-mutation-harnesses.mjs"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

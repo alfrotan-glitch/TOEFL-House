@@ -24,7 +24,8 @@
     "audit:design-system": "node scripts/verify-design-system.mjs",
     "audit:logging": "node scripts/verify-logging.mjs",
     "audit:cleanliness": "node scripts/verify-source-cleanliness.mjs",
-    "audit:deps": "node scripts/verify-server-dependency-isolation.mjs"
+    "audit:deps": "node scripts/verify-server-dependency-isolation.mjs",
+    "audit:mutation": "npm --prefix server run audit:mutation"
   },
   "dependencies": {
     "lucide-react": "1.27.0",
