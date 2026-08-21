@@ -289,7 +289,7 @@ currently holds four package authority suites —
 `budget-movement-authority.test.ts` (40 cases),
 `invoice-payment-boundary.test.ts` (7 cases),
 `document-and-authorization-integrity.test.ts` (38 cases) and
-`refund-attribution-authority.test.ts` (16 cases) — covering the
+`refund-attribution-authority.test.ts` (19 cases) — covering the
 budget-movement, savings-ledger, finance-settings, invoice-payment-boundary,
 document-numbering, discount-authorization and refund-attribution concerns
 remediated in `docs/certification/WP-07-slices-A-B-finance-remediation.md`. They

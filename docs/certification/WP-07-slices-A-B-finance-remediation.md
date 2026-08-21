@@ -297,8 +297,13 @@ discount-authorization input boundary and failure behaviour, and refund
 attribution under the owner's two rules. Still outstanding, and deliberately not
 claimed:
 
-- payment allocation across semesters and installment plans (which charge a
-  payment settles when none is named — the charge-side counterpart of D-113);
+- **payment allocation — narrowed by inspection, not yet certified.** The
+  charge side is already explicit: `fee` requires `semesterId`, `installment`
+  requires `installmentId` and must match its amount, `book` requires `bookId`,
+  and `chapter`/`exam`/`other` are documented as deliberately unbacked ad-hoc
+  charges. What was missing was the settlement rule, now consolidated as
+  `getSemesterTuitionPaid` (D-116). Installment-plan state transitions and their
+  interaction with semester debt remain unexamined;
 - invoice creation/issue/cancel lifecycle beyond numbering and the payment path;
 - the WP-07 legacy-test disposition under C-2 (35 inventoried files / 409 cases
   are still the behavioural record; the three package suites replace none of
