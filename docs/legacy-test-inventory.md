@@ -191,50 +191,70 @@ under `server/src/tests/work-packages/wp04/`.
 
 ## WP-05 Academic Structure
 
-20 files · 224 cases
+**Boundary correction (CHALLENGE/CHECKPOINT):** the operative Protocol §W route
+boundary assigns enrollment and waitlist to WP-05. The defensible historical
+core is therefore **15 files / 229 statically declared cases / 325 baseline
+runtime cases (323 passed, 2 artifact-dependent skips)**, not the former
+20-file/224-case heading. The runtime count is higher because parameterized
+cases expand when executed. The two layout cases skip only when compiled
+frontend assets are absent and are exercised after the release build.
 
-| File | Cases | Asserted behaviour |
+| Core historical file | Cases | Asserted behaviour |
 |---|---:|---|
-| `academic-lifecycle.test.ts` | 14 | Class Lifecycle Engine — HTTP integration · Enrollment Lifecycle Engine · lifecycle-engine.ts — pure unit tests |
-| `academic-policy-engine.test.ts` | 9 | Academic Policy Engine — the six new policy getters have sane defaults · Academic Policy Engine — GET /:id/policy-profile diagnostic endpoint · Academic Policy Engine — Retake Policy enforcement · Academic Policy Engine — Make-up Policy enforcement |
-| `class-capacity.test.ts` | 6 | countActiveStudentsInClass — authoritative seat rule · EnrollmentService.enroll — single writer of the projection · Route-level capacity enforcement — HTTP |
-| `class-subsystem-remediation.test.ts` | 46 | C-1 — cancel does not strand live enrollments · C-2 — merge enforces the class gender policy · C-3 — PUT /:id validates fee and capacity · C-5 — merge appends to notes instead of destroying them · C-6 — extra-class enrollment accepts a payment · H-1 — object-level branch isolation on every class endpoint · H-2 — DELETE refuses a class that still holds live enrollments · C-7 — GET /api/classes pagination |
-| `class-teacher-ownership.test.ts` | 6 | F-6: a teacher cannot reach a colleague\ |
-| `formula-parser.test.ts` | 4 | Safe Formula Parser |
-| `program-versions-panel-layout.test.ts` | 10 | ProgramVersionsPanel — container queries are really compiled · ProgramVersionsPanel — no overlap at any target width |
-| `promotion-engine.test.ts` | 18 | Promotion Engine — criteria resolution precedence · Promotion Engine — factor computation · Promotion Engine — decidePromotion (pure) · Promotion Engine — complete-semester integration |
-| `promotion-resolve-lifecycle-guard.test.ts` | 7 | SSL-1 — promotion/resolve is refused before the class is locked · SSL-1 — the financial consequence is closed · SSL-1 — surrounding authority is preserved · SSL-1 — concurrency: two operators resolving the same semester |
-| `promotion-threshold-validation.test.ts` | 16 | ACFG-1 · Layer 2 — POST /academic/levels validates passMark · ACFG-1 · Layer 2 — PUT /academic/levels/:id validates passMark · ACFG-1 · Layer 1 — POST /catalog/promotion-rules validates its thresholds · ACFG-1 · the promotion authority sees only valid thresholds |
-| `teacher-assignment-engine.test.ts` | 10 | Teacher Assignment Engine — assignment types · Teacher Assignment Engine — business rules scoped to ongoing roles only · Teacher Assignment Engine — class vs session scoping · Teacher Assignment Engine — teacher replacement convenience endpoint · Teacher Assignment Engine — payroll distribution excludes one-off roles |
-| `teacher-evaluation-integrity.test.ts` | 4 | Teacher evaluation integrity |
-| `teacher-grand-audit.test.ts` | 2 | Teacher Grand Audit — historical payroll invariants · Teacher payroll historical integrity |
-| `teacher-history-integrity.test.ts` | 5 | teacher compensation history is append-only · payroll history survives partial payment and reversal |
-| `teacher-hr-integrity.test.ts` | 2 | Teacher HR and payroll integrity |
-| `teacher-input-error-contract.test.ts` | 17 | T-3 · evaluation score returns 4xx, never 500, and stores nothing · T-3 · evaluation still accepts every legitimate score · T-3 · employee pay-salary returns 4xx, never 500, and moves no money · T-3 · teacher pay-salary honours the same contract · T-3 · no raw database error can reach the client from these routes |
-| `teacher-payroll-hardening.test.ts` | 2 | Teacher payroll hardening |
-| `teacher-skill-contract-forensic.test.ts` | 23 | Phase 2 — contract type discovery · Phase 4 — Skill recording is independent of contract type · Phase 6/9 — compensation rule per contract type · Phase 10 — reporting surfaces Skills for every contract type · Phase 7 — configurable monthly Skill target · Phase 11 — Skill security · Phase 13 — duplicate protection · Phase 12 — historical integrity |
-| `teacher-update-validation.test.ts` | 21 | T-2 · baseSalary is validated identically on create and update · T-2 · defaultSkillRate is validated identically on create and update · T-2 · performanceScore is rejected, never silently clamped · T-2 · the shared guards reject non-finite numbers directly · T-2 · payroll propagation is closed · T-2 · legitimate behaviour is preserved · T-2 · a rejected update is fully atomic |
-| `version-publish-workflow.test.ts` | 2 | Program version publish workflow |
+| `academic-lifecycle.test.ts` | 14 | Class and enrollment lifecycle integration plus pure transition graphs. |
+| `academic-policy-engine.test.ts` | 9 | Academic policy defaults, diagnostics, retake and make-up enforcement. |
+| `class-capacity.test.ts` | 6 | Canonical distinct-student seat count, enrollment writer and HTTP capacity gates. |
+| `class-subsystem-remediation.test.ts` | 46 | Cancel/merge integrity, gender, money/seat validation, branch scope, deletion and pagination. |
+| `class-teacher-ownership.test.ts` | 6 | Teacher class-object ownership and colleague isolation. |
+| `program-versions-panel-layout.test.ts` | 10 | Compiled responsive layout and no-overlap contracts. |
+| `promotion-engine.test.ts` | 18 | Criteria resolution, factor computation, decisions and semester completion. |
+| `promotion-resolve-lifecycle-guard.test.ts` | 7 | Grade-lock prerequisite, financial closure and concurrent resolution. |
+| `promotion-threshold-validation.test.ts` | 16 | Level/catalog threshold validation and promotion-authority consumption. |
+| `teacher-assignment-engine.test.ts` | 10 | Assignment roles, ongoing-work rules, class/session scope, replacement and workload/payroll separation. |
+| `teacher-evaluation-integrity.test.ts` | 4 | Evaluation score provenance and integrity. |
+| `teacher-update-validation.test.ts` | 21 | Symmetric teacher input/money validation, skill-rate updates, rejected-write atomicity and the legacy direct-performance contract that must be retired. |
+| `version-publish-workflow.test.ts` | 2 | Program-version publish workflow. |
+| `enrollment-subsystem-remediation.test.ts` | 41 | Active-source transfer, duplicate admission, class merge, errors and exact class projection closure. |
+| `transfer-freeze-waitlist-engines.test.ts` | 19 | Freeze, transfer and waitlist workflows; its full-class offer expectation is explicitly contradictory and must be replaced. |
+
+Seven former WP-05 rows are not whole-package Academic Structure authorities:
+
+| Historical file | Cases | Correct disposition |
+|---|---:|---|
+| `formula-parser.test.ts` | 4 | Generic configuration rule-engine knowledge; attributed to Organization & Configuration, not WP-05. |
+| `teacher-grand-audit.test.ts` | 2 | Teacher payroll history; WP-08. |
+| `teacher-history-integrity.test.ts` | 5 | Compensation/payroll history; WP-08. |
+| `teacher-hr-integrity.test.ts` | 2 | Teacher HR/payroll integration; WP-08. |
+| `teacher-payroll-hardening.test.ts` | 2 | Payroll computation/payment hardening; WP-08. |
+| `teacher-input-error-contract.test.ts` | 17 | Split: evaluation input belongs to WP-05 replacement authority; employee/teacher pay-salary and raw payroll-error contracts remain WP-08. The mixed file is not counted wholesale in either WP-05 core. |
+| `teacher-skill-contract-forensic.test.ts` | 23 | Split: skill workload/security/duplicate behavior belongs to WP-05 replacement authority; compensation behavior remains WP-08 and report projections remain WP-11. The mixed file is not counted wholesale in WP-05 core. |
+
+No legacy behavior is yet marked replaced at this checkpoint. Certification
+requires focused WP-05 authority to replace or explicitly retire every mapped
+core behavior, including the contradictory waitlist and performance-score
+expectations.
 
 ## WP-06 Academic Delivery
 
-13 files · 159 cases
+**Boundary correction:** **11 files / 99 statically declared cases**.
+`enrollment-subsystem-remediation.test.ts` and
+`transfer-freeze-waitlist-engines.test.ts` are WP-05 under Protocol §W and are
+listed above. Shared class-route code does not move generic assessment,
+gradebook, session or attendance behavior out of WP-06.
 
 | File | Cases | Asserted behaviour |
 |---|---:|---|
-| `assessment-engine.test.ts` | 11 | Assessment Engine — types and fields · Assessment Engine — edit/delete lifecycle · Assessment Engine — teacher comments · Assessment Engine — make-up support |
-| `attendance-bounds.test.ts` | 9 | S20: the attendance list is bounded · S20: the summary is computed over the COMPLETE history |
-| `enrollment-subsystem-remediation.test.ts` | 41 | E-1 — transfer requires a valid active source enrollment · E-2 — duplicate enrollment is refused on every write path · E-3 — class merge is semantically consistent · E-4 — enrollment error contract · C-1 — dropped/withdrawn enrollments close their semester projection |
-| `exam-certificate-fee-integrity.test.ts` | 12 | EXM-1 · a certificate always carries its diploma fee · EXAMS · correction authorization and score bounds |
-| `exam-correction-financial-invariant.test.ts` | 8 | EXM-2 — a correction cycle never mints, destroys or duplicates money |
-| `exam-enrollment-uniqueness.test.ts` | 7 | the database refuses a duplicate exam enrolment · the constraint does not block legitimate enrolments |
-| `exam-fee-monetary-validation.test.ts` | 7 | exam fee monetary validation |
-| `exam-visitor-eligibility.test.ts` | 9 | a live lead can be enrolled in an exam · a closed-lost lead is refused · the surrounding guards still hold |
-| `grade-lock-workflow.test.ts` | 10 | Grade Lock Workflow — the full happy path · Grade Lock Workflow — teacher vs manager edit permissions · Grade Lock Workflow — pure unit tests |
-| `gradebook-engine.test.ts` | 8 | Gradebook Engine — live computed preview · Gradebook Engine — grade history · Gradebook Engine — pure computation unit tests |
-| `installment-plan-integrity.test.ts` | 5 | F-11: installment plan validation |
-| `session-attendance-engine.test.ts` | 13 | Session Engine — HTTP integration · Smart Attendance Engine — activation gating · Smart Attendance Engine — bulk marking, weights, auto-drop · Timetable skill coverage — regression |
-| `transfer-freeze-waitlist-engines.test.ts` | 19 | Freeze Engine · Transfer Engine · Waitlist Engine |
+| `assessment-engine.test.ts` | 11 | Assessment Engine — types and fields · edit/delete lifecycle · teacher comments · make-up support. |
+| `attendance-bounds.test.ts` | 9 | S20: bounded attendance list and complete-history summary. |
+| `exam-certificate-fee-integrity.test.ts` | 12 | Certificate/diploma fee and exam correction authorization/score bounds. |
+| `exam-correction-financial-invariant.test.ts` | 8 | Exam correction financial conservation. |
+| `exam-enrollment-uniqueness.test.ts` | 7 | Exam enrollment uniqueness and legal repeated activity. |
+| `exam-fee-monetary-validation.test.ts` | 7 | Exam fee monetary validation. |
+| `exam-visitor-eligibility.test.ts` | 9 | Visitor eligibility and surrounding guards. |
+| `grade-lock-workflow.test.ts` | 10 | Grade-lock lifecycle, permissions and pure engine. |
+| `gradebook-engine.test.ts` | 8 | Live grade preview, history and pure computation. |
+| `installment-plan-integrity.test.ts` | 5 | Installment-plan validation. |
+| `session-attendance-engine.test.ts` | 13 | Sessions, attendance activation/bulk marking/weights/auto-drop and timetable skill coverage. |
 
 ## WP-07 Finance
 
