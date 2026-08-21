@@ -5,6 +5,7 @@ import { getJourneyEngine } from '../journey/journey-engine.js';
 import { JourneyEventType } from '../journey/event-types.js';
 import { HttpError } from '../../middleware/errorHandler.js';
 import { nextInvoiceNumber } from '../../utils/invoice.js';
+import { assertMoney } from '../../utils/money.js';
 import {
   assertEnrollmentTransition,
   type EnrollmentStatus,
@@ -12,6 +13,8 @@ import {
   TERMINAL_ENROLLMENT_STATUSES,
 } from './lifecycle-engine.js';
 import { countActiveStudentsInClass } from './class-capacity.js';
+import { partitionFeeSnapshot } from '../finance/invoicing.js';
+import { ensureTuitionObligation } from '../finance/obligations.js';
 import { assertClassGenderAllows, assertNoDuplicateSeatEnrollment, assertNotAlreadySeatedInClass } from './class-admission.js';
 import { resolvePlacementRequirement, isAuthoritativeDecision } from '../placement/policy-engine.js';
 import { evaluateEnrollmentEligibility } from '../placement/placement-policy.js';
@@ -141,8 +144,8 @@ export class EnrollmentService {
     // goes unsettled by the choice; booking it as `fee`, by contrast, paid down
     // OTHER terms' debt. Revisit when the owner rules on WP07-F18.
     this.stmtInsertInvoice = db.prepare(
-      `INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, notes, invoice_number, issued_by, purpose, created_at)
-       VALUES (?, ?, ?, ?, ?, 'issued', ?, ?, ?, ?, ?, ?, 'other', datetime('now'))`
+      `INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, notes, invoice_number, issued_by, purpose, obligation_id, created_at)
+       VALUES (?, ?, ?, ?, ?, 'issued', ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
     );
     this.stmtInsertInvoiceItem = db.prepare(
       `INSERT INTO invoice_items (id, invoice_id, description, quantity, unit_price, amount) VALUES (?, ?, ?, 1, ?, ?)`
@@ -166,7 +169,10 @@ export class EnrollmentService {
       UPDATE student_semesters SET status = 'completed'
       WHERE student_id = ? AND class_id IS ? AND semester_name = ? AND status = 'active'
     `);
-    this.stmtInsertNewSemester = db.prepare(`INSERT INTO student_semesters (id, student_id, semester_name, class_id, enroll_date, fee_amount, status) VALUES (?, ?, ?, ?, date('now'), 0, 'active')`);
+    // The term carries the tuition it bills. While it was inserted with a
+    // hard-coded 0, the enrolment billed tuition on an invoice and the balance
+    // authority — which reads this row — saw no debt at all (WP07-F18).
+    this.stmtInsertNewSemester = db.prepare(`INSERT INTO student_semesters (id, student_id, semester_name, class_id, enroll_date, fee_amount, net_fee_amount, status) VALUES (?, ?, ?, ?, date('now'), ?, ?, 'active')`);
     // `students.current_class_id` is a denormalized convenience column that
     // has never existed in this schema (confirmed: absent from schema.sql
     // and all 30 migrations). Nothing else in the codebase reads it — the
@@ -448,20 +454,44 @@ export class EnrollmentService {
       });
       const snapshotJson = JSON.stringify(snapshot);
 
+      // WHAT THIS ENROLMENT BILLS, split by purpose before anything is written.
+      // The discount attaches to TUITION only — the rule visitor conversion and
+      // manual registration already apply — so a discount that fits the whole
+      // snapshot but not the tuition is refused rather than silently spread
+      // onto a registration fee nobody discounted.
+      const { tuitionFees, otherFees, tuitionTotal, otherTotal } = partitionFeeSnapshot(snapshot.fees);
+      // PARSED, not coerced (WP07-F20). `Math.max(0, Number(x))` accepted
+      // `true` as a 1 AFN discount, `[1000]` as 1,000 AFN, and turned a
+      // negative into a silent 0. The route above this one already parses with
+      // `assertMoney`, but every caller converges HERE, so the guard belongs
+      // here too — the same rule the invoice and payment boundaries apply.
+      const discount = input.discountAmount == null
+        ? 0
+        : assertMoney(input.discountAmount, 'Enrolment discount');
+      if (discount > tuitionTotal) {
+        throw new HttpError(400, `Discount cannot exceed the tuition of ${tuitionTotal} AFN for this enrolment.`);
+      }
+      const netTuition = tuitionTotal - discount;
+
       this.stmtInsertEnrollment.run(
         enrollmentId, input.studentId, programId, programName, semesterName,
         levelCode, input.classId ?? null, input.branchId, enrollmentType, initialStatus, skillsJson,
         input.startedAt || new Date().toISOString(), input.notes ?? null, programVersionId, snapshotJson
       );
 
-      // The student_semesters row is a derived projection (attendance /
-      // gradebook). EnrollmentService is the single writer: it is created
-      // here, in the same transaction as the enrollments row, so the two can
-      // never drift. No caller inserts a semester row itself — visitor
-      // conversion, waitlist conversion and manual student registration all
-      // rely on this.
+      // The student_semesters row is this enrolment's term, created here in the
+      // same transaction as the enrollments row so the two can never drift.
+      //
+      // It carries the TUITION the enrolment bills, because `student_semesters`
+      // is the canonical authority for what a term costs and every balance,
+      // hold and settlement rule reads it. Two other writers — manual student
+      // registration and visitor conversion — create the term themselves with
+      // their own figures and pass `writeSemester: false`, which is why this is
+      // conditional rather than unconditional.
+      let termId: string | null = null;
       if (input.classId && initialStatus === 'active' && input.writeSemester !== false) {
-        this.stmtInsertNewSemester.run(makeId('ss'), input.studentId, semesterName, input.classId);
+        termId = makeId('ss');
+        this.stmtInsertNewSemester.run(termId, input.studentId, semesterName, input.classId, tuitionTotal, netTuition);
       }
 
       const eventType = enrollmentType === 'repeat' || enrollmentType === 'partial_repeat'
@@ -482,48 +512,76 @@ export class EnrollmentService {
         });
       }
 
-      let invoiceId: string | null = null;
-      let invoiceNumber: string | null = null;
+      // ── BILLING: one document per purpose (owner decision on WP07-F18) ──
+      //
+      // Each purpose gets its own document, and the tuition one names the term
+      // it bills — what D-127 requires of every tuition invoice. Registration
+      // and tuition on one document would produce a tuition charge that can
+      // settle no term, invisible to the balance authority.
+      const issued: Array<{ id: string; number: string | null; purpose: 'tuition' | 'other'; netAmount: number }> = [];
 
-      if (input.autoInvoice !== false && snapshot.total > 0) {
-        invoiceId = makeId('inv');
-        // A discount may not exceed the fee it discounts. `Math.max(0, total -
-        // discount)` silently floored the net at zero, so a client-supplied
-        // 9,999,999 on a 5,000 enrolment produced a 100% discount and a net of
-        // 0 — a wiped obligation reported as success. journey.routes passes
-        // discountAmount straight from the request body, so this is reachable
-        // from the API and must be rejected here, at the one place every
-        // caller converges.
-        const discount = Math.max(0, Number(input.discountAmount || 0));
-        if (discount > snapshot.total) {
-          throw new HttpError(400, `Discount cannot exceed the enrolment fee of ${snapshot.total} AFN.`);
-        }
-        const net = snapshot.total - discount;
-        
+      const issueInvoice = (
+        purpose: 'tuition' | 'other',
+        obligationId: string | null,
+        gross: number,
+        discountAmount: number,
+        lines: readonly { name: string; amount: number }[],
+      ) => {
+        const netAmount = gross - discountAmount;
+        if (gross <= 0) return;
+        const newInvoiceId = makeId('inv');
         const due = new Date();
         due.setDate(due.getDate() + 14);
-        
-        const year = new Date().getFullYear();
-        invoiceNumber = nextInvoiceNumber(input.branchId, year);
-
+        const number = nextInvoiceNumber(input.branchId, new Date().getFullYear());
         this.stmtInsertInvoice.run(
-          invoiceId, input.studentId, snapshot.total, discount, net, new Date().toISOString().slice(0, 10),
-          due.toISOString().slice(0, 10), input.branchId, `Auto-generated from enrollment ${enrollmentId}`,
-          invoiceNumber, input.actorName || 'system'
+          newInvoiceId, input.studentId, gross, discountAmount, netAmount,
+          new Date().toISOString().slice(0, 10), due.toISOString().slice(0, 10), input.branchId,
+          `Auto-generated from enrollment ${enrollmentId}`, number, input.actorName || 'system',
+          purpose, obligationId,
         );
-
-        for (const fee of snapshot.fees) {
-          this.stmtInsertInvoiceItem.run(makeId('ii'), invoiceId, fee.name, fee.amount, fee.amount);
+        for (const fee of lines) {
+          this.stmtInsertInvoiceItem.run(makeId('ii'), newInvoiceId, fee.name, fee.amount, fee.amount);
         }
-
+        issued.push({ id: newInvoiceId, number, purpose, netAmount });
         this.journey.appendEvent({
           studentId: input.studentId, eventType: JourneyEventType.INVOICE_ISSUED, occurredAt: new Date().toISOString(),
           branchId: input.branchId, enrollmentId, actorUserId: input.actorUserId, actorName: input.actorName,
-          payload: { invoiceId, invoiceNumber, amount: net, fees: snapshot.fees },
+          payload: { invoiceId: newInvoiceId, invoiceNumber: number, amount: netAmount, purpose, fees: lines },
         });
+      };
+
+      if (input.autoInvoice !== false) {
+        if (termId) {
+          // This call created the term, so tuition has an obligation to name.
+          // Issued whenever tuition was CHARGED, even when a 100% authorized
+          // discount takes it all: the document is the record that the fee
+          // existed and was discounted, and the discounts-granted report sums
+          // `invoices.discount_amount` from exactly these rows.
+          if (tuitionTotal > 0) {
+            const obligation = ensureTuitionObligation(this.db, termId);
+            issueInvoice('tuition', obligation.id, tuitionTotal, discount, tuitionFees);
+          }
+          issueInvoice('other', null, otherTotal, 0, otherFees);
+        } else if (input.writeSemester === false) {
+          // The CALLER owns the term and has already written its own tuition
+          // figure onto it. Billing tuition again here would charge it twice,
+          // so only the fees alongside tuition are billed.
+          issueInvoice('other', null, otherTotal, 0, otherFees);
+        } else {
+          // No term exists anywhere — an enrolment with no class writes no
+          // projection — so no tuition obligation can be named and the whole
+          // snapshot is billed as one non-tuition document. Recorded as the
+          // narrow residual of WP07-F18: such an enrolment creates no tuition
+          // receivable in the balance authority, because it creates no term.
+          issueInvoice('other', null, snapshot.total, discount, snapshot.fees);
+        }
       }
 
-      return { enrollmentId, invoiceId, invoiceNumber, snapshot };
+      const primary = issued.find((row) => row.purpose === 'tuition') ?? issued[0] ?? null;
+      const invoiceId: string | null = primary?.id ?? null;
+      const invoiceNumber: string | null = primary?.number ?? null;
+
+      return { enrollmentId, invoiceId, invoiceNumber, invoices: issued, snapshot };
     });
 
     return run();
@@ -619,7 +677,10 @@ export class EnrollmentService {
       if (semester.changes !== 1) {
         throw new HttpError(409, 'The source enrollment semester projection is missing or no longer active.');
       }
-      this.stmtInsertNewSemester.run(makeId('ss'), source.student_id, semesterName, input.toClassId);
+      // A transfer moves a student between classes; it opens the destination
+      // projection and bills no NEW tuition, because the term being transferred
+      // was already billed (D-88).
+      this.stmtInsertNewSemester.run(makeId('ss'), source.student_id, semesterName, input.toClassId, 0, 0);
 
       try { this.stmtUpdateStudentCurrentClass?.run(input.toClassId, source.student_id); } catch { /* optional column */ }
       if (fromClassId) this.stmtDeleteFutureRosters.run(source.student_id, fromClassId);

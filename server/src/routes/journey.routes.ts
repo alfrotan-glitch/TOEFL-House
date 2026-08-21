@@ -7,6 +7,7 @@ import { getJourneyEngine } from '../core/journey/journey-engine.js';
 import { getEnrollmentService } from '../core/academic/enrollment-service.js';
 import { getCatalogService } from '../core/academic/catalog-service.js';
 import { resolveAuthorizedDiscount } from '../core/configuration/discount-authority.js';
+import { partitionFeeSnapshot } from '../core/finance/invoicing.js';
 import { assertClassGenderAllowsStudent } from './classes.routes.js';
 import { JourneyEventType } from '../core/journey/event-types.js';
 import { assertStudentAccess } from '../core/rbac/abac.js';
@@ -264,13 +265,17 @@ journeyRouter.post(
         branchId: student.branch_id,
         enrollmentType: enrollmentType || 'new',
       });
-      const feeTotal = Number(snapshot.total || 0);
+      // The ceiling is a percentage of the TUITION, not of the whole snapshot.
+      // A discount attaches to tuition only (owner decision on WP07-F18), so
+      // basing the ceiling on a total that includes the registration fee would
+      // authorise more discount than there is tuition to discount.
+      const { tuitionTotal } = partitionFeeSnapshot(snapshot.fees);
       const authorized = resolveAuthorizedDiscount(db, studentId, 100, { branchId: student.branch_id });
-      const maxDiscount = Math.round((feeTotal * authorized.percent) / 100);
+      const maxDiscount = Math.round((tuitionTotal * authorized.percent) / 100);
       if (requestedDiscount > maxDiscount) {
         throw new HttpError(
           400,
-          `Discount of ${requestedDiscount} AFN exceeds the authorized maximum of ${maxDiscount} AFN (${authorized.percent}% of ${feeTotal} AFN) for this student.`,
+          `Discount of ${requestedDiscount} AFN exceeds the authorized maximum of ${maxDiscount} AFN (${authorized.percent}% of ${tuitionTotal} AFN tuition) for this student.`,
         );
       }
     }

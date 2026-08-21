@@ -216,3 +216,53 @@ export function invoicePaymentAttribution(
     obligationId: invoice.obligation_id,
   };
 }
+
+// ── Which academic fees are tuition (owner decision on WP07-F18) ───────────
+//
+// `fee_rules.fee_type` is academic configuration; whether a given type is
+// TUITION is a money rule, so it lives here beside the purpose vocabulary
+// rather than in the catalog. One declaration, read by the enrolment writer and
+// by the discount ceiling, so the two can never disagree about what a discount
+// attaches to.
+//
+// `semester` bills the term. `retake` bills a repeat of the term, which the
+// owner ruled is tuition. `registration`, `placement`, `book`, `card`, `exam`,
+// `diploma` and `other` are charges alongside tuition, not tuition.
+
+export const TUITION_FEE_TYPES = ['semester', 'retake'] as const;
+
+export const isTuitionFeeType = (feeType: unknown): boolean =>
+  typeof feeType === 'string' && (TUITION_FEE_TYPES as readonly string[]).includes(feeType);
+
+export interface SnapshotFee {
+  feeType: string;
+  name: string;
+  amount: number;
+}
+
+export interface FeePartition {
+  tuitionFees: SnapshotFee[];
+  otherFees: SnapshotFee[];
+  tuitionTotal: number;
+  otherTotal: number;
+}
+
+/**
+ * Splits a fee snapshot into the part that bills a term and the part that does
+ * not.
+ *
+ * A discount attaches to the tuition part only, which is what visitor
+ * conversion and manual registration already do — they compute
+ * `netTuition = gross - gross * percent / 100` and never discount a
+ * registration fee. Applying the same rule here removes an inconsistency
+ * instead of introducing one.
+ */
+export function partitionFeeSnapshot(fees: readonly SnapshotFee[] | undefined): FeePartition {
+  const tuitionFees: SnapshotFee[] = [];
+  const otherFees: SnapshotFee[] = [];
+  for (const fee of fees ?? []) {
+    (isTuitionFeeType(fee.feeType) ? tuitionFees : otherFees).push(fee);
+  }
+  const sum = (rows: SnapshotFee[]) => rows.reduce((total, fee) => total + (Number(fee.amount) || 0), 0);
+  return { tuitionFees, otherFees, tuitionTotal: sum(tuitionFees), otherTotal: sum(otherFees) };
+}

@@ -516,3 +516,54 @@ because it was paid, not because it was reduced.
 * **Server-complete, operator-incomplete.** The four sponsorship endpoints exist and are proven, but `FundingView.tsx` does not yet expose them: an operator cannot record a receipt or apply a sponsorship from a screen. The scholarship lifecycle (D-124) has its surface; the sponsorship lifecycle does not.
 * **E1b not started** — cash is still attributed by `payments.semester`.
 * **WP07-F18 still open** and awaiting the owner (A-18).
+
+---
+
+# Slice H — the enrolment bills by purpose (WP07-F18, WP07-F20)
+
+**Date:** 2026-08-21 · **Owner decisions executed:** split model, retake = tuition, discount attaches to tuition (→ D-136/D-137/D-138)
+**Release gate:** 22 passed · 0 failed · 0 skipped · **Server suite:** 2788 passed · 160 known WP-04 skips · 0 failed
+**Schema:** 117 tables · 251 indexes · 127 triggers
+
+## The defect, proven before repair (§103)
+
+```
+× the term the enrolment creates bills the tuition, not zero
+  AssertionError: expected +0 to be 8000
+× the enrolment issues one tuition invoice naming the term and one other invoice
+  AssertionError: expected [ { …(7) } ] to have a length of 2 but got 1
+× a discount larger than the tuition is refused, even when the whole snapshot is bigger
+  AssertionError: expected [Function] to throw an error
+```
+
+The term billed **0** while the invoice billed 8,000, so `getStudentBalance`
+reported no tuition debt for that student at all. A 9,000 AFN discount on 8,000
+AFN of tuition was accepted because it was measured against the 9,500 AFN
+snapshot total.
+
+## What ATTACK found — WP07-F20
+
+`EnrollmentService.enroll` coerced its discount with `Math.max(0, Number(x))`:
+`true` became a **1 AFN discount**, `[1000]` became **1,000 AFN**, and `-1000`
+became a silent **0**. The journey route parses with `assertMoney`, but every
+caller converges on the service, which did not. Repaired there (D-140).
+
+## What is now true
+
+| Rule | Enforced by |
+|---|---|
+| The term carries the tuition it bills | `stmtInsertNewSemester` writes `fee_amount` / `net_fee_amount` |
+| A tuition invoice names the term's obligation | `ensureTuitionObligation` + `invoices.obligation_id` CHECK (D-127) |
+| Registration is billed on its own document | `partitionFeeSnapshot` + two `issueInvoice` calls |
+| `semester` and `retake` are tuition; nothing else is | `TUITION_FEE_TYPES`, one declaration read by two callers |
+| A discount attaches to tuition only | service check + journey ceiling on `tuitionTotal` |
+| A fully discounted term still records its document | `gross > 0` issues the invoice even at net 0 |
+| Tuition is billed only against a term this call created | `termId` / `writeSemester` branch (D-139) |
+| The discount is parsed, not coerced | `assertMoney` (D-140) |
+
+## Scope honesty
+
+* **Residual, recorded not hidden (D-139):** an enrolment with no class creates no term, so no tuition obligation exists to name and the whole snapshot is billed as one `other` document. Such an enrolment creates no tuition receivable in the balance authority.
+* **F-18b remains open and unclaimed:** `reports.routes.ts:389-409` sums open invoices as "outstanding" while the balance authority derives tuition outstanding from `student_semesters`. On the conversion path both exist, so the two figures overlap. Pre-existing, unchanged by this slice, and deliberately not resolved here (§106).
+* **F-18c fixed in passing:** the false "EnrollmentService is the single writer" comment is replaced with the true statement that two other writers create the term themselves and pass `writeSemester: false`.
+* **E1b is next.**
