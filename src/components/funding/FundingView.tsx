@@ -85,12 +85,34 @@ interface AwardPosition {
   allocations: Array<{ id: string; amount: number; status: 'active' | 'reversed'; date: string; semester_name: string | null }>;
 }
 
+/**
+ * A sponsorship agreement's money position, as resolved by the server.
+ *
+ * `monthlyAmount` is what the donor PROMISED and settles nothing; `received` is
+ * donation money actually earmarked to the agreement and is the only backing an
+ * application may draw on (owner decision D-131). The browser computes none of
+ * these — like a fund position, this is financial truth (LAW 2).
+ */
+interface SponsorshipPosition {
+  agreementId: string;
+  donorId: string;
+  studentId: string | null;
+  monthlyAmount: number;
+  received: number;
+  applied: number;
+  available: number;
+  status: 'active' | 'completed' | 'terminated';
+  receipts: Array<{ id: string; donation_id: string; amount: number; date: string; receipt_no: string }>;
+  allocations: Array<{ id: string; amount: number; date: string; status: 'active' | 'reversed'; semester_name: string | null; student_id: string }>;
+}
+
 interface TuitionObligationRow {
   id: string;
   semesterName: string;
   netAmount: number;
   settledCash: number;
-  settledScholarship: number;
+  /** Scholarship AND sponsorship money applied to this term. */
+  settledAid: number;
   outstanding: number;
 }
 
@@ -222,6 +244,14 @@ export default function FundingView({
   const [showSponsorshipModal, setShowSponsorshipModal] = useState(false);
   const [sponsorshipForm, setSponsorshipForm] = useState({ donorId: '', studentId: '', monthlyAmount: 0, startDate: '', endDate: '' });
 
+  // Sponsorship money. Every figure below is read from the server.
+  const [sponsorshipPositions, setSponsorshipPositions] = useState<Record<string, SponsorshipPosition>>({});
+  const [managingSponsorship, setManagingSponsorship] = useState<SponsorshipAgreement | null>(null);
+  const [sponsorshipPosition, setSponsorshipPosition] = useState<SponsorshipPosition | null>(null);
+  const [sponsorObligations, setSponsorObligations] = useState<TuitionObligationRow[] | null>(null);
+  const [receiptForm, setReceiptForm] = useState({ donationId: '', amount: 0 });
+  const [sponsorApplyForm, setSponsorApplyForm] = useState({ studentId: '', obligationId: '', amount: 0 });
+
   // ---- Derived treasury metrics ----
   const reloadFundPositions = useCallback(async () => {
     const entries = await Promise.all(
@@ -237,6 +267,32 @@ export default function FundingView({
   }, [scholarships]);
 
   useEffect(() => { void reloadFundPositions(); }, [reloadFundPositions]);
+
+  const reloadSponsorshipPositions = useCallback(async () => {
+    const entries = await Promise.all(
+      sponsorships.map(async (sp) => {
+        try {
+          return [sp.id, await api.get<SponsorshipPosition>(`/funding/sponsorships/${sp.id}/position`)] as const;
+        } catch {
+          return [sp.id, null] as const;
+        }
+      }),
+    );
+    setSponsorshipPositions(Object.fromEntries(entries.filter((e): e is readonly [string, SponsorshipPosition] => e[1] !== null)));
+  }, [sponsorships]);
+
+  useEffect(() => { void reloadSponsorshipPositions(); }, [reloadSponsorshipPositions]);
+
+  /** The agreement's position, and the obligations its money may settle. */
+  const reloadSponsorship = useCallback(async (agreement: SponsorshipAgreement, studentRef: string) => {
+    const position = await api.get<SponsorshipPosition>(`/funding/sponsorships/${agreement.id}/position`);
+    setSponsorshipPosition(position);
+    if (studentRef) {
+      setSponsorObligations(await api.get<TuitionObligationRow[]>(`/funding/students/${studentRef}/tuition-obligations`));
+    } else {
+      setSponsorObligations(null);
+    }
+  }, []);
 
   const reloadAward = useCallback(async (award: ScholarshipAward) => {
     const [position, rows] = await Promise.all([
@@ -459,6 +515,91 @@ export default function FundingView({
       await Promise.all([reloadAward(managingAward), reloadFundPositions()]);
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Could not close the award.', 'error');
+    }
+  };
+
+  const openSponsorship = async (agreement: SponsorshipAgreement) => {
+    setManagingSponsorship(agreement);
+    setSponsorshipPosition(null);
+    setSponsorObligations(null);
+    setReceiptForm({ donationId: '', amount: 0 });
+    setSponsorApplyForm({ studentId: agreement.studentId ?? '', obligationId: '', amount: 0 });
+    try {
+      await reloadSponsorship(agreement, agreement.studentId ?? '');
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not load this sponsorship.', 'error');
+    }
+  };
+
+  /** Earmark a donation from the signing donor to this agreement. */
+  const submitSponsorshipReceipt = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!managingSponsorship) return;
+    try {
+      await api.post(`/funding/sponsorships/${managingSponsorship.id}/receipts`, {
+        donationId: receiptForm.donationId,
+        amount: receiptForm.amount,
+      });
+      notify('Donation earmarked to the sponsorship.', 'success');
+      // A receipt moves no tuition, so only funding data changes.
+      invalidate('funding');
+      setReceiptForm({ donationId: '', amount: 0 });
+      await Promise.all([
+        reloadSponsorship(managingSponsorship, sponsorApplyForm.studentId),
+        reloadSponsorshipPositions(),
+      ]);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not record the receipt.', 'error');
+    }
+  };
+
+  const submitSponsorshipApplication = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!managingSponsorship) return;
+    try {
+      await api.post(`/funding/sponsorships/${managingSponsorship.id}/allocations`, {
+        obligationId: sponsorApplyForm.obligationId,
+        amount: sponsorApplyForm.amount,
+      });
+      notify('Sponsorship applied to the tuition obligation.', 'success');
+      // This settles tuition, so the datasets that publish a student's balance
+      // are stale the moment it succeeds.
+      invalidate('students', 'payments', 'funding');
+      setSponsorApplyForm({ ...sponsorApplyForm, obligationId: '', amount: 0 });
+      await Promise.all([
+        reloadSponsorship(managingSponsorship, sponsorApplyForm.studentId),
+        reloadSponsorshipPositions(),
+      ]);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not apply the sponsorship.', 'error');
+    }
+  };
+
+  const reverseSponsorshipApplication = async (allocationId: string) => {
+    if (!managingSponsorship) return;
+    const reason = window.prompt('Why is this application being reversed? (at least 8 characters)');
+    if (!reason) return;
+    try {
+      await api.post(`/funding/sponsorship-allocations/${allocationId}/reverse`, { reason });
+      notify('Application reversed; the money returned to the agreement.', 'success');
+      invalidate('students', 'payments', 'funding');
+      await Promise.all([
+        reloadSponsorship(managingSponsorship, sponsorApplyForm.studentId),
+        reloadSponsorshipPositions(),
+      ]);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not reverse the application.', 'error');
+    }
+  };
+
+  /** Change which student's obligations the apply form offers. */
+  const chooseSponsoredStudent = async (studentRef: string) => {
+    setSponsorApplyForm({ studentId: studentRef, obligationId: '', amount: 0 });
+    if (!managingSponsorship) return;
+    try {
+      await reloadSponsorship(managingSponsorship, studentRef);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not load that student.', 'error');
     }
   };
 
@@ -868,24 +1009,44 @@ export default function FundingView({
                 <tr className="border-b border-slate-100 text-slate-500 font-bold">
                   <th className="py-2.5 px-3 text-slate-700">Sponsor</th>
                   <th className="py-2.5 px-3 text-slate-700">Sponsored Student</th>
-                  <th className="py-2.5 px-3 text-slate-700">Monthly</th>
-                  <th className="py-2.5 px-3 text-slate-700">Term</th>
+                  <th className="py-2.5 px-3 text-slate-700">Promised / month</th>
+                  <th className="py-2.5 px-3 text-slate-700">Received</th>
+                  <th className="py-2.5 px-3 text-slate-700">Applied</th>
+                  <th className="py-2.5 px-3 text-slate-700">Available</th>
                   <th className="py-2.5 px-3 text-slate-700">Status</th>
+                  <th className="py-2.5 px-3 text-slate-700 text-end">Money</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50 text-slate-600">
                 {sponsorships.length === 0 ? (
-                  <tr><td colSpan={5} className="text-center py-10 text-slate-400">No sponsorship agreements yet.</td></tr>
+                  <tr><td colSpan={8} className="text-center py-10 text-slate-400">No sponsorship agreements yet.</td></tr>
                 ) : (
-                  sponsorships.map((sp) => (
-                    <tr key={sp.id} className="hover:bg-emerald-50/30 transition-colors">
-                      <td className="py-3 px-3 font-bold text-slate-800">{donorName(sp.donorId)}</td>
-                      <td className="py-3 px-3 text-slate-500">{sp.studentId ? studentName(sp.studentId) : '—'}</td>
-                      <td className="py-3 px-3 font-black font-mono tabular-nums text-emerald-700">{fmt(sp.monthlyAmount)}</td>
-                      <td className="py-3 px-3 font-mono text-slate-400">{sp.startDate} → {sp.endDate}</td>
-                      <td className="py-3 px-3"><StatusPill status={sp.status} /></td>
-                    </tr>
-                  ))
+                  sponsorships.map((sp) => {
+                    const pos = sponsorshipPositions[sp.id];
+                    return (
+                      <tr key={sp.id} className="hover:bg-emerald-50/30 transition-colors">
+                        <td className="py-3 px-3 font-bold text-slate-800">{donorName(sp.donorId)}</td>
+                        <td className="py-3 px-3 text-slate-500">
+                          {sp.studentId ? studentName(sp.studentId) : <span className="italic text-slate-400">any student</span>}
+                          <span className="block font-mono text-[10px] text-slate-400">{sp.startDate} → {sp.endDate}</span>
+                        </td>
+                        {/* A promise, deliberately shown apart from the money. */}
+                        <td className="py-3 px-3 font-mono tabular-nums text-slate-400">{fmt(sp.monthlyAmount)}</td>
+                        <td className="py-3 px-3 font-black font-mono tabular-nums text-emerald-700">{pos ? fmt(pos.received) : '—'}</td>
+                        <td className="py-3 px-3 font-mono tabular-nums text-slate-600">{pos ? fmt(pos.applied) : '—'}</td>
+                        <td className="py-3 px-3 font-black font-mono tabular-nums text-indigo-700">{pos ? fmt(pos.available) : '—'}</td>
+                        <td className="py-3 px-3"><StatusPill status={sp.status} /></td>
+                        <td className="py-3 px-3 text-end">
+                          <button
+                            onClick={() => void openSponsorship(sp)}
+                            className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                          >
+                            Manage money
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -1124,6 +1285,148 @@ export default function FundingView({
               )}
               <p className="text-[10px] text-slate-400">
                 Reversing an application returns the money to this award; closing the award returns whatever is unapplied to the fund. Scholarship money is never paid to a student.
+              </p>
+            </div>
+          )}
+        </ModalShell>
+      )}
+
+      {managingSponsorship && (
+        <ModalShell title={`Sponsorship money — ${donorName(managingSponsorship.donorId)}`} onClose={() => setManagingSponsorship(null)}>
+          {!sponsorshipPosition ? (
+            <p className="text-xs text-slate-400 py-6 text-center">Loading the sponsorship position…</p>
+          ) : (
+            <div className="space-y-4 text-xs">
+              {/* Rendered, never derived: every figure is the server's. */}
+              <div className="grid grid-cols-4 gap-2 bg-slate-50 border border-slate-200 rounded-xl p-3 text-center">
+                <div>
+                  <p className="text-slate-400">Promised / month</p>
+                  <p className="font-bold text-slate-500 font-mono tabular-nums">{fmt(sponsorshipPosition.monthlyAmount)}</p>
+                </div>
+                <div>
+                  <p className="text-slate-400">Received</p>
+                  <p className="font-bold text-emerald-700 font-mono tabular-nums">{fmt(sponsorshipPosition.received)}</p>
+                </div>
+                <div>
+                  <p className="text-slate-400">Applied</p>
+                  <p className="font-bold text-slate-700 font-mono tabular-nums">{fmt(sponsorshipPosition.applied)}</p>
+                </div>
+                <div>
+                  <p className="text-slate-400">Available</p>
+                  <p className="font-bold text-indigo-700 font-mono tabular-nums">{fmt(sponsorshipPosition.available)}</p>
+                </div>
+              </div>
+              <p className="text-[10px] text-slate-500 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                The monthly figure is a <strong>promise</strong> and settles nothing until it is received. Only a
+                donation earmarked below becomes money this agreement can apply to a student&rsquo;s tuition.
+              </p>
+
+              {/* ---- Record a receipt ---- */}
+              <form onSubmit={submitSponsorshipReceipt} className="space-y-2 border-t border-slate-100 pt-3">
+                <p className="font-bold text-slate-800">Record money received</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <select
+                    className={inputCls}
+                    value={receiptForm.donationId}
+                    onChange={(e) => setReceiptForm({ ...receiptForm, donationId: e.target.value })}
+                    required
+                  >
+                    <option value="">Donation from this sponsor…</option>
+                    {donations
+                      .filter((d) => d.donorId === managingSponsorship.donorId)
+                      .map((d) => (
+                        <option key={d.id} value={d.id}>{d.receiptNo} — {fmt(d.amount)} ({d.date})</option>
+                      ))}
+                  </select>
+                  <input
+                    type="number" min={1} step={1} className={inputCls} placeholder="Amount"
+                    value={receiptForm.amount || ''}
+                    onChange={(e) => setReceiptForm({ ...receiptForm, amount: Number(e.target.value) })}
+                    required
+                  />
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  Only a donation from the donor who signed this agreement may back it, and only the part of that
+                  donation nobody else has claimed.
+                </p>
+                <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 rounded-lg cursor-pointer">
+                  Earmark to this sponsorship
+                </button>
+              </form>
+
+              {/* ---- Apply to a tuition obligation ---- */}
+              <form onSubmit={submitSponsorshipApplication} className="space-y-2 border-t border-slate-100 pt-3">
+                <p className="font-bold text-slate-800">Apply to tuition</p>
+                {managingSponsorship.studentId ? (
+                  <p className="text-[10px] text-slate-500">
+                    This agreement names {studentName(managingSponsorship.studentId)} and may settle only their tuition.
+                  </p>
+                ) : (
+                  <select
+                    className={inputCls}
+                    value={sponsorApplyForm.studentId}
+                    onChange={(e) => void chooseSponsoredStudent(e.target.value)}
+                    required
+                  >
+                    <option value="">Choose the student to support…</option>
+                    {students.map((st) => <option key={st.id} value={st.id}>{st.fullName}</option>)}
+                  </select>
+                )}
+                <select
+                  className={inputCls}
+                  value={sponsorApplyForm.obligationId}
+                  onChange={(e) => setSponsorApplyForm({ ...sponsorApplyForm, obligationId: e.target.value })}
+                  required
+                  disabled={!sponsorObligations?.length}
+                >
+                  <option value="">{sponsorObligations?.length ? 'Term to settle…' : 'No open term to settle'}</option>
+                  {(sponsorObligations ?? []).filter((o) => o.outstanding > 0).map((o) => (
+                    <option key={o.id} value={o.id}>{o.semesterName} — {fmt(o.outstanding)} outstanding</option>
+                  ))}
+                </select>
+                <input
+                  type="number" min={1} step={1} className={inputCls} placeholder="Amount to apply"
+                  value={sponsorApplyForm.amount || ''}
+                  onChange={(e) => setSponsorApplyForm({ ...sponsorApplyForm, amount: Number(e.target.value) })}
+                  required
+                />
+                <button
+                  type="submit"
+                  disabled={sponsorshipPosition.available <= 0}
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold py-2 rounded-lg cursor-pointer"
+                >
+                  {sponsorshipPosition.available > 0 ? 'Apply to this term' : 'Nothing received yet to apply'}
+                </button>
+              </form>
+
+              {/* ---- What this agreement has settled ---- */}
+              <div className="border-t border-slate-100 pt-3 space-y-1.5">
+                <p className="font-bold text-slate-800">Applications</p>
+                {sponsorshipPosition.allocations.length === 0 ? (
+                  <p className="text-[11px] text-slate-400">This sponsorship has settled nothing yet.</p>
+                ) : (
+                  sponsorshipPosition.allocations.map((a) => (
+                    <div key={a.id} className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
+                      <span className="text-slate-600">
+                        {a.semester_name ?? 'term'} · <span className="font-mono tabular-nums font-bold">{fmt(a.amount)}</span>
+                        {a.status === 'reversed' && <span className="ms-2 text-[10px] font-bold text-rose-600">reversed</span>}
+                      </span>
+                      {a.status === 'active' && (
+                        <button
+                          onClick={() => void reverseSponsorshipApplication(a.id)}
+                          className="text-[11px] font-bold text-rose-600 hover:text-rose-800 cursor-pointer"
+                        >
+                          Reverse
+                        </button>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <p className="text-[10px] text-slate-400">
+                Reversing an application returns the money to this agreement, where it stays earmarked and
+                re-applicable. Sponsorship money is never paid to a student and never becomes cash.
               </p>
             </div>
           )}

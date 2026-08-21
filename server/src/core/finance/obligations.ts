@@ -118,8 +118,13 @@ export interface ObligationPosition {
   obligation: TuitionObligation;
   /** Settled by cash: tuition payments and the refunds that reverse them. */
   settledCash: number;
-  /** Settled by scholarship allocations that are still active. */
-  settledScholarship: number;
+  /**
+   * Settled by AID — scholarship and sponsorship allocations that are still
+   * active. Named for what it counts: after owner decision D-131 a sponsorship
+   * settles tuition too, and a field called `settledScholarship` would report
+   * a donor's sponsorship as scholarship money.
+   */
+  settledAid: number;
   settled: number;
   outstanding: number;
 }
@@ -156,19 +161,19 @@ export function getObligationPosition(db: Database, obligationId: string): Oblig
   // Keyed on the obligation itself, never on the term's NAME: the name is not
   // unique over time and this is the figure the payment desk trusts.
   const settledCash = getObligationCashSettled(db, obligationId);
-  const settledScholarship = getObligationScholarshipSettled(db, obligationId);
-  const settled = settledCash + settledScholarship;
+  const settledAid = getObligationAidSettled(db, obligationId);
+  const settled = settledCash + settledAid;
   return {
     obligation,
     settledCash,
-    settledScholarship,
+    settledAid,
     settled,
     outstanding: Math.max(0, obligation.netAmount - settled),
   };
 }
 
 /** Aid money currently applied to one obligation, whatever the instrument. */
-export function getObligationScholarshipSettled(db: Database, obligationId: string): number {
+export function getObligationAidSettled(db: Database, obligationId: string): number {
   const row = db
     .prepare(
       `SELECT COALESCE(SUM(amount), 0) AS total FROM obligation_allocations

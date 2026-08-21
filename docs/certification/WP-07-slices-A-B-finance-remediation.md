@@ -513,7 +513,7 @@ because it was paid, not because it was reduced.
 
 ## Scope honesty
 
-* **Server-complete, operator-incomplete.** The four sponsorship endpoints exist and are proven, but `FundingView.tsx` does not yet expose them: an operator cannot record a receipt or apply a sponsorship from a screen. The scholarship lifecycle (D-124) has its surface; the sponsorship lifecycle does not.
+* ~~**Server-complete, operator-incomplete.**~~ **CLOSED by slice J** (D-144): the funding screen now runs the whole sponsorship lifecycle.
 * **E1b not started** — cash is still attributed by `payments.semester`.
 * **WP07-F18 still open** and awaiting the owner (A-18).
 
@@ -625,3 +625,61 @@ every instrument.
 * **BOS revenue attribution is unchanged.** `stmtRevenueByClass` / `stmtRevenueByTimeSlot` still guess the term by name. E1b makes a correct attribution possible; using it is a reporting-side change that should carry its own defect ID.
 * **F-18b unchanged** — the open-invoice "outstanding" figure in `reports.routes.ts` still overlaps the balance authority.
 * **S6 remains server-complete, operator-incomplete** — `FundingView.tsx` still does not expose the sponsorship endpoints.
+
+---
+
+# Slice J — the sponsorship lifecycle reaches the operator (S6 surface)
+
+**Date:** 2026-08-21 · **Decisions:** D-144, D-145
+**Release gate:** 22 passed · 0 failed · 0 skipped · **Server suite:** 2811 passed · 160 known WP-04 skips · 0 failed
+**Schema:** unchanged (117 tables · 251 indexes · 127 triggers) — no new API, no new authority
+
+## The defect, proven before repair (§103)
+
+```
+× reads the sponsorship position from the server instead of showing only the promise
+× offers the whole approved sponsorship lifecycle
+× invalidates the datasets a sponsorship application changes
+× states that a promise is not money, so the operator is not misled
+```
+
+The sponsorship tab was a five-column read-only table whose only money figure
+was `monthlyAmount` — which after D-131 is a **promise that settles nothing**.
+Thirty-one proven server cases were unreachable from any screen.
+
+## What the operator can now do
+
+| Action | Endpoint | Invalidates |
+|---|---|---|
+| See promised / received / applied / available per agreement | `GET /funding/sponsorships/:id/position` | — (read) |
+| Earmark a donation from the signing donor | `POST /funding/sponsorships/:id/receipts` | `funding` |
+| Apply money to a named tuition obligation | `POST /funding/sponsorships/:id/allocations` | `students`, `payments`, `funding` |
+| Reverse an application, with a reason | `POST /funding/sponsorship-allocations/:id/reverse` | `students`, `payments`, `funding` |
+
+A receipt invalidates `funding` alone because it settles no tuition; an
+application and a reversal invalidate the student and payment datasets because
+they change what a student owes.
+
+## What ATTACK found — D-145
+
+`ObligationPosition.settledScholarship` had silently become inaccurate: after
+D-131 it counts sponsorship money too, so the `/funding/students/:id/
+tuition-obligations` contract was reporting a donor's **sponsorship** as
+**scholarship** money to every reader. Renamed `settledAid` in the core, the
+route contract and the UI type; behaviour unchanged, two suites re-expressed.
+
+## Adversarial coverage added
+
+* the apply action is disabled while `available <= 0`, and says why;
+* only donations from the donor who signed the agreement are offered as backing;
+* a reversal cannot be issued without a stated reason;
+* the promise and the money are rendered as different things, and `available` is never derived from `monthlyAmount`;
+* no obligation figure is computed in the browser.
+
+## Still uncertified
+
+* **WP-07 is NOT CERTIFIED.** The C-2 legacy-test disposition (35 inventoried files / 409 cases) is untouched.
+* **TR-4 stands** — this review is by the same agent that wrote the code.
+* **F-18b open** — `reports.routes.ts` open-invoice "outstanding" overlaps the balance authority.
+* **BOS revenue attribution** still guesses a term by name, though E1b now makes an exact attribution possible.
+* **`payments.semester`** is still written for display and refund attribution; retiring it is the agreed follow-on.

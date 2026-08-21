@@ -172,7 +172,7 @@ describe('WP-07 · applying an award settles tuition and moves no money', () => 
       obligationId: obligation.id,
       amount: 6000,
     }).expect(201);
-    expect(applied.body.obligation).toMatchObject({ settledScholarship: 6000, settledCash: 0, outstanding: 4000 });
+    expect(applied.body.obligation).toMatchObject({ settledAid: 6000, settledCash: 0, outstanding: 4000 });
 
     // No new ledger row, and branch cash is exactly where the donation left it.
     expect(ledgerRows().length).toBe(ledgerBefore);
@@ -258,7 +258,7 @@ describe('WP-07 · reversal returns money to scholarship funding, never to the s
       reason: 'Student withdrew before the term started',
     }).expect(200);
 
-    expect(reversed.body.obligation).toMatchObject({ settledScholarship: 0, outstanding: 10000 });
+    expect(reversed.body.obligation).toMatchObject({ settledAid: 0, outstanding: 10000 });
     expect(reversed.body.award).toMatchObject({ allocated: 0, remaining: 8000 });
     // The money did not reach the student and did not reach the branch.
     expect(getFinanceAccount('branch', branch)).toEqual(cashBefore);

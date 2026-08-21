@@ -639,7 +639,7 @@ fundingRouter.get(
         semesterName: obligation.semesterName,
         netAmount: obligation.netAmount,
         settledCash: position.settledCash,
-        settledScholarship: position.settledScholarship,
+        settledAid: position.settledAid,
         outstanding: position.outstanding,
         status: obligation.status,
       };

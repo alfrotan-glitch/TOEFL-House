@@ -136,7 +136,7 @@ describe('WP-07 · S6 — a promise settles nothing, received money settles tuit
     expect(funded.body.available).toBe(5000);
 
     const applied = await allocate({ obligationId, amount: 5000 }).expect(201);
-    expect(applied.body.obligation.settledScholarship).toBe(5000);
+    expect(applied.body.obligation.settledAid).toBe(5000);
     expect(applied.body.obligation.outstanding).toBe(7000);
 
     // The term and the student both know about the money.
@@ -367,5 +367,95 @@ describe('WP-07 · S5 — a sponsorship discount and a sponsorship agreement are
     const agreementColumns = (db.prepare('PRAGMA table_info(sponsorship_agreements)').all() as Array<{ name: string }>).map((c) => c.name);
     expect(agreementColumns).not.toContain('discount_percent');
     expect(agreementColumns).toContain('monthly_amount');
+  });
+});
+
+// ── S6 operator surface ────────────────────────────────────────────────────
+//
+// The API above is proven, but proven server code nobody can reach is not a
+// delivered capability. These cases are structural — they cannot prove pixels —
+// but they pin the architectural invariants the funding screen must hold, the
+// same way D-124 pinned them for the scholarship lifecycle:
+//
+//   LAW 2 / §28  the screen RENDERS the server's position and never derives one
+//   §35          money that changes a student's tuition position invalidates
+//                the datasets that publish it, not just this screen's state
+import { readFileSync as readSource } from 'node:fs';
+import { dirname as dirOf, join as joinPath } from 'node:path';
+import { fileURLToPath as urlToPath } from 'node:url';
+
+describe('WP-07 · S6 — the funding screen can actually run a sponsorship', () => {
+  const source = readSource(
+    joinPath(dirOf(urlToPath(import.meta.url)), '..', '..', '..', '..', '..', 'src', 'components', 'funding', 'FundingView.tsx'),
+    'utf8',
+  );
+
+  it('reads the sponsorship position from the server instead of showing only the promise', () => {
+    expect(source).toContain('/funding/sponsorships/${sp.id}/position');
+    // received / applied / available are the server's words, rendered as-is.
+    expect(source).toMatch(/sponsorshipPosition[\s\S]*received/);
+    expect(source).toMatch(/available/);
+  });
+
+  it('offers the whole approved sponsorship lifecycle', () => {
+    expect(source).toContain('/receipts');
+    expect(source).toContain('/funding/sponsorships/${managingSponsorship.id}/allocations');
+    expect(source).toContain('/funding/sponsorship-allocations/${allocationId}/reverse');
+    expect(source).toContain('/funding/students/${');
+  });
+
+  it('invalidates the datasets a sponsorship application changes', () => {
+    // Applying sponsorship money settles tuition, so the student and payment
+    // datasets are stale the moment it succeeds.
+    const applyBlock = source.slice(source.indexOf('submitSponsorshipApplication'));
+    expect(applyBlock).toMatch(/invalidate\('students', 'payments', 'funding'\)/);
+  });
+
+  it('states that a promise is not money, so the operator is not misled', () => {
+    expect(source).toMatch(/promise/i);
+    expect(source).toMatch(/settles nothing|not money|until it is received/i);
+  });
+
+  it('never computes a sponsorship position in the browser', () => {
+    // The retired client arithmetic pattern: deriving a balance from the
+    // monthly promise instead of reading what was received.
+    expect(source).not.toMatch(/monthlyAmount\s*[-*]\s*/);
+    expect(source).not.toMatch(/received\s*-\s*applied/);
+  });
+});
+
+describe('WP-07 · S6 · ATTACK — the operator surface cannot invent or overstate money', () => {
+  const source = readSource(
+    joinPath(dirOf(urlToPath(import.meta.url)), '..', '..', '..', '..', '..', 'src', 'components', 'funding', 'FundingView.tsx'),
+    'utf8',
+  );
+
+  it('the apply action is unavailable while the agreement has received nothing', () => {
+    expect(source).toMatch(/disabled=\{sponsorshipPosition\.available <= 0\}/);
+    expect(source).toMatch(/Nothing received yet to apply/);
+  });
+
+  it('only donations from the signing donor are offered as backing', () => {
+    expect(source).toMatch(/donations\s*\n?\s*\.filter\(\(d\) => d\.donorId === managingSponsorship\.donorId\)/);
+  });
+
+  it('a reversal cannot be issued without a stated reason', () => {
+    const block = source.slice(source.indexOf('reverseSponsorshipApplication'));
+    expect(block).toMatch(/window\.prompt\(/);
+    expect(block).toMatch(/if \(!reason\) return;/);
+  });
+
+  it('the promise and the money are shown as different things', () => {
+    expect(source).toMatch(/Promised \/ month/);
+    expect(source).toMatch(/Received/);
+    // The promise must never be rendered as the agreement's money.
+    expect(source).not.toMatch(/available.*=.*monthlyAmount/);
+  });
+
+  it('an obligation position reports AID, not "scholarship", now that a sponsorship settles tuition', () => {
+    // A field named for one instrument would report a donor's sponsorship as
+    // scholarship money on every screen that reads it.
+    expect(source).toContain('settledAid');
+    expect(source).not.toContain('settledScholarship');
   });
 });
