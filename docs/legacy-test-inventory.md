@@ -283,8 +283,23 @@ is re-homed to `server/src/tests/work-packages/wp03/` as WP-03 authority
 
 ## WP-07 Finance
 
-**C-2 disposition: NOT REPLACED.** The 35 inventoried files below remain in
-place and remain the WP-07 behavioural record. `server/src/tests/work-packages/wp07/`
+**C-2 disposition: RESOLVED 2026-08-21** (audit:
+`docs/work-packages/WP-07-C2-legacy-test-disposition-audit.md`; decisions
+D-147..D-149). Of the 35 inventoried files: **25 remain unchanged**, **1 is
+retired as a skipped knowledge record** (`payment.test.ts`) and **9 were
+re-expressed** against the authorities established in slices A–K. No file was
+deleted (§14, §70).
+
+**COUNT CORRECTED: 580 cases, not 409.** The original figure counted each
+`it.each(...)` block as one case. Executed, the 35 files run 580. The correction
+is derived, not declared — reproduce with:
+
+```
+npx vitest run <the 35 files> --reporter=json
+```
+
+The per-file counts in the table below are the ORIGINAL inventory figures and
+are retained as the historical record; the authoritative current count is 580. `server/src/tests/work-packages/wp07/`
 currently holds four package authority suites —
 `budget-movement-authority.test.ts` (40 cases),
 `invoice-payment-boundary.test.ts` (7 cases),
@@ -295,10 +310,9 @@ document-numbering, discount-authorization and refund-attribution concerns
 remediated in `docs/certification/WP-07-slices-A-B-finance-remediation.md`. They
 replace no inventoried file — several inventoried suites were re-expressed under
 D-115 to attribute their refunds, but their asserted behaviour is unchanged and
-they remain the WP-07 record. Payment allocation and the invoice lifecycle
-beyond numbering are untouched, so WP-07's C-2 obligation is open.
+they remain the WP-07 record.
 
-35 files · 409 cases
+35 files · 409 cases as originally counted · **580 cases as executed**
 
 | File | Cases | Asserted behaviour |
 |---|---:|---|

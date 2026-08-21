@@ -301,7 +301,18 @@ function ensurePaidLevel(): string {
   return 'lvl_overpay';
 }
 
-describe('enrolment discount cannot exceed the enrolment fee', () => {
+/**
+ * SCOPE: the service bound only.
+ *
+ * These cases pin that `EnrollmentService.enroll` refuses a discount larger
+ * than what it discounts. They do NOT pin the ceiling BASIS: their fixture
+ * carries a tuition-only fee, so the tuition total and the snapshot total are
+ * the same number and a regression from one to the other is invisible here.
+ * The basis is proven — with a registration fee alongside the tuition, and
+ * killed by mutation — in `journey-enrollment-discount-authority.test.ts`
+ * (owner decision on WP07-F18: a discount attaches to tuition only).
+ */
+describe('enrolment discount cannot exceed the enrolment fee (service bound; basis proven elsewhere)', () => {
   it('rejects a discount larger than the fee', async () => {
     const { getEnrollmentService } = await import('../core/academic/enrollment-service.js');
     const studentId = await newStudent();

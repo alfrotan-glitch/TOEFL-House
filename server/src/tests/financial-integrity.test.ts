@@ -279,7 +279,13 @@ describe('§3 Financial Reconciliation', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 // §4 — INVOICE STATE MACHINE
 // ═══════════════════════════════════════════════════════════════════════════
-describe('§4 Invoice State Machine', () => {
+/**
+ * SCOPE: the state machine of a NON-TUITION invoice (these fixtures bill
+ * `other`). A tuition invoice additionally names an obligation, is bounded by
+ * the term's billing capacity, and settles that term when paid — all proven in
+ * `work-packages/wp07/invoice-purpose-authority.test.ts` (D-127, D-128).
+ */
+describe('§4 Invoice State Machine (non-tuition document)', () => {
   const invId = id('inv');
   const stuId = id('stu');
 

@@ -149,39 +149,115 @@ describe('assertMoney parses rather than coerces', () => {
 
 describe('the financial input inventory stays routed through the boundary', () => {
   /**
-   * Every money-typed request field found by inventorying the route layer.
-   * If a new financial input is added without validation, add it here — or
-   * better, route it through assertMoney and this test passes by itself.
+   * DERIVED, NOT DECLARED.
+   *
+   * This inventory used to be a hand-maintained list of `[file, label]` pairs,
+   * checked one-directionally: for each LISTED pair, assert the file contains
+   * `assertMoney(` and that label. A money field added without validation could
+   * never fail it, and the list had drifted — `invoices.routes.ts` was absent
+   * altogether while validating three money fields, and `students.routes.ts`
+   * listed two of its five labels.
+   *
+   * The inventory is now computed from the source on every run: every money
+   * label that reaches `assertMoney` is discovered, and every money-shaped
+   * request field is checked for reaching it. A new financial input either
+   * routes through the boundary or fails here.
+   *
+   * SCOPE covers the route layer AND `core/finance`, because the settlement and
+   * sponsorship authorities (D-120, D-131, D-140) legitimately parse money
+   * inside core rather than at the route.
    */
-  const INVENTORY: Array<[string, string]> = [
-    ['academic.routes.ts', 'default fee'],
-    ['academic.routes.ts', 'level fee'],
-    ['books.routes.ts', 'book price'],
-    ['books.routes.ts', 'book purchase price'],
-    ['books.routes.ts', 'discount'],
-    ['classes.routes.ts', 'class fee'],
-    ['exams.routes.ts', 'exam fee'],
-    ['funding.routes.ts', 'scholarship budget'],
-    ['funding.routes.ts', 'award amount'],
-    ['funding.routes.ts', 'monthly sponsorship amount'],
-    ['funding.routes.ts', 'campaign target amount'],
-    ['journey.routes.ts', 'discount amount'],
-    ['skills.routes.ts', 'monthlyRate'],
-    ['students.routes.ts', 'tuition amount'],
-    ['students.routes.ts', 'amount paid'],
-    ['teachers.routes.ts', 'base salary'],
-    ['teachers.routes.ts', 'default skill rate'],
-    ['visitors.routes.ts', 'semester fee'],
-    ['visitors.routes.ts', 'received fee amount'],
-  ];
+  const coreFinanceDir = path.join(
+    path.resolve(fileURLToPath(new URL('.', import.meta.url)), '..'),
+    'core', 'finance',
+  );
 
-  for (const [file, field] of INVENTORY) {
-    it(`${file} validates "${field}"`, () => {
-      const src = fs.readFileSync(path.join(routesDir, file), 'utf8');
-      expect(src).toContain(`assertMoney(`);
-      expect(src, `${file} must validate ${field}`).toContain(`'${field}'`);
-    });
-  }
+  const sourcesIn = (dir: string) =>
+    fs.readdirSync(dir).filter((f) => f.endsWith('.ts')).map((f) => ({ file: f, dir }));
+
+  const MONEY_SOURCES = [...sourcesIn(routesDir), ...sourcesIn(coreFinanceDir)];
+
+  /** Every label this file actually hands to assertMoney. */
+  const labelsOf = (text: string): string[] =>
+    [...text.matchAll(/assertMoney\(\s*[^,)]+,\s*'([^']+)'/g)].map((m) => m[1]);
+
+  const derived = MONEY_SOURCES
+    .map(({ file, dir }) => ({ file, labels: labelsOf(fs.readFileSync(path.join(dir, file), 'utf8')) }))
+    .filter((entry) => entry.labels.length > 0);
+
+  it('the money boundary is reached from every source that parses money', () => {
+    // A living inventory: it must not be empty, and it must cover the money
+    // authorities this work package established.
+    expect(derived.length).toBeGreaterThan(0);
+    const byFile = Object.fromEntries(derived.map((d) => [d.file, d.labels]));
+
+    // Route-layer money that the retired hand-list omitted entirely.
+    expect(byFile['invoices.routes.ts'], 'invoices.routes.ts parses money and must be inventoried').toBeDefined();
+    expect(byFile['invoices.routes.ts']).toEqual(expect.arrayContaining(['unitPrice', 'discount amount']));
+
+    // Core-layer money the route-only scan could never see.
+    expect(byFile['obligations.ts'], 'the settlement authority parses money in core').toBeDefined();
+  });
+
+  it.each(
+    derived.map(({ file, labels }) => [file, labels] as const),
+  )('%s parses every money field it names', (file, labels) => {
+    expect(labels.length).toBeGreaterThan(0);
+    for (const label of labels) {
+      expect(label.trim(), `${file} passed an empty money label`).not.toBe('');
+    }
+  });
+
+  /**
+   * The other direction, which is the one that used to be impossible: a
+   * money-shaped request field that never reaches the boundary.
+   *
+   * A destructured request field whose name reads as money must appear within
+   * the same file in an `assertMoney` call, or be explicitly exempted with the
+   * reason it is not a monetary input.
+   */
+  const MONEY_WORD_RE = /\b(amount|price|fee|salary|budget|rate)\b/;
+
+  /**
+   * `surchargeFee` is a money field and `\bfee\b` does not match inside it, so
+   * the name is split at its camel humps before the words are looked for. A
+   * boundary-only match let every camelCase money field through.
+   */
+  const readsAsMoney = (field: string) =>
+    // An identifier names a row, never a figure, however money-ish the noun.
+    !/Ids?$/.test(field)
+    && MONEY_WORD_RE.test(field.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase());
+
+  /** Fields whose names read as money but are not monetary inputs. */
+  const NOT_MONEY: Record<string, string> = {
+    amountPaidNow: 'alias parsed as "amount paid" in the same handler',
+    feeType: 'a taxonomy code, not a figure',
+    feeKey: 'a configuration key, not a figure',
+    rateType: 'a classification, not a figure',
+    amountReceived: 'alias parsed as "amount received" in the same handler',
+  };
+
+  it('no money-shaped request field escapes the boundary unparsed', () => {
+    const offenders: string[] = [];
+    for (const { file, dir } of MONEY_SOURCES) {
+      const text = fs.readFileSync(path.join(dir, file), 'utf8');
+      if (!text.includes('assertMoney(')) continue;
+      const labels = labelsOf(text).join(' | ').toLowerCase();
+      for (const match of text.matchAll(/const\s*\{([^}]*)\}\s*=\s*req\.body/g)) {
+        for (const raw of match[1].split(',')) {
+          const field = raw.split(':')[0].split('=')[0].trim();
+          if (!field || !readsAsMoney(field) || NOT_MONEY[field]) continue;
+          // The field is money-shaped: some assertMoney label in this file must
+          // plausibly name it, or the field must be handed to assertMoney directly.
+          const named = labels.includes(field.toLowerCase())
+            || labels.split(/[^a-z]+/).some((w) => w && field.toLowerCase().includes(w))
+            || new RegExp(`assertMoney\\(\\s*${field}\\b`).test(text);
+          if (!named) offenders.push(`${file}: ${field}`);
+        }
+      }
+    }
+    expect(offenders, 'these request fields look like money but reach no boundary').toEqual([]);
+  });
 
   it('no route writes a raw request price/fee/salary straight into SQL', () => {
     // Catch the specific shapes that produced real defects in passes 12-14.

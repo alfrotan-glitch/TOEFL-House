@@ -203,7 +203,10 @@ describe('balance arithmetic invariants', () => {
       expect(b.outstanding).toBeGreaterThanOrEqual(0);
       expect(b.creditBalance).toBeGreaterThanOrEqual(0);
       expect(Math.min(b.outstanding, b.creditBalance)).toBe(0);
-      expect(b.outstanding - b.creditBalance).toBeCloseTo(due - paid, 6);
+      // Exact, not approximate. Every stored money column is an INTEGER
+      // (D-12/D-22) and D-104 removed tolerance from money comparisons, so a
+      // tolerance here would let the identity drift and still pass.
+      expect(b.outstanding - b.creditBalance).toBe(due - paid);
     }
   });
 

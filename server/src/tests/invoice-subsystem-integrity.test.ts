@@ -17,6 +17,16 @@
  * path — configuration write, persisted setting, invoice creation, stored due
  * date — not just the PUT response.
  *
+ * SCOPE AFTER THE WP-07 INVOICE WORK: this suite covers the invoice DOCUMENT —
+ * numbering, due dates, money scale, RBAC, branch isolation, lifecycle and
+ * overpayment. Its invoices bill `other`, because a term may not be billed
+ * twice over (D-128) and this suite creates many invoices for one student.
+ *
+ * The TUITION invoice — purpose, the obligation it names, the term's billing
+ * capacity and what its payment settles — is proven in
+ * `work-packages/wp07/invoice-purpose-authority.test.ts`. Neither suite covers
+ * the other; read them together.
+ *
  * Behaviours deliberately PRESERVED (policy undefined, no security impact):
  *   - an overdue UNPAID invoice may be cancelled
  *   - no maximum line quantity exists (assertMoney bounds the resulting total)

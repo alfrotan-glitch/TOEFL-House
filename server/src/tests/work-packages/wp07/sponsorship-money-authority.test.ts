@@ -459,3 +459,72 @@ describe('WP-07 · S6 · ATTACK — the operator surface cannot invent or overst
     expect(source).not.toContain('settledScholarship');
   });
 });
+
+// ── C-2 re-expression: the newer money writers join the sweeps ─────────────
+//
+// `finance-money-writer-parity` sweeps four writers (invoice payment, ad-hoc
+// payment, refund, donation desk) and `money-writer-idempotency` covers retries
+// for two of them. Slices E–G added four more money writers, and neither sweep
+// reached them. Parity and retry safety for the sponsorship writers are
+// asserted here, beside the authority they belong to, rather than by widening a
+// suite whose fixtures know nothing about agreements.
+describe('WP-07 · C-2 · the sponsorship writers hold the money-writer contract', () => {
+  it('a retried receipt earmarks the money once, not twice', async () => {
+    const donation = seedDonation(5000);
+    const body = { donationId: donation, amount: 5000 };
+
+    await receipt(body).expect(201);
+    const retry = await receipt(body);
+
+    // The second attempt must not double the backing. It is refused because the
+    // donation has nothing left, which is the bound that matters.
+    expect(retry.status).toBe(400);
+    expect((await position()).body.received).toBe(5000);
+    expect(
+      db.prepare('SELECT COUNT(*) AS c FROM sponsorship_receipts WHERE agreement_id = ?').get(agreementId),
+    ).toEqual({ c: 1 });
+  });
+
+  it('a retried application settles the term once, not twice', async () => {
+    await receipt({ donationId: seedDonation(12000), amount: 12000 }).expect(201);
+    const body = { obligationId, amount: 12000 };
+
+    await allocate(body).expect(201);
+    const retry = await allocate(body);
+
+    expect(retry.status).toBe(400);
+    expect(getStudentBalance(db, studentId).outstanding).toBe(0);
+    expect(
+      db.prepare(
+        `SELECT COUNT(*) AS c FROM obligation_allocations
+          WHERE sponsorship_agreement_id = ? AND status = 'active'`,
+      ).get(agreementId),
+    ).toEqual({ c: 1 });
+  });
+
+  it('neither writer moves branch cash, and both keep the books balanced', async () => {
+    const before = getFinanceAccount('branch', branch);
+    await receipt({ donationId: seedDonation(6000), amount: 6000 }).expect(201);
+    await allocate({ obligationId, amount: 6000 }).expect(201);
+    const after = getFinanceAccount('branch', branch);
+
+    expect(after.mainBalance).toBe(before.mainBalance);
+    expect(after.savingBalance).toBe(before.savingBalance);
+    expect(computeReconciliation({ branchId: branch, isAll: false }).healthy).toBe(true);
+  });
+
+  it('a rejected write leaves no trace in either table', async () => {
+    const donation = seedDonation(5000);
+    expect((await receipt({ donationId: donation, amount: 'abc' })).status).toBe(400);
+    expect((await allocate({ obligationId, amount: 'abc' })).status).toBe(400);
+
+    // Scoped: the test database persists across cases in a run, so a global
+    // count would read other cases' rows.
+    expect(
+      db.prepare('SELECT COUNT(*) AS c FROM sponsorship_receipts WHERE agreement_id = ?').get(agreementId),
+    ).toEqual({ c: 0 });
+    expect(
+      db.prepare('SELECT COUNT(*) AS c FROM obligation_allocations WHERE obligation_id = ?').get(obligationId),
+    ).toEqual({ c: 0 });
+  });
+});

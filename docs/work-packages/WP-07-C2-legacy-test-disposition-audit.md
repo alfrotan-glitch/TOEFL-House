@@ -2,7 +2,9 @@
 
 **Protocol:** §65 CHECKPOINT · §14 / §70 (fixtures are re-expressed, never deleted) · §103 EVIDENCE · §104 · §106 SCOPE · LAW 1
 **Date:** 2026-08-21 · **Baseline:** `5ade361` (release gate 22/22; server suite 2816 passed · 160 known skips)
-**Status:** **AUDIT ONLY. Nothing was changed.** No test, source, schema or registry behaviour was modified to produce this document. Disposition is presented for owner approval.
+**Status:** audit performed read-only; **disposition APPROVED by the owner 2026-08-21 and IMPLEMENTED** (D-147/D-148/D-149). §6 records the outcome, including the two reclassifications the approved deep read produced.
+
+**Original status when written:** **AUDIT ONLY. Nothing was changed.** No test, source, schema or registry behaviour was modified to produce this document. Disposition is presented for owner approval.
 
 ---
 
@@ -182,3 +184,57 @@ F-18b, with TR-4 outstanding"* — not as unconditional.
 |---|---|---|
 | **AR-1** | Classification of the 27 files not read line by line rests on execution status, signal scan and ownership mapping. A case could assert a superseded rule while still passing on a non-discriminating fixture — the exact pattern found in 4 files that *were* read closely. | Read the Class-1 files in depth before certifying, or accept and record the residual. **Recommend: deep-read the 6 Class-1 files that touch settlement** (`balance-single-source-of-truth`, `cash-position-reconciliation`, `refund-reclaims-savings`, `guarded-category-concurrency`, `ledger-period-totals`, `financial-extended`). |
 | **AR-2** | The 580 figure is this run's expansion of `it.each`; a data-driven table could change it again. | Record the count as derived, with the command that produces it. |
+
+
+---
+
+## 6. OUTCOME — deep read performed, disposition implemented
+
+The owner approved the disposition in full and directed the **deep read of the
+6 settlement-touching Class-1 files** (AR-1 mitigation). Both were done.
+
+### 6.1 Deep read of the 6 — one reclassification
+
+| File | Deep-read outcome |
+|---|---|
+| `cash-position-reconciliation.test.ts` | Class 1 **confirmed** — eight variance-detection classes, none affected by allocations |
+| `refund-reclaims-savings.test.ts` | Class 1 **confirmed** — operates on `recordIncome` directly; the savings reclaim is unchanged by D-142 |
+| `guarded-category-concurrency.test.ts` | Class 1 **confirmed** — "concurrent payments can never exceed the semester debt" is now backed by the allocation authority and still discriminates |
+| `ledger-period-totals.test.ts` | Class 1 **confirmed** — period totals vs pages; not settlement-shaped |
+| `financial-extended.test.ts` | Class 1 **confirmed** — D2 (`total − discount = net`) and D5 (`fee_amount ≥ net_fee_amount`) both still hold after D-136 |
+| `balance-single-source-of-truth.test.ts` | **RECLASSIFIED 1 → 3.** It asserted the balance identity with `toBeCloseTo(due - paid, 6)`. Every stored money column is an INTEGER and D-104 removed tolerance from money comparisons, so the identity could drift and still pass. Re-expressed to exact equality. |
+
+**Final disposition: 25 remain · 1 retired · 9 re-expressed.**
+
+### 6.2 The audit's central claim, proven by mutation
+
+Class 3 was defined as "passes, and no longer discriminates the rule it claims
+to protect". That claim was tested rather than asserted:
+
+| Mutation | Before re-expression | After |
+|---|---|---|
+| Add an unvalidated money field `surchargeFee` to `invoices.routes.ts` | **survived** — 27/27 green | **killed** — `invoices.routes.ts: surchargeFee` |
+| Regress the discount ceiling from the tuition total to the snapshot total | **survived** — 22/22 green | **killed** — 2 cases fail |
+
+A third defect was found while building the new guard and is worth recording:
+the first version of the money-field detector used `\b(fee|amount|…)\b`, which
+never matches inside a camelCase name like `surchargeFee`. It was green and
+useless until the mutation exposed it. The detector now splits names at their
+camel humps, and exempts any field ending in `Id`/`Ids` as an identifier rather
+than a figure.
+
+### 6.3 Certification impact — updated
+
+| Blocker | State |
+|---|---|
+| C-2 legacy-test disposition | **CLOSED** (D-147/D-148/D-149) |
+| Inventory count wrong (409 vs 580) | **CLOSED** — corrected, derived, reproducible |
+| Money-boundary guard could not detect a new unvalidated field | **CLOSED** — mutation-proven |
+| Newer money writers absent from parity/idempotency sweeps | **CLOSED** |
+| **TR-4** — review by the same agent | **OPEN** (structural) |
+| **F-18b** — two different "outstanding" figures | **OPEN** |
+| Revenue reports INNER JOIN `classes` (slice K residual) | **OPEN** |
+| `payments.semester` retirement | **OPEN** (agreed follow-on) |
+
+**WP-07 is now certifiable except F-18b, with TR-4 outstanding.** It is not
+certified, and no certification claim has been made.

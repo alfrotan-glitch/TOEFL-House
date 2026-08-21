@@ -55,6 +55,14 @@ const VERSION = 'jrn_version';
 const LEVEL = 'jrn_level';
 const CLASS_ID = 'jrn_class';
 const FEE = 10_000;
+/**
+ * A REGISTRATION fee alongside the tuition, so the ceiling basis is actually
+ * discriminated. A discount attaches to TUITION only (owner decision on
+ * WP07-F18), and the authorised maximum is a percentage of the tuition rather
+ * than of the whole fee snapshot. With a tuition-only fixture the old and new
+ * bases coincide and a regression to the snapshot basis would pass unnoticed.
+ */
+const REGISTRATION_FEE = 2_500;
 
 let app: express.Express;
 let registrar: TokenPayload;
@@ -122,6 +130,13 @@ beforeAll(async () => {
      VALUES (?, 'Journey Class', ?, 500, 'active', 'activated', 'A1', ?, ?, ?)`,
   ).run(CLASS_ID, BRANCH, FEE, PROGRAM, LEVEL);
   db.prepare('INSERT OR REPLACE INTO level_branch_fees (id, level_id, branch_id, fee) VALUES (?, ?, ?, ?)').run('jrn_lbf', LEVEL, BRANCH, FEE);
+  // Registration sits alongside tuition on the enrolment snapshot, so the
+  // snapshot total (12,500) and the tuition total (10,000) differ and the
+  // ceiling basis is observable.
+  db.prepare(
+    `INSERT OR REPLACE INTO fee_rules (id, fee_type, name, amount, branch_id, is_active, version)
+     VALUES ('jrn_fr_reg', 'registration', 'Registration fee', ?, ?, 1, 1)`,
+  ).run(REGISTRATION_FEE, BRANCH);
 
   const pwd = await hashPassword('Str0ng!Pass2026');
   db.prepare(

@@ -20,7 +20,17 @@ afterAll(() => {
   // Shared test DB lifecycle is managed by the Vitest process; do not close the singleton here.
 });
 
-describe('Discount Cap Enforcement', () => {
+/**
+ * SCOPE: the rule ENGINE, not the discount authority.
+ *
+ * `evaluateRules` clamps a percent it derives itself from configuration. The
+ * 30% here is a rule in this fixture's configuration, NOT the operative
+ * discount ceiling — the ordinary ceiling is resolved by
+ * `resolveAuthorizedDiscount` and proven at 20% in
+ * `discount-authorization-boundary.test.ts`, which overrides whatever the rule
+ * engine derives. Read together, not separately.
+ */
+describe('Discount rule engine — derived-percent clamping (subordinate to the discount authority)', () => {
   it('caps discount at 30% when input exceeds the limit', () => {
     const result = evaluateRules({
       category: 'discount',
