@@ -90,10 +90,10 @@ exact failure the protocol was written to stop.
 
 ## Subsequent work (added 2026-08-21, does not alter the record above)
 
-`docs/certification/WP-07-slice-A-budget-treasury.md` records a scope-limited
+`docs/certification/WP-07-slices-A-B-finance-remediation.md` records a scope-limited
 remediation of the budget-line movement authority, savings-ledger purity,
-finance operational settings and reconciliation precision, performed under the
-Master Protocol. It repairs four proven money defects that post-date this v2
-record and does **not** discharge WP-07's re-certification burden: invoices,
-payments, refunds, discounts, receipts and the C-2 legacy-test disposition
-remain open.
+finance operational settings, reconciliation precision and the invoice payment
+boundary, performed under the Master Protocol. It repairs ten proven defects
+that post-date this v2 record and does **not** discharge WP-07's
+re-certification burden: the invoice lifecycle, refunds and payment allocation,
+discounts, receipts and the C-2 legacy-test disposition remain open.

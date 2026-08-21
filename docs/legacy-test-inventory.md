@@ -285,13 +285,14 @@ is re-homed to `server/src/tests/work-packages/wp03/` as WP-03 authority
 
 **C-2 disposition: NOT REPLACED.** The 35 inventoried files below remain in
 place and remain the WP-07 behavioural record. `server/src/tests/work-packages/wp07/`
-currently holds one package authority suite —
-`budget-movement-authority.test.ts` (40 cases) — covering the budget-movement,
-savings-ledger and finance-settings concerns remediated in
-`docs/certification/WP-07-slice-A-budget-treasury.md`. It replaces no
-inventoried file: invoices, payments, refunds, discounts and receipts are
-untouched by that slice, so their suites are still authoritative and WP-07's
-C-2 obligation is open.
+currently holds two package authority suites —
+`budget-movement-authority.test.ts` (40 cases) and
+`invoice-payment-boundary.test.ts` (7 cases) — covering the budget-movement,
+savings-ledger, finance-settings and invoice-payment-boundary concerns
+remediated in `docs/certification/WP-07-slices-A-B-finance-remediation.md`. They
+replace no inventoried file: invoice lifecycle, refunds, discounts and receipts
+are untouched, so those suites remain authoritative and WP-07's C-2 obligation
+is open.
 
 35 files · 409 cases
 

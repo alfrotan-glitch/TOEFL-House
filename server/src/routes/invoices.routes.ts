@@ -46,7 +46,6 @@ const stmtUpdateInvoiceIssue = db.prepare(
 const stmtGetInvoicePaymentsSum = db.prepare(
   `SELECT COALESCE(SUM(amount), 0) as s FROM payments WHERE invoice_id = ? AND status = 'completed'`
 );
-const stmtGetPaymentByIdempotency = db.prepare('SELECT * FROM payments WHERE idempotency_key = ?');
 const stmtInsertPayment = db.prepare(
   `INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, notes, receipt_number, branch_id, idempotency_key) VALUES (?, ?, ?, ?, ?, ?, 'completed', 'fee', ?, ?, ?, ?)`
 );
@@ -293,13 +292,16 @@ invoicesRouter.post(
     const row = stmtGetPlainInvoiceById.get(req.params.id) as any;
     if (!row) throw new HttpError(404, 'Invoice not found.');
     requireInvoiceBranch(req, row);
-    if (!['issued', 'partial', 'overdue'].includes(row.status)) {
-      throw new HttpError(400, 'Only issued, partial, or overdue invoices can accept payment.');
-    }
-
     const { amount, paymentMethod, notes } = req.body as { amount?: number; paymentMethod?: string; notes?: string };
     const VALID_METHODS = ['cash', 'card', 'bank_transfer'] as const;
-    const resolvedMethod = VALID_METHODS.includes(paymentMethod as any) ? paymentMethod : 'cash';
+    // An unrecognised method is REFUSED, not replaced. Recording a cheque or a
+    // mistyped `bank_transfr` as CASH states that money is in the drawer when
+    // it is not, and `POST /api/students/:id/payments` — the other collection
+    // path — already applies exactly this rule to the same field.
+    if (paymentMethod != null && !VALID_METHODS.includes(paymentMethod as (typeof VALID_METHODS)[number])) {
+      throw new HttpError(400, 'Invalid payment method.');
+    }
+    const resolvedMethod = paymentMethod ?? 'cash';
     // F-5: `Number()` is a coercion, not a parse, so values that are not
     // amounts became real invoice payments with real cash movement.
     // Reproduced live on a fresh database:
@@ -343,22 +345,49 @@ invoicesRouter.post(
       method: resolvedMethod,
       actorUserId: user.userId ?? null,
     });
-    const priorPayment = db.prepare(
-      `SELECT * FROM payments WHERE idempotency_key IN (${payIdemCandidates.map(() => '?').join(',')}) LIMIT 1`
-    ).get(...payIdemCandidates) as any;
+    // SCOPED TO THIS INVOICE. A client-supplied `Idempotency-Key` is caller-
+    // controlled, so matching on the key alone lets a key already used by a
+    // payment on another invoice answer 200 with `idempotentReplay: true` —
+    // reporting a collection that never happened on this invoice, and handing
+    // back another payment's receipt number.
+    const findPriorPayment = () => db.prepare(
+      `SELECT id, receipt_number FROM payments
+        WHERE invoice_id = ? AND student_id = ?
+          AND idempotency_key IN (${payIdemCandidates.map(() => '?').join(',')}) LIMIT 1`
+    ).get(row.id, row.student_id, ...payIdemCandidates) as { id: string; receipt_number: string | null } | undefined;
+    const priorPayment = findPriorPayment();
     if (priorPayment?.id) return replayPayment(priorPayment);
     const idempotencyKey = payIdemCandidates[0];
+
+    // The state gate runs AFTER the replay check, deliberately. A retry of a
+    // payment that has just settled the invoice finds it `paid`, and answering
+    // "only issued, partial or overdue invoices can accept payment" would tell
+    // the operator their collection failed when it succeeded.
+    if (!['issued', 'partial', 'overdue'].includes(row.status)) {
+      throw new HttpError(400, 'Only issued, partial, or overdue invoices can accept payment.');
+    }
 
     const payId = id('pay');
     // Allocated only after the replay check so retries do not burn receipt numbers.
     const rc = nextReceiptNumber();
     const student = stmtGetStudentById.get(row.student_id) as any;
 
+    let replayOf: { id: string; receipt_number: string | null } | undefined;
     const tx = db.transaction(() => {
+      // The pre-check above can lose a race with a concurrent retry. Repeating
+      // it inside the transaction makes the retry collapse into a replay
+      // instead of failing the balance check the winner has just satisfied —
+      // an operator whose click was retried would otherwise be told the
+      // payment was rejected while it had in fact been taken.
+      replayOf = findPriorPayment();
+      if (replayOf) return;
+
       const paidSoFar = Number((stmtGetInvoicePaymentsSum.get(row.id) as { s: number }).s || 0);
       const remaining = Number(row.net_amount) - paidSoFar;
       if (remaining <= 0) throw new HttpError(409, 'Invoice is already fully paid.');
-      if (payAmount > remaining + 0.001) {
+      // Whole AFN (D-12/D-22/D-104): exact comparison, no tolerance to hide a
+      // one-afghani overpayment behind.
+      if (payAmount > remaining) {
         throw new HttpError(400, `Amount exceeds remaining balance (${remaining} AFN).`);
       }
 
@@ -374,17 +403,22 @@ invoicesRouter.post(
       });
 
       const newPaid = paidSoFar + payAmount;
-      const newStatus = newPaid >= row.net_amount - 0.001 ? 'paid' : 'partial';
+      const newStatus = newPaid >= Number(row.net_amount) ? 'paid' : 'partial';
       stmtUpdateInvoiceStatus.run(newStatus, row.id);
     });
     try {
       tx();
+      if (replayOf) return replayPayment(replayOf);
     } catch (err) {
       // Two concurrent requests raced past the pre-check; the unique index on
-      // payments.idempotency_key is the authoritative guard. Serve the winner.
+      // payments.idempotency_key is the authoritative guard. Serve the winner —
+      // but only when the winner is a payment on THIS invoice. The index is
+      // global, so a key already spent on another invoice lands here too, and
+      // replaying it would confirm a collection that never happened here.
       if (isUniqueViolation(err)) {
-        const winner = stmtGetPaymentByIdempotency.get(idempotencyKey) as any;
+        const winner = findPriorPayment();
         if (winner?.id) return replayPayment(winner);
+        throw new HttpError(409, 'This idempotency key has already been used for a different payment.');
       }
       throw err;
     }

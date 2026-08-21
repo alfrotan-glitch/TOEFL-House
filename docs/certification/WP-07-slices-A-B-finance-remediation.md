@@ -1,10 +1,10 @@
-# Remediation Record — WP-07 Slice A · Budget, treasury and finance-settings authority
+# Remediation Record — WP-07 Slices A & B · Budget/treasury authority and the invoice payment boundary
 
-**Work Package:** WP-07 Finance — budget-line movement, savings ledger purity, finance operational settings
+**Work Package:** WP-07 Finance — budget-line movement, savings ledger purity, finance operational settings, invoice payment boundary
 **Protocol:** `docs/MASTER_ENGINEERING_PROTOCOL.md` §§58–74 and §W
 **Date:** 2026-08-21
 **Recoverable pre-slice baseline:** `d29554bff7a635011ebed8a2d5085c265fc07197` (WP-06 certified)
-**Implementation checkpoint:** `998e6a4` (budget-movement authority)
+**Implementation checkpoints:** `998e6a4` (budget-movement authority) · `0fbf3ce` (review repairs)
 **Status:** SLICE COMPLETE — **WP-07 as a whole remains UNCERTIFIED**
 
 > This record certifies only the concerns named below. It does **not** certify
@@ -31,10 +31,15 @@ Included:
   writes them;
 - the release gate's financial reconciliation step.
 
+Added in slice B:
+
+- the invoice payment boundary: payment-method validation, idempotency replay
+  scope and ordering, and overpayment precision on `POST /api/invoices/:id/pay`.
+
 Excluded (unchanged, and not certified here):
 
-- invoice lifecycle, payment recording, refunds, receipts, discount
-  authorization, student balances;
+- invoice creation/issue/cancel lifecycle beyond the payment path, refunds,
+  receipts numbering policy, discount authorization, student balances;
 - payroll computation and payroll's own budget spend path (WP-08);
 - the report engine and metric catalogue design (WP-11) — only the transfer
   disclosure fields were changed;
@@ -69,6 +74,9 @@ re-run after the repair.
 | WP07-F5 | The savings rate accepts values it cannot honour | MEDIUM | `PUT /finance/saving-engine/settings {percent:'abc'}` → 200 and `'abc'` stored, after which every read silently used the 5% default; `PUT /invoices/config/settings {dailySavingPercent:500}` → 200, no upper bound |
 | WP07-F6 | A rejected setting reports success | MEDIUM | the configuration form skipped an invalid value and answered `{ok:true}` |
 | WP07-F7 | The ledger arrow contradicts the amount | LOW | a −500 refund rendered as `+-500`; a negative budget movement would render as `−-8,000` |
+| WP07-F8 | An unrecognised invoice payment method is recorded as **cash** | MEDIUM | `paymentMethod: 'cheque'` → 201, a 2,000 AFN payment stored as `cash`, while `POST /api/students/:id/payments` rejected the identical input with 400 |
+| WP07-F9 | An idempotency key spent on one invoice fabricates a replay on another | HIGH | the same `Idempotency-Key` on a second, unpaid invoice returned **200 `idempotentReplay: true`** carrying the first invoice's receipt number, so an operator is told a collection succeeded that never happened — and is shown another payment's receipt |
+| WP07-F10 | A retried payment that settled the invoice reports failure | MEDIUM | the state gate ran before the replay check, so a concurrent retry answered 400 "Only issued, partial, or overdue invoices can accept payment" although the money had been taken |
 
 ## MODEL
 
@@ -116,14 +124,16 @@ Recorded as **D-101 … D-105** in `docs/registries/decisions.md`.
 | Ledger arrow derived from the amount | `src/components/finance/FinanceDashboardPanel.tsx` |
 | Two-decimal residue removed | `income.ts`, `studentBalance.ts`, `reconciliation.ts` |
 | Reconciliation gate drives a full money lifecycle | `scripts/release-validate.mjs` |
-| Package test authority | `server/src/tests/work-packages/wp07/budget-movement-authority.test.ts` (new, 40 cases) |
+| Package test authority (budget/treasury/settings) | `server/src/tests/work-packages/wp07/budget-movement-authority.test.ts` (new, 40 cases) |
+| Invoice payment: method refused not substituted; replay scoped to invoice + student in all three places; replay checked before the state gate; exact whole-AFN overpayment comparison; the now-unused global key lookup removed | `server/src/routes/invoices.routes.ts` |
+| Package test authority (invoice payment) | `server/src/tests/work-packages/wp07/invoice-payment-boundary.test.ts` (new, 7 cases) |
 
 ## VERIFY
 
 | Command | Result |
 |---|---|
-| `npx vitest run src/tests/work-packages/wp07` | 40/40 passed |
-| `npx vitest run` (server, full) | **2604 passed · 160 skipped** (the 160 are the explicit WP-04 retirements) · 0 failed |
+| `npx vitest run src/tests/work-packages/wp07` | 47/47 passed |
+| `npx vitest run` (server, full) | **2611 passed · 160 skipped** (the 160 are the explicit WP-04 retirements) · 0 failed |
 | `npx tsc --noEmit` (server + frontend) | clean |
 | `npm run release:validate` | **22 passed · 0 failed · 0 skipped** |
 | Reconciliation gate detail | `full money lifecycle · amount/cash/saving/budget all 0` |
@@ -142,6 +152,13 @@ transaction); settlement of another branch's line by an organization owner;
 overdraw a line; a one-afghani cash break (detected, not tolerated); an
 out-of-range stored savings rate (income refused, nothing written); `'abc'`,
 `500`, `-1`, `true`, `[10]` and `1500.4` through both settings writers.
+
+Invoice payment: an unrecognised method; each accepted method; an omitted
+method; an overpayment by exactly one afghani (and the exact final afghani,
+which is accepted); a shared `Idempotency-Key` replayed against a different
+invoice; a keyed retry of a payment that already settled the invoice; and two
+concurrent identical payments (one 201, one 200 replay, one `payments` row,
+reconciliation healthy).
 
 ## REPAIR (findings from the independent review of the first checkpoint)
 
@@ -178,7 +195,7 @@ reproduced before repair and is pinned by an executed test; every applicable
 gate passes; no business policy was invented; no schema change was required.
 
 **WP-07 Finance remains NOT CERTIFIED.** Outstanding, and deliberately not
-claimed: invoice lifecycle and numbering, payment and refund allocation,
-discount authorization, receipts, the WP-07 legacy-test disposition under C-2,
-and the re-certification burden recorded in
-`docs/certification/WP-07-finance.md`.
+claimed: invoice creation/issue/cancel lifecycle and numbering, refunds and
+payment allocation across semesters/installments, discount authorization,
+receipt numbering policy, the WP-07 legacy-test disposition under C-2, and the
+re-certification burden recorded in `docs/certification/WP-07-finance.md`.
