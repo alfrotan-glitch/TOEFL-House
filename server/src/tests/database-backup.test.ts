@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
 import { copyFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
@@ -11,6 +13,7 @@ import {
   BACKUP_RETENTION,
   assertDistinctBackupDestinations,
   backupBucketLabels,
+  syncFile,
   verifySqliteSnapshot,
 } from '../core/operations/database-backup.js';
 
@@ -399,5 +402,57 @@ describe('backup configuration and bucket boundaries', () => {
       weekly: '2026-W53',
       monthly: '2027-01',
     });
+  });
+});
+
+// ── WP-OPS · durability sync must use a writable handle ────────────────────
+//
+// REPORTED FROM WINDOWS: the startup backup aborted with
+// `EPERM: operation not permitted, fsync`, raised by `handle.sync()` inside
+// `syncFile`, which opened the snapshot with a READ-ONLY handle (`'r'`).
+//
+// Windows refuses `FlushFileBuffers` on a handle without write access, so every
+// call failed — and `syncFile` runs for the local daily snapshot, for each
+// weekly/monthly tier and for every external copy, so the backend could not
+// finish initialising.
+//
+// POSIX permits fsync on a read-only descriptor, which is why this survived
+// every run on Linux. Verified on this platform: mode 'r' and mode 'r+' both
+// return FSYNC_OK. A behavioural reproduction is therefore impossible here, and
+// the regression guard has to be the structural one below — it is the only
+// assertion that can fail on a Linux CI.
+describe('WP-OPS · the durability sync opens a handle it is allowed to flush', () => {
+  const backupSource = readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'core', 'operations', 'database-backup.ts'),
+    'utf8',
+  );
+
+  it('syncFile never opens the snapshot read-only', () => {
+    const fn = backupSource.slice(
+      backupSource.indexOf('async function syncFile('),
+      backupSource.indexOf('export async function verifySqliteSnapshot('),
+    );
+    expect(fn, 'syncFile must exist').toContain('handle.sync()');
+    // The exact shape that failed on Windows.
+    expect(fn).not.toMatch(/open\(\s*filePath\s*,\s*'r'\s*\)/);
+    expect(fn).toMatch(/open\(\s*filePath\s*,\s*'r\+'\s*\)/);
+  });
+
+  it('flushes a real snapshot file and leaves its contents intact', async () => {
+    const probe = path.join(os.tmpdir(), `sync-probe-${randomUUID()}.bin`);
+    const payload = Buffer.from('snapshot-bytes');
+    await writeFile(probe, payload);
+    try {
+      await expect(syncFile(probe)).resolves.toBeUndefined();
+      // 'r+' must not truncate. A mode of 'w' would flush an empty file and
+      // silently destroy the backup it was meant to make durable.
+      expect(readFileSync(probe)).toEqual(payload);
+    } finally {
+      await rm(probe, { force: true });
+    }
+  });
+
+  it('refuses to report success when the file does not exist', async () => {
+    await expect(syncFile(path.join(os.tmpdir(), `absent-${randomUUID()}.bin`))).rejects.toThrow();
   });
 });

@@ -161,14 +161,30 @@ async function sha256File(filePath: string): Promise<string> {
   return hash.digest('hex');
 }
 
+/**
+ * Flushes a written snapshot to stable storage.
+ *
+ * The handle is opened READ/WRITE. Windows refuses `FlushFileBuffers` on a
+ * handle without write access and raises `EPERM: operation not permitted,
+ * fsync`, which aborted every startup backup: this runs for the local daily
+ * snapshot, for each weekly/monthly tier and for every external copy, so the
+ * backend never finished initialising. POSIX allows fsync on a read-only
+ * descriptor, which is why it survived every Linux run.
+ *
+ * `'r+'` and not `'w'`: `'w'` truncates, so it would flush an empty file and
+ * destroy the backup it was called to make durable.
+ */
 async function syncFile(filePath: string): Promise<void> {
-  const handle = await open(filePath, 'r');
+  const handle = await open(filePath, 'r+');
   try {
     await handle.sync();
   } finally {
     await handle.close();
   }
 }
+
+/** Exported for the durability regression cases. */
+export { syncFile };
 
 /** Opens the snapshot itself and proves both SQLite and referential integrity. */
 export async function verifySqliteSnapshot(filePath: string): Promise<VerifiedSnapshot> {
