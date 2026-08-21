@@ -13,7 +13,7 @@ import { authenticate, authorize, requirePermission, resolveBranchScope, canAcce
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
-import { assertMoney, assertPerformanceScore } from '../utils/money.js';
+import { assertMoney, assertPerformanceScore, assertSeatCount } from '../utils/money.js';
 import { addNotification } from '../utils/notifications.js';
 import { evaluateRules } from '../core/configuration/rule-engine.js';
 import {
@@ -66,8 +66,8 @@ const stmtCountActiveClassesForTeacher = db.prepare(`SELECT COUNT(DISTINCT class
   WHERE cts.teacher_id = ? AND cts.assignment_type IN ('primary','assistant') AND c.status = 'active'
 )`);
 const stmtCountSkillsForTeacher = db.prepare("SELECT COUNT(*) as c FROM class_teacher_skills WHERE teacher_id = ?");
-const stmtGetActiveTeacherClasses = db.prepare("SELECT id, name, branch_id, status FROM classes WHERE teacher_id = ? AND status = 'active' ORDER BY name");
-const stmtGetActiveTeacherAssignments = db.prepare(`SELECT cts.id, cts.class_id, cts.skill_id, cts.assignment_type, cts.session_id, cts.start_date, cts.end_date, c.name AS class_name FROM class_teacher_skills cts JOIN classes c ON c.id = cts.class_id WHERE cts.teacher_id = ? AND cts.assignment_type IN ('primary','assistant') AND (cts.end_date IS NULL OR cts.end_date >= date('now'))`);
+const stmtGetActiveTeacherClasses = db.prepare("SELECT id, name, branch_id, status FROM classes WHERE teacher_id = ? AND lifecycle_stage NOT IN ('completed','archived','cancelled') ORDER BY name");
+const stmtGetActiveTeacherAssignments = db.prepare(`SELECT cts.id, cts.class_id, cts.skill_id, cts.assignment_type, cts.session_id, cts.start_date, cts.end_date, c.name AS class_name FROM class_teacher_skills cts JOIN classes c ON c.id = cts.class_id WHERE cts.teacher_id = ? AND cts.assignment_type IN ('primary','assistant') AND c.lifecycle_stage NOT IN ('completed','archived','cancelled') AND (cts.end_date IS NULL OR cts.end_date >= date('now'))`);
 
 const stmtInsertTeacher = db.prepare(
   `INSERT INTO teachers (id, full_name, phone, email, base_salary, salary_type, performance_score, status, branch_id, joined_date, specialization, qualification, contract_type, default_skill_rate, target_skills_per_month) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)`
@@ -182,6 +182,20 @@ function requireTeacher(req: import('express').Request, teacherId: string): Teac
   return row;
 }
 
+function assertTeacherHasNoActiveWork(teacher: TeacherRow, action = 'deactivated'): void {
+  const activeClasses = stmtGetActiveTeacherClasses.all(teacher.id) as Array<{ name: string }>;
+  const activeAssignments = stmtGetActiveTeacherAssignments.all(teacher.id) as Array<{ class_name: string }>;
+  if (!activeClasses.length && !activeAssignments.length) return;
+  const classNames = [...new Set([
+    ...activeClasses.map((item) => item.name),
+    ...activeAssignments.map((item) => item.class_name),
+  ])];
+  throw new HttpError(
+    409,
+    `Teacher cannot be ${action} while active teaching assignments exist. Reassign or close them first. Active classes: ${classNames.join(', ') || 'none'}.`,
+  );
+}
+
 // ============================================================================ 
 // §1 — TEACHERS 
 // ============================================================================ 
@@ -231,15 +245,16 @@ teachersRouter.post('/', requirePermission('Teacher.Create'), ah(async (req, res
   }
   // Monthly workload target (Skills/month). Configuration only — it never
   // changes pay; it drives Target/Actual/Shortfall/Excess reporting.
-  const targetSkills = req.body.targetSkillsPerMonth == null ? 0 : Number(req.body.targetSkillsPerMonth);
-  if (!Number.isFinite(targetSkills) || targetSkills < 0) throw new HttpError(400, 'Target Skills per month must be a non-negative number.');
+  const targetSkills = req.body.targetSkillsPerMonth == null
+    ? 0
+    : assertSeatCount(req.body.targetSkillsPerMonth, 'Target Skills per month');
 
   const newId = id('t');
   const tx = db.transaction(() => {
     // New teachers start with NO evaluation (performance_score 0) — a 50/100
     // default silently fabricated a half-appraisal. The score is set only by
     // the evaluation endpoint (POST /:id/evaluation).
-    stmtInsertTeacher.run(newId, String(fullName).trim(), phone || null, email || null, numericBaseSalary, resolvedType, 0, resolvedBranchId, today(), specialization || null, qualification || null, contractType || null, defaultSkillRate, Math.round(targetSkills));
+    stmtInsertTeacher.run(newId, String(fullName).trim(), phone || null, email || null, numericBaseSalary, resolvedType, 0, resolvedBranchId, today(), specialization || null, qualification || null, contractType || null, defaultSkillRate, targetSkills);
     stmtInsertCompensationHistory.run(id('tch'), newId, today(), numericBaseSalary, resolvedType, contractType || null, defaultSkillRate, 'Initial contract', user.userId);
   });
   tx();
@@ -250,8 +265,19 @@ teachersRouter.post('/', requirePermission('Teacher.Create'), ah(async (req, res
 
 teachersRouter.put('/:id', requirePermission('Teacher.Edit'), ah(async (req, res) => {
   const existing = requireTeacher(req, req.params.id);
-  const { fullName, phone, email, baseSalary, salaryType, specialization, qualification, contractType, status, performanceScore } = req.body;
-  if (status && !['active','inactive','on_leave'].includes(status)) throw new HttpError(400, 'Invalid teacher status.');
+  const { fullName, phone, email, baseSalary, salaryType, specialization, qualification, contractType, status } = req.body;
+  if (Object.prototype.hasOwnProperty.call(req.body ?? {}, 'performanceScore')) {
+    throw new HttpError(400, 'Performance score can only be changed through the teacher evaluation command.');
+  }
+  if (status !== undefined && status !== null && !['active','inactive','on_leave'].includes(status)) {
+    throw new HttpError(400, 'Invalid teacher status.');
+  }
+  if (status === 'inactive' && existing.status !== 'inactive') assertTeacherHasNoActiveWork(existing);
+  if (fullName !== undefined && (typeof fullName !== 'string' || !fullName.trim())) throw new HttpError(400, 'Teacher name cannot be empty.');
+  assertTextLengths([
+    [fullName, 'Full name', TEXT_LIMITS.name], [phone, 'Phone', TEXT_LIMITS.short], [email, 'Email', TEXT_LIMITS.email],
+    [specialization, 'Specialization', TEXT_LIMITS.line], [qualification, 'Qualification', TEXT_LIMITS.line],
+  ]);
   // ── T-2: money fields use the SAME authority as POST ─────────────────────
   // These were validated only for `!Number.isFinite(...) || < 0`, which is a
   // coercion rather than a parse. Reproduced live on a fresh database, PUT
@@ -276,15 +302,6 @@ teachersRouter.put('/:id', requirePermission('Teacher.Edit'), ah(async (req, res
   if (nextContractType && !['monthly','hourly','per_session'].includes(nextContractType)) throw new HttpError(400, 'Invalid contract type.');
   if (resolvedType === 'per_session' && nextContractType && nextContractType !== 'per_session') throw new HttpError(400, 'A per-session salary model requires a per-session contract type.');
   
-  // T-2: REJECT an out-of-range score instead of silently clamping it.
-  // `Math.max(0, Math.min(100, Number(x)))` answered 200 while storing a value
-  // the caller never sent (5000 -> 100, -20 -> 0), and 'abc' became NaN and
-  // reached the database as HTTP 500. A rejected write is honest; a clamped one
-  // is a silent rewrite of the caller's intent.
-  const resolvedScore = performanceScore != null
-    ? assertPerformanceScore(performanceScore, 'Performance score')
-    : existing.performance_score;
-
   let nextDefaultSkillRate: number;
   if (req.body.defaultSkillRate != null) {
     try { nextDefaultSkillRate = assertMoney(req.body.defaultSkillRate, 'Default skill rate'); }
@@ -292,8 +309,9 @@ teachersRouter.put('/:id', requirePermission('Teacher.Edit'), ah(async (req, res
   } else {
     nextDefaultSkillRate = Number(existing.default_skill_rate);
   }
-  const nextTargetSkills = req.body.targetSkillsPerMonth != null ? Number(req.body.targetSkillsPerMonth) : null;
-  if (nextTargetSkills != null && (!Number.isFinite(nextTargetSkills) || nextTargetSkills < 0)) throw new HttpError(400, 'Target Skills per month must be a non-negative number.');
+  const nextTargetSkills = req.body.targetSkillsPerMonth == null
+    ? null
+    : assertSeatCount(req.body.targetSkillsPerMonth, 'Target Skills per month');
   const compensationChanged = nextBaseSalary !== Number(existing.base_salary) || resolvedType !== existing.salary_type || nextContractType !== existing.contract_type || nextDefaultSkillRate !== Number(existing.default_skill_rate);
   const effectiveFrom = typeof req.body.effectiveFrom === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.body.effectiveFrom) ? req.body.effectiveFrom : today();
   const joinedDate = (db.prepare('SELECT joined_date FROM teachers WHERE id = ?').get(existing.id) as { joined_date?: string } | undefined)?.joined_date;
@@ -304,8 +322,8 @@ teachersRouter.put('/:id', requirePermission('Teacher.Edit'), ah(async (req, res
       resolvedType, specialization ?? existing.specialization, qualification ?? existing.qualification, 
       nextContractType, status ?? existing.status,
       nextDefaultSkillRate,
-      resolvedScore, 
-      nextTargetSkills == null ? null : Math.round(nextTargetSkills),
+      existing.performance_score,
+      nextTargetSkills,
       req.params.id
     );
     if (compensationChanged) {
@@ -327,17 +345,7 @@ teachersRouter.post('/:id/transfer', requirePermission('Teacher.Edit'), ah(async
   if (!target) throw new HttpError(404, 'Target branch not found.');
   if (!target.is_active) throw new HttpError(400, 'Cannot transfer a teacher to an inactive branch.');
 
-  const activeClasses = stmtGetActiveTeacherClasses.all(teacher.id) as Array<{ id: string; name: string; branch_id: string; status: string }>;
-  const activeAssignments = stmtGetActiveTeacherAssignments.all(teacher.id) as Array<{ id: string; class_id: string; class_name: string; assignment_type: string }>;
-  if (activeClasses.length || activeAssignments.length) {
-    const classNames = [
-      ...new Set([
-        ...activeClasses.map((c) => c.name),
-        ...activeAssignments.map((a) => a.class_name),
-      ]),
-    ];
-    throw new HttpError(409, `Teacher cannot be transferred while active teaching assignments exist. Reassign or close the current assignments first. Active classes: ${classNames.join(', ') || 'none'}.`);
-  }
+  assertTeacherHasNoActiveWork(teacher, 'transferred');
 
   const tx = db.transaction(() => {
     stmtUpdateTeacherBranch.run(targetBranchId, teacher.id);
@@ -352,9 +360,7 @@ teachersRouter.post('/:id/transfer', requirePermission('Teacher.Edit'), ah(async
 
 teachersRouter.delete('/:id', requirePermission('Teacher.Delete', 'Teacher.Edit'), ah(async (req, res) => {
   const teacher = requireTeacher(req, req.params.id);
-  const activeClasses = stmtGetActiveTeacherClasses.all(teacher.id) as any[];
-  const activeAssignments = stmtGetActiveTeacherAssignments.all(teacher.id) as any[];
-  if (activeClasses.length || activeAssignments.length) throw new HttpError(409, `Teacher cannot be deactivated while active teaching assignments exist. Reassign or close them first. Active classes: ${activeClasses.map((c: any) => c.name).join(', ') || 'none'}.`);
+  assertTeacherHasNoActiveWork(teacher);
   const tx = db.transaction(() => {
     stmtUpdateTeacher.run(teacher.full_name, teacher.phone, teacher.email, teacher.base_salary, teacher.salary_type, teacher.specialization, teacher.qualification, teacher.contract_type, 'inactive', teacher.default_skill_rate, teacher.performance_score, null, teacher.id);
     stmtDeactivateLinkedTeacherUser.run(teacher.id);

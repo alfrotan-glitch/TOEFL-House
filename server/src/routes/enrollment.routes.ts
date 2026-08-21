@@ -19,6 +19,7 @@ import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id as makeId, today } from '../utils/ids.js';
 import { getEnrollmentService } from '../core/academic/enrollment-service.js';
 import { getFreezePolicy, getTransferPolicy } from '../core/academic/academic-policy-service.js';
+import { optionalText, requiredText, TEXT_LIMITS } from '../utils/textInput.js';
 
 export const enrollmentRouter = Router();
 enrollmentRouter.use(authenticate);
@@ -90,11 +91,23 @@ function registerTransition(
   auditVerb: string,
 ) {
   enrollmentRouter.post(`/:id${path}`, authorize('receptionist', 'general_manager', 'head_of_department', 'owner'), ah(async (req, res) => {
-    requireEnrollment(req, req.params.id); // 404 / branch-scope check up front
-    const reason = req.body?.reason ?? undefined;
+    const enrollment = requireEnrollment(req, req.params.id); // 404 / branch-scope check up front
+    const reason = req.body?.reason === undefined
+      ? undefined
+      : optionalText(req.body.reason, 'Reason', TEXT_LIMITS.notes) ?? undefined;
     if (requiresReason && !reason) throw new HttpError(400, 'A reason is required for this transition.');
     const user = req.user;
-    const result = method(enrollments, req.params.id, { reason, actorUserId: user?.userId, actorName: user?.fullName });
+    const options = { reason, actorUserId: user?.userId, actorName: user?.fullName };
+    const activeFreeze = enrollment.status === 'frozen'
+      ? stmtGetActiveFreezeForEnrollment.get(req.params.id) as { id: string } | undefined
+      : undefined;
+    const result = activeFreeze
+      ? db.transaction(() => {
+          const completed = stmtCompleteFreeze.run(today(), activeFreeze.id);
+          if (completed.changes !== 1) throw new HttpError(409, 'Freeze history changed before the enrollment transition could be committed.');
+          return method(enrollments, req.params.id, options);
+        })()
+      : method(enrollments, req.params.id, options);
     writeAudit(req, `${auditVerb} enrollment ${req.params.id}${reason ? ` (${reason})` : ''}`);
     res.json({ ok: true, enrollment: mapEnrollment(enrollments.getById(req.params.id)), ...(result as object) });
   }));
@@ -155,8 +168,8 @@ function mapFreeze(row: any) {
  *  policy, immediately activate) a freeze with a tracked duration. */
 enrollmentRouter.post('/:id/freeze-requests', requirePermission('Enrollment.FreezeRequest'), ah(async (req, res) => {
   const enrollment = requireEnrollment(req, req.params.id);
-  const { reason, days } = req.body ?? {};
-  if (!reason) throw new HttpError(400, 'A reason is required to request a freeze.');
+  const { reason: rawReason, days } = req.body ?? {};
+  const reason = requiredText(rawReason, 'Freeze reason', TEXT_LIMITS.notes);
   const numDays = Number(days);
   if (!Number.isInteger(numDays) || numDays <= 0) throw new HttpError(400, 'days must be a positive whole number.');
 
@@ -170,15 +183,13 @@ enrollmentRouter.post('/:id/freeze-requests', requirePermission('Enrollment.Free
   }
 
   const user = req.user;
-  // freeze() validates the transition itself (409 if not currently freezable)
-  // and writes the enrollments.status change + enrollment_events row exactly
-  // as the existing bare /:id/freeze endpoint always has.
-  enrollments.freeze(req.params.id, { reason, actorUserId: user?.userId, actorName: user?.fullName });
-
   const startDate = today();
   const plannedEndDate = addDays(startDate, numDays);
   const freezeId = makeId('efz');
-  stmtInsertFreeze.run(freezeId, req.params.id, enrollment.student_id, enrollment.branch_id, reason, startDate, plannedEndDate, user?.userId || null, user?.userId || null);
+  db.transaction(() => {
+    enrollments.freeze(req.params.id, { reason, actorUserId: user?.userId, actorName: user?.fullName });
+    stmtInsertFreeze.run(freezeId, req.params.id, enrollment.student_id, enrollment.branch_id, reason, startDate, plannedEndDate, user?.userId || null, user?.userId || null);
+  })();
 
   writeAudit(req, `Froze enrollment ${req.params.id} for ${numDays} day(s) until ${plannedEndDate} (${reason})`);
   res.status(201).json({ ok: true, freeze: mapFreeze(stmtGetActiveFreezeForEnrollment.get(req.params.id)), enrollment: mapEnrollment(enrollments.getById(req.params.id)) });
@@ -193,9 +204,14 @@ enrollmentRouter.post('/:id/freeze-requests/resume', requirePermission('Enrollme
   if (!active) throw new HttpError(404, 'No active freeze to resume from.');
 
   const user = req.user;
-  const reason = req.body?.reason ?? undefined;
-  enrollments.unfreeze(req.params.id, { reason, actorUserId: user?.userId, actorName: user?.fullName });
-  stmtCompleteFreeze.run(today(), active.id);
+  const reason = req.body?.reason === undefined
+    ? undefined
+    : optionalText(req.body.reason, 'Resume reason', TEXT_LIMITS.notes) ?? undefined;
+  db.transaction(() => {
+    const completed = stmtCompleteFreeze.run(today(), active.id);
+    if (completed.changes !== 1) throw new HttpError(409, 'Freeze history changed before resume could be committed.');
+    enrollments.unfreeze(req.params.id, { reason, actorUserId: user?.userId, actorName: user?.fullName });
+  })();
 
   writeAudit(req, `Resumed enrollment ${req.params.id} from freeze ${active.id}`);
   res.json({ ok: true, enrollment: mapEnrollment(enrollments.getById(req.params.id)) });
@@ -222,12 +238,13 @@ const stmtInsertTransferRequest = db.prepare(
    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
 const stmtGetTransferRequestById = db.prepare('SELECT * FROM enrollment_transfer_requests WHERE id = ?');
+const stmtGetPendingTransferRequest = db.prepare("SELECT id FROM enrollment_transfer_requests WHERE enrollment_id = ? AND status = 'pending' LIMIT 1");
 const stmtListTransferRequestsForEnrollment = db.prepare('SELECT * FROM enrollment_transfer_requests WHERE enrollment_id = ? ORDER BY created_at DESC');
 const stmtUpdateTransferRequestApproved = db.prepare(
-  `UPDATE enrollment_transfer_requests SET status = 'approved', approved_by = ?, new_enrollment_id = ?, decision_notes = ?, updated_at = datetime('now') WHERE id = ?`
+  `UPDATE enrollment_transfer_requests SET status = 'approved', approved_by = ?, new_enrollment_id = ?, decision_notes = ?, updated_at = datetime('now') WHERE id = ? AND status = 'pending'`
 );
 const stmtUpdateTransferRequestRejected = db.prepare(
-  `UPDATE enrollment_transfer_requests SET status = 'rejected', approved_by = ?, decision_notes = ?, updated_at = datetime('now') WHERE id = ?`
+  `UPDATE enrollment_transfer_requests SET status = 'rejected', approved_by = ?, decision_notes = ?, updated_at = datetime('now') WHERE id = ? AND status = 'pending'`
 );
 
 function mapTransferRequest(row: any) {
@@ -253,9 +270,13 @@ function mapTransferRequest(row: any) {
  *  otherwise the request waits as 'pending' for approve()/reject(). */
 enrollmentRouter.post('/:id/transfer-requests', requirePermission('Enrollment.TransferRequest'), ah(async (req, res) => {
   const enrollment = requireEnrollment(req, req.params.id);
-  const { toClassId, reason } = req.body ?? {};
-  if (!toClassId || !reason) throw new HttpError(400, 'toClassId and reason are required.');
+  const { toClassId, reason: rawReason } = req.body ?? {};
+  if (!toClassId) throw new HttpError(400, 'toClassId and reason are required.');
+  const reason = requiredText(rawReason, 'Transfer reason', TEXT_LIMITS.notes);
   if (enrollment.class_id === toClassId) throw new HttpError(400, 'Student is already in this class.');
+  if (stmtGetPendingTransferRequest.get(req.params.id)) {
+    throw new HttpError(409, 'This enrollment already has a pending transfer request.');
+  }
 
   const toClass = stmtGetClassMinimalForTransfer.get(toClassId) as any;
   if (!toClass) throw new HttpError(404, 'Target class not found.');
@@ -268,11 +289,14 @@ enrollmentRouter.post('/:id/transfer-requests', requirePermission('Enrollment.Tr
   const requestId = makeId('etr');
 
   if (daysEnrolled >= policy.minDaysBeforeAutoApprove) {
-    const result = enrollments.transfer({ studentId: enrollment.student_id, toClassId, notes: reason, actorUserId: user?.userId });
-    stmtInsertTransferRequest.run(
-      requestId, req.params.id, enrollment.student_id, enrollment.class_id, toClassId, enrollment.branch_id,
-      reason, 'approved', result.enrollmentId, user?.userId || null, user?.userId || null, 'Auto-approved: tenure meets policy threshold.',
-    );
+    db.transaction(() => {
+      const transferred = enrollments.transfer({ sourceEnrollmentId: req.params.id, toClassId, notes: reason, actorUserId: user?.userId });
+      stmtInsertTransferRequest.run(
+        requestId, req.params.id, enrollment.student_id, enrollment.class_id, toClassId, enrollment.branch_id,
+        reason, 'approved', transferred.enrollmentId, user?.userId || null, user?.userId || null, 'Auto-approved: tenure meets policy threshold.',
+      );
+      return transferred;
+    })();
     writeAudit(req, `Auto-approved transfer of enrollment ${req.params.id} to class ${toClassId} (${reason})`);
     res.status(201).json({ ok: true, transferRequest: mapTransferRequest(stmtGetTransferRequestById.get(requestId)) });
   } else {
@@ -294,8 +318,14 @@ enrollmentRouter.post('/:id/transfer-requests/:requestId/approve', authorize('ge
   if (reqRow.status !== 'pending') throw new HttpError(409, `Only a pending transfer request can be approved (this one is '${reqRow.status}').`);
 
   const user = req.user;
-  const result = enrollments.transfer({ studentId: reqRow.student_id, toClassId: reqRow.to_class_id, notes: reqRow.reason, actorUserId: user?.userId });
-  stmtUpdateTransferRequestApproved.run(user?.userId || null, result.enrollmentId, req.body?.notes || null, req.params.requestId);
+  const decisionNotes = req.body?.notes === undefined
+    ? null
+    : optionalText(req.body.notes, 'Decision notes', TEXT_LIMITS.notes);
+  db.transaction(() => {
+    const result = enrollments.transfer({ sourceEnrollmentId: reqRow.enrollment_id, toClassId: reqRow.to_class_id, notes: reqRow.reason, actorUserId: user?.userId });
+    const approved = stmtUpdateTransferRequestApproved.run(user?.userId || null, result.enrollmentId, decisionNotes, req.params.requestId);
+    if (approved.changes !== 1) throw new HttpError(409, 'Transfer request changed before approval could be committed.');
+  })();
 
   writeAudit(req, `Approved transfer request ${req.params.requestId} for enrollment ${req.params.id}`);
   res.json({ ok: true, transferRequest: mapTransferRequest(stmtGetTransferRequestById.get(req.params.requestId)) });
@@ -310,7 +340,11 @@ enrollmentRouter.post('/:id/transfer-requests/:requestId/reject', authorize('gen
   if (reqRow.status !== 'pending') throw new HttpError(409, `Only a pending transfer request can be rejected (this one is '${reqRow.status}').`);
 
   const user = req.user;
-  stmtUpdateTransferRequestRejected.run(user?.userId || null, req.body?.notes || null, req.params.requestId);
+  const decisionNotes = req.body?.notes === undefined
+    ? null
+    : optionalText(req.body.notes, 'Decision notes', TEXT_LIMITS.notes);
+  const rejected = stmtUpdateTransferRequestRejected.run(user?.userId || null, decisionNotes, req.params.requestId);
+  if (rejected.changes !== 1) throw new HttpError(409, 'Transfer request changed before rejection could be committed.');
 
   writeAudit(req, `Rejected transfer request ${req.params.requestId} for enrollment ${req.params.id}`);
   res.json({ ok: true, transferRequest: mapTransferRequest(stmtGetTransferRequestById.get(req.params.requestId)) });

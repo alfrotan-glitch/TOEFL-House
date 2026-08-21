@@ -99,8 +99,8 @@ async function seedUser(userId: string, role: string, branchId: string, username
 
 function seedClass(classId: string, name: string, branchId: string, capacity: number | null = 30, genderPolicy: string = 'mixed', fee: number = 5000) {
   db.prepare(
-    `INSERT OR IGNORE INTO classes (id, name, branch_id, capacity, gender_policy, fee, status, level)
-     VALUES (?, ?, ?, ?, ?, ?, 'active', 'Intermediate')`
+    `INSERT OR IGNORE INTO classes (id, name, branch_id, capacity, gender_policy, fee, status, lifecycle_stage, level)
+     VALUES (?, ?, ?, ?, ?, ?, 'active', 'activated', 'Intermediate')`
   ).run(classId, name, branchId, capacity, genderPolicy, fee);
 }
 

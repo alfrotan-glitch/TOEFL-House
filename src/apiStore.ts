@@ -1158,8 +1158,9 @@ export function useApiStore() {
 
   const editTeacher = async (id: string, fullName: string, phone: string, email: string, baseSalary: number,
     salaryType?: TeacherContractType, specialization?: string, qualification?: string,
-    contractType?: 'monthly' | 'hourly' | 'per_session', status?: 'active' | 'inactive' | 'on_leave') => {
-    await api.put(`/teachers/${id}`, { fullName, phone, email, baseSalary, salaryType, specialization, qualification, contractType, status });
+    contractType?: 'monthly' | 'hourly' | 'per_session', status?: 'active' | 'inactive' | 'on_leave',
+    defaultSkillRate?: number) => {
+    await api.put(`/teachers/${id}`, { fullName, phone, email, baseSalary, salaryType, specialization, qualification, contractType, status, defaultSkillRate });
     await reloadTeachers();
     invalidate('teachers');
   };

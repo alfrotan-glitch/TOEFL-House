@@ -65,7 +65,7 @@ describe('Release-gate forensic — untested student/unauthorized surfaces', () 
     app = createApp();
 
     // Seed: class, teacher, session, students, roster, enrollment.
-    db.prepare(`INSERT OR IGNORE INTO classes (id, name, branch_id, capacity, status, level, fee) VALUES ('rg_class', 'RG Class', ?, 10, 'active', 'A1', 4000)`).run(BRANCH_A);
+    db.prepare(`INSERT OR IGNORE INTO classes (id, name, branch_id, capacity, status, lifecycle_stage, level, fee) VALUES ('rg_class', 'RG Class', ?, 10, 'active', 'activated', 'A1', 4000)`).run(BRANCH_A);
     db.prepare(`INSERT OR IGNORE INTO teachers (id, full_name, branch_id, status) VALUES ('rg_tea', 'RG Teacher', ?, 'active')`).run(BRANCH_A);
     db.prepare(`INSERT OR IGNORE INTO sessions (id, class_id, teacher_id, branch_id, date, start_time, end_time, status) VALUES ('rg_sess', 'rg_class', 'rg_tea', ?, ?, '09:00', '10:00', 'scheduled')`).run(BRANCH_A, today());
     db.prepare(`INSERT OR IGNORE INTO students (id, student_code, full_name, status, registration_date, branch_id, gender, phone)
@@ -75,7 +75,7 @@ describe('Release-gate forensic — untested student/unauthorized surfaces', () 
     db.prepare(`INSERT OR IGNORE INTO rosters (id, session_id, student_id, attendance_status) VALUES (?, 'rg_sess', 'rg_stu1', 'not_marked')`).run(id('ros'));
     db.prepare(`INSERT OR IGNORE INTO rosters (id, session_id, student_id, attendance_status) VALUES (?, 'rg_sess', 'rg_stu2', 'not_marked')`).run(id('ros'));
     db.prepare(`INSERT OR IGNORE INTO enrollments (id, student_id, class_id, branch_id, enrollment_type, status, started_at)
-      VALUES ('rg_enr', 'rg_stu1', 'rg_class', ?, 'new', 'active', ?)`).run(BRANCH_A, today());
+      VALUES ('rg_enr', 'rg_stu1', 'rg_class', ?, 'new', 'frozen', ?)`).run(BRANCH_A, today());
     db.prepare(`INSERT OR IGNORE INTO enrollment_freezes (id, enrollment_id, student_id, reason, status, branch_id, start_date, planned_end_date) VALUES ('rg_frz', 'rg_enr', 'rg_stu1', 'test', 'active', ?, ?, ?)`).run(BRANCH_A, today(), today());
   });
 

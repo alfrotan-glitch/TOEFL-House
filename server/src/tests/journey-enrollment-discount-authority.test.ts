@@ -118,8 +118,8 @@ beforeAll(async () => {
      VALUES (?, ?, ?, 'A1', 'A1', 1, 1, ?)`,
   ).run(LEVEL, PROGRAM, VERSION, FEE);
   db.prepare(
-    `INSERT OR IGNORE INTO classes (id, name, branch_id, capacity, status, level, fee, program_id, level_id)
-     VALUES (?, 'Journey Class', ?, 500, 'active', 'A1', ?, ?, ?)`,
+    `INSERT OR IGNORE INTO classes (id, name, branch_id, capacity, status, lifecycle_stage, level, fee, program_id, level_id)
+     VALUES (?, 'Journey Class', ?, 500, 'active', 'activated', 'A1', ?, ?, ?)`,
   ).run(CLASS_ID, BRANCH, FEE, PROGRAM, LEVEL);
   db.prepare('INSERT OR REPLACE INTO level_branch_fees (id, level_id, branch_id, fee) VALUES (?, ?, ?, ?)').run('jrn_lbf', LEVEL, BRANCH, FEE);
 

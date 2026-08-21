@@ -106,6 +106,12 @@ const stmtInsertRegistration = db.prepare(
   `INSERT INTO registrations (id, student_id, class_id, date, amount_paid, receipt_number, discount_applied, branch_id, source, semester) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
 const stmtGetActiveSemesterBalances = db.prepare(`SELECT s.id, s.semester_name, s.net_fee_amount, s.fee_amount FROM student_semesters s WHERE s.student_id = ? AND s.status = 'active'`);
+const stmtGetTransferSourceEnrollment = db.prepare(`
+  SELECT id FROM enrollments
+  WHERE student_id = ? AND status = 'active' AND enrollment_type <> 'extra'
+  ORDER BY started_at DESC, created_at DESC, id DESC
+  LIMIT 1
+`);
 const stmtGetStudentPaymentsBySemester = db.prepare("SELECT COALESCE(SUM(CASE WHEN category IN ('fee','installment') THEN amount WHEN category = 'refund' THEN amount ELSE 0 END), 0) AS paid FROM payments WHERE student_id = ? AND semester = ? AND status = 'completed'");
 
 const stmtInsertEnrollment = db.prepare(
@@ -1595,8 +1601,10 @@ studentsRouter.post('/:id/transfer', requirePermission('Student.Transfer'), ah(a
   if (targetClass.branch_id !== student.branch_id) throw new HttpError(400, 'Target class belongs to another branch.');
   if (targetClass.status !== 'active') throw new HttpError(400, 'Target class is not active.');
   assertClassGenderAllowsStudent(toClassId, student.gender);
+  const source = stmtGetTransferSourceEnrollment.get(req.params.id) as { id: string } | undefined;
+  if (!source) throw new HttpError(409, 'This student has no active primary enrollment to transfer.');
   try {
-    const result = getEnrollmentService(db).transfer({ studentId: req.params.id, toClassId, notes: notes || null, actorUserId: user.userId });
+    const result = getEnrollmentService(db).transfer({ sourceEnrollmentId: source.id, toClassId, notes: notes || null, actorUserId: user.userId });
     writeAudit(req, `Transferred student ${student.full_name} to class ${targetClass.name}`, { newValue: JSON.stringify({ toClassId, notes: notes || null }) });
     res.json({ ok: true, ...result });
   } catch (err: unknown) {

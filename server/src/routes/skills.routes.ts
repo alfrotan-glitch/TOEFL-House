@@ -3,6 +3,7 @@ import { db } from '../db/connection.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { assertMoney } from '../utils/money.js';
+import { assertOptionalIsoDate, assertDateRange } from '../utils/isoDate.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id } from '../utils/ids.js';
 import { contractPaysPerSkill, normalizeContractType } from '../core/payroll/class-payroll.js';
@@ -45,7 +46,7 @@ const stmtUpdateCtsFull = db.prepare(
   `UPDATE class_teacher_skills SET monthly_rate = ?, assignment_type = ?, start_date = ?, end_date = ?, reason = ? WHERE id = ?`
 );
 const stmtDeleteCts = db.prepare('DELETE FROM class_teacher_skills WHERE id = ?');
-const stmtGetSessionForCts = db.prepare('SELECT id, class_id, branch_id FROM sessions WHERE id = ?');
+const stmtGetSessionForCts = db.prepare('SELECT id, class_id, branch_id, date FROM sessions WHERE id = ?');
 
 const ASSIGNMENT_TYPES = ['primary', 'assistant', 'substitute', 'guest', 'examiner'] as const;
 /** Ongoing, ordinarily-paid roles — these feed automatic monthly payroll
@@ -174,16 +175,24 @@ classTeacherSkillsRouter.post(
     const skill = db.prepare('SELECT id FROM skills WHERE id = ?').get(skillId) as any;
     if (!skill) throw new HttpError(404, 'Skill not found.');
 
+    let sessionDate: string | null = null;
     if (sessionId) {
       const session = stmtGetSessionForCts.get(sessionId) as any;
       if (!session) throw new HttpError(404, 'Session not found.');
       if (session.class_id !== classId) throw new HttpError(400, 'sessionId does not belong to the specified class.');
       if (session.branch_id !== assignmentBranchId) throw new HttpError(400, 'Session belongs to another branch.');
+      sessionDate = session.date;
     }
     // A teacher must be employable to receive new teaching work. This is an
     // employment-status rule, NOT a contract-type rule.
     if (teacher.status !== 'active') {
       throw new HttpError(400, 'Only an active teacher can be assigned new teaching work.');
+    }
+    const normalizedStart = assertOptionalIsoDate(startDate, 'startDate');
+    const normalizedEnd = assertOptionalIsoDate(endDate, 'endDate');
+    assertDateRange(normalizedStart, normalizedEnd, 'startDate', 'endDate');
+    if (sessionDate && ((normalizedStart && normalizedStart > sessionDate) || (normalizedEnd && normalizedEnd < sessionDate))) {
+      throw new HttpError(400, 'Assignment dates must include the linked session date.');
     }
 
     // ── SKILL != CONTRACT TYPE ───────────────────────────────────────────
@@ -231,7 +240,7 @@ classTeacherSkillsRouter.post(
 
     const newId = id('cts');
     try {
-      stmtInsertCts.run(newId, classId, teacherId, skillId, resolvedRate, assignmentBranchId, resolvedType, startDate || null, endDate || null, reason || null, sessionId || null);
+      stmtInsertCts.run(newId, classId, teacherId, skillId, resolvedRate, assignmentBranchId, resolvedType, normalizedStart, normalizedEnd, reason || null, sessionId || null);
     } catch (err: any) {
       if (String(err.message).includes('UNIQUE')) {
         throw new HttpError(409, 'This teacher is already assigned to this skill in this class (and session, if specified).');
@@ -258,14 +267,11 @@ classTeacherSkillsRouter.put(
     if (monthlyRate == null && assignmentType === undefined && startDate === undefined && endDate === undefined && reason === undefined) {
       throw new HttpError(400, 'Nothing to update — provide at least one of monthlyRate, assignmentType, startDate, endDate, or reason.');
     }
-    if (monthlyRate != null && (!Number.isFinite(Number(monthlyRate)) || Number(monthlyRate) < 0)) {
-      throw new HttpError(400, 'A non-negative monthly rate is required.');
-    }
     if (assignmentType !== undefined && !ASSIGNMENT_TYPES.includes(assignmentType)) {
       throw new HttpError(400, `Invalid assignmentType: "${assignmentType}". Must be one of: ${ASSIGNMENT_TYPES.join(', ')}.`);
     }
     const nextType = assignmentType ?? existing.assignment_type;
-    const nextRate = monthlyRate != null ? Number(monthlyRate) : Number(existing.monthly_rate) || 0;
+    const nextRate = monthlyRate != null ? assertMoney(monthlyRate, 'monthlyRate') : Number(existing.monthly_rate) || 0;
     // Same rule as creation: a rate is only required where the contract's
     // compensation rule actually pays per Skill. A fixed/per_session teacher
     // keeps a legitimate rate of 0 — the Skill is workload, not pay.
@@ -274,10 +280,19 @@ classTeacherSkillsRouter.put(
     if (editPaysPerSkill && PAYROLL_ELIGIBLE_TYPES.includes(nextType) && nextRate <= 0) {
       throw new HttpError(400, 'Primary/assistant assignments on a Skill-paid contract require a positive monthly rate.');
     }
-    const nextStart = startDate !== undefined ? startDate : existing.start_date;
-    const nextEnd = endDate !== undefined ? endDate : existing.end_date;
-    if (nextStart && nextEnd && String(nextEnd) < String(nextStart)) {
-      throw new HttpError(400, 'Assignment end date cannot be before its start date.');
+    const nextStart = startDate !== undefined
+      ? assertOptionalIsoDate(startDate, 'startDate')
+      : existing.start_date;
+    const nextEnd = endDate !== undefined
+      ? assertOptionalIsoDate(endDate, 'endDate')
+      : existing.end_date;
+    assertDateRange(nextStart, nextEnd, 'startDate', 'endDate');
+    if (existing.session_id) {
+      const linkedSession = stmtGetSessionForCts.get(existing.session_id) as { date: string } | undefined;
+      if (!linkedSession) throw new HttpError(409, 'Linked session no longer exists.');
+      if ((nextStart && nextStart > linkedSession.date) || (nextEnd && nextEnd < linkedSession.date)) {
+        throw new HttpError(400, 'Assignment dates must include the linked session date.');
+      }
     }
     if (nextType !== existing.assignment_type && !existing.session_id && stmtGetClassScopedCts.get(existing.class_id, existing.teacher_id, existing.skill_id)) {
       const duplicate = db.prepare(`SELECT id FROM class_teacher_skills WHERE class_id = ? AND teacher_id = ? AND skill_id = ? AND session_id IS NULL AND id != ?`).get(existing.class_id, existing.teacher_id, existing.skill_id, existing.id);
@@ -286,14 +301,24 @@ classTeacherSkillsRouter.put(
 
     // PATCH semantics: a request carrying only monthlyRate leaves every other
     // field unchanged via the ?? fallback.
-    stmtUpdateCtsFull.run(
-      nextRate,
-      nextType,
-      nextStart,
-      nextEnd,
-      reason !== undefined ? reason : existing.reason,
-      req.params.id
-    );
+    try {
+      stmtUpdateCtsFull.run(
+        nextRate,
+        nextType,
+        nextStart,
+        nextEnd,
+        reason !== undefined ? reason : existing.reason,
+        req.params.id
+      );
+    } catch (err: any) {
+      if (String(err?.message).includes('ongoing skill limit')) {
+        throw new HttpError(409, 'A class may have at most three distinct ongoing primary/assistant skills.');
+      }
+      if (String(err?.message).includes('UNIQUE')) {
+        throw new HttpError(409, 'Another assignment already owns this class, teacher, skill and session identity.');
+      }
+      throw err;
+    }
     writeAudit(req, `Updated skill assignment ${req.params.id}` + (monthlyRate != null ? ` (rate: ${monthlyRate} AFN)` : ''));
     res.json({ ok: true });
   })
@@ -347,12 +372,13 @@ classTeacherSkillsRouter.post(
     if (teacher.branch_id !== original.branch_id) throw new HttpError(400, 'Substitute teacher belongs to another branch.');
     if (session.branch_id !== original.branch_id) throw new HttpError(400, 'Session belongs to another branch.');
     if (teacher.status !== 'active') throw new HttpError(400, 'Substitute teacher must be active.');
+    const resolvedRate = monthlyRate == null ? 0 : assertMoney(monthlyRate, 'monthlyRate');
 
     const newId = id('cts');
     try {
       stmtInsertCts.run(
         newId, original.class_id, substituteTeacherId, original.skill_id,
-        monthlyRate != null ? Number(monthlyRate) : 0, original.branch_id,
+        resolvedRate, original.branch_id,
         'substitute', session.date ?? null, session.date ?? null, reason, sessionId
       );
     } catch (err: any) {

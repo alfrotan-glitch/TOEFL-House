@@ -28,6 +28,16 @@ describe('WP-05 adversarial integrity boundary', () => {
 
     expect(response.status).toBe(400);
     expect(db.prepare('SELECT id FROM classes WHERE name = ?').get(`${c.key} mixed graph`)).toBeUndefined();
+
+    const partial = await supertest(c.app)
+      .post('/api/classes')
+      .set(c.owner)
+      .send({ name: `${c.key} partial graph`, branchId: c.branchA, programId: c.programA, level: 'Ad hoc' });
+    expect(partial.status).toBe(400);
+    expect(() => db.prepare(`
+      INSERT INTO classes (id,name,program_id,level,branch_id)
+      VALUES (?,?,?,'Ad hoc',?)
+    `).run(`${c.key}_partial`, `${c.key} partial direct`, c.programA, c.branchA)).toThrow(/academic integrity/i);
   });
 
   it('refuses invalid academic planning scalars instead of storing them', async () => {
@@ -44,10 +54,15 @@ describe('WP-05 adversarial integrity boundary', () => {
       .post('/api/academic/rooms')
       .set(c.owner)
       .send({ code: `${c.key}_room`, name: 'Negative', branchId: c.branchA, capacity: -1 });
+    const coercedBoolean = await supertest(c.app)
+      .post('/api/academic/programs')
+      .set(c.owner)
+      .send({ name: `${c.key} coerced boolean`, branchId: c.branchA, isActive: 'false' });
 
     expect(negativeProgram.status).toBe(400);
     expect(reversedSlot.status).toBe(400);
     expect(negativeRoom.status).toBe(400);
+    expect(coercedBoolean.status).toBe(400);
   });
 
   it('keeps course offering identity correlated with linked classes and derives capacity', async () => {
@@ -88,6 +103,54 @@ describe('WP-05 adversarial integrity boundary', () => {
     const read = await supertest(c.app).get(`/api/offerings/${offering.body.id}`).set(c.owner);
     expect(read.status).toBe(200);
     expect(read.body.capacityTotal).toBe(7);
+  });
+
+  it('rejects malformed class and offering identity, status and date facts', async () => {
+    const c = seedContext();
+    const reversedClass = await supertest(c.app)
+      .post('/api/classes')
+      .set(c.owner)
+      .send({
+        name: `${c.key} reversed dates`,
+        branchId: c.branchA,
+        programId: c.programA,
+        levelId: c.levelA,
+        startDate: '2026-09-02',
+        endDate: '2026-09-01',
+      });
+    const malformedClassDate = await supertest(c.app)
+      .post('/api/classes')
+      .set(c.owner)
+      .send({ name: `${c.key} malformed date`, branchId: c.branchA, level: 'Ad hoc', startDate: '09/01/2026' });
+    const invalidOfferingStatus = await supertest(c.app)
+      .post('/api/offerings')
+      .set(c.owner)
+      .send({
+        name: `${c.key} invalid offering`,
+        branchId: c.branchA,
+        programId: c.programA,
+        programVersionId: c.versionA,
+        levelId: c.levelA,
+        academicTermId: c.termA,
+        status: 'OPEN',
+      });
+    db.prepare("UPDATE program_versions SET status='archived' WHERE id=?").run(c.versionA);
+    const archivedOffering = await supertest(c.app)
+      .post('/api/offerings')
+      .set(c.owner)
+      .send({
+        name: `${c.key} archived offering`,
+        branchId: c.branchA,
+        programId: c.programA,
+        programVersionId: c.versionA,
+        levelId: c.levelA,
+        academicTermId: c.termA,
+      });
+
+    expect(reversedClass.status).toBe(400);
+    expect(malformedClassDate.status).toBe(400);
+    expect(invalidOfferingStatus.status).toBe(400);
+    expect(archivedOffering.status).toBe(400);
   });
 
   it('does not transfer an unrelated live enrollment through a terminal source id', async () => {
@@ -139,10 +202,10 @@ describe('WP-05 adversarial integrity boundary', () => {
     const extraClass = await createActiveClass(c, { name: `${c.key} extra` });
     const toClass = await createActiveClass(c, { name: `${c.key} destination` });
     const studentId = seedStudent(c, 'semester-scope');
-    enroll(c, studentId, fromClass, { semesterName: `${c.key} Main`, enrollmentType: 'new' });
+    const sourceEnrollmentId = enroll(c, studentId, fromClass, { semesterName: `${c.key} Main`, enrollmentType: 'new' });
     enroll(c, studentId, extraClass, { semesterName: `${c.key} Extra`, enrollmentType: 'extra' });
 
-    getEnrollmentService(db).transfer({ studentId, toClassId: toClass, notes: 'move main only' });
+    getEnrollmentService(db).transfer({ sourceEnrollmentId, toClassId: toClass, notes: 'move main only' });
 
     const extraSemester = db.prepare('SELECT status,class_id FROM student_semesters WHERE student_id=? AND semester_name=?')
       .get(studentId, `${c.key} Extra`) as any;
@@ -166,6 +229,60 @@ describe('WP-05 adversarial integrity boundary', () => {
     } finally {
       db.exec(`DROP TRIGGER IF EXISTS ${trigger}`);
     }
+  });
+
+  it('correlates freeze, transfer-request and waitlist history at the storage boundary', async () => {
+    const c = seedContext();
+    const sourceClass = await createActiveClass(c, { name: `${c.key} history source` });
+    const targetClass = await createActiveClass(c, { name: `${c.key} history target` });
+    const studentId = seedStudent(c, 'history-scope');
+    const otherStudentId = seedStudent(c, 'history-other');
+    const enrollmentId = enroll(c, studentId, sourceClass, { semesterName: `${c.key} History` });
+    const rejects = (write: () => unknown) => expect(write).toThrow();
+
+    rejects(() => db.prepare(`INSERT INTO enrollment_freezes
+      (id,enrollment_id,student_id,branch_id,reason,start_date,status)
+      VALUES (?,?,?,?,?,'2026-09-01','active')`)
+      .run(`${c.key}_freeze_active_drift`, enrollmentId, studentId, c.branchA, 'drift'));
+
+    getEnrollmentService(db).freeze(enrollmentId, { reason: 'storage attack fixture' });
+    rejects(() => db.prepare(`INSERT INTO enrollment_freezes
+      (id,enrollment_id,student_id,branch_id,reason,start_date,status)
+      VALUES (?,?,?,?,?,'2026-09-01','active')`)
+      .run(`${c.key}_freeze_scope`, enrollmentId, otherStudentId, c.branchA, 'scope'));
+    db.prepare(`INSERT INTO enrollment_freezes
+      (id,enrollment_id,student_id,branch_id,reason,start_date,planned_end_date,status)
+      VALUES (?,?,?,?,?,'2026-09-01','2026-09-02','active')`)
+      .run(`${c.key}_freeze_valid`, enrollmentId, studentId, c.branchA, 'valid');
+    rejects(() => db.prepare(`INSERT INTO enrollment_freezes
+      (id,enrollment_id,student_id,branch_id,reason,start_date,status)
+      VALUES (?,?,?,?,?,'2026-09-03','active')`)
+      .run(`${c.key}_freeze_duplicate`, enrollmentId, studentId, c.branchA, 'duplicate'));
+    rejects(() => db.prepare(`INSERT INTO enrollment_freezes
+      (id,enrollment_id,student_id,branch_id,reason,start_date,planned_end_date,status)
+      VALUES (?,?,?,?,?,'not-a-date','2026-09-01','completed')`)
+      .run(`${c.key}_freeze_date`, enrollmentId, studentId, c.branchA, 'date'));
+
+    db.prepare("UPDATE enrollment_freezes SET status='completed' WHERE id=?")
+      .run(`${c.key}_freeze_valid`);
+    getEnrollmentService(db).unfreeze(enrollmentId, { reason: 'prepare transfer request attack' });
+    const insertTransfer = db.prepare(`INSERT INTO enrollment_transfer_requests
+      (id,enrollment_id,student_id,from_class_id,to_class_id,branch_id,reason,status)
+      VALUES (?,?,?,?,?,?,?,'pending')`);
+    rejects(() => insertTransfer.run(
+      `${c.key}_transfer_scope`, enrollmentId, otherStudentId, sourceClass, targetClass, c.branchA, 'scope',
+    ));
+    insertTransfer.run(
+      `${c.key}_transfer_valid`, enrollmentId, studentId, sourceClass, targetClass, c.branchA, 'valid',
+    );
+    rejects(() => insertTransfer.run(
+      `${c.key}_transfer_duplicate`, enrollmentId, studentId, sourceClass, targetClass, c.branchA, 'duplicate',
+    ));
+
+    rejects(() => db.prepare(`INSERT INTO class_waitlist
+      (id,class_id,student_id,branch_id,status,position)
+      VALUES (?,?,?,?,'waiting',0)`)
+      .run(`${c.key}_waitlist_position`, targetClass, otherStudentId, c.branchA));
   });
 
   it('offers only a real open seat and preserves FIFO order', async () => {
@@ -288,8 +405,11 @@ describe('WP-05 database backstop attacks', () => {
       db.prepare('INSERT INTO skills (id,name) VALUES (?,?)').run(skillId, `${c.key} Skill ${index}`);
     }
     const sessionId = `${c.key}_session`;
+    const datedSessionId = `${c.key}_dated_session`;
     db.prepare(`INSERT INTO sessions (id,class_id,date,start_time,end_time,status,branch_id)
       VALUES (?,?,date('now'),'08:00','09:00','scheduled',?)`).run(sessionId, otherClassId, c.branchA);
+    db.prepare(`INSERT INTO sessions (id,class_id,date,start_time,end_time,status,branch_id)
+      VALUES (?,?,'2026-09-01','08:00','09:00','scheduled',?)`).run(datedSessionId, classId, c.branchA);
 
     const rejected = (write: () => unknown) => {
       try { write(); return false; } catch { return true; }
@@ -303,6 +423,7 @@ describe('WP-05 database backstop attacks', () => {
       rejected(() => insert.run(`${c.key}_dates`, classId, teacherA, skills[1], 0, c.branchA, '2026-09-02', '2026-09-01', null)),
       rejected(() => insert.run(`${c.key}_branch`, classId, teacherB, skills[2], 0, c.branchA, null, null, null)),
       rejected(() => insert.run(`${c.key}_session_bad`, classId, teacherA, skills[3], 0, c.branchA, null, null, sessionId)),
+      rejected(() => insert.run(`${c.key}_session_date`, classId, teacherA, skills[3], 0, c.branchA, '2026-09-02', null, datedSessionId)),
     ];
 
     insert.run(`${c.key}_first`, classId, teacherA, skills[4], 0, c.branchA, null, null, null);
@@ -313,6 +434,6 @@ describe('WP-05 database backstop attacks', () => {
       (id,class_id,teacher_id,skill_id,monthly_rate,branch_id,assignment_type)
       VALUES (?,?,?,?,0,?,'primary')`).run(`${c.key}_fourth`, classId, teacherA, skills[0], c.branchA)));
 
-    expect(outcomes).toEqual([true, true, true, true, true, true]);
+    expect(outcomes).toEqual([true, true, true, true, true, true, true]);
   });
 });

@@ -33,19 +33,19 @@
  * Raw INSERT/UPDATE is used ONLY to age fixtures into states the API cannot
  * reach directly, never to fake a result production code should produce.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { today, id as mkId } from '../utils/ids.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import classesRouter from '../routes/classes.routes.js';
-import { studentsRouter } from '../routes/students.routes.js';
-import { enrollmentRouter } from '../routes/enrollment.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { ACTIVE_ENROLLMENT_STATUSES } from '../core/academic/class-capacity.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { today, id as mkId } from '../../../utils/ids.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import classesRouter from '../../../routes/classes.routes.js';
+import { studentsRouter } from '../../../routes/students.routes.js';
+import { enrollmentRouter } from '../../../routes/enrollment.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { ACTIVE_ENROLLMENT_STATUSES } from '../../../core/academic/class-capacity.js';
 
 const BRANCH = 'cls_rem_branch';
 

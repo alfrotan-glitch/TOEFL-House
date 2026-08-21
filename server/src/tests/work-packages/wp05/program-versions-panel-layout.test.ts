@@ -26,7 +26,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL('../../../../../', import.meta.url));
 const PANEL = join(REPO_ROOT, 'src/components/academic/ProgramVersionsPanel.tsx');
 const DIST_ASSETS = join(REPO_ROOT, 'dist/assets');
 

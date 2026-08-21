@@ -1,12 +1,14 @@
-# WP-05 Academic Structure — SCOPE through CHECKPOINT plan
+# WP-05 Academic Structure — implementation and verification record
 
 **Protocol:** `docs/MASTER_ENGINEERING_PROTOCOL.md` §§58–74 and §W
 **Date:** 2026-08-21
 **Pre-package baseline:** `47f618d57394aecf0b0c468c6cb0c49664a89c84`
-**Lifecycle state:** DECIDE — implementation has not started
+**Lifecycle state:** CERTIFY — scope-limited certification complete
+**Required checkpoint:** `9cbde9b` (`checkpoint WP-05 academic structure repairs`)
 
-> This is a scope and implementation checkpoint, not a certification. It covers
-> only WP-05 and the direct dependencies required to make its contracts coherent.
+> This record began as the recoverable SCOPE-through-CHECKPOINT plan and now
+> records completion of the remaining lifecycle. It covers only WP-05 and the
+> direct dependencies required to make its contracts coherent.
 
 ## SCOPE
 
@@ -181,3 +183,50 @@ Recoverability is provided by baseline commit
 `47f618d57394aecf0b0c468c6cb0c49664a89c84`. The attack fixtures, reproduced
 failures, corrected inventory, decisions and this exact plan must be committed
 as a separate checkpoint before production implementation begins.
+
+
+## IMPLEMENT → VERIFY → ATTACK → REPAIR → REVERIFY
+
+Implementation followed D-86–D-92 and the checkpoint above:
+
+- curriculum, offering and class identifiers are correlated at route and storage
+  boundaries; level prerequisites are a validated acyclic ownership graph and
+  program-version copies remap dependency ids;
+- offering capacity is derived from linked class capacities;
+- exact-source transfer, freeze history and transfer-request decisions commit
+  with their lifecycle/projection effects;
+- waitlist offers require a real FIFO opening, active queue positions remain
+  unique across waiting/offered states, and conversion delegates to
+  `EnrollmentService`;
+- evaluation is the only performance-score provenance command, teacher
+  deactivation paths share the active-work guard, and assignment identity,
+  branch, session, date, rate and workload limits have storage backstops;
+- the teacher UI/API contract now forwards `defaultSkillRate`;
+- all fifteen historical suites were rebased under `work-packages/wp05`, with
+  contradictory full-class-offer and generic-score-write expectations retired.
+
+The initial 15-case attack suite intentionally failed before implementation.
+The expanded package authority now passes **17 files / 348 tests**. Final
+clean-data full-suite evidence is **2536 passed / 160 explicit WP-04 retirement
+skips**. Canonical preflight passes at **112 tables / 238 indexes / 117
+triggers**. Both TypeScript projects, production builds, lint (zero errors),
+all static/protocol/registry/design/logging/cleanliness/dependency/bundle audits,
+19 scoped mutation attacks and full release validation pass.
+
+## INDEPENDENT REVIEW → CLEAN → CERTIFY
+
+The cold review re-read the ownership graph, transactions, schema triggers,
+route errors, UI contract, replacement tests and package boundary. It found and
+repaired four final defects before re-verification:
+
+1. duplicate prerequisite ids were normalized instead of rejected at the API;
+2. joining behind an offered waitlist entry could reuse an active queue
+   position and surface a storage conflict;
+3. direct teacher-score updates lacked a database provenance guard;
+4. changing a fourth guest assignment to an ongoing role surfaced the database
+   workload backstop as HTTP 500 instead of a 409 business conflict.
+
+Generated databases and build output are removed during CLEAN. The authoritative
+scope-limited evidence and certification matrix are in
+`docs/certification/WP-05-academic-structure.md`. No later Work Package is
+certified by this record.

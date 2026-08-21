@@ -927,11 +927,11 @@ CREATE TABLE IF NOT EXISTS programs (
   id              TEXT PRIMARY KEY, 
   name            TEXT NOT NULL, 
   description     TEXT, 
-  duration_months INTEGER NOT NULL DEFAULT 0, 
+  duration_months INTEGER NOT NULL DEFAULT 0 CHECK (typeof(duration_months) = 'integer' AND duration_months >= 0),
   branch_id       TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT, 
   organization_id TEXT, 
   code            TEXT, 
-  is_active       INTEGER NOT NULL DEFAULT 1, 
+  is_active       INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
   created_at      TEXT NOT NULL DEFAULT (datetime('now')) 
 );
 CREATE INDEX IF NOT EXISTS idx_programs_branch       ON programs(branch_id);
@@ -940,13 +940,13 @@ CREATE TABLE IF NOT EXISTS program_versions (
   id                TEXT PRIMARY KEY, 
   program_id        TEXT NOT NULL REFERENCES programs(id) ON DELETE CASCADE, 
   version_label     TEXT NOT NULL, 
-  version_number    INTEGER NOT NULL DEFAULT 1, 
+  version_number    INTEGER NOT NULL DEFAULT 1 CHECK (typeof(version_number) = 'integer' AND version_number >= 1),
   status            TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','published','archived')), 
-  effective_from    TEXT, 
-  effective_to      TEXT, 
-  duration_months   INTEGER NOT NULL DEFAULT 0, 
+  effective_from    TEXT CHECK (effective_from IS NULL OR (date(effective_from) IS NOT NULL AND date(effective_from) = effective_from)),
+  effective_to      TEXT CHECK (effective_to IS NULL OR (date(effective_to) IS NOT NULL AND date(effective_to) = effective_to)),
+  duration_months   INTEGER NOT NULL DEFAULT 0 CHECK (typeof(duration_months) = 'integer' AND duration_months >= 0),
   description       TEXT, 
-  is_default        INTEGER NOT NULL DEFAULT 0, 
+  is_default        INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0,1)),
   published_at      TEXT, 
   created_by        TEXT, 
   created_at        TEXT NOT NULL DEFAULT (datetime('now')), 
@@ -961,9 +961,9 @@ CREATE TABLE IF NOT EXISTS subjects (
   code                TEXT NOT NULL, 
   name                TEXT NOT NULL, 
   description         TEXT, 
-  hours               INTEGER NOT NULL DEFAULT 0, 
-  sort_order          INTEGER NOT NULL DEFAULT 0, 
-  is_active           INTEGER NOT NULL DEFAULT 1, 
+  hours               INTEGER NOT NULL DEFAULT 0 CHECK (typeof(hours) = 'integer' AND hours >= 0),
+  sort_order          INTEGER NOT NULL DEFAULT 0 CHECK (typeof(sort_order) = 'integer' AND sort_order >= 0),
+  is_active           INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
   created_at          TEXT NOT NULL DEFAULT (datetime('now')), 
   UNIQUE(program_version_id, code) 
 );
@@ -975,10 +975,10 @@ CREATE TABLE IF NOT EXISTS modules (
   code            TEXT NOT NULL, 
   name            TEXT NOT NULL, 
   description     TEXT, 
-  hours           INTEGER NOT NULL DEFAULT 0, 
-  sort_order      INTEGER NOT NULL DEFAULT 0, 
+  hours           INTEGER NOT NULL DEFAULT 0 CHECK (typeof(hours) = 'integer' AND hours >= 0),
+  sort_order      INTEGER NOT NULL DEFAULT 0 CHECK (typeof(sort_order) = 'integer' AND sort_order >= 0),
   assessment_type TEXT DEFAULT 'continuous', 
-  is_active       INTEGER NOT NULL DEFAULT 1, 
+  is_active       INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
   created_at      TEXT NOT NULL DEFAULT (datetime('now')), 
   UNIQUE(subject_id, code) 
 );
@@ -988,15 +988,15 @@ CREATE TABLE IF NOT EXISTS levels (
   id                  TEXT PRIMARY KEY, 
   program_id          TEXT NOT NULL REFERENCES programs(id) ON DELETE CASCADE, 
   name                TEXT NOT NULL, 
-  "order"             INTEGER NOT NULL DEFAULT 1, 
-  prerequisites       TEXT DEFAULT '[]', 
-  program_version_id  TEXT, 
+  "order"             INTEGER NOT NULL DEFAULT 1 CHECK (typeof("order") = 'integer' AND "order" >= 1),
+  prerequisites       TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(prerequisites) AND json_type(prerequisites) = 'array'),
+  program_version_id  TEXT REFERENCES program_versions(id) ON DELETE SET NULL,
   code                TEXT, 
-  duration_months     INTEGER DEFAULT 0, 
-  default_fee         INTEGER DEFAULT 0, 
-  pass_mark           REAL DEFAULT 60, 
-  is_active           INTEGER DEFAULT 1, 
-  min_viable_size     INTEGER DEFAULT 5, 
+  duration_months     INTEGER NOT NULL DEFAULT 0 CHECK (typeof(duration_months) = 'integer' AND duration_months >= 0),
+  default_fee         INTEGER NOT NULL DEFAULT 0 CHECK (typeof(default_fee) = 'integer' AND default_fee >= 0),
+  pass_mark           REAL NOT NULL DEFAULT 60 CHECK (typeof(pass_mark) IN ('integer','real') AND pass_mark >= 0 AND pass_mark <= 100),
+  is_active           INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
+  min_viable_size     INTEGER NOT NULL DEFAULT 5 CHECK (typeof(min_viable_size) = 'integer' AND min_viable_size >= 0),
   created_at          TEXT NOT NULL DEFAULT (datetime('now')) 
 );
 CREATE INDEX IF NOT EXISTS idx_levels_program        ON levels(program_id);
@@ -1022,14 +1022,15 @@ CREATE TABLE IF NOT EXISTS skills (
 CREATE TABLE IF NOT EXISTS academic_terms ( 
   id          TEXT PRIMARY KEY, 
   branch_id   TEXT NOT NULL REFERENCES branches(id) ON DELETE CASCADE, 
-  year        INTEGER NOT NULL, 
+  year        INTEGER NOT NULL CHECK (typeof(year) = 'integer' AND year >= 1),
   code        TEXT NOT NULL, 
   name        TEXT NOT NULL, 
-  start_date  TEXT, 
-  end_date    TEXT, 
-  is_active   INTEGER NOT NULL DEFAULT 1, 
+  start_date  TEXT CHECK (start_date IS NULL OR date(start_date) IS NOT NULL AND date(start_date) = start_date),
+  end_date    TEXT CHECK (end_date IS NULL OR date(end_date) IS NOT NULL AND date(end_date) = end_date),
+  is_active   INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
   created_at  TEXT NOT NULL DEFAULT (datetime('now')), 
-  UNIQUE(branch_id, year, code) 
+  UNIQUE(branch_id, year, code),
+  CHECK (start_date IS NULL OR end_date IS NULL OR end_date >= start_date)
 );
 CREATE INDEX IF NOT EXISTS idx_academic_terms_branch ON academic_terms(branch_id, year);
 
@@ -1038,10 +1039,10 @@ CREATE TABLE IF NOT EXISTS time_slots (
   branch_id   TEXT NOT NULL REFERENCES branches(id) ON DELETE CASCADE, 
   code        TEXT NOT NULL, 
   label       TEXT NOT NULL, 
-  start_time  TEXT NOT NULL, 
-  end_time    TEXT NOT NULL, 
-  is_active   INTEGER NOT NULL DEFAULT 1, 
-  sort_order  INTEGER NOT NULL DEFAULT 0, 
+  start_time  TEXT NOT NULL CHECK (length(start_time) = 5 AND time(start_time) IS NOT NULL),
+  end_time    TEXT NOT NULL CHECK (length(end_time) = 5 AND time(end_time) IS NOT NULL AND end_time > start_time),
+  is_active   INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
+  sort_order  INTEGER NOT NULL DEFAULT 0 CHECK (typeof(sort_order) = 'integer' AND sort_order >= 0),
   created_at  TEXT NOT NULL DEFAULT (datetime('now')), 
   UNIQUE(branch_id, code) 
 );
@@ -1052,8 +1053,8 @@ CREATE TABLE IF NOT EXISTS rooms (
   branch_id   TEXT NOT NULL REFERENCES branches(id) ON DELETE CASCADE, 
   code        TEXT NOT NULL, 
   name        TEXT NOT NULL, 
-  capacity    INTEGER NOT NULL DEFAULT 0, 
-  is_active   INTEGER NOT NULL DEFAULT 1, 
+  capacity    INTEGER NOT NULL DEFAULT 0 CHECK (typeof(capacity) = 'integer' AND capacity >= 0),
+  is_active   INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
   notes       TEXT, 
   created_at  TEXT NOT NULL DEFAULT (datetime('now')), 
   UNIQUE(branch_id, code) 
@@ -1062,16 +1063,15 @@ CREATE INDEX IF NOT EXISTS idx_rooms_branch          ON rooms(branch_id, is_acti
 
 CREATE TABLE IF NOT EXISTS course_offerings ( 
   id                  TEXT PRIMARY KEY, 
-  program_id          TEXT REFERENCES programs(id) ON DELETE SET NULL, 
-  program_version_id  TEXT, 
-  level_id            TEXT REFERENCES levels(id) ON DELETE SET NULL, 
+  program_id          TEXT NOT NULL REFERENCES programs(id) ON DELETE RESTRICT,
+  program_version_id  TEXT NOT NULL REFERENCES program_versions(id) ON DELETE RESTRICT,
+  level_id            TEXT NOT NULL REFERENCES levels(id) ON DELETE RESTRICT,
   branch_id           TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT, 
-  academic_term_id    TEXT REFERENCES academic_terms(id) ON DELETE SET NULL, 
+  academic_term_id    TEXT NOT NULL REFERENCES academic_terms(id) ON DELETE RESTRICT,
   code                TEXT, 
   name                TEXT NOT NULL, 
   status              TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','open','closed','archived')), 
-  capacity_total      INTEGER NOT NULL DEFAULT 0, 
-  fee_snapshot        INTEGER NOT NULL DEFAULT 0, 
+  fee_snapshot        INTEGER NOT NULL DEFAULT 0 CHECK (typeof(fee_snapshot) = 'integer' AND fee_snapshot >= 0),
   created_at          TEXT NOT NULL DEFAULT (datetime('now')) 
 );
 CREATE INDEX IF NOT EXISTS idx_course_offerings_branch ON course_offerings(branch_id, status);
@@ -1083,11 +1083,11 @@ CREATE TABLE IF NOT EXISTS classes (
   program_id           TEXT REFERENCES programs(id) ON DELETE SET NULL,
   level_id             TEXT REFERENCES levels(id) ON DELETE SET NULL,
   level                TEXT NOT NULL,
-  capacity             INTEGER NOT NULL DEFAULT 0,
-  min_viable_size      INTEGER NOT NULL DEFAULT 0,
+  capacity             INTEGER NOT NULL DEFAULT 0 CHECK (typeof(capacity) = 'integer' AND capacity >= 0),
+  min_viable_size      INTEGER NOT NULL DEFAULT 0 CHECK (typeof(min_viable_size) = 'integer' AND min_viable_size >= 0 AND (capacity = 0 OR min_viable_size <= capacity)),
   schedule_time        TEXT,
-  start_date           TEXT,
-  end_date             TEXT,
+  start_date           TEXT CHECK (start_date IS NULL OR date(start_date) IS NOT NULL AND date(start_date) = start_date),
+  end_date             TEXT CHECK (end_date IS NULL OR date(end_date) IS NOT NULL AND date(end_date) = end_date AND (start_date IS NULL OR end_date >= start_date)),
   status               TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','active','completed','cancelled')),
   lifecycle_stage      TEXT NOT NULL DEFAULT 'draft' CHECK (lifecycle_stage IN (
                          'draft','scheduled','enrollment_open','enrollment_closed',
@@ -1096,13 +1096,13 @@ CREATE TABLE IF NOT EXISTS classes (
                        )),
   lifecycle_updated_at TEXT,
   cancellation_reason  TEXT,
-  fee                  INTEGER NOT NULL DEFAULT 0,
+  fee                  INTEGER NOT NULL DEFAULT 0 CHECK (typeof(fee) = 'integer' AND fee >= 0),
   branch_id            TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
   gender_policy        TEXT NOT NULL DEFAULT 'mixed' CHECK (gender_policy IN ('female','male','mixed')),
   room_id              TEXT REFERENCES rooms(id) ON DELETE SET NULL,
   time_slot_id         TEXT REFERENCES time_slots(id) ON DELETE SET NULL,
   academic_term_id     TEXT REFERENCES academic_terms(id) ON DELETE SET NULL,
-  activation_date      TEXT,
+  activation_date      TEXT CHECK (activation_date IS NULL OR date(activation_date) IS NOT NULL AND date(activation_date) = activation_date),
   merged_into_id       TEXT,
   offering_id          TEXT REFERENCES course_offerings(id) ON DELETE SET NULL,
   notes                TEXT
@@ -1120,16 +1120,192 @@ CREATE INDEX IF NOT EXISTS idx_classes_lifecycle ON classes(lifecycle_stage);
 CREATE INDEX IF NOT EXISTS idx_classes_program   ON classes(program_id);
 CREATE INDEX IF NOT EXISTS idx_classes_teacher   ON classes(teacher_id);
 
+-- Curriculum identifiers are one ownership graph, not independently valid
+-- foreign keys. These guards protect direct writers as well as HTTP routes.
+CREATE TRIGGER IF NOT EXISTS trg_levels_version_program_insert
+BEFORE INSERT ON levels
+WHEN NEW.program_version_id IS NOT NULL
+ AND (SELECT program_id FROM program_versions WHERE id = NEW.program_version_id) IS NOT NEW.program_id
+BEGIN SELECT RAISE(ABORT, 'level program version mismatch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_levels_version_program_update
+BEFORE UPDATE OF program_id, program_version_id ON levels
+WHEN NEW.program_version_id IS NOT NULL
+ AND (SELECT program_id FROM program_versions WHERE id = NEW.program_version_id) IS NOT NEW.program_id
+BEGIN SELECT RAISE(ABORT, 'level program version mismatch'); END;
+
+-- `levels.prerequisites` is a real curriculum graph even though its compact
+-- representation is JSON. Every edge must resolve inside the same program;
+-- two explicitly versioned endpoints must share one version. Common
+-- (unversioned) levels may be reused by a version of their own program.
+CREATE TRIGGER IF NOT EXISTS trg_levels_prerequisites_integrity_insert
+BEFORE INSERT ON levels
+WHEN EXISTS (
+  SELECT 1 FROM json_each(NEW.prerequisites) edge
+  LEFT JOIN levels prerequisite ON prerequisite.id = edge.value
+  WHERE edge.type <> 'text' OR edge.value <> trim(edge.value) OR edge.value = ''
+     OR prerequisite.id IS NULL OR prerequisite.id = NEW.id
+     OR prerequisite.program_id IS NOT NEW.program_id
+     OR (NEW.program_version_id IS NOT NULL
+       AND prerequisite.program_version_id IS NOT NULL
+       AND prerequisite.program_version_id IS NOT NEW.program_version_id)
+) OR (SELECT COUNT(*) FROM json_each(NEW.prerequisites)) <>
+     (SELECT COUNT(DISTINCT value) FROM json_each(NEW.prerequisites))
+BEGIN SELECT RAISE(ABORT, 'level prerequisite ownership mismatch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_levels_prerequisites_integrity_update
+BEFORE UPDATE OF prerequisites, program_id, program_version_id ON levels
+WHEN EXISTS (
+  SELECT 1 FROM json_each(NEW.prerequisites) edge
+  LEFT JOIN levels prerequisite ON prerequisite.id = edge.value
+  WHERE edge.type <> 'text' OR edge.value <> trim(edge.value) OR edge.value = ''
+     OR prerequisite.id IS NULL OR prerequisite.id = NEW.id
+     OR prerequisite.program_id IS NOT NEW.program_id
+     OR (NEW.program_version_id IS NOT NULL
+       AND prerequisite.program_version_id IS NOT NULL
+       AND prerequisite.program_version_id IS NOT NEW.program_version_id)
+) OR (SELECT COUNT(*) FROM json_each(NEW.prerequisites)) <>
+     (SELECT COUNT(DISTINCT value) FROM json_each(NEW.prerequisites))
+BEGIN SELECT RAISE(ABORT, 'level prerequisite ownership mismatch'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_levels_prerequisites_cycle_insert
+BEFORE INSERT ON levels
+WHEN EXISTS (
+  WITH RECURSIVE dependency(level_id) AS (
+    SELECT value FROM json_each(NEW.prerequisites)
+    UNION
+    SELECT nested.value
+    FROM dependency current
+    JOIN levels prerequisite ON prerequisite.id = current.level_id
+    JOIN json_each(prerequisite.prerequisites) nested
+  )
+  SELECT 1 FROM dependency WHERE level_id = NEW.id
+)
+BEGIN SELECT RAISE(ABORT, 'level prerequisite cycle'); END;
+CREATE TRIGGER IF NOT EXISTS trg_levels_prerequisites_cycle_update
+BEFORE UPDATE OF prerequisites ON levels
+WHEN EXISTS (
+  WITH RECURSIVE dependency(level_id) AS (
+    SELECT value FROM json_each(NEW.prerequisites)
+    UNION
+    SELECT nested.value
+    FROM dependency current
+    JOIN levels prerequisite ON prerequisite.id = current.level_id
+    JOIN json_each(prerequisite.prerequisites) nested
+  )
+  SELECT 1 FROM dependency WHERE level_id = NEW.id
+)
+BEGIN SELECT RAISE(ABORT, 'level prerequisite cycle'); END;
+
+-- Updating or deleting a prerequisite endpoint must not strand inbound edges.
+CREATE TRIGGER IF NOT EXISTS trg_levels_prerequisites_inbound_update
+BEFORE UPDATE OF program_id, program_version_id ON levels
+WHEN EXISTS (
+  SELECT 1
+  FROM levels dependent, json_each(dependent.prerequisites) edge
+  WHERE dependent.id <> OLD.id AND edge.type = 'text' AND edge.value = OLD.id
+    AND (dependent.program_id IS NOT NEW.program_id
+      OR (dependent.program_version_id IS NOT NULL
+        AND NEW.program_version_id IS NOT NULL
+        AND dependent.program_version_id IS NOT NEW.program_version_id))
+)
+BEGIN SELECT RAISE(ABORT, 'level prerequisite inbound ownership mismatch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_levels_prerequisites_delete
+BEFORE DELETE ON levels
+WHEN EXISTS (
+  SELECT 1 FROM levels dependent, json_each(dependent.prerequisites) edge
+  WHERE dependent.id <> OLD.id AND edge.type = 'text' AND edge.value = OLD.id
+)
+BEGIN SELECT RAISE(ABORT, 'level is required by another level'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_subjects_level_version_insert
+BEFORE INSERT ON subjects
+WHEN NEW.level_id IS NOT NULL
+ AND (SELECT program_version_id FROM levels WHERE id = NEW.level_id) IS NOT NEW.program_version_id
+BEGIN SELECT RAISE(ABORT, 'subject level program version mismatch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_subjects_level_version_update
+BEFORE UPDATE OF program_version_id, level_id ON subjects
+WHEN NEW.level_id IS NOT NULL
+ AND (SELECT program_version_id FROM levels WHERE id = NEW.level_id) IS NOT NEW.program_version_id
+BEGIN SELECT RAISE(ABORT, 'subject level program version mismatch'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_offerings_scope_insert
+BEFORE INSERT ON course_offerings
+WHEN (SELECT branch_id FROM programs WHERE id = NEW.program_id) IS NOT NEW.branch_id
+ OR (SELECT program_id FROM program_versions WHERE id = NEW.program_version_id) IS NOT NEW.program_id
+ OR (SELECT program_id FROM levels WHERE id = NEW.level_id) IS NOT NEW.program_id
+ OR (SELECT program_version_id FROM levels WHERE id = NEW.level_id) IS NOT NEW.program_version_id
+ OR (SELECT branch_id FROM academic_terms WHERE id = NEW.academic_term_id) IS NOT NEW.branch_id
+BEGIN SELECT RAISE(ABORT, 'offering curriculum scope mismatch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_offerings_scope_update
+BEFORE UPDATE OF program_id, program_version_id, level_id, branch_id, academic_term_id ON course_offerings
+WHEN (SELECT branch_id FROM programs WHERE id = NEW.program_id) IS NOT NEW.branch_id
+ OR (SELECT program_id FROM program_versions WHERE id = NEW.program_version_id) IS NOT NEW.program_id
+ OR (SELECT program_id FROM levels WHERE id = NEW.level_id) IS NOT NEW.program_id
+ OR (SELECT program_version_id FROM levels WHERE id = NEW.level_id) IS NOT NEW.program_version_id
+ OR (SELECT branch_id FROM academic_terms WHERE id = NEW.academic_term_id) IS NOT NEW.branch_id
+ OR EXISTS (
+   SELECT 1 FROM classes c LEFT JOIN levels l ON l.id = c.level_id
+   WHERE c.offering_id = OLD.id
+    AND (c.branch_id IS NOT NEW.branch_id OR c.program_id IS NOT NEW.program_id
+      OR c.level_id IS NOT NEW.level_id OR c.academic_term_id IS NOT NEW.academic_term_id
+      OR l.program_version_id IS NOT NEW.program_version_id)
+ )
+BEGIN SELECT RAISE(ABORT, 'offering curriculum scope mismatch'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_classes_integrity_insert
+BEFORE INSERT ON classes
+WHEN ((NEW.program_id IS NULL) <> (NEW.level_id IS NULL))
+ OR (NEW.program_id IS NOT NULL AND (SELECT branch_id FROM programs WHERE id = NEW.program_id) IS NOT NEW.branch_id)
+ OR (NEW.level_id IS NOT NULL AND ((SELECT program_id FROM levels WHERE id = NEW.level_id) IS NOT NEW.program_id))
+ OR (NEW.teacher_id IS NOT NULL AND ((SELECT branch_id FROM teachers WHERE id = NEW.teacher_id) IS NOT NEW.branch_id OR (SELECT status FROM teachers WHERE id = NEW.teacher_id) <> 'active'))
+ OR (NEW.room_id IS NOT NULL AND (SELECT branch_id FROM rooms WHERE id = NEW.room_id) IS NOT NEW.branch_id)
+ OR (NEW.time_slot_id IS NOT NULL AND (SELECT branch_id FROM time_slots WHERE id = NEW.time_slot_id) IS NOT NEW.branch_id)
+ OR (NEW.academic_term_id IS NOT NULL AND (SELECT branch_id FROM academic_terms WHERE id = NEW.academic_term_id) IS NOT NEW.branch_id)
+ OR (NEW.offering_id IS NOT NULL AND NOT EXISTS (
+   SELECT 1 FROM course_offerings o JOIN levels l ON l.id = NEW.level_id
+   WHERE o.id = NEW.offering_id AND o.branch_id = NEW.branch_id
+    AND o.program_id IS NEW.program_id AND o.level_id IS NEW.level_id
+    AND o.academic_term_id IS NEW.academic_term_id
+    AND o.program_version_id IS l.program_version_id
+ ))
+ OR NEW.status IS NOT CASE
+   WHEN NEW.lifecycle_stage = 'draft' THEN 'draft'
+   WHEN NEW.lifecycle_stage = 'cancelled' THEN 'cancelled'
+   WHEN NEW.lifecycle_stage IN ('completed','archived') THEN 'completed'
+   ELSE 'active' END
+BEGIN SELECT RAISE(ABORT, 'class academic integrity mismatch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_classes_integrity_update
+BEFORE UPDATE OF teacher_id, program_id, level_id, branch_id, room_id, time_slot_id, academic_term_id, offering_id, status, lifecycle_stage ON classes
+WHEN ((NEW.program_id IS NULL) <> (NEW.level_id IS NULL))
+ OR (NEW.program_id IS NOT NULL AND (SELECT branch_id FROM programs WHERE id = NEW.program_id) IS NOT NEW.branch_id)
+ OR (NEW.level_id IS NOT NULL AND ((SELECT program_id FROM levels WHERE id = NEW.level_id) IS NOT NEW.program_id))
+ OR (NEW.teacher_id IS NOT NULL AND ((SELECT branch_id FROM teachers WHERE id = NEW.teacher_id) IS NOT NEW.branch_id OR (NEW.teacher_id IS NOT OLD.teacher_id AND (SELECT status FROM teachers WHERE id = NEW.teacher_id) <> 'active')))
+ OR (NEW.room_id IS NOT NULL AND (SELECT branch_id FROM rooms WHERE id = NEW.room_id) IS NOT NEW.branch_id)
+ OR (NEW.time_slot_id IS NOT NULL AND (SELECT branch_id FROM time_slots WHERE id = NEW.time_slot_id) IS NOT NEW.branch_id)
+ OR (NEW.academic_term_id IS NOT NULL AND (SELECT branch_id FROM academic_terms WHERE id = NEW.academic_term_id) IS NOT NEW.branch_id)
+ OR (NEW.offering_id IS NOT NULL AND NOT EXISTS (
+   SELECT 1 FROM course_offerings o JOIN levels l ON l.id = NEW.level_id
+   WHERE o.id = NEW.offering_id AND o.branch_id = NEW.branch_id
+    AND o.program_id IS NEW.program_id AND o.level_id IS NEW.level_id
+    AND o.academic_term_id IS NEW.academic_term_id
+    AND o.program_version_id IS l.program_version_id
+ ))
+ OR NEW.status IS NOT CASE
+   WHEN NEW.lifecycle_stage = 'draft' THEN 'draft'
+   WHEN NEW.lifecycle_stage = 'cancelled' THEN 'cancelled'
+   WHEN NEW.lifecycle_stage IN ('completed','archived') THEN 'completed'
+   ELSE 'active' END
+BEGIN SELECT RAISE(ABORT, 'class academic integrity mismatch'); END;
+
 CREATE TABLE IF NOT EXISTS class_teacher_skills (
   id              TEXT PRIMARY KEY,
   class_id        TEXT NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
   teacher_id      TEXT NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
   skill_id        TEXT NOT NULL REFERENCES skills(id) ON DELETE RESTRICT,
-  monthly_rate    INTEGER NOT NULL DEFAULT 0,
+  monthly_rate    INTEGER NOT NULL DEFAULT 0 CHECK (typeof(monthly_rate) = 'integer' AND monthly_rate >= 0),
   branch_id       TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
   assignment_type TEXT NOT NULL DEFAULT 'primary' CHECK (assignment_type IN ('primary','assistant','substitute','guest','examiner')),
-  start_date      TEXT,
-  end_date        TEXT,
+  start_date      TEXT CHECK (start_date IS NULL OR date(start_date) IS NOT NULL AND date(start_date) = start_date),
+  end_date        TEXT CHECK (end_date IS NULL OR date(end_date) IS NOT NULL AND date(end_date) = end_date AND (start_date IS NULL OR end_date >= start_date)),
   reason          TEXT,
   session_id      TEXT REFERENCES sessions(id) ON DELETE CASCADE,
   UNIQUE(class_id, teacher_id, skill_id, session_id)
@@ -1138,6 +1314,8 @@ CREATE INDEX IF NOT EXISTS idx_cts_class ON class_teacher_skills(class_id);
 CREATE INDEX IF NOT EXISTS idx_cts_class_skill
 ON class_teacher_skills(class_id, skill_id, teacher_id);
 CREATE INDEX IF NOT EXISTS idx_cts_session ON class_teacher_skills(session_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_cts_class_scoped
+ON class_teacher_skills(class_id, teacher_id, skill_id) WHERE session_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_cts_teacher ON class_teacher_skills(teacher_id);
 CREATE INDEX IF NOT EXISTS idx_cts_teacher_workload
 ON class_teacher_skills(teacher_id, branch_id, assignment_type, start_date, end_date);
@@ -1201,11 +1379,11 @@ CREATE TABLE IF NOT EXISTS teachers (
   full_name          TEXT NOT NULL,
   phone              TEXT,
   email              TEXT,
-  base_salary        INTEGER NOT NULL DEFAULT 0,
+  base_salary        INTEGER NOT NULL DEFAULT 0 CHECK (typeof(base_salary) = 'integer' AND base_salary >= 0),
   salary_type        TEXT NOT NULL DEFAULT 'fixed' CHECK (salary_type IN (
                        'fixed','per_skill','per_session','hybrid','per_level'
                      )),
-  performance_score  REAL NOT NULL DEFAULT 0,
+  performance_score  REAL NOT NULL DEFAULT 0 CHECK (typeof(performance_score) IN ('integer','real') AND performance_score >= 0 AND performance_score <= 100),
   status             TEXT NOT NULL DEFAULT 'active' CHECK (status IN (
                        'active','inactive','on_leave'
                      )),
@@ -1216,8 +1394,9 @@ CREATE TABLE IF NOT EXISTS teachers (
   contract_type      TEXT CHECK (contract_type IN (
                        'monthly','hourly','per_session'
                      )),
-  default_skill_rate INTEGER NOT NULL DEFAULT 0
-, target_skills_per_month INTEGER NOT NULL DEFAULT 0);
+  default_skill_rate INTEGER NOT NULL DEFAULT 0 CHECK (typeof(default_skill_rate) = 'integer' AND default_skill_rate >= 0),
+  target_skills_per_month INTEGER NOT NULL DEFAULT 0 CHECK (typeof(target_skills_per_month) = 'integer' AND target_skills_per_month >= 0)
+);
 CREATE INDEX IF NOT EXISTS idx_teachers_branch ON teachers(branch_id);
 CREATE INDEX IF NOT EXISTS idx_teachers_status ON teachers(status);
 
@@ -1274,15 +1453,26 @@ CREATE TABLE IF NOT EXISTS teacher_evaluations (
   id           TEXT PRIMARY KEY, 
   teacher_id   TEXT NOT NULL REFERENCES teachers(id) ON DELETE CASCADE, 
   evaluator_id TEXT NOT NULL, 
-  date         TEXT NOT NULL, 
-  score        REAL NOT NULL DEFAULT 0, 
-  criteria     TEXT NOT NULL DEFAULT '{}', 
+  date         TEXT NOT NULL CHECK (date(date) IS NOT NULL AND date(date) = date),
+  score        REAL NOT NULL CHECK (typeof(score) IN ('integer','real') AND score > 0 AND score <= 100),
+  criteria     TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(criteria) AND json_type(criteria) = 'object'),
   notes        TEXT, 
   created_at   TEXT NOT NULL DEFAULT (datetime('now')) 
 );
 CREATE INDEX IF NOT EXISTS idx_teacher_eval_teacher  ON teacher_evaluations(teacher_id);
 CREATE INDEX IF NOT EXISTS idx_teacher_evaluations_period
 ON teacher_evaluations(teacher_id, date, created_at);
+CREATE TRIGGER IF NOT EXISTS trg_teacher_performance_evaluation_guard
+BEFORE UPDATE OF performance_score ON teachers
+WHEN NEW.performance_score IS NOT OLD.performance_score
+ AND (
+   SELECT evaluation.score
+   FROM teacher_evaluations evaluation
+   WHERE evaluation.teacher_id = NEW.id
+   ORDER BY evaluation.rowid DESC
+   LIMIT 1
+ ) IS NOT NEW.performance_score
+BEGIN SELECT RAISE(ABORT, 'teacher performance score requires latest evaluation provenance'); END;
 
 -- ============================================================================
 -- ACADEMIC DELIVERY
@@ -1362,9 +1552,9 @@ CREATE TABLE IF NOT EXISTS enrollment_freezes (
   student_id        TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE, 
   branch_id         TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT, 
   reason            TEXT NOT NULL, 
-  start_date        TEXT NOT NULL, 
-  planned_end_date  TEXT NOT NULL, 
-  actual_end_date   TEXT, 
+  start_date        TEXT NOT NULL CHECK (date(start_date) IS NOT NULL AND date(start_date) = start_date),
+  planned_end_date  TEXT NOT NULL CHECK (date(planned_end_date) IS NOT NULL AND date(planned_end_date) = planned_end_date AND planned_end_date >= start_date),
+  actual_end_date   TEXT CHECK (actual_end_date IS NULL OR (date(actual_end_date) IS NOT NULL AND date(actual_end_date) = actual_end_date AND actual_end_date >= start_date)),
   status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','completed')), 
   requested_by      TEXT, 
   approved_by       TEXT, 
@@ -1373,6 +1563,36 @@ CREATE TABLE IF NOT EXISTS enrollment_freezes (
 );
 CREATE INDEX IF NOT EXISTS idx_efz_enrollment ON enrollment_freezes(enrollment_id);
 CREATE INDEX IF NOT EXISTS idx_efz_status ON enrollment_freezes(status);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_efz_active_enrollment
+ON enrollment_freezes(enrollment_id) WHERE status = 'active';
+CREATE TRIGGER IF NOT EXISTS trg_enrollment_freezes_scope_insert
+BEFORE INSERT ON enrollment_freezes
+WHEN (SELECT student_id FROM enrollments WHERE id = NEW.enrollment_id) IS NOT NEW.student_id
+ OR (SELECT branch_id FROM enrollments WHERE id = NEW.enrollment_id) IS NOT NEW.branch_id
+BEGIN SELECT RAISE(ABORT, 'freeze enrollment scope mismatch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_enrollment_freezes_scope_update
+BEFORE UPDATE OF enrollment_id, student_id, branch_id ON enrollment_freezes
+WHEN (SELECT student_id FROM enrollments WHERE id = NEW.enrollment_id) IS NOT NEW.student_id
+ OR (SELECT branch_id FROM enrollments WHERE id = NEW.enrollment_id) IS NOT NEW.branch_id
+BEGIN SELECT RAISE(ABORT, 'freeze enrollment scope mismatch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_enrollment_freezes_active_projection_insert
+BEFORE INSERT ON enrollment_freezes
+WHEN NEW.status = 'active'
+ AND (SELECT status FROM enrollments WHERE id = NEW.enrollment_id) IS NOT 'frozen'
+BEGIN SELECT RAISE(ABORT, 'active freeze requires frozen enrollment'); END;
+CREATE TRIGGER IF NOT EXISTS trg_enrollment_freezes_active_projection_update
+BEFORE UPDATE OF enrollment_id, status ON enrollment_freezes
+WHEN NEW.status = 'active'
+ AND (SELECT status FROM enrollments WHERE id = NEW.enrollment_id) IS NOT 'frozen'
+BEGIN SELECT RAISE(ABORT, 'active freeze requires frozen enrollment'); END;
+CREATE TRIGGER IF NOT EXISTS trg_enrollments_active_freeze_projection_update
+BEFORE UPDATE OF status ON enrollments
+WHEN OLD.status = 'frozen' AND NEW.status <> 'frozen'
+ AND EXISTS (
+   SELECT 1 FROM enrollment_freezes
+   WHERE enrollment_id = NEW.id AND status = 'active'
+ )
+BEGIN SELECT RAISE(ABORT, 'active freeze must be completed before enrollment resumes'); END;
 
 CREATE TABLE IF NOT EXISTS enrollment_transfer_requests ( 
   id                TEXT PRIMARY KEY, 
@@ -1386,19 +1606,54 @@ CREATE TABLE IF NOT EXISTS enrollment_transfer_requests (
   new_enrollment_id TEXT REFERENCES enrollments(id) ON DELETE SET NULL, 
   requested_by      TEXT, 
   approved_by       TEXT, 
-  decision_notes    TEXT, 
-  created_at        TEXT NOT NULL DEFAULT (datetime('now')), 
-  updated_at        TEXT NOT NULL DEFAULT (datetime('now')) 
+  decision_notes    TEXT,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK (
+    (status = 'approved' AND new_enrollment_id IS NOT NULL)
+    OR (status IN ('pending','rejected','cancelled') AND new_enrollment_id IS NULL)
+  )
 );
 CREATE INDEX IF NOT EXISTS idx_etr_enrollment ON enrollment_transfer_requests(enrollment_id);
 CREATE INDEX IF NOT EXISTS idx_etr_status ON enrollment_transfer_requests(status);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_etr_pending_enrollment
+ON enrollment_transfer_requests(enrollment_id) WHERE status = 'pending';
+CREATE TRIGGER IF NOT EXISTS trg_enrollment_transfer_requests_scope_insert
+BEFORE INSERT ON enrollment_transfer_requests
+WHEN (SELECT student_id FROM enrollments WHERE id = NEW.enrollment_id) IS NOT NEW.student_id
+ OR (SELECT class_id FROM enrollments WHERE id = NEW.enrollment_id) IS NOT NEW.from_class_id
+ OR (SELECT branch_id FROM enrollments WHERE id = NEW.enrollment_id) IS NOT NEW.branch_id
+ OR (SELECT branch_id FROM classes WHERE id = NEW.to_class_id) IS NOT NEW.branch_id
+ OR (NEW.status = 'pending' AND (SELECT status FROM enrollments WHERE id = NEW.enrollment_id) IS NOT 'active')
+ OR (NEW.status = 'approved' AND (
+      (SELECT student_id FROM enrollments WHERE id = NEW.new_enrollment_id) IS NOT NEW.student_id
+      OR (SELECT class_id FROM enrollments WHERE id = NEW.new_enrollment_id) IS NOT NEW.to_class_id
+      OR (SELECT branch_id FROM enrollments WHERE id = NEW.new_enrollment_id) IS NOT NEW.branch_id
+      OR (SELECT status FROM enrollments WHERE id = NEW.enrollment_id) IS NOT 'transferred'
+    ))
+BEGIN SELECT RAISE(ABORT, 'transfer request scope mismatch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_enrollment_transfer_requests_scope_update
+BEFORE UPDATE OF enrollment_id, student_id, from_class_id, to_class_id, branch_id, status, new_enrollment_id
+ON enrollment_transfer_requests
+WHEN (SELECT student_id FROM enrollments WHERE id = NEW.enrollment_id) IS NOT NEW.student_id
+ OR (SELECT class_id FROM enrollments WHERE id = NEW.enrollment_id) IS NOT NEW.from_class_id
+ OR (SELECT branch_id FROM enrollments WHERE id = NEW.enrollment_id) IS NOT NEW.branch_id
+ OR (SELECT branch_id FROM classes WHERE id = NEW.to_class_id) IS NOT NEW.branch_id
+ OR (NEW.status = 'pending' AND (SELECT status FROM enrollments WHERE id = NEW.enrollment_id) IS NOT 'active')
+ OR (NEW.status = 'approved' AND (
+      (SELECT student_id FROM enrollments WHERE id = NEW.new_enrollment_id) IS NOT NEW.student_id
+      OR (SELECT class_id FROM enrollments WHERE id = NEW.new_enrollment_id) IS NOT NEW.to_class_id
+      OR (SELECT branch_id FROM enrollments WHERE id = NEW.new_enrollment_id) IS NOT NEW.branch_id
+      OR (SELECT status FROM enrollments WHERE id = NEW.enrollment_id) IS NOT 'transferred'
+    ))
+BEGIN SELECT RAISE(ABORT, 'transfer request scope mismatch'); END;
 
 CREATE TABLE IF NOT EXISTS class_waitlist ( 
   id            TEXT PRIMARY KEY, 
   class_id      TEXT NOT NULL REFERENCES classes(id) ON DELETE CASCADE, 
   student_id    TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE, 
   branch_id     TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT, 
-  position      INTEGER NOT NULL, 
+  position      INTEGER NOT NULL CHECK (typeof(position) = 'integer' AND position >= 1),
   status        TEXT NOT NULL DEFAULT 'waiting' CHECK (status IN ('waiting','offered','converted','expired','cancelled')), 
   notes         TEXT, 
   offered_at    TEXT, 
@@ -1442,6 +1697,58 @@ CREATE INDEX IF NOT EXISTS idx_sessions_linked  ON sessions(linked_session_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_teacher ON sessions(teacher_id, date);
 CREATE INDEX IF NOT EXISTS idx_teacher_sessions_period
 ON sessions(teacher_id, date, status, branch_id);
+
+CREATE TRIGGER IF NOT EXISTS trg_cts_scope_insert
+BEFORE INSERT ON class_teacher_skills
+WHEN (SELECT branch_id FROM classes WHERE id = NEW.class_id) IS NOT NEW.branch_id
+ OR (SELECT branch_id FROM teachers WHERE id = NEW.teacher_id) IS NOT NEW.branch_id
+ OR (SELECT status FROM teachers WHERE id = NEW.teacher_id) <> 'active'
+ OR (NEW.session_id IS NOT NULL AND (
+   (SELECT class_id FROM sessions WHERE id = NEW.session_id) IS NOT NEW.class_id
+   OR (SELECT branch_id FROM sessions WHERE id = NEW.session_id) IS NOT NEW.branch_id
+   OR (NEW.start_date IS NOT NULL AND NEW.start_date > (SELECT date FROM sessions WHERE id = NEW.session_id))
+   OR (NEW.end_date IS NOT NULL AND NEW.end_date < (SELECT date FROM sessions WHERE id = NEW.session_id))
+ ))
+BEGIN SELECT RAISE(ABORT, 'teacher assignment scope mismatch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_cts_scope_update
+BEFORE UPDATE OF class_id, teacher_id, branch_id, session_id, start_date, end_date ON class_teacher_skills
+WHEN (SELECT branch_id FROM classes WHERE id = NEW.class_id) IS NOT NEW.branch_id
+ OR (SELECT branch_id FROM teachers WHERE id = NEW.teacher_id) IS NOT NEW.branch_id
+ OR (NEW.teacher_id IS NOT OLD.teacher_id AND (SELECT status FROM teachers WHERE id = NEW.teacher_id) <> 'active')
+ OR (NEW.session_id IS NOT NULL AND (
+   (SELECT class_id FROM sessions WHERE id = NEW.session_id) IS NOT NEW.class_id
+   OR (SELECT branch_id FROM sessions WHERE id = NEW.session_id) IS NOT NEW.branch_id
+   OR (NEW.start_date IS NOT NULL AND NEW.start_date > (SELECT date FROM sessions WHERE id = NEW.session_id))
+   OR (NEW.end_date IS NOT NULL AND NEW.end_date < (SELECT date FROM sessions WHERE id = NEW.session_id))
+ ))
+BEGIN SELECT RAISE(ABORT, 'teacher assignment scope mismatch'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_cts_skill_limit_insert
+BEFORE INSERT ON class_teacher_skills
+WHEN NEW.assignment_type IN ('primary','assistant')
+ AND NOT EXISTS (SELECT 1 FROM class_teacher_skills WHERE class_id = NEW.class_id AND skill_id = NEW.skill_id AND assignment_type IN ('primary','assistant'))
+ AND (SELECT COUNT(DISTINCT skill_id) FROM class_teacher_skills WHERE class_id = NEW.class_id AND assignment_type IN ('primary','assistant')) >= 3
+BEGIN SELECT RAISE(ABORT, 'class has reached the ongoing skill limit'); END;
+CREATE TRIGGER IF NOT EXISTS trg_cts_skill_limit_update
+BEFORE UPDATE OF class_id, skill_id, assignment_type ON class_teacher_skills
+WHEN NEW.assignment_type IN ('primary','assistant')
+ AND NOT EXISTS (SELECT 1 FROM class_teacher_skills WHERE class_id = NEW.class_id AND skill_id = NEW.skill_id AND assignment_type IN ('primary','assistant') AND id <> OLD.id)
+ AND (SELECT COUNT(DISTINCT skill_id) FROM class_teacher_skills WHERE class_id = NEW.class_id AND assignment_type IN ('primary','assistant') AND id <> OLD.id) >= 3
+BEGIN SELECT RAISE(ABORT, 'class has reached the ongoing skill limit'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_teachers_inactive_work_guard
+BEFORE UPDATE OF status ON teachers
+WHEN NEW.status = 'inactive' AND OLD.status <> 'inactive'
+ AND (
+   EXISTS (SELECT 1 FROM classes c WHERE c.teacher_id = OLD.id AND c.lifecycle_stage NOT IN ('completed','archived','cancelled'))
+   OR EXISTS (
+     SELECT 1 FROM class_teacher_skills cts JOIN classes c ON c.id = cts.class_id
+     WHERE cts.teacher_id = OLD.id AND cts.assignment_type IN ('primary','assistant')
+       AND c.lifecycle_stage NOT IN ('completed','archived','cancelled')
+       AND (cts.end_date IS NULL OR cts.end_date >= date('now'))
+   )
+ )
+BEGIN SELECT RAISE(ABORT, 'teacher has active teaching work'); END;
 
 CREATE TABLE IF NOT EXISTS rosters (
   id                 TEXT PRIMARY KEY,

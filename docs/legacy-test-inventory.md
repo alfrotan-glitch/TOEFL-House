@@ -229,10 +229,27 @@ Seven former WP-05 rows are not whole-package Academic Structure authorities:
 | `teacher-input-error-contract.test.ts` | 17 | Split: evaluation input belongs to WP-05 replacement authority; employee/teacher pay-salary and raw payroll-error contracts remain WP-08. The mixed file is not counted wholesale in either WP-05 core. |
 | `teacher-skill-contract-forensic.test.ts` | 23 | Split: skill workload/security/duplicate behavior belongs to WP-05 replacement authority; compensation behavior remains WP-08 and report projections remain WP-11. The mixed file is not counted wholesale in WP-05 core. |
 
-No legacy behavior is yet marked replaced at this checkpoint. Certification
-requires focused WP-05 authority to replace or explicitly retire every mapped
-core behavior, including the contradictory waitlist and performance-score
-expectations.
+**WP-05 C-2 disposition: REPLACED.** All fifteen mapped suites are rebased under
+`server/src/tests/work-packages/wp05/` as requirement-focused package authority.
+Their 325 mapped runtime cases preserve the behavioral knowledge; fixture writes
+were aligned with the canonical curriculum/lifecycle graph rather than weakening
+storage integrity. One additional regression case proves that the established
+bare unfreeze command closes active freeze history atomically, bringing the
+rebased historical authority to 326 runtime cases. A further active-position regression proves that an offered entry retains its queue identity while later full-class joins append safely, bringing the rebased authority to 327 runtime cases. Two contradictory expectations
+are explicitly retired:
+
+- `teacher-update-validation.test.ts` now proves that generic teacher updates
+  reject every otherwise-valid performance score and preserve the prior value;
+  the evaluation command remains the only score/provenance writer.
+- `transfer-freeze-waitlist-engines.test.ts` now proves that a full class cannot
+  issue an offer, then proves the earliest waiting entry can be offered only
+  after a real seat is released.
+
+`attack.test.ts` adds 17 adversarial cases for the selected defect classes, and
+`academic-prerequisite-integrity.test.ts` adds 4 graph/copy cases. The executable
+WP-05 authority is therefore **17 files / 348 runtime cases**, all passing after
+the release build. The complete clean-data server suite reports exactly 160
+explicitly retired WP-04 placement cases; WP-05 has no skipped authority.
 
 ## WP-06 Academic Delivery
 

@@ -55,7 +55,11 @@ const stmtGetStudentMinimal = db.prepare('SELECT id, full_name, branch_id, gende
 const stmtCheckActiveEnrollmentInClass = db.prepare(
   `SELECT id FROM enrollments WHERE student_id = ? AND class_id = ? AND status = 'active'`
 );
-const stmtCountWaitingForClass = db.prepare(`SELECT COUNT(*) as c FROM class_waitlist WHERE class_id = ? AND status = 'waiting'`);
+const stmtGetNextActivePosition = db.prepare(`
+  SELECT COALESCE(MAX(position), 0) + 1 AS position
+  FROM class_waitlist
+  WHERE class_id = ? AND status IN ('waiting','offered')
+`);
 const stmtGetActiveWaitlistEntry = db.prepare(
   `SELECT id FROM class_waitlist WHERE class_id = ? AND student_id = ? AND status IN ('waiting','offered')`
 );
@@ -65,22 +69,19 @@ const stmtInsertWaitlistEntry = db.prepare(
 );
 const stmtGetWaitlistEntryById = db.prepare('SELECT * FROM class_waitlist WHERE id = ?');
 const stmtListWaitlistForClass = db.prepare('SELECT * FROM class_waitlist WHERE class_id = ? ORDER BY position ASC');
+const stmtGetFirstWaitingEntry = db.prepare(`
+  SELECT id FROM class_waitlist
+  WHERE class_id = ? AND status = 'waiting'
+  ORDER BY position ASC, created_at ASC, id ASC
+  LIMIT 1
+`);
+const stmtCountOfferedEntries = db.prepare(`SELECT COUNT(*) AS c FROM class_waitlist WHERE class_id = ? AND status = 'offered'`);
 const stmtUpdateWaitlistOffered = db.prepare(
   `UPDATE class_waitlist SET status = 'offered', offered_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND status = 'waiting'`
-);
-const stmtUpdateWaitlistConverted = db.prepare(
-  `UPDATE class_waitlist SET status = 'converted', responded_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`
 );
 const stmtUpdateWaitlistCancelled = db.prepare(
   `UPDATE class_waitlist SET status = 'cancelled', responded_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND status IN ('waiting','offered')`
 );
-const stmtInsertSemesterForConversion = db.prepare(
-  `INSERT INTO student_semesters (id, student_id, semester_name, class_id, enroll_date, fee_amount, status) VALUES (?, ?, ?, ?, date('now'), 0, 'active')`
-);
-const stmtGetFutureSessionsForClass = db.prepare(
-  `SELECT id FROM sessions WHERE class_id = ? AND date >= date('now') AND status != 'cancelled'`
-);
-const stmtInsertRosterForConversion = db.prepare('INSERT OR IGNORE INTO rosters (id, session_id, student_id, attendance_status) VALUES (?, ?, ?, \'not_marked\')');
 
 function requireClassForWaitlist(req: import('express').Request, classId: string) {
   const row = stmtGetClassForWaitlist.get(classId) as any;
@@ -140,7 +141,11 @@ waitlistRouter.post('/', requirePermission('Waitlist.Manage'), ah(async (req, re
   const entryId = makeId('wl');
   const user = req.user;
   const createTx = db.transaction(() => {
-    const position = (stmtCountWaitingForClass.get(classId) as { c: number }).c + 1;
+    // Offered entries still own their queue positions until converted or
+    // cancelled. Counting only waiting rows can reuse an offered position and
+    // turn a legitimate join into a storage conflict, so append after the
+    // highest currently active position.
+    const position = (stmtGetNextActivePosition.get(classId) as { position: number }).position;
     const result = stmtInsertWaitlistEntry.run(entryId, classId, studentId, cls.branch_id, position, notes || null, user?.userId || null);
     if (result.changes !== 1) throw new HttpError(409, 'Waitlist entry could not be created.');
     return position;
@@ -160,13 +165,21 @@ waitlistRouter.get('/', requirePermission('Waitlist.View'), ah(async (req, res) 
 /** POST /api/classes/:id/waitlist/:entryId/offer — mark a seat as offered
  *  to this student (a staff action once a seat has actually opened up). */
 waitlistRouter.post('/:entryId/offer', requirePermission('Waitlist.Manage'), authorize('receptionist', 'general_manager', 'head_of_department', 'owner'), ah(async (req, res) => {
-  requireClassForWaitlist(req, req.params.id);
+  const cls = requireClassForWaitlist(req, req.params.id);
   const entry = stmtGetWaitlistEntryById.get(req.params.entryId) as any;
   if (!entry || entry.class_id !== req.params.id) throw new HttpError(404, 'Waitlist entry not found.');
   if (entry.status !== 'waiting') throw new HttpError(409, `Only a 'waiting' entry can be offered a seat (this one is '${entry.status}').`);
 
-  const offered = stmtUpdateWaitlistOffered.run(entry.id);
-  if (offered.changes !== 1) throw new HttpError(409, 'This waitlist entry changed concurrently; reload and try again.');
+  db.transaction(() => {
+    const offeredCount = (stmtCountOfferedEntries.get(cls.id) as { c: number }).c;
+    if (!(cls.capacity > 0) || countActiveStudentsInClass(db, cls.id) + offeredCount >= cls.capacity) {
+      throw new HttpError(409, `Class "${cls.name}" has no open seat to offer.`);
+    }
+    const first = stmtGetFirstWaitingEntry.get(cls.id) as { id: string } | undefined;
+    if (!first || first.id !== entry.id) throw new HttpError(409, 'An earlier waiting entry must be offered first.');
+    const offered = stmtUpdateWaitlistOffered.run(entry.id);
+    if (offered.changes !== 1) throw new HttpError(409, 'This waitlist entry changed concurrently; reload and try again.');
+  })();
   writeAudit(req, `Offered a seat to waitlist entry ${entry.id} for class ${req.params.id}`);
   res.json(mapWaitlistEntry(stmtGetWaitlistEntryById.get(entry.id)));
 }));
@@ -199,30 +212,28 @@ waitlistRouter.post('/:entryId/convert', requirePermission('Waitlist.Manage'), a
 
   const user = req.user;
   const run = db.transaction(() => {
+    if (entry.status === 'waiting') {
+      const first = stmtGetFirstWaitingEntry.get(classId) as { id: string } | undefined;
+      const offeredCount = (stmtCountOfferedEntries.get(classId) as { c: number }).c;
+      if (!first || first.id !== entry.id || offeredCount > 0) {
+        throw new HttpError(409, 'An earlier offered or waiting entry must be processed first.');
+      }
+    }
     const activeEntryUpdate = db.prepare(`UPDATE class_waitlist SET status = 'converted', responded_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND status IN ('waiting','offered')`).run(entry.id);
     if (activeEntryUpdate.changes !== 1) throw new HttpError(409, 'This waitlist entry was already processed by another request.');
     const lockedActiveCount = countActiveStudentsInClass(db, classId);
     if (cls.capacity > 0 && lockedActiveCount >= cls.capacity) throw new HttpError(409, `Class "${cls.name}" is full.`);
-    const enrolled = enrollmentService.enroll({
+    return enrollmentService.enroll({
       studentId: entry.student_id,
       branchId: cls.branch_id,
       classId,
+      semesterName: cls.name || 'Current Semester',
       enrollmentType: 'new',
       startedAt: today(),
       notes: `Converted from class waitlist (entry ${entry.id})`,
       actorUserId: user?.userId,
       actorName: user?.fullName,
-      writeSemester: false,
     });
-
-    stmtInsertSemesterForConversion.run(makeId('ss'), entry.student_id, cls.name || 'Term', classId);
-
-    const futureSessions = stmtGetFutureSessionsForClass.all(classId) as { id: string }[];
-    for (const s of futureSessions) {
-      stmtInsertRosterForConversion.run(makeId('ros'), s.id, entry.student_id);
-    }
-
-    return enrolled;
   });
   const result = run();
 

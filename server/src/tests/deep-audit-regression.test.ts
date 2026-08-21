@@ -96,7 +96,7 @@ describe('User creation via API (RBAC param fix)', () => {
 
 describe('Manual student registration & ID card (simple-payment 10-arg fix)', () => {
   it('registers a student manually with payment (no SQL param error)', async () => {
-    db.prepare(`INSERT OR IGNORE INTO classes (id, name, branch_id, capacity, status, level, fee) VALUES (?, ?, ?, 10, 'active', 'A1', 5000)`)
+    db.prepare(`INSERT OR IGNORE INTO classes (id, name, branch_id, capacity, status, lifecycle_stage, level, fee) VALUES (?, ?, ?, 10, 'active', 'activated', 'A1', 5000)`)
       .run('ar_class', 'Audit Class', BRANCH);
     const res = await supertest(app).post('/api/students/manual').set(authHeader(registrar)).send({
       fullName: 'Manual Student', phone: '0700000123', gender: 'male', branchId: BRANCH, classId: 'ar_class', tuitionAmount: 5000, amountPaidNow: 2000,

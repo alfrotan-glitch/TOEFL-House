@@ -46,11 +46,11 @@ beforeAll(() => {
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(
     BRANCH_ID, 'Audit Branch', 'Test'
   );
-  db.prepare('INSERT OR IGNORE INTO classes (id, name, level, capacity, fee, branch_id, gender_policy, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
-    'cls_audit_1', 'Audit Class A', 'B2', 20, 5000, BRANCH_ID, 'mixed', 'active'
+  db.prepare('INSERT OR IGNORE INTO classes (id, name, level, capacity, fee, branch_id, gender_policy, status, lifecycle_stage) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+    'cls_audit_1', 'Audit Class A', 'B2', 20, 5000, BRANCH_ID, 'mixed', 'active', 'activated'
   );
-  db.prepare('INSERT OR IGNORE INTO classes (id, name, level, capacity, fee, branch_id, gender_policy, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
-    'cls_audit_2', 'Audit Class B', 'B1', 20, 3000, BRANCH_ID, 'mixed', 'active'
+  db.prepare('INSERT OR IGNORE INTO classes (id, name, level, capacity, fee, branch_id, gender_policy, status, lifecycle_stage) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+    'cls_audit_2', 'Audit Class B', 'B1', 20, 3000, BRANCH_ID, 'mixed', 'active', 'activated'
   );
   // Seed the student_code_counter to a known value so tests are deterministic
   db.prepare("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('student_code_counter', '5000')").run();

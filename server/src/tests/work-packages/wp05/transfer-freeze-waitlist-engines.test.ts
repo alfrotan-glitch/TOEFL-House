@@ -3,21 +3,21 @@
  * ============================================================================
  * Mirrors the app/RBAC-bootstrap pattern established in Phases 1-8.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { today, id as makeId } from '../utils/ids.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import enrollmentRouter from '../routes/enrollment.routes.js';
-import classesRouter from '../routes/classes.routes.js';
-import waitlistRouter from '../routes/waitlist.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { getClassLifecycleService } from '../core/academic/class-lifecycle-service.js';
-import { getEnrollmentService } from '../core/academic/enrollment-service.js';
-import { createRule } from '../core/configuration/rule-engine.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { today, id as makeId } from '../../../utils/ids.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import enrollmentRouter from '../../../routes/enrollment.routes.js';
+import classesRouter from '../../../routes/classes.routes.js';
+import waitlistRouter from '../../../routes/waitlist.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { getClassLifecycleService } from '../../../core/academic/class-lifecycle-service.js';
+import { getEnrollmentService } from '../../../core/academic/enrollment-service.js';
+import { createRule } from '../../../core/configuration/rule-engine.js';
 
 const BRANCH_A = 'p9_branch_a';
 const BRANCH_B = 'p9_branch_b';
@@ -163,6 +163,27 @@ describe('Freeze Engine', () => {
     expect(listRes.body[0].actualEndDate).toBeTruthy();
   });
 
+  it('the legacy unfreeze command closes active freeze history atomically', async () => {
+    const classId = await createActivatedClass('Legacy Unfreeze Class');
+    const studentId = seedStudent();
+    const enrollmentId = enrollActive(studentId, classId);
+    const freezeRes = await supertest(app)
+      .post(`/api/enrollments/${enrollmentId}/freeze-requests`)
+      .set(authHeader(manager))
+      .send({ reason: 'Short interruption', days: 2 });
+    expect(freezeRes.status).toBe(201);
+
+    const unfreezeRes = await supertest(app)
+      .post(`/api/enrollments/${enrollmentId}/unfreeze`)
+      .set(authHeader(manager))
+      .send({ reason: 'Returned' });
+    expect(unfreezeRes.status).toBe(200);
+    expect(unfreezeRes.body.enrollment.status).toBe('active');
+    const history = db.prepare('SELECT status, actual_end_date FROM enrollment_freezes WHERE enrollment_id=?').get(enrollmentId) as any;
+    expect(history.status).toBe('completed');
+    expect(history.actual_end_date).toBe(today());
+  });
+
   it('requires a reason to request a freeze', async () => {
     const classId = await createActivatedClass('Freeze Class E');
     const studentId = seedStudent();
@@ -241,6 +262,12 @@ describe('Transfer Engine', () => {
     const stillEnrolled = enrollmentService.getById(enrollmentId);
     expect(stillEnrolled.status).toBe('active');
     expect(stillEnrolled.class_id).toBe(fromRes.body.id);
+
+    const duplicatePending = await supertest(app)
+      .post(`/api/enrollments/${enrollmentId}/transfer-requests`)
+      .set(authHeader(strictManager))
+      .send({ toClassId: toRes.body.id, reason: 'Duplicate pending request' });
+    expect(duplicatePending.status).toBe(409);
 
     // Approving it now executes the transfer.
     const approveRes = await supertest(app)
@@ -352,6 +379,36 @@ describe('Waitlist Engine', () => {
     expect(listRes.body.map((e: any) => e.studentId)).toEqual([s1, s2]);
   });
 
+  it('appends after offered and waiting positions without reusing an active queue identity', async () => {
+    const classId = await createActivatedClass('Waitlist Active Position Class', 1);
+    const originalFiller = seedStudent();
+    enrollActive(originalFiller, classId);
+
+    const first = seedStudent();
+    const second = seedStudent();
+    const firstJoin = await supertest(app).post(`/api/classes/${classId}/waitlist`).set(authHeader(manager)).send({ studentId: first });
+    const secondJoin = await supertest(app).post(`/api/classes/${classId}/waitlist`).set(authHeader(manager)).send({ studentId: second });
+    expect(firstJoin.body.position).toBe(1);
+    expect(secondJoin.body.position).toBe(2);
+
+    db.prepare("UPDATE enrollments SET status = 'completed' WHERE student_id = ? AND class_id = ?").run(originalFiller, classId);
+    const offered = await supertest(app)
+      .post(`/api/classes/${classId}/waitlist/${firstJoin.body.id}/offer`)
+      .set(authHeader(manager))
+      .send({});
+    expect(offered.status).toBe(200);
+
+    // A separate admission consumes the opening before the offer is converted,
+    // making the class full and therefore eligible for another waitlist join.
+    enrollActive(seedStudent(), classId);
+    const thirdJoin = await supertest(app)
+      .post(`/api/classes/${classId}/waitlist`)
+      .set(authHeader(manager))
+      .send({ studentId: seedStudent() });
+    expect(thirdJoin.status).toBe(201);
+    expect(thirdJoin.body.position).toBe(3);
+  });
+
   it('rejects a duplicate join for a student already waiting', async () => {
     const classId = await createActivatedClass('Waitlist Dup Class', 1);
     const fillerStudent = seedStudent();
@@ -364,7 +421,7 @@ describe('Waitlist Engine', () => {
     expect(dupRes.status).toBe(409);
   });
 
-  it('offer transitions an entry to offered', async () => {
+  it('retires full-class offers and transitions the FIFO entry only after a seat is freed', async () => {
     const classId = await createActivatedClass('Waitlist Offer Class', 1);
     const fillerStudent = seedStudent();
     enrollActive(fillerStudent, classId);
@@ -372,6 +429,10 @@ describe('Waitlist Engine', () => {
 
     const s1 = seedStudent();
     const joinRes = await supertest(app).post(`/api/classes/${classId}/waitlist`).set(authHeader(manager)).send({ studentId: s1 });
+    const fullOfferRes = await supertest(app).post(`/api/classes/${classId}/waitlist/${joinRes.body.id}/offer`).set(authHeader(manager)).send({});
+    expect(fullOfferRes.status).toBe(409);
+
+    db.prepare("UPDATE enrollments SET status = 'completed' WHERE student_id = ? AND class_id = ?").run(fillerStudent, classId);
     const offerRes = await supertest(app).post(`/api/classes/${classId}/waitlist/${joinRes.body.id}/offer`).set(authHeader(manager)).send({});
     expect(offerRes.status).toBe(200);
     expect(offerRes.body.status).toBe('offered');

@@ -80,16 +80,14 @@ export class EnrollmentService {
   private stmtInsertInvoice: Database.Statement;
   private stmtInsertInvoiceItem: Database.Statement;
   
-  private stmtGetActiveEnrollment: Database.Statement;
   private stmtGetActiveEnrollments: Database.Statement;
-  private stmtGetLatestEnrollment: Database.Statement;
   private stmtGetSuspendedEnrollments: Database.Statement;
   private stmtCompleteEnrollment: Database.Statement;
   private stmtTransferOutEnrollment: Database.Statement;
   private stmtInsertNewEnrollment: Database.Statement;
   private stmtInsertTransferEvent: Database.Statement;
   private stmtInsertEnrollEvent: Database.Statement;
-  private stmtCompleteActiveSemesters: Database.Statement;
+  private stmtCompleteSourceSemester: Database.Statement;
   private stmtInsertNewSemester: Database.Statement;
   private stmtUpdateStudentCurrentClass: Database.Statement | null;
   private stmtDeleteFutureRosters: Database.Statement;
@@ -143,26 +141,24 @@ export class EnrollmentService {
       `INSERT INTO invoice_items (id, invoice_id, description, quantity, unit_price, amount) VALUES (?, ?, ?, 1, ?, ?)`
     );
 
-    this.stmtGetActiveEnrollment = db.prepare(`SELECT * FROM enrollments WHERE student_id = ? AND status = 'active' AND enrollment_type <> 'extra' ORDER BY started_at DESC, created_at DESC, id DESC LIMIT 1`);
     this.stmtGetActiveEnrollments = db.prepare(
       `SELECT * FROM enrollments WHERE student_id = ? AND status = 'active' ORDER BY started_at ASC, created_at ASC, id ASC`,
     );
-    // Used only to explain *why* a transfer was refused (audit E-1): reporting
-    // the most recent enrollment's status turns an opaque 409 into an
-    // actionable message.
-    this.stmtGetLatestEnrollment = db.prepare(`SELECT * FROM enrollments WHERE student_id = ? ORDER BY created_at DESC, started_at DESC LIMIT 1`);
     this.stmtGetSuspendedEnrollments = db.prepare(
       `SELECT * FROM enrollments WHERE student_id = ? AND status = 'suspended' ORDER BY started_at ASC, created_at ASC, id ASC`,
     );
     this.stmtCompleteEnrollment = db.prepare(`UPDATE enrollments SET status = 'completed', ended_at = datetime('now'), updated_at = datetime('now'), notes = COALESCE(notes, '') || ? WHERE id = ?`);
-    this.stmtTransferOutEnrollment = db.prepare(`UPDATE enrollments SET status = 'transferred', ended_at = datetime('now'), updated_at = datetime('now'), notes = COALESCE(notes, '') || ? WHERE id = ?`);
+    this.stmtTransferOutEnrollment = db.prepare(`UPDATE enrollments SET status = 'transferred', ended_at = datetime('now'), updated_at = datetime('now'), notes = COALESCE(notes, '') || ? WHERE id = ? AND status = 'active'`);
     this.stmtInsertNewEnrollment = db.prepare(
       `INSERT INTO enrollments (id, student_id, program_id, program_name, semester_name, level_code, class_id, branch_id, enrollment_type, status, started_at, notes, program_version_id, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new', 'active', datetime('now'), ?, ?, datetime('now'), datetime('now'))`
     );
     this.stmtInsertTransferEvent = db.prepare(`INSERT INTO enrollment_events (id, enrollment_id, student_id, event_type, from_class_id, to_class_id, notes, actor_user_id) VALUES (?, ?, ?, 'transferred', ?, ?, ?, ?)`);
     this.stmtInsertEnrollEvent = db.prepare(`INSERT INTO enrollment_events (id, enrollment_id, student_id, event_type, from_class_id, to_class_id, notes, actor_user_id) VALUES (?, ?, ?, 'enrolled', ?, ?, ?, ?)`);
-    this.stmtCompleteActiveSemesters = db.prepare(`UPDATE student_semesters SET status = 'completed' WHERE student_id = ? AND status = 'active'`);
+    this.stmtCompleteSourceSemester = db.prepare(`
+      UPDATE student_semesters SET status = 'completed'
+      WHERE student_id = ? AND class_id IS ? AND semester_name = ? AND status = 'active'
+    `);
     this.stmtInsertNewSemester = db.prepare(`INSERT INTO student_semesters (id, student_id, semester_name, class_id, enroll_date, fee_amount, status) VALUES (?, ?, ?, ?, date('now'), 0, 'active')`);
     // `students.current_class_id` is a denormalized convenience column that
     // has never existed in this schema (confirmed: absent from schema.sql
@@ -426,6 +422,10 @@ export class EnrollmentService {
 
     const enrollmentId = makeId('enr');
     const skillsJson = input.skillsFocus ? JSON.stringify(input.skillsFocus) : null;
+    const initialStatus: EnrollmentStatus = input.initialStatus || 'active';
+    const semesterName = input.classId && initialStatus === 'active'
+      ? (input.semesterName || 'Current Semester')
+      : (input.semesterName ?? null);
 
     const run = this.db.transaction(() => {
       if (input.classId) {
@@ -441,9 +441,8 @@ export class EnrollmentService {
       });
       const snapshotJson = JSON.stringify(snapshot);
 
-      const initialStatus: EnrollmentStatus = input.initialStatus || 'active';
       this.stmtInsertEnrollment.run(
-        enrollmentId, input.studentId, programId, programName, input.semesterName ?? null,
+        enrollmentId, input.studentId, programId, programName, semesterName,
         levelCode, input.classId ?? null, input.branchId, enrollmentType, initialStatus, skillsJson,
         input.startedAt || new Date().toISOString(), input.notes ?? null, programVersionId, snapshotJson
       );
@@ -455,7 +454,7 @@ export class EnrollmentService {
       // conversion, waitlist conversion and manual student registration all
       // rely on this.
       if (input.classId && initialStatus === 'active' && input.writeSemester !== false) {
-        this.stmtInsertNewSemester.run(makeId('ss'), input.studentId, input.semesterName || 'Current Semester', input.classId);
+        this.stmtInsertNewSemester.run(makeId('ss'), input.studentId, semesterName, input.classId);
       }
 
       const eventType = enrollmentType === 'repeat' || enrollmentType === 'partial_repeat'
@@ -560,86 +559,71 @@ export class EnrollmentService {
    * route, the transfer-request approval workflow, and any future writer —
    * gets the same rule.
    */
-  transfer(input: { studentId: string; toClassId: string; notes?: string | null; actorUserId?: string | null; }) {
-    const student = this.stmtGetStudent.get(input.studentId) as { id: string; branch_id: string; status: string; gender: string } | undefined;
+  transfer(input: { sourceEnrollmentId: string; toClassId: string; notes?: string | null; actorUserId?: string | null; }) {
+    const source = this.stmtGetEnrollmentById.get(input.sourceEnrollmentId) as any;
+    if (!source) throw new HttpError(404, 'Source enrollment not found.');
+    if (source.status !== 'active') {
+      throw new HttpError(409, `Only an active source enrollment can be transferred (this one is '${source.status}').`);
+    }
+
+    const student = this.stmtGetStudent.get(source.student_id) as { id: string; branch_id: string; status: string; gender: string } | undefined;
     if (!student) throw new HttpError(404, 'Student not found.');
     if (student.status === 'suspended') throw new HttpError(409, 'Suspended students must be resumed before transfer.');
-    const active = this.stmtGetActiveEnrollment.get(input.studentId) as any;
     const toClass = this.stmtGetClass.get(input.toClassId) as any;
     if (!toClass) throw new HttpError(404, 'Target class not found.');
     if (toClass.branch_id !== student.branch_id) throw new HttpError(400, 'Target class belongs to another branch.');
     if (toClass.status && toClass.status !== 'active') throw new HttpError(400, 'Target class is not active.');
 
-    // ── A TRANSFER REQUIRES AN ACTIVE SOURCE ENROLLMENT (audit E-1) ──
-    // Without this, the destination INSERT below runs for a student who has
-    // nothing to transfer, silently manufacturing an enrollment that never
-    // passed the admission gates.
-    if (!active) {
-      const latest = this.stmtGetLatestEnrollment.get(input.studentId) as { status: string } | undefined;
-      throw new HttpError(
-        409,
-        latest
-          ? `This student has no active enrollment to transfer (most recent enrollment is '${latest.status}'). ` +
-            'Enroll the student instead — transferring cannot revive a closed enrollment.'
-          : 'This student has no enrollment to transfer. Enroll the student first.',
-      );
-    }
-
-    // The outgoing enrollment moves active → 'transferred'. Route it through
-    // the lifecycle authority so transfer can never perform a state change the
-    // state machine forbids.
-    assertEnrollmentTransition(active.status as EnrollmentStatus, 'transferred');
-
-    const fromClassId = active?.class_id || null;
+    assertEnrollmentTransition(source.status as EnrollmentStatus, 'transferred');
+    const fromClassId = source.class_id || null;
     if (fromClassId === input.toClassId) throw new HttpError(400, 'Student is already in this class.');
 
-    // Destination admission gates — the same rules `enroll()` applies, so the
-    // two paths cannot disagree about who may occupy a seat.
     assertClassGenderAllows(toClass, student.gender);
-    assertPlacementEligibleForClass(this.db, input.studentId, input.toClassId, student.branch_id);
-    assertNotAlreadySeatedInClass(this.db, input.studentId, input.toClassId);
+    assertPlacementEligibleForClass(this.db, source.student_id, input.toClassId, student.branch_id);
+    assertNotAlreadySeatedInClass(this.db, source.student_id, input.toClassId);
 
     const newEnrollmentId = makeId('enr');
+    const semesterName = source.semester_name || 'Current Semester';
 
     this.db.transaction(() => {
+      const lockedSource = this.stmtGetEnrollmentById.get(input.sourceEnrollmentId) as any;
+      if (!lockedSource || lockedSource.status !== 'active') {
+        throw new HttpError(409, 'Source enrollment changed before the transfer could be committed.');
+      }
       const currentTargetCount = countActiveStudentsInClass(this.db, input.toClassId);
       const targetCapacity = Number(toClass.capacity ?? 0);
       if (targetCapacity > 0 && currentTargetCount >= targetCapacity) throw new HttpError(409, 'Target class is full.');
+      assertNotAlreadySeatedInClass(this.db, source.student_id, input.toClassId);
 
-      // Re-checked inside the transaction: the pre-flight guard above runs
-      // before the write lock, so the duplicate rule is confirmed here where
-      // it is race-safe (mirrors how capacity is handled).
-      assertNotAlreadySeatedInClass(this.db, input.studentId, input.toClassId);
-
-      // `active` is guaranteed non-null: a transfer without an active source
-      // enrollment is rejected before the transaction opens (audit E-1).
-      this.stmtTransferOutEnrollment.run(input.notes ? `\n[transfer] ${input.notes}` : '\n[transfer]', active.id);
-      this.stmtInsertTransferEvent.run(makeId('eev'), active.id, input.studentId, fromClassId, input.toClassId, input.notes || null, input.actorUserId || null);
+      const moved = this.stmtTransferOutEnrollment.run(
+        input.notes ? `\n[transfer] ${input.notes}` : '\n[transfer]',
+        source.id,
+      );
+      if (moved.changes !== 1) throw new HttpError(409, 'Source enrollment changed before the transfer could be committed.');
+      this.stmtInsertTransferEvent.run(makeId('eev'), source.id, source.student_id, fromClassId, input.toClassId, input.notes || null, input.actorUserId || null);
 
       this.stmtInsertNewEnrollment.run(
-        newEnrollmentId, input.studentId, active?.program_id || toClass.program_id || null,
-        active?.program_name || null, active?.semester_name || null, active?.level_code || toClass.level || null,
-        input.toClassId, toClass.branch_id, input.notes || null, active?.program_version_id || null
+        newEnrollmentId, source.student_id, source.program_id || toClass.program_id || null,
+        source.program_name || null, semesterName, source.level_code || toClass.level || null,
+        input.toClassId, toClass.branch_id, input.notes || null, source.program_version_id || null,
       );
 
-      this.stmtCompleteActiveSemesters.run(input.studentId);
-      this.stmtInsertNewSemester.run(makeId('ss'), input.studentId, active?.semester_name || toClass.name || 'Term', input.toClassId);
-
-      try { this.stmtUpdateStudentCurrentClass?.run(input.toClassId, input.studentId); } catch { /* optional column */ }
-
-      if (fromClassId) {
-        this.stmtDeleteFutureRosters.run(input.studentId, fromClassId);
+      const semester = this.stmtCompleteSourceSemester.run(source.student_id, fromClassId, semesterName);
+      if (semester.changes !== 1) {
+        throw new HttpError(409, 'The source enrollment semester projection is missing or no longer active.');
       }
+      this.stmtInsertNewSemester.run(makeId('ss'), source.student_id, semesterName, input.toClassId);
+
+      try { this.stmtUpdateStudentCurrentClass?.run(input.toClassId, source.student_id); } catch { /* optional column */ }
+      if (fromClassId) this.stmtDeleteFutureRosters.run(source.student_id, fromClassId);
 
       const futureSessions = this.stmtGetFutureSessions.all(input.toClassId) as { id: string }[];
-      for (const s of futureSessions) {
-        this.stmtInsertRoster.run(makeId('ros'), s.id, input.studentId);
-      }
+      for (const s of futureSessions) this.stmtInsertRoster.run(makeId('ros'), s.id, source.student_id);
 
-      this.stmtInsertEnrollEvent.run(makeId('eev'), newEnrollmentId, input.studentId, fromClassId, input.toClassId, 'transfer target', input.actorUserId || null);
+      this.stmtInsertEnrollEvent.run(makeId('eev'), newEnrollmentId, source.student_id, fromClassId, input.toClassId, 'transfer target', input.actorUserId || null);
     })();
 
-    return { enrollmentId: newEnrollmentId, fromClassId, toClassId: input.toClassId };
+    return { enrollmentId: newEnrollmentId, sourceEnrollmentId: source.id, fromClassId, toClassId: input.toClassId };
   }
 
   suspend(input: { studentId: string; notes?: string | null; actorUserId?: string | null; actorName?: string | null }) {

@@ -10,16 +10,16 @@
  *    must never be stored as a real evaluation).
  * 4. The evaluation history is traceable (score + date + notes).
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { today } from '../utils/ids.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { teachersRouter } from '../routes/teachers.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { today } from '../../../utils/ids.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { teachersRouter } from '../../../routes/teachers.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
 
 const BRANCH = 'eval_regression_branch';
 
@@ -80,18 +80,30 @@ describe('Teacher evaluation integrity', () => {
     expect(history).toHaveLength(1);
     expect(Number(history[0].score)).toBe(85);
     expect(history[0].notes).toContain('classroom');
+
+    // Direct writers cannot bypass the evaluation command with a score that
+    // has no matching provenance row.
+    expect(() => db.prepare('UPDATE teachers SET performance_score = 86 WHERE id = ?').run(created.body.id))
+      .toThrow(/evaluation provenance/i);
+    expect(Number((db.prepare('SELECT performance_score FROM teachers WHERE id = ?').get(created.body.id) as any).performance_score)).toBe(85);
   });
 
-  it('rejects zero / negative / out-of-range evaluations', async () => {
+  it('parses decimal scores and rejects coerced or out-of-range evaluations', async () => {
     const created = await supertest(app).post('/api/teachers').set(authHeader(manager)).send({
       fullName: 'Guard Teacher', phone: '0700000777', baseSalary: 12000, salaryType: 'fixed', contractType: 'monthly', branchId: BRANCH,
     });
-    for (const score of [0, -5, 101]) {
+    for (const score of [0, -5, 101, true, '0x10', 'abc']) {
       const res = await supertest(app).post(`/api/teachers/${created.body.id}/evaluation`).set(authHeader(manager)).send({ score, notes: 'x' });
       expect(res.status).toBe(400);
     }
+    const parsed = await supertest(app)
+      .post(`/api/teachers/${created.body.id}/evaluation`)
+      .set(authHeader(manager))
+      .send({ score: '75', notes: 'valid decimal string' });
+    expect(parsed.status).toBe(201);
+    expect(parsed.body.score).toBe(75);
     const row = db.prepare('SELECT performance_score FROM teachers WHERE id = ?').get(created.body.id) as any;
-    expect(Number(row.performance_score)).toBe(0);
+    expect(Number(row.performance_score)).toBe(75);
   });
 
   it('rejects non-object criteria', async () => {
@@ -100,5 +112,11 @@ describe('Teacher evaluation integrity', () => {
     });
     const res = await supertest(app).post(`/api/teachers/${created.body.id}/evaluation`).set(authHeader(manager)).send({ score: 70, criteria: 'not-an-object' });
     expect(res.status).toBe(400);
+
+    const insert = db.prepare(`INSERT INTO teacher_evaluations
+      (id,teacher_id,evaluator_id,date,score,criteria) VALUES (?,?,?,?,?,?)`);
+    expect(() => insert.run('eval_zero_direct', created.body.id, manager.userId, today(), 0, '{}')).toThrow();
+    expect(() => insert.run('eval_array_direct', created.body.id, manager.userId, today(), 70, '[]')).toThrow();
+    expect(() => insert.run('eval_date_direct', created.body.id, manager.userId, 'not-a-date', 70, '{}')).toThrow();
   });
 });

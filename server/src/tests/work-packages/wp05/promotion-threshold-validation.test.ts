@@ -41,17 +41,17 @@
  * via its own 0..100 check, and rejecting them here would invent a business
  * rule this audit has no authority to introduce. See the report's policy note.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { resolvePromotionCriteria } from '../core/academic/promotion-engine.js';
-import academicRouter from '../routes/academic.routes.js';
-import catalogRouter from '../routes/catalog.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { resolvePromotionCriteria } from '../../../core/academic/promotion-engine.js';
+import academicRouter from '../../../routes/academic.routes.js';
+import catalogRouter from '../../../routes/catalog.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
 
 const BRANCH = 'pth_branch';
 const PROGRAM = 'pth_program';
@@ -278,8 +278,8 @@ describe('ACFG-1 · the promotion authority sees only valid thresholds', () => {
     const level = seedLevelIn(pv, 72);
     const cls = `pth_cls_${++seq}`;
     db.prepare(
-      `INSERT INTO classes (id, name, branch_id, capacity, status, level, fee, program_id, level_id)
-       VALUES (?, ?, ?, 30, 'active', 'A1', 1000, ?, ?)`,
+      `INSERT INTO classes (id, name, branch_id, capacity, status, lifecycle_stage, level, fee, program_id, level_id)
+       VALUES (?, ?, ?, 30, 'active', 'activated', 'A1', 1000, ?, ?)`,
     ).run(cls, `PTH Class ${seq}`, BRANCH, PROGRAM, level);
 
     // resolvePromotionCriteria takes the class ROW, not an id.

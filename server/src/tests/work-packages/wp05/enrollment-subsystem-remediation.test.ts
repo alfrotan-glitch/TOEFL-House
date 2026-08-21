@@ -24,21 +24,21 @@
  * directly (e.g. forcing an enrollment to 'pending'), never to fake a result
  * the production code is supposed to produce.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { today } from '../utils/ids.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { studentsRouter } from '../routes/students.routes.js';
-import { journeyRouter } from '../routes/journey.routes.js';
-import classesRouter from '../routes/classes.routes.js';
-import { enrollmentRouter } from '../routes/enrollment.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { getEnrollmentService } from '../core/academic/enrollment-service.js';
-import { ACTIVE_ENROLLMENT_STATUSES } from '../core/academic/class-capacity.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { today } from '../../../utils/ids.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { studentsRouter } from '../../../routes/students.routes.js';
+import { journeyRouter } from '../../../routes/journey.routes.js';
+import classesRouter from '../../../routes/classes.routes.js';
+import { enrollmentRouter } from '../../../routes/enrollment.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { getEnrollmentService } from '../../../core/academic/enrollment-service.js';
+import { ACTIVE_ENROLLMENT_STATUSES } from '../../../core/academic/class-capacity.js';
 
 const BRANCH = 'enr_rem_branch';
 const OTHER_BRANCH = 'enr_rem_branch_b';
@@ -82,11 +82,13 @@ function makeClass(
   capacity: number,
   opts: { gender?: 'mixed' | 'female' | 'male'; branch?: string; status?: string } = {},
 ) {
+  const status = opts.status || 'active';
+  const lifecycleStage = status === 'completed' ? 'completed' : 'activated';
   db.prepare(
     `INSERT OR REPLACE INTO classes (id, name, branch_id, capacity, min_viable_size, status,
        lifecycle_stage, level, fee, gender_policy, start_date)
-     VALUES (?, ?, ?, ?, 1, ?, 'activated', 'A1', 5000, ?, ?)`
-  ).run(cid, `Class ${cid}`, opts.branch || BRANCH, capacity, opts.status || 'active', opts.gender || 'mixed', today());
+     VALUES (?, ?, ?, ?, 1, ?, ?, 'A1', 5000, ?, ?)`
+  ).run(cid, `Class ${cid}`, opts.branch || BRANCH, capacity, status, lifecycleStage, opts.gender || 'mixed', today());
   db.prepare('DELETE FROM enrollments WHERE class_id = ?').run(cid);
 }
 function seatRows(studentId: string, classId: string): number {
@@ -312,7 +314,7 @@ describe('E-1 — transfer requires a valid active source enrollment', () => {
 
     // Cleanup so the gated program cannot leak into later fixtures.
     db.prepare("DELETE FROM placement_assessment_profiles WHERE id = 'e1_pap'").run();
-    db.prepare("UPDATE classes SET level_id = NULL WHERE id = 'e1_pl_dst'").run();
+    db.prepare("UPDATE classes SET level_id = NULL, program_id = NULL WHERE id = 'e1_pl_dst'").run();
   });
 
   it('refuses a transfer into a class where the student already holds a seat', async () => {
@@ -639,7 +641,7 @@ describe('E-4 — enrollment error contract', () => {
   it('service-layer validation throws typed errors carrying a 4xx status', () => {
     const svc = getEnrollmentService(db);
     makeClass('e4_direct', 10);
-    expect(() => svc.transfer({ studentId: 'nonexistent_student', toClassId: 'e4_direct' }))
+    expect(() => svc.transfer({ sourceEnrollmentId: 'nonexistent_enrollment', toClassId: 'e4_direct' }))
       .toThrow(expect.objectContaining({ status: 404 }));
   });
 
@@ -647,10 +649,10 @@ describe('E-4 — enrollment error contract', () => {
     const svc = getEnrollmentService(db);
     // A genuinely broken call must surface as a server-side fault, not be
     // silently reclassified as client error by a blanket catch.
-    expect(() => svc.transfer({ studentId: null as unknown as string, toClassId: null as unknown as string }))
+    expect(() => svc.transfer({ sourceEnrollmentId: null as unknown as string, toClassId: null as unknown as string }))
       .toThrow();
     const thrown = (() => {
-      try { svc.transfer({ studentId: null as unknown as string, toClassId: null as unknown as string }); }
+      try { svc.transfer({ sourceEnrollmentId: null as unknown as string, toClassId: null as unknown as string }); }
       catch (e) { return e as { status?: number }; }
     })();
     // Either untyped (→ 500 by the error handler) or an explicit 5xx; it must
@@ -884,7 +886,7 @@ describe('C-1 — dropped/withdrawn enrollments close their semester projection'
   });
 
   it('JourneyEngine owns no enrollment-INSERT authority (9)', async () => {
-    const engine = (await import('../core/journey/journey-engine.js')).getJourneyEngine(db);
+    const engine = (await import('../../../core/journey/journey-engine.js')).getJourneyEngine(db);
     // The unguarded raw-INSERT path was removed; the journey layer records
     // facts only. If this ever returns a function again, a shadow enrollment
     // writer has been reintroduced.

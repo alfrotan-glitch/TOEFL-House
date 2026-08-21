@@ -23,8 +23,8 @@ beforeAll(() => {
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(
     BRANCH_ID, 'Extended Test Branch', 'Test'
   );
-  db.prepare('INSERT OR IGNORE INTO classes (id, name, level, capacity, fee, branch_id, gender_policy, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
-    'cls_ext_1', 'Extended Class A', 'B2', 30, 5000, BRANCH_ID, 'mixed', 'active'
+  db.prepare('INSERT OR IGNORE INTO classes (id, name, level, capacity, fee, branch_id, gender_policy, status, lifecycle_stage) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+    'cls_ext_1', 'Extended Class A', 'B2', 30, 5000, BRANCH_ID, 'mixed', 'active', 'activated'
   );
   db.prepare("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('student_code_counter', '20000')").run();
   db.prepare("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('receipt_counter', '20000')").run();

@@ -50,11 +50,11 @@ function seedPrograms() {
   db.prepare(`INSERT OR IGNORE INTO levels (id,program_id,name,"order",program_version_id)
               VALUES ('vux_lvl','vux_prog','Level 1',1,'vux_pv')`).run();
   // Class governed by a placement-REQUIRED program version.
-  db.prepare(`INSERT OR IGNORE INTO classes (id,name,level,branch_id,status,capacity,fee,program_id,level_id,gender_policy)
-              VALUES ('vux_cls','UX Class','Level 1',?, 'active',50,6000,'vux_prog','vux_lvl','mixed')`).run(BRANCH_A);
+  db.prepare(`INSERT OR IGNORE INTO classes (id,name,level,branch_id,status,lifecycle_stage,capacity,fee,program_id,level_id,gender_policy)
+              VALUES ('vux_cls','UX Class','Level 1',?, 'active','activated',50,6000,'vux_prog','vux_lvl','mixed')`).run(BRANCH_A);
   // Class with no level → governed by no placement policy.
-  db.prepare(`INSERT OR IGNORE INTO classes (id,name,level,branch_id,status,capacity,fee,gender_policy)
-              VALUES ('vux_open','UX Open Class','Open',?, 'active',50,6000,'mixed')`).run(BRANCH_A);
+  db.prepare(`INSERT OR IGNORE INTO classes (id,name,level,branch_id,status,lifecycle_stage,capacity,fee,gender_policy)
+              VALUES ('vux_open','UX Open Class','Open',?, 'active','activated',50,6000,'mixed')`).run(BRANCH_A);
   db.prepare(`INSERT OR IGNORE INTO placement_assessment_profiles
       (id, program_version_id, branch_id, components_json, scoring_model, allow_retake,
        pass_score, requirement_mode, first_level_exempt, max_attempts)
@@ -406,8 +406,8 @@ describe('UX-3 — conversion eligibility can be checked without attempting a wr
   });
 
   it('reports an inactive class as blocked', async () => {
-    db.prepare(`INSERT OR REPLACE INTO classes (id,name,level,branch_id,status,capacity,fee,gender_policy)
-                VALUES ('vux_dead','Dead Class','Open',?, 'cancelled',50,6000,'mixed')`).run(BRANCH_A);
+    db.prepare(`INSERT OR REPLACE INTO classes (id,name,level,branch_id,status,lifecycle_stage,capacity,fee,gender_policy)
+                VALUES ('vux_dead','Dead Class','Open',?, 'cancelled','cancelled',50,6000,'mixed')`).run(BRANCH_A);
     const res = await supertest(app)
       .get('/api/visitors/vux_vE/conversion-eligibility?classId=vux_dead')
       .set(authHeader(registrarA));

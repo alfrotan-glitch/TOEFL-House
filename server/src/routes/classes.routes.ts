@@ -1,13 +1,14 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { parsePagination as parsePaginationShared } from '../utils/pagination.js';
-import { assertTextLengths, TEXT_LIMITS } from '../utils/textInput.js';
+import { requiredText, TEXT_LIMITS } from '../utils/textInput.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { assertClassAccess, isClassTeacherScoped } from '../core/rbac/abac.js';
 import { writeAudit } from '../middleware/audit.js';
 import { assertMoney, assertSeatCount } from '../utils/money.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
+import { assertDateRange, assertOptionalIsoDate } from '../utils/isoDate.js';
 import { getJourneyEngine } from '../core/journey/journey-engine.js';
 import { JourneyEventType } from '../core/journey/event-types.js';
 import { getClassLifecycleService } from '../core/academic/class-lifecycle-service.js';
@@ -125,7 +126,12 @@ const stmtGetSlotConflicts = db.prepare(`
     AND room_id = ?
 `);
 
-const stmtGetLevelById = db.prepare('SELECT * FROM levels WHERE id = ?');
+const stmtGetLevelById = db.prepare(`
+  SELECT l.*, p.branch_id AS program_branch_id, p.is_active AS program_is_active
+  FROM levels l
+  JOIN programs p ON p.id = l.program_id
+  WHERE l.id = ?
+`);
 const stmtGetLevelFee = db.prepare('SELECT fee FROM level_branch_fees WHERE level_id = ? AND branch_id = ?');
 const stmtGetTimeSlot = db.prepare('SELECT * FROM time_slots WHERE id = ? AND is_active = 1');
 const stmtGetRoom = db.prepare('SELECT * FROM rooms WHERE id = ? AND is_active = 1');
@@ -441,12 +447,10 @@ classesRouter.post(
   requirePermission('Class.Create'),
   ah(async (req, res) => {
     const {
-      name, teacherId, level, levelId, programId, capacity, scheduleTime, startDate, endDate,
+      name, teacherId, level, levelId, programId: requestedProgramId, capacity, scheduleTime, startDate, endDate,
       fee, minViableSize, branchId, roomId, timeSlotId, academicTermId, activationDate, genderPolicy,
     } = req.body;
-    assertTextLengths([[(req.body as { name?: unknown }).name, 'Class name', TEXT_LIMITS.name]]);
-    
-    if (!name) throw new HttpError(400, 'Class name is required.');
+    const normalizedName = requiredText(name, 'Class name', TEXT_LIMITS.name);
 
     const userBranchId = req.user?.branchId;
     if (!userBranchId) throw new HttpError(403, 'User branch context is missing.');
@@ -459,6 +463,10 @@ classesRouter.post(
     let resolvedFee = fee == null ? 0 : assertMoney(fee, 'class fee');
     let resolvedSchedule = scheduleTime || null;
     const resolvedBranch = branchId || userBranchId;
+    let resolvedProgramId: string | null = requestedProgramId || null;
+    if (requestedProgramId && !levelId) {
+      throw new HttpError(400, 'A configured program requires a configured level.');
+    }
     if (!canAccessBranchResource(req, resolvedBranch)) throw new HttpError(403, 'Target branch is outside your authorized scope.');
     if (teacherId) {
       const teacher = db.prepare('SELECT id, branch_id, status FROM teachers WHERE id = ?').get(teacherId) as { id: string; branch_id: string; status: string } | undefined;
@@ -472,7 +480,14 @@ classesRouter.post(
       if (term.branch_id !== resolvedBranch) throw new HttpError(400, 'Academic term belongs to another branch.');
       if (!term.is_active) throw new HttpError(400, 'Academic term is inactive.');
     }
-    const resolvedGender = genderPolicy === 'female' || genderPolicy === 'male' || genderPolicy === 'mixed' ? genderPolicy : 'mixed';
+    if (genderPolicy !== undefined && genderPolicy !== null && !['female', 'male', 'mixed'].includes(genderPolicy)) {
+      throw new HttpError(400, 'Invalid class gender policy.');
+    }
+    const resolvedGender = genderPolicy ?? 'mixed';
+    const normalizedStart = assertOptionalIsoDate(startDate, 'startDate');
+    const normalizedEnd = assertOptionalIsoDate(endDate, 'endDate');
+    const normalizedActivation = assertOptionalIsoDate(activationDate, 'activationDate');
+    assertDateRange(normalizedStart, normalizedEnd, 'startDate', 'endDate');
 
     // Seat counts are validated at BOTH writers so create and update cannot
     // disagree about what a capacity is (audit C-3).
@@ -483,19 +498,21 @@ classesRouter.post(
       const lvl = stmtGetLevelById.get(levelId) as any;
       if (!lvl) throw new HttpError(400, 'Configured level not found.');
       if (lvl.is_active === 0) throw new HttpError(400, 'Selected level is inactive.');
+      if (lvl.program_is_active === 0) throw new HttpError(400, 'Selected program is inactive.');
+      if (String(lvl.program_branch_id) !== String(resolvedBranch)) {
+        throw new HttpError(400, 'Selected level belongs to a program in another branch.');
+      }
+      if (requestedProgramId && String(lvl.program_id) !== String(requestedProgramId)) {
+        throw new HttpError(400, 'Selected level does not belong to the selected program.');
+      }
+      resolvedProgramId = String(lvl.program_id);
       resolvedLevelLabel = lvl.name;
-      
+
       const override = stmtGetLevelFee.get(levelId, resolvedBranch) as any;
       resolvedFee = override ? override.fee : (lvl.default_fee ?? 0);
       resolvedMinViable = Number(lvl.min_viable_size) >= 0 ? Number(lvl.min_viable_size) : (Number(minViableSize) || ACADEMIC_DEFAULTS.levelMinViableSize);
     }
-    if (!resolvedLevelLabel) throw new HttpError(400, 'Level is required (select a configured level).');
-    if (levelId && programId) {
-      const levelRow = stmtGetLevelById.get(levelId) as any;
-      if (levelRow?.program_id && String(levelRow.program_id) !== String(programId)) {
-        throw new HttpError(400, 'Selected level does not belong to the selected program.');
-      }
-    }
+    resolvedLevelLabel = requiredText(resolvedLevelLabel, 'Level', TEXT_LIMITS.name);
 
     if (timeSlotId) {
       const slot = stmtGetTimeSlot.get(timeSlotId) as any;
@@ -512,8 +529,8 @@ classesRouter.post(
 
     assertClassPlanningConstraints({
       branchId: resolvedBranch, teacherId: teacherId || null, roomId: roomId || null,
-      timeSlotId: timeSlotId || null, scheduleTime: resolvedSchedule, startDate: startDate || null,
-      endDate: endDate || null, capacity: resolvedCapacity, minViableSize: resolvedMinViable,
+      timeSlotId: timeSlotId || null, scheduleTime: resolvedSchedule, startDate: normalizedStart,
+      endDate: normalizedEnd, capacity: resolvedCapacity, minViableSize: resolvedMinViable,
     });
 
     const newId = id('c');
@@ -521,16 +538,16 @@ classesRouter.post(
     // this endpoint's historical intent — immediately visible/orderable).
     // Pass activationDate to create it already-activated in one step, or
     // asDraft: true for the blueprint's not-yet-published Draft state.
-    const initialStage: ClassStage = activationDate ? 'activated' : (req.body?.asDraft ? 'draft' : 'scheduled');
+    const initialStage: ClassStage = normalizedActivation ? 'activated' : (req.body?.asDraft ? 'draft' : 'scheduled');
     const initialStatus = deriveCoarseClassStatus(initialStage);
 
     stmtInsertClass.run(
-      newId, name, teacherId || null, programId || null, levelId || null, resolvedLevelLabel,
-      resolvedCapacity, resolvedSchedule, startDate || null, endDate || null,
+      newId, normalizedName, teacherId || null, resolvedProgramId, levelId || null, resolvedLevelLabel,
+      resolvedCapacity, resolvedSchedule, normalizedStart, normalizedEnd,
       initialStatus, initialStage,
-      resolvedFee || 0, resolvedMinViable || 5, resolvedBranch,
+      resolvedFee || 0, resolvedMinViable, resolvedBranch,
       roomId || null, timeSlotId || null, academicTermId || null,
-      activationDate || null, resolvedGender
+      normalizedActivation, resolvedGender
     );
 
     writeAudit(req, `Created new class: ${name} (fee rule: ${resolvedFee || 0} AFN)`);
@@ -544,6 +561,17 @@ classesRouter.put(
   ah(async (req, res) => {
     const existing = requireClass(req, req.params.id);
     const { name, teacherId, level, capacity, scheduleTime, startDate, endDate, status, fee, minViableSize } = req.body;
+    const nextName = name !== undefined ? requiredText(name, 'Class name', TEXT_LIMITS.name) : existing.name;
+    if (status !== undefined && status !== null && !['draft', 'active', 'completed', 'cancelled'].includes(status)) {
+      throw new HttpError(400, 'Invalid class status.');
+    }
+    const requestedGender = req.body?.genderPolicy;
+    if (requestedGender !== undefined && requestedGender !== null && !['female', 'male', 'mixed'].includes(requestedGender)) {
+      throw new HttpError(400, 'Invalid class gender policy.');
+    }
+    const nextStart = assertOptionalIsoDate(startDate !== undefined ? startDate : existing.start_date, 'startDate');
+    const nextEnd = assertOptionalIsoDate(endDate !== undefined ? endDate : existing.end_date, 'endDate');
+    assertDateRange(nextStart, nextEnd, 'startDate', 'endDate');
 
     const nextTeacherId = teacherId ?? existing.teacher_id;
     if (nextTeacherId) {
@@ -557,7 +585,9 @@ classesRouter.put(
     const hasSlotRule = !!existing.time_slot_id;
     const hasRoomRule = !!existing.room_id;
 
-    const nextLevel = hasLevelRule ? existing.level : (level ?? existing.level);
+    const nextLevel = hasLevelRule
+      ? existing.level
+      : (level !== undefined ? requiredText(level, 'Level', TEXT_LIMITS.name) : existing.level);
     // MONETARY VALIDATION ON UPDATE (audit C-3). POST /api/classes has always
     // run the fee through assertMoney; this UPDATE did not, so the same field
     // that is rejected at creation was writable here with no validation at all.
@@ -586,22 +616,19 @@ classesRouter.put(
     assertClassPlanningConstraints({
       classId: existing.id, branchId: existing.branch_id, teacherId: nextTeacherId,
       roomId: existing.room_id, timeSlotId: existing.time_slot_id, scheduleTime: nextSchedule,
-      startDate: startDate ?? existing.start_date, endDate: endDate ?? existing.end_date,
+      startDate: nextStart, endDate: nextEnd,
       capacity: nextCapacity, minViableSize: nextMinViable,
     });
 
-    const validGenders = ['female', 'male', 'mixed'];
-    const requestedGender = req.body?.genderPolicy;
-
     const updateTx = db.transaction(() => {
       stmtUpdateClass.run(
-        name ?? existing.name, nextTeacherId, nextLevel,
+        nextName, nextTeacherId, nextLevel,
         nextCapacity, nextSchedule,
-        startDate ?? existing.start_date, endDate ?? existing.end_date,
+        nextStart, nextEnd,
         nextFee, nextMinViable, req.params.id
       );
 
-      if (requestedGender && validGenders.includes(requestedGender)) {
+      if (requestedGender !== undefined && requestedGender !== null) {
         stmtUpdateClassGender.run(requestedGender, req.params.id);
       }
 

@@ -47,8 +47,8 @@ function seedPlacementRequiredProgram() {
               VALUES ('vsa_pv','vsa_prog','v1',1,'published',1)`).run();
   db.prepare(`INSERT OR IGNORE INTO levels (id,program_id,name,"order",program_version_id)
               VALUES ('vsa_lvl','vsa_prog','Level 1',1,'vsa_pv')`).run();
-  db.prepare(`INSERT OR IGNORE INTO classes (id,name,level,branch_id,status,capacity,fee,program_id,level_id,gender_policy)
-              VALUES ('vsa_cls','VSA Class','Level 1',?, 'active',50,6000,'vsa_prog','vsa_lvl','mixed')`).run(BRANCH_A);
+  db.prepare(`INSERT OR IGNORE INTO classes (id,name,level,branch_id,status,lifecycle_stage,capacity,fee,program_id,level_id,gender_policy)
+              VALUES ('vsa_cls','VSA Class','Level 1',?, 'active','activated',50,6000,'vsa_prog','vsa_lvl','mixed')`).run(BRANCH_A);
   // An ungoverned program + class pair for the control tests: no placement
   // profile attaches to pv_open, so conversions through it are legitimately
   // eligible. Note the conversion gate correctly still fires when the VISITOR
@@ -61,8 +61,8 @@ function seedPlacementRequiredProgram() {
   // tests use this for legitimate conversions. They previously reached the same
   // state by detaching the visitor's program — which was the V-1 defect itself,
   // and is now correctly refused.
-  db.prepare(`INSERT OR IGNORE INTO classes (id,name,level,branch_id,status,capacity,fee,gender_policy)
-              VALUES ('vsa_open','VSA Open Class','Open',?, 'active',50,6000,'mixed')`).run(BRANCH_A);
+  db.prepare(`INSERT OR IGNORE INTO classes (id,name,level,branch_id,status,lifecycle_stage,capacity,fee,gender_policy)
+              VALUES ('vsa_open','VSA Open Class','Open',?, 'active','activated',50,6000,'mixed')`).run(BRANCH_A);
   db.prepare(`INSERT OR IGNORE INTO placement_assessment_profiles
       (id, program_version_id, branch_id, components_json, scoring_model, allow_retake,
        pass_score, requirement_mode, first_level_exempt, max_attempts)

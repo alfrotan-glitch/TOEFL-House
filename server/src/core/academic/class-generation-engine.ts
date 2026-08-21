@@ -32,7 +32,6 @@ export class ClassGenerationEngine {
   private stmtUpdateRunStatus: Database.Statement;
   private stmtGetVersion: Database.Statement;
   private stmtGetOffering: Database.Statement;
-  private stmtUpdateOfferingCapacity: Database.Statement;
   private stmtGetTerm: Database.Statement;
   private stmtInsertClass: Database.Statement;
 
@@ -57,7 +56,6 @@ export class ClassGenerationEngine {
        WHERE pv.id = ?`
     );
     this.stmtGetOffering = db.prepare('SELECT * FROM course_offerings WHERE id = ?');
-    this.stmtUpdateOfferingCapacity = db.prepare('UPDATE course_offerings SET capacity_total = (SELECT COALESCE(SUM(capacity),0) FROM classes WHERE offering_id = ?) WHERE id = ?');
     this.stmtGetTerm = db.prepare('SELECT branch_id, start_date, end_date, is_active FROM academic_terms WHERE id = ?');
     this.stmtInsertClass = db.prepare(
       `INSERT INTO classes (id, name, teacher_id, program_id, level_id, level, capacity, min_viable_size, schedule_time, start_date, end_date, status, lifecycle_stage, fee, branch_id, room_id, time_slot_id, academic_term_id, gender_policy, offering_id)
@@ -334,7 +332,6 @@ export class ClassGenerationEngine {
           this.stmtUpdateItemError.run(String(e?.message || e), item.id);
         }
       }
-      if (offeringId) this.stmtUpdateOfferingCapacity.run(offeringId, offeringId);
       this.stmtUpdateRunStatus.run(runId);
     });
     tx();

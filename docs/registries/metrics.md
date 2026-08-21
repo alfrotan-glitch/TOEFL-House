@@ -34,3 +34,4 @@ Money is stored, validated, computed and displayed as whole AFN. Operator input 
 fractional amount is rejected; system-derived percentages settle once through
 `assertComputedMoney`. Consequently a displayed total and the sum of its displayed parts
 use the same unit and no hidden sub-unit balance exists. See D-22 and D-23.
+| Offering capacity | `COALESCE(SUM(classes.capacity), 0)` over classes whose `offering_id` names the offering | `classes` | point-in-time | one branch-correlated offering | sum | seats | whole seat | `GET /api/offerings`, offering detail and academic planning UI | `server/src/tests/work-packages/wp05/attack.test.ts` | derived on every read; no `course_offerings.capacity_total` storage authority |

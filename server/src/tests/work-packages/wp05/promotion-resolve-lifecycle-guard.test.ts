@@ -37,19 +37,19 @@
  * report anything before the class is locked (`completed`/`archived`). These
  * tests hold the write path to exactly the same authority.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { today } from '../utils/ids.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import classesRouter from '../routes/classes.routes.js';
-import studentsRouter from '../routes/students.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { deriveCoarseClassStatus, type ClassStage } from '../core/academic/lifecycle-engine.js';
-import { getStudentBalance } from '../utils/studentBalance.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { today } from '../../../utils/ids.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import classesRouter from '../../../routes/classes.routes.js';
+import studentsRouter from '../../../routes/students.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { deriveCoarseClassStatus, type ClassStage } from '../../../core/academic/lifecycle-engine.js';
+import { getStudentBalance } from '../../../utils/studentBalance.js';
 
 const BRANCH = 'prl_branch';
 const OTHER_BRANCH = 'prl_branch_other';

@@ -227,11 +227,49 @@ export class AcademicCatalogService {
   private copyVersionContents(fromId: string, toId: string) {
     const levels = this.stmtGetLevelsForCopy.all(fromId) as any[];
     const levelMap = new Map<string, string>();
+    // Allocate every target id first, then topologically order the source
+    // levels. The database rejects dangling JSON edges, so a dependent cannot
+    // be inserted before the copied prerequisite it will reference.
+    for (const l of levels) levelMap.set(l.id, makeId('lvl'));
+    const prerequisiteMap = new Map<string, string[]>();
     for (const l of levels) {
-      const newLvlId = makeId('lvl');
-      levelMap.set(l.id, newLvlId);
+      const parsed: unknown = JSON.parse(l.prerequisites || '[]');
+      if (!Array.isArray(parsed) || parsed.some((value) => typeof value !== 'string')) {
+        throw new Error(`Invalid prerequisite graph for level ${l.id}.`);
+      }
+      prerequisiteMap.set(l.id, parsed);
+    }
+    const pendingLevels = [...levels];
+    const orderedLevels: any[] = [];
+    const insertedSourceIds = new Set<string>();
+    while (pendingLevels.length > 0) {
+      const nextIndex = pendingLevels.findIndex((level) =>
+        prerequisiteMap.get(level.id)!.every((prerequisiteId) =>
+          !levelMap.has(prerequisiteId) || insertedSourceIds.has(prerequisiteId),
+        ),
+      );
+      if (nextIndex < 0) throw new Error('Program version contains a cyclic prerequisite graph.');
+      const [nextLevel] = pendingLevels.splice(nextIndex, 1);
+      orderedLevels.push(nextLevel);
+      insertedSourceIds.add(nextLevel.id);
+    }
+
+    for (const l of orderedLevels) {
+      const rawPrerequisites = prerequisiteMap.get(l.id)!;
+      const remappedPrerequisites = rawPrerequisites.map((prerequisiteId) => {
+        const copiedId = levelMap.get(prerequisiteId);
+        if (copiedId) return copiedId;
+        const sharedLevel = this.stmtGetLevelById.get(prerequisiteId) as
+          | { program_id: string; program_version_id: string | null }
+          | undefined;
+        if (sharedLevel && sharedLevel.program_id === l.program_id && sharedLevel.program_version_id === null) {
+          return prerequisiteId;
+        }
+        throw new Error(`Prerequisite ${prerequisiteId} is outside the copied program version.`);
+      });
+      const newLvlId = levelMap.get(l.id)!;
       this.stmtInsertLevelForCopy.run(
-        newLvlId, l.program_id, l.name, l.order, l.prerequisites, toId, l.code,
+        newLvlId, l.program_id, l.name, l.order, JSON.stringify(remappedPrerequisites), toId, l.code,
         l.duration_months, l.default_fee, l.pass_mark, l.is_active, l.min_viable_size
       );
     }

@@ -90,7 +90,7 @@ describe('ERP cross-system forensic audit', () => {
     // Seed a student + exam + result.
     db.prepare(`INSERT OR IGNORE INTO students (id, student_code, full_name, status, registration_date, branch_id, gender, phone)
       VALUES ('xf_stu', 'TH-XF-1', 'XF Student', 'active', ?, ?, 'male', '0700111001')`).run(today(), BRANCH_A);
-    db.prepare(`INSERT OR IGNORE INTO classes (id, name, branch_id, capacity, status, level, fee, program_id) VALUES ('xf_class', 'XF Class', ?, 10, 'active', 'A1', 4000, ?)`).run(BRANCH_A, PROGRAM);
+    db.prepare(`INSERT OR IGNORE INTO classes (id, name, branch_id, capacity, status, lifecycle_stage, level, fee, program_id, level_id) VALUES ('xf_class', 'XF Class', ?, 10, 'active', 'activated', 'A1', 4000, ?, ?)`).run(BRANCH_A, PROGRAM, LEVEL_A1);
     db.prepare(`INSERT OR IGNORE INTO exams (id, title, date, type, branch_id, fee) VALUES ('xf_exam', 'XF Final', ?, 'final', ?, 0)`).run(today(), BRANCH_A);
     const resultId = id('res');
     db.prepare(`INSERT INTO exam_results (id, exam_id, student_id, candidate_name, score, status, branch_id) VALUES (?, 'xf_exam', 'xf_stu', 'XF Student', 0, 'pending', ?)`).run(resultId, BRANCH_A);

@@ -22,9 +22,12 @@ const SERVER = path.resolve(__dirname, '..');
 
 const ONLY = process.argv.includes('--only') ? process.argv[process.argv.indexOf('--only') + 1] : null;
 const FULL = process.argv.includes('--full');
+const WP05 = process.argv.includes('--wp05');
 const TEST_CMD = FULL
   ? 'npx vitest run --silent 2>&1'
-  : 'npx vitest run src/tests/teacher-input-error-contract.test.ts --silent 2>&1';
+  : WP05
+    ? 'npx vitest run src/tests/work-packages/wp05/teacher-evaluation-integrity.test.ts --silent 2>&1'
+    : 'npx vitest run src/tests/teacher-input-error-contract.test.ts --silent 2>&1';
 
 const ROUTES = 'src/routes/teachers.routes.ts';
 
@@ -113,7 +116,16 @@ const MUTANTS = [
   },
 ];
 
-const selected = ONLY ? MUTANTS.filter((m) => m.id === ONLY) : MUTANTS;
+// WP-05 claims only teacher evaluation behavior. M2 and M11 are deliberately
+// excluded from mutation claims because canonical storage independently rejects
+// zero-score and non-object-criteria rows, making those route-only mutants
+// observably equivalent. Payroll mutants remain with WP-08.
+const wp05Mutants = new Set(['M1', 'M5']);
+const selected = ONLY
+  ? MUTANTS.filter((m) => m.id === ONLY)
+  : WP05
+    ? MUTANTS.filter((m) => wp05Mutants.has(m.id))
+    : MUTANTS;
 if (!selected.length) { console.error(`No mutant matches --only ${ONLY}`); process.exit(2); }
 
 const read = (f) => readFileSync(path.join(SERVER, f), 'utf8');

@@ -3,21 +3,21 @@
  * ============================================================================
  * Mirrors the app/RBAC-bootstrap pattern established in Phases 1-4.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { today, id as makeId } from '../utils/ids.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import classesRouter from '../routes/classes.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { getClassLifecycleService } from '../core/academic/class-lifecycle-service.js';
-import { getEnrollmentService } from '../core/academic/enrollment-service.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { today, id as makeId } from '../../../utils/ids.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import classesRouter from '../../../routes/classes.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { getClassLifecycleService } from '../../../core/academic/class-lifecycle-service.js';
+import { getEnrollmentService } from '../../../core/academic/enrollment-service.js';
 import {
   resolvePromotionCriteria, computeAttendancePercentage, hasFinancialHold, findFailedMandatorySkills, decidePromotion,
-} from '../core/academic/promotion-engine.js';
+} from '../../../core/academic/promotion-engine.js';
 
 const BRANCH = 'pe_branch_a';
 

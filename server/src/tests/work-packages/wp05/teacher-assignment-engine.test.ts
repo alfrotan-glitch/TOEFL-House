@@ -3,20 +3,20 @@
  * ============================================================================
  * Mirrors the app/RBAC-bootstrap pattern established in Phases 1-7.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { today, id as makeId } from '../utils/ids.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { classTeacherSkillsRouter, skillsRouter } from '../routes/skills.routes.js';
-import sessionsRouter from '../routes/sessions.routes.js';
-import classesRouter from '../routes/classes.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { getClassLifecycleService } from '../core/academic/class-lifecycle-service.js';
-import { computeTeacherDueAmount } from '../core/payroll/class-payroll.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { today, id as makeId } from '../../../utils/ids.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import { classTeacherSkillsRouter, skillsRouter } from '../../../routes/skills.routes.js';
+import sessionsRouter from '../../../routes/sessions.routes.js';
+import classesRouter from '../../../routes/classes.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { getClassLifecycleService } from '../../../core/academic/class-lifecycle-service.js';
+import { computeTeacherDueAmount } from '../../../core/payroll/class-payroll.js';
 
 const BRANCH = 'ta_branch_a';
 
@@ -141,6 +141,15 @@ describe('Teacher Assignment Engine — business rules scoped to ongoing roles o
       classId, teacherId: 'ta_cap_guest', skillId: 'ta_cap_skill_4', assignmentType: 'guest', monthlyRate: 0,
     });
     expect(guestOk.status).toBe(201);
+
+    // Updating that fourth, non-ongoing skill into an ongoing role reaches the
+    // same storage limit and must be a business conflict, never an HTTP 500.
+    const blockedUpdate = await supertest(app)
+      .put(`/api/class-teacher-skills/${guestOk.body.id}`)
+      .set(authHeader(manager))
+      .send({ assignmentType: 'primary', monthlyRate: 1000 });
+    expect(blockedUpdate.status).toBe(409);
+    expect(blockedUpdate.body.error).toMatch(/three distinct/i);
   });
 
   it('a rate is required for primary/assistant but optional for substitute/guest/examiner', async () => {

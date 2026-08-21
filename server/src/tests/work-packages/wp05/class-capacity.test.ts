@@ -12,19 +12,19 @@
  * both rows atomically, and the route-level enroll paths (visitor conversion,
  * manual student registration) never duplicate the projection row.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { id, today } from '../utils/ids.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { countActiveStudentsInClass } from '../core/academic/class-capacity.js';
-import { getEnrollmentService } from '../core/academic/enrollment-service.js';
-import { studentsRouter } from '../routes/students.routes.js';
-import { visitorsRouter } from '../routes/visitors.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { id, today } from '../../../utils/ids.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { countActiveStudentsInClass } from '../../../core/academic/class-capacity.js';
+import { getEnrollmentService } from '../../../core/academic/enrollment-service.js';
+import { studentsRouter } from '../../../routes/students.routes.js';
+import { visitorsRouter } from '../../../routes/visitors.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
 
 const BRANCH = 'cap_branch';
 let classCounter = 0;
@@ -32,7 +32,7 @@ let classCounter = 0;
 function freshClass(capacity = 10): string {
   classCounter += 1;
   const classId = `cap_class_${classCounter}`;
-  db.prepare(`INSERT OR IGNORE INTO classes (id, name, branch_id, capacity, status, level, fee) VALUES (?, ?, ?, ?, 'active', 'A1', 5000)`)
+  db.prepare(`INSERT OR IGNORE INTO classes (id, name, branch_id, capacity, status, lifecycle_stage, level, fee) VALUES (?, ?, ?, ?, 'active', 'activated', 'A1', 5000)`)
     .run(classId, `Capacity Class ${classCounter}`, BRANCH, capacity);
   return classId;
 }

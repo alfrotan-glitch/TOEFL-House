@@ -9,26 +9,26 @@
  * refactor fixes: POST /api/classes previously threw
  * "SqliteError: CHECK constraint failed: classes" on every call.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { today } from '../utils/ids.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import classesRouter from '../routes/classes.routes.js';
-import enrollmentRouter from '../routes/enrollment.routes.js';
-import studentsRouter from '../routes/students.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { getEnrollmentService } from '../core/academic/enrollment-service.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { today } from '../../../utils/ids.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import classesRouter from '../../../routes/classes.routes.js';
+import enrollmentRouter from '../../../routes/enrollment.routes.js';
+import studentsRouter from '../../../routes/students.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { getEnrollmentService } from '../../../core/academic/enrollment-service.js';
 import {
   assertClassTransition,
   assertEnrollmentTransition,
   deriveCoarseClassStatus,
   CLASS_TRANSITIONS,
   CLASS_STAGES,
-} from '../core/academic/lifecycle-engine.js';
+} from '../../../core/academic/lifecycle-engine.js';
 
 const BRANCH = 'lc_branch_a';
 
@@ -186,7 +186,7 @@ describe('Enrollment Lifecycle Engine', () => {
     const before = svc.getById(enrolled.enrollmentId);
     expect(before.status).toBe('active');
 
-    svc.transfer({ studentId, toClassId: classB });
+    svc.transfer({ sourceEnrollmentId: enrolled.enrollmentId, toClassId: classB });
 
     const after = svc.getById(enrolled.enrollmentId);
     expect(after.status).toBe('transferred'); // NOT 'completed'

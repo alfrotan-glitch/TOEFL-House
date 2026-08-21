@@ -8,7 +8,7 @@ import { db } from '../db/connection.js';
 import { assertTextLengths, TEXT_LIMITS } from '../utils/textInput.js';
 import { authenticate, authorize, requirePermission, denyPermissionless, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
-import { assertMoney, assertPerformanceScore } from '../utils/money.js';
+import { assertMoney, assertPerformanceScore, assertSeatCount } from '../utils/money.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { assertOptionalIsoDate, assertDateRange } from '../utils/isoDate.js';
 import { id } from '../utils/ids.js';
@@ -69,6 +69,11 @@ const stmtUpdateLevel = db.prepare(
   `UPDATE levels SET name=?, "order"=?, prerequisites=?, code=?, duration_months=?, default_fee=?, pass_mark=?, is_active=?, min_viable_size=? WHERE id=?`
 );
 const stmtCountClassesByLevel = db.prepare('SELECT COUNT(*) as c FROM classes WHERE level_id = ?');
+const stmtCountLevelPrerequisiteReferences = db.prepare(`
+  SELECT COUNT(*) AS c
+  FROM levels AS dependent, json_each(dependent.prerequisites) AS prerequisite
+  WHERE prerequisite.type = 'text' AND prerequisite.value = ?
+`);
 const stmtDeactivateLevel = db.prepare('UPDATE levels SET is_active = 0 WHERE id = ?');
 const stmtDeleteLevelFees = db.prepare('DELETE FROM level_branch_fees WHERE level_id = ?');
 const stmtDeleteLevel = db.prepare('DELETE FROM levels WHERE id = ?');
@@ -227,6 +232,96 @@ function requireLevelAccess(req: import('express').Request, levelId: string) {
   return row;
 }
 
+function assertPositiveWholeNumber(value: unknown, field: string): number {
+  const parsed = assertSeatCount(value, field);
+  if (parsed < 1) throw new HttpError(400, `${field} must be at least 1.`);
+  return parsed;
+}
+
+function resolveBooleanFlag(value: unknown, fallback: number, field = 'isActive'): number {
+  if (value === undefined || value === null) return fallback;
+  if (value === true || value === 1) return 1;
+  if (value === false || value === 0) return 0;
+  throw new HttpError(400, `${field} must be a boolean.`);
+}
+
+function assertTimeRange(startValue: unknown, endValue: unknown): { start: string; end: string } {
+  const timePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+  if (typeof startValue !== 'string' || typeof endValue !== 'string' ||
+      !timePattern.test(startValue) || !timePattern.test(endValue)) {
+    throw new HttpError(400, 'startTime and endTime must use 24-hour HH:MM format.');
+  }
+  if (endValue <= startValue) throw new HttpError(400, 'endTime must be later than startTime.');
+  return { start: startValue, end: endValue };
+}
+
+function normalizePrerequisites(value: unknown): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || !item.trim())) {
+    throw new HttpError(400, 'prerequisites must be an array of level ids.');
+  }
+  const normalized = value.map((item) => item.trim());
+  if (new Set(normalized).size !== normalized.length) {
+    throw new HttpError(400, 'prerequisites cannot contain duplicate level ids.');
+  }
+  return normalized;
+}
+
+interface LevelPrerequisiteRow {
+  id: string;
+  program_id: string;
+  program_version_id: string | null;
+  prerequisites: string;
+}
+
+/**
+ * A level dependency is an ownership graph, not an unverified JSON label.
+ * Unversioned levels are common program curriculum, so they may connect to a
+ * versioned level in the same program. Two explicitly versioned levels must
+ * belong to the same version. Cycles are rejected before storage and repeated
+ * at the database boundary for direct/concurrent writers.
+ */
+function validateLevelPrerequisites(
+  levelId: string,
+  programId: string,
+  programVersionId: string | null,
+  prerequisites: string[],
+): void {
+  const pending = [...prerequisites];
+  const visited = new Set<string>();
+
+  for (const prerequisiteId of prerequisites) {
+    if (prerequisiteId === levelId) throw new HttpError(400, 'A level cannot require itself.');
+    const prerequisite = stmtGetLevelById.get(prerequisiteId) as LevelPrerequisiteRow | undefined;
+    if (!prerequisite) throw new HttpError(400, `Prerequisite level not found: ${prerequisiteId}.`);
+    if (prerequisite.program_id !== programId) {
+      throw new HttpError(400, 'Prerequisite levels must belong to the same program.');
+    }
+    if (programVersionId && prerequisite.program_version_id && prerequisite.program_version_id !== programVersionId) {
+      throw new HttpError(400, 'Prerequisite levels must belong to the same program version.');
+    }
+  }
+
+  while (pending.length > 0) {
+    const currentId = pending.pop()!;
+    if (currentId === levelId) throw new HttpError(400, 'Level prerequisites cannot contain a cycle.');
+    if (visited.has(currentId)) continue;
+    visited.add(currentId);
+    const current = stmtGetLevelById.get(currentId) as LevelPrerequisiteRow | undefined;
+    if (!current) throw new HttpError(400, `Prerequisite level not found: ${currentId}.`);
+    let nested: unknown;
+    try {
+      nested = JSON.parse(current.prerequisites || '[]');
+    } catch {
+      throw new HttpError(400, 'Stored prerequisite graph is invalid.');
+    }
+    if (!Array.isArray(nested) || nested.some((item) => typeof item !== 'string')) {
+      throw new HttpError(400, 'Stored prerequisite graph is invalid.');
+    }
+    pending.push(...nested);
+  }
+}
+
 // ── Programs ───────────────────────────────────────────────────────────────
 
 academicRouter.get(
@@ -256,10 +351,10 @@ academicRouter.post(
       newId,
       String(name).trim(),
       description?.trim() || null,
-      Number(durationMonths) || 0,
+      durationMonths == null ? 0 : assertSeatCount(durationMonths, 'Program duration months'),
       resolvedBranch,
       code?.trim()?.toUpperCase() || null,
-      isActive === false || isActive === 0 ? 0 : 1
+      resolveBooleanFlag(isActive, 1)
     );
     writeAudit(req, `Created academic program: ${name}`);
     res.status(201).json(mapProgram(stmtGetProgramById.get(newId)));
@@ -274,12 +369,17 @@ academicRouter.put(
     if (!existing) throw new HttpError(404, 'Program not found.');
     requireAcademicBranchAccess(req, existing.branch_id);
     const { name, code, description, durationMonths, isActive } = req.body ?? {};
+    if (name !== undefined && (typeof name !== 'string' || !name.trim())) throw new HttpError(400, 'Program name cannot be empty.');
+    assertTextLengths([[name, 'Program name', TEXT_LIMITS.name], [code, 'Code', TEXT_LIMITS.short], [description, 'Description', TEXT_LIMITS.notes]]);
+    const nextDuration = durationMonths == null
+      ? existing.duration_months
+      : assertSeatCount(durationMonths, 'Program duration months');
     stmtUpdateProgram.run(
       name ?? existing.name,
       description !== undefined ? description : existing.description,
-      durationMonths ?? existing.duration_months,
+      nextDuration,
       code !== undefined ? code : existing.code,
-      isActive === false || isActive === 0 ? 0 : isActive === true || isActive === 1 ? 1 : existing.is_active ?? 1,
+      resolveBooleanFlag(isActive, existing.is_active ?? 1),
       req.params.id
     );
     writeAudit(req, `Updated academic program: ${existing.name}`);
@@ -337,16 +437,26 @@ academicRouter.post(
     if (!name || !String(name).trim()) throw new HttpError(400, 'Level name is required.');
     
     requireProgramAccess(req, programId);
+    assertTextLengths([[name, 'Level name', TEXT_LIMITS.name], [code, 'Code', TEXT_LIMITS.short]]);
+    const normalizedPrerequisites = normalizePrerequisites(prerequisites);
+    const resolvedOrder = order == null ? 1 : assertPositiveWholeNumber(order, 'Level order');
+    const resolvedDuration = durationMonths == null
+      ? ACADEMIC_DEFAULTS.levelDurationMonths
+      : assertSeatCount(durationMonths, 'Level duration months');
+    const resolvedMinimum = minViableSize == null
+      ? ACADEMIC_DEFAULTS.levelMinViableSize
+      : assertSeatCount(minViableSize, 'Level minimum viable size');
 
     const newId = id('lvl');
+    validateLevelPrerequisites(newId, programId, null, normalizedPrerequisites);
     stmtInsertLevel.run(
       newId,
       programId,
       String(name).trim(),
-      Number(order) || 1,
-      JSON.stringify(prerequisites || []),
+      resolvedOrder,
+      JSON.stringify(normalizedPrerequisites),
       code?.trim()?.toUpperCase() || null,
-      Number(durationMonths) || ACADEMIC_DEFAULTS.levelDurationMonths,
+      resolvedDuration,
       // `Number(defaultFee) || fallback` accepted 'abc' (NaN -> falls back
       // silently), -6000 and 1e15. A level fee is the SOURCE of every class
       // fee and therefore of every student's tuition, so a bad value here
@@ -362,8 +472,8 @@ academicRouter.post(
       // with the same 0..100 discipline the branch profile (Layer 3) already
       // enforced. Omitted/null still means "use the configured default".
       passMark == null ? ACADEMIC_DEFAULTS.levelPassMark : assertPerformanceScore(passMark, 'Level pass mark'),
-      isActive === false || isActive === 0 ? 0 : 1,
-      Number(minViableSize) >= 0 ? Number(minViableSize) : ACADEMIC_DEFAULTS.levelMinViableSize
+      resolveBooleanFlag(isActive, 1),
+      resolvedMinimum
     );
     writeAudit(req, `Created level: ${name}`);
     res.status(201).json(mapLevel(stmtGetLevelById.get(newId)));
@@ -378,21 +488,39 @@ academicRouter.put(
     if (!existing) throw new HttpError(404, 'Level not found.');
     requireLevelAccess(req, req.params.id);
     const { name, code, order, durationMonths, defaultFee, passMark, minViableSize, prerequisites, isActive } = req.body ?? {};
-    
+    if (name !== undefined && (typeof name !== 'string' || !name.trim())) throw new HttpError(400, 'Level name cannot be empty.');
+    assertTextLengths([[name, 'Level name', TEXT_LIMITS.name], [code, 'Code', TEXT_LIMITS.short]]);
+    const nextOrder = order == null ? existing.order : assertPositiveWholeNumber(order, 'Level order');
+    const nextDuration = durationMonths == null
+      ? existing.duration_months
+      : assertSeatCount(durationMonths, 'Level duration months');
+    const nextMinimum = minViableSize == null
+      ? (existing.min_viable_size ?? ACADEMIC_DEFAULTS.levelMinViableSize)
+      : assertSeatCount(minViableSize, 'Level minimum viable size');
+    const nextPrerequisites = prerequisites !== undefined
+      ? normalizePrerequisites(prerequisites)
+      : normalizePrerequisites(JSON.parse(existing.prerequisites || '[]'));
+    validateLevelPrerequisites(
+      req.params.id,
+      existing.program_id,
+      existing.program_version_id ?? null,
+      nextPrerequisites,
+    );
+
     stmtUpdateLevel.run(
       name ?? existing.name,
-      order ?? existing.order,
-      prerequisites !== undefined ? JSON.stringify(prerequisites) : existing.prerequisites,
+      nextOrder,
+      JSON.stringify(nextPrerequisites),
       code !== undefined ? code : existing.code,
-      durationMonths ?? existing.duration_months,
+      nextDuration,
       defaultFee == null ? existing.default_fee : assertMoney(defaultFee, 'default fee'),
       // ACFG-1: this update wrote the raw body value with no validation at all,
       // so -1, 101, 1e9, 'abc' and true all reached levels.pass_mark (no CHECK
       // on the column). Same canonical bound as the create path; an omitted or
       // null passMark still means "leave unchanged".
       passMark == null ? existing.pass_mark : assertPerformanceScore(passMark, 'Level pass mark'),
-      isActive === false || isActive === 0 ? 0 : isActive === true || isActive === 1 ? 1 : existing.is_active ?? 1,
-      minViableSize !== undefined ? Number(minViableSize) : (existing.min_viable_size ?? ACADEMIC_DEFAULTS.levelMinViableSize),
+      resolveBooleanFlag(isActive, existing.is_active ?? 1),
+      nextMinimum,
       req.params.id
     );
     writeAudit(req, `Updated level: ${existing.name}`);
@@ -409,9 +537,10 @@ academicRouter.delete(
     requireLevelAccess(req, req.params.id);
     
     const classCount = (stmtCountClassesByLevel.get(req.params.id) as { c: number }).c;
-    if (classCount > 0) {
+    const prerequisiteReferenceCount = (stmtCountLevelPrerequisiteReferences.get(req.params.id) as { c: number }).c;
+    if (classCount > 0 || prerequisiteReferenceCount > 0) {
       stmtDeactivateLevel.run(req.params.id);
-      writeAudit(req, `Deactivated level (has classes): ${existing.name}`);
+      writeAudit(req, `Deactivated level (has academic dependencies): ${existing.name}`);
       res.json({ ok: true, deactivated: true });
       return;
     }
@@ -707,6 +836,8 @@ academicRouter.post(
     }
     const resolvedBranch = branchId || req.user?.branchId;
     requireAcademicBranchAccess(req, resolvedBranch);
+    const range = assertTimeRange(startTime, endTime);
+    const resolvedSortOrder = sortOrder == null ? 0 : assertSeatCount(sortOrder, 'Time slot sort order');
     const newId = id('ts');
     try {
       stmtInsertTimeSlot.run(
@@ -714,10 +845,10 @@ academicRouter.post(
         resolvedBranch,
         String(code).trim().toUpperCase(),
         String(label).trim(),
-        startTime,
-        endTime,
-        isActive === false ? 0 : 1,
-        Number(sortOrder) || 0
+        range.start,
+        range.end,
+        resolveBooleanFlag(isActive, 1),
+        resolvedSortOrder
       );
     } catch {
       throw new HttpError(409, 'Time slot code must be unique within the branch.');
@@ -735,14 +866,16 @@ academicRouter.put(
     if (!existing) throw new HttpError(404, 'Time slot not found.');
     requireAcademicBranchAccess(req, existing.branch_id);
     const { code, label, startTime, endTime, sortOrder, isActive } = req.body ?? {};
-    
+    const range = assertTimeRange(startTime ?? existing.start_time, endTime ?? existing.end_time);
+    const nextSortOrder = sortOrder == null ? existing.sort_order : assertSeatCount(sortOrder, 'Time slot sort order');
+
     stmtUpdateTimeSlot.run(
       code ?? existing.code,
       label ?? existing.label,
-      startTime ?? existing.start_time,
-      endTime ?? existing.end_time,
-      sortOrder ?? existing.sort_order,
-      isActive === false ? 0 : isActive === true ? 1 : existing.is_active,
+      range.start,
+      range.end,
+      nextSortOrder,
+      resolveBooleanFlag(isActive, existing.is_active),
       req.params.id
     );
     writeAudit(req, `Updated time slot ${existing.code}`);
@@ -782,6 +915,7 @@ academicRouter.post(
     if (!code || !name) throw new HttpError(400, 'Room code and name are required.');
     const resolvedBranch = branchId || req.user?.branchId;
     requireAcademicBranchAccess(req, resolvedBranch);
+    const resolvedCapacity = capacity == null ? 0 : assertSeatCount(capacity, 'Room capacity');
     const newId = id('rm');
     try {
       stmtInsertRoom.run(
@@ -789,8 +923,8 @@ academicRouter.post(
         resolvedBranch,
         String(code).trim().toUpperCase(),
         String(name).trim(),
-        Number(capacity) || 0,
-        isActive === false ? 0 : 1,
+        resolvedCapacity,
+        resolveBooleanFlag(isActive, 1),
         notes || null
       );
     } catch {
@@ -809,13 +943,14 @@ academicRouter.put(
     if (!existing) throw new HttpError(404, 'Room not found.');
     requireAcademicBranchAccess(req, existing.branch_id);
     const { code, name, capacity, notes, isActive } = req.body ?? {};
-    
+    const nextCapacity = capacity == null ? existing.capacity : assertSeatCount(capacity, 'Room capacity');
+
     stmtUpdateRoom.run(
       code ?? existing.code,
       name ?? existing.name,
-      capacity ?? existing.capacity,
+      nextCapacity,
       notes !== undefined ? notes : existing.notes,
-      isActive === false ? 0 : isActive === true ? 1 : existing.is_active,
+      resolveBooleanFlag(isActive, existing.is_active),
       req.params.id
     );
     writeAudit(req, `Updated room ${existing.name}`);
@@ -860,17 +995,18 @@ academicRouter.post(
     const start = assertOptionalIsoDate(startDate, 'startDate');
     const end = assertOptionalIsoDate(endDate, 'endDate');
     assertDateRange(start, end);
+    const resolvedYear = assertPositiveWholeNumber(year, 'Academic term year');
     const newId = id('term');
 
     stmtInsertTerm.run(
       newId,
       resolvedBranch,
-      Number(year),
+      resolvedYear,
       String(code).trim().toUpperCase(),
       String(name).trim(),
       start,
       end,
-      isActive === false ? 0 : 1
+      resolveBooleanFlag(isActive, 1)
     );
     writeAudit(req, `Created academic term ${name}`);
     res.status(201).json(mapTerm(stmtGetTermById.get(newId)));
@@ -903,14 +1039,15 @@ academicRouter.put(
     const nextStart = assertOptionalIsoDate(resolveDate(startDate, existing.start_date), 'startDate');
     const nextEnd = assertOptionalIsoDate(resolveDate(endDate, existing.end_date), 'endDate');
     assertDateRange(nextStart, nextEnd);
+    const nextYear = year == null ? existing.year : assertPositiveWholeNumber(year, 'Academic term year');
 
     stmtUpdateTerm.run(
-      year ?? existing.year,
+      nextYear,
       code ?? existing.code,
       name ?? existing.name,
       nextStart,
       nextEnd,
-      isActive === false ? 0 : isActive === true ? 1 : existing.is_active,
+      resolveBooleanFlag(isActive, existing.is_active),
       req.params.id
     );
     writeAudit(req, `Updated academic term ${existing.name}`);

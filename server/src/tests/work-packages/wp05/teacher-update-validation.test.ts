@@ -26,17 +26,17 @@
  * accept). There is no create/update divergence to close, and choosing a new
  * upper bound for a workload target would be inventing a business rule.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { today } from '../utils/ids.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { teachersRouter } from '../routes/teachers.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { assertMoney, assertPerformanceScore } from '../utils/money.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { today } from '../../../utils/ids.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { teachersRouter } from '../../../routes/teachers.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { assertMoney, assertPerformanceScore } from '../../../utils/money.js';
 
 const BRANCH = 'tuv_branch';
 let app: express.Express;
@@ -178,14 +178,13 @@ describe('T-2 · performanceScore is rejected, never silently clamped', () => {
     expect(Number(rowOf(tid).performance_score)).toBe(40);
   });
 
-  it('accepts the full legitimate range, including fractions and the bounds', async () => {
-    // performance_score is REAL, and 0 is the established "not yet evaluated"
-    // sentinel that POST /api/teachers writes for every new teacher.
+  it('retires generic score writes across the legitimate range because evaluations are the sole authority', async () => {
     for (const score of [0, 1, 50, 87.5, 99.99, 100]) {
       const tid = mkTeacher(10000, 50, 40);
       const res = await put(tid, { performanceScore: score });
-      expect(res.status).toBe(200);
-      expect(Number(rowOf(tid).performance_score)).toBe(score);
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/evaluation/i);
+      expect(Number(rowOf(tid).performance_score)).toBe(40);
     }
   });
 });

@@ -59,7 +59,7 @@ beforeAll(async () => {
   const ali = seedStudent('TH-1001', 'Ali Ahmadi', { phone: '0700111222', tazkira: 'TAZ-111', whatsapp: '0799111222', email: 'ali@example.com', father: 'Mohammad' });
   const zahra = seedStudent('TH-1002', 'Zahra Karimi', { status: 'suspended', phone: '0700333444' });
   seedStudent('TH-1003', 'Reza Noori', { phone: '0700555666' });
-  db.prepare(`INSERT OR IGNORE INTO classes (id, name, branch_id, capacity, status, level, fee) VALUES (?, ?, ?, 20, 'active', 'A1', 5000)`)
+  db.prepare(`INSERT OR IGNORE INTO classes (id, name, branch_id, capacity, status, lifecycle_stage, level, fee) VALUES (?, ?, ?, 20, 'active', 'activated', 'A1', 5000)`)
     .run('list_class', 'List Class A', BRANCH);
   db.prepare(`INSERT OR IGNORE INTO enrollments (id, student_id, class_id, branch_id, enrollment_type, status, started_at) VALUES (?, ?, 'list_class', ?, 'new', 'active', ?)`)
     .run(id('enr'), ali, BRANCH, today());

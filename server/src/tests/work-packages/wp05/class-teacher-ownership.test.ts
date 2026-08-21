@@ -28,16 +28,16 @@
  * These tests drive real HTTP through the real router, because the pre-existing
  * unit test on canAccessClass passed throughout the vulnerable period.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeEach } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import classesRouter from '../routes/classes.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { today } from '../utils/ids.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import classesRouter from '../../../routes/classes.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { today } from '../../../utils/ids.js';
 
 const BRANCH = 'cto_branch';
 const T_OWN = 'cto_teacher_own';    // teacher who owns CLASS_OWN
@@ -90,8 +90,8 @@ beforeEach(async () => {
 
   const mkClass = (id: string, teacher: string) =>
     db.prepare(
-      `INSERT OR REPLACE INTO classes (id, name, teacher_id, branch_id, level, capacity, schedule_time, start_date, end_date, fee, status)
-       VALUES (?, ?, ?, ?, 'A1', 10, '08:00', ?, '2026-12-01', 5000, 'active')`,
+      `INSERT OR REPLACE INTO classes (id, name, teacher_id, branch_id, level, capacity, schedule_time, start_date, end_date, fee, status, lifecycle_stage)
+       VALUES (?, ?, ?, ?, 'A1', 10, '08:00', ?, '2026-12-01', 5000, 'active', 'activated')`,
     ).run(id, id, teacher, BRANCH, today());
   mkClass(CLASS_OWN, T_OWN);
   mkClass(CLASS_OTHER, T_OTHER);

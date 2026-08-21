@@ -9,16 +9,16 @@
  * setPlacementProfile) is guarded by typecheck/build; this suite guards the
  * API contract it depends on.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { academicRouter } from '../routes/academic.routes.js';
-import { catalogRouter } from '../routes/catalog.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { academicRouter } from '../../../routes/academic.routes.js';
+import { catalogRouter } from '../../../routes/catalog.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
 
 const BRANCH = 'publish_regression_branch';
 

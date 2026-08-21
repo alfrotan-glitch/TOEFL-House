@@ -117,9 +117,9 @@ beforeAll(async () => {
     for (let i = 0; i < 4; i += 1) insTeachDefault.run(`ds_th_n_${i}`, `Teacher D${i}`, TODAY, BRANCH);
     for (let i = 0; i < 3; i += 1) insTeach.run(`ds_th_i_${i}`, `Teacher I${i}`, TODAY, 'inactive', BRANCH);
     for (let i = 0; i < 2; i += 1) insTeach.run(`ds_th_l_${i}`, `Teacher L${i}`, TODAY, 'on_leave', BRANCH);
-    const insC = db.prepare(`INSERT INTO classes (id,name,level,status,branch_id) VALUES (?,?,?,?,?)`);
-    for (let i = 0; i < 9; i += 1) insC.run(`ds_c_a_${i}`, `Class A${i}`, 'beginner', 'active', BRANCH);
-    for (let i = 0; i < 2; i += 1) insC.run(`ds_c_f_${i}`, `Class F${i}`, 'beginner', 'completed', BRANCH);
+    const insC = db.prepare(`INSERT INTO classes (id,name,level,status,lifecycle_stage,branch_id) VALUES (?,?,?,?,?,?)`);
+    for (let i = 0; i < 9; i += 1) insC.run(`ds_c_a_${i}`, `Class A${i}`, 'beginner', 'active', 'activated', BRANCH);
+    for (let i = 0; i < 2; i += 1) insC.run(`ds_c_f_${i}`, `Class F${i}`, 'beginner', 'completed', 'completed', BRANCH);
   })();
 
   const pwd = await hashPassword('Str0ng!Pass2026');

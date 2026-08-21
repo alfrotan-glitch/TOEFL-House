@@ -22,14 +22,13 @@ const SERVER = path.resolve(__dirname, '..');
 const ONLY = process.argv.includes('--only') ? process.argv[process.argv.indexOf('--only') + 1] : null;
 const FULL = process.argv.includes('--full');
 const SUITES = [
-  'src/tests/rbac-expired-grant-escalation.test.ts',
-  'src/tests/rbac-scope.test.ts',
-  'src/tests/owner-scope-escalation.test.ts',
-  'src/tests/branch-scope-not-home-branch.test.ts',
-  'src/tests/p1-scope-hardening.test.ts',
-  'src/tests/class-teacher-ownership.test.ts',
-  'src/tests/rbac-search-entity-permission.test.ts',
-  'src/tests/rbac-home-branch-invariant.test.ts',
+  'src/tests/work-packages/wp02/rbac-expired-grant-escalation.test.ts',
+  'src/tests/work-packages/wp02/rbac-scope.test.ts',
+  'src/tests/work-packages/wp02/owner-scope-escalation.test.ts',
+  'src/tests/work-packages/wp02/p1-scope-hardening.test.ts',
+  'src/tests/work-packages/wp05/class-teacher-ownership.test.ts',
+  'src/tests/work-packages/wp02/rbac-search-entity-permission.test.ts',
+  'src/tests/work-packages/wp02/rbac-home-branch-invariant.test.ts',
 ].join(' ');
 const TEST_CMD = FULL ? 'npx vitest run --silent 2>&1' : `npx vitest run ${SUITES} --silent 2>&1`;
 

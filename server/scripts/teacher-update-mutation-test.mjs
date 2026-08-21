@@ -28,9 +28,10 @@ const SERVER = path.resolve(__dirname, '..');
 
 const ONLY = process.argv.includes('--only') ? process.argv[process.argv.indexOf('--only') + 1] : null;
 const FULL = process.argv.includes('--full');
+const WP05 = process.argv.includes('--wp05');
 const TEST_CMD = FULL
   ? 'npx vitest run --silent 2>&1'
-  : 'npx vitest run src/tests/teacher-update-validation.test.ts --silent 2>&1';
+  : 'npx vitest run src/tests/work-packages/wp05/teacher-update-validation.test.ts --silent 2>&1';
 
 const ROUTES = 'src/routes/teachers.routes.ts';
 const MONEY = 'src/utils/money.ts';
@@ -54,11 +55,10 @@ const MUTANTS = [
   },
   {
     id: 'M3',
-    invariant: 'T-2 PUT rejects an out-of-range performanceScore instead of clamping',
+    invariant: 'WP-05 generic teacher PUT rejects every performanceScore write',
     file: ROUTES,
-    find: "    ? assertPerformanceScore(performanceScore, 'Performance score')",
-    // Restores the original silent clamp.
-    replace: '    ? Math.max(0, Math.min(100, Number(performanceScore)))',
+    find: "  if (Object.prototype.hasOwnProperty.call(req.body ?? {}, 'performanceScore')) {\n    throw new HttpError(400, 'Performance score can only be changed through the teacher evaluation command.');\n  }",
+    replace: "  if (false) {\n    throw new HttpError(400, 'Performance score can only be changed through the teacher evaluation command.');\n  }",
   },
   // ── Boundary: the shared guards must actually guard ──────────────────────
   {
@@ -148,7 +148,14 @@ const MUTANTS = [
   },
 ];
 
-const selected = ONLY ? MUTANTS.filter((m) => m.id === ONLY) : MUTANTS;
+// WP-05 owns evaluation provenance, not compensation/payroll boundaries. The
+// scoped mode therefore mutates only the generic-score-writer retirement; the
+// remaining historical T-2 mutants stay available to their owning package.
+const selected = ONLY
+  ? MUTANTS.filter((m) => m.id === ONLY)
+  : WP05
+    ? MUTANTS.filter((m) => m.id === 'M3')
+    : MUTANTS;
 if (!selected.length) { console.error(`No mutant matches --only ${ONLY}`); process.exit(2); }
 
 const read = (f) => readFileSync(path.join(SERVER, f), 'utf8');
