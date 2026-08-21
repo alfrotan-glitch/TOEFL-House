@@ -1,36 +1,27 @@
 /**
- * Atomic receipt & student-code generators.
- * All use system_settings as an atomic counter — safe under concurrent access
- * because every call is a single SQL statement executed inside the caller's
- * db.transaction() (or the implicit autocommit transaction of better-sqlite3).
+ * Receipt numbers and student codes.
  *
- * CRITICAL: never use Math.random() for receipt numbers or student codes.
- * Math.random() produces collisions under concurrent requests.
- * 
- * WARNING FOR SETTINGS.TS: If you run Node.js in Cluster Mode (multi-process),
- * ensure `incrementNumberSetting` uses `UPDATE system_settings SET value = value + ? WHERE key = ? RETURNING value`
- * to prevent race conditions between different CPU cores.
+ * Both are allocated from the one sequence authority
+ * (`documentNumbers.allocateDocumentSequence`), so there is a single
+ * implementation of "next number in this series" in the codebase. Never
+ * generate either from `Math.random()`: random identifiers collide, and a
+ * collision on a receipt number means two payments claim one proof.
+ *
+ * Receipt numbers are issued from a SINGLE global series, not per branch, which
+ * is why `uq_payments_receipt_number` enforces global uniqueness at rest.
  */
-import { incrementNumberSetting } from './settings.js';
+import { allocateDocumentSequence, formatDocumentNumber } from './documentNumbers.js';
 
-/**
- * Generates the next receipt number: R-XXXXXXXX
- * Uses an atomic counter in system_settings, guaranteed unique.
- */
+/** Series keys. Stated once, so a rename cannot silently restart a sequence. */
+const RECEIPT_SERIES = 'receipt_counter';
+const STUDENT_CODE_SERIES = 'student_code_counter';
+
+/** The next receipt number: `R-00000001`. */
 export function nextReceiptNumber(): string {
-  const seq = incrementNumberSetting('receipt_counter', 1, 0);
-  const seqNum = Math.trunc(Number(seq) || 0);
-  return `R-${String(seqNum).padStart(8, '0')}`;
+  return formatDocumentNumber('R', allocateDocumentSequence(RECEIPT_SERIES), 8);
 }
 
-/**
- * Generates the next student code: TH-NNNN
- * Uses an atomic counter in system_settings, guaranteed unique.
- */
+/** The next student code: `TH-001001`. The series starts at 1001. */
 export function nextStudentCode(): string {
-  // Assuming default starts at 1000
-  const seq = incrementNumberSetting('student_code_counter', 1, 1000);
-  const seqNum = Math.trunc(Number(seq) || 1000);
-  // in the DB doesn't break when numbers grow (e.g., TH-001000 vs TH-001001)
-  return `TH-${String(seqNum).padStart(6, '0')}`;
+  return formatDocumentNumber('TH', allocateDocumentSequence(STUDENT_CODE_SERIES, 1001), 6);
 }

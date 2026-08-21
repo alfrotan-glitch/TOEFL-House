@@ -17,8 +17,7 @@
  * Each descriptor below owns the key, the human label and the parse. A writer
  * consumes a descriptor; it never re-states the rule.
  */
-import { HttpError } from '../../middleware/errorHandler.js';
-import { assertDayOffset, assertMoney } from '../../utils/money.js';
+import { assertDayOffset, assertMoney, assertPercent } from '../../utils/money.js';
 
 export interface FinanceSettingDescriptor {
   /** `system_settings` key. */
@@ -29,30 +28,14 @@ export interface FinanceSettingDescriptor {
   parse(value: unknown): number;
 }
 
-/**
- * The share of each operating payment swept into the branch savings account.
- *
- * A percentage, not money: fractional rates are legitimate (2.5%), so this is
- * not `assertMoney`. The bound is the definition of a percentage — a rate above
- * 100% would sweep more than the payment.
- */
-function parsePercent(value: unknown): number {
-  const n = typeof value === 'number'
-    ? value
-    : typeof value === 'string' && /^\d+(\.\d+)?$/.test(value.trim())
-      ? Number(value.trim())
-      : Number.NaN;
-  if (!Number.isFinite(n) || n < 0 || n > 100) {
-    throw new HttpError(400, 'Percentage must be a number between 0 and 100.');
-  }
-  return n;
-}
-
 export const FINANCE_SETTINGS: Record<'dailySavingPercent' | 'expenseAutoApproveThreshold' | 'invoiceDueDays', FinanceSettingDescriptor> = {
   dailySavingPercent: {
     key: 'daily_saving_percent',
     field: 'dailySavingPercent',
-    parse: parsePercent,
+    // A percentage, not money: fractional rates are legitimate (2.5%), and the
+    // bound is the definition of a percentage — above 100% the sweep would take
+    // more than the payment.
+    parse: (value: unknown) => assertPercent(value, 'Percentage'),
   },
   expenseAutoApproveThreshold: {
     key: 'expense_auto_approve_threshold',

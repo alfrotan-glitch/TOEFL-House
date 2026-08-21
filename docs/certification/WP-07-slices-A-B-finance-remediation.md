@@ -1,10 +1,10 @@
-# Remediation Record — WP-07 Slices A & B · Budget/treasury authority and the invoice payment boundary
+# Remediation Record — WP-07 Slices A–C · Budget/treasury authority, the invoice payment boundary, and document/authorization integrity
 
 **Work Package:** WP-07 Finance — budget-line movement, savings ledger purity, finance operational settings, invoice payment boundary
 **Protocol:** `docs/MASTER_ENGINEERING_PROTOCOL.md` §§58–74 and §W
 **Date:** 2026-08-21
 **Recoverable pre-slice baseline:** `d29554bff7a635011ebed8a2d5085c265fc07197` (WP-06 certified)
-**Implementation checkpoints:** `998e6a4` (budget-movement authority) · `0fbf3ce` (review repairs)
+**Implementation checkpoints:** `998e6a4` (budget-movement authority) · `0fbf3ce` (review repairs) · `d6ff265` (invoice payment boundary) · `74465f8` (idempotency replay scope)
 **Status:** SLICE COMPLETE — **WP-07 as a whole remains UNCERTIFIED**
 
 > This record certifies only the concerns named below. It does **not** certify
@@ -35,6 +35,14 @@ Added in slice B:
 
 - the invoice payment boundary: payment-method validation, idempotency replay
   scope and ordering, and overpayment precision on `POST /api/invoices/:id/pay`.
+
+Added in slice C:
+
+- document numbering (receipt, student code, invoice, scoped documents): the
+  sequence authority and uniqueness at rest;
+- duplicate schema authority on the WP-07 tables (`invoices`, `invoice_items`,
+  `payments`);
+- the discount-authorization write path and the resolver's failure behaviour.
 
 Excluded (unchanged, and not certified here):
 
@@ -77,6 +85,10 @@ re-run after the repair.
 | WP07-F8 | An unrecognised invoice payment method is recorded as **cash** | MEDIUM | `paymentMethod: 'cheque'` → 201, a 2,000 AFN payment stored as `cash`, while `POST /api/students/:id/payments` rejected the identical input with 400 |
 | WP07-F9 | An idempotency key spent on one invoice fabricates a replay on another | HIGH | the same `Idempotency-Key` on a second, unpaid invoice returned **200 `idempotentReplay: true`** carrying the first invoice's receipt number, so an operator is told a collection succeeded that never happened — and is shown another payment's receipt |
 | WP07-F10 | A retried payment that settled the invoice reports failure | MEDIUM | the state gate ran before the replay check, so a concurrent retry answered 400 "Only issued, partial, or overdue invoices can accept payment" although the money had been taken |
+| WP07-F12 | A receipt number is not unique at rest | HIGH | the database accepted two payments carrying `R-00099001`, on insert and on update, while the generator's comment promised uniqueness. The receipt is the payer's proof, so an ambiguous number is an unauditable payment (LAW 3) |
+| WP07-F13 | The canonical schema declares the same object twice | MEDIUM | one unique index under two names on `invoices`, one index under two names on `invoice_items`, and two branch-guard trigger pairs each on `invoices` and `payments` where the `IS NOT` pair strictly subsumes the `<>` pair (§12) |
+| WP07-F14 | A discount grant is coerced, undated and its store fails silently | HIGH | `approvedPercent: [10]` granted 10%, `true` granted 1%, `''`/`null` created a 0% authorization record; `effectiveFrom: 'banana'` was stored and silently prevented the grant from ever activating (and `effectiveTo: 'banana'` from ever expiring); and a resolver that could not read the authorization table charged ordinary policy without a word |
+| WP07-F11 | A refund is unattributed, so a non-tuition refund creates tuition debt | HIGH — **OPEN, owner decision required** | proven on a fresh database: tuition 10,000 paid in full, a 2,000 exam fee paid, then a 2,000 refund → the canonical balance authority reports `tuitionPaid 8,000 / outstanding 2,000`. The same authority feeds the roster, the portal, branch outstanding and the enrolment debt-hold, so a refunded exam fee can block a student's enrolment |
 
 ## MODEL
 
@@ -127,13 +139,20 @@ Recorded as **D-101 … D-105** in `docs/registries/decisions.md`.
 | Package test authority (budget/treasury/settings) | `server/src/tests/work-packages/wp07/budget-movement-authority.test.ts` (new, 40 cases) |
 | Invoice payment: method refused not substituted; replay scoped to invoice + student in all three places; replay checked before the state gate; exact whole-AFN overpayment comparison; the now-unused global key lookup removed | `server/src/routes/invoices.routes.ts` |
 | Package test authority (invoice payment) | `server/src/tests/work-packages/wp07/invoice-payment-boundary.test.ts` (new, 7 cases) |
+| One sequence authority; `receipt.ts` / `invoice.ts` become typed callers | `server/src/utils/documentNumbers.ts`, `receipt.ts`, `invoice.ts` |
+| `uq_payments_receipt_number`; duplicate index and subsumed guard pairs removed from the WP-07 tables | `server/src/db/schema.sql` (112 tables · 237 indexes · 113 triggers) |
+| One percentage boundary consumed by the savings rate and discount grants | `server/src/utils/money.ts` (`assertPercent`), `core/configuration/finance-settings.ts` |
+| Discount grant parsed; effective window through the canonical ISO-date authority; resolver no longer swallows a store failure | `server/src/routes/discount-authorizations.routes.ts`, `core/configuration/discount-authority.ts` |
+| WP-02 structural case re-expressed by property instead of trigger name (forced by the schema consolidation, D-112) | `server/src/tests/work-packages/wp02/high-assurance-security.test.ts` |
+| Package test authority (documents + authorization) | `server/src/tests/work-packages/wp07/document-and-authorization-integrity.test.ts` (new, 38 cases) |
 
 ## VERIFY
 
 | Command | Result |
 |---|---|
-| `npx vitest run src/tests/work-packages/wp07` | 47/47 passed |
-| `npx vitest run` (server, full) | **2611 passed · 160 skipped** (the 160 are the explicit WP-04 retirements) · 0 failed |
+| `npx vitest run src/tests/work-packages/wp07` | 85/85 passed |
+| `npx vitest run` (server, full) | **2648 passed · 160 skipped** (the 160 are the explicit WP-04 retirements) · 0 failed |
+| `npm run preflight:fresh-schema` | 112 tables · 237 indexes · 113 triggers; stands alone, sound, idempotent |
 | `npx tsc --noEmit` (server + frontend) | clean |
 | `npm run release:validate` | **22 passed · 0 failed · 0 skipped** |
 | Reconciliation gate detail | `full money lifecycle · amount/cash/saving/budget all 0` |
@@ -159,6 +178,16 @@ which is accepted); a shared `Idempotency-Key` replayed against a different
 invoice; a keyed retry of a payment that already settled the invoice; and two
 concurrent identical payments (one 201, one 200 replay, one `payments` row,
 reconciliation healthy).
+
+Slice C: a duplicate receipt number by INSERT and by UPDATE; 100 interleaved
+payment/refund allocations from one counter; an invoice number reused inside its
+branch (refused) and in another branch (allowed, matching the counter); every
+index shape and branch guard on the three WP-07 tables; `[10]`, `true`, `''`,
+`null`, `'1e2'`, `'0x0F'`, whitespace, `Infinity`, `NaN` and an object as a
+discount percent; `'banana'`, `'2026-13-45'` and a reversed window as an
+effective window; a requested percent above the ceiling (recorded, never
+granted); and a renamed authorization table (the resolver now raises instead of
+quietly charging ordinary policy).
 
 ## REPAIR (findings from the independent review of the first checkpoint)
 
@@ -205,14 +234,42 @@ in this slice's scope:
   the invariant, but payroll is not certified here.
 - The same-agent limitation on independent review remains tracked as TR-4.
 
+## OPEN — OWNER DECISION REQUIRED (WP07-F11, refund attribution)
+
+Slice C stops here rather than guessing. The repository contains two
+contradictory positions and no evidence that resolves them:
+
+- `POST /api/students/:id/refund` computes its refundable base from **every**
+  completed non-refund payment — tuition, book, exam, card, placement, diploma —
+  and records the refund with no link to what it reverses;
+- `server/src/utils/studentBalance.ts` counts **every** refund against tuition
+  (`fee | installment | refund`), and its own comment states that non-tuition
+  categories "do not pay down tuition".
+
+Both cannot be right. Proven consequence (fresh database): refunding a 2,000 AFN
+exam fee leaves a student who has paid tuition in full showing 2,000 AFN of
+tuition debt, which the enrolment debt-hold then acts on.
+
+Fixing this requires a rule the repository does not contain — what a refund
+attaches to, and what the operator must state when issuing one. §105 forbids
+inventing it, so it is raised to the owner and remains OPEN. Nothing about the
+refund path was changed in this slice.
+
 ## CERTIFICATION (scope-limited)
 
 **READY — for the concerns in SCOPE only.** Every defect listed above was
 reproduced before repair and is pinned by an executed test; every applicable
 gate passes; no business policy was invented; no schema change was required.
 
-**WP-07 Finance remains NOT CERTIFIED.** Outstanding, and deliberately not
-claimed: invoice creation/issue/cancel lifecycle and numbering, refunds and
-payment allocation across semesters/installments, discount authorization,
-receipt numbering policy, the WP-07 legacy-test disposition under C-2, and the
-re-certification burden recorded in `docs/certification/WP-07-finance.md`.
+**WP-07 Finance remains NOT CERTIFIED.** Discharged by slice C: document
+numbering and uniqueness at rest, WP-07 duplicate schema authority, and the
+discount-authorization input boundary and failure behaviour. Still outstanding,
+and deliberately not claimed:
+
+- **WP07-F11 refund attribution — BLOCKED on the owner decision above;**
+- payment allocation across semesters and installment plans;
+- invoice creation/issue/cancel lifecycle beyond numbering and the payment path;
+- the WP-07 legacy-test disposition under C-2 (35 inventoried files / 409 cases
+  are still the behavioural record; the three package suites replace none of
+  them);
+- the re-certification burden recorded in `docs/certification/WP-07-finance.md`.

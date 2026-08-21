@@ -9,15 +9,19 @@ describe('high-assurance security invariants', () => {
   });
 
   it('has high-assurance branch guards installed', () => {
-    const names = [
-      'trg_enrollments_branch_guard',
-      'trg_invoices_branch_guard',
-      'trg_payments_branch_guard',
-      'trg_book_sales_branch_guard',
-      'trg_waitlist_branch_guard',
-    ];
-    const placeholders = names.map(() => '?').join(', ');
-    const rows = db.prepare(`SELECT name FROM sqlite_master WHERE type='trigger' AND name IN (${placeholders})`).all(...names) as {name:string}[];
-    expect(rows).toHaveLength(names.length);
+    // Asserted by the PROPERTY the tables must have, not by trigger name. The
+    // guarantee is "a cross-branch write to this table is refused by the
+    // database on insert and on update"; which object provides it is a schema
+    // detail, and pinning names here made a schema consolidation look like a
+    // security regression when the guarantee was untouched.
+    const guarded = ['enrollments', 'invoices', 'payments', 'book_sales', 'class_waitlist'];
+    for (const table of guarded) {
+      const triggers = db
+        .prepare(`SELECT name, sql FROM sqlite_master WHERE type='trigger' AND tbl_name = ?`)
+        .all(table) as { name: string; sql: string }[];
+      const branchGuards = triggers.filter((t) => /branch/i.test(t.sql) && /RAISE\(ABORT/i.test(t.sql));
+      expect(branchGuards.some((t) => /BEFORE INSERT/i.test(t.sql)), `${table} insert guard`).toBe(true);
+      expect(branchGuards.some((t) => /BEFORE UPDATE/i.test(t.sql)), `${table} update guard`).toBe(true);
+    }
   });
 });

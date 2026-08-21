@@ -219,6 +219,40 @@ export function assertPerformanceScore(
 }
 
 /**
+ * Percentage boundary.
+ *
+ * A percentage is not money (it has no currency precision) and not a score (it
+ * has no fixed 100-point scale — a category ceiling may be lower). It is its
+ * own boundary, and it exists once so the savings rate, a discount grant and
+ * any future rate cannot each decide what `[10]`, `true`, `''` or `null` mean.
+ * `Number()` reads those as 10, 1, 0 and 0 respectively, which is how a value
+ * nobody entered becomes a rate that moves money.
+ *
+ * Fractional percentages are accepted: a 2.5% sweep and a 12.5% discount are
+ * both legitimate, and the values they produce are settled by
+ * `assertComputedMoney` at the point money is derived.
+ */
+export function assertPercent(value: unknown, field = 'Percentage', opts: { max?: number } = {}): number {
+  const max = opts.max ?? 100;
+  let n: number;
+  if (typeof value === 'number') {
+    n = value;
+  } else if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed === '' || !DECIMAL_NUMERAL.test(trimmed)) {
+      throw new HttpError(400, `${field} must be a number between 0 and ${max}.`);
+    }
+    n = Number(trimmed);
+  } else {
+    throw new HttpError(400, `${field} must be a number between 0 and ${max}.`);
+  }
+  if (!Number.isFinite(n) || n < 0 || n > max) {
+    throw new HttpError(400, `${field} must be a number between 0 and ${max}.`);
+  }
+  return n;
+}
+
+/**
  * The largest day offset that still produces a valid JavaScript Date.
  *
  * ECMAScript clamps a time value to +/-8.64e15 ms (about 100,000,000 days

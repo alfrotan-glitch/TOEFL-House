@@ -167,18 +167,17 @@ export function resolveAuthorizedDiscount(
         ?.branch_id ??
         null);
 
-    let rows: AuthRow[];
-    try {
-      rows = db
-        .prepare(
-          `SELECT id, category, approved_percent, status, effective_from, effective_to, branch_id
-             FROM student_discount_authorizations WHERE student_id = ?`,
-        )
-        .all(studentId) as AuthRow[];
-    } catch {
-      // Table absent (pre-migration database): ordinary policy still applies.
-      rows = [];
-    }
+    // No fallback. A failure to read the authorization store is not evidence
+    // that the student has no authorization, and answering with ordinary policy
+    // would quietly charge a different figure than the approver granted. The
+    // canonical schema always provides this table, so an error here is a real
+    // fault and must surface (LAW 6).
+    const rows = db
+      .prepare(
+        `SELECT id, category, approved_percent, status, effective_from, effective_to, branch_id
+           FROM student_discount_authorizations WHERE student_id = ?`,
+      )
+      .all(studentId) as AuthRow[];
 
     for (const row of rows) {
       if (!authorizationIsLive(row, branchId, today)) continue;

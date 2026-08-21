@@ -28,6 +28,8 @@ import {
   CATEGORY_MAX,
   type DiscountCategory,
 } from '../core/configuration/discount-authority.js';
+import { assertOptionalIsoDate, assertDateRange } from '../utils/isoDate.js';
+import { assertPercent } from '../utils/money.js';
 
 export const discountAuthorizationsRouter = Router();
 discountAuthorizationsRouter.use(authenticate);
@@ -84,17 +86,30 @@ discountAuthorizationsRouter.post(
       throw new HttpError(403, 'You may only authorize discounts for your own branch.');
     }
 
-    const requested = Number(body.requestedPercent ?? body.approvedPercent ?? 0);
-    const approvedRaw = Number(body.approvedPercent ?? 0);
-    if (!Number.isFinite(approvedRaw) || approvedRaw < 0) {
-      throw new HttpError(400, 'Approved percent must be zero or greater.');
-    }
+    // Parsed, never coerced. `Number()` turns `[10]` into 10, `true` into 1 and
+    // `''`/`null` into 0, so a coercion here mints a discount out of a value
+    // nobody approved — including a 0% authorization record created by an empty
+    // form field. The grant must be stated explicitly.
+    const approvedRaw = assertPercent(body.approvedPercent, 'Approved percent');
     const max = CATEGORY_MAX[category];
     if (approvedRaw > max) {
       throw new HttpError(400, `${category} may not exceed ${max}%.`);
     }
+    // What was asked for may exceed what is granted; it is a record, not an
+    // authority. It is still parsed, so the audit row cannot hold a coercion.
+    const requested = body.requestedPercent == null
+      ? approvedRaw
+      : assertPercent(body.requestedPercent, 'Requested percent');
     const reason = String(body.reason ?? '').trim();
     if (!reason) throw new HttpError(400, 'A reason is required for a discount exception.');
+
+    // The effective window decides when a money grant is live, and the resolver
+    // compares it as an ISO date string. An unparseable value silently either
+    // never activates the grant (`'banana' > today`) or never expires it
+    // (`'banana' < today` is false), so it is refused here.
+    const effectiveFrom = assertOptionalIsoDate(body.effectiveFrom, 'Effective from');
+    const effectiveTo = assertOptionalIsoDate(body.effectiveTo, 'Effective to');
+    assertDateRange(effectiveFrom, effectiveTo, 'Effective from', 'Effective to');
 
     const authId = randomUUID();
     db.prepare(
@@ -114,8 +129,8 @@ discountAuthorizationsRouter.post(
       user.userId ?? null,
       reason,
       body.evidenceRef ? String(body.evidenceRef) : null,
-      body.effectiveFrom ? String(body.effectiveFrom) : null,
-      body.effectiveTo ? String(body.effectiveTo) : null,
+      effectiveFrom,
+      effectiveTo,
       student.branch_id,
       'manual',
     );

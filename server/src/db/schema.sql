@@ -2288,12 +2288,11 @@ CREATE INDEX IF NOT EXISTS idx_invoices_due_date     ON invoices(due_date);
 CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices(status);
 CREATE INDEX IF NOT EXISTS idx_invoices_status_due   ON invoices(status, due_date);
 CREATE INDEX IF NOT EXISTS idx_invoices_student      ON invoices(student_id);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_invoice_number_per_branch ON invoices(branch_id, invoice_number) WHERE invoice_number IS NOT NULL;
+-- Invoice numbers are issued per branch and per year by `invoice_sequence:*`,
+-- so uniqueness is scoped to the branch that issued them.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_invoices_branch_invoice_number
   ON invoices(branch_id, invoice_number)
   WHERE invoice_number IS NOT NULL;
-CREATE TRIGGER IF NOT EXISTS trg_invoices_branch_guard BEFORE INSERT ON invoices WHEN (SELECT branch_id FROM students WHERE id = NEW.student_id) <> NEW.branch_id BEGIN SELECT RAISE(ABORT, 'invoice branch mismatch'); END;
-CREATE TRIGGER IF NOT EXISTS trg_invoices_branch_guard_update BEFORE UPDATE OF student_id, branch_id ON invoices WHEN (SELECT branch_id FROM students WHERE id = NEW.student_id) <> NEW.branch_id BEGIN SELECT RAISE(ABORT, 'invoice branch mismatch'); END;
 CREATE TRIGGER IF NOT EXISTS trg_invoices_branch_integrity_insert
 BEFORE INSERT ON invoices
 WHEN (SELECT branch_id FROM students WHERE id = NEW.student_id) IS NOT NEW.branch_id
@@ -2325,7 +2324,6 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   unit_price  INTEGER NOT NULL DEFAULT 0, 
   amount      INTEGER NOT NULL DEFAULT 0 
 );
-CREATE INDEX IF NOT EXISTS idx_invoice_items_inv     ON invoice_items(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id);
 CREATE TRIGGER IF NOT EXISTS trg_invoice_items_money_scale_insert
 BEFORE INSERT ON invoice_items
@@ -2357,8 +2355,12 @@ CREATE INDEX IF NOT EXISTS idx_payments_date         ON payments(date);
 CREATE INDEX IF NOT EXISTS idx_payments_invoice      ON payments(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_payments_student      ON payments(student_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_idempotency ON payments(idempotency_key) WHERE idempotency_key IS NOT NULL;
-CREATE TRIGGER IF NOT EXISTS trg_payments_branch_guard BEFORE INSERT ON payments WHEN (NEW.student_id IS NOT NULL AND (SELECT branch_id FROM students WHERE id = NEW.student_id) <> NEW.branch_id) OR (NEW.invoice_id IS NOT NULL AND (SELECT branch_id FROM invoices WHERE id = NEW.invoice_id) <> NEW.branch_id) OR (NEW.book_id IS NOT NULL AND (SELECT branch_id FROM books WHERE id = NEW.book_id) <> NEW.branch_id) BEGIN SELECT RAISE(ABORT, 'payment branch mismatch'); END;
-CREATE TRIGGER IF NOT EXISTS trg_payments_branch_guard_update BEFORE UPDATE OF student_id, invoice_id, book_id, branch_id ON payments WHEN (NEW.student_id IS NOT NULL AND (SELECT branch_id FROM students WHERE id = NEW.student_id) <> NEW.branch_id) OR (NEW.invoice_id IS NOT NULL AND (SELECT branch_id FROM invoices WHERE id = NEW.invoice_id) <> NEW.branch_id) OR (NEW.book_id IS NOT NULL AND (SELECT branch_id FROM books WHERE id = NEW.book_id) <> NEW.branch_id) BEGIN SELECT RAISE(ABORT, 'payment branch mismatch'); END;
+-- A receipt number is the payer's proof that a specific payment happened, so
+-- two payments may never carry one. The number is issued by a single global
+-- counter (`receipt_counter`), which is why uniqueness here is global rather
+-- than per branch. Rows with no receipt (internal bookings) are unconstrained.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_receipt_number
+  ON payments(receipt_number) WHERE receipt_number IS NOT NULL;
 CREATE TRIGGER IF NOT EXISTS trg_payments_branch_integrity_insert
 BEFORE INSERT ON payments
 WHEN (NEW.student_id IS NOT NULL AND (SELECT branch_id FROM students WHERE id = NEW.student_id) IS NOT NEW.branch_id)
