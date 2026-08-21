@@ -176,8 +176,8 @@ Recorded as **D-101 … D-105** in `docs/registries/decisions.md`.
 
 | Command | Result |
 |---|---|
-| `npx vitest run src/tests/work-packages/wp07` | 128/128 passed |
-| `npx vitest run` (server, full) | **2702 passed · 160 skipped** (the 160 are the explicit WP-04 retirements) · 0 failed |
+| `npx vitest run src/tests/work-packages/wp07` | 131/131 passed |
+| `npx vitest run` (server, full) | **2705 passed · 160 skipped** (the 160 are the explicit WP-04 retirements) · 0 failed |
 | `npm run preflight:fresh-schema` | 115 tables · 245 indexes · 122 triggers; stands alone, sound, idempotent |
 | `npm run release:validate` (after slice E) | **22 passed · 0 failed · 0 skipped**; fresh install 115 tables; financial invariants reconcile |
 | `npx tsc --noEmit` (server + frontend) | clean |
@@ -380,10 +380,13 @@ claimed:
   allocations; both are read through one settlement authority
   (`getSemesterTuitionSettled`), so no figure disagrees, but the storage is not
   yet unified. `source_kind = 'payment'` is declared and unused until then;
-- the funding **UI** for slice E: the API, the authority and the invariants are
-  complete and tested, but `FundingView.tsx` does not yet expose funding a
-  scholarship from a donation or applying an award. The capability is
-  server-complete and operator-incomplete, and is not claimed otherwise;
+- ~~the funding **UI** for slice E~~ — **completed**. `FundingView.tsx` now
+  renders the server's fund position (received / committed / available beside
+  the declared target), funds a scholarship from a received donation, applies an
+  award to a named tuition obligation, reverses an application and closes an
+  award. The retired browser-side arithmetic (`totalBudget − allocatedAmount`)
+  is gone, and the screen invalidates the student/payment datasets it affects,
+  which the §35 freshness rule caught and now enforces;
 - payment allocation — narrowed by inspection, not yet certified. The
   charge side is already explicit: `fee` requires `semesterId`, `installment`
   requires `installmentId` and must match its amount, `book` requires `bookId`,

@@ -20,6 +20,9 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { db, initSchema } from '../../../db/connection.js';
 import { errorHandler } from '../../../middleware/errorHandler.js';
 import { fundingRouter } from '../../../routes/funding.routes.js';
@@ -419,5 +422,32 @@ describe('WP-07 · attack · scholarship money cannot be misdirected', () => {
     const donation = db.prepare('SELECT id FROM donations LIMIT 1').get() as { id: string };
     expect(() => db.prepare('DELETE FROM donations WHERE id = ?').run(donation.id)).toThrow(/FOREIGN KEY/i);
     expect(() => db.prepare('DELETE FROM student_obligations WHERE id = ?').run(obligation.id)).toThrow(/FOREIGN KEY/i);
+  });
+});
+
+describe('WP-07 · the funding screen renders server truth, it does not compute it', () => {
+  const source = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', '..', 'src', 'components', 'funding', 'FundingView.tsx'),
+    'utf8',
+  );
+
+  it('reads the fund position from the server instead of subtracting in the browser', () => {
+    expect(source).toContain('/funding/scholarships/${sc.id}/position');
+    // The retired client arithmetic: a declared target minus a mirrored total.
+    expect(source).not.toContain('const remaining = sc.totalBudget - sc.allocatedAmount;');
+    expect(source).not.toContain('awardingScholarship.totalBudget - awardingScholarship.allocatedAmount');
+  });
+
+  it('offers the operator the whole approved lifecycle', () => {
+    expect(source).toContain('/funding/scholarships/${fundingScholarship.id}/fundings');
+    expect(source).toContain('/funding/scholarship-awards/${managingAward.id}/allocations');
+    expect(source).toContain('/allocations/${allocationId}/reverse');
+    expect(source).toContain('/funding/scholarship-awards/${managingAward.id}/close');
+    expect(source).toContain('/funding/students/${award.studentId}/tuition-obligations');
+  });
+
+  it('states where reversed money goes, so the operator is not guessing', () => {
+    expect(source).toMatch(/Reversing an application returns the money to this award/);
+    expect(source).toMatch(/never paid to a student/i);
   });
 });

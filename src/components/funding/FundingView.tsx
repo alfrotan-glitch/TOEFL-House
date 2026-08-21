@@ -13,10 +13,12 @@
  *  - Emerald = money in, amber = in-flight campaigns, rose = restricted funds.
  *  - Animated progress, hover lift, staggered tab reveals, live pulse.
  */
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {HandCoins, Users, Target, ReceiptText, GraduationCap, HeartHandshake, Plus, Search, Landmark, Building2, Globe2, User, Lock, Unlock, Calendar, Edit, X, Info, BadgeCheck} from 'lucide-react';
 import {Donor, FundingCampaign, Donation, Scholarship, ScholarshipAward, SponsorshipAgreement, Student, UserRole} from '../../types';
 import Toast from '../common/Toast';
+import { api } from '../../api/client';
+import { useInvalidate } from '../../state/serverStateFreshness';
 import { ShamsiDateInput } from '../common/ShamsiDateInput';
 
 // ============================================================================
@@ -54,6 +56,43 @@ const DONOR_TYPE_META: Record<Donor['type'], { label: string; icon: React.Elemen
 };
 
 const fmt = (n: number) => `${(n ?? 0).toLocaleString('en-US')} AFN`;
+
+/**
+ * A fund's money position, as resolved by the server.
+ *
+ * `received` is donation money explicitly allocated into the fund and is the
+ * only backing an award may draw on (owner decision D-121); `declaredTarget` is
+ * the fund's stated goal and bounds nothing. The browser must not compute any
+ * of these — a scholarship position is financial truth (LAW 2).
+ */
+interface FundPosition {
+  scholarshipId: string;
+  received: number;
+  committed: number;
+  available: number;
+  declaredTarget: number;
+  fundings: Array<{ id: string; donation_id: string; amount: number; date: string; receipt_no: string; donor_name: string }>;
+}
+
+interface AwardPosition {
+  awardId: string;
+  scholarshipId: string;
+  studentId: string;
+  amount: number;
+  allocated: number;
+  remaining: number;
+  status: 'active' | 'closed';
+  allocations: Array<{ id: string; amount: number; status: 'active' | 'reversed'; date: string; semester_name: string | null }>;
+}
+
+interface TuitionObligationRow {
+  id: string;
+  semesterName: string;
+  netAmount: number;
+  settledCash: number;
+  settledScholarship: number;
+  outstanding: number;
+}
 
 // ============================================================================
 // Small presentational pieces
@@ -164,6 +203,18 @@ export default function FundingView({
 
   const [showScholarshipModal, setShowScholarshipModal] = useState(false);
   const [scholarshipForm, setScholarshipForm] = useState({ name: '', donorId: '', totalBudget: 0, criteria: '' });
+  // Fund and award positions come from the server on every read; nothing here
+  // recomputes them (LAW 2).
+  // Applying scholarship money changes a student's tuition position, so the
+  // datasets that publish it must be invalidated, not just this screen's state.
+  const invalidate = useInvalidate();
+  const [fundPositions, setFundPositions] = useState<Record<string, FundPosition>>({});
+  const [fundingScholarship, setFundingScholarship] = useState<Scholarship | null>(null);
+  const [fundingForm, setFundingForm] = useState({ donationId: '', amount: 0 });
+  const [managingAward, setManagingAward] = useState<ScholarshipAward | null>(null);
+  const [awardPosition, setAwardPosition] = useState<AwardPosition | null>(null);
+  const [obligations, setObligations] = useState<TuitionObligationRow[] | null>(null);
+  const [applyForm, setApplyForm] = useState({ obligationId: '', amount: 0 });
 
   const [awardingScholarship, setAwardingScholarship] = useState<Scholarship | null>(null);
   const [awardForm, setAwardForm] = useState({ studentId: '', amount: 0, semester: '', notes: '' });
@@ -172,6 +223,30 @@ export default function FundingView({
   const [sponsorshipForm, setSponsorshipForm] = useState({ donorId: '', studentId: '', monthlyAmount: 0, startDate: '', endDate: '' });
 
   // ---- Derived treasury metrics ----
+  const reloadFundPositions = useCallback(async () => {
+    const entries = await Promise.all(
+      scholarships.map(async (sc) => {
+        try {
+          return [sc.id, await api.get<FundPosition>(`/funding/scholarships/${sc.id}/position`)] as const;
+        } catch {
+          return [sc.id, null] as const;
+        }
+      }),
+    );
+    setFundPositions(Object.fromEntries(entries.filter((e): e is readonly [string, FundPosition] => e[1] !== null)));
+  }, [scholarships]);
+
+  useEffect(() => { void reloadFundPositions(); }, [reloadFundPositions]);
+
+  const reloadAward = useCallback(async (award: ScholarshipAward) => {
+    const [position, rows] = await Promise.all([
+      api.get<AwardPosition>(`/funding/scholarship-awards/${award.id}`),
+      api.get<TuitionObligationRow[]>(`/funding/students/${award.studentId}/tuition-obligations`),
+    ]);
+    setAwardPosition(position);
+    setObligations(rows);
+  }, []);
+
   const treasury = useMemo(() => {
     const totalRaised = donations.reduce((s, d) => s + d.amount, 0);
     const restricted = donations.filter((d) => d.restricted).reduce((s, d) => s + d.amount, 0);
@@ -278,13 +353,20 @@ export default function FundingView({
   const submitAward = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!awardingScholarship || !awardForm.studentId || awardForm.amount <= 0) return notify('Select a student and enter an amount.', 'error');
-    const remaining = awardingScholarship.totalBudget - awardingScholarship.allocatedAmount;
-    if (awardForm.amount > remaining) return notify(`Exceeds remaining budget (${fmt(remaining)}).`, 'error');
+    // The ceiling is money the fund has RECEIVED, and the server owns that
+    // decision. This only avoids a pointless round trip on a figure the server
+    // already published; it never substitutes for the server's answer.
+    const available = fundPositions[awardingScholarship.id]?.available;
+    if (available !== undefined && awardForm.amount > available) {
+      return notify(`Exceeds the ${fmt(available)} this fund has available.`, 'error');
+    }
     try {
       await awardScholarship({ scholarshipId: awardingScholarship.id, studentId: awardForm.studentId, amount: awardForm.amount, semester: awardForm.semester || undefined, notes: awardForm.notes || undefined });
       notify('Scholarship awarded to student.');
+      invalidate('funding');
       setAwardingScholarship(null);
       setAwardForm({ studentId: '', amount: 0, semester: '', notes: '' });
+      await reloadFundPositions();
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Failed to award scholarship.', 'error');
     }
@@ -303,6 +385,80 @@ export default function FundingView({
       setSponsorshipForm({ donorId: '', studentId: '', monthlyAmount: 0, startDate: '', endDate: '' });
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Failed to create sponsorship.', 'error');
+    }
+  };
+
+  const submitFunding = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!fundingScholarship) return;
+    try {
+      await api.post(`/funding/scholarships/${fundingScholarship.id}/fundings`, {
+        donationId: fundingForm.donationId,
+        amount: fundingForm.amount,
+      });
+      notify('Donation allocated to the fund.', 'success');
+      invalidate('funding');
+      setFundingScholarship(null);
+      await reloadFundPositions();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not fund the scholarship.', 'error');
+    }
+  };
+
+  const openAward = async (awardRow: ScholarshipAward) => {
+    setManagingAward(awardRow);
+    setAwardPosition(null);
+    setObligations(null);
+    setApplyForm({ obligationId: '', amount: 0 });
+    try {
+      await reloadAward(awardRow);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not load this award.', 'error');
+    }
+  };
+
+  const submitApplication = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!managingAward) return;
+    try {
+      await api.post(`/funding/scholarship-awards/${managingAward.id}/allocations`, {
+        obligationId: applyForm.obligationId,
+        amount: applyForm.amount,
+      });
+      notify('Scholarship applied to the tuition obligation.', 'success');
+      invalidate('students', 'payments', 'funding');
+      setApplyForm({ obligationId: '', amount: 0 });
+      await Promise.all([reloadAward(managingAward), reloadFundPositions()]);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not apply the award.', 'error');
+    }
+  };
+
+  const reverseApplication = async (allocationId: string) => {
+    if (!managingAward) return;
+    const reason = window.prompt('Why is this application being reversed? (at least 8 characters)');
+    if (!reason) return;
+    try {
+      await api.post(`/funding/scholarship-awards/${managingAward.id}/allocations/${allocationId}/reverse`, { reason });
+      notify('Application reversed; the money returned to the award.', 'success');
+      invalidate('students', 'payments', 'funding');
+      await Promise.all([reloadAward(managingAward), reloadFundPositions()]);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not reverse the application.', 'error');
+    }
+  };
+
+  const closeManagedAward = async () => {
+    if (!managingAward) return;
+    const reason = window.prompt('Why is this award being closed? (at least 8 characters)');
+    if (!reason) return;
+    try {
+      const res = await api.post<{ returnedToFund: number }>(`/funding/scholarship-awards/${managingAward.id}/close`, { reason });
+      notify(`Award closed; ${fmt(res.returnedToFund)} returned to the fund.`, 'success');
+      invalidate('funding');
+      await Promise.all([reloadAward(managingAward), reloadFundPositions()]);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not close the award.', 'error');
     }
   };
 
@@ -596,7 +752,7 @@ export default function FundingView({
               </div>
             ) : (
               scholarships.map((sc) => {
-                const remaining = sc.totalBudget - sc.allocatedAmount;
+                const position = fundPositions[sc.id];
                 return (
                   <div key={sc.id} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between gap-4">
                     <div className="space-y-2">
@@ -610,13 +766,38 @@ export default function FundingView({
                       {sc.donorId && <p className="text-[10px] text-slate-500">Funded by <span className="font-bold text-slate-700">{donorName(sc.donorId)}</span></p>}
                     </div>
                     <div className="space-y-2">
-                      <GoalBar raised={sc.allocatedAmount} target={sc.totalBudget} />
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] text-slate-400 font-mono">{fmt(remaining)} remaining</span>
+                      {/* Committed against RECEIVED money. The declared target is
+                          a goal and funds nothing (owner decision D-121). */}
+                      <GoalBar raised={position?.committed ?? 0} target={position?.received ?? 0} />
+                      {position ? (
+                        <div className="grid grid-cols-3 gap-2 text-[10px] font-mono">
+                          <div><p className="text-slate-400">Received</p><p className="font-bold text-emerald-700">{fmt(position.received)}</p></div>
+                          <div><p className="text-slate-400">Committed</p><p className="font-bold text-slate-700">{fmt(position.committed)}</p></div>
+                          <div><p className="text-slate-400">Available</p><p className="font-bold text-indigo-700">{fmt(position.available)}</p></div>
+                        </div>
+                      ) : (
+                        <p className="text-[10px] text-slate-400 italic">Loading fund position…</p>
+                      )}
+                      <p className="text-[10px] text-slate-400">
+                        Declared target {fmt(position?.declaredTarget ?? sc.totalBudget)} · funded by {position?.fundings.length ?? 0} donation(s)
+                      </p>
+                      {position && position.received === 0 && (
+                        <p className="text-[10px] text-amber-700 font-bold">Allocate a donation before awarding: a fund can only award money it has received.</p>
+                      )}
+                      <div className="flex items-center justify-between gap-2">
+                        {canManage && (
+                          <button
+                            onClick={() => { setFundingScholarship(sc); setFundingForm({ donationId: '', amount: 0 }); }}
+                            className="flex items-center gap-1 text-[11px] font-bold text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
+                          >
+                            <HandCoins className="w-3.5 h-3.5" /> Fund from donation
+                          </button>
+                        )}
                         {canManage && sc.status === 'active' && (
                           <button
                             onClick={() => { setAwardingScholarship(sc); setAwardForm({ studentId: '', amount: 0, semester: '', notes: '' }); }}
-                            className="flex items-center gap-1 text-[11px] font-bold text-indigo-700 hover:text-indigo-900 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
+                            disabled={!position || position.available <= 0}
+                            className="flex items-center gap-1 text-[11px] font-bold text-indigo-700 hover:text-indigo-900 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                           >
                             <BadgeCheck className="w-3.5 h-3.5" /> Award Student
                           </button>
@@ -643,11 +824,12 @@ export default function FundingView({
                     <th className="py-2.5 px-3 text-slate-700">Semester</th>
                     <th className="py-2.5 px-3 text-slate-700">Award Date</th>
                     <th className="py-2.5 px-3 text-slate-700 text-start">Amount</th>
+                    <th className="py-2.5 px-3 text-slate-700 text-start">Applied</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50 text-slate-600">
                   {scholarshipAwards.length === 0 ? (
-                    <tr><td colSpan={5} className="text-center py-8 text-slate-400">No awards issued yet.</td></tr>
+                    <tr><td colSpan={6} className="text-center py-8 text-slate-400">No awards issued yet.</td></tr>
                   ) : (
                     scholarshipAwards.map((a) => (
                       <tr key={a.id} className="hover:bg-indigo-50/30 transition-colors">
@@ -656,6 +838,14 @@ export default function FundingView({
                         <td className="py-3 px-3 text-slate-500">{a.semester || '—'}</td>
                         <td className="py-3 px-3 font-mono text-slate-400">{a.awardDate}</td>
                         <td className="py-3 px-3 text-start font-black font-mono tabular-nums text-indigo-700">{fmt(a.amount)}</td>
+                        <td className="py-3 px-3 text-start">
+                          <button
+                            onClick={() => void openAward(a)}
+                            className="text-[11px] font-bold text-indigo-700 hover:text-indigo-900 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
+                          >
+                            Apply / manage
+                          </button>
+                        </td>
                       </tr>
                     ))
                   )}
@@ -803,7 +993,7 @@ export default function FundingView({
         <ModalShell title={`Award — ${awardingScholarship.name}`} onClose={() => setAwardingScholarship(null)}>
           <div className="bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2.5 text-[11px] text-emerald-800 font-semibold mb-4 flex items-center gap-2">
             <Info className="w-4 h-4 shrink-0" />
-            Remaining budget: {fmt(awardingScholarship.totalBudget - awardingScholarship.allocatedAmount)}
+            Available to award: {fmt(fundPositions[awardingScholarship.id]?.available ?? 0)} — received {fmt(fundPositions[awardingScholarship.id]?.received ?? 0)}, already committed {fmt(fundPositions[awardingScholarship.id]?.committed ?? 0)}
           </div>
           <form onSubmit={submitAward} className="space-y-3.5 text-xs">
             <div><label className={labelCls}>Student *</label>
@@ -821,6 +1011,122 @@ export default function FundingView({
               <input className={inputCls} value={awardForm.notes} onChange={(e) => setAwardForm({ ...awardForm, notes: e.target.value })} /></div>
             <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-lg cursor-pointer transition-colors shadow-sm">Award Scholarship</button>
           </form>
+        </ModalShell>
+      )}
+
+      {/* Fund a scholarship from a received donation (owner decision D-121) */}
+      {fundingScholarship && (
+        <ModalShell title={`Fund — ${fundingScholarship.name}`} onClose={() => setFundingScholarship(null)}>
+          <div className="bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2.5 text-[11px] text-emerald-800 font-semibold mb-4 flex items-start gap-2">
+            <Info className="w-4 h-4 shrink-0 mt-0.5" />
+            A fund holds money the institute has already received. Allocating a donation here is the only way it is backed — and the donation is not recognised as income again.
+          </div>
+          <form onSubmit={submitFunding} className="space-y-3.5 text-xs">
+            <div><label className={labelCls}>Donation *</label>
+              <select className={inputCls} value={fundingForm.donationId} onChange={(e) => setFundingForm({ ...fundingForm, donationId: e.target.value })} required>
+                <option value="">Select a received donation…</option>
+                {donations.map((d) => (
+                  <option key={d.id} value={d.id}>{d.date} · {donorName(d.donorId)} · {fmt(d.amount)}{d.receiptNo ? ` · ${d.receiptNo}` : ''}</option>
+                ))}
+              </select>
+              <p className="text-[10px] text-slate-400 mt-1">The server refuses more than the donation still has unallocated.</p>
+            </div>
+            <div><label className={labelCls}>Amount to allocate (AFN) *</label>
+              <input type="number" min={1} className={inputCls} value={fundingForm.amount || ''} onChange={(e) => setFundingForm({ ...fundingForm, amount: Number(e.target.value) })} required /></div>
+            <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-lg cursor-pointer transition-colors shadow-sm">Allocate to fund</button>
+          </form>
+          {fundPositions[fundingScholarship.id] && fundPositions[fundingScholarship.id].fundings.length > 0 && (
+            <div className="mt-4 border-t border-slate-100 pt-3">
+              <p className="text-[11px] font-bold text-slate-700 mb-2">Already funded by</p>
+              <ul className="space-y-1 text-[11px] text-slate-500">
+                {fundPositions[fundingScholarship.id].fundings.map((f) => (
+                  <li key={f.id} className="flex items-center justify-between">
+                    <span>{f.date} · {f.donor_name} · {f.receipt_no}</span>
+                    <span className="font-mono font-bold text-slate-700">{fmt(f.amount)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </ModalShell>
+      )}
+
+      {/* Apply an award to a tuition obligation, reverse an application, close the award */}
+      {managingAward && (
+        <ModalShell title={`Award — ${studentName(managingAward.studentId)}`} onClose={() => { setManagingAward(null); setAwardPosition(null); setObligations(null); }}>
+          {!awardPosition ? (
+            <p className="text-[11px] text-slate-400 italic py-6 text-center">Loading award position…</p>
+          ) : (
+            <div className="space-y-4 text-xs">
+              <div className="grid grid-cols-3 gap-2 text-[11px] font-mono bg-slate-50 rounded-lg p-3">
+                <div><p className="text-slate-400">Awarded</p><p className="font-bold text-slate-800">{fmt(awardPosition.amount)}</p></div>
+                <div><p className="text-slate-400">Applied</p><p className="font-bold text-emerald-700">{fmt(awardPosition.allocated)}</p></div>
+                <div><p className="text-slate-400">Unapplied</p><p className="font-bold text-indigo-700">{fmt(awardPosition.remaining)}</p></div>
+              </div>
+
+              {awardPosition.status === 'active' ? (
+                <form onSubmit={submitApplication} className="space-y-3">
+                  <div><label className={labelCls}>Tuition obligation *</label>
+                    <select
+                      className={inputCls}
+                      value={applyForm.obligationId}
+                      onChange={(e) => {
+                        const picked = obligations?.find((o) => o.id === e.target.value);
+                        setApplyForm({ obligationId: e.target.value, amount: picked ? Math.min(picked.outstanding, awardPosition.remaining) : 0 });
+                      }}
+                      required
+                    >
+                      <option value="">Select the term this pays…</option>
+                      {(obligations ?? []).filter((o) => o.outstanding > 0).map((o) => (
+                        <option key={o.id} value={o.id}>{o.semesterName} · {fmt(o.outstanding)} outstanding of {fmt(o.netAmount)}</option>
+                      ))}
+                    </select>
+                    {obligations && obligations.filter((o) => o.outstanding > 0).length === 0 && (
+                      <p className="text-[10px] text-slate-400 mt-1">This student has no outstanding tuition to apply the award to.</p>
+                    )}
+                  </div>
+                  <div><label className={labelCls}>Amount (AFN) *</label>
+                    <input type="number" min={1} className={inputCls} value={applyForm.amount || ''} onChange={(e) => setApplyForm({ ...applyForm, amount: Number(e.target.value) })} required /></div>
+                  <button type="submit" disabled={!applyForm.obligationId} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-lg cursor-pointer transition-colors shadow-sm disabled:opacity-40 disabled:cursor-not-allowed">
+                    Apply to this term
+                  </button>
+                </form>
+              ) : (
+                <p className="text-[11px] text-slate-500 bg-slate-50 rounded-lg p-3">This award is closed. Applied money stayed where it was applied.</p>
+              )}
+
+              <div className="border-t border-slate-100 pt-3">
+                <p className="text-[11px] font-bold text-slate-700 mb-2">Applications</p>
+                {awardPosition.allocations.length === 0 ? (
+                  <p className="text-[11px] text-slate-400 italic">Nothing applied yet.</p>
+                ) : (
+                  <ul className="space-y-1.5">
+                    {awardPosition.allocations.map((al) => (
+                      <li key={al.id} className="flex items-center justify-between gap-2 text-[11px]">
+                        <span className={al.status === 'reversed' ? 'text-slate-400 line-through' : 'text-slate-600'}>
+                          {al.date} · {al.semester_name ?? 'tuition'} · <span className="font-mono font-bold">{fmt(al.amount)}</span>
+                        </span>
+                        {al.status === 'active' && canManage && (
+                          <button onClick={() => void reverseApplication(al.id)} className="text-[11px] font-bold text-rose-700 hover:text-rose-900 hover:bg-rose-50 px-2 py-1 rounded-lg cursor-pointer transition-colors">
+                            Reverse
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              {canManage && awardPosition.status === 'active' && (
+                <button onClick={() => void closeManagedAward()} className="w-full border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold py-2 rounded-lg cursor-pointer transition-colors text-[11px]">
+                  Close award — return {fmt(awardPosition.remaining)} to the fund
+                </button>
+              )}
+              <p className="text-[10px] text-slate-400">
+                Reversing an application returns the money to this award; closing the award returns whatever is unapplied to the fund. Scholarship money is never paid to a student.
+              </p>
+            </div>
+          )}
         </ModalShell>
       )}
 
