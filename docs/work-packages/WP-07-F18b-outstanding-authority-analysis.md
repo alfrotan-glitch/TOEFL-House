@@ -2,7 +2,9 @@
 
 **Protocol:** §65 CHECKPOINT · §61 (no invented policy) · §103 EVIDENCE · §106 SCOPE · LAW 1 · LAW 4
 **Date:** 2026-08-21 · **Baseline:** `526df15` (release gate 22/22; suite 2817 passed · 162 skipped · 0 failed)
-**Status:** **ANALYSIS ONLY. Nothing was changed.** `git status` is clean; the probe used to prove the defect was run from a scratch database and deleted.
+**Status:** analysis performed read-only; **owner approved Option 2 + "as at today" and it is IMPLEMENTED** (D-150/D-151). **See §7 — this analysis contained an error, corrected there.**
+
+**Original status when written:** **ANALYSIS ONLY. Nothing was changed.** `git status` is clean; the probe used to prove the defect was run from a scratch database and deleted.
 
 ---
 
@@ -141,3 +143,44 @@ answer. That is the owner's call, which is why nothing has been implemented.
 * **Slice-K residual** — both BOS revenue reports INNER JOIN `classes`, so tuition for a class-less term appears in neither total.
 * **`payments.semester` retirement** — the agreed follow-on.
 * **TR-4** — independent review remains outstanding.
+
+
+---
+
+## 7. ERRATUM and outcome
+
+### 7.1 This analysis was wrong in one respect (D-152)
+
+§1 tabulated authority **A** as *aid-aware: yes*, and §2's probe printed
+`A) balance authority "Student Arrears": 0`.
+
+**That was incorrect.** The probe subtracted aid **in its own arithmetic**
+(`A.outstanding - aid.t`). Production's `getBranchOutstanding` — which is what
+the dashboard actually calls — contained no aid subtraction at all
+(`git show HEAD:server/src/utils/studentBalance.ts`). `getStudentBalance` is
+aid-aware; `getBranchOutstanding` was not, and §1 conflated the two.
+
+**The true pre-repair state:**
+
+| Surface | Reported for a term fully settled by a donor |
+|---|---|
+| Student profile / roster (`getStudentBalance`) | **0** — correct |
+| BOS "Student Arrears" (`getBranchOutstanding`) | **10,000** — wrong |
+| Operations report (invoice-derived) | **10,000** — wrong |
+
+The defect was **wider** than analysed, not narrower: two of the three surfaces
+were wrong, and the two "competing authorities" framing understated it. This is
+recorded rather than quietly amended.
+
+### 7.2 What was implemented
+
+* **D-150** — the report publishes one composed receivable: `{ tuition, nonTuition, total, openInvoices }`. Tuition from the tuition authority only; everything else from the documents that bill it. A position as at today.
+* **D-151 (WP07-F23)** — `getBranchOutstanding` subtracts active aid allocations and accepts `branchId: string | null`, so the per-student, per-branch and organization-wide figures are one definition with different filters.
+
+**Release gate:** 22 passed · 0 failed · 0 skipped. **Server suite:** 2825 passed · 162 skipped · 0 failed.
+
+### 7.3 Still open after F-18b
+
+* **TR-4** — independent review by a second reviewer.
+* Slice-K residual — both revenue reports INNER JOIN `classes`.
+* `payments.semester` retirement.

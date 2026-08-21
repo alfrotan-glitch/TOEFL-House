@@ -27,6 +27,7 @@ import {
 import { CATEGORY_NAME } from '../core/finance/category-taxonomy.js';
 import { BUDGET_MOVEMENT_CATEGORY, BUDGET_MOVEMENT_TYPE } from '../core/finance/budget-movements.js';
 import { db } from '../db/connection.js';
+import { getBranchOutstanding } from '../utils/studentBalance.js';
 import { authenticate, requirePermission, resolveBranchScope } from '../middleware/auth.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { REPORT_CATALOG, REPORT_CATEGORIES } from '../core/reporting/report-catalog.js';
@@ -386,27 +387,41 @@ reportsRouter.get(
       registrationDiscounts: Number(registrationDiscount.d || 0),
     };
 
-    // ── Financial: outstanding student balances at period end (open invoices
-    //    net minus completed payments; refunds reduce the paid side) ──
-    const outstandingQ = (isAll
-      ? db.prepare(`SELECT
-          COALESCE(SUM(CASE WHEN i.status IN ('issued','partial','overdue') THEN i.net_amount ELSE 0 END),0) AS gross,
-          COALESCE(SUM(CASE WHEN i.status IN ('issued','partial','overdue') THEN
-            (SELECT COALESCE(SUM(p.amount),0) FROM payments p WHERE p.invoice_id = i.id AND p.status = 'completed') END),0) AS paid
-        FROM invoices i WHERE i.status != 'draft' AND i.status != 'cancelled' AND i.status != 'paid'`).get()
-      : db.prepare(`SELECT
-          COALESCE(SUM(CASE WHEN i.status IN ('issued','partial','overdue') THEN i.net_amount ELSE 0 END),0) AS gross,
-          COALESCE(SUM(CASE WHEN i.status IN ('issued','partial','overdue') THEN
-            (SELECT COALESCE(SUM(p.amount),0) FROM payments p WHERE p.invoice_id = i.id AND p.status = 'completed') END),0) AS paid
-        FROM invoices i WHERE i.branch_id = ? AND i.status != 'draft' AND i.status != 'cancelled' AND i.status != 'paid'`).get(branchId)) as { gross: number; paid: number };
+    // ── Financial: ONE receivable, derived from the authorities (WP07-F18b) ──
+    //
+    // Tuition comes from the tuition authority and nothing else does, so a term
+    // is counted once. Reading it off invoices instead reported every term a
+    // donor had settled as still owed, because aid settles an OBLIGATION and
+    // never touches the invoice.
+    //
+    // Everything that is not tuition is a real receivable that no term carries
+    // — registration, books, exam, extra classes — and is summed from the
+    // invoices that bill it, each floored at zero so one overpaid document
+    // cannot mask another's debt.
+    //
+    // A POSITION AS AT TODAY, not a flow over the reporting window: it carries
+    // no date filter and no longer claims one.
+    const outstandingTuition = getBranchOutstanding(db, isAll ? null : branchId);
+    const nonTuitionQ = (isAll
+      ? db.prepare(`SELECT COALESCE(SUM(MAX(0, i.net_amount -
+            (SELECT COALESCE(SUM(p.amount),0) FROM payments p WHERE p.invoice_id = i.id AND p.status = 'completed'))),0) AS remaining
+          FROM invoices i WHERE i.purpose <> 'tuition' AND i.status IN ('issued','partial','overdue')`).get()
+      : db.prepare(`SELECT COALESCE(SUM(MAX(0, i.net_amount -
+            (SELECT COALESCE(SUM(p.amount),0) FROM payments p WHERE p.invoice_id = i.id AND p.status = 'completed'))),0) AS remaining
+          FROM invoices i WHERE i.branch_id = ? AND i.purpose <> 'tuition' AND i.status IN ('issued','partial','overdue')`).get(branchId)) as { remaining: number };
     const outstandingCountRow = (isAll
       ? db.prepare(`SELECT COUNT(*) AS c FROM invoices WHERE status IN ('issued','partial','overdue')`).get()
       : db.prepare(`SELECT COUNT(*) AS c FROM invoices WHERE branch_id = ? AND status IN ('issued','partial','overdue')`).get(branchId)) as { c: number };
+    const nonTuition = Number(nonTuitionQ.remaining) || 0;
     const outstanding = {
+      /** Owed on tuition, from the tuition authority. Aid-settled terms excluded. */
+      tuition: outstandingTuition,
+      /** Owed on everything that is not tuition, from the documents that bill it. */
+      nonTuition,
+      /** What students owe the institute, counted once. */
+      total: outstandingTuition + nonTuition,
+      /** Operational metric: documents still open, whatever their purpose. */
       openInvoices: Number(outstandingCountRow.c || 0),
-      gross: Number(outstandingQ.gross || 0),
-      paid: Number(outstandingQ.paid || 0),
-      remaining: Math.max(0, Number(outstandingQ.gross || 0) - Number(outstandingQ.paid || 0)),
     };
 
     // ── Operational: books sold by title (authoritative: book_sales JOIN books) ──

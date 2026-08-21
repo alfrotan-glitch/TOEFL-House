@@ -1593,7 +1593,12 @@ export interface OperationsReport {
     balances: { main: number; saving: number; budgetAllocated: number; budgetRemaining: number };
     collectedPayments: { count: number; total: number; male: number; female: number };
     discounts: { invoiceDiscounts: number; registrationDiscounts: number };
-    outstanding: { openInvoices: number; gross: number; paid: number; remaining: number };
+    /**
+     * What students owe, counted once (WP07-F18b): tuition from the tuition
+     * authority, everything else from the documents that bill it. A position as
+     * at today, not a flow over the reporting window.
+     */
+    outstanding: { tuition: number; nonTuition: number; total: number; openInvoices: number };
   };
   operational: {
     newStudents: ReportGenderCount;

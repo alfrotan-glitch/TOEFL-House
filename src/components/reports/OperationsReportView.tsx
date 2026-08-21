@@ -211,9 +211,12 @@ export default function OperationsReportView() {
               <div className="text-[10px] text-slate-400 mt-0.5">Invoices {formatAFN(report.financial.discounts.invoiceDiscounts)} · Registrations {formatAFN(report.financial.discounts.registrationDiscounts)}</div>
             </div>
             <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
-              <div className="text-[10px] uppercase font-bold text-slate-400">Outstanding balances</div>
-              <div className="text-xl font-extrabold font-mono text-amber-700 mt-1">{formatAFN(report.financial.outstanding.remaining)}</div>
-              <div className="text-[10px] text-slate-400 mt-0.5">{report.financial.outstanding.openInvoices} open invoices · {formatAFN(report.financial.outstanding.gross)} gross</div>
+              <div className="text-[10px] uppercase font-bold text-slate-400">Receivable (as at today)</div>
+              <div className="text-xl font-extrabold font-mono text-amber-700 mt-1">{formatAFN(report.financial.outstanding.total)}</div>
+              <div className="text-[10px] text-slate-400 mt-0.5">
+                Tuition {formatAFN(report.financial.outstanding.tuition)} · Other {formatAFN(report.financial.outstanding.nonTuition)}
+                {' · '}{report.financial.outstanding.openInvoices} open invoices
+              </div>
             </div>
             <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
               <div className="text-[10px] uppercase font-bold text-slate-400">vs previous period ({report.financial.previous.from} → {report.financial.previous.to})</div>

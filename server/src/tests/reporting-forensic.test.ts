@@ -161,14 +161,18 @@ describe('Reporting forensic — new required metrics + period consistency', () 
       VALUES (?, 'income', 'book', 600, '2026-06-12', 'Sold 2 copies of Rep Title', 'rep_book', 'T', ?)`).run(id('tx'), BRANCH);
   });
 
-  it('reports discounts and outstanding balances from authoritative sources', async () => {
+  it('reports discounts and the receivable from authoritative sources', async () => {
     const res = await supertest(app).get(`/api/reports/overview?period=month&key=${SHAMSI_MONTH}`).set(authHeader(owner));
     expect(res.status).toBe(200);
     expect(res.body.financial.discounts.invoiceDiscounts).toBe(500);
-    // Outstanding: invoice net 4500 - paid 2000 = 2500.
-    expect(res.body.financial.outstanding.gross).toBe(4500);
-    expect(res.body.financial.outstanding.paid).toBe(2000);
-    expect(res.body.financial.outstanding.remaining).toBe(2500);
+    // Receivable is composed, not read off invoices (WP07-F18b): tuition comes
+    // from the tuition authority and everything else from the documents that
+    // bill it. This fixture's student holds no term, so all of it is
+    // non-tuition: invoice net 4500 - paid 2000 = 2500.
+    expect(res.body.financial.outstanding.tuition).toBe(0);
+    expect(res.body.financial.outstanding.nonTuition).toBe(2500);
+    expect(res.body.financial.outstanding.total).toBe(2500);
+    expect(res.body.financial.outstanding.openInvoices).toBeGreaterThanOrEqual(1);
   });
 
   it('reports books sold by title with quantity and net', async () => {

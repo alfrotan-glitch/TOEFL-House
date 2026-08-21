@@ -729,3 +729,55 @@ Both reports still INNER JOIN `classes`, so tuition paid for a term with no
 class attached does not appear in a by-class or by-time-slot total. That is
 inherent to reports grouped by class, but it means neither total is a complete
 revenue figure and neither should be read as one. Not changed here (§106).
+
+---
+
+# Slice L — one receivable (WP07-F18b, WP07-F23)
+
+**Date:** 2026-08-21 · **Decisions:** D-150, D-151, D-152 (erratum)
+**Release gate:** 22 passed · 0 failed · 0 skipped · **Server suite:** 2825 passed · 162 skipped · 0 failed
+
+## The defect
+
+Aid settles an **obligation** and never touches the invoice, so a term paid in
+full by a donor left its invoice `issued`. Every scholarship- or
+sponsorship-settled term was reported as owed — forever.
+
+Worse than first analysed: `getBranchOutstanding` (the executive dashboard's
+"Student Arrears") also ignored aid, while `getStudentBalance` (profile and
+roster) did not. Two implementations of one definition, inside one module,
+disagreeing about the same student.
+
+| Surface | Before | After |
+|---|---:|---:|
+| Student profile / roster | 0 | 0 |
+| BOS "Student Arrears" | **10,000** | 0 |
+| Operations report | **10,000** | 0 |
+
+## The model, as the owner chose it
+
+`outstanding = { tuition, nonTuition, total, openInvoices }` — tuition from the
+tuition authority and nothing else, so a term is counted once; everything else
+from the documents that bill it, each floored at zero. A **position as at
+today**: no date filter, and no longer claiming one.
+
+`getBranchOutstanding` now subtracts active aid and takes
+`branchId: string | null`, so per-student, per-branch and organization-wide are
+one definition with different filters.
+
+## Honesty note (D-152)
+
+The read-only analysis that preceded this slice **overstated its own evidence**:
+its probe subtracted aid in its own arithmetic and reported the dashboard at 0
+when production would have shown 10,000. The erratum is recorded in the analysis
+document and in the decision register rather than quietly amended. The finding
+it missed — WP07-F23 — was caught during implementation and is fixed here.
+
+## Still uncertified
+
+* **TR-4** — every review in this work package was performed by the agent that wrote the code.
+* Slice-K residual — both BOS revenue reports INNER JOIN `classes`, so tuition for a class-less term appears in neither total.
+* `payments.semester` retirement — the agreed follow-on.
+
+**WP-07 has no known open financial defect.** It is still not certified: TR-4 is
+unresolved and no independent review has been performed.

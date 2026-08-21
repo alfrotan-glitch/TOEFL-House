@@ -296,26 +296,43 @@ export function getStudentBalancesByIds(
 }
 
 /**
- * Branch-wide outstanding tuition — the dashboard figure.
+ * Outstanding tuition for one branch, or for the whole organization.
+ *
  * Sums per-student outstanding (each floored at zero) so one student's credit
- * balance cannot mask another student's debt.
+ * balance cannot mask another's debt. Aid-aware by construction: it measures
+ * what `student_semesters` bills against what has settled it, and a term
+ * settled by a scholarship or a sponsorship is not outstanding.
+ *
+ * `branchId = null` means every branch. Expressed as one query rather than two
+ * so the organization-wide figure can never drift from the per-branch one
+ * (LAW 1) — the operations report and the executive dashboard read the same
+ * definition of what students owe.
  */
-export function getBranchOutstanding(db: Database, branchId: string): number {
+export function getBranchOutstanding(db: Database, branchId: string | null): number {
+  const scope = branchId ? 'AND st.branch_id = ?' : '';
+  const params = branchId ? [branchId] : [];
   const row = db
     .prepare(
-      `SELECT COALESCE(SUM(MAX(0, sem.total - COALESCE(paid.total, 0))), 0) AS outstanding
+      `SELECT COALESCE(SUM(MAX(0, sem.total - COALESCE(paid.total, 0) - COALESCE(aid.total, 0))), 0) AS outstanding
        FROM (
          SELECT student_id, SUM(COALESCE(net_fee_amount, fee_amount)) AS total
          FROM student_semesters GROUP BY student_id
        ) sem
-       JOIN students st ON st.id = sem.student_id AND st.branch_id = ?
+       JOIN students st ON st.id = sem.student_id ${scope}
        LEFT JOIN (
          SELECT student_id, SUM(amount) AS total
          FROM payments
          WHERE status = 'completed' AND ${TUITION_PAYMENT_SQL}
          GROUP BY student_id
-       ) paid ON paid.student_id = sem.student_id`,
+       ) paid ON paid.student_id = sem.student_id
+       LEFT JOIN (
+         SELECT o.student_id, SUM(a.amount) AS total
+         FROM obligation_allocations a
+         JOIN student_obligations o ON o.id = a.obligation_id
+         WHERE a.status = 'active' AND a.source_kind IN ${AID_SOURCE_KINDS_SQL}
+         GROUP BY o.student_id
+       ) aid ON aid.student_id = sem.student_id`,
     )
-    .get(branchId) as { outstanding: number };
+    .get(...params) as { outstanding: number };
   return Number(row.outstanding) || 0;
 }
