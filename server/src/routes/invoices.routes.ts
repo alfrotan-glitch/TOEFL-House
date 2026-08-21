@@ -23,6 +23,7 @@ import {
   assertInvoicePurpose, resolveInvoiceObligation, assertInvoiceHasLines, invoicePaymentAttribution,
   assertTuitionInvoiceFits,
 } from '../core/finance/invoicing.js';
+import { allocatePaymentToObligation } from '../core/finance/obligations.js';
 
 export const invoicesRouter = Router();
 invoicesRouter.use(authenticate, authorize('owner', 'finance_manager', 'general_manager', 'receptionist'));
@@ -426,6 +427,15 @@ invoicesRouter.post(
         attribution.category, attribution.semesterName,
         notes || `Payment for invoice ${row.invoice_number || row.id}`, rc, row.branch_id, idempotencyKey || null
       );
+
+      // Cash settles the term by NAMING it, through the one settlement
+      // authority every instrument uses.
+      if (attribution.obligationId) {
+        allocatePaymentToObligation(db, {
+          paymentId: payId, obligationId: attribution.obligationId, amount: payAmount,
+          operatorName: user.fullName, date,
+        });
+      }
 
       recordIncome({
         category: attribution.category, amount: payAmount, date,

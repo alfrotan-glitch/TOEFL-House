@@ -567,3 +567,61 @@ caller converges on the service, which did not. Repaired there (D-140).
 * **F-18b remains open and unclaimed:** `reports.routes.ts:389-409` sums open invoices as "outstanding" while the balance authority derives tuition outstanding from `student_semesters`. On the conversion path both exist, so the two figures overlap. Pre-existing, unchanged by this slice, and deliberately not resolved here (§106).
 * **F-18c fixed in passing:** the false "EnrollmentService is the single writer" comment is replaced with the true statement that two other writers create the term themselves and pass `writeSemester: false`.
 * **E1b is next.**
+
+---
+
+# Slice I — cash settles through the one authority (E1b, WP07-F21)
+
+**Date:** 2026-08-21 · **Owner decisions executed:** refund reverses its allocation; allocations authoritative now, column retired later (→ D-141/D-142/D-143)
+**Release gate:** 22 passed · 0 failed · 0 skipped · **Server suite:** 2801 passed · 160 known WP-04 skips · 0 failed
+**Schema:** 117 tables · 251 indexes · 127 triggers (no schema change — `source_kind='payment'` was already declared)
+
+## What changed
+
+`obligation_allocations` declared three instruments and used two. Cash is now
+the third: every tuition cash writer allocates, and `getSemesterTuitionPaid`
+reads allocations rather than the free-text `payments.semester`.
+
+| Writer | Allocates |
+|---|---|
+| payment desk, `category='fee'` | the obligation of the named term |
+| payment desk, `category='installment'` | the obligation the plan belongs to (D-125) |
+| tuition invoice payment | the obligation the invoice names (D-127) |
+| visitor conversion | the obligation of the term the conversion creates |
+| enrol-semester collection | the obligation of the term being opened |
+
+## Why it is not merely tidiness
+
+`uq_student_semester_active` is `UNIQUE(student_id, semester_name) WHERE
+status = 'active'`, so a term NAME is unique only among active terms — **not
+over time**. The suite's central case takes "Term One", pays it in full,
+completes it, and opens a second "Term One". Each term now reports exactly what
+it was paid, and the second is collectable in full.
+
+## What ATTACK found — WP07-F21
+
+Precise allocations were not sufficient on their own. The payment desk still
+computed a term's debt with `getSemesterTuitionSettled(studentId, semesterName)`
+— **by name** — so the first term's payments were counted against the second and
+the desk answered `400 This semester is already fully paid` to a legitimate
+collection. Both desk reads now key on the obligation (D-143).
+
+## The refund fork, as the owner ruled it
+
+A refund reverses the allocation it targets and re-allocates whatever the
+student keeps settled:
+
+* full refund → allocation reversed, term re-opens by the whole amount;
+* 3,000 refund on a 10,000 payment → one reversed row, one fresh active 7,000 row, exactly 3,000 re-opened, 3,001 refused;
+* two successive partial refunds each reduce the term by exactly their amount;
+* a refund of a non-tuition charge touches no allocation.
+
+Reconciliation stays healthy throughout, and `CHECK (amount > 0)` still guards
+every instrument.
+
+## Scope honesty
+
+* **`payments.semester` is still written** for display and refund attribution. It is no longer the settlement key. Retiring the column is the agreed follow-on, once no reader remains.
+* **BOS revenue attribution is unchanged.** `stmtRevenueByClass` / `stmtRevenueByTimeSlot` still guess the term by name. E1b makes a correct attribution possible; using it is a reporting-side change that should carry its own defect ID.
+* **F-18b unchanged** — the open-invoice "outstanding" figure in `reports.routes.ts` still overlaps the balance authority.
+* **S6 remains server-complete, operator-incomplete** — `FundingView.tsx` still does not expose the sponsorship endpoints.

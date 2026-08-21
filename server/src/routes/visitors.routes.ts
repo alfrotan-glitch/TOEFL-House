@@ -27,7 +27,7 @@ import { resolveFee } from '../core/configuration/policy-resolver.js';
 import { assertClassGenderAllowsStudent } from './classes.routes.js';
 import { getEnrollmentService } from '../core/academic/enrollment-service.js';
 import { countActiveStudentsInClass } from '../core/academic/class-capacity.js';
-import { ensureTuitionObligation } from '../core/finance/obligations.js';
+import { ensureTuitionObligation, allocatePaymentToObligation } from '../core/finance/obligations.js';
 import { getJourneyEngine } from '../core/journey/journey-engine.js';
 import { JourneyEventType } from '../core/journey/event-types.js';
 import { nextReceiptNumber, nextStudentCode } from '../utils/receipt.js';
@@ -899,6 +899,10 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
       // The term is recorded on the payment, so the money settles the term it
       // was collected for instead of settling none at all.
       stmtInsertConvertedPayment.run(paymentId, newStudentId, invoiceId, paidNow, date, resolvedPaymentMethod, conversionObligation.semesterName, `Registration payment for ${classItem.name}`, receiptNumber, studentBranchId, `visitor-convert:${visitor.id}`);
+      allocatePaymentToObligation(db, {
+        paymentId, obligationId: conversionObligation.id, amount: paidNow,
+        operatorName: user.fullName, date,
+      });
       recordIncome({ category: 'fee', amount: paidNow, date, description: `Registration fee for ${visitor.full_name} (${studentCode})`, referenceId: invoiceId, operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null, branchId: studentBranchId, paymentId });
     }
 

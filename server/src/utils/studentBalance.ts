@@ -157,22 +157,29 @@ export function getStudentBalance(db: Database, studentId: string, scope: Balanc
 }
 
 /**
- * Tuition settled against ONE semester.
+ * Cash settled against ONE semester.
  *
- * The semester is the filter, for both charges and refunds: a refund carries
- * the semester of the payment it reverses (owner decision D-114), and a refund
- * of a non-tuition charge carries none. Every caller must come here rather than
- * filter payments itself — a rule that counts refunds without checking their
- * semester inflates one term's debt with another term's refund, and the payment
- * desk then collects against a term that is already settled.
+ * Read from `obligation_allocations`, the single settlement authority: a cash
+ * payment names the obligation it pays, exactly as scholarship and sponsorship
+ * money do. `payments.semester` is still written for display and for refund
+ * attribution, but it no longer decides what a term has been paid — it is free
+ * text, and `uq_student_semester_active` makes a term NAME unique only among
+ * ACTIVE terms, so a student who takes one term twice has two terms with one
+ * name and a string cannot say which was paid.
+ *
+ * A refund reduces this figure by reversing the allocation it targets and
+ * re-allocating whatever the student keeps settled, so only ACTIVE allocations
+ * are summed here.
  */
 export function getSemesterTuitionPaid(db: Database, studentId: string, semesterName: string): number {
   const row = db
     .prepare(
-      `SELECT COALESCE(SUM(amount), 0) AS paid
-         FROM payments
-        WHERE student_id = ? AND semester = ? AND status = 'completed'
-          AND category IN ('fee','installment','refund')`,
+      `SELECT COALESCE(SUM(a.amount), 0) AS paid
+         FROM obligation_allocations a
+         JOIN student_obligations o ON o.id = a.obligation_id
+         JOIN student_semesters ss ON ss.id = o.semester_id
+        WHERE o.student_id = ? AND ss.semester_name = ?
+          AND a.source_kind = 'payment' AND a.status = 'active'`,
     )
     .get(studentId, semesterName) as { paid: number };
   return Number(row.paid) || 0;

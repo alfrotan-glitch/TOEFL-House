@@ -9,10 +9,13 @@ import { assertTextLengths, optionalText, requiredText, TEXT_LIMITS } from '../u
 import { parsePagination as parsePaginationShared } from '../utils/pagination.js';
 import { getStudentBalance, getStudentBalancesByIds, getStudentBalancesPage, getSemesterTuitionSettled } from '../utils/studentBalance.js';
 import {
+  allocatePaymentToObligation,
   ensureTuitionObligation,
+  getObligationPosition,
   getPayableInstallment,
   listStudentInstallments,
   markInstallmentPaid,
+  refundPaymentAllocation,
   setInstallmentPlan,
 } from '../core/finance/obligations.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
@@ -1134,10 +1137,11 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
     if (!semesterId) throw new HttpError(400, 'semesterId is required when paying a class fee.');
     const sem = (stmtGetSemestersByStudent.all(student.id) as any[]).find(s => s.id === semesterId);
     if (!sem) throw new HttpError(404, 'Semester not found.');
-    // One authority for "how much has this semester been paid" — charges and
-    // the refunds that reverse them, both filtered by the semester itself.
-    const totalPaidForSem = getSemesterTuitionSettled(db, student.id, sem.semester_name);
-    const semDebt = Math.max(0, Number(sem.net_fee_amount ?? sem.fee_amount) - totalPaidForSem);
+    // Keyed on the OBLIGATION, never on the term's name (WP07-F21). A term name
+    // is unique only among ACTIVE terms, so a student repeating "Term One" has
+    // two debts under one name; summing by name reported the first term's
+    // payments against the second and made the second uncollectable.
+    const semDebt = getObligationPosition(db, ensureTuitionObligation(db, String(sem.id)).id).outstanding;
     if (semDebt <= 0) throw new HttpError(400, 'This semester is already fully paid.');
     resolvedAmount = semDebt;
     // An amount larger than the outstanding balance is REJECTED, never capped.
@@ -1229,12 +1233,17 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
 
   if (resolvedAmount <= 0) throw new HttpError(400, 'Amount must be greater than 0.');
 
+  // The obligation this money settles, named rather than inferred from a term
+  // string (E1b). Null for a charge that settles no term.
+  let settledObligationId: string | null = null;
+
   const tx = db.transaction(() => {
     if (category === 'fee') {
       const currentSem = (stmtGetSemestersByStudent.all(student.id) as any[]).find((s) => s.id === semesterId);
       if (!currentSem) throw new HttpError(404, 'Semester not found.');
-      const currentPaid = getSemesterTuitionSettled(db, student.id, currentSem.semester_name);
-      const currentDebt = Math.max(0, Number(currentSem.net_fee_amount ?? currentSem.fee_amount) - currentPaid);
+      // Re-read under the write lock, keyed on the obligation (WP07-F21).
+      settledObligationId = ensureTuitionObligation(db, String(currentSem.id)).id;
+      const currentDebt = getObligationPosition(db, settledObligationId).outstanding;
       if (currentDebt <= 0) throw new HttpError(409, 'This semester is already fully paid.');
       // Authoritative re-read inside the transaction. This is the check that
       // actually holds under concurrency: two operators paying the last 5000
@@ -1253,6 +1262,7 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
       const fresh = getPayableInstallment(db, student.id, String(installmentId));
       if (fresh.installment.amount !== resolvedAmount) throw new HttpError(409, 'The instalment changed while this payment was being taken.');
       if (resolvedAmount > fresh.outstanding) throw new HttpError(409, 'That term no longer has that much outstanding.');
+      settledObligationId = fresh.obligation.id;
     }
     // The idempotency key is ALWAYS persisted, for every category. It is the
     // only mechanism that serialises concurrent duplicates: the pre-checks
@@ -1260,6 +1270,12 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
     // simultaneously. Writing NULL here for guarded categories would disable
     // the unique index, because SQLite considers each NULL distinct.
     stmtInsertPayment.run(payId, student.id, resolvedAmount, date, resolvedMethod, category, notes || 'Smart Payment', rc, student.branch_id, semName, null, bookRefId, idempotencyKey);
+    if (settledObligationId) {
+      allocatePaymentToObligation(db, {
+        paymentId: payId, obligationId: settledObligationId, amount: resolvedAmount,
+        operatorName: user.fullName, date,
+      });
+    }
     if (category === 'installment') markInstallmentPaid(db, String(installmentId), payId);
     if (category === 'book') {
       const updated = stmtUpdateBookStock.run(bookRefId, student.branch_id);
@@ -1442,6 +1458,14 @@ studentsRouter.post('/:id/refund', requirePermission('Refund.Approve'), ah(async
       payId, student.id, -refundAmount, date, String(reason).trim(), rc, student.branch_id,
       idempotencyKey, target.id, target.semester ?? null,
     );
+    // The refund reverses the allocation its target made and re-allocates
+    // whatever the student keeps settled, so a term re-opens by exactly the
+    // amount returned (owner decision on E1b).
+    refundPaymentAllocation(db, {
+      targetPaymentId: target.id, refundAmount, reason: String(reason).trim(),
+      operatorName: user.fullName, date,
+    });
+
     recordIncome({
       category: 'refund', amount: -refundAmount, date,
       description: `Refund issued to ${student.full_name} against ${target.category} payment ${target.id}`,
@@ -1531,6 +1555,10 @@ studentsRouter.post('/:id/enroll-semester', requirePermission('Class.Assign'), a
       // payment cannot legitimately repeat. A NULL here would disable
       // uq_payments_idempotency for the row.
       stmtInsertPayment.run(semPayId, student.id, paidNow, date, 'cash', 'fee', `Semester fee for ${semesterName}`, rc, student.branch_id, semesterName, null, null, `enroll-semester:${newSemId}`);
+      allocatePaymentToObligation(db, {
+        paymentId: semPayId, obligationId: ensureTuitionObligation(db, newSemId).id, amount: paidNow,
+        operatorName: user.fullName, date,
+      });
       recordIncome({ category: 'fee', amount: paidNow, date, description: `Received ${semesterName} fee from ${student.full_name}`, referenceId: student.id, paymentId: semPayId, operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null, branchId: student.branch_id });
     }
     // Enrollment happens in the same transaction (see manual-add above).

@@ -25,6 +25,7 @@ import { randomUUID } from 'node:crypto';
 import { db, initSchema } from '../../../db/connection.js';
 import { getEnrollmentService } from '../../../core/academic/enrollment-service.js';
 import { getStudentBalance, getSemesterTuitionSettled } from '../../../utils/studentBalance.js';
+import { allocatePaymentToObligation } from '../../../core/finance/obligations.js';
 import { today } from '../../../utils/ids.js';
 
 const TUITION = 8000;
@@ -196,11 +197,18 @@ describe('WP-07 · WP07-F18 — the term carries its tuition and the documents s
     const other = invoices.find((i) => i.purpose === 'other')!;
     const term = termRow()!;
 
-    // Settled through the same authority every other tuition payment uses.
-    db.prepare(
-      `INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, semester, receipt_number, branch_id, idempotency_key)
-       VALUES (?, ?, ?, ?, ?, 'cash', 'completed', 'fee', 'Enrolment Term', ?, ?, ?)`,
-    ).run(`${key}_p1`, studentId, tuition.id, TUITION, today(), `R-${key.slice(-6)}-1`, branch, `${key}_k1`);
+    // Settled through the same authority every other tuition payment uses:
+    // the cash NAMES the obligation it pays (E1b), it is not matched to a term
+    // by a string.
+    db.transaction(() => {
+      db.prepare(
+        `INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, semester, receipt_number, branch_id, idempotency_key)
+         VALUES (?, ?, ?, ?, ?, 'cash', 'completed', 'fee', 'Enrolment Term', ?, ?, ?)`,
+      ).run(`${key}_p1`, studentId, tuition.id, TUITION, today(), `R-${key.slice(-6)}-1`, branch, `${key}_k1`);
+      allocatePaymentToObligation(db, {
+        paymentId: `${key}_p1`, obligationId: tuition.obligation_id!, amount: TUITION, operatorName: 'Test',
+      });
+    })();
     expect(getSemesterTuitionSettled(db, studentId, 'Enrolment Term')).toBe(TUITION);
     expect(getStudentBalance(db, studentId).outstanding).toBe(0);
 

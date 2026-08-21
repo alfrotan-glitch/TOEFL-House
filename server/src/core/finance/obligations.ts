@@ -36,7 +36,7 @@
 import type { Database } from 'better-sqlite3';
 import { HttpError } from '../../middleware/errorHandler.js';
 import { assertMoney } from '../../utils/money.js';
-import { TUITION_NET_SQL, getSemesterTuitionPaid, AID_SOURCE_KINDS_SQL } from '../../utils/studentBalance.js';
+import { TUITION_NET_SQL, AID_SOURCE_KINDS_SQL } from '../../utils/studentBalance.js';
 import { id, today } from '../../utils/ids.js';
 import { assertOptionalIsoDate } from '../../utils/isoDate.js';
 
@@ -153,7 +153,9 @@ export function getObligationPosition(db: Database, obligationId: string): Oblig
     netAmount: Number(row.net_amount) || 0,
     status: row.status,
   };
-  const settledCash = getSemesterTuitionPaid(db, row.student_id, row.semester_name);
+  // Keyed on the obligation itself, never on the term's NAME: the name is not
+  // unique over time and this is the figure the payment desk trusts.
+  const settledCash = getObligationCashSettled(db, obligationId);
   const settledScholarship = getObligationScholarshipSettled(db, obligationId);
   const settled = settledCash + settledScholarship;
   return {
@@ -716,4 +718,97 @@ export function reverseSponsorshipAllocation(
     )
     .run(params.operatorName, reason, params.allocationId);
   if (updated.changes !== 1) throw new HttpError(409, 'This allocation is already reversed.');
+}
+
+// ── Cash allocation (owner decision on E1b) ────────────────────────────────
+//
+// Cash settles a term the same way every other instrument does: by naming the
+// obligation it pays. `payments.semester` is a free-text column, and
+// `uq_student_semester_active` makes a term NAME unique only among ACTIVE terms
+// — not over time. A student who takes "Term One" twice has two terms with one
+// name, and a string cannot say which one was paid. An allocation names the
+// obligation, so it always can.
+//
+// Unlike scholarship and sponsorship money, a cash allocation is the shadow of
+// a real ledger movement: `recordIncome` already moved branch cash when the
+// payment was written. Allocating it moves no further money — it only records
+// WHAT the money settled.
+
+/** Cash currently applied to one obligation. */
+export function getObligationCashSettled(db: Database, obligationId: string): number {
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(amount), 0) AS total FROM obligation_allocations
+        WHERE obligation_id = ? AND source_kind = 'payment' AND status = 'active'`,
+    )
+    .get(obligationId) as { total: number };
+  return Number(row.total) || 0;
+}
+
+/** Applies a cash payment to one tuition obligation. */
+export function allocatePaymentToObligation(
+  db: Database,
+  params: { paymentId: string; obligationId: string; amount: number; operatorName?: string | null; date?: string },
+): { allocationId: string } {
+  if (!db.inTransaction) throw new Error('allocatePaymentToObligation() called outside a transaction.');
+  const amount = assertMoney(params.amount, 'Allocation amount');
+  if (amount <= 0) throw new HttpError(400, 'An allocation must be greater than zero.');
+
+  const allocationId = id('alloc');
+  db.prepare(
+    `INSERT INTO obligation_allocations
+       (id, obligation_id, amount, source_kind, payment_id, status, operator_name, date)
+     VALUES (?, ?, ?, 'payment', ?, 'active', ?, ?)`,
+  ).run(allocationId, params.obligationId, amount, params.paymentId, params.operatorName ?? null, params.date ?? today());
+  return { allocationId };
+}
+
+/**
+ * Reduces a payment's settlement when it is refunded (owner decision on E1b).
+ *
+ * The refund reverses the allocation it targets through the mechanism every
+ * other instrument uses, and — when only part of the payment is returned —
+ * writes a fresh allocation for the amount the student keeps owing settled.
+ * There is therefore exactly ONE way to undo an allocation, and
+ * `CHECK (amount > 0)` keeps protecting the table.
+ *
+ * A payment that settled no obligation (a book, exam or card charge) has
+ * nothing to reverse, and this is a no-op for it.
+ */
+export function refundPaymentAllocation(
+  db: Database,
+  params: { targetPaymentId: string; refundAmount: number; reason: string; operatorName: string; date?: string },
+): { reversedAllocationId: string | null; retainedAllocationId: string | null } {
+  if (!db.inTransaction) throw new Error('refundPaymentAllocation() called outside a transaction.');
+  const refundAmount = assertMoney(params.refundAmount, 'Refund amount');
+
+  const active = db
+    .prepare(
+      `SELECT id, obligation_id, amount FROM obligation_allocations
+        WHERE payment_id = ? AND source_kind = 'payment' AND status = 'active'`,
+    )
+    .get(params.targetPaymentId) as { id: string; obligation_id: string; amount: number } | undefined;
+  if (!active) return { reversedAllocationId: null, retainedAllocationId: null };
+
+  if (refundAmount > Number(active.amount)) {
+    throw new HttpError(409, `Only ${active.amount} AFN of that payment is still settling a term.`);
+  }
+
+  db.prepare(
+    `UPDATE obligation_allocations
+        SET status = 'reversed', reversed_at = datetime('now'), reversed_by = ?, reversal_reason = ?
+      WHERE id = ? AND status = 'active'`,
+  ).run(params.operatorName, String(params.reason ?? '').trim() || 'refund', active.id);
+
+  const retained = Number(active.amount) - refundAmount;
+  if (retained <= 0) return { reversedAllocationId: active.id, retainedAllocationId: null };
+
+  const { allocationId } = allocatePaymentToObligation(db, {
+    paymentId: params.targetPaymentId,
+    obligationId: active.obligation_id,
+    amount: retained,
+    operatorName: params.operatorName,
+    date: params.date,
+  });
+  return { reversedAllocationId: active.id, retainedAllocationId: allocationId };
 }
