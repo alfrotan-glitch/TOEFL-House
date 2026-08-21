@@ -7,7 +7,7 @@ import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { assertTextLengths, optionalText, requiredText, TEXT_LIMITS } from '../utils/textInput.js';
 import { parsePagination as parsePaginationShared } from '../utils/pagination.js';
-import { getStudentBalance, getStudentBalancesByIds, getStudentBalancesPage, getSemesterTuitionPaid } from '../utils/studentBalance.js';
+import { getStudentBalance, getStudentBalancesByIds, getStudentBalancesPage, getSemesterTuitionSettled } from '../utils/studentBalance.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import {
   canAccessAllBranchesForRequirement,
@@ -1124,7 +1124,7 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
     if (!sem) throw new HttpError(404, 'Semester not found.');
     // One authority for "how much has this semester been paid" — charges and
     // the refunds that reverse them, both filtered by the semester itself.
-    const totalPaidForSem = getSemesterTuitionPaid(db, student.id, sem.semester_name);
+    const totalPaidForSem = getSemesterTuitionSettled(db, student.id, sem.semester_name);
     const semDebt = Math.max(0, Number(sem.net_fee_amount ?? sem.fee_amount) - totalPaidForSem);
     if (semDebt <= 0) throw new HttpError(400, 'This semester is already fully paid.');
     resolvedAmount = semDebt;
@@ -1215,7 +1215,7 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
     if (category === 'fee') {
       const currentSem = (stmtGetSemestersByStudent.all(student.id) as any[]).find((s) => s.id === semesterId);
       if (!currentSem) throw new HttpError(404, 'Semester not found.');
-      const currentPaid = getSemesterTuitionPaid(db, student.id, currentSem.semester_name);
+      const currentPaid = getSemesterTuitionSettled(db, student.id, currentSem.semester_name);
       const currentDebt = Math.max(0, Number(currentSem.net_fee_amount ?? currentSem.fee_amount) - currentPaid);
       if (currentDebt <= 0) throw new HttpError(409, 'This semester is already fully paid.');
       // Authoritative re-read inside the transaction. This is the check that

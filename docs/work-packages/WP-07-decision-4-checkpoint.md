@@ -4,7 +4,8 @@
 **Date:** 2026-08-21
 **Baseline:** `a416f82` (release gate 22/22)
 **Owner approval received:** Decision 4 model (Option 2) and S1–S6 "exactly as recommended"
-**Checkpoint outcome:** **BLOCKED — implementation not started.** No source, schema, test or registry changed.
+**Checkpoint outcome (2026-08-21, first pass):** BLOCKED.
+**Checkpoint outcome (2026-08-21, second pass): CLEARED — see §6.** Owner answered Q1(a), Q2(no) and Q3(approved); S5/S6 stay blocked by owner instruction.
 
 The owner instructed: *"first validate every rule against the Master Engineering
 Protocol, canonical authorities, invariants, and data-integrity constraints. If
@@ -130,3 +131,67 @@ allocations) or narrative (a record only)?
 - Nothing changed: no source file, schema object, test or registry.
 - Release gate re-run at this baseline: **22 passed · 0 failed**.
 - WP-07 remains NOT CERTIFIED; WP07-F16 and WP07-F17 remain open.
+
+---
+
+## 6. CHECKPOINT CLEARED — owner answers and revalidation
+
+**Owner answers (2026-08-21).**
+
+1. **Q1 → (a).** A scholarship fund receives money **only** through donations
+   explicitly allocated to that fund.
+2. **Q2 → no.** Institution-funded scholarship funds are **not allowed** under
+   this model; future institute-funded aid is a separate waiver/discount
+   mechanism.
+3. **Q3 → approved.** `student_obligations` + `obligation_allocations` is **the**
+   canonical allocation authority. Decision 4 must use it; no parallel authority.
+4. **S5, S6 remain blocked** by explicit owner instruction — no assumption.
+
+**Revalidation against the protocol — no conflict found.**
+
+| Rule | Check | Verdict |
+|---|---|---|
+| Funds backed only by allocated donations | Makes "received backing" computable as `SUM(scholarship_fundings.amount)`; the premise of the settlement rule becomes verifiable per fund | **VALID** — closes Blocker A (LAW 4) |
+| No institution-funded funds | Enforced *by construction*: backing can only come from donations, so a fund with no donation allocations can award nothing. No new policy invented, no column made mandatory (a fund may legitimately receive from several donors) | **VALID** (LAW 6) |
+| One canonical allocation authority | Closes Blocker B | **VALID** (LAW 1) |
+| Donation may not be over-allocated | `SUM(fundings per donation) ≤ donation.amount` — new invariant | **VALID** (LAW 4) |
+| Settlement writes no cash and no income | Unchanged from the approved rule; `computeReconciliation` untouched | **VALID** (§78) |
+
+**Two interpretations recorded rather than assumed** (§90), both flagged for
+owner confirmation and neither silently chosen:
+
+- **I-1 — where a reversed allocation goes.** The approved rule says reversal
+  "returns the amount to the fund". Returning it to the *fund* while the award
+  remains active would let the sum of active award commitments exceed the fund's
+  received backing — an over-commitment the S1 invariant forbids. The
+  implementation therefore returns a reversed allocation to **its award** (still
+  committed to that student, immediately re-allocatable), and adds an explicit
+  **close-award** command that returns the unallocated remainder to the **fund**.
+  Both destinations are reachable by an operator act; neither is automatic. The
+  owner's substantive rule — the money never reaches the student — holds in both.
+- **I-2 — `scholarships.total_budget` is no longer a money authority.** With
+  backing defined by allocated donations, `total_budget` is kept as the fund's
+  declared **target** and no longer bounds awards. It is not removed, because
+  removing it would change a UI contract the owner has not asked to change.
+
+## 7. Scope of the approved slice (E1-core + Decision 4)
+
+**In scope**
+
+- `student_obligations` — tuition only, one per `student_semesters` row, **amount
+  derived** from the existing tuition authority (no second amount store, §13).
+- `obligation_allocations` — the canonical allocation table, `source_kind`
+  `payment | scholarship` with exactly-one-of enforced by CHECK. `payment` is
+  declared now and populated when E1b migrates the payment desk.
+- `scholarship_fundings` — donations allocated into funds.
+- `scholarship_awards` — award lifecycle (active/closed) for S2/S3.
+- One settlement authority: tuition settled = cash (existing `getSemesterTuitionPaid`)
+  **+** active scholarship allocations. Consumed by the payment desk and the
+  student balance, so a scholarship-settled term cannot be collected again.
+
+**Out of scope (unchanged, and stated so it is not mistaken for done)**
+
+- Migrating cash payments into `obligation_allocations` (**E1b**).
+- Invoices (Decision 2 / WP07-F17), installments (WP07-F16), fixed fees
+  (Decision 5), free-text semesters (Decision 6) — none approved.
+- S5 (`SPONSORSHIP` discount duplication) and S6 (sponsorship agreements).

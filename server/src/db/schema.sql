@@ -2613,6 +2613,32 @@ CREATE TABLE IF NOT EXISTS scholarships (
 );
 CREATE INDEX IF NOT EXISTS idx_scholarships_branch   ON scholarships(branch_id);
 
+-- Money entering a scholarship fund. A fund is backed ONLY by donations
+-- explicitly allocated to it (owner decision D-121), so a fund with no funding
+-- row can award nothing — which is how "no institution-funded scholarships" is
+-- enforced, without making any column mandatory.
+CREATE TABLE IF NOT EXISTS scholarship_fundings (
+  id             TEXT PRIMARY KEY,
+  scholarship_id TEXT NOT NULL REFERENCES scholarships(id) ON DELETE RESTRICT,
+  donation_id    TEXT NOT NULL REFERENCES donations(id) ON DELETE RESTRICT,
+  amount         INTEGER NOT NULL CHECK (amount > 0),
+  branch_id      TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  operator_name  TEXT,
+  date           TEXT NOT NULL,
+  created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_scholarship_fundings_fund ON scholarship_fundings(scholarship_id);
+CREATE INDEX IF NOT EXISTS idx_scholarship_fundings_donation ON scholarship_fundings(donation_id);
+CREATE TRIGGER IF NOT EXISTS trg_scholarship_fundings_branch_insert
+BEFORE INSERT ON scholarship_fundings
+WHEN (SELECT branch_id FROM scholarships WHERE id = NEW.scholarship_id) IS NOT NEW.branch_id
+  OR (SELECT branch_id FROM donations    WHERE id = NEW.donation_id)    IS NOT NEW.branch_id
+BEGIN SELECT RAISE(ABORT, 'A scholarship may only be funded by a donation of its own branch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_scholarship_fundings_money_scale_insert
+BEFORE INSERT ON scholarship_fundings
+WHEN NEW.amount <> CAST(NEW.amount AS INTEGER)
+BEGIN SELECT RAISE(ABORT, 'scholarship funding amount must be a whole number of AFN'); END;
+
 CREATE TABLE IF NOT EXISTS scholarship_awards ( 
   id             TEXT PRIMARY KEY, 
   scholarship_id TEXT NOT NULL REFERENCES scholarships(id) ON DELETE CASCADE, 
@@ -2621,7 +2647,14 @@ CREATE TABLE IF NOT EXISTS scholarship_awards (
   award_date     TEXT NOT NULL, 
   semester       TEXT, 
   notes          TEXT, 
-  branch_id      TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT 
+  branch_id      TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  -- An award commits fund money to one student. Closing it returns whatever is
+  -- still unallocated to the fund; the allocated part stays with the student.
+  status         TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','closed')),
+  closed_at      TEXT,
+  closed_by      TEXT,
+  close_reason   TEXT,
+  CHECK ((status = 'active' AND closed_at IS NULL) OR (status = 'closed' AND closed_at IS NOT NULL))
 );
 CREATE INDEX IF NOT EXISTS idx_schol_awards_schol    ON scholarship_awards(scholarship_id);
 CREATE INDEX IF NOT EXISTS idx_schol_awards_stu      ON scholarship_awards(student_id);
@@ -2634,6 +2667,81 @@ CREATE TRIGGER IF NOT EXISTS trg_scholarship_awards_money_scale_insert
 BEFORE INSERT ON scholarship_awards
 WHEN NEW.amount <> CAST(NEW.amount AS INTEGER)
 BEGIN SELECT RAISE(ABORT, 'scholarship amount must be a whole number of AFN'); END;
+
+-- ============================================================================
+-- OBLIGATIONS AND ALLOCATIONS
+-- ============================================================================
+-- THE canonical answer to "what does this money settle?" (owner decision D-120).
+--
+-- An obligation is something a student owes. An allocation is money applied to
+-- one obligation by one funding instrument. Cash and scholarship money settle
+-- through the SAME table, so there is one settlement authority rather than one
+-- per instrument.
+--
+-- The obligation deliberately stores NO amount of its own: for tuition the
+-- amount is `COALESCE(net_fee_amount, fee_amount)` on the semester row, which is
+-- already the tuition authority. Copying it here would create a second store of
+-- one figure (§13).
+CREATE TABLE IF NOT EXISTS student_obligations (
+  id          TEXT PRIMARY KEY,
+  student_id  TEXT NOT NULL REFERENCES students(id) ON DELETE RESTRICT,
+  branch_id   TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  kind        TEXT NOT NULL CHECK (kind IN ('tuition')),
+  -- The row that carries the amount for this kind. Tuition points at a semester.
+  semester_id TEXT REFERENCES student_semesters(id) ON DELETE RESTRICT,
+  status      TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','cancelled')),
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK (kind <> 'tuition' OR semester_id IS NOT NULL)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_obligation_tuition_semester
+  ON student_obligations(semester_id) WHERE semester_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_obligations_student ON student_obligations(student_id, status);
+CREATE TRIGGER IF NOT EXISTS trg_obligations_student_branch_insert
+BEFORE INSERT ON student_obligations
+WHEN (SELECT branch_id FROM students WHERE id = NEW.student_id) IS NOT NEW.branch_id
+BEGIN SELECT RAISE(ABORT, 'Obligation branch does not match student branch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_obligations_semester_owner_insert
+BEFORE INSERT ON student_obligations
+WHEN NEW.semester_id IS NOT NULL
+ AND (SELECT student_id FROM student_semesters WHERE id = NEW.semester_id) IS NOT NEW.student_id
+BEGIN SELECT RAISE(ABORT, 'Obligation semester belongs to another student'); END;
+
+-- One allocation = one instrument applying one amount to one obligation.
+-- `source_kind` names the instrument and exactly one instrument key may be set,
+-- enforced by CHECK rather than by convention (LAW 3). `payment` is declared
+-- here and is populated when the payment desk migrates onto allocations; today
+-- cash tuition is still attributed by `payments.semester` and both are read
+-- through one settlement authority.
+CREATE TABLE IF NOT EXISTS obligation_allocations (
+  id                   TEXT PRIMARY KEY,
+  obligation_id        TEXT NOT NULL REFERENCES student_obligations(id) ON DELETE RESTRICT,
+  amount               INTEGER NOT NULL CHECK (amount > 0),
+  source_kind          TEXT NOT NULL CHECK (source_kind IN ('payment','scholarship')),
+  payment_id           TEXT REFERENCES payments(id) ON DELETE RESTRICT,
+  scholarship_award_id TEXT REFERENCES scholarship_awards(id) ON DELETE RESTRICT,
+  status               TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','reversed')),
+  reversed_at          TEXT,
+  reversed_by          TEXT,
+  reversal_reason      TEXT,
+  operator_name        TEXT,
+  date                 TEXT NOT NULL,
+  created_at           TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK (
+       (source_kind = 'payment'     AND payment_id IS NOT NULL AND scholarship_award_id IS NULL)
+    OR (source_kind = 'scholarship' AND scholarship_award_id IS NOT NULL AND payment_id IS NULL)
+  ),
+  CHECK (
+       (status = 'active'   AND reversed_at IS NULL)
+    OR (status = 'reversed' AND reversed_at IS NOT NULL)
+  )
+);
+CREATE INDEX IF NOT EXISTS idx_allocations_obligation ON obligation_allocations(obligation_id, status);
+CREATE INDEX IF NOT EXISTS idx_allocations_award ON obligation_allocations(scholarship_award_id, status);
+CREATE INDEX IF NOT EXISTS idx_allocations_payment ON obligation_allocations(payment_id, status);
+CREATE TRIGGER IF NOT EXISTS trg_allocations_money_scale_insert
+BEFORE INSERT ON obligation_allocations
+WHEN NEW.amount <> CAST(NEW.amount AS INTEGER)
+BEGIN SELECT RAISE(ABORT, 'allocation amount must be a whole number of AFN'); END;
 
 CREATE TABLE IF NOT EXISTS sponsorship_agreements ( 
   id             TEXT PRIMARY KEY, 

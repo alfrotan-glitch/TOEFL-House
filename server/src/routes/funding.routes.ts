@@ -28,6 +28,17 @@ import { assertMoney } from '../utils/money.js';
 import { addNotification } from '../utils/notifications.js';
 import { recordIncome } from '../utils/income.js';
 import { resolveIdempotency } from '../utils/idempotency.js';
+import {
+  allocateScholarshipToObligation,
+  closeAward,
+  fundScholarshipFromDonation,
+  getAwardPosition,
+  getDonationUnallocated,
+  getFundPosition,
+  getObligationPosition,
+  listTuitionObligations,
+  reverseScholarshipAllocation,
+} from '../core/finance/obligations.js';
 import { eventBus } from '../core/events/event-bus.js';
 
 export const fundingRouter = Router();
@@ -481,17 +492,18 @@ fundingRouter.post(
     requireFundingBranchAccess(req, scholarship.branch_id);
     if (scholarship.status !== 'active') throw new HttpError(409, 'This scholarship is no longer active.');
 
-    // Both operands are coerced explicitly: a row written outside the validated
-    // budget path can hold a non-numeric total, and a NaN comparison silently
-    // approves every award.
-    const totalBudgetValue = Number(scholarship.total_budget);
-    const allocatedValue = Number(scholarship.allocated_amount) || 0;
-    if (!Number.isFinite(totalBudgetValue)) {
-      throw new HttpError(409, 'This scholarship has an invalid budget and cannot be awarded against.');
-    }
-    const remaining = totalBudgetValue - allocatedValue;
-    if (!(awardAmount <= remaining)) {
-      throw new HttpError(409, `Insufficient scholarship budget. Remaining: ${remaining.toLocaleString()} AFN.`);
+    // A fund may only award money it has actually RECEIVED (owner decision
+    // D-121). Backing is donation money explicitly allocated into the fund, so a
+    // fund nobody has funded can award nothing — which is how "no
+    // institution-funded scholarships" is enforced, without a declared budget
+    // being able to stand in for money. `total_budget` remains the fund's
+    // declared target and no longer bounds an award.
+    const fund = getFundPosition(db, scholarshipId);
+    if (!(awardAmount <= fund.available)) {
+      throw new HttpError(
+        409,
+        `Insufficient scholarship funding. Received ${fund.received} AFN, already committed ${fund.committed} AFN, available ${fund.available} AFN.`,
+      );
     }
 
     const student = stmtGetStudentById.get(studentId) as any;
@@ -506,9 +518,11 @@ fundingRouter.post(
 
     const tx = db.transaction(() => {
       stmtInsertAward.run(newId, scholarshipId, studentId, awardAmount, date, semester || null, notes || null, student.branch_id);
-      const newAllocated = allocatedValue + awardAmount;
-      const newStatus = newAllocated >= totalBudgetValue ? 'exhausted' : 'active';
-      stmtUpdateScholarshipAllocation.run(newAllocated, newStatus, scholarshipId);
+      // `scholarships.allocated_amount` is a display mirror of the derived
+      // committed figure; the authority is `getFundPosition`.
+      const committed = getFundPosition(db, scholarshipId).committed;
+      const newStatus = committed >= getFundPosition(db, scholarshipId).received ? 'exhausted' : 'active';
+      stmtUpdateScholarshipAllocation.run(committed, newStatus, scholarshipId);
       return eventBus.emit('scholarship.awarded', 'scholarship', newId, 
       { scholarshipId, studentId, studentName: student.full_name, amount: awardAmount }, 
       { operatorId: user.userId, branchId: student.branch_id }
@@ -521,6 +535,228 @@ fundingRouter.post(
     writeAudit(req, `Awarded scholarship: ${awardAmount} AFN to ${student.full_name} from "${scholarship.name}"`);
     res.status(201).json({ id: newId });
   })
+);
+
+// ============================================================================
+// §4b — SCHOLARSHIP FUNDING AND OBLIGATION ALLOCATION (owner decisions D-120/D-121)
+// ============================================================================
+// A fund holds donation money explicitly allocated to it. An award commits some
+// of that money to one student. Applying an award allocates it to a specific
+// tuition obligation, which settles the obligation and moves NO cash — the
+// donor's money was recognised when the donation was received.
+
+/** What a fund has received, committed and can still award. */
+fundingRouter.get(
+  '/scholarships/:id/position',
+  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager'),
+  ah(async (req, res) => {
+    const scholarship = stmtGetScholarshipById.get(req.params.id) as any;
+    if (!scholarship) throw new HttpError(404, 'Scholarship not found.');
+    requireFundingBranchAccess(req, scholarship.branch_id);
+    const position = getFundPosition(db, scholarship.id);
+    const fundings = db
+      .prepare(
+        `SELECT f.id, f.donation_id, f.amount, f.date, d.receipt_no, dn.full_name AS donor_name
+           FROM scholarship_fundings f
+           JOIN donations d ON d.id = f.donation_id
+           JOIN donors dn ON dn.id = d.donor_id
+          WHERE f.scholarship_id = ? ORDER BY f.date DESC, f.rowid DESC`,
+      )
+      .all(scholarship.id);
+    res.json({ ...position, declaredTarget: Number(scholarship.total_budget) || 0, fundings });
+  }),
+);
+
+/** Allocate donation money into a fund. The only way a fund is backed. */
+fundingRouter.post(
+  '/scholarships/:id/fundings',
+  authorize('owner', 'general_manager', 'donor_manager'),
+  ah(async (req, res) => {
+    const user = getUserContext(req);
+    const scholarship = stmtGetScholarshipById.get(req.params.id) as any;
+    if (!scholarship) throw new HttpError(404, 'Scholarship not found.');
+    requireFundingBranchAccess(req, scholarship.branch_id);
+
+    const { donationId, amount } = req.body as { donationId?: string; amount?: unknown };
+    const donationRef = typeof donationId === 'string' ? donationId.trim() : '';
+    if (!donationRef) throw new HttpError(400, 'A donation must be named (donationId).');
+    const donation = db.prepare('SELECT id, branch_id FROM donations WHERE id = ?').get(donationRef) as
+      | { id: string; branch_id: string }
+      | undefined;
+    if (!donation) throw new HttpError(404, 'Donation not found.');
+    if (donation.branch_id !== scholarship.branch_id) {
+      throw new HttpError(400, 'A scholarship may only be funded by a donation of its own branch.');
+    }
+
+    let fundingId = '';
+    db.transaction(() => {
+      fundingId = fundScholarshipFromDonation(db, {
+        scholarshipId: scholarship.id,
+        donationId: donation.id,
+        amount: amount as number,
+        branchId: scholarship.branch_id,
+        operatorName: user.fullName,
+      }).fundingId;
+    })();
+
+    const position = getFundPosition(db, scholarship.id);
+    writeAudit(req, `Funded scholarship "${scholarship.name}" with ${position.received} AFN received in total (donation ${donation.id})`, { branchId: scholarship.branch_id });
+    res.status(201).json({ id: fundingId, ...position });
+  }),
+);
+
+/** How much of a donation is still unallocated to any fund. */
+fundingRouter.get(
+  '/donations/:id/allocation',
+  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager'),
+  ah(async (req, res) => {
+    const donation = db.prepare('SELECT id, branch_id FROM donations WHERE id = ?').get(req.params.id) as
+      | { id: string; branch_id: string }
+      | undefined;
+    if (!donation) throw new HttpError(404, 'Donation not found.');
+    requireFundingBranchAccess(req, donation.branch_id);
+    res.json(getDonationUnallocated(db, donation.id));
+  }),
+);
+
+/** The tuition obligations a scholarship award can be applied to. */
+fundingRouter.get(
+  '/students/:studentId/tuition-obligations',
+  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager'),
+  ah(async (req, res) => {
+    const student = stmtGetStudentById.get(req.params.studentId) as any;
+    if (!student) throw new HttpError(404, 'Student not found.');
+    requireFundingBranchAccess(req, student.branch_id);
+    const obligations = listTuitionObligations(db, student.id).map((obligation) => {
+      const position = getObligationPosition(db, obligation.id);
+      return {
+        id: obligation.id,
+        semesterId: obligation.semesterId,
+        semesterName: obligation.semesterName,
+        netAmount: obligation.netAmount,
+        settledCash: position.settledCash,
+        settledScholarship: position.settledScholarship,
+        outstanding: position.outstanding,
+        status: obligation.status,
+      };
+    });
+    res.json(obligations);
+  }),
+);
+
+/** An award and what remains unapplied on it. */
+fundingRouter.get(
+  '/scholarship-awards/:id',
+  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager'),
+  ah(async (req, res) => {
+    const award = db.prepare('SELECT branch_id FROM scholarship_awards WHERE id = ?').get(req.params.id) as
+      | { branch_id: string }
+      | undefined;
+    if (!award) throw new HttpError(404, 'Scholarship award not found.');
+    requireFundingBranchAccess(req, award.branch_id);
+    const position = getAwardPosition(db, req.params.id);
+    const allocations = db
+      .prepare(
+        `SELECT a.id, a.amount, a.status, a.date, a.reversal_reason, o.id AS obligation_id, ss.semester_name
+           FROM obligation_allocations a
+           JOIN student_obligations o ON o.id = a.obligation_id
+           LEFT JOIN student_semesters ss ON ss.id = o.semester_id
+          WHERE a.scholarship_award_id = ? ORDER BY a.rowid`,
+      )
+      .all(req.params.id);
+    res.json({ ...position, allocations });
+  }),
+);
+
+/** Apply award money to one tuition obligation. Settles it; moves no cash. */
+fundingRouter.post(
+  '/scholarship-awards/:id/allocations',
+  authorize('owner', 'general_manager', 'donor_manager'),
+  ah(async (req, res) => {
+    const user = getUserContext(req);
+    const award = db.prepare('SELECT id, branch_id FROM scholarship_awards WHERE id = ?').get(req.params.id) as
+      | { id: string; branch_id: string }
+      | undefined;
+    if (!award) throw new HttpError(404, 'Scholarship award not found.');
+    requireFundingBranchAccess(req, award.branch_id);
+
+    const { obligationId, amount } = req.body as { obligationId?: string; amount?: unknown };
+    const obligationRef = typeof obligationId === 'string' ? obligationId.trim() : '';
+    if (!obligationRef) throw new HttpError(400, 'A tuition obligation must be named (obligationId).');
+
+    let allocationId = '';
+    db.transaction(() => {
+      allocationId = allocateScholarshipToObligation(db, {
+        awardId: award.id,
+        obligationId: obligationRef,
+        amount: amount as number,
+        operatorName: user.fullName,
+      }).allocationId;
+    })();
+
+    const position = getObligationPosition(db, obligationRef);
+    writeAudit(req, `Applied scholarship award ${award.id} to obligation ${obligationRef}`, { branchId: award.branch_id, newValue: JSON.stringify({ allocationId, outstanding: position.outstanding }) });
+    res.status(201).json({ id: allocationId, award: getAwardPosition(db, award.id), obligation: position });
+  }),
+);
+
+/** Reverse an application. The money returns to its award, never to the student. */
+fundingRouter.post(
+  '/scholarship-awards/:id/allocations/:allocationId/reverse',
+  authorize('owner', 'general_manager', 'donor_manager'),
+  ah(async (req, res) => {
+    const user = getUserContext(req);
+    const award = db.prepare('SELECT id, branch_id FROM scholarship_awards WHERE id = ?').get(req.params.id) as
+      | { id: string; branch_id: string }
+      | undefined;
+    if (!award) throw new HttpError(404, 'Scholarship award not found.');
+    requireFundingBranchAccess(req, award.branch_id);
+
+    const allocation = db
+      .prepare('SELECT id, scholarship_award_id, obligation_id FROM obligation_allocations WHERE id = ?')
+      .get(req.params.allocationId) as { id: string; scholarship_award_id: string | null; obligation_id: string } | undefined;
+    if (!allocation) throw new HttpError(404, 'Allocation not found.');
+    if (allocation.scholarship_award_id !== award.id) throw new HttpError(400, 'That allocation belongs to another award.');
+
+    db.transaction(() => {
+      reverseScholarshipAllocation(db, {
+        allocationId: allocation.id,
+        reason: String((req.body as { reason?: unknown })?.reason ?? ''),
+        operatorName: user.fullName,
+      });
+    })();
+
+    writeAudit(req, `Reversed scholarship allocation ${allocation.id}`, { branchId: award.branch_id });
+    res.json({ ok: true, award: getAwardPosition(db, award.id), obligation: getObligationPosition(db, allocation.obligation_id) });
+  }),
+);
+
+/** Close an award, returning whatever it never applied to the fund. */
+fundingRouter.post(
+  '/scholarship-awards/:id/close',
+  authorize('owner', 'general_manager', 'donor_manager'),
+  ah(async (req, res) => {
+    const user = getUserContext(req);
+    const award = db.prepare('SELECT id, branch_id, scholarship_id FROM scholarship_awards WHERE id = ?').get(req.params.id) as
+      | { id: string; branch_id: string; scholarship_id: string }
+      | undefined;
+    if (!award) throw new HttpError(404, 'Scholarship award not found.');
+    requireFundingBranchAccess(req, award.branch_id);
+
+    let returned = 0;
+    db.transaction(() => {
+      returned = closeAward(db, {
+        awardId: award.id,
+        reason: String((req.body as { reason?: unknown })?.reason ?? ''),
+        operatorName: user.fullName,
+      }).returnedToFund;
+      const position = getFundPosition(db, award.scholarship_id);
+      stmtUpdateScholarshipAllocation.run(position.committed, position.committed >= position.received ? 'exhausted' : 'active', award.scholarship_id);
+    })();
+
+    writeAudit(req, `Closed scholarship award ${award.id}; ${returned} AFN returned to the fund`, { branchId: award.branch_id });
+    res.json({ ok: true, returnedToFund: returned, fund: getFundPosition(db, award.scholarship_id) });
+  }),
 );
 
 // ============================================================================

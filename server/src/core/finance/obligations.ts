@@ -1,0 +1,403 @@
+/**
+ * Obligations and allocations — THE settlement authority.
+ * ============================================================================
+ * An **obligation** is something a student owes. An **allocation** is money
+ * applied to one obligation by one funding instrument. Both cash and
+ * scholarship money settle through this one authority (owner decision D-120),
+ * because the alternative — one settlement rule per instrument — is how the
+ * same afghani ends up counted differently by the payment desk, the balance and
+ * the reports.
+ *
+ * WHAT AN OBLIGATION DOES NOT DO
+ * ------------------------------
+ * It does not restate the amount owed. For tuition the amount lives on the
+ * semester row and is already authoritative there; copying it here would create
+ * a second store of one figure (§13). The obligation supplies IDENTITY — a
+ * stable thing for money to point at — and the amount is derived.
+ *
+ * SCHOLARSHIP MONEY MOVES NO CASH
+ * -------------------------------
+ * A scholarship allocation settles an obligation and writes nothing to the
+ * ledger. The donor's money was recognised as income when the donation was
+ * received (`recordIncome({ category: 'donation' })`), so recognising it again
+ * as tuition would count one afghani twice, and would break the branch cash
+ * position, which is derived as operating income minus savings minus owner
+ * drawings. The cash authority is therefore untouched by this module.
+ *
+ * FUND ARITHMETIC (all derived, nothing mirrored)
+ * -----------------------------------------------
+ *     fund.received   = SUM(scholarship_fundings.amount)
+ *     fund.committed  = SUM(active awards.amount)
+ *     fund.available  = received - committed              -- what may still be awarded
+ *     award.allocated = SUM(active allocations of that award)
+ *     award.remaining = amount - allocated                -- what may still be applied
+ *     obligation.settled = cash settled + scholarship allocated
+ */
+import type { Database } from 'better-sqlite3';
+import { HttpError } from '../../middleware/errorHandler.js';
+import { assertMoney } from '../../utils/money.js';
+import { TUITION_NET_SQL, getSemesterTuitionPaid } from '../../utils/studentBalance.js';
+import { id, today } from '../../utils/ids.js';
+
+export type ObligationKind = 'tuition';
+
+export interface TuitionObligation {
+  id: string;
+  studentId: string;
+  branchId: string;
+  semesterId: string;
+  semesterName: string;
+  netAmount: number;
+  status: 'open' | 'cancelled';
+}
+
+/**
+ * The tuition obligation for a semester, created on first use.
+ *
+ * Lazily created rather than written by the enrolment service, so this slice
+ * does not reach into WP-05's certified writers. `uq_obligation_tuition_semester`
+ * makes the operation idempotent under concurrency: a losing race reads the
+ * winner's row instead of creating a second one.
+ */
+export function ensureTuitionObligation(db: Database, semesterId: string): TuitionObligation {
+  const semester = db
+    .prepare(
+      `SELECT ss.id, ss.student_id, ss.semester_name, ${TUITION_NET_SQL} AS net_amount, st.branch_id
+         FROM student_semesters ss JOIN students st ON st.id = ss.student_id
+        WHERE ss.id = ?`,
+    )
+    .get(semesterId) as
+    | { id: string; student_id: string; semester_name: string; net_amount: number; branch_id: string }
+    | undefined;
+  if (!semester) throw new HttpError(404, 'Semester not found.');
+
+  const existing = db
+    .prepare(`SELECT id, status FROM student_obligations WHERE semester_id = ?`)
+    .get(semesterId) as { id: string; status: 'open' | 'cancelled' } | undefined;
+
+  let obligationId = existing?.id;
+  let status: 'open' | 'cancelled' = existing?.status ?? 'open';
+  if (!obligationId) {
+    obligationId = id('obl');
+    try {
+      db.prepare(
+        `INSERT INTO student_obligations (id, student_id, branch_id, kind, semester_id, status)
+         VALUES (?, ?, ?, 'tuition', ?, 'open')`,
+      ).run(obligationId, semester.student_id, semester.branch_id, semesterId);
+    } catch (err) {
+      const winner = db.prepare(`SELECT id, status FROM student_obligations WHERE semester_id = ?`).get(semesterId) as
+        | { id: string; status: 'open' | 'cancelled' }
+        | undefined;
+      if (!winner) throw err;
+      obligationId = winner.id;
+      status = winner.status;
+    }
+  }
+
+  return {
+    id: obligationId,
+    studentId: semester.student_id,
+    branchId: semester.branch_id,
+    semesterId,
+    semesterName: semester.semester_name,
+    netAmount: Number(semester.net_amount) || 0,
+    status,
+  };
+}
+
+/** Every tuition obligation this student holds, created on first read. */
+export function listTuitionObligations(db: Database, studentId: string): TuitionObligation[] {
+  const semesters = db
+    .prepare(`SELECT id FROM student_semesters WHERE student_id = ? ORDER BY enroll_date DESC, rowid DESC`)
+    .all(studentId) as Array<{ id: string }>;
+  return semesters.map((row) => ensureTuitionObligation(db, row.id));
+}
+
+export interface ObligationPosition {
+  obligation: TuitionObligation;
+  /** Settled by cash: tuition payments and the refunds that reverse them. */
+  settledCash: number;
+  /** Settled by scholarship allocations that are still active. */
+  settledScholarship: number;
+  settled: number;
+  outstanding: number;
+}
+
+/**
+ * What this obligation still owes, counting every instrument.
+ *
+ * Cash tuition is read through `getSemesterTuitionPaid` — the existing
+ * settlement authority (D-116) — rather than re-derived here, so there is one
+ * definition of "paid in cash for this term" and one of "settled in total".
+ */
+export function getObligationPosition(db: Database, obligationId: string): ObligationPosition {
+  const row = db
+    .prepare(
+      `SELECT o.id, o.student_id, o.branch_id, o.semester_id, o.status,
+              ss.semester_name, ${TUITION_NET_SQL} AS net_amount
+         FROM student_obligations o JOIN student_semesters ss ON ss.id = o.semester_id
+        WHERE o.id = ?`,
+    )
+    .get(obligationId) as
+    | { id: string; student_id: string; branch_id: string; semester_id: string; status: 'open' | 'cancelled'; semester_name: string; net_amount: number }
+    | undefined;
+  if (!row) throw new HttpError(404, 'Obligation not found.');
+
+  const obligation: TuitionObligation = {
+    id: row.id,
+    studentId: row.student_id,
+    branchId: row.branch_id,
+    semesterId: row.semester_id,
+    semesterName: row.semester_name,
+    netAmount: Number(row.net_amount) || 0,
+    status: row.status,
+  };
+  const settledCash = getSemesterTuitionPaid(db, row.student_id, row.semester_name);
+  const settledScholarship = getObligationScholarshipSettled(db, obligationId);
+  const settled = settledCash + settledScholarship;
+  return {
+    obligation,
+    settledCash,
+    settledScholarship,
+    settled,
+    outstanding: Math.max(0, obligation.netAmount - settled),
+  };
+}
+
+/** Scholarship money currently applied to one obligation. */
+export function getObligationScholarshipSettled(db: Database, obligationId: string): number {
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(amount), 0) AS total FROM obligation_allocations
+        WHERE obligation_id = ? AND source_kind = 'scholarship' AND status = 'active'`,
+    )
+    .get(obligationId) as { total: number };
+  return Number(row.total) || 0;
+}
+
+/** Scholarship money applied to a student's tuition, across every obligation. */
+export function getStudentScholarshipSettled(db: Database, studentId: string): number {
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(a.amount), 0) AS total
+         FROM obligation_allocations a
+         JOIN student_obligations o ON o.id = a.obligation_id
+        WHERE o.student_id = ? AND o.kind = 'tuition'
+          AND a.source_kind = 'scholarship' AND a.status = 'active'`,
+    )
+    .get(studentId) as { total: number };
+  return Number(row.total) || 0;
+}
+
+/** Scholarship money applied to one semester's tuition. */
+export function getSemesterScholarshipSettled(db: Database, studentId: string, semesterName: string): number {
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(a.amount), 0) AS total
+         FROM obligation_allocations a
+         JOIN student_obligations o ON o.id = a.obligation_id
+         JOIN student_semesters ss ON ss.id = o.semester_id
+        WHERE o.student_id = ? AND ss.semester_name = ?
+          AND a.source_kind = 'scholarship' AND a.status = 'active'`,
+    )
+    .get(studentId, semesterName) as { total: number };
+  return Number(row.total) || 0;
+}
+
+// ── Scholarship fund positions ─────────────────────────────────────────────
+
+export interface FundPosition {
+  scholarshipId: string;
+  /** Donation money explicitly allocated into this fund. The only backing. */
+  received: number;
+  /** Committed to students by active awards. */
+  committed: number;
+  /** Still awardable. */
+  available: number;
+}
+
+export function getFundPosition(db: Database, scholarshipId: string): FundPosition {
+  const received = Number(
+    (db.prepare(`SELECT COALESCE(SUM(amount),0) AS t FROM scholarship_fundings WHERE scholarship_id = ?`)
+      .get(scholarshipId) as { t: number }).t,
+  ) || 0;
+  const committed = Number(
+    (db.prepare(`SELECT COALESCE(SUM(amount),0) AS t FROM scholarship_awards WHERE scholarship_id = ? AND status = 'active'`)
+      .get(scholarshipId) as { t: number }).t,
+  ) || 0;
+  return { scholarshipId, received, committed, available: received - committed };
+}
+
+export interface AwardPosition {
+  awardId: string;
+  scholarshipId: string;
+  studentId: string;
+  amount: number;
+  allocated: number;
+  remaining: number;
+  status: 'active' | 'closed';
+}
+
+export function getAwardPosition(db: Database, awardId: string): AwardPosition {
+  const award = db
+    .prepare(`SELECT id, scholarship_id, student_id, amount, status FROM scholarship_awards WHERE id = ?`)
+    .get(awardId) as
+    | { id: string; scholarship_id: string; student_id: string; amount: number; status: 'active' | 'closed' }
+    | undefined;
+  if (!award) throw new HttpError(404, 'Scholarship award not found.');
+  const allocated = Number(
+    (db.prepare(
+      `SELECT COALESCE(SUM(amount),0) AS t FROM obligation_allocations
+        WHERE scholarship_award_id = ? AND status = 'active'`,
+    ).get(awardId) as { t: number }).t,
+  ) || 0;
+  return {
+    awardId: award.id,
+    scholarshipId: award.scholarship_id,
+    studentId: award.student_id,
+    amount: Number(award.amount) || 0,
+    allocated,
+    remaining: Math.max(0, Number(award.amount) - allocated),
+    status: award.status,
+  };
+}
+
+/** Donation money not yet allocated into any fund. */
+export function getDonationUnallocated(db: Database, donationId: string): { amount: number; allocated: number; unallocated: number } {
+  const donation = db.prepare(`SELECT amount FROM donations WHERE id = ?`).get(donationId) as { amount: number } | undefined;
+  if (!donation) throw new HttpError(404, 'Donation not found.');
+  const allocated = Number(
+    (db.prepare(`SELECT COALESCE(SUM(amount),0) AS t FROM scholarship_fundings WHERE donation_id = ?`)
+      .get(donationId) as { t: number }).t,
+  ) || 0;
+  const amount = Number(donation.amount) || 0;
+  return { amount, allocated, unallocated: Math.max(0, amount - allocated) };
+}
+
+// ── Commands ───────────────────────────────────────────────────────────────
+
+/**
+ * Applies scholarship money to one tuition obligation.
+ *
+ * Writes no cash and no ledger row: the donor's money was recognised when the
+ * donation arrived. Must run inside a transaction, because the caller's checks
+ * and this write have to succeed or fail together.
+ */
+export function allocateScholarshipToObligation(
+  db: Database,
+  params: { awardId: string; obligationId: string; amount: number; operatorName: string; date?: string },
+): { allocationId: string } {
+  if (!db.inTransaction) {
+    throw new Error('allocateScholarshipToObligation() called outside a transaction.');
+  }
+  const amount = assertMoney(params.amount, 'Allocation amount');
+  if (amount <= 0) throw new HttpError(400, 'An allocation must be greater than zero.');
+
+  const award = getAwardPosition(db, params.awardId);
+  if (award.status !== 'active') throw new HttpError(409, 'This award is closed and can no longer be applied.');
+  if (amount > award.remaining) {
+    throw new HttpError(400, `Only ${award.remaining} AFN of this award is still unapplied.`);
+  }
+
+  const position = getObligationPosition(db, params.obligationId);
+  if (position.obligation.status !== 'open') throw new HttpError(409, 'This obligation is not open.');
+  if (position.obligation.studentId !== award.studentId) {
+    throw new HttpError(403, 'That obligation belongs to another student.');
+  }
+  if (amount > position.outstanding) {
+    throw new HttpError(400, `Only ${position.outstanding} AFN is still outstanding on that obligation.`);
+  }
+
+  const allocationId = id('alloc');
+  db.prepare(
+    `INSERT INTO obligation_allocations
+       (id, obligation_id, amount, source_kind, scholarship_award_id, status, operator_name, date)
+     VALUES (?, ?, ?, 'scholarship', ?, 'active', ?, ?)`,
+  ).run(allocationId, params.obligationId, amount, params.awardId, params.operatorName, params.date ?? today());
+  return { allocationId };
+}
+
+/**
+ * Reverses an allocation.
+ *
+ * The amount returns to its AWARD — still committed to that student and
+ * immediately re-applicable — and the obligation re-opens by exactly that
+ * amount. It never returns to the student: scholarship money is the donor's.
+ * Returning it to the FUND is a separate, explicit act (`closeAward`), because
+ * releasing it while the award stays active would let the fund's active
+ * commitments exceed the money it has received.
+ */
+export function reverseScholarshipAllocation(
+  db: Database,
+  params: { allocationId: string; reason: string; operatorName: string },
+): void {
+  if (!db.inTransaction) throw new Error('reverseScholarshipAllocation() called outside a transaction.');
+  const reason = String(params.reason ?? '').trim();
+  if (reason.length < 8) throw new HttpError(400, 'A reversal reason of at least 8 characters is required.');
+
+  const row = db
+    .prepare(`SELECT id, status, source_kind FROM obligation_allocations WHERE id = ?`)
+    .get(params.allocationId) as { id: string; status: string; source_kind: string } | undefined;
+  if (!row) throw new HttpError(404, 'Allocation not found.');
+  if (row.source_kind !== 'scholarship') throw new HttpError(400, 'Only a scholarship allocation is reversed here.');
+  if (row.status !== 'active') throw new HttpError(409, 'This allocation is already reversed.');
+
+  const updated = db
+    .prepare(
+      `UPDATE obligation_allocations
+          SET status = 'reversed', reversed_at = datetime('now'), reversed_by = ?, reversal_reason = ?
+        WHERE id = ? AND status = 'active'`,
+    )
+    .run(params.operatorName, reason, params.allocationId);
+  if (updated.changes !== 1) throw new HttpError(409, 'This allocation is already reversed.');
+}
+
+/**
+ * Closes an award, returning whatever it never applied to the fund.
+ *
+ * Applied money stays where it was applied: an obligation that was settled by
+ * this award remains settled, and its allocation is untouched.
+ */
+export function closeAward(
+  db: Database,
+  params: { awardId: string; reason: string; operatorName: string },
+): { returnedToFund: number } {
+  if (!db.inTransaction) throw new Error('closeAward() called outside a transaction.');
+  const reason = String(params.reason ?? '').trim();
+  if (reason.length < 8) throw new HttpError(400, 'A close reason of at least 8 characters is required.');
+
+  const award = getAwardPosition(db, params.awardId);
+  if (award.status !== 'active') throw new HttpError(409, 'This award is already closed.');
+
+  const updated = db
+    .prepare(
+      `UPDATE scholarship_awards
+          SET status = 'closed', closed_at = datetime('now'), closed_by = ?, close_reason = ?
+        WHERE id = ? AND status = 'active'`,
+    )
+    .run(params.operatorName, reason, params.awardId);
+  if (updated.changes !== 1) throw new HttpError(409, 'This award is already closed.');
+  return { returnedToFund: award.remaining };
+}
+
+/** Allocates donation money into a scholarship fund — the only way a fund is backed. */
+export function fundScholarshipFromDonation(
+  db: Database,
+  params: { scholarshipId: string; donationId: string; amount: number; branchId: string; operatorName: string; date?: string },
+): { fundingId: string } {
+  if (!db.inTransaction) throw new Error('fundScholarshipFromDonation() called outside a transaction.');
+  const amount = assertMoney(params.amount, 'Funding amount');
+  if (amount <= 0) throw new HttpError(400, 'A funding amount must be greater than zero.');
+
+  const donation = getDonationUnallocated(db, params.donationId);
+  if (amount > donation.unallocated) {
+    throw new HttpError(400, `Only ${donation.unallocated} AFN of that donation is still unallocated.`);
+  }
+
+  const fundingId = id('schf');
+  db.prepare(
+    `INSERT INTO scholarship_fundings (id, scholarship_id, donation_id, amount, branch_id, operator_name, date)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(fundingId, params.scholarshipId, params.donationId, amount, params.branchId, params.operatorName, params.date ?? today());
+  return { fundingId };
+}

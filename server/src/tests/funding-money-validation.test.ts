@@ -99,21 +99,30 @@ describe('the award budget check fails closed on a poisoned budget', () => {
     expect(wouldReject(20_000, 50_000, 40_000)).toBe(true);
   });
 
-  it('the route validates both the award amount and the stored budget', () => {
+  it('the route validates the award amount and bounds it by money the fund RECEIVED', () => {
     expect(fundingSource).toContain("const awardAmount = assertMoney(amount, 'award amount');");
-    expect(fundingSource).toContain('if (!Number.isFinite(totalBudgetValue))');
-    expect(fundingSource).toContain('if (!(awardAmount <= remaining))');
-    // The coercions that caused this must not return. (The donations handler
-    // still uses `amount <= 0`, but its value reaches recordIncome, which runs
-    // assertMoney and a two-decimal DB trigger — verified live: "abc", 1e309,
-    // 1e15 and 0.001 are all rejected there.)
+    // Owner decision D-121 replaced the declared-budget ceiling with received
+    // funding, which makes this invariant strictly stronger: a poisoned
+    // `total_budget` can no longer approve anything, because it no longer
+    // participates in the decision at all.
+    expect(fundingSource).toContain('const fund = getFundPosition(db, scholarshipId);');
+    expect(fundingSource).toContain('if (!(awardAmount <= fund.available))');
+    // The coercions that caused the original defect must not return. (The
+    // donations handler still uses `amount <= 0`, but its value reaches
+    // recordIncome, which runs assertMoney and a whole-AFN DB trigger.)
     expect(fundingSource).not.toContain('const remaining = scholarship.total_budget - scholarship.allocated_amount;');
+    expect(fundingSource).not.toContain('const remaining = totalBudgetValue - allocatedValue;');
     expect(fundingSource).not.toContain('!scholarshipId || !studentId || !amount || amount <= 0');
+    // Behaviour for both is proven end-to-end in
+    // `work-packages/wp07/scholarship-funding-authority.test.ts`.
   });
 
-  it('the persisted award uses the validated amount, not the raw body value', () => {
+  it('the persisted award uses the validated amount, and the fund figure is derived', () => {
     expect(fundingSource).toContain('stmtInsertAward.run(newId, scholarshipId, studentId, awardAmount');
-    expect(fundingSource).toContain('const newAllocated = allocatedValue + awardAmount;');
+    // `scholarships.allocated_amount` is now a display mirror of a derived
+    // figure rather than an independently maintained running total.
+    expect(fundingSource).toContain('const committed = getFundPosition(db, scholarshipId).committed;');
+    expect(fundingSource).not.toContain('const newAllocated = allocatedValue + awardAmount;');
   });
 
   it('the scholarship insert uses the validated budget', () => {

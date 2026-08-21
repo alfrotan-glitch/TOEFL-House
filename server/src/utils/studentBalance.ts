@@ -83,6 +83,13 @@ export function deriveBalance(tuitionDue: number, tuitionPaid: number): StudentB
   };
 }
 
+/**
+ * The net amount a semester bills. `net_fee_amount` is post-discount; the gross
+ * figure overstates a discounted student's debt. Exported so the obligation
+ * authority reads the same expression instead of restating it (§13, LAW 1).
+ */
+export const TUITION_NET_SQL = 'COALESCE(net_fee_amount, fee_amount)';
+
 /** Charge categories that pay down tuition. */
 const TUITION_CHARGE_SQL = `'fee','installment'`;
 
@@ -98,6 +105,20 @@ const TUITION_PAYMENT_SQL = `(
       ) IN (${TUITION_CHARGE_SQL}))
 )`;
 
+
+/** Scholarship money applied to any of this student's tuition obligations. */
+function studentScholarshipSettled(db: Database, studentId: string): number {
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(a.amount), 0) AS total
+         FROM obligation_allocations a
+         JOIN student_obligations o ON o.id = a.obligation_id
+        WHERE o.student_id = ? AND o.kind = 'tuition'
+          AND a.source_kind = 'scholarship' AND a.status = 'active'`,
+    )
+    .get(studentId) as { total: number };
+  return Number(row.total) || 0;
+}
 
 /** Authoritative single-student balance, read straight from the database. */
 export function getStudentBalance(db: Database, studentId: string, scope: BalanceScope = 'all'): StudentBalance {
@@ -117,7 +138,9 @@ export function getStudentBalance(db: Database, studentId: string, scope: Balanc
     )
     .get(studentId) as { total: number };
 
-  return deriveBalance(due.total, paid.total);
+  // Tuition is settled by cash AND by scholarship money; a student whose term a
+  // donor paid does not owe it (owner decision D-120).
+  return deriveBalance(due.total, Number(paid.total) + studentScholarshipSettled(db, studentId));
 }
 
 /**
@@ -140,6 +163,33 @@ export function getSemesterTuitionPaid(db: Database, studentId: string, semester
     )
     .get(studentId, semesterName) as { paid: number };
   return Number(row.paid) || 0;
+}
+
+/**
+ * Scholarship money applied to this semester's tuition.
+ *
+ * Expressed here, beside the cash rule, so "how much of this term is settled"
+ * has one home. Scholarship money never appears in `payments`: it settles the
+ * obligation without moving cash, because the donor's money was recognised when
+ * the donation was received (owner decisions D-120/D-121).
+ */
+export function getSemesterScholarshipSettled(db: Database, studentId: string, semesterName: string): number {
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(a.amount), 0) AS total
+         FROM obligation_allocations a
+         JOIN student_obligations o ON o.id = a.obligation_id
+         JOIN student_semesters ss ON ss.id = o.semester_id
+        WHERE o.student_id = ? AND ss.semester_name = ?
+          AND a.source_kind = 'scholarship' AND a.status = 'active'`,
+    )
+    .get(studentId, semesterName) as { total: number };
+  return Number(row.total) || 0;
+}
+
+/** Everything that settles this semester's tuition, whatever the instrument. */
+export function getSemesterTuitionSettled(db: Database, studentId: string, semesterName: string): number {
+  return getSemesterTuitionPaid(db, studentId, semesterName) + getSemesterScholarshipSettled(db, studentId, semesterName);
 }
 
 /** One roster row: a student id plus their authoritative balance. */

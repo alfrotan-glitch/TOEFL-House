@@ -1,4 +1,4 @@
-# Remediation Record — WP-07 Slices A–D · Budget/treasury authority, the invoice payment boundary, document/authorization integrity, and refund attribution
+# Remediation Record — WP-07 Slices A–E · Budget/treasury authority, the invoice payment boundary, document/authorization integrity, refund attribution, and scholarship funding
 
 **Work Package:** WP-07 Finance — budget-line movement, savings ledger purity, finance operational settings, invoice payment boundary
 **Protocol:** `docs/MASTER_ENGINEERING_PROTOCOL.md` §§58–74 and §W
@@ -35,6 +35,17 @@ Added in slice B:
 
 - the invoice payment boundary: payment-method validation, idempotency replay
   scope and ordering, and overpayment precision on `POST /api/invoices/:id/pay`.
+
+Added in slice E (owner decisions D-120 and D-121 — Decision 4 and Decision A/E1-core):
+
+- `student_obligations` + `obligation_allocations`: the single settlement
+  authority, tuition obligations only, amount derived from the existing tuition
+  authority;
+- `scholarship_fundings`: donation money allocated into a fund — the only
+  backing a fund can have;
+- scholarship award lifecycle, application to obligations, reversal and close;
+- the settlement rule consumed by the payment desk and the student balance, so a
+  scholarship-settled term cannot be collected again in cash.
 
 Added in slice D (owner decisions D-113 and D-114):
 
@@ -165,9 +176,10 @@ Recorded as **D-101 … D-105** in `docs/registries/decisions.md`.
 
 | Command | Result |
 |---|---|
-| `npx vitest run src/tests/work-packages/wp07` | 104/104 passed |
-| `npx vitest run` (server, full) | **2678 passed · 160 skipped** (the 160 are the explicit WP-04 retirements) · 0 failed |
-| `npm run preflight:fresh-schema` | 112 tables · 238 indexes · 117 triggers; stands alone, sound, idempotent |
+| `npx vitest run src/tests/work-packages/wp07` | 128/128 passed |
+| `npx vitest run` (server, full) | **2702 passed · 160 skipped** (the 160 are the explicit WP-04 retirements) · 0 failed |
+| `npm run preflight:fresh-schema` | 115 tables · 245 indexes · 122 triggers; stands alone, sound, idempotent |
+| `npm run release:validate` (after slice E) | **22 passed · 0 failed · 0 skipped**; fresh install 115 tables; financial invariants reconcile |
 | `npx tsc --noEmit` (server + frontend) | clean |
 | `npm run release:validate` | **22 passed · 0 failed · 0 skipped** |
 | Reconciliation gate detail | `full money lifecycle · amount/cash/saving/budget all 0` |
@@ -258,6 +270,36 @@ in this slice's scope:
   the invariant, but payroll is not certified here.
 - The same-agent limitation on independent review remains tracked as TR-4.
 
+## SLICE E — SCHOLARSHIP FUNDING (Decision 4 + Decision A/E1-core)
+
+**Owner decisions implemented:** D-120 (one settlement authority; scholarship
+settlement moves no cash and no income), D-121 (a fund is backed only by
+donations explicitly allocated to it; institution-funded funds are impossible by
+construction). S5 and S6 remain blocked by owner instruction and were not
+touched.
+
+**Checkpoint.** `docs/work-packages/WP-07-decision-4-checkpoint.md` records the
+first pass as BLOCKED and the second as CLEARED, with the revalidation of every
+approved rule and two mechanics recorded rather than assumed (D-122).
+
+**Attack — what was exercised.** An unfunded fund with a 50,000 AFN declared
+target awarding anything; an award one afghani over received backing; a donation
+allocated beyond its own value; a cross-branch donation funding a fund; an
+allocation to another student's obligation; an allocation naming no obligation;
+zero, negative, fractional, string, array, boolean and null amounts; more than
+the award's remainder; more than the obligation's outstanding; **two concurrent
+applications of one award**; **two concurrent awards against one fund**; a
+reversal with no reason; a double reversal; a reversal through another award;
+applying a closed award; a direct-database allocation naming two instruments or
+none; a second obligation for one semester; an obligation over another student's
+semester; and deletion of a funded donation and a settled obligation.
+
+**The accounting property, proven rather than asserted.** After a donation is
+recognised once and a scholarship settles a term: the ledger holds exactly one
+income row (`donation`), branch cash is unchanged by the settlement,
+`computeReconciliation` stays healthy, the student's tuition position falls by
+the settled amount, and the payment desk refuses to collect that term again.
+
 ## OPEN — OWNER DECISION REQUIRED (WP07-F16 and WP07-F17, charge-side attribution)
 
 D-113 and D-114 settled what a REFUND attaches to. The same question is open on
@@ -333,6 +375,15 @@ claimed:
 
 - **WP07-F16 (installment → semester) and WP07-F17 (invoice → obligation) —
   BLOCKED on the owner decisions above;**
+- **E1b** — migrating cash payments onto `obligation_allocations`. Today cash
+  tuition is still attributed by `payments.semester` and scholarship money by
+  allocations; both are read through one settlement authority
+  (`getSemesterTuitionSettled`), so no figure disagrees, but the storage is not
+  yet unified. `source_kind = 'payment'` is declared and unused until then;
+- the funding **UI** for slice E: the API, the authority and the invariants are
+  complete and tested, but `FundingView.tsx` does not yet expose funding a
+  scholarship from a donation or applying an award. The capability is
+  server-complete and operator-incomplete, and is not claimed otherwise;
 - payment allocation — narrowed by inspection, not yet certified. The
   charge side is already explicit: `fee` requires `semesterId`, `installment`
   requires `installmentId` and must match its amount, `book` requires `bookId`,
