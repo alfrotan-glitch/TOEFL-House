@@ -20,7 +20,7 @@
  * invariant itself rather than one route's wiring.
  */
 import { describe, it, expect } from 'vitest';
-import { assertMoney } from '../utils/money.js';
+import { assertMoney } from '../../../utils/money.js';
 
 /** Mirrors how exams.routes.ts now resolves a submitted fee. */
 const resolveExamFee = (fee: unknown) => assertMoney(fee ?? 0, 'exam fee');

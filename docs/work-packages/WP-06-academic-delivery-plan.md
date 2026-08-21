@@ -212,4 +212,56 @@ Summary of the implementation plan:
 
 ## IMPLEMENT / VERIFY / ATTACK record
 
-(completed during this pass; filled in below)
+**IMPLEMENT** — decisions D-93–D-100 executed:
+
+- Schema: `attendance.session_id` removed; `exam_results.status`/`score`
+  CHECKs; `exams.type` vocabulary unified (no `mock`, no default); `certificates`
+  lifecycle columns (`status`/`revoked_at`/`revoked_by`); `student_grades.score`
+  and `class_assessments` weight/max_score CHECKs. Preflight: 112 tables /
+  238 indexes / 117 triggers, stands alone.
+- Attendance authority: mirror writes removed from the roster commands;
+  `core/academic/attendance-query.ts` exports the single union; report metrics,
+  impact stats, `/api/attendance` list and summary all consume it; summary rate
+  uses the attended-equivalent authority; teacher rows excluded from student
+  surfaces.
+- Sessions: mark-guarded DELETE, completed-session date/time immutability,
+  transactional single-roster PATCH with the bulk path's guards, canonical
+  date/time validation everywhere (`utils/isoDate.ts`), timetable generator
+  input hardening; dead declarations removed.
+- Exams: `resolveBranchScope` creation branch, one type vocabulary, ISO date
+  validation, status-gated score entry, revocation-as-state with unchanged fee
+  policy; stale comments rewritten as current intent.
+- Gradebook: score/status bounds at route + schema.
+- Frontend: `ExamsView` renders scored state from `status`; `types.ts` exam
+  union and attendance comment updated.
+
+**VERIFY** — full suite 163 files / 2564 tests passing with only the 160
+explicit WP-04 retirements skipped; `audit:registries` 335 rows all live;
+server and frontend typechecks clean.
+
+**ATTACK** — the new authority suites include the adversarial cases:
+
+- attendance: stray mirror rows after bulk and single marks (0), day-level +
+  session same-day double facts, teacher-row pollution of summary and metrics,
+  `not_marked` placeholder leakage, marked-session deletion, completed-session
+  date moves and teacher corrections, attended-equivalent rate credit;
+- exams: identity-branch creation (403, no row), explicit cross-branch scope
+  honored, `branchId=all` refused, `mock` rejected on create and edit,
+  malformed dates rejected, scored-0 re-entry blocked, direct-storage CHECK
+  violations (status/score/type/certificate status/attendance session column);
+- sessions: malformed dates/times, reversed spans, garbage generation windows,
+  bogus roster statuses and duplicate ids, homework due dates, early
+  completion;
+- gradebook: negative scores, above-max scores, unknown statuses, direct-storage
+  bound violations.
+
+**REPAIR/REVERIFY** — two defects found during the attack pass:
+
+1. an `isAll` exam-creation request reached an unhelpful 403; it is now an
+   explicit 400 with a clear message, covered by the `branchId=all` case;
+2. the unfiltered (org-wide, no targetId) `/api/attendance/summary` call
+   rendered an empty WHERE clause and would have failed; the WHERE is now
+   conditional and an unfiltered org-wide case pins it.
+
+Re-verified: wp06 14 files / 126 tests green; full suite 163 files / 2562
+tests with only the 160 explicit WP-04 retirements; full release gate green.

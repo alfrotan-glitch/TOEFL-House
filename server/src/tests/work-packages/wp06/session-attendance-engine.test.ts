@@ -8,25 +8,25 @@
  * phase fixes: POST /api/sessions/generate previously threw
  * "RangeError: Too few parameter values were provided" on every call.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { today } from '../utils/ids.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import classesRouter from '../routes/classes.routes.js';
-import sessionsRouter from '../routes/sessions.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { getEnrollmentService } from '../core/academic/enrollment-service.js';
-import { getClassLifecycleService } from '../core/academic/class-lifecycle-service.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { today } from '../../../utils/ids.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import classesRouter from '../../../routes/classes.routes.js';
+import sessionsRouter from '../../../routes/sessions.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { getEnrollmentService } from '../../../core/academic/enrollment-service.js';
+import { getClassLifecycleService } from '../../../core/academic/class-lifecycle-service.js';
 import {
   computeAttendanceWeight,
   classifyArrival,
   checkConsecutiveAbsences,
   getAttendancePolicy,
-} from '../core/academic/attendance-policy-service.js';
+} from '../../../core/academic/attendance-policy-service.js';
 
 const BRANCH = 'se_branch_a';
 

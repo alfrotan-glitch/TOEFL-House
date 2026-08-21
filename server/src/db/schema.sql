@@ -1773,7 +1773,6 @@ CREATE TABLE IF NOT EXISTS attendance (
   target_type TEXT NOT NULL CHECK (target_type IN ('student','teacher')), 
   status      TEXT NOT NULL, 
   class_id    TEXT REFERENCES classes(id) ON DELETE SET NULL, 
-  session_id  TEXT REFERENCES sessions(id) ON DELETE SET NULL, 
   branch_id   TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT 
 );
 CREATE INDEX IF NOT EXISTS idx_attendance_date       ON attendance(date);
@@ -1822,7 +1821,8 @@ CREATE TABLE IF NOT EXISTS class_assessments (
   makeup_for_assessment_id TEXT REFERENCES class_assessments(id) ON DELETE SET NULL,
   created_at              TEXT NOT NULL DEFAULT (datetime('now'))
 , lock_status TEXT NOT NULL DEFAULT 'draft'
-  CHECK (lock_status IN ('draft','submitted','reviewed','approved','published','locked')), lock_status_updated_at TEXT);
+  CHECK (lock_status IN ('draft','submitted','reviewed','approved','published','locked')), lock_status_updated_at TEXT,
+  CHECK (weight >= 0 AND max_score > 0));
 CREATE INDEX IF NOT EXISTS idx_assessments_class ON class_assessments(class_id);
 CREATE INDEX IF NOT EXISTS idx_assessments_makeup_for ON class_assessments(makeup_for_assessment_id);
 
@@ -1831,7 +1831,7 @@ CREATE TABLE IF NOT EXISTS student_grades (
   assessment_id TEXT NOT NULL REFERENCES class_assessments(id) ON DELETE CASCADE,
   student_id TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
   class_id TEXT NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
-  score REAL,
+  score REAL CHECK (score IS NULL OR score >= 0),
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'graded', 'excused', 'missing')),
   notes TEXT,
   graded_by TEXT,
@@ -1865,7 +1865,7 @@ CREATE TABLE IF NOT EXISTS exams (
   date      TEXT NOT NULL, 
   fee       INTEGER NOT NULL DEFAULT 0, 
   class_id  TEXT REFERENCES classes(id) ON DELETE SET NULL, 
-  type      TEXT NOT NULL DEFAULT 'mock' CHECK (type IN ('placement','midterm','final','mock','certification')), 
+  type      TEXT NOT NULL CHECK (type IN ('placement','midterm','final','certification')), 
   branch_id TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT 
 );
 CREATE INDEX IF NOT EXISTS idx_exams_branch          ON exams(branch_id);
@@ -1884,8 +1884,8 @@ CREATE TABLE IF NOT EXISTS exam_results (
   student_id         TEXT REFERENCES students(id) ON DELETE CASCADE, -- Removed NOT NULL to allow visitors
   visitor_id         TEXT REFERENCES visitors(id) ON DELETE SET NULL, -- Added for Walk-in candidates
   candidate_name     TEXT, -- Added to store the name at the time of exam (for display if not a student)
-  score              REAL, 
-  status             TEXT, 
+  score              REAL CHECK (score IS NULL OR (score >= 0 AND score <= 120)), 
+  status             TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','pass','fail')), 
   exam_fee_paid      INTEGER NOT NULL DEFAULT 0, 
   certificate_issued INTEGER NOT NULL DEFAULT 0, 
   certificate_no     TEXT, 
@@ -1923,7 +1923,10 @@ CREATE TABLE IF NOT EXISTS certificates (
   certificate_no TEXT NOT NULL UNIQUE, 
   grade          TEXT, 
   branch_id      TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT, 
-  created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+  status         TEXT NOT NULL DEFAULT 'issued' CHECK (status IN ('issued','revoked')), 
+  revoked_at     TEXT, 
+  revoked_by     TEXT, 
+  created_at     TEXT NOT NULL DEFAULT (datetime('now')) 
 );
 CREATE INDEX IF NOT EXISTS idx_certificates_student  ON certificates(student_id);
 

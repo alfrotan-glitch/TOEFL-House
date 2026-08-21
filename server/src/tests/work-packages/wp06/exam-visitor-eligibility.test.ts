@@ -22,16 +22,16 @@
  *
  * These tests drive the real HTTP route with realistic status values.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { examsRouter } from '../routes/exams.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { today } from '../utils/ids.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { examsRouter } from '../../../routes/exams.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { today } from '../../../utils/ids.js';
 
 const BRANCH = 'exv_a';
 const BRANCH_B = 'exv_b';

@@ -511,7 +511,7 @@ export interface Exam {
   date: string;
   fee: number;
   classId?: string;
-  type: 'placement' | 'midterm' | 'final' | 'mock' | 'certification';
+  type: 'placement' | 'midterm' | 'final' | 'certification';
   branchId: string;
 }
 
@@ -1009,10 +1009,9 @@ export interface Attendance {
   date: string;
   targetId: string;
   targetType: 'student' | 'teacher';
-  /** The dedicated legacy attendance router only ever writes the original
-   *  4 values; sessions.routes.ts additionally dual-writes into this same
-   *  table with the full Smart Attendance Engine status set (Phase 2), so
-   *  a GET response can legitimately include any of them. */
+  /** A response row can be a session mark (full status vocabulary, written by
+   *  the roster commands) or a day-level/teacher mark (the four day-level
+   *  statuses) — one read surface over the two attendance authorities. */
   status: 'present' | 'late' | 'absent' | 'excused' | 'medical_leave' | 'sick' | 'leave' | 'online' | 'hybrid' | 'left_early';
   classId?: string;
   sessionId?: string;

@@ -21,7 +21,8 @@ import { parsePagination as parsePaginationShared } from '../utils/pagination.js
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource, requestHasRole, requestHasAnyRole } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
-import { id, today } from '../utils/ids.js';
+import { id } from '../utils/ids.js';
+import { assertOptionalIsoDate, assertTimeOfDay, assertTimeRange } from '../utils/isoDate.js';
 import { eventBus } from '../core/events/event-bus.js';
 import { isPostActivation, ATTENDANCE_STATUSES, SESSION_TYPES, type AttendanceStatus } from '../core/academic/lifecycle-engine.js';
 import { getAttendancePolicy, computeAttendanceWeight, checkConsecutiveAbsences, ATTENDED_EQUIVALENT_STATUSES } from '../core/academic/attendance-policy-service.js';
@@ -48,7 +49,6 @@ const stmtGetSessionDetail = db.prepare(
    WHERE s.id = ?`
 );
 const stmtGetClassById = db.prepare('SELECT * FROM classes WHERE id = ?');
-const stmtGetTeacherById = db.prepare('SELECT id FROM teachers WHERE id = ?');
 const stmtGetUserLinkedTeacher = db.prepare('SELECT linked_teacher_id FROM users WHERE id = ?');
 const stmtGetTimeSlot = db.prepare('SELECT start_time, end_time FROM time_slots WHERE id = ?');
 // `branch_id` is selected because the handler enforces that a class and its
@@ -100,10 +100,8 @@ const stmtGetQuizzes = db.prepare('SELECT * FROM quizzes WHERE session_id = ? OR
 const stmtInsertQuiz = db.prepare(`INSERT INTO quizzes (id, session_id, title, description, max_score, due_date, assigned_by) VALUES (?, ?, ?, ?, ?, ?, ?)`);
 const stmtGetQuizById = db.prepare('SELECT * FROM quizzes WHERE id = ? AND session_id = ?');
 const stmtDeleteQuizById = db.prepare('DELETE FROM quizzes WHERE id = ?');
-const stmtDeleteLegacyAttendance = db.prepare(`DELETE FROM attendance WHERE date = ? AND target_id = ? AND target_type = 'student' AND session_id = ?`);
-const stmtInsertLegacyAttendance = db.prepare(`INSERT INTO attendance (id, date, target_id, target_type, status, class_id, session_id, branch_id) VALUES (?, ?, ?, 'student', ?, ?, ?, ?)`);
-const stmtGetSessionByIdSimple = db.prepare('SELECT id FROM sessions WHERE id = ?');
 const stmtGetStudentEnrollmentForClass = db.prepare(`SELECT id FROM enrollments WHERE student_id = ? AND class_id = ? AND status = 'active'`);
+const stmtCountMarkedRosters = db.prepare(`SELECT COUNT(*) AS c FROM rosters WHERE session_id = ? AND attendance_status != 'not_marked'`);
 
 /** Safely extracts user context */
 function getUserContext(req: import('express').Request) {
@@ -426,12 +424,19 @@ sessionsRouter.post(
   '/generate',
   authorize('receptionist', 'general_manager', 'head_of_department'),
   ah(async (req, res) => {
-    const user = getUserContext(req);
     const { classId, weekStart, weeks = 1, daysOfWeek, startTime, endTime, skillId, skillIds, teacherId } = req.body || {};
 
     if (!classId) throw new HttpError(400, 'classId is required.');
+    if (weeks !== undefined && (!Number.isInteger(Number(weeks)) || Number(weeks) < 1 || Number(weeks) > 12)) {
+      throw new HttpError(400, 'weeks must be a whole number between 1 and 12.');
+    }
     const weekCount = Math.min(12, Math.max(1, Number(weeks) || 1));
-    const days: number[] = Array.isArray(daysOfWeek) && daysOfWeek.length ? daysOfWeek.map(Number) : AF_TEACHING_DAYS;
+    const requestedDays = Array.isArray(daysOfWeek) && daysOfWeek.length ? daysOfWeek.map(Number) : AF_TEACHING_DAYS;
+    if (requestedDays.some((d) => !Number.isInteger(d) || d < 0 || d > 6)) {
+      throw new HttpError(400, 'daysOfWeek must contain whole numbers between 0 (Sunday) and 6 (Saturday).');
+    }
+    const days: number[] = [...new Set(requestedDays)];
+    const weekOrigin = assertOptionalIsoDate(weekStart, 'weekStart') ?? startOfWeekSaturday();
 
     const cls = stmtGetClassById.get(classId) as any;
     if (!cls) throw new HttpError(404, 'Class not found.');
@@ -448,6 +453,9 @@ sessionsRouter.post(
     const parsed = parseScheduleTimes(cls.schedule_time);
     start = start || parsed?.start || '08:00';
     end = end || parsed?.end || '09:30';
+    start = assertTimeOfDay(start, 'startTime');
+    end = assertTimeOfDay(end, 'endTime');
+    assertTimeRange(start, end);
     const resolvedTeacher = teacherId || cls.teacher_id;
     if (resolvedTeacher) {
       const teacher = db.prepare('SELECT id, branch_id, status FROM teachers WHERE id = ?').get(resolvedTeacher) as any;
@@ -455,7 +463,6 @@ sessionsRouter.post(
       if (teacher.branch_id !== cls.branch_id) throw new HttpError(400, 'Teacher and class branch must match.');
       if (teacher.status !== 'active') throw new HttpError(400, 'Selected teacher is not active.');
     }
-    const weekOrigin = startOfWeekSaturday(weekStart);
 
     let termFrom: string | null = null, termTo: string | null = null;
     if (cls.academic_term_id) {
@@ -591,6 +598,10 @@ sessionsRouter.post(
     const { classId, date, startTime, endTime, topic, notes, teacherId, skillId, sessionType, linkedSessionId, roomId } = req.body;
     
     if (!classId || !date || !startTime || !endTime) throw new HttpError(400, 'classId, date, startTime, and endTime are required.');
+    const sessionDate = assertOptionalIsoDate(date, 'date')!;
+    const normStart = assertTimeOfDay(startTime, 'startTime');
+    const normEnd = assertTimeOfDay(endTime, 'endTime');
+    assertTimeRange(normStart, normEnd);
     if (sessionType && !SESSION_TYPES.includes(sessionType)) {
       throw new HttpError(400, `Invalid sessionType: "${sessionType}". Must be one of: ${SESSION_TYPES.join(', ')}.`);
     }
@@ -627,12 +638,12 @@ sessionsRouter.post(
     const newId = id('sess');
     const resolvedTeacherId = teacherId || cls.teacher_id;
 
-    assertNoSessionConflict(classId, date, startTime, endTime);
-    assertNoTeacherConflict(resolvedTeacherId, date, startTime, endTime);
+    assertNoSessionConflict(classId, sessionDate, normStart, normEnd);
+    assertNoTeacherConflict(resolvedTeacherId, sessionDate, normStart, normEnd);
 
     const tx = db.transaction(() => {
       stmtInsertSession.run(
-        newId, classId, date, startTime, endTime, topic || null, notes || null,
+        newId, classId, sessionDate, normStart, normEnd, topic || null, notes || null,
         sessionType || 'regular', linkedSessionId || null,
         resolvedTeacherId, selectedRoomId, skillId || null, cls.branch_id
       );
@@ -640,12 +651,12 @@ sessionsRouter.post(
       for (const studentId of studentIds) {
         stmtInsertRoster.run(id('ros'), newId, studentId);
       }
-      return eventBus.emit('session.scheduled', 'session', newId, { classId, date, startTime, endTime, topic }, { operatorId: user.userId, branchId: cls.branch_id });
+      return eventBus.emit('session.scheduled', 'session', newId, { classId, date: sessionDate, startTime: normStart, endTime: normEnd, topic }, { operatorId: user.userId, branchId: cls.branch_id });
     });
     const event = tx();
     void eventBus.dispatch(event);
 
-    writeAudit(req, `Created session for class "${cls.name}" on ${date} (${startTime}–${endTime})`);
+    writeAudit(req, `Created session for class "${cls.name}" on ${sessionDate} (${normStart}–${normEnd})`);
     const created = stmtGetSessionDetail.get(newId) as any;
     res.status(201).json(mapSessionRow(created));
   })
@@ -657,10 +668,18 @@ sessionsRouter.put(
   ah(async (req, res) => {
     const existing = requireSession(req, req.params.id);
     const { date, startTime, endTime, topic, notes, teacherId, skillId, roomId } = req.body;
-    
-    const nextDate = date ?? existing.date;
-    const nextStart = startTime ?? existing.start_time;
-    const nextEnd = endTime ?? existing.end_time;
+
+    const nextDate = date !== undefined && date !== null && date !== '' ? assertOptionalIsoDate(date, 'date')! : existing.date;
+    const nextStart = startTime !== undefined && startTime !== null && startTime !== '' ? assertTimeOfDay(startTime, 'startTime') : existing.start_time;
+    const nextEnd = endTime !== undefined && endTime !== null && endTime !== '' ? assertTimeOfDay(endTime, 'endTime') : existing.end_time;
+    assertTimeRange(nextStart, nextEnd);
+
+    // A completed session is a historical fact: its date and time feed every
+    // attendance rate and analytics window. Re-dating one would move its marks
+    // between periods after they were already reported.
+    if (existing.status === 'completed' && (nextDate !== existing.date || nextStart !== existing.start_time || nextEnd !== existing.end_time)) {
+      throw new HttpError(409, 'Cannot change the date or time of a completed session.');
+    }
     
     assertNoSessionConflict(existing.class_id, nextDate, nextStart, nextEnd, req.params.id);
     const nextRoomId = roomId !== undefined ? roomId : existing.room_id;
@@ -731,6 +750,10 @@ sessionsRouter.delete(
   ah(async (req, res) => {
     const existing = requireSession(req, req.params.id);
     if (existing.status === 'completed') throw new HttpError(409, 'Cannot delete a completed session.');
+    const markedCount = (stmtCountMarkedRosters.get(req.params.id) as { c: number }).c;
+    if (markedCount > 0) {
+      throw new HttpError(409, `Cannot delete a session with ${markedCount} recorded attendance mark(s). Cancel it instead.`);
+    }
 
     const tx = db.transaction(() => {
       stmtDeleteRosters.run(req.params.id);
@@ -885,8 +908,6 @@ sessionsRouter.post(
       for (const rec of records) {
         const weight = computeAttendanceWeight(rec.status, rec.lateMinutes, policy);
         stmtUpdateRoster.run(rec.status, rec.lateMinutes ?? null, weight, now, req.params.id, rec.studentId);
-        stmtDeleteLegacyAttendance.run(session.date, rec.studentId, req.params.id);
-        stmtInsertLegacyAttendance.run(id('at'), session.date, rec.studentId, rec.status, session.class_id, req.params.id, session.branch_id);
 
         if (rec.status === 'absent') {
           autoDrops.push(checkAndApplyAutoDrop(rec.studentId, session.class_id, policy, user.userId));
@@ -894,7 +915,6 @@ sessionsRouter.post(
       }
       // Auto-drop mutations and the attendance event are one transaction so a
       // crash cannot leave the attendance state without its durable event.
-      const triggeredDrops = autoDrops.filter((d): d is NonNullable<typeof d> => d !== null);
       return eventBus.emit('attendance.marked', 'session', req.params.id, { classId: session.class_id, date: session.date, recordCount: records.length }, { operatorId: user.userId, branchId: session.branch_id });
     });
     const event = tx();
@@ -922,6 +942,11 @@ sessionsRouter.patch(
     const roster = stmtGetRoster.get(req.params.rosterId, req.params.id) as any;
     if (!roster) throw new HttpError(404, 'Roster entry not found.');
 
+    // Same correction guard as the bulk path: a completed session is history.
+    if (session.status === 'completed' && !requestHasAnyRole(req, ['general_manager', 'owner', 'receptionist'])) {
+      throw new HttpError(400, 'Session is completed. Only managers can correct attendance.');
+    }
+
     const { status, lateMinutes } = req.body as { status: AttendanceStatus; lateMinutes?: number };
     if (!ATTENDANCE_STATUSES.includes(status)) {
       throw new HttpError(400, `Invalid attendance status: "${status}".`);
@@ -929,12 +954,19 @@ sessionsRouter.patch(
 
     const policy = getAttendancePolicy(session.branch_id);
     const weight = status === 'not_marked' ? null : computeAttendanceWeight(status, lateMinutes, policy);
-    stmtUpdateRosterById.run(status, lateMinutes ?? null, weight, new Date().toISOString(), req.params.rosterId);
 
-    let autoDrop = null;
-    if (status === 'absent') {
-      autoDrop = checkAndApplyAutoDrop(roster.student_id, session.class_id, policy, user.userId);
-    }
+    let autoDrop: ReturnType<typeof checkAndApplyAutoDrop> = null;
+    // One transaction: the mark, any auto-drop mutation and the durable event
+    // either all commit or all roll back — identical to the bulk path.
+    const tx = db.transaction(() => {
+      stmtUpdateRosterById.run(status, lateMinutes ?? null, weight, new Date().toISOString(), req.params.rosterId);
+      if (status === 'absent') {
+        autoDrop = checkAndApplyAutoDrop(roster.student_id, session.class_id, policy, user.userId);
+      }
+      return eventBus.emit('attendance.marked', 'session', req.params.id, { classId: session.class_id, date: session.date, recordCount: 1 }, { operatorId: user.userId, branchId: session.branch_id });
+    });
+    const event = tx();
+    void eventBus.dispatch(event);
 
     writeAudit(req, `Updated roster entry ${req.params.rosterId} to "${status}"` + (autoDrop ? `; auto-dropped student for consecutive absences` : ''));
     res.json({ ok: true, autoDrop });
@@ -992,9 +1024,10 @@ sessionsRouter.post(
 
     const { title, description, dueDate } = req.body;
     if (!title || !dueDate) throw new HttpError(400, 'title and dueDate are required.');
+    const normDueDate = assertOptionalIsoDate(dueDate, 'dueDate')!;
 
     const newId = id('hw');
-    stmtInsertHomework.run(newId, req.params.id, title, description || null, dueDate, user.fullName);
+    stmtInsertHomework.run(newId, req.params.id, title, description || null, normDueDate, user.fullName);
 
     writeAudit(req, `Assigned homework "${title}" for session ${req.params.id}`);
     res.status(201).json({ id: newId });

@@ -449,7 +449,7 @@ export default function ExamsView({
                           </td>
                           <td className="py-3 px-3 font-mono text-slate-500">{exam ? exam.date : 'N/A'}</td>
                           <td className="py-3 px-3 text-center">
-                            {result.score > 0 ? (
+                            {result.status !== 'pending' ? (
                               <span className={`inline-flex font-mono font-bold px-2 py-0.5 rounded ${result.status === 'pass' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
                                 {result.score} / 120
                               </span>

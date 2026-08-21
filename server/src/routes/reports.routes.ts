@@ -293,20 +293,21 @@ reportsRouter.get(
         WHERE r.date >= ? AND r.date <= ? AND r.branch_id = ? ${genderClause}`).get(from, to, branchId, ...genderParam)) as { male: number; female: number; total: number };
     const registrations = { male: Number(regQ.male || 0), female: Number(regQ.female || 0), total: Number(regQ.total || 0) };
 
-    // Certificates (gender via student).
+    // Certificates (gender via student). Only issued output counts; revoked
+    // certificates are recorded history, not certificates in circulation.
     const certQ = (isAll
       ? db.prepare(`SELECT
           COALESCE(SUM(CASE WHEN s.gender = 'male' THEN 1 ELSE 0 END),0) AS male,
           COALESCE(SUM(CASE WHEN s.gender = 'female' THEN 1 ELSE 0 END),0) AS female,
           COUNT(*) AS total
         FROM certificates c LEFT JOIN students s ON s.id = c.student_id
-        WHERE c.issue_date >= ? AND c.issue_date <= ? ${genderClause}`).get(from, to, ...genderParam)
+        WHERE c.status = 'issued' AND c.issue_date >= ? AND c.issue_date <= ? ${genderClause}`).get(from, to, ...genderParam)
       : db.prepare(`SELECT
           COALESCE(SUM(CASE WHEN s.gender = 'male' THEN 1 ELSE 0 END),0) AS male,
           COALESCE(SUM(CASE WHEN s.gender = 'female' THEN 1 ELSE 0 END),0) AS female,
           COUNT(*) AS total
         FROM certificates c LEFT JOIN students s ON s.id = c.student_id
-        WHERE c.issue_date >= ? AND c.issue_date <= ? AND c.branch_id = ? ${genderClause}`).get(from, to, branchId, ...genderParam)) as { male: number; female: number; total: number };
+        WHERE c.status = 'issued' AND c.issue_date >= ? AND c.issue_date <= ? AND c.branch_id = ? ${genderClause}`).get(from, to, branchId, ...genderParam)) as { male: number; female: number; total: number };
     const certificatesIssued = { male: Number(certQ.male || 0), female: Number(certQ.female || 0), total: Number(certQ.total || 0) };
 
     // Exams conducted in period.

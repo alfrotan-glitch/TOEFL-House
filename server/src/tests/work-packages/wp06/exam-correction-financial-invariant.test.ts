@@ -24,19 +24,19 @@
  * a correction cycle must not MINT, DESTROY, DUPLICATE or REVERSE money, and
  * the ledger must stay reconciled.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { today } from '../utils/ids.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import examsRouter from '../routes/exams.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { getFinanceAccount } from '../utils/financeAccounts.js';
-import { computeReconciliation } from '../utils/reconciliation.js';
-import { seedDefaultRules } from '../core/configuration/rule-engine.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { today } from '../../../utils/ids.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import examsRouter from '../../../routes/exams.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { getFinanceAccount } from '../../../utils/financeAccounts.js';
+import { computeReconciliation } from '../../../utils/reconciliation.js';
+import { seedDefaultRules } from '../../../core/configuration/rule-engine.js';
 
 const BRANCH = 'exm_branch';
 
@@ -120,11 +120,20 @@ describe('EXM-2 — a correction cycle never mints, destroys or duplicates money
   it('a DOWNWARD correction revokes the certificate and reverses nothing', async () => {
     const incomeBefore = diplomaIncome();
     const rowsBefore = ledgerRowCount();
+    const certsBefore = certCount();
 
     const res = await correct(20);
     expect(res.status).toBe(200);
     expect(res.body.certificateIssued).toBe(false);
-    expect(certCount()).toBe(0); // entitlement withdrawn
+    // The entitlement is withdrawn by a state transition, not a deletion: the
+    // issuance fact is retained as revoked.
+    expect(certCount()).toBe(certsBefore);
+    const latest = db.prepare(
+      `SELECT status, revoked_at, revoked_by FROM certificates WHERE student_id = 'exm_stu' ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+    ).get() as { status: string; revoked_at: string | null; revoked_by: string | null };
+    expect(latest.status).toBe('revoked');
+    expect(latest.revoked_at).toBeTruthy();
+    expect(latest.revoked_by).toBe(owner.fullName);
 
     // No reversal, no new ledger row, no negative income: money is neither
     // destroyed nor minted by an academic decision.
@@ -202,8 +211,14 @@ describe('EXM-2 — a correction cycle never mints, destroys or duplicates money
 
   it('POLICY: the entitlement IS revoked even though the money is retained', () => {
     // Lifecycle authority acted (certificate withdrawn) while financial truth
-    // was preserved — the two are decoupled on purpose.
-    expect(certCount()).toBe(0);
+    // was preserved — the two are decoupled on purpose. The certificate row is
+    // retained as a revoked academic-output fact, never deleted.
+    const certRow = db.prepare(
+      `SELECT status, revoked_at, revoked_by FROM certificates WHERE student_id = 'exm_stu' ORDER BY revoked_at DESC LIMIT 1`,
+    ).get() as { status: string; revoked_at: string | null; revoked_by: string | null };
+    expect(certRow.status).toBe('revoked');
+    expect(certRow.revoked_at).toBeTruthy();
+    expect(certRow.revoked_by).toBe(owner.fullName);
     const row = db.prepare(`SELECT certificate_issued, certificate_no FROM exam_results WHERE id = 'exm_res'`).get() as
       { certificate_issued: number; certificate_no: string | null };
     expect(row.certificate_issued).toBe(0);

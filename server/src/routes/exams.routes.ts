@@ -7,8 +7,8 @@ import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
 import { isUniqueViolation } from '../utils/idempotency.js';
+import { assertOptionalIsoDate } from '../utils/isoDate.js';
 import { assertMoney } from '../utils/money.js';
-import { getNumberSetting } from '../utils/settings.js';
 import { recordIncome } from '../utils/income.js';
 import { evaluateRules } from '../core/configuration/rule-engine.js';
 import { resolveFee } from '../core/configuration/policy-resolver.js';
@@ -59,7 +59,9 @@ const stmtInsertCertificate = db.prepare(
 const stmtUpdateCorrectedScore = db.prepare(
   `UPDATE exam_results SET score = ?, status = ?, certificate_issued = ?, certificate_no = ? WHERE id = ?`
 );
-const stmtDeleteCertificate = db.prepare('DELETE FROM certificates WHERE certificate_no = ?');
+const stmtRevokeCertificate = db.prepare(
+  `UPDATE certificates SET status = 'revoked', revoked_at = datetime('now'), revoked_by = ? WHERE certificate_no = ?`
+);
 
 /** Ensure exam exists and caller may access its branch. */
 function requireExam(req: import('express').Request, examId: string): any {
@@ -68,9 +70,6 @@ function requireExam(req: import('express').Request, examId: string): any {
   
   const { branchId, isAll } = resolveBranchScope(req);
   if (!isAll && branchId && row.branch_id && row.branch_id !== branchId) {
-    const user = req.user;
-    if (!user) throw new HttpError(401, 'Not authenticated');
-    const scopes = req.rbac?.permissions.map((p: { scope: string }) => p.scope) ?? [];
     const cross = !!row.branch_id && canAccessBranchResource(req, row.branch_id);
     if (!cross) throw new HttpError(403, 'Exam belongs to another branch.');
   }
@@ -97,11 +96,17 @@ examsRouter.post(
   ah(async (req, res) => {
     const { title, date, fee, type } = req.body;
     if (!title || !date) throw new HttpError(400, 'Exam title and date are required.');
+    const examDate = assertOptionalIsoDate(date, 'date')!;
     const allowedTypes = new Set(['placement', 'midterm', 'final', 'certification']);
     if (!allowedTypes.has(String(type))) throw new HttpError(400, 'A valid exam type is required.');
-    
-    const branchId = req.user?.branchId;
-    if (!branchId) throw new HttpError(403, 'User branch context is missing.');
+
+    // The exam's branch is the caller's AUTHORIZED scope, not their identity
+    // branch: an assignment for branch B never authorizes creating an exam in
+    // an unrelated identity branch A. A concrete branch is required — a
+    // request that explicitly asks for the all-branches scope cannot name the
+    // branch an exam belongs to.
+    const { branchId, isAll } = resolveBranchScope(req);
+    if (isAll || !branchId) throw new HttpError(400, 'Exam creation requires a specific branch (do not request branchId=all).');
     
     // The exam fee is money and must clear the same bar as every other
     // monetary input. `Math.max(0, Number(fee ?? 0))` silently turned rubbish
@@ -111,7 +116,7 @@ examsRouter.post(
     const resolvedFee = assertMoney(fee ?? 0, 'exam fee');
 
     const newId = id('ex');
-    stmtInsertExam.run(newId, String(title).trim(), date, resolvedFee, String(type), branchId);
+    stmtInsertExam.run(newId, String(title).trim(), examDate, resolvedFee, String(type), branchId);
     writeAudit(req, `Created new exam event: ${title}`);
     res.status(201).json({ id: newId });
   })
@@ -130,12 +135,13 @@ examsRouter.put(
     // valid charge just because the row already exists.
     const nextFee = assertMoney(fee != null ? fee : exam.fee, 'exam fee');
     if (!allowedTypes.has(nextType)) throw new HttpError(400, 'Invalid exam type.');
-    if (date && String(date) < String(exam.date) && (stmtCountScoredResults.get(exam.id) as { c: number }).c > 0) {
+    const nextDate = date ? assertOptionalIsoDate(date, 'date')! : exam.date;
+    if (nextDate < exam.date && (stmtCountScoredResults.get(exam.id) as { c: number }).c > 0) {
       throw new HttpError(409, 'Exam date cannot move backward after scores have been recorded.');
     }
     stmtUpdateExam.run(
       String(title || exam.title).trim(),
-      date || exam.date,
+      nextDate,
       nextFee,
       nextType,
       req.params.id
@@ -279,7 +285,10 @@ examsRouter.patch(
     const result = stmtGetResultById.get(req.params.resultId) as any;
     if (!result) throw new HttpError(404, 'Exam result record not found.');
     if (result.exam_id !== exam.id) throw new HttpError(400, 'Exam result does not belong to this exam.');
-    if (result.score > 0) throw new HttpError(409, 'Scores have already been submitted for this candidate. Use the correction tool if needed.');
+    // `status` is the scored marker: a pending result has no score yet, and a
+    // scored result — pass or fail, including a legitimate score of 0 — can
+    // only be changed through the privileged correction tool.
+    if (result.status !== 'pending') throw new HttpError(409, 'Scores have already been submitted for this candidate. Use the correction tool if needed.');
 
     const user = req.user;
     if (!user?.branchId || !user?.fullName) throw new HttpError(403, 'User context is missing.');
@@ -374,17 +383,10 @@ examsRouter.put(
     let certNo = result.certificate_no;
     let certIssued = 0;
 
-    // EXM-1: a correction that crosses the pass threshold issues a real
-    // certificate, so it must carry the diploma fee exactly as the score-entry
-    // path does. This handler had no recordIncome call at all, so the identical
-    // document was produced for free — reachable through the ordinary
-    // split-role workflow where a registrar records a failing score and a
-    // manager later corrects it upward (proven live: 500 AFN vs 0 AFN for the
-    // same certificate).
-    //
-    // The charge reuses the score-entry rule verbatim: once per student,
-    // whether it was already settled by a certificate issuance or at the
-    // payment desk. Re-issuing after a revocation therefore does not bill the
+    // A correction that crosses the pass threshold issues a real certificate,
+    // so it carries the diploma fee under exactly the score-entry rule: once
+    // per student, whether already settled by a certificate issuance or at the
+    // payment desk. Re-issuing after a revocation therefore never bills the
     // student a second time.
     let correctionDiplomaFee = 0;
     if (shouldHaveCert && !result.certificate_issued && result.student_id) {
@@ -421,34 +423,19 @@ examsRouter.put(
           }
         }
       } else if (!shouldHaveCert && result.certificate_issued) {
-        // Revoke certificate if score was corrected to below the passing threshold.
+        // Revocation is a state transition, not a deletion: the certificate is
+        // an academic output fact and stays on record as revoked.
         //
-        // EXM-2 (POLICY, deliberate): revocation does NOT reverse money, and
-        // the exam correction engine is NOT a financial authority. Two fee
-        // semantics exist and the system distinguishes them explicitly:
-        //
-        //   payments/income category 'exam'    — the examination SERVICE, paid
-        //       at enrolment (exams.routes ~L234). It was delivered: the
-        //       candidate sat the exam. A score change never makes it
-        //       refundable.
-        //   payments/income category 'diploma' — certificate ISSUANCE, charged
-        //       ONCE PER STUDENT and only when no prior certificate and no
-        //       prior diploma payment exist (the `priorCertCount === 0 &&
-        //       !alreadyPaid` rule above).
-        //
-        // Because the diploma charge is once-per-student and the re-issue path
-        // deliberately does not re-bill, auto-reversing it here would let a
-        // correct-down / correct-up cycle hand back money and then re-issue the
-        // same certificate for free. The charge is therefore retained, and the
-        // ledger stays reconciled (cash remains backed by its income row;
-        // nothing is minted, destroyed or duplicated).
-        //
-        // If the institution decides a revoked certificate should be refunded,
-        // that is an OWNER POLICY DECISION and must be executed through the one
-        // refund authority — POST /students/:id/refund, which carries
-        // `Refund.Approve`, mandatory idempotency, the refundable-balance
-        // recompute and recordIncome(). It must never be written from here.
-        if (certNo) stmtDeleteCertificate.run(certNo);
+        // Revocation deliberately does NOT reverse money — the exam correction
+        // engine is not a financial authority. The 'exam' fee was for a service
+        // already delivered, and the 'diploma' fee is charged once per student
+        // (the `priorCertCount === 0 && !alreadyPaid` rule above). Retaining
+        // the charge keeps the ledger reconciled: cash remains backed by its
+        // income row, and a correct-down / correct-up cycle re-issues a new
+        // certificate without minting or refunding money. Refunding a revoked
+        // certificate is an owner policy decision executed only through the one
+        // refund authority (POST /students/:id/refund) — never from here.
+        if (certNo) stmtRevokeCertificate.run(user.fullName, certNo);
         certNo = null;
         certIssued = 0;
       } else if (shouldHaveCert && result.certificate_issued) {

@@ -57,3 +57,33 @@ export function assertDateRange(
     throw new HttpError(400, `${endField} cannot be earlier than ${startField}.`);
   }
 }
+
+const TIME_OF_DAY_RE = /^([01]?\d|2[0-3]):[0-5]\d$/;
+
+/**
+ * Validate a stored `HH:MM` time-of-day value and normalize it to `HH:MM`.
+ *
+ * Session times are stored as TEXT and compared lexically in every conflict
+ * query, so a free-form value ("8", "25:99", "morning") silently breaks every
+ * overlap check it participates in. This is the single authority for that
+ * check: it accepts the human spelling (`8:05`), rejects impossible times, and
+ * returns the canonical zero-padded form callers should store.
+ */
+export function assertTimeOfDay(value: unknown, field: string): string {
+  if (typeof value !== 'string' || !TIME_OF_DAY_RE.test(value.trim())) {
+    throw new HttpError(400, `${field} must be a valid time in HH:MM format.`);
+  }
+  const [h, m] = value.trim().split(':').map(Number);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+/**
+ * Enforce that an end time is after its start. A zero-length span is rejected
+ * because every overlap predicate treats `end <= start` as "no overlap", which
+ * would let a stored zero-length session through as an invisible ghost row.
+ */
+export function assertTimeRange(startTime: string, endTime: string, startField = 'startTime', endField = 'endTime'): void {
+  if (endTime <= startTime) {
+    throw new HttpError(400, `${endField} must be after ${startField}.`);
+  }
+}

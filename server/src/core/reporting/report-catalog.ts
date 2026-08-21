@@ -31,6 +31,7 @@ import {
   nonExpenseCashMovementSql,
 } from '../finance/ledger-classification.js';
 import { LEAD_CONVERTED_SQL, LEAD_OPEN_SQL } from '../visitors/lead-lifecycle.js';
+import { STUDENT_ATTENDANCE_UNION } from '../academic/attendance-query.js';
 import type { ReportingPeriod } from '../calendar/periods.js';
 
 /** What kind of number a metric yields, so consumers format it correctly. */
@@ -156,17 +157,17 @@ export const METRIC_CATALOG: readonly MetricDefinition[] = [
     label: 'Attendance marked present',
     unit: 'count',
     scopeAlias: 'a',
-    sql: `SELECT COUNT(*) AS value FROM attendance a
+    sql: `SELECT COUNT(*) AS value FROM (${STUDENT_ATTENDANCE_UNION}) a
           WHERE a.status = 'present' AND a.date >= ? AND a.date <= ?`,
-    note: 'Row count, not a rate; the rate is derived by the consumer from present/total.',
+    note: 'Student attendance facts marked present (session rosters plus day-level marks). Row count, not a rate; the rate is derived by the consumer from present/total.',
   }),
   M({
     id: 'attendance.recorded',
     label: 'Attendance records',
     unit: 'count',
     scopeAlias: 'a',
-    sql: `SELECT COUNT(*) AS value FROM attendance a WHERE a.date >= ? AND a.date <= ?`,
-    note: 'Denominator for any attendance rate.',
+    sql: `SELECT COUNT(*) AS value FROM (${STUDENT_ATTENDANCE_UNION}) a WHERE a.date >= ? AND a.date <= ?`,
+    note: 'Student attendance facts (session rosters plus day-level marks). Denominator for any student attendance rate.',
   }),
   M({
     id: 'payroll.teacher_paid',
@@ -207,8 +208,8 @@ export const METRIC_CATALOG: readonly MetricDefinition[] = [
     label: 'Certificates issued',
     unit: 'count',
     scopeAlias: 'c',
-    sql: `SELECT COUNT(*) AS value FROM certificates c WHERE c.issue_date >= ? AND c.issue_date <= ?`,
-    note: 'Academic output actually handed over in the period.',
+    sql: `SELECT COUNT(*) AS value FROM certificates c WHERE c.status = 'issued' AND c.issue_date >= ? AND c.issue_date <= ?`,
+    note: 'Academic output actually handed over in the period — revoked certificates are recorded history, not issued output.',
   }),
   M({
     id: 'teacher.active',

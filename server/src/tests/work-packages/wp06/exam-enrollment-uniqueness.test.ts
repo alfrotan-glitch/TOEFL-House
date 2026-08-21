@@ -27,9 +27,9 @@
  * alone is sufficient.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { db, initSchema } from '../db/connection.js';
-import { isUniqueViolation } from '../utils/idempotency.js';
-import { today } from '../utils/ids.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { isUniqueViolation } from '../../../utils/idempotency.js';
+import { today } from '../../../utils/ids.js';
 
 const BRANCH = 'exu_branch';
 const EXAM = 'exu_exam';

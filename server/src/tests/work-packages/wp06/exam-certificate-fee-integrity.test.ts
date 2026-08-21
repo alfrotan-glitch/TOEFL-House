@@ -28,18 +28,18 @@
  * income row standing. Refunds are the Finance subsystem's authority and
  * inventing one here would be a second, parallel refund path.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { ensureOrganizationHierarchy, FIXED_ORG_ID } from '../db/organizationHierarchy.js';
-import { today } from '../utils/ids.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { seedDefaultRules } from '../core/configuration/rule-engine.js';
-import { examsRouter } from '../routes/exams.routes.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { ensureOrganizationHierarchy, FIXED_ORG_ID } from '../../../db/organizationHierarchy.js';
+import { today } from '../../../utils/ids.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { seedDefaultRules } from '../../../core/configuration/rule-engine.js';
+import { examsRouter } from '../../../routes/exams.routes.js';
 
 const BR = 'exmt_branch';
 const DIPLOMA_FEE = 500;
@@ -238,13 +238,19 @@ describe('EXM-1 · a certificate always carries its diploma fee', () => {
     const paid = diplomaIncome('exmt_revoked');
     expect(paid.s).toBe(DIPLOMA_FEE);
 
-    // Corrected down: the certificate is revoked. The original income stands —
-    // refunds belong to Finance, not to this endpoint.
+    // Corrected down: the certificate is revoked — the row is retained as a
+    // revoked academic-output fact. The original income stands; refunds belong
+    // to Finance, not to this endpoint.
     await supertest(app)
       .put(`/api/exams/${examId}/results/${resultId}/correct`)
       .set(auth(OWNER))
       .send({ score: FAIL });
-    expect(certCount('exmt_revoked')).toBe(0);
+    const revokedRow = db.prepare(
+      `SELECT status, revoked_at, revoked_by FROM certificates WHERE student_id = 'exmt_revoked'`,
+    ).get() as { status: string; revoked_at: string | null; revoked_by: string | null };
+    expect(revokedRow.status).toBe('revoked');
+    expect(revokedRow.revoked_at).toBeTruthy();
+    expect(revokedRow.revoked_by).toBe(OWNER.fullName);
     expect(diplomaIncome('exmt_revoked').s).toBe(DIPLOMA_FEE);
 
     // Corrected back up: already paid, so no second charge.

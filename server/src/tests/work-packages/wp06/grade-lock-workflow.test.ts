@@ -3,19 +3,19 @@
  * ============================================================================
  * Mirrors the app/RBAC-bootstrap pattern established in Phases 1-6.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { today } from '../utils/ids.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import classesRouter from '../routes/classes.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { getClassLifecycleService } from '../core/academic/class-lifecycle-service.js';
-import { getGradeLockService } from '../core/academic/grade-lock-service.js';
-import { assertGradeLockTransition, GRADE_LOCK_STAGES, GRADE_LOCK_TRANSITIONS } from '../core/academic/lifecycle-engine.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { today } from '../../../utils/ids.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import classesRouter from '../../../routes/classes.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { getClassLifecycleService } from '../../../core/academic/class-lifecycle-service.js';
+import { getGradeLockService } from '../../../core/academic/grade-lock-service.js';
+import { assertGradeLockTransition, GRADE_LOCK_STAGES, GRADE_LOCK_TRANSITIONS } from '../../../core/academic/lifecycle-engine.js';
 
 const BRANCH = 'gl_branch_a';
 

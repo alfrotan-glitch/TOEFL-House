@@ -26,6 +26,7 @@ import { id, today } from '../utils/ids.js';
 import { addNotification } from '../utils/notifications.js';
 import { eventBus } from '../core/events/event-bus.js';
 import { ATTENDED_EQUIVALENT_STATUSES } from '../core/academic/attendance-policy-service.js';
+import { STUDENT_ATTENDANCE_UNION } from '../core/academic/attendance-query.js';
 import { periodBoundariesForKey } from '../core/calendar/periods.js';
 
 export const impactRouter = Router();
@@ -77,7 +78,8 @@ const stmtCountSponsoredStudents = db.prepare("SELECT COUNT(DISTINCT student_id)
 const stmtCountGraduates = db.prepare("SELECT COUNT(*) AS graduates FROM students WHERE branch_id = ? AND status = 'graduated'");
 const stmtGetAttendanceStats = db.prepare(
   `SELECT COUNT(*) AS total, SUM(CASE WHEN status IN (${ATTENDED_EQUIVALENT_STATUSES.map(() => '?').join(',')}) THEN 1 ELSE 0 END) AS attended
-   FROM attendance WHERE branch_id = ? AND target_type = 'student' AND date BETWEEN ? AND ?`
+   FROM (${STUDENT_ATTENDANCE_UNION})
+   WHERE branch_id = ? AND date BETWEEN ? AND ?`
 );
 
 // Summary Aggregations

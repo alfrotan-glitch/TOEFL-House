@@ -253,11 +253,20 @@ explicitly retired WP-04 placement cases; WP-05 has no skipped authority.
 
 ## WP-06 Academic Delivery
 
-**Boundary correction:** **11 files / 99 statically declared cases**.
+**Boundary correction (final):** **10 files / 94 statically declared cases**.
 `enrollment-subsystem-remediation.test.ts` and
 `transfer-freeze-waitlist-engines.test.ts` are WP-05 under Protocol §W and are
 listed above. Shared class-route code does not move generic assessment,
 gradebook, session or attendance behavior out of WP-06.
+
+`installment-plan-integrity.test.ts` (5 cases) is **not** WP-06: it validates
+the installment-plan payload on `students.routes.ts` (PATCH
+`/api/students/:id`, POST `/api/students/:id/payments`) — a WP-03 surface. It
+is re-homed to `server/src/tests/work-packages/wp03/` as WP-03 authority
+(C-16). The ten claimed suites below are rebased to
+`server/src/tests/work-packages/wp06/` with three new authority suites
+(`attendance-authority`, `session-input-guards`, `exam-scope-and-storage`,
+`gradebook-bounds`).
 
 | File | Cases | Asserted behaviour |
 |---|---:|---|
@@ -270,7 +279,6 @@ gradebook, session or attendance behavior out of WP-06.
 | `exam-visitor-eligibility.test.ts` | 9 | Visitor eligibility and surrounding guards. |
 | `grade-lock-workflow.test.ts` | 10 | Grade-lock lifecycle, permissions and pure engine. |
 | `gradebook-engine.test.ts` | 8 | Live grade preview, history and pure computation. |
-| `installment-plan-integrity.test.ts` | 5 | Installment-plan validation. |
 | `session-attendance-engine.test.ts` | 13 | Sessions, attendance activation/bulk marking/weights/auto-drop and timetable skill coverage. |
 
 ## WP-07 Finance

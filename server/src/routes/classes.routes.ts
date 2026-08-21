@@ -24,6 +24,8 @@ import { getRetakePolicy, countPriorRetakes, getMakeupPolicy, getFullPolicyProfi
 import { getEnrollmentService } from '../core/academic/enrollment-service.js';
 import { assertClassGenderAllows } from '../core/academic/class-admission.js';
 import { ACTIVE_ENROLLMENT_STATUSES } from '../core/academic/class-capacity.js';
+import { ATTENDED_EQUIVALENT_STATUSES } from '../core/academic/attendance-policy-service.js';
+import { ATTENDANCE_LIST_UNION, STUDENT_ATTENDANCE_UNION } from '../core/academic/attendance-query.js';
 import type { RoleCode } from '../core/rbac/permission-catalog.js';
 import {
   canAccessAllBranchesForRequirement,
@@ -223,6 +225,14 @@ const ASSESSMENT_TYPES = [
   'practice_test', 'makeup_exam',
 ] as const;
 
+const GRADE_STATUSES = ['pending', 'graded', 'excused', 'missing'] as const;
+
+/** Assessment scoring bounds: weights are non-negative, maxScore positive. */
+function assertAssessmentBounds(weight: number, maxScore: number): void {
+  if (!Number.isFinite(weight) || weight < 0) throw new HttpError(400, 'Assessment weight must be a non-negative number.');
+  if (!Number.isFinite(maxScore) || maxScore <= 0) throw new HttpError(400, 'Assessment maxScore must be a positive number.');
+}
+
 const stmtInsertAssessment = db.prepare(
   `INSERT INTO class_assessments (id, class_id, title, type, weight, max_score, date, passing_score, publish_date, due_date, visibility, rubric, allows_makeup, makeup_for_assessment_id)
    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -326,16 +336,13 @@ function requireClass(req: import('express').Request, classId: string): ClassRow
 /**
  * The day-level attendance API, mounted at `/api/attendance`.
  *
- * Attendance has two writing surfaces over ONE fact table. The session roster
- * (`sessions.routes.ts`) is the structured one: it marks a roster, computes a
- * weight from the attendance policy, can trigger an auto-drop, and mirrors each
- * mark into `attendance` carrying its `session_id`. This router writes the rows
- * that belong to no session — day-level marks, and teacher attendance, which
- * has no roster at all — leaving `session_id` NULL.
- *
- * The table is the query surface for both: two metrics in the report catalog
- * and the impact report read it directly. Neither writer is redundant and
- * neither is a compatibility shim.
+ * Student attendance has exactly two authorities: session marks live in
+ * `rosters` (written by the session roster commands) and day-level marks live
+ * in this `attendance` table. This router writes only the rows that belong to
+ * no session — day-level student marks and teacher attendance, which has no
+ * roster at all. Reads here and in the report/impact surfaces go through
+ * `core/academic/attendance-query.ts`, the single read authority that unions
+ * the two stores, so no consumer recombines them differently.
  */
 export const attendanceRouter = Router();
 attendanceRouter.use(authenticate);
@@ -967,11 +974,14 @@ classesRouter.post('/:id/assessments', authorize('owner', 'general_manager', 'he
   }
 
   const existingAssessments = stmtGetAssessments.all(cls.id) as AssessmentRow[];
+  const normWeight = Number(weight ?? 0);
+  const normMaxScore = Number(maxScore ?? 100);
+  assertAssessmentBounds(normWeight, normMaxScore);
   // Makeup-linked assessments borrow the original's weight in scoring (see
   // complete-semester) rather than consuming their own slice of the
   // 100% budget, so they're excluded from this check on both sides.
   if (!makeupForAssessmentId) {
-    const totalWeight = existingAssessments.filter(a => !a.makeup_for_assessment_id).reduce((acc, a) => acc + a.weight, 0) + (weight || 0);
+    const totalWeight = existingAssessments.filter(a => !a.makeup_for_assessment_id).reduce((acc, a) => acc + a.weight, 0) + normWeight;
     if (totalWeight > 100) {
       throw new HttpError(400, `Total assessment weight cannot exceed 100%. Current total would be ${totalWeight}%.`);
     }
@@ -979,7 +989,7 @@ classesRouter.post('/:id/assessments', authorize('owner', 'general_manager', 'he
 
   const newId = id('asmt');
   stmtInsertAssessment.run(
-    newId, cls.id, title, type, weight || 0, maxScore || 100, dueDate || date || null,
+    newId, cls.id, title, type, normWeight, normMaxScore, dueDate || date || null,
     passingScore ?? null, publishDate || null, dueDate || null,
     visibility || 'visible', rubric || null, allowsMakeup ? 1 : 0, makeupForAssessmentId || null
   );
@@ -999,6 +1009,7 @@ classesRouter.put('/:id/assessments/:assessmentId', authorize('owner', 'general_
 
   const nextWeight = weight ?? existing.weight;
   const nextMaxScore = maxScore ?? existing.max_score;
+  assertAssessmentBounds(Number(nextWeight), Number(nextMaxScore));
   const scoringFieldsChanged = nextWeight !== existing.weight || nextMaxScore !== existing.max_score;
 
   if (scoringFieldsChanged && !confirmRescore) {
@@ -1078,12 +1089,15 @@ classesRouter.post('/:id/assessments/:assessmentId/makeup', authorize('owner', '
   }
 
   const newId = id('asmt');
+  const normMakeupWeight = Number(weight ?? 0);
+  const normMakeupMaxScore = Number(maxScore ?? original.max_score);
+  assertAssessmentBounds(normMakeupWeight, normMakeupMaxScore);
   stmtInsertAssessment.run(
     newId, cls.id, `Makeup: ${original.title}`, 'makeup_exam',
-    weight ?? 0, // Defaults to 0 — a makeup normally REPLACES the original's
-                 // weight in scoring (see complete-semester) rather than
-                 // adding a second weighted line item on top of it.
-    maxScore ?? original.max_score, dueDate || date || null,
+    normMakeupWeight, // Defaults to 0 — a makeup normally REPLACES the original's
+                      // weight in scoring (see complete-semester) rather than
+                      // adding a second weighted line item on top of it.
+    normMakeupMaxScore, dueDate || date || null,
     original.passing_score, null, dueDate || date || null,
     'visible', original.rubric, 0, original.id
   );
@@ -1156,12 +1170,15 @@ classesRouter.put('/:id/grades', authorize('owner', 'general_manager', 'head_of_
         );
       }
       
-      if (g.score != null && g.score > assessment.max_score) {
-        throw new HttpError(400, `Score ${g.score} exceeds max score ${assessment.max_score} for assessment ${assessment.title}.`);
+      if (g.score != null && (g.score < 0 || g.score > assessment.max_score)) {
+        throw new HttpError(400, `Score ${g.score} is outside 0–${assessment.max_score} for assessment ${assessment.title}.`);
+      }
+      const nextStatus = g.status || 'graded';
+      if (!(GRADE_STATUSES as readonly string[]).includes(nextStatus)) {
+        throw new HttpError(400, `Invalid grade status: "${nextStatus}". Must be one of: ${GRADE_STATUSES.join(', ')}.`);
       }
 
       const previous = stmtGetExistingGrade.get(g.assessmentId, g.studentId) as GradeSnapshot | undefined;
-      const nextStatus = g.status || 'graded';
 
       stmtUpsertGrade.run(id('gr'), g.assessmentId, g.studentId, cls.id, g.score, nextStatus, g.notes ?? null, user?.userId || 'system');
 
@@ -1481,7 +1498,7 @@ attendanceRouter.get(
     const { targetId, date, from, to } = req.query as Record<string, string>;
     const { branchId, isAll, teacherId } = resolveAttendanceReadScope(req);
 
-    let query = 'SELECT * FROM attendance WHERE 1=1';
+    let query = `SELECT * FROM (${ATTENDANCE_LIST_UNION}) WHERE 1=1`;
     const params: string[] = [];
 
     if (!isAll && branchId) {
@@ -1489,9 +1506,9 @@ attendanceRouter.get(
       params.push(branchId);
     }
     if (teacherId) {
-      query += ` AND ((target_type = 'teacher' AND target_id = ?)
-        OR (target_type = 'student' AND class_id IN (SELECT id FROM classes WHERE teacher_id = ?)))`;
-      params.push(teacherId, teacherId);
+      query += ` AND ((target_type = 'teacher' AND teacher_id = ?)
+        OR (target_type = 'student' AND (class_id IN (SELECT id FROM classes WHERE teacher_id = ?) OR teacher_id = ?)))`;
+      params.push(teacherId, teacherId, teacherId);
     }
     if (targetId) {
       query += ' AND target_id = ?';
@@ -1505,14 +1522,9 @@ attendanceRouter.get(
       params.push(from, to);
     }
 
-    // BOUNDED. This route had no LIMIT: it returned every attendance record the
-    // branch had ever recorded. At 16,001 rows that is already 2.4 MB, and a
-    // 500-student academy over three years (~390,000 rows) would be ~58 MB in a
-    // single response, re-fetched every time the Attendance tab opens.
-    //
-    // Callers that need a specific student or day already pass targetId/date/
-    // from+to and are unaffected. An unfiltered call now returns the most
-    // recent page instead of the entire history.
+    // BOUNDED: an unfiltered call returns the most recent page, never the whole
+    // history. Callers that need a specific student or day pass targetId/date/
+    // from+to and are unaffected by the page size.
     const { limit, offset } = parsePaginationShared(req as { query: Record<string, unknown> }, {
       defaultPageSize: ATTENDANCE_PAGE_SIZE,
       maxPageSize: ATTENDANCE_MAX_PAGE_SIZE,
@@ -1546,31 +1558,34 @@ attendanceRouter.get(
       defaultPageSize: ATTENDANCE_PAGE_SIZE,
       maxPageSize: ATTENDANCE_MAX_PAGE_SIZE,
     });
-    const clauses: string[] = ["target_type = 'student'"];
+    const clauses: string[] = [];
     const params: unknown[] = [];
     if (!isAll && branchId) { clauses.push('branch_id = ?'); params.push(branchId); }
     if (teacherId) {
-      clauses.push(`class_id IN (SELECT id FROM classes WHERE teacher_id = ?)`);
-      params.push(teacherId);
+      clauses.push(`(class_id IN (SELECT id FROM classes WHERE teacher_id = ?) OR teacher_id = ?)`);
+      params.push(teacherId, teacherId);
     }
     if (targetId) { clauses.push('target_id = ?'); params.push(targetId); }
 
+    const attendedPlaceholders = ATTENDED_EQUIVALENT_STATUSES.map(() => '?').join(',');
+    const whereSql = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
     const rows = db.prepare(`
       SELECT target_id,
              COUNT(*) AS total,
              SUM(CASE WHEN status = 'present' THEN 1 ELSE 0 END) AS present,
              SUM(CASE WHEN status = 'leave'   THEN 1 ELSE 0 END) AS onLeave,
              SUM(CASE WHEN status = 'absent'  THEN 1 ELSE 0 END) AS absent,
-             SUM(CASE WHEN status = 'sick'    THEN 1 ELSE 0 END) AS sick
-      FROM attendance
-      WHERE ${clauses.join(' AND ')}
+             SUM(CASE WHEN status = 'sick'    THEN 1 ELSE 0 END) AS sick,
+             SUM(CASE WHEN status IN (${attendedPlaceholders}) THEN 1 ELSE 0 END) AS credited
+      FROM (${STUDENT_ATTENDANCE_UNION})
+      ${whereSql}
       GROUP BY target_id
       LIMIT ? OFFSET ?
-    `).all(...params, limit, offset) as Array<{ target_id: string; total: number; present: number; onLeave: number; absent: number; sick: number }>;
+    `).all(...ATTENDED_EQUIVALENT_STATUSES, ...params, limit, offset) as Array<{ target_id: string; total: number; present: number; onLeave: number; absent: number; sick: number; credited: number }>;
 
     res.json(rows.map((r) => {
       const total = Number(r.total) || 0;
-      const credited = (Number(r.present) || 0) + (Number(r.onLeave) || 0);
+      const credited = Number(r.credited) || 0;
       return {
         targetId: r.target_id,
         total,
@@ -1578,7 +1593,8 @@ attendanceRouter.get(
         onLeave: Number(r.onLeave) || 0,
         absent: Number(r.absent) || 0,
         sick: Number(r.sick) || 0,
-        // Present + leave counts as attended, matching the existing UI rule.
+        // Credited statuses come from the one attended-equivalent authority,
+        // not a local present+leave rule.
         rate: total > 0 ? Math.round((credited / total) * 100) : null,
       };
     }));
