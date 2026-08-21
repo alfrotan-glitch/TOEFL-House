@@ -26,6 +26,11 @@ import { eventBus } from '../core/events/event-bus.js';
 import { isPostActivation, ATTENDANCE_STATUSES, SESSION_TYPES, type AttendanceStatus } from '../core/academic/lifecycle-engine.js';
 import { getAttendancePolicy, computeAttendanceWeight, checkConsecutiveAbsences, ATTENDED_EQUIVALENT_STATUSES } from '../core/academic/attendance-policy-service.js';
 import { getEnrollmentService } from '../core/academic/enrollment-service.js';
+import {
+  canAccessAllBranchesForRequirement,
+  canAccessBranchForRequirement,
+  hasPermissionForBranchWithActionScopes,
+} from '../core/rbac/rbac-service.js';
 
 const enrollmentServiceForAutoDrop = getEnrollmentService(db);
 
@@ -109,10 +114,67 @@ function getUserContext(req: import('express').Request) {
   return user;
 }
 
-function requireSession(req: import('express').Request, sessionId: string): any {
+const BRANCH_ACTION_SCOPES = ['organization', 'campus', 'branch', 'department'] as const;
+const OWN_ACTION_SCOPES = ['class', 'own'] as const;
+
+function linkedTeacherId(req: import('express').Request): string | null {
+  const user = getUserContext(req);
+  const row = stmtGetUserLinkedTeacher.get(user.userId) as { linked_teacher_id?: string | null } | undefined;
+  return row?.linked_teacher_id ?? null;
+}
+
+/**
+ * Session permissions with own/class action scope are object grants, not branch
+ * collection grants. The ownership predicate is the canonical account link to
+ * the teacher assigned to the session.
+ */
+function canAccessSessionForPermissions(
+  req: import('express').Request,
+  session: { branch_id?: string | null; teacher_id?: string | null },
+  permissionCodes: readonly string[],
+): boolean {
+  if (!req.rbac || !session.branch_id) return false;
+  if (hasPermissionForBranchWithActionScopes(
+    db, req.rbac, session.branch_id, permissionCodes, BRANCH_ACTION_SCOPES,
+  )) return true;
+  if (!hasPermissionForBranchWithActionScopes(
+    db, req.rbac, session.branch_id, permissionCodes, OWN_ACTION_SCOPES,
+  )) return false;
+  const teacherId = linkedTeacherId(req);
+  return !!teacherId && !!session.teacher_id && teacherId === session.teacher_id;
+}
+
+function canAccessClassForPermissions(
+  req: import('express').Request,
+  classRow: { branch_id?: string | null; teacher_id?: string | null },
+  permissionCodes: readonly string[],
+): boolean {
+  if (!req.rbac || !classRow.branch_id) return false;
+  if (hasPermissionForBranchWithActionScopes(
+    db, req.rbac, classRow.branch_id, permissionCodes, BRANCH_ACTION_SCOPES,
+  )) return true;
+  if (!hasPermissionForBranchWithActionScopes(
+    db, req.rbac, classRow.branch_id, permissionCodes, OWN_ACTION_SCOPES,
+  )) return false;
+  const teacherId = linkedTeacherId(req);
+  return !!teacherId && !!classRow.teacher_id && teacherId === classRow.teacher_id;
+}
+
+function requireSession(
+  req: import('express').Request,
+  sessionId: string,
+  permissionCodes?: readonly string[],
+): any {
   const session = stmtGetSessionById.get(sessionId) as any;
   if (!session) throw new HttpError(404, 'Session not found.');
-  
+
+  if (permissionCodes) {
+    if (!canAccessSessionForPermissions(req, session, permissionCodes)) {
+      throw new HttpError(403, 'You do not have access to this session.');
+    }
+    return session;
+  }
+
   const { branchId, isAll } = resolveBranchScope(req);
   if (!isAll && branchId && session.branch_id && session.branch_id !== branchId) {
     const cross = !!session.branch_id && canAccessBranchResource(req, session.branch_id);
@@ -286,15 +348,29 @@ function mapSessionRow(r: any, classTeacherId?: string | null) {
 
 sessionsRouter.get(
   '/',
-  authorize('receptionist', 'general_manager', 'head_of_department', 'teacher', 'owner', 'finance_manager'),
+  requirePermission('Session.View'),
   ah(async (req, res) => {
     const { classId, from, to, status } = req.query as Record<string, string>;
-    const { branchId, isAll } = resolveBranchScope(req);
+    // Resolve only the assignment envelope. Session.View is enforced below so
+    // own grants can return the caller's sessions without becoming branch-wide.
+    const { branchId, isAll } = resolveBranchScope(req, { ignoreAccessRequirement: true });
     const { limit, offset } = parsePagination(req);
     let sql = `SELECT s.*, c.name AS class_name, t.full_name AS teacher_name, sk.name AS skill_name FROM sessions s LEFT JOIN classes c ON c.id = s.class_id LEFT JOIN teachers t ON t.id = s.teacher_id LEFT JOIN skills sk ON sk.id = s.skill_id WHERE 1=1`;
     const params: unknown[] = [];
 
     if (!isAll) { sql += ' AND s.branch_id = ?'; params.push(branchId); }
+    const hasBroadScope = req.rbac && (isAll
+      ? canAccessAllBranchesForRequirement(req.rbac, { permissionCodes: ['Session.View'] })
+      : !!branchId && canAccessBranchForRequirement(db, req.rbac, branchId, { permissionCodes: ['Session.View'] }));
+    if (!hasBroadScope) {
+      if (!req.rbac || !branchId || !hasPermissionForBranchWithActionScopes(
+        db, req.rbac, branchId, ['Session.View'], OWN_ACTION_SCOPES,
+      )) throw new HttpError(403, 'No authorized session scope is available for this request.');
+      const teacherId = linkedTeacherId(req);
+      if (!teacherId) throw new HttpError(403, 'Teacher account is not linked to a teacher profile.');
+      sql += ' AND s.teacher_id = ?';
+      params.push(teacherId);
+    }
     if (classId) { sql += ' AND s.class_id = ?'; params.push(classId); }
     if (from && to) { sql += ' AND s.date BETWEEN ? AND ?'; params.push(from, to); } 
     else if (from) { sql += ' AND s.date >= ?'; params.push(from); } 
@@ -315,9 +391,9 @@ sessionsRouter.get(
   ah(async (req, res) => {
     const session = stmtGetSessionDetail.get(req.params.id) as any;
     if (!session) throw new HttpError(404, 'Session not found.');
-
-    const { branchId, isAll } = resolveBranchScope(req);
-    if (!isAll && session.branch_id !== branchId) throw new HttpError(403, 'You do not have access to this session.');
+    if (!canAccessSessionForPermissions(req, session, ['Session.View'])) {
+      throw new HttpError(403, 'You do not have access to this session.');
+    }
 
     const rosterSummary = stmtGetRosterSummary.get(req.params.id) as any;
     const homework = stmtGetHomework.all(req.params.id) as any[];
@@ -730,7 +806,7 @@ sessionsRouter.get(
   '/:id/roster',
   requirePermission('Session.View', 'Attendance.View'),
   ah(async (req, res) => {
-    requireSession(req, req.params.id);
+    requireSession(req, req.params.id, ['Session.View', 'Attendance.View']);
     const rows = stmtGetRosterFull.all(req.params.id) as any[];
     res.json(rows.map((r) => ({
       id: r.id, sessionId: r.session_id, studentId: r.student_id, studentName: r.student_name,
@@ -898,7 +974,7 @@ sessionsRouter.get(
   '/:id/homework',
   requirePermission('Session.View'),
   ah(async (req, res) => {
-    requireSession(req, req.params.id);
+    requireSession(req, req.params.id, ['Session.View']);
     const rows = stmtGetHomework.all(req.params.id) as any[];
     res.json(rows.map((h) => ({
       id: h.id, sessionId: h.session_id, title: h.title, description: h.description, dueDate: h.due_date, assignedBy: h.assigned_by, createdAt: h.created_at,
@@ -948,7 +1024,7 @@ sessionsRouter.get(
   '/:id/quizzes',
   requirePermission('Session.View'),
   ah(async (req, res) => {
-    requireSession(req, req.params.id);
+    requireSession(req, req.params.id, ['Session.View']);
     const rows = stmtGetQuizzes.all(req.params.id) as any[];
     res.json(rows.map((q) => ({
       id: q.id, sessionId: q.session_id, title: q.title, description: q.description,
@@ -1005,7 +1081,9 @@ sessionsRouter.get(
     if (!classId) throw new HttpError(400, 'classId is required.');
     const classRow = stmtGetClassById.get(classId) as any;
     if (!classRow) throw new HttpError(404, 'Class not found.');
-    if (!canAccessBranchResource(req, classRow.branch_id)) throw new HttpError(403, 'Class belongs to another branch.');
+    if (!canAccessClassForPermissions(req, classRow, ['Session.View', 'Attendance.View'])) {
+      throw new HttpError(403, 'You do not have access to this class attendance.');
+    }
     // Numerator uses attendance_weight when available (reflects the
     // half-absence policy — a 'late' mark past the half-absence threshold
     // only contributes 0.5), falling back to a plain attended/not split for
@@ -1031,7 +1109,9 @@ sessionsRouter.get(
     if (!classId) throw new HttpError(400, 'classId is required.');
     const classRow = stmtGetClassById.get(classId) as any;
     if (!classRow) throw new HttpError(404, 'Class not found.');
-    if (!canAccessBranchResource(req, classRow.branch_id)) throw new HttpError(403, 'Class belongs to another branch.');
+    if (!canAccessClassForPermissions(req, classRow, ['Session.View', 'Attendance.View'])) {
+      throw new HttpError(403, 'You do not have access to this class attendance.');
+    }
 
     let sql = `SELECT r.student_id, st.full_name AS student_name, st.student_code, COUNT(*) AS totalSessions,
       SUM(CASE WHEN r.attendance_status = 'present' THEN 1 ELSE 0 END) AS presentCount,

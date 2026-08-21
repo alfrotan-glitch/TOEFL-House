@@ -2,7 +2,7 @@ import { nextScopedDocumentNumber } from '../utils/documentNumbers.js';
 import { isLeadClosed } from '../core/visitors/lead-lifecycle.js';
 import { Router } from 'express';
 import { db } from '../db/connection.js';
-import { authenticate, authorize, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
+import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
@@ -83,7 +83,7 @@ function requireExam(req: import('express').Request, examId: string): any {
 
 examsRouter.get(
   '/',
-  authorize('receptionist', 'general_manager', 'teacher', 'head_of_department'),
+  requirePermission('Exam.View'),
   ah(async (req, res) => {
     const { branchId, isAll } = resolveBranchScope(req);
     const rows = isAll ? stmtGetAllExams.all() : stmtGetExamsByBranch.all(branchId);
@@ -165,7 +165,7 @@ examsRouter.delete(
 
 examsRouter.get(
   '/:id/results',
-  authorize('receptionist', 'general_manager', 'teacher', 'head_of_department'),
+  requirePermission('Exam.View'),
   ah(async (req, res) => {
     requireExam(req, req.params.id);
     res.json(stmtGetResultsByExam.all(req.params.id));
@@ -174,7 +174,7 @@ examsRouter.get(
 
 examsRouter.get(
   '/results/all',
-  authorize('receptionist', 'general_manager', 'teacher', 'head_of_department'),
+  requirePermission('Exam.View'),
   ah(async (req, res) => {
     const { branchId, isAll } = resolveBranchScope(req);
     const rows = isAll ? stmtGetAllResults.all() : stmtGetResultsByBranch.all(branchId);

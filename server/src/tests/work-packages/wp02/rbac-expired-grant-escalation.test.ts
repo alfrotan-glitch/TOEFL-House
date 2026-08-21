@@ -37,15 +37,15 @@
  * with no assignment history at all keeps the documented legacy behaviour — that
  * path is exercised below so the fix cannot silently delete legacy support.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { hashPassword, signToken, type TokenPayload } from '../utils/auth.js';
-import { authenticate, authorize, requirePermission } from '../middleware/auth.js';
-import { errorHandler } from '../middleware/errorHandler.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { hashPassword, signToken, type TokenPayload } from '../../../utils/auth.js';
+import { authenticate, authorize, requirePermission } from '../../../middleware/auth.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
 import {
   bootstrapRbacCatalog,
   buildRbacContext,
@@ -53,7 +53,7 @@ import {
   canAccessBranch,
   canAccessAllBranches,
   resolveUserPermissions,
-} from '../core/rbac/rbac-service.js';
+} from '../../../core/rbac/rbac-service.js';
 
 const PAST = '2020-01-01 00:00:00';
 const FUTURE = '2099-01-01 00:00:00';

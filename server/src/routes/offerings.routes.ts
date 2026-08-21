@@ -8,6 +8,9 @@ import { authenticate, authorize, requirePermission, resolveBranchScope, canAcce
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id } from '../utils/ids.js';
+import {
+  hasPermissionForBranchWithActionScopes,
+} from '../core/rbac/rbac-service.js';
 
 export const offeringsRouter = Router();
 offeringsRouter.use(authenticate);
@@ -36,6 +39,15 @@ const stmtGetOfferingById = db.prepare(`${SELECT_BASE} WHERE o.id = ?`);
 const stmtGetClassesByOffering = db.prepare(
   `SELECT id, name, status, capacity, teacher_id, time_slot_id, room_id, branch_id FROM classes WHERE offering_id = ? ORDER BY name`
 );
+const stmtGetLinkedTeacher = db.prepare('SELECT linked_teacher_id AS teacherId FROM users WHERE id = ?');
+const stmtTeacherOwnsOffering = db.prepare('SELECT 1 FROM classes WHERE offering_id = ? AND teacher_id = ? LIMIT 1');
+const stmtGetTeacherOfferingCounts = db.prepare(`
+  SELECT COUNT(*) AS classCount,
+         COUNT(DISTINCT CASE WHEN e.status = 'active' THEN e.student_id END) AS enrolledCount
+    FROM classes c
+    LEFT JOIN enrollments e ON e.class_id = c.id
+   WHERE c.offering_id = ? AND c.teacher_id = ?
+`);
 const stmtInsertOffering = db.prepare(
   `INSERT INTO course_offerings (id, program_id, program_version_id, level_id, branch_id, academic_term_id, code, name, status, capacity_total, fee_snapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
@@ -56,14 +68,33 @@ function requireOfferingBranchAccess(req: import('express').Request, row: any): 
   }
 }
 
+function classViewScopeForOffering(req: import('express').Request, row: any): { broad: boolean; teacherId: string | null } {
+  if (!req.rbac || !row?.branch_id) return { broad: false, teacherId: null };
+  const broad = hasPermissionForBranchWithActionScopes(
+    db, req.rbac, String(row.branch_id), ['Class.View'], ['organization', 'campus', 'branch', 'department'],
+  );
+  if (broad) return { broad: true, teacherId: null };
+  const narrow = hasPermissionForBranchWithActionScopes(
+    db, req.rbac, String(row.branch_id), ['Class.View'], ['class', 'own'],
+  );
+  if (!narrow) return { broad: false, teacherId: null };
+  const linked = stmtGetLinkedTeacher.get(req.user?.userId) as { teacherId: string | null } | undefined;
+  const teacherId = linked?.teacherId ?? null;
+  const ownsOffering = teacherId && stmtTeacherOwnsOffering.get(row.id, teacherId);
+  return { broad: false, teacherId: ownsOffering ? teacherId : null };
+}
+
 function requireRelatedBranchMatch(offering: any, related: any, label: string): void {
   if (offering.branch_id !== related.branch_id) {
     throw new HttpError(400, `${label} belongs to another branch.`);
   }
 }
 
-function mapOffering(row: any) {
+function mapOffering(row: any, teacherId: string | null = null) {
   if (!row) return null;
+  const narrowCounts = teacherId
+    ? stmtGetTeacherOfferingCounts.get(row.id, teacherId) as { classCount: number; enrolledCount: number }
+    : null;
   return {
     id: row.id,
     programId: row.program_id,
@@ -80,37 +111,48 @@ function mapOffering(row: any) {
     status: row.status,
     capacityTotal: row.capacity_total ?? 0,
     feeSnapshot: row.fee_snapshot ?? 0,
-    classCount: row.class_count ?? 0,
-    enrolledCount: row.enrolled_count ?? 0,
+    classCount: narrowCounts?.classCount ?? row.class_count ?? 0,
+    enrolledCount: narrowCounts?.enrolledCount ?? row.enrolled_count ?? 0,
     createdAt: row.created_at,
   };
 }
 
 offeringsRouter.get(
   '/',
-  authorize('receptionist', 'general_manager', 'head_of_department', 'owner', 'teacher'),
+  requirePermission('Class.View'),
   ah(async (req, res) => {
-    const { branchId, isAll } = resolveBranchScope(req);
+    const { branchId, isAll } = resolveBranchScope(req, { ignoreAccessRequirement: true });
     const { status } = req.query as { status?: string };
     let rows = (isAll ? stmtGetAllOfferings.all() : stmtGetOfferingsByBranch.all(branchId)) as any[];
-    
+    rows = rows.filter((row) => {
+      const scope = classViewScopeForOffering(req, row);
+      return scope.broad || !!scope.teacherId;
+    });
+
     if (status) {
       rows = rows.filter(r => r.status === status);
     }
     
-    res.json(rows.map(mapOffering));
+    res.json(rows.map((row) => {
+      const scope = classViewScopeForOffering(req, row);
+      return mapOffering(row, scope.broad ? null : scope.teacherId);
+    }));
   })
 );
 
 offeringsRouter.get(
   '/:id',
-  authorize('receptionist', 'general_manager', 'head_of_department', 'owner', 'teacher'),
+  requirePermission('Class.View'),
   ah(async (req, res) => {
     const row = stmtGetOfferingById.get(req.params.id) as any;
     if (!row) throw new HttpError(404, 'Course offering not found.');
-    requireOfferingBranchAccess(req, row);
-    const classes = stmtGetClassesByOffering.all(req.params.id);
-    res.json({ ...mapOffering(row), classes });
+    const scope = classViewScopeForOffering(req, row);
+    if (!scope.broad && !scope.teacherId) {
+      throw new HttpError(403, 'Course offering is outside your authorized class scope.');
+    }
+    let classes = stmtGetClassesByOffering.all(req.params.id) as any[];
+    if (!scope.broad) classes = classes.filter((cls) => cls.teacher_id === scope.teacherId);
+    res.json({ ...mapOffering(row, scope.broad ? null : scope.teacherId), classes });
   })
 );
 

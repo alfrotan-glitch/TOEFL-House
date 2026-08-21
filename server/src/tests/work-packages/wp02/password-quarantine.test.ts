@@ -6,16 +6,16 @@
  * API is unreachable except for the auth endpoints needed to change the
  * password. After a successful change, normal access resumes.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { signToken, hashPassword } from '../utils/auth.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { authRouter } from '../routes/auth.routes.js';
-import { studentsRouter } from '../routes/students.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { signToken, hashPassword } from '../../../utils/auth.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { authRouter } from '../../../routes/auth.routes.js';
+import { studentsRouter } from '../../../routes/students.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
 
 const BRANCH = 'quarantine_branch';
 

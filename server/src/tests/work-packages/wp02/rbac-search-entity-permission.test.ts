@@ -13,15 +13,15 @@
  * caller. Verified live over HTTP before writing this — with a lead present, an
  * owner receives the `Visitor` entity and a teacher receives nothing.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { hashPassword, signToken, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import searchRouter from '../routes/search.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { hashPassword, signToken, type TokenPayload } from '../../../utils/auth.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import searchRouter from '../../../routes/search.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
 
 const BR = 'sep_b1';
 let app: express.Express;

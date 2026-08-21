@@ -1,9 +1,9 @@
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
-import { db, initSchema } from '../db/connection.js';
-import { ensureOrganizationHierarchy, FIXED_ORG_ID } from '../db/organizationHierarchy.js';
-import { canAccessClass } from '../core/rbac/abac.js';
-import { bootstrapRbacCatalog, buildRbacContext, canAccessAllBranches, canAccessBranch, resolveUserPermissions } from '../core/rbac/rbac-service.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { ensureOrganizationHierarchy, FIXED_ORG_ID } from '../../../db/organizationHierarchy.js';
+import { canAccessClass } from '../../../core/rbac/abac.js';
+import { bootstrapRbacCatalog, buildRbacContext, canAccessAllBranches, canAccessBranch, resolveUserPermissions } from '../../../core/rbac/rbac-service.js';
 
 const BRANCH_A = 'rbac_scope_a';
 const BRANCH_B = 'rbac_scope_b';
@@ -59,11 +59,12 @@ describe('Phase 1 RBAC scope invariants', () => {
         'ur_teacher_scope', 'rbac_teacher',
         (db.prepare('SELECT id FROM roles WHERE code = ?').get('teacher') as { id: string }).id, BRANCH_A);
     db.prepare(`INSERT OR REPLACE INTO teachers
-      (id, full_name, branch_id, joined_date, user_id)
-      VALUES (?, ?, ?, ?, ?)`).run('rbac_teacher_profile', 'RBAC Teacher', BRANCH_A, '2026-01-01', 'rbac_teacher');
+      (id, full_name, branch_id, joined_date)
+      VALUES (?, ?, ?, ?)`).run('rbac_teacher_profile', 'RBAC Teacher', BRANCH_A, '2026-01-01');
     db.prepare(`INSERT OR REPLACE INTO teachers
-      (id, full_name, branch_id, joined_date, user_id)
-      VALUES (?, ?, ?, ?, NULL)`).run('rbac_other_teacher', 'Other Teacher', BRANCH_A, '2026-01-01');
+      (id, full_name, branch_id, joined_date)
+      VALUES (?, ?, ?, ?)`).run('rbac_other_teacher', 'Other Teacher', BRANCH_A, '2026-01-01');
+    // The account-side linked identity is the sole teacher↔user authority.
     db.prepare('UPDATE users SET linked_teacher_id = ? WHERE id = ?').run('rbac_teacher_profile', 'rbac_teacher');
     db.prepare(`INSERT OR REPLACE INTO classes
       (id, name, teacher_id, level, branch_id)

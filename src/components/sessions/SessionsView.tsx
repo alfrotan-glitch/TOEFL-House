@@ -46,6 +46,7 @@ interface SessionsViewProps {
   skills: Skill[];
   classTeacherSkills: ClassTeacherSkill[];
   activeRole: UserRole;
+  isGlobalOwner: boolean;
   activeBranchId?: string;
 }
 
@@ -111,10 +112,11 @@ export default function SessionsView({
   skills,
   classTeacherSkills,
   activeRole,
+  isGlobalOwner,
   activeBranchId,
 }: SessionsViewProps) {
   const invalidate = useInvalidate();
-  const canManage = ['owner', 'manager', 'registrar', 'head_of_department', 'teacher'].includes(activeRole);
+  const canManage = isGlobalOwner || ['general_manager', 'receptionist', 'head_of_department', 'teacher'].includes(activeRole);
 
   const [localSessions, setLocalSessions] = useState<Session[]>(sessionsProp);
   const [listLoading, setListLoading] = useState(false);

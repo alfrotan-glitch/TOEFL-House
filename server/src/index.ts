@@ -11,7 +11,6 @@ import cors from 'cors';
 import helmet from 'helmet';
 import http from 'http';
 import compression from 'compression';
-import rateLimit from 'express-rate-limit';
 
 // ── Database ──────────────────────────────────────────────────────────────
 import { initSchema, db } from './db/connection.js';
@@ -124,16 +123,6 @@ app.use(cors({ origin: corsOrigins, credentials: true }));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
-// ── Rate limiting ─────────────────────────────────────────────────────────
-// Prevent brute-force attacks on authentication routes
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 50, // Limit each IP to 50 requests per window
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many attempts, please try again later.' }
-});
-
 // ── Request logging ───────────────────────────────────────────────────────
 app.use((req: Request, _res: Response, next: NextFunction) => {
   if (process.env.NODE_ENV !== 'production') {
@@ -189,7 +178,7 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   res.status(503).json({ error: startupFailure || 'Service is still initializing. Please retry shortly.', code: startupFailure ? 'STARTUP_FAILED' : 'SERVICE_NOT_READY' });
 });
 
-app.use('/api/auth', authLimiter, authRouter); // Apply rate limiter to auth
+app.use('/api/auth', authRouter); // Login endpoints own credential-specific rate limits
 app.use('/api/users', usersRouter);
 app.use('/api/security', securityRouter);
 app.use('/api/organization', organizationRouter);

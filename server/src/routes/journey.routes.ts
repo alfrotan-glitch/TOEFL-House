@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
-import { authenticate, authorize, canAccessBranchResource } from '../middleware/auth.js';
+import { authenticate, authorize, requirePermission } from '../middleware/auth.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { assertMoney } from '../utils/money.js';
 import { getJourneyEngine } from '../core/journey/journey-engine.js';
@@ -9,6 +9,8 @@ import { getCatalogService } from '../core/academic/catalog-service.js';
 import { resolveAuthorizedDiscount } from '../core/configuration/discount-authority.js';
 import { assertClassGenderAllowsStudent } from './classes.routes.js';
 import { JourneyEventType } from '../core/journey/event-types.js';
+import { assertStudentAccess } from '../core/rbac/abac.js';
+import { hasPermission, isGlobalOwner } from '../core/rbac/rbac-service.js';
 import { writeAudit } from '../middleware/audit.js';
 // The journey route is NOT a second status authority (audit STU-C1). It
 // delegates every students.status write to the same guarded function the
@@ -45,16 +47,14 @@ function getUserContext(req: import('express').Request) {
 function requireStudent(req: import('express').Request, studentId: string) {
   const row = stmtGetStudentCore.get(studentId) as any;
   if (!row) throw new HttpError(404, 'Student not found.');
-  if (!canAccessBranchResource(req, row.branch_id)) {
-    throw new HttpError(403, 'Student belongs to another branch.');
-  }
+  assertStudentAccess(req, studentId);
   return row;
 }
 
 /** Full chronological lifecycle timeline. */
 journeyRouter.get(
   '/timeline',
-  authorize('owner', 'general_manager', 'receptionist', 'finance_manager', 'teacher', 'head_of_department'),
+  requirePermission('Student.View'),
   ah(async (req, res) => {
     const studentId = req.params.id as string;
     requireStudent(req, studentId);
@@ -82,7 +82,7 @@ journeyRouter.get(
 /** Projected current state from events only. */
 journeyRouter.get(
   '/state',
-  authorize('owner', 'general_manager', 'receptionist', 'finance_manager', 'teacher', 'head_of_department'),
+  requirePermission('Student.View'),
   ah(async (req, res) => {
     const studentId = req.params.id as string;
     requireStudent(req, studentId);
@@ -93,11 +93,12 @@ journeyRouter.get(
 /** Combined journey payload for UI drawers. */
 journeyRouter.get(
   '/',
-  authorize('owner', 'general_manager', 'receptionist', 'finance_manager', 'teacher', 'head_of_department'),
+  requirePermission('Student.View'),
   ah(async (req, res) => {
     const studentId = req.params.id as string;
     const student = requireStudent(req, studentId);
     const j = engine();
+    const mayViewFinance = !!req.rbac && (isGlobalOwner(req.rbac) || hasPermission(req.rbac, 'Payment.View'));
     res.json({
       student: {
         id: student.id,
@@ -107,7 +108,7 @@ journeyRouter.get(
       },
       state: j.getCurrentState(studentId),
       timeline: j.getTimeline(studentId),
-      financialTimeline: j.getFinancialTimeline(studentId),
+      financialTimeline: mayViewFinance ? j.getFinancialTimeline(studentId) : [],
     });
   })
 );

@@ -33,6 +33,7 @@ export interface FinanceViewProps {
   mainAccountBalance: number;
   savingBalance: number;
   activeRole: UserRole;
+  isGlobalOwner: boolean;
   chargeBudget: (budgetLineId: string, amount: number) => void;
   createBudgetLine: (input: BudgetLineInput) => Promise<void>;
   createExpenseRequest: (
@@ -94,7 +95,7 @@ const TABS: { id: FinanceTab; label: string; ownerOnly?: boolean }[] = [
 export default function FinanceView(props: FinanceViewProps) {
   const invalidate = useInvalidate();
   const {
-    budgetLines, financeCategories, expenseRequests, transactions, mainAccountBalance, savingBalance, activeRole,
+    budgetLines, financeCategories, expenseRequests, transactions, mainAccountBalance, savingBalance, activeRole, isGlobalOwner,
     chargeBudget, createBudgetLine, createExpenseRequest, recordOperationalPayment, getExpenseReport,
     updateExpenseAutoApproveThreshold, expenseAutoApproveThreshold,
     invoices, students, financeConfig, createInvoice, issueInvoice, payInvoice, cancelInvoice, updateFinanceConfig,
@@ -116,10 +117,10 @@ export default function FinanceView(props: FinanceViewProps) {
   const [depositBusy, setDepositBusy] = useState(false);
   const [depositError, setDepositError] = useState<string | null>(null);
 
-  const isOwner = activeRole === 'owner';
-  const isManager = activeRole === 'general_manager' || isOwner;
-  /** Budget allocation, month-end, policy — not finance clerk */
-  const hasPermissionCode = (code: string) => activeRole === 'owner' || (permissionCodes?.includes(code) ?? false);
+  const isOwner = isGlobalOwner;
+  const isManager = activeRole === 'general_manager' || isGlobalOwner;
+  /** The effective set already includes the global Owner bypass. */
+  const hasPermissionCode = (code: string) => permissionCodes?.includes(code) ?? false;
   const canViewBudget = hasPermissionCode('Budget.View');
   const canAllocateBudget = hasPermissionCode('Budget.Allocate') || hasPermissionCode('Budget.Edit');
   const canViewReports = hasPermissionCode('Finance.Report') || hasPermissionCode('Ledger.View');

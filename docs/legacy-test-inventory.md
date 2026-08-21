@@ -55,26 +55,41 @@ dependent scope, and architecture—rather than by historical defect.
 
 ## WP-02 Identity & Access
 
-16 files · 155 cases
+**C-2 disposition: REPLACED.** The historical inventory was 16 files / 155 declared
+cases. Fourteen requirement-focused suites now live under
+`server/src/tests/work-packages/wp02/`; two mixed legacy files had their WP-02 sections
+removed while their six finance/audit/identifier cases and five WP-03 search cases remain
+in place for their owning packages. The package baseline is 16 files / 187 runtime tests
+(including the new attack and architecture authorities). No WP-02 assertion depends on an
+arbitrary student initial secret, cross-position scope laundering, `users.role`,
+entity-side staff links, or a bare Owner label.
 
-| File | Cases | Asserted behaviour |
+| Legacy file | WP-02 knowledge | Replacement / retirement disposition |
+|---|---|---|
+| `academic-setup-authorization-matrix.test.ts` | Permissionless, role-gated, permission-gated and catalog/enforcement matrix | Rebased as `work-packages/wp02/academic-setup-authorization-matrix.test.ts` and retained as the direct-consumer matrix. |
+| `high-assurance-security.test.ts` | JWT and secret invariants | Rebased as `work-packages/wp02/high-assurance-security.test.ts`; claim-free tokens are also checked by `identity-access.architecture.test.ts`. |
+| `login-rate-limit-isolation.test.ts` | Per-account login isolation | Rebased as `work-packages/wp02/login-rate-limit-isolation.test.ts`; broad auth-router throttling is forbidden by the architecture suite. |
+| `owner-scope-escalation.test.ts` | Only `owner@organization` is globally privileged | Rebased as `work-packages/wp02/owner-scope-escalation.test.ts`; server-resolved UI propagation is checked by the architecture suite. |
+| `p1-scope-hardening.test.ts` | Scoped route access and identifier attacks | Rebased as `work-packages/wp02/p1-scope-hardening.test.ts`. |
+| `password-quarantine.test.ts` | Forced staff password-change quarantine | Rebased as `work-packages/wp02/password-quarantine.test.ts`. |
+| `position-lifecycle.test.ts` | Position CRUD, multi-position combination/removal, Owner equivalence | WP-02 sections removed. Position mutation/grant ceilings are replaced by `security-grant-escalation.test.ts`; assignment correlation, deny precedence and takeover attacks by `identity-access.attack.test.ts`. Six downstream finance/audit/identifier cases remain in the original file and are not WP-02 authority. |
+| `rbac-expired-grant-escalation.test.ts` | Expired assignments and overrides grant nothing | Rebased as `work-packages/wp02/rbac-expired-grant-escalation.test.ts`. |
+| `rbac-home-branch-invariant.test.ts` | Home branch is a filter default, never a grant | Rebased as `work-packages/wp02/rbac-home-branch-invariant.test.ts`. |
+| `rbac-scope.test.ts` | Organization/campus/branch/class reach and permission scope | Rebased as `work-packages/wp02/rbac-scope.test.ts` and converted to the sole account-side teacher link. |
+| `rbac-search-entity-permission.test.ts` | Per-entity search permission | Rebased as `work-packages/wp02/rbac-search-entity-permission.test.ts`. |
+| `security-grant-escalation.test.ts` | Role/permission grant ceiling, scope ceiling, protected system roles | Rebased as `work-packages/wp02/security-grant-escalation.test.ts` with corrected unauthorized-before-lookup ordering. |
+| `student-portal-name-credential-policy.test.ts` | Initial full-name password and optional user rotation | Rebased as `work-packages/wp02/student-portal-name-credential-policy.test.ts`. |
+| `student-portal-privilege-boundary.test.ts` | Zero staff permissions and one-object self service | Rebased as `work-packages/wp02/student-portal-privilege-boundary.test.ts`. |
+| `student-portal-secret-auth.test.ts` | Bcrypt authentication, state checks and revocation | Rebased as `work-packages/wp02/student-portal-secret-auth.test.ts`; arbitrary values represent post-initial rotation, not provisioning policy. |
+| `student-portal.test.ts` | Provisioning, credentials, self-scope and student search | WP-02 sections removed. Provisioning/credentials/self-scope are replaced by the three package portal suites plus `identity-access.attack.test.ts`. Five student-search cases remain in the original file as WP-03 knowledge only. |
+
+### WP-02 package authorities
+
+| File | Runtime cases | Purpose |
 |---|---:|---|
-| `academic-setup-authorization-matrix.test.ts` | 21 | Academic Setup — permissionless principals cannot read configuration · Academic Setup — role-gated authority (academic.routes) · Academic Setup — permission-gated authority (catalog.routes) · Academic Setup — the permission catalog matches the enforced matrix |
-| `high-assurance-security.test.ts` | 2 | high-assurance security invariants |
-| `login-rate-limit-isolation.test.ts` | 3 | login lockout is scoped to the account, not the network |
-| `owner-scope-escalation.test.ts` | 5 | only an organization-scoped owner is a global owner |
-| `p1-scope-hardening.test.ts` | 10 | Phase 2 P1 — scope hardening |
-| `password-quarantine.test.ts` | 2 | Password-change quarantine |
-| `position-lifecycle.test.ts` | 15 | Position lifecycle (create / edit / activate / deactivate) · Multiple positions — combine, scope, removal · Three-owner model · Female Reception separation + traceability · Report ↔ ledger reconciliation · Audit append-only · Concurrent identifier uniqueness |
-| `rbac-expired-grant-escalation.test.ts` | 10 | RBAC-1 · an expired grant must revoke, never escalate |
-| `rbac-home-branch-invariant.test.ts` | 4 | home-branch fallback is a row filter, not an authorization grant |
-| `rbac-scope.test.ts` | 6 | Phase 1 RBAC scope invariants |
-| `rbac-search-entity-permission.test.ts` | 2 | V-5 · global search gates each entity on its own permission |
-| `security-grant-escalation.test.ts` | 18 | SEC-1 · the owner identity role cannot be granted by a non-owner · SEC-2 · scope may not be widened beyond the granter reach · SEC-3 · system identity roles are not rewritable |
-| `student-portal-name-credential-policy.test.ts` | 14 | SPA-3 — the initial password is the student name · SPA-3 — rotation stays optional and user-initiated, and is honoured · SPA-3 — scope, isolation and enumeration are unchanged |
-| `student-portal-privilege-boundary.test.ts` | 6 | CLOSURE-1 — the student role carries no permissions · CLOSURE-1 — the portal reaches exactly one object-scoped endpoint · CLOSURE-1 — the portal can move no money and reach no staff surface |
-| `student-portal-secret-auth.test.ts` | 18 | SPA-1 — identifier alone is no longer authentication · SPA-1 — valid credentials still work and stay unprivileged · SPA-1 — branch isolation and account state · SPA-1 — session revocation still works |
-| `student-portal.test.ts` | 19 | Account creation — RangeError regression (rbac-service sync) · Student portal login (student code + secret) · Student self-scope — read only, own profile only · Whole-DB student search — paginated { rows, total } |
+| `work-packages/wp02/identity-access.attack.test.ts` | 17 | Privilege escalation, assignment/action-scope laundering, narrow teacher object/collection boundaries, stale-session, portal-link and deterministic-deny attacks. |
+| `work-packages/wp02/identity-access.architecture.test.ts` | 8 | Sole role/link/token authorities, schema boundaries, auth-rate-limit placement, server-resolved Owner UI fact, and awaited logout. |
+| Fourteen rebased requirement suites above | 162 | Authentication, student portal, scope, grants, direct consumers and security lifecycle. |
 
 ## WP-03 Students & Admissions
 

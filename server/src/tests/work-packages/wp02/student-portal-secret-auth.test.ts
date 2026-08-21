@@ -20,17 +20,17 @@
  * student-portal-privilege-boundary.test.ts and re-asserted here for the
  * password-authenticated session.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { today } from '../utils/ids.js';
-import { hashPassword } from '../utils/auth.js';
-import authRouter from '../routes/auth.routes.js';
-import studentsRouter from '../routes/students.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { today } from '../../../utils/ids.js';
+import { hashPassword } from '../../../utils/auth.js';
+import authRouter from '../../../routes/auth.routes.js';
+import studentsRouter from '../../../routes/students.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
 
 const BRANCH_A = 'spa_branch_a';
 const BRANCH_B = 'spa_branch_b';

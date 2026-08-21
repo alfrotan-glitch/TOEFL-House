@@ -17,6 +17,7 @@ interface ExamsViewProps {
   students: Student[];
   visitors: Visitor[];
   activeRole: UserRole;
+  isGlobalOwner: boolean;
   registerExam: (title: string, date: string, fee: number) => Promise<void>;
   editExam: (examId: string, payload: { title: string; date: string; fee: number }) => Promise<void>;
   deleteExam: (examId: string) => Promise<void>;
@@ -29,7 +30,7 @@ interface ExamsViewProps {
 const INITIAL_SKILL_SCORES = { reading: 0, listening: 0, speaking: 0, writing: 0 };
 
 export default function ExamsView({
-  exams, examResults, students, visitors, activeRole, registerExam, editExam, deleteExam, enrollExamCandidate, addExamResult, correctExamScore, triggerToast,
+  exams, examResults, students, visitors, activeRole, isGlobalOwner, registerExam, editExam, deleteExam, enrollExamCandidate, addExamResult, correctExamScore, triggerToast,
 }: ExamsViewProps) {
   const [showExamForm, setShowExamForm] = useState(false);
   const [editingExam, setEditingExam] = useState<Exam | null>(null);
@@ -192,8 +193,8 @@ export default function ExamsView({
     }
   };
 
-  const canManage = activeRole === 'receptionist' || activeRole === 'owner' || activeRole === 'general_manager';
-  const canCorrect = activeRole === 'owner' || activeRole === 'general_manager';
+  const canManage = activeRole === 'receptionist' || isGlobalOwner || activeRole === 'general_manager';
+  const canCorrect = isGlobalOwner || activeRole === 'general_manager';
   const sortedResults = useMemo(() => [...examResults].reverse(), [examResults]);
 
   return (

@@ -16,7 +16,7 @@ export interface PositionRow {
   description: string | null;
   isSystem: boolean;
   isActive: boolean;
-  permissions: { code: string; resource: string; action: string; description: string; scope: string }[];
+  permissions: { permissionId: string; code: string; resource: string; action: string; description: string; scope: string }[];
 }
 export interface PermissionDef {
   id: string;
@@ -34,12 +34,13 @@ interface Props {
   createPosition: (params: { name: string; description?: string; permissions?: { permissionId: string; scope?: string }[] }) => Promise<unknown>;
   updatePosition: (roleId: string, updates: { name?: string; description?: string; isActive?: boolean }) => Promise<void>;
   updatePositionPermissions: (roleId: string, permissions: { permissionId: string; scope?: string }[]) => Promise<void>;
+  canEdit: boolean;
 }
 
 const SCOPE_OPTIONS = ['organization', 'campus', 'branch', 'department', 'program', 'class', 'own'];
 
 export default function PositionsPanel(props: Props) {
-  const { positions, permissionCatalog, load, createPosition, updatePosition, updatePositionPermissions } = props;
+  const { positions, permissionCatalog, load, createPosition, updatePosition, updatePositionPermissions, canEdit } = props;
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -67,7 +68,7 @@ export default function PositionsPanel(props: Props) {
     setEditing(p);
     setEditName(p.name);
     setEditDescription(p.description || '');
-    setSelectedPerms(new Map(p.permissions.map((perm) => [perm.code, perm.scope])));
+    setSelectedPerms(new Map(p.permissions.map((permission) => [permission.permissionId, permission.scope])));
     setError(null);
   };
 
@@ -131,9 +132,9 @@ export default function PositionsPanel(props: Props) {
           <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5"><ShieldCheck className="w-5 h-5 text-indigo-600" /> Positions</h3>
           <p className="text-[10px] text-slate-400 mt-0.5">Data-driven positions with permission sets and scopes. Deactivating a position removes its permissions immediately.</p>
         </div>
-        <button onClick={openCreate} className="flex items-center gap-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl cursor-pointer shadow-sm">
+        {canEdit && <button onClick={openCreate} className="flex items-center gap-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl cursor-pointer shadow-sm">
           <Plus className="w-4 h-4" /> New position
-        </button>
+        </button>}
       </div>
 
       {error && <div className="rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-[11px] font-semibold text-rose-700" role="alert">{error}</div>}
@@ -203,10 +204,10 @@ export default function PositionsPanel(props: Props) {
               </div>
               <div className="flex items-center gap-1.5">
                 <span className={text.meta}>{p.permissions.length} permissions</span>
-                <button onClick={() => openEdit(p)} className="text-indigo-600 hover:text-indigo-800 cursor-pointer p-1.5" title="Edit position & permissions"><Pencil className="w-3.5 h-3.5" /></button>
-                <button onClick={() => void toggleActive(p)} disabled={busy} className={`p-1.5 rounded-lg cursor-pointer disabled:opacity-40 ${p.isActive ? 'text-rose-500 hover:bg-rose-50' : 'text-emerald-600 hover:bg-emerald-50'}`} title={p.isActive ? 'Deactivate' : 'Activate'}>
+                {canEdit && <button onClick={() => openEdit(p)} className="text-indigo-600 hover:text-indigo-800 cursor-pointer p-1.5" title="Edit position & permissions"><Pencil className="w-3.5 h-3.5" /></button>}
+                {canEdit && <button onClick={() => void toggleActive(p)} disabled={busy} className={`p-1.5 rounded-lg cursor-pointer disabled:opacity-40 ${p.isActive ? 'text-rose-500 hover:bg-rose-50' : 'text-emerald-600 hover:bg-emerald-50'}`} title={p.isActive ? 'Deactivate' : 'Activate'}>
                   <Power className="w-3.5 h-3.5" />
-                </button>
+                </button>}
               </div>
             </div>
             {p.description && <p className="text-[10px] text-slate-400 mt-1">{p.description}</p>}

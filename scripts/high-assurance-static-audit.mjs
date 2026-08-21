@@ -46,7 +46,10 @@ if (auth.includes('export function hasRole')) failures.push('hasRole must remain
 const permissions = read('server/src/core/rbac/permission-catalog.ts');
 if (/code:\s*'counselor'[\s\S]{0,600}'Lead\.Convert'/.test(permissions)) failures.push('Counselor must not receive Lead.Convert permission.');
 
-for (const file of ['server/src/tests/p1-scope-hardening.test.ts','server/src/tests/rbac-scope.test.ts']) {
+for (const file of [
+  'server/src/tests/work-packages/wp02/p1-scope-hardening.test.ts',
+  'server/src/tests/work-packages/wp02/rbac-scope.test.ts',
+]) {
   if (exists(file) && read(file).includes('afterAll(() => //')) failures.push(`Malformed afterAll callback remains in ${file}.`);
 }
 

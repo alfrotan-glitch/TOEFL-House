@@ -22,16 +22,16 @@
  * legacy-role fallback are organization-scoped, so this preserves every
  * legitimate owner.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { db, initSchema } from '../db/connection.js';
+import { db, initSchema } from '../../../db/connection.js';
 import {
   bootstrapRbacCatalog, buildRbacContext, isGlobalOwner,
   canAccessBranch, canAccessAllBranches,
-} from '../core/rbac/rbac-service.js';
+} from '../../../core/rbac/rbac-service.js';
 
 const CAMPUS_A = 'campus_scope_a';
 const CAMPUS_B = 'campus_scope_b';
@@ -113,7 +113,7 @@ describe('only an organization-scoped owner is a global owner', () => {
     // Structural guard: a future edit that reintroduces `hasRole(ctx,'owner')`
     // as a bypass silently restores the escalation, and no behavioural test
     // would catch it until a second campus exists in production.
-    const root = path.resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
+    const root = path.resolve(fileURLToPath(new URL('.', import.meta.url)), '../../..');
     const files = [
       'middleware/auth.ts', 'core/rbac/rbac-service.ts',
       'routes/bos.routes.ts', 'routes/branches.routes.ts', 'routes/events.routes.ts',

@@ -14,8 +14,11 @@ import {
 export interface EffectivePermission {
   code: string; 
   scope: PermissionScope; 
-  source: 'role' | 'override' | 'delegation';
+  source: 'role' | 'override';
+  /** Scope of the permission action itself (for object-level ABAC). */
   scopeId: string | null;
+  /** Assignment/override boundary that supplied scopeId. */
+  boundaryScope: PermissionScope;
 }
 
 export interface RbacUserContext {
@@ -54,10 +57,10 @@ function rbacSchemaExists(db: Database.Database): boolean {
 
   const tableCount = db.prepare(
     `SELECT COUNT(*) as c FROM sqlite_master 
-     WHERE type='table' AND name IN ('roles', 'permissions', 'user_roles', 'role_permissions', 'role_delegations', 'permission_overrides')`
+     WHERE type='table' AND name IN ('roles', 'permissions', 'user_roles', 'role_permissions', 'permission_overrides')`
   ).get() as { c: number };
   
-  const exists = tableCount.c === 6;
+  const exists = tableCount.c === 5;
   rbacSchemaCache.set(db, exists);
   return exists;
 }
@@ -74,7 +77,7 @@ interface RbacStatements {
   insertUserRole: Database.Statement;
   getPrimaryUserRole: Database.Statement;
   getUserRbacPerms: Database.Statement;
-  getDelegations: Database.Statement;
+  getUserAuthorityGrants: Database.Statement;
   getOverrides: Database.Statement;
   getUserRoles: Database.Statement;
 }
@@ -104,10 +107,20 @@ function getStmts(db: Database.Database): RbacStatements {
       WHERE ur.user_id = ? AND r.is_active = 1
         AND (ur.expires_at IS NULL OR ur.expires_at > datetime('now'))
     `),
-    getDelegations: db.prepare(`
-      SELECT p.code AS code, rp.default_scope AS scope, d.scope_type AS delegation_scope, d.scope_id AS delegation_scope_id FROM role_delegations d
-      JOIN role_permissions rp ON rp.role_id = d.role_id JOIN permissions p ON p.id = rp.permission_id
-      WHERE d.to_user_id = ? AND d.is_active = 1 AND d.starts_at <= datetime('now') AND d.ends_at >= datetime('now')
+    getUserAuthorityGrants: db.prepare(`
+      SELECT p.code AS code, ur.scope_type AS boundaryScope, ur.scope_id AS scopeId
+        FROM user_roles ur
+        JOIN roles r ON r.id = ur.role_id AND r.is_active = 1
+        JOIN role_permissions rp ON rp.role_id = ur.role_id
+        JOIN permissions p ON p.id = rp.permission_id
+       WHERE ur.user_id = ?
+         AND (ur.expires_at IS NULL OR ur.expires_at > datetime('now'))
+      UNION ALL
+      SELECT p.code AS code, o.scope_type AS boundaryScope, o.scope_id AS scopeId
+        FROM permission_overrides o
+        JOIN permissions p ON p.id = o.permission_id
+       WHERE o.user_id = ? AND o.effect = 'grant'
+         AND (o.expires_at IS NULL OR o.expires_at > datetime('now'))
     `),
     getOverrides: db.prepare(`
       SELECT p.code AS code, o.effect AS effect, o.scope_type AS scope, o.scope_id AS scope_id FROM permission_overrides o
@@ -229,24 +242,35 @@ export function resolveUserPermissions(db: Database.Database, userId: string): E
       code: string; scope: PermissionScope; user_scope: PermissionScope; user_scope_id: string | null;
     }[];
     for (const row of rows) {
-      grants.push({ code: row.code, scope: narrowerScope(row.scope, row.user_scope), source: 'role', scopeId: row.user_scope_id });
-    }
-
-    const dels = stmts.getDelegations.all(userId) as {
-      code: string; scope: PermissionScope; delegation_scope: PermissionScope; delegation_scope_id: string | null;
-    }[];
-    for (const d of dels) {
-      grants.push({ code: d.code, scope: narrowerScope(d.scope, d.delegation_scope), source: 'delegation', scopeId: d.delegation_scope_id });
+      grants.push({
+        code: row.code,
+        scope: narrowerScope(row.scope, row.user_scope),
+        source: 'role',
+        scopeId: row.user_scope_id,
+        boundaryScope: row.user_scope,
+      });
     }
 
     const overs = stmts.getOverrides.all(userId) as {
       code: string; effect: 'grant' | 'deny'; scope: PermissionScope; scope_id?: string | null;
     }[];
+    // A deny is deterministic and dominant for its permission code. Processing
+    // rows sequentially made the result depend on insertion/row order: a later
+    // grant could resurrect a denied permission. Resolve the policy as sets
+    // first, then materialize grants.
+    const deniedCodes = new Set(overs.filter((o) => o.effect === 'deny').map((o) => o.code));
+    for (let i = grants.length - 1; i >= 0; i -= 1) {
+      if (deniedCodes.has(grants[i].code)) grants.splice(i, 1);
+    }
     for (const o of overs) {
-      if (o.effect === 'deny') {
-        for (let i = grants.length - 1; i >= 0; i--) if (grants[i].code === o.code) grants.splice(i, 1);
-      } else {
-        grants.push({ code: o.code, scope: o.scope, source: 'override', scopeId: o.scope_id ?? null });
+      if (o.effect === 'grant' && !deniedCodes.has(o.code)) {
+        grants.push({
+          code: o.code,
+          scope: o.scope,
+          source: 'override',
+          scopeId: o.scope_id ?? null,
+          boundaryScope: o.scope,
+        });
       }
     }
     return grants;
@@ -363,33 +387,162 @@ export function getPermissionScope(ctx: RbacUserContext, code: string): Permissi
   // caller's branch/resource checks.
   return matches.reduce((effective, grant) => narrowerScope(effective, grant.scope), matches[0].scope);
 }
-/**
- * Central branch-resource authorization. A role name never grants cross-branch
- * access by itself. Access is derived from the user's actual RBAC assignment.
- */
-export function canAccessBranch(db: Database.Database, ctx: RbacUserContext, branchId: string): boolean {
-  // Only an organization-scoped owner sees everything. A campus- or
-  // branch-scoped owner falls through to the scope checks below, exactly like
-  // any other role.
-  if (isGlobalOwner(ctx)) return true;
-
+function boundaryCanAccessBranch(
+  db: Database.Database,
+  scopeType: PermissionScope,
+  scopeId: string | null,
+  branchId: string,
+): boolean {
+  if (scopeType === 'organization') return true;
+  if (scopeType === 'branch') return scopeId === branchId;
+  if (scopeType !== 'campus' || !scopeId) return false;
   const branch = db.prepare('SELECT campus_id AS campusId FROM branches WHERE id = ?').get(branchId) as
     | { campusId: string | null }
     | undefined;
-  if (!branch) return false;
+  return !!branch && branch.campusId === scopeId;
+}
 
-  for (const role of ctx.roles) {
-    if (role.scopeType === 'organization') return true;
-    if (role.scopeType === 'branch' && role.scopeId === branchId) return true;
-    if (role.scopeType === 'campus' && role.scopeId && role.scopeId === branch.campusId) return true;
-  }
-
-  // No home-branch fallback. `users.branch_id` records where a person is
-  // based; it does not authorize anything. Access comes from an assignment
-  // and nowhere else, so revoking the assignment revokes the access.
-  return false;
+/**
+ * Central branch-resource authorization. A role name never grants cross-branch
+ * access by itself. Access is derived from the user's live assignments.
+ */
+export function canAccessBranch(db: Database.Database, ctx: RbacUserContext, branchId: string): boolean {
+  if (isGlobalOwner(ctx)) return true;
+  return ctx.roles.some((role) => boundaryCanAccessBranch(db, role.scopeType, role.scopeId, branchId));
 }
 
 export function canAccessAllBranches(ctx: RbacUserContext): boolean {
   return isGlobalOwner(ctx) || ctx.roles.some((r) => r.scopeType === 'organization');
+}
+
+export interface BranchAccessRequirement {
+  roleCodes?: readonly string[];
+  permissionCodes?: readonly string[];
+}
+
+/**
+ * Tests effective permission grants without discarding either half of their
+ * authority: the action scope (branch/class/own) and the assignment boundary
+ * that supplied it. Object-level consumers use this before applying their own
+ * ownership predicate; collection consumers allow only branch-capable scopes.
+ */
+export function hasPermissionForBranchWithActionScopes(
+  db: Database.Database,
+  ctx: RbacUserContext,
+  branchId: string,
+  permissionCodes: readonly string[],
+  actionScopes: readonly PermissionScope[],
+): boolean {
+  if (isGlobalOwner(ctx)) return true;
+  return ctx.permissions.some(
+    (permission) => permissionCodes.includes(permission.code)
+      && actionScopes.includes(permission.scope)
+      && boundaryCanAccessBranch(db, permission.boundaryScope, permission.scopeId, branchId),
+  );
+}
+
+/**
+ * Correlates a branch decision with the role/permission that admitted the
+ * request. Without this correlation, a finance position in branch B can lend
+ * `Payment.Edit` to an unrelated receptionist assignment in branch A: the
+ * permission check sees one assignment and the branch check sees the other.
+ */
+export function canAccessBranchForRequirement(
+  db: Database.Database,
+  ctx: RbacUserContext,
+  branchId: string,
+  requirement: BranchAccessRequirement = {},
+): boolean {
+  if (isGlobalOwner(ctx)) return true;
+  const roleCodes = requirement.roleCodes ?? [];
+  const permissionCodes = requirement.permissionCodes ?? [];
+
+  if (roleCodes.length > 0 && !ctx.roles.some(
+    (role) => roleCodes.includes(role.roleCode) && boundaryCanAccessBranch(db, role.scopeType, role.scopeId, branchId),
+  )) return false;
+
+  if (permissionCodes.length > 0) {
+    // A department-scoped HOD is posted to a branch in the current domain
+    // model (there is no department identifier on resources), so its live
+    // branch assignment is the enforceable boundary. Dashboard.View:own is a
+    // personal feature grant whose established summary contract is still the
+    // caller's assigned branch; it is not an object ownership grant.
+    const hasBranchPermission = hasPermissionForBranchWithActionScopes(
+      db,
+      ctx,
+      branchId,
+      permissionCodes,
+      ['organization', 'campus', 'branch', 'department'],
+    ) || (permissionCodes.includes('Dashboard.View') && hasPermissionForBranchWithActionScopes(
+      db,
+      ctx,
+      branchId,
+      ['Dashboard.View'],
+      ['own'],
+    ));
+    if (!hasBranchPermission) return false;
+  }
+
+  return roleCodes.length > 0 || permissionCodes.length > 0
+    ? true
+    : canAccessBranch(db, ctx, branchId);
+}
+
+export function canAccessAllBranchesForRequirement(
+  ctx: RbacUserContext,
+  requirement: BranchAccessRequirement = {},
+): boolean {
+  if (isGlobalOwner(ctx)) return true;
+  const roleCodes = requirement.roleCodes ?? [];
+  const permissionCodes = requirement.permissionCodes ?? [];
+
+  if (roleCodes.length > 0 && !ctx.roles.some(
+    (role) => roleCodes.includes(role.roleCode) && role.scopeType === 'organization',
+  )) return false;
+  if (permissionCodes.length > 0 && !ctx.permissions.some(
+    (permission) => permissionCodes.includes(permission.code)
+      && permission.scope === 'organization'
+      && permission.boundaryScope === 'organization',
+  )) return false;
+
+  return roleCodes.length > 0 || permissionCodes.length > 0
+    ? true
+    : canAccessAllBranches(ctx);
+}
+
+/**
+ * A non-global administrator may act only on a branch-bounded principal whose
+ * effective privilege is no greater than their own. Password reset is account
+ * takeover authority; role removal is denial-of-service authority. Checking
+ * only the target's identity branch does not contain either operation.
+ */
+export function canAdministerUser(
+  db: Database.Database,
+  caller: RbacUserContext,
+  target: RbacUserContext,
+): boolean {
+  if (isGlobalOwner(caller)) return true;
+  if (isGlobalOwner(target)) return false;
+  if (!target.roles.every(
+    (role) => role.scopeType === 'branch'
+      && !!role.scopeId
+      && canAccessBranch(db, caller, role.scopeId),
+  )) return false;
+  // Compare against every live underlying grant, not only the current effective
+  // set. A temporary deny must not let a lower administrator take over an
+  // account whose stronger role authority will return when the deny expires.
+  const targetGrants = getStmts(db).getUserAuthorityGrants.all(target.userId, target.userId) as Array<{
+    code: string;
+    boundaryScope: PermissionScope;
+    scopeId: string | null;
+  }>;
+  if (!targetGrants.every((permission) => permission.boundaryScope === 'branch'
+    && !!permission.scopeId
+    && canAccessBranchForRequirement(
+      db,
+      caller,
+      permission.scopeId,
+      { permissionCodes: [permission.code] },
+    ))) return false;
+  return true;
 }

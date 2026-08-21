@@ -31,6 +31,7 @@ interface FundingViewProps {
   sponsorships: SponsorshipAgreement[];
   students: Student[];
   activeRole: UserRole;
+  isGlobalOwner: boolean;
   addDonor: (data: Partial<Donor>) => void | Promise<void>;
   editDonor: (id: string, data: Partial<Donor>) => void | Promise<void>;
   addFundingCampaign: (data: Partial<FundingCampaign>) => void | Promise<void>;
@@ -140,10 +141,10 @@ const labelCls = 'block text-slate-600 font-bold mb-1 text-[11px]';
 // ============================================================================
 export default function FundingView({
   donors, campaigns, donations, scholarships, scholarshipAwards, sponsorships, students,
-  activeRole, addDonor, editDonor, addFundingCampaign, recordDonation, addScholarship,
+  activeRole, isGlobalOwner, addDonor, editDonor, addFundingCampaign, recordDonation, addScholarship,
   awardScholarship, addSponsorship,
 }: FundingViewProps) {
-  const canManage = ['owner', 'manager', 'donor_manager'].includes(activeRole);
+  const canManage = isGlobalOwner || ['general_manager', 'donor_manager'].includes(activeRole);
 
   const [tab, setTab] = useState<FundingTab>('donors');
   const [searchQuery, setSearchQuery] = useState('');

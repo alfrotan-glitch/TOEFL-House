@@ -34,6 +34,7 @@ interface Props {
   instances: WorkflowInstance[];
   automations: Automation[];
   activeRole: string;
+  isGlobalOwner: boolean;
   approveWorkflowStep: (instanceId: string, notes?: string) => Promise<void>;
   rejectWorkflowStep: (instanceId: string, reason: string) => Promise<void>;
   getWorkflowInstanceDetail: (instanceId: string) => Promise<WorkflowInstanceDetail>;
@@ -52,7 +53,7 @@ const STATUS_LABELS: Record<WorkflowStatus, string> = {
 const TERMINAL_STATUSES: WorkflowStatus[] = ['approved', 'rejected', 'completed', 'cancelled'];
 
 export default function WorkflowsView({
-  instances, automations, activeRole,
+  instances, automations, activeRole, isGlobalOwner,
   approveWorkflowStep, rejectWorkflowStep, getWorkflowInstanceDetail, toggleAutomation,
 }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -84,11 +85,12 @@ export default function WorkflowsView({
   }, [selectedId, getWorkflowInstanceDetail]);
 
   const currentStepDef = detail?.steps.find(s => s.order === detail.currentStep);
-  // Mirrors the backend's own check: the assigned role, or owner/manager, may act.
+  // Mirrors the backend's own check: the assigned role, global Owner, or
+  // general manager may act. A scoped Owner label is not a superuser signal.
   const canActOnCurrentStep =
     !!currentStepDef &&
     !TERMINAL_STATUSES.includes(detail!.status) &&
-    (activeRole === currentStepDef.role || activeRole === 'owner' || activeRole === 'general_manager');
+    (activeRole === currentStepDef.role || isGlobalOwner || activeRole === 'general_manager');
 
   const handleApprove = async () => {
     if (!selectedId) return;

@@ -8,8 +8,9 @@ import React, { useState, useCallback } from 'react';
 import {Building2, Database, Edit, Trash2, Plus, X, User, HeartHandshake, Tag, KeyRound, UserPlus, CheckCircle2, MapPin, ShieldCheck} from 'lucide-react';
 import PositionsPanel, { PositionRow, PermissionDef } from './PositionsPanel';
 import UserPositionsPanel, { UserLite } from './UserPositionsPanel';
-import {SystemSettings, Branch, Campus, Partner, UserRole} from '../../types';
+import {SystemSettings, Branch, Campus, Partner} from '../../types';
 import { ASSIGNABLE_ROLES, getRoleLabel } from '../../config/roles';
+import { hasPermission } from '../../config/permissions';
 import { BRAND_NAME } from '../../config/branding';
 
 interface UserAccount {
@@ -35,7 +36,8 @@ interface SettingsViewProps {
   addPartner: (fullName: string, phone: string, email: string, sharePercent: number, roleDescription: string) => Promise<void>;
   editPartner: (id: string, fullName: string, phone: string, email: string, sharePercent: number, roleDescription: string) => Promise<void>;
   deletePartner: (id: string) => Promise<void>;
-  activeRole: UserRole;
+  isGlobalOwner: boolean;
+  permissionCodes?: Set<string>;
   onOpenAcademicSetup: () => void;
   listUserAccounts: () => Promise<UserAccount[]>;
   createUserAccount: (params: {
@@ -69,7 +71,8 @@ export default function SettingsView({
   addPartner,
   editPartner,
   deletePartner,
-  activeRole,
+  isGlobalOwner,
+  permissionCodes,
   onOpenAcademicSetup,
   listUserAccounts,
   createUserAccount,
@@ -96,7 +99,12 @@ export default function SettingsView({
   // Organization hierarchy form state
   const campuses: Campus[] = settings.campuses || [];
   const branchesList: Branch[] = settings.branches || [];
-  const canConfigureOrg = activeRole === 'owner' || activeRole === 'general_manager';
+  const canConfigureOrg = isGlobalOwner;
+  const canViewUsers = hasPermission(permissionCodes, 'User.View');
+  const canCreateUsers = hasPermission(permissionCodes, 'User.Create') && hasPermission(permissionCodes, 'Role.Edit');
+  const canEditUsers = hasPermission(permissionCodes, 'User.Edit');
+  const canViewRoles = hasPermission(permissionCodes, 'Role.View');
+  const canEditRoles = hasPermission(permissionCodes, 'Role.Edit');
   const [campusForm, setCampusForm] = useState({
     name: '', code: '', address: '', postalCode: '', phone: '', email: '', description: '', isActive: true,
   });
@@ -199,7 +207,7 @@ export default function SettingsView({
   const [newUsername, setNewUsername] = useState<string>('');
   const [newTempPassword, setNewTempPassword] = useState<string>('');
   const [newUserFullName, setNewUserFullName] = useState<string>('');
-  const [newUserRole, setNewUserRole] = useState<string>('registrar');
+  const [newUserRole, setNewUserRole] = useState<string>('receptionist');
   const [resettingUserId, setResettingUserId] = useState<string | null>(null);
   const [resetTempPassword, setResetTempPassword] = useState<string>('');
 
@@ -220,11 +228,11 @@ export default function SettingsView({
   // Load once per owner session without mirroring props into state inside an
   // effect (react-hooks/set-state-in-effect).
   const [accountsLoadedFor, setAccountsLoadedFor] = useState<string>('');
-  if (activeRole === 'owner' && accountsLoadedFor !== 'owner') {
-    setAccountsLoadedFor('owner');
+  if (canViewUsers && accountsLoadedFor !== 'authorized') {
+    setAccountsLoadedFor('authorized');
     loadUserAccounts();
   }
-  if (activeRole !== 'owner' && accountsLoadedFor) setAccountsLoadedFor('');
+  if (!canViewUsers && accountsLoadedFor) setAccountsLoadedFor('');
 
 
   const handleCreateUser = async (e: React.FormEvent) => {
@@ -245,7 +253,7 @@ export default function SettingsView({
       setNewUsername('');
       setNewTempPassword('');
       setNewUserFullName('');
-      setNewUserRole('registrar');
+      setNewUserRole('receptionist');
       setShowAddUserForm(false);
       loadUserAccounts();
       alert('User account created. Share the temporary password with the user securely.');
@@ -366,7 +374,7 @@ export default function SettingsView({
   };
 
   const totalShares = partners.reduce((sum, p) => sum + p.sharePercent, 0);
-  const isOwner = activeRole === 'owner';
+  const canManageEquity = isGlobalOwner;
 
   return (
     <div className="space-y-6 font-sans text-start" id="settings-view-root">
@@ -655,7 +663,7 @@ export default function SettingsView({
             </h3>
             <p className={text.hint}>Senior owners and each partner’s equity share</p>
           </div>
-          {isOwner && !showAddForm && !editingPartnerId && (
+          {canManageEquity && !showAddForm && !editingPartnerId && (
             <button
               onClick={() => {
                 clearForm();
@@ -807,7 +815,7 @@ export default function SettingsView({
                 </div>
               </div>
 
-              {isOwner && (
+              {canManageEquity && (
                 <div className="flex gap-2 justify-end pt-2 border-t border-slate-100">
                   <button
                     onClick={() => handleStartEdit(p)}
@@ -829,15 +837,15 @@ export default function SettingsView({
           ))}
         </div>
 
-        {/* User Account Management (owner only) */}
-        {isOwner && (
+        {/* User account management follows the server-resolved permission set. */}
+        {canViewUsers && (
           <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
             <div className="flex items-center justify-between border-b border-slate-50 pb-2.5">
               <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5">
                 <KeyRound className="w-5 h-5 text-indigo-600" />
                 User accounts
               </h3>
-              {!showAddUserForm && (
+              {canCreateUsers && !showAddUserForm && (
                 <button
                   onClick={() => setShowAddUserForm(true)}
                   className="flex items-center gap-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl cursor-pointer shadow-sm transition-all"
@@ -848,7 +856,7 @@ export default function SettingsView({
               )}
             </div>
 
-            {showAddUserForm && (
+            {canCreateUsers && showAddUserForm && (
               <form onSubmit={handleCreateUser} className="bg-slate-50/50 border border-slate-200 rounded-2xl p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs animate-in slide-in-from-top duration-200">
                 <div className="space-y-1">
                   <label className="block text-slate-600 font-bold">Full name:</label>
@@ -897,7 +905,7 @@ export default function SettingsView({
                     </p>
                     <p className="text-[10px] text-slate-400 font-mono mt-0.5">{u.username} • {getRoleLabel(u.role)}</p>
                   </div>
-                  {resettingUserId === u.id ? (
+                  {canEditUsers && (resettingUserId === u.id ? (
                     <div className="flex items-center gap-1.5">
                       <input
                         type="text"
@@ -921,14 +929,14 @@ export default function SettingsView({
                     >
                       Reset password
                     </button>
-                  )}
+                  ))}
                 </div>
               ))}
             </div>
           </div>
         )}
 
-        {isOwner && (
+        {canViewRoles && (
           <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-5">
             <div className="flex items-center gap-1.5 border-b border-slate-50 pb-2.5">
               <ShieldCheck className="w-5 h-5 text-indigo-600" />
@@ -942,6 +950,7 @@ export default function SettingsView({
               createPosition={createPosition}
               updatePosition={updatePosition}
               updatePositionPermissions={updatePositionPermissions}
+              canEdit={canEditRoles}
             />
             <div className="border-t border-slate-100 pt-5">
               <UserPositionsPanel
@@ -954,6 +963,7 @@ export default function SettingsView({
                 assignUserPosition={assignUserPosition}
                 removeUserPosition={removeUserPosition}
                 viewEffectivePermissions={viewEffectivePermissions}
+                canEdit={canEditUsers && canEditRoles}
               />
             </div>
           </div>

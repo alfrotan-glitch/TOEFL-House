@@ -132,30 +132,33 @@ CREATE TABLE IF NOT EXISTS users (
   email                TEXT,
   branch_id            TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
   campus_id            TEXT REFERENCES campuses(id) ON DELETE SET NULL,
-  linked_teacher_id    TEXT,
-  linked_employee_id   TEXT,
-  linked_partner_id    TEXT,
+  linked_teacher_id    TEXT REFERENCES teachers(id) ON DELETE SET NULL,
+  linked_employee_id   TEXT REFERENCES employees(id) ON DELETE SET NULL,
+  linked_partner_id    TEXT REFERENCES partners(id) ON DELETE SET NULL,
   linked_student_id    TEXT REFERENCES students(id) ON DELETE SET NULL,
-  is_active            INTEGER NOT NULL DEFAULT 1,
-  must_change_password INTEGER NOT NULL DEFAULT 1,
+  is_active            INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
+  must_change_password INTEGER NOT NULL DEFAULT 1 CHECK (must_change_password IN (0,1)),
   session_version      INTEGER NOT NULL DEFAULT 1 CHECK (session_version >= 1),
   created_at           TEXT NOT NULL DEFAULT (datetime('now')),
   last_login_at        TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_users_branch         ON users(branch_id);
 CREATE INDEX IF NOT EXISTS idx_users_campus         ON users(campus_id);
-CREATE INDEX IF NOT EXISTS idx_users_linked_student ON users(linked_student_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_linked_student ON users(linked_student_id) WHERE linked_student_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_linked_teacher ON users(linked_teacher_id) WHERE linked_teacher_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_linked_employee ON users(linked_employee_id) WHERE linked_employee_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_linked_partner ON users(linked_partner_id) WHERE linked_partner_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS roles ( 
   id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL, description TEXT, 
-  is_system INTEGER NOT NULL DEFAULT 0, is_active INTEGER NOT NULL DEFAULT 1, 
+  is_system INTEGER NOT NULL DEFAULT 0 CHECK (is_system IN (0,1)), is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
   sort_order INTEGER NOT NULL DEFAULT 100, created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT 
 );
 CREATE INDEX IF NOT EXISTS idx_roles_code            ON roles(code);
 
 CREATE TABLE IF NOT EXISTS permissions ( 
   id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, resource TEXT NOT NULL, action TEXT NOT NULL, 
-  description TEXT, category TEXT NOT NULL DEFAULT 'general', is_system INTEGER NOT NULL DEFAULT 1, 
+  description TEXT, category TEXT NOT NULL DEFAULT 'general', is_system INTEGER NOT NULL DEFAULT 1 CHECK (is_system IN (0,1)),
   created_at TEXT NOT NULL DEFAULT (datetime('now')) 
 );
 CREATE INDEX IF NOT EXISTS idx_permissions_code      ON permissions(code);
@@ -174,7 +177,7 @@ CREATE TABLE IF NOT EXISTS user_roles (
   id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, 
   role_id TEXT NOT NULL REFERENCES roles(id) ON DELETE CASCADE, 
   scope_type TEXT NOT NULL DEFAULT 'branch' CHECK (scope_type IN ('organization','campus','branch','department','program','class','own')), 
-  scope_id TEXT, is_primary INTEGER NOT NULL DEFAULT 0, assigned_by TEXT, 
+  scope_id TEXT, is_primary INTEGER NOT NULL DEFAULT 0 CHECK (is_primary IN (0,1)), assigned_by TEXT,
   assigned_at TEXT NOT NULL DEFAULT (datetime('now')), expires_at TEXT, 
   UNIQUE(user_id, role_id, scope_type, scope_id) 
 );
@@ -202,13 +205,6 @@ CREATE TABLE IF NOT EXISTS permission_overrides (
 );
 CREATE INDEX IF NOT EXISTS idx_permission_overrides_user ON permission_overrides(user_id);
 
-CREATE TABLE IF NOT EXISTS role_delegations ( 
-  id TEXT PRIMARY KEY, from_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, 
-  to_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, role_id TEXT NOT NULL REFERENCES roles(id) ON DELETE CASCADE, 
-  scope_type TEXT NOT NULL DEFAULT 'branch', scope_id TEXT, reason TEXT, 
-  starts_at TEXT NOT NULL DEFAULT (datetime('now')), ends_at TEXT NOT NULL, created_by TEXT, is_active INTEGER NOT NULL DEFAULT 1 
-);
-
 CREATE TABLE IF NOT EXISTS employees ( 
   id          TEXT PRIMARY KEY, 
   full_name   TEXT NOT NULL, 
@@ -218,8 +214,7 @@ CREATE TABLE IF NOT EXISTS employees (
   base_salary INTEGER NOT NULL DEFAULT 0, 
   status      TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','inactive')), 
   branch_id   TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT, 
-  joined_date TEXT NOT NULL, 
-  user_id     TEXT REFERENCES users(id) ON DELETE SET NULL 
+  joined_date TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_employees_branch      ON employees(branch_id);
 
@@ -963,7 +958,6 @@ CREATE TABLE IF NOT EXISTS teachers (
   contract_type      TEXT CHECK (contract_type IN (
                        'monthly','hourly','per_session'
                      )),
-  user_id            TEXT REFERENCES users(id),
   default_skill_rate INTEGER NOT NULL DEFAULT 0
 , target_skills_per_month INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS idx_teachers_branch ON teachers(branch_id);

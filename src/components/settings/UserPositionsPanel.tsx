@@ -35,10 +35,11 @@ interface Props {
   assignUserPosition: (userId: string, params: { roleId: string; scopeType?: string; scopeId?: string | null }) => Promise<unknown>;
   removeUserPosition: (userId: string, assignmentId: string) => Promise<unknown>;
   viewEffectivePermissions: (userId: string) => Promise<EffectivePerm[]>;
+  canEdit: boolean;
 }
 
 export default function UserPositionsPanel(props: Props) {
-  const { users, positions, branches, campuses, loadUsers, listUserPositions, assignUserPosition, removeUserPosition, viewEffectivePermissions } = props;
+  const { users, positions, branches, campuses, loadUsers, listUserPositions, assignUserPosition, removeUserPosition, viewEffectivePermissions, canEdit } = props;
   const [assigning, setAssigning] = useState<string | null>(null); // userId
   const [roleId, setRoleId] = useState('');
   const [scopeType, setScopeType] = useState('branch');
@@ -53,7 +54,11 @@ export default function UserPositionsPanel(props: Props) {
       const [pos, perms] = await Promise.all([listUserPositions(userId), viewEffectivePermissions(userId)]);
       setPositionsByUser((prev) => ({ ...prev, [userId]: pos }));
       setEffective((prev) => ({ ...prev, [userId]: perms }));
-    } catch { /* keep previous */ }
+    } catch (err) {
+      setPositionsByUser((previous) => ({ ...previous, [userId]: [] }));
+      setEffective((previous) => ({ ...previous, [userId]: [] }));
+      setError(err instanceof Error ? err.message : 'Could not load this user’s access.');
+    }
   }, [listUserPositions, viewEffectivePermissions]);
 
   useEffect(() => {
@@ -67,6 +72,10 @@ export default function UserPositionsPanel(props: Props) {
   const handleAssign = async (e: React.FormEvent, userId: string) => {
     e.preventDefault();
     if (!roleId) { setError('Choose a position.'); return; }
+    if ((scopeType === 'branch' || scopeType === 'campus') && !scopeId) {
+      setError(`Choose a ${scopeType}.`);
+      return;
+    }
     setBusy(true); setError(null);
     try {
       await assignUserPosition(userId, {
@@ -115,9 +124,9 @@ export default function UserPositionsPanel(props: Props) {
                   <span className="font-mono text-[9px] text-slate-400 ms-2">{u.username}</span>
                   {!u.isActive && <span className="text-[9px] bg-rose-100 text-rose-600 px-1.5 py-0.5 rounded font-bold ms-1">Inactive</span>}
                 </div>
-                <button onClick={() => setAssigning(assigning === u.id ? null : u.id)} className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer bg-indigo-50 px-3 py-1.5 rounded-lg flex items-center gap-1">
+                {canEdit && <button onClick={() => setAssigning(assigning === u.id ? null : u.id)} className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer bg-indigo-50 px-3 py-1.5 rounded-lg flex items-center gap-1">
                   <UserPlus className="w-3.5 h-3.5" /> {assigning === u.id ? 'Cancel' : 'Assign position'}
-                </button>
+                </button>}
               </div>
 
               <div className="mt-2 flex flex-wrap gap-1.5">
@@ -126,7 +135,7 @@ export default function UserPositionsPanel(props: Props) {
                   <span key={p.id} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold ${p.isPrimary ? 'bg-slate-900 text-white' : 'bg-indigo-50 text-indigo-700'}`}>
                     {p.roleName}
                     {!p.isPrimary && p.scopeType !== 'branch' && <span className="opacity-70">{p.scopeType}</span>}
-                    {!p.isPrimary && (
+                    {canEdit && !p.isPrimary && (
                       <button onClick={() => void handleRemove(u.id, p.id)} disabled={busy} className="hover:text-rose-500 cursor-pointer disabled:opacity-40" title="Remove position">
                         <X className="w-3 h-3" />
                       </button>

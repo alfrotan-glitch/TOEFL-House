@@ -20,21 +20,21 @@
  * This suite locks that in at both levels: the resolver returns the right
  * answer on its own, AND the guarded endpoint still denies.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { hashPassword, signToken, type TokenPayload } from '../utils/auth.js';
-import { authenticate, requirePermission } from '../middleware/auth.js';
-import { errorHandler } from '../middleware/errorHandler.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { hashPassword, signToken, type TokenPayload } from '../../../utils/auth.js';
+import { authenticate, requirePermission } from '../../../middleware/auth.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
 import {
   bootstrapRbacCatalog,
   buildRbacContext,
   canAccessBranch,
   isGlobalOwner,
-} from '../core/rbac/rbac-service.js';
+} from '../../../core/rbac/rbac-service.js';
 
 const HOME = 'hbi_home';
 const PAST = '2020-01-01 00:00:00';

@@ -9,7 +9,15 @@ import { assertTextLengths, TEXT_LIMITS } from '../utils/textInput.js';
 import { parsePagination as parsePaginationShared } from '../utils/pagination.js';
 import { getStudentBalance, getStudentBalancesPage } from '../utils/studentBalance.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
-import { hasAnyRole } from '../core/rbac/rbac-service.js';
+import {
+  canAccessAllBranchesForRequirement,
+  canAccessBranchForRequirement,
+  hasAnyRole,
+  hasPermission,
+  hasPermissionForBranchWithActionScopes,
+  isGlobalOwner,
+} from '../core/rbac/rbac-service.js';
+import { assertStudentAccess } from '../core/rbac/abac.js';
 import { writeAudit } from '../middleware/audit.js';
 import { assertMoney } from '../utils/money.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
@@ -50,6 +58,9 @@ paymentsRouter.use(authenticate);
 
 // ── Performance Optimization: Prepared Statements ──────────────────────────
 const stmtGetStudentById = db.prepare('SELECT * FROM students WHERE id = ?');
+const stmtGetLinkedStudentTeacher = db.prepare(
+  'SELECT linked_teacher_id AS teacherId, linked_student_id AS studentId FROM users WHERE id = ?',
+);
 const stmtGetStudentsAll = db.prepare('SELECT * FROM students ORDER BY registration_date DESC LIMIT ? OFFSET ?');
 const stmtGetStudentsByBranch = db.prepare('SELECT * FROM students WHERE branch_id = ? ORDER BY registration_date DESC LIMIT ? OFFSET ?');
 const stmtGetSemestersBatch = db.prepare(`SELECT * FROM student_semesters WHERE student_id IN (SELECT value FROM json_each(?)) ORDER BY enroll_date`);
@@ -238,9 +249,17 @@ function parseJsonArray<T>(value: string | null | undefined): T[] {
   return Array.isArray(parsed) ? (parsed as T[]) : [];
 }
 
-function requireStudent(req: import('express').Request, studentId: string): StudentContextRow {
+function requireStudent(
+  req: import('express').Request,
+  studentId: string,
+  options: { objectView?: boolean } = {},
+): StudentContextRow {
   const student = stmtGetStudentById.get(studentId) as StudentContextRow | undefined;
   if (!student) throw new HttpError(404, 'Student not found.');
+  if (options.objectView) {
+    assertStudentAccess(req, studentId);
+    return student;
+  }
   const { branchId, isAll } = resolveBranchScope(req);
   if (!isAll && branchId && student.branch_id && student.branch_id !== branchId) {
     const cross = !!student.branch_id && canAccessBranchResource(req, student.branch_id);
@@ -291,22 +310,28 @@ export function applyStudentStatus(
 
 interface StudentRow { id: string; student_code: string; full_name: string; phone: string | null; email: string | null; qr_code: string | null; status: string; registration_date: string; branch_id: string; discount_percent: number; gender: string; lead_id: string | null; father_name: string | null; address_region: string | null; tazkira_no: string | null; whatsapp: string | null; dob: string | null; school_or_university: string | null; emergency_contact_name: string | null; emergency_contact_phone: string | null; notes: string | null; placement_score: string | null; installment_plan: string | null; card_design: string | null; }
 
-function mapStudentBase(row: StudentRow) {
+function mapStudentBase(row: StudentRow, includeFinance = true) {
   return {
     id: row.id, studentCode: row.student_code, fullName: row.full_name, phone: row.phone, email: row.email,
     qrCode: row.qr_code, status: row.status, registrationDate: row.registration_date, branchId: row.branch_id,
-    discountPercent: row.discount_percent, gender: row.gender, leadId: row.lead_id || undefined,
+    ...(includeFinance ? { discountPercent: row.discount_percent } : {}),
+    gender: row.gender, leadId: row.lead_id || undefined,
     fatherName: row.father_name, addressRegion: row.address_region, tazkiraNo: row.tazkira_no,
     whatsapp: row.whatsapp, dob: row.dob, schoolOrUniversity: row.school_or_university,
     emergencyContactName: row.emergency_contact_name, emergencyContactPhone: row.emergency_contact_phone,
     notes: row.notes, placementScore: parseJson(row.placement_score, undefined),
-    installmentPlan: parseJson(row.installment_plan, undefined),
+    ...(includeFinance ? { installmentPlan: parseJson(row.installment_plan, undefined) } : {}),
     cardDesign: parseJson(row.card_design, undefined),
   };
 }
 
-function mapStudents(rows: StudentRow[]) {
+function mayViewStudentFinance(req: import('express').Request): boolean {
+  return !!req.rbac && (isGlobalOwner(req.rbac) || hasPermission(req.rbac, 'Payment.View'));
+}
+
+function mapStudents(rows: StudentRow[], options: { includeFinance?: boolean } = {}) {
   if (rows.length === 0) return [];
+  const includeFinance = options.includeFinance !== false;
   const semesters = stmtGetSemestersBatch.all(JSON.stringify(rows.map(r => r.id))) as any[];
   const byStudent = new Map<string, any[]>();
   for (const s of semesters) {
@@ -318,10 +343,17 @@ function mapStudents(rows: StudentRow[]) {
   for (const enrollment of primaryEnrollments) enrollmentByStudent.set(enrollment.student_id, enrollment);
 
   return rows.map((row) => {
-    const sems = (byStudent.get(row.id) || []).map((s) => ({ id: s.id, semesterName: s.semester_name, classId: s.class_id, enrollDate: s.enroll_date, feeAmount: s.fee_amount, netFeeAmount: s.net_fee_amount ?? null, status: s.status }));
+    const sems = (byStudent.get(row.id) || []).map((s) => ({
+      id: s.id,
+      semesterName: s.semester_name,
+      classId: s.class_id,
+      enrollDate: s.enroll_date,
+      ...(includeFinance ? { feeAmount: s.fee_amount, netFeeAmount: s.net_fee_amount ?? null } : {}),
+      status: s.status,
+    }));
     const enrollment = enrollmentByStudent.get(row.id);
     return {
-      ...mapStudentBase(row),
+      ...mapStudentBase(row, includeFinance),
       semesters: sems,
       currentClassId: enrollment?.class_id ?? (sems.length ? sems[sems.length - 1].classId : null),
       currentProgramName: enrollment?.program_name ?? null,
@@ -395,6 +427,59 @@ paymentsRouter.get('/balances', requirePermission('Payment.View'), ah(async (req
   res.json(getStudentBalancesPage(db, { branchId: isAll ? null : branchId, scope: 'all', limit, offset }));
 }));
 
+interface StudentReadScope {
+  branchId: string | null;
+  isAll: boolean;
+  teacherId: string | null;
+  ownStudentId: string | null;
+}
+
+function resolveStudentReadScope(req: import('express').Request): StudentReadScope {
+  const { branchId, isAll } = resolveBranchScope(req, { ignoreAccessRequirement: true });
+  if (!req.rbac) throw new HttpError(403, 'Authorization context is unavailable.');
+  const hasBroadScope = isAll
+    ? canAccessAllBranchesForRequirement(req.rbac, { permissionCodes: ['Student.View'] })
+    : !!branchId && canAccessBranchForRequirement(db, req.rbac, branchId, { permissionCodes: ['Student.View'] });
+  if (hasBroadScope) return { branchId, isAll, teacherId: null, ownStudentId: null };
+  if (!branchId) throw new HttpError(403, 'No authorized student scope is available for this request.');
+
+  const linked = stmtGetLinkedStudentTeacher.get(req.user?.userId) as
+    | { teacherId: string | null; studentId: string | null }
+    | undefined;
+  if (hasPermissionForBranchWithActionScopes(
+    db, req.rbac, branchId, ['Student.View'], ['class'],
+  ) && linked?.teacherId) {
+    return { branchId, isAll: false, teacherId: linked.teacherId, ownStudentId: null };
+  }
+  if (hasPermissionForBranchWithActionScopes(
+    db, req.rbac, branchId, ['Student.View'], ['own'],
+  ) && linked?.studentId) {
+    return { branchId, isAll: false, teacherId: null, ownStudentId: linked.studentId };
+  }
+  throw new HttpError(403, 'No authorized student scope is available for this request.');
+}
+
+function studentAuthorityFilter(scope: StudentReadScope): { clauses: string[]; params: unknown[] } {
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+  if (!scope.isAll) { clauses.push('students.branch_id = ?'); params.push(scope.branchId); }
+  if (scope.teacherId) {
+    clauses.push(`EXISTS (
+      SELECT 1 FROM classes c
+       WHERE c.teacher_id = ?
+         AND (EXISTS (SELECT 1 FROM student_semesters ss
+                       WHERE ss.student_id = students.id AND ss.class_id = c.id
+                         AND ss.status IN ('active','deferred'))
+           OR EXISTS (SELECT 1 FROM enrollments e
+                       WHERE e.student_id = students.id AND e.class_id = c.id
+                         AND e.status IN ('active','confirmed','pending')))
+    )`);
+    params.push(scope.teacherId);
+  }
+  if (scope.ownStudentId) { clauses.push('students.id = ?'); params.push(scope.ownStudentId); }
+  return { clauses, params };
+}
+
 /**
  * Whole-database student search with pagination — works at any scale
  * (10k / 20k+ students). Returns { rows, total } so the UI can page and
@@ -402,12 +487,12 @@ paymentsRouter.get('/balances', requirePermission('Payment.View'), ah(async (req
  * email/father), status, classId.
  */
 studentsRouter.get('/search', requirePermission('Student.View'), ah(async (req, res) => {
-  const { branchId, isAll } = resolveBranchScope(req);
+  const scope = resolveStudentReadScope(req);
   const { limit, offset } = parsePagination(req);
-  const { whereSql, params } = buildStudentListWhere(req, { branchId, isAll });
+  const { whereSql, params } = buildStudentListWhere(req, scope);
   const total = (db.prepare(`SELECT COUNT(*) AS c FROM students ${whereSql}`).get(...params) as { c: number }).c;
   const rows = db.prepare(`SELECT * FROM students ${whereSql} ORDER BY registration_date DESC LIMIT ? OFFSET ?`).all(...params, limit, offset) as StudentRow[];
-  res.json({ rows: mapStudents(rows), total });
+  res.json({ rows: mapStudents(rows, { includeFinance: mayViewStudentFinance(req) }), total });
 }));
 
 /**
@@ -422,14 +507,14 @@ studentsRouter.get('/search', requirePermission('Student.View'), ah(async (req, 
  */
 function buildStudentListWhere(
   req: import('express').Request,
-  scope: { branchId: string | null; isAll: boolean },
+  scope: StudentReadScope,
 ): { whereSql: string; params: unknown[] } {
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
   const status = typeof req.query.status === 'string' ? req.query.status.trim() : '';
   const classId = typeof req.query.classId === 'string' ? req.query.classId.trim() : '';
-  const where: string[] = [];
-  const params: unknown[] = [];
-  if (!scope.isAll) { where.push('branch_id = ?'); params.push(scope.branchId); }
+  const authority = studentAuthorityFilter(scope);
+  const where: string[] = [...authority.clauses];
+  const params: unknown[] = [...authority.params];
   if (q) {
     where.push(`(full_name LIKE ? ESCAPE '\\' OR student_code LIKE ? ESCAPE '\\' OR phone LIKE ? ESCAPE '\\'
                 OR COALESCE(tazkira_no,'') LIKE ? ESCAPE '\\' OR COALESCE(whatsapp,'') LIKE ? ESCAPE '\\'
@@ -462,13 +547,14 @@ function buildStudentListWhere(
  * because both numbers come from the same truncation.
  */
 studentsRouter.get('/summary', requirePermission('Student.View'), ah(async (req, res) => {
-  const { branchId, isAll } = resolveBranchScope(req);
-  const { whereSql, params } = buildStudentListWhere(req, { branchId, isAll });
+  const scope = resolveStudentReadScope(req);
+  const { whereSql, params } = buildStudentListWhere(req, scope);
 
   const filtered = (db.prepare(`SELECT COUNT(*) AS c FROM students ${whereSql}`).get(...params) as { c: number }).c;
-  const unfiltered = isAll
-    ? (db.prepare('SELECT COUNT(*) AS c FROM students').get() as { c: number }).c
-    : (db.prepare('SELECT COUNT(*) AS c FROM students WHERE branch_id = ?').get(branchId) as { c: number }).c;
+  const authority = studentAuthorityFilter(scope);
+  const authorityWhere = authority.clauses.length ? `WHERE ${authority.clauses.join(' AND ')}` : '';
+  const unfiltered = (db.prepare(`SELECT COUNT(*) AS c FROM students ${authorityWhere}`)
+    .get(...authority.params) as { c: number }).c;
 
   const byStatus = db.prepare(
     `SELECT status, COUNT(*) AS count FROM students ${whereSql} GROUP BY status`
@@ -503,7 +589,9 @@ studentsRouter.get('/export', requirePermission('Student.View'), ah(async (req, 
   const { branchId, isAll } = resolveBranchScope(req);
   // EXACTLY the same filter builder the roster uses — one definition, so an
   // export can never disagree with the list the operator is looking at.
-  const { whereSql, params } = buildStudentListWhere(req, { branchId, isAll });
+  const { whereSql, params } = buildStudentListWhere(req, {
+    branchId, isAll, teacherId: null, ownStudentId: null,
+  });
 
   const rows = db.prepare(
     `SELECT id, student_code, full_name, phone, whatsapp, father_name, tazkira_no,
@@ -512,13 +600,15 @@ studentsRouter.get('/export', requirePermission('Student.View'), ah(async (req, 
       ORDER BY registration_date DESC`
   ).all(...params) as StudentRow[];
 
-  // Authoritative balances for exactly these students, from the single
-  // definition in utils/studentBalance — never recomputed client-side.
+  // Financial columns require Payment.View in addition to Student.View.
+  const includeFinance = mayViewStudentFinance(req);
   const balances = new Map<string, { tuitionDue: number; tuitionPaid: number; outstanding: number }>();
-  for (const b of getStudentBalancesPage(db, {
-    branchId: isAll ? null : branchId, scope: 'all', limit: rows.length || 1, offset: 0,
-  })) {
-    balances.set(b.studentId, { tuitionDue: b.tuitionDue, tuitionPaid: b.tuitionPaid, outstanding: b.outstanding });
+  if (includeFinance) {
+    for (const b of getStudentBalancesPage(db, {
+      branchId: isAll ? null : branchId, scope: 'all', limit: rows.length || 1, offset: 0,
+    })) {
+      balances.set(b.studentId, { tuitionDue: b.tuitionDue, tuitionPaid: b.tuitionPaid, outstanding: b.outstanding });
+    }
   }
 
   const classesByStudent = new Map<string, string>();
@@ -534,14 +624,19 @@ studentsRouter.get('/export', requirePermission('Student.View'), ah(async (req, 
   // The shared serializer, so escaping is defined once. A second inline
   // implementation is how one export learns to quote an embedded comma and the
   // other does not.
-  const header = ['Code', 'Full Name', 'Phone', 'WhatsApp', 'Father Name', 'Tazkira No', 'Email',
-                  'Gender', 'Status', 'Classes', 'Total Fee', 'Paid', 'Debt', 'Registered'];
+  const header = [
+    'Code', 'Full Name', 'Phone', 'WhatsApp', 'Father Name', 'Tazkira No', 'Email',
+    'Gender', 'Status', 'Classes',
+    ...(includeFinance ? ['Total Fee', 'Paid', 'Debt'] : []),
+    'Registered',
+  ];
   const csvRows = rows.map((r) => {
     const fin = balances.get(r.id) ?? { tuitionDue: 0, tuitionPaid: 0, outstanding: 0 };
     return [
       r.student_code, r.full_name, r.phone, r.whatsapp, r.father_name, r.tazkira_no, r.email,
       r.gender, r.status, classesByStudent.get(r.id) ?? '',
-      fin.tuitionDue, fin.tuitionPaid, fin.outstanding, r.registration_date,
+      ...(includeFinance ? [fin.tuitionDue, fin.tuitionPaid, fin.outstanding] : []),
+      r.registration_date,
     ];
   });
 
@@ -553,11 +648,11 @@ studentsRouter.get('/export', requirePermission('Student.View'), ah(async (req, 
 }));
 
 studentsRouter.get('/', requirePermission('Student.View'), ah(async (req, res) => {
-  const { branchId, isAll } = resolveBranchScope(req);
+  const scope = resolveStudentReadScope(req);
   const { limit, offset } = parsePagination(req);
   // Server-side search + filters so the list stays correct beyond page 1:
   // q matches name / code / phone / tazkira / whatsapp / email / father.
-  const { whereSql, params } = buildStudentListWhere(req, { branchId, isAll });
+  const { whereSql, params } = buildStudentListWhere(req, scope);
 
   // Authoritative totals (audit STU-H2). A bare array capped at MAX_PAGE_SIZE
   // with no total leaves a client unable to tell a full result from a
@@ -566,9 +661,10 @@ studentsRouter.get('/', requirePermission('Student.View'), ah(async (req, res) =
   // Visitors roster contract (X-Total-Count / X-Unfiltered-Count / X-Page-*),
   // which the frontend already knows how to consume.
   const filteredTotal = (db.prepare(`SELECT COUNT(*) AS c FROM students ${whereSql}`).get(...params) as { c: number }).c;
-  const unfilteredTotal = isAll
-    ? (db.prepare('SELECT COUNT(*) AS c FROM students').get() as { c: number }).c
-    : (db.prepare('SELECT COUNT(*) AS c FROM students WHERE branch_id = ?').get(branchId) as { c: number }).c;
+  const authority = studentAuthorityFilter(scope);
+  const authorityWhere = authority.clauses.length ? `WHERE ${authority.clauses.join(' AND ')}` : '';
+  const unfilteredTotal = (db.prepare(`SELECT COUNT(*) AS c FROM students ${authorityWhere}`)
+    .get(...authority.params) as { c: number }).c;
   res.setHeader('X-Total-Count', String(filteredTotal));
   res.setHeader('X-Unfiltered-Count', String(unfilteredTotal));
   res.setHeader('X-Page-Limit', String(limit));
@@ -599,7 +695,7 @@ studentsRouter.get('/', requirePermission('Student.View'), ah(async (req, res) =
   const sql = `SELECT * FROM students ${whereSql} ORDER BY registration_date DESC LIMIT ? OFFSET ?`;
   params.push(limit, offset);
   const rows = db.prepare(sql).all(...params) as StudentRow[];
-  res.json(mapStudents(rows));
+  res.json(mapStudents(rows, { includeFinance: mayViewStudentFinance(req) }));
 }));
 
 /**
@@ -629,7 +725,8 @@ studentsRouter.get('/me', authorize('student'), ah(async (req, res) => {
 }));
 
 studentsRouter.get('/:id', requirePermission('Student.View'), ah(async (req, res) => {
-  const student = requireStudent(req, req.params.id) as StudentRow;
+  const student = requireStudent(req, req.params.id, { objectView: true }) as StudentRow;
+  const mayViewFinance = mayViewStudentFinance(req);
   // The balance ships WITH the student so no client ever has to re-derive it.
   // Recomputing tuition in the profile drawer or the student portal from the
   // paginated payments array disagrees with this endpoint the moment a
@@ -637,11 +734,13 @@ studentsRouter.get('/:id', requirePermission('Student.View'), ah(async (req, res
   // all) — the same student shows a 20,000 AFN different debt
   // on the roster and on the profile.
   res.json({
-    ...mapStudents([student])[0],
-    balance: {
-      lifetime: getStudentBalance(db, student.id, 'all'),
-      current: getStudentBalance(db, student.id, 'active'),
-    },
+    ...mapStudents([student], { includeFinance: mayViewFinance })[0],
+    ...(mayViewFinance ? {
+      balance: {
+        lifetime: getStudentBalance(db, student.id, 'all'),
+        current: getStudentBalance(db, student.id, 'active'),
+      },
+    } : {}),
   });
 }));
 

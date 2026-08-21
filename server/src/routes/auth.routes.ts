@@ -7,7 +7,7 @@ import {
   buildRbacContext,
   effectivePermissionCodes,
   effectiveTabAccess,
-  hasRole,
+  isGlobalOwner,
   type RbacUserContext,
 } from '../core/rbac/rbac-service.js';
 import { writeAudit } from '../middleware/audit.js';
@@ -55,6 +55,7 @@ function usernameKeyPart(req: import('express').Request): string {
 const loginLimiter = rateLimit({
   windowMs: ATTEMPT_WINDOW_MS,
   max: 10,
+  skipSuccessfulRequests: true,
   keyGenerator: (req) => `${ipKeyGenerator(req.ip ?? '')}|${usernameKeyPart(req)}`,
   message: { error: 'Too many login attempts for this account. Please try again in 15 minutes.' },
   standardHeaders: true,
@@ -69,6 +70,7 @@ const loginLimiter = rateLimit({
 const loginIpLimiter = rateLimit({
   windowMs: ATTEMPT_WINDOW_MS,
   max: 100,
+  skipSuccessfulRequests: true,
   message: { error: 'Too many login attempts from this network. Please try again in 15 minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -83,6 +85,7 @@ const loginIpLimiter = rateLimit({
 const studentLoginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 60,
+  skipSuccessfulRequests: true,
   message: { error: 'Too many student sign-in attempts. Please try again in 15 minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -92,8 +95,8 @@ const studentLoginLimiter = rateLimit({
 const stmtGetUserByUsername = db.prepare('SELECT * FROM users WHERE username = ?');
 const stmtGetUserByIdSafe = db.prepare('SELECT id, username, full_name, email, branch_id, must_change_password, session_version FROM users WHERE id = ?');
 const stmtGetUserByIdFull = db.prepare('SELECT * FROM users WHERE id = ?');
-const stmtUpdateLastLogin = db.prepare("UPDATE users SET last_login_at = datetime('now') WHERE id = ?");
-const stmtUpdatePassword = db.prepare("UPDATE users SET password_hash = ?, must_change_password = 0, session_version = session_version + 1 WHERE id = ?");
+const stmtUpdateLastLogin = db.prepare("UPDATE users SET last_login_at = datetime('now') WHERE id = ? AND password_hash = ? AND session_version = ? AND is_active = 1");
+const stmtUpdatePassword = db.prepare("UPDATE users SET password_hash = ?, must_change_password = 0, session_version = session_version + 1 WHERE id = ? AND session_version = ?");
 
 // Dummy hash to prevent timing attacks during username enumeration
 const DUMMY_HASH = '$2a$10$N9qo8uLOickgx2ZMRZoMy.Mrq8JjCqDwBvVj9oGm6ZvXqJqoYtXa';
@@ -123,22 +126,31 @@ authRouter.post(
   loginIpLimiter,
   loginLimiter,
   ah(async (req, res) => {
-    const { username, password } = req.body as { username?: string; password?: string };
-    if (!username || !password) {
+    const body = (req.body ?? {}) as { username?: unknown; password?: unknown };
+    if (typeof body.username !== 'string' || !body.username || typeof body.password !== 'string' || !body.password) {
       throw new HttpError(400, 'Username and password are required.');
     }
 
-    const row = stmtGetUserByUsername.get(username) as UserRow | undefined;
-    const isPasswordValid = row 
-      ? await verifyPassword(password, row.password_hash) 
-      : await verifyPassword(password, DUMMY_HASH);
+    const row = stmtGetUserByUsername.get(body.username) as UserRow | undefined;
+    const isPasswordValid = row
+      ? await verifyPassword(body.password, row.password_hash)
+      : await verifyPassword(body.password, DUMMY_HASH);
 
-    if (!row || !isPasswordValid) {
-      throw new HttpError(401, 'Invalid username or password.');
-    }
+    if (!row || !isPasswordValid) throw new HttpError(401, 'Invalid username or password.');
+    if (!row.is_active) throw new HttpError(403, 'This account has been deactivated. Contact the system administrator.');
 
-    if (!row.is_active) {
-      throw new HttpError(403, 'This account has been deactivated. Contact the system administrator.');
+    // Resolve authorization before issuing a session or recording a successful
+    // login. An identity without a live primary assignment has no workspace.
+    const rbac = buildRequiredRbacContext({
+      id: row.id, username: row.username, full_name: row.full_name, branch_id: row.branch_id,
+    });
+    if (!rbac.primaryRole) throw new HttpError(403, 'This account has no active primary position.');
+
+    // Password verification is asynchronous. A reset/deactivation can occur
+    // while bcrypt runs; this conditional write detects that race so the route
+    // never returns a successful session that is already revoked.
+    if (stmtUpdateLastLogin.run(row.id, row.password_hash, row.session_version).changes !== 1) {
+      throw new HttpError(401, 'Account state changed during sign-in. Please try again.');
     }
 
     const token = signToken({
@@ -148,22 +160,18 @@ authRouter.post(
       fullName: row.full_name,
       sessionVersion: row.session_version,
     });
-
-    stmtUpdateLastLogin.run(row.id);
     setSessionCookie(res, token);
 
     req.user = { userId: row.id, username: row.username, branchId: row.branch_id, fullName: row.full_name, sessionVersion: row.session_version };
+    req.rbac = rbac;
     writeAudit(req, 'User logged in');
 
-    const rbac = buildRequiredRbacContext({
-      id: row.id, username: row.username, full_name: row.full_name, branch_id: row.branch_id,
-    });
-    
     res.json({
       ...(process.env.NODE_ENV === 'production' ? {} : { token }),
       user: {
         id: row.id, username: row.username, fullName: row.full_name, email: row.email,
         role: rbac.primaryRole, branchId: row.branch_id, mustChangePassword: !!row.must_change_password,
+        isGlobalOwner: isGlobalOwner(rbac),
         permissions: effectivePermissionCodes(rbac),
         roles: rbac.roles,
         tabAccess: effectiveTabAccess(rbac),
@@ -189,6 +197,7 @@ authRouter.get(
     res.json({
       id: row.id, username: row.username, fullName: row.full_name, email: row.email,
       role: rbac.primaryRole, branchId: row.branch_id, mustChangePassword: !!row.must_change_password,
+      isGlobalOwner: isGlobalOwner(rbac),
       permissions: effectivePermissionCodes(rbac),
       roles: rbac.roles,
       tabAccess: effectiveTabAccess(rbac),
@@ -243,15 +252,15 @@ authRouter.post(
     const student = db.prepare(`SELECT * FROM students WHERE LOWER(TRIM(student_code)) = LOWER(TRIM(?))`).get(code) as
       | { id: string; student_code: string; full_name: string; branch_id: string; status: string } | undefined;
 
-    // Look the portal account up before branching, so every failure mode below
-    // costs one password verification and returns the same 401.
+    // A portal login is admitted only through a live PRIMARY student
+    // assignment. A secondary student label on a staff account must never turn
+    // the low-strength portal credential into an administrative session.
     const user = student
       ? (db.prepare(`SELECT u.* FROM users u
-             JOIN user_roles ur ON ur.user_id = u.id
-             JOIN roles r ON r.id = ur.role_id AND r.code = 'student'
-            WHERE u.linked_student_id = ?`).get(student.id) as
-          | { id: string; username: string; full_name: string; role: string; branch_id: string; password_hash: string; is_active: number; session_version: number; must_change_password: number }
-          | undefined)
+             JOIN user_roles ur ON ur.user_id = u.id AND ur.is_primary = 1
+               AND (ur.expires_at IS NULL OR ur.expires_at > datetime('now'))
+             JOIN roles r ON r.id = ur.role_id AND r.code = 'student' AND r.is_active = 1
+            WHERE u.linked_student_id = ?`).get(student.id) as UserRow | undefined)
       : undefined;
 
     const passwordMatches = user
@@ -260,42 +269,46 @@ authRouter.post(
 
     // One indistinguishable answer for: unknown code, no portal account,
     // wrong secret. Enumerating student codes must not be possible here.
-    if (!student || !user || !passwordMatches) {
-      throw new HttpError(401, 'Invalid student code or password.');
-    }
-    if (!user.is_active) {
-      throw new HttpError(403, 'This portal account has been deactivated. Contact the office.');
-    }
+    if (!student || !user || !passwordMatches) throw new HttpError(401, 'Invalid student code or password.');
+    if (!user.is_active) throw new HttpError(403, 'This portal account has been deactivated. Contact the office.');
     if (student.status === 'suspended' || student.status === 'inactive') {
       throw new HttpError(403, 'This student account is not active. Contact the office.');
     }
+    if (user.branch_id !== student.branch_id) throw new HttpError(403, 'This portal account is not linked to the student branch.');
+
+    const rbac = buildRequiredRbacContext({
+      id: user.id, username: user.username, full_name: user.full_name, branch_id: user.branch_id,
+    });
+    if (rbac.primaryRole !== 'student' || rbac.roles.some((role) => role.roleCode !== 'student') || effectivePermissionCodes(rbac).length > 0) {
+      throw new HttpError(403, 'This account is not eligible for the student portal.');
+    }
+    if (stmtUpdateLastLogin.run(user.id, user.password_hash, user.session_version).changes !== 1) {
+      throw new HttpError(401, 'Account state changed during sign-in. Please try again.');
+    }
 
     const token = signToken({
-      userId: user!.id, username: user!.username, branchId: user!.branch_id,
-      fullName: user!.full_name, sessionVersion: user!.session_version,
+      userId: user.id, username: user.username, branchId: user.branch_id,
+      fullName: user.full_name, sessionVersion: user.session_version,
     });
-    db.prepare("UPDATE users SET last_login_at = datetime('now') WHERE id = ?").run(user!.id);
     setSessionCookie(res, token);
 
-    // Operator attribution for a real authentication event. The secret is
-    // never part of the audit payload.
     req.user = {
-      userId: user!.id, username: user!.username,
-      branchId: user!.branch_id, fullName: user!.full_name, sessionVersion: user!.session_version,
+      userId: user.id, username: user.username,
+      branchId: user.branch_id, fullName: user.full_name, sessionVersion: user.session_version,
     };
-    writeAudit(req, 'Student portal login', { branchId: user!.branch_id });
+    req.rbac = rbac;
+    writeAudit(req, 'Student portal login', { branchId: user.branch_id });
 
     res.json({
       ...(process.env.NODE_ENV === 'production' ? {} : { token }),
       user: {
-        id: user!.id, username: user!.username, fullName: user!.full_name, email: null,
-        role: 'student', branchId: user!.branch_id,
-        // A forced rotation must be visible to the portal client, exactly as
-        // it is for staff — the quarantine in authenticate() applies to this
-        // account too.
-        mustChangePassword: !!user!.must_change_password,
-        permissions: [], roles: [{ roleId: 'student', roleCode: 'student', roleName: 'Student', scopeType: 'branch', scopeId: user!.branch_id }],
-        tabAccess: {},
+        id: user.id, username: user.username, fullName: user.full_name, email: user.email,
+        role: rbac.primaryRole, branchId: user.branch_id,
+        mustChangePassword: !!user.must_change_password,
+        isGlobalOwner: isGlobalOwner(rbac),
+        permissions: effectivePermissionCodes(rbac),
+        roles: rbac.roles,
+        tabAccess: effectiveTabAccess(rbac),
       },
     });
   })
@@ -314,8 +327,13 @@ authRouter.post(
     if (token) {
       try {
         const decoded = verifyToken(token);
-        if (decoded?.userId) {
-          db.prepare('UPDATE users SET session_version = session_version + 1 WHERE id = ?').run(decoded.userId);
+        if (decoded?.userId && decoded.sessionVersion) {
+          // A stale token may clear its own cookie, but it cannot keep revoking
+          // sessions established after that token was superseded.
+          db.prepare(`UPDATE users
+                         SET session_version = session_version + 1
+                       WHERE id = ? AND session_version = ?`)
+            .run(decoded.userId, decoded.sessionVersion);
         }
       } catch {
         // Unverifiable/expired token: nothing to revoke.
@@ -330,18 +348,22 @@ authRouter.post(
   '/change-password',
   authenticate,
   ah(async (req, res) => {
-    const { currentPassword, newPassword } = req.body as { currentPassword?: string; newPassword?: string };
-    if (!newPassword || newPassword.length < 12) {
+    const body = (req.body ?? {}) as { currentPassword?: unknown; newPassword?: unknown };
+    if (typeof body.currentPassword !== 'string' || !body.currentPassword) {
+      throw new HttpError(400, 'Current password is required.');
+    }
+    if (typeof body.newPassword !== 'string' || body.newPassword.length < 12) {
       throw new HttpError(400, 'New password must be at least 12 characters.');
     }
 
     const row = stmtGetUserByIdFull.get(req.user!.userId) as UserRow | undefined;
     if (!row) throw new HttpError(404, 'User not found.');
-    if (!currentPassword || !(await verifyPassword(currentPassword, row.password_hash))) {
+    if (!(await verifyPassword(body.currentPassword, row.password_hash))) {
       throw new HttpError(401, 'Current password is incorrect.');
     }
-    const newHash = await hashPassword(newPassword);
-    stmtUpdatePassword.run(newHash, row.id);
+    const newHash = await hashPassword(body.newPassword);
+    const changed = stmtUpdatePassword.run(newHash, row.id, row.session_version);
+    if (changed.changes !== 1) throw new HttpError(409, 'Password changed concurrently. Please sign in again.');
     const nextSessionVersion = row.session_version + 1;
     const renewedToken = signToken({
       userId: row.id, username: row.username, branchId: row.branch_id,

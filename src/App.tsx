@@ -145,7 +145,9 @@ function AuthenticatedApp() {
     return () => { Object.values(timers).forEach(clearTimeout); };
   }, [toastTimers]);
 
-  const activeRole = (store.settings.currentRoleId || user?.role || 'registrar') as UserRole;
+  // Identity is server-resolved. A mutable settings value must never impersonate
+  // a position in frontend authorization checks.
+  const activeRole = (user?.role || 'receptionist') as UserRole;
   const activeBranchId = store.settings.currentBranchId;
   // ── RBAC + role-based tab guard ─────────────────────────────────────
   const isTabAllowed = useCallback(
@@ -249,7 +251,7 @@ function AuthenticatedApp() {
             advanceVisitorStage={store.advanceVisitorStage} registerVisitorToStudent={store.registerVisitorToStudent}
             visitorSummary={store.visitorSummary} visitorQuery={store.visitorQuery}
             checkConversionEligibility={store.checkConversionEligibility} checkDuplicateLeads={store.checkDuplicateLeads}
-            permissionCodes={user?.permissions ? Array.from(user.permissions) : undefined} activeRole={activeRole}
+            permissionCodes={user?.permissions ? Array.from(user.permissions) : undefined}
           />
         );
       case 'students':
@@ -259,7 +261,7 @@ function AuthenticatedApp() {
             studentBalances={store.studentBalances} attendanceSummary={store.attendanceSummary}
             studentSummary={store.studentSummary}
             exams={store.exams} examResults={store.examResults} attendance={store.attendance} activeRole={activeRole}
-            branches={store.settings.branches} activeBranchId={activeBranchId}
+            isGlobalOwner={user?.isGlobalOwner ?? false} branches={store.settings.branches} activeBranchId={activeBranchId}
             books={store.books} 
             addStudentManual={store.addStudentManual} updateStudentStatus={store.updateStudentStatus} updateStudent={store.updateStudent}
             recordFeePayment={store.recordFeePayment} enrollStudentSemester={store.enrollStudentSemester} issueStudentCard={store.issueStudentCard}
@@ -269,7 +271,7 @@ function AuthenticatedApp() {
         return (
           <ClassesView
             classes={store.classes} teachers={store.teachers} students={store.students} activeRole={activeRole}
-            onOpenTimetable={(classId) => { try { sessionStorage.setItem('erp.openSessionsClassId', classId); } catch { /* sessionStorage may be unavailable in private/restricted contexts */ } setCurrentTab('sessions'); }}
+            isGlobalOwner={user?.isGlobalOwner ?? false} onOpenTimetable={(classId) => { try { sessionStorage.setItem('erp.openSessionsClassId', classId); } catch { /* sessionStorage may be unavailable in private/restricted contexts */ } setCurrentTab('sessions'); }}
             branchId={activeBranchId} addClass={store.addClass} editClass={store.editClass} deleteClass={store.deleteClass}
             mergeClass={store.mergeClass} getClassMergeCandidates={store.getClassMergeCandidates} skills={store.skills}
             classTeacherSkills={store.classTeacherSkills} addSkill={store.addSkill} assignTeacherSkill={store.assignTeacherSkill}
@@ -283,12 +285,12 @@ function AuthenticatedApp() {
           />
         );
       case 'sessions':
-        return <SessionsView sessions={store.sessions} classes={store.classes} students={store.students} teachers={store.teachers} skills={store.skills} classTeacherSkills={store.classTeacherSkills} activeRole={activeRole} activeBranchId={activeBranchId} />;
+        return <SessionsView sessions={store.sessions} classes={store.classes} students={store.students} teachers={store.teachers} skills={store.skills} classTeacherSkills={store.classTeacherSkills} activeRole={activeRole} isGlobalOwner={user?.isGlobalOwner ?? false} activeBranchId={activeBranchId} />;
       case 'teachers':
         return (
           <TeachersView
             teachers={store.teachers} employees={store.employees} classes={store.classes} budgetLines={store.budgetLines}
-            activeRole={activeRole} skills={store.skills} classTeacherSkills={store.classTeacherSkills} addTeacher={store.addTeacher}
+            activeRole={activeRole} isGlobalOwner={user?.isGlobalOwner ?? false} skills={store.skills} classTeacherSkills={store.classTeacherSkills} addTeacher={store.addTeacher}
             editTeacher={store.editTeacher} deleteTeacher={store.deleteTeacher} transferTeacher={store.transferTeacher}
             getTeacherSalaryStatus={store.getTeacherSalaryStatus} branches={store.settings.branches} campuses={store.settings.campuses || store.campuses || []}
             currentBranchId={activeBranchId} payTeacherSalary={store.payTeacherSalary} addEmployee={store.addEmployee} editEmployee={store.editEmployee}
@@ -304,7 +306,8 @@ function AuthenticatedApp() {
             examResults={store.examResults} 
             students={store.students} 
             visitors={store.visitors} 
-            activeRole={activeRole} 
+            activeRole={activeRole}
+            isGlobalOwner={user?.isGlobalOwner ?? false}
             registerExam={store.registerExam} 
             editExam={store.editExam}
             deleteExam={store.deleteExam}
@@ -319,7 +322,7 @@ function AuthenticatedApp() {
           <FinanceView
             budgetLines={store.budgetLines} financeCategories={store.financeCategories} createBudgetLine={store.createBudgetLine} expenseRequests={store.expenseRequests} transactions={store.transactions}
             mainAccountBalance={store.mainAccountBalance} savingBalance={store.savingBalance} activeRole={activeRole}
-            chargeBudget={store.chargeBudget} createExpenseRequest={store.createExpenseRequest} recordOperationalPayment={store.recordOperationalPayment}
+            isGlobalOwner={user?.isGlobalOwner ?? false} chargeBudget={store.chargeBudget} createExpenseRequest={store.createExpenseRequest} recordOperationalPayment={store.recordOperationalPayment}
             getExpenseReport={store.getExpenseReport} updateExpenseAutoApproveThreshold={store.updateExpenseAutoApproveThreshold}
             expenseAutoApproveThreshold={store.expenseAutoApproveThreshold} invoices={store.invoices} students={store.students}
             financeConfig={store.financeConfig} permissionCodes={user?.permissions ? Array.from(user.permissions) : undefined} financeReconciliation={store.financeReconciliation} financeDashboard={store.financeDashboard} isTabLoading={store.isTabLoading} reloadFinanceDashboard={store.reloadFinanceDashboard} ensureFinanceSection={store.ensureFinanceSection} createInvoice={store.createInvoice} issueInvoice={store.issueInvoice} payInvoice={store.payInvoice}
@@ -333,7 +336,7 @@ function AuthenticatedApp() {
           <FundingView
             students={store.students} donors={store.donors} campaigns={store.fundingCampaigns} donations={store.donations}
             scholarships={store.scholarships} scholarshipAwards={store.scholarshipAwards} sponsorships={store.sponsorships} activeRole={activeRole}
-            addDonor={store.addDonor} editDonor={store.editDonor} addFundingCampaign={store.addFundingCampaign} recordDonation={store.recordDonation}
+            isGlobalOwner={user?.isGlobalOwner ?? false} addDonor={store.addDonor} editDonor={store.editDonor} addFundingCampaign={store.addFundingCampaign} recordDonation={store.recordDonation}
             addScholarship={store.addScholarship} awardScholarship={store.awardScholarship} addSponsorship={store.addSponsorship}
           />
         );
@@ -344,15 +347,15 @@ function AuthenticatedApp() {
       case 'impact':
         return <ImpactView reports={store.impactReports} generateReport={store.generateImpactReport} />;
       case 'books':
-        return <BooksView issuer={resolveDocumentIssuer(store.settings.branches.find((b) => b.id === activeBranchId))} books={store.books} bookSales={store.bookSales} students={store.students} recordBookSale={store.recordBookSale} addBook={store.addBook} editBook={store.editBook} deleteBook={store.deleteBook} refundBookSale={store.refundBookSale} activeRole={activeRole} />;
+        return <BooksView issuer={resolveDocumentIssuer(store.settings.branches.find((b) => b.id === activeBranchId))} books={store.books} bookSales={store.bookSales} students={store.students} recordBookSale={store.recordBookSale} addBook={store.addBook} editBook={store.editBook} deleteBook={store.deleteBook} refundBookSale={store.refundBookSale} activeRole={activeRole} isGlobalOwner={user?.isGlobalOwner ?? false} />;
       case 'workflows':
-        return <WorkflowsView instances={store.workflows} automations={store.automations} activeRole={activeRole} approveWorkflowStep={store.approveWorkflowStep} rejectWorkflowStep={store.rejectWorkflowStep} getWorkflowInstanceDetail={store.getWorkflowInstanceDetail} toggleAutomation={store.toggleAutomation} />;
+        return <WorkflowsView instances={store.workflows} automations={store.automations} activeRole={activeRole} isGlobalOwner={user?.isGlobalOwner ?? false} approveWorkflowStep={store.approveWorkflowStep} rejectWorkflowStep={store.rejectWorkflowStep} getWorkflowInstanceDetail={store.getWorkflowInstanceDetail} toggleAutomation={store.toggleAutomation} />;
       case 'rules':
-        return <RulesManagementView businessRules={store.businessRules} activeRole={activeRole} reloadBusinessRules={store.reloadBusinessRules} createBusinessRule={store.createBusinessRule} updateBusinessRule={store.updateBusinessRule} deactivateBusinessRule={store.deactivateBusinessRule} deleteBusinessRule={store.deleteBusinessRule} rollbackBusinessRule={store.rollbackBusinessRule} getBusinessRuleVersions={store.getBusinessRuleVersions} evaluateBusinessRules={store.evaluateBusinessRules} triggerToast={triggerToast} />;
+        return <RulesManagementView businessRules={store.businessRules} activeRole={activeRole} isGlobalOwner={user?.isGlobalOwner ?? false} reloadBusinessRules={store.reloadBusinessRules} createBusinessRule={store.createBusinessRule} updateBusinessRule={store.updateBusinessRule} deactivateBusinessRule={store.deactivateBusinessRule} deleteBusinessRule={store.deleteBusinessRule} rollbackBusinessRule={store.rollbackBusinessRule} getBusinessRuleVersions={store.getBusinessRuleVersions} evaluateBusinessRules={store.evaluateBusinessRules} triggerToast={triggerToast} />;
       case 'audit':
         return <AuditLogView />;
       case 'academic-setup':
-        return <AcademicSetupView branchId={activeBranchId} activeRole={activeRole} permissionCodes={user?.permissions ? Array.from(user.permissions) : undefined} />;
+        return <AcademicSetupView branchId={activeBranchId} permissionCodes={user?.permissions ? Array.from(user.permissions) : undefined} />;
       case 'test-bank':
         return <TestBankAdminView triggerToast={triggerToast} />;
       case 'settings':
@@ -363,7 +366,7 @@ function AuthenticatedApp() {
             addPartner={store.addPartner}
             editPartner={store.editPartner}
             deletePartner={store.deletePartner}
-            activeRole={activeRole} onOpenAcademicSetup={() => handleTabChange('academic-setup')} listUserAccounts={store.listUserAccounts}
+            isGlobalOwner={user?.isGlobalOwner ?? false} permissionCodes={user?.permissions} onOpenAcademicSetup={() => handleTabChange('academic-setup')} listUserAccounts={store.listUserAccounts}
             createUserAccount={store.createUserAccount} resetUserPassword={store.resetUserPassword} createCampus={store.createCampus}
             updateCampus={store.updateCampus} deactivateCampus={store.deactivateCampus} deleteCampus={store.deleteCampus} createBranch={store.createBranch}
             updateBranch={store.updateBranch} deactivateBranch={store.deactivateBranch} deleteBranch={store.deleteBranch}
@@ -421,7 +424,7 @@ function AuthenticatedApp() {
 
       <Sidebar
         currentTab={effectiveTab} setCurrentTab={handleTabChange} activeRole={activeRole} onLogout={logout}
-        activeBranchId={activeBranchId} changeBranch={store.changeBranch} canPickBranch={activeRole === 'owner' || activeRole === 'general_manager'}
+        activeBranchId={activeBranchId} changeBranch={store.changeBranch} canPickBranch={(user?.isGlobalOwner ?? false) || activeRole === 'general_manager'}
         branches={store.settings.branches} campuses={store.settings.campuses || store.campuses || []} currentBranchName={store.currentBranchName}
         isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} tabAccess={user?.tabAccess}
       />

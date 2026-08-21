@@ -29,6 +29,7 @@ interface BooksViewProps {
   deleteBook: (id: string) => Promise<void>;
   refundBookSale: (saleId: string) => Promise<void>;
   activeRole: UserRole;
+  isGlobalOwner: boolean;
   /** Contact details of the issuing branch, for printed receipts. */
   issuer: DocumentIssuer;
 }
@@ -43,6 +44,7 @@ export default function BooksView({
   deleteBook,
   refundBookSale,
   activeRole,
+  isGlobalOwner,
   issuer
 }: BooksViewProps) {
   /** Change in Settings later; default alert when stock <= this. */
@@ -252,8 +254,8 @@ export default function BooksView({
     }
   };
 
-  const isAuthorizedToManage = activeRole === 'owner' || activeRole === 'general_manager' || activeRole === 'receptionist' || activeRole === 'finance_manager';
-  const isOwnerOrManager = activeRole === 'owner' || activeRole === 'general_manager';
+  const isAuthorizedToManage = isGlobalOwner || activeRole === 'general_manager' || activeRole === 'receptionist' || activeRole === 'finance_manager';
+  const isOwnerOrManager = isGlobalOwner || activeRole === 'general_manager';
 
   // Dynamic Metrics & Totals
   const totalDistinctBooks = books.length;

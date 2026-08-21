@@ -48,16 +48,16 @@
  * route — `isGlobalOwner` and `canAccessBranchResource` — rather than adding a
  * parallel notion of who is privileged.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog, buildRbacContext, isGlobalOwner, canAccessAllBranches } from '../core/rbac/rbac-service.js';
-import securityRouter from '../routes/security.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { id } from '../utils/ids.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import { bootstrapRbacCatalog, buildRbacContext, isGlobalOwner, canAccessAllBranches } from '../../../core/rbac/rbac-service.js';
+import securityRouter from '../../../routes/security.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { id } from '../../../utils/ids.js';
 
 const BRANCH_A = 'secg_a';
 const BRANCH_B = 'secg_b';

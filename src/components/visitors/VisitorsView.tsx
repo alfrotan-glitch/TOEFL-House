@@ -44,8 +44,6 @@ interface VisitorsViewProps {
   visitorQuery?: VisitorQuery;
   /** Effective permission codes for the signed-in user (UX-4). */
   permissionCodes?: string[];
-  /** Signed-in role; 'owner' implies every permission. */
-  activeRole?: string;
   advanceVisitorStage: (visitorId: string, stage?: Visitor['stage']) => Promise<void>;
   registerVisitorToStudent: (
     visitorId: string, classId: string, amountPaid: number, discountPercent: number, notes?: string,
@@ -60,7 +58,7 @@ interface VisitorsViewProps {
 
 export default function VisitorsView({
   visitors, classes, branches, activeBranchId, addVisitor, updateVisitorCRM, addVisitorFollowUp,
-  updateVisitor, reloadVisitors, visitorSummary, visitorQuery, permissionCodes, activeRole,
+  updateVisitor, reloadVisitors, visitorSummary, visitorQuery, permissionCodes,
   advanceVisitorStage, registerVisitorToStudent, checkConversionEligibility, checkDuplicateLeads, programVersions = []
 }: VisitorsViewProps) {
   const { courseOptions } = useAcademicOptions(classes, activeBranchId);

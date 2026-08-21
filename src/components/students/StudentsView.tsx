@@ -28,6 +28,7 @@ interface StudentsViewProps {
   examResults: ExamResult[];
   attendance: Attendance[];
   activeRole: UserRole;
+  isGlobalOwner: boolean;
   branches: Branch[];
   activeBranchId: string;
   addStudentManual: (fullName: string, phone: string, email: string, gender: 'male' | 'female', discountPercent: number, notes?: string, classId?: string, tuitionAmount?: number, fatherName?: string, addressRegion?: string, tazkiraNo?: string, whatsapp?: string, dob?: string, schoolOrUniversity?: string, emergencyContactName?: string, emergencyContactPhone?: string, amountPaidNow?: number, branchId?: string) => void;
@@ -44,7 +45,7 @@ interface StudentsViewProps {
 export default function StudentsView({
   attendanceSummary,
   studentBalances,
-  students, visitors = [], classes, payments, exams, examResults, attendance, activeRole, branches, activeBranchId,
+  students, visitors = [], classes, payments, exams, examResults, attendance, activeRole, isGlobalOwner, branches, activeBranchId,
   addStudentManual, updateStudentStatus, updateStudent, enrollStudentSemester, issueStudentCard, books = [],
   studentSummary = null
 }: StudentsViewProps) {
@@ -86,8 +87,8 @@ export default function StudentsView({
   const [refundAmount, setRefundAmount] = useState(0);
   const [refundReason, setRefundReason] = useState('');
 
-  const isRegistrar = activeRole === 'receptionist' || activeRole === 'owner' || activeRole === 'general_manager';
-  const isOwnerOrManager = activeRole === 'owner' || activeRole === 'general_manager';
+  const isRegistrar = activeRole === 'receptionist' || isGlobalOwner || activeRole === 'general_manager';
+  const isOwnerOrManager = isGlobalOwner || activeRole === 'general_manager';
 
   const [classFilter, setClassFilter] = useState<string>('all');
   // Whole-database server search: when any filter/search is active we query

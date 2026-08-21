@@ -77,7 +77,7 @@ export default function DashboardView({
 }: DashboardViewProps) {
   const { user } = useAuth();
   const role = activeRole as string;
-  const isAuthorized = role === 'owner' || role === 'general_manager';
+  const isAuthorized = !!user?.isGlobalOwner || role === 'general_manager';
 
   const [mainTab, setMainTab] = useState<'overview' | 'bos' | 'analytics'>('overview');
   const [timeframe, setTimeframe] = useState<'today' | 'month' | 'year'>('month');
@@ -349,7 +349,7 @@ export default function DashboardView({
             getExecutiveDashboard={getExecutiveDashboard} getMarketingFunnel={getMarketingFunnel}
             getStudentAnalytics={getStudentAnalytics} getDecisionWarnings={getDecisionWarnings}
             getProfitDistribution={getProfitDistribution} withdrawProfitDistribution={withdrawProfitDistribution}
-            isOwner={role === 'owner'} triggerToast={triggerToast}
+            isOwner={!!user?.isGlobalOwner} triggerToast={triggerToast}
           />
         ) : mainTab === 'analytics' ? (
           <div className="space-y-6 animate-in fade-in duration-500">

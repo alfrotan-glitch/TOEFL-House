@@ -4,23 +4,23 @@
  * Regression coverage for branch/campus/global configuration boundaries that
  * are not covered by the P0 isolation suite.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { id } from '../utils/ids.js';
-import { academicRouter } from '../routes/academic.routes.js';
-import { campusesRouter, branchesRouter, partnersRouter } from '../routes/branches.routes.js';
-import { automationsRouter } from '../routes/automations.routes.js';
-import { workflowsRouter } from '../routes/workflows.routes.js';
-import { rulesRouter } from '../routes/rules.routes.js';
-import { eventsRouter } from '../routes/events.routes.js';
-import { bosRouter } from '../routes/bos.routes.js';
-import { setSetting } from '../utils/settings.js';
-import { errorHandler } from '../middleware/errorHandler.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import { id } from '../../../utils/ids.js';
+import { academicRouter } from '../../../routes/academic.routes.js';
+import { campusesRouter, branchesRouter, partnersRouter } from '../../../routes/branches.routes.js';
+import { automationsRouter } from '../../../routes/automations.routes.js';
+import { workflowsRouter } from '../../../routes/workflows.routes.js';
+import { rulesRouter } from '../../../routes/rules.routes.js';
+import { eventsRouter } from '../../../routes/events.routes.js';
+import { bosRouter } from '../../../routes/bos.routes.js';
+import { setSetting } from '../../../utils/settings.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
 
 const A = 'p1_branch_a';
 const B = 'p1_branch_b';

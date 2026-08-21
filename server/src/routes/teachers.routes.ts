@@ -37,14 +37,14 @@ interface TeacherRow {
   base_salary: number; salary_type: string; performance_score: number;
   status: string; branch_id: string; joined_date: string;
   specialization: string | null; qualification: string | null;
-  contract_type: string | null; default_skill_rate: number; user_id: string | null;
+  contract_type: string | null; default_skill_rate: number;
   target_skills_per_month?: number;
 }
 
 interface EmployeeRow {
   id: string; full_name: string; phone: string | null; email: string | null;
   role: string; base_salary: number; status: string; branch_id: string;
-  joined_date: string; user_id: string | null;
+  joined_date: string;
 }
 
 interface BudgetRow {
@@ -113,7 +113,6 @@ const stmtInsertEmployee = db.prepare(`INSERT INTO employees (id, full_name, pho
 const stmtUpdateEmployee = db.prepare(`UPDATE employees SET full_name=?, phone=?, email=?, role=?, base_salary=?, status=? WHERE id=?`);
 const stmtUpdateEmployeeBranch = db.prepare('UPDATE employees SET branch_id = ? WHERE id = ?');
 const stmtUpdateUserBranchForEmployee = db.prepare('UPDATE users SET branch_id = ? WHERE linked_employee_id = ?');
-const stmtUpdateUserBranchById = db.prepare('UPDATE users SET branch_id = ? WHERE id = ?');
 const stmtSoftDeleteEmployee = db.prepare("UPDATE employees SET status = 'inactive' WHERE id = ?");
 
 // ── EMPLOYEE PAYROLL LEDGER (teacher audit T-1) ────────────────────────────
@@ -148,7 +147,7 @@ function mapTeacher(row: TeacherRow | undefined) {
     id: row.id, fullName: row.full_name, phone: row.phone, email: row.email, baseSalary: row.base_salary, 
     salaryType: row.salary_type, performanceScore: row.performance_score, status: row.status, branchId: row.branch_id, 
     joinedDate: row.joined_date, specialization: row.specialization, qualification: row.qualification, 
-    contractType: row.contract_type, defaultSkillRate: row.default_skill_rate ?? 0, userId: row.user_id,
+    contractType: row.contract_type, defaultSkillRate: row.default_skill_rate ?? 0,
     targetSkillsPerMonth: row.target_skills_per_month ?? 0
   };
 }
@@ -157,7 +156,7 @@ function mapEmployee(row: EmployeeRow | undefined) {
   if (!row) return row;
   return { 
     id: row.id, fullName: row.full_name, phone: row.phone, email: row.email, role: row.role, 
-    baseSalary: row.base_salary, status: row.status, branchId: row.branch_id, joinedDate: row.joined_date, userId: row.user_id 
+    baseSalary: row.base_salary, status: row.status, branchId: row.branch_id, joinedDate: row.joined_date
   };
 }
 
@@ -687,7 +686,6 @@ employeesRouter.post('/:id/transfer', requirePermission('Employee.Edit'), ah(asy
   const tx = db.transaction(() => {
     stmtUpdateEmployeeBranch.run(targetBranchId, employee.id);
     stmtUpdateUserBranchForEmployee.run(targetBranchId, employee.id);
-    if (employee.user_id) stmtUpdateUserBranchById.run(targetBranchId, employee.user_id);
   });
   tx();
 

@@ -23,6 +23,7 @@ interface ClassesViewProps {
   teachers: Teacher[];
   students: Student[];
   activeRole: UserRole;
+  isGlobalOwner: boolean;
   branchId?: string;
   addClass: (
     name: string, teacherId: string, level: string, capacity: number,
@@ -61,7 +62,7 @@ interface ClassesViewProps {
 }
 
 export default function ClassesView({
-  classes, teachers, students, activeRole, branchId,
+  classes, teachers, students, activeRole, isGlobalOwner, branchId,
   addClass, editClass, deleteClass, mergeClass, getClassMergeCandidates,
   onOpenTimetable, skills, classTeacherSkills, addSkill,
   assignTeacherSkill, editTeacherSkillRate, removeTeacherSkill,
@@ -129,9 +130,9 @@ export default function ClassesView({
   const [editingRateFor, setEditingRateFor] = useState<string | null>(null);
   const [editingRateValue, setEditingRateValue] = useState<number | ''>('');
 
-  const isOwnerOrManager = activeRole === 'owner' || activeRole === 'general_manager';
-  const canManageSkillTeachers = ['owner', 'manager', 'head_of_department'].includes(activeRole);
-  const isTeacherOrAdmin = ['owner', 'manager', 'registrar', 'head_of_department', 'teacher'].includes(activeRole);
+  const isOwnerOrManager = isGlobalOwner || activeRole === 'general_manager';
+  const canManageSkillTeachers = isGlobalOwner || ['general_manager', 'head_of_department'].includes(activeRole);
+  const isTeacherOrAdmin = isGlobalOwner || ['general_manager', 'receptionist', 'head_of_department', 'teacher'].includes(activeRole);
 
   /** PERFORMANCE FIX: O(1) lookup for student counts per class */
 

@@ -74,7 +74,7 @@ function ToggleActive({ active, onToggle, disabled }: { active: boolean; onToggl
   );
 }
 
-export default function AcademicSetupView({ branchId, activeRole, permissionCodes }: { branchId?: string; activeRole?: string; permissionCodes?: string[] } = {}) {
+export default function AcademicSetupView({ branchId, permissionCodes }: { branchId?: string; permissionCodes?: string[] } = {}) {
   // Capability is read from the same permission list the rest of the app uses
   // (see FinanceView's `hasPermissionCode`) instead of being assumed from the
   // fact that the tab rendered at all.
@@ -90,7 +90,9 @@ export default function AcademicSetupView({ branchId, activeRole, permissionCode
   // re-deriving capability from role names. `owner` is special-cased only
   // because the server grants it a global bypass in `requirePermission`.
   const invalidate = useInvalidate();
-  const hasPermissionCode = (code: string) => activeRole === 'owner' || (permissionCodes?.includes(code) ?? false);
+  // The server reports the global Owner's bypass in this effective set. Never
+  // recreate it from a role label: a scoped Owner is not globally privileged.
+  const hasPermissionCode = (code: string) => permissionCodes?.includes(code) ?? false;
   /** Terms, time slots, rooms, programs, levels — `AcademicSetup.Edit`. */
   const canEditAcademicInfrastructure = hasPermissionCode('AcademicSetup.Edit');
   /** Program versions, subjects, modules — `Curriculum.Author`. */

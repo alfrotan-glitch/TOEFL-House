@@ -24,6 +24,11 @@ import { getEnrollmentService } from '../core/academic/enrollment-service.js';
 import { assertClassGenderAllows } from '../core/academic/class-admission.js';
 import { ACTIVE_ENROLLMENT_STATUSES } from '../core/academic/class-capacity.js';
 import type { RoleCode } from '../core/rbac/permission-catalog.js';
+import {
+  canAccessAllBranchesForRequirement,
+  canAccessBranchForRequirement,
+  hasPermissionForBranchWithActionScopes,
+} from '../core/rbac/rbac-service.js';
 import { ACADEMIC_DEFAULTS } from '../core/configuration/policy-catalog.js';
 import { createLogger } from '../core/observability/logger.js';
 const log = createLogger('classes');
@@ -78,6 +83,7 @@ interface RosterRow {
 
 // ── Performance Optimization: Prepared Statements ──────────────────────────
 const stmtGetClassById = db.prepare('SELECT * FROM classes WHERE id = ?');
+const stmtGetLinkedTeacherForAttendance = db.prepare('SELECT linked_teacher_id AS teacherId FROM users WHERE id = ?');
 
 const stmtGetAllClasses = db.prepare(`
   SELECT c.*, (SELECT COUNT(DISTINCT e.student_id) FROM enrollments e WHERE e.class_id = c.id AND e.status IN ('active','confirmed','pending')) as enrolled_count
@@ -377,8 +383,19 @@ classesRouter.get(
 
   requirePermission('Class.View'),
   ah(async (req, res) => {
-    const { branchId, isAll } = resolveBranchScope(req);
-    const rows = (isAll ? stmtGetAllClasses.all() : stmtGetClassesByBranch.all(branchId)) as ClassRow[];
+    const { branchId, isAll } = resolveBranchScope(req, { ignoreAccessRequirement: true });
+    let rows = (isAll ? stmtGetAllClasses.all() : stmtGetClassesByBranch.all(branchId)) as ClassRow[];
+    const hasBroadScope = req.rbac && (isAll
+      ? canAccessAllBranchesForRequirement(req.rbac, { permissionCodes: ['Class.View'] })
+      : !!branchId && canAccessBranchForRequirement(db, req.rbac, branchId, { permissionCodes: ['Class.View'] }));
+    if (!hasBroadScope) {
+      if (!req.rbac || !branchId || !hasPermissionForBranchWithActionScopes(
+        db, req.rbac, branchId, ['Class.View'], ['class', 'own'],
+      )) throw new HttpError(403, 'No authorized class scope is available for this request.');
+      const linked = stmtGetLinkedTeacherForAttendance.get(req.user?.userId) as { teacherId: string | null } | undefined;
+      if (!linked?.teacherId) throw new HttpError(403, 'Teacher account is not linked to a teacher profile.');
+      rows = rows.filter((row) => row.teacher_id === linked.teacherId);
+    }
 
     // PAGINATION CONTRACT (audit C-7). This endpoint ACCEPTED `limit`/`offset`
     // and silently ignored them: `?limit=10` against 326 classes returned all
@@ -1340,9 +1357,28 @@ classesRouter.get('/:id/promotion/pending-review', authorize('owner', 'general_m
 // §5 — DAY-LEVEL ATTENDANCE (session-scoped marking lives in sessions.routes)
 // ============================================================================
 
+function resolveAttendanceReadScope(req: import('express').Request): {
+  branchId: string | null;
+  isAll: boolean;
+  teacherId: string | null;
+} {
+  const { branchId, isAll } = resolveBranchScope(req, { ignoreAccessRequirement: true });
+  if (!req.rbac) throw new HttpError(403, 'Authorization context is unavailable.');
+  const broad = isAll
+    ? canAccessAllBranchesForRequirement(req.rbac, { permissionCodes: ['Attendance.View'] })
+    : !!branchId && canAccessBranchForRequirement(db, req.rbac, branchId, { permissionCodes: ['Attendance.View'] });
+  if (broad) return { branchId, isAll, teacherId: null };
+  if (!branchId || !hasPermissionForBranchWithActionScopes(
+    db, req.rbac, branchId, ['Attendance.View'], ['class', 'own'],
+  )) throw new HttpError(403, 'No authorized attendance scope is available for this request.');
+  const linked = stmtGetLinkedTeacherForAttendance.get(req.user?.userId) as { teacherId: string | null } | undefined;
+  if (!linked?.teacherId) throw new HttpError(403, 'Teacher account is not linked to a teacher profile.');
+  return { branchId, isAll: false, teacherId: linked.teacherId };
+}
+
 attendanceRouter.post(
   '/',
-  authorize('receptionist', 'general_manager', 'teacher', 'head_of_department'),
+  requirePermission('Attendance.Edit'),
   ah(async (req, res) => {
     const { date, records } = req.body as {
       date: string;
@@ -1353,7 +1389,46 @@ attendanceRouter.post(
     }
 
     const userBranchId = req.user?.branchId;
-    if (!userBranchId) throw new HttpError(403, 'User branch context is missing.');
+    if (!userBranchId || !req.rbac) throw new HttpError(403, 'User branch context is missing.');
+
+    const hasBroadScope = canAccessBranchForRequirement(
+      db, req.rbac, userBranchId, { permissionCodes: ['Attendance.Edit'] },
+    );
+    const hasOwnScope = hasPermissionForBranchWithActionScopes(
+      db, req.rbac, userBranchId, ['Attendance.Edit'], ['class', 'own'],
+    );
+    if (!hasBroadScope && !hasOwnScope) {
+      throw new HttpError(403, 'No authorized attendance scope is available for this request.');
+    }
+    const linked = !hasBroadScope
+      ? stmtGetLinkedTeacherForAttendance.get(req.user?.userId) as { teacherId: string | null } | undefined
+      : undefined;
+    if (!hasBroadScope && !linked?.teacherId) {
+      throw new HttpError(403, 'Teacher account is not linked to a teacher profile.');
+    }
+
+    for (const record of records) {
+      if (record.targetType === 'student') {
+        const student = db.prepare('SELECT branch_id AS branchId FROM students WHERE id = ?').get(record.targetId) as { branchId: string } | undefined;
+        if (!student || student.branchId !== userBranchId) throw new HttpError(403, 'Student is outside your authorized branch.');
+        if (!hasBroadScope) {
+          if (!record.classId) throw new HttpError(403, 'Class-scoped attendance requires a class.');
+          assertClassAccess(req, record.classId);
+          const enrolled = db.prepare(`SELECT 1 FROM (
+            SELECT student_id, class_id FROM student_semesters WHERE status IN ('active','deferred')
+            UNION ALL
+            SELECT student_id, class_id FROM enrollments WHERE status IN ('active','confirmed','pending')
+          ) WHERE student_id = ? AND class_id = ? LIMIT 1`).get(record.targetId, record.classId);
+          if (!enrolled) throw new HttpError(403, 'Student is not enrolled in the authorized class.');
+        }
+      } else {
+        const teacher = db.prepare('SELECT branch_id AS branchId FROM teachers WHERE id = ?').get(record.targetId) as { branchId: string } | undefined;
+        if (!teacher || teacher.branchId !== userBranchId) throw new HttpError(403, 'Teacher is outside your authorized branch.');
+        if (!hasBroadScope && record.targetId !== linked?.teacherId) {
+          throw new HttpError(403, 'You can only record your own teacher attendance.');
+        }
+      }
+    }
 
     const insertAttendanceTx = db.transaction(() => {
       const stmtDeleteAttendanceByDateAndTarget = db.prepare(
@@ -1377,7 +1452,7 @@ attendanceRouter.get(
   requirePermission('Attendance.View'),
   ah(async (req, res) => {
     const { targetId, date, from, to } = req.query as Record<string, string>;
-    const { branchId, isAll } = resolveBranchScope(req);
+    const { branchId, isAll, teacherId } = resolveAttendanceReadScope(req);
 
     let query = 'SELECT * FROM attendance WHERE 1=1';
     const params: string[] = [];
@@ -1385,6 +1460,11 @@ attendanceRouter.get(
     if (!isAll && branchId) {
       query += ' AND branch_id = ?';
       params.push(branchId);
+    }
+    if (teacherId) {
+      query += ` AND ((target_type = 'teacher' AND target_id = ?)
+        OR (target_type = 'student' AND class_id IN (SELECT id FROM classes WHERE teacher_id = ?)))`;
+      params.push(teacherId, teacherId);
     }
     if (targetId) {
       query += ' AND target_id = ?';
@@ -1430,7 +1510,7 @@ attendanceRouter.get(
   '/summary',
   requirePermission('Attendance.View'),
   ah(async (req, res) => {
-    const { branchId, isAll } = resolveBranchScope(req);
+    const { branchId, isAll, teacherId } = resolveAttendanceReadScope(req);
     const targetId = typeof req.query.targetId === 'string' ? req.query.targetId.trim() : '';
 
     // Bounded like the roster it annotates; a single-student lookup passes
@@ -1442,6 +1522,10 @@ attendanceRouter.get(
     const clauses: string[] = ["target_type = 'student'"];
     const params: unknown[] = [];
     if (!isAll && branchId) { clauses.push('branch_id = ?'); params.push(branchId); }
+    if (teacherId) {
+      clauses.push(`class_id IN (SELECT id FROM classes WHERE teacher_id = ?)`);
+      params.push(teacherId);
+    }
     if (targetId) { clauses.push('target_id = ?'); params.push(targetId); }
 
     const rows = db.prepare(`

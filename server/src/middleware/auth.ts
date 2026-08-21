@@ -1,7 +1,11 @@
 import type { Request, Response, NextFunction } from 'express';
 import { verifyToken, TokenPayload } from '../utils/auth.js';
 import { db } from '../db/connection.js';
-import { buildRbacContext, hasPermission, hasAnyPermission, hasAnyRole, hasRole, isGlobalOwner, canAccessBranch, canAccessAllBranches, type RbacUserContext } from '../core/rbac/rbac-service.js';
+import {
+  buildRbacContext, hasAnyPermission, hasRole, isGlobalOwner,
+  canAccessBranchForRequirement, canAccessAllBranchesForRequirement,
+  type BranchAccessRequirement, type RbacUserContext,
+} from '../core/rbac/rbac-service.js';
 import type { RoleCode } from '../core/rbac/permission-catalog.js';
 import { HttpError } from './errorHandler.js';
 
@@ -11,6 +15,7 @@ declare global {
     interface Request {
       user?: TokenPayload;
       rbac?: RbacUserContext;
+      branchAccessRequirement?: BranchAccessRequirement;
     }
   }
 }
@@ -124,6 +129,13 @@ export function requestHasAnyRole(req: Request, roles: RoleCode[]): boolean {
   return roles.some((role) => requestHasRole(req, role));
 }
 
+function addBranchAccessRequirement(req: Request, requirement: BranchAccessRequirement): void {
+  req.branchAccessRequirement = {
+    roleCodes: Array.from(new Set([...(req.branchAccessRequirement?.roleCodes ?? []), ...(requirement.roleCodes ?? [])])),
+    permissionCodes: Array.from(new Set([...(req.branchAccessRequirement?.permissionCodes ?? []), ...(requirement.permissionCodes ?? [])])),
+  };
+}
+
 export function authorize(...roles: RoleCode[]) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return res.status(401).json({ error: 'Not authenticated.' });
@@ -135,6 +147,7 @@ export function authorize(...roles: RoleCode[]) {
     // route lists therefore implicitly include the owner; business-rule gates
     // (grade locks, rescore guards, cancellation reasons, etc.) still apply
     // independently of this role check.
+    addBranchAccessRequirement(req, { roleCodes: roles });
     if (req.rbac && isGlobalOwner(req.rbac)) return next();
     if (requestHasAnyRole(req, roles)) return next();
     return res.status(403).json({ error: 'You do not have permission to perform this operation.' });
@@ -163,6 +176,7 @@ export function requirePermission(...codes: string[]) {
     // access (Owner model): role-gated routes grant the owner through authorize();
     // permission-gated routes must not exclude the owner merely because the
     // catalog omits a code for audit documentation purposes.
+    addBranchAccessRequirement(req, { permissionCodes: codes });
     if (req.rbac && isGlobalOwner(req.rbac)) return next();
     if (req.rbac && hasAnyPermission(req.rbac, codes)) return next();
     return res.status(403).json({
@@ -193,12 +207,14 @@ export function canAccessBranchResource(req: Request, branchId: string): boolean
     full_name: req.user.fullName,
     branch_id: req.user.branchId,
   });
-  return canAccessBranch(db, context, branchId);
+  return canAccessBranchForRequirement(db, context, branchId, req.branchAccessRequirement);
 }
 
 interface BranchScopeOptions {
   /** Use the all-branches scope when no branch was requested and RBAC permits it. */
   defaultToAllAuthorized?: boolean;
+  /** Aggregators that gate each result category separately resolve only the assignment envelope. */
+  ignoreAccessRequirement?: boolean;
 }
 
 /** Resolves requested/default branch scope exclusively from live RBAC assignments. */
@@ -213,27 +229,28 @@ export function resolveBranchScope(
   const context = req.rbac ?? buildRbacContext(db, {
     id: user.userId, username: user.username, full_name: user.fullName, branch_id: user.branchId,
   });
+  const accessRequirement = options.ignoreAccessRequirement ? undefined : req.branchAccessRequirement;
 
   const authorizedHomeScope = (): { branchId: string; isAll: false } => {
-    if (!canAccessBranch(db, context, user.branchId)) {
+    if (!canAccessBranchForRequirement(db, context, user.branchId, accessRequirement)) {
       throw new HttpError(403, 'No authorized branch scope is available for this request.');
     }
     return { branchId: user.branchId, isAll: false };
   };
 
   if (requested === 'all') {
-    return canAccessAllBranches(context)
+    return canAccessAllBranchesForRequirement(context, accessRequirement)
       ? { branchId: null, isAll: true }
       : authorizedHomeScope();
   }
 
   if (requested) {
-    return canAccessBranch(db, context, requested)
+    return canAccessBranchForRequirement(db, context, requested, accessRequirement)
       ? { branchId: requested, isAll: false }
       : authorizedHomeScope();
   }
 
-  if (options.defaultToAllAuthorized && canAccessAllBranches(context)) {
+  if (options.defaultToAllAuthorized && canAccessAllBranchesForRequirement(context, accessRequirement)) {
     return { branchId: null, isAll: true };
   }
 

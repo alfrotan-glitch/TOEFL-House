@@ -27,6 +27,7 @@ interface TeachersViewProps {
   classes: Class[];
   budgetLines: BudgetLine[];
   activeRole: UserRole;
+  isGlobalOwner: boolean;
   skills: Skill[];
   classTeacherSkills: ClassTeacherSkill[];
   addTeacher: (fullName: string, phone: string, email: string, baseSalary: number, salaryType?: TeacherContractType, specialization?: string, qualification?: string, contractType?: 'monthly' | 'hourly' | 'per_session', branchId?: string, defaultSkillRate?: number) => void;
@@ -50,7 +51,7 @@ interface TeachersViewProps {
 }
 
 export default function TeachersView({
-  teachers, employees = [], classes, budgetLines, activeRole, addTeacher, editTeacher, deleteTeacher,
+  teachers, employees = [], classes, budgetLines, activeRole, isGlobalOwner, addTeacher, editTeacher, deleteTeacher,
   transferTeacher, getTeacherSalaryStatus, branches, campuses, currentBranchId, payTeacherSalary,
   addEmployee, editEmployee, deleteEmployee, transferEmployee, payEmployeeSalary,
   skills, classTeacherSkills, assignTeacherSkill, editTeacherSkillRate, removeTeacherSkill, triggerToast
@@ -103,8 +104,8 @@ export default function TeachersView({
   const [salaryStatusLoading, setSalaryStatusLoading] = useState<boolean>(false);
   const [evaluatingTeacher, setEvaluatingTeacher] = useState<Teacher | null>(null);
 
-  const isOwnerOrFinance = activeRole === 'owner' || activeRole === 'finance_manager' || activeRole === 'general_manager';
-  const isOwnerOrManager = activeRole === 'owner' || activeRole === 'general_manager';
+  const isOwnerOrFinance = isGlobalOwner || activeRole === 'finance_manager' || activeRole === 'general_manager';
+  const isOwnerOrManager = isGlobalOwner || activeRole === 'general_manager';
 
   const handleCreateTeacher = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -5,17 +5,27 @@
  */
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { api, setToken, onUnauthorized } from '../api/client';
-import { canAccessTab as checkTabAccess } from '../config/permissions';
+import { canAccessTab as checkTabAccess, hasPermission } from '../config/permissions';
 import { AuthContext, AuthUser, AuthContextValue, USER_ROLES } from './auth-context';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const logout = useCallback(() => {
-    void fetch(`${import.meta.env.VITE_API_URL || '/api'}/auth/logout`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' } }).catch(() => undefined);
-    setToken(null);
-    setUser(null);
+  const logout = useCallback(async () => {
+    try {
+      // Wait for server-side revocation and the Set-Cookie expiry before the
+      // local session disappears. A fire-and-forget request races navigation
+      // and can leave the HttpOnly session alive in the browser.
+      await fetch(`${import.meta.env.VITE_API_URL || '/api'}/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+      });
+    } finally {
+      setToken(null);
+      setUser(null);
+    }
   }, []);
   const logoutRef = useRef(logout);
   useEffect(() => { logoutRef.current = logout; }, [logout]);
@@ -26,7 +36,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const value = rawUser as Record<string, unknown>;
     if (typeof value.id !== 'string' || typeof value.username !== 'string' || typeof value.fullName !== 'string' ||
         (value.email !== null && typeof value.email !== 'string') || typeof value.role !== 'string' ||
-        typeof value.branchId !== 'string' || typeof value.mustChangePassword !== 'boolean') {
+        typeof value.branchId !== 'string' || typeof value.mustChangePassword !== 'boolean' ||
+        typeof value.isGlobalOwner !== 'boolean') {
       throw new Error('Invalid user payload.');
     }
     const permissions = Array.isArray(value.permissions)
@@ -48,6 +59,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       role: value.role as AuthUser['role'],
       branchId: value.branchId,
       mustChangePassword: value.mustChangePassword,
+      isGlobalOwner: value.isGlobalOwner,
       permissions: new Set(permissions),
       roles,
       tabAccess,
@@ -86,9 +98,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser((prev) => (prev ? { ...prev, mustChangePassword: false } : prev));
   }, []);
   const can = useCallback((permissionCode: string) => {
-    if (!user) return false;
-    if (user.role === 'owner') return true;
-    return user.permissions ? user.permissions.has(permissionCode) : false;
+    return !!user && hasPermission(user.permissions, permissionCode);
   }, [user]);
   const canAccessTab = useCallback((tabId: string) => {
     if (!user) return false;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { db } from '../db/connection.js';
-import { signToken, verifyToken } from '../utils/auth.js';
+import { db } from '../../../db/connection.js';
+import { signToken, verifyToken } from '../../../utils/auth.js';
 
 describe('high-assurance security invariants', () => {
   it('issues and verifies a session-versioned token', () => {

@@ -17,6 +17,8 @@ export interface AuthUser {
   role: UserRole;
   branchId: string;
   mustChangePassword: boolean;
+  /** Resolved server-side; a scoped owner role is intentionally false. */
+  isGlobalOwner: boolean;
   permissions?: Set<string>;
   roles?: { roleId: string; roleCode: string; roleName: string; scopeType: string; scopeId: string | null }[];
   tabAccess?: Record<string, boolean>;
@@ -26,7 +28,7 @@ export interface AuthContextValue {
   user: AuthUser | null;
   isLoading: boolean;
   login: (username: string, password: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   refreshUser: () => Promise<void>;
   can: (permissionCode: string) => boolean;

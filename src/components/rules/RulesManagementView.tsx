@@ -21,6 +21,7 @@ export interface CategoryMeta {
 interface Props {
   businessRules: Record<RuleCategory, BusinessRule[]>;
   activeRole: string;
+  isGlobalOwner: boolean;
   reloadBusinessRules: (category: RuleCategory) => Promise<void>;
   createBusinessRule: (data: Partial<BusinessRule>) => Promise<BusinessRule>;
   updateBusinessRule: (ruleId: string, category: RuleCategory, data: Partial<BusinessRule>) => Promise<BusinessRule>;
@@ -34,7 +35,7 @@ interface Props {
 
 
 export default function RulesManagementView({
-  businessRules, activeRole, reloadBusinessRules, createBusinessRule, updateBusinessRule,
+  businessRules, activeRole, isGlobalOwner, reloadBusinessRules, createBusinessRule, updateBusinessRule,
   deactivateBusinessRule, deleteBusinessRule, rollbackBusinessRule, getBusinessRuleVersions,
   evaluateBusinessRules, triggerToast,
 }: Props) {
@@ -47,8 +48,8 @@ export default function RulesManagementView({
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const canEdit = activeRole === 'owner' || activeRole === 'general_manager';
-  const canDeleteOrRollback = activeRole === 'owner';
+  const canEdit = isGlobalOwner || activeRole === 'general_manager';
+  const canDeleteOrRollback = isGlobalOwner;
 
   const rules = useMemo(() => businessRules[activeCategory] || [], [businessRules, activeCategory]);
 

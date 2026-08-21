@@ -27,19 +27,19 @@
  * That last property is the one that makes this policy safe to ship: "initial"
  * must mean initial.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { today } from '../utils/ids.js';
-import { signToken, type TokenPayload } from '../utils/auth.js';
-import authRouter from '../routes/auth.routes.js';
-import usersRouter from '../routes/users.routes.js';
-import studentsRouter from '../routes/students.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { hashPassword } from '../utils/auth.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { today } from '../../../utils/ids.js';
+import { signToken, type TokenPayload } from '../../../utils/auth.js';
+import authRouter from '../../../routes/auth.routes.js';
+import usersRouter from '../../../routes/users.routes.js';
+import studentsRouter from '../../../routes/students.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { hashPassword } from '../../../utils/auth.js';
 
 const BRANCH_A = 'spn_branch_a';
 const BRANCH_B = 'spn_branch_b';

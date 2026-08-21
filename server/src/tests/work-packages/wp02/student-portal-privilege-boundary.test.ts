@@ -21,23 +21,23 @@
  *   POST /students/:id/refund         -> 403
  *   GET  /payments|/invoices|/finance|/classes|/teachers|/bos|/security|/users -> 403
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { today } from '../utils/ids.js';
-import { signToken, type TokenPayload } from '../utils/auth.js';
-import studentsRouter from '../routes/students.routes.js';
-import invoicesRouter from '../routes/invoices.routes.js';
-import financeRouter from '../routes/finance.routes.js';
-import classesRouter from '../routes/classes.routes.js';
-import teachersRouter from '../routes/teachers.routes.js';
-import bosRouter from '../routes/bos.routes.js';
-import securityRouter from '../routes/security.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { ROLE_DEFINITIONS } from '../core/rbac/permission-catalog.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { today } from '../../../utils/ids.js';
+import { signToken, type TokenPayload } from '../../../utils/auth.js';
+import studentsRouter from '../../../routes/students.routes.js';
+import invoicesRouter from '../../../routes/invoices.routes.js';
+import financeRouter from '../../../routes/finance.routes.js';
+import classesRouter from '../../../routes/classes.routes.js';
+import teachersRouter from '../../../routes/teachers.routes.js';
+import bosRouter from '../../../routes/bos.routes.js';
+import securityRouter from '../../../routes/security.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { ROLE_DEFINITIONS } from '../../../core/rbac/permission-catalog.js';
 
 const BRANCH = 'spp_branch';
 
