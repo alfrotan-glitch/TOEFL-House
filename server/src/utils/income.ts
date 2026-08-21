@@ -3,13 +3,11 @@ import { HttpError } from '../middleware/errorHandler.js';
 import { db } from '../db/connection.js';
 import { id, today } from './ids.js';
 import { getNumberSetting } from './settings.js';
+import { SYSTEM_DEFAULTS } from '../core/configuration/policy-catalog.js';
 import {
   decrementMainBalanceIfSufficient, decrementSavingBalanceIfSufficient,
   getFinanceAccount, incrementMainBalance, incrementSavingBalance,
 } from './financeAccounts.js';
-
-/** Money is stored to 2dp; keep intermediate arithmetic on the same grid. */
-const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
 // ── Performance: Module-level Prepared Statements ──────────────────────────
 const stmtInsertIncomeTx = db.prepare(
@@ -88,11 +86,11 @@ export function recordIncome(params: RecordIncomeParams): { savingAmount: number
     const owed = Math.abs(normalizedAmount);
     if (!decrementMainBalanceIfSufficient('branch', params.branchId, owed)) {
       const { mainBalance, savingBalance } = getFinanceAccount('branch', params.branchId);
-      const fromSaving = round2(owed - mainBalance);
+      const fromSaving = owed - mainBalance;
       if (mainBalance < 0 || fromSaving > savingBalance) {
         throw new HttpError(
           409,
-          `Insufficient branch funds for this reversal/refund. Available: ${round2(mainBalance + savingBalance)} AFN, required: ${owed} AFN.`,
+          `Insufficient branch funds for this reversal/refund. Available: ${mainBalance + savingBalance} AFN, required: ${owed} AFN.`,
         );
       }
       if (mainBalance > 0 && !decrementMainBalanceIfSufficient('branch', params.branchId, mainBalance)) {
@@ -116,8 +114,19 @@ export function recordIncome(params: RecordIncomeParams): { savingAmount: number
   } else {
     incrementMainBalance('branch', params.branchId, normalizedAmount);
   }
-  const rawPercent = getNumberSetting('daily_saving_percent', 5);
-  const percent = Math.max(0, Math.min(100, rawPercent || 0));
+  // The sweep rate is CONFIGURATION, and a clamp is not validation: silently
+  // rewriting a stored 150 into 100 (or a stored -5 into 0) moves a different
+  // amount of money than the configuration says, with nothing to show for it
+  // (LAW 6). The write path validates the range; a value outside it can now
+  // only come from a direct database edit, and that fails loudly here rather
+  // than quietly changing what the branch keeps.
+  const percent = getNumberSetting('daily_saving_percent', SYSTEM_DEFAULTS.dailySavingPercent);
+  if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
+    throw new HttpError(
+      409,
+      `The configured daily saving percentage (${percent}) is outside 0-100. Correct it in finance settings before recording income.`,
+    );
+  }
   // Savings are only created from positive operating income. Refunds/reversals
   // are contra-revenue and must never trigger another savings transfer.
   const savingAmount = normalizedAmount > 0 ? assertComputedMoney((normalizedAmount * percent) / 100, 'saving amount') : 0;

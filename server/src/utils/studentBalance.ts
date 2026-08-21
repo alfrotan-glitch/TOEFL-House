@@ -58,19 +58,18 @@ export interface StudentBalance {
   paidPercentage: number;
 }
 
-function round2(n: number): number {
-  return Math.round((n + Number.EPSILON) * 100) / 100;
-}
-
 /** Derive the balance from already-computed totals. Pure — safe to unit test. */
 export function deriveBalance(tuitionDue: number, tuitionPaid: number): StudentBalance {
-  const due = round2(Number(tuitionDue) || 0);
-  const paid = round2(Number(tuitionPaid) || 0);
+  // Whole AFN (D-12/D-22): every stored money column is an INTEGER, so these
+  // sums are already canonical and re-rounding them here would be a second
+  // rounding authority.
+  const due = Number(tuitionDue) || 0;
+  const paid = Number(tuitionPaid) || 0;
   return {
     tuitionDue: due,
     tuitionPaid: paid,
-    outstanding: round2(Math.max(0, due - paid)),
-    creditBalance: round2(Math.max(0, paid - due)),
+    outstanding: Math.max(0, due - paid),
+    creditBalance: Math.max(0, paid - due),
     paidPercentage: due > 0 ? Math.min(100, Math.max(0, Math.round((paid / due) * 100))) : 100,
   };
 }
@@ -203,5 +202,5 @@ export function getBranchOutstanding(db: Database, branchId: string): number {
        ) paid ON paid.student_id = sem.student_id`,
     )
     .get(branchId) as { outstanding: number };
-  return round2(row.outstanding);
+  return Number(row.outstanding) || 0;
 }

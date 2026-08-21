@@ -46,6 +46,19 @@ function KpiCard(props: { icon: React.ReactNode; label: string; value: string; s
   );
 }
 
+/**
+ * Which way a ledger row moved money, for display only.
+ *
+ * The stored amount is SIGNED: a refund is negative income and a month-end
+ * budget movement is a negative budget charge. Deriving the arrow from `type`
+ * alone printed "+" in front of a negative refund and "−" in front of a
+ * negative budget return, so the row read as the opposite of what happened.
+ */
+function ledgerEffect(tx: { type: string; amount: number }): number {
+  const amount = Number(tx.amount) || 0;
+  return tx.type === 'expense' ? -amount : amount;
+}
+
 export default function FinanceDashboardPanel(props: FinanceDashboardPanelProps) {
   const { dashboard, canApprove, canControl, isOwner, roleLabel, scopeLabel, loading, onGo, onDeposit, onApprove, onRefresh } = props;
 
@@ -280,8 +293,8 @@ export default function FinanceDashboardPanel(props: FinanceDashboardPanelProps)
                   <div className="text-[11px] font-bold text-slate-800 truncate">{tx.description || tx.category}</div>
                   <div className="text-[9px] text-slate-400 font-mono">{tx.date} · {tx.category} · {tx.operatorName}</div>
                 </div>
-                <span className={`text-[11px] font-mono font-extrabold shrink-0 ${tx.type === 'income' ? 'text-emerald-600' : tx.type === 'expense' || tx.type === 'budget_charge' ? 'text-rose-600' : 'text-slate-500'}`}>
-                  {tx.type === 'income' ? '+' : tx.type === 'expense' || tx.type === 'budget_charge' ? '−' : ''}{formatAFN(tx.amount)}
+                <span className={`text-[11px] font-mono font-extrabold shrink-0 ${ledgerEffect(tx) > 0 ? 'text-emerald-600' : ledgerEffect(tx) < 0 ? 'text-rose-600' : 'text-slate-500'}`}>
+                  {ledgerEffect(tx) > 0 ? '+' : ledgerEffect(tx) < 0 ? '−' : ''}{formatAFN(Math.abs(tx.amount))}
                 </span>
               </div>
             ))}

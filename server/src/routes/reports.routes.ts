@@ -25,6 +25,7 @@ import {
   operatingIncomeSql,
 } from '../core/finance/ledger-classification.js';
 import { CATEGORY_NAME } from '../core/finance/category-taxonomy.js';
+import { BUDGET_MOVEMENT_CATEGORY, BUDGET_MOVEMENT_TYPE } from '../core/finance/budget-movements.js';
 import { db } from '../db/connection.js';
 import { authenticate, requirePermission, resolveBranchScope } from '../middleware/auth.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
@@ -210,25 +211,34 @@ reportsRouter.get(
           WHERE date >= ? AND date <= ? AND (
             (type = 'income' AND category = '${CAPITAL_INJECTION_CATEGORY}') OR
             (type = 'expense' AND finance_category_id = '${OWNER_DRAWINGS_CATEGORY_ID}') OR
-            type = 'budget_charge' OR type = 'saving_transfer')
+            type = '${BUDGET_MOVEMENT_TYPE}' OR type = 'saving_transfer')
           GROUP BY type, category, finance_category_id`).all(from, to)
       : db.prepare(`SELECT type, category, COALESCE(SUM(amount),0) AS total FROM financial_transactions
           WHERE date >= ? AND date <= ? AND branch_id = ? AND (
             (type = 'income' AND category = '${CAPITAL_INJECTION_CATEGORY}') OR
             (type = 'expense' AND finance_category_id = '${OWNER_DRAWINGS_CATEGORY_ID}') OR
-            type = 'budget_charge' OR type = 'saving_transfer')
+            type = '${BUDGET_MOVEMENT_TYPE}' OR type = 'saving_transfer')
           GROUP BY type, category, finance_category_id`).all(from, to, branchId)) as Array<{ type: string; category: string; finance_category_id: string | null; total: number }>;
+    // Budget movements are SIGNED and are disclosed by the operator action that
+    // produced them. Netting a month-end return against a funding charge and
+    // publishing the result as "budget charged" states neither figure.
     const transfers = {
       capitalInjection: 0,
       profitDistribution: 0,
       budgetCharged: 0,
+      budgetReturned: 0,
+      budgetTransferred: 0,
       savingTransferred: 0,
     };
     for (const r of transferRows) {
       const v = Number(r.total || 0);
       if (r.type === 'income' && r.category === CAPITAL_INJECTION_CATEGORY) transfers.capitalInjection += v;
       else if (r.type === 'expense' && r.finance_category_id === OWNER_DRAWINGS_CATEGORY_ID) transfers.profitDistribution += v;
-      else if (r.type === 'budget_charge') transfers.budgetCharged += v;
+      else if (r.type === BUDGET_MOVEMENT_TYPE) {
+        if (r.category === BUDGET_MOVEMENT_CATEGORY.return) transfers.budgetReturned += -v;
+        else if (r.category === BUDGET_MOVEMENT_CATEGORY.transfer_in) transfers.budgetTransferred += v;
+        else if (r.category !== BUDGET_MOVEMENT_CATEGORY.transfer_out) transfers.budgetCharged += v;
+      }
       else if (r.type === 'saving_transfer') transfers.savingTransferred += v;
     }
 

@@ -10,6 +10,7 @@
  */
 import { db } from '../db/connection.js';
 import { OPERATING_INCOME_SQL, OWNER_DRAWING_SQL } from '../core/finance/ledger-classification.js';
+import { BUDGET_MOVEMENT_TYPE } from '../core/finance/budget-movements.js';
 
 export interface ReconciliationResult {
   scope: 'organization' | 'branch';
@@ -92,8 +93,8 @@ export function computeReconciliation(opts: { branchId: string | null; isAll: bo
     WHERE p.status = 'completed' AND p.id IN (SELECT DISTINCT payment_id FROM financial_transactions WHERE payment_id IS NOT NULL)
   `;
   const mismatchSql = boundBranchId === null
-    ? `${mismatchBase} GROUP BY p.id HAVING ABS(p.amount - COALESCE(SUM(ft.amount),0)) >= 0.01 ORDER BY p.date DESC LIMIT 100`
-    : `${mismatchBase} AND p.branch_id = ? GROUP BY p.id HAVING ABS(p.amount - COALESCE(SUM(ft.amount),0)) >= 0.01 ORDER BY p.date DESC LIMIT 100`;
+    ? `${mismatchBase} GROUP BY p.id HAVING p.amount <> COALESCE(SUM(ft.amount),0) ORDER BY p.date DESC LIMIT 100`
+    : `${mismatchBase} AND p.branch_id = ? GROUP BY p.id HAVING p.amount <> COALESCE(SUM(ft.amount),0) ORDER BY p.date DESC LIMIT 100`;
   const mismatchRows = (boundBranchId === null
     ? db.prepare(mismatchSql).all()
     : db.prepare(mismatchSql).all(boundBranchId)) as Array<{ payment_id: string; payment_amount: number; ledger_amount: number }>;
@@ -115,8 +116,12 @@ export function computeReconciliation(opts: { branchId: string | null; isAll: bo
   //     do not debit branch cash either.
   //
   // Hence, per branch:
-  //     main_balance   = SUM(operating income) - SUM(saving_transfer)
-  //     saving_balance = SUM(saving_transfer)
+  //     main_balance   = SUM(saving-account movement) subtracted from income
+  //     saving_balance = SUM(saving-account movement)
+  //
+  // `saving_transfer` means the branch SAVINGS ACCOUNT and nothing else: any
+  // other movement carrying that type makes this check report a savings balance
+  // the branch does not have. Budget movements carry their own type.
   //   * an OWNER DRAWING (written by `bos.routes.ts`) is the one expense path
   //     that debits BRANCH CASH directly instead of a budget line, so it has to
   //     come off expected main.
@@ -130,15 +135,18 @@ export function computeReconciliation(opts: { branchId: string | null; isAll: bo
   const operatingIncome = scalarValue(operatingIncomeSql, 'AND branch_id = ?', boundBranchId);
   const expectedSaving = scalarValue(savingSql, 'AND branch_id = ?', boundBranchId);
   const ownerDrawings = scalarValue(ownerDrawingSql, 'AND branch_id = ?', boundBranchId);
-  const expectedMain = Math.round((operatingIncome - expectedSaving - ownerDrawings) * 100) / 100;
+  // Whole AFN throughout (D-12/D-22): every money column is an INTEGER, so a
+  // variance is either zero or a real discrepancy. A two-decimal tolerance here
+  // would only hide a genuine one-afghani break.
+  const expectedMain = operatingIncome - expectedSaving - ownerDrawings;
 
   const acctSql = `SELECT COALESCE(SUM(main_balance),0) AS main, COALESCE(SUM(saving_balance),0) AS saving FROM finance_accounts WHERE scope_type = 'branch'`;
   const acctRow = (boundBranchId === null
     ? db.prepare(acctSql).get()
     : db.prepare(`${acctSql} AND scope_id = ?`).get(boundBranchId)) as { main: number; saving: number };
 
-  const cashVariance = Math.round((Number(acctRow.main || 0) - expectedMain) * 100) / 100;
-  const savingVariance = Math.round((Number(acctRow.saving || 0) - expectedSaving) * 100) / 100;
+  const cashVariance = Number(acctRow.main || 0) - expectedMain;
+  const savingVariance = Number(acctRow.saving || 0) - expectedSaving;
 
   // ── Budget position ──────────────────────────────────────────────────────
   // Budget lines are the THIRD store of money in this system (after branch cash
@@ -148,25 +156,28 @@ export function computeReconciliation(opts: { branchId: string | null; isAll: bo
   // the row — silently misstates what the institute can still spend.
   //
   // Invariant, per branch:
-  //     SUM(current_amount) = SUM(budget_charge) - SUM(expense)
+  //     SUM(current_amount) = SUM(budget movement) - SUM(expense)
   //
-  // budget_charge rows carry the funded line in reference_id; expense rows are
+  // A budget movement is SIGNED (see core/finance/budget-movements): funding a
+  // line is positive, returning it to the treasury or moving it to another line
+  // is negative, so the sum is the money currently placed in the branch's
+  // envelopes. Movement rows carry the line in reference_id; expense rows are
   // matched by branch, which is the same granularity the lines are held at.
   //
   // The spend side counts only expense rows that actually CAME OUT OF a budget
   // line. Owner drawings do not: they debit branch cash, so counting them here
   // would make every withdrawal look like unexplained budget spend.
-  const budgetChargedSql = `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type='budget_charge'`;
+  const budgetChargedSql = `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type='${BUDGET_MOVEMENT_TYPE}'`;
   const budgetSpentSql =
     `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions ` +
     `WHERE type='expense' AND NOT ${OWNER_DRAWING_SQL}`;
   const budgetCharged = scalarValue(budgetChargedSql, 'AND branch_id = ?', boundBranchId);
   const budgetSpent = scalarValue(budgetSpentSql, 'AND branch_id = ?', boundBranchId);
-  const expectedBudget = Math.round((budgetCharged - budgetSpent) * 100) / 100;
+  const expectedBudget = budgetCharged - budgetSpent;
 
   const lineSql = `SELECT COALESCE(SUM(current_amount),0) AS v FROM budget_lines WHERE 1=1`;
   const actualBudget = scalarValue(lineSql, 'AND branch_id = ?', boundBranchId);
-  const budgetVariance = Math.round((actualBudget - expectedBudget) * 100) / 100;
+  const budgetVariance = actualBudget - expectedBudget;
 
   return {
     scope: isAll ? 'organization' : 'branch',
@@ -175,19 +186,19 @@ export function computeReconciliation(opts: { branchId: string | null; isAll: bo
     ledgerBackedTotal: ledgerBacked,
     paymentBackedCount: paymentCount,
     ledgerBackedCount: ledgerCount,
-    amountVariance: Math.round((paymentBacked - ledgerBacked) * 100) / 100,
+    amountVariance: paymentBacked - ledgerBacked,
     unmatchedPayments,
     orphanLedgerRows,
     mismatchedPayments: mismatchRows.map((r) => ({
       paymentId: r.payment_id,
       paymentAmount: r.payment_amount,
       ledgerAmount: r.ledger_amount,
-      variance: Math.round((Number(r.payment_amount) - Number(r.ledger_amount)) * 100) / 100,
+      variance: Number(r.payment_amount) - Number(r.ledger_amount),
     })),
     cashVariance,
     savingVariance,
     budgetVariance,
-    healthy: Math.abs(paymentBacked - ledgerBacked) < 0.01 && unmatchedPayments === 0 && orphanLedgerRows === 0 && mismatchRows.length === 0
-      && Math.abs(cashVariance) < 0.01 && Math.abs(savingVariance) < 0.01 && Math.abs(budgetVariance) < 0.01,
+    healthy: paymentBacked === ledgerBacked && unmatchedPayments === 0 && orphanLedgerRows === 0 && mismatchRows.length === 0
+      && cashVariance === 0 && savingVariance === 0 && budgetVariance === 0,
   };
 }

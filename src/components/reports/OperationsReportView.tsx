@@ -51,10 +51,12 @@ function printableReport(report: OperationsReport) {
     </table>` : ''}
     <h2>Expenses by category</h2>
     <table>${rows(report.financial.expense.byCategory)}<tr class="total"><td>Total</td><td class="num">${money(report.financial.expense.total)}</td></tr></table>
-    ${report.financial.transfers.capitalInjection || report.financial.transfers.profitDistribution || report.financial.transfers.budgetCharged || report.financial.transfers.savingTransferred ? `<h2>Capital &amp; transfers</h2><table>
+    ${Object.values(report.financial.transfers).some((v) => Number(v) !== 0) ? `<h2>Capital &amp; transfers</h2><table>
       ${report.financial.transfers.capitalInjection ? `<tr><td>Capital injected</td><td class="num">${money(report.financial.transfers.capitalInjection)}</td></tr>` : ''}
       ${report.financial.transfers.profitDistribution ? `<tr><td>Profit distributions</td><td class="num">${money(report.financial.transfers.profitDistribution)}</td></tr>` : ''}
-      ${report.financial.transfers.budgetCharged ? `<tr><td>Budget charged</td><td class="num">${money(report.financial.transfers.budgetCharged)}</td></tr>` : ''}
+      ${report.financial.transfers.budgetCharged ? `<tr><td>Budget funded</td><td class="num">${money(report.financial.transfers.budgetCharged)}</td></tr>` : ''}
+      ${report.financial.transfers.budgetReturned ? `<tr><td>Budget returned to treasury</td><td class="num">${money(report.financial.transfers.budgetReturned)}</td></tr>` : ''}
+      ${report.financial.transfers.budgetTransferred ? `<tr><td>Budget reassigned between lines</td><td class="num">${money(report.financial.transfers.budgetTransferred)}</td></tr>` : ''}
       ${report.financial.transfers.savingTransferred ? `<tr><td>Savings transferred</td><td class="num">${money(report.financial.transfers.savingTransferred)}</td></tr>` : ''}
     </table>` : ''}
     <h2>Operational summary</h2>
@@ -246,9 +248,9 @@ export default function OperationsReportView() {
                   </div>
                 ))}
               </div>
-              {(report.financial.transfers.capitalInjection > 0 || report.financial.transfers.budgetCharged > 0 || report.financial.transfers.savingTransferred > 0 || report.financial.transfers.profitDistribution > 0) && (
+              {Object.values(report.financial.transfers).some((v) => Number(v) !== 0) && (
                 <div className="mt-3 pt-2 border-t border-slate-100 text-[10px] text-slate-400">
-                  Capital injected: <b>{formatAFN(report.financial.transfers.capitalInjection)}</b> · Budget charged: <b>{formatAFN(report.financial.transfers.budgetCharged)}</b> · Savings transferred: <b>{formatAFN(report.financial.transfers.savingTransferred)}</b> · Profit distributions: <b>{formatAFN(report.financial.transfers.profitDistribution)}</b>
+                  Capital injected: <b>{formatAFN(report.financial.transfers.capitalInjection)}</b> · Budget funded: <b>{formatAFN(report.financial.transfers.budgetCharged)}</b> · Budget returned: <b>{formatAFN(report.financial.transfers.budgetReturned)}</b> · Budget reassigned: <b>{formatAFN(report.financial.transfers.budgetTransferred)}</b> · Savings transferred: <b>{formatAFN(report.financial.transfers.savingTransferred)}</b> · Profit distributions: <b>{formatAFN(report.financial.transfers.profitDistribution)}</b>
                 </div>
               )}
             </div>

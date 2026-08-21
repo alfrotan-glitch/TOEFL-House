@@ -27,7 +27,7 @@ interface PnlPayload {
   byCategory: { type: string; category: string; total: number; classification: FinanceCategoryClassification | null }[];
   /** Cash out that is NOT trading cost. Resolved by the server, never here. */
   nonOperating?: { capitalExpenditure: number; nonExpenseCashMovement: number };
-  transfers: { capitalInjection: number; profitDistribution: number; budgetCharged: number; savingTransferred: number };
+  transfers: { capitalInjection: number; profitDistribution: number; budgetCharged: number; budgetReturned: number; budgetTransferred: number; savingTransferred: number };
 }
 
 interface Props {
@@ -86,7 +86,7 @@ export default function PnLPanel({ selectedYear, selectedMonth }: Props) {
   const capexTotal = pnl.nonOperating?.capitalExpenditure ?? capexRows.reduce((s2, r) => s2 + r.total, 0);
   const nonExpenseTotal = pnl.nonOperating?.nonExpenseCashMovement ?? nonExpenseRows.reduce((s2, r) => s2 + r.total, 0);
   const periodLabel = selectedMonth === 'all' ? selectedYear : `${selectedYear}-${selectedMonth}`;
-  const hasTransfers = pnl.transfers.capitalInjection + pnl.transfers.profitDistribution + pnl.transfers.budgetCharged + pnl.transfers.savingTransferred > 0;
+  const hasTransfers = Object.values(pnl.transfers).some((v) => Number(v) !== 0);
 
   const printReport = () => {
     const rows = (list: { category: string; total: number }[]) => list
@@ -111,7 +111,9 @@ export default function PnLPanel({ selectedYear, selectedMonth }: Props) {
         ${hasTransfers ? `<h2>Capital &amp; transfers (not operating)</h2><table><tbody>
           ${pnl.transfers.capitalInjection ? `<tr><td>Capital injected</td><td class="num">${escapeHtml(formatAFN(pnl.transfers.capitalInjection))}</td></tr>` : ''}
           ${pnl.transfers.profitDistribution ? `<tr><td>Profit distributions</td><td class="num">${escapeHtml(formatAFN(pnl.transfers.profitDistribution))}</td></tr>` : ''}
-          ${pnl.transfers.budgetCharged ? `<tr><td>Budget charged</td><td class="num">${escapeHtml(formatAFN(pnl.transfers.budgetCharged))}</td></tr>` : ''}
+          ${pnl.transfers.budgetCharged ? `<tr><td>Budget funded</td><td class="num">${escapeHtml(formatAFN(pnl.transfers.budgetCharged))}</td></tr>` : ''}
+          ${pnl.transfers.budgetReturned ? `<tr><td>Budget returned to treasury</td><td class="num">${escapeHtml(formatAFN(pnl.transfers.budgetReturned))}</td></tr>` : ''}
+          ${pnl.transfers.budgetTransferred ? `<tr><td>Budget reassigned between lines</td><td class="num">${escapeHtml(formatAFN(pnl.transfers.budgetTransferred))}</td></tr>` : ''}
           ${pnl.transfers.savingTransferred ? `<tr><td>Savings transferred</td><td class="num">${escapeHtml(formatAFN(pnl.transfers.savingTransferred))}</td></tr>` : ''}
         </tbody></table>` : ''}
       `,
@@ -238,7 +240,9 @@ export default function PnLPanel({ selectedYear, selectedMonth }: Props) {
             {[
               ['Capital injected', pnl.transfers.capitalInjection],
               ['Profit distributions', pnl.transfers.profitDistribution],
-              ['Budget charged', pnl.transfers.budgetCharged],
+              ['Budget funded', pnl.transfers.budgetCharged],
+              ['Budget returned', pnl.transfers.budgetReturned],
+              ['Budget reassigned', pnl.transfers.budgetTransferred],
               ['Savings transferred', pnl.transfers.savingTransferred],
             ].map(([label, value]) => (
               <div key={label as string} className="bg-slate-50 rounded-xl p-3">

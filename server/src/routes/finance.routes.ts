@@ -22,6 +22,7 @@ import { addNotification } from '../utils/notifications.js';
 import { getNumberSetting, setSetting } from '../utils/settings.js';
 import { decrementMainBalanceIfSufficient, incrementMainBalance, getFinanceAccount } from '../utils/financeAccounts.js';
 import { computeReconciliation } from '../utils/reconciliation.js';
+import { BUDGET_MOVEMENT_CATEGORY, BUDGET_MOVEMENT_TYPE, postBudgetMovement } from '../core/finance/budget-movements.js';
 import { assertMoney } from '../utils/money.js';
 import { SYSTEM_DEFAULTS } from '../core/configuration/policy-catalog.js';
 
@@ -30,10 +31,6 @@ financeRouter.use(authenticate);
 
 // ── Performance Optimization: Prepared Statements ──────────────────────────
 const stmtGetBudgetLineById = db.prepare('SELECT * FROM budget_lines WHERE id = ?');
-const stmtUpdateBudgetLineCharge = db.prepare('UPDATE budget_lines SET current_amount = current_amount + ?, allocated_amount = allocated_amount + ? WHERE id = ?');
-const stmtUpdateBudgetLineClear = db.prepare('UPDATE budget_lines SET current_amount = 0 WHERE id = ?');
-const stmtUpdateBudgetLineAddAmount = db.prepare('UPDATE budget_lines SET current_amount = current_amount + ? WHERE id = ?');
-const stmtUpdateBudgetLineSubAmount = db.prepare('UPDATE budget_lines SET current_amount = current_amount - ? WHERE id = ?');
 
 // `finance_category_id` is the accounting authority. Transfers (budget charge,
 // month-end, capital injection) pass NULL: they are not expenses.
@@ -629,18 +626,23 @@ financeRouter.post(
   ah(async (req, res) => {
     const user = getUserContext(req);
     const budgetLine = requireBudgetLine(req, req.params.id);
-    const { amount } = req.body;
-    if (!amount || amount <= 0) throw new HttpError(400, 'Invalid amount.');
-    
+    // Parse at the boundary, so the value that is checked is the value that is
+    // written. A comparison-only guard (`!amount || amount <= 0`) passes strings
+    // and booleans through to the writers, and leaves the rejection message to
+    // whichever internal helper happens to notice first.
+    let amount: number;
+    try { amount = assertMoney(req.body?.amount, 'Charge amount'); }
+    catch { throw new HttpError(400, 'A charge amount in whole AFN greater than zero is required.'); }
+    if (amount <= 0) throw new HttpError(400, 'A charge amount in whole AFN greater than zero is required.');
+
     const date = today();
     const tx = db.transaction(() => {
       if (!decrementMainBalanceIfSufficient('organization', 'global', amount)) throw new HttpError(409, 'Insufficient organization treasury balance or the balance changed.');
-      stmtUpdateBudgetLineCharge.run(amount, amount, budgetLine.id);
-      stmtInsertFinTx.run(
-        id('tx'), 'budget_charge', 'budget_allocation', null, amount, date,
-        `Budget charge for line "${budgetLine.name}" from the central finance account`,
-        budgetLine.id, user.fullName, budgetLine.branch_id || user.branchId
-      );
+      postBudgetMovement({
+        line: budgetLine, kind: 'allocation', amount, date,
+        description: `Budget charge for line "${budgetLine.name}" from the central finance account`,
+        operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null,
+      });
     });
     tx();
     
@@ -657,20 +659,24 @@ financeRouter.post(
     const user = getUserContext(req);
     const budgetLine = requireBudgetLine(req, req.params.id);
     const { decision, targetBudgetLineId } = req.body as { decision: 'return' | 'transfer'; targetBudgetLineId?: string };
-    const unusedAmount = budgetLine.current_amount;
+    const unusedAmount = Number(budgetLine.current_amount);
     
     if (unusedAmount <= 0) throw new HttpError(400, 'The remaining budget for this line is zero and requires no adjustment.');
     const date = today();
+    const operatorRole = req.rbac?.primaryRole ?? null;
     
     if (decision === 'return') {
       const tx = db.transaction(() => {
-        stmtUpdateBudgetLineClear.run(budgetLine.id);
+        // The movement is booked to the branch that OWNS the line, not to the
+        // operator's branch: an owner settling another branch's envelope moves
+        // that branch's money, and a ledger row filed under the operator's
+        // branch left both branches' budget positions unreconcilable.
+        postBudgetMovement({
+          line: budgetLine, kind: 'return', amount: unusedAmount, date,
+          description: `Month-end settlement: returning unused budget from line "${budgetLine.name}" to the main account`,
+          operatorName: user.fullName, operatorRole,
+        });
         incrementMainBalance('organization', 'global', unusedAmount);
-        stmtInsertFinTx.run(
-          id('tx'), 'budget_charge', 'budget_return', null, unusedAmount, date,
-          `Month-end settlement: returning unused budget from line "${budgetLine.name}" to the main account`,
-          budgetLine.id, user.fullName, user.branchId
-        );
       });
       tx();
       addNotification('Month-end budget settlement', `${unusedAmount} AFN of unused budget from ${budgetLine.name} has been returned to the main account.`, 'success', user.branchId);
@@ -678,17 +684,27 @@ financeRouter.post(
     } else if (decision === 'transfer' && targetBudgetLineId) {
       const targetLine = stmtGetBudgetLineById.get(targetBudgetLineId) as any;
       if (!targetLine) throw new HttpError(404, 'Target budget line not found.');
+      // A line cannot receive its own remainder: the pair of movements would
+      // net to nothing while the ledger claimed a settlement had happened.
+      if (targetLine.id === budgetLine.id) throw new HttpError(400, 'A budget line cannot be transferred to itself.');
       if (targetLine.branch_id && !canAccessBranchResource(req, targetLine.branch_id)) throw new HttpError(403, 'Target budget line belongs to another branch.');
       if (targetLine.branch_id && budgetLine.branch_id && targetLine.branch_id !== budgetLine.branch_id) throw new HttpError(400, 'Budget transfer must remain within the same branch.');
+      if (!targetLine.is_active) throw new HttpError(409, 'Target budget line is retired and cannot receive a transfer.');
       
       const tx = db.transaction(() => {
-        stmtUpdateBudgetLineClear.run(budgetLine.id);
-        stmtUpdateBudgetLineAddAmount.run(unusedAmount, targetBudgetLineId);
-        stmtInsertFinTx.run(
-          id('tx'), 'saving_transfer', 'budget_transfer', null, unusedAmount, date,
-          `Month-end settlement: transferring remaining budget from "${budgetLine.name}" to budget line "${targetLine.name}"`,
-          budgetLine.id, user.fullName, user.branchId
-        );
+        // Two signed movements, not one row of an unrelated type. They sum to
+        // zero, so a transfer changes which envelope holds the money without
+        // changing how much the branch holds.
+        postBudgetMovement({
+          line: budgetLine, kind: 'transfer_out', amount: unusedAmount, date,
+          description: `Month-end settlement: transferring remaining budget from "${budgetLine.name}" to budget line "${targetLine.name}"`,
+          operatorName: user.fullName, operatorRole,
+        });
+        postBudgetMovement({
+          line: targetLine, kind: 'transfer_in', amount: unusedAmount, date,
+          description: `Month-end settlement: received remaining budget from budget line "${budgetLine.name}"`,
+          operatorName: user.fullName, operatorRole,
+        });
       });
       tx();
       addNotification('Month-end budget transfer', `${unusedAmount} AFN of unused budget from "${budgetLine.name}" has been transferred to "${targetLine.name}".`, 'success', user.branchId);
@@ -1074,11 +1090,22 @@ financeRouter.put(
   '/saving-engine/settings',
   requirePermission('Budget.Allocate', 'Budget.Edit', 'Expense.Approve'),
   ah(async (req, res) => {
-    const { percent } = req.body;
-    if (percent == null || percent < 0 || percent > 100) throw new HttpError(400, 'Percentage must be between 0 and 100.');
+    // Parse, never coerce: `'abc' < 0` and `'abc' > 100` are both false, so the
+    // old comparison-only check stored the string verbatim and every later read
+    // silently fell back to the default rate while the settings screen showed
+    // the value the operator typed.
+    const raw = (req.body as { percent?: unknown }).percent;
+    const percent = typeof raw === 'number'
+      ? raw
+      : typeof raw === 'string' && /^\d+(\.\d+)?$/.test(raw.trim())
+        ? Number(raw.trim())
+        : Number.NaN;
+    if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
+      throw new HttpError(400, 'Percentage must be a number between 0 and 100.');
+    }
     setSetting('daily_saving_percent', String(percent));
     writeAudit(req, `Changed daily savings percentage to ${percent}%`);
-    res.json({ ok: true });
+    res.json({ ok: true, percent });
   })
 );
 
@@ -1169,8 +1196,12 @@ financeRouter.get(
     //    classifies as capital expenditure or a non-expense cash movement.
     //    Before the taxonomy existed the only exclusion was owner drawings, so
     //    a laptop purchase and a salary advance both landed in operating cost.
-    //  - budget_charge and saving_transfer are balance-sheet transfers between
-    //    treasury/saving/budget accounts, never operating income or expense.
+    //  - budget movements and savings movements are balance-sheet transfers
+    //    between treasury/saving/budget accounts, never operating income or
+    //    expense. Budget movements are SIGNED, so they are disclosed by the
+    //    operator action that produced them (funded / returned / reassigned)
+    //    rather than summed into one figure that nets a return against a
+    //    charge and calls the result "charged".
     //  - student refunds are already recorded as negative income
     //    (contra-revenue) and therefore reduce operating income; that mechanism
     //    is unchanged.
@@ -1181,6 +1212,8 @@ financeRouter.get(
     let capitalExpenditure = 0;
     let nonExpenseCashMovement = 0;
     let budgetCharged = 0;
+    let budgetReturned = 0;
+    let budgetTransferred = 0;
     let savingTransferred = 0;
 
     for (const row of finalByCategory) {
@@ -1198,7 +1231,12 @@ financeRouter.get(
         // contract is relied on by /reports/overview and the P&L print-out.
         if (row.finance_category_id === OWNER_DRAWINGS_CATEGORY_ID) profitDistribution += row.total;
       }
-      else if (row.type === 'budget_charge') budgetCharged += row.total;
+      else if (row.type === BUDGET_MOVEMENT_TYPE) {
+        if (row.category === BUDGET_MOVEMENT_CATEGORY.return) budgetReturned += -row.total;
+        else if (row.category === BUDGET_MOVEMENT_CATEGORY.transfer_in) budgetTransferred += row.total;
+        else if (row.category === BUDGET_MOVEMENT_CATEGORY.transfer_out) { /* the matching transfer_in is the disclosed figure */ }
+        else budgetCharged += row.total;
+      }
       else if (row.type === 'saving_transfer') savingTransferred += row.total;
     }
 
@@ -1230,6 +1268,8 @@ financeRouter.get(
         capitalInjection,
         profitDistribution,
         budgetCharged,
+        budgetReturned,
+        budgetTransferred,
         savingTransferred,
       },
     });

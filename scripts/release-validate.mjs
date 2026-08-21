@@ -139,21 +139,85 @@ check('fresh install from canonical schema', () => {
 });
 
 check('financial invariants reconcile', () => {
-  // Runs the real reconciliation against a freshly bootstrapped database, so
-  // the gate proves the invariants hold on a clean install rather than trusting
-  // whatever state a developer's DB happens to be in.
+  // Runs the real reconciliation against a freshly bootstrapped database after
+  // driving a COMPLETE money lifecycle through the authoritative writers.
+  //
+  // An empty database reconciles trivially, so the previous version of this
+  // gate could not have failed: it proved only that 0 = 0. The month-end
+  // settlement defects repaired under WP-07 (a return booked as another
+  // positive budget charge; a line-to-line transfer booked as a savings
+  // movement) were invisible to it for exactly that reason. The probe now
+  // exercises income, the savings sweep, a refund, treasury funding, budget
+  // spend, a line-to-line transfer and a return to the treasury, then demands
+  // every variance be exactly zero.
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'th-recon-'));
   const dbPath = path.join(tmp, 'recon.sqlite');
   const probe = path.join(tmp, 'probe.mjs');
+  const src = (...parts) => JSON.stringify(path.join(root, 'server', 'src', ...parts));
   fs.writeFileSync(probe, `
-    import { db, initSchema } from ${JSON.stringify(path.join(root, 'server', 'src', 'db', 'connection.ts'))};
-    import { computeReconciliation } from ${JSON.stringify(path.join(root, 'server', 'src', 'utils', 'reconciliation.ts'))};
+    import { db, initSchema } from ${src('db', 'connection.ts')};
+    import { computeReconciliation } from ${src('utils', 'reconciliation.ts')};
+    import { recordIncome } from ${src('utils', 'income.ts')};
+    import { postBudgetMovement } from ${src('core', 'finance', 'budget-movements.ts')};
+    import { incrementMainBalance, decrementMainBalanceIfSufficient } from ${src('utils', 'financeAccounts.ts')};
+    import { id } from ${src('utils', 'ids.ts')};
+
     initSchema();
     db.prepare("INSERT OR IGNORE INTO branches (id,name,location) VALUES ('rg','rg','L')").run();
+    const line = (lid, name) => {
+      db.prepare(\`INSERT OR REPLACE INTO budget_lines (id,name,category_id,allocated_amount,current_amount,branch_id,cost_type)
+                   VALUES (?,?,'sub_rent',0,0,'rg','fixed')\`).run(lid, name);
+      return { id: lid, name, branch_id: 'rg' };
+    };
+    const lineA = line('rg_line_a', 'Line A');
+    const lineB = line('rg_line_b', 'Line B');
+
+    // Operating income, its automatic savings sweep, and a refund that has to
+    // reclaim part of that sweep.
+    db.transaction(() => recordIncome({
+      category: 'fee', amount: 20000, date: '2026-06-01', description: 'tuition',
+      operatorName: 'Gate', operatorRole: 'owner', branchId: 'rg',
+    }))();
+    db.transaction(() => recordIncome({
+      category: 'refund', amount: -19500, date: '2026-06-02', description: 'refund',
+      operatorName: 'Gate', operatorRole: 'owner', branchId: 'rg',
+    }))();
+
+    // Owner capital into the treasury, then budget funding out of it.
+    db.transaction(() => {
+      incrementMainBalance('organization', 'global', 60000);
+      db.prepare(\`INSERT INTO financial_transactions (id, type, category, amount, date, description, operator_name, branch_id)
+                   VALUES (?, 'income', 'capital_injection', 60000, '2026-06-03', 'capital', 'Gate', 'rg')\`).run(id('tx'));
+    })();
+    db.transaction(() => {
+      if (!decrementMainBalanceIfSufficient('organization', 'global', 40000)) throw new Error('treasury debit failed');
+      postBudgetMovement({ line: lineA, kind: 'allocation', amount: 40000, date: '2026-06-03', description: 'fund A', operatorName: 'Gate' });
+    })();
+
+    // Spend from the line, exactly as an approved expense does.
+    db.transaction(() => {
+      const updated = db.prepare('UPDATE budget_lines SET current_amount = current_amount - ? WHERE id = ? AND current_amount >= ?').run(15000, lineA.id, 15000);
+      if (updated.changes !== 1) throw new Error('budget spend failed');
+      db.prepare(\`INSERT INTO financial_transactions (id, type, category, finance_category_id, amount, date, description, reference_id, operator_name, branch_id)
+                   VALUES (?, 'expense', 'sub_rent', 'sub_rent', 15000, '2026-06-04', 'rent paid from A', ?, 'Gate', 'rg')\`).run(id('tx'), lineA.id);
+    })();
+
+    // Month-end: reassign the remainder to another line, then return part of it.
+    db.transaction(() => {
+      postBudgetMovement({ line: lineA, kind: 'transfer_out', amount: 25000, date: '2026-06-30', description: 'reassign', operatorName: 'Gate' });
+      postBudgetMovement({ line: lineB, kind: 'transfer_in', amount: 25000, date: '2026-06-30', description: 'reassign', operatorName: 'Gate' });
+    })();
+    db.transaction(() => {
+      postBudgetMovement({ line: lineB, kind: 'return', amount: 25000, date: '2026-06-30', description: 'return', operatorName: 'Gate' });
+      incrementMainBalance('organization', 'global', 25000);
+    })();
+
     const r = computeReconciliation({ branchId: null, isAll: true });
+    const lines = db.prepare('SELECT COALESCE(SUM(current_amount),0) c, COALESCE(SUM(allocated_amount),0) a FROM budget_lines').get();
     console.log('RESULT ' + JSON.stringify({
       amount: r.amountVariance, cash: r.cashVariance,
       saving: r.savingVariance, budget: r.budgetVariance, healthy: r.healthy,
+      lineCurrent: lines.c, lineAllocated: lines.a,
     }));
   `);
   const out = execSync(`npx tsx ${JSON.stringify(probe)}`, {
@@ -163,11 +227,15 @@ check('financial invariants reconcile', () => {
   const line = out.trim().split('\n').filter((l) => l.startsWith('RESULT ')).pop();
   if (!line) throw new Error('reconciliation probe produced no result');
   const r = JSON.parse(line.slice('RESULT '.length));
-  const bad = ['amount', 'cash', 'saving', 'budget'].filter((k) => Math.abs(r[k]) >= 0.01);
+  // Whole AFN: a variance is either zero or a real break (D-12/D-22).
+  const bad = ['amount', 'cash', 'saving', 'budget'].filter((k) => r[k] !== 0);
   if (bad.length) throw new Error(`non-zero variance: ${bad.map((k) => `${k}=${r[k]}`).join(', ')}`);
   if (!r.healthy) throw new Error('reconciliation reports unhealthy');
+  // Spend, and only spend, remains charged against the branch envelopes.
+  if (r.lineCurrent !== 0) throw new Error(`budget lines still hold ${r.lineCurrent} AFN after settlement`);
+  if (r.lineAllocated !== 15000) throw new Error(`allocation should equal the 15000 AFN spent, got ${r.lineAllocated}`);
   fs.rmSync(tmp, { recursive: true, force: true });
-  return 'amount/cash/saving/budget all 0';
+  return 'full money lifecycle · amount/cash/saving/budget all 0';
 });
 
 console.log('\nBranding');

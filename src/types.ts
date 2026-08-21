@@ -1555,7 +1555,7 @@ export interface OperationsReport {
     expense: { total: number; byCategory: { category: string; total: number }[] };
     net: number;
     previous: { from: string; to: string; income: number; expense: number; net: number };
-    transfers: { capitalInjection: number; profitDistribution: number; budgetCharged: number; savingTransferred: number };
+    transfers: { capitalInjection: number; profitDistribution: number; budgetCharged: number; budgetReturned: number; budgetTransferred: number; savingTransferred: number };
     balances: { main: number; saving: number; budgetAllocated: number; budgetRemaining: number };
     collectedPayments: { count: number; total: number; male: number; female: number };
     discounts: { invoiceDiscounts: number; registrationDiscounts: number };
