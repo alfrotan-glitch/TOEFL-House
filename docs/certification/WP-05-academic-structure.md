@@ -1,10 +1,10 @@
 # Certification — WP-05 Academic Structure
 
-**Work Package:** WP-05 Academic Structure  
-**Protocol:** `docs/MASTER_ENGINEERING_PROTOCOL.md` §§58–74 and §W  
-**Date:** 2026-08-21  
-**Recoverable pre-package baseline:** `47f618d57394aecf0b0c468c6cb0c49664a89c84`  
-**Required implementation checkpoint:** `9cbde9b` (`checkpoint WP-05 academic structure repairs`)  
+**Work Package:** WP-05 Academic Structure
+**Protocol:** `docs/MASTER_ENGINEERING_PROTOCOL.md` §§58–74 and §W
+**Date:** 2026-08-21
+**Recoverable pre-package baseline:** `47f618d57394aecf0b0c468c6cb0c49664a89c84`
+**Required implementation checkpoint:** `9cbde9b` (`checkpoint WP-05 academic structure repairs`)
 **Status:** READY — scope-limited certification complete
 
 > This artifact certifies only WP-05. It does not certify Academic Delivery,
