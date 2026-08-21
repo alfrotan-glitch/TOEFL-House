@@ -410,11 +410,19 @@ export interface PlacementScore {
   components?: Array<{ key: string; label: string; score?: number | null; percentage?: number | null; status: string }>;
 }
 
+/**
+ * One instalment of a tuition plan.
+ *
+ * An instalment belongs to the term it pays (owner decision D-125), which is
+ * why it carries `semesterName`: paying it settles that term, and the desk
+ * never chooses a semester.
+ */
 export interface Installment {
   id: string;
   dueDate: string;
   amount: number;
-  status: 'paid' | 'pending' | 'overdue';
+  status: 'paid' | 'pending';
+  semesterName?: string;
   notes?: string;
 }
 

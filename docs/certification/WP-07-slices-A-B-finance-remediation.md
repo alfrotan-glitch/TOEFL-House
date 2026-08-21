@@ -104,7 +104,7 @@ re-run after the repair.
 | WP07-F12 | A receipt number is not unique at rest | HIGH | the database accepted two payments carrying `R-00099001`, on insert and on update, while the generator's comment promised uniqueness. The receipt is the payer's proof, so an ambiguous number is an unauditable payment (LAW 3) |
 | WP07-F13 | The canonical schema declares the same object twice | MEDIUM | one unique index under two names on `invoices`, one index under two names on `invoice_items`, and two branch-guard trigger pairs each on `invoices` and `payments` where the `IS NOT` pair strictly subsumes the `<>` pair (§12) |
 | WP07-F14 | A discount grant is coerced, undated and its store fails silently | HIGH | `approvedPercent: [10]` granted 10%, `true` granted 1%, `''`/`null` created a 0% authorization record; `effectiveFrom: 'banana'` was stored and silently prevented the grant from ever activating (and `effectiveTo: 'banana'` from ever expiring); and a resolver that could not read the authorization table charged ordinary policy without a word |
-| WP07-F16 | An installment payment settles no semester, so the same tuition can be collected twice | HIGH — **OPEN, owner decision required** | proven on a fresh database: a 4,000 AFN installment is stored with `semester = NULL`; the balance authority counts it (`tuitionPaid 4,000 / outstanding 6,000`) while the payment desk still offers the full 10,000 for that term **and accepts it** — 14,000 AFN collected for a 10,000 AFN term. Present at the WP-06 certified baseline `d29554b` and unchanged by slices A–D (`semName` is assigned only in the two fee branches) |
+| WP07-F16 | An installment payment settles no semester, so the same tuition can be collected twice | HIGH — **RESOLVED in slice E3 (D-125)** | proven on a fresh database: a 4,000 AFN installment is stored with `semester = NULL`; the balance authority counts it (`tuitionPaid 4,000 / outstanding 6,000`) while the payment desk still offers the full 10,000 for that term **and accepts it** — 14,000 AFN collected for a 10,000 AFN term. Present at the WP-06 certified baseline `d29554b` and unchanged by slices A–D (`semName` is assigned only in the two fee branches) |
 | WP07-F17 | An invoice payment is always booked as TUITION, whatever the invoice is for | HIGH — **OPEN, owner decision required** | proven on a fresh database: an issued invoice whose only line is "Textbooks and stationery" (3 × 1,000) is paid, `POST /api/invoices/:id/pay` writes `category = 'fee'` with no semester, and the student's tuition outstanding falls from 10,000 to 7,000. The tuition receivable is understated by the value of goods sold |
 | WP07-F15 | A refund of one semester distorts another semester's price | HIGH | proven after D-114 landed: with Term A partially refunded by 2,000, Term B's outstanding read 12,000 instead of 10,000, and after Term B was paid in full the desk accepted a further payment against it (`amountCharged: 1`). Two inline copies of the semester-settlement rule counted every refund against whichever term was being paid |
 | WP07-F11 | A refund is unattributed, so a non-tuition refund creates tuition debt | HIGH — **RESOLVED in slice D** | proven on a fresh database: tuition 10,000 paid in full, a 2,000 exam fee paid, then a 2,000 refund → the canonical balance authority reported `tuitionPaid 8,000 / outstanding 2,000`. The same authority feeds the roster, the portal, branch outstanding and the enrolment debt-hold, so a refunded exam fee could block a student's enrolment |
@@ -373,8 +373,12 @@ discount-authorization input boundary and failure behaviour, and refund
 attribution under the owner's two rules. Still outstanding, and deliberately not
 claimed:
 
-- **WP07-F16 (installment → semester) and WP07-F17 (invoice → obligation) —
-  BLOCKED on the owner decisions above;**
+- **WP07-F17 (invoice → obligation) — approved by the owner (invoice declares
+  its purpose and a tuition invoice names its obligation) and NOT YET BUILT;**
+  WP07-F16 is closed by slice E3 (D-125);
+- **S6 (sponsorship agreements are financial)** — approved and not yet built;
+- **S5** — owner ruled the SPONSORSHIP discount and scholarships are *different*
+  concepts; the boundary must be documented so they cannot be confused;
 - **E1b** — migrating cash payments onto `obligation_allocations`. Today cash
   tuition is still attributed by `payments.semester` and scholarship money by
   allocations; both are read through one settlement authority

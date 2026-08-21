@@ -507,7 +507,7 @@ export default function StudentsView({
                   <label className={text.label}>Select Installment:</label>
                   <select value={payInstallmentId} onChange={(e) => { setPayInstallmentId(e.target.value); const inst = paymentStudent.installmentPlan?.find(i => i.id === e.target.value); if (inst) setPayAmount(inst.amount); }} className={inputCls} required>
                     <option value="">-- Pending Installments --</option>
-                    {paymentStudent.installmentPlan?.filter(i => i.status !== 'paid').map(inst => <option key={inst.id} value={inst.id}>{inst.dueDate} - {formatAFN(inst.amount)}</option>)}
+                    {paymentStudent.installmentPlan?.filter(i => i.status !== 'paid').map(inst => <option key={inst.id} value={inst.id}>{inst.dueDate || 'no due date'} · {inst.semesterName ?? 'tuition'} · {formatAFN(inst.amount)}</option>)}
                   </select>
                 </div>
               )}

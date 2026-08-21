@@ -8,6 +8,13 @@ import { db } from '../db/connection.js';
 import { assertTextLengths, optionalText, requiredText, TEXT_LIMITS } from '../utils/textInput.js';
 import { parsePagination as parsePaginationShared } from '../utils/pagination.js';
 import { getStudentBalance, getStudentBalancesByIds, getStudentBalancesPage, getSemesterTuitionSettled } from '../utils/studentBalance.js';
+import {
+  ensureTuitionObligation,
+  getPayableInstallment,
+  listStudentInstallments,
+  markInstallmentPaid,
+  setInstallmentPlan,
+} from '../core/finance/obligations.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import {
   canAccessAllBranchesForRequirement,
@@ -68,7 +75,6 @@ interface PaymentRow { id: string; student_id: string; amount: number; date: str
 
 const stmtGetPaymentsAll = db.prepare<[number, number], PaymentRow>('SELECT * FROM payments ORDER BY date DESC LIMIT ? OFFSET ?');
 const stmtGetPaymentsByBranch = db.prepare<[string, number, number], PaymentRow>('SELECT * FROM payments WHERE branch_id = ? ORDER BY date DESC LIMIT ? OFFSET ?');
-const stmtGetPaymentsByStudent = db.prepare('SELECT * FROM payments WHERE student_id = ? ORDER BY date DESC');
 
 const stmtGetClassDetails = db.prepare('SELECT * FROM classes WHERE id = ?');
 const stmtGetClassFee = db.prepare('SELECT fee FROM classes WHERE id = ?');
@@ -105,7 +111,6 @@ const stmtFindVisitorByTazkira = db.prepare(
 const stmtInsertRegistration = db.prepare(
   `INSERT INTO registrations (id, student_id, class_id, date, amount_paid, receipt_number, discount_applied, branch_id, source, semester) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
-const stmtGetActiveSemesterBalances = db.prepare(`SELECT s.id, s.semester_name, s.net_fee_amount, s.fee_amount FROM student_semesters s WHERE s.student_id = ? AND s.status = 'active'`);
 const stmtGetTransferSourceEnrollment = db.prepare(`
   SELECT id FROM enrollments
   WHERE student_id = ? AND status = 'active' AND enrollment_type <> 'extra'
@@ -204,7 +209,7 @@ const stmtListRefundablePayments = db.prepare(
 );
 const stmtUpdateStudentCard = db.prepare('UPDATE students SET card_design = ?, notes = ? WHERE id = ?');
 const stmtUpdateStudentDetails = db.prepare(
-  `UPDATE students SET full_name=?, phone=?, email=?, discount_percent=?, gender=?, father_name=?, address_region=?, tazkira_no=?, whatsapp=?, dob=?, school_or_university=?, emergency_contact_name=?, emergency_contact_phone=?, notes=?, placement_score=?, installment_plan=?, card_design=? WHERE id=?`
+  `UPDATE students SET full_name=?, phone=?, email=?, discount_percent=?, gender=?, father_name=?, address_region=?, tazkira_no=?, whatsapp=?, dob=?, school_or_university=?, emergency_contact_name=?, emergency_contact_phone=?, notes=?, placement_score=?, card_design=? WHERE id=?`
 );
 const stmtUpdateStudentStatus = db.prepare(
   `UPDATE students SET status = ?
@@ -225,7 +230,6 @@ const stmtCompleteSemestersOnGraduation = db.prepare(
   `UPDATE student_semesters SET status = 'completed'
     WHERE student_id = ? AND status IN ('active','deferred')`
 );
-const stmtUpdateStudentInstallments = db.prepare('UPDATE students SET installment_plan = ? WHERE id = ?');
 
 // The frontend loads the student list once per workspace and filters/searchs
 // client-side over the loaded set, so the default cap must cover the whole
@@ -280,10 +284,6 @@ function parseJson<T>(value: string | null | undefined, fallback: T): T {
  * producing `500 plan.find is not a function` on the payment endpoint. Malformed
  * stored data must degrade to "no installments", never crash a money route.
  */
-function parseJsonArray<T>(value: string | null | undefined): T[] {
-  const parsed = parseJson<unknown>(value, null);
-  return Array.isArray(parsed) ? (parsed as T[]) : [];
-}
 
 function requireStudent(
   req: import('express').Request,
@@ -336,7 +336,7 @@ export function applyStudentStatus(
   });
 }
 
-interface StudentRow { id: string; student_code: string; full_name: string; phone: string | null; email: string | null; qr_code: string | null; status: string; registration_date: string; branch_id: string; discount_percent: number; gender: string; lead_id: string | null; father_name: string | null; address_region: string | null; tazkira_no: string | null; whatsapp: string | null; dob: string | null; school_or_university: string | null; emergency_contact_name: string | null; emergency_contact_phone: string | null; notes: string | null; placement_score: string | null; installment_plan: string | null; card_design: string | null; }
+interface StudentRow { id: string; student_code: string; full_name: string; phone: string | null; email: string | null; qr_code: string | null; status: string; registration_date: string; branch_id: string; discount_percent: number; gender: string; lead_id: string | null; father_name: string | null; address_region: string | null; tazkira_no: string | null; whatsapp: string | null; dob: string | null; school_or_university: string | null; emergency_contact_name: string | null; emergency_contact_phone: string | null; notes: string | null; placement_score: string | null; card_design: string | null; }
 
 function mapStudentBase(row: StudentRow, includeFinance = true) {
   return {
@@ -348,7 +348,7 @@ function mapStudentBase(row: StudentRow, includeFinance = true) {
     whatsapp: row.whatsapp, dob: row.dob, schoolOrUniversity: row.school_or_university,
     emergencyContactName: row.emergency_contact_name, emergencyContactPhone: row.emergency_contact_phone,
     notes: row.notes, placementScore: parseJson(row.placement_score, undefined),
-    ...(includeFinance ? { installmentPlan: parseJson(row.installment_plan, undefined) } : {}),
+    ...(includeFinance ? { installmentPlan: listStudentInstallments(db, row.id).map((i) => ({ id: i.id, amount: i.amount, dueDate: i.dueDate ?? '', status: i.status, semesterName: i.semesterName })) } : {}),
     cardDesign: parseJson(row.card_design, undefined),
   };
 }
@@ -1143,12 +1143,18 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
   } 
   else if (category === 'installment') {
     if (!installmentId) throw new HttpError(400, 'installmentId is required.');
-    const plan = parseJsonArray<{ id: string; amount: number; status: string; dueDate?: string }>(student.installment_plan);
-    const inst = plan.find((i) => i.id === installmentId);
-    if (!inst || inst.status === 'paid') throw new HttpError(409, 'Installment not found or already paid.');
-    resolvedAmount = Number(inst.amount);
-    if (!Number.isFinite(resolvedAmount) || resolvedAmount <= 0) throw new HttpError(400, 'Installment amount is invalid.');
+    // The instalment belongs to a tuition obligation, so the term it settles is
+    // a fact of the plan rather than something the desk selects (owner
+    // decisions D-117/D-125). While the plan was JSON on the student, an
+    // instalment payment settled no term and the same tuition could be
+    // collected twice.
+    const payable = getPayableInstallment(db, student.id, installmentId);
+    resolvedAmount = payable.installment.amount;
     if (requestedAmount !== null && requestedAmount !== resolvedAmount) throw new HttpError(400, 'Installment payment must match the installment amount.');
+    if (resolvedAmount > payable.outstanding) {
+      throw new HttpError(409, `That term has only ${payable.outstanding} AFN outstanding; the instalment plan no longer matches what is owed.`);
+    }
+    semName = payable.obligation.semesterName;
   }
   else if (category === 'book') {
     if (!bookId) throw new HttpError(400, 'bookId is required.');
@@ -1230,12 +1236,11 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
       if (resolvedAmount <= 0) throw new HttpError(400, 'Amount must be greater than 0.');
     }
     if (category === 'installment') {
-      const currentStudent = stmtGetStudentById.get(student.id) as any;
-      const currentPlan = parseJsonArray<{ id: string; amount: number; status: string; dueDate?: string }>(currentStudent?.installment_plan);
-      const currentInst = currentPlan.find((item) => item.id === installmentId);
-      if (!currentInst || currentInst.status === 'paid') throw new HttpError(409, 'Installment is no longer payable.');
-      currentInst.status = 'paid';
-      stmtUpdateStudentInstallments.run(JSON.stringify(currentPlan), student.id);
+      // Re-read inside the transaction: two desks paying one instalment both
+      // pass the check above, and only one may mark it paid.
+      const fresh = getPayableInstallment(db, student.id, String(installmentId));
+      if (fresh.installment.amount !== resolvedAmount) throw new HttpError(409, 'The instalment changed while this payment was being taken.');
+      if (resolvedAmount > fresh.outstanding) throw new HttpError(409, 'That term no longer has that much outstanding.');
     }
     // The idempotency key is ALWAYS persisted, for every category. It is the
     // only mechanism that serialises concurrent duplicates: the pre-checks
@@ -1243,6 +1248,7 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
     // simultaneously. Writing NULL here for guarded categories would disable
     // the unique index, because SQLite considers each NULL distinct.
     stmtInsertPayment.run(payId, student.id, resolvedAmount, date, resolvedMethod, category, notes || 'Smart Payment', rc, student.branch_id, semName, null, bookRefId, idempotencyKey);
+    if (category === 'installment') markInstallmentPaid(db, String(installmentId), payId);
     if (category === 'book') {
       const updated = stmtUpdateBookStock.run(bookRefId, student.branch_id);
       if (updated.changes !== 1) throw new HttpError(409, 'Book stock changed. Please retry.');
@@ -1326,6 +1332,46 @@ studentsRouter.get('/:id/refundable-payments', requirePermission('Refund.Approve
  * explained, and it was proven to create tuition debt out of a refunded exam
  * fee, which the enrolment debt-hold then acted on.
  */
+/**
+ * The instalment plan of ONE tuition obligation.
+ *
+ * A plan pays a term, so it is written against that term rather than onto the
+ * student. Paying an instalment then settles the term the plan belongs to and
+ * the desk never chooses a semester (owner decisions D-117 and D-125).
+ */
+studentsRouter.get('/:id/installment-plan', requirePermission('Payment.View'), ah(async (req, res) => {
+  const student = requireStudent(req, req.params.id);
+  res.json(listStudentInstallments(db, student.id).map((row) => ({
+    id: row.id,
+    obligationId: row.obligationId,
+    semesterId: row.semesterId,
+    semesterName: row.semesterName,
+    sequence: row.sequence,
+    amount: row.amount,
+    dueDate: row.dueDate,
+    status: row.status,
+  })));
+}));
+
+studentsRouter.put('/:id/installment-plan', requirePermission('Payment.Create'), ah(async (req, res) => {
+  const student = requireStudent(req, req.params.id);
+  const { semesterId, installments } = req.body as { semesterId?: string; installments?: Array<{ amount: unknown; dueDate?: unknown }> };
+  const semesterRef = typeof semesterId === 'string' ? semesterId.trim() : '';
+  if (!semesterRef) throw new HttpError(400, 'The term this plan pays must be named (semesterId).');
+
+  const semester = (stmtGetSemestersByStudent.all(student.id) as Array<{ id: string }>).find((row) => row.id === semesterRef);
+  if (!semester) throw new HttpError(404, 'Semester not found for this student.');
+
+  let plan: ReturnType<typeof setInstallmentPlan> = [];
+  db.transaction(() => {
+    const obligation = ensureTuitionObligation(db, semesterRef);
+    plan = setInstallmentPlan(db, { obligationId: obligation.id, installments: installments ?? [] });
+  })();
+
+  writeAudit(req, `Set an instalment plan of ${plan.length} instalments for ${student.full_name}`, { branchId: student.branch_id, newValue: JSON.stringify({ semesterId: semesterRef, total: plan.reduce((sum, row) => sum + row.amount, 0) }) });
+  res.json(plan);
+}));
+
 studentsRouter.post('/:id/refund', requirePermission('Refund.Approve'), ah(async (req, res) => {
   const user = getUserContext(req);
   const student = requireStudent(req, req.params.id);
@@ -1581,33 +1627,11 @@ studentsRouter.patch('/:id', requirePermission('Student.Edit'), ah(async (req, r
     throw new HttpError(400, 'ID-card designs must be saved through the issue-card workflow.');
   }
 
-  // Validate the installment plan at the WRITE boundary. It is stored as JSON
-  // and later drives real payments, so a malformed plan is corrupt financial
-  // data, not a cosmetic problem. Accepting a pre-serialised string here
-  // double-encoded it (the column is JSON.stringify'd below), which parsed back
-  // to a string and crashed the payment route with
-  // `500 plan.find is not a function`.
-  if (f.installmentPlan !== undefined && f.installmentPlan !== null) {
-    if (!Array.isArray(f.installmentPlan)) {
-      throw new HttpError(400, 'installmentPlan must be an array of installments, not a string or object.');
-    }
-    if (f.installmentPlan.length > 100 || JSON.stringify(f.installmentPlan).length > 100_000) {
-      throw new HttpError(400, 'installmentPlan is too large.');
-    }
-    const seen = new Set<string>();
-    for (const item of f.installmentPlan as Array<Record<string, unknown>>) {
-      if (!item || typeof item !== 'object') throw new HttpError(400, 'Each installment must be an object.');
-      const instId = requiredText(item.id, 'Installment id', TEXT_LIMITS.short);
-      // Duplicate ids would make "pay installment X" ambiguous, and marking one
-      // paid would silently settle the other.
-      if (seen.has(instId)) throw new HttpError(400, `Duplicate installment id "${instId}".`);
-      seen.add(instId);
-      const installmentAmount = assertMoney(item.amount, `Installment "${instId}" amount`);
-      if (installmentAmount <= 0) throw new HttpError(400, `Installment "${instId}" amount must be greater than zero.`);
-      if (item.status !== undefined && !['pending', 'paid'].includes(String(item.status))) {
-        throw new HttpError(400, `Installment "${instId}" has an invalid status.`);
-      }
-    }
+  // The instalment plan is no longer a field of the student profile: it is the
+  // schedule of a tuition obligation and is written through
+  // `PUT /api/students/:id/installment-plan` (owner decision D-125).
+  if (f.installmentPlan !== undefined) {
+    throw new HttpError(400, 'An instalment plan is set through PUT /api/students/:id/installment-plan, against the term it pays.');
   }
 
     let effDiscount = merge('discountPercent', 'discount_percent');
@@ -1627,7 +1651,6 @@ studentsRouter.patch('/:id', requirePermission('Student.Edit'), ah(async (req, r
     merge('dob', 'dob'), merge('schoolOrUniversity', 'school_or_university'), merge('emergencyContactName', 'emergency_contact_name'),
     merge('emergencyContactPhone', 'emergency_contact_phone'), merge('notes', 'notes'),
     f.placementScore !== undefined ? JSON.stringify(f.placementScore) : existing.placement_score,
-    f.installmentPlan !== undefined ? JSON.stringify(f.installmentPlan) : existing.installment_plan,
     f.cardDesign !== undefined ? JSON.stringify(f.cardDesign) : existing.card_design, req.params.id
   );
 
@@ -1636,9 +1659,9 @@ studentsRouter.patch('/:id', requirePermission('Student.Edit'), ah(async (req, r
   const identitySnapshot = (r: any) => JSON.stringify({
     fullName: r.full_name, phone: r.phone, email: r.email, gender: r.gender,
     discountPercent: r.discount_percent, tazkiraNo: r.tazkira_no, dob: r.dob,
-    placementScore: r.placement_score != null ? '(set)' : null, installmentPlan: r.installment_plan != null ? '(set)' : null,
+    placementScore: r.placement_score != null ? '(set)' : null,
   });
-  writeAudit(req, `Updated student profile ${existing.full_name}`, { oldValue: identitySnapshot(existing), newValue: identitySnapshot({ ...existing, full_name: merge('fullName', 'full_name'), phone: merge('phone', 'phone'), email: merge('email', 'email'), gender: merge('gender', 'gender'), discount_percent: effDiscount, tazkira_no: merge('tazkiraNo', 'tazkira_no'), dob: merge('dob', 'dob'), placement_score: f.placementScore !== undefined ? JSON.stringify(f.placementScore) : existing.placement_score, installment_plan: f.installmentPlan !== undefined ? JSON.stringify(f.installmentPlan) : existing.installment_plan }) });
+  writeAudit(req, `Updated student profile ${existing.full_name}`, { oldValue: identitySnapshot(existing), newValue: identitySnapshot({ ...existing, full_name: merge('fullName', 'full_name'), phone: merge('phone', 'phone'), email: merge('email', 'email'), gender: merge('gender', 'gender'), discount_percent: effDiscount, tazkira_no: merge('tazkiraNo', 'tazkira_no'), dob: merge('dob', 'dob'), placement_score: f.placementScore !== undefined ? JSON.stringify(f.placementScore) : existing.placement_score }) });
   res.json({ ok: true });
 }));
 

@@ -360,7 +360,6 @@ CREATE TABLE IF NOT EXISTS students (
   emergency_contact_phone TEXT, 
   notes                   TEXT, 
   placement_score         TEXT, 
-  installment_plan        TEXT, 
   card_design             TEXT, 
   created_at              TEXT NOT NULL DEFAULT (datetime('now')) 
 );
@@ -2705,6 +2704,31 @@ BEFORE INSERT ON student_obligations
 WHEN NEW.semester_id IS NOT NULL
  AND (SELECT student_id FROM student_semesters WHERE id = NEW.semester_id) IS NOT NEW.student_id
 BEGIN SELECT RAISE(ABORT, 'Obligation semester belongs to another student'); END;
+
+-- A tuition plan: the instalments of ONE obligation (owner decision D-125).
+-- The plan hangs off the obligation, so paying an instalment settles the term
+-- that obligation bills and the operator never chooses a semester. While the
+-- plan lived as JSON on the student it belonged to nobody, and an instalment
+-- payment settled no term at all — 14,000 AFN was collectable for a 10,000 AFN
+-- term.
+CREATE TABLE IF NOT EXISTS student_installments (
+  id            TEXT PRIMARY KEY,
+  obligation_id TEXT NOT NULL REFERENCES student_obligations(id) ON DELETE RESTRICT,
+  sequence      INTEGER NOT NULL CHECK (sequence > 0),
+  amount        INTEGER NOT NULL CHECK (amount > 0),
+  due_date      TEXT,
+  status        TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','paid')),
+  paid_payment_id TEXT REFERENCES payments(id) ON DELETE RESTRICT,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK ((status = 'pending' AND paid_payment_id IS NULL) OR (status = 'paid' AND paid_payment_id IS NOT NULL))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_installment_obligation_sequence
+  ON student_installments(obligation_id, sequence);
+CREATE INDEX IF NOT EXISTS idx_installments_obligation ON student_installments(obligation_id, status);
+CREATE TRIGGER IF NOT EXISTS trg_installments_money_scale_insert
+BEFORE INSERT ON student_installments
+WHEN NEW.amount <> CAST(NEW.amount AS INTEGER)
+BEGIN SELECT RAISE(ABORT, 'installment amount must be a whole number of AFN'); END;
 
 -- One allocation = one instrument applying one amount to one obligation.
 -- `source_kind` names the instrument and exactly one instrument key may be set,

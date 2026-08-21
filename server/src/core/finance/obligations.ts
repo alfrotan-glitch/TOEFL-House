@@ -38,6 +38,7 @@ import { HttpError } from '../../middleware/errorHandler.js';
 import { assertMoney } from '../../utils/money.js';
 import { TUITION_NET_SQL, getSemesterTuitionPaid } from '../../utils/studentBalance.js';
 import { id, today } from '../../utils/ids.js';
+import { assertOptionalIsoDate } from '../../utils/isoDate.js';
 
 export type ObligationKind = 'tuition';
 
@@ -400,4 +401,145 @@ export function fundScholarshipFromDonation(
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(fundingId, params.scholarshipId, params.donationId, amount, params.branchId, params.operatorName, params.date ?? today());
   return { fundingId };
+}
+
+// ── Instalment plans (owner decision D-125) ────────────────────────────────
+//
+// A plan is the instalments of ONE tuition obligation. Because the plan hangs
+// off the obligation, paying an instalment settles the term that obligation
+// bills and the operator never picks a semester — which is what D-117 requires.
+
+export interface InstallmentRow {
+  id: string;
+  obligationId: string;
+  sequence: number;
+  amount: number;
+  dueDate: string | null;
+  status: 'pending' | 'paid';
+  paidPaymentId: string | null;
+}
+
+const mapInstallment = (row: {
+  id: string; obligation_id: string; sequence: number; amount: number;
+  due_date: string | null; status: 'pending' | 'paid'; paid_payment_id: string | null;
+}): InstallmentRow => ({
+  id: row.id,
+  obligationId: row.obligation_id,
+  sequence: Number(row.sequence),
+  amount: Number(row.amount),
+  dueDate: row.due_date,
+  status: row.status,
+  paidPaymentId: row.paid_payment_id,
+});
+
+/** The plan of one obligation, in schedule order. */
+export function listInstallments(db: Database, obligationId: string): InstallmentRow[] {
+  return (db
+    .prepare(
+      `SELECT id, obligation_id, sequence, amount, due_date, status, paid_payment_id
+         FROM student_installments WHERE obligation_id = ? ORDER BY sequence`,
+    )
+    .all(obligationId) as Parameters<typeof mapInstallment>[0][]).map(mapInstallment);
+}
+
+/** Every instalment this student holds, with the term each one pays. */
+export function listStudentInstallments(
+  db: Database,
+  studentId: string,
+): Array<InstallmentRow & { semesterName: string; semesterId: string }> {
+  return (db
+    .prepare(
+      `SELECT i.id, i.obligation_id, i.sequence, i.amount, i.due_date, i.status, i.paid_payment_id,
+              ss.semester_name, ss.id AS semester_id
+         FROM student_installments i
+         JOIN student_obligations o ON o.id = i.obligation_id
+         JOIN student_semesters ss ON ss.id = o.semester_id
+        WHERE o.student_id = ?
+        ORDER BY ss.enroll_date DESC, i.sequence`,
+    )
+    .all(studentId) as Array<Parameters<typeof mapInstallment>[0] & { semester_name: string; semester_id: string }>).map((row) => ({
+      ...mapInstallment(row),
+      semesterName: row.semester_name,
+      semesterId: row.semester_id,
+    }));
+}
+
+/**
+ * Replaces the plan of one obligation.
+ *
+ * The plan may not promise more than the obligation bills, and a paid
+ * instalment is history: once any instalment is paid the schedule is fixed,
+ * because rewriting it would silently move money that has already been taken.
+ */
+export function setInstallmentPlan(
+  db: Database,
+  params: { obligationId: string; installments: Array<{ amount: unknown; dueDate?: unknown }> },
+): InstallmentRow[] {
+  if (!db.inTransaction) throw new Error('setInstallmentPlan() called outside a transaction.');
+  const position = getObligationPosition(db, params.obligationId);
+  if (position.obligation.status !== 'open') throw new HttpError(409, 'This obligation is not open.');
+
+  const existing = listInstallments(db, params.obligationId);
+  if (existing.some((row) => row.status === 'paid')) {
+    throw new HttpError(409, 'This plan has a paid instalment and can no longer be rewritten.');
+  }
+  if (!Array.isArray(params.installments) || params.installments.length === 0) {
+    throw new HttpError(400, 'A plan needs at least one instalment.');
+  }
+  if (params.installments.length > 60) throw new HttpError(400, 'A plan may not exceed 60 instalments.');
+
+  const parsed = params.installments.map((item, index) => {
+    const amount = assertMoney(item?.amount, `Instalment ${index + 1} amount`);
+    if (amount <= 0) throw new HttpError(400, `Instalment ${index + 1} must be greater than zero.`);
+    const dueDate = assertOptionalIsoDate(item?.dueDate, `Instalment ${index + 1} due date`);
+    return { amount, dueDate };
+  });
+
+  const planned = parsed.reduce((sum, row) => sum + row.amount, 0);
+  if (planned > position.obligation.netAmount) {
+    throw new HttpError(
+      400,
+      `The plan totals ${planned} AFN but the term bills ${position.obligation.netAmount} AFN.`,
+    );
+  }
+
+  db.prepare(`DELETE FROM student_installments WHERE obligation_id = ?`).run(params.obligationId);
+  const insert = db.prepare(
+    `INSERT INTO student_installments (id, obligation_id, sequence, amount, due_date, status)
+     VALUES (?, ?, ?, ?, ?, 'pending')`,
+  );
+  parsed.forEach((row, index) => insert.run(id('inst'), params.obligationId, index + 1, row.amount, row.dueDate));
+  return listInstallments(db, params.obligationId);
+}
+
+export interface PayableInstallment {
+  installment: InstallmentRow;
+  obligation: TuitionObligation;
+  outstanding: number;
+}
+
+/** The instalment a payment names, with the term it settles. */
+export function getPayableInstallment(db: Database, studentId: string, installmentId: string): PayableInstallment {
+  const row = db
+    .prepare(
+      `SELECT i.id, i.obligation_id, i.sequence, i.amount, i.due_date, i.status, i.paid_payment_id, o.student_id
+         FROM student_installments i JOIN student_obligations o ON o.id = i.obligation_id
+        WHERE i.id = ?`,
+    )
+    .get(installmentId) as (Parameters<typeof mapInstallment>[0] & { student_id: string }) | undefined;
+  if (!row) throw new HttpError(404, 'Instalment not found.');
+  if (row.student_id !== studentId) throw new HttpError(403, 'That instalment belongs to another student.');
+  if (row.status === 'paid') throw new HttpError(409, 'This instalment is already paid.');
+
+  const position = getObligationPosition(db, row.obligation_id);
+  return { installment: mapInstallment(row), obligation: position.obligation, outstanding: position.outstanding };
+}
+
+/** Marks an instalment paid by a specific payment. */
+export function markInstallmentPaid(db: Database, installmentId: string, paymentId: string): void {
+  if (!db.inTransaction) throw new Error('markInstallmentPaid() called outside a transaction.');
+  const updated = db
+    .prepare(`UPDATE student_installments SET status = 'paid', paid_payment_id = ? WHERE id = ? AND status = 'pending'`)
+    .run(paymentId, installmentId);
+  if (updated.changes !== 1) throw new HttpError(409, 'This instalment is no longer payable.');
 }
