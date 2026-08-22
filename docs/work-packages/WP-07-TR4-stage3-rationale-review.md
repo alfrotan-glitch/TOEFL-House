@@ -170,3 +170,38 @@ Gates unchanged and green: mutation **18 passed · 0 failed**, `release:validate
 
 **Remaining, in the registered order:** residuals R-1…R-4 → the certification question.
 **WP-07 remains NOT certified. Stopped at the checkpoint.**
+
+---
+
+## 12. RESIDUALS R-1…R-4 DISPOSED (2026-08-22, Owner: "continue") — 1 closed, 1 refreshed, 2 decision points
+
+**R-3 — CLOSED with evidence.** The dossier's "19 of 26 Class-1 files not deep-read" residual was
+already mitigated: the C-2 audit's §6 records the Owner-approved deep read of all six
+settlement-touching Class-1 files, with per-file outcomes in §6.1 — including one genuine
+reclassification (`balance-single-source-of-truth.test.ts`, `toBeCloseTo` → exact equality after
+D-104). Nothing further to do.
+
+**R-2 — OPEN BY DESIGN, evidence refreshed.** `payments.semester` retirement remains future work:
+live consumers enumerated — the payment-list surfaces (`students.routes.ts` SELECTs, display
+contract) and the refund path (the refund INSERT inherits the reversed payment's semester, the
+D-113/D-116 attribution contract). Until those move to allocation-keyed reads, the column is
+load-bearing. Recorded; no action available.
+
+**R-1 — DECISION POINT (recommendation attached).** Both BOS revenue reports share
+`REVENUE_BY_ALLOCATION_SQL`, whose `JOIN classes` drops tuition revenue for class-less terms,
+while `stmtMonthlyRevenue` reads the ledger directly — so the by-class breakdown's sum can be
+lower than the branch's true revenue. **Recommended model:** LEFT JOIN + an explicit
+"(no class)" attribution bucket so the breakdown reconciles with the ledger-true total (§77),
+no silent reallocation to other classes. ~10-line SQL change + reconciliation assertions in the
+BOS suite. Awaiting Owner approval (report-visible change).
+
+**R-4 — DECISION POINT (recommendation attached).** Classless enrolments are reachable
+(`enrollment-service` writes a term only when `classId && active && writeSemester !== false`;
+all three callers pass `writeSemester: false` with their own term rows). D-139's design — bill
+the snapshot as one `other` document, no tuition receivable for the nameless term — is PROVEN
+and deliberate; the alternative double-bills the callers that own their term.
+**Recommended: accept D-139 as final** (residual recorded as designed behaviour, not a defect).
+Awaiting Owner decision.
+
+**Standing:** release 22/22 · mutation 18/0 (all survivors documented) · suite 2843/162/0 ·
+tree clean. **WP-07 NOT certified. Stopped at the checkpoint.**
