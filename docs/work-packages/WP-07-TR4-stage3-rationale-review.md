@@ -84,3 +84,19 @@ discharge is S3-F1** (the register gap), plus the previously recorded open recom
 
 **TR-4 remains OPEN pending the Owner's disposition of S3-F1. WP-07 remains NOT certified.**
 Stopped at the checkpoint.
+
+---
+
+## 5. DISPOSITION — S3-F1 RESOLVED (2026-08-22, Owner: "Continue")
+
+Append-only rows **D-158…D-161** added to `docs/registries/decisions.md`, recording: the TR4-R9
+settlement-authority removal (superseding the subjects of D-116/D-133/D-141, which remain as
+history), the TR4-R12 gate hardening, the M7 subsumption simplification (Owner Option b, never
+classified EQUIVALENT), and the TR4-R14 survivor/anchor dispositions ending in the fully green
+mutation gate. Historical rationale untouched. Verified: `audit:registries` PASS (443 rows, 778
+path references, all live); `release:validate` **22 passed · 0 failed**.
+
+**S3-F1 closed. TR-4's review record is now internally consistent end-to-end.** Remaining open
+items, in the registered order: TR4-R13 (cross-surface runtime agreement test) → TR4-R10/R11
+(predicate consolidation) → dead export `getStudentScholarshipSettled` → residuals R-1…R-4 → the
+certification question. **WP-07 remains NOT certified. Stopped at the checkpoint.**
