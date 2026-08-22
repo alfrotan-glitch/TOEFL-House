@@ -131,3 +131,25 @@ server suite **2843 passed · 162 skipped · 0 failed** (+1 test). Changed: `stu
 
 **Remaining, in the registered order:** TR4-R10/R11 → dead export → residuals R-1…R-4 → the
 certification question. **WP-07 remains NOT certified. Stopped at the checkpoint.**
+
+---
+
+## 10. TR4-R10 + TR4-R11 EXECUTED — predicate consolidation (2026-08-22, Owner: "Continue")
+
+**R10:** the four inline `COALESCE(net_fee_amount, fee_amount)` copies inside `studentBalance.ts`
+now use the module's own exported `TUITION_NET_SQL` — the rule is written once in the file that
+defines it, as the constant always intended.
+
+**R11:** the active-cash-allocation predicate (`source_kind = 'payment' AND status = 'active'`)
+is now `CASH_ALLOCATION_SQL` in `studentBalance.ts`, exported beside the `AID_SOURCE_KINDS_SQL`
+it mirrors, and consumed by all three readers — both obligation-position queries (single-table,
+now aliased) and the BOS revenue aggregate (multi-join). Verified: **no raw occurrence of the
+predicate remains anywhere outside the constant** (grep-clean).
+
+Harness-anchor safety was checked before editing (no harness anchors reference either literal).
+Behaviour is provably unchanged: the server suite reports the identical 2843 passed · 162
+skipped · 0 failed, and all gates held — mutation **18 passed · 0 failed**, `release:validate`
+**22 passed · 0 failed**. Changed: 3 files, +20/−11.
+
+**Remaining, in the registered order:** dead export `getStudentScholarshipSettled` → residuals
+R-1…R-4 → the certification question. **WP-07 remains NOT certified. Stopped at the checkpoint.**

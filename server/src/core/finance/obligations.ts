@@ -36,7 +36,7 @@
 import type { Database } from 'better-sqlite3';
 import { HttpError } from '../../middleware/errorHandler.js';
 import { assertMoney } from '../../utils/money.js';
-import { TUITION_NET_SQL, AID_SOURCE_KINDS_SQL } from '../../utils/studentBalance.js';
+import { TUITION_NET_SQL, AID_SOURCE_KINDS_SQL, CASH_ALLOCATION_SQL } from '../../utils/studentBalance.js';
 import { id, today } from '../../utils/ids.js';
 import { assertOptionalIsoDate } from '../../utils/isoDate.js';
 
@@ -729,8 +729,8 @@ export function reverseSponsorshipAllocation(
 export function getObligationCashSettled(db: Database, obligationId: string): number {
   const row = db
     .prepare(
-      `SELECT COALESCE(SUM(amount), 0) AS total FROM obligation_allocations
-        WHERE obligation_id = ? AND source_kind = 'payment' AND status = 'active'`,
+      `SELECT COALESCE(SUM(a.amount), 0) AS total FROM obligation_allocations a
+        WHERE a.obligation_id = ? AND ${CASH_ALLOCATION_SQL}`,
     )
     .get(obligationId) as { total: number };
   return Number(row.total) || 0;
@@ -775,8 +775,8 @@ export function refundPaymentAllocation(
 
   const active = db
     .prepare(
-      `SELECT id, obligation_id, amount FROM obligation_allocations
-        WHERE payment_id = ? AND source_kind = 'payment' AND status = 'active'`,
+      `SELECT a.id, a.obligation_id, a.amount FROM obligation_allocations a
+        WHERE a.payment_id = ? AND ${CASH_ALLOCATION_SQL}`,
     )
     .get(params.targetPaymentId) as { id: string; obligation_id: string; amount: number } | undefined;
   if (!active) return { reversedAllocationId: null, retainedAllocationId: null };

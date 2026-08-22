@@ -119,6 +119,15 @@ const TUITION_PAYMENT_SQL = `(
  */
 export const AID_SOURCE_KINDS_SQL = `('scholarship','sponsorship')`;
 
+/**
+ * An ACTIVE cash allocation: the source-kind/status pairing every "settled in
+ * cash" reader applies. Column references carry the `a.` alias so multi-join
+ * aggregates (BOS revenue) and single-table readers (obligation positions)
+ * share ONE expression of the rule, exactly as AID_SOURCE_KINDS_SQL does for
+ * aid money.
+ */
+export const CASH_ALLOCATION_SQL = "a.source_kind = 'payment' AND a.status = 'active'";
+
 /** Aid money applied to any of this student's tuition obligations. */
 function studentScholarshipSettled(db: Database, studentId: string): number {
   const row = db
@@ -138,7 +147,7 @@ export function getStudentBalance(db: Database, studentId: string, scope: Balanc
   const semesterFilter = scope === 'active' ? `AND status = 'active'` : '';
   const due = db
     .prepare(
-      `SELECT COALESCE(SUM(COALESCE(net_fee_amount, fee_amount)), 0) AS total
+      `SELECT COALESCE(SUM(${TUITION_NET_SQL}), 0) AS total
        FROM student_semesters WHERE student_id = ? ${semesterFilter}`,
     )
     .get(studentId) as { total: number };
@@ -196,7 +205,7 @@ export function getStudentBalancesPage(
               COALESCE(paid.total, 0) + COALESCE(aid.total, 0) AS tuition_paid
          FROM students st
          LEFT JOIN (
-           SELECT student_id, SUM(COALESCE(net_fee_amount, fee_amount)) AS total
+           SELECT student_id, SUM(${TUITION_NET_SQL}) AS total
            FROM student_semesters ${semesterFilter} GROUP BY student_id
          ) sem ON sem.student_id = st.id
          LEFT JOIN (
@@ -236,7 +245,7 @@ export function getStudentBalancesByIds(
             COALESCE(paid.total, 0) + COALESCE(aid.total, 0) AS tuition_paid
        FROM students st
        LEFT JOIN (
-         SELECT student_id, SUM(COALESCE(net_fee_amount, fee_amount)) AS total
+         SELECT student_id, SUM(${TUITION_NET_SQL}) AS total
          FROM student_semesters ${semesterFilter} GROUP BY student_id
        ) sem ON sem.student_id = st.id
        LEFT JOIN (
@@ -280,7 +289,7 @@ export function getBranchOutstanding(db: Database, branchId: string | null): num
     .prepare(
       `SELECT COALESCE(SUM(MAX(0, sem.total - COALESCE(paid.total, 0) - COALESCE(aid.total, 0))), 0) AS outstanding
        FROM (
-         SELECT student_id, SUM(COALESCE(net_fee_amount, fee_amount)) AS total
+         SELECT student_id, SUM(${TUITION_NET_SQL}) AS total
          FROM student_semesters GROUP BY student_id
        ) sem
        JOIN students st ON st.id = sem.student_id ${scope}

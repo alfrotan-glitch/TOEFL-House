@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { LEAD_CONVERTED_SQL } from '../core/visitors/lead-lifecycle.js';
 import { db } from '../db/connection.js';
-import { getBranchOutstanding } from '../utils/studentBalance.js';
+import { getBranchOutstanding, CASH_ALLOCATION_SQL } from '../utils/studentBalance.js';
 import { authenticate, authorize, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { isGlobalOwner } from '../core/rbac/rbac-service.js';
 import { writeAudit } from '../middleware/audit.js';
@@ -248,7 +248,7 @@ const REVENUE_BY_ALLOCATION_SQL = `
   JOIN student_obligations o ON o.id = a.obligation_id
   JOIN student_semesters ss ON ss.id = o.semester_id
   JOIN classes c ON c.id = ss.class_id
-  WHERE a.source_kind = 'payment' AND a.status = 'active'
+  WHERE ${CASH_ALLOCATION_SQL}
     AND p.status = 'completed'
     AND c.branch_id = ? AND p.date BETWEEN ? AND ?`;
 
