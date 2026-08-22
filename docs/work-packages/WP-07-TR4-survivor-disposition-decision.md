@@ -110,3 +110,17 @@ plus a written reason in the harness; the author does not classify Class W; WP-0
 until TR-4 is discharged; the decision register's historical rationale is untouched.
 
 **Stopped at this decision checkpoint — awaiting Owner approval.**
+
+---
+
+## 5. OWNER APPROVALS RECORDED (2026-08-22, same checkpoint)
+
+| Bucket | Owner decision |
+|---|---|
+| 1 — obsolete anchors | **Approved: retire M1/M12/M14 into the documented OBSOLETE registry AND design the M15 successor mutant** for the fractional-rejection boundary (D-23). |
+| 2 — real survivors | **Approved: full coverage-repair model** — placement P1/P2/P3/P6 cases (1e15/1e20, 'abc', omitted-fee fallback, billable-first-attempt) and the rbac M7 measurement fix (add `security-grant-escalation.test.ts` to the harness suites). |
+| 3 — pre-existing 18 | **Approved: class-based protocol in the recommended order** — Class C coverage repairs (5) → Class R probes (8), with Class W (6) and J10 packaged for the independent reviewer. |
+
+Per the round's governing instruction ("Proceed to the next Decision Checkpoint only … Do not
+implement"), **no implementation has begun**. Each approved batch executes under its own full
+lifecycle (CHECKPOINT → … → CERTIFY, no WP-07 certification) when the Owner says proceed.
