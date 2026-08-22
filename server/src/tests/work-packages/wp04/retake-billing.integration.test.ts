@@ -64,6 +64,40 @@ describe('WP-04 retake eligibility and placement billing', () => {
     expect((await startAttempt(context)).status).toBe(409);
   });
 
+  it('an unconfigured retake fee falls back to the base fee, never to zero', async () => {
+    const context = seedContext();
+    expect((await putProfile(context, {
+      firstAttemptBillable: false,
+      allowRetake: true,
+      maxAttempts: 2,
+      retakeBillable: true,
+      retakeFeeAmount: null,
+    })).status).toBe(200);
+    const first = await startAttempt(context);
+    expect((await scoreAndComplete(context, first.body.id, 80)).completed.status).toBe(200);
+    const second = await startAttempt(context);
+    const { completed } = await scoreAndComplete(context, second.body.id, 80);
+    expect(completed.status).toBe(200);
+    // TR4-R14 follow-up (kills placement mutant P3): an omitted/null retake fee
+    // must charge the BASE fee (100), not 0 — a stored 0 silently makes every
+    // billable retake free.
+    expect(completed.body.feeCharged).toBe(100);
+    expect(paymentFor(second.body.id).amount).toBe(100);
+  });
+
+  it('the first sitting is billed the base fee even when a retake fee is configured', async () => {
+    const context = seedContext();
+    expect((await putProfile(context, { firstAttemptBillable: true, retakeBillable: true, retakeFeeAmount: 55 })).status).toBe(200);
+    const started = await startAttempt(context);
+    const { completed } = await scoreAndComplete(context, started.body.id, 80);
+    expect(completed.status).toBe(200);
+    // TR4-R14 follow-up (kills placement mutant P6): the retake fee prices
+    // RETAKES only. Billing the first sitting at 55 would undercharge every
+    // first attempt by the configured difference.
+    expect(completed.body.feeCharged).toBe(100);
+    expect(paymentFor(started.body.id).amount).toBe(100);
+  });
+
   it('blocks a retake when disabled and enforces the maximum completed-attempt cap', async () => {
     const disabled = seedContext();
     expect((await putProfile(disabled, { allowRetake: false })).status).toBe(200);

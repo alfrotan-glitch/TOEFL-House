@@ -29,6 +29,12 @@ const SUITES = [
   'src/tests/work-packages/wp05/class-teacher-ownership.test.ts',
   'src/tests/work-packages/wp02/rbac-search-entity-permission.test.ts',
   'src/tests/work-packages/wp02/rbac-home-branch-invariant.test.ts',
+  // TR4-R14 follow-up (kills M7): hasPermission has exactly two production
+  // call sites (security.routes requirePermissionAtBranch, users.routes
+  // requireRoleAssignmentAuthority). This suite drives both grant endpoints
+  // with principals who lack the permission and expects 403 — the only live
+  // deny-path coverage of the mutated function.
+  'src/tests/work-packages/wp02/security-grant-escalation.test.ts',
 ].join(' ');
 const TEST_CMD = FULL ? 'npx vitest run --silent 2>&1' : `npx vitest run ${SUITES} --silent 2>&1`;
 

@@ -124,3 +124,41 @@ until TR-4 is discharged; the decision register's historical rationale is untouc
 Per the round's governing instruction ("Proceed to the next Decision Checkpoint only … Do not
 implement"), **no implementation has begun**. Each approved batch executes under its own full
 lifecycle (CHECKPOINT → … → CERTIFY, no WP-07 certification) when the Owner says proceed.
+
+---
+
+## 6. OUTCOME — Bucket 2 executed (2026-08-22, Owner-directed)
+
+Lifecycle: CHECKPOINT (`030c1e6`) → DISCOVER → IMPLEMENT → VERIFY → ATTACK → REPAIR → REVERIFY →
+CLEAN. Three files, +48/−0.
+
+**Placement coverage (P1/P2/P3/P6) — all four KILLED by execution.**
+`wp04/profile-policy.integration.test.ts` invalid payloads gained `1e15`, `1e20`, `'abc'`;
+`wp04/retake-billing.integration.test.ts` gained the omitted-fee-fallback case (retake must charge
+the base fee, never 0) and the billable-first-attempt case (first sitting charges the base fee even
+when a retake fee is configured). Harness verdict: **placement-retake-fee FAIL→PASS, 6/7 killed,
+0 survivors** (P5 remains the harness's proven-equivalent entry — untouched).
+
+**RBAC M7 — the approved fallback is FALSIFIED by construction; disposition returned to the Owner.**
+The measurement fix was applied (`security-grant-escalation.test.ts` added to the harness suites —
+kept: genuine deny-path wiring against future guard divergence) but M7 still survives, and code
+reading proves why: `requirePermissionAtBranch` (security.routes) and `requireRoleAssignmentAuthority`
+(users.routes) both test `!hasPermission(ctx, code) || !canAccessBranchForRequirement(…,
+{permissionCodes:[code]})`, and the branch leg resolves from the **same post-deny `ctx.permissions`
+set** with strictly stronger conditions (`hasPermissionForBranchWithActionScopes`, rbac-service.ts
+:429-442) — so **branch-leg true ⟹ hasPermission true**, making the `hasPermission` leg subsumed at
+its only two production call sites. A behavioral kill is impossible; adding a test that cannot fail
+under the mutant would make the harness lie. Per §66/§105 this was not decided unilaterally.
+**Owner options:** (a) classify M7 EQUIVALENT with the by-construction proof above (reviewer
+co-sign), or (b) approve a production simplification — remove the subsumed `hasPermission` leg (and
+optionally consolidate `hasPermission`/`hasAnyPermission`, LAW 1) — after which M7's anchor target
+disappears and it retires through the Bucket-1 OBSOLETE mechanism with this evidence.
+
+**Gates after the round:** `npm run release:validate` — **22 passed · 0 failed · 0 skipped**
+(518 files tracked). Server suite **2830 passed · 162 skipped · 0 failed** (2992 total; +2 tests).
+`npm run audit:mutation` — **10 passed · 8 failed · 29 surviving · 3 documented INVALID**
+(placement FAIL→PASS; every other harness byte-identical; nothing classified, EQUIVALENT sets
+untouched, decision register untouched).
+
+**WP-07: NOT certified** — the mutation gate still fails (8 harnesses), M7's disposition is pending,
+and Buckets 1 and 3 remain. **TR-4 OPEN.**

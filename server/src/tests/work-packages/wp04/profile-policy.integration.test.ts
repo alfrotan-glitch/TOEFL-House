@@ -65,6 +65,14 @@ describe('WP-04 canonical placement profile and policy resolution', () => {
       { maxAttempts: 0 },
       { maxAttempts: 101 },
       { retakeFeeAmount: -1 },
+      // TR4-R14 follow-up (kills placement mutants P1/P2): magnitude is guarded
+      // ONLY by the route's validateMoney — the canonical schema CHECK
+      // (>= 0 AND integer-valued) accepts 1e15 and 1e20, and nothing else
+      // bounds them. Non-numeric input must be a 400 from the validator, not a
+      // 500 from a NaN database-binding TypeError deeper in the stack.
+      { retakeFeeAmount: 1e15 },
+      { retakeFeeAmount: 1e20 },
+      { retakeFeeAmount: 'abc' },
       { decisionRules: [{ id: 'r', priority: 1, conditions: [{ componentKey: 'main', field: 'score', op: 'gte', value: 101 }], outcome: 'pass' }] },
     ];
     for (const invalid of invalidPayloads) {
