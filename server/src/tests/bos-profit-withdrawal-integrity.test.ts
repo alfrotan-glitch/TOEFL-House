@@ -262,6 +262,12 @@ describe('BOS · withdrawal authorization and input validation', () => {
     const before = mainBalance();
     const res = await withdraw(100);
     expect(res.status).toBe(409);
+    // TR-4 (kills bos mutant B5): the RESERVE pre-guard must answer with its
+    // own contract. With the pre-guard removed, the liquidity-headroom guard
+    // still refuses the withdrawal with 409 — money stays safe — but the
+    // operator hears "0 AFN liquidity headroom" instead of the reserve
+    // fund's actual state ("has not reached its 6-month minimum").
+    expect(String(res.body?.error ?? '')).toMatch(/has not reached its 6-month minimum/);
     expect(mainBalance()).toBe(before);
   });
 

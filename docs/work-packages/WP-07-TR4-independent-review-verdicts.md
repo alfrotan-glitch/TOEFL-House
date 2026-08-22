@@ -188,3 +188,33 @@ the bos surgery were caught by the TR4-R12-hardened gate and fixed).
 - Remaining open items unchanged: TR-4 Stage 3, TR4-R10/R11/R13, dead export, residuals R-1…R-4.
 
 **WP-07: NOT certified. TR-4: OPEN. Stopped at the checkpoint.**
+
+---
+
+## 8. B5 DISPOSED — THE GATE IS FULLY GREEN (2026-08-22, Owner: "CONTINUE")
+
+Executed under the full lifecycle from `bf7e6e7` (state verified intact on resume). The B5 probe
+was the reserve-not-met scenario the suite already had: under B5 the withdrawal is still refused
+— the **liquidity-headroom guard shadows the pre-guard** — but the error contract changes
+("0 AFN liquidity headroom" instead of "has not reached its 6-month minimum"). By the standard
+this engagement already applied to fmw M2/M4, that is **observable, hence NOT equivalent** →
+**coverage repair** (option (a)): the scenario now asserts the reserve pre-guard's own message
+(`+6 lines`, one file). **B5 KILLED by execution.**
+
+**Gates after the round — the first fully green standing in the record:**
+- `npm run audit:mutation` — **18 passed · 0 failed · 18 surviving · 5 obsolete · 0 INVALID —
+  MUTATION GATE PASSED.** Every survivor line is a documented registry member
+  (proven-EQUIVALENT or OBSOLETE); nothing is unclassified.
+- `npm run release:validate` — **22 passed · 0 failed · 0 skipped.**
+- Server suite — **2842 passed · 162 skipped · 0 failed** on the post-round full run.
+  *Observed transient, recorded honestly:* one of three full-suite runs this round reported a
+  single unnamed test failure that did not reproduce in the release gate's embedded run nor in
+  the immediate rerun (both 100% green) — same class as the previously recorded full-suite
+  isolation flake. Not attributable to this round's one-line assertion change.
+
+**Remaining before any certification question (all Owner decisions):** TR-4 Stage 3
+(decision-rationale review), TR4-R10/R11 (predicate consolidation), TR4-R13 (cross-surface
+runtime agreement test), dead export `getStudentScholarshipSettled`, residuals R-1…R-4,
+and the un-named transient above if it recurs.
+
+**WP-07: NOT certified. TR-4: OPEN. Stopped at the checkpoint.**
