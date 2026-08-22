@@ -81,8 +81,8 @@ const stmtGetBranchDetailsForTransfer = db.prepare(`SELECT b.id, b.name, b.code,
 const stmtUpdateTeacherBranch = db.prepare('UPDATE teachers SET branch_id = ? WHERE id = ?');
 const stmtUpdateUserBranchForTeacher = db.prepare('UPDATE users SET branch_id = ? WHERE linked_teacher_id = ?');
 const stmtDeactivateLinkedTeacherUser = db.prepare('UPDATE users SET is_active = 0 WHERE linked_teacher_id = ?');
-const stmtGetTeacherSalaryByIdempotency = db.prepare("SELECT id, teacher_id, period_key, due_amount, paid_amount, payment_type, transaction_id, branch_id, status FROM teacher_salary_ledger WHERE idempotency_key = ? AND status = 'posted'");
-const stmtGetTeacherSalaryByIdempotencyCandidates = db.prepare("SELECT id, teacher_id, period_key, due_amount, paid_amount, payment_type, transaction_id, branch_id, status FROM teacher_salary_ledger WHERE idempotency_key IN (?, ?) AND status = 'posted' LIMIT 1");
+const stmtGetTeacherSalaryByIdempotency = db.prepare("SELECT id, teacher_id, period_key, due_amount, paid_amount, payment_type, transaction_id, branch_id, status, notes FROM teacher_salary_ledger WHERE idempotency_key = ? AND status = 'posted'");
+const stmtGetTeacherSalaryByIdempotencyCandidates = db.prepare("SELECT id, teacher_id, period_key, due_amount, paid_amount, payment_type, transaction_id, branch_id, status, notes FROM teacher_salary_ledger WHERE idempotency_key IN (?, ?) AND status = 'posted' LIMIT 1");
 const stmtGetSalaryLedger = db.prepare('SELECT * FROM teacher_salary_ledger WHERE id = ? AND teacher_id = ?');
 const stmtVoidSalaryLedger = db.prepare(`UPDATE teacher_salary_ledger SET status = 'voided', voided_at = datetime('now'), voided_by = ?, void_reason = ? WHERE id = ? AND status = 'posted'`);
 const stmtInsertSalaryLedgerWithIdempotency = db.prepare(`INSERT INTO teacher_salary_ledger (id, teacher_id, period_key, period_label, due_amount, paid_amount, payment_type, transaction_id, notes, branch_id, operator_name, idempotency_key, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'posted')`);
@@ -128,6 +128,8 @@ const stmtGetEmployeeSalaryByIdempotency = db.prepare(
 const stmtGetEmployeeSalaryByIdempotencyCandidates = db.prepare(
   "SELECT id, employee_id, period_key, paid_amount, payment_type, transaction_id, branch_id, status FROM employee_salary_ledger WHERE idempotency_key IN (?, ?) AND status = 'posted' LIMIT 1"
 );
+const stmtGetEmployeeSalaryLedger = db.prepare('SELECT * FROM employee_salary_ledger WHERE id = ? AND employee_id = ?');
+const stmtVoidEmployeeSalaryLedger = db.prepare("UPDATE employee_salary_ledger SET status = 'voided', voided_at = datetime('now'), voided_by = ?, void_reason = ? WHERE id = ? AND status = 'posted'");
 const stmtInsertEmployeeSalaryLedger = db.prepare(
   `INSERT INTO employee_salary_ledger (id, employee_id, period_key, period_label, paid_amount, payment_type, transaction_id, notes, branch_id, operator_name, idempotency_key, status)
    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'posted')`
@@ -143,6 +145,33 @@ function findEmployeeSalaryReplay(candidates: readonly string[]) {
   return (candidates.length === 1
     ? stmtGetEmployeeSalaryByIdempotency.get(candidates[0])
     : stmtGetEmployeeSalaryByIdempotencyCandidates.get(candidates[0], candidates[1])) as any;
+}
+
+function teacherReplaySettlement(ledger: { teacher_id: string; period_key: string; due_amount: number; paid_amount: number; notes?: string | null }) {
+  try {
+    const snapshot = JSON.parse(String(ledger.notes ?? '')) as Record<string, unknown>;
+    if (
+      Number.isFinite(snapshot.due) && Number.isFinite(snapshot.previouslyPaid) && Number.isFinite(snapshot.remainingAfter)
+      && Number(snapshot.due) >= 0 && Number(snapshot.previouslyPaid) >= 0 && Number(snapshot.remainingAfter) >= 0
+    ) {
+      return {
+        due: Number(snapshot.due),
+        previouslyPaid: Number(snapshot.previouslyPaid),
+        remainingAfter: Number(snapshot.remainingAfter),
+      };
+    }
+  } catch {
+    // A row without a settlement snapshot derives its current position from
+    // the posted facts for its own period.
+  }
+
+  const paid = sumPaidForPeriod(db, ledger.teacher_id, ledger.period_key);
+  const due = Number(ledger.due_amount);
+  return {
+    due,
+    previouslyPaid: Math.max(0, paid - Number(ledger.paid_amount)),
+    remainingAfter: Math.max(0, due - paid),
+  };
 }
 
 /** The five contract types, taken from the payroll engine's single source of
@@ -559,8 +588,9 @@ teachersRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(asy
         const existing = findTeacherSalaryReplay(idempotencyCandidates);
         if (existing) {
           if (existing.teacher_id !== freshTeacher.id || existing.period_key !== periodKey) throw new HttpError(409, 'Idempotency key was already used for a different payroll operation.');
+          const settlement = teacherReplaySettlement(existing);
           db.exec('COMMIT');
-          return { amountPaid: Number(existing.paid_amount), due: Number(existing.due_amount), previouslyPaid: Math.max(0, Number(existing.due_amount) - Number(existing.paid_amount)), remainingAfter: Math.max(0, Number(existing.due_amount) - Number(existing.paid_amount)), periodKey, teacher: freshTeacher, replayed: true };
+          return { amountPaid: Number(existing.paid_amount), ...settlement, periodKey, teacher: freshTeacher, replayed: true };
         }
       }
 
@@ -597,10 +627,17 @@ teachersRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(asy
         `Paid ${finalPaymentType} salary for ${periodLabel} to teacher ${freshTeacher.full_name}`,
         freshTeacher.id, user.fullName, payrollBranchId,
       );
-      stmtInsertSalaryLedgerWithIdempotency.run(ledgerId, freshTeacher.id, periodKey, periodLabel, adjustedDue, resolvedAmount, finalPaymentType, txId, JSON.stringify(dueInfo.breakdown), payrollBranchId, user.fullName, idempotencyKey);
+      const remainingAfter = Math.max(0, remaining - resolvedAmount);
+      const replaySnapshot = JSON.stringify({
+        breakdown: dueInfo.breakdown,
+        due: adjustedDue,
+        previouslyPaid: alreadyPaid,
+        remainingAfter,
+      });
+      stmtInsertSalaryLedgerWithIdempotency.run(ledgerId, freshTeacher.id, periodKey, periodLabel, adjustedDue, resolvedAmount, finalPaymentType, txId, replaySnapshot, payrollBranchId, user.fullName, idempotencyKey);
 
       db.exec('COMMIT');
-      return { amountPaid: resolvedAmount, due: adjustedDue, previouslyPaid: alreadyPaid, remainingAfter: Math.max(0, remaining - resolvedAmount), periodKey, teacher: freshTeacher, replayed: false };
+      return { amountPaid: resolvedAmount, due: adjustedDue, previouslyPaid: alreadyPaid, remainingAfter, periodKey, teacher: freshTeacher, replayed: false };
     } catch (err) {
       try { db.exec('ROLLBACK'); } catch { /* rollback may already be complete */ }
       // Atomic backstop. The replay pre-check above is a fast path; under true
@@ -611,10 +648,11 @@ teachersRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(asy
         const winner = findTeacherSalaryReplay([idempotencyKey]);
         if (winner && winner.teacher_id === teacher.id) {
           return {
-            amountPaid: Number(winner.paid_amount), due: Number(winner.due_amount),
-            previouslyPaid: Math.max(0, Number(winner.due_amount) - Number(winner.paid_amount)),
-            remainingAfter: Math.max(0, Number(winner.due_amount) - Number(winner.paid_amount)),
-            periodKey, teacher, replayed: true,
+            amountPaid: Number(winner.paid_amount),
+            ...teacherReplaySettlement(winner),
+            periodKey,
+            teacher,
+            replayed: true,
           };
         }
       }
@@ -887,6 +925,50 @@ employeesRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(as
     ledgerId: result.ledgerId, replayed: result.replayed,
     remainingBudget: result.remainingBudget,
   });
+}));
+
+employeesRouter.post('/:id/payroll/:ledgerId/void', requirePermission('Payroll.Edit'), ah(async (req, res) => {
+  const user = getUserContext(req);
+  const employee = requireEmployee(req, req.params.id);
+  const ledger = stmtGetEmployeeSalaryLedger.get(req.params.ledgerId, employee.id) as any;
+  if (!ledger) throw new HttpError(404, 'Salary payment record not found.');
+  if (ledger.status === 'voided') throw new HttpError(409, 'Salary payment is already voided.');
+  const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+  if (reason.length < 8) throw new HttpError(400, 'A void reason of at least 8 characters is required.');
+
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const freshLedger = stmtGetEmployeeSalaryLedger.get(req.params.ledgerId, employee.id) as any;
+    if (!freshLedger || freshLedger.status !== 'posted') throw new HttpError(409, 'Salary payment is no longer posted.');
+    const payrollBranchId = freshLedger.branch_id;
+    const budgetLine = stmtGetPayrollBudgetLine.get('employee', payrollBranchId) as BudgetRow | undefined;
+    if (!budgetLine) throw new HttpError(500, 'Employee payroll budget line is not configured for this branch.');
+
+    const amount = Number(freshLedger.paid_amount);
+    const isGenuineAdvance = freshLedger.payment_type === 'advance';
+    const reversalTxId = id('tx');
+    stmtUpdateBudgetAmount.run(-amount, budgetLine.id);
+    stmtInsertFinTx.run(
+      reversalTxId,
+      isGenuineAdvance ? 'salary_advance' : 'salary',
+      payrollLedgerCategoryId(isGenuineAdvance),
+      -amount,
+      today(),
+      `Voided employee salary payment ${freshLedger.id}: ${reason}`,
+      freshLedger.id,
+      user.fullName,
+      payrollBranchId,
+    );
+    stmtVoidEmployeeSalaryLedger.run(user.fullName, reason, freshLedger.id);
+    db.exec('COMMIT');
+
+    writeAudit(req, `Voided employee salary payment ${freshLedger.id} for ${employee.full_name}: ${reason}`);
+    addNotification('Employee Salary Voided', `Salary payment for ${employee.full_name} was voided.`, 'warning', employee.branch_id);
+    res.json({ ok: true, ledgerId: freshLedger.id, reversalTransactionId: reversalTxId, amountRestored: amount });
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch { /* rollback may already be complete */ }
+    throw error;
+  }
 }));
 
 export default teachersRouter;

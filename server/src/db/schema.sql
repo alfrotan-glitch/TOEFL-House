@@ -2530,8 +2530,7 @@ CREATE INDEX IF NOT EXISTS idx_teacher_salary_branch_period
 ON teacher_salary_ledger(branch_id, period_key, paid_at);
 CREATE INDEX IF NOT EXISTS idx_teacher_salary_due
 ON teacher_salary_ledger(teacher_id, period_key, paid_at);
--- `idx_teacher_salary_due` is the one covering period lookup. Remove the
--- duplicate name left by the former schema so planner choice is unambiguous.
+-- `idx_teacher_salary_due` is the one canonical covering period lookup.
 DROP INDEX IF EXISTS idx_teacher_salary_period;
 CREATE INDEX IF NOT EXISTS idx_teacher_salary_status ON teacher_salary_ledger(teacher_id, period_key, status);
 CREATE INDEX IF NOT EXISTS idx_tsl_teacher_period ON teacher_salary_ledger(teacher_id, period_key);
@@ -2545,7 +2544,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_teacher_salary_idempotency
 ON teacher_salary_ledger(idempotency_key)
 WHERE idempotency_key IS NOT NULL AND status = 'posted';
 DROP TRIGGER IF EXISTS trg_teacher_salary_money_scale_insert;
-CREATE TRIGGER IF NOT EXISTS trg_teacher_salary_fact_insert
+DROP TRIGGER IF EXISTS trg_teacher_salary_fact_insert;
+CREATE TRIGGER trg_teacher_salary_fact_insert
 BEFORE INSERT ON teacher_salary_ledger
 WHEN typeof(NEW.due_amount) IS NOT 'integer'
   OR NEW.due_amount < 0
@@ -2554,10 +2554,23 @@ WHEN typeof(NEW.due_amount) IS NOT 'integer'
   OR NEW.paid_amount > NEW.due_amount
   OR (NEW.payment_type = 'full' AND NEW.paid_amount <> NEW.due_amount)
   OR NEW.payment_type = 'advance'
+  OR NEW.status IS NOT 'posted'
   OR NEW.period_key NOT GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'
   OR CAST(substr(NEW.period_key, 6, 2) AS INTEGER) NOT BETWEEN 1 AND 12
+  OR NEW.transaction_id IS NULL
+  OR NOT EXISTS (
+    SELECT 1 FROM financial_transactions ft
+    WHERE ft.id = NEW.transaction_id
+      AND ft.type = 'expense'
+      AND ft.category = 'salary'
+      AND ft.finance_category_id = 'sub_salaries_wages'
+      AND ft.amount = NEW.paid_amount
+      AND ft.reference_id = NEW.teacher_id
+      AND ft.branch_id = NEW.branch_id
+  )
 BEGIN SELECT RAISE(ABORT, 'teacher salary ledger fact is invalid'); END;
-CREATE TRIGGER IF NOT EXISTS trg_teacher_salary_fact_update
+DROP TRIGGER IF EXISTS trg_teacher_salary_fact_update;
+CREATE TRIGGER trg_teacher_salary_fact_update
 BEFORE UPDATE OF due_amount, paid_amount, payment_type, period_key ON teacher_salary_ledger
 WHEN typeof(NEW.due_amount) IS NOT 'integer'
   OR NEW.due_amount < 0
@@ -2569,6 +2582,43 @@ WHEN typeof(NEW.due_amount) IS NOT 'integer'
   OR NEW.period_key NOT GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'
   OR CAST(substr(NEW.period_key, 6, 2) AS INTEGER) NOT BETWEEN 1 AND 12
 BEGIN SELECT RAISE(ABORT, 'teacher salary ledger fact is invalid'); END;
+DROP TRIGGER IF EXISTS trg_teacher_salary_immutable_update;
+CREATE TRIGGER trg_teacher_salary_immutable_update
+BEFORE UPDATE ON teacher_salary_ledger
+WHEN OLD.status IS NOT 'posted'
+  OR NEW.status IS NOT 'voided'
+  OR NEW.id IS NOT OLD.id
+  OR NEW.teacher_id IS NOT OLD.teacher_id
+  OR NEW.period_key IS NOT OLD.period_key
+  OR NEW.period_label IS NOT OLD.period_label
+  OR NEW.due_amount IS NOT OLD.due_amount
+  OR NEW.paid_amount IS NOT OLD.paid_amount
+  OR NEW.payment_type IS NOT OLD.payment_type
+  OR NEW.transaction_id IS NOT OLD.transaction_id
+  OR NEW.notes IS NOT OLD.notes
+  OR NEW.branch_id IS NOT OLD.branch_id
+  OR NEW.paid_at IS NOT OLD.paid_at
+  OR NEW.operator_name IS NOT OLD.operator_name
+  OR NEW.idempotency_key IS NOT OLD.idempotency_key
+  OR NEW.voided_at IS NULL
+  OR NEW.voided_by IS NULL
+  OR length(trim(NEW.voided_by)) = 0
+  OR NEW.void_reason IS NULL
+  OR length(trim(NEW.void_reason)) < 8
+  OR NOT EXISTS (
+    SELECT 1 FROM financial_transactions reversal
+    WHERE reversal.type = 'expense'
+      AND reversal.category = 'salary'
+      AND reversal.finance_category_id = 'sub_salaries_wages'
+      AND reversal.amount = -OLD.paid_amount
+      AND reversal.reference_id = OLD.id
+      AND reversal.branch_id = OLD.branch_id
+  )
+BEGIN SELECT RAISE(ABORT, 'teacher salary ledger facts are immutable'); END;
+DROP TRIGGER IF EXISTS trg_teacher_salary_no_delete;
+CREATE TRIGGER trg_teacher_salary_no_delete
+BEFORE DELETE ON teacher_salary_ledger
+BEGIN SELECT RAISE(ABORT, 'teacher salary ledger facts cannot be deleted'); END;
 
 CREATE TABLE IF NOT EXISTS employee_salary_ledger (
   id              TEXT PRIMARY KEY,
@@ -2598,20 +2648,105 @@ DROP INDEX IF EXISTS uq_employee_salary_idempotency;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_employee_salary_idempotency
   ON employee_salary_ledger(idempotency_key)
   WHERE idempotency_key IS NOT NULL AND status = 'posted';
-CREATE TRIGGER IF NOT EXISTS trg_employee_salary_fact_insert
+DROP TRIGGER IF EXISTS trg_employee_salary_fact_insert;
+CREATE TRIGGER trg_employee_salary_fact_insert
 BEFORE INSERT ON employee_salary_ledger
 WHEN typeof(NEW.paid_amount) IS NOT 'integer'
   OR NEW.paid_amount <= 0
+  OR NEW.status IS NOT 'posted'
   OR NEW.period_key NOT GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'
   OR CAST(substr(NEW.period_key, 6, 2) AS INTEGER) NOT BETWEEN 1 AND 12
+  OR NEW.transaction_id IS NULL
+  OR NOT EXISTS (
+    SELECT 1 FROM financial_transactions ft
+    WHERE ft.id = NEW.transaction_id
+      AND ft.type = 'expense'
+      AND ft.amount = NEW.paid_amount
+      AND ft.reference_id = NEW.employee_id
+      AND ft.branch_id = NEW.branch_id
+      AND (
+        (NEW.payment_type = 'advance'
+          AND ft.category = 'salary_advance'
+          AND ft.finance_category_id = 'sub_salary_advances')
+        OR
+        (NEW.payment_type IN ('full', 'partial')
+          AND ft.category = 'salary'
+          AND ft.finance_category_id = 'sub_salaries_wages')
+      )
+  )
 BEGIN SELECT RAISE(ABORT, 'employee salary ledger fact is invalid'); END;
-CREATE TRIGGER IF NOT EXISTS trg_employee_salary_fact_update
+DROP TRIGGER IF EXISTS trg_employee_salary_fact_update;
+CREATE TRIGGER trg_employee_salary_fact_update
 BEFORE UPDATE OF paid_amount, payment_type, period_key ON employee_salary_ledger
 WHEN typeof(NEW.paid_amount) IS NOT 'integer'
   OR NEW.paid_amount <= 0
   OR NEW.period_key NOT GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'
   OR CAST(substr(NEW.period_key, 6, 2) AS INTEGER) NOT BETWEEN 1 AND 12
 BEGIN SELECT RAISE(ABORT, 'employee salary ledger fact is invalid'); END;
+DROP TRIGGER IF EXISTS trg_employee_salary_immutable_update;
+CREATE TRIGGER trg_employee_salary_immutable_update
+BEFORE UPDATE ON employee_salary_ledger
+WHEN OLD.status IS NOT 'posted'
+  OR NEW.status IS NOT 'voided'
+  OR NEW.id IS NOT OLD.id
+  OR NEW.employee_id IS NOT OLD.employee_id
+  OR NEW.period_key IS NOT OLD.period_key
+  OR NEW.period_label IS NOT OLD.period_label
+  OR NEW.paid_amount IS NOT OLD.paid_amount
+  OR NEW.payment_type IS NOT OLD.payment_type
+  OR NEW.transaction_id IS NOT OLD.transaction_id
+  OR NEW.notes IS NOT OLD.notes
+  OR NEW.branch_id IS NOT OLD.branch_id
+  OR NEW.paid_at IS NOT OLD.paid_at
+  OR NEW.operator_name IS NOT OLD.operator_name
+  OR NEW.idempotency_key IS NOT OLD.idempotency_key
+  OR NEW.voided_at IS NULL
+  OR NEW.voided_by IS NULL
+  OR length(trim(NEW.voided_by)) = 0
+  OR NEW.void_reason IS NULL
+  OR length(trim(NEW.void_reason)) < 8
+  OR NOT EXISTS (
+    SELECT 1 FROM financial_transactions reversal
+    WHERE reversal.type = 'expense'
+      AND reversal.amount = -OLD.paid_amount
+      AND reversal.reference_id = OLD.id
+      AND reversal.branch_id = OLD.branch_id
+      AND (
+        (OLD.payment_type = 'advance'
+          AND reversal.category = 'salary_advance'
+          AND reversal.finance_category_id = 'sub_salary_advances')
+        OR
+        (OLD.payment_type IN ('full', 'partial')
+          AND reversal.category = 'salary'
+          AND reversal.finance_category_id = 'sub_salaries_wages')
+      )
+  )
+BEGIN SELECT RAISE(ABORT, 'employee salary ledger facts are immutable'); END;
+DROP TRIGGER IF EXISTS trg_employee_salary_no_delete;
+CREATE TRIGGER trg_employee_salary_no_delete
+BEFORE DELETE ON employee_salary_ledger
+BEGIN SELECT RAISE(ABORT, 'employee salary ledger facts cannot be deleted'); END;
+
+-- A financial transaction linked to a payroll fact, including its void contra,
+-- is part of that immutable payroll history and cannot be detached later.
+DROP TRIGGER IF EXISTS trg_financial_transactions_payroll_fact_update_guard;
+CREATE TRIGGER trg_financial_transactions_payroll_fact_update_guard
+BEFORE UPDATE ON financial_transactions
+WHEN EXISTS (
+  SELECT 1 FROM teacher_salary_ledger t WHERE t.transaction_id = OLD.id OR t.id = OLD.reference_id
+) OR EXISTS (
+  SELECT 1 FROM employee_salary_ledger e WHERE e.transaction_id = OLD.id OR e.id = OLD.reference_id
+)
+BEGIN SELECT RAISE(ABORT, 'payroll financial facts cannot be modified'); END;
+DROP TRIGGER IF EXISTS trg_financial_transactions_payroll_fact_delete_guard;
+CREATE TRIGGER trg_financial_transactions_payroll_fact_delete_guard
+BEFORE DELETE ON financial_transactions
+WHEN EXISTS (
+  SELECT 1 FROM teacher_salary_ledger t WHERE t.transaction_id = OLD.id OR t.id = OLD.reference_id
+) OR EXISTS (
+  SELECT 1 FROM employee_salary_ledger e WHERE e.transaction_id = OLD.id OR e.id = OLD.reference_id
+)
+BEGIN SELECT RAISE(ABORT, 'payroll financial facts cannot be deleted'); END;
 
 -- ============================================================================
 -- FUNDING & IMPACT

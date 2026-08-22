@@ -73,6 +73,45 @@ const paidTotal = (eid: string) => txRows(eid).reduce((sum, r) => sum + Number(r
 const budgetNow = () => Number((db.prepare('SELECT current_amount c FROM budget_lines WHERE id = ?').get(budgetLineId) as { c: number }).c);
 const setBudget = (v: number) => db.prepare('UPDATE budget_lines SET current_amount = ? WHERE id = ?').run(v, budgetLineId);
 
+function insertEmployeeLedgerFixture(input: {
+  id: string; employeeId: string; periodKey: string; periodLabel: string;
+  amount: number; paymentType: 'full' | 'partial' | 'advance'; idempotencyKey: string | null;
+}) {
+  const transactionId = mkId('tx');
+  const isAdvance = input.paymentType === 'advance';
+  db.transaction(() => {
+    db.prepare(
+      `INSERT INTO financial_transactions
+         (id, type, category, finance_category_id, amount, date, description, reference_id, operator_name, branch_id)
+       VALUES (?, 'expense', ?, ?, ?, ?, 'fixture', ?, 'fixture', ?)`,
+    ).run(
+      transactionId,
+      isAdvance ? 'salary_advance' : 'salary',
+      isAdvance ? 'sub_salary_advances' : 'sub_salaries_wages',
+      input.amount,
+      today(),
+      input.employeeId,
+      BRANCH,
+    );
+    db.prepare(
+      `INSERT INTO employee_salary_ledger
+         (id, employee_id, period_key, period_label, paid_amount, payment_type, transaction_id, branch_id, idempotency_key, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      input.id,
+      input.employeeId,
+      input.periodKey,
+      input.periodLabel,
+      input.amount,
+      input.paymentType,
+      transactionId,
+      BRANCH,
+      input.idempotencyKey,
+      'posted',
+    );
+  })();
+}
+
 beforeAll(async () => {
   initSchema();
   bootstrapRbacCatalog(db);
@@ -280,16 +319,17 @@ describe('T-1 · failure rollback', () => {
     // three must vanish together. If the boundary were split, money would leave
     // the budget and an expense would be recorded with no ledger row behind it.
     const e = mkEmployee('epi_atomic');
-    db.prepare(
-      `INSERT INTO employee_salary_ledger (id, employee_id, period_key, period_label, paid_amount, payment_type, branch_id, idempotency_key, status)
-       VALUES (?, ?, '1405-09', 'Qaws 1405', 8000, 'full', ?, ?, 'posted')`,
-    ).run(mkId('esl'), e, BRANCH, 'epi-atomic-preexisting');
+    insertEmployeeLedgerFixture({
+      id: mkId('esl'), employeeId: e, periodKey: '1405-09', periodLabel: 'Qaws 1405',
+      amount: 8000, paymentType: 'full', idempotencyKey: 'epi-atomic-preexisting',
+    });
 
     const before = budgetNow();
+    const transactionsBefore = txRows(e).length;
     const r = await pay(e, { monthName: 'Qaws 1405', amountPaid: 8000, paymentType: 'full' }, 'epi-atomic-new');
     expect(r.status).toBe(409);
     expect(budgetNow()).toBe(before);
-    expect(txRows(e)).toHaveLength(0);
+    expect(txRows(e)).toHaveLength(transactionsBefore);
     expect(ledgerRows(e)).toHaveLength(1);
   });
 
@@ -322,11 +362,10 @@ describe('T-1 · database-level race arbiter', () => {
   // asserted directly against the database.
   it('the database itself refuses a second row with the same idempotency key', () => {
     const e = mkEmployee('epi_uq_key');
-    const insert = (rowId: string, key: string) =>
-      db.prepare(
-        `INSERT INTO employee_salary_ledger (id, employee_id, period_key, period_label, paid_amount, payment_type, branch_id, idempotency_key, status)
-         VALUES (?, ?, '1405-05', 'Asad 1405', 500, 'partial', ?, ?, 'posted')`,
-      ).run(rowId, e, BRANCH, key);
+    const insert = (rowId: string, key: string) => insertEmployeeLedgerFixture({
+      id: rowId, employeeId: e, periodKey: '1405-05', periodLabel: 'Asad 1405',
+      amount: 500, paymentType: 'partial', idempotencyKey: key,
+    });
 
     insert(mkId('esl'), 'epi-race-key');
     expect(() => insert(mkId('esl'), 'epi-race-key')).toThrow(/UNIQUE constraint failed/i);
@@ -336,28 +375,43 @@ describe('T-1 · database-level race arbiter', () => {
   it('the unique key index still allows many rows with NO key (partial index)', () => {
     const e = mkEmployee('epi_uq_null');
     for (let i = 0; i < 3; i++) {
-      db.prepare(
-        `INSERT INTO employee_salary_ledger (id, employee_id, period_key, period_label, paid_amount, payment_type, branch_id, idempotency_key, status)
-         VALUES (?, ?, '1405-06', 'Sonbola 1405', 100, 'partial', ?, NULL, 'posted')`,
-      ).run(mkId('esl'), e, BRANCH);
+      insertEmployeeLedgerFixture({
+        id: mkId('esl'), employeeId: e, periodKey: '1405-06', periodLabel: 'Sonbola 1405',
+        amount: 100, paymentType: 'partial', idempotencyKey: null,
+      });
     }
     expect(ledgerRows(e)).toHaveLength(3);
   });
 
   it('the database itself refuses two posted FULL rows for one employee-period', () => {
     const e = mkEmployee('epi_uq_full');
-    const insert = (rowId: string, type: string, status = 'posted') =>
-      db.prepare(
-        `INSERT INTO employee_salary_ledger (id, employee_id, period_key, period_label, paid_amount, payment_type, branch_id, idempotency_key, status)
-         VALUES (?, ?, '1405-08', 'Aqrab 1405', 800, ?, ?, ?, ?)`,
-      ).run(rowId, e, type, BRANCH, mkId('k'), status);
+    const insert = (rowId: string, type: 'full' | 'partial' | 'advance') =>
+      insertEmployeeLedgerFixture({
+        id: rowId, employeeId: e, periodKey: '1405-08', periodLabel: 'Aqrab 1405',
+        amount: 800, paymentType: type, idempotencyKey: mkId('k'),
+      });
 
-    insert(mkId('esl'), 'full');
+    const originalId = mkId('esl');
+    insert(originalId, 'full');
     expect(() => insert(mkId('esl'), 'full')).toThrow(/UNIQUE constraint failed/i);
-    // Partials and advances are unaffected, and a VOIDED full frees the slot
-    // so a corrected payment can be re-made.
+    // Partials remain valid alongside a full payment.
     expect(() => insert(mkId('esl'), 'partial')).not.toThrow();
-    expect(() => insert(mkId('esl'), 'full', 'voided')).not.toThrow();
+
+    // A correction first posts the signed contra, then transitions the original
+    // row to voided; only then does the full-period slot become available.
+    db.transaction(() => {
+      db.prepare(
+        `INSERT INTO financial_transactions
+           (id, type, category, finance_category_id, amount, date, description, reference_id, operator_name, branch_id)
+         VALUES (?, 'expense', 'salary', 'sub_salaries_wages', -800, ?, 'void fixture', ?, 'fixture', ?)`,
+      ).run(mkId('tx'), today(), originalId, BRANCH);
+      db.prepare(
+        `UPDATE employee_salary_ledger
+           SET status = 'voided', voided_at = datetime('now'), voided_by = 'fixture', void_reason = 'voided fixture reason'
+         WHERE id = ?`,
+      ).run(originalId);
+    })();
+    expect(() => insert(mkId('esl'), 'full')).not.toThrow();
   });
 });
 

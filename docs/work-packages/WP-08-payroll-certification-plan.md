@@ -93,7 +93,7 @@ repair.
 ## INDEPENDENT-REVIEW AMENDMENT / RE-DECIDE
 
 A cold review of the repaired diff and the payroll report consumer found four
-additional defects. `payroll-certification.review.test.ts` reproduces all four
+additional defects. `payroll-certification.review.test.ts` reproduced all four
 against the first repair (4/4 failing):
 
 1. Employee ledger rows have the same correction-state columns as teacher rows,
@@ -104,6 +104,11 @@ against the first repair (4/4 failing):
    money explainable.
 4. A posted salary row can be directly rewritten or deleted despite being a
    financial history fact.
+
+A final direct-delete probe then found one linked consequence (1/1 failing):
+removing a ledger's linked financial transaction left an orphaned payroll fact.
+The second repair guards both the ledger and its linked original/contra
+transactions.
 
 The plan is therefore extended, before the second repair, to:
 
@@ -118,4 +123,19 @@ The plan is therefore extended, before the second repair, to:
 This is a deliberate WP-08 → WP-11 dependent-consumer re-scope: the report
 catalog remains WP-11's authority, but its payroll metric must consume the
 corrected WP-08 ledger lifecycle rather than publishing a contradictory number.
-The next commit is the second recoverable schema/financial checkpoint.
+Checkpoint `a72f0ea` is the second recoverable schema/financial checkpoint:
+it retains the first repair and the independently constructed failing review
+suite before the second correction begins.
+
+## FINAL AUTHORITY-AUDIT FOLLOW-UP
+
+The final authority pass replayed a keyed teacher partial payment and found one
+more API-truth defect: the retry reported `previouslyPaid = due - paid`, which
+turned a first 1,000 AFN payment against a 10,000 AFN due into a fabricated
+9,000 AFN prior payment. The focused assertion failed 1/1 before repair.
+
+Each new teacher ledger row now stores the original due, prior-paid and
+remaining-after snapshot alongside its calculation breakdown. A replay returns
+that snapshot; rows whose existing notes contain only a breakdown use the live
+posted-period total as an explicit conservative fallback. The final attack
+suite is 10/10.

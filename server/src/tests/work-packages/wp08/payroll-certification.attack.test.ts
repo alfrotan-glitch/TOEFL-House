@@ -163,6 +163,22 @@ describe('WP-08 ATTACK · a derived retry survives the idempotency bucket edge',
     }
   });
 
+  it('replays the teacher settlement position without inventing prior payment', async () => {
+    const teacherId = createTeacher();
+    const key = `wp08-settlement-replay-${runId}`;
+    const first = await payTeacher(teacherId, { monthName: '1405-05', amountPaid: 1_000, paymentType: 'partial' }, key);
+    const retry = await payTeacher(teacherId, { monthName: '1405-05', amountPaid: 1_000, paymentType: 'partial' }, key);
+
+    expect(first.status).toBe(201);
+    expect(retry.status).toBe(201);
+    expect(retry.body.replayed).toBe(true);
+    expect(retry.body).toMatchObject({
+      due: first.body.due,
+      previouslyPaid: first.body.previouslyPaid,
+      remainingAfter: first.body.remainingAfter,
+    });
+  });
+
   it('does not pay an employee twice when a retry lands on the next 90-second bucket', async () => {
     const employeeId = createEmployee();
     const beforeBudget = employeeBudget();
@@ -279,11 +295,17 @@ describe('WP-08 ATTACK · the database rejects malformed payroll facts', () => {
     const teacherId = createTeacher();
     let inserted = false;
     const probe = db.transaction(() => {
+      const transactionId = nextId('transaction');
+      db.prepare(
+        `INSERT INTO financial_transactions
+           (id, type, category, finance_category_id, amount, date, description, reference_id, operator_name, branch_id)
+         VALUES (?, 'expense', 'salary', 'sub_salaries_wages', -1, '2026-08-22', 'probe', ?, 'attack', ?)`,
+      ).run(transactionId, teacherId, BRANCH_A);
       db.prepare(
         `INSERT INTO teacher_salary_ledger
-           (id, teacher_id, period_key, period_label, due_amount, paid_amount, payment_type, branch_id, operator_name, status)
-         VALUES (?, ?, '1405-08', 'اسد ۱۴۰۵', 10_000, -1, 'partial', ?, 'attack', 'posted')`,
-      ).run(nextId('ledger'), teacherId, BRANCH_A);
+           (id, teacher_id, period_key, period_label, due_amount, paid_amount, payment_type, transaction_id, branch_id, operator_name, status)
+         VALUES (?, ?, '1405-08', 'اسد ۱۴۰۵', 10_000, -1, 'partial', ?, ?, 'attack', 'posted')`,
+      ).run(nextId('ledger'), teacherId, transactionId, BRANCH_A);
       inserted = true;
       throw new Error('rollback direct-write probe');
     });

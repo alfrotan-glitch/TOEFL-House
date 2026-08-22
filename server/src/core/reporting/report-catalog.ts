@@ -175,8 +175,9 @@ export const METRIC_CATALOG: readonly MetricDefinition[] = [
     unit: 'afn',
     scopeAlias: 't',
     sql: `SELECT COALESCE(SUM(t.paid_amount), 0) AS value FROM teacher_salary_ledger t
-          WHERE t.status <> 'voided' AND t.paid_at >= ? AND t.paid_at <= ?`,
-    note: 'Voided rows are excluded so a reversal does not still read as money paid.',
+          JOIN financial_transactions ft ON ft.id = t.transaction_id
+          WHERE t.status = 'posted' AND ft.date >= ? AND ft.date <= ?`,
+    note: 'Posted payroll is dated by its linked financial fact; voided rows are excluded.',
   }),
   M({
     id: 'payroll.employee_paid',
@@ -184,8 +185,9 @@ export const METRIC_CATALOG: readonly MetricDefinition[] = [
     unit: 'afn',
     scopeAlias: 'e',
     sql: `SELECT COALESCE(SUM(e.paid_amount), 0) AS value FROM employee_salary_ledger e
-          WHERE e.paid_at >= ? AND e.paid_at <= ?`,
-    note: 'Separate from teacher payroll: the two envelopes are deliberately distinct.',
+          JOIN financial_transactions ft ON ft.id = e.transaction_id
+          WHERE e.status = 'posted' AND ft.date >= ? AND ft.date <= ?`,
+    note: 'Posted employee payroll is dated by its linked financial fact; the envelopes remain separate.',
   }),
   M({
     id: 'academic.sessions_held',

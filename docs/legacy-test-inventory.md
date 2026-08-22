@@ -354,14 +354,18 @@ they remain the WP-07 record.
 
 ## WP-08 Payroll
 
-4 files · 53 cases
+The four historical core files below account for 53 statically declared cases.
+WP-08 certification adds two current authority suites; their runtime cases are
+listed explicitly rather than being folded into the historical inventory.
 
 | File | Cases | Asserted behaviour |
 |---|---:|---|
-| `employee-payroll-idempotency.test.ts` | 25 | T-1 · sequential duplicate requests · T-1 · concurrent duplicate requests · T-1 · explicit Idempotency-Key · T-1 · legitimate distinct payments still succeed · T-1 · full-payment period guard · T-1 · failure rollback · T-1 · database-level race arbiter · T-1 · financial reconciliation · employee payroll classifies a genuine advance as a receivable |
-| `employee-salary-validation.test.ts` | 14 | employee salary · the storage layer cannot be relied on to validate · employee salary · PUT rejects every non-amount, exactly as the teacher writer does · employee salary · POST rejects every non-amount · employee salary · legitimate values are preserved · employee salary · a rejected update is atomic · employee salary · corrupt salaries cannot reach payroll |
-| `payroll-reversal-integrity.test.ts` | 12 | voiding a salary payment reverses it in the ledger · the schema itself releases a voided period · payroll idempotency (F-4: un-keyed repeats double-paid teachers) · budget lines cannot go negative |
-| `payroll.test.ts` | 2 | Payroll Semantic Budget Lookup |
+| `employee-payroll-idempotency.test.ts` | 25 | T-1 · sequential/concurrent/idempotency-key retries · distinct payments · full-period guard · rollback · database race arbiter · reconciliation · genuine advance treatment |
+| `employee-salary-validation.test.ts` | 14 | employee base-salary parse/storage boundary and rejected-write atomicity |
+| `payroll-reversal-integrity.test.ts` | 12 | teacher void contra, released period, idempotency and budget floor |
+| `payroll.test.ts` | 2 | payroll envelope semantic lookup |
+| `work-packages/wp08/payroll-certification.attack.test.ts` | 10 runtime | derived-key boundary replay, exact settlement replay, correction replay, canonical period, fail-closed policy, target scope, direct money and duplicate-index attacks |
+| `work-packages/wp08/payroll-certification.review.test.ts` | 9 runtime | employee correction, payroll report reconciliation, linked-fact lifecycle, direct write/delete and frontend-contract review |
 
 ## WP-09 Funding & Impact
 

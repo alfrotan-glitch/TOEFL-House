@@ -168,12 +168,32 @@ describe('the schema itself releases a voided period', () => {
     // Direct insert: two 'full' rows for one teacher+period are allowed only
     // because the first is voided. A live duplicate must still be rejected.
     const tid = await newTeacher('Index Probe Teacher');
-    const insert = (id: string, status: string) =>
+    const insert = (ledgerId: string, status: string) => db.transaction(() => {
+      const transactionId = `tx_${ledgerId}`;
       db.prepare(
+        `INSERT INTO financial_transactions
+           (id, type, category, finance_category_id, amount, date, description, reference_id, operator_name, branch_id)
+         VALUES (?, 'expense', 'salary', 'sub_salaries_wages', 10000, '2026-01-01', 'probe', ?, 'probe', ?)`,
+      ).run(transactionId, tid, BRANCH);
+      const inserted = db.prepare(
         `INSERT INTO teacher_salary_ledger
-           (id, teacher_id, period_key, period_label, due_amount, paid_amount, payment_type, branch_id, operator_name, idempotency_key, status)
-         VALUES (?, ?, '1499-01', '1499-01', 10000, 10000, 'full', ?, 'probe', ?, ?)`,
-      ).run(id, tid, BRANCH, `idx-probe-${id}`, status);
+           (id, teacher_id, period_key, period_label, due_amount, paid_amount, payment_type, transaction_id, branch_id, operator_name, idempotency_key, status)
+         VALUES (?, ?, '1499-01', '1499-01', 10000, 10000, 'full', ?, ?, 'probe', ?, 'posted')`,
+      ).run(ledgerId, tid, transactionId, BRANCH, `idx-probe-${ledgerId}`);
+      if (status === 'voided') {
+        db.prepare(
+          `INSERT INTO financial_transactions
+             (id, type, category, finance_category_id, amount, date, description, reference_id, operator_name, branch_id)
+           VALUES (?, 'expense', 'salary', 'sub_salaries_wages', -10000, '2026-01-01', 'void probe', ?, 'probe', ?)`,
+        ).run(`void_${ledgerId}`, ledgerId, BRANCH);
+        db.prepare(
+          `UPDATE teacher_salary_ledger
+             SET status = 'voided', voided_at = '2026-01-01 00:00:00', voided_by = 'probe', void_reason = 'voided fixture reason'
+           WHERE id = ?`,
+        ).run(ledgerId);
+      }
+      return inserted;
+    })();
 
     insert('tsl_idx_a', 'voided');
     expect(() => insert('tsl_idx_b', 'posted')).not.toThrow();
