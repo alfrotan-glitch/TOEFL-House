@@ -173,6 +173,13 @@ export interface StudentBalanceRow extends StudentBalance {
  * `scope` matches getStudentBalance exactly, so a row here always equals
  * getStudentBalance(db, id, scope) for the same student.
  */
+/**
+ * Batch balances must equal getStudentBalance for the same student and scope:
+ * tuition is settled by cash AND by aid money (D-120), so both terms are
+ * summed here exactly as the single-student authority does — all tuition
+ * obligations, active allocations, scholarship + sponsorship. Pinned by
+ * server/src/tests/work-packages/wp07/cross-surface-money-agreement.test.ts.
+ */
 export function getStudentBalancesPage(
   db: Database,
   opts: { branchId: string | null; scope?: BalanceScope; limit: number; offset: number },
@@ -186,7 +193,7 @@ export function getStudentBalancesPage(
     .prepare(
       `SELECT st.id AS student_id,
               COALESCE(sem.total, 0) AS tuition_due,
-              COALESCE(paid.total, 0) AS tuition_paid
+              COALESCE(paid.total, 0) + COALESCE(aid.total, 0) AS tuition_paid
          FROM students st
          LEFT JOIN (
            SELECT student_id, SUM(COALESCE(net_fee_amount, fee_amount)) AS total
@@ -198,6 +205,13 @@ export function getStudentBalancesPage(
            WHERE status = 'completed' AND ${TUITION_PAYMENT_SQL}
            GROUP BY student_id
          ) paid ON paid.student_id = st.id
+         LEFT JOIN (
+           SELECT o.student_id AS student_id, SUM(a.amount) AS total
+           FROM obligation_allocations a
+           JOIN student_obligations o ON o.id = a.obligation_id
+           WHERE o.kind = 'tuition' AND a.source_kind IN ${AID_SOURCE_KINDS_SQL} AND a.status = 'active'
+           GROUP BY o.student_id
+         ) aid ON aid.student_id = st.id
          ${branchFilter}
          ORDER BY st.registration_date DESC
          LIMIT ? OFFSET ?`,
@@ -219,7 +233,7 @@ export function getStudentBalancesByIds(
   const rows = db.prepare(
     `SELECT st.id AS student_id,
             COALESCE(sem.total, 0) AS tuition_due,
-            COALESCE(paid.total, 0) AS tuition_paid
+            COALESCE(paid.total, 0) + COALESCE(aid.total, 0) AS tuition_paid
        FROM students st
        LEFT JOIN (
          SELECT student_id, SUM(COALESCE(net_fee_amount, fee_amount)) AS total
@@ -231,6 +245,13 @@ export function getStudentBalancesByIds(
          WHERE status = 'completed' AND ${TUITION_PAYMENT_SQL}
          GROUP BY student_id
        ) paid ON paid.student_id = st.id
+       LEFT JOIN (
+         SELECT o.student_id AS student_id, SUM(a.amount) AS total
+         FROM obligation_allocations a
+         JOIN student_obligations o ON o.id = a.obligation_id
+         WHERE o.kind = 'tuition' AND a.source_kind IN ${AID_SOURCE_KINDS_SQL} AND a.status = 'active'
+         GROUP BY o.student_id
+       ) aid ON aid.student_id = st.id
       WHERE st.id IN (SELECT value FROM json_each(?))`,
   ).all(JSON.stringify(ids)) as Array<{ student_id: string; tuition_due: number; tuition_paid: number }>;
   return rows.map((row) => ({

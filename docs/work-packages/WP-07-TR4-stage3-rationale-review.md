@@ -100,3 +100,34 @@ path references, all live); `release:validate` **22 passed · 0 failed**.
 items, in the registered order: TR4-R13 (cross-surface runtime agreement test) → TR4-R10/R11
 (predicate consolidation) → dead export `getStudentScholarshipSettled` → residuals R-1…R-4 → the
 certification question. **WP-07 remains NOT certified. Stopped at the checkpoint.**
+
+---
+
+## 9. TR4-R13 EXECUTED — AND IT CAUGHT A REAL DEFECT (2026-08-22, Owner: "Continue")
+
+*(Round note: the sandbox was re-cloned again before this round; recovery per §65 was executed —
+remote verified, branch restored to `eba381b`, dependencies reinstalled, state re-established.)*
+
+The cross-surface suite (`server/src/tests/work-packages/wp07/cross-surface-money-agreement.test.ts`)
+drives ONE student through every instrument — cash 4,000, a 1,000 refund, a 2,000 scholarship and
+a 2,000 sponsorship against a 10,000 term — and asserts the five surfaces agree with the
+authorities: `getObligationPosition` + `getStudentBalance` (DB), profile `balance` block, the
+roster page, the BOS executive dashboard's `outstandingPayments`, and the operations report's
+`financial.outstanding.tuition`.
+
+**TR4-R13-F1 — SEVERITY HIGH, found by the suite and repaired under §69:** the two BATCH balance
+readers — `getStudentBalancesPage` (roster) and `getStudentBalancesByIds` (roster list/export) —
+summed only cash payments and **omitted the aid-settled term** that `getStudentBalance`, the
+authority their rows promise to equal, includes (D-120). Every donor-settled student showed a
+higher debt on the roster than on the profile, the dashboard and the operations report — a
+§77/LAW 1 disagreement in exactly the form the dossier's question 5 anticipated. Repair: both
+queries now add the identical aid term (all tuition obligations, active allocations, scholarship
++ sponsorship — mirroring the authority exactly), current-intent comment per §4 (the first
+draft's historical narrative was rejected by the cleanliness audit, correctly).
+
+**Gates:** mutation **18 passed · 0 failed** · `release:validate` **22 passed · 0 failed** ·
+server suite **2843 passed · 162 skipped · 0 failed** (+1 test). Changed: `studentBalance.ts`
+(+23/−2) and the new suite.
+
+**Remaining, in the registered order:** TR4-R10/R11 → dead export → residuals R-1…R-4 → the
+certification question. **WP-07 remains NOT certified. Stopped at the checkpoint.**
