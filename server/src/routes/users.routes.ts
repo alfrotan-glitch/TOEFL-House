@@ -10,7 +10,6 @@ import {
   buildRbacContext,
   canAccessBranchForRequirement,
   canAdministerUser,
-  hasPermission,
   isGlobalOwner,
 } from '../core/rbac/rbac-service.js';
 import { ROLE_CODES, type RoleCode } from '../core/rbac/permission-catalog.js';
@@ -134,7 +133,13 @@ function requireRoleAssignmentAuthority(req: Request, role: RoleCode, branchId: 
   if (!req.rbac) throw new HttpError(403, 'Authorization context is unavailable.');
   if (isGlobalOwner(req.rbac)) return;
   if (role === 'owner') throw new HttpError(403, 'Only a global owner may grant the owner role.');
-  if (!hasPermission(req.rbac, 'Role.Edit') || !canAccessBranchForRequirement(
+  // The former `!hasPermission(req.rbac, 'Role.Edit') ||` leg was removed as
+  // redundant (Owner-approved simplification, TR-4 M7 disposition, 2026-08-22):
+  // canAccessBranchForRequirement(…, {permissionCodes:['Role.Edit']}) resolves
+  // from the same post-deny ctx.permissions with strictly stronger conditions,
+  // so it implies the set-membership test. See the matching note in
+  // security.routes.ts (requirePermissionAtBranch).
+  if (!canAccessBranchForRequirement(
     db,
     req.rbac,
     branchId,

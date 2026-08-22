@@ -58,12 +58,15 @@ function summarise(output) {
   // claims. Surfaced here so drift is visible without reading per-mutant logs.
   const invalid = [...output.matchAll(/^\s*(\S+)\s+INVALID/gm)].map((m) => m[1]);
   const voidRuns = [...output.matchAll(/^\s*(\S+)\s+.*MEASUREMENT VOID/gm)].map((m) => m[1]);
+  // TR-4 Bucket-1: retired mutants with written evidence, reported distinctly.
+  const obsolete = [...output.matchAll(/^\s*(\S+)\s+OBSOLETE/gm)].map((m) => m[1]);
   const tallyLine = output.match(/^.*killed.*$/m) ?? output.match(/^KILLED:.*$/m);
   const tally = tallyLine ? String(tallyLine[0]).trim() : '';
   return {
     survivors: [...new Set([...survivors, ...alt])],
     invalid: [...new Set(invalid)],
     voidRuns: [...new Set(voidRuns)],
+    obsolete: [...new Set(obsolete)],
     tally,
   };
 }
@@ -81,9 +84,9 @@ for (const file of harnesses) {
   });
   const output = `${run.stdout ?? ''}${run.stderr ?? ''}`;
   const code = run.status === null ? 124 : run.status;
-  const { survivors, invalid, voidRuns, tally } = summarise(output);
+  const { survivors, invalid, voidRuns, obsolete, tally } = summarise(output);
   const seconds = Math.round((Date.now() - started) / 1000);
-  results.push({ harness: file, exitCode: code, survivors, invalid, voidRuns, tally, seconds });
+  results.push({ harness: file, exitCode: code, survivors, invalid, voidRuns, obsolete, tally, seconds });
 
   const verdict = code === 0 ? 'PASS' : 'FAIL';
   console.log(
@@ -92,12 +95,14 @@ for (const file of harnesses) {
   if (survivors.length > 0) console.log(`        survivors: ${survivors.join(', ')}`);
   if (invalid.length > 0) console.log(`        INVALID anchors (measurement lost): ${invalid.join(', ')}`);
   if (voidRuns.length > 0) console.log(`        VOID runs (target suite skipped): ${voidRuns.join(', ')}`);
+  if (obsolete.length > 0) console.log(`        obsolete (documented retirement): ${obsolete.join(', ')}`);
 }
 
 const failed = results.filter((r) => r.exitCode !== 0);
 const survivorCount = results.reduce((n, r) => n + r.survivors.length, 0);
 const invalidCount = results.reduce((n, r) => n + r.invalid.length, 0);
 const voidCount = results.reduce((n, r) => n + r.voidRuns.length, 0);
+const obsoleteCount = results.reduce((n, r) => n + r.obsolete.length, 0);
 
 if (jsonOut) {
   writeFileSync(jsonOut, `${JSON.stringify({ generatedAt: new Date().toISOString(), results }, null, 2)}\n`);
@@ -108,7 +113,8 @@ console.log(`\n─────────────────────�
 console.log(`  ${results.length - failed.length} passed · ${failed.length} failed · ${survivorCount} surviving mutant(s) reported`);
 if (invalidCount > 0) console.log(`  ${invalidCount} INVALID anchor(s) — intended measurement(s) that could not be applied`);
 if (voidCount > 0) console.log(`  ${voidCount} VOID run(s) — target suite executed no tests\n`);
-if (invalidCount === 0 && voidCount === 0) console.log('');
+if (obsoleteCount > 0) console.log(`  ${obsoleteCount} obsolete mutant(s) — retired with recorded evidence in the harness`);
+if (invalidCount === 0 && voidCount === 0 && obsoleteCount === 0) console.log('');
 
 if (failed.length > 0) {
   console.error('  MUTATION GATE FAILED');

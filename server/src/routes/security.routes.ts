@@ -9,7 +9,6 @@ import {
   canAdministerUser,
   resolveUserPermissions,
   isGlobalOwner,
-  hasPermission,
   effectivePermissionCodes,
   effectiveTabAccess,
 } from '../core/rbac/rbac-service.js';
@@ -172,7 +171,14 @@ function requireTargetMutationAccess(req: Request, userId: string): TargetUser {
 function requirePermissionAtBranch(req: Request, permissionCode: string, branchId: string): void {
   if (!req.rbac) throw new HttpError(403, 'Authorization context is unavailable.');
   if (callerIsGlobalOwner(req)) return;
-  if (!hasPermission(req.rbac, permissionCode) || !canAccessBranchForRequirement(
+  // The former `!hasPermission(req.rbac, permissionCode) ||` leg was removed as
+  // redundant (Owner-approved simplification, TR-4 M7 disposition, 2026-08-22):
+  // canAccessBranchForRequirement(…, {permissionCodes:[code]}) resolves from the
+  // same post-deny ctx.permissions with strictly stronger conditions
+  // (hasPermissionForBranchWithActionScopes), so it implies the set-membership
+  // test. Keeping both expressed one rule twice and made the weaker leg look
+  // independently load-bearing.
+  if (!canAccessBranchForRequirement(
     db,
     req.rbac,
     branchId,

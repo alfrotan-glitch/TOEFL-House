@@ -184,6 +184,16 @@ const MUTANTS = [
 const selected = ONLY ? MUTANTS.filter((m) => m.id === ONLY) : MUTANTS;
 if (!selected.length) { console.error(`No mutant matches --only ${ONLY}`); process.exit(2); }
 
+// TR-4 Bucket-1 OBSOLETE registry — mutants retired with written evidence,
+// never silently, never inside an EQUIVALENT set. An obsolete mutant's target
+// no longer exists, so it is skipped BEFORE anchoring: it is neither INVALID
+// nor a survivor, and the gate reports it distinctly.
+const OBSOLETE = {
+  M1: 'the legacy-role fallback guarded by `hasAnyAssignment` no longer exists anywhere in rbac-service.ts (grep hasAnyAssignment|getLegacyUser|legacy → 0 hits); successor enforcement is execution-proven — the expiry predicates are KILLED as M2/M3 since the TR4-R14 re-base. No decision record for the original removal was located (flagged to the Owner).',
+  M12: 'same evidence as M1 — the permission fallback this mutant guarded was removed with the legacy path; nothing remains to mutate.',
+  M7: 'subsumption proof (Owner option b, 2026-08-22): both production call sites tested `!hasPermission(ctx, code) || !canAccessBranchForRequirement(…, {permissionCodes:[code]})`, and the branch leg resolves from the same post-deny ctx.permissions with strictly stronger conditions (hasPermissionForBranchWithActionScopes) — branch-leg true implies hasPermission true. The redundant leg and the now-unused function were removed as an approved production simplification; the mutant target no longer exists. The deny-path suite wiring added in Bucket 2 is preserved.',
+};
+
 const read = (f) => readFileSync(path.join(SERVER, f), 'utf8');
 const write = (f, c) => writeFileSync(path.join(SERVER, f), c);
 
@@ -221,6 +231,11 @@ try {
 const results = [];
 try {
   for (const m of selected) {
+    if (OBSOLETE[m.id]) {
+      results.push({ ...m, status: 'OBSOLETE', detail: OBSOLETE[m.id] });
+      console.log(`${m.id.padEnd(4)} OBSOLETE   ${m.invariant} — target retired with recorded evidence (see OBSOLETE registry)`);
+      continue;
+    }
     const original = ORIGINALS.get(m.file);
     const occurrences = original.split(m.find).length - 1;
     if (occurrences !== 1) {
@@ -261,7 +276,12 @@ const killed = results.filter((r) => r.status === 'KILLED').length;
 const survived = results.filter((r) => r.status === 'SURVIVED');
 const equivalent = results.filter((r) => r.status === 'EQUIVALENT');
 const invalid = results.filter((r) => r.status === 'INVALID');
-console.log(`KILLED: ${killed}/${results.length - equivalent.length}   PROVEN EQUIVALENT: ${equivalent.length}   SURVIVED: ${survived.length}   INVALID: ${invalid.length}`);
+const obsolete = results.filter((r) => r.status === 'OBSOLETE');
+console.log(`KILLED: ${killed}/${results.length - equivalent.length - obsolete.length}   PROVEN EQUIVALENT: ${equivalent.length}   OBSOLETE (documented): ${obsolete.length}   SURVIVED: ${survived.length}   INVALID: ${invalid.length}`);
+if (obsolete.length) {
+  console.log('\nOBSOLETE MUTANTS (target retired; evidence in this file):');
+  for (const o of obsolete) console.log(`  ${o.id} — ${o.invariant}`);
+}
 if (survived.length) {
   console.log('\nSURVIVING MUTANTS (missing coverage):');
   for (const s of survived) console.log(`  ${s.id} — ${s.invariant} (${s.file})`);

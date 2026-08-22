@@ -162,3 +162,44 @@ untouched, decision register untouched).
 
 **WP-07: NOT certified** — the mutation gate still fails (8 harnesses), M7's disposition is pending,
 and Buckets 1 and 3 remain. **TR-4 OPEN.**
+
+---
+
+## 7. OUTCOME — Bucket 1 + M7 Option (b) executed (2026-08-22, Owner-directed)
+
+Lifecycle: CHECKPOINT (`a457ab5`) → DISCOVER → IMPLEMENT → VERIFY → ATTACK → REVERIFY → CLEAN.
+Six files, +86/−19. The decision register (`docs/registries/decisions.md`) is **0-diff**.
+
+**M7 Option (b) — the approved production simplification.** The subsumed
+`!hasPermission(ctx, code) ||` leg was removed from `requirePermissionAtBranch`
+(security.routes.ts) and `requireRoleAssignmentAuthority` (users.routes.ts), each carrying the
+subsumption proof in a comment; the now-unused `hasPermission` function was deleted from
+rbac-service.ts (`hasAnyPermission` remains the single set-membership authority — the LAW 1 twin
+is gone). Behavior-preservation evidence: **206/206 tests pass** across wp02 (17 files) and the
+org-authorization suite, including the Bucket-2 deny-path suite wiring, which is **preserved**
+in the rbac harness. M7 was then **retired through the OBSOLETE mechanism** with the subsumption
+proof recorded in the harness registry — never classified EQUIVALENT.
+
+**OBSOLETE mechanism (as approved).** Per-harness registries with written evidence, skipped
+before anchoring, reported distinctly by the harness and the gate — never silent, never inside
+EQUIVALENT sets:
+- **M1, M12** (rbac): legacy-role fallback absent (0 grep hits); successor enforcement
+  execution-proven (M2/M3 KILLED); no decision record located for the removal (flagged).
+- **M14** (teacher-update): subject removed by recorded decision **D-23**.
+- **M7** (rbac): subsumption proof + this round's simplification.
+
+**M15 successor mutant (as approved) — verdict by execution: SURVIVED.** The new mutant probing
+D-23's replacement boundary ("assertMoney rejects fractional input") applies cleanly and is not
+killed by `wp05/teacher-update-validation.test.ts` — an honest new real survivor. It joins the
+**Bucket-3 Class C** list (reject-path coverage: teacher-update M7, M12, M15) — not repaired
+here; adding that coverage was not in this round's approvals.
+
+**Gates after the round:** `npm run release:validate` — **22 passed · 0 failed · 0 skipped**.
+Server suite **2830 passed · 162 skipped · 0 failed** (unchanged counts — the production change is
+behavior-preserving). `npm run audit:mutation` — **11 passed · 7 failed · 29 surviving ·
+4 documented-obsolete · 0 INVALID** (rbac FAIL→PASS at 9/9 killed; teacher-update 10/13 with
+M15's honest survival; every unmodified harness byte-identical).
+
+**WP-07: NOT certified** — the mutation gate still fails (7 harnesses), Bucket 3 remains
+(19 real survivors: employee-salary 2, fer 1, fmw 6, funding 3, journey 1, teacher-input 3,
+teacher-update 3 incl. M15). **TR-4 OPEN. Stopped at the decision checkpoint.**

@@ -335,9 +335,14 @@ export function hasAnyRole(ctx: RbacUserContext, roleCodes: string[]): boolean {
   return roleCodes.some((role) => hasRole(ctx, role));
 }
 
-export function hasPermission(ctx: RbacUserContext, code: string): boolean {
-  return ctx.permissionCodes.has(code);
-}
+// `hasPermission(ctx, code)` was removed (Owner-approved simplification, TR-4 M7
+// disposition, 2026-08-22): at both of its production call sites the guard was
+// `!hasPermission(ctx, code) || !canAccessBranchForRequirement(…,
+// {permissionCodes:[code]})`, and the branch leg resolves from the same
+// post-deny ctx.permissions with strictly stronger conditions
+// (hasPermissionForBranchWithActionScopes) — so it implied the set-membership
+// test and the weaker leg was dead weight. `hasAnyPermission` below remains the
+// single set-membership authority used by the middleware.
 
 export function hasAnyPermission(ctx: RbacUserContext, codes: string[]): boolean {
   return codes.some((c) => ctx.permissionCodes.has(c));

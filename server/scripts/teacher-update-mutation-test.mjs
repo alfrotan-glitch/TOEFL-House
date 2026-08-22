@@ -150,18 +150,27 @@ const MUTANTS = [
     replace: '  void allowZero;',
   },
   {
-    // OBSOLETE ANCHOR — TR4-F10, decision deferred to the Owner (not
-    // classified, not removed): assertMoney no longer rounds to two decimals —
-    // fractional input is now rejected outright ("must be a whole number of
-    // AFN"); rounding moved to assertComputedMoney via roundMoney, a different
-    // function with a different contract. Re-basing would invent a new mutant,
-    // so this entry keeps reporting INVALID — loudly — until the Owner retires
-    // or redefines it.
+    // Retired through the TR-4 Bucket-1 OBSOLETE mechanism (Owner-approved):
+    // assertMoney no longer rounds to two decimals — recorded decision D-23
+    // ("Reject, do not round, operator input") made it refuse fractional
+    // amounts outright, with rounding moved to assertComputedMoney. The
+    // successor mutant M15 below probes the replacement boundary.
     id: 'M14',
     invariant: 'T-2 assertMoney rounds to two decimals',
     file: MONEY,
     find: '  const rounded = Math.round((n + Number.EPSILON) * 100) / 100;',
     replace: '  const rounded = n;',
+  },
+  {
+    // M15 — Owner-approved successor to the retired M14: D-23 replaced rounding
+    // with outright rejection, so the boundary to probe is that a fractional
+    // operator input is refused (a typed 24000.50 must 400) rather than stored
+    // as a REAL half-afghani.
+    id: 'M15',
+    invariant: 'T-2 assertMoney rejects fractional input (whole AFN only)',
+    file: MONEY,
+    find: '  if (!Number.isInteger(n)) throw new HttpError(400, `${field} must be a whole number of AFN.`);',
+    replace: '  void n;',
   },
 ];
 
@@ -210,8 +219,19 @@ try {
 }
 
 const results = [];
+// TR-4 Bucket-1 OBSOLETE registry — retired with written evidence, never
+// silently, never inside an EQUIVALENT set. Skipped BEFORE anchoring: the
+// target no longer exists, so the mutant is neither INVALID nor a survivor.
+const OBSOLETE = {
+  M14: 'subject removed by recorded decision D-23 ("Reject, do not round, operator input"): assertMoney refuses fractional amounts; rounding lives only in assertComputedMoney. Successor mutant M15 probes the replacement boundary (Owner-approved, 2026-08-22).',
+};
 try {
   for (const m of selected) {
+    if (OBSOLETE[m.id]) {
+      results.push({ ...m, status: 'OBSOLETE', detail: OBSOLETE[m.id] });
+      console.log(`${m.id.padEnd(4)} OBSOLETE  ${m.invariant} — target retired with recorded evidence (see OBSOLETE registry)`);
+      continue;
+    }
     const original = ORIGINALS.get(m.file);
     const occurrences = original.split(m.find).length - 1;
     if (occurrences !== 1) {
@@ -250,7 +270,12 @@ console.log('\n' + '='.repeat(78));
 const killed = results.filter((r) => r.status === 'KILLED').length;
 const survived = results.filter((r) => r.status === 'SURVIVED');
 const invalid = results.filter((r) => r.status === 'INVALID');
-console.log(`KILLED: ${killed}/${results.length}   SURVIVED: ${survived.length}   INVALID: ${invalid.length}`);
+const obsolete = results.filter((r) => r.status === 'OBSOLETE');
+console.log(`KILLED: ${killed}/${results.length - obsolete.length}   OBSOLETE (documented): ${obsolete.length}   SURVIVED: ${survived.length}   INVALID: ${invalid.length}`);
+if (obsolete.length) {
+  console.log('\nOBSOLETE MUTANTS (target retired; evidence in this file):');
+  for (const o of obsolete) console.log(`  ${o.id} — ${o.invariant}`);
+}
 if (survived.length) {
   console.log('\nSURVIVING MUTANTS (missing test coverage):');
   for (const s of survived) console.log(`  ${s.id} — ${s.invariant} (${s.file})`);
