@@ -132,7 +132,7 @@ describe('F-11: an instalment plan is a schedule, not a JSON field', () => {
   it('accepts a valid plan and charges exactly the instalment amount', async () => {
     const plan = await putPlan([{ amount: 2500, dueDate: today() }, { amount: 2500 }]);
     expect(plan.status).toBe(200);
-    const [first, second] = plan.body as Array<{ id: string; status: string }>;
+    const [first] = plan.body as Array<{ id: string; status: string }>;
 
     const pay = await supertest(app)
       .post(`/api/students/${STUDENT}/payments`).set(auth())

@@ -99,16 +99,6 @@ function seedLevelIn(versionId: string, passMark: number | null): string {
   return lid;
 }
 
-/** A level created directly, so tests that need a subject can skip the route. */
-function seedLevel(passMark: number | null): string {
-  const lid = `pth_lvl_${++seq}`;
-  db.prepare(
-    `INSERT INTO levels (id, program_id, program_version_id, name, code, "order", is_active, default_fee, pass_mark)
-     VALUES (?, ?, ?, ?, ?, 1, 1, 1000, ?)`,
-  ).run(lid, PROGRAM, VERSION, `Seeded ${seq}`, `S${seq}`, passMark);
-  return lid;
-}
-
 beforeAll(async () => {
   initSchema();
   bootstrapRbacCatalog(db);

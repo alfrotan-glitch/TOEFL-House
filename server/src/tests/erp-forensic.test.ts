@@ -57,7 +57,6 @@ describe('ERP cross-system forensic audit', () => {
   let app: express.Express;
   let owner: TokenPayload;
   let registrar: TokenPayload;
-  let manager: TokenPayload;
   let teacher: TokenPayload;
 
   beforeAll(async () => {
@@ -79,7 +78,6 @@ describe('ERP cross-system forensic audit', () => {
     }
 
     owner = { userId: 'xf_owner', username: 'xf_owner', branchId: BRANCH_A, fullName: 'XF Owner' };
-    manager = { userId: 'xf_mgr', username: 'xf_mgr', branchId: BRANCH_A, fullName: 'XF Manager' };
     registrar = { userId: 'xf_reg', username: 'xf_reg', branchId: BRANCH_A, fullName: 'XF Registrar' };
     teacher = { userId: 'xf_tea', username: 'xf_tea', branchId: BRANCH_A, fullName: 'XF Teacher' };
     app = createApp();
@@ -211,7 +209,7 @@ describe('ERP forensic — concurrency + scale (second suite)', () => {
   it('concurrency: 10 parallel manual diploma payments on a fresh student → exactly one succeeds', async () => {
     db.prepare(`INSERT OR IGNORE INTO students (id, student_code, full_name, status, registration_date, branch_id, gender, phone)
       VALUES ('xf_conc', 'TH-XF-C', 'Conc Student', 'active', ?, ?, 'male', '0700111999')`).run(today(), BRANCH_A);
-    const results = await Promise.all(Array.from({ length: 10 }, (_, i) =>
+    const results = await Promise.all(Array.from({ length: 10 }, (_, _i) =>
       supertest(app).post('/api/students/xf_conc/payments').set(authHeader(owner)).send({ amount: 500, category: 'diploma' })));
     const ok = results.filter((r) => r.status === 201).length;
     const conflicts = results.filter((r) => r.status === 409).length;

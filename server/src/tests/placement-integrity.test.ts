@@ -28,7 +28,7 @@ import visitorsRouter from '../routes/visitors.routes.js';
 import placementRouter from '../routes/placement.routes.js';
 import academicRouter from '../routes/academic.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
-import { id, today } from '../utils/ids.js';
+import { today } from '../utils/ids.js';
 
 const BRANCH = 'pint_branch';
 const BRANCH_B = 'pint_branch_b';

@@ -26,7 +26,7 @@ import { errorHandler } from '../../../middleware/errorHandler.js';
 import studentsRouter from '../../../routes/students.routes.js';
 import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
 import { bearerFor, seedUser } from '../../support/identity.js';
-import { getStudentBalance, getSemesterTuitionSettled } from '../../../utils/studentBalance.js';
+import { getStudentBalance } from '../../../utils/studentBalance.js';
 import { ensureTuitionObligation, getObligationPosition } from '../../../core/finance/obligations.js';
 import { computeReconciliation } from '../../../utils/reconciliation.js';
 import { today } from '../../../utils/ids.js';
@@ -92,7 +92,7 @@ describe('WP-07 · E1b — cash names the obligation it settles', () => {
     expect(cash[0].amount).toBe(4000);
 
     expect(getObligationPosition(db, obligationId).settledCash).toBe(4000);
-    expect(getSemesterTuitionSettled(db, studentId, TERM)).toBe(4000);
+    expect(getObligationPosition(db, obligationId).settled).toBe(4000);
     expect(getStudentBalance(db, studentId).outstanding).toBe(6000);
   });
 

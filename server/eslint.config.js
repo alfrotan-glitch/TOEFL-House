@@ -29,12 +29,9 @@ export default tseslint.config(
       // audit as outstanding, not introduced here); flagging every one would
       // turn the gate into noise and hide new problems.
       '@typescript-eslint/no-explicit-any': 'off',
-      // Matches the root config's severity exactly. This file restores a lint
-      // gate that was silently dead in CI; it is not the place to introduce a
-      // stricter standard than the project already applies to its frontend.
-      // The ~100 unused values this surfaces are recorded in the audit as
-      // outstanding cleanup, deliberately not bundled into the release fix.
-      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', caughtErrors: 'none' }],
+      // TR4-R12: unused imports/variables are release-blocking errors, not
+      // advisory warnings. A dead import must never enter through a green gate.
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrors: 'none' }],
     },
   },
 );

@@ -4,7 +4,7 @@ Verifies that listing students returns semesters correctly via batch query.
 */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { db, initSchema } from '../../../db/connection.js';
-import { id, today } from '../../../utils/ids.js';
+import { today } from '../../../utils/ids.js';
 
 beforeAll(() => {
   initSchema();

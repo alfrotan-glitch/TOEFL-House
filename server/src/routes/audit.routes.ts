@@ -12,13 +12,6 @@ import { ah, HttpError } from '../middleware/errorHandler.js';
 export const auditRouter = Router();
 auditRouter.use(authenticate);
 
-// ── Performance Optimization: Prepared Statements ──────────────────────────
-// Filters + pagination are bound parameters only; the LIMIT is applied in SQL.
-const stmtCountAuditLogs = db.prepare('SELECT COUNT(*) AS c FROM audit_logs WHERE 1=1');
-const stmtCountAuditLogsByBranch = db.prepare('SELECT COUNT(*) AS c FROM audit_logs WHERE branch_id = ?');
-const stmtGetAuditLogsPage = db.prepare('SELECT * FROM audit_logs ORDER BY date DESC, time DESC, rowid DESC LIMIT ? OFFSET ?');
-const stmtGetAuditLogsPageByBranch = db.prepare('SELECT * FROM audit_logs WHERE branch_id = ? ORDER BY date DESC, time DESC, rowid DESC LIMIT ? OFFSET ?');
-
 // Only owner & manager can see the full audit trail.
 auditRouter.get(
   '/',

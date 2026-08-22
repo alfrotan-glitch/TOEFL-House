@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeAll } from 'vitest';
 import { db, initSchema } from '../db/connection.js';
-import { teacherBranchAsOf, computeTeacherDueAmount } from '../core/payroll/class-payroll.js';
+import { teacherBranchAsOf } from '../core/payroll/class-payroll.js';
 
 beforeAll(() => { initSchema(); });
 

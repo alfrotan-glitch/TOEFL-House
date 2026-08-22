@@ -394,7 +394,7 @@ describe('STU-H3 — phone identity is normalized', () => {
   });
 
   it('PATCH cannot steal another student\'s number via reformatting', async () => {
-    const a = await createStudent({ fullName: 'Owner A', phone: '0700880022' });
+    await createStudent({ fullName: 'Owner A', phone: '0700880022' });
     const b = await createStudent({ fullName: 'Owner B', phone: '0700880033' });
     const steal = await supertest(app).patch(`/api/students/${b.body.id}`).set(authHeader(reg))
       .send({ phone: '+93700880022' });

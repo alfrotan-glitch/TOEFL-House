@@ -120,7 +120,6 @@ invoicesRouter.get(
   ah(async (req, res) => {
     const { status, studentId } = req.query as Record<string, string>;
     const { branchId, isAll } = resolveBranchScope(req);
-    const todayStr = today();
 
     let rows = (isAll ? stmtGetAllInvoices.all() : stmtGetInvoicesByBranch.all(branchId)) as any[];
 

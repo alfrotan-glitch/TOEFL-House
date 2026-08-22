@@ -15,7 +15,6 @@ import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
 import { assertMoney, assertPerformanceScore, assertSeatCount } from '../utils/money.js';
 import { addNotification } from '../utils/notifications.js';
-import { evaluateRules } from '../core/configuration/rule-engine.js';
 import {
   computeTeacherDueAmount, toPeriodKey, currentJalaliPeriodKey,
   sumPaidForPeriod, hasFullPayForPeriod, teacherBranchAsOf,
@@ -104,7 +103,6 @@ const stmtInsertFinTx = db.prepare(
      (id, type, category, finance_category_id, amount, date, description, reference_id, operator_name, branch_id)
    VALUES (?, 'expense', ?, ?, ?, ?, ?, ?, ?, ?)`,
 );
-const stmtInsertSalaryLedger = db.prepare(`INSERT INTO teacher_salary_ledger (id, teacher_id, period_key, period_label, due_amount, paid_amount, payment_type, transaction_id, notes, branch_id, operator_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 const stmtInsertCompensationHistory = db.prepare('INSERT INTO teacher_compensation_history (id, teacher_id, effective_from, base_salary, salary_type, contract_type, default_skill_rate, reason, operator_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
 const stmtInsertEvaluation = db.prepare(`INSERT INTO teacher_evaluations (id, teacher_id, evaluator_id, date, score, criteria, notes) VALUES (?, ?, ?, ?, ?, ?, ?)`);
 

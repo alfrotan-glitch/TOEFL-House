@@ -32,7 +32,6 @@ import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
 import { ensureOrganizationHierarchy, FIXED_ORG_ID } from '../db/organizationHierarchy.js';
-import { today } from '../utils/ids.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';

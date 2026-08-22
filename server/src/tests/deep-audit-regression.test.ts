@@ -54,7 +54,6 @@ function authHeader(user: TokenPayload): { Authorization: string } {
 let app: express.Express;
 let owner: TokenPayload;
 let manager: TokenPayload;
-let finance: TokenPayload;
 let registrar: TokenPayload;
 
 beforeAll(async () => {
@@ -69,7 +68,6 @@ beforeAll(async () => {
 
   owner = makeUser({ userId: 'u_ar_owner', branchId: BRANCH });
   manager = makeUser({ userId: 'u_ar_mgr', branchId: BRANCH });
-  finance = makeUser({ userId: 'u_ar_fin', branchId: BRANCH });
   registrar = makeUser({ userId: 'u_ar_reg', branchId: BRANCH });
   app = createApp();
 });

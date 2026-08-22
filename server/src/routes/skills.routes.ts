@@ -55,7 +55,7 @@ const ASSIGNMENT_TYPES = ['primary', 'assistant', 'substitute', 'guest', 'examin
  *  calculation — see the Phase 8 report for why. */
 const PAYROLL_ELIGIBLE_TYPES = ['primary', 'assistant'];
 
-/** Safely extracts user context required for mutations */
+/** Safely extracts user context required for mutations. */
 function getUserContext(req: import('express').Request) {
   const user = req.user;
   if (!user?.branchId) {
@@ -149,7 +149,7 @@ classTeacherSkillsRouter.post(
   '/',
   authorize('general_manager', 'head_of_department'),
   ah(async (req, res) => {
-    const user = getUserContext(req);
+    getUserContext(req);
     const { classId, teacherId, skillId, monthlyRate, assignmentType, startDate, endDate, reason, sessionId } = req.body;
     
     if (!classId || !teacherId || !skillId) {
@@ -258,7 +258,7 @@ classTeacherSkillsRouter.put(
   '/:id',
   authorize('general_manager', 'head_of_department'),
   ah(async (req, res) => {
-    const user = getUserContext(req);
+    getUserContext(req);
     const existing = stmtGetCtsById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Assignment not found.');
     if (!canAccessBranchResource(req, existing.branch_id)) throw new HttpError(403, 'Assignment belongs to another branch.');
@@ -329,10 +329,10 @@ classTeacherSkillsRouter.delete(
   '/:id',
   authorize('general_manager', 'head_of_department'),
   ah(async (req, res) => {
+    getUserContext(req);
     const existing = stmtGetCtsById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Assignment not found.');
     
-    const user = getUserContext(req);
     if (!canAccessBranchResource(req, existing.branch_id)) throw new HttpError(403, 'Assignment belongs to another branch.');
     stmtDeleteCts.run(req.params.id);
     writeAudit(req, `Removed teacher skill assignment from class ${existing.class_id}`);
@@ -354,7 +354,7 @@ classTeacherSkillsRouter.post(
   '/:id/substitute',
   authorize('general_manager', 'head_of_department'),
   ah(async (req, res) => {
-    const user = getUserContext(req);
+    getUserContext(req);
     const original = stmtGetCtsById.get(req.params.id) as any;
     if (!original) throw new HttpError(404, 'Assignment not found.');
     if (!canAccessBranchResource(req, original.branch_id)) throw new HttpError(403, 'Assignment belongs to another branch.');

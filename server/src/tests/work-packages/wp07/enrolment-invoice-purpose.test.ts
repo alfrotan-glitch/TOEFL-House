@@ -24,8 +24,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { db, initSchema } from '../../../db/connection.js';
 import { getEnrollmentService } from '../../../core/academic/enrollment-service.js';
-import { getStudentBalance, getSemesterTuitionSettled } from '../../../utils/studentBalance.js';
-import { allocatePaymentToObligation } from '../../../core/finance/obligations.js';
+import { getStudentBalance } from '../../../utils/studentBalance.js';
+import { allocatePaymentToObligation, getObligationPosition } from '../../../core/finance/obligations.js';
 import { today } from '../../../utils/ids.js';
 
 const TUITION = 8000;
@@ -209,7 +209,7 @@ describe('WP-07 · WP07-F18 — the term carries its tuition and the documents s
         paymentId: `${key}_p1`, obligationId: tuition.obligation_id!, amount: TUITION, operatorName: 'Test',
       });
     })();
-    expect(getSemesterTuitionSettled(db, studentId, 'Enrolment Term')).toBe(TUITION);
+    expect(getObligationPosition(db, tuition.obligation_id!).settled).toBe(TUITION);
     expect(getStudentBalance(db, studentId).outstanding).toBe(0);
 
     // The registration invoice's money is not tuition and never was.
@@ -217,7 +217,7 @@ describe('WP-07 · WP07-F18 — the term carries its tuition and the documents s
       `INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, receipt_number, branch_id, idempotency_key)
        VALUES (?, ?, ?, ?, ?, 'cash', 'completed', 'other', ?, ?, ?)`,
     ).run(`${key}_p2`, studentId, other.id, REGISTRATION, today(), `R-${key.slice(-6)}-2`, branch, `${key}_k2`);
-    expect(getSemesterTuitionSettled(db, studentId, 'Enrolment Term')).toBe(TUITION);
+    expect(getObligationPosition(db, tuition.obligation_id!).settled).toBe(TUITION);
     expect(term.id).toBeTruthy();
   });
 

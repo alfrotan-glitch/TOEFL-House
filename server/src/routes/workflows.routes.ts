@@ -44,9 +44,6 @@ const stmtGetInstanceById = db.prepare('SELECT * FROM workflow_instances WHERE i
 const stmtInsertInstance = db.prepare(
   `INSERT INTO workflow_instances (id, definition_id, entity_type, entity_id, current_step, status, branch_id, initiated_by, started_at, payload) VALUES (?, ?, ?, ?, ?, 'in_progress', ?, ?, ?, ?)`
 );
-const stmtUpdateInstanceStep = db.prepare(`UPDATE workflow_instances SET current_step = ?, status = 'in_progress' WHERE id = ?`);
-const stmtUpdateInstanceStatus = db.prepare(`UPDATE workflow_instances SET status = ?, completed_at = ? WHERE id = ?`);
-
 const stmtInsertHistory = db.prepare(
   `INSERT INTO workflow_history (id, instance_id, step_order, actor, action, notes, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)`
 );

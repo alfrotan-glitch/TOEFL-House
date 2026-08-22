@@ -55,7 +55,7 @@ function createApp() {
   return app;
 }
 
-const token = (userId: string, role: string) =>
+const token = (userId: string, _role: string) =>
   `Bearer ${signToken({ userId, username: userId, branchId: BRANCH, fullName: userId } as TokenPayload)}`;
 
 let app: express.Express;

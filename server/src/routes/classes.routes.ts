@@ -156,7 +156,6 @@ const stmtUpdateClass = db.prepare(
 const stmtUpdateClassGender = db.prepare('UPDATE classes SET gender_policy = ? WHERE id = ?');
 
 const stmtDeleteClassTeacherSkills = db.prepare('DELETE FROM class_teacher_skills WHERE class_id = ?');
-const stmtDeleteSessionsForClass = db.prepare('DELETE FROM sessions WHERE class_id = ?');
 const stmtDeleteClass = db.prepare('DELETE FROM classes WHERE id = ?');
 
 // ── CLASS MERGE: what moves (audit E-3) ──────────────────────────────────

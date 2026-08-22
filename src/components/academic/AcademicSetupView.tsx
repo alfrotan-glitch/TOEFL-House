@@ -17,28 +17,13 @@ import { ShamsiDateInput } from '../common/ShamsiDateInput';
 import { useInvalidate } from '../../state/serverStateFreshness';
 
 /**
- * Canonical workflow order, derived from a single ordered list so the type, the
- * navigation and the phase numbering cannot drift apart. Declared by hand the
- * union drifts from the order operators actually meet the steps in ('catalog'
- * first, 'terms' last), which makes the type a misleading guide to the workflow.
- *
- * Phase meaning:
+ * Canonical academic-setup tabs. Phase meaning:
  *   1 Infrastructure  — the branch calendar and physical capacity.
  *   2 Curriculum      — what is taught. Independent of phase 1 (see the phase
  *                       completion block for why).
  *   3 Course delivery — binds curriculum to infrastructure.
  */
-const TAB_ORDER = [
-  { id: 'terms',     phase: 1, label: '1.1 Academic Terms' },
-  { id: 'slots',     phase: 1, label: '1.2 Time Slots' },
-  { id: 'rooms',     phase: 1, label: '1.3 Physical Rooms' },
-  { id: 'catalog',   phase: 2, label: '2.1 Programs & Levels' },
-  { id: 'versions',  phase: 2, label: '2.2 Versions & Rules' },
-  { id: 'offerings', phase: 3, label: '3.1 Course Offerings' },
-  { id: 'generate',  phase: 3, label: '3.2 Generate Classes' },
-] as const;
-
-type Tab = (typeof TAB_ORDER)[number]['id'];
+type Tab = 'terms' | 'slots' | 'rooms' | 'catalog' | 'versions' | 'offerings' | 'generate';
 
 function NavButton({ t, label, icon, isLocked, tab, setTab }: { t: Tab; label: string; icon: React.ReactNode; isLocked: boolean; tab: Tab; setTab: React.Dispatch<React.SetStateAction<Tab>> }) {
   return (

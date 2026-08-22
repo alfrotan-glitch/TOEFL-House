@@ -14,7 +14,6 @@ import classesRouter from '../../../routes/classes.routes.js';
 import { errorHandler } from '../../../middleware/errorHandler.js';
 import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
 import { getClassLifecycleService } from '../../../core/academic/class-lifecycle-service.js';
-import { getGradeLockService } from '../../../core/academic/grade-lock-service.js';
 import { assertGradeLockTransition, GRADE_LOCK_STAGES, GRADE_LOCK_TRANSITIONS } from '../../../core/academic/lifecycle-engine.js';
 
 const BRANCH = 'gl_branch_a';

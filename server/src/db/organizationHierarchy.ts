@@ -1,4 +1,3 @@
-import { ensureFinanceAccount } from '../utils/financeAccounts.js';
 /**
  * Ensures the fixed Organization → Campus → Branch hierarchy exists.
  *

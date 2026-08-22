@@ -163,7 +163,6 @@ describe('a mounted consumer refetches when another view mutates its dataset', (
         } catch {
           return; // never reaches invalidate()
         }
-        // eslint-disable-next-line no-unreachable
         invalidate('academic');
       };
       return React.createElement('button', { onClick }, 'save');

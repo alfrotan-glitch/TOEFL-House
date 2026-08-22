@@ -42,10 +42,8 @@ describe('Student subsystem deep audit', () => {
   let app: express.Express;
   let owner: TokenPayload;
   let registrar: TokenPayload;
-  let finance: TokenPayload;
   let teacher: TokenPayload;
   let studentTok: TokenPayload;
-  let manager: TokenPayload;
 
   beforeAll(async () => {
     initSchema();
@@ -65,9 +63,7 @@ describe('Student subsystem deep audit', () => {
     assignRole('stu_stu', 'student', BRANCH_A);
 
     owner = { userId: 'stu_owner', username: 'stu_owner', branchId: BRANCH_A, fullName: 'Stu Owner' };
-    manager = { userId: 'stu_mgr', username: 'stu_mgr', branchId: BRANCH_A, fullName: 'Stu Manager' };
     registrar = { userId: 'stu_reg', username: 'stu_reg', branchId: BRANCH_A, fullName: 'Stu Registrar' };
-    finance = { userId: 'stu_fin', username: 'stu_fin', branchId: BRANCH_A, fullName: 'Stu Finance' };
     teacher = { userId: 'stu_tea', username: 'stu_tea', branchId: BRANCH_A, fullName: 'Stu Teacher' };
     studentTok = { userId: 'stu_stu', username: 'stu_stu', branchId: BRANCH_A, fullName: 'Stu Student' };
     app = createApp();

@@ -215,7 +215,7 @@ describe.skip('Placement content-driven lifecycle (test bank → responses → s
   });
 
   it('profile PUT: rejects inactive test, rejects another-branch test, accepts active same-branch test', async () => {
-    const base = (testId: string, key: string) => ({
+    const base = (testId: string, _key: string) => ({
       enabled: true, required: true, allowRetake: true, maxScore: 100, passScore: 60, scoringModel: 'weighted_average',
       components: [
         { key: 'listening', type: 'content_test', label: 'Listening', required: true, weight: 40, maxScore: 100, testId },

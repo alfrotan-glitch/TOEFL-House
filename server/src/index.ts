@@ -344,7 +344,7 @@ function setupGracefulShutdown() {
   process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
 }
 
-process.on('unhandledRejection', (reason, promise) => {
+process.on('unhandledRejection', (reason, _promise) => {
   log.error('Unhandled promise rejection', reason);
 });
 

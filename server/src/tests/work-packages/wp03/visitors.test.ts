@@ -178,10 +178,6 @@ function countStudents(): number {
   return (db.prepare('SELECT COUNT(*) as c FROM students').get() as { c: number }).c;
 }
 
-function countJourneyEvents(studentId: string): number {
-  return (db.prepare('SELECT COUNT(*) as c FROM student_journey_events WHERE student_id = ?').get(studentId) as { c: number }).c;
-}
-
 // ── Seed a full class for capacity tests ───────────────────────────────────
 function fillClass(classId: string, count: number) {
   for (let i = 0; i < count; i++) {
@@ -211,7 +207,6 @@ function fillClass(classId: string, count: number) {
 describe('Visitor Module', () => {
   let app: Express.Application;
   let registrarA: TokenPayload;
-  let registrarB: TokenPayload;
   let managerA: TokenPayload;
   let ownerUser: TokenPayload;
   let counselorA: TokenPayload;
@@ -235,7 +230,7 @@ describe('Visitor Module', () => {
     app = createApp();
 
     registrarA = makeUser({ userId: 'u_reg_a', branchId: BRANCH_A });
-    registrarB = makeUser({ userId: 'u_reg_b', branchId: BRANCH_B });
+
     managerA = makeUser({ userId: 'u_mgr_a', branchId: BRANCH_A });
     ownerUser = makeUser({ userId: 'u_owner', branchId: BRANCH_A });
     counselorA = makeUser({ userId: 'u_cns_a', branchId: BRANCH_A });

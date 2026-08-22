@@ -7,7 +7,7 @@
  * reach a log line, because that is the easiest place to leak one and the
  * hardest place to notice it afterwards.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { createLogger, redact } from '../core/observability/logger.js';
 
 /** Captures what the logger actually wrote, per stream. */

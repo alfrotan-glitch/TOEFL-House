@@ -1,5 +1,5 @@
 import React from 'react';
-import { GraduationCap, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { BrandLogo } from '../common/BrandLogo';
 import { BRAND_NAME, BRAND_SLOGAN } from '../../config/branding';
 

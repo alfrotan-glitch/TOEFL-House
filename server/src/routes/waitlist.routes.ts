@@ -91,7 +91,6 @@ function requireClassForWaitlist(req: import('express').Request, classId: string
   if (!isAll && branchId && row.branch_id && row.branch_id !== branchId) {
     const user = req.user;
     if (!user) throw new HttpError(401, 'Not authenticated');
-    const scopes = req.rbac?.permissions.map((p: { scope: string }) => p.scope) ?? [];
     const cross = !!row.branch_id && canAccessBranchResource(req, row.branch_id);
     if (!cross) throw new HttpError(403, 'Class belongs to another branch.');
   }

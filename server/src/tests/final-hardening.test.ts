@@ -39,7 +39,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
-import { ensureOrganizationHierarchy, FIXED_ORG_ID } from '../db/organizationHierarchy.js';
+import { ensureOrganizationHierarchy } from '../db/organizationHierarchy.js';
 import { id, today } from '../utils/ids.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
 import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
@@ -277,7 +277,7 @@ describe('Receptionist ≠ Finance', () => {
     const bl = db.prepare('SELECT id FROM budget_lines LIMIT 1').get() as { id: string } | undefined;
     const charge = await supertest(app).post(`/api/finance/budget-lines/${bl?.id || 'none'}/charge`).set(authHeader(receptionist)).send({ amount: 100 });
     expect(charge.status).toBe(403);
-    const reqRow = db.prepare(`INSERT INTO expense_requests (id, title, amount, budget_line_id, requester, status, date, branch_id, expense_kind, payment_method, auto_approved)
+    db.prepare(`INSERT INTO expense_requests (id, title, amount, budget_line_id, requester, status, date, branch_id, expense_kind, payment_method, auto_approved)
       VALUES (?, 'x', 100, ?, 'recep', 'pending', ?, ?, 'other', 'cash', 0)`).run(id('req'), bl?.id || null, today(), BRANCH);
     const reqId = (db.prepare("SELECT id FROM expense_requests WHERE requester = 'recep' ORDER BY rowid DESC LIMIT 1").get() as { id: string }).id;
     const decide = await supertest(app).post(`/api/finance/expense-requests/${reqId}/decide`).set(authHeader(receptionist)).send({ isApproved: true });

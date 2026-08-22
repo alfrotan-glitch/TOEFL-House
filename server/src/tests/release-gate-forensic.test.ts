@@ -105,12 +105,10 @@ describe('Release-gate forensic — untested student/unauthorized surfaces', () 
 
 describe('Release-gate forensic — cross-writer financial duplication', () => {
   let app: express.Express;
-  let owner: TokenPayload;
   let registrar: TokenPayload;
 
   beforeAll(async () => {
     app = createApp();
-    owner = { userId: 'rg_owner', username: 'rg_owner', branchId: BRANCH_A, fullName: 'RG Owner' };
     registrar = { userId: 'rg_reg', username: 'rg_reg', branchId: BRANCH_A, fullName: 'RG Registrar' };
     // Seed a book.
     db.prepare(`INSERT OR IGNORE INTO books (id, title, price, purchase_price, stock, is_chapter, branch_id) VALUES ('rg_book', 'RG Book', 250, 100, 5, 0, ?)`).run(BRANCH_A);

@@ -29,10 +29,10 @@ import { errorHandler } from '../../../middleware/errorHandler.js';
 import { fundingRouter } from '../../../routes/funding.routes.js';
 import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
 import { bearerFor, seedUser } from '../../support/identity.js';
-import { getStudentBalance, getSemesterTuitionSettled } from '../../../utils/studentBalance.js';
+import { getStudentBalance } from '../../../utils/studentBalance.js';
 import { computeReconciliation } from '../../../utils/reconciliation.js';
 import { getFinanceAccount } from '../../../utils/financeAccounts.js';
-import { ensureTuitionObligation } from '../../../core/finance/obligations.js';
+import { ensureTuitionObligation, getObligationPosition } from '../../../core/finance/obligations.js';
 import { today } from '../../../utils/ids.js';
 
 const app = express();
@@ -140,7 +140,7 @@ describe('WP-07 · S6 — a promise settles nothing, received money settles tuit
     expect(applied.body.obligation.outstanding).toBe(7000);
 
     // The term and the student both know about the money.
-    expect(getSemesterTuitionSettled(db, studentId, SEMESTER)).toBe(5000);
+    expect(getObligationPosition(db, obligationId).settled).toBe(5000);
     expect(getStudentBalance(db, studentId).outstanding).toBe(7000);
 
     // And no cash was created: the donor's money was recognised on arrival.
@@ -317,7 +317,7 @@ describe('WP-07 · S6 · ATTACK — money that must not appear', () => {
     await allocate({ obligationId, amount: 12000 }).expect(201);
 
     // The term is settled, so nothing of it remains to be billed or collected.
-    expect(getSemesterTuitionSettled(db, studentId, SEMESTER)).toBe(12000);
+    expect(getObligationPosition(db, obligationId).settled).toBe(12000);
     expect(getStudentBalance(db, studentId).outstanding).toBe(0);
     expect(computeReconciliation({ branchId: branch, isAll: false }).healthy).toBe(true);
   });

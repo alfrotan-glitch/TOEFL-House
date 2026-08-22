@@ -16,7 +16,7 @@ import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
 import { getClassLifecycleService } from '../../../core/academic/class-lifecycle-service.js';
 import { getEnrollmentService } from '../../../core/academic/enrollment-service.js';
 import {
-  resolvePromotionCriteria, computeAttendancePercentage, hasFinancialHold, findFailedMandatorySkills, decidePromotion,
+  resolvePromotionCriteria, computeAttendancePercentage, hasFinancialHold, decidePromotion,
 } from '../../../core/academic/promotion-engine.js';
 
 const BRANCH = 'pe_branch_a';

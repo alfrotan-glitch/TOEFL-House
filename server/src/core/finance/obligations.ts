@@ -132,9 +132,10 @@ export interface ObligationPosition {
 /**
  * What this obligation still owes, counting every instrument.
  *
- * Cash tuition is read through `getSemesterTuitionPaid` — the existing
- * settlement authority (D-116) — rather than re-derived here, so there is one
- * definition of "paid in cash for this term" and one of "settled in total".
+ * Cash tuition is read through `getObligationCashSettled` — the obligation's
+ * own settlement authority — rather than re-derived here, so there is one
+ * definition of "paid in cash for this obligation" and one of "settled in
+ * total".
  */
 export function getObligationPosition(db: Database, obligationId: string): ObligationPosition {
   const row = db

@@ -142,7 +142,6 @@ describe.skip('Placement final hardening', () => {
     const incomeAfter = (db.prepare(`SELECT COALESCE(SUM(amount),0) s FROM financial_transactions WHERE category='placement' AND description LIKE '%Dup Candidate%'`).get() as { s: number }).s;
     expect(incomeAfter).toBe(300); // no duplication
     // Exactly one payment + one income for the candidate.
-    const payments = (db.prepare(`SELECT COUNT(*) c FROM payments WHERE idempotency_key = ?`).get(`placement:${complete.body.attempt ? '' : ''}${''}`) as { c: number }).c;
     const placed = (db.prepare(`SELECT COUNT(*) c FROM payments p JOIN placement_assessment_attempts a ON p.idempotency_key='placement:'||a.id WHERE a.visitor_id='pha_v_dup'`).get() as { c: number }).c;
     expect(placed).toBe(1);
   });
@@ -203,7 +202,6 @@ describe.skip('Placement final hardening', () => {
 
   it('RBAC: financial visibility — finance can read placement income; finance cannot touch placement attempts; reception cannot read finance', async () => {
     // Finance CAN read the ledger (which includes placement income)…
-    const ledger = await supertest(app).get('/api/finance/transactions').set(authHeader(finance));
     // (finance route not mounted here; skip) — instead assert finance cannot reach placement attempts.
     seedVisitor('pha_v_finvis', 'FinVis', BRANCH_A, VERSION);
     const attempts = await supertest(app).get('/api/placement/visitors/pha_v_finvis/placement/attempts').set(authHeader(finance));

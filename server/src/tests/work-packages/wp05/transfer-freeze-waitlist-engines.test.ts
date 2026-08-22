@@ -20,7 +20,6 @@ import { getEnrollmentService } from '../../../core/academic/enrollment-service.
 import { createRule } from '../../../core/configuration/rule-engine.js';
 
 const BRANCH_A = 'p9_branch_a';
-const BRANCH_B = 'p9_branch_b';
 const BRANCH = BRANCH_A;
 
 function createApp() {

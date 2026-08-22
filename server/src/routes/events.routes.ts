@@ -18,7 +18,7 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { authenticate, authorize, canAccessBranchResource } from '../middleware/auth.js';
-import { hasRole, isGlobalOwner } from '../core/rbac/rbac-service.js';
+import { isGlobalOwner } from '../core/rbac/rbac-service.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id } from '../utils/ids.js';

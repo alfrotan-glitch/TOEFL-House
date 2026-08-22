@@ -112,8 +112,8 @@ const TUITION_PAYMENT_SQL = `(
  * Scholarship and sponsorship money were both recognised as income when the
  * donation arrived, so applying either settles a term and writes no ledger row
  * (owner decisions D-120 and S6). `payment` is deliberately absent: cash is
- * attributed through `payments.semester`, and counting it here as well would
- * settle every cash term twice. Declared once, here, because three read paths
+ * attributed through `obligation_allocations`, and counting it here as well
+ * would settle every cash term twice. Declared once, here, because two read paths
  * in this module and three in the obligation authority ask the same question,
  * and a copy that drifts silently changes what a student owes.
  */
@@ -154,62 +154,6 @@ export function getStudentBalance(db: Database, studentId: string, scope: Balanc
   // Tuition is settled by cash AND by scholarship money; a student whose term a
   // donor paid does not owe it (owner decision D-120).
   return deriveBalance(due.total, Number(paid.total) + studentScholarshipSettled(db, studentId));
-}
-
-/**
- * Cash settled against ONE semester.
- *
- * Read from `obligation_allocations`, the single settlement authority: a cash
- * payment names the obligation it pays, exactly as scholarship and sponsorship
- * money do. `payments.semester` is still written for display and for refund
- * attribution, but it no longer decides what a term has been paid — it is free
- * text, and `uq_student_semester_active` makes a term NAME unique only among
- * ACTIVE terms, so a student who takes one term twice has two terms with one
- * name and a string cannot say which was paid.
- *
- * A refund reduces this figure by reversing the allocation it targets and
- * re-allocating whatever the student keeps settled, so only ACTIVE allocations
- * are summed here.
- */
-export function getSemesterTuitionPaid(db: Database, studentId: string, semesterName: string): number {
-  const row = db
-    .prepare(
-      `SELECT COALESCE(SUM(a.amount), 0) AS paid
-         FROM obligation_allocations a
-         JOIN student_obligations o ON o.id = a.obligation_id
-         JOIN student_semesters ss ON ss.id = o.semester_id
-        WHERE o.student_id = ? AND ss.semester_name = ?
-          AND a.source_kind = 'payment' AND a.status = 'active'`,
-    )
-    .get(studentId, semesterName) as { paid: number };
-  return Number(row.paid) || 0;
-}
-
-/**
- * Scholarship money applied to this semester's tuition.
- *
- * Expressed here, beside the cash rule, so "how much of this term is settled"
- * has one home. Scholarship money never appears in `payments`: it settles the
- * obligation without moving cash, because the donor's money was recognised when
- * the donation was received (owner decisions D-120/D-121).
- */
-export function getSemesterScholarshipSettled(db: Database, studentId: string, semesterName: string): number {
-  const row = db
-    .prepare(
-      `SELECT COALESCE(SUM(a.amount), 0) AS total
-         FROM obligation_allocations a
-         JOIN student_obligations o ON o.id = a.obligation_id
-         JOIN student_semesters ss ON ss.id = o.semester_id
-        WHERE o.student_id = ? AND ss.semester_name = ?
-          AND a.source_kind IN ${AID_SOURCE_KINDS_SQL} AND a.status = 'active'`,
-    )
-    .get(studentId, semesterName) as { total: number };
-  return Number(row.total) || 0;
-}
-
-/** Everything that settles this semester's tuition, whatever the instrument. */
-export function getSemesterTuitionSettled(db: Database, studentId: string, semesterName: string): number {
-  return getSemesterTuitionPaid(db, studentId, semesterName) + getSemesterScholarshipSettled(db, studentId, semesterName);
 }
 
 /** One roster row: a student id plus their authoritative balance. */

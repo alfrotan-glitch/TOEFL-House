@@ -13,7 +13,6 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { db, initSchema } from '../db/connection.js';
-import { id, today } from '../utils/ids.js';
 import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
 import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { financeRouter } from '../routes/finance.routes.js';

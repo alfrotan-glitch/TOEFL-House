@@ -124,9 +124,6 @@ const stmtUpdateExpenseRequestRejected = db.prepare(
   `UPDATE expense_requests SET status = 'rejected', reject_reason = ?, approved_by = ?, approved_by_user_id = ? WHERE id = ? AND status = 'pending'`
 );
 
-const stmtGetAllTransactions = db.prepare('SELECT * FROM financial_transactions ORDER BY date DESC, rowid DESC LIMIT 500');
-const stmtGetTransactionsByBranch = db.prepare('SELECT * FROM financial_transactions WHERE branch_id = ? ORDER BY date DESC, rowid DESC LIMIT 500');
-
 // `/finance/overview` publishes income / expense / net. Those are the same
 // three numbers `/finance/pnl` publishes, so they have to obey the same rule —
 // otherwise the Finance header and the P&L tab disagree about the same money.

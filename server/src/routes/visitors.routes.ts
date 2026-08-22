@@ -23,7 +23,6 @@ import { recordIncome } from '../utils/income.js';
 import { getNumberSetting, incrementNumberSetting } from '../utils/settings.js';
 import { evaluateRules } from '../core/configuration/rule-engine.js';
 import { resolveAuthorizedDiscount } from '../core/configuration/discount-authority.js';
-import { resolveFee } from '../core/configuration/policy-resolver.js';
 import { assertClassGenderAllowsStudent } from './classes.routes.js';
 import { getEnrollmentService } from '../core/academic/enrollment-service.js';
 import { countActiveStudentsInClass } from '../core/academic/class-capacity.js';
@@ -43,9 +42,6 @@ const stmtGetVisitorById = db.prepare('SELECT * FROM visitors WHERE id = ?');
 const stmtFindVisitorByTazkira = db.prepare("SELECT id FROM visitors WHERE tazkira_no = ? LIMIT 1");
 const stmtFindVisitorByTazkiraExcluding = db.prepare("SELECT id FROM visitors WHERE tazkira_no = ? AND id <> ? LIMIT 1");
 const stmtFindStudentByTazkiraNo = db.prepare("SELECT id, lead_id FROM students WHERE tazkira_no = ? LIMIT 1");
-const stmtGetProgramVersionForVisitor = db.prepare(`SELECT pv.id, pv.program_id, pv.status, p.name AS program_name, p.branch_id FROM program_versions pv JOIN programs p ON p.id = pv.program_id WHERE pv.id = ?`);
-const stmtGetAllVisitors = db.prepare('SELECT * FROM visitors ORDER BY visit_date DESC LIMIT ? OFFSET ?');
-const stmtGetVisitorsByBranch = db.prepare('SELECT * FROM visitors WHERE branch_id = ? ORDER BY visit_date DESC LIMIT ? OFFSET ?');
 const stmtCountAllVisitors = db.prepare('SELECT COUNT(*) as c FROM visitors');
 const stmtCountVisitorsByBranch = db.prepare('SELECT COUNT(*) as c FROM visitors WHERE branch_id = ?');
 
@@ -60,7 +56,6 @@ const stmtUpdateVisitor = db.prepare(
   `UPDATE visitors SET full_name=?, phone=?, email=?, gender=?, source=?, campaign_id=?, stage=?, assigned_to=?, notes=?, interested_course=?, follow_up_status=?, next_contact_date=?, father_name=?, address_region=?, tazkira_no=?, whatsapp=?, dob=?, school_or_university=?, emergency_contact_name=?, emergency_contact_phone=?, program_version_id=? WHERE id=?`
 );
 const stmtInsertFollowup = db.prepare('INSERT INTO visitor_followups (id, visitor_id, date, notes, operator, outcome) VALUES (?, ?, ?, ?, ?, ?)');
-const stmtUpdateVisitorPlacement = db.prepare("UPDATE visitors SET placement_score = ?, placement_method = ?, placement_status = 'completed', stage = ? WHERE id = ?");
 const stmtUpdateVisitorCRM = db.prepare(`UPDATE visitors SET interested_course=?, follow_up_status=?, next_contact_date=?, stage=?, notes=COALESCE(?, notes) WHERE id=?`);
 const stmtUpdateVisitorStage = db.prepare('UPDATE visitors SET stage = ? WHERE id = ? AND stage = ?');
 const stmtGetLevelProgramVersion = db.prepare('SELECT program_version_id FROM levels WHERE id = ?');

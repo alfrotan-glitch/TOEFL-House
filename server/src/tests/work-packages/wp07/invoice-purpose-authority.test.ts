@@ -27,7 +27,8 @@ import { invoicesRouter } from '../../../routes/invoices.routes.js';
 import studentsRouter from '../../../routes/students.routes.js';
 import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
 import { bearerFor, seedUser } from '../../support/identity.js';
-import { getStudentBalance, getSemesterTuitionSettled } from '../../../utils/studentBalance.js';
+import { getStudentBalance } from '../../../utils/studentBalance.js';
+import { ensureTuitionObligation, getObligationPosition } from '../../../core/finance/obligations.js';
 import { computeReconciliation } from '../../../utils/reconciliation.js';
 import { today } from '../../../utils/ids.js';
 
@@ -91,7 +92,7 @@ describe('WP-07 · WP07-F17 — an invoice payment settles what the invoice bill
 
     // The tuition position is untouched: books money is not tuition money.
     expect(getStudentBalance(db, studentId).outstanding).toBe(10000);
-    expect(getSemesterTuitionSettled(db, studentId, SEMESTER)).toBe(0);
+    expect(getObligationPosition(db, ensureTuitionObligation(db, semesterId).id).settled).toBe(0);
 
     const rows = paymentsOf();
     expect(rows).toHaveLength(1);
@@ -111,7 +112,7 @@ describe('WP-07 · WP07-F17 — an invoice payment settles what the invoice bill
 
     await payInvoice(created.body.id, { amount: 10000 }).expect(201);
 
-    expect(getSemesterTuitionSettled(db, studentId, SEMESTER)).toBe(10000);
+    expect(getObligationPosition(db, ensureTuitionObligation(db, semesterId).id).settled).toBe(10000);
     expect(getStudentBalance(db, studentId).outstanding).toBe(0);
 
     const rows = paymentsOf();
@@ -365,7 +366,7 @@ describe('WP-07 · ATTACK · a purpose cannot be forged, coerced or bypassed', (
     }).expect(201);
     await payInvoice(created.body.id, { amount: 2000 }).expect(201);
 
-    expect(getSemesterTuitionSettled(db, studentId, SEMESTER)).toBe(0);
+    expect(getObligationPosition(db, ensureTuitionObligation(db, semesterId).id).settled).toBe(0);
     expect(getStudentBalance(db, studentId).outstanding).toBe(10000);
     expect(paymentsOf()[0].category).toBe('exam');
   });
@@ -395,7 +396,7 @@ describe('WP-07 · ATTACK · a purpose cannot be forged, coerced or bypassed', (
     await payInvoice(a.body.id, { amount: 6000 }).expect(201);
     await payInvoice(b.body.id, { amount: 4000 }).expect(201);
 
-    expect(getSemesterTuitionSettled(db, studentId, SEMESTER)).toBe(10000);
+    expect(getObligationPosition(db, ensureTuitionObligation(db, semesterId).id).settled).toBe(10000);
     expect(getStudentBalance(db, studentId).outstanding).toBe(0);
     expect(getStudentBalance(db, studentId).creditBalance).toBe(0);
   });

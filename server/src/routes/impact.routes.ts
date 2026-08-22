@@ -22,7 +22,7 @@ import { db } from '../db/connection.js';
 import { authenticate, authorize, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
-import { id, today } from '../utils/ids.js';
+import { id } from '../utils/ids.js';
 import { addNotification } from '../utils/notifications.js';
 import { eventBus } from '../core/events/event-bus.js';
 import { ATTENDED_EQUIVALENT_STATUSES } from '../core/academic/attendance-policy-service.js';
@@ -288,7 +288,7 @@ impactRouter.post(
   '/stories',
   authorize('owner', 'general_manager', 'donor_manager'),
   ah(async (req, res) => {
-    const user = getUserContext(req);
+    getUserContext(req);
     const { studentId, title, content, photoUrl, tags } = req.body;
     
     if (!studentId || !title || !content) throw new HttpError(400, 'Student, title, and content are required.');

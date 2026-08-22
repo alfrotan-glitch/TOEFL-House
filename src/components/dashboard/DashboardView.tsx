@@ -99,11 +99,6 @@ export default function DashboardView({
   }, [toast]);
 
   const triggerToast = (message: string, type: 'success' | 'error' | 'info') => setToast({ message, type });
-  // The server's local date is the single date authority. Deriving it here with
-  // toISOString() (UTC) made the client and server disagree for 4.5 hours every
-  // day in Asia/Kabul — audit finding D-4. The fallback keeps the component
-  // renderable before the summary arrives, and uses local time, never UTC.
-  const todayStr = dashboardSummary?.today ?? new Date().toLocaleDateString('en-CA');
 
   // Per-period intake comes from the server, which counts the whole population
   // in SQL over server-local date boundaries. The previous implementation

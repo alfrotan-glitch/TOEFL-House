@@ -5,9 +5,9 @@ import { nextInvoiceNumber } from '../utils/invoice.js';
  */
 import { Router } from 'express';
 import { db } from '../db/connection.js';
-import { assertTextLengths, optionalText, requiredText, TEXT_LIMITS } from '../utils/textInput.js';
+import { optionalText, requiredText, TEXT_LIMITS } from '../utils/textInput.js';
 import { parsePagination as parsePaginationShared } from '../utils/pagination.js';
-import { getStudentBalance, getStudentBalancesByIds, getStudentBalancesPage, getSemesterTuitionSettled } from '../utils/studentBalance.js';
+import { getStudentBalance, getStudentBalancesByIds, getStudentBalancesPage } from '../utils/studentBalance.js';
 import {
   allocatePaymentToObligation,
   ensureTuitionObligation,
@@ -32,7 +32,6 @@ import { ah, HttpError } from '../middleware/errorHandler.js';
 import { toCsv } from '../utils/csv.js';
 import { id, today } from '../utils/ids.js';
 import { recordIncome } from '../utils/income.js';
-import { getNumberSetting, incrementNumberSetting } from '../utils/settings.js';
 import { evaluateRules } from '../core/configuration/rule-engine.js';
 import { resolveAuthorizedDiscount } from '../core/configuration/discount-authority.js';
 import { resolveFee } from '../core/configuration/policy-resolver.js';
@@ -44,7 +43,6 @@ import { assertClassGenderAllowsStudent } from './classes.routes.js';
 import { assertPlacementEligibleForClass } from '../core/placement/enrollment-gate.js';
 import { assertNotAlreadySeatedInClass } from '../core/academic/class-admission.js';
 import { JourneyEventType } from '../core/journey/event-types.js';
-import { SYSTEM_DEFAULTS } from '../core/configuration/policy-catalog.js';
 import { resolveIdempotency, isUniqueViolation } from '../utils/idempotency.js';
 // Single authorities for the Student subsystem (audit STU-C1/C2/H1/H3).
 import { normalizeStudentInput, studentPhoneKey } from '../core/students/student-input.js';
@@ -69,8 +67,6 @@ const stmtGetStudentById = db.prepare('SELECT * FROM students WHERE id = ?');
 const stmtGetLinkedStudentTeacher = db.prepare(
   'SELECT linked_teacher_id AS teacherId, linked_student_id AS studentId FROM users WHERE id = ?',
 );
-const stmtGetStudentsAll = db.prepare('SELECT * FROM students ORDER BY registration_date DESC LIMIT ? OFFSET ?');
-const stmtGetStudentsByBranch = db.prepare('SELECT * FROM students WHERE branch_id = ? ORDER BY registration_date DESC LIMIT ? OFFSET ?');
 const stmtGetSemestersBatch = db.prepare(`SELECT * FROM student_semesters WHERE student_id IN (SELECT value FROM json_each(?)) ORDER BY enroll_date`);
 const stmtGetSemestersByStudent = db.prepare('SELECT * FROM student_semesters WHERE student_id = ? ORDER BY enroll_date DESC');
 const stmtGetPrimaryEnrollmentsBatch = db.prepare(`SELECT e.* FROM enrollments e WHERE e.status IN ('active','confirmed','pending') AND e.enrollment_type != 'extra' AND e.student_id IN (SELECT value FROM json_each(?)) AND NOT EXISTS (SELECT 1 FROM enrollments e2 WHERE e2.student_id = e.student_id AND e2.status IN ('active','confirmed','pending') AND e2.enrollment_type != 'extra' AND e2.started_at > e.started_at)`);

@@ -28,8 +28,8 @@
  *   1. the `payments.category` its collection is recorded under, and
  *   2. whether that collection settles a tuition term — and if so, which one.
  *
- * Non-tuition money carries no semester, which is what keeps it out of
- * `getSemesterTuitionPaid` and out of the student's tuition position.
+ * Non-tuition money carries no obligation, which is what keeps it out of the
+ * obligation-keyed settlement authority and out of the student's tuition position.
  */
 import type { Database } from 'better-sqlite3';
 import { HttpError } from '../../middleware/errorHandler.js';
