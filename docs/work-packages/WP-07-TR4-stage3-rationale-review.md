@@ -153,3 +153,20 @@ skipped · 0 failed, and all gates held — mutation **18 passed · 0 failed**, 
 
 **Remaining, in the registered order:** dead export `getStudentScholarshipSettled` → residuals
 R-1…R-4 → the certification question. **WP-07 remains NOT certified. Stopped at the checkpoint.**
+
+---
+
+## 11. DEAD EXPORT REMOVED (2026-08-22, Owner: "Continue")
+
+`getStudentScholarshipSettled` (`core/finance/obligations.ts`) — flagged in the first round of
+this engagement as the dead student-keyed twin of the TR4-R9 settlement readers — re-verified
+**zero call sites anywhere** (code, tests, scripts, living registries; grep returned only its own
+definition) and deleted. The live student-level aid term is `studentBalance.ts`'s internal
+`studentScholarshipSettled`, consumed by `getStudentBalance` and — since the TR4-R13 repair — by
+both batch readers.
+
+Gates unchanged and green: mutation **18 passed · 0 failed**, `release:validate` **22 passed ·
+0 failed**, suite **2843 passed · 162 skipped · 0 failed**. Changed: 1 file, −15 lines.
+
+**Remaining, in the registered order:** residuals R-1…R-4 → the certification question.
+**WP-07 remains NOT certified. Stopped at the checkpoint.**

@@ -184,20 +184,6 @@ export function getObligationAidSettled(db: Database, obligationId: string): num
   return Number(row.total) || 0;
 }
 
-/** Scholarship money applied to a student's tuition, across every obligation. */
-export function getStudentScholarshipSettled(db: Database, studentId: string): number {
-  const row = db
-    .prepare(
-      `SELECT COALESCE(SUM(a.amount), 0) AS total
-         FROM obligation_allocations a
-         JOIN student_obligations o ON o.id = a.obligation_id
-        WHERE o.student_id = ? AND o.kind = 'tuition'
-          AND a.source_kind IN ${AID_SOURCE_KINDS_SQL} AND a.status = 'active'`,
-    )
-    .get(studentId) as { total: number };
-  return Number(row.total) || 0;
-}
-
 // ── Scholarship fund positions ─────────────────────────────────────────────
 
 export interface FundPosition {
