@@ -86,5 +86,36 @@ change · index removal. The failing adversarial suite is deliberately retained 
 executable evidence at
 `server/src/tests/work-packages/wp08/payroll-certification.attack.test.ts`.
 
-The next commit is the required recoverable pre-repair checkpoint. It contains
-this plan, the 9/9 failing attack evidence, and no implementation repair.
+Checkpoint `173ba66` is the recoverable pre-repair state. It contains this
+plan's first version, the 9/9 failing attack evidence, and no implementation
+repair.
+
+## INDEPENDENT-REVIEW AMENDMENT / RE-DECIDE
+
+A cold review of the repaired diff and the payroll report consumer found four
+additional defects. `payroll-certification.review.test.ts` reproduces all four
+against the first repair (4/4 failing):
+
+1. Employee ledger rows have the same correction-state columns as teacher rows,
+   but no authorized employee void command exists.
+2. Payroll reports constrain timestamp text against date-only bounds, which
+   excludes a payment made later on the current date.
+3. A direct ledger insert may omit the financial transaction that makes the
+   money explainable.
+4. A posted salary row can be directly rewritten or deleted despite being a
+   financial history fact.
+
+The plan is therefore extended, before the second repair, to:
+
+- expose an employee void command with the same atomic envelope restoration,
+  signed contra entry, audit and reason requirements as teacher correction;
+- make the declared payroll report consume the linked transaction's canonical
+  accounting date and only posted ledger facts;
+- require a matching financial transaction for each new salary ledger fact;
+- permit exactly one ledger update transition — `posted` to `voided` with
+  operator and reason — and reject direct deletion or fact mutation.
+
+This is a deliberate WP-08 → WP-11 dependent-consumer re-scope: the report
+catalog remains WP-11's authority, but its payroll metric must consume the
+corrected WP-08 ledger lifecycle rather than publishing a contradictory number.
+The next commit is the second recoverable schema/financial checkpoint.

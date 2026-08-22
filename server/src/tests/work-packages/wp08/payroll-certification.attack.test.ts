@@ -13,7 +13,6 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { db, initSchema } from '../../../db/connection.js';
 import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
 import { IDEMPOTENCY_WINDOW_SECONDS } from '../../../utils/idempotency.js';
-import { today } from '../../../utils/ids.js';
 import { errorHandler } from '../../../middleware/errorHandler.js';
 import { employeesRouter, teachersRouter } from '../../../routes/teachers.routes.js';
 import { bearerFor, seedUser } from '../../support/identity.js';
@@ -80,8 +79,14 @@ function employeeLedgerRows(employeeId: string): Array<{ id: string; paid_amount
 
 function teacherTransactions(teacherId: string): Array<{ amount: number }> {
   return db.prepare(
-    "SELECT amount FROM financial_transactions WHERE reference_id = ? AND type = 'expense' ORDER BY rowid",
-  ).all(teacherId) as Array<{ amount: number }>;
+    `SELECT amount FROM financial_transactions
+      WHERE type = 'expense' AND (
+        reference_id = ? OR reference_id IN (
+          SELECT id FROM teacher_salary_ledger WHERE teacher_id = ?
+        )
+      )
+      ORDER BY rowid`,
+  ).all(teacherId, teacherId) as Array<{ amount: number }>;
 }
 
 function employeeTransactions(employeeId: string): Array<{ amount: number }> {
@@ -285,8 +290,8 @@ describe('WP-08 ATTACK · the database rejects malformed payroll facts', () => {
 
     try {
       probe();
-    } catch (error) {
-      if ((error as Error).message !== 'rollback direct-write probe') throw error;
+    } catch {
+      // A rejected write and the intentional rollback both leave no fact.
     }
     expect(inserted).toBe(false);
   });

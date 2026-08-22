@@ -38,7 +38,7 @@ interface TeachersViewProps {
   branches: Branch[];
   campuses: Campus[];
   currentBranchId: string;
-  payTeacherSalary: (teacherId: string, monthName: string, amountPaid: number, paymentType: 'full' | 'partial' | 'advance') => Promise<void>;
+  payTeacherSalary: (teacherId: string, monthName: string, amountPaid: number, paymentType: 'full' | 'partial') => Promise<void>;
   addEmployee: (fullName: string, phone: string, email: string, role: string, baseSalary: number, branchId?: string) => Promise<void>;
   editEmployee: (id: string, fullName: string, phone: string, email: string, role: string, baseSalary: number, status: 'active' | 'inactive') => Promise<void>;
   deleteEmployee: (id: string) => Promise<void>;
@@ -207,12 +207,11 @@ export default function TeachersView({
       const due = teacherSalaryStatus?.due ?? getTeacherMonthlyTotal(salaryTeacher) ?? 0;
       const remaining = teacherSalaryStatus?.remaining ?? due;
       if (paymentType === 'full') setAmountPaid(remaining > 0 ? remaining : due);
-      else if (paymentType === 'advance') setAmountPaid(Math.round(due * 0.4));
       else if (paymentType === 'partial') setAmountPaid(Math.round(due * 0.5));
     }
   }
 
-  const handleTeacherPaymentTypeChange = (type: 'full' | 'partial' | 'advance') => setPaymentType(type);
+  const handleTeacherPaymentTypeChange = (type: 'full' | 'partial') => setPaymentType(type);
   const handleEmployeePaymentTypeChange = (type: 'full' | 'partial' | 'advance') => {
     setPaymentType(type);
     if (salaryEmployee) {
@@ -225,7 +224,7 @@ export default function TeachersView({
   const handlePayTeacherSalaryConfirm = async () => {
     if (!salaryTeacher || amountPaid <= 0) return;
     try {
-      await payTeacherSalary(salaryTeacher.id, selectedMonth, amountPaid, paymentType);
+      await payTeacherSalary(salaryTeacher.id, selectedMonth, amountPaid, paymentType === 'partial' ? 'partial' : 'full');
       // Payslip is only printed after the payment was confirmed by the server.
       setPrintedPayslip({ fullName: salaryTeacher.fullName, role: 'Teacher', month: selectedMonth, amount: amountPaid, baseSalary: salaryTeacher.baseSalary, paymentType, serialNo: 'PAY-TCH-' + Math.floor(Math.random() * 90000 + 10000), date: new Date().toISOString().split('T')[0] });
       setSalaryTeacher(null);

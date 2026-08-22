@@ -1179,7 +1179,7 @@ export function useApiStore() {
     return api.get<TeacherSalaryStatus>(`/teachers/${teacherId}/salary-status`, { month: monthName });
   };
 
-  const payTeacherSalary = async (teacherId: string, monthName: string, amountPaid: number, paymentType: 'full' | 'partial' | 'advance') => {
+  const payTeacherSalary = async (teacherId: string, monthName: string, amountPaid: number, paymentType: 'full' | 'partial') => {
     await api.post(`/teachers/${teacherId}/pay-salary`, { monthName, amountPaid, paymentType });
     // A salary payment writes an `expense` ledger row, so GET /finance/overview
     // returns different `expense` and `net` totals immediately afterwards

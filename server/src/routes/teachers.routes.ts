@@ -16,7 +16,8 @@ import { id, today } from '../utils/ids.js';
 import { assertMoney, assertPerformanceScore, assertSeatCount } from '../utils/money.js';
 import { addNotification } from '../utils/notifications.js';
 import {
-  computeTeacherDueAmount, toPeriodKey, currentJalaliPeriodKey,
+  computeTeacherDueAmount, currentJalaliPeriodKey, resolvePayrollPeriodKey,
+  PayrollRuleConfigurationError,
   sumPaidForPeriod, hasFullPayForPeriod, teacherBranchAsOf,
   CONTRACT_TYPES,
 } from '../core/payroll/class-payroll.js';
@@ -80,7 +81,8 @@ const stmtGetBranchDetailsForTransfer = db.prepare(`SELECT b.id, b.name, b.code,
 const stmtUpdateTeacherBranch = db.prepare('UPDATE teachers SET branch_id = ? WHERE id = ?');
 const stmtUpdateUserBranchForTeacher = db.prepare('UPDATE users SET branch_id = ? WHERE linked_teacher_id = ?');
 const stmtDeactivateLinkedTeacherUser = db.prepare('UPDATE users SET is_active = 0 WHERE linked_teacher_id = ?');
-const stmtGetTeacherSalaryByIdempotency = db.prepare('SELECT id, teacher_id, period_key, due_amount, paid_amount, payment_type, transaction_id, branch_id, status FROM teacher_salary_ledger WHERE idempotency_key = ?');
+const stmtGetTeacherSalaryByIdempotency = db.prepare("SELECT id, teacher_id, period_key, due_amount, paid_amount, payment_type, transaction_id, branch_id, status FROM teacher_salary_ledger WHERE idempotency_key = ? AND status = 'posted'");
+const stmtGetTeacherSalaryByIdempotencyCandidates = db.prepare("SELECT id, teacher_id, period_key, due_amount, paid_amount, payment_type, transaction_id, branch_id, status FROM teacher_salary_ledger WHERE idempotency_key IN (?, ?) AND status = 'posted' LIMIT 1");
 const stmtGetSalaryLedger = db.prepare('SELECT * FROM teacher_salary_ledger WHERE id = ? AND teacher_id = ?');
 const stmtVoidSalaryLedger = db.prepare(`UPDATE teacher_salary_ledger SET status = 'voided', voided_at = datetime('now'), voided_by = ?, void_reason = ? WHERE id = ? AND status = 'posted'`);
 const stmtInsertSalaryLedgerWithIdempotency = db.prepare(`INSERT INTO teacher_salary_ledger (id, teacher_id, period_key, period_label, due_amount, paid_amount, payment_type, transaction_id, notes, branch_id, operator_name, idempotency_key, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'posted')`);
@@ -121,12 +123,27 @@ const stmtSoftDeleteEmployee = db.prepare("UPDATE employees SET status = 'inacti
 // `full` only and is a check-then-act under concurrency.
 // These statements mirror the teacher payroll path exactly.
 const stmtGetEmployeeSalaryByIdempotency = db.prepare(
-  'SELECT id, employee_id, period_key, paid_amount, payment_type, transaction_id, branch_id, status FROM employee_salary_ledger WHERE idempotency_key = ?'
+  "SELECT id, employee_id, period_key, paid_amount, payment_type, transaction_id, branch_id, status FROM employee_salary_ledger WHERE idempotency_key = ? AND status = 'posted'"
+);
+const stmtGetEmployeeSalaryByIdempotencyCandidates = db.prepare(
+  "SELECT id, employee_id, period_key, paid_amount, payment_type, transaction_id, branch_id, status FROM employee_salary_ledger WHERE idempotency_key IN (?, ?) AND status = 'posted' LIMIT 1"
 );
 const stmtInsertEmployeeSalaryLedger = db.prepare(
   `INSERT INTO employee_salary_ledger (id, employee_id, period_key, period_label, paid_amount, payment_type, transaction_id, notes, branch_id, operator_name, idempotency_key, status)
    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'posted')`
 );
+
+function findTeacherSalaryReplay(candidates: readonly string[]) {
+  return (candidates.length === 1
+    ? stmtGetTeacherSalaryByIdempotency.get(candidates[0])
+    : stmtGetTeacherSalaryByIdempotencyCandidates.get(candidates[0], candidates[1])) as any;
+}
+
+function findEmployeeSalaryReplay(candidates: readonly string[]) {
+  return (candidates.length === 1
+    ? stmtGetEmployeeSalaryByIdempotency.get(candidates[0])
+    : stmtGetEmployeeSalaryByIdempotencyCandidates.get(candidates[0], candidates[1])) as any;
+}
 
 /** The five contract types, taken from the payroll engine's single source of
  *  truth so routes, engine and database CHECK can never drift apart again. */
@@ -137,6 +154,26 @@ function getUserContext(req: import('express').Request) {
   const user = req.user;
   if (!user?.userId || !user?.branchId || !user?.fullName) throw new HttpError(403, 'User context missing.');
   return user;
+}
+
+function requirePayrollPeriod(value: unknown): string {
+  const periodKey = resolvePayrollPeriodKey(value);
+  if (periodKey) return periodKey;
+  if (value == null || (typeof value === 'string' && !value.trim())) {
+    throw new HttpError(400, 'Month is required.');
+  }
+  throw new HttpError(400, 'Month must be a Shamsi period such as 1405-05 or "اسد 1405".');
+}
+
+function computeTeacherPayroll(teacher: TeacherRow, periodKey: string) {
+  try {
+    return computeTeacherDueAmount(db, teacher, periodKey);
+  } catch (error) {
+    if (error instanceof PayrollRuleConfigurationError) {
+      throw new HttpError(409, 'Payroll configuration is invalid. Correct the active payroll rules before calculating or paying salary.');
+    }
+    throw error;
+  }
 }
 
 function mapTeacher(row: TeacherRow | undefined) {
@@ -370,11 +407,12 @@ teachersRouter.delete('/:id', requirePermission('Teacher.Delete', 'Teacher.Edit'
 
 teachersRouter.get('/:id/computed-salary', requirePermission('Payroll.View'), ah(async (req, res) => {
   const teacher = requireTeacher(req, req.params.id);
-  const periodKey = typeof (req.query as any).month === 'string' ? toPeriodKey(String((req.query as any).month)) : undefined;
+  const suppliedMonth = (req.query as Record<string, unknown>).month;
+  const periodKey = suppliedMonth === undefined ? currentJalaliPeriodKey() : requirePayrollPeriod(suppliedMonth);
   // The payroll engine reports the period-correct Skill workload
   // (skillCount / targetSkills / shortfall / excess) for EVERY contract
   // type, alongside the separately-visible fixed and Skill pay components.
-  const dueInfo = computeTeacherDueAmount(db, teacher, periodKey);
+  const dueInfo = computeTeacherPayroll(teacher, periodKey);
   // Lifetime assignment count, reported alongside the period figures because
   // clients read `totalSkillAssignments` as a career total, not a period one.
   const totalSkillAssignments = (stmtCountSkillsForTeacher.get(teacher.id) as { c: number }).c;
@@ -444,12 +482,9 @@ teachersRouter.get('/:id/evaluations', requirePermission('Teacher.View'), ah(asy
 
 teachersRouter.get('/:id/salary-status', requirePermission('Payroll.Edit', 'Payroll.View', 'Teacher.View'), ah(async (req, res) => {
   const teacher = requireTeacher(req, req.params.id);
-  // Periods are Hijri Shamsi months (e.g. '1405-05' = اسد ۱۴۰۵). Gregorian
-  // input is converted by toPeriodKey, so either form resolves to one period.
-  const monthName = String((req.query as any).month || currentJalaliPeriodKey());
-  const periodKey = toPeriodKey(monthName);
-  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(periodKey)) throw new HttpError(400, 'Month must be a Shamsi period such as 1405-05 or "اسد 1405".');
-  const dueInfo = computeTeacherDueAmount(db, teacher, periodKey);
+  const suppliedMonth = (req.query as Record<string, unknown>).month;
+  const periodKey = suppliedMonth === undefined ? currentJalaliPeriodKey() : requirePayrollPeriod(suppliedMonth);
+  const dueInfo = computeTeacherPayroll(teacher, periodKey);
   const paid = sumPaidForPeriod(db, teacher.id, periodKey);
   const fullPaid = hasFullPayForPeriod(db, teacher.id, periodKey);
   
@@ -473,22 +508,18 @@ teachersRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(asy
   const teacher = requireTeacher(req, req.params.id);
   if (teacher.status === 'inactive') throw new HttpError(400, 'Cannot pay salary to an inactive teacher.');
 
-  const { monthName, amountPaid, paymentType } = req.body as { monthName: string; amountPaid?: number; paymentType?: 'full' | 'partial' };
-  if (!monthName) throw new HttpError(400, 'Month is required.');
-  const periodKey = toPeriodKey(monthName);
-  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(periodKey)) throw new HttpError(400, 'Month must be a Shamsi period such as 1405-05 or "اسد 1405".');
-  const type = paymentType || 'full';
-  // 'advance' is deliberately NOT accepted on the teacher path.
-  //
-  // It never meant what it said: the amount is capped at `remaining` — the
-  // salary already accrued for the period — so a teacher "advance" was always a
-  // PARTIAL PAYMENT of earned salary, i.e. an ordinary wage expense. Keeping the
-  // label would have forced a choice between two wrong answers: book earned
-  // salary as a receivable, or leave two payment types that mean the same thing
-  // and classify differently. The concept is removed instead of reinterpreted.
-  if (!['full', 'partial'].includes(type)) {
+  const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body as Record<string, unknown> : {};
+  const monthName = body.monthName;
+  const amountPaid = body.amountPaid;
+  const paymentType = body.paymentType;
+  const periodKey = requirePayrollPeriod(monthName);
+  // A teacher payment is always against salary already earned. The capped
+  // former `advance` path is therefore an ordinary partial payment, not a
+  // distinct accounting event.
+  if (paymentType !== undefined && paymentType !== 'full' && paymentType !== 'partial') {
     throw new HttpError(400, "Invalid payment type. Teacher payroll accepts 'full' or 'partial'; a teacher payment is always against salary already earned.");
   }
+  const type: 'full' | 'partial' = paymentType === 'partial' ? 'partial' : 'full';
 
   // T-3: same treatment as the employee path. `amountPaid` is optional here
   // (omitting it means "pay the full remaining balance"), so null/undefined
@@ -511,7 +542,7 @@ teachersRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(asy
   // so retries of the same intent collapse while a genuinely later, distinct
   // payment (a different amount, or a different time bucket) still goes
   // through. The DB unique index on idempotency_key is the race arbiter.
-  const { key: idempotencyKey } = resolveIdempotency(req, {
+  const { key: idempotencyKey, candidates: idempotencyCandidates } = resolveIdempotency(req, {
     route: 'teacher-pay-salary',
     teacherId: teacher.id,
     periodKey,
@@ -525,7 +556,7 @@ teachersRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(asy
       const freshTeacher = stmtGetTeacherById.get(teacher.id) as TeacherRow;
       if (!freshTeacher || freshTeacher.status === 'inactive') throw new HttpError(400, 'Teacher is not eligible for salary payment.');
       {
-        const existing = stmtGetTeacherSalaryByIdempotency.get(idempotencyKey) as any;
+        const existing = findTeacherSalaryReplay(idempotencyCandidates);
         if (existing) {
           if (existing.teacher_id !== freshTeacher.id || existing.period_key !== periodKey) throw new HttpError(409, 'Idempotency key was already used for a different payroll operation.');
           db.exec('COMMIT');
@@ -533,7 +564,7 @@ teachersRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(asy
         }
       }
 
-      const dueInfo = computeTeacherDueAmount(db, freshTeacher, periodKey);
+      const dueInfo = computeTeacherPayroll(freshTeacher, periodKey);
       if (dueInfo.isBlocked) throw new HttpError(409, dueInfo.blockReason || 'Payroll is blocked by policy.');
       const adjustedDue = Number(dueInfo.due);
       if (!Number.isFinite(adjustedDue) || adjustedDue < 0) throw new HttpError(500, 'Payroll calculation returned an invalid amount.');
@@ -569,7 +600,7 @@ teachersRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(asy
       stmtInsertSalaryLedgerWithIdempotency.run(ledgerId, freshTeacher.id, periodKey, periodLabel, adjustedDue, resolvedAmount, finalPaymentType, txId, JSON.stringify(dueInfo.breakdown), payrollBranchId, user.fullName, idempotencyKey);
 
       db.exec('COMMIT');
-      return { amountPaid: resolvedAmount, due: adjustedDue, previouslyPaid: alreadyPaid, remainingAfter: Math.max(0, remaining - resolvedAmount), periodKey, teacher: freshTeacher };
+      return { amountPaid: resolvedAmount, due: adjustedDue, previouslyPaid: alreadyPaid, remainingAfter: Math.max(0, remaining - resolvedAmount), periodKey, teacher: freshTeacher, replayed: false };
     } catch (err) {
       try { db.exec('ROLLBACK'); } catch { /* rollback may already be complete */ }
       // Atomic backstop. The replay pre-check above is a fast path; under true
@@ -577,7 +608,7 @@ teachersRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(asy
       // win uq_teacher_salary_idempotency. The losers replay the winner's
       // result rather than surfacing a 500 or paying the teacher twice.
       if (isUniqueViolation(err)) {
-        const winner = stmtGetTeacherSalaryByIdempotency.get(idempotencyKey) as any;
+        const winner = findTeacherSalaryReplay([idempotencyKey]);
         if (winner && winner.teacher_id === teacher.id) {
           return {
             amountPaid: Number(winner.paid_amount), due: Number(winner.due_amount),
@@ -593,7 +624,7 @@ teachersRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(asy
 
   addNotification('Teacher Salary Paid', `${result.amountPaid} AFN paid to ${result.teacher.full_name}.`, 'success', result.teacher.branch_id);
   writeAudit(req, `Paid teacher salary — ${result.teacher.full_name} — ${result.amountPaid} AFN for ${monthName}`);
-  res.status(201).json({ ok: true, amountPaid: result.amountPaid, periodKey: result.periodKey, due: result.due, previouslyPaid: result.previouslyPaid, remainingAfter: result.remainingAfter });
+  res.status(201).json({ ok: true, amountPaid: result.amountPaid, periodKey: result.periodKey, due: result.due, previouslyPaid: result.previouslyPaid, remainingAfter: result.remainingAfter, replayed: !!result.replayed });
 }));
 
 
@@ -682,6 +713,7 @@ employeesRouter.post('/:id/transfer', requirePermission('Employee.Edit'), ah(asy
   const targetBranchId = typeof req.body?.targetBranchId === 'string' ? req.body.targetBranchId.trim() : '';
   if (!targetBranchId) throw new HttpError(400, 'targetBranchId is required.');
   if (targetBranchId === employee.branch_id) throw new HttpError(400, 'Employee is already assigned to this branch.');
+  if (!canAccessBranchResource(req, targetBranchId)) throw new HttpError(403, 'Target branch is outside your authorized scope.');
 
   const target = stmtGetBranchDetailsForTransfer.get(targetBranchId) as any;
   if (!target) throw new HttpError(404, 'Target branch not found.');
@@ -735,8 +767,12 @@ employeesRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(as
   const employee = requireEmployee(req, req.params.id);
   if (employee.status === 'inactive') throw new HttpError(400, 'Cannot pay salary to an inactive employee.');
 
-  const { monthName, amountPaid, paymentType } = req.body as { monthName: string; amountPaid: number; paymentType: 'full' | 'partial' | 'advance' };
-  if (!monthName || amountPaid == null) throw new HttpError(400, 'Month and payment amount are required.');
+  const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body as Record<string, unknown> : {};
+  const monthName = body.monthName;
+  const amountPaid = body.amountPaid;
+  const paymentType = body.paymentType;
+  if (amountPaid == null) throw new HttpError(400, 'Month and payment amount are required.');
+  const periodKey = requirePayrollPeriod(monthName);
 
   // T-3: parse with the shared money boundary, THEN apply this endpoint's own
   // "greater than zero" rule to the parsed value. `Number()` is a coercion, so
@@ -747,18 +783,10 @@ employeesRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(as
   // 400. The accepted range is unchanged: any amount >= 0.01 still works.
   const resolvedAmount = assertMoney(amountPaid, 'Payment amount');
   if (resolvedAmount <= 0) throw new HttpError(400, 'Payment amount must be greater than zero.');
-  const type = paymentType || 'full';
-  if (!['full', 'partial', 'advance'].includes(type)) throw new HttpError(400, 'Invalid payment type.');
-
-  // `toPeriodKey` normalises 'Asad 1405', 'اسد ۱۴۰۵', '1405-05' and '2026-08'
-  // to one canonical key so the same month written two ways is one period.
-  // It returns '' for anything it cannot parse; falling back to the raw label
-  // keeps unparseable-but-distinct months distinct. Collapsing them to a shared
-  // '' would make two different months look like retries of each other and
-  // refuse the second, legitimate payment. This endpoint does not constrain the
-  // month format, so an unparseable label is passed through rather than
-  // rejected.
-  const periodKey = toPeriodKey(monthName) || String(monthName).trim();
+  if (paymentType !== undefined && paymentType !== 'full' && paymentType !== 'partial' && paymentType !== 'advance') {
+    throw new HttpError(400, 'Invalid payment type.');
+  }
+  const type: 'full' | 'partial' | 'advance' = paymentType === 'partial' || paymentType === 'advance' ? paymentType : 'full';
 
   // ── SERVER-SIDE IDEMPOTENCY (teacher audit T-1) ──────────────────────────
   // Always applied, never only when the caller remembers a key — the same
@@ -772,7 +800,7 @@ employeesRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(as
   // different month, a different payment type or a later time bucket all
   // produce a different key. Verified: 1,000 partial + 2,500 partial +
   // another month + an advance all still succeed.
-  const { key: idempotencyKey } = resolveIdempotency(req, {
+  const { key: idempotencyKey, candidates: idempotencyCandidates } = resolveIdempotency(req, {
     route: 'employee-pay-salary',
     employeeId: employee.id,
     periodKey,
@@ -791,7 +819,7 @@ employeesRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(as
     // path. A budget read outside the transaction is not covered by that lock.
     db.exec('BEGIN IMMEDIATE');
     try {
-      const replay = stmtGetEmployeeSalaryByIdempotency.get(idempotencyKey) as
+      const replay = findEmployeeSalaryReplay(idempotencyCandidates) as
         | { id: string; employee_id: string; period_key: string; paid_amount: number; payment_type: string } | undefined;
       if (replay) {
         if (replay.employee_id !== employee.id || replay.period_key !== periodKey) {
@@ -839,7 +867,7 @@ employeesRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(as
       // losers replay the winner's result rather than paying twice or
       // surfacing a 500.
       if (isUniqueViolation(err)) {
-        const winner = stmtGetEmployeeSalaryByIdempotency.get(idempotencyKey) as { id: string; employee_id: string; paid_amount: number } | undefined;
+        const winner = findEmployeeSalaryReplay([idempotencyKey]) as { id: string; employee_id: string; paid_amount: number } | undefined;
         if (winner && winner.employee_id === employee.id) {
           return { amountPaid: Number(winner.paid_amount), ledgerId: winner.id, replayed: true, remainingBudget: null as number | null };
         }

@@ -2530,20 +2530,45 @@ CREATE INDEX IF NOT EXISTS idx_teacher_salary_branch_period
 ON teacher_salary_ledger(branch_id, period_key, paid_at);
 CREATE INDEX IF NOT EXISTS idx_teacher_salary_due
 ON teacher_salary_ledger(teacher_id, period_key, paid_at);
-CREATE INDEX IF NOT EXISTS idx_teacher_salary_period
-ON teacher_salary_ledger(teacher_id, period_key, paid_at);
+-- `idx_teacher_salary_due` is the one covering period lookup. Remove the
+-- duplicate name left by the former schema so planner choice is unambiguous.
+DROP INDEX IF EXISTS idx_teacher_salary_period;
 CREATE INDEX IF NOT EXISTS idx_teacher_salary_status ON teacher_salary_ledger(teacher_id, period_key, status);
 CREATE INDEX IF NOT EXISTS idx_tsl_teacher_period ON teacher_salary_ledger(teacher_id, period_key);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_teacher_salary_full_period
 ON teacher_salary_ledger(teacher_id, period_key)
 WHERE payment_type = 'full' AND status = 'posted';
+-- A voided payment is history, not a live retry. A corrected payment may reuse
+-- its request identity and becomes the sole posted row for that key.
+DROP INDEX IF EXISTS uq_teacher_salary_idempotency;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_teacher_salary_idempotency
-ON teacher_salary_ledger(idempotency_key) WHERE idempotency_key IS NOT NULL;
-CREATE TRIGGER IF NOT EXISTS trg_teacher_salary_money_scale_insert
+ON teacher_salary_ledger(idempotency_key)
+WHERE idempotency_key IS NOT NULL AND status = 'posted';
+DROP TRIGGER IF EXISTS trg_teacher_salary_money_scale_insert;
+CREATE TRIGGER IF NOT EXISTS trg_teacher_salary_fact_insert
 BEFORE INSERT ON teacher_salary_ledger
-WHEN NEW.due_amount <> CAST(NEW.due_amount AS INTEGER)
-  OR NEW.paid_amount <> CAST(NEW.paid_amount AS INTEGER)
-BEGIN SELECT RAISE(ABORT, 'teacher salary monetary values must be a whole number of AFN'); END;
+WHEN typeof(NEW.due_amount) IS NOT 'integer'
+  OR NEW.due_amount < 0
+  OR typeof(NEW.paid_amount) IS NOT 'integer'
+  OR NEW.paid_amount <= 0
+  OR NEW.paid_amount > NEW.due_amount
+  OR (NEW.payment_type = 'full' AND NEW.paid_amount <> NEW.due_amount)
+  OR NEW.payment_type = 'advance'
+  OR NEW.period_key NOT GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'
+  OR CAST(substr(NEW.period_key, 6, 2) AS INTEGER) NOT BETWEEN 1 AND 12
+BEGIN SELECT RAISE(ABORT, 'teacher salary ledger fact is invalid'); END;
+CREATE TRIGGER IF NOT EXISTS trg_teacher_salary_fact_update
+BEFORE UPDATE OF due_amount, paid_amount, payment_type, period_key ON teacher_salary_ledger
+WHEN typeof(NEW.due_amount) IS NOT 'integer'
+  OR NEW.due_amount < 0
+  OR typeof(NEW.paid_amount) IS NOT 'integer'
+  OR NEW.paid_amount <= 0
+  OR NEW.paid_amount > NEW.due_amount
+  OR (NEW.payment_type = 'full' AND NEW.paid_amount <> NEW.due_amount)
+  OR NEW.payment_type = 'advance'
+  OR NEW.period_key NOT GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'
+  OR CAST(substr(NEW.period_key, 6, 2) AS INTEGER) NOT BETWEEN 1 AND 12
+BEGIN SELECT RAISE(ABORT, 'teacher salary ledger fact is invalid'); END;
 
 CREATE TABLE IF NOT EXISTS employee_salary_ledger (
   id              TEXT PRIMARY KEY,
@@ -2569,8 +2594,24 @@ CREATE INDEX IF NOT EXISTS idx_employee_salary_period
   ON employee_salary_ledger(employee_id, period_key, paid_at);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_employee_salary_full_period
   ON employee_salary_ledger(employee_id, period_key) WHERE payment_type = 'full' AND status = 'posted';
+DROP INDEX IF EXISTS uq_employee_salary_idempotency;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_employee_salary_idempotency
-  ON employee_salary_ledger(idempotency_key) WHERE idempotency_key IS NOT NULL;
+  ON employee_salary_ledger(idempotency_key)
+  WHERE idempotency_key IS NOT NULL AND status = 'posted';
+CREATE TRIGGER IF NOT EXISTS trg_employee_salary_fact_insert
+BEFORE INSERT ON employee_salary_ledger
+WHEN typeof(NEW.paid_amount) IS NOT 'integer'
+  OR NEW.paid_amount <= 0
+  OR NEW.period_key NOT GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'
+  OR CAST(substr(NEW.period_key, 6, 2) AS INTEGER) NOT BETWEEN 1 AND 12
+BEGIN SELECT RAISE(ABORT, 'employee salary ledger fact is invalid'); END;
+CREATE TRIGGER IF NOT EXISTS trg_employee_salary_fact_update
+BEFORE UPDATE OF paid_amount, payment_type, period_key ON employee_salary_ledger
+WHEN typeof(NEW.paid_amount) IS NOT 'integer'
+  OR NEW.paid_amount <= 0
+  OR NEW.period_key NOT GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'
+  OR CAST(substr(NEW.period_key, 6, 2) AS INTEGER) NOT BETWEEN 1 AND 12
+BEGIN SELECT RAISE(ABORT, 'employee salary ledger fact is invalid'); END;
 
 -- ============================================================================
 -- FUNDING & IMPACT

@@ -83,6 +83,15 @@ export interface TeacherPayrollInput {
   performance_score: number;
 }
 
+/** A configured payroll rule is authoritative policy, so it must either
+ * evaluate successfully or stop the calculation. */
+export class PayrollRuleConfigurationError extends Error {
+  constructor(message = 'Active payroll configuration cannot be evaluated.', options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'PayrollRuleConfigurationError';
+  }
+}
+
 interface AssignmentRow {
   skill_id: string;
   monthly_rate: number;
@@ -270,23 +279,32 @@ function getRuleEngineValues(cache: ReturnType<typeof createRuleEngineCache>, br
   const cacheKey = JSON.stringify(data);
   if (cache.has(cacheKey)) return cache.get(cacheKey);
 
+  let result;
   try {
-    const result = evaluateRules({ category: 'payroll', branchId, data, dryRun: true });
-    const value = {
-      enrollmentMultiplier: typeof result.finalOutputs.enrollmentMultiplier === 'number' ? result.finalOutputs.enrollmentMultiplier : 1,
-      performanceMultiplier: typeof result.finalOutputs.performanceMultiplier === 'number' ? result.finalOutputs.performanceMultiplier : 1,
-      levelRate: typeof result.finalOutputs.levelRate === 'number' ? result.finalOutputs.levelRate : null,
-      isBlocked: result.isBlocked,
-      blockReason: result.blockReason,
-      warnings: result.warnings || []
-    };
-    cache.set(cacheKey, value);
-    return value;
-  } catch (e) {
-    const fallback = { enrollmentMultiplier: 1, performanceMultiplier: 1, levelRate: null, isBlocked: false, blockReason: '', warnings: [] };
-    cache.set(cacheKey, fallback);
-    return fallback;
+    result = evaluateRules({ category: 'payroll', branchId, data, dryRun: true });
+  } catch (cause) {
+    throw new PayrollRuleConfigurationError(undefined, { cause });
   }
+
+  const numericOutput = (key: string, fallback: number | null): number | null => {
+    if (!Object.prototype.hasOwnProperty.call(result.finalOutputs, key)) return fallback;
+    const value = result.finalOutputs[key];
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      throw new PayrollRuleConfigurationError(`Active payroll rule produced a non-numeric ${key}.`);
+    }
+    return value;
+  };
+
+  const value = {
+    enrollmentMultiplier: numericOutput('enrollmentMultiplier', 1) as number,
+    performanceMultiplier: numericOutput('performanceMultiplier', 1) as number,
+    levelRate: numericOutput('levelRate', null),
+    isBlocked: result.isBlocked,
+    blockReason: result.blockReason,
+    warnings: result.warnings || []
+  };
+  cache.set(cacheKey, value);
+  return value;
 }
 
 // ── Main Payroll Calculator ────────────────────────────────────────────────
@@ -484,7 +502,11 @@ export function toPeriodKey(monthName: string): string {
     const label = nameMatch[1];
     const idxFa = (AFGHAN_MONTHS_FA as readonly string[]).indexOf(label);
     const idxEn = (AFGHAN_MONTHS_EN as readonly string[]).findIndex((m) => m.toLowerCase() === label.toLowerCase());
-    const idx = idxFa >= 0 ? idxFa : idxEn;
+    // Operators use more than one established Latin transliteration for three
+    // Afghan month names. They all normalize to the same stored month key.
+    const aliasIndex: Record<string, number> = { saur: 1, sonbola: 5, hoot: 11 };
+    const idxAlias = aliasIndex[label.toLowerCase()] ?? -1;
+    const idx = idxFa >= 0 ? idxFa : idxEn >= 0 ? idxEn : idxAlias;
     if (idx >= 0) return `${nameMatch[2]}-${String(idx + 1).padStart(2, '0')}`;
   }
 
@@ -507,6 +529,20 @@ export function toPeriodKey(monthName: string): string {
   }
 
   return '';
+}
+
+/** Canonical stored payroll-period shape: a Solar Hijri year and month. */
+export const PAYROLL_PERIOD_KEY = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+export function isPayrollPeriodKey(value: unknown): value is string {
+  return typeof value === 'string' && PAYROLL_PERIOD_KEY.test(value);
+}
+
+/** Normalizes an API value only when it names one real payroll period. */
+export function resolvePayrollPeriodKey(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const periodKey = toPeriodKey(value);
+  return isPayrollPeriodKey(periodKey) ? periodKey : null;
 }
 
 export function sumPaidForPeriod(db: Database.Database, teacherId: string, periodKey: string): number {

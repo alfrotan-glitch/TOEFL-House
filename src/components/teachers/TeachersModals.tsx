@@ -79,7 +79,7 @@ interface TeachersModalsProps {
   teacherBudget: BudgetLine | undefined;
   employeeBudget: BudgetLine | undefined;
   paymentType: 'full' | 'partial' | 'advance';
-  handleTeacherPaymentTypeChange: (type: 'full' | 'partial' | 'advance') => void;
+  handleTeacherPaymentTypeChange: (type: 'full' | 'partial') => void;
   handleEmployeePaymentTypeChange: (type: 'full' | 'partial' | 'advance') => void;
   amountPaid: number; setAmountPaid: (v: number) => void;
   selectedMonth: string; setSelectedMonth: (v: string) => void;
@@ -291,8 +291,8 @@ export default function TeachersModals(props: TeachersModalsProps) {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={text.label}>Payment Type:</label>
-                <select value={paymentType} onChange={(e) => handleTeacherPaymentTypeChange(e.target.value as any)} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 cursor-pointer font-bold">
-                  <option value="full">Full Salary</option><option value="partial">Partial</option><option value="advance">Advance</option>
+                <select value={paymentType === 'partial' ? 'partial' : 'full'} onChange={(e) => handleTeacherPaymentTypeChange(e.target.value as 'full' | 'partial')} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 cursor-pointer font-bold">
+                  <option value="full">Full Salary</option><option value="partial">Partial</option>
                 </select>
               </div>
               <div>
