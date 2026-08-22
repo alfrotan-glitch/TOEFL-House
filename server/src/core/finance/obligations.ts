@@ -198,21 +198,6 @@ export function getStudentScholarshipSettled(db: Database, studentId: string): n
   return Number(row.total) || 0;
 }
 
-/** Scholarship money applied to one semester's tuition. */
-export function getSemesterScholarshipSettled(db: Database, studentId: string, semesterName: string): number {
-  const row = db
-    .prepare(
-      `SELECT COALESCE(SUM(a.amount), 0) AS total
-         FROM obligation_allocations a
-         JOIN student_obligations o ON o.id = a.obligation_id
-         JOIN student_semesters ss ON ss.id = o.semester_id
-        WHERE o.student_id = ? AND ss.semester_name = ?
-          AND a.source_kind IN ${AID_SOURCE_KINDS_SQL} AND a.status = 'active'`,
-    )
-    .get(studentId, semesterName) as { total: number };
-  return Number(row.total) || 0;
-}
-
 // ── Scholarship fund positions ─────────────────────────────────────────────
 
 export interface FundPosition {
