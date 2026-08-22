@@ -120,7 +120,68 @@ a term failure, or a reason to weaken the offering trigger.
 ## CHECKPOINT
 
 Classification: core curriculum/API/UI contract repair; current certified WP-05
-surface; high-integrity ownership graph. The failing reproduction test and this
-plan must be committed before implementation. No schema migration or bulk data
-mutation is authorized; existing levels are repaired only through the explicit
-operator command.
+surface; high-integrity ownership graph. The defect checkpoint is `07d466d`,
+based on pre-remediation state `31836ffe5c9b1d6594c17db7e8b58305a0bd4682`.
+It contains this plan and the deliberately failing four-case reproduction suite
+before implementation. No schema migration or bulk data mutation is authorized;
+existing levels are repaired only through the explicit operator command.
+
+## IMPLEMENT
+
+- `POST /api/academic/levels` now accepts an explicit optional
+  `programVersionId`, validates version → program → branch ownership, and
+  persists that link with the level.
+- `POST /api/academic/levels/:id/assign-version` is the explicit one-way
+  repair command for an existing unversioned level. It validates ownership,
+  prerequisite compatibility and optimistic assignment state; generic level
+  `PUT` refuses a hidden version assignment.
+- `mapLevel()` now publishes `programVersionId` across level reads and branch
+  configuration snapshots.
+- Academic Setup subscribes to the canonical `academic` freshness version, so
+  a just-created version reappears in the level form without a manual page
+  refresh. Its level form can select a version, and existing unversioned levels
+  expose an explicit attachment control.
+- Course Offerings now filters levels by exact version equality and tells the
+  operator why no eligible level is available. The strict offering and
+  generation backstops remain unchanged.
+
+## VERIFY → ATTACK → REPAIR → REVERIFY
+
+The new authority suite first failed **4/4** at checkpoint:
+
+1. normal `Program → Version → Level → Offering` creation omitted the level
+   version and was refused;
+2. an existing unversioned level had no attach command;
+3. the missing command returned 404 even for a cross-program probe; and
+4. the API/frontend did not expose or filter `programVersionId`.
+
+After repair it passes **5/5**, including:
+
+- real HTTP creation of program, version, level, term, room, slot and offering;
+- real generation preview, draft and publish with one created correlated class;
+- refusal of an unversioned level before attachment, then successful offering
+  creation after explicit attachment;
+- cross-program refusal with no level mutation; and
+- generic update refusal plus frontend freshness/version-filter source guards.
+
+The full WP-05 authority passes **18 files / 354 tests / 2 build-dependent
+layout skips** before the production build. The complete server suite then
+passes **178 files / 2868 tests / 162 explicit retired-placement skips**; the
+release gate reruns it after the production build.
+
+## INDEPENDENT REVIEW
+
+A cold review of the graph found one additional consumer defect beyond the
+initial API mismatch: `ProgramVersionsPanel` invalidated `academic` after
+version creation, but `AcademicSetupView` did not subscribe to that dataset and
+could retain a stale empty version list. The remediation uses the existing
+`useDatasetVersion('academic')` authority rather than introducing a window event
+or a second cache.
+
+## CLEAN / STATUS
+
+No migration, silent backfill, compatibility alias or raw data mutation is
+introduced. Existing unversioned levels remain visible and may be attached only
+through the explicit command. The historical WP-05 certification remains a
+record of its original pass; the accompanying remediation certification records
+the current course-offering result.

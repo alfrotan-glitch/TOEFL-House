@@ -251,6 +251,14 @@ WP-05 authority is therefore **17 files / 348 runtime cases**, all passing after
 the release build. The complete clean-data server suite reports exactly 160
 explicitly retired WP-04 placement cases; WP-05 has no skipped authority.
 
+**Post-certification remediation (2026-08-22):**
+`course-offering-version-compatibility.test.ts` adds 5 current authority cases
+for explicit level-version assignment, exact offering filtering and real
+Course Offering → generation publish. It is documented in
+`docs/work-packages/WP-05-course-offering-compatibility-remediation.md` and
+`docs/certification/WP-05-course-offering-compatibility-remediation.md`; it does
+not rewrite the historical inventory count above.
+
 ## WP-06 Academic Delivery
 
 **Boundary correction (final):** **10 files / 94 statically declared cases**.

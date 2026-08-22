@@ -152,6 +152,20 @@ describe('WP-05 · course offering version compatibility', () => {
       .send({ programId, name: 'Existing unversioned level' });
     expect(level.status).toBe(201);
     expect(level.body.programVersionId).toBeNull();
+    const { termId } = await createTermRoomAndSlot(context);
+    const beforeAttach = await supertest(context.app)
+      .post('/api/offerings')
+      .set(context.owner)
+      .send({
+        name: 'Offering must not accept an unversioned level',
+        branchId: context.branchId,
+        programId,
+        programVersionId: versionId,
+        levelId: level.body.id,
+        academicTermId: termId,
+      });
+    expect(beforeAttach.status).toBe(400);
+    expect(beforeAttach.body.error).toMatch(/selected level/i);
 
     const attached = await supertest(context.app)
       .post(`/api/academic/levels/${level.body.id}/assign-version`)
@@ -159,6 +173,18 @@ describe('WP-05 · course offering version compatibility', () => {
       .send({ programVersionId: versionId });
     expect(attached.status).toBe(200);
     expect(attached.body.programVersionId).toBe(versionId);
+    const offering = await supertest(context.app)
+      .post('/api/offerings')
+      .set(context.owner)
+      .send({
+        name: 'Offering from attached existing level',
+        branchId: context.branchId,
+        programId,
+        programVersionId: versionId,
+        levelId: level.body.id,
+        academicTermId: termId,
+      });
+    expect(offering.status).toBe(201);
 
     const repeat = await supertest(context.app)
       .post(`/api/academic/levels/${level.body.id}/assign-version`)
@@ -167,9 +193,17 @@ describe('WP-05 · course offering version compatibility', () => {
     expect(repeat.status).toBe(409);
   });
 
-  it('rejects cross-program version assignment without mutating the level', async () => {
+  it('rejects cross-program version creation and assignment without mutating a level', async () => {
     const own = await createProgramVersion(context, 'own');
     const foreign = await createProgramVersion(context, 'foreign');
+    const countBefore = Number((db.prepare('SELECT COUNT(*) AS count FROM levels WHERE program_id = ?').get(own.programId) as { count: number }).count);
+    const invalidCreate = await supertest(context.app)
+      .post('/api/academic/levels')
+      .set(context.owner)
+      .send({ programId: own.programId, programVersionId: foreign.versionId, name: 'Cross-program level' });
+    expect(invalidCreate.status).toBe(400);
+    expect(Number((db.prepare('SELECT COUNT(*) AS count FROM levels WHERE program_id = ?').get(own.programId) as { count: number }).count)).toBe(countBefore);
+
     const level = await supertest(context.app)
       .post('/api/academic/levels')
       .set(context.owner)
@@ -186,11 +220,31 @@ describe('WP-05 · course offering version compatibility', () => {
     ).toEqual({ program_version_id: null });
   });
 
+  it('keeps generic level edits from becoming a hidden version-assignment writer', async () => {
+    const { programId, versionId } = await createProgramVersion(context);
+    const level = await supertest(context.app)
+      .post('/api/academic/levels')
+      .set(context.owner)
+      .send({ programId, name: 'Command-boundary level' });
+    expect(level.status).toBe(201);
+
+    const generic = await supertest(context.app)
+      .put(`/api/academic/levels/${level.body.id}`)
+      .set(context.owner)
+      .send({ programVersionId: versionId });
+    expect(generic.status).toBe(400);
+    expect(db.prepare('SELECT program_version_id FROM levels WHERE id = ?').get(level.body.id)).toEqual({ program_version_id: null });
+  });
+
   it('publishes level-version identity and never lists an unversioned level as offering-compatible', () => {
     const academicRoute = fs.readFileSync(path.join(repoRoot, 'server', 'src', 'routes', 'academic.routes.ts'), 'utf8');
     const offeringPanel = fs.readFileSync(path.join(repoRoot, 'src', 'components', 'academic', 'OfferingsPanel.tsx'), 'utf8');
+    const setupView = fs.readFileSync(path.join(repoRoot, 'src', 'components', 'academic', 'AcademicSetupView.tsx'), 'utf8');
     expect(academicRoute).toContain('programVersionId: row.program_version_id ?? null');
     expect(offeringPanel).toContain('l.programVersionId === form.programVersionId');
     expect(offeringPanel).not.toContain('!l.programVersionId || l.programVersionId === form.programVersionId');
+    expect(setupView).toContain('programVersionId: lvlProgramVersionId || undefined');
+    expect(setupView).toContain('/assign-version');
+    expect(setupView).toContain("useDatasetVersion('academic')");
   });
 });

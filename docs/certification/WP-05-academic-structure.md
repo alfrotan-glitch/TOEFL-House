@@ -289,3 +289,13 @@ scope.
 This certification is deliberately bounded. It does not advance or certify
 WP-06 Academic Delivery, WP-07 Library, WP-08 Payroll, Finance, Reporting,
 Workflow, Audit, production operations or complete-system release readiness.
+
+## Subsequent remediation — 2026-08-22
+
+A post-certification reproduction found an order-dependent Course Offering
+compatibility defect: a level created after its program version remained
+unversioned, the level API hid that state, and the offering UI treated it as
+compatible until the strict offering boundary correctly refused it. This record
+remains an accurate statement of the original WP-05 pass; the current remedial
+verdict, root cause, implementation and fresh API generation evidence are in
+`docs/certification/WP-05-course-offering-compatibility-remediation.md`.

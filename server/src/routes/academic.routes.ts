@@ -62,8 +62,17 @@ const stmtDeleteProgram = db.prepare('DELETE FROM programs WHERE id = ?');
 const stmtGetLevelsByProgram = db.prepare('SELECT * FROM levels WHERE program_id = ? ORDER BY "order" ASC');
 const stmtGetAllLevels = db.prepare('SELECT * FROM levels ORDER BY program_id, "order" ASC');
 const stmtGetLevelById = db.prepare('SELECT * FROM levels WHERE id = ?');
+const stmtGetProgramVersionForLevel = db.prepare(`
+  SELECT pv.id, pv.program_id, pv.status, p.branch_id
+  FROM program_versions pv
+  JOIN programs p ON p.id = pv.program_id
+  WHERE pv.id = ?
+`);
+const stmtAssignUnversionedLevelVersion = db.prepare(
+  'UPDATE levels SET program_version_id = ? WHERE id = ? AND program_version_id IS NULL',
+);
 const stmtInsertLevel = db.prepare(
-  `INSERT INTO levels (id, program_id, name, "order", prerequisites, code, duration_months, default_fee, pass_mark, is_active, min_viable_size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  `INSERT INTO levels (id, program_id, program_version_id, name, "order", prerequisites, code, duration_months, default_fee, pass_mark, is_active, min_viable_size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
 const stmtUpdateLevel = db.prepare(
   `UPDATE levels SET name=?, "order"=?, prerequisites=?, code=?, duration_months=?, default_fee=?, pass_mark=?, is_active=?, min_viable_size=? WHERE id=?`
@@ -136,6 +145,7 @@ function mapLevel(row: any) {
   return {
     id: row.id,
     programId: row.program_id,
+    programVersionId: row.program_version_id ?? null,
     name: row.name,
     code: row.code ?? null,
     order: row.order ?? row['order'] ?? 1,
@@ -230,6 +240,25 @@ function requireLevelAccess(req: import('express').Request, levelId: string) {
   if (!row) throw new HttpError(404, 'Level not found.');
   requireAcademicBranchAccess(req, row.branch_id);
   return row;
+}
+
+function resolveLevelProgramVersion(
+  req: import('express').Request,
+  programId: string,
+  programVersionId: unknown,
+): string | null {
+  if (programVersionId === undefined || programVersionId === null || programVersionId === '') return null;
+  if (typeof programVersionId !== 'string') throw new HttpError(400, 'Program version must be a version id.');
+  const version = stmtGetProgramVersionForLevel.get(programVersionId) as
+    | { id: string; program_id: string; status: string; branch_id: string }
+    | undefined;
+  if (!version) throw new HttpError(404, 'Program version not found.');
+  if (version.status === 'archived') throw new HttpError(400, 'Archived program versions cannot receive levels.');
+  if (version.program_id !== programId) {
+    throw new HttpError(400, 'Program version must belong to the selected program.');
+  }
+  requireAcademicBranchAccess(req, version.branch_id);
+  return version.id;
 }
 
 function assertPositiveWholeNumber(value: unknown, field: string): number {
@@ -432,11 +461,12 @@ academicRouter.post(
   '/levels',
   requirePermission('AcademicSetup.Edit'),
   ah(async (req, res) => {
-    const { programId, name, code, order, durationMonths, defaultFee, passMark, minViableSize, prerequisites, isActive } = req.body ?? {};
+    const { programId, programVersionId, name, code, order, durationMonths, defaultFee, passMark, minViableSize, prerequisites, isActive } = req.body ?? {};
     if (!programId) throw new HttpError(400, 'programId is required.');
     if (!name || !String(name).trim()) throw new HttpError(400, 'Level name is required.');
     
     requireProgramAccess(req, programId);
+    const resolvedProgramVersionId = resolveLevelProgramVersion(req, programId, programVersionId);
     assertTextLengths([[name, 'Level name', TEXT_LIMITS.name], [code, 'Code', TEXT_LIMITS.short]]);
     const normalizedPrerequisites = normalizePrerequisites(prerequisites);
     const resolvedOrder = order == null ? 1 : assertPositiveWholeNumber(order, 'Level order');
@@ -448,10 +478,11 @@ academicRouter.post(
       : assertSeatCount(minViableSize, 'Level minimum viable size');
 
     const newId = id('lvl');
-    validateLevelPrerequisites(newId, programId, null, normalizedPrerequisites);
+    validateLevelPrerequisites(newId, programId, resolvedProgramVersionId, normalizedPrerequisites);
     stmtInsertLevel.run(
       newId,
       programId,
+      resolvedProgramVersionId,
       String(name).trim(),
       resolvedOrder,
       JSON.stringify(normalizedPrerequisites),
@@ -488,6 +519,9 @@ academicRouter.put(
     if (!existing) throw new HttpError(404, 'Level not found.');
     requireLevelAccess(req, req.params.id);
     const { name, code, order, durationMonths, defaultFee, passMark, minViableSize, prerequisites, isActive } = req.body ?? {};
+    if (Object.prototype.hasOwnProperty.call(req.body ?? {}, 'programVersionId')) {
+      throw new HttpError(400, 'Use the explicit level version-assignment command to attach an existing level.');
+    }
     if (name !== undefined && (typeof name !== 'string' || !name.trim())) throw new HttpError(400, 'Level name cannot be empty.');
     assertTextLengths([[name, 'Level name', TEXT_LIMITS.name], [code, 'Code', TEXT_LIMITS.short]]);
     const nextOrder = order == null ? existing.order : assertPositiveWholeNumber(order, 'Level order');
@@ -524,6 +558,35 @@ academicRouter.put(
       req.params.id
     );
     writeAudit(req, `Updated level: ${existing.name}`);
+    res.json(mapLevel(stmtGetLevelById.get(req.params.id)));
+  })
+);
+
+academicRouter.post(
+  '/levels/:id/assign-version',
+  requirePermission('AcademicSetup.Edit'),
+  ah(async (req, res) => {
+    const existing = stmtGetLevelById.get(req.params.id) as any;
+    if (!existing) throw new HttpError(404, 'Level not found.');
+    requireLevelAccess(req, req.params.id);
+    if (existing.program_version_id) {
+      throw new HttpError(409, 'Level is already assigned to a program version and cannot be moved.');
+    }
+
+    const resolvedProgramVersionId = resolveLevelProgramVersion(
+      req,
+      existing.program_id,
+      req.body?.programVersionId,
+    );
+    if (!resolvedProgramVersionId) throw new HttpError(400, 'programVersionId is required.');
+    const prerequisites = normalizePrerequisites(JSON.parse(existing.prerequisites || '[]'));
+    validateLevelPrerequisites(req.params.id, existing.program_id, resolvedProgramVersionId, prerequisites);
+
+    const assigned = stmtAssignUnversionedLevelVersion.run(resolvedProgramVersionId, req.params.id);
+    if (assigned.changes !== 1) {
+      throw new HttpError(409, 'Level version assignment changed before it could be applied. Refresh and retry.');
+    }
+    writeAudit(req, `Assigned level ${existing.name} to program version ${resolvedProgramVersionId}`);
     res.json(mapLevel(stmtGetLevelById.get(req.params.id)));
   })
 );

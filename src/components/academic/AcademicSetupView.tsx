@@ -14,7 +14,7 @@ import ProgramVersionsPanel from './ProgramVersionsPanel';
 import ClassGenerationWizard from './ClassGenerationWizard';
 import OfferingsPanel from './OfferingsPanel';
 import { ShamsiDateInput } from '../common/ShamsiDateInput';
-import { useInvalidate } from '../../state/serverStateFreshness';
+import { useDatasetVersion, useInvalidate } from '../../state/serverStateFreshness';
 
 /**
  * Canonical academic-setup tabs. Phase meaning:
@@ -36,7 +36,8 @@ function NavButton({ t, label, icon, isLocked, tab, setTab }: { t: Tab; label: s
 }
 
 interface Program { id: string; name: string; code?: string | null; description?: string | null; durationMonths?: number; isActive: boolean; }
-interface Level { id: string; programId: string; name: string; code?: string | null; order: number; durationMonths: number; defaultFee: number; passMark: number; minViableSize?: number; isActive: boolean; }
+interface ProgramVersion { id: string; programId: string; versionLabel: string; status: 'draft' | 'published' | 'archived'; }
+interface Level { id: string; programId: string; programVersionId?: string | null; name: string; code?: string | null; order: number; durationMonths: number; defaultFee: number; passMark: number; minViableSize?: number; isActive: boolean; }
 interface TimeSlot { id: string; code: string; label: string; startTime: string; endTime: string; isActive: boolean; sortOrder?: number; }
 interface Room { id: string; code: string; name: string; capacity: number; isActive: boolean; notes?: string | null; }
 interface Term { id: string; year: number; code: string; name: string; startDate?: string | null; endDate?: string | null; isActive: boolean; }
@@ -75,6 +76,7 @@ export default function AcademicSetupView({ branchId, permissionCodes }: { branc
   // re-deriving capability from role names. `owner` is special-cased only
   // because the server grants it a global bypass in `requirePermission`.
   const invalidate = useInvalidate();
+  const academicVersion = useDatasetVersion('academic');
   // The server reports the global Owner's bypass in this effective set. Never
   // recreate it from a role label: a scoped Owner is not globally privileged.
   const hasPermissionCode = (code: string) => permissionCodes?.includes(code) ?? false;
@@ -89,6 +91,7 @@ export default function AcademicSetupView({ branchId, permissionCodes }: { branc
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   useEffect(() => { setVisited((seen) => (seen[tab] ? seen : { ...seen, [tab]: true })); }, [tab]);
   const [programs, setPrograms] = useState<Program[]>([]);
+  const [programVersions, setProgramVersions] = useState<ProgramVersion[]>([]);
   const [levels, setLevels] = useState<Level[]>([]);
   const [slots, setSlots] = useState<TimeSlot[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -112,7 +115,9 @@ export default function AcademicSetupView({ branchId, permissionCodes }: { branc
   const [progName, setProgName] = useState(''); const [progCode, setProgCode] = useState(''); const [progDesc, setProgDesc] = useState('');
   const [editProgId, setEditProgId] = useState<string | null>(null); const [editProgName, setEditProgName] = useState(''); const [editProgCode, setEditProgCode] = useState(''); const [editProgDesc, setEditProgDesc] = useState('');
   const [levelFormProgramId, setLevelFormProgramId] = useState<string | null>(null);
+  const [lvlProgramVersionId, setLvlProgramVersionId] = useState('');
   const [lvlName, setLvlName] = useState(''); const [lvlCode, setLvlCode] = useState(''); const [lvlOrder, setLvlOrder] = useState(1); const [lvlMonths, setLvlMonths] = useState(0); const [lvlFee, setLvlFee] = useState(0); const [lvlPass, setLvlPass] = useState(0); const [lvlMinViable, setLvlMinViable] = useState(0);
+  const [levelVersionAssignment, setLevelVersionAssignment] = useState<Record<string, string>>({});
   const [editLvlId, setEditLvlId] = useState<string | null>(null); const [editLvl, setEditLvl] = useState({ name: '', code: '', order: 1, durationMonths: 0, defaultFee: 0, passMark: 0, minViableSize: 0 });
   const [feeDraft, setFeeDraft] = useState<Record<string, number>>({});
   const [slotForm, setSlotForm] = useState({ code: '', label: '', startTime: '08:00', endTime: '09:30' }); const [editSlotId, setEditSlotId] = useState<string | null>(null); const [editSlot, setEditSlot] = useState({ code: '', label: '', startTime: '', endTime: '' });
@@ -145,7 +150,22 @@ export default function AcademicSetupView({ branchId, permissionCodes }: { branc
       setPrograms(Array.isArray(p) ? p : []); setLevels(Array.isArray(l) ? l : []); setSlots(Array.isArray(s) ? s : []); setRooms(Array.isArray(r) ? r : []); setTerms(Array.isArray(tm) ? tm : []); setFees(Array.isArray(f) ? f : []);
       // Offering/version counts gate Phase 3, so they are always read back from
       // the server rather than inferred from local activity.
-      try { const [offs, vers] = await Promise.all([api.get<any[]>('/offerings', query), api.get<any[]>('/catalog/program-versions', query)]); if (!isCurrent()) return; setOfferingCount(Array.isArray(offs) ? offs.length : 0); setVersionCount(Array.isArray(vers) ? vers.length : 0); } catch { if (!isCurrent()) return; setOfferingCount(0); setVersionCount(0); }
+      try {
+        const [offs, vers] = await Promise.all([
+          api.get<any[]>('/offerings', query),
+          api.get<ProgramVersion[]>('/catalog/program-versions', query),
+        ]);
+        if (!isCurrent()) return;
+        const versionRows = Array.isArray(vers) ? vers : [];
+        setOfferingCount(Array.isArray(offs) ? offs.length : 0);
+        setVersionCount(versionRows.length);
+        setProgramVersions(versionRows);
+      } catch {
+        if (!isCurrent()) return;
+        setOfferingCount(0);
+        setVersionCount(0);
+        setProgramVersions([]);
+      }
       const draft: Record<string, number> = {}; for (const fee of f) draft[fee.levelId] = fee.fee; setFeeDraft(draft);
       setExpanded((prev) => { const next = { ...prev }; for (const prog of p) { if (next[prog.id] === undefined) next[prog.id] = true; } return next; });
     } catch (err) { if (!isCurrent()) return; setError(err instanceof Error ? err.message : 'Failed to load configuration'); }
@@ -158,12 +178,12 @@ export default function AcademicSetupView({ branchId, permissionCodes }: { branc
   useEffect(() => {
     // Clear branch-scoped data immediately so the previous branch's terms,
     // rooms and programs cannot stay on screen during the transition.
-    setPrograms([]); setLevels([]); setSlots([]); setRooms([]); setTerms([]); setFees([]);
-    setOfferingCount(0); setVersionCount(0); setFeeDraft({}); setExpanded({});
+    setPrograms([]); setProgramVersions([]); setLevels([]); setSlots([]); setRooms([]); setTerms([]); setFees([]);
+    setOfferingCount(0); setVersionCount(0); setFeeDraft({}); setExpanded({}); setLevelVersionAssignment({}); setLvlProgramVersionId('');
     setEditTermId(null); setEditSlotId(null); setEditRoomId(null); setEditProgId(null); setEditLvlId(null); setLevelFormProgramId(null);
     setPanelRefreshKey((k) => k + 1);
     void (async () => { await reload(); })();
-  }, [reload, branchId]);
+  }, [reload, branchId, academicVersion]);
 
   // Every mutation funnels through here so that authoritative state is re-read
   // afterwards. On failure nothing is invalidated and no derived completion
@@ -187,6 +207,9 @@ export default function AcademicSetupView({ branchId, permissionCodes }: { branc
   };
 
   const levelsOf = (programId: string) => levels.filter((l) => l.programId === programId).sort((a, b) => a.order - b.order);
+  const versionsForProgram = (programId: string) => programVersions.filter(
+    (version) => version.programId === programId && version.status !== 'archived',
+  );
   const feeFor = (levelId: string, defaultFee: number) => feeDraft[levelId] !== undefined ? feeDraft[levelId] : defaultFee;
 
   // ---------------------------------------------------------------------
@@ -445,7 +468,9 @@ export default function AcademicSetupView({ branchId, permissionCodes }: { branc
               ) : (
                 <div className="space-y-3">
                   {programs.map((p) => {
-                    const open = !!expanded[p.id]; const childLevels = levelsOf(p.id);
+                    const open = !!expanded[p.id];
+                    const childLevels = levelsOf(p.id);
+                    const availableVersions = versionsForProgram(p.id);
                     return (
                       <div key={p.id} className={`bg-white border rounded-2xl overflow-hidden ${p.isActive ? 'border-slate-200' : 'opacity-70'}`}>
                         <div className="flex flex-wrap items-center gap-2 px-4 py-3 bg-gradient-to-r from-slate-50 to-white border-b border-slate-100">
@@ -495,6 +520,11 @@ export default function AcademicSetupView({ branchId, permissionCodes }: { branc
                                     <div className="flex-1 min-w-[220px]">
                                       <p className="font-bold text-slate-900 break-words"><span className="text-slate-400 me-1">{l.order}.</span>{l.name} {l.code ? <span className="font-mono text-indigo-600">({l.code})</span> : null}</p>
                                       <p className="text-[10px] text-slate-500 mt-0.5 break-words leading-relaxed">{l.durationMonths} mo · catalog {formatAFN(l.defaultFee)} · pass {l.passMark}% · min class {(l as any).minViableSize ?? 5}</p>
+                                      <p className={`text-[10px] mt-1 font-bold ${l.programVersionId ? 'text-indigo-700' : 'text-amber-700'}`}>
+                                        {l.programVersionId
+                                          ? `Assigned to ${availableVersions.find((version) => version.id === l.programVersionId)?.versionLabel || 'a program version'}`
+                                          : 'Unversioned — assign a version before using this level in a course offering.'}
+                                      </p>
                                     </div>
                                     <div className="flex items-center gap-1.5 bg-emerald-50/80 border border-emerald-100 rounded-lg px-2 py-1">
                                       <Building2 className="w-3 h-3 text-emerald-600" />
@@ -502,6 +532,16 @@ export default function AcademicSetupView({ branchId, permissionCodes }: { branc
                                       <input aria-label="Branch fee override" type="number" className="w-28 border border-emerald-200 rounded px-2 py-0.5 text-[11px] font-mono" value={feeFor(l.id, l.defaultFee)} onChange={(e) => setFeeDraft((d) => ({ ...d, [l.id]: Number(e.target.value) }))} />
                                       <button title="Save branch-specific fee override" type="button" disabled={busy} className="text-[10px] font-bold text-emerald-700 hover:underline" onClick={() => run(async () => { await api.put('/academic/level-fees', { levelId: l.id, fee: feeFor(l.id, l.defaultFee), branchId }); })}>Save</button>
                                     </div>
+                                    {!l.programVersionId && availableVersions.length > 0 && <div className="flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1">
+                                      <select aria-label={`Assign ${l.name} to a program version`} value={levelVersionAssignment[l.id] || ''} onChange={(e) => setLevelVersionAssignment((draft) => ({ ...draft, [l.id]: e.target.value }))} className="max-w-36 bg-transparent text-[10px] font-bold text-amber-900 outline-none">
+                                        <option value="">Assign to version…</option>
+                                        {availableVersions.map((version) => <option key={version.id} value={version.id}>{version.versionLabel}</option>)}
+                                      </select>
+                                      <button type="button" disabled={busy || !levelVersionAssignment[l.id]} className="text-[10px] font-bold text-amber-800 disabled:opacity-50" onClick={() => run(async () => {
+                                        await api.post(`/academic/levels/${l.id}/assign-version`, { programVersionId: levelVersionAssignment[l.id] });
+                                        setLevelVersionAssignment((draft) => ({ ...draft, [l.id]: '' }));
+                                      })}>Assign</button>
+                                    </div>}
                                     <ToggleActive active={l.isActive} disabled={busy} onToggle={() => run(async () => { await api.put(`/academic/levels/${l.id}`, { isActive: !l.isActive }); })} />
                                     <button type="button" className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100" onClick={() => { setEditLvlId(l.id); setEditLvl({ name: l.name, code: l.code || '', order: l.order, durationMonths: l.durationMonths, defaultFee: l.defaultFee, passMark: l.passMark, minViableSize: (l as any).minViableSize ?? 5 }); }}><Pencil className="w-3.5 h-3.5" /></button>
                                     <button type="button" className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50" disabled={busy} onClick={() => { if (!window.confirm(`Remove level "${l.name}"?\n\nIf it is already referenced it is deactivated instead of deleted.`)) return; run(async () => { await api.delete(`/academic/levels/${l.id}`); }); }}><Trash2 className="w-3.5 h-3.5" /></button>
@@ -511,21 +551,42 @@ export default function AcademicSetupView({ branchId, permissionCodes }: { branc
                             ))}
                             {levelFormProgramId === p.id ? (
                               <form className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-3 grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-xs"
-                                onSubmit={(e) => { e.preventDefault(); run(async () => { await api.post('/academic/levels', { programId: p.id, name: lvlName, code: lvlCode || undefined, order: lvlOrder, durationMonths: lvlMonths, defaultFee: lvlFee, passMark: lvlPass, minViableSize: lvlMinViable }); setLvlName(''); setLvlCode(''); setLevelFormProgramId(null); }); }}>
+                                onSubmit={(e) => { e.preventDefault(); run(async () => {
+                                  await api.post('/academic/levels', {
+                                    programId: p.id,
+                                    programVersionId: lvlProgramVersionId || undefined,
+                                    name: lvlName,
+                                    code: lvlCode || undefined,
+                                    order: lvlOrder,
+                                    durationMonths: lvlMonths,
+                                    defaultFee: lvlFee,
+                                    passMark: lvlPass,
+                                    minViableSize: lvlMinViable,
+                                  });
+                                  setLvlName('');
+                                  setLvlCode('');
+                                  setLvlProgramVersionId('');
+                                  setLevelFormProgramId(null);
+                                }); }}>
                                 <input required value={lvlName} onChange={(e) => setLvlName(e.target.value)} placeholder="Level name *" className="border border-slate-200 rounded-lg px-2 py-1.5 bg-white" />
+                                <select aria-label="Program version for level" value={lvlProgramVersionId} onChange={(e) => setLvlProgramVersionId(e.target.value)} className="border border-slate-200 rounded-lg px-2 py-1.5 bg-white">
+                                  <option value="">Unversioned / shared draft</option>
+                                  {availableVersions.map((version) => <option key={version.id} value={version.id}>{version.versionLabel}</option>)}
+                                </select>
                                 <input value={lvlCode} onChange={(e) => setLvlCode(e.target.value)} placeholder="Code" className="border border-slate-200 rounded-lg px-2 py-1.5 bg-white font-mono" />
                                 <input type="number" value={lvlOrder} onChange={(e) => setLvlOrder(Number(e.target.value))} className="border border-slate-200 rounded-lg px-2 py-1.5 bg-white" title="Order" />
                                 <input type="number" value={lvlMonths} onChange={(e) => setLvlMonths(Number(e.target.value))} className="border border-slate-200 rounded-lg px-2 py-1.5 bg-white" title="Months" />
                                 <input type="number" value={lvlFee} onChange={(e) => setLvlFee(Number(e.target.value))} className="border border-slate-200 rounded-lg px-2 py-1.5 bg-white" title="Default fee" />
                                 <input type="number" value={lvlPass} onChange={(e) => setLvlPass(Number(e.target.value))} className="border border-slate-200 rounded-lg px-2 py-1.5 bg-white" title="Pass mark" />
                                 <input type="number" value={lvlMinViable} onChange={(e) => setLvlMinViable(Number(e.target.value))} className="border border-slate-200 rounded-lg px-2 py-1.5 bg-white" title="Min viable class size" placeholder="Min capacity" />
+                                {availableVersions.length > 0 && <p className="col-span-2 sm:col-span-3 text-[10px] text-amber-800">Select a version for a level that will be used in a Course Offering. Leave it unversioned only for a shared/staged catalog level.</p>}
                                 <div className="col-span-2 sm:col-span-3 flex gap-1.5">
                                   <button type="submit" disabled={busy} className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-bold disabled:opacity-50 flex items-center gap-1">{busy && <Loader2 className="w-3 h-3 animate-spin" />} Save level</button>
                                   <button type="button" className="px-3 py-1.5 rounded-lg bg-white border border-slate-200" onClick={() => setLevelFormProgramId(null)}>Cancel</button>
                                 </div>
                               </form>
                             ) : (
-                              <button type="button" className="text-[11px] font-bold text-indigo-600 flex items-center gap-1 hover:underline px-1" onClick={() => { setLevelFormProgramId(p.id); setLvlOrder(childLevels.length + 1); }}><Plus className="w-3.5 h-3.5" /> Add level under {p.name}</button>
+                              <button type="button" className="text-[11px] font-bold text-indigo-600 flex items-center gap-1 hover:underline px-1" onClick={() => { setLevelFormProgramId(p.id); setLvlProgramVersionId(''); setLvlOrder(childLevels.length + 1); }}><Plus className="w-3.5 h-3.5" /> Add level under {p.name}</button>
                             )}
                           </div>
                         )}

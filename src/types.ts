@@ -220,6 +220,8 @@ export interface Program {
 export interface Level {
   id: string;
   programId: string;
+  /** Null means a shared/staged catalog level, not a course-offering level. */
+  programVersionId?: string | null;
   name: string;
   order: number;
   prerequisites?: string[];
