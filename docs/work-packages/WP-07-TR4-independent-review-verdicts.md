@@ -108,3 +108,41 @@ Stage 3 and the other open items.
 restores verified per-run).
 
 **Stopped at the required checkpoint: awaiting Owner authorization to apply any verdict.**
+
+---
+
+## 5. DISPOSITIONS APPLIED (2026-08-22, Owner: "continue according to protocol")
+
+Applied exactly the three checkpoint items, each with its written evidence; nothing beyond.
+
+1. **10 EQUIVALENT entries applied** with in-harness written reasons citing this review's diffs:
+   funding F1/F3/F7 · employee-salary M2/M5 (new mechanism) · fer M2 (new mechanism) ·
+   fmw M6/M10/M11/M13 (`equivalent: true`, matching the harness's existing M7/M12 template).
+2. **fmw M2/M4 coverage repair applied (test-only)**: two zero-amount cases in the parity suite
+   asserting the desk boundary's own error contract — both mutants now **KILLED by execution**
+   (7/7 killed, 6 proven-equivalent, 0 survivors).
+3. **J10 via the stricter path**: a numeric-string discount probe added to the journey suite
+   (executed: identical outcomes), then J10 → EQUIVALENT with the suite-execution + probe
+   evidence recorded in-harness.
+
+**Gate after application: `npm run audit:mutation` → 18 passed · 0 failed — MUTATION GATE PASSED**
+(first time in the repository's record). All 17 remaining "surviving" lines are documented
+registry members (proven-EQUIVALENT or OBSOLETE). `release:validate` 22/22; suite
+2842 passed · 162 skipped · 0 failed (+3 pins).
+
+## 6. NEW FINDING surfaced by honest measurement (not repaired — authorization required)
+
+Fixing the gate's INVALID-surfacing regex (a defect in the TR4-R14-approved mechanism: it missed
+array-style harnesses that print the verdict at line-end) revealed **31 pre-existing INVALID
+anchors** that had been invisible in every previous run, including **J1 "remove the authorization
+ceiling entirely (the defect)"** of journey, invoice-integrity I1/I2/I9/I10/I12, and
+security-grant-escalation S1–S4/S6–S10 (9 of 11 — that harness measures only 2 of its intended
+11 mutants). These are the same class as TR4-F10 (stale anchors) but were **not** part of this
+round's three authorized items, so they are **recorded, not repaired**. The gate's PASS is
+therefore honest but qualified: every *measured* verdict is green; 31 *intended* measurements
+could not be applied. A second gap is also recorded: the journey harness exits 0 on INVALID
+(others exit 1) — aligning it is a one-line harness-policy change for the Owner to approve.
+
+**Proposed next step (awaiting authorization):** re-base the 31 stale anchors under the
+TR4-R14 discipline (preserve documented semantics, verdicts by execution, no invented mutants;
+obsolete targets → the OBSOLETE registry with evidence), and align the journey exit policy.

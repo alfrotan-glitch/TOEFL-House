@@ -431,3 +431,29 @@ describe('F-5 · cash conservation across pay/refund (verified symmetry)', () =>
     expect(Math.round(ledger * 100) / 100).toBe(Math.round(paid * 100) / 100);
   });
 });
+
+describe('F-5 · a zero amount is refused by the desk boundary, not by the layer beneath it', () => {
+  it('invoice payment of 0 answers with the payment boundary error and writes nothing', async () => {
+    // TR-4 review verdict (fmw M2, NOT equivalent): with the desk guard removed
+    // the deeper income layer still refuses the zero — money stays safe — but
+    // the client would hear "Income amount cannot be zero." instead of the
+    // payment boundary's own contract. This pin kills the mutant.
+    const sid = mkStudent();
+    const iid = mkInvoice(sid, 1000);
+    const res = await payInvoice(iid, { amount: 0 });
+    expect(res.status).toBe(400);
+    expect(String(res.body?.error ?? '')).toMatch(/must be positive/);
+    expect(db.prepare('SELECT COUNT(*) c FROM payments WHERE invoice_id = ?').get(iid)).toMatchObject({ c: 0 });
+    expect((db.prepare('SELECT status FROM invoices WHERE id = ?').get(iid) as { status: string }).status).toBe('issued');
+  });
+
+  it('refund of 0 answers with the refund boundary error and writes nothing', async () => {
+    // TR-4 review verdict (fmw M4, NOT equivalent): same discipline as above.
+    const sid = mkStudent();
+    await payStudent(sid, { amount: 500 });
+    const res = await refundStudent(sid, { amount: 0 });
+    expect(res.status).toBe(400);
+    expect(String(res.body?.error ?? '')).toMatch(/must be positive/);
+    expect(db.prepare("SELECT COUNT(*) c FROM payments WHERE student_id = ? AND category = 'refund'").get(sid)).toMatchObject({ c: 0 });
+  });
+});

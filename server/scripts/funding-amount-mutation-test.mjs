@@ -23,7 +23,17 @@ const TEST = 'src/tests/funding-amount-integrity.test.ts';
 // still returned HTTP 400 ("Invalid data provided") from the constraint and the
 // stored status remained 'active'. The route check is defence-in-depth that
 // yields the clearer message, so removing it changes no observable outcome.
-const EQUIVALENT = new Set(['F10', 'F11']);
+//
+// F1, F3, F7 — PROVEN EQUIVALENT, TR-4 review by execution (2026-08-22):
+// applying each mutant and creating/updating with numeric strings — including
+// the whitespace edge ' 1250 ' — produced byte-identical observations under
+// mutant and baseline: rows stored {1250, typeof 'integer'}. The columns are
+// INTEGER-affinity, only assertMoney-valid numerals can reach the mutated
+// writes (invalid values 400 at the validator the mutants do not touch), and
+// every valid numeral affinity-coerces; every reader maps through Number().
+// Durable pins: the suite's numeric-string typeof tests.
+// Evidence: docs/work-packages/WP-07-TR4-independent-review-verdicts.md.
+const EQUIVALENT = new Set(['F1', 'F3', 'F7', 'F10', 'F11']);
 
 const MUTANTS = [
   // ── FND-1: the created sponsorship must persist the validated amount ──

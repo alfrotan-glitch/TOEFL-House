@@ -46,7 +46,17 @@ const TEST = 'src/tests/journey-enrollment-discount-authority.test.ts';
 // detects the authority being bypassed, hard-coded or asked about the wrong
 // student. The literal 100 is retained because it states the intent directly:
 // ask for the ceiling, do not let the request influence it.
-const EQUIVALENT = new Set(['J6']);
+//
+// J10 — PROVEN EQUIVALENT, TR-4 review by execution (2026-08-22): the mutant
+// passes Number(raw) instead of the validated discountAmount into
+// EnrollmentService.enroll. Number(raw) === validated for every input that
+// survives the route's own assertMoney, invalid values are rejected before the
+// mutated expression, and the service re-asserts internally (D-140). Executed:
+// the suite (including its numeric-string discount probe) passes under the
+// mutant with byte-identical enrolment/invoice outcomes — the same
+// transformation executed for the fmw M6/M13 probes, which diffed identical.
+// Evidence: docs/work-packages/WP-07-TR4-independent-review-verdicts.md.
+const EQUIVALENT = new Set(['J6', 'J10']);
 
 const MUTANTS = [
   ['J1', 'remove the authorization ceiling entirely (the defect)', ROUTE,

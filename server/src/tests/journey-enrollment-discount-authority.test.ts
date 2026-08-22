@@ -191,6 +191,16 @@ describe('JRN-1 · a journey enrollment may not exceed the authorized discount',
     expect(invoiceOf(sid)).toMatchObject({ total: FEE, discount: 1500, net: 8500 });
   });
 
+  it('accepts a numeric-string discount identically to the numeric form', async () => {
+    // TR-4 review probe (J10): the validated amount and Number(raw) are the
+    // same value for every input that survives validation, so '2000' and 2000
+    // must produce identical enrolment and invoice outcomes.
+    const sid = makeStudent();
+    const res = await enroll(sid, { discountAmount: '2000' });
+    expect(res.status).toBe(201);
+    expect(invoiceOf(sid)).toMatchObject({ total: FEE, discount: 2000, net: 8000 });
+  });
+
   it('rejects one AFN above the authorized maximum, with zero DB mutation', async () => {
     const sid = makeStudent();
     const before = counts();

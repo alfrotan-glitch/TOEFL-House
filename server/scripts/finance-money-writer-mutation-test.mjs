@@ -71,6 +71,13 @@ const MUTANTS = [
     file: STU,
     find: "    category,\n    amount: parsedAmount,",
     replace: "    category,\n    amount: amount === undefined || amount === null || amount === '' ? null : Number(amount),",
+    // PROVEN EQUIVALENT — TR-4 review, verified by execution (2026-08-22):
+    // paying '1000' (string) then 1000 (number) gave byte-identical outcomes
+    // under mutant and baseline (201 → 200 idempotent replay, one payment row,
+    // sum 1000): Number(raw) === parsed for every value that survives the
+    // route's own assertMoney, and invalid values never reach the fingerprint.
+    // Evidence: docs/work-packages/WP-07-TR4-independent-review-verdicts.md.
+    equivalent: true,
   },
   {
     id: 'M7',
@@ -108,6 +115,13 @@ const MUTANTS = [
     file: FUN,
     find: '        newId, campaignId || null, donorId, donationAmount, donationDate, ',
     replace: '        newId, campaignId || null, donorId, amount, donationDate, ',
+    // PROVEN EQUIVALENT — TR-4 review, verified by execution (2026-08-22):
+    // a '500' (string) donation produced an identical row under mutant and
+    // baseline ({amount: 500, typeof: 'integer'}): donations.amount is an
+    // INTEGER-affinity column, and only assertMoney-valid numerals — every one
+    // of which affinity-coerces — can reach this write. Evidence:
+    // docs/work-packages/WP-07-TR4-independent-review-verdicts.md.
+    equivalent: true,
   },
   {
     id: 'M11',
@@ -115,6 +129,11 @@ const MUTANTS = [
     file: FUN,
     find: '        stmtUpdateCampaignRaisedAmount.run(donationAmount, campaignId);',
     replace: '        stmtUpdateCampaignRaisedAmount.run(amount, campaignId);',
+    // PROVEN EQUIVALENT — TR-4 review, verified by execution (2026-08-22):
+    // raised_amount moved to {500, 'integer'} identically under mutant and
+    // baseline for a '500' string donation — same affinity mechanism as M10.
+    // Evidence: docs/work-packages/WP-07-TR4-independent-review-verdicts.md.
+    equivalent: true,
   },
   {
     id: 'M12',
@@ -141,6 +160,13 @@ const MUTANTS = [
     file: FUN,
     find: '      amount: donationAmount,\n      date: donationDate,',
     replace: '      amount: Number(amount),\n      date: donationDate,',
+    // PROVEN EQUIVALENT — TR-4 review, verified by execution (2026-08-22):
+    // donating '500' twice replayed idempotently under mutant and baseline
+    // alike (second 200, income {sum: 500, count: 1}) — Number(raw) and the
+    // parsed value are the same fingerprint for every valid input; the suite's
+    // own '200'-string replay test pins this contract permanently.
+    // Evidence: docs/work-packages/WP-07-TR4-independent-review-verdicts.md.
+    equivalent: true,
   },
 ]
 

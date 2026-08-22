@@ -185,9 +185,18 @@ try {
 
 console.log('\n' + '='.repeat(78));
 const killed = results.filter((r) => r.status === 'KILLED').length;
-const survived = results.filter((r) => r.status === 'SURVIVED');
+// PROVEN EQUIVALENT — TR-4 review by execution (2026-08-22): M2 stores the raw
+// body value instead of the parsed amount. Applied mutant with amount ' 1200 '
+// (whitespace string) stored {1200, typeof 'integer'} byte-identically to
+// baseline: INTEGER-affinity column, only assertMoney-valid numerals reach the
+// write, every valid numeral affinity-coerces. Durable pin: the suite's
+// numeric-string amountClassOf test. Evidence:
+// docs/work-packages/WP-07-TR4-independent-review-verdicts.md.
+const EQUIVALENT = new Set(['M2']);
+const survived = results.filter((r) => r.status === 'SURVIVED' && !EQUIVALENT.has(r.id));
+const equivalent = results.filter((r) => r.status === 'SURVIVED' && EQUIVALENT.has(r.id));
 const invalid = results.filter((r) => r.status === 'INVALID');
-console.log(`KILLED: ${killed}/${results.length}   SURVIVED: ${survived.length}   INVALID: ${invalid.length}`);
+console.log(`KILLED: ${killed}/${results.length - equivalent.length}   PROVEN EQUIVALENT: ${equivalent.length}   SURVIVED: ${survived.length}   INVALID: ${invalid.length}`);
 if (survived.length) {
   console.log('\nSURVIVING MUTANTS (missing test coverage):');
   for (const s of survived) console.log(`  ${s.id} — ${s.invariant} (${s.file})`);

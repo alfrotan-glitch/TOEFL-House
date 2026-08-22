@@ -56,7 +56,12 @@ function summarise(output) {
   const alt = [...output.matchAll(/^\s*(\S+)\s+SURVIVED\s/gm)].map((m) => m[1]);
   // TR4-F10: anchors that match 0x mean the harness measured LESS than it
   // claims. Surfaced here so drift is visible without reading per-mutant logs.
-  const invalid = [...output.matchAll(/^\s*(\S+)\s+INVALID/gm)].map((m) => m[1]);
+  // (Also matches the array-style harnesses that print the description between
+  // the id and the verdict — journey prints "J1 <desc> INVALID (anchor …)".)
+  const invalid = [
+    ...output.matchAll(/^\s*(\S+)\s+INVALID/gm),
+    ...output.matchAll(/^\s*(\S+)\s+.*\sINVALID\s/gm),
+  ].map((m) => m[1]);
   const voidRuns = [...output.matchAll(/^\s*(\S+)\s+.*MEASUREMENT VOID/gm)].map((m) => m[1]);
   // TR-4 Bucket-1: retired mutants with written evidence, reported distinctly.
   const obsolete = [...output.matchAll(/^\s*(\S+)\s+OBSOLETE/gm)].map((m) => m[1]);

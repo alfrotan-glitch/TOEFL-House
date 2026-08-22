@@ -157,9 +157,18 @@ try {
 
 console.log('\n' + '='.repeat(78));
 const killed = results.filter((r) => r.status === 'KILLED').length;
-const survived = results.filter((r) => r.status === 'SURVIVED');
+// PROVEN EQUIVALENT — TR-4 review by execution (2026-08-22): M2 and M5 swap
+// the parsed salary for the raw body value on PUT/POST. Applied mutants with
+// baseSalary ' 5000 ' / ' 6000 ' (whitespace strings) stored
+// {5000|6000, typeof 'integer'} byte-identically to baseline: the column is
+// INTEGER-affinity, only assertMoney-valid numerals reach the write, and every
+// valid numeral affinity-coerces. Durable pins: the suite's numeric-string
+// typeof tests. Evidence: docs/work-packages/WP-07-TR4-independent-review-verdicts.md.
+const EQUIVALENT = new Set(['M2', 'M5']);
+const survived = results.filter((r) => r.status === 'SURVIVED' && !EQUIVALENT.has(r.id));
+const equivalent = results.filter((r) => r.status === 'SURVIVED' && EQUIVALENT.has(r.id));
 const invalid = results.filter((r) => r.status === 'INVALID');
-console.log(`KILLED: ${killed}/${results.length}   SURVIVED: ${survived.length}   INVALID: ${invalid.length}`);
+console.log(`KILLED: ${killed}/${results.length - equivalent.length}   PROVEN EQUIVALENT: ${equivalent.length}   SURVIVED: ${survived.length}   INVALID: ${invalid.length}`);
 if (survived.length) {
   console.log('\nSURVIVING MUTANTS (missing test coverage):');
   for (const s of survived) console.log(`  ${s.id} — ${s.invariant} (${s.file})`);
