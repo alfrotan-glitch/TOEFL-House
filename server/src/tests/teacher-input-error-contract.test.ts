@@ -161,14 +161,18 @@ describe('T-3 · evaluation score returns 4xx, never 500, and stores nothing', (
   });
 
   it.each([
-    ['null', null],
-    ['zero', 0],
-    ['negative', -5],
-    ['above 100', 101],
-  ])('keeps rejecting an out-of-range score (%s)', async (_label, value) => {
+    ['null', null, /must be a number between 1 and 100/],
+    ['zero', 0, /greater than zero/],
+    ['negative', -5, /cannot be negative/],
+    ['above 100', 101, /cannot exceed 100/],
+  ])('keeps rejecting an out-of-range score (%s) with the domain error', async (_label, value, message) => {
     const tid = mkTeacher(40);
     const res = await evaluate(tid, { score: value });
     expect(res.status).toBe(400);
+    // The route's domain check must answer — not the schema CHECK's generic
+    // 400. With teacher-input mutant M2 (allowZero flipped) the database is
+    // what rejects the zero, and the client sees the generic message instead.
+    expect(String(res.body?.error ?? '')).toMatch(message);
     expect(evalRows(tid)).toHaveLength(0);
     expect(scoreOf(tid)).toBe(40);
   });
@@ -178,6 +182,10 @@ describe('T-3 · evaluation score returns 4xx, never 500, and stores nothing', (
     for (const criteria of ['notanobject', [1, 2]]) {
       const res = await evaluate(tid, { score: 50, criteria });
       expect(res.status).toBe(400);
+      // Same discipline as the score cases: the route's own object check must
+      // answer (kills teacher-input mutant M11, where the check is disabled and
+      // only the schema CHECK json_type() guard catches it).
+      expect(String(res.body?.error ?? '')).toMatch(/criteria must be an object/i);
     }
     expect(evalRows(tid)).toHaveLength(0);
     expect(scoreOf(tid)).toBe(40);
@@ -228,6 +236,32 @@ describe('T-3 · employee pay-salary returns 4xx, never 500, and moves no money'
       expect(ledgerRows(eid)).toHaveLength(0);
     });
   }
+
+  it('rejects a zero amount with the desk guard, not a database error, and moves no money', async () => {
+    // Kills teacher-input mutant M7 (the `resolvedAmount <= 0` guard deleted):
+    // a zero must be refused by the desk's own check with its own message — if
+    // the guard were gone, either a 0 AFN payment would move residue or the
+    // schema CHECK would answer with the generic message.
+    const eid = mkEmployee();
+    const before = budgetOf(empBudgetId);
+    const res = await payEmployee(eid, { monthName: 'Asad 1405', amountPaid: 0, paymentType: 'partial' });
+    expect(res.status).toBe(400);
+    expect(String(res.body?.error ?? '')).toMatch(/greater than zero/);
+    expect(budgetOf(empBudgetId)).toBe(before);
+    expect(txRows(eid)).toHaveLength(0);
+    expect(ledgerRows(eid)).toHaveLength(0);
+  });
+
+  it('rejects a negative amount at the money boundary and moves no money', async () => {
+    const eid = mkEmployee();
+    const before = budgetOf(empBudgetId);
+    const res = await payEmployee(eid, { monthName: 'Asad 1405', amountPaid: -100, paymentType: 'partial' });
+    expect(res.status).toBe(400);
+    expect(String(res.body?.error ?? '')).toMatch(/cannot be negative/);
+    expect(budgetOf(empBudgetId)).toBe(before);
+    expect(txRows(eid)).toHaveLength(0);
+    expect(ledgerRows(eid)).toHaveLength(0);
+  });
 
   it('rejects a sub-cent amount with 400 instead of a 500 from the database trigger', async () => {
     const eid = mkEmployee();

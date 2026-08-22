@@ -203,3 +203,49 @@ M15's honest survival; every unmodified harness byte-identical).
 **WP-07: NOT certified** — the mutation gate still fails (7 harnesses), Bucket 3 remains
 (19 real survivors: employee-salary 2, fer 1, fmw 6, funding 3, journey 1, teacher-input 3,
 teacher-update 3 incl. M15). **TR-4 OPEN. Stopped at the decision checkpoint.**
+
+---
+
+## 8. OUTCOME — Bucket 3 Class C + Class R executed (2026-08-22, "continue according to protocol")
+
+Lifecycle: CHECKPOINT (`8cba3e4`) → DISCOVER → IMPLEMENT → VERIFY → ATTACK → REVERIFY → CLEAN.
+Four test files, +111/−5. No production code changed. Decision register 0-diff.
+
+**Class C — 6/6 KILLED by executed coverage.**
+- `teacher-input-error-contract.test.ts`: the out-of-range score matrix now asserts each case's
+  **domain error message** (probe fact: with the mutant applied, the DB CHECK rejects the zero and
+  the client sees the generic message — the status-only assertion could not distinguish layers);
+  the criteria test asserts "criteria must be an object"; employee pay-salary gained explicit
+  zero and negative cases (desk-guard message + no residue). **M2, M7, M11 dead — 9/9 killed.**
+- `wp05/teacher-update-validation.test.ts`: direct unit kills at the money boundary — negative
+  (M7), fractional/whole-AFN (M15), non-decimal numeral strings (M12). **13/13 killed + M14
+  obsolete — harness FAIL→PASS.**
+
+**Class R — all 6 probed by execution; every probe SURVIVES: the equivalence cases are now
+evidence-backed and go to the Owner + reviewer, unclassified.**
+- Probes added: sponsorship-update and campaign-update numeric strings stored as numbers with
+  `typeof` asserted (`funding-amount-integrity.test.ts`); employee PUT and POST numeric-string
+  salaries with `typeof` asserted (`employee-salary-validation.test.ts`). Existing probes:
+  funding CREATE `'750' → integer`, fer `'2400' → integer` (`amountClassOf`).
+- Verdicts: **F1, F3, F7, salary M2/M5, fer M2 all SURVIVED with the probes in place.**
+  Mechanism (verified in schema + routes): every one of these writers targets a numeric-affinity
+  column, so the raw assertMoney-valid string is stored **byte-identically** to the parsed number,
+  and every read path re-maps through `Number(...)`. The raw-vs-parsed difference is unobservable
+  at storage, API and aggregate layers. **Proposed disposition (for the reviewer to confirm, not
+  classified here): EQUIVALENT by column affinity + read-path normalization, one written reason
+  per harness.**
+
+**Gates after the round:** `npm run audit:mutation` — **13 passed · 5 failed · 23 surviving ·
+4 documented-obsolete · 0 INVALID** (teacher-input and teacher-update FAIL→PASS; the 5 remaining
+failing harnesses are exactly the ones holding probed/referred survivors). `npm run
+release:validate` — **22/22 PASSED**. Server suite **2839 passed · 162 skipped · 0 failed**
+(3001 total; +9 tests).
+
+**Remaining for disposition (all evidence prepared):**
+| Item | Count | Evidence |
+|---|---|---|
+| Class R (F1/F3/F7, salary M2/M5, fer M2) | 6 | probed survivors above — affinity equivalence cases |
+| Class W (fmw M2/M4/M6/M10/M11/M13) | 6 | dossier TR4-F3 + fresh gate data; referred to the independent reviewer (dossier's own rule: not the author) |
+| Class E (journey J10) | 1 | dossier TR4-F4 / D-140 hypothesis — reviewer confirms or refutes |
+
+**WP-07: NOT certified. TR-4 OPEN. Stopped at the decision checkpoint.**

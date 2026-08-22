@@ -180,6 +180,22 @@ describe('FND-2 · PATCH /funding/sponsorships/:id validates the monthly amount'
     expect(row.ty).toBe('integer');
   });
 
+  it('stores a numeric string on update as a number, never as TEXT', async () => {
+    // Class-R probe (TR-4): the VALIDATED value must be what the update writes.
+    // If the raw body string were written instead (funding mutant F3), only the
+    // column's affinity would hide it — this pin keeps that observable.
+    const created = await makeSponsorship(1000);
+    const id = created.body.id;
+    const res = await supertest(app)
+      .patch(`/api/funding/sponsorships/${id}`)
+      .set(auth(OWNER))
+      .send({ monthlyAmount: '1250' });
+    expect(res.status).toBe(200);
+    const row = sponsorshipRow(id)!;
+    expect(row.monthly_amount).toBe(1250);
+    expect(row.ty).toBe('integer');
+  });
+
   it('treats a JSON-untransmittable Infinity (which arrives as null) as an absent field', async () => {
     // JSON.stringify(Infinity) is `null`, so a client cannot actually transmit
     // Infinity over HTTP. Null is the "leave this field alone" signal, which is
@@ -276,6 +292,21 @@ describe('FND-3 · PATCH /funding/campaigns/:id validates the target amount', ()
     expect(res.status).toBe(400);
     const row = campaignRow(id)!;
     expect(row.target_amount).toBe(100000);
+    expect(row.ty).toBe('integer');
+  });
+
+  it('stores a numeric string target on update as a number, never as TEXT', async () => {
+    // Class-R probe (TR-4): same discipline as the sponsorship update — the
+    // validated value must be what is written (funding mutant F7).
+    const created = await makeCampaign(100000);
+    const id = created.body.id;
+    const res = await supertest(app)
+      .patch(`/api/funding/campaigns/${id}`)
+      .set(auth(OWNER))
+      .send({ targetAmount: '150000' });
+    expect(res.status).toBe(200);
+    const row = campaignRow(id)!;
+    expect(row.target_amount).toBe(150000);
     expect(row.ty).toBe('integer');
   });
 

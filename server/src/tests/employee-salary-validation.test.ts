@@ -255,6 +255,28 @@ describe('employee salary · legitimate values are preserved', () => {
     expect(row.status).toBe('inactive');
   });
 
+  it('stores a numeric-string salary update as a number, never as TEXT', async () => {
+    // Class-R probe (TR-4): the PARSED salary must be what the update writes;
+    // if the raw body string were written instead (employee-salary mutant M2),
+    // only the column's affinity would hide it — this pin keeps that observable.
+    const eid = mkEmployee(5000);
+    const res = await putEmp(eid, { baseSalary: '27500' });
+    expect(res.status).toBe(200);
+    expect(salaryTypeOf(eid)).toBe('integer');
+    expect(Number(rowOf(eid).base_salary)).toBe(27500);
+  });
+
+  it('creates an employee from a numeric-string salary as a number', async () => {
+    // Class-R probe (TR-4): same discipline on the INSERT path (employee-salary
+    // mutant M5).
+    const res = await postEmp({ baseSalary: '19500' });
+    expect(res.status).toBe(201);
+    const eid = res.body?.employee?.id ?? res.body?.id;
+    expect(eid).toBeTruthy();
+    expect(salaryTypeOf(String(eid))).toBe('integer');
+    expect(Number(rowOf(String(eid)).base_salary)).toBe(19500);
+  });
+
   it('still rejects an invalid status at the ROUTE, not merely at the schema CHECK', async () => {
     const eid = mkEmployee(9000);
     const res = await putEmp(eid, { status: 'deleted' });

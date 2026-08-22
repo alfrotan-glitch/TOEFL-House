@@ -206,6 +206,25 @@ describe('T-2 · the shared guards reject non-finite numbers directly', () => {
     }
   });
 
+  it('assertMoney rejects a negative amount', () => {
+    // Kills teacher-update mutant M7 (the negative check deleted): the money
+    // boundary itself must refuse negatives, independent of any route guard.
+    expect(() => assertMoney(-5, 'Base salary')).toThrow(/cannot be negative/);
+  });
+
+  it('assertMoney rejects fractional input — whole AFN only (D-23)', () => {
+    // Kills teacher-update mutant M15 (the whole-number check deleted): a typed
+    // 24000.50 must be refused, never silently stored as a REAL half-afghani.
+    expect(() => assertMoney(24000.5, 'Base salary')).toThrow(/whole number/);
+  });
+
+  it('assertPerformanceScore rejects non-decimal numeral strings', () => {
+    // '0x10' coerces to 16 through raw Number() — the pre-fix defect. Kills
+    // teacher-update mutant M12 (the decimal-numeral check deleted).
+    expect(() => assertPerformanceScore('0x10', 'Score')).toThrow(/must be a number between/);
+    expect(assertPerformanceScore('87', 'Score')).toBe(87);
+  });
+
   it('assertPerformanceScore enforces the 0..100 range and its zero sentinel', () => {
     expect(assertPerformanceScore(0)).toBe(0);
     expect(assertPerformanceScore(100)).toBe(100);
