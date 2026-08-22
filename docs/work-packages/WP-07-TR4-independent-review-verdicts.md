@@ -146,3 +146,45 @@ could not be applied. A second gap is also recorded: the journey harness exits 0
 **Proposed next step (awaiting authorization):** re-base the 31 stale anchors under the
 TR4-R14 discipline (preserve documented semantics, verdicts by execution, no invented mutants;
 obsolete targets → the OBSOLETE registry with evidence), and align the journey exit policy.
+
+---
+
+## 7. THE 31-ANCHOR RE-BASE EXECUTED (2026-08-22, Owner: "CONTINUE — follow the Master Protocol")
+
+**Environment incident recovered first (§65):** the sandbox was re-cloned between rounds — local
+history reset to the root, dependencies gone. Recovery: fetched `a7041c8` (all work safe on the
+remote), verified the working tree matched it byte-for-byte, restored the branch pointer,
+reinstalled dependencies (both `node_modules`), and re-established the verified state exactly
+(gate 18/0/17+31 INVALID reproduced). Notably, the object-style harnesses' baseline prechecks
+**refused to run falsely green** on the broken environment — the design held.
+
+**The re-base (6 harnesses, 6 files, +149/−80, harness/test scripts only):**
+
+| Harness | Re-based | Verdicts by execution |
+|---|---|---|
+| invoice-integrity | I1/I2 (validator moved to `finance-settings.ts` — harness gained a second target file), I9/I10 (D-23 replaced round-checks with rejection), I12 (D-104 removed the +0.001 tolerance) | **5/5 KILLED** |
+| branch-profile-fee | F1–F4 (fee loop assigns into `fees[key]`), F11 (guard became `requireCatalogBranch`) | **5/5 KILLED**; F11's stale EQUIVALENT entry corrected — the re-based guard is observably enforced |
+| bos-profit-withdrawal | B1/B2/B4/B10 re-pointed into the shared authority `core/finance/profit-distribution.ts` (harness gained multi-file support), B3/B5/B6 onto route-level position guards | B1/B2/B3/B4/B10 **KILLED**; B6 equivalence **re-proven** against the new anchor; **B5 = new real survivor** |
+| security-grant-escalation | S1–S3 (single-line owner guard), S4 (org+campus guards in `requireAssignmentScope`), S6 (branch reach), S7/S8 (`requireRoleDefinitionReach`), S9 (shared `normalizePermissionList` bound) | **8/8 KILLED**; S9's stale EQUIVALENT corrected (killed by execution); **S10 → OBSOLETE** (its custom-position loop was unified into `normalizePermissionList`; S9 covers the single implementation) |
+| journey-discount-authority | J1 (the defect), J3, J4 (feeTotal→tuitionTotal rename), J8 (partitionFeeSnapshot) | **4/4 KILLED**; exit policy aligned to fail on INVALID |
+| exam-certificate-fee | E6 (role rename manager→general_manager) | **KILLED** |
+
+**Total: 28 KILLED · 1 real survivor (bos B5) · 1 equivalence re-proven (bos B6) · 1 OBSOLETE (S10) ·
+2 stale EQUIVALENT entries corrected to their executed truth (F11, S9). INVALID anchors: 31 → 0.**
+
+**Gates:** `npm run audit:mutation` — **17 passed · 1 failed · 19 surviving · 5 obsolete ·
+0 INVALID** (the one failure is bos, whose B5 is an honest new survivor — below). `npm run
+release:validate` — **22 passed · 0 failed**. Server suite **2842 passed · 162 skipped · 0 failed**
+(no test files changed this round). Server lint green (two unused-import errors introduced during
+the bos surgery were caught by the TR4-R12-hardened gate and fixed).
+
+**Decision checkpoint:**
+- **bos B5** — "remove the reserve-fund pre-guard" now survives: the route's post-withdrawal
+  liquidity check (`postWithdrawalLiquidity < reserveFundTarget`) appears to shadow the pre-guard
+  (`!position.reserveFundMet`) on every suite scenario. Disposition options: (a) coverage repair —
+  a scenario where only the pre-guard answers (if one exists); (b) EQUIVALENT by shadowing, with
+  an executed diff as evidence; (c) production simplification (remove the redundant pre-guard).
+  Not decided here.
+- Remaining open items unchanged: TR-4 Stage 3, TR4-R10/R11/R13, dead export, residuals R-1…R-4.
+
+**WP-07: NOT certified. TR-4: OPEN. Stopped at the checkpoint.**

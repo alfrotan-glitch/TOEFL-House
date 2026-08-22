@@ -10,6 +10,9 @@ import { readFileSync, writeFileSync, copyFileSync, unlinkSync, existsSync } fro
 import { execSync } from 'node:child_process';
 
 const ROUTE = 'src/routes/invoices.routes.ts';
+// I1/I2 re-pointed (TR4-R14, 2026-08-22): due-days validation moved from the
+// route into the declarative finance-settings schema.
+const SETTINGS = 'src/core/configuration/finance-settings.ts';
 const MONEY = 'src/utils/money.ts';
 const TEST = 'src/tests/invoice-subsystem-integrity.test.ts';
 
@@ -24,11 +27,14 @@ const EQUIVALENT = new Set(['I3', 'I15']);
 
 const MUTANTS = [
   // ── INV-1: configuration boundary ─────────────────────────────────────────
-  ['I1', 'restore raw Number() acceptance for due days', ROUTE,
-   "setSetting(dbKey, String(assertDayOffset(body[jsKey], 'Invoice due days')));",
-   'setSetting(dbKey, String(Number(body[jsKey])));'],
-  ['I2', 'bypass the due-days validator entirely', ROUTE,
-   "      if (jsKey === 'invoiceDueDays') {", '      if (false) {'],
+  // I1/I2 re-based (TR4-R14 discipline, 2026-08-22): the validator moved to
+  // core/configuration/finance-settings.ts; semantics unchanged.
+  ['I1', 'restore raw Number() acceptance for due days', SETTINGS,
+   "    parse: (value: unknown) => assertDayOffset(value, 'Invoice due days'),",
+   '    parse: (value: unknown) => Number(value) as number,'],
+  ['I2', 'bypass the due-days validator entirely', SETTINGS,
+   "    parse: (value: unknown) => assertDayOffset(value, 'Invoice due days'),",
+   '    parse: (value: unknown) => value as number,'],
   ['I3', 'remove the finite check', MONEY,
    'if (!Number.isFinite(n)) throw new HttpError(400, `${field} must be a whole number of days.`);\n  if (!Number.isInteger(n))',
    'if (false) throw new HttpError(400, `${field} must be a whole number of days.`);\n  if (!Number.isInteger(n))'],
@@ -46,15 +52,20 @@ const MUTANTS = [
   ['I8', 'raise the ceiling past the valid-Date limit', MONEY,
    'const MAX_DAY_OFFSET = 100_000_000;', 'const MAX_DAY_OFFSET = 1e30;'],
   // ── INV-2: sub-cent money consistency ─────────────────────────────────────
+  // I9/I10/I12 re-based (TR4-R14 discipline, 2026-08-22): D-23 replaced the
+  // old round-checks with outright assertMoney rejection, and D-104 removed
+  // the +0.001 overpayment tolerance; mutants below restore the old defects.
   ['I9', 'silently round a sub-cent unitPrice', ROUTE,
-   "      if (typeof it.unitPrice === 'number' && it.unitPrice !== unitPrice) {", '      if (false) {'],
+   "      const unitPrice = assertMoney(it.unitPrice, 'unitPrice');",
+   '      const unitPrice = Math.round(Number(it.unitPrice) * 100) / 100;'],
   ['I10', 'silently round a sub-cent discount', ROUTE,
-   "    if (typeof discountAmount === 'number' && discountAmount !== requestedDiscount) {", '    if (false) {'],
+   "    const requestedDiscount = assertMoney(discountAmount, 'discount amount');",
+   '    const requestedDiscount = Math.round(Number(discountAmount) * 100) / 100;'],
   // ── Pre-existing invariants the suite now locks ───────────────────────────
   ['I11', 'drop the payment amount validator', ROUTE,
    "try { payAmount = assertMoney(amount, 'Payment amount'); }", 'try { payAmount = Number(amount); }'],
   ['I12', 'allow overpayment beyond the remaining balance', ROUTE,
-   'if (payAmount > remaining + 0.001) {', 'if (false) {'],
+   '      if (payAmount > remaining) {', '      if (false) {'],
   ['I13', 'allow cancelling an invoice that has payments', ROUTE,
    "if (paid > 0) throw new HttpError(400, 'Cannot cancel an invoice that already has payments. Refund first.');",
    "if (false) throw new HttpError(400, 'x');"],
@@ -67,7 +78,7 @@ const MUTANTS = [
 
 const only = process.argv.includes('--only') ? process.argv[process.argv.indexOf('--only') + 1] : null;
 const originals = new Map();
-for (const f of [ROUTE, MONEY]) originals.set(f, readFileSync(f, 'utf8'));
+for (const f of [ROUTE, MONEY, SETTINGS]) originals.set(f, readFileSync(f, 'utf8'));
 const backups = new Map();
 for (const f of [ROUTE, MONEY]) {
   const b = `/tmp/${f.replace(/\W/g, '_')}.bak`;

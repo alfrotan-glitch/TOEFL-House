@@ -14,14 +14,18 @@ const BAK = '/tmp/catalog.routes.bak.ts';
 const TEST = 'src/tests/branch-profile-fee-validation.test.ts';
 
 const MUTANTS = [
+  // F1-F4 re-based (TR4-R14 discipline, 2026-08-22): the fee loop assigns
+  // directly into fees[key] and D-23 replaced the round-check with outright
+  // assertMoney rejection; mutants below preserve the original defect
+  // semantics against the current shape.
   ['F1', 'remove fee validation entirely (raw passthrough)',
-   'const money = assertMoney(b[key], label);', 'const money = Number(b[key]);'],
+   '    fees[key] = assertMoney(b[key], label);', '    fees[key] = Number(b[key]);'],
   ['F2', 'bypass canonical validator, accept any number',
-   'const money = assertMoney(b[key], label);', 'const money = Number(b[key]) || 0;'],
+   '    fees[key] = assertMoney(b[key], label);', '    fees[key] = Number(b[key]) || 0;'],
   ['F3', 'allow negative fees',
-   'const money = assertMoney(b[key], label);', 'const money = assertMoney(b[key], label, { allowNegative: true });'],
+   '    fees[key] = assertMoney(b[key], label);', '    fees[key] = assertMoney(b[key], label, { allowNegative: true });'],
   ['F4', 'silently round sub-cent instead of rejecting',
-   'if (typeof b[key] === \'number\' && (b[key] as number) !== money) {', 'if (false) {'],
+   '    fees[key] = assertMoney(b[key], label);', '    fees[key] = Math.round(Number(b[key]) * 100) / 100;'],
   ['F5', 'validate only the first fee field',
    'for (const [key, label] of FEE_FIELDS) {', 'for (const [key, label] of FEE_FIELDS.slice(0, 1)) {'],
   ['F6', 'skip validation when value is a string (coerce text)',
@@ -42,9 +46,10 @@ const MUTANTS = [
   // already denies every non-owner principal, and an owner writing another
   // branch is correct behaviour. The in-route check is defence-in-depth, so no
   // test can distinguish its removal. It is retained deliberately.
-  ['F11', 'branch scope check removed (cross-branch config write) [EQUIVALENT]',
-   'if (!canAccessBranchResource(req, req.params.branchId)) throw new HttpError(403, \'Branch is outside your authorized scope.\');\n  const b = (req.body ?? {}) as Record<string, unknown>;',
-   'const b = (req.body ?? {}) as Record<string, unknown>;'],
+  // F11 re-based (same discipline): the inline guard became requireCatalogBranch.
+  ['F11', 'branch scope check removed (cross-branch config write)',
+   '  requireCatalogBranch(req, req.params.branchId);\n  const b = (req.body ?? {}) as Record<string, unknown>;',
+   '  const b = (req.body ?? {}) as Record<string, unknown>;'],
 ];
 
 const only = process.argv.includes('--only') ? process.argv[process.argv.indexOf('--only') + 1] : null;
@@ -69,7 +74,12 @@ try {
   writeFileSync(SRC, original);
   if (existsSync(BAK)) unlinkSync(BAK);
 }
-const EQUIVALENT = new Set(['F11']); // proven equivalent by live execution
+// F11 removed from EQUIVALENT (2026-08-22, TR4-R14 re-base): against the
+// re-pointed requireCatalogBranch guard the mutant is KILLED by execution —
+// the suite's cross-branch case fails when the guard is removed. The old
+// equivalence applied only to the pre-rebase inline canAccessBranchResource
+// copy, which no longer exists.
+const EQUIVALENT = new Set();
 const survived = results.filter(r => r[2].includes('SURVIVED') && !EQUIVALENT.has(r[0]));
 const equivalent = results.filter(r => r[2].includes('SURVIVED') && EQUIVALENT.has(r[0]));
 if (equivalent.length) console.log(`\n${equivalent.length} proven-equivalent mutant(s): ${equivalent.map(r => r[0]).join(', ')} (see comment in this file)`);

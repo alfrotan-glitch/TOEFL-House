@@ -28,47 +28,77 @@ const TEST = 'src/tests/security-grant-escalation.test.ts';
 // granting the position itself still goes through requireScopedAssignment
 // (mutant S4/S5 cover that, and both are killed). The bound is retained as
 // defence-in-depth so the stored row cannot claim more than the granter could.
-const EQUIVALENT = new Set(['S9']);
+// S9 removed from EQUIVALENT (2026-08-22, TR4-R14 re-base): against the
+// shared normalizePermissionList scope-bound block the mutant is KILLED by
+// execution — the suite fails when the bound is removed. The old equivalence
+// applied only to the pre-rebase requireScopedAssignment loop.
+const EQUIVALENT = new Set();
+// TR-4 OBSOLETE registry (2026-08-22) — retired with written evidence, never
+// silent, never inside EQUIVALENT. Skipped BEFORE anchoring.
+const OBSOLETE = {
+  S10: 'target unified: POST /roles and PUT /roles/:id/permissions both validate through normalizePermissionList; the separate custom-position scope loop no longer exists. S9 covers the single shared implementation.',
+};
 
 const MUTANTS = [
   // ── SEC-1: the owner role may only be granted by a global owner ──
+  // S1-S4, S6-S9 re-based (TR4-R14 discipline, 2026-08-22): the guards moved
+  // into requireAssignmentScope / requireRoleDefinitionReach /
+  // normalizePermissionList and were reformatted to single-throw lines;
+  // semantics below are unchanged from the originals.
   ['S1', 'drop the owner-role grant guard (the defect)', ROUTE,
-   `  if (role.code === 'owner' && !callerIsGlobalOwner(req)) {
-    throw new HttpError(403, 'Only a global owner may grant the owner role.');
-  }`,
+   "  if (role.code === 'owner' && !callerIsGlobalOwner(req)) throw new HttpError(403, 'Only a global owner may grant the owner role.');",
    ''],
   ['S2', 'owner-role guard trusts any caller claiming owner', ROUTE,
-   "  if (role.code === 'owner' && !callerIsGlobalOwner(req)) {",
-   "  if (role.code === 'owner' && false) {"],
+   "  if (role.code === 'owner' && !callerIsGlobalOwner(req)) throw new HttpError(403, 'Only a global owner may grant the owner role.');",
+   "  if (role.code === 'owner' && false) throw new HttpError(403, 'Only a global owner may grant the owner role.');"],
   ['S3', 'owner-role guard only blocks the primary flag', ROUTE,
-   "  if (role.code === 'owner' && !callerIsGlobalOwner(req)) {",
-   "  if (role.code === 'owner' && isPrimary && !callerIsGlobalOwner(req)) {"],
+   "  if (role.code === 'owner' && !callerIsGlobalOwner(req)) throw new HttpError(403, 'Only a global owner may grant the owner role.');",
+   "  if (role.code === 'owner' && isPrimary && !callerIsGlobalOwner(req)) throw new HttpError(403, 'Only a global owner may grant the owner role.');"],
 
   // ── SEC-2: scope may not be widened ──
   ['S4', 'restore the branch-only scope check (the defect)', ROUTE,
-   `  if (!callerIsGlobalOwner(req)) {
-    throw new HttpError(403, \`Only a global owner may grant \${scope}-scoped access.\`);
-  }`,
-   ''],
+   `  if (scopeType === 'organization') {
+    if (scopeId !== null) throw new HttpError(400, 'Organization scope must not carry a scopeId.');
+    if (!callerIsGlobalOwner(req)) throw new HttpError(403, 'Only a global owner may grant organization-scoped access.');
+    return;
+  }
+  if (!scopeId) throw new HttpError(400, \`\${scopeType} scope requires a scopeId.\`);
+  if (scopeType === 'campus') {
+    if (!callerIsGlobalOwner(req)) throw new HttpError(403, 'Only a global owner may grant campus-scoped access.');`,
+   `  if (scopeType === 'organization') {
+    if (scopeId !== null) throw new HttpError(400, 'Organization scope must not carry a scopeId.');
+    return;
+  }
+  if (!scopeId) throw new HttpError(400, \`\${scopeType} scope requires a scopeId.\`);
+  if (scopeType === 'campus') {`],
   ['S5', 'scope guard permits organization but blocks campus', ROUTE,
    "  if (!callerIsGlobalOwner(req)) {",
    "  if (scope !== 'organization' && !callerIsGlobalOwner(req)) {"],
   ['S6', 'branch scope guard ignores the branch reach check', ROUTE,
-   '    if (scopeId && !canAccessBranchResource(req, scopeId)) {',
-   '    if (scopeId && false) {'],
+   "  if (!db.prepare('SELECT id FROM branches WHERE id = ?').get(scopeId)) throw new HttpError(404, 'Target branch not found.');\n  requirePermissionAtBranch(req, permissionCode, scopeId);",
+   "  if (!db.prepare('SELECT id FROM branches WHERE id = ?').get(scopeId)) throw new HttpError(404, 'Target branch not found.');"],
 
   // ── SEC-3: system identity roles are not rewritable ──
   ['S7', 'drop the system-role rewrite guard (the defect)', ROUTE,
-   `  if (role.isSystem && !callerIsGlobalOwner(req)) {
-    throw new HttpError(403, 'Only a global owner may change the permissions of a system role.');
-  }`,
-   ''],
+   "  if (callerIsGlobalOwner(req)) return;\n  if (role.isSystem) throw new HttpError(403, 'Only a global owner may change a system role.');",
+   '  if (callerIsGlobalOwner(req)) return;'],
   ['S8', 'system-role guard protects only the owner role', ROUTE,
-   '  if (role.isSystem && !callerIsGlobalOwner(req)) {',
-   "  if (role.code === 'owner' && !callerIsGlobalOwner(req)) {"],
+   "  if (role.isSystem) throw new HttpError(403, 'Only a global owner may change a system role.');",
+   "  if ((role as { code?: string }).code === 'owner') throw new HttpError(403, 'Only a global owner may change a system role.');"],
   ['S9', 'role-permission scopes are no longer bounded', ROUTE,
-   "  for (const p of body.permissions) requireScopedAssignment(req, p.scope || 'branch', null);",
-   ''],
+   `    const scope = normalizeScope(candidate.scope, PERMISSION_SCOPES, 'branch');
+    if (!callerIsGlobalOwner(req)) {
+      if (scope !== 'branch') throw new HttpError(403, 'Only a global owner may define permissions wider or narrower than branch scope.');
+      if (!req.rbac?.permissionCodes.has(permission.code)) {
+        throw new HttpError(403, 'You cannot grant a permission you do not hold.');
+      }
+    }`,
+   `    const scope = normalizeScope(candidate.scope, PERMISSION_SCOPES, 'branch');`],
+  // S10 retired through the OBSOLETE mechanism (2026-08-22): custom-position
+  // creation and role-permission editing now share ONE scope-bound
+  // implementation (normalizePermissionList, security.routes.ts:287,353,381);
+  // the separate custom-position loop this mutant anchored no longer exists.
+  // S9's re-based anchor mutates the single shared guard. Not EQUIVALENT.
   ['S10', 'custom position creation may carry any scope', ROUTE,
    '    if (p.scope) requireScopedAssignment(req, p.scope, null);',
    ''],
@@ -89,6 +119,7 @@ const restoreAll = () => { for (const [f, src] of originals) writeFileSync(f, sr
 const results = [];
 try {
   for (const [id, desc, file, find, repl] of MUTANTS) {
+    if (OBSOLETE[id]) { results.push([id, desc, 'OBSOLETE']); console.log(`${id.padEnd(4)} OBSOLETE  ${desc} — target retired with recorded evidence`); continue; }
     if (only && id !== only) continue;
     const src = originals.get(file);
     const hits = src.split(find).length - 1;

@@ -59,11 +59,15 @@ const TEST = 'src/tests/journey-enrollment-discount-authority.test.ts';
 const EQUIVALENT = new Set(['J6', 'J10']);
 
 const MUTANTS = [
+  // J1/J3/J4/J8 re-based (TR4-R14 discipline, 2026-08-22): the route renamed
+  // feeTotal → tuitionTotal (partitionFeeSnapshot, tuition-only ceiling) and
+  // reworded the ceiling message; semantics below are unchanged from the
+  // originals.
   ['J1', 'remove the authorization ceiling entirely (the defect)', ROUTE,
    `      if (requestedDiscount > maxDiscount) {
         throw new HttpError(
           400,
-          \`Discount of \${requestedDiscount} AFN exceeds the authorized maximum of \${maxDiscount} AFN (\${authorized.percent}% of \${feeTotal} AFN) for this student.\`,
+          \`Discount of \${requestedDiscount} AFN exceeds the authorized maximum of \${maxDiscount} AFN (\${authorized.percent}% of \${tuitionTotal} AFN tuition) for this student.\`,
         );
       }`,
    ''],
@@ -73,12 +77,12 @@ const MUTANTS = [
    '      if (requestedDiscount >= maxDiscount) {'],
 
   ['J3', 'ignore the authority and allow the whole fee', ROUTE,
-   '      const maxDiscount = Math.round((feeTotal * authorized.percent) / 100);',
-   '      const maxDiscount = feeTotal;'],
+   '      const maxDiscount = Math.round((tuitionTotal * authorized.percent) / 100);',
+   '      const maxDiscount = tuitionTotal;'],
 
   ['J4', 'hard-code the ordinary ceiling, ignoring authorized exceptions', ROUTE,
-   '      const maxDiscount = Math.round((feeTotal * authorized.percent) / 100);',
-   '      const maxDiscount = Math.round((feeTotal * 20) / 100);'],
+   '      const maxDiscount = Math.round((tuitionTotal * authorized.percent) / 100);',
+   '      const maxDiscount = Math.round((tuitionTotal * 20) / 100);'],
 
   ['J5', 'ask the authority about no student, so every grant is ordinary', ROUTE,
    "      const authorized = resolveAuthorizedDiscount(db, studentId, 100, { branchId: student.branch_id });",
@@ -93,8 +97,8 @@ const MUTANTS = [
    '    if (requestedDiscount > 100000) {'],
 
   ['J8', 'price the ceiling off an empty fee snapshot', ROUTE,
-   '      const feeTotal = Number(snapshot.total || 0);',
-   '      const feeTotal = 0;'],
+   '      const { tuitionTotal } = partitionFeeSnapshot(snapshot.fees);',
+   '      const tuitionTotal = 0;'],
 
   ['J9', 'stop validating the requested amount as money', ROUTE,
    "    const requestedDiscount = discountAmount != null ? assertMoney(discountAmount, 'discount amount') : 0;",
@@ -139,6 +143,10 @@ try {
 }
 const equivalent = results.filter((r) => r[2].includes('SURVIVED') && EQUIVALENT.has(r[0]));
 const survived = results.filter((r) => r[2].includes('SURVIVED') && !EQUIVALENT.has(r[0]));
+// Exit-policy alignment (TR-4, 2026-08-22): an anchor that cannot apply is a
+// lost measurement and fails the harness, like every other harness here.
+const invalid = results.filter((r) => r[2].includes('INVALID'));
 if (equivalent.length) console.log(`\n${equivalent.length} proven-equivalent mutant(s): ${equivalent.map((r) => r[0]).join(', ')} (see the note at the top of this file)`);
+if (invalid.length) console.log(`${invalid.length} INVALID anchor(s): ${invalid.map((r) => r[0]).join(', ')} (pattern drifted — fix the harness)`);
 console.log(`\n${results.filter((r) => r[2] === 'KILLED').length}/${results.length} killed, ${survived.length} survivors`);
-process.exit(survived.length ? 1 : 0);
+process.exit(survived.length || invalid.length ? 1 : 0);

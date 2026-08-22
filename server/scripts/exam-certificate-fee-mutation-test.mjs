@@ -40,8 +40,10 @@ const MUTANTS = [
   ['E5', 'charge even when no certificate is issued',
    'if (shouldHaveCert && !result.certificate_issued && result.student_id) {',
    'if (result.student_id) {'],
+  // E6 re-based (TR4-R14 discipline, 2026-08-22): the correction gate's role
+  // list changed from ('owner','manager') to ('owner','general_manager').
   ['E6', 'drop the owner/manager gate on correction',
-   "authorize('owner', 'manager'), // Strict access control for score correction", ''],
+   "authorize('owner', 'general_manager'), // Strict access control for score correction", ''],
   ['E7', 'drop the corrected-score bounds check',
    "if (typeof score !== 'number' || score < 0 || score > 120) throw new HttpError(400, 'Invalid score. Must be between 0 and 120.');",
    "if (false) throw new HttpError(400, 'x');"],
