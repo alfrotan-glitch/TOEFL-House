@@ -180,3 +180,54 @@ describe('WP-07 · TR4-R13 — every surface agrees for cash + refund + scholars
     expect(Number(report.body.financial.outstanding.total)).toBe(OUTSTANDING);
   });
 });
+
+describe('WP-07 · R-1 — class-less tuition revenue is attributed once and reconciles with the ledger', () => {
+  it('revenue-by-class carries an explicit (no class) bucket whose total equals the ledger income', async () => {
+    // One class-ful term and one class-less term (class_id NULL — also what a
+    // class deletion leaves behind), each paid in full through the desk.
+    const classId = `${key}_cls`;
+    db.prepare(
+      `INSERT INTO classes (id, name, level, schedule_time, branch_id) VALUES (?, 'Morning Class', 'Beginner', '08:00', ?)`,
+    ).run(classId, branch);
+
+    const classful = `${key}_s2`;
+    db.prepare(
+      `INSERT INTO students (id, student_code, full_name, status, registration_date, branch_id, gender, phone)
+       VALUES (?, ?, 'Classful', 'active', ?, ?, 'male', ?)`,
+    ).run(classful, `TH-R1A-${++seq}`, today(), branch, `079${String(2000000 + seq).slice(-7)}`);
+    db.prepare(
+      `INSERT INTO student_semesters (id, student_id, semester_name, enroll_date, fee_amount, net_fee_amount, class_id, status)
+       VALUES (?, ?, 'Term One', ?, 6000, 6000, ?, 'active')`,
+    ).run(`${key}_sem2`, classful, today(), classId);
+
+    const classless = `${key}_s3`;
+    db.prepare(
+      `INSERT INTO students (id, student_code, full_name, status, registration_date, branch_id, gender, phone)
+       VALUES (?, ?, 'Classless', 'active', ?, ?, 'male', ?)`,
+    ).run(classless, `TH-R1B-${++seq}`, today(), branch, `079${String(3000000 + seq).slice(-7)}`);
+    db.prepare(
+      `INSERT INTO student_semesters (id, student_id, semester_name, enroll_date, fee_amount, net_fee_amount, status)
+       VALUES (?, ?, 'Term One', ?, 4000, 4000, 'active')`,
+    ).run(`${key}_sem3`, classless, today());
+
+    await post(`/api/students/${classful}/payments`, { category: 'fee', amount: 6000, semesterId: `${key}_sem2` }).expect(201);
+    await post(`/api/students/${classless}/payments`, { category: 'fee', amount: 4000, semesterId: `${key}_sem3` }).expect(201);
+
+    const byClass = (await get(`/api/bos/revenue-by-class`).expect(200)).body as Array<{ name: string; revenue: number }>;
+    const noClass = byClass.filter((r) => r.name === '(no class)');
+    expect(noClass).toHaveLength(1); // included exactly once, never dropped or duplicated
+    expect(noClass[0].revenue).toBe(4000);
+    expect(byClass.find((r) => r.name === 'Morning Class')?.revenue).toBe(6000);
+
+    // The authoritative ledger: the same money, once, whatever the attribution.
+    const ledger = Number((db.prepare(
+      `SELECT COALESCE(SUM(amount), 0) AS income FROM financial_transactions WHERE type = 'income' AND branch_id = ?`,
+    ).get(branch) as { income: number }).income);
+    expect(ledger).toBe(10000);
+    expect(byClass.reduce((sum, r) => sum + r.revenue, 0)).toBe(ledger);
+
+    const bySlot = (await get(`/api/bos/revenue-by-timeslot`).expect(200)).body as Array<{ slot: string; revenue: number }>;
+    expect(bySlot.find((r) => r.slot === 'Unknown')?.revenue).toBe(4000);
+    expect(bySlot.reduce((sum, r) => sum + r.revenue, 0)).toBe(ledger);
+  });
+});

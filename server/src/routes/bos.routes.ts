@@ -247,13 +247,14 @@ const REVENUE_BY_ALLOCATION_SQL = `
   JOIN payments p ON p.id = a.payment_id
   JOIN student_obligations o ON o.id = a.obligation_id
   JOIN student_semesters ss ON ss.id = o.semester_id
-  JOIN classes c ON c.id = ss.class_id
+  LEFT JOIN classes c ON c.id = ss.class_id
   WHERE ${CASH_ALLOCATION_SQL}
     AND p.status = 'completed'
-    AND c.branch_id = ? AND p.date BETWEEN ? AND ?`;
+    AND ((c.id IS NOT NULL AND c.branch_id = ?) OR (c.id IS NULL AND p.branch_id = ?))
+    AND p.date BETWEEN ? AND ?`;
 
 const stmtRevenueByClass = db.prepare(`
-  SELECT c.name, SUM(a.amount) as revenue
+  SELECT COALESCE(c.name, '(no class)') AS name, SUM(a.amount) as revenue
   ${REVENUE_BY_ALLOCATION_SQL}
   GROUP BY c.id
   ORDER BY revenue DESC
@@ -576,7 +577,7 @@ bosRouter.get(
   ah(async (req, res) => {
     const branchId = requireBosBranch(req);
     const { from, to } = getTimeBounds(req.query.period as string, req.query.timeframe as string);
-    const rows = stmtRevenueByClass.all(branchId, from, to) as any[];
+    const rows = stmtRevenueByClass.all(branchId, branchId, from, to) as any[];
     res.json(rows.map(r => ({ name: r.name, revenue: r.revenue || 0 })));
   })
 );
@@ -586,7 +587,7 @@ bosRouter.get(
   ah(async (req, res) => {
     const branchId = requireBosBranch(req);
     const { from, to } = getTimeBounds(req.query.period as string, req.query.timeframe as string);
-    const rows = stmtRevenueByTimeSlot.all(branchId, from, to) as any[];
+    const rows = stmtRevenueByTimeSlot.all(branchId, branchId, from, to) as any[];
     res.json(rows.map(r => ({ slot: r.slot, revenue: r.revenue || 0 })));
   })
 );

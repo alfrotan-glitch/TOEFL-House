@@ -205,3 +205,35 @@ Awaiting Owner decision.
 
 **Standing:** release 22/22 · mutation 18/0 (all survivors documented) · suite 2843/162/0 ·
 tree clean. **WP-07 NOT certified. Stopped at the checkpoint.**
+
+---
+
+## 13. R-1 IMPLEMENTED AND PROVEN · R-4 ACCEPTED (2026-08-22, Owner-approved)
+
+**R-1 — executed under the full lifecycle.** `REVENUE_BY_ALLOCATION_SQL` now LEFT-JOINS classes
+and branches class-ful rows by the class's branch, class-less rows by the payment's branch (where
+the money was actually collected); `revenue-by-class` carries an explicit **`(no class)`** bucket
+(`GROUP BY c.id` keeps all class-less terms in exactly one row), and `revenue-by-timeslot`'s
+existing `'Unknown'` slot absorbs them by the same rule. Both call sites pass the branch twice.
+**Minimum reconciliation coverage added** (a second case in the TR4-R13 cross-surface suite): a
+class-ful term (6,000, scheduled 08:00) and a class-less term (4,000) paid through the desk —
+asserting `(no class)` appears **exactly once** with 4,000, the class row keeps 6,000, and
+**both breakdowns sum to the authoritative ledger income** (10,000). One mid-round fixture error
+(the test's own class lacked a schedule time, so its revenue correctly joined 'Unknown') was
+diagnosed from the dump and fixed in the fixture — the production change needed nothing.
+Gates: mutation **18 passed · 0 failed** · `release:validate` **22 passed · 0 failed** · suite
+**2844 passed · 162 skipped · 0 failed**. Changed: `bos.routes.ts` (attribution SQL + 2 call
+sites) and the cross-surface suite (+1 case).
+
+**R-4 — accepted as intentional final design, no production change.** Evidence and rationale:
+classless enrolments are reachable (`enrollment-service` writes a term only when
+`classId && active && writeSemester !== false`; all three callers — manual registration,
+student registration, visitor conversion — pass `writeSemester: false` owning their own term).
+D-139's behaviour — bill the whole snapshot as one `other` document, create no tuition receivable
+for a term that does not exist — is **PROVEN** and deliberate: the alternative bills tuition
+twice for the two callers that own their term, or refuses to invoice a real charge. The residual
+is hereby recorded as designed behaviour, not a defect. R-2 and R-3 untouched, as directed.
+
+**Standing after the round:** release 22/22 · mutation 18/0 · suite 2844/162/0 · tree clean.
+**WP-07 NOT certified — awaiting the Owner's instruction on the §73 certification assessment.**
+Stopped at the Decision Checkpoint.
