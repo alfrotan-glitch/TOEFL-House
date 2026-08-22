@@ -38,6 +38,9 @@ const MW = 'src/middleware/auth.ts';
 
 const MUTANTS = [
   {
+    // OBSOLETE ANCHOR — TR4-F10, decision deferred to the Owner (not
+    // classified, not removed): see the note on M12 below — the legacy-role
+    // fallback this mutant guards no longer exists in rbac-service.ts.
     id: 'M1',
     invariant: 'RBAC-1 — an expired grant must not fall through to the legacy role',
     file: SVC,
@@ -45,30 +48,48 @@ const MUTANTS = [
     replace: '  if (roles.length === 0) {',
   },
   {
+    // TR4-F10 re-base: the expiry predicate now lives in the prepared
+    // statement `getUserRoles` below (it moved out of the old query shape the
+    // anchor was written against). Semantics unchanged: drop the predicate.
     id: 'M2',
     invariant: 'expiry predicate on getUserRoles is enforced',
     file: SVC,
-    find: `      FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+    find: `    getUserRoles: db.prepare(\`
+      SELECT ur.role_id AS roleId, r.code AS roleCode, r.name AS roleName, ur.scope_type AS scopeType,
+             ur.scope_id AS scopeId, ur.is_primary AS isPrimary
+      FROM user_roles ur JOIN roles r ON r.id = ur.role_id
       WHERE ur.user_id = ? AND r.is_active = 1
         AND (ur.expires_at IS NULL OR ur.expires_at > datetime('now'))
-    \`),
-    getLegacyUser:`,
-    replace: `      FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+      ORDER BY ur.is_primary DESC
+    \`),`,
+    replace: `    getUserRoles: db.prepare(\`
+      SELECT ur.role_id AS roleId, r.code AS roleCode, r.name AS roleName, ur.scope_type AS scopeType,
+             ur.scope_id AS scopeId, ur.is_primary AS isPrimary
+      FROM user_roles ur JOIN roles r ON r.id = ur.role_id
       WHERE ur.user_id = ? AND r.is_active = 1
-    \`),
-    getLegacyUser:`,
+      ORDER BY ur.is_primary DESC
+    \`),`,
   },
   {
+    // TR4-F10 re-base: same predicate, now in `getUserRbacPerms`.
     id: 'M3',
     invariant: 'expiry predicate on getUserRbacPerms is enforced',
     file: SVC,
-    find: `      WHERE ur.user_id = ? AND r.is_active = 1
+    find: `    getUserRbacPerms: db.prepare(\`
+      SELECT p.code AS code, rp.default_scope AS scope, ur.scope_type AS user_scope, ur.scope_id AS user_scope_id
+      FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+      JOIN role_permissions rp ON rp.role_id = ur.role_id
+      JOIN permissions p ON p.id = rp.permission_id
+      WHERE ur.user_id = ? AND r.is_active = 1
         AND (ur.expires_at IS NULL OR ur.expires_at > datetime('now'))
-    \`),
-    getDelegations:`,
-    replace: `      WHERE ur.user_id = ? AND r.is_active = 1
-    \`),
-    getDelegations:`,
+    \`),`,
+    replace: `    getUserRbacPerms: db.prepare(\`
+      SELECT p.code AS code, rp.default_scope AS scope, ur.scope_type AS user_scope, ur.scope_id AS user_scope_id
+      FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+      JOIN role_permissions rp ON rp.role_id = ur.role_id
+      JOIN permissions p ON p.id = rp.permission_id
+      WHERE ur.user_id = ? AND r.is_active = 1
+    \`),`,
   },
   {
     id: 'M4',
@@ -78,18 +99,23 @@ const MUTANTS = [
     replace: "  return ctx.roles.some((r) => r.roleCode === 'owner');",
   },
   {
+    // TR4-F10 re-base: the per-role loop became the single comparison in
+    // boundaryCanAccessBranch. Semantics unchanged: a branch-scoped grant no
+    // longer has to match the requested branch.
     id: 'M5',
     invariant: 'branch scope comparison must match the requested branch',
     file: SVC,
-    find: "    if (role.scopeType === 'branch' && role.scopeId === branchId) return true;",
-    replace: "    if (role.scopeType === 'branch') return true;",
+    find: "  if (scopeType === 'branch') return scopeId === branchId;",
+    replace: "  if (scopeType === 'branch') return true;",
   },
   {
+    // TR4-F10 re-base: campus comparison now resolves via branch.campusId.
+    // Semantics unchanged: any campus scope grants, regardless of match.
     id: 'M6',
     invariant: 'campus scope comparison must match the branch campus',
     file: SVC,
-    find: "    if (role.scopeType === 'campus' && role.scopeId && role.scopeId === branch.campusId) return true;",
-    replace: "    if (role.scopeType === 'campus') return true;",
+    find: '  return !!branch && branch.campusId === scopeId;',
+    replace: '  return !!branch;',
   },
   {
     id: 'M7',
@@ -124,13 +150,23 @@ const MUTANTS = [
     replace: '    return true;',
   },
   {
+    // TR4-F10 re-base: hasLegacyRole was renamed requestHasRole. Semantics
+    // unchanged: teacher-scoped detection never triggers.
     id: 'M11',
     invariant: 'teacher-scoped detection (isClassTeacherScoped) still triggers',
     file: ABAC,
-    find: "  return scope === 'own' || scope === 'class' || hasLegacyRole(req, 'teacher');",
+    find: "  return scope === 'own' || scope === 'class' || requestHasRole(req, 'teacher');",
     replace: '  return false;',
   },
   {
+    // OBSOLETE ANCHOR — TR4-F10, decision deferred to the Owner (not
+    // classified, not removed): this mutant and M12 mutated the legacy-role
+    // fallback guarded by `hasAnyAssignment`, and that fallback no longer
+    // exists anywhere in rbac-service.ts (grep: hasAnyAssignment /
+    // getLegacyUser / legacy → 0 hits). There is no current code whose
+    // behaviour these documented invariants describe, so they cannot be
+    // re-based without inventing new semantics. They keep reporting INVALID —
+    // loudly and visibly — until the Owner retires or redefines them.
     id: 'M12',
     invariant: 'explicit-assignment detection drives the permission fallback',
     file: SVC,

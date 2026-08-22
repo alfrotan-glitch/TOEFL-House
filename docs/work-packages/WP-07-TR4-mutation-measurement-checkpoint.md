@@ -135,4 +135,39 @@ export F.
 > detection, and surface INVALID counts in the gate summary. Verdicts change only by execution;
 > classification and EQUIVALENT sets remain with the Owner and reviewer.
 
-**TR-4 remains OPEN. No WP-07 certification is signed. Stopped at this decision checkpoint.**
+---
+
+## 8. OUTCOME — TR4-R14 approved by the Owner and implemented (2026-08-22)
+
+Owner approved full scope. Lifecycle executed: CHECKPOINT (`e0a820b`) → IMPLEMENT → VERIFY →
+ATTACK → REPAIR → REVERIFY → CLEAN. Five files changed, +139/−37, all under `server/scripts/`.
+
+**§66 plan falsification, handled by STOP-not-drift:** of the 13 stale anchors, **10 were
+re-basable** and **3 are obsolete in their documented form** — rbac M1/M12 (the legacy-role
+fallback guarded by `hasAnyAssignment` no longer exists anywhere) and teacher-update M14
+(`assertMoney` no longer rounds; it rejects fractional input as "a whole number of AFN").
+Re-basing those would invent new mutants. They remain in place, reporting INVALID loudly, with
+in-harness OBSOLETE notes; their retirement or redefinition is **deferred to the Owner**. No
+EQUIVALENT set was touched (placement remains exactly `P5`); the decision register is 0-diff.
+
+**Measured result (`npm run audit:mutation`, full 18-harness gate):**
+
+| Harness | Before (checkpoint `1b8ed39`) | After | Reading |
+|---|---|---|---|
+| placement-retake-fee | 0/7 killed · 3 survivors · 3 hidden INVALID (vacuous) | **2/7 killed · 4 survivors · 0 hidden** | P4, P7 KILLED by the live WP-04 suites. **P1 (the original defect), P2, P3, P6 SURVIVE for real** — genuine coverage gaps in the live replacement suites, unclassified, for the Owner. P5 remains EQUIVALENT as set. |
+| rbac-authorization | 4/12 killed · 7 hidden INVALID · M7 | **9/12 killed · 2 INVALID (documented-obsolete) · M7** | all five re-based anchors (M2/M3/M5/M6/M11) KILLED — the suite genuinely detects them. M7 (grant-all permissions) survives as a real, unclassified survivor. |
+| teacher-update | 9/13 · 2 hidden INVALID · M7,M12 | **10/13 · 1 INVALID (documented-obsolete) · M7,M12** | M4 (precision ceiling) re-based and KILLED. |
+| finance-expense-request | 7/8 · 1 hidden INVALID · M2 | **7/8 · 0 INVALID · M2** | M7's paired schema anchor fixed (trailing-whitespace drift). |
+| all 14 others | unchanged | **byte-identical** | — |
+
+Gate total: **9 passed · 9 failed · 33 surviving · 3 INVALID anchors surfaced** (was 32 surviving
+with 13 INVALID invisible). The INVALID and VOID counts are now printed in the gate summary.
+Net measurement effect: **13 silent losses → 3 visible, Owner-deferred; 10 restored mutants →
+7 KILLED, 3 revealed as real survivors (P1, P2, P3) + P6.**
+
+**Release gate:** `npm run release:validate` — **22 passed · 0 failed · 0 skipped** (server suite,
+builds, reconcile, audits all green; 517 files tracked). `npm run lint` (root + server) green.
+
+**WP-07 remains NOT certified. TR-4 remains OPEN.** New unclassified survivors awaiting Owner
+disposition: placement P1, P2, P3, P6; rbac M7 (plus all pre-existing survivors, unchanged).
+Open Owner decisions: the three obsolete anchors (M1, M12, M14 — retire or redefine).

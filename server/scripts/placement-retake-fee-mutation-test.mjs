@@ -15,7 +15,16 @@ import { execSync } from 'node:child_process';
 
 const ROUTE = 'src/routes/academic.routes.ts';
 const POLICY = 'src/core/placement/placement-policy.ts';
-const TEST = 'src/tests/placement-retake-fee-integrity.test.ts';
+// Re-pointed (TR4-R14 / TR4-F11): the original target
+// `src/tests/placement-retake-fee-integrity.test.ts` is one of the 13 legacy
+// placement suites D-85 retired as explicit skipped knowledge records, so the
+// harness measured vacuously (every applicable mutant "survived" against a
+// suite that cannot fail). The live WP-04 replacements below drive the exact
+// mutated route (`PUT /api/academic/program-versions/:id/placement-profile`)
+// and the mutated billing decision (`feeCharged`, `payment.amount`).
+const TESTS =
+  'src/tests/work-packages/wp04/retake-billing.integration.test.ts ' +
+  'src/tests/work-packages/wp04/profile-policy.integration.test.ts';
 
 // PROVEN-EQUIVALENT mutants, established by execution rather than inspection.
 //
@@ -32,23 +41,29 @@ const TEST = 'src/tests/placement-retake-fee-integrity.test.ts';
 // NULL), so it is retained deliberately rather than removed.
 const EQUIVALENT = new Set(['P5']);
 
+// P1–P3 re-based (TR4-R14 / TR4-F10): the route now reads
+// `const retakeFeeAmount = validateMoney(body.retakeFeeAmount, 'retakeFeeAmount');`
+// (validateMoney = assertMoney behind a nullable wrapper), so the original
+// anchors — written against the pre-refactor inline `assertMoney` conditional —
+// matched 0x. Each mutant below preserves its documented semantics against the
+// current code shape.
 const MUTANTS = [
   ['P1', 'restore the original weak guard (the defect)', ROUTE,
+   `  const retakeFeeAmount = validateMoney(body.retakeFeeAmount, 'retakeFeeAmount');`,
    `  const retakeFeeAmount = body.retakeFeeAmount == null || body.retakeFeeAmount === ''
     ? null
-    : assertMoney(body.retakeFeeAmount, 'retakeFeeAmount');`,
-   `  const retakeFeeAmount = body.retakeFeeAmount == null || body.retakeFeeAmount === '' ? null : Number(body.retakeFeeAmount);
+    : Number(body.retakeFeeAmount);
   if (retakeFeeAmount != null && (!Number.isFinite(retakeFeeAmount) || retakeFeeAmount < 0)) throw new HttpError(400, 'retakeFeeAmount must be a non-negative amount.');`],
 
   ['P2', 'bypass the validator entirely, coerce the raw input', ROUTE,
-   "    : assertMoney(body.retakeFeeAmount, 'retakeFeeAmount');",
-   '    : Number(body.retakeFeeAmount);'],
+   `  const retakeFeeAmount = validateMoney(body.retakeFeeAmount, 'retakeFeeAmount');`,
+   `  const retakeFeeAmount = body.retakeFeeAmount == null || body.retakeFeeAmount === '' ? null : Number(body.retakeFeeAmount);`],
 
   ['P3', 'treat an omitted retake fee as zero rather than null', ROUTE,
+   `  const retakeFeeAmount = validateMoney(body.retakeFeeAmount, 'retakeFeeAmount');`,
    `  const retakeFeeAmount = body.retakeFeeAmount == null || body.retakeFeeAmount === ''
-    ? null`,
-   `  const retakeFeeAmount = body.retakeFeeAmount == null || body.retakeFeeAmount === ''
-    ? 0`],
+    ? 0
+    : validateMoney(body.retakeFeeAmount, 'retakeFeeAmount');`],
 
   // ── the billing decision this fee feeds ──
   ['P4', 'retake billing ignores the configured retake fee and uses the base fee', POLICY,
@@ -89,10 +104,24 @@ try {
     }
     writeFileSync(file, src.replace(find, repl));
     let verdict;
+    let out = '';
+    let threw = false;
     try {
-      execSync(`rm -f src/tests/test.sqlite*; npx vitest run --no-file-parallelism ${TEST}`, { stdio: 'pipe', timeout: 180000 });
-      verdict = '*** SURVIVED ***';
-    } catch { verdict = 'KILLED'; }
+      out = execSync(`rm -f src/tests/test.sqlite*; npx vitest run --no-file-parallelism ${TESTS}`, { encoding: 'utf8', timeout: 180000 });
+    } catch (e) {
+      threw = true;
+      out = `${e.stdout ?? ''}${e.stderr ?? ''}`;
+    }
+    // TR4-F11 guard: a suite that executes zero tests (everything skipped or
+    // missing) cannot fail, so it can kill nothing. That is a VOID measurement,
+    // never a survivor — and it fails the harness so the drift is visible.
+    if (/No test files found/.test(out)) {
+      verdict = 'INVALID (target suite not found)';
+    } else if (/Tests\s+0\s+passed/.test(out)) {
+      verdict = '*** SUITE-SKIPPED — MEASUREMENT VOID ***';
+    } else {
+      verdict = threw ? 'KILLED' : '*** SURVIVED ***';
+    }
     results.push([id, desc, verdict]);
     console.log(`${id.padEnd(4)} ${desc.padEnd(64)} ${verdict}`);
     restoreAll();
@@ -103,6 +132,8 @@ try {
 }
 const equivalent = results.filter((r) => r[2].includes('SURVIVED') && EQUIVALENT.has(r[0]));
 const survived = results.filter((r) => r[2].includes('SURVIVED') && !EQUIVALENT.has(r[0]));
+const voidRuns = results.filter((r) => r[2].includes('VOID'));
 if (equivalent.length) console.log(`\n${equivalent.length} proven-equivalent mutant(s): ${equivalent.map((r) => r[0]).join(', ')} (see the note at the top of this file)`);
+if (voidRuns.length) console.log(`${voidRuns.length} VOID measurement(s): ${voidRuns.map((r) => r[0]).join(', ')} — the target suite executed 0 tests; a suite that cannot fail cannot kill`);
 console.log(`\n${results.filter((r) => r[2] === 'KILLED').length}/${results.length} killed, ${survived.length} survivors`);
-process.exit(survived.length ? 1 : 0);
+process.exit(survived.length || voidRuns.length ? 1 : 0);

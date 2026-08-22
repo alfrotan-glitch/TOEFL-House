@@ -82,10 +82,12 @@ const MUTANTS = [
     replace: "export type NotificationType = 'alert' | 'info' | 'warning' | 'critical' | 'success';",
     // Widening the union alone changes no runtime behaviour, so this mutant is
     // paired with the schema to prove the CHECK itself is asserted.
+    // TR4-F10 re-base: the notifications CHECK line lost its trailing space in
+    // schema.sql, so the anchor matched 0x. Text otherwise unchanged.
     also: [{
       file: SCHEMA,
-      find: "type      TEXT NOT NULL DEFAULT 'info' CHECK (type IN ('info','warning','critical','success')), ",
-      replace: "type      TEXT NOT NULL DEFAULT 'info', ",
+      find: "type      TEXT NOT NULL DEFAULT 'info' CHECK (type IN ('info','warning','critical','success')),",
+      replace: "type      TEXT NOT NULL DEFAULT 'info',",
     }],
   },
   {

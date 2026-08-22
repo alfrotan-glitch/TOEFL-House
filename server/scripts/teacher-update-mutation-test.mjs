@@ -62,11 +62,21 @@ const MUTANTS = [
   },
   // ── Boundary: the shared guards must actually guard ──────────────────────
   {
+    // TR4-F10 re-base: assertMoney no longer rounds (it rejects fractional
+    // input as "a whole number of AFN"); the ceiling survives as the
+    // isSafeInteger/MAX_MONEY block. The whole-number line above it
+    // disambiguates this block from assertComputedMoney's identical throw.
+    // Semantics unchanged: the precision ceiling stops being enforced.
     id: 'M4',
     invariant: 'T-2 assertMoney enforces the safe-integer-cents ceiling (blocks 1e15)',
     file: MONEY,
-    find: "  if (!Number.isSafeInteger(Math.round(Math.abs(rounded) * 100))) throw new HttpError(400, `${field} exceeds supported monetary precision.`);",
-    replace: '  void rounded;',
+    find: `  if (!Number.isInteger(n)) throw new HttpError(400, \`\${field} must be a whole number of AFN.\`);
+  if (!Number.isSafeInteger(n) || Math.abs(n) > MAX_MONEY) {
+    throw new HttpError(400, \`\${field} exceeds supported monetary precision.\`);
+  }
+  return Object.is(n, -0) ? 0 : n;`,
+    replace: `  if (!Number.isInteger(n)) throw new HttpError(400, \`\${field} must be a whole number of AFN.\`);
+  return Object.is(n, -0) ? 0 : n;`,
   },
   {
     id: 'M5',
@@ -140,6 +150,13 @@ const MUTANTS = [
     replace: '  void allowZero;',
   },
   {
+    // OBSOLETE ANCHOR — TR4-F10, decision deferred to the Owner (not
+    // classified, not removed): assertMoney no longer rounds to two decimals —
+    // fractional input is now rejected outright ("must be a whole number of
+    // AFN"); rounding moved to assertComputedMoney via roundMoney, a different
+    // function with a different contract. Re-basing would invent a new mutant,
+    // so this entry keeps reporting INVALID — loudly — until the Owner retires
+    // or redefines it.
     id: 'M14',
     invariant: 'T-2 assertMoney rounds to two decimals',
     file: MONEY,

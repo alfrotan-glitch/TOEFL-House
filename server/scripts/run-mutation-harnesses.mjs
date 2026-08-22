@@ -54,9 +54,18 @@ if (harnesses.length === 0) {
 function summarise(output) {
   const survivors = [...output.matchAll(/^\s*(\S+)\s+.*\*\*\* SURVIVED \*\*\*/gm)].map((m) => m[1]);
   const alt = [...output.matchAll(/^\s*(\S+)\s+SURVIVED\s/gm)].map((m) => m[1]);
+  // TR4-F10: anchors that match 0x mean the harness measured LESS than it
+  // claims. Surfaced here so drift is visible without reading per-mutant logs.
+  const invalid = [...output.matchAll(/^\s*(\S+)\s+INVALID/gm)].map((m) => m[1]);
+  const voidRuns = [...output.matchAll(/^\s*(\S+)\s+.*MEASUREMENT VOID/gm)].map((m) => m[1]);
   const tallyLine = output.match(/^.*killed.*$/m) ?? output.match(/^KILLED:.*$/m);
   const tally = tallyLine ? String(tallyLine[0]).trim() : '';
-  return { survivors: [...new Set([...survivors, ...alt])], tally };
+  return {
+    survivors: [...new Set([...survivors, ...alt])],
+    invalid: [...new Set(invalid)],
+    voidRuns: [...new Set(voidRuns)],
+    tally,
+  };
 }
 
 console.log(`Mutation harness gate — ${harnesses.length} harness(es)\n`);
@@ -72,19 +81,23 @@ for (const file of harnesses) {
   });
   const output = `${run.stdout ?? ''}${run.stderr ?? ''}`;
   const code = run.status === null ? 124 : run.status;
-  const { survivors, tally } = summarise(output);
+  const { survivors, invalid, voidRuns, tally } = summarise(output);
   const seconds = Math.round((Date.now() - started) / 1000);
-  results.push({ harness: file, exitCode: code, survivors, tally, seconds });
+  results.push({ harness: file, exitCode: code, survivors, invalid, voidRuns, tally, seconds });
 
   const verdict = code === 0 ? 'PASS' : 'FAIL';
   console.log(
     `  ${verdict.padEnd(4)}  ${file.replace('-mutation-test.mjs', '').padEnd(34)} ${String(seconds).padStart(4)}s  ${tally}`,
   );
   if (survivors.length > 0) console.log(`        survivors: ${survivors.join(', ')}`);
+  if (invalid.length > 0) console.log(`        INVALID anchors (measurement lost): ${invalid.join(', ')}`);
+  if (voidRuns.length > 0) console.log(`        VOID runs (target suite skipped): ${voidRuns.join(', ')}`);
 }
 
 const failed = results.filter((r) => r.exitCode !== 0);
 const survivorCount = results.reduce((n, r) => n + r.survivors.length, 0);
+const invalidCount = results.reduce((n, r) => n + r.invalid.length, 0);
+const voidCount = results.reduce((n, r) => n + r.voidRuns.length, 0);
 
 if (jsonOut) {
   writeFileSync(jsonOut, `${JSON.stringify({ generatedAt: new Date().toISOString(), results }, null, 2)}\n`);
@@ -92,7 +105,10 @@ if (jsonOut) {
 }
 
 console.log(`\n──────────────────────────────────────────────────────────`);
-console.log(`  ${results.length - failed.length} passed · ${failed.length} failed · ${survivorCount} surviving mutant(s) reported\n`);
+console.log(`  ${results.length - failed.length} passed · ${failed.length} failed · ${survivorCount} surviving mutant(s) reported`);
+if (invalidCount > 0) console.log(`  ${invalidCount} INVALID anchor(s) — intended measurement(s) that could not be applied`);
+if (voidCount > 0) console.log(`  ${voidCount} VOID run(s) — target suite executed no tests\n`);
+if (invalidCount === 0 && voidCount === 0) console.log('');
 
 if (failed.length > 0) {
   console.error('  MUTATION GATE FAILED');
