@@ -20,7 +20,7 @@ import { api, ApiError } from './api/client';
 import { useAuth } from './contexts/useAuth';
 import {
   Student, Teacher, Employee, Partner, Class, Visitor, Attendance, Payment, BooksWorkspace,
-  Exam, ExamResult, BudgetLine, BudgetLineInput, FinanceCategory, ExpenseRequest, FinancialTransaction, AuditLog, Notification,
+  Exam, ExamResult, BudgetLine, BudgetLineInput, FinanceCategory, ExpenseRequest, FinancialTransaction, AuditLog, Notification, PaginatedRows,
   Skill, ClassTeacherSkill, OperationalPaymentInput, ExpenseReport, ExpenseKind, Invoice, FinanceConfig, FinanceDashboard,
   // 1.0.0 types
   Donor, FundingCampaign, Donation, DonationRestriction, Scholarship, ScholarshipAward, SponsorshipAgreement, FundingSummary,
@@ -538,7 +538,9 @@ export function useApiStore() {
     [bq, canSeeFinance]
   );
   const reloadAuditLogs = useCallback(
-    () => (canSeeAuditLog ? api.get<AuditLog[]>('/audit-logs', bq).then(setAuditLogs) : Promise.resolve()),
+    () => (canSeeAuditLog
+      ? api.get<PaginatedRows<AuditLog>>('/audit-logs', { ...bq, limit: '50' }).then((page) => setAuditLogs(page.rows))
+      : Promise.resolve(setAuditLogs([]))),
     [bq, canSeeAuditLog]
   );
   // The notifications endpoint chooses its default through the canonical RBAC

@@ -2,54 +2,132 @@ import { Router } from 'express';
 import { db } from '../db/connection.js';
 import {
   authenticate,
-  authorize,
   canAccessBranchResource,
   denyPermissionless,
+  requirePermission,
   resolveBranchScope,
 } from '../middleware/auth.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
+import { parsePagination } from '../utils/pagination.js';
 
 export const auditRouter = Router();
 auditRouter.use(authenticate);
 
-// Only owner & manager can see the full audit trail.
+interface AuditLogRow {
+  id: string;
+  operator_id: string | null;
+  operator_name: string | null;
+  operator_role: string | null;
+  action: string;
+  date: string;
+  time: string;
+  old_value: string | null;
+  new_value: string | null;
+  ip: string | null;
+  device: string | null;
+  branch_id: string | null;
+}
+
+interface AuditFailureRow {
+  id: string;
+  occurred_at: string;
+  request_id: string | null;
+  operator_id: string | null;
+  branch_id: string | null;
+  action: string;
+  error: string;
+  payload: string | null;
+}
+
+function escapeLikeTerm(value: string): string {
+  return value.replace(/[%_\\]/g, (match) => `\\${match}`);
+}
+
+function pagedResponse<T>(rows: T[], total: number, limit: number, offset: number, page: number) {
+  return {
+    rows,
+    total,
+    limit,
+    offset,
+    page,
+    hasMore: offset + rows.length < total,
+  };
+}
+
+// ============================================================================
+// Audit log
+// ============================================================================
+
 auditRouter.get(
   '/',
-  authorize('general_manager'), // authorize() implicitly allows 'owner' as well
+  requirePermission('Audit.View'),
   ah(async (req, res) => {
     const { branchId, isAll } = resolveBranchScope(req);
     const operatorName = typeof req.query.operatorName === 'string' ? req.query.operatorName.trim() : '';
     const action = typeof req.query.action === 'string' ? req.query.action.trim() : '';
     const dateFrom = typeof req.query.dateFrom === 'string' ? req.query.dateFrom.trim() : '';
     const dateTo = typeof req.query.dateTo === 'string' ? req.query.dateTo.trim() : '';
-    const limit = Math.min(2000, Math.max(1, parseInt(String(req.query.limit || '500'), 10) || 500));
-    const offset = Math.max(0, parseInt(String(req.query.offset || '0'), 10) || 0);
+    const { limit, offset, page } = parsePagination(req, { defaultPageSize: 200, maxPageSize: 2000 });
 
     const clauses: string[] = [];
     const params: unknown[] = [];
     if (!isAll) { clauses.push('branch_id = ?'); params.push(branchId); }
-    if (operatorName) { clauses.push('operator_name LIKE ?'); params.push(`%${operatorName.replace(/[%_\\]/g, (m) => `\\${m}`)}%`); }
-    if (action) { clauses.push('action LIKE ?'); params.push(`%${action.replace(/[%_\\]/g, (m) => `\\${m}`)}%`); }
+    if (operatorName) { clauses.push("operator_name LIKE ? ESCAPE '\\'"); params.push(`%${escapeLikeTerm(operatorName)}%`); }
+    if (action) { clauses.push("action LIKE ? ESCAPE '\\'"); params.push(`%${escapeLikeTerm(action)}%`); }
     if (dateFrom) { clauses.push('date >= ?'); params.push(dateFrom); }
     if (dateTo) { clauses.push('date <= ?'); params.push(dateTo); }
 
     const whereSql = clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '';
     const countRow = db.prepare(`SELECT COUNT(*) AS c FROM audit_logs${whereSql}`).get(...params) as { c: number };
-    const rows = db.prepare(`SELECT * FROM audit_logs${whereSql} ORDER BY date DESC, time DESC, rowid DESC LIMIT ? OFFSET ?`).all(...params, limit, offset);
+    const rows = db.prepare(
+      `SELECT * FROM audit_logs${whereSql} ORDER BY date DESC, time DESC, rowid DESC LIMIT ? OFFSET ?`
+    ).all(...params, limit, offset) as AuditLogRow[];
+
     res.setHeader('X-Total-Count', String(countRow.c));
     res.setHeader('X-Page-Limit', String(limit));
     res.setHeader('X-Page-Offset', String(offset));
-    if (req.query.includeTotal === '1') {
-      res.json({ rows, total: countRow.c });
-      return;
-    }
-    res.json(rows);
+    res.json(pagedResponse(rows, countRow.c, limit, offset, page));
+  })
+);
+
+auditRouter.get(
+  '/failures',
+  requirePermission('Audit.View'),
+  ah(async (req, res) => {
+    const { branchId, isAll } = resolveBranchScope(req);
+    const action = typeof req.query.action === 'string' ? req.query.action.trim() : '';
+    const error = typeof req.query.error === 'string' ? req.query.error.trim() : '';
+    const requestId = typeof req.query.requestId === 'string' ? req.query.requestId.trim() : '';
+    const dateFrom = typeof req.query.dateFrom === 'string' ? req.query.dateFrom.trim() : '';
+    const dateTo = typeof req.query.dateTo === 'string' ? req.query.dateTo.trim() : '';
+    const { limit, offset, page } = parsePagination(req, { defaultPageSize: 100, maxPageSize: 1000 });
+
+    const clauses: string[] = [];
+    const params: unknown[] = [];
+    if (!isAll) { clauses.push('branch_id = ?'); params.push(branchId); }
+    if (action) { clauses.push("action LIKE ? ESCAPE '\\'"); params.push(`%${escapeLikeTerm(action)}%`); }
+    if (error) { clauses.push("error LIKE ? ESCAPE '\\'"); params.push(`%${escapeLikeTerm(error)}%`); }
+    if (requestId) { clauses.push('request_id = ?'); params.push(requestId); }
+    if (dateFrom) { clauses.push('date(occurred_at) >= ?'); params.push(dateFrom); }
+    if (dateTo) { clauses.push('date(occurred_at) <= ?'); params.push(dateTo); }
+
+    const whereSql = clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '';
+    const countRow = db.prepare(`SELECT COUNT(*) AS c FROM audit_failures${whereSql}`).get(...params) as { c: number };
+    const rows = db.prepare(
+      `SELECT * FROM audit_failures${whereSql} ORDER BY occurred_at DESC, rowid DESC LIMIT ? OFFSET ?`
+    ).all(...params, limit, offset) as AuditFailureRow[];
+
+    res.setHeader('X-Total-Count', String(countRow.c));
+    res.setHeader('X-Page-Limit', String(limit));
+    res.setHeader('X-Page-Offset', String(offset));
+    res.json(pagedResponse(rows, countRow.c, limit, offset, page));
   })
 );
 
 // ============================================================================
-// Notifications Router
+// Notifications
 // ============================================================================
+
 export const notificationsRouter = Router();
 notificationsRouter.use(authenticate);
 

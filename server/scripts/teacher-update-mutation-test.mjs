@@ -125,8 +125,8 @@ const MUTANTS = [
     id: 'M10',
     invariant: 'T-2 assertPerformanceScore rejects negative scores',
     file: MONEY,
-    find: '  if (n < 0) throw new HttpError(400, `${field} cannot be negative.`);\n  if (!allowZero',
-    replace: '  if (false) throw new HttpError(400, `${field} cannot be negative.`);\n  if (!allowZero',
+    find: '  if (n < 0) throw new HttpError(400, `${field} cannot be negative.`);\n  if (n > 100) throw new HttpError(400, `${field} cannot exceed 100.`);\n  if (!allowZero',
+    replace: '  if (false) throw new HttpError(400, `${field} cannot be negative.`);\n  if (n > 100) throw new HttpError(400, `${field} cannot exceed 100.`);\n  if (!allowZero',
   },
   {
     id: 'M11',

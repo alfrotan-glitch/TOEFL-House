@@ -212,8 +212,8 @@ export function assertPerformanceScore(
     throw new HttpError(400, `${field} must be a number between ${allowZero ? 0 : 1} and 100.`);
   }
   if (!Number.isFinite(n)) throw new HttpError(400, `${field} must be a number between ${allowZero ? 0 : 1} and 100.`);
-  if (n > 100) throw new HttpError(400, `${field} cannot exceed 100.`);
   if (n < 0) throw new HttpError(400, `${field} cannot be negative.`);
+  if (n > 100) throw new HttpError(400, `${field} cannot exceed 100.`);
   if (!allowZero && n === 0) throw new HttpError(400, `${field} must be greater than zero.`);
   return n;
 }

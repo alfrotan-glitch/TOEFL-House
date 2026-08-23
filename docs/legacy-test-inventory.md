@@ -471,16 +471,35 @@ The five cross-cutting guards inventoried above — `frontend-cache-invalidation
 
 ## WP-13 Audit & Platform
 
-9 files · 77 cases
+**C-2 disposition: REPLACED.** The historical inventory was **9 files / 77
+statically counted cases**. Discovery widened the verified runtime baseline to
+**10 files / 109 tests** because `notifications-authority.test.ts` is part of the
+same route/registry surface, and the package now adds **3 package-local
+authorities / 8 tests** under `server/src/tests/work-packages/wp13/`.
 
-| File | Cases | Asserted behaviour |
+The mixed top-level suites remain active as broader system, release and
+cross-domain regression guards. WP-13's package authority is now the dedicated
+`work-packages/wp13/` directory, which certifies the canonical audit permission,
+contract and platform-gate seams directly while the older suites keep proving
+cross-system closure.
+
+| Historical / mixed file | Cases | Replacement / retained disposition |
 |---|---:|---|
-| `deep-audit-regression.test.ts` | 9 | User creation via API (RBAC param fix) · Manual student registration & ID card (simple-payment 10-arg fix) · Global search (classes.code fix) · Manager & finance HR/payroll RBAC (catalog fix) |
-| `deployment-verifier.test.ts` | 9 | deployment verifier |
-| `erp-forensic.test.ts` | 7 | ERP cross-system forensic audit · ERP forensic — concurrency + scale (second suite) |
-| `final-hardening.test.ts` | 18 | Student-role isolation (no branch-wide reads) · Owner equivalent unrestricted access + refund flow · Receptionist ≠ Finance · P&L accounting semantics (single source of truth) · Ledger pagination · Audit log filters + pagination · Reporting endpoint · Logout revokes the session · Multiple positions per user · Invoice student name/code snapshot |
-| `governance-audit.test.ts` | 4 | B-2 — owner absolute access preserves attribution · B-3 — rule changes capture before and after values |
-| `release-gate-forensic.test.ts` | 4 | Release-gate forensic — untested student/unauthorized surfaces · Release-gate forensic — cross-writer financial duplication |
-| `script-path-portability.test.ts` | 5 | WIN-1 — no script derives a filesystem path from URL.pathname · WIN-1 — fileURLToPath is what makes this portable · WIN-1 — line endings are pinned so checkouts match across platforms |
-| `system-closure-authorities.test.ts` | 13 | CLOSURE-2 — head_of_department is academic-only and cannot waive debt · CLOSURE-4 — sponsorship revival cannot restore discount authority · CLOSURE-6 — sub-cent and zero amounts never reach a money writer · CLOSURE-7 — workflow approval is advisory and authorizes nothing · CLOSURE-8 — student_semesters status domain is enforced by the database · CLOSURE-12 — financial reconciliation holds after real HTTP activity |
-| `system-integrity-guards.test.ts` | 8 | G1 — schema.sql must be the sole schema authority · G2 — date basis must be consistent across the system · G3 — every navigation entry resolves to a real route |
+| `deep-audit-regression.test.ts` | 9 | Retained as a top-level regression guard for cross-subsystem audit-sensitive bug classes; not the package-local authority. |
+| `deployment-verifier.test.ts` | 9 | Retained as the runtime verifier guard for `server/scripts/verify-deployment.mjs`; package-local WP-13 source contracts now pin the platform gate wiring too. |
+| `erp-forensic.test.ts` | 7 | Retained as whole-ERP forensic and concurrency evidence that still exercises audit-adjacent truth across subsystem boundaries. |
+| `final-hardening.test.ts` | 18 | Retained as mixed security/finance/reporting/audit closure; its audit assertions were updated to the new paginated envelope. |
+| `governance-audit.test.ts` | 4 | Retained as governance-specific attribution/change-history evidence. |
+| `release-gate-forensic.test.ts` | 4 | Retained as release-gate forensic evidence for formerly under-tested unauthorized and cross-writer surfaces. |
+| `script-path-portability.test.ts` | 5 | Retained as cross-platform script-portability evidence; package-local WP-13 contracts now also pin the specific release/deployment audit hooks. |
+| `system-closure-authorities.test.ts` | 13 | Retained as system-wide closure authority. |
+| `system-integrity-guards.test.ts` | 8 | Retained as system-wide schema/date/route integrity authority. |
+| `notifications-authority.test.ts` | 28 | Explicitly included in the WP-13 runtime baseline because notifications share the route, registry and authorization surface and were resolved by D-58/D-59. |
+
+### WP-13 package authorities
+
+| File | Runtime cases | Purpose |
+|---|---:|---|
+| `work-packages/wp13/audit-platform.authority.test.ts` | 3 | Canonical `Audit.View` authorization, branch-scoped audit visibility, literal filter escaping, and the readable `audit_failures` side-channel. |
+| `work-packages/wp13/audit-platform.contract.test.ts` | 3 | Source contracts for the permissioned audit routes, durable audit-failure writer, and portable deployment/release gate hooks. |
+| `work-packages/wp13/audit-platform.frontend-contract.test.ts` | 2 | Shared camelCase/paginated audit contract across the audit workspace, dashboard consumer path and shared frontend types/store. |

@@ -320,9 +320,11 @@ describe('Audit log filters + pagination', () => {
     const res = await supertest(app).get('/api/audit-logs?operatorName=Hardening%20Finance').set(authHeader(owner));
     expect(res.status).toBe(200);
     expect(Number(res.headers['x-total-count'])).toBeGreaterThanOrEqual(1);
+    expect(Array.isArray(res.body.rows)).toBe(true);
     // SQLite LIKE is case-insensitive for ASCII; compare case-insensitively.
-    expect(res.body.every((r: { operator_name: string }) => r.operator_name.toLowerCase().includes('hardening finance'))).toBe(true);
+    expect(res.body.rows.every((r: { operator_name: string }) => r.operator_name.toLowerCase().includes('hardening finance'))).toBe(true);
     const byAction = await supertest(app).get('/api/audit-logs?action=Created%20student').set(authHeader(owner));
+    expect(Array.isArray(byAction.body.rows)).toBe(true);
     expect(Number(byAction.headers['x-total-count'])).toBeGreaterThanOrEqual(1);
   });
 

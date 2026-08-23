@@ -1465,16 +1465,37 @@ export interface Notification {
 
 export interface AuditLog {
   id: string;
-  operatorId: string;
-  operatorName: string;
+  operatorId: string | null;
+  operatorName: string | null;
+  operatorRole: string | null;
   action: string;
   date: string;
   time: string;
-  oldValue?: string;
-  newValue?: string;
-  ip: string;
-  device: string;
-  branchId: string;
+  oldValue: string | null;
+  newValue: string | null;
+  ip: string | null;
+  device: string | null;
+  branchId: string | null;
+}
+
+export interface AuditFailure {
+  id: string;
+  occurredAt: string;
+  requestId: string | null;
+  operatorId: string | null;
+  branchId: string | null;
+  action: string;
+  error: string;
+  payload: string | null;
+}
+
+export interface PaginatedRows<T> {
+  rows: T[];
+  total: number;
+  page: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
 }
 
 // ============================================================================
