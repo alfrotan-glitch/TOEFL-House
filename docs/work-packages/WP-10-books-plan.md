@@ -27,9 +27,10 @@ plan was written.
 - The complete Books vertical slice: catalog, immutable inventory receipts, stock
   availability, sales, full sale returns/refunds, student lending/issuance, returns,
   overdue visibility, server API, RBAC, audit records, frontend state and UI.
-- Replacement of the duplicate book-payment writer in `students.routes.ts` and its
-  student-payment UI entry point. This is a necessary boundary repair: Book commerce
-  must have one financial/inventory writer.
+- Replacement of the duplicate book-payment writer in `students.routes.ts`, its
+  student-payment UI entry point, and the generic student-refund path that could reverse
+  a Book payment without returning Book inventory. This is a necessary boundary repair:
+  Book commerce must have one financial/inventory writer.
 - The dependent report/catalog consumers only where their current Book source would
   otherwise become false after the Books reconstruction.
 - Books-specific canonical-authority, invariant, metric, decision and conflict-register
@@ -181,7 +182,7 @@ policy that moves money must return to Owner decision under §105 and §20–21.
 | Domain | Add `server/src/core/books/books-service.ts` for validation, authoritative workspace queries, catalog/receipt commands, sale/refund money lifecycle and loan/return commands inside explicit transactions. |
 | API | Rebuild `server/src/routes/books.routes.ts` around permission checks and the service. Expose a server-rendered workspace plus focused commands; remove the obsolete stock-write and role-name routes. |
 | RBAC | Add Book restock/issue/return/refund permissions and assign default scopes consistent with the currently executable Books route behavior; server routes use `requirePermission`. |
-| Student boundary | Remove the generic `category='book'` payment path, its book lookup/stock mutation and the Student UI book-payment affordance. Preserve generic finance behavior for non-Book categories. |
+| Student boundary | Remove the generic `category='book'` payment path, its book lookup/stock mutation, its generic refund eligibility, and the Student UI book-payment affordance. Preserve generic finance behavior for non-Book categories. |
 | Frontend | Replace legacy Books components and state with a typed workspace consumer. It renders server totals and supports catalog, stock receipt, sale, sale-return, loan and return workflows; it has intentional loading/empty/error/permission states and never calculates inventory/financial truth locally. |
 | Consumers | Adapt report/catalog and dependent tests only to consume the final sale relation; do not redesign WP-11 reporting architecture. |
 | Tests | Re-home/rebuild Book tests under `server/src/tests/work-packages/wp10/`; add API, direct-schema, RBAC, cross-writer, finance/reconciliation, idempotency/concurrency, lending lifecycle, UI-contract and cold-review attack suites. |
