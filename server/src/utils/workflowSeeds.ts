@@ -7,6 +7,7 @@ startup is safe.
 import { db } from '../db/connection.js';
 import { id } from './ids.js';
 import type { RoleCode } from '../core/rbac/permission-catalog.js';
+import { WORKFLOW_TRIGGER_MANUAL, type WorkflowTrigger } from '../core/events/event-registry.js';
 
 interface DefaultWorkflowStep {
   order: number;
@@ -21,7 +22,7 @@ interface DefaultWorkflowStep {
 
 interface DefaultWorkflowDefinition {
   name: string;
-  trigger: string;
+  trigger: WorkflowTrigger;
   steps: DefaultWorkflowStep[];
 }
 
@@ -37,7 +38,7 @@ const DEFAULT_WORKFLOWS: DefaultWorkflowDefinition[] = [
   },
   {
     name: 'Refund Request',
-    trigger: 'payment.refund_requested',
+    trigger: WORKFLOW_TRIGGER_MANUAL,
     steps: [
       { order: 1, role: 'receptionist', action: 'review', label: 'Registrar verification', slaHours: 12 },
       { order: 2, role: 'general_manager', action: 'approve', label: 'Branch manager approval', slaHours: 24 },
@@ -46,7 +47,7 @@ const DEFAULT_WORKFLOWS: DefaultWorkflowDefinition[] = [
   },
   {
     name: 'Teacher Salary Payment',
-    trigger: 'teacher.salary_requested',
+    trigger: WORKFLOW_TRIGGER_MANUAL,
     steps: [
       { order: 1, role: 'head_of_department', action: 'review', label: 'Academic head review', slaHours: 24 },
       { order: 2, role: 'finance_manager', action: 'approve', label: 'Finance approval', slaHours: 24 },
@@ -56,7 +57,7 @@ const DEFAULT_WORKFLOWS: DefaultWorkflowDefinition[] = [
   },
   {
     name: 'Student Withdrawal',
-    trigger: 'student.withdrawal_requested',
+    trigger: WORKFLOW_TRIGGER_MANUAL,
     steps: [
       { order: 1, role: 'receptionist', action: 'review', label: 'Registrar review', slaHours: 24 },
       { order: 2, role: 'general_manager', action: 'approve', label: 'Branch manager approval', slaHours: 48 },
@@ -65,7 +66,7 @@ const DEFAULT_WORKFLOWS: DefaultWorkflowDefinition[] = [
   },
   {
     name: 'Budget Reallocation',
-    trigger: 'budget.reallocation_requested',
+    trigger: WORKFLOW_TRIGGER_MANUAL,
     steps: [
       { order: 1, role: 'finance_manager', action: 'review', label: 'Finance review', slaHours: 24 },
       { order: 2, role: 'owner', action: 'approve', label: 'Founder approval', slaHours: 48 },
@@ -73,7 +74,7 @@ const DEFAULT_WORKFLOWS: DefaultWorkflowDefinition[] = [
   },
   {
     name: 'Scholarship Award',
-    trigger: 'scholarship.award_requested',
+    trigger: WORKFLOW_TRIGGER_MANUAL,
     steps: [
       { order: 1, role: 'general_manager', action: 'review', label: 'Manager eligibility review', slaHours: 48 },
       { order: 2, role: 'donor_manager', action: 'review', label: 'Donor manager verification', slaHours: 48 },

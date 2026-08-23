@@ -95,3 +95,28 @@ must exist, and every `Test` must name a real test file.
 | Book sale and full sale-return cash fact | immutable `book_sales` → linked `payments` → linked `financial_transactions`; immutable `book_sale_refunds` → signed contra payment/income | `server/src/core/books/books-service.ts` + Book/payment/income triggers in `server/src/db/schema.sql` | `POST /api/books/catalog/:bookId/sales`, `POST /api/books/sales/:saleId/return` | `src/components/books/BooksView.tsx` | `server/src/routes/reports.routes.ts`, `server/src/core/reporting/report-catalog.ts`, reconciliation | `server/src/tests/work-packages/wp10/books-authority.test.ts`, `server/src/tests/work-packages/wp10/books-authority.attack.test.ts` | AUTHORITATIVE |
 | Book student-loan custody and return chronology | immutable `book_loans`/`book_loan_returns` plus append-only `student_journey_events` | `server/src/core/books/books-service.ts` calling canonical `server/src/core/journey/journey-engine.ts` in the same transaction | `POST /api/books/catalog/:bookId/loans`, `POST /api/books/loans/:loanId/return` | `src/components/books/BooksView.tsx`, student journey | — | `server/src/tests/work-packages/wp10/books-authority.test.ts`, `server/src/tests/work-packages/wp10/books-authority.attack.test.ts` | AUTHORITATIVE |
 | Books command authorization | `permissions`, `role_permissions`, assignment scope | `Book.View`, `Book.Create`, `Book.Edit`, `Book.Restock`, `Book.Sell`, `Book.Refund`, `Book.Issue`, `Book.Return` in `server/src/core/rbac/permission-catalog.ts` | `requirePermission` in `server/src/routes/books.routes.ts` | Books affordances consume resolved permissions only | scoped Book report/read consumers | `server/src/tests/work-packages/wp10/books-authority.attack.test.ts`, `server/src/tests/work-packages/wp10/books-frontend-contract.test.ts` | AUTHORITATIVE |
+
+## WP-12 — Workflow, Automation and Event Authority
+
+- **Canonical event vocabulary:** `server/src/core/events/event-registry.ts` is
+  the only authority for `DomainEventType`, `/api/events/types`, workflow
+  triggers and automation triggers.
+- **Workflow definition authority:** `server/src/routes/workflows.routes.ts`
+  governs definition CRUD; `Workflow.Configure` is the mutation authority and is
+  intentionally owner-only because definitions are global configuration.
+- **Workflow instance authority:** `Workflow.View`, `Workflow.Trigger`,
+  `Workflow.Approve`, `Workflow.Reject` and `Workflow.Cancel` govern instance
+  read/action routes; branch scope remains resolved from canonical RBAC.
+- **Automation definition authority:** `server/src/routes/automations.routes.ts`
+  governs automation CRUD/toggle/test; `Automation.Edit` is the mutation
+  authority and is intentionally owner-only because automations are global
+  configuration.
+- **Runtime execution authority:** `server/src/core/events/handlers.ts` starts
+  matching workflows for dispatched events; `server/src/core/events/automation-engine.ts`
+  validates, evaluates and executes matching automations.
+- **Event operations authority:** `server/src/routes/events.routes.ts` uses
+  `Event.View` for stream/stats/type/log visibility and `Event.Manage` for
+  replay/flush/subscription mutation.
+- **Workflow UI actionability authority:** `src/components/workflows/WorkflowsView.tsx`
+  consumes permission codes and assigned role codes from the auth context; the
+  browser never infers actionability from a role label alone.

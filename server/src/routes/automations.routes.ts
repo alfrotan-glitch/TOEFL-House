@@ -7,8 +7,8 @@
  * when domain events fire.
  *
  * Access control:
- *   - owner, manager: full CRUD + toggle + execution log
- *   - head_of_department: read-only (view active automations)
+ *   - Workflow.View: read-only visibility
+ *   - Automation.Edit: global automation mutation (owner-only by default role grants)
  *
  * @module routes/automations.routes
  * @version 2.0.0
@@ -18,12 +18,18 @@
 import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { parsePagination as parsePaginationShared } from '../utils/pagination.js';
-import { authenticate, authorize } from '../middleware/auth.js';
+import { authenticate, requirePermission } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id } from '../utils/ids.js';
 import { addNotification } from '../utils/notifications.js';
 import { createLogger } from '../core/observability/logger.js';
+import {
+  evaluateAutomation,
+  validateAutomationActions,
+  validateAutomationConditions,
+} from '../core/events/automation-engine.js';
+import { isDomainEventType } from '../core/events/event-registry.js';
 const log = createLogger('automations');
 
 export const automationsRouter = Router();
@@ -79,7 +85,7 @@ const stmtGetExecutionLogs = db.prepare(
 /** GET /api/automations — list all automations, optionally filtered by trigger or active status */
 automationsRouter.get(
   '/',
-  authorize('owner', 'general_manager', 'head_of_department'),
+  requirePermission('Workflow.View'),
   ah(async (req, res) => {
     const { trigger, isActive } = req.query as Record<string, string>;
 
@@ -117,7 +123,7 @@ automationsRouter.get(
 /** GET /api/automations/:id — single automation with execution stats */
 automationsRouter.get(
   '/:id',
-  authorize('owner', 'general_manager', 'head_of_department'),
+  requirePermission('Workflow.View'),
   ah(async (req, res) => {
     const row = stmtGetAutomationById.get(req.params.id) as any;
     if (!row) throw new HttpError(404, 'Automation not found.');
@@ -151,42 +157,24 @@ automationsRouter.get(
 /** POST /api/automations — create a new automation rule (owner/manager only) */
 automationsRouter.post(
   '/',
-  authorize('owner'),
+  requirePermission('Automation.Edit'),
   ah(async (req, res) => {
-    const { name, trigger, conditions, actions } = req.body;
-
-    if (!name || !trigger) {
+    const rawName = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    const rawTrigger = typeof req.body?.trigger === 'string' ? req.body.trigger.trim() : '';
+    if (!rawName || !rawTrigger) {
       throw new HttpError(400, 'Automation name and trigger event are required.');
     }
-    if (!Array.isArray(conditions)) {
-      throw new HttpError(400, 'Conditions must be an array of rule conditions.');
-    }
-    if (!Array.isArray(actions) || actions.length === 0) {
-      throw new HttpError(400, 'At least one action is required.');
+    if (!isDomainEventType(rawTrigger)) {
+      throw new HttpError(400, `Unknown automation trigger '${rawTrigger}'.`);
     }
 
-    // Validate condition structure
-    const validOperators = ['eq', 'neq', 'gt', 'lt', 'gte', 'lte', 'in', 'contains'];
-    for (let i = 0; i < conditions.length; i++) {
-      const cond = conditions[i];
-      if (!cond.field || !cond.operator) {
-        throw new HttpError(400, `Condition ${i + 1} must have "field" and "operator".`);
-      }
-      if (!validOperators.includes(cond.operator)) {
-        throw new HttpError(400, `Condition ${i + 1} has invalid operator "${cond.operator}".`);
-      }
-    }
-
-    // Validate action structure
-    const validActionTypes = ['notify', 'create_entity', 'update_entity', 'transition', 'webhook'];
-    for (let i = 0; i < actions.length; i++) {
-      const act = actions[i];
-      if (!act.type || !validActionTypes.includes(act.type)) {
-        throw new HttpError(400, `Action ${i + 1} has invalid type "${act.type}".`);
-      }
-      if (!act.config || typeof act.config !== 'object') {
-        throw new HttpError(400, `Action ${i + 1} must have a "config" object.`);
-      }
+    let normalizedConditions;
+    let normalizedActions;
+    try {
+      normalizedConditions = validateAutomationConditions(req.body?.conditions ?? []);
+      normalizedActions = validateAutomationActions(req.body?.actions);
+    } catch (error) {
+      throw new HttpError(400, error instanceof Error ? error.message : 'Invalid automation definition.');
     }
 
     const newId = id('auto');
@@ -194,23 +182,26 @@ automationsRouter.post(
 
     const tx = db.transaction(() => {
       stmtInsertAutomation.run(
-        newId, name, trigger, JSON.stringify(conditions), JSON.stringify(actions), now, now
+        newId,
+        rawName,
+        rawTrigger,
+        JSON.stringify(normalizedConditions),
+        JSON.stringify(normalizedActions),
+        now,
+        now,
       );
-      // Register the automation as an event subscription
-      stmtInsertSubscription.run(
-        id('es'), trigger, JSON.stringify({ automationId: newId })
-      );
+      stmtInsertSubscription.run(id('es'), rawTrigger, JSON.stringify({ automationId: newId }));
     });
     tx();
 
     addNotification(
       'Automation Created',
-      `Automation "${name}" is now active and listening for "${trigger}" events.`,
+      `Automation "${rawName}" is now active and listening for "${rawTrigger}" events.`,
       'success',
-      req.user?.branchId
+      req.user?.branchId,
     );
 
-    writeAudit(req, `Created automation: ${name} (trigger: ${trigger})`);
+    writeAudit(req, `Created automation: ${rawName} (trigger: ${rawTrigger})`);
     res.status(201).json({ id: newId });
   })
 );
@@ -222,7 +213,7 @@ automationsRouter.post(
 /** PATCH /api/automations/:id — update automation name, conditions, actions, or active status */
 automationsRouter.patch(
   '/:id',
-  authorize('owner'),
+  requirePermission('Automation.Edit'),
   ah(async (req, res) => {
     const existing = stmtGetAutomationById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Automation not found.');
@@ -230,23 +221,24 @@ automationsRouter.patch(
     const { name, conditions, actions, isActive } = req.body;
     const now = new Date().toISOString();
 
-    if (conditions !== undefined && !Array.isArray(conditions)) {
-      throw new HttpError(400, 'Conditions must be an array.');
-    }
-    if (actions !== undefined && (!Array.isArray(actions) || actions.length === 0)) {
-      throw new HttpError(400, 'At least one action is required.');
+    let normalizedConditions = existing.conditions;
+    let normalizedActions = existing.actions;
+    try {
+      if (conditions !== undefined) normalizedConditions = JSON.stringify(validateAutomationConditions(conditions));
+      if (actions !== undefined) normalizedActions = JSON.stringify(validateAutomationActions(actions));
+    } catch (error) {
+      throw new HttpError(400, error instanceof Error ? error.message : 'Invalid automation definition.');
     }
 
     stmtUpdateAutomation.run(
-      name ?? existing.name,
-      conditions !== undefined ? JSON.stringify(conditions) : existing.conditions,
-      actions !== undefined ? JSON.stringify(actions) : existing.actions,
+      typeof name === 'string' && name.trim() ? name.trim() : existing.name,
+      normalizedConditions,
+      normalizedActions,
       isActive !== undefined ? (isActive ? 1 : 0) : existing.is_active,
       now,
-      req.params.id
+      req.params.id,
     );
 
-    // Sync the event subscription active state securely
     if (isActive !== undefined) {
       stmtUpdateSubscriptionActive.run(isActive ? 1 : 0, req.params.id);
     }
@@ -263,7 +255,7 @@ automationsRouter.patch(
 /** POST /api/automations/:id/toggle — quick toggle active/inactive */
 automationsRouter.post(
   '/:id/toggle',
-  authorize('owner'),
+  requirePermission('Automation.Edit'),
   ah(async (req, res) => {
     const existing = stmtGetAutomationById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Automation not found.');
@@ -298,7 +290,7 @@ automationsRouter.post(
 /** DELETE /api/automations/:id — permanently delete an automation (owner only) */
 automationsRouter.delete(
   '/:id',
-  authorize('owner'),
+  requirePermission('Automation.Edit'),
   ah(async (req, res) => {
     const existing = stmtGetAutomationById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Automation not found.');
@@ -321,7 +313,7 @@ automationsRouter.delete(
 /** GET /api/automations/:id/executions — recent execution history for an automation */
 automationsRouter.get(
   '/:id/executions',
-  authorize('owner', 'general_manager', 'head_of_department'),
+  requirePermission('Workflow.View'),
   ah(async (req, res) => {
     const existing = stmtGetAutomationById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Automation not found.');
@@ -354,35 +346,28 @@ automationsRouter.get(
 
 automationsRouter.post(
   '/:id/test',
-  authorize('owner', 'general_manager'),
+  requirePermission('Automation.Edit'),
   ah(async (req, res) => {
     const existing = stmtGetAutomationById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Automation not found.');
 
     const { samplePayload } = req.body;
-    if (!samplePayload || typeof samplePayload !== 'object') {
+    if (!samplePayload || typeof samplePayload !== 'object' || Array.isArray(samplePayload)) {
       throw new HttpError(400, 'A "samplePayload" object is required for testing.');
     }
 
-    const conditions = JSON.parse(existing.conditions || '[]');
-    const actions = JSON.parse(existing.actions || '[]');
-
-    const conditionResults = conditions.map((cond: any, idx: number) => {
-      const fieldValue = resolveFieldPath(cond.field, samplePayload);
-      const matched = evaluateTestCondition(cond, fieldValue);
-      return {
-        index: idx + 1, field: cond.field, operator: cond.operator,
-        expectedValue: cond.value, actualValue: fieldValue, matched,
-      };
-    });
-
-    const allConditionsMet = conditionResults.every((r: any) => r.matched);
+    const conditions = validateAutomationConditions(JSON.parse(existing.conditions || '[]'));
+    const actions = validateAutomationActions(JSON.parse(existing.actions || '[]'));
+    const verdict = evaluateAutomation(conditions, samplePayload as Record<string, unknown>);
 
     res.json({
-      automationId: existing.id, automationName: existing.name, trigger: existing.trigger,
-      allConditionsMet, conditionResults,
-      actionsThatWouldFire: allConditionsMet ? actions : [],
-      verdict: allConditionsMet
+      automationId: existing.id,
+      automationName: existing.name,
+      trigger: existing.trigger,
+      allConditionsMet: verdict.allConditionsMet,
+      conditionResults: verdict.conditionResults,
+      actionsThatWouldFire: verdict.allConditionsMet ? actions : [],
+      verdict: verdict.allConditionsMet
         ? 'All conditions met — actions WOULD execute.'
         : 'Conditions NOT met — no actions would execute.',
     });
@@ -400,41 +385,50 @@ export function seedDefaultAutomations(): void {
 
   const defaults = [
     {
-      name: 'Low Attendance Parent Alert', trigger: 'attendance.marked',
+      name: 'Low Attendance Alert',
+      trigger: 'attendance.marked',
       conditions: [{ field: 'attendanceRate', operator: 'lt', value: 85 }],
-      actions: [{ type: 'notify', config: { channel: 'sms', template: 'parent_attendance_warning', message: 'Student attendance has fallen below the 85% threshold.' } }],
+      actions: [{ type: 'notify', config: { title: 'Attendance alert', severity: 'warning', message: 'Attendance has fallen below the configured threshold.' } }],
     },
     {
-      name: 'Auto-Promote on Exam Pass', trigger: 'exam.result_recorded',
+      name: 'High Exam Result Review',
+      trigger: 'exam.result_recorded',
       conditions: [{ field: 'score', operator: 'gte', value: 90 }],
-      actions: [
-        { type: 'transition', config: { targetStatus: 'promoted' } },
-        { type: 'notify', config: { channel: 'internal', message: 'Student auto-promoted after satisfying the configured promotion policy.' } },
-      ],
+      actions: [{ type: 'notify', config: { title: 'High exam result', severity: 'info', message: 'A high exam score was recorded and may need follow-up action.' } }],
     },
     {
-      name: 'Overdue Installment Reminder', trigger: 'payment.received',
+      name: 'Outstanding Balance Reminder',
+      trigger: 'payment.received',
       conditions: [{ field: 'remainingBalance', operator: 'gt', value: 0 }],
-      actions: [{ type: 'notify', config: { channel: 'internal', template: 'installment_reminder', message: 'Installment payment received. Outstanding balance updated.' } }],
+      actions: [{ type: 'notify', config: { title: 'Outstanding balance', severity: 'info', message: 'A payment was received and the account still carries an outstanding balance.' } }],
     },
     {
-      name: 'New Student Welcome Notification', trigger: 'student.registered',
+      name: 'New Student Welcome Notification',
+      trigger: 'student.registered',
       conditions: [],
-      actions: [{ type: 'notify', config: { channel: 'internal', template: 'welcome_student', message: 'A new student has been registered in the system.' } }],
+      actions: [{ type: 'notify', config: { title: 'New student registered', severity: 'success', message: 'A new student has been registered in the system.' } }],
     },
     {
-      name: 'Critical Stock Alert', trigger: 'book.sold',
+      name: 'Critical Stock Alert',
+      trigger: 'book.sold',
       conditions: [{ field: 'remainingStock', operator: 'lte', value: 5 }],
-      actions: [{ type: 'notify', config: { channel: 'internal', template: 'low_stock_alert', message: 'Book stock has fallen to critical levels. Restock recommended.' } }],
+      actions: [{ type: 'notify', config: { title: 'Critical stock alert', severity: 'warning', message: 'Book stock has fallen to critical levels. Restock recommended.' } }],
     },
-  ];
+  ] as const;
 
   const seedTx = db.transaction(() => {
     for (const auto of defaults) {
       const autoId = id('auto');
+      const conditions = validateAutomationConditions(auto.conditions);
+      const actions = validateAutomationActions(auto.actions);
       stmtInsertAutomation.run(
-        autoId, auto.name, auto.trigger, JSON.stringify(auto.conditions), JSON.stringify(auto.actions),
-        new Date().toISOString(), new Date().toISOString()
+        autoId,
+        auto.name,
+        auto.trigger,
+        JSON.stringify(conditions),
+        JSON.stringify(actions),
+        new Date().toISOString(),
+        new Date().toISOString(),
       );
       stmtInsertSubscription.run(id('es'), auto.trigger, JSON.stringify({ automationId: autoId }));
     }
@@ -445,39 +439,6 @@ export function seedDefaultAutomations(): void {
     log.info('✅ Seeded default automations.');
   } catch (error) {
     log.error('❌ Failed to seed default automations:', error);
-  }
-}
-
-// ============================================================================
-// §10 — INTERNAL HELPERS
-// ============================================================================
-
-function resolveFieldPath(path: string, data: Record<string, unknown>): unknown {
-  const segments = path.split('.');
-  let current: unknown = data;
-
-  for (const segment of segments) {
-    if (current === null || current === undefined) return undefined;
-    if (typeof current !== 'object') return undefined;
-    current = (current as Record<string, unknown>)[segment];
-  }
-  return current;
-}
-
-function evaluateTestCondition(cond: any, fieldValue: unknown): boolean {
-  const { operator, value } = cond;
-
-  switch (operator) {
-    case 'eq': return fieldValue === value;
-    case 'neq': return fieldValue !== value;
-    case 'gt': return Number(fieldValue) > Number(value);
-    case 'lt': return Number(fieldValue) < Number(value);
-    case 'gte': return Number(fieldValue) >= Number(value);
-    case 'lte': return Number(fieldValue) <= Number(value);
-    case 'in': return Array.isArray(value) && value.includes(fieldValue);
-    case 'contains':
-      return typeof fieldValue === 'string' && typeof value === 'string' && fieldValue.includes(value);
-    default: return false;
   }
 }
 

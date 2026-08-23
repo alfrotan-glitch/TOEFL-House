@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import type { WorkflowInstance, Automation, WorkflowStatus } from '../../types';
 import { formatJalaliDateTime } from '../../utils/jalali';
+import { useAuth } from '../../contexts/useAuth';
 
 interface WorkflowStepDef {
   order: number;
@@ -33,8 +34,6 @@ interface WorkflowInstanceDetail extends WorkflowInstance {
 interface Props {
   instances: WorkflowInstance[];
   automations: Automation[];
-  activeRole: string;
-  isGlobalOwner: boolean;
   approveWorkflowStep: (instanceId: string, notes?: string) => Promise<void>;
   rejectWorkflowStep: (instanceId: string, reason: string) => Promise<void>;
   getWorkflowInstanceDetail: (instanceId: string) => Promise<WorkflowInstanceDetail>;
@@ -53,9 +52,10 @@ const STATUS_LABELS: Record<WorkflowStatus, string> = {
 const TERMINAL_STATUSES: WorkflowStatus[] = ['approved', 'rejected', 'completed', 'cancelled'];
 
 export default function WorkflowsView({
-  instances, automations, activeRole, isGlobalOwner,
+  instances, automations,
   approveWorkflowStep, rejectWorkflowStep, getWorkflowInstanceDetail, toggleAutomation,
 }: Props) {
+  const { user, can } = useAuth();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<WorkflowInstanceDetail | null>(null);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
@@ -85,12 +85,19 @@ export default function WorkflowsView({
   }, [selectedId, getWorkflowInstanceDetail]);
 
   const currentStepDef = detail?.steps.find(s => s.order === detail.currentStep);
-  // Mirrors the backend's own check: the assigned role, global Owner, or
-  // general manager may act. A scoped Owner label is not a superuser signal.
+  const assignedRoleCodes = new Set(
+    user?.roles?.map((assignment) => assignment.roleCode) ?? (user?.role ? [user.role] : [])
+  );
+  const hasStepRole = !!currentStepDef && assignedRoleCodes.has(currentStepDef.role);
+  const hasManagerOverride = assignedRoleCodes.has('general_manager');
+  const canApproveStep = can('Workflow.Approve');
+  const canRejectStep = can('Workflow.Reject');
+  const canManageAutomations = can('Automation.Edit');
   const canActOnCurrentStep =
     !!currentStepDef &&
     !TERMINAL_STATUSES.includes(detail!.status) &&
-    (activeRole === currentStepDef.role || isGlobalOwner || activeRole === 'general_manager');
+    (hasStepRole || user?.isGlobalOwner || hasManagerOverride) &&
+    (canApproveStep || canRejectStep);
 
   const handleApprove = async () => {
     if (!selectedId) return;
@@ -265,15 +272,16 @@ export default function WorkflowsView({
                   ) : (
                     <div className="flex gap-2">
                       <button
-                        disabled={isActing}
+                        disabled={isActing || !canApproveStep}
                         onClick={handleApprove}
                         className="flex items-center gap-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded-lg px-3.5 py-2"
                       >
                         <ThumbsUp className="w-3.5 h-3.5" /> {isActing ? 'Saving…' : 'Approve this step'}
                       </button>
                       <button
+                        disabled={!canRejectStep}
                         onClick={() => setShowRejectForm(true)}
-                        className="flex items-center gap-1.5 text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-lg px-3.5 py-2"
+                        className="flex items-center gap-1.5 text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 disabled:opacity-50 rounded-lg px-3.5 py-2"
                       >
                         <ThumbsDown className="w-3.5 h-3.5" /> Reject
                       </button>
@@ -282,7 +290,7 @@ export default function WorkflowsView({
                 ) : (
                   <p className="text-xs text-amber-700 bg-amber-50 rounded-xl p-3 flex items-center gap-2">
                     <Ban className="w-4 h-4 shrink-0" />
-                    Only role «{currentStepDef?.role}» (or manager/owner) can approve or reject this step.
+                    You need the current step role plus workflow approval authority to action this step.
                   </p>
                 )}
 
@@ -326,8 +334,9 @@ export default function WorkflowsView({
                   <p className="text-xs text-slate-500">Trigger: {x.trigger}</p>
                 </div>
                 <button
+                  disabled={!canManageAutomations}
                   onClick={() => toggleAutomation(x.id, !x.isActive)}
-                  className={`text-xs font-bold px-2.5 py-1 rounded-full transition-colors ${
+                  className={`text-xs font-bold px-2.5 py-1 rounded-full transition-colors disabled:opacity-50 ${
                     x.isActive ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
                   }`}
                 >

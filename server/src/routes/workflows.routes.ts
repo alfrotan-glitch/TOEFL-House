@@ -7,13 +7,14 @@ and full audit history.
 */
 import { Router } from 'express';
 import { db } from '../db/connection.js';
-import { authenticate, authorize, requirePermission, resolveBranchScope, requestHasRole, canAccessBranchResource } from '../middleware/auth.js';
+import { authenticate, requirePermission, resolveBranchScope, requestHasRole, canAccessBranchResource } from '../middleware/auth.js';
 import { ROLE_CODES, type RoleCode } from '../core/rbac/permission-catalog.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id } from '../utils/ids.js';
 import { addNotification } from '../utils/notifications.js';
 import { eventBus } from '../core/events/event-bus.js';
+import { isWorkflowTrigger, WORKFLOW_TRIGGER_MANUAL } from '../core/events/event-registry.js';
 
 export const workflowsRouter = Router();
 workflowsRouter.use(authenticate);
@@ -56,6 +57,13 @@ const stmtGetPendingInstances = db.prepare(
    WHERE wi.branch_id = ? AND wi.status = 'in_progress' 
    ORDER BY wi.started_at ASC`
 );
+const stmtGetPendingInstancesAll = db.prepare(
+  `SELECT wi.*, wd.name as definition_name, wd.steps as definition_steps
+   FROM workflow_instances wi
+   JOIN workflow_definitions wd ON wd.id = wi.definition_id
+   WHERE wi.status = 'in_progress'
+   ORDER BY wi.started_at ASC`
+);
 
 // Helper to safely parse JSON
 /**
@@ -76,9 +84,37 @@ function assertKnownStepRole(role: string, stepOrder: number): RoleCode {
 }
 
 const parseSteps = (stepsJson: string): any[] => {
-  try { return JSON.parse(stepsJson) || []; } 
+  try { return JSON.parse(stepsJson) || []; }
   catch { return []; }
 };
+
+function normalizeWorkflowTrigger(raw: unknown): string {
+  const trigger = typeof raw === 'string' ? raw.trim() : '';
+  if (!trigger) throw new HttpError(400, 'Workflow trigger is required.');
+  if (!isWorkflowTrigger(trigger)) throw new HttpError(400, `Unknown workflow trigger '${trigger}'.`);
+  return trigger;
+}
+
+function normalizeWorkflowSteps(raw: unknown): Array<{ order: number; role: RoleCode; action: 'approve' | 'review' | 'notify' | 'execute'; label?: string; slaHours?: number }> {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new HttpError(400, 'At least one workflow step is required.');
+  }
+  return raw.map((entry, index) => {
+    if (!entry || typeof entry !== 'object') throw new HttpError(400, `Step ${index + 1} must be an object.`);
+    const step = entry as Record<string, unknown>;
+    const role = assertKnownStepRole(String(step.role ?? ''), index + 1);
+    const action = typeof step.action === 'string' ? step.action.trim() : '';
+    if (!['approve', 'review', 'notify', 'execute'].includes(action)) {
+      throw new HttpError(400, `Step ${index + 1} has an invalid action "${action}".`);
+    }
+    const label = typeof step.label === 'string' && step.label.trim() ? step.label.trim() : undefined;
+    const slaHours = step.slaHours === undefined || step.slaHours === null ? undefined : Number(step.slaHours);
+    if (slaHours !== undefined && (!Number.isFinite(slaHours) || slaHours < 0)) {
+      throw new HttpError(400, `Step ${index + 1} has invalid slaHours "${step.slaHours}".`);
+    }
+    return { order: index + 1, role, action: action as 'approve' | 'review' | 'notify' | 'execute', label, slaHours };
+  });
+}
 
 // Helper to enforce branch scope
 const ENTITY_BRANCH_QUERIES: Record<string, string> = {
@@ -125,44 +161,37 @@ workflowsRouter.get('/definitions/:id', requirePermission('Workflow.View'), ah(a
   });
 }));
 
-workflowsRouter.post('/definitions', authorize('owner'), ah(async (req, res) => {
-  const { name, trigger, steps } = req.body;
-  if (!name || !trigger || !Array.isArray(steps) || steps.length === 0) {
-    throw new HttpError(400, 'Name, trigger, and at least one step are required.');
-  }
-  const sanitizedSteps = steps.map((step: any, index: number) => {
-    if (!step.role || !step.action) {
-      throw new HttpError(400, `Step ${index + 1} must have a "role" and an "action".`);
-    }
-    if (!['approve', 'review', 'notify', 'execute'].includes(step.action)) {
-      throw new HttpError(400, `Step ${index + 1} has an invalid action "${step.action}".`);
-    }
-    return { ...step, order: index + 1 }; // Force sequential order
-  });
+workflowsRouter.post('/definitions', requirePermission('Workflow.Configure'), ah(async (req, res) => {
+  const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+  if (!name) throw new HttpError(400, 'Workflow name is required.');
+  const trigger = normalizeWorkflowTrigger(req.body?.trigger);
+  const sanitizedSteps = normalizeWorkflowSteps(req.body?.steps);
 
   const newId = id('wfd');
   const now = new Date().toISOString();
   stmtInsertDefinition.run(newId, name, trigger, JSON.stringify(sanitizedSteps), now, now);
-  
+
   writeAudit(req, `Created workflow definition: ${name} (trigger: ${trigger})`);
   res.status(201).json({ id: newId });
 }));
 
-workflowsRouter.patch('/definitions/:id', authorize('owner'), ah(async (req, res) => {
+workflowsRouter.patch('/definitions/:id', requirePermission('Workflow.Configure'), ah(async (req, res) => {
   const existing = stmtGetDefinitionById.get(req.params.id) as DefinitionRow | undefined;
   if (!existing) throw new HttpError(404, 'Workflow definition not found.');
-  
+
   const { name, steps, isActive } = req.body;
   const now = new Date().toISOString();
-  
+  const nextName = typeof name === 'string' && name.trim() ? name.trim() : existing.name;
+  const nextSteps = steps !== undefined ? JSON.stringify(normalizeWorkflowSteps(steps)) : existing.steps;
+
   stmtUpdateDefinition.run(
-    name ?? existing.name,
-    steps ? JSON.stringify(steps.map((s: any, i: number) => ({ ...s, order: i + 1 }))) : existing.steps,
+    nextName,
+    nextSteps,
     isActive !== undefined ? (isActive ? 1 : 0) : existing.is_active,
     now,
-    req.params.id
+    req.params.id,
   );
-  
+
   writeAudit(req, `Updated workflow definition: ${existing.name}`);
   res.json({ ok: true });
 }));
@@ -171,7 +200,7 @@ workflowsRouter.patch('/definitions/:id', authorize('owner'), ah(async (req, res
 // §2 — WORKFLOW INSTANCES
 // ============================================================================
 
-workflowsRouter.get('/instances', ah(async (req, res) => {
+workflowsRouter.get('/instances', requirePermission('Workflow.View'), ah(async (req, res) => {
   const { status, entityType, entityId } = req.query as Record<string, string>;
   const { branchId, isAll } = resolveBranchScope(req);
   
@@ -197,7 +226,7 @@ workflowsRouter.get('/instances', ah(async (req, res) => {
   })));
 }));
 
-workflowsRouter.get('/instances/:id', ah(async (req, res) => {
+workflowsRouter.get('/instances/:id', requirePermission('Workflow.View'), ah(async (req, res) => {
   const row = stmtGetInstanceById.get(req.params.id) as InstanceRow | undefined;
   if (!row) throw new HttpError(404, 'Workflow instance not found.');
   assertBranchAccess(req, row.branch_id);
@@ -222,7 +251,7 @@ workflowsRouter.get('/instances/:id', ah(async (req, res) => {
 // §3 — TRIGGER / START A WORKFLOW
 // ============================================================================
 
-workflowsRouter.post('/trigger', requirePermission('Workflow.Trigger'), authorize('owner', 'general_manager'), ah(async (req, res) => {
+workflowsRouter.post('/trigger', requirePermission('Workflow.Trigger'), ah(async (req, res) => {
   const { definitionId, entityType, entityId, payload } = req.body;
   if (!definitionId || !entityType || !entityId) {
     throw new HttpError(400, 'definitionId, entityType, and entityId are required.');
@@ -231,7 +260,10 @@ workflowsRouter.post('/trigger', requirePermission('Workflow.Trigger'), authoriz
   const definition = stmtGetDefinitionById.get(definitionId) as DefinitionRow | undefined;
   if (!definition) throw new HttpError(404, 'Workflow definition not found.');
   if (!definition.is_active) throw new HttpError(409, 'This workflow definition is not active.');
-  
+  if (definition.trigger !== WORKFLOW_TRIGGER_MANUAL) {
+    throw new HttpError(409, `Workflow definition '${definition.name}' is event-triggered and cannot be started manually.`);
+  }
+
   const steps = parseSteps(definition.steps);
   if (steps.length === 0) throw new HttpError(409, 'This workflow definition has no steps.');
   
@@ -389,7 +421,7 @@ workflowsRouter.post('/instances/:id/reject', requirePermission('Workflow.Reject
 // §6 — CANCEL WORKFLOW
 // ============================================================================
 
-workflowsRouter.post('/instances/:id/cancel', requirePermission('Workflow.Cancel'), authorize('owner', 'general_manager'), ah(async (req, res) => {
+workflowsRouter.post('/instances/:id/cancel', requirePermission('Workflow.Cancel'), ah(async (req, res) => {
   const instance = stmtGetInstanceById.get(req.params.id) as InstanceRow | undefined;
   if (!instance) throw new HttpError(404, 'Workflow instance not found.');
   assertBranchAccess(req, instance.branch_id);
@@ -431,12 +463,14 @@ workflowsRouter.get('/instances/:id/history', requirePermission('Workflow.View')
 // §8 — PENDING ACTIONS FOR CURRENT USER
 // ============================================================================
 
-workflowsRouter.get('/pending', ah(async (req, res) => {
-  const branchId = req.user!.branchId;
-  
-  if (!branchId) return res.json([]);
-  
-  const instances = stmtGetPendingInstances.all(branchId) as any[];
+workflowsRouter.get('/pending', requirePermission('Workflow.View'), ah(async (req, res) => {
+  const { branchId, isAll } = resolveBranchScope(req);
+
+  if (!isAll && !branchId) return res.json([]);
+
+  const instances = (isAll
+    ? stmtGetPendingInstancesAll.all()
+    : stmtGetPendingInstances.all(branchId)) as any[];
   
   // NOTE: Because steps are stored as JSON, we must filter in JS. 
   // Architectural recommendation: Add `current_step_role` as a column to workflow_instances.

@@ -7,8 +7,8 @@
  * subscriptions, and viewing event handler execution logs.
  *
  * Access control:
- *   - owner: full access (stream, replay, subscriptions, purge)
- *   - manager: read-only stream + handler logs
+ *   - Event.View: stream, chain, statistics, handler logs and type registry
+ *   - Event.Manage: replay, flush and subscription mutation
  *
  * @module routes/events.routes
  * @version 2.0.0
@@ -17,13 +17,13 @@
 
 import { Router } from 'express';
 import { db } from '../db/connection.js';
-import { authenticate, authorize, canAccessBranchResource } from '../middleware/auth.js';
+import { authenticate, canAccessBranchResource, requirePermission } from '../middleware/auth.js';
 import { isGlobalOwner } from '../core/rbac/rbac-service.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id } from '../utils/ids.js';
 import { eventBus } from '../core/events/event-bus.js';
-import type { DomainEventType } from '../core/events/event-bus.js';
+import { DOMAIN_EVENT_CATALOG, isDomainEventType, type DomainEventType } from '../core/events/event-registry.js';
 
 export const eventsRouter = Router();
 eventsRouter.use(authenticate);
@@ -55,7 +55,7 @@ const stmtCountUnpublishedEvents = db.prepare(
 
 eventsRouter.get(
   '/stream',
-  authorize('owner', 'general_manager'),
+  requirePermission('Event.View'),
   ah(async (req, res) => {
     const {
       type, aggregateType, aggregateId, correlationId, branchId, limit,
@@ -111,7 +111,7 @@ eventsRouter.get(
 
 eventsRouter.get(
   '/chain/:correlationId',
-  authorize('owner', 'general_manager'),
+  requirePermission('Event.View'),
   ah(async (req, res) => {
     const chain = eventBus.getCorrelationChain(req.params.correlationId);
     if (chain.length === 0) throw new HttpError(404, 'No events found for this correlation ID.');
@@ -138,7 +138,7 @@ eventsRouter.get(
 
 eventsRouter.get(
   '/stats',
-  authorize('owner', 'general_manager'),
+  requirePermission('Event.View'),
   ah(async (req, res) => {
     const { from, to, branchId } = req.query as Record<string, string>;
 
@@ -183,7 +183,7 @@ eventsRouter.get(
 
 eventsRouter.post(
   '/replay',
-  authorize('owner'),
+  requirePermission('Event.Manage'),
   ah(async (req, res) => {
     const { aggregateType, aggregateId } = req.body;
     if (!aggregateType || !aggregateId) throw new HttpError(400, 'aggregateType and aggregateId are required.');
@@ -200,7 +200,7 @@ eventsRouter.post(
 
 eventsRouter.post(
   '/flush',
-  authorize('owner'),
+  requirePermission('Event.Manage'),
   ah(async (req, res) => {
     const count = await eventBus.flushUnpublished();
     writeAudit(req, `Manually flushed ${count} unpublished events`);
@@ -214,7 +214,7 @@ eventsRouter.post(
 
 eventsRouter.get(
   '/subscriptions',
-  authorize('owner'),
+  requirePermission('Event.Manage'),
   ah(async (_req, res) => {
     const rows = stmtGetAllSubscriptions.all() as any[];
     res.json(
@@ -228,26 +228,29 @@ eventsRouter.get(
 
 eventsRouter.post(
   '/subscriptions',
-  authorize('owner'),
+  requirePermission('Event.Manage'),
   ah(async (req, res) => {
-    const { eventType, handler, config } = req.body;
-    if (!eventType || !handler) throw new HttpError(400, 'eventType and handler are required.');
+    const rawEventType = typeof req.body?.eventType === 'string' ? req.body.eventType.trim() : '';
+    const handler = typeof req.body?.handler === 'string' ? req.body.handler.trim() : '';
+    if (!rawEventType || !handler) throw new HttpError(400, 'eventType and handler are required.');
+    if (!isDomainEventType(rawEventType)) throw new HttpError(400, `Unknown event type '${rawEventType}'.`);
 
     const validHandlers = ['workflow', 'automation', 'notification', 'webhook'];
     if (!validHandlers.includes(handler)) {
       throw new HttpError(400, `Invalid handler. Must be one of: ${validHandlers.join(', ')}`);
     }
     const newId = id('es');
-    stmtInsertSubscription.run(newId, eventType, handler, JSON.stringify(config || {}));
+    stmtInsertSubscription.run(newId, rawEventType, handler, JSON.stringify(req.body?.config || {}));
 
-    writeAudit(req, `Created event subscription: ${handler} → ${eventType}`);
+
+    writeAudit(req, `Created event subscription: ${handler} → ${rawEventType}`);
     res.status(201).json({ id: newId });
   })
 );
 
 eventsRouter.patch(
   '/subscriptions/:id',
-  authorize('owner'),
+  requirePermission('Event.Manage'),
   ah(async (req, res) => {
     const existing = stmtGetSubscriptionById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Subscription not found.');
@@ -269,7 +272,7 @@ eventsRouter.patch(
 
 eventsRouter.delete(
   '/subscriptions/:id',
-  authorize('owner'),
+  requirePermission('Event.Manage'),
   ah(async (req, res) => {
     const existing = stmtGetSubscriptionById.get(req.params.id) as any;
     if (!existing) throw new HttpError(404, 'Subscription not found.');
@@ -286,7 +289,7 @@ eventsRouter.delete(
 
 eventsRouter.get(
   '/handler-logs',
-  authorize('owner', 'general_manager'),
+  requirePermission('Event.View'),
   ah(async (req, res) => {
     const { eventId, handler, success, limit } = req.query as Record<string, string>;
     const maxLimit = Math.min(Number(limit) || 50, 200);
@@ -328,7 +331,7 @@ eventsRouter.get(
 
 eventsRouter.get(
   '/handlers',
-  authorize('owner'),
+  requirePermission('Event.Manage'),
   ah(async (req, res) => {
     const eventType = req.query.type as string | undefined;
     const handlers = eventBus.listHandlers(eventType as DomainEventType | undefined);
@@ -342,79 +345,9 @@ eventsRouter.get(
 
 eventsRouter.get(
   '/types',
-  authorize('owner', 'general_manager'),
+  requirePermission('Event.View'),
   ah(async (_req, res) => {
-    const types: { type: string; category: string; description: string }[] = [
-      // CRM / Lead Pipeline
-      { type: 'lead.created', category: 'crm', description: 'A new lead/visitor was created' },
-      { type: 'lead.followed_up', category: 'crm', description: 'A follow-up was logged for a lead' },
-      { type: 'lead.placement_scheduled', category: 'crm', description: 'Placement test scheduled' },
-      { type: 'lead.placement_completed', category: 'crm', description: 'Placement test completed' },
-      { type: 'lead.converted', category: 'crm', description: 'Lead converted to student' },
-      { type: 'lead.lost', category: 'crm', description: 'Lead marked as lost' },
-      // Student
-      { type: 'student.registered', category: 'student', description: 'New student registered' },
-      { type: 'student.enrolled', category: 'student', description: 'Student enrolled in a class' },
-      { type: 'student.status_changed', category: 'student', description: 'Student status changed' },
-      { type: 'student.card_issued', category: 'student', description: 'Smart ID card issued' },
-      { type: 'student.graduated', category: 'student', description: 'Student graduated' },
-      // Academic / Session
-      { type: 'class.created', category: 'academic', description: 'New class created' },
-      { type: 'class.updated', category: 'academic', description: 'Class details updated' },
-      { type: 'session.scheduled', category: 'academic', description: 'Session scheduled' },
-      { type: 'session.completed', category: 'academic', description: 'Session completed' },
-      { type: 'session.cancelled', category: 'academic', description: 'Session cancelled' },
-      { type: 'attendance.marked', category: 'academic', description: 'Attendance marked' },
-      // Assessment
-      { type: 'exam.created', category: 'assessment', description: 'New exam created' },
-      { type: 'exam.result_recorded', category: 'assessment', description: 'Exam result recorded' },
-      { type: 'exam.certificate_issued', category: 'assessment', description: 'Certificate issued' },
-      // Teacher / HR
-      { type: 'teacher.created', category: 'hr', description: 'New teacher added' },
-      { type: 'teacher.updated', category: 'hr', description: 'Teacher details updated' },
-      { type: 'teacher.skill_assigned', category: 'hr', description: 'Skill assigned to teacher' },
-      { type: 'teacher.salary_paid', category: 'hr', description: 'Teacher salary paid' },
-      { type: 'employee.created', category: 'hr', description: 'New employee added' },
-      { type: 'employee.salary_paid', category: 'hr', description: 'Employee salary paid' },
-      // Finance
-      { type: 'payment.received', category: 'finance', description: 'Payment received' },
-      { type: 'payment.refunded', category: 'finance', description: 'Payment refunded' },
-      { type: 'invoice.created', category: 'finance', description: 'Invoice created' },
-      { type: 'invoice.paid', category: 'finance', description: 'Invoice paid' },
-      { type: 'budget.charged', category: 'finance', description: 'Budget line charged' },
-      { type: 'budget.month_end_settled', category: 'finance', description: 'Month-end budget settled' },
-      { type: 'expense.requested', category: 'finance', description: 'Expense request submitted' },
-      { type: 'expense.approved', category: 'finance', description: 'Expense approved' },
-      { type: 'expense.rejected', category: 'finance', description: 'Expense rejected' },
-      { type: 'saving.transferred', category: 'finance', description: 'Saving transfer executed' },
-      { type: 'profit.withdrawn', category: 'finance', description: 'Profit withdrawn' },
-      // Inventory
-      { type: 'book.added', category: 'inventory', description: 'Book added to inventory' },
-      { type: 'book.restocked', category: 'inventory', description: 'Book restocked' },
-      { type: 'book.sold', category: 'inventory', description: 'Book sold' },
-      { type: 'book.sale_refunded', category: 'inventory', description: 'Book sale refunded' },
-      // Funding / Donation
-      { type: 'donor.created', category: 'funding', description: 'New donor registered' },
-      { type: 'donation.received', category: 'funding', description: 'Donation received' },
-      { type: 'campaign.created', category: 'funding', description: 'Funding campaign created' },
-      { type: 'scholarship.awarded', category: 'funding', description: 'Scholarship awarded' },
-      { type: 'sponsorship.created', category: 'funding', description: 'Sponsorship agreement created' },
-      // Impact
-      { type: 'impact.report_generated', category: 'impact', description: 'Impact report generated' },
-      // Workflow / Automation
-      { type: 'workflow.started', category: 'workflow', description: 'Workflow instance started' },
-      { type: 'workflow.step_completed', category: 'workflow', description: 'Workflow step completed' },
-      { type: 'workflow.completed', category: 'workflow', description: 'Workflow completed' },
-      { type: 'workflow.rejected', category: 'workflow', description: 'Workflow rejected' },
-      { type: 'automation.triggered', category: 'automation', description: 'Automation triggered' },
-      // System
-      { type: 'user.created', category: 'system', description: 'User account created' },
-      { type: 'user.password_changed', category: 'system', description: 'Password changed' },
-      { type: 'branch.created', category: 'system', description: 'Branch created' },
-      { type: 'settings.updated', category: 'system', description: 'System settings updated' },
-    ];
-
-    res.json({ count: types.length, types });
+    res.json({ count: DOMAIN_EVENT_CATALOG.length, types: DOMAIN_EVENT_CATALOG });
   })
 );
 

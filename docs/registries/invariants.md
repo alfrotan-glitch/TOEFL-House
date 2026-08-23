@@ -83,7 +83,7 @@ Validated by `npm run audit:registries`.
 | An expired assignment grants nothing | application | `server/src/core/rbac/rbac-service.ts` | `server/src/tests/work-packages/wp02/rbac-expired-grant-escalation.test.ts` | 403 |
 | A user has at most one primary role assignment | database | `trg_user_roles_single_primary` | `server/src/tests/rbac-single-authority.test.ts` | `SqliteError: user may have only one primary role` |
 | Authorization guards name canonical role codes only | application + compiler | `RoleCode` derived from `ROLE_CODES` in `server/src/core/rbac/permission-catalog.ts` | `server/src/tests/work-packages/wp02/rbac-scope.test.ts` | unknown role name fails to compile |
-| A workflow step naming an unknown role is reported, not silently denied | application | `server/src/routes/workflows.routes.ts` (`assertKnownStepRole`) | `server/src/tests/event-bus.test.ts` | 409 naming the bad role and step |
+| A workflow step naming an unknown role is reported, not silently denied | application | `server/src/routes/workflows.routes.ts` (`assertKnownStepRole`) | `server/src/tests/work-packages/wp12/workflow-automation-authority.test.ts` | 409 naming the bad role and step |
 | Every stored amount is a whole number of AFN | database | INTEGER money columns + `trg_*_money_scale_*` | `server/src/tests/money-boundary-property.test.ts` | `must be a whole number of AFN` |
 | Operator-supplied money is never silently rounded | application | `server/src/utils/money.ts` (`assertMoney`) | `server/src/tests/money-boundary-property.test.ts` | HTTP 400 |
 | A single amount cannot exceed MAX_SAFE_INTEGER/100, so aggregates stay exact | application | `server/src/utils/money.ts` (`MAX_MONEY`) | `server/src/tests/money-boundary-property.test.ts` | HTTP 400 |
@@ -166,3 +166,18 @@ Validated by `npm run audit:registries`.
 | A Book loan names a same-branch student, a lending-enabled active catalog item and real ordered dates; one return closes it | database + application transaction | Book loan/return guards plus `assertOptionalIsoDate` / `assertDateRange`; `book_loans`/`book_loan_returns` unique constraints | `server/src/tests/work-packages/wp10/books-authority.test.ts`, `server/src/tests/work-packages/wp10/books-authority.attack.test.ts` | 400/403/409 or `RAISE(ABORT)`; no cash movement is created |
 | Book issue and return append the matching Student Journey fact atomically | domain transaction | `issueBookLoan` / `returnBookLoan` call `StudentJourneyEngine.appendEvent` inside their Book transaction | `server/src/tests/work-packages/wp10/books-authority.test.ts` | Book and journey writes roll back together |
 | Only permission-authorized users can mutate catalog, receipt, sale, refund, loan or return facts | server authorization | `requirePermission` in `server/src/routes/books.routes.ts` with canonical branch scope | `server/src/tests/work-packages/wp10/books-authority.attack.test.ts` | 403 before mutation |
+
+## WP-12 — Workflow & Automation Invariants
+
+- A workflow trigger is either `manual` or a type present in
+  `server/src/core/events/event-registry.ts`; no route may persist an unknown
+  trigger string.
+- An automation trigger must be a canonical domain event type from
+  `server/src/core/events/event-registry.ts`.
+- Event-triggered workflows auto-start as real in-progress workflow instances
+  with an initial `workflow_history` row recording `action='start'`.
+- Automation runtime scope in WP-12 is notify-only: matching automations may
+  create notifications and `event_handler_log` rows, but they may not mutate
+  arbitrary cross-domain state.
+- Workflow approval remains advisory only and does not create financial or other
+  external authority outside the owning domain command surface.

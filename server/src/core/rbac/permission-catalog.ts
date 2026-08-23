@@ -117,10 +117,12 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
   { code: 'Funding.RecordDonation', resource: 'Funding', action: 'RecordDonation', description: 'Record donation income only', category: 'funding' },
   { code: 'Funding.Edit', resource: 'Funding', action: 'Edit', description: 'Manage donors, campaigns and aid funding', category: 'funding' },
   { code: 'Workflow.View', resource: 'Workflow', action: 'View', description: 'View workflows', category: 'automation' },
+  { code: 'Workflow.Configure', resource: 'Workflow', action: 'Configure', description: 'Create and modify workflow definitions', category: 'automation' },
   { code: 'Workflow.Approve', resource: 'Workflow', action: 'Approve', description: 'Approve workflows', category: 'automation' },
   { code: 'Workflow.Reject', resource: 'Workflow', action: 'Reject', description: 'Reject workflows', category: 'automation' },
   { code: 'Workflow.Trigger', resource: 'Workflow', action: 'Trigger', description: 'Start workflows for authorized resources', category: 'automation' },
   { code: 'Workflow.Cancel', resource: 'Workflow', action: 'Cancel', description: 'Cancel workflows', category: 'automation' },
+  { code: 'Automation.Edit', resource: 'Automation', action: 'Edit', description: 'Create and modify automations', category: 'automation' },
   { code: 'Waitlist.View', resource: 'Waitlist', action: 'View', description: 'View class waitlists', category: 'academic' },
   { code: 'Waitlist.Manage', resource: 'Waitlist', action: 'Manage', description: 'Manage class waitlists', category: 'academic' },
   { code: 'Enrollment.FreezeRequest', resource: 'Enrollment', action: 'FreezeRequest', description: 'Create enrollment freeze requests', category: 'academic' },
@@ -137,6 +139,7 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
   { code: 'Permission.Override', resource: 'Permission', action: 'Override', description: 'Override permissions', category: 'security' },
   { code: 'Audit.View', resource: 'Audit', action: 'View', description: 'View audit log', category: 'security' },
   { code: 'Event.View', resource: 'Event', action: 'View', description: 'View events', category: 'security' },
+  { code: 'Event.Manage', resource: 'Event', action: 'Manage', description: 'Replay, flush and manage event subscriptions', category: 'security' },
   { code: 'Settings.View', resource: 'Settings', action: 'View', description: 'View settings', category: 'security' },
   { code: 'Settings.Edit', resource: 'Settings', action: 'Edit', description: 'Edit settings', category: 'security' },
   { code: 'Branch.View', resource: 'Branch', action: 'View', description: 'View branches', category: 'security' },
@@ -219,7 +222,7 @@ export const ROLE_DEFINITIONS: RoleDef[] = [
       'Attendance.View','Attendance.Edit','Exam.View','Exam.Create','Exam.Edit','Exam.Publish','Grade.View','Grade.Edit','Promotion.Approve',
       'Certificate.Issue','Certificate.Print','Teacher.View','Teacher.Edit','Teacher.Create','Teacher.Delete','Employee.View','Employee.Edit','Payroll.View','Payroll.Edit',
       'Payment.View','Payment.Create','Invoice.View','Invoice.Create','Discount.View','Expense.View','Expense.Create','Expense.Approve','Budget.View','Budget.Edit','Budget.Allocate','Finance.Report','Refund.Approve','Report.View','Funding.View','Funding.RecordDonation','Funding.Edit','Impact.View','Impact.Edit',
-      'Book.View','Book.Create','Book.Edit','Book.Restock','Book.Sell','Book.Refund','Book.Issue','Book.Return','Workflow.View','Workflow.Trigger','Workflow.Approve','Workflow.Reject','Workflow.Cancel','Waitlist.View','Waitlist.Manage','Enrollment.FreezeRequest','Enrollment.TransferRequest','Rule.View','Audit.View','Settings.View','Branch.View','AcademicSetup.View','Curriculum.TestBank',
+      'Book.View','Book.Create','Book.Edit','Book.Restock','Book.Sell','Book.Refund','Book.Issue','Book.Return','Workflow.View','Workflow.Trigger','Workflow.Approve','Workflow.Reject','Workflow.Cancel','Waitlist.View','Waitlist.Manage','Enrollment.FreezeRequest','Enrollment.TransferRequest','Rule.View','Audit.View','Event.View','Settings.View','Branch.View','AcademicSetup.View','Curriculum.TestBank',
       // Academic Setup authority, encoding access general_manager already
       // exercised through authorize('owner','general_manager') and Class.Create.
       // See the AcademicSetup block in PERMISSION_CATALOG for the evidence.

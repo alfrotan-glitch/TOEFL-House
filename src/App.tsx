@@ -364,7 +364,7 @@ function AuthenticatedApp() {
           loadBooksHistoryPage={store.loadBooksHistoryPage}
         />;
       case 'workflows':
-        return <WorkflowsView instances={store.workflows} automations={store.automations} activeRole={activeRole} isGlobalOwner={user?.isGlobalOwner ?? false} approveWorkflowStep={store.approveWorkflowStep} rejectWorkflowStep={store.rejectWorkflowStep} getWorkflowInstanceDetail={store.getWorkflowInstanceDetail} toggleAutomation={store.toggleAutomation} />;
+        return <WorkflowsView instances={store.workflows} automations={store.automations} approveWorkflowStep={store.approveWorkflowStep} rejectWorkflowStep={store.rejectWorkflowStep} getWorkflowInstanceDetail={store.getWorkflowInstanceDetail} toggleAutomation={store.toggleAutomation} />;
       case 'rules':
         return <RulesManagementView businessRules={store.businessRules} activeRole={activeRole} isGlobalOwner={user?.isGlobalOwner ?? false} reloadBusinessRules={store.reloadBusinessRules} createBusinessRule={store.createBusinessRule} updateBusinessRule={store.updateBusinessRule} deactivateBusinessRule={store.deactivateBusinessRule} deleteBusinessRule={store.deleteBusinessRule} rollbackBusinessRule={store.rollbackBusinessRule} getBusinessRuleVersions={store.getBusinessRuleVersions} evaluateBusinessRules={store.evaluateBusinessRules} triggerToast={triggerToast} />;
       case 'audit':

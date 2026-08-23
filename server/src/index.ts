@@ -51,7 +51,7 @@ import booksRouter from './routes/books.routes.js';
 import fundingRouter from './routes/funding.routes.js';
 import impactRouter from './routes/impact.routes.js';
 import workflowsRouter from './routes/workflows.routes.js';
-import automationsRouter from './routes/automations.routes.js';
+import automationsRouter, { seedDefaultAutomations } from './routes/automations.routes.js';
 import eventsRouter from './routes/events.routes.js';
 import auditRouter, { notificationsRouter } from './routes/audit.routes.js';
 import systemSettingsRouter from './routes/settings.routes.js';
@@ -83,9 +83,10 @@ async function bootstrap(): Promise<void> {
   
   bootstrapAcademicCatalog(db);
   
-  log.info('Seeding default rules and workflows…');
+  log.info('Seeding default rules, workflows and automations…');
   seedDefaultRules();
   seedDefaultWorkflowDefinitions();
+  seedDefaultAutomations();
 
   log.info('Checking automated database backups…');
   await backupService.start();

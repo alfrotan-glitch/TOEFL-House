@@ -51,3 +51,12 @@ use the same unit and no hidden sub-unit balance exists. See D-22 and D-23.
 | Attendance marked present | `COUNT(*)` of student attendance facts with status `'present'` | `rosters` ⋈ `sessions` ∪ day-level `attendance` (the `attendance-query` union) | date range | branch scope, student facts only | count | count | integer | `attendance-summary` report | `server/src/tests/work-packages/wp06/attendance-authority.test.ts` | teacher attendance excluded by the union authority (D-94) |
 | Attendance records | `COUNT(*)` of student attendance facts | `rosters` ⋈ `sessions` ∪ day-level `attendance` (the `attendance-query` union) | date range | branch scope, student facts only | count | count | integer | `attendance-summary` report (denominator) | `server/src/tests/work-packages/wp06/attendance-authority.test.ts` | denominator for any student attendance rate |
 | Certificates issued | `COUNT(*)` where `status='issued'` | `certificates` | issue-date range | branch scope | count | count | integer | `academic-delivery` report, `/api/reports/overview` | `server/src/tests/work-packages/wp06/exam-scope-and-storage.test.ts` | revoked certificates are recorded history, not issued output (D-95) |
+
+## WP-12 — Workflow & Automation Operational Metrics
+
+- Automation execution counts, success/failure totals, average duration and last
+  execution time are derived from `event_handler_log` rows keyed by
+  `handler = 'automation:<automationId>'`.
+- Event stream type visibility is counted from canonical `domain_events.type`
+  values; `/api/events/types` is registry introspection, not a second metric
+  source.

@@ -8,19 +8,20 @@ import { eventBus, DomainEvent } from './event-bus.js';
 import { addNotification } from '../../utils/notifications.js';
 import { id } from '../../utils/ids.js';
 import { createLogger } from '../observability/logger.js';
+import { processAutomationsForEvent } from './automation-engine.js';
 const log = createLogger('handlers');
 
 // ── Performance: Module-level Prepared Statements ──────────────────────────
-const stmtGetActiveWorkflowDef = db.prepare(
-  "SELECT * FROM workflow_definitions WHERE trigger = ? AND is_active = 1 LIMIT 1"
+const stmtGetActiveWorkflowDefs = db.prepare(
+  "SELECT * FROM workflow_definitions WHERE trigger = ? AND is_active = 1 ORDER BY created_at ASC"
 );
 const stmtInsertWorkflowInstance = db.prepare(
   `INSERT INTO workflow_instances (id, definition_id, entity_type, entity_id, current_step, status, branch_id, initiated_by, payload)
-   VALUES (?, ?, ?, ?, 1, 'pending', ?, ?, ?)`
+   VALUES (?, ?, ?, ?, 1, 'in_progress', ?, ?, ?)`
 );
 const stmtInsertWorkflowHistory = db.prepare(
-  `INSERT INTO workflow_history (id, instance_id, step_order, actor, action, notes)
-   VALUES (?, ?, 0, 'system', 'initiated', 'Workflow auto-started by event')`
+  `INSERT INTO workflow_history (id, instance_id, step_order, actor, action, notes, timestamp)
+   VALUES (?, ?, 0, 'system', 'start', 'Workflow auto-started by event', ?)`
 );
 const stmtUpsertPipelineMetric = db.prepare(
   `INSERT INTO pipeline_metrics (pipeline, stage, count, conversion_rate, average_time_in_stage, branch_id, computed_at)
@@ -43,6 +44,11 @@ interface BaseEventPayload {
   requester?: string;
   period?: string;
   metricsCount?: number;
+}
+
+function inferEntityTypeFromEventType(eventType: string): string {
+  const [aggregate] = eventType.split('.', 1);
+  return aggregate === 'expense' ? 'expense_request' : aggregate;
 }
 
 /**
@@ -188,35 +194,46 @@ export function registerEventHandlers(): void {
   // ── Workflow Trigger Handlers ─────────────────────────────────────────
 
   eventBus.on(
-    'expense.requested',
+    '*',
     async (event: DomainEvent) => {
-      const wfDef = stmtGetActiveWorkflowDef.get(event.type) as any;
-      if (!wfDef) return;
+      const defs = stmtGetActiveWorkflowDefs.all(event.type) as Array<{ id: string }>;
+      if (defs.length === 0) return;
 
-      const { title, amount, requester, branchId } = event.payload as BaseEventPayload;
-      const instanceId = id('wfi');
+      const payload = event.payload as BaseEventPayload;
+      const entityType = inferEntityTypeFromEventType(event.type);
+      const branchId = payload.branchId || event.branchId;
+      const actor = event.operatorId || 'system';
+      const startedAt = event.occurredAt;
       const startWorkflowTx = db.transaction(() => {
-        stmtInsertWorkflowInstance.run(
-          instanceId,
-          wfDef.id,
-          'expense_request',
-          event.aggregateId,
-          branchId || event.branchId,
-          event.operatorId,
-          JSON.stringify({ title, amount, requester })
-        );
-
-        stmtInsertWorkflowHistory.run(
-          id('wfh'), 
-          instanceId
-        );
+        for (const wfDef of defs) {
+          const instanceId = id('wfi');
+          stmtInsertWorkflowInstance.run(
+            instanceId,
+            wfDef.id,
+            entityType,
+            event.aggregateId,
+            branchId,
+            actor,
+            JSON.stringify(event.payload),
+          );
+          stmtInsertWorkflowHistory.run(id('wfh'), instanceId, startedAt);
+        }
       });
-      
       startWorkflowTx();
     },
-    'workflow-expense-requested',
+    'workflow-auto-start',
     50,
-    true
+    true,
+  );
+
+  eventBus.on(
+    '*',
+    async (event: DomainEvent) => {
+      processAutomationsForEvent(event);
+    },
+    'automation-engine',
+    150,
+    true,
   );
 
   // ── Analytics / Pipeline Metrics Handler ──────────────────────────────

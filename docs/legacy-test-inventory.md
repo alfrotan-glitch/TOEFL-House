@@ -463,11 +463,11 @@ The five cross-cutting guards inventoried above — `frontend-cache-invalidation
 
 ## WP-12 Workflow & Automation
 
-1 files · 4 cases
+1 files · 7 cases
 
 | File | Cases | Asserted behaviour |
 |---|---:|---|
-| `event-bus.test.ts` | 4 | Event Bus Integration |
+| `server/src/tests/work-packages/wp12/workflow-automation-authority.test.ts` | 7 | Route permission boundaries for workflows/automations/events · canonical trigger and role validation · workflow auto-start runtime · automation execution logging |
 
 ## WP-13 Audit & Platform
 

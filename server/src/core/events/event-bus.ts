@@ -29,89 +29,12 @@ Design Principles:
 import { db } from '../../db/connection.js';
 import { randomUUID } from 'node:crypto';
 import { createLogger } from '../observability/logger.js';
+import type { DomainEventType } from './event-registry.js';
 const log = createLogger('event-bus');
 
 // ============================================================================
 // §1 — TYPE DEFINITIONS
 // ============================================================================
-
-/**
-Canonical event type registry. Every event in the system MUST use one
-of these names. Adding a new event type requires adding it here first.
-
-Naming convention: <aggregate>.<past-tense-verb>
-e.g. "student.registered", "payment.received", "exam.result_recorded"
-*/
-export type DomainEventType =
-  // ── CRM / Lead Pipeline ──
-  | 'lead.created'
-  | 'lead.followed_up'
-  | 'lead.placement_scheduled'
-  | 'lead.placement_completed'
-  | 'lead.converted'
-  | 'lead.lost'
-  // ── Student ──
-  | 'student.registered'
-  | 'student.enrolled'
-  | 'student.status_changed'
-  | 'student.card_issued'
-  | 'student.graduated'
-  // ── Academic / Session ──
-  | 'class.created'
-  | 'class.updated'
-  | 'class.lifecycle_changed'
-  | 'class.activated'
-  | 'session.scheduled'
-  | 'session.completed'
-  | 'session.cancelled'
-  | 'attendance.marked'
-  // ── Assessment ──
-  | 'exam.created'
-  | 'exam.result_recorded'
-  | 'exam.certificate_issued'
-  // ── Teacher / HR ──
-  | 'teacher.created'
-  | 'teacher.updated'
-  | 'teacher.skill_assigned'
-  | 'teacher.salary_paid'
-  | 'employee.created'
-  | 'employee.salary_paid'
-  // ── Finance ──
-  | 'payment.received'
-  | 'payment.refunded'
-  | 'invoice.created'
-  | 'invoice.paid'
-  | 'budget.charged'
-  | 'budget.month_end_settled'
-  | 'expense.requested'
-  | 'expense.approved'
-  | 'expense.rejected'
-  | 'saving.transferred'
-  | 'profit.withdrawn'
-  // ── Inventory ──
-  | 'book.added'
-  | 'book.restocked'
-  | 'book.sold'
-  | 'book.sale_refunded'
-  // ── Funding / Donation ──
-  | 'donor.created'
-  | 'donation.received'
-  | 'campaign.created'
-  | 'scholarship.awarded'
-  | 'sponsorship.created'
-  // ── Impact ──
-  | 'impact.report_generated'
-  // ── Workflow / Automation ──
-  | 'workflow.started'
-  | 'workflow.step_completed'
-  | 'workflow.completed'
-  | 'workflow.rejected'
-  | 'automation.triggered'
-  // ── System ──
-  | 'user.created'
-  | 'user.password_changed'
-  | 'branch.created'
-  | 'settings.updated';
 
 /** The aggregate (entity) that emitted the event. */
 export type AggregateType =
