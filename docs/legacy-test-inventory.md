@@ -440,6 +440,27 @@ and no 60% cost rule is a valid business authority.
 | `ui-cross-view-freshness.test.ts` | 10 | a mounted consumer refetches when another view mutates its dataset · the dependency graph propagates to derived datasets · out-of-order responses cannot overwrite newer server truth · branch isolation |
 | `ui-server-state-freshness.test.ts` | 12 | canonical freshness mechanism exists and is single · no component mutates the server outside the canonical mechanism · consumers of shared datasets subscribe to the freshness signal |
 
+**C-2 disposition: REPLACED — 2026-08-23.** The legacy dashboard/reporting/freshness authorities and the remaining top-level WP-11 reporting/BOS suites now live under `server/src/tests/work-packages/wp11/`, where the package-local authority is organized by reporting catalog/window, calendar, dashboard, BOS, search, frontend consumer, and freshness contracts. The executable WP-11 package authority is **14 files / 275 runtime tests**.
+
+The five cross-cutting guards inventoried above — `frontend-cache-invalidation.test.ts`, `jalali-calendar.test.ts`, `pagination-hardening.test.ts`, `printed-documents.test.ts`, and `text-input-bounds.test.ts` — remain active top-level authorities by design because they are shared platform contracts, not retired duplicate WP-11 copies.
+
+| Re-homed / current WP-11 authority | Package-local authority |
+|---|---|
+| `dashboard-summary.test.ts` | `server/src/tests/work-packages/wp11/dashboard-summary.test.ts` |
+| `dashboard-timezone.test.ts` | `server/src/tests/work-packages/wp11/dashboard-timezone.test.ts` |
+| `reporting-catalog.test.ts` | `server/src/tests/work-packages/wp11/reporting-catalog.test.ts` |
+| `reporting-export-reconciliation.test.ts` | `server/src/tests/work-packages/wp11/reporting-export-reconciliation.test.ts` |
+| `reporting-forensic.test.ts` | `server/src/tests/work-packages/wp11/reporting-forensic.test.ts` |
+| `reporting-periods.test.ts` | `server/src/tests/work-packages/wp11/reporting-periods.test.ts` |
+| `bos-period-authority.test.ts` | `server/src/tests/work-packages/wp11/bos-period-authority.test.ts` |
+| `bos-profit-withdrawal-integrity.test.ts` | `server/src/tests/work-packages/wp11/bos-profit-withdrawal-integrity.test.ts` |
+| `ui-cross-view-freshness.test.ts` | `server/src/tests/work-packages/wp11/ui-cross-view-freshness.test.ts` |
+| `ui-server-state-freshness.test.ts` | `server/src/tests/work-packages/wp11/ui-server-state-freshness.test.ts` |
+| — | `server/src/tests/work-packages/wp11/reporting-window-contract.test.ts` |
+| — | `server/src/tests/work-packages/wp11/executive-bos-access.test.ts` |
+| — | `server/src/tests/work-packages/wp11/search-contract.test.ts` |
+| — | `server/src/tests/work-packages/wp11/frontend-consumers.contract.test.ts` |
+
 ## WP-12 Workflow & Automation
 
 1 files · 4 cases

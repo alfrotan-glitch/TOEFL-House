@@ -15,17 +15,17 @@
  * The fixtures deliberately exceed every page limit in the system, because a
  * fixture that fits inside one page cannot detect the defect class at all.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { dashboardRouter } from '../routes/dashboard.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { periodBoundaries, buildDashboardSummary } from '../core/dashboard/dashboard-summary.js';
-import { today } from '../utils/ids.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { dashboardRouter } from '../../../routes/dashboard.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { periodBoundaries, buildDashboardSummary } from '../../../core/dashboard/dashboard-summary.js';
+import { today } from '../../../utils/ids.js';
 
 const BRANCH = 'ds_branch_a';
 const BRANCH_B = 'ds_branch_b';

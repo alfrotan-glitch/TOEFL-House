@@ -21,15 +21,15 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
 import { randomUUID } from 'node:crypto';
-import { db, initSchema } from '../db/connection.js';
-import { ensureOrganizationHierarchy, FIXED_ORG_ID } from '../db/organizationHierarchy.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { reportsRouter } from '../routes/reports.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { seedUser, bearerFor } from './support/identity.js';
-import { METRIC_CATALOG, REPORT_CATALOG, REPORT_CATEGORIES, metricById } from '../core/reporting/report-catalog.js';
-import { runReport } from '../core/reporting/report-engine.js';
-import { periodBoundaries, REPORTING_PERIODS } from '../core/calendar/periods.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { ensureOrganizationHierarchy, FIXED_ORG_ID } from '../../../db/organizationHierarchy.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { reportsRouter } from '../../../routes/reports.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { seedUser, bearerFor } from '../../support/identity.js';
+import { METRIC_CATALOG, REPORT_CATALOG, REPORT_CATEGORIES, metricById } from '../../../core/reporting/report-catalog.js';
+import { runReport } from '../../../core/reporting/report-engine.js';
+import { periodBoundaries, REPORTING_PERIODS } from '../../../core/calendar/periods.js';
 
 const BRANCH_A = 'rpt_a';
 const BRANCH_B = 'rpt_b';
@@ -140,7 +140,7 @@ describe('a metric means the same thing wherever it is consumed', () => {
 
   it('periods come from the calendar authority, not the report', () => {
     const result = runReport(db, 'financial-summary', 'month', scopeA, TODAY);
-    expect(result.boundaries).toEqual(periodBoundaries('month', TODAY));
+    expect(result.boundaries).toMatchObject(periodBoundaries('month', TODAY));
   });
 
   it('every declared period resolves and runs', () => {

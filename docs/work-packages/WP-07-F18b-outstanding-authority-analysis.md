@@ -92,7 +92,7 @@ one:
 | `server/src/routes/reports.routes.ts` | one block, lines 389-409 |
 | `src/types.ts:1596` | `outstanding: { openInvoices, gross, paid, remaining }` |
 | `src/components/reports/OperationsReportView.tsx:214-216` | the card label and its sub-line |
-| `server/src/tests/reporting-forensic.test.ts:169-171` | 3 assertions on `gross` / `paid` / `remaining` |
+| `server/src/tests/work-packages/wp11/reporting-forensic.test.ts:169-171` | 3 assertions on `gross` / `paid` / `remaining` |
 | BOS dashboard + `getBranchOutstanding` | **untouched by every option below** — A is already correct |
 
 Small and contained: one server block, one type, one UI card, three assertions.

@@ -23,17 +23,17 @@
  * The invariant: the SUM of profit distributions taken in a period may never
  * exceed the maximum computed for that period.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { ensureOrganizationHierarchy, FIXED_ORG_ID } from '../db/organizationHierarchy.js';
-import { id, today } from '../utils/ids.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { bosRouter } from '../routes/bos.routes.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { ensureOrganizationHierarchy, FIXED_ORG_ID } from '../../../db/organizationHierarchy.js';
+import { id, today } from '../../../utils/ids.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { bosRouter } from '../../../routes/bos.routes.js';
 
 const BR = 'bos_branch_a';
 

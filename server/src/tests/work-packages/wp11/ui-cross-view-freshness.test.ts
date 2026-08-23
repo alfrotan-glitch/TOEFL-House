@@ -32,7 +32,7 @@ import {
   useInvalidate,
   useVersionedFetch,
   type ServerStateFreshness,
-} from '../../../src/state/serverStateFreshness';
+} from '../../../../../src/state/serverStateFreshness';
 
 // React 19 wants this flag set for act() to be recognised.
 const g = globalThis as unknown as Record<string, unknown>;

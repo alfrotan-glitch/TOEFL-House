@@ -15,14 +15,14 @@ import {
   periodBoundaries,
   currentJalaliMonthSpan,
   type ReportingPeriod,
-} from '../core/calendar/periods.js';
+} from '../../../core/calendar/periods.js';
 import {
   gregorianToJalali,
   jalaliToIso,
   jalaliMonthLength,
   isJalaliLeapYear,
   isoToJalaliPeriodKey,
-} from '../utils/jalali.js';
+} from '../../../utils/jalali.js';
 
 /** Every date in an inclusive Gregorian range. */
 function eachDay(from: string, to: string): string[] {
@@ -241,7 +241,7 @@ describe('Invariants that must hold for every period', () => {
 
 describe('Agreement with payroll, which already reports on Shamsi months', () => {
   it('produces the same span payroll uses for the same period key', async () => {
-    const { jalaliMonthToGregorianRange } = await import('../utils/jalali.js');
+    const { jalaliMonthToGregorianRange } = await import('../../../utils/jalali.js');
     for (const iso of ['2026-01-15', '2026-05-05', '2026-08-17', '2026-11-30']) {
       const b = periodBoundaries('month', iso);
       const [jy, jm] = b.periodKey.split('-').map(Number);

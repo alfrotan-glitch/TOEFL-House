@@ -31,20 +31,20 @@
  * The invariant: BOS's period IS the system's period, and total distributions
  * within an accounting period never exceed that period's computed ceiling.
  */
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { ensureOrganizationHierarchy, FIXED_ORG_ID } from '../db/organizationHierarchy.js';
-import { id, today } from '../utils/ids.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { bosRouter } from '../routes/bos.routes.js';
-import { addDays, periodBoundaries, periodBoundariesForKey, previousMonthKey } from '../core/calendar/periods.js';
-import { DEFAULT_RULE_CATALOG, TREASURY_DEFAULTS } from '../core/configuration/policy-catalog.js';
-import { computeProfitDistribution, resolveDistributionTier } from '../core/finance/profit-distribution.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { ensureOrganizationHierarchy, FIXED_ORG_ID } from '../../../db/organizationHierarchy.js';
+import { id, today } from '../../../utils/ids.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { bosRouter } from '../../../routes/bos.routes.js';
+import { addDays, periodBoundaries, periodBoundariesForKey, previousMonthKey } from '../../../core/calendar/periods.js';
+import { DEFAULT_RULE_CATALOG, TREASURY_DEFAULTS } from '../../../core/configuration/policy-catalog.js';
+import { computeProfitDistribution, resolveDistributionTier } from '../../../core/finance/profit-distribution.js';
 
 const BR = 'bos_cal_branch';
 

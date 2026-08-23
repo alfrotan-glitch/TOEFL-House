@@ -8,7 +8,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
-const TEST = 'src/tests/bos-profit-withdrawal-integrity.test.ts';
+const TEST = 'src/tests/work-packages/wp11/bos-profit-withdrawal-integrity.test.ts';
 
 // B6 is a PROVEN-EQUIVALENT mutant, established by execution rather than
 // inspection. Removing the route's `amount > currentMainBalance` pre-check does

@@ -20,19 +20,19 @@
  *  4. Ledger endpoint honors explicit from/to (period isolation).
  *  5. Discount aggregation: report exposes gross/discount/net from invoices.
  */
-import { periodBoundariesForKey } from '../core/calendar/periods.js';
-import { assignRole } from './support/identity.js';
+import { periodBoundariesForKey } from '../../../core/calendar/periods.js';
+import { assignRole } from '../../support/identity.js';
 import { beforeAll, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { reportsRouter } from '../routes/reports.routes.js';
-import { financeRouter } from '../routes/finance.routes.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { id } from '../utils/ids.js';
-import { createBookCatalogItem, postBookSale } from '../core/books/books-service.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { reportsRouter } from '../../../routes/reports.routes.js';
+import { financeRouter } from '../../../routes/finance.routes.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { id } from '../../../utils/ids.js';
+import { createBookCatalogItem, postBookSale } from '../../../core/books/books-service.js';
 
 /** The Shamsi month and quarter the June-2026 fixtures fall inside. */
 const SHAMSI_MONTH = '1405-03';

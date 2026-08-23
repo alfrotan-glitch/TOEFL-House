@@ -12,7 +12,7 @@
  * date logic under non-UTC offsets so the mismatch cannot come back unnoticed.
  */
 import { describe, expect, it } from 'vitest';
-import { periodBoundaries, addDays } from '../core/calendar/periods.js';
+import { periodBoundaries, addDays } from '../../../core/calendar/periods.js';
 
 /** Run `fn` with process.env.TZ temporarily set, restoring it afterwards. */
 function withTZ<T>(tz: string, fn: () => T): T {

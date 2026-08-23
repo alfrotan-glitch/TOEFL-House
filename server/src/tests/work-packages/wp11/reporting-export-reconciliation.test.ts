@@ -19,24 +19,24 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assignRole } from './support/identity.js';
+import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
-import { db, initSchema } from '../db/connection.js';
-import { ensureOrganizationHierarchy, FIXED_ORG_ID } from '../db/organizationHierarchy.js';
-import { id, today } from '../utils/ids.js';
-import { signToken, hashPassword, type TokenPayload } from '../utils/auth.js';
-import { errorHandler } from '../middleware/errorHandler.js';
-import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
-import { reportsRouter } from '../routes/reports.routes.js';
-import { REPORT_CATALOG } from '../core/reporting/report-catalog.js';
-import { runReport } from '../core/reporting/report-engine.js';
-import { reportToCsv } from '../core/reporting/report-export.js';
-import { csvEscape, toCsv } from '../utils/csv.js';
-import type { ReportingPeriod } from '../core/calendar/periods.js';
+import { db, initSchema } from '../../../db/connection.js';
+import { ensureOrganizationHierarchy, FIXED_ORG_ID } from '../../../db/organizationHierarchy.js';
+import { id, today } from '../../../utils/ids.js';
+import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
+import { errorHandler } from '../../../middleware/errorHandler.js';
+import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
+import { reportsRouter } from '../../../routes/reports.routes.js';
+import { REPORT_CATALOG } from '../../../core/reporting/report-catalog.js';
+import { runReport } from '../../../core/reporting/report-engine.js';
+import { reportToCsv } from '../../../core/reporting/report-export.js';
+import { csvEscape, toCsv } from '../../../utils/csv.js';
+import type { ReportingPeriod } from '../../../core/calendar/periods.js';
 
-const repoRootForReports = path.resolve(fileURLToPath(new URL('.', import.meta.url)), '..', '..', '..');
+const repoRootForReports = path.resolve(fileURLToPath(new URL('../../../../../', import.meta.url)));
 
 const BR = 'rep_branch';
 
@@ -311,7 +311,7 @@ describe('the reporting view defines no metrics of its own', () => {
 
   it('asks the server for the export instead of serializing its own table', () => {
     const src = viewSource();
-    expect(src).toContain('/export?period=');
+    expect(src).toContain('/export?');
     // Building CSV in the browser would mean a join over the rendered rows.
     expect(src).not.toMatch(/join\(','\)/);
     expect(src).not.toContain('text/csv');

@@ -134,6 +134,7 @@ export default function BusinessOperatingSystemView({
   const breakEvenGap = exec.monthlyRevenue - exec.breakEven;
   const isPastBreakEven = breakEvenGap >= 0;
   const breakEvenPct = exec.breakEven > 0 ? Math.min(150, Math.round((exec.monthlyRevenue / exec.breakEven) * 100)) : 0;
+  const visitorIntake = funnel.funnel.reduce((sum, row) => sum + row.leads, 0);
 
   const kpis = [
     { label: 'Income Today', value: exec.todayRevenue, icon: DollarSign, color: 'text-emerald-600 bg-emerald-500/10' },
@@ -201,7 +202,7 @@ export default function BusinessOperatingSystemView({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="bg-gradient-to-br from-indigo-500/10 to-indigo-500/5 border border-indigo-500/20 rounded-xl p-5">
             <p className="text-indigo-600 font-bold uppercase tracking-wider text-[9px]">New Visitors</p>
-            <p className="font-black text-slate-800 text-3xl mt-2 tabular-nums">{studentStats.newStudents + studentStats.returningStudents}</p>
+            <p className="font-black text-slate-800 text-3xl mt-2 tabular-nums">{visitorIntake}</p>
             <p className="text-[10px] text-slate-500 mt-1 capitalize">{timeframe === 'today' ? 'Today' : `This ${timeframe}`}</p>
           </div>
           <div className="bg-gradient-to-br from-emerald-500/10 to-emerald-500/5 border border-emerald-500/20 rounded-xl p-5">

@@ -2,8 +2,7 @@ import { Router } from 'express';
 import { LEAD_CONVERTED_SQL } from '../core/visitors/lead-lifecycle.js';
 import { db } from '../db/connection.js';
 import { getBranchOutstanding, CASH_ALLOCATION_SQL } from '../utils/studentBalance.js';
-import { authenticate, authorize, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
-import { isGlobalOwner } from '../core/rbac/rbac-service.js';
+import { authenticate, requirePermission, requireGlobalOwner, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
@@ -26,20 +25,13 @@ import {
 import { TREASURY_DEFAULTS } from '../core/configuration/policy-catalog.js';
 
 export const bosRouter = Router();
-bosRouter.use(authenticate, authorize('owner', 'finance_manager', 'general_manager')); // Read-only dashboard access for authorized finance/management roles
+bosRouter.use(authenticate);
 
 function requireBosBranch(req: import('express').Request): string {
   const { branchId, isAll } = resolveBranchScope(req);
   if (isAll || !branchId) throw new HttpError(400, 'A concrete branch scope is required.');
   if (!canAccessBranchResource(req, branchId)) throw new HttpError(403, 'Branch access denied.');
   return branchId;
-}
-
-function requireOwner(req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) {
-  if (!req.rbac || !isGlobalOwner(req.rbac)) {
-    return res.status(403).json({ error: 'Owner authorization is required for this operation.' });
-  }
-  next();
 }
 
 /**
@@ -271,6 +263,7 @@ const stmtRevenueByTimeSlot = db.prepare(`
 // ================= Executive Dashboard =================
 bosRouter.get(
   '/executive-dashboard',
+  requirePermission('Dashboard.Executive'),
   ah(async (req, res) => {
     const branchId = requireBosBranch(req);
     const { from, to, period } = getTimeBounds(req.query.period as string, req.query.timeframe as string);
@@ -336,6 +329,7 @@ bosRouter.get(
 // ================= Marketing Funnel =================
 bosRouter.get(
   '/marketing-funnel',
+  requirePermission('Dashboard.Executive'),
   ah(async (req, res) => {
     const branchId = requireBosBranch(req);
     const { from, to } = getTimeBounds(req.query.period as string, req.query.timeframe as string);
@@ -373,6 +367,7 @@ bosRouter.get(
 // ================= Student Analytics =================
 bosRouter.get(
   '/student-analytics',
+  requirePermission('Dashboard.Executive'),
   ah(async (req, res) => {
     const branchId = requireBosBranch(req);
     const { from, to } = getTimeBounds(req.query.period as string, req.query.timeframe as string);
@@ -410,6 +405,7 @@ bosRouter.get(
 // ================= Decision Warnings =================
 bosRouter.get(
   '/decision-warnings',
+  requirePermission('Dashboard.Executive'),
   ah(async (req, res) => {
     const branchId = requireBosBranch(req);
     const warnings: { severity: 'info' | 'warning' | 'critical'; title: string; message: string }[] = [];
@@ -465,6 +461,7 @@ bosRouter.get(
 
 bosRouter.get(
   '/profit-distribution/calculate',
+  requirePermission('Dashboard.Executive'),
   ah(async (req, res) => {
     const branchId = requireBosBranch(req);
     if (req.query.period || (req.query.timeframe && req.query.timeframe !== 'month')) {
@@ -504,7 +501,7 @@ bosRouter.get(
 
 bosRouter.post(
   '/profit-distribution/withdraw',
-  requireOwner,
+  requireGlobalOwner,
   ah(async (req, res) => {
     const rawAmount = req.body?.amount;
     let amount: number;
@@ -574,6 +571,7 @@ bosRouter.post(
 // ================= NEW: Profitability Analytics =================
 bosRouter.get(
   '/revenue-by-class',
+  requirePermission('Dashboard.Executive'),
   ah(async (req, res) => {
     const branchId = requireBosBranch(req);
     const { from, to } = getTimeBounds(req.query.period as string, req.query.timeframe as string);
@@ -584,6 +582,7 @@ bosRouter.get(
 
 bosRouter.get(
   '/revenue-by-timeslot',
+  requirePermission('Dashboard.Executive'),
   ah(async (req, res) => {
     const branchId = requireBosBranch(req);
     const { from, to } = getTimeBounds(req.query.period as string, req.query.timeframe as string);

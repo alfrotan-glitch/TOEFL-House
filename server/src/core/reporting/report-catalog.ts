@@ -272,6 +272,8 @@ export interface ReportDefinition {
   permission: string;
   /** Periods this report is meaningful at. */
   periods: readonly ReportingPeriod[];
+  /** Whether the definition authorizes explicit bounded date ranges. */
+  allowsDateRange?: boolean;
   /** Metric ids, in presentation order. */
   metrics: readonly string[];
   purpose: string;
@@ -286,6 +288,7 @@ export const REPORT_CATALOG: readonly ReportDefinition[] = [
     category: 'financial',
     permission: 'Report.View',
     periods: ALL_PERIODS,
+    allowsDateRange: true,
     metrics: [
       'finance.operating_income',
       'finance.operating_expense',
@@ -300,6 +303,7 @@ export const REPORT_CATALOG: readonly ReportDefinition[] = [
     category: 'student',
     permission: 'Report.View',
     periods: ALL_PERIODS,
+    allowsDateRange: true,
     metrics: ['student.new_students', 'student.registrations'],
     purpose: 'How many students joined, and how many registration events were taken.',
   },
@@ -309,6 +313,7 @@ export const REPORT_CATALOG: readonly ReportDefinition[] = [
     category: 'visitor',
     permission: 'Report.View',
     periods: ALL_PERIODS,
+    allowsDateRange: true,
     metrics: ['visitor.new_leads', 'visitor.converted', 'visitor.open_leads'],
     purpose: 'Lead volume and what became of it, using the lead-lifecycle authority.',
   },
@@ -318,6 +323,7 @@ export const REPORT_CATALOG: readonly ReportDefinition[] = [
     category: 'enrollment',
     permission: 'Report.View',
     periods: ALL_PERIODS,
+    allowsDateRange: true,
     metrics: ['enrollment.created'],
     purpose: 'Enrollment events recorded in the period.',
   },
@@ -327,6 +333,7 @@ export const REPORT_CATALOG: readonly ReportDefinition[] = [
     category: 'attendance',
     permission: 'Report.View',
     periods: ALL_PERIODS,
+    allowsDateRange: true,
     metrics: ['attendance.recorded', 'attendance.present'],
     purpose: 'Attendance volume and presence, from which a rate can be derived consistently.',
   },
@@ -336,6 +343,7 @@ export const REPORT_CATALOG: readonly ReportDefinition[] = [
     category: 'payroll',
     permission: 'Payroll.View',
     periods: ALL_PERIODS,
+    allowsDateRange: true,
     metrics: ['payroll.teacher_paid', 'payroll.employee_paid'],
     purpose: 'Payroll actually paid in the period, with reversals excluded.',
   },
@@ -345,6 +353,7 @@ export const REPORT_CATALOG: readonly ReportDefinition[] = [
     category: 'management',
     permission: 'Report.View',
     periods: ALL_PERIODS,
+    allowsDateRange: true,
     metrics: [
       'finance.operating_income',
       'finance.operating_expense',
@@ -359,6 +368,7 @@ export const REPORT_CATALOG: readonly ReportDefinition[] = [
     category: 'academic',
     permission: 'Report.View',
     periods: ALL_PERIODS,
+    allowsDateRange: true,
     metrics: ['academic.sessions_held', 'academic.exams_held', 'academic.certificates_issued'],
     purpose: 'What was actually taught, examined and awarded in the period.',
   },
@@ -368,6 +378,7 @@ export const REPORT_CATALOG: readonly ReportDefinition[] = [
     category: 'teacher',
     permission: 'Report.View',
     periods: ALL_PERIODS,
+    allowsDateRange: true,
     metrics: ['teacher.active'],
     purpose: 'Active teaching headcount as at the period end.',
   },
@@ -377,6 +388,7 @@ export const REPORT_CATALOG: readonly ReportDefinition[] = [
     category: 'operational',
     permission: 'Report.View',
     periods: ALL_PERIODS,
+    allowsDateRange: true,
     metrics: ['operational.book_sales', 'academic.sessions_held'],
     purpose: 'Day-to-day operational output that is not academic or financial reporting.',
   },
@@ -386,6 +398,7 @@ export const REPORT_CATALOG: readonly ReportDefinition[] = [
     category: 'audit',
     permission: 'Audit.View',
     periods: ALL_PERIODS,
+    allowsDateRange: true,
     metrics: ['audit.actions'],
     purpose: 'Recorded operator activity, for review.',
   },

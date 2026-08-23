@@ -14,8 +14,14 @@
  * cannot forget it and quietly publish another branch's numbers.
  */
 import type BetterSqlite3 from 'better-sqlite3';
-import { periodBoundaries, type PeriodBoundaries, type ReportingPeriod } from '../calendar/periods.js';
+import type { ReportingPeriod } from '../calendar/periods.js';
 import { metricById, reportById, type MetricDefinition, type ReportDefinition } from './report-catalog.js';
+import {
+  resolveReportWindow,
+  type ReportPeriodSelection,
+  type ReportWindowSelection,
+  type ResolvedReportWindow,
+} from './report-window.js';
 
 export interface ReportScope {
   /** Null when the caller legitimately sees the whole organization. */
@@ -36,9 +42,9 @@ export interface ReportResult {
   title: string;
   category: ReportDefinition['category'];
   purpose: string;
-  period: ReportingPeriod;
+  period: ReportPeriodSelection;
   /** Resolved boundaries, echoed so a printed copy can state its own span. */
-  boundaries: PeriodBoundaries;
+  boundaries: ResolvedReportWindow;
   scope: { branchId: string | null; isAll: boolean };
   metrics: ReportMetricResult[];
   /** True when every metric returned zero — lets the UI show a real empty state. */
@@ -48,10 +54,14 @@ export interface ReportResult {
 export class UnknownReportError extends Error {}
 export class UnsupportedPeriodError extends Error {}
 
+function normalizeSelection(period: ReportingPeriod | ReportWindowSelection): ReportWindowSelection {
+  return typeof period === 'string' ? { period } : period;
+}
+
 function runMetric(
   db: BetterSqlite3.Database,
   metric: MetricDefinition,
-  boundaries: PeriodBoundaries,
+  boundaries: ResolvedReportWindow,
   scope: ReportScope,
 ): number {
   const params: unknown[] = [boundaries.from, boundaries.to];
@@ -79,17 +89,23 @@ function runMetric(
 export function runReport(
   db: BetterSqlite3.Database,
   reportId: string,
-  period: ReportingPeriod,
+  period: ReportingPeriod | ReportWindowSelection,
   scope: ReportScope,
   todayStr?: string,
 ): ReportResult {
   const definition = reportById(reportId);
   if (!definition) throw new UnknownReportError(`Unknown report '${reportId}'.`);
-  if (!definition.periods.includes(period)) {
-    throw new UnsupportedPeriodError(`Report '${reportId}' is not defined for the '${period}' period.`);
+
+  const selection = normalizeSelection(period);
+  if (selection.period !== 'range' && !definition.periods.includes(selection.period)) {
+    throw new UnsupportedPeriodError(`Report '${reportId}' is not defined for the '${selection.period}' period.`);
   }
 
-  const boundaries = periodBoundaries(period, todayStr);
+  const boundaries = resolveReportWindow(selection, {
+    allowRange: Boolean(definition.allowsDateRange),
+    currentMode: 'to-date',
+    todayStr,
+  });
 
   const metrics = definition.metrics.map((id) => {
     const metric = metricById(id);
@@ -110,7 +126,7 @@ export function runReport(
     title: definition.title,
     category: definition.category,
     purpose: definition.purpose,
-    period,
+    period: boundaries.period,
     boundaries,
     scope: { branchId: scope.branchId, isAll: scope.isAll },
     metrics,

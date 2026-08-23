@@ -14,7 +14,7 @@
  * filters, generated-by, position, timestamp) so printed reports are
  * self-explanatory and traceable without ERP access.
  */
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { LEAD_CONVERTED_SQL } from '../core/visitors/lead-lifecycle.js';
 import {
   CAPITAL_INJECTION_CATEGORY,
@@ -30,7 +30,7 @@ import { db } from '../db/connection.js';
 import { getBranchOutstanding } from '../utils/studentBalance.js';
 import { authenticate, requirePermission, resolveBranchScope } from '../middleware/auth.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
-import { REPORT_CATALOG, REPORT_CATEGORIES } from '../core/reporting/report-catalog.js';
+import { REPORT_CATALOG, REPORT_CATEGORIES, reportById, type ReportDefinition } from '../core/reporting/report-catalog.js';
 import { reportToCsv, reportExportFilename } from '../core/reporting/report-export.js';
 import { writeAudit } from '../middleware/audit.js';
 import {
@@ -38,75 +38,54 @@ import {
   UnknownReportError,
   UnsupportedPeriodError,
 } from '../core/reporting/report-engine.js';
+import { REPORTING_PERIODS } from '../core/calendar/periods.js';
 import {
-  REPORTING_PERIODS,
-  periodBoundaries,
-  periodBoundariesForKey,
-  type ReportingPeriod,
-} from '../core/calendar/periods.js';
+  InvalidReportWindowError,
+  MAX_REPORT_RANGE_DAYS,
+  parseReportWindowQuery,
+  resolveReportWindow,
+} from '../core/reporting/report-window.js';
 import { getFinanceAccount } from '../utils/financeAccounts.js';
 import { incrementNumberSetting, getNumberSetting } from '../utils/settings.js';
 import { SYSTEM_DEFAULTS } from '../core/configuration/policy-catalog.js';
+import { isGlobalOwner } from '../core/rbac/rbac-service.js';
 
 export const reportsRouter = Router();
 reportsRouter.use(authenticate);
 
-const MAX_RANGE_DAYS = 366;
+function canReadDeclaredReport(
+  definition: ReportDefinition,
+  permissionCodes: Set<string> | undefined,
+  rbac?: Parameters<typeof isGlobalOwner>[0],
+) {
+  if (definition.permission === 'Report.View') return true;
+  if (rbac && isGlobalOwner(rbac)) return true;
+  return permissionCodes?.has(definition.permission) ?? false;
+}
 
-/**
- * Resolves the reporting period.
- *
- * Delegated to the calendar authority rather than computed here. Doing its own
- * Gregorian arithmetic — `${ym}-01` to the last day of the Gregorian month —
- * while Finance, payroll and the dashboard resolve a SHAMSI month makes the two
- * never coincide: on every day sampled, the spans differed (2026-08-20 gave 2026-07-23..2026-08-22
- * here versus 2026-08-01..2026-08-31 there). That is the same misattribution
- * the calendar authority was created to fix, still live in the main financial
- * report because this endpoint was never migrated onto it.
- *
- * Named periods now come from that one authority. `range` stays as it is:
- * two explicit Gregorian dates are unambiguous and belong to no calendar.
- *
- * The bounds are the FULL period (`periodEnd`), not month-to-date: the label
- * names a whole period, so a report carrying that label must cover it.
- */
-function resolvePeriod(query: Record<string, string | undefined>) {
-  const period = query.period || 'month';
+function requireDeclaredReportPermission(definition: ReportDefinition, req: Request) {
+  if (canReadDeclaredReport(definition, req.rbac?.permissionCodes, req.rbac)) return;
+  throw new HttpError(403, `This report requires ${definition.permission}.`);
+}
 
-  if (period === 'range') {
-    const from = typeof query.from === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(query.from) ? query.from : '';
-    const to = typeof query.to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(query.to) ? query.to : '';
-    if (!from || !to) throw new HttpError(400, 'Range reports require valid from and to dates (YYYY-MM-DD).');
-    if (from > to) throw new HttpError(400, 'from must not be after to.');
-    const days = Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86400000);
-    if (days > MAX_RANGE_DAYS) throw new HttpError(400, `Range may not exceed ${MAX_RANGE_DAYS} days.`);
-    return { period, from, to, periodLabel: `${from} → ${to}` };
+function resolveOverviewWindow(query: Record<string, string | undefined>) {
+  try {
+    const selection = parseReportWindowQuery(query, { allowRange: true, defaultPeriod: 'month' });
+    return resolveReportWindow(selection, { allowRange: true, currentMode: 'full-period' });
+  } catch (err) {
+    throw new HttpError(400, err instanceof Error ? err.message : 'Invalid report window.');
   }
+}
 
-  if (!REPORTING_PERIODS.includes(period as ReportingPeriod)) {
-    throw new HttpError(400, `Unknown period '${period}'.`);
+function resolveDeclaredReportWindow(definition: ReportDefinition, query: Record<string, string | undefined>) {
+  try {
+    return parseReportWindowQuery(query, {
+      allowRange: Boolean(definition.allowsDateRange),
+      defaultPeriod: 'month',
+    });
+  } catch (err) {
+    throw new HttpError(400, err instanceof Error ? err.message : 'Invalid report window.');
   }
-
-  // A historical period is named by its Shamsi key ('1405-05', '1405-Q2',
-  // '1405'), resolved by the same authority as the current one — otherwise a
-  // report about a past month would use a different calendar from a report
-  // about this one.
-  const key = typeof query.key === 'string' ? query.key.trim() : '';
-  if (key) {
-    let b;
-    try {
-      b = periodBoundariesForKey(key);
-    } catch (err) {
-      throw new HttpError(400, err instanceof Error ? err.message : `Unrecognised period key '${key}'.`);
-    }
-    if (b.period !== period) {
-      throw new HttpError(400, `Period key '${key}' describes a ${b.period}, not a ${period}.`);
-    }
-    return { period, from: b.from, to: b.periodEnd, periodLabel: b.periodKey };
-  }
-
-  const b = periodBoundaries(period as ReportingPeriod);
-  return { period, from: b.from, to: b.periodEnd, periodLabel: b.periodKey };
 }
 
 /** Sum helper for gender-aware income. */
@@ -128,7 +107,9 @@ reportsRouter.get(
   '/overview',
   requirePermission('Report.View', 'Finance.Report', 'Ledger.View'),
   ah(async (req, res) => {
-    const { period, from, to, periodLabel } = resolvePeriod(req.query as Record<string, string | undefined>);
+    const window = resolveOverviewWindow(req.query as Record<string, string | undefined>);
+    const { period, from, to } = window;
+    const periodLabel = window.label;
     const gender = req.query.gender === 'male' || req.query.gender === 'female' ? req.query.gender : 'all';
     const { branchId, isAll } = resolveBranchScope(req);
 
@@ -556,17 +537,19 @@ reportsRouter.get(
   '/catalog',
   authenticate,
   requirePermission('Report.View'),
-  ah(async (_req, res) => {
+  ah(async (req, res) => {
     res.json({
       categories: REPORT_CATEGORIES,
       periods: REPORTING_PERIODS,
-      reports: REPORT_CATALOG.map((r) => ({
+      maxRangeDays: MAX_REPORT_RANGE_DAYS,
+      reports: REPORT_CATALOG.filter((r) => canReadDeclaredReport(r, req.rbac?.permissionCodes, req.rbac)).map((r) => ({
         id: r.id,
         title: r.title,
         category: r.category,
         purpose: r.purpose,
         periods: r.periods,
         permission: r.permission,
+        allowsDateRange: Boolean(r.allowsDateRange),
       })),
     });
   }),
@@ -584,23 +567,17 @@ reportsRouter.get(
   authenticate,
   requirePermission('Report.View'),
   ah(async (req, res) => {
-    const definition = REPORT_CATALOG.find((r) => r.id === req.params.reportId);
+    const definition = reportById(req.params.reportId);
     if (!definition) throw new HttpError(404, `Unknown report '${req.params.reportId}'.`);
 
-    if (definition.permission !== 'Report.View' && !req.rbac?.permissionCodes.has(definition.permission)) {
-      throw new HttpError(403, `This report requires ${definition.permission}.`);
-    }
-
-    const period = String(req.query.period ?? 'month') as ReportingPeriod;
-    if (!REPORTING_PERIODS.includes(period)) {
-      throw new HttpError(400, `Unknown period '${period}'.`);
-    }
+    requireDeclaredReportPermission(definition, req);
+    const window = resolveDeclaredReportWindow(definition, req.query as Record<string, string | undefined>);
 
     const scope = resolveBranchScope(req);
     try {
-      res.json(runReport(db, definition.id, period, scope));
+      res.json(runReport(db, definition.id, window, scope));
     } catch (err) {
-      if (err instanceof UnsupportedPeriodError) throw new HttpError(400, err.message);
+      if (err instanceof UnsupportedPeriodError || err instanceof InvalidReportWindowError) throw new HttpError(400, err.message);
       if (err instanceof UnknownReportError) throw new HttpError(404, err.message);
       throw err;
     }
@@ -625,29 +602,23 @@ reportsRouter.get(
   authenticate,
   requirePermission('Report.View'),
   ah(async (req, res) => {
-    const definition = REPORT_CATALOG.find((r) => r.id === req.params.reportId);
+    const definition = reportById(req.params.reportId);
     if (!definition) throw new HttpError(404, `Unknown report '${req.params.reportId}'.`);
 
-    if (definition.permission !== 'Report.View' && !req.rbac?.permissionCodes.has(definition.permission)) {
-      throw new HttpError(403, `This report requires ${definition.permission}.`);
-    }
+    requireDeclaredReportPermission(definition, req);
 
     const format = String(req.query.format ?? 'csv').toLowerCase();
     if (format !== 'csv') {
       throw new HttpError(400, `Unsupported export format '${format}'. Only csv is available.`);
     }
 
-    const period = String(req.query.period ?? 'month') as ReportingPeriod;
-    if (!REPORTING_PERIODS.includes(period)) {
-      throw new HttpError(400, `Unknown period '${period}'.`);
-    }
-
+    const window = resolveDeclaredReportWindow(definition, req.query as Record<string, string | undefined>);
     const scope = resolveBranchScope(req);
     let result;
     try {
-      result = runReport(db, definition.id, period, scope);
+      result = runReport(db, definition.id, window, scope);
     } catch (err) {
-      if (err instanceof UnsupportedPeriodError) throw new HttpError(400, err.message);
+      if (err instanceof UnsupportedPeriodError || err instanceof InvalidReportWindowError) throw new HttpError(400, err.message);
       if (err instanceof UnknownReportError) throw new HttpError(404, err.message);
       throw err;
     }

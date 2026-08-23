@@ -18,7 +18,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL('../../../../../', import.meta.url));
 const SRC = join(REPO_ROOT, 'src');
 const STORE = join(SRC, 'apiStore.ts');
 const FRESHNESS = join(SRC, 'state/serverStateFreshness.ts');

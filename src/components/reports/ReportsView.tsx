@@ -22,12 +22,13 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { BarChart3, Download, Printer, RefreshCw, FileText, AlertTriangle } from 'lucide-react';
 import { api } from '../../api/client';
 import { formatAFN } from '../../utils/format';
-import { formatJalaliDateTime } from '../../utils/jalali';
+import { formatJalaliDateTime, jalaliPeriodLabel, recentJalaliPeriods, toLatinDigits } from '../../utils/jalali';
 import { brandPrintHeaderHtml } from '../../config/branding';
 import { openPrintDocument, escapeHtml } from '../../design-system/print';
 import { text, layout, surface, control, button, badge } from '../../design-system/styles';
 
 type MetricUnit = 'afn' | 'count' | 'percent' | 'days';
+type WindowMode = 'current' | 'historical' | 'range';
 
 interface CatalogReport {
   id: string;
@@ -36,11 +37,13 @@ interface CatalogReport {
   purpose: string;
   periods: string[];
   permission: string;
+  allowsDateRange: boolean;
 }
 
 interface Catalog {
   categories: string[];
   periods: string[];
+  maxRangeDays: number;
   reports: CatalogReport[];
 }
 
@@ -93,6 +96,16 @@ const PERIOD_LABEL: Record<string, string> = {
   year: 'This year',
 };
 
+const HISTORICAL_KEY_HINT: Record<string, string> = {
+  month: 'Choose a Shamsi month key such as 1405-05.',
+  quarter: 'Enter a Shamsi quarter key such as 1405-Q2.',
+  year: 'Enter a Shamsi year key such as 1405.',
+};
+
+function normalizeShamsiKey(value: string): string {
+  return toLatinDigits(value ?? '').trim().toUpperCase();
+}
+
 interface ReportsViewProps {
   triggerToast: (message: string, type: 'success' | 'error' | 'info') => void;
 }
@@ -102,6 +115,11 @@ export default function ReportsView({ triggerToast }: ReportsViewProps) {
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [period, setPeriod] = useState<string>('month');
+  const [windowMode, setWindowMode] = useState<WindowMode>('current');
+  const historicalMonthOptions = useMemo(() => recentJalaliPeriods(12, 0).slice(1), []);
+  const [historicalKey, setHistoricalKey] = useState<string>(historicalMonthOptions[0] ?? '');
+  const [rangeFrom, setRangeFrom] = useState('');
+  const [rangeTo, setRangeTo] = useState('');
   const [run, setRun] = useState<ReportRun | null>(null);
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
@@ -131,19 +149,62 @@ export default function ReportsView({ triggerToast }: ReportsViewProps) {
   // A report declares the periods it is meaningful at. Offering one it does not
   // support would produce a 400 the operator cannot act on, so the choice is
   // narrowed to what the server will accept.
-  const availablePeriods = selected?.periods ?? [];
-  useEffect(() => {
-    if (availablePeriods.length > 0 && !availablePeriods.includes(period)) {
-      setPeriod(availablePeriods.includes('month') ? 'month' : availablePeriods[0]);
+  const availablePeriods = useMemo(() => selected?.periods ?? [], [selected]);
+  const effectivePeriod =
+    availablePeriods.length === 0 || availablePeriods.includes(period)
+      ? period
+      : (availablePeriods.includes('month') ? 'month' : availablePeriods[0]);
+
+  const periodSupportsHistoricalKey = effectivePeriod === 'month' || effectivePeriod === 'quarter' || effectivePeriod === 'year';
+  const effectiveWindowMode: WindowMode =
+    windowMode === 'historical' && !periodSupportsHistoricalKey
+      ? 'current'
+      : windowMode === 'range' && !selected?.allowsDateRange
+        ? 'current'
+        : windowMode;
+
+  const buildRunQuery = useCallback((): { params: Record<string, string> | null; validationError: string | null } => {
+    if (!selectedId || availablePeriods.length === 0 || !availablePeriods.includes(effectivePeriod) || !selected) {
+      return { params: null, validationError: null };
     }
-  }, [availablePeriods, period]);
+
+    if (effectiveWindowMode === 'range') {
+      if (!selected.allowsDateRange) {
+        return { params: null, validationError: 'This report does not allow an explicit date range.' };
+      }
+      if (!rangeFrom || !rangeTo) {
+        return { params: null, validationError: 'Choose both range dates before running the report.' };
+      }
+      return { params: { period: 'range', from: rangeFrom, to: rangeTo }, validationError: null };
+    }
+
+    if (effectiveWindowMode === 'historical') {
+      if (!periodSupportsHistoricalKey) {
+        return { params: null, validationError: 'Historical mode is available only for month, quarter and year.' };
+      }
+      const key = normalizeShamsiKey(historicalKey || (effectivePeriod === 'month' ? (historicalMonthOptions[0] ?? '') : ''));
+      if (!key) {
+        return { params: null, validationError: HISTORICAL_KEY_HINT[effectivePeriod] ?? 'Enter a Shamsi period key.' };
+      }
+      return { params: { period: effectivePeriod, key }, validationError: null };
+    }
+
+    return { params: { period: effectivePeriod }, validationError: null };
+  }, [availablePeriods, effectivePeriod, effectiveWindowMode, historicalKey, historicalMonthOptions, periodSupportsHistoricalKey, rangeFrom, rangeTo, selected, selectedId]);
+
+  const pendingQuery = useMemo(() => buildRunQuery(), [buildRunQuery]);
 
   const loadRun = useCallback(async () => {
-    if (!selectedId || availablePeriods.length === 0 || !availablePeriods.includes(period)) return;
+    if (!selectedId) return;
+    if (!pendingQuery.params) {
+      setRun(null);
+      setRunError(null);
+      return;
+    }
     setRunning(true);
     setRunError(null);
     try {
-      const data = await api.get<ReportRun>(`/reports/run/${selectedId}`, { period });
+      const data = await api.get<ReportRun>(`/reports/run/${selectedId}`, pendingQuery.params);
       setRun(data);
     } catch (e: unknown) {
       setRun(null);
@@ -151,9 +212,12 @@ export default function ReportsView({ triggerToast }: ReportsViewProps) {
     } finally {
       setRunning(false);
     }
-  }, [selectedId, period, availablePeriods]);
+  }, [pendingQuery.params, selectedId]);
 
-  useEffect(() => { void loadRun(); }, [loadRun]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void loadRun(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadRun]);
 
   /**
    * The file comes from the server, not from this table.
@@ -164,10 +228,15 @@ export default function ReportsView({ triggerToast }: ReportsViewProps) {
    */
   const exportCsv = async () => {
     if (!selectedId) return;
+    if (!pendingQuery.params) {
+      triggerToast(pendingQuery.validationError ?? 'Choose a valid reporting window first.', 'error');
+      return;
+    }
     setExporting(true);
     try {
+      const params = new URLSearchParams({ ...pendingQuery.params, format: 'csv' });
       const res = await fetch(
-        `/api/reports/run/${encodeURIComponent(selectedId)}/export?period=${encodeURIComponent(period)}`,
+        `/api/reports/run/${encodeURIComponent(selectedId)}/export?${params.toString()}`,
         { credentials: 'include' },
       );
       if (!res.ok) {
@@ -180,7 +249,7 @@ export default function ReportsView({ triggerToast }: ReportsViewProps) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${selectedId}-${res.headers.get('X-Report-Period-Key') ?? period}.csv`;
+      a.download = `${selectedId}-${res.headers.get('X-Report-Period-Key') ?? effectivePeriod}.csv`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -238,6 +307,11 @@ export default function ReportsView({ triggerToast }: ReportsViewProps) {
     }
     return map;
   }, [catalog]);
+
+  const historicalHint =
+    effectivePeriod === 'month' && historicalMonthOptions.length > 0
+      ? `Recent month keys are listed from ${jalaliPeriodLabel(historicalMonthOptions[0], true)} backwards.`
+      : HISTORICAL_KEY_HINT[effectivePeriod] ?? 'Historical mode uses canonical Shamsi keys.';
 
   if (catalogError) {
     return (
@@ -311,33 +385,113 @@ export default function ReportsView({ triggerToast }: ReportsViewProps) {
             <p className="text-center text-slate-400 py-12">Select a report.</p>
           ) : (
             <>
-              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b border-slate-100 pb-4">
+              <div className="flex flex-col gap-4 border-b border-slate-100 pb-4 xl:flex-row xl:items-start xl:justify-between">
                 <div>
                   <h2 className="text-lg font-bold text-slate-900">{selected.title}</h2>
                   <p className={text.hint}>{selected.purpose}</p>
-                  <span className={`${badge.neutral} mt-2`}>{selected.category}</span>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span className={badge.neutral}>{selected.category}</span>
+                    {selected.allowsDateRange && <span className={badge.success}>Range-enabled</span>}
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <label htmlFor="report-period" className="sr-only">Period</label>
-                  <select
-                    id="report-period"
-                    value={period}
-                    onChange={(e) => setPeriod(e.target.value)}
-                    className={`${control.select} w-auto`}
-                  >
-                    {availablePeriods.map((p) => (
-                      <option key={p} value={p}>{PERIOD_LABEL[p] ?? p}</option>
-                    ))}
-                  </select>
-                  <button type="button" onClick={() => void loadRun()} className={button.secondary} disabled={running}>
-                    <RefreshCw className={`w-4 h-4 ${running ? 'animate-spin' : ''}`} /> Refresh
-                  </button>
-                  <button type="button" onClick={printReport} className={button.secondary} disabled={!run || running}>
-                    <Printer className="w-4 h-4" /> Print
-                  </button>
-                  <button type="button" onClick={() => void exportCsv()} className={button.primary} disabled={exporting || running}>
-                    <Download className="w-4 h-4" /> {exporting ? 'Exporting…' : 'Export CSV'}
-                  </button>
+
+                <div className="flex flex-col gap-2 xl:items-end">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label htmlFor="report-period" className="sr-only">Period</label>
+                    <select
+                      id="report-period"
+                      value={effectivePeriod}
+                      onChange={(e) => setPeriod(e.target.value)}
+                      className={`${control.select} w-auto`}
+                    >
+                      {availablePeriods.map((p) => (
+                        <option key={p} value={p}>{PERIOD_LABEL[p] ?? p}</option>
+                      ))}
+                    </select>
+
+                    <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1 text-xs font-semibold">
+                      {([
+                        { id: 'current', label: 'Current' },
+                        ...(periodSupportsHistoricalKey ? [{ id: 'historical', label: 'Historical' }] : []),
+                        ...(selected.allowsDateRange ? [{ id: 'range', label: 'Range' }] : []),
+                      ] as Array<{ id: WindowMode; label: string }>).map((mode) => (
+                        <button
+                          key={mode.id}
+                          type="button"
+                          onClick={() => setWindowMode(mode.id)}
+                          className={`rounded-lg px-3 py-1.5 transition-colors ${
+                            effectiveWindowMode === mode.id
+                              ? 'bg-white text-indigo-700 shadow-sm'
+                              : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                        >
+                          {mode.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {effectiveWindowMode === 'historical' && periodSupportsHistoricalKey && (
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
+                      {effectivePeriod === 'month' ? (
+                        <select
+                          value={historicalKey}
+                          onChange={(e) => setHistoricalKey(e.target.value)}
+                          className={`${control.select} w-full sm:w-auto min-w-52`}
+                        >
+                          {historicalMonthOptions.map((key) => (
+                            <option key={key} value={key}>
+                              {jalaliPeriodLabel(key)} · {key}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          type="text"
+                          value={historicalKey}
+                          onChange={(e) => setHistoricalKey(e.target.value)}
+                          placeholder={effectivePeriod === 'quarter' ? '1405-Q2' : '1405'}
+                          className={`${control.input} w-full sm:w-auto sm:min-w-52`}
+                        />
+                      )}
+                      <p className={text.meta}>{historicalHint}</p>
+                    </div>
+                  )}
+
+                  {effectiveWindowMode === 'range' && selected.allowsDateRange && (
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
+                      <input
+                        type="date"
+                        value={rangeFrom}
+                        onChange={(e) => setRangeFrom(e.target.value)}
+                        className={`${control.input} w-full sm:w-auto`}
+                      />
+                      <span className="text-xs text-slate-400">to</span>
+                      <input
+                        type="date"
+                        value={rangeTo}
+                        onChange={(e) => setRangeTo(e.target.value)}
+                        className={`${control.input} w-full sm:w-auto`}
+                      />
+                      <p className={text.meta}>Maximum {catalog.maxRangeDays} days.</p>
+                    </div>
+                  )}
+
+                  {pendingQuery.validationError && (
+                    <p className="text-xs text-amber-700">{pendingQuery.validationError}</p>
+                  )}
+
+                  <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+                    <button type="button" onClick={() => void loadRun()} className={button.secondary} disabled={running || !pendingQuery.params}>
+                      <RefreshCw className={`w-4 h-4 ${running ? 'animate-spin' : ''}`} /> Refresh
+                    </button>
+                    <button type="button" onClick={printReport} className={button.secondary} disabled={!run || running}>
+                      <Printer className="w-4 h-4" /> Print
+                    </button>
+                    <button type="button" onClick={() => void exportCsv()} className={button.primary} disabled={exporting || running || !pendingQuery.params}>
+                      <Download className="w-4 h-4" /> {exporting ? 'Exporting…' : 'Export CSV'}
+                    </button>
+                  </div>
                 </div>
               </div>
 

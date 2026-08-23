@@ -194,7 +194,7 @@ export function useApiStore() {
     settings:   ['settings', 'academic-setup'],
     organization: ['settings', 'academic-setup', 'dashboard'],
     workflows:  ['workflows'],
-    audit:      ['audit'],
+    audit:      ['dashboard', 'audit'],
   }), []);
 
   /**
@@ -728,7 +728,10 @@ export function useApiStore() {
           reloadVisitors(),
           reloadNotifications(),
           reloadDashboardSummary(),
-          ...(canSeeFinance ? [reloadFinanceOverview()] : []),
+          ...(canSeeFinance
+            ? [reloadFinanceOverview(), reloadFinanceDashboard(), reloadRevenueByClass(), reloadRevenueByTimeSlot()]
+            : []),
+          ...(canSeeAuditLog ? [reloadAuditLogs()] : []),
         ]);
       case 'students':
         return Promise.all([reloadStudents(), reloadStudentBalances(), reloadAttendanceSummary(), reloadClasses(), reloadProgramVersions()]);
@@ -766,12 +769,13 @@ export function useApiStore() {
         return Promise.resolve();
     }
   }, [
-    canSeeFinance, reloadAuditLogs, reloadAttendance, reloadAttendanceSummary, reloadBooksWorkspace, reloadBranches, reloadBudgetLines, reloadCampuses,
-    reloadClasses, reloadClassTeacherSkills, reloadDonors, reloadEmployees, reloadExamResults, reloadExams,
-    reloadFinanceOverview, reloadFundingCampaigns, reloadImpactReports, reloadFundingWorkspace,
-    reloadNotifications, reloadOrganization, reloadPartners, reloadProgramVersions, reloadDashboardSummary,
-    reloadSessions, reloadSkills, reloadStudents, reloadStudentsLite, reloadStudentBalances, reloadTeachers,
-    reloadVisitors, reloadWorkflows, reloadAutomations,
+    canSeeAuditLog, canSeeFinance, reloadAuditLogs, reloadAttendance, reloadAttendanceSummary, reloadAutomations, reloadBooksWorkspace,
+    reloadBranches, reloadBudgetLines, reloadCampuses, reloadClasses, reloadClassTeacherSkills, reloadDashboardSummary,
+    reloadDonors, reloadEmployees, reloadExamResults, reloadExams, reloadFinanceDashboard, reloadFinanceOverview,
+    reloadFundingCampaigns, reloadFundingWorkspace, reloadImpactReports, reloadNotifications, reloadOrganization,
+    reloadPartners, reloadProgramVersions, reloadRevenueByClass, reloadRevenueByTimeSlot, reloadSessions,
+    reloadSkills, reloadStudents, reloadStudentsLite, reloadStudentBalances, reloadTeachers, reloadVisitors,
+    reloadWorkflows,
   ]);
 
   const ensureTabData = useCallback(async (tab: string) => {
@@ -1435,7 +1439,15 @@ export function useApiStore() {
 
   const withdrawProfitDistribution = async (amount: number, recipientPartnerId?: string, notes?: string) => {
     await api.post('/bos/profit-distribution/withdraw', { amount, recipientPartnerId, notes });
-    await Promise.all([reloadFinanceOverview(), reloadTransactions(), reloadRevenueByClass(), reloadRevenueByTimeSlot()]);
+    await Promise.all([
+      reloadFinanceOverview(),
+      reloadFinanceDashboard(),
+      reloadDashboardSummary(),
+      reloadTransactions(),
+      reloadRevenueByClass(),
+      reloadRevenueByTimeSlot(),
+      reloadNotifications(),
+    ]);
     invalidate('finance');
   };
 

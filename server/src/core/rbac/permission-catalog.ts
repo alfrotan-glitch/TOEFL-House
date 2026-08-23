@@ -213,7 +213,7 @@ export const ROLE_DEFINITIONS: RoleDef[] = [
     code: 'general_manager', name: 'General Manager', description: 'Campus/branch operations',
     isSystem: true, sortOrder: 20,
     permissions: pick([
-      'Dashboard.View','Analytics.View','Student.View','Student.Create','Student.Edit','Student.Suspend','Student.Resume','Student.Transfer','Student.Print',
+      'Dashboard.View','Dashboard.Executive','Analytics.View','Student.View','Student.Create','Student.Edit','Student.Suspend','Student.Resume','Student.Transfer','Student.Print',
       'Lead.View','Lead.Create','Lead.Edit','Lead.Convert','Lead.Assign',
       'Class.View','Class.Create','Class.Edit','Class.Assign','Session.View','Session.Create','Session.Edit',
       'Attendance.View','Attendance.Edit','Exam.View','Exam.Create','Exam.Edit','Exam.Publish','Grade.View','Grade.Edit','Promotion.Approve',
@@ -239,7 +239,7 @@ export const ROLE_DEFINITIONS: RoleDef[] = [
     code: 'finance_manager', name: 'Finance Manager', description: 'Finance desk — payments & ledger; no treasury allocation',
     isSystem: true, sortOrder: 40,
     permissions: pick([
-      'Dashboard.View','Student.View','Payment.View','Payment.Create','Payment.Edit','Invoice.View','Invoice.Create','Invoice.Edit',
+      'Dashboard.View','Dashboard.Executive','Student.View','Payment.View','Payment.Create','Payment.Edit','Invoice.View','Invoice.Create','Invoice.Edit',
       'Refund.View','Refund.Approve','Discount.View','Budget.View','Expense.View','Expense.Create',
       'Finance.Report','Ledger.View','Report.View','Payroll.View','Payroll.Edit','Teacher.View','Teacher.Create','Teacher.Edit','Employee.View','Book.View','Book.Create','Book.Edit','Book.Restock','Book.Sell','Book.Refund','Funding.View','Funding.RecordDonation','Workflow.View',
     ], 'branch'),

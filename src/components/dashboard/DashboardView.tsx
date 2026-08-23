@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { formatJalaliAxis, formatJalali, toPersianDigits } from '../../utils/jalali';
-import {TrendingUp, TrendingDown, Users, School, Wallet, PiggyBank, Eye, EyeOff, UserCheck, Clock, Zap, AlertTriangle, BookOpen, Activity, GraduationCap, Loader2, CheckCircle2, CalendarDays, BarChart3, Sparkles} from 'lucide-react';
+import {TrendingUp, TrendingDown, Users, Wallet, PiggyBank, Eye, EyeOff, UserCheck, Clock, Zap, AlertTriangle, BookOpen, Activity, GraduationCap, Loader2, CheckCircle2, CalendarDays, BarChart3, Sparkles} from 'lucide-react';
 import {AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend, RadialBarChart, RadialBar} from 'recharts';
 import { AuditLog, BudgetLine, Class, DashboardSummary, FinanceDashboard, Invoice, Student, UserRole, Visitor } from '../../types';
 import { isLeadOpen } from '../../config/leadLifecycle';
@@ -76,8 +76,7 @@ export default function DashboardView({
   getProfitDistribution, withdrawProfitDistribution, revenueByClass = [], revenueByTimeSlot = [], onNavigate
 }: DashboardViewProps) {
   const { user } = useAuth();
-  const role = activeRole as string;
-  const isAuthorized = !!user?.isGlobalOwner || role === 'general_manager';
+  const canViewExecutive = !!user?.isGlobalOwner || !!user?.permissions?.has('Dashboard.Executive');
 
   const [mainTab, setMainTab] = useState<'overview' | 'bos' | 'analytics'>('overview');
   const [timeframe, setTimeframe] = useState<'today' | 'month' | 'year'>('month');
@@ -97,6 +96,10 @@ export default function DashboardView({
       return () => clearTimeout(timer);
     }
   }, [toast]);
+
+  useEffect(() => {
+    if (!canViewExecutive && mainTab === 'bos') setMainTab('overview');
+  }, [canViewExecutive, mainTab]);
 
   const triggerToast = (message: string, type: 'success' | 'error' | 'info') => setToast({ message, type });
 
@@ -198,49 +201,6 @@ export default function DashboardView({
     return { activeClassOptions: qClasses };
   }, [visitors, classes, quickRegVisitorId]);
 
-  if (!isAuthorized) {
-    return (
-      <div className="relative min-h-screen p-6 lg:p-10 font-sans text-slate-800">
-        <div className="fixed inset-0 -z-10 bg-gradient-to-br from-slate-50 via-indigo-50/30 to-slate-100"></div>
-        <div className="mx-auto max-w-7xl space-y-8">
-          <div className="mb-8 flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-slate-900 to-slate-600 bg-clip-text text-transparent">Operations Dashboard</h1>
-              <p className="mt-1 text-sm text-slate-500">Welcome back, {user?.fullName || 'User'}</p>
-            </div>
-            <div className={` ${glassCard} px-4 py-2`}>
-              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Role</p>
-              <p className="font-extrabold text-indigo-600 capitalize">{role}</p>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-             <div className={`${glassCard} p-6`}>
-              <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 flex items-center justify-center mb-3">
-                <Users className="w-6 h-6 text-indigo-600" strokeWidth={2.5} />
-              </div>
-              <p className="text-3xl font-extrabold text-slate-900 tabular-nums">{metrics.activeStudents}</p>
-              <p className="text-xs text-slate-500 font-medium uppercase tracking-wider mt-1">Active Students</p>
-            </div>
-            <div className={`${glassCard} p-6`}>
-              <div className="w-12 h-12 rounded-2xl bg-violet-500/10 flex items-center justify-center mb-3">
-                <School className="w-6 h-6 text-violet-600" strokeWidth={2.5} />
-              </div>
-              <p className="text-3xl font-extrabold text-slate-900 tabular-nums">{metrics.activeClasses}</p>
-              <p className="text-xs text-slate-500 font-medium uppercase tracking-wider mt-1">Active Classes</p>
-            </div>
-            <div className={`${glassCard} p-6`}>
-              <div className="w-12 h-12 rounded-2xl bg-sky-500/10 flex items-center justify-center mb-3">
-                <GraduationCap className="w-6 h-6 text-sky-600" strokeWidth={2.5} />
-              </div>
-              <p className="text-3xl font-extrabold text-slate-900 tabular-nums">{metrics.activeTeachers}</p>
-              <p className="text-xs text-slate-500 font-medium uppercase tracking-wider mt-1">Teachers</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   const money = (n: number) => (hideBalances ? '••••••' : formatAFN(n));
 
   const handleQuickRegister = async (e: React.FormEvent) => {
@@ -301,12 +261,17 @@ export default function DashboardView({
         <header className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-slate-900 to-slate-500 bg-clip-text text-transparent">
-              Executive Dashboard
+              Operations Dashboard
             </h1>
-            <p className="mt-1.5 text-sm text-slate-500 flex items-center gap-2 font-medium">
-              <CalendarDays className="w-4 h-4 text-slate-400" />
-              {formatJalali(new Date().toLocaleDateString('en-CA'), 'long')}
-            </p>
+            <div className="mt-1.5 flex flex-wrap items-center gap-2 text-sm text-slate-500 font-medium">
+              <span className="flex items-center gap-2">
+                <CalendarDays className="w-4 h-4 text-slate-400" />
+                {formatJalali(new Date().toLocaleDateString('en-CA'), 'long')}
+              </span>
+              <span className="rounded-full border border-slate-200 bg-white/70 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-slate-500">
+                {String(activeRole).replace(/_/g, ' ')}
+              </span>
+            </div>
           </div>
           <div className="flex items-center gap-3">
             <button 
@@ -322,11 +287,11 @@ export default function DashboardView({
               {[
                 { id: 'overview', label: 'Overview', icon: Activity },
                 { id: 'analytics', label: 'Analytics', icon: BarChart3 },
-                { id: 'bos', label: 'Business OS', icon: Zap },
+                ...(canViewExecutive ? [{ id: 'bos', label: 'Business OS', icon: Zap }] : []),
               ].map((tab) => (
                 <button
                   key={tab.id}
-                  onClick={() => setMainTab(tab.id as any)}
+                  onClick={() => setMainTab(tab.id as 'overview' | 'analytics' | 'bos')}
                   className={`flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-bold transition-all duration-300 ${
                     mainTab === tab.id ? 'bg-white text-indigo-600 shadow-sm scale-105' : 'text-slate-500 hover:text-slate-900'
                   }`}
@@ -339,12 +304,13 @@ export default function DashboardView({
           </div>
         </header>
 
-        {mainTab === 'bos' ? (
+        {mainTab === 'bos' && canViewExecutive ? (
           <BusinessOperatingSystemView
             getExecutiveDashboard={getExecutiveDashboard} getMarketingFunnel={getMarketingFunnel}
             getStudentAnalytics={getStudentAnalytics} getDecisionWarnings={getDecisionWarnings}
             getProfitDistribution={getProfitDistribution} withdrawProfitDistribution={withdrawProfitDistribution}
             isOwner={!!user?.isGlobalOwner} triggerToast={triggerToast}
+            revenueByClass={revenueByClass} revenueByTimeSlot={revenueByTimeSlot}
           />
         ) : mainTab === 'analytics' ? (
           <div className="space-y-6 animate-in fade-in duration-500">
