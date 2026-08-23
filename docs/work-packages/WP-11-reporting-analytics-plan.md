@@ -179,6 +179,9 @@ D-61 policy remains separate from observed metrics.
 
 WP-11 changes reporting architecture, RBAC, security-sensitive disclosure,
 metric authority, printing/export and potentially schema-supported query paths.
-The committed/pushed baseline above is recoverable. No material implementation
-may begin until this plan is checkpointed; implementation must re-enter DECIDE
-if it discovers an unresolved business metric or policy ambiguity.
+The committed/pushed baseline above is recoverable. Owner decision D-178 clears
+the discovered BOS security-policy ambiguity: Owner, General Manager and Finance
+Manager receive permission-based read-only Executive BOS analytics; only Global
+Owner may withdraw profit. No material implementation may begin until this plan
+and decision refinement are checkpointed; implementation must re-enter DECIDE
+if it discovers another unresolved business metric or policy ambiguity.
