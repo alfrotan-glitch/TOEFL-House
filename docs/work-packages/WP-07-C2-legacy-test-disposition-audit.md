@@ -70,7 +70,7 @@ them. No action beyond keeping them.
 | File | Cases | Why it stays |
 |---|---:|---|
 | `balance-single-source-of-truth.test.ts` | 7 | `studentBalance` is still THE balance authority; roster-vs-profile agreement is untouched by D-141 |
-| `book-price-monetary-validation.test.ts` | 13 | book/salary money validation — outside the settlement authority |
+| `book-price-monetary-validation.test.ts` | 13 | **SUBSEQUENTLY SUPERSEDED by WP-10 (2026-08-23):** its Book assertions were rebuilt under `work-packages/wp10`; its teacher assertions duplicate current payroll money coverage, so the mixed legacy file is removed rather than retained under a false Book authority |
 | `bos-profit-withdrawal-integrity.test.ts` | 23 | cumulative withdrawal ceiling; unaffected by allocations |
 | `cash-position-reconciliation.test.ts` | 8 | branch cash = income − savings − drawings; reconfirmed green by every slice A–K |
 | `discount-authorization-boundary.test.ts` | 40 | the discount **authority** (20% ordinary ceiling, categories do not stack) — still canonical |

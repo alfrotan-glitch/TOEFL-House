@@ -1006,7 +1006,6 @@ export interface Payment {
   id: string;
   studentId?: string;
   invoiceId?: string;
-  bookId?: string;
   amount: number;
   date: string;
   paymentMethod: 'cash' | 'card' | 'bank_transfer';
@@ -1055,41 +1054,99 @@ export interface Attendance {
 }
 
 // ============================================================================
-// BC #10: INVENTORY (inventory schema)
+// BOOKS — catalog, custody and commerce read model
 // ============================================================================
 
-export interface RestockRecord {
-  date: string;
-  quantity: number;
-  price: number;
-  purchasePrice?: number;
-}
+export type BookItemKind = 'book' | 'chapter';
+export type BookPaymentMethod = 'cash' | 'card' | 'bank_transfer';
 
-export interface Book {
+export interface BookCatalogItem {
   id: string;
   title: string;
-  price: number;
-  purchasePrice?: number;
-  stock: number;
-  isChapter: boolean;
+  itemKind: BookItemKind;
+  saleEnabled: boolean;
+  salePrice: number | null;
+  lendingEnabled: boolean;
+  defaultUnitCost: number | null;
+  status: 'active' | 'archived';
   branchId: string;
-  entryDate?: string;
-  restockHistory?: RestockRecord[];
+  receivedQuantity: number;
+  soldQuantity: number;
+  loanedQuantity: number;
+  availableQuantity: number;
+}
+
+export interface BookStockReceipt {
+  id: string;
+  bookId: string;
+  bookTitle: string;
+  quantity: number;
+  receivedOn: string;
+  unitCost: number | null;
+  note: string | null;
+  branchId: string;
+  receivedByName: string;
 }
 
 export interface BookSale {
   id: string;
   bookId: string;
+  bookTitle: string;
+  itemKind: BookItemKind;
   quantity: number;
-  totalAmount: number;
-  discountAmount?: number;
-  netAmount?: number;
-  paymentMethod?: 'cash' | 'card' | 'transfer';
-  status?: 'completed' | 'refunded';
-  date: string;
-  customerName: string;
-  studentId?: string;
+  unitPrice: number;
+  grossAmount: number;
+  discountAmount: number;
+  netAmount: number;
+  soldOn: string;
+  purchaserName: string;
+  studentId: string | null;
+  studentName: string | null;
   branchId: string;
+  receiptNumber: string;
+  refunded: boolean;
+  returnedOn: string | null;
+  refundReason: string | null;
+}
+
+export interface BookLoan {
+  id: string;
+  bookId: string;
+  bookTitle: string;
+  itemKind: BookItemKind;
+  studentId: string;
+  studentName: string;
+  issuedOn: string;
+  dueOn: string;
+  branchId: string;
+  returnId: string | null;
+  returnedOn: string | null;
+  returnNote: string | null;
+  returned: boolean;
+  overdue: boolean;
+}
+
+export interface BookHistoryPage<T> {
+  items: T[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+export interface BooksWorkspace {
+  catalog: BookCatalogItem[];
+  receipts: BookHistoryPage<BookStockReceipt>;
+  sales: BookHistoryPage<BookSale>;
+  loans: BookHistoryPage<BookLoan>;
+  summary: {
+    catalogItems: number;
+    availableQuantity: number;
+    activeLoans: number;
+    overdueLoans: number;
+    soldQuantity: number;
+    salesRevenue: number;
+    returnedSalesValue: number;
+  };
 }
 
 // ============================================================================

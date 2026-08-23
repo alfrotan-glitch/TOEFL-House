@@ -70,15 +70,13 @@ const stmtGetLinkedStudentTeacher = db.prepare(
 const stmtGetSemestersBatch = db.prepare(`SELECT * FROM student_semesters WHERE student_id IN (SELECT value FROM json_each(?)) ORDER BY enroll_date`);
 const stmtGetSemestersByStudent = db.prepare('SELECT * FROM student_semesters WHERE student_id = ? ORDER BY enroll_date DESC');
 const stmtGetPrimaryEnrollmentsBatch = db.prepare(`SELECT e.* FROM enrollments e WHERE e.status IN ('active','confirmed','pending') AND e.enrollment_type != 'extra' AND e.student_id IN (SELECT value FROM json_each(?)) AND NOT EXISTS (SELECT 1 FROM enrollments e2 WHERE e2.student_id = e.student_id AND e2.status IN ('active','confirmed','pending') AND e2.enrollment_type != 'extra' AND e2.started_at > e.started_at)`);
-interface PaymentRow { id: string; student_id: string; amount: number; date: string; category: string; receipt_number: string | null; semester: string | null; status: string; payment_method: string | null; notes: string | null; branch_id: string; invoice_id: string | null; book_id: string | null; }
+interface PaymentRow { id: string; student_id: string; amount: number; date: string; category: string; receipt_number: string | null; semester: string | null; status: string; payment_method: string | null; notes: string | null; branch_id: string; invoice_id: string | null; }
 
 const stmtGetPaymentsAll = db.prepare<[number, number], PaymentRow>('SELECT * FROM payments ORDER BY date DESC LIMIT ? OFFSET ?');
 const stmtGetPaymentsByBranch = db.prepare<[string, number, number], PaymentRow>('SELECT * FROM payments WHERE branch_id = ? ORDER BY date DESC LIMIT ? OFFSET ?');
 
 const stmtGetClassDetails = db.prepare('SELECT * FROM classes WHERE id = ?');
 const stmtGetClassFee = db.prepare('SELECT fee FROM classes WHERE id = ?');
-const stmtGetBookPrice = db.prepare('SELECT id, title, price, stock FROM books WHERE id = ? AND branch_id = ?');
-const stmtUpdateBookStock = db.prepare('UPDATE books SET stock = stock - 1 WHERE id = ? AND branch_id = ? AND stock > 0');
 /**
  * Phone identity lookup, normalized (audit STU-H3).
  *
@@ -140,7 +138,7 @@ const stmtInsertSemester = db.prepare(
   `INSERT INTO student_semesters (id, student_id, semester_name, class_id, enroll_date, fee_amount, net_fee_amount, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'active')`
 );
 const stmtInsertPayment = db.prepare(
-  `INSERT INTO payments (id, student_id, amount, date, payment_method, status, category, notes, receipt_number, branch_id, semester, invoice_id, book_id, idempotency_key) VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?)`
+  `INSERT INTO payments (id, student_id, amount, date, payment_method, status, category, notes, receipt_number, branch_id, semester, invoice_id, idempotency_key) VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?)`
 );
 /**
  * Idempotency replay lookup, SCOPED TO THE STUDENT.
@@ -197,6 +195,7 @@ const stmtInsertRefundPayment = db.prepare(
    VALUES (?, ?, ?, ?, 'cash', 'completed', 'refund', ?, ?, ?, ?, ?, ?)`
 );
 /** The payment a refund may reverse, with what is left of it. */
+const stmtIsBookSalePayment = db.prepare('SELECT 1 FROM book_sales WHERE payment_id = ?');
 const stmtGetRefundTarget = db.prepare(
   `SELECT p.id, p.student_id, p.branch_id, p.amount, p.category, p.semester, p.status, p.date, p.receipt_number,
           COALESCE((SELECT SUM(ABS(r.amount)) FROM payments r
@@ -210,6 +209,7 @@ const stmtListRefundablePayments = db.prepare(
                      WHERE r.refunds_payment_id = p.id AND r.status = 'completed'), 0) AS refunded
      FROM payments p
     WHERE p.student_id = ? AND p.status = 'completed' AND p.category <> 'refund' AND p.amount > 0
+      AND NOT EXISTS (SELECT 1 FROM book_sales s WHERE s.payment_id = p.id)
     ORDER BY p.date DESC, p.rowid DESC`
 );
 const stmtUpdateStudentCard = db.prepare('UPDATE students SET card_design = ?, notes = ? WHERE id = ?');
@@ -1024,7 +1024,7 @@ studentsRouter.post('/:id/enroll-class', requirePermission('Class.Assign'), ah(a
       // Recorded as what it is. Booked as `fee` it counted as TUITION paid,
       // and because an extra class charges no term, it paid down other terms'
       // debt — the WP07-F17 leak arriving through a second door.
-      stmtInsertPayment.run(pid, student.id, paidNow, date, 'cash', 'other', `Extra class fee: ${cls.name}`, nextReceiptNumber(), student.branch_id, null, null, null, `extra-class:${enrollId}`);
+      stmtInsertPayment.run(pid, student.id, paidNow, date, 'cash', 'other', `Extra class fee: ${cls.name}`, nextReceiptNumber(), student.branch_id, null, null, `extra-class:${enrollId}`);
       recordIncome({ category: 'other', amount: paidNow, date, description: `Extra class fee from ${student.full_name}`, referenceId: student.id, paymentId: pid, operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null, branchId: student.branch_id });
     }
 
@@ -1056,10 +1056,9 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
   const { category, paymentMethod, amount } = req.body ?? {};
   const notes = optionalText(req.body?.notes, 'Payment notes', TEXT_LIMITS.notes);
   const semesterId = optionalText(req.body?.semesterId, 'Semester id', TEXT_LIMITS.short);
-  const bookId = optionalText(req.body?.bookId, 'Book id', TEXT_LIMITS.short);
   const installmentId = optionalText(req.body?.installmentId, 'Installment id', TEXT_LIMITS.short);
 
-  if (!category || !['fee', 'book', 'chapter', 'exam', 'card', 'placement', 'diploma', 'installment', 'other'].includes(category)) throw new HttpError(400, 'Invalid category.');
+  if (!category || !['fee', 'chapter', 'exam', 'card', 'placement', 'diploma', 'installment', 'other'].includes(category)) throw new HttpError(400, 'Invalid category.');
   if (paymentMethod != null && !['cash', 'card', 'bank_transfer'].includes(paymentMethod)) {
     throw new HttpError(400, 'Invalid payment method.');
   }
@@ -1091,7 +1090,6 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
     amount: parsedAmount,
     semesterId: semesterId ?? null,
     installmentId: installmentId ?? null,
-    bookId: bookId ?? null,
     method: resolvedMethod,
     actorUserId: user.userId,
   });
@@ -1113,7 +1111,7 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
   // the key was written as NULL for guarded categories, SQLite treated every
   // NULL as distinct, the unique index never fired, and 12 concurrent un-keyed
   // `fee` payments produced 12 payments and 12 income rows from one intent.
-  const GUARDED_CATEGORIES = ['fee', 'installment', 'book', 'card', 'diploma', 'placement'];
+  const GUARDED_CATEGORIES = ['fee', 'installment', 'card', 'diploma', 'placement'];
   const replayEligible = clientSuppliedKey || !GUARDED_CATEGORIES.includes(category);
   if (replayEligible) {
     for (const candidate of idempotencyCandidates) {
@@ -1125,7 +1123,6 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
   const payId = id('pay');
   let resolvedAmount = 0;
   let semName: string | null = null;
-  let bookRefId: string | null = null;
   const requestedAmount = parsedAmount;
   if (requestedAmount !== null && requestedAmount <= 0) throw new HttpError(400, 'Amount must be greater than 0.');
 
@@ -1167,27 +1164,6 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
       throw new HttpError(409, `That term has only ${payable.outstanding} AFN outstanding; the instalment plan no longer matches what is owed.`);
     }
     semName = payable.obligation.semesterName;
-  }
-  else if (category === 'book') {
-    if (!bookId) throw new HttpError(400, 'bookId is required.');
-    const book = stmtGetBookPrice.get(bookId, student.branch_id) as any;
-    if (!book) throw new HttpError(404, 'Book not found.');
-    if (book.stock <= 0) throw new HttpError(409, 'Book is out of stock.');
-    resolvedAmount = Number(book.price || 0);
-    if (requestedAmount !== null && requestedAmount !== resolvedAmount) throw new HttpError(400, 'Book payment must match the listed book price.');
-    // Financial integrity: a book is charged once per student. The book-sale
-    // desk (POST /books/:id/sell) and the payment desk are two writers for the
-    // same business event; the manual payment must not duplicate a completed
-    // sale (or an earlier payment) for this student+book.
-    const alreadySold = db.prepare(
-      `SELECT 1 FROM book_sales WHERE student_id = ? AND book_id = ? AND status = 'completed' LIMIT 1`
-    ).get(student.id, bookId);
-    if (alreadySold) throw new HttpError(409, 'This book was already sold to this student. No additional book payment is due.');
-    const alreadyPaidBook = db.prepare(
-      `SELECT 1 FROM payments WHERE student_id = ? AND book_id = ? AND category IN ('book','chapter') AND status = 'completed' LIMIT 1`
-    ).get(student.id, bookId);
-    if (alreadyPaidBook) throw new HttpError(409, 'This book was already paid for by this student.');
-    bookRefId = bookId;
   }
   else if (['chapter', 'exam', 'other'].includes(category)) {
     // AD-HOC CHARGES. These three are deliberately not backed by a
@@ -1265,7 +1241,7 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
     // above are read-then-write and every concurrent request passes them
     // simultaneously. Writing NULL here for guarded categories would disable
     // the unique index, because SQLite considers each NULL distinct.
-    stmtInsertPayment.run(payId, student.id, resolvedAmount, date, resolvedMethod, category, notes || 'Smart Payment', rc, student.branch_id, semName, null, bookRefId, idempotencyKey);
+    stmtInsertPayment.run(payId, student.id, resolvedAmount, date, resolvedMethod, category, notes || 'Smart Payment', rc, student.branch_id, semName, null, idempotencyKey);
     if (settledObligationId) {
       allocatePaymentToObligation(db, {
         paymentId: payId, obligationId: settledObligationId, amount: resolvedAmount,
@@ -1273,10 +1249,6 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
       });
     }
     if (category === 'installment') markInstallmentPaid(db, String(installmentId), payId);
-    if (category === 'book') {
-      const updated = stmtUpdateBookStock.run(bookRefId, student.branch_id);
-      if (updated.changes !== 1) throw new HttpError(409, 'Book stock changed. Please retry.');
-    }
     // Ad-hoc charges carry their stated reason into the ledger. Every other
     // category is self-describing (a 'fee' row is explained by its semester, a
     // 'book' row by its book), but an ad-hoc amount is only explicable by the
@@ -1310,7 +1282,7 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
     getJourneyEngine(db).appendEvent({ studentId: student.id, eventType: JourneyEventType.PAYMENT_RECORDED, occurredAt: date, branchId: student.branch_id, actorUserId: user.userId, actorName: user.fullName, payload: { amount: resolvedAmount, category, receiptNumber: rc } });
   } catch (err) { log.warn('[journey] failed', err); }
 
-  writeAudit(req, `Recorded ${category} payment ${resolvedAmount} AFN from ${student.full_name}`, { branchId: student.branch_id, newValue: JSON.stringify({ receipt: rc, amount: resolvedAmount, category, paymentId: payId, semester: semName, bookId: bookRefId }) });
+  writeAudit(req, `Recorded ${category} payment ${resolvedAmount} AFN from ${student.full_name}`, { branchId: student.branch_id, newValue: JSON.stringify({ receipt: rc, amount: resolvedAmount, category, paymentId: payId, semester: semName }) });
   res.status(201).json({ receiptNumber: rc, amountCharged: resolvedAmount });
 }));
 
@@ -1417,6 +1389,9 @@ studentsRouter.post('/:id/refund', requirePermission('Refund.Approve'), ah(async
   if (target.student_id !== student.id) throw new HttpError(403, 'That payment belongs to another student.');
   if (target.status !== 'completed') throw new HttpError(409, 'Only a completed payment can be refunded.');
   if (target.category === 'refund') throw new HttpError(400, 'A refund cannot be refunded.');
+  if (stmtIsBookSalePayment.get(target.id)) {
+    throw new HttpError(409, 'Book sale returns are recorded only through the Books workspace so cash and inventory reverse together.');
+  }
   const refundable = Math.max(0, Number(target.amount) - Number(target.refunded));
   if (refundable <= 0) throw new HttpError(409, 'That payment has already been fully refunded.');
   if (refundAmount > refundable) {
@@ -1550,7 +1525,7 @@ studentsRouter.post('/:id/enroll-semester', requirePermission('Class.Assign'), a
       // already forbids a second active semester of the same name, so this
       // payment cannot legitimately repeat. A NULL here would disable
       // uq_payments_idempotency for the row.
-      stmtInsertPayment.run(semPayId, student.id, paidNow, date, 'cash', 'fee', `Semester fee for ${semesterName}`, rc, student.branch_id, semesterName, null, null, `enroll-semester:${newSemId}`);
+      stmtInsertPayment.run(semPayId, student.id, paidNow, date, 'cash', 'fee', `Semester fee for ${semesterName}`, rc, student.branch_id, semesterName, null, `enroll-semester:${newSemId}`);
       allocatePaymentToObligation(db, {
         paymentId: semPayId, obligationId: ensureTuitionObligation(db, newSemId).id, amount: paidNow,
         operatorName: user.fullName, date,

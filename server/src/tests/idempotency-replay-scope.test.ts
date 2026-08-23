@@ -33,7 +33,6 @@ import { fundingRouter } from '../routes/funding.routes.js';
 import booksRouter from '../routes/books.routes.js';
 import { bootstrapRbacCatalog } from '../core/rbac/rbac-service.js';
 import { bearerFor, seedUser } from './support/identity.js';
-import { today } from '../utils/ids.js';
 
 const BRANCH = 'idem_scope_branch';
 let app: express.Express;
@@ -59,14 +58,14 @@ beforeAll(async () => {
   donorA = (await supertest(app).post('/api/funding/donors').set(owner).send({ fullName: 'Donor A', type: 'individual', phone: '0700111222' }).expect(201)).body.id;
   donorB = (await supertest(app).post('/api/funding/donors').set(owner).send({ fullName: 'Donor B', type: 'individual', phone: '0700111333' }).expect(201)).body.id;
 
-  bookA = `bk_idem_a`;
-  bookB = `bk_idem_b`;
-  for (const [id, title] of [[bookA, 'Book A'], [bookB, 'Book B']] as const) {
-    db.prepare(
-      `INSERT OR REPLACE INTO books (id, title, price, stock, branch_id, entry_date)
-       VALUES (?, ?, 500, 50, ?, ?)`,
-    ).run(id, title, BRANCH, today());
-  }
+  const catalogA = await supertest(app).post('/api/books/catalog').set(owner).set('Idempotency-Key', 'idem-scope-catalog-a').send({
+    title: 'Book A', itemKind: 'book', branchId: BRANCH, saleEnabled: true, salePrice: 500, lendingEnabled: false, initialQuantity: 50,
+  }).expect(201);
+  const catalogB = await supertest(app).post('/api/books/catalog').set(owner).set('Idempotency-Key', 'idem-scope-catalog-b').send({
+    title: 'Book B', itemKind: 'book', branchId: BRANCH, saleEnabled: true, salePrice: 500, lendingEnabled: false, initialQuantity: 50,
+  }).expect(201);
+  bookA = catalogA.body.id;
+  bookB = catalogB.body.id;
 });
 
 describe('a donation replay is a replay of the same gift', () => {
@@ -116,61 +115,60 @@ describe('a book-sale replay is a replay of the same sale', () => {
   it('refuses a key already spent on another book instead of confirming a sale that never happened', async () => {
     const key = 'idem-scope-sale';
     await supertest(app)
-      .post(`/api/books/${bookA}/sell`)
+      .post(`/api/books/catalog/${bookA}/sales`)
       .set(owner)
       .set('Idempotency-Key', key)
-      .send({ quantity: 1, customerName: 'Walk-in', paymentMethod: 'cash' })
+      .send({ quantity: 1, purchaserName: 'Walk-in', paymentMethod: 'cash' })
       .expect(201);
 
-    const stockBefore = (db.prepare('SELECT stock FROM books WHERE id = ?').get(bookB) as { stock: number }).stock;
+    const before = db.prepare('SELECT available_quantity FROM book_inventory_positions WHERE book_id = ?').get(bookB) as { available_quantity: number };
     const second = await supertest(app)
-      .post(`/api/books/${bookB}/sell`)
+      .post(`/api/books/catalog/${bookB}/sales`)
       .set(owner)
       .set('Idempotency-Key', key)
-      .send({ quantity: 1, customerName: 'Walk-in', paymentMethod: 'cash' });
+      .send({ quantity: 1, purchaserName: 'Walk-in', paymentMethod: 'cash' });
 
     expect(second.status).toBe(409);
-    expect((db.prepare('SELECT stock FROM books WHERE id = ?').get(bookB) as { stock: number }).stock).toBe(stockBefore);
+    expect(db.prepare('SELECT available_quantity FROM book_inventory_positions WHERE book_id = ?').get(bookB)).toEqual(before);
     expect((db.prepare('SELECT COUNT(*) c FROM book_sales WHERE book_id = ?').get(bookB) as { c: number }).c).toBe(0);
   });
 
   it('still replays a genuine retry of the same sale', async () => {
     const key = 'idem-scope-sale-retry';
     const first = await supertest(app)
-      .post(`/api/books/${bookA}/sell`)
+      .post(`/api/books/catalog/${bookA}/sales`)
       .set(owner)
       .set('Idempotency-Key', key)
-      .send({ quantity: 2, customerName: 'Repeat', paymentMethod: 'cash' })
+      .send({ quantity: 2, purchaserName: 'Repeat', paymentMethod: 'cash' })
       .expect(201);
     const retry = await supertest(app)
-      .post(`/api/books/${bookA}/sell`)
+      .post(`/api/books/catalog/${bookA}/sales`)
       .set(owner)
       .set('Idempotency-Key', key)
-      .send({ quantity: 2, customerName: 'Repeat', paymentMethod: 'cash' })
+      .send({ quantity: 2, purchaserName: 'Repeat', paymentMethod: 'cash' })
       .expect(200);
     expect(retry.body).toMatchObject({ id: first.body.id, idempotentReplay: true });
   });
 });
 
-describe('no money writer looks an idempotency key up on its own', () => {
-  const routes = path.join(path.resolve(fileURLToPath(new URL('.', import.meta.url)), '..'), 'routes');
-  const source = (file: string) => fs.readFileSync(path.join(routes, file), 'utf8');
+describe('no money writer looks an idempotency key up without its business event', () => {
+  const serverRoot = path.resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
+  const source = (file: string) => fs.readFileSync(path.join(serverRoot, file), 'utf8');
 
   it.each([
-    ['invoices.routes.ts', /invoice_id = \? AND student_id = \?/],
-    ['books.routes.ts', /assertSameSale\(/],
-    ['funding.routes.ts', /assertSameDonation\(/],
-    ['teachers.routes.ts', /Idempotency key was already used for a different payroll operation/],
+    ['routes/invoices.routes.ts', /invoice_id = \? AND student_id = \?/],
+    ['core/books/books-service.ts', /This idempotency key has already been used for a different Book sale/],
+    ['routes/funding.routes.ts', /assertSameDonation\(/],
+    ['routes/teachers.routes.ts', /Idempotency key was already used for a different payroll operation/],
   ])('%s scopes its replay to the business event', (file, pattern) => {
     expect(source(file as string)).toMatch(pattern as RegExp);
   });
 
-  it('no route replays a bare key lookup without a scope', () => {
-    for (const file of ['invoices.routes.ts', 'books.routes.ts', 'funding.routes.ts']) {
-      const text = source(file);
-      // A lookup of the form `idempotency_key = ?` with nothing else in the
-      // WHERE clause is exactly the pattern that produced the false replays.
-      expect(text).not.toMatch(/WHERE idempotency_key = \?'\)/);
-    }
+  it('does not retain a bare Book idempotency lookup after the domain boundary moved to the service', () => {
+    const booksRoute = source('routes/books.routes.ts');
+    const booksService = source('core/books/books-service.ts');
+    expect(booksRoute).not.toMatch(/WHERE idempotency_key/);
+    expect(booksService).toContain('idempotency_key IN');
+    expect(booksService).toContain('idempotencyCandidates');
   });
 });

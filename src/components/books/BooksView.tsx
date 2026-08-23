@@ -1,1297 +1,507 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
-import { text } from '../../design-system/styles';
-import React, { useState } from 'react';
-import {BookOpen, ShoppingBag, Plus, Sparkles, ClipboardList, TrendingUp, Calendar, Trash2, X, CheckCircle2, AlertCircle, Edit, Info, Search, History, Printer, CreditCard, RotateCcw, BarChart3, AlertTriangle} from 'lucide-react';
-import {Book, BookSale, Student, UserRole} from '../../types';
-import BooksModals from './BooksModals';
-import {formatAFN} from '../../utils/format';
+import React, { useMemo, useState } from 'react';
+import {
+  BookOpen, BookOpenCheck, ClipboardCheck,
+  HandCoins, LibraryBig, PackagePlus, Pencil, Plus, Printer,
+  ReceiptText, RefreshCcw, RotateCcw, Search, Undo2,
+} from 'lucide-react';
+import type { BookCatalogItem, BookLoan, BookSale, BooksWorkspace, Student } from '../../types';
 import type { DocumentIssuer } from '../../config/documentIssuer';
-import { ShamsiDateInput } from '../common/ShamsiDateInput';
+import { formatAFN } from '../../utils/format';
+import { hasPermission } from '../../config/permissions';
+import { openPrintDocument } from '../../design-system/print';
+import { badge, button, control, cx, layout, surface, table, text } from '../../design-system/styles';
+import ShamsiDateInput from '../common/ShamsiDateInput';
 
 interface BooksViewProps {
-  books: Book[];
-  bookSales: BookSale[];
-  students: Student[];
-  recordBookSale: (
-    bookId: string, 
-    quantity: number, 
-    customerName: string, 
-    studentId?: string, 
-    discountAmount?: number, 
-    paymentMethod?: 'cash' | 'card' | 'transfer'
-  ) => Promise<void>;
-  addBook: (title: string, price: number, stock: number, isChapter: boolean, entryDate?: string, purchasePrice?: number) => Promise<void>;
-  editBook: (id: string, title: string, price: number, stock: number, isChapter: boolean, purchasePrice?: number) => Promise<void>;
-  deleteBook: (id: string) => Promise<void>;
-  refundBookSale: (saleId: string) => Promise<void>;
-  activeRole: UserRole;
-  isGlobalOwner: boolean;
-  /** Contact details of the issuing branch, for printed receipts. */
   issuer: DocumentIssuer;
+  workspace: BooksWorkspace | null;
+  students: Student[];
+  permissionCodes?: string[];
+  createBookCatalogItem: (input: {
+    title: string;
+    itemKind: 'book' | 'chapter';
+    saleEnabled: boolean;
+    salePrice?: number | null;
+    lendingEnabled: boolean;
+    initialQuantity: number;
+    receivedOn?: string;
+    unitCost?: number | null;
+    note?: string;
+  }) => Promise<void>;
+  updateBookCatalogItem: (bookId: string, input: {
+    title?: string;
+    saleEnabled?: boolean;
+    salePrice?: number | null;
+    lendingEnabled?: boolean;
+    defaultUnitCost?: number | null;
+    status?: 'active' | 'archived';
+  }) => Promise<void>;
+  receiveBookStock: (bookId: string, input: { quantity: number; receivedOn?: string; unitCost?: number | null; note?: string }) => Promise<void>;
+  recordBookSale: (bookId: string, input: {
+    quantity: number;
+    purchaserName?: string;
+    studentId?: string;
+    discountAmount?: number;
+    paymentMethod?: 'cash' | 'card' | 'bank_transfer';
+    soldOn?: string;
+  }) => Promise<void>;
+  returnBookSale: (saleId: string, input: { reason: string; returnedOn?: string }) => Promise<void>;
+  issueBookLoan: (bookId: string, input: { studentId: string; dueOn: string; issuedOn?: string }) => Promise<void>;
+  returnBookLoan: (loanId: string, input: { returnedOn?: string; note?: string }) => Promise<void>;
+  loadBooksHistoryPage: (page: number) => Promise<void>;
+}
+
+type BooksTab = 'catalog' | 'sales' | 'loans' | 'receipts';
+type Dialog =
+  | { kind: 'catalog' }
+  | { kind: 'edit'; book: BookCatalogItem }
+  | { kind: 'receipt'; book: BookCatalogItem }
+  | { kind: 'sale'; book: BookCatalogItem }
+  | { kind: 'saleReturn'; sale: BookSale }
+  | { kind: 'loan'; book: BookCatalogItem }
+  | { kind: 'loanReturn'; loan: BookLoan }
+  | null;
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : 'The command could not be completed. Please try again.';
+}
+
+function escapeHtml(value: string | number | null | undefined): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function itemKindLabel(kind: 'book' | 'chapter'): string {
+  return kind === 'chapter' ? 'Skill chapter' : 'Book';
+}
+
+function statusTone(status: BookCatalogItem['status']) {
+  return status === 'active' ? badge.success : badge.neutral;
+}
+
+function dialogTitle(dialog: Exclude<Dialog, null>): string {
+  switch (dialog.kind) {
+    case 'catalog': return 'Create catalog item';
+    case 'edit': return `Edit ${dialog.book.title}`;
+    case 'receipt': return `Receive stock · ${dialog.book.title}`;
+    case 'sale': return `Record sale · ${dialog.book.title}`;
+    case 'saleReturn': return `Return sale ${dialog.sale.receiptNumber}`;
+    case 'loan': return `Issue loan · ${dialog.book.title}`;
+    case 'loanReturn': return `Return loan · ${dialog.loan.bookTitle}`;
+  }
 }
 
 export default function BooksView({
-  books,
-  bookSales,
+  issuer,
+  workspace,
   students,
+  permissionCodes,
+  createBookCatalogItem,
+  updateBookCatalogItem,
+  receiveBookStock,
   recordBookSale,
-  addBook,
-  editBook,
-  deleteBook,
-  refundBookSale,
-  activeRole,
-  isGlobalOwner,
-  issuer
+  returnBookSale,
+  issueBookLoan,
+  returnBookLoan,
+  loadBooksHistoryPage,
 }: BooksViewProps) {
-  /** Change in Settings later; default alert when stock <= this. */
-  const LOW_STOCK_THRESHOLD = 5;
-  const [subTab, setSubTab] = useState<'sales' | 'add' | 'analytics'>('sales');
-  
-  // Dynamic initialization for selectedBookId
-  const [selectedBookId, setSelectedBookId] = useState<string>(() => {
-    return books.length > 0 ? books[0].id : '';
-  });
-  
-  const [quantity, setQuantity] = useState<number>(1);
-  const [customerName, setCustomerName] = useState<string>('');
-  const [studentId, setStudentId] = useState<string>('');
-  const [discountInput, setDiscountInput] = useState<string>('0');
-  const [discountType, setDiscountType] = useState<'percent' | 'afn'>('percent');
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'transfer'>('cash');
+  const [tab, setTab] = useState<BooksTab>('catalog');
+  const [search, setSearch] = useState('');
+  const [dialog, setDialog] = useState<Dialog>(null);
+  const [busy, setBusy] = useState(false);
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Add new book form state
-  const [newTitle, setNewTitle] = useState<string>('');
-  const [newPrice, setNewPrice] = useState<number>(0);
-  const [newPurchasePrice, setNewPurchasePrice] = useState<number>(0);
-  const [newStock, setNewStock] = useState<number>(0);
-  const [newIsChapter, setNewIsChapter] = useState<boolean>(false);
-  const [newEntryDate, setNewEntryDate] = useState<string>(() => {
-    return new Date().toISOString().split('T')[0];
-  });
+  const [catalogTitle, setCatalogTitle] = useState('');
+  const [catalogKind, setCatalogKind] = useState<'book' | 'chapter'>('book');
+  const [catalogSaleEnabled, setCatalogSaleEnabled] = useState(true);
+  const [catalogSalePrice, setCatalogSalePrice] = useState('');
+  const [catalogLendingEnabled, setCatalogLendingEnabled] = useState(false);
+  const [catalogQuantity, setCatalogQuantity] = useState('1');
+  const [catalogUnitCost, setCatalogUnitCost] = useState('');
+  const [catalogReceivedOn, setCatalogReceivedOn] = useState('');
 
-  // Edit book form state
-  const [editingBook, setEditingBook] = useState<Book | null>(null);
-  const [editTitle, setEditTitle] = useState<string>('');
-  const [editPrice, setEditPrice] = useState<number>(0);
-  const [editPurchasePrice, setEditPurchasePrice] = useState<number>(0);
-  const [editStock, setEditStock] = useState<number>(0);
-  const [editIsChapter, setEditIsChapter] = useState<boolean>(true);
+  const [editTitle, setEditTitle] = useState('');
+  const [editSaleEnabled, setEditSaleEnabled] = useState(true);
+  const [editSalePrice, setEditSalePrice] = useState('');
+  const [editLendingEnabled, setEditLendingEnabled] = useState(false);
+  const [editDefaultUnitCost, setEditDefaultUnitCost] = useState('');
+  const [editStatus, setEditStatus] = useState<'active' | 'archived'>('active');
 
-  // Search & Filters state
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [typeFilter, setTypeFilter] = useState<'all' | 'books' | 'chapters'>('all');
-  const [stockFilter, setStockFilter] = useState<'all' | 'low'>('all');
+  const [receiptQuantity, setReceiptQuantity] = useState('1');
+  const [receiptUnitCost, setReceiptUnitCost] = useState('');
+  const [receiptDate, setReceiptDate] = useState('');
+  const [receiptNote, setReceiptNote] = useState('');
 
-  // Custom UI feedback states
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
-  const [bookToDelete, setBookToDelete] = useState<Book | null>(null);
-  const [selectedBookHistory, setSelectedBookHistory] = useState<Book | null>(null);
-  const [selectedSaleReceipt, setSelectedSaleReceipt] = useState<{ sale: BookSale; book: Book } | null>(null);
-  const [saleToRefund, setSaleToRefund] = useState<BookSale | null>(null);
+  const [saleQuantity, setSaleQuantity] = useState('1');
+  const [saleStudentId, setSaleStudentId] = useState('');
+  const [salePurchaserName, setSalePurchaserName] = useState('');
+  const [saleDiscount, setSaleDiscount] = useState('0');
+  const [salePaymentMethod, setSalePaymentMethod] = useState<'cash' | 'card' | 'bank_transfer'>('cash');
+  const [saleDate, setSaleDate] = useState('');
 
-  // Quick restock states
-  const [restockingBook, setRestockingBook] = useState<Book | null>(null);
-  const [quickRestockQty, setQuickRestockQty] = useState<number>(1);
-  const [showAuditModal, setShowAuditModal] = useState<boolean>(false);
+  const [saleReturnReason, setSaleReturnReason] = useState('');
+  const [saleReturnDate, setSaleReturnDate] = useState('');
+  const [loanStudentId, setLoanStudentId] = useState('');
+  const [loanDueOn, setLoanDueOn] = useState('');
+  const [loanIssuedOn, setLoanIssuedOn] = useState('');
+  const [loanReturnDate, setLoanReturnDate] = useState('');
+  const [loanReturnNote, setLoanReturnNote] = useState('');
 
-  const handleQuickRestockSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!restockingBook) return;
-    try {
-      await addBook(
-        restockingBook.title,
-        restockingBook.price,
-        quickRestockQty,
-        restockingBook.isChapter,
-        new Date().toISOString().split('T')[0],
-        restockingBook.purchasePrice ?? 0
-      );
-      setRestockingBook(null);
-      setQuickRestockQty(20);
-      showToastMsg(`Stock for "${restockingBook.title}" increased successfully to ${quickRestockQty} units.`, 'success');
-    } catch (err) {
-      showToastMsg(err instanceof Error ? err.message : 'Restock failed. Please try again.', 'error');
-    }
+  const canCreate = hasPermission(permissionCodes, 'Book.Create');
+  const canEdit = hasPermission(permissionCodes, 'Book.Edit');
+  const canRestock = hasPermission(permissionCodes, 'Book.Restock');
+  const canSell = hasPermission(permissionCodes, 'Book.Sell');
+  const canRefund = hasPermission(permissionCodes, 'Book.Refund');
+  const canIssue = hasPermission(permissionCodes, 'Book.Issue');
+  const canReturn = hasPermission(permissionCodes, 'Book.Return');
+
+  const branchStudents = useMemo(
+    () => students.filter((student) => student.branchId === undefined || workspace?.catalog.some((book) => book.branchId === student.branchId)),
+    [students, workspace?.catalog],
+  );
+  const filteredCatalog = useMemo(() => {
+    const normalized = search.trim().toLocaleLowerCase();
+    if (!normalized) return workspace?.catalog ?? [];
+    return (workspace?.catalog ?? []).filter((book) =>
+      book.title.toLocaleLowerCase().includes(normalized) || itemKindLabel(book.itemKind).toLocaleLowerCase().includes(normalized),
+    );
+  }, [search, workspace?.catalog]);
+
+  const selectTab = (next: BooksTab) => {
+    setTab(next);
+    // One bounded workspace request pages all histories. Reset when changing
+    // history type so a sparse receipt/loan ledger never renders an empty page
+    // merely because the previous sales view was on a later page.
+    const currentPage = next === 'sales' ? workspace?.sales.page
+      : next === 'loans' ? workspace?.loans.page
+        : next === 'receipts' ? workspace?.receipts.page
+          : 1;
+    if (next !== 'catalog' && currentPage && currentPage !== 1) void loadBooksHistoryPage(1);
   };
 
-  const showToastMsg = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
-    setToast({ message, type });
-    setTimeout(() => {
-      setToast(null);
-    }, 4500);
+  const openCatalog = () => {
+    setCatalogTitle('');
+    setCatalogKind('book');
+    setCatalogSaleEnabled(true);
+    setCatalogSalePrice('');
+    setCatalogLendingEnabled(false);
+    setCatalogQuantity('1');
+    setCatalogUnitCost('');
+    setCatalogReceivedOn('');
+    setDialog({ kind: 'catalog' });
   };
 
-  const handleStartEditBook = (book: Book) => {
-    setEditingBook(book);
+  const openEdit = (book: BookCatalogItem) => {
     setEditTitle(book.title);
-    setEditPrice(book.price);
-    setEditPurchasePrice(book.purchasePrice ?? 0);
-    setEditStock(book.stock);
-    setEditIsChapter(book.isChapter);
+    setEditSaleEnabled(book.saleEnabled);
+    setEditSalePrice(book.salePrice == null ? '' : String(book.salePrice));
+    setEditLendingEnabled(book.lendingEnabled);
+    setEditDefaultUnitCost(book.defaultUnitCost == null ? '' : String(book.defaultUnitCost));
+    setEditStatus(book.status);
+    setDialog({ kind: 'edit', book });
   };
 
-  const handleEditBookSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingBook) return;
+  const openReceipt = (book: BookCatalogItem) => {
+    setReceiptQuantity('1');
+    setReceiptUnitCost(book.defaultUnitCost == null ? '' : String(book.defaultUnitCost));
+    setReceiptDate('');
+    setReceiptNote('');
+    setDialog({ kind: 'receipt', book });
+  };
+
+  const openSale = (book: BookCatalogItem) => {
+    setSaleQuantity('1');
+    setSaleStudentId('');
+    setSalePurchaserName('');
+    setSaleDiscount('0');
+    setSalePaymentMethod('cash');
+    setSaleDate('');
+    setDialog({ kind: 'sale', book });
+  };
+
+  const openLoan = (book: BookCatalogItem) => {
+    setLoanStudentId('');
+    setLoanDueOn('');
+    setLoanIssuedOn('');
+    setDialog({ kind: 'loan', book });
+  };
+
+  const submit = async (work: () => Promise<void>, success: string) => {
+    if (busy) return;
+    setBusy(true);
     try {
-      await editBook(editingBook.id, editTitle, editPrice, editStock, editIsChapter, editPurchasePrice);
-      setEditingBook(null);
-      showToastMsg('Book/chapter details updated successfully.', 'success');
-    } catch (err) {
-      showToastMsg(err instanceof Error ? err.message : 'Failed to update the book/chapter. Please try again.', 'error');
+      await work();
+      setDialog(null);
+      setToast({ type: 'success', text: success });
+    } catch (error) {
+      setToast({ type: 'error', text: messageOf(error) });
+    } finally {
+      setBusy(false);
     }
   };
 
-  const handleDeleteConfirm = async () => {
-    if (!bookToDelete) return;
-    try {
-      await deleteBook(bookToDelete.id);
-      showToastMsg(`Book/chapter "${bookToDelete.title}" deleted successfully.`, 'success');
-      setBookToDelete(null);
-      // Update selectedBookId if the deleted book was selected in invoice
-      if (selectedBookId === bookToDelete.id) {
-        const remaining = books.filter(b => b.id !== bookToDelete.id);
-        setSelectedBookId(remaining.length > 0 ? remaining[0].id : '');
-      }
-    } catch (err) {
-      showToastMsg(err instanceof Error ? err.message : 'Failed to delete the book/chapter. Please try again.', 'error');
-    }
-  };
-
-  const selectedBook = books.find(b => b.id === selectedBookId);
-  const grossCost = selectedBook ? selectedBook.price * quantity : 0;
-
-  // Calculate dynamic discount amount
-  const calculatedDiscount = (() => {
-    const val = Number(discountInput) || 0;
-    if (discountType === 'percent') {
-      return Math.round((grossCost * Math.min(val, 100)) / 100);
-    }
-    return Math.min(val, grossCost);
-  })();
-
-  const totalCost = Math.max(0, grossCost - calculatedDiscount);
-
-  const handleSaleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedBookId) {
-      showToastMsg('Please select a book or skill chapter.', 'error');
-      return;
-    }
-    if (!customerName && !studentId) {
-      showToastMsg('Please specify buyer or student name.', 'error');
-      return;
-    }
-
-    let finalCustomerName = customerName;
-    if (studentId) {
-      const stud = students.find(s => s.id === studentId);
-      if (stud) finalCustomerName = stud.fullName;
-    }
-
-    try {
-      await recordBookSale(
-        selectedBookId, 
-        quantity, 
-        finalCustomerName, 
-        studentId || undefined, 
-        calculatedDiscount, 
-        paymentMethod
-      );
-      // Reset form only after the sale was actually recorded.
-      setCustomerName('');
-      setStudentId('');
-      setQuantity(1);
-      setDiscountInput('0');
-      setPaymentMethod('cash');
-      showToastMsg('Sale recorded successfully and revenue was added to the finance cash desk.', 'success');
-    } catch (err) {
-      showToastMsg(err instanceof Error ? err.message : 'Sale failed. Please try again.', 'error');
-    }
-  };
-
-  const handleAddBookSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTitle.trim()) {
-      showToastMsg('Please enter book or chapter title.', 'error');
-      return;
-    }
-    if (newPrice <= 0) {
-      showToastMsg('Sale price must be greater than zero.', 'error');
-      return;
-    }
-    if (newStock < 0) {
-      showToastMsg('Stock cannot be negative.', 'error');
-      return;
-    }
-    try {
-      await addBook(newTitle, newPrice, newStock, newIsChapter, newEntryDate, newPurchasePrice);
-      setNewTitle('');
-      setNewPrice(0);
-      setNewPurchasePrice(0);
-      setNewStock(0);
-      setNewIsChapter(false);
-      setNewEntryDate(new Date().toISOString().split('T')[0]);
-      setSubTab('sales');
-      showToastMsg('Book/chapter registered successfully.', 'success');
-    } catch (err) {
-      showToastMsg(err instanceof Error ? err.message : 'Failed to register the book/chapter. Please try again.', 'error');
-    }
-  };
-
-  const handleRefundConfirm = async () => {
-    if (!saleToRefund) return;
-    try {
-      await refundBookSale(saleToRefund.id);
-      showToastMsg('Sale reversed and stock restored.', 'info');
-      setSaleToRefund(null);
-    } catch (err) {
-      showToastMsg(err instanceof Error ? err.message : 'Refund failed. Please try again.', 'error');
-    }
-  };
-
-  const isAuthorizedToManage = isGlobalOwner || activeRole === 'general_manager' || activeRole === 'receptionist' || activeRole === 'finance_manager';
-  const isOwnerOrManager = isGlobalOwner || activeRole === 'general_manager';
-
-  // Dynamic Metrics & Totals
-  const totalDistinctBooks = books.length;
-  const totalCopiesInStock = books.reduce((sum, b) => sum + b.stock, 0);
-  const totalAssetValue = books.reduce((sum, b) => sum + (b.price * b.stock), 0);
-  const totalAcquisitionCost = books.reduce((sum, b) => sum + (((b.purchasePrice ?? 0)) * b.stock), 0);
-
-  // Filtered sales (exclude refunded from some totals if appropriate, but let's count only completed)
-  const completedSales = bookSales.filter(s => s.status !== 'refunded');
-  const refundedSales = bookSales.filter(s => s.status === 'refunded');
-  
-  const totalSalesRevenue = completedSales.reduce((sum, s) => sum + (s.netAmount !== undefined ? s.netAmount : s.totalAmount), 0);
-  const totalSalesCopies = completedSales.reduce((sum, s) => sum + s.quantity, 0);
-  
-  // Calculate Net Profit
-  // Profit = netAmount_of_sale - (purchase_price_of_book * sale_quantity)
-  const totalNetProfit = completedSales.reduce((sum, s) => {
-    const book = books.find(b => b.id === s.bookId);
-    const purchase = (book?.purchasePrice ?? 0);
-    const revenue = s.netAmount !== undefined ? s.netAmount : s.totalAmount;
-    const cost = purchase * s.quantity;
-    return sum + (revenue - cost);
-  }, 0);
-
-  // Filtered Books
-  const filteredBooks = books.filter(b => {
-    const matchesSearch = b.title.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesType = typeFilter === 'all' ? true : (typeFilter === 'books' ? !b.isChapter : b.isChapter);
-    const matchesStock = stockFilter === 'all' ? true : (stockFilter === 'low' ? b.stock <= 5 : true);
-    return matchesSearch && matchesType && matchesStock;
-  });
-
-  // Calculate payment method share
-  const paymentMethodsStats = completedSales.reduce((acc, s) => {
-    const method = s.paymentMethod || 'cash';
-    const amount = s.netAmount !== undefined ? s.netAmount : s.totalAmount;
-    acc[method] = (acc[method] || 0) + amount;
-    return acc;
-  }, { cash: 0, card: 0, transfer: 0 } as Record<string, number>);
-
-  const totalSalesWithMethods = paymentMethodsStats.cash + paymentMethodsStats.card + paymentMethodsStats.transfer;
-
-  // Find products with critically low stock (<= 2)
-  const criticalBooks = books.filter(b => b.stock <= 2);
-
-  // Find highest units sold book ID to mark as "Best Seller" (Best seller)
-  const bestSellerId = (() => {
-    if (completedSales.length === 0) return null;
-    const salesCount: Record<string, number> = {};
-    completedSales.forEach(s => {
-      salesCount[s.bookId] = (salesCount[s.bookId] || 0) + s.quantity;
+  const printSale = (sale: BookSale) => {
+    const issuerLines = [issuer.branchName, issuer.address, issuer.phone, issuer.email]
+      .filter((value): value is string => Boolean(value))
+      .map((value) => `<div>${escapeHtml(value)}</div>`)
+      .join('');
+    const opened = openPrintDocument({
+      title: `Book sale ${sale.receiptNumber}`,
+      paper: 'receipt80',
+      hideFooter: true,
+      bodyHtml: `<main class="th-receipt">
+        <header class="th-receipt-head"><h1 class="th-title">Book sale receipt</h1>${issuerLines}<div>Receipt: ${escapeHtml(sale.receiptNumber)}</div></header>
+        <table><thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Amount</th></tr></thead><tbody>
+          <tr><td>${escapeHtml(sale.bookTitle)}</td><td class="num">${sale.quantity}</td><td class="num">${escapeHtml(formatAFN(sale.netAmount))}</td></tr>
+        </tbody></table>
+        <p>Purchaser: ${escapeHtml(sale.studentName ?? sale.purchaserName)}</p>
+        <p>Sale date: ${escapeHtml(sale.soldOn)}</p>
+        ${sale.discountAmount > 0 ? `<p>Discount: ${escapeHtml(formatAFN(sale.discountAmount))}</p>` : ''}
+        <p class="th-total">Total: ${escapeHtml(formatAFN(sale.netAmount))}</p>
+      </main>`,
     });
-    let maxQty = 0;
-    let maxId: string | null = null;
-    Object.entries(salesCount).forEach(([id, qty]) => {
-      if (qty > maxQty) {
-        maxQty = qty;
-        maxId = id;
-      }
-    });
-    return maxQty >= 3 ? maxId : null; // Only tag if sold at least 3 copies to make it genuine
-  })();
+    if (!opened) setToast({ type: 'error', text: 'The print window was blocked. Allow pop-ups and try again.' });
+  };
+
+  if (!workspace) {
+    return (
+      <section className={cx(surface.panel, 'p-8 text-center')} aria-busy="true">
+        <LibraryBig className="mx-auto h-8 w-8 text-brand-600" />
+        <h2 className="mt-3 text-lg font-bold text-slate-900">Loading Books workspace</h2>
+        <p className={text.hint}>Inventory, sales and lending facts are being loaded from the server.</p>
+      </section>
+    );
+  }
 
   return (
-    <div className="space-y-6 font-sans text-start relative" id="books-view-root">
-      
-      {/* Toast Notification HUD */}
+    <section className="space-y-6" aria-labelledby="books-page-title">
       {toast && (
-        <div 
-          className={`fixed top-4 start-4 z-50 flex items-center gap-3 px-5 py-3 rounded-2xl shadow-xl border animate-in slide-in-from-left duration-300 ${
-            toast.type === 'success' 
-              ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
-              : toast.type === 'error' 
-                ? 'bg-rose-50 border-rose-200 text-rose-800' 
-                : 'bg-indigo-50 border-indigo-200 text-indigo-800'
-          }`}
-          id="books-custom-toast"
-        >
-          {toast.type === 'success' && <CheckCircle2 className="w-5 h-5 text-emerald-600" />}
-          {toast.type === 'error' && <AlertCircle className="w-5 h-5 text-rose-600" />}
-          {toast.type === 'info' && <Info className="w-5 h-5 text-indigo-600" />}
-          <span className="text-xs font-bold">{toast.message}</span>
-          <button onClick={() => setToast(null)} className="p-1 hover:bg-black/5 rounded-lg transition-colors cursor-pointer">
-            <X className="w-3.5 h-3.5 text-slate-400 hover:text-slate-600" />
-          </button>
+        <div role="status" className={cx('rounded-xl border px-4 py-3 text-sm font-medium', toast.type === 'success'
+          ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+          : 'border-rose-200 bg-rose-50 text-rose-800')}>
+          {toast.text}
         </div>
       )}
 
-      {/* Page Header */}
-      <div className="border-b border-slate-200 pb-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <header className="flex flex-col gap-4 border-b border-slate-200 pb-5 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h2 className="text-xl font-extrabold text-slate-900 flex items-center gap-2">
-            <BookOpen className="w-6 h-6 text-indigo-600" />
-            Bookstore & inventory
-          </h2>
-          <p className={text.hint}>Catalog, sales, restock, discounts, and receipts — all data from your inventory</p>
+          <div className={layout.inline}>
+            <LibraryBig className="h-6 w-6 text-brand-600" aria-hidden="true" />
+            <h1 id="books-page-title" className="text-xl font-extrabold text-slate-900">Books, sales & lending</h1>
+          </div>
+          <p className={text.hint}>Catalog facts, available copies, cash receipts and student custody are reconciled by the server.</p>
         </div>
+        {canCreate && <button type="button" className={button.primary} onClick={openCatalog}><Plus className="h-4 w-4" />Create catalog item</button>}
+      </header>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Metric label="Available copies" value={workspace.summary.availableQuantity} icon={<BookOpen className="h-4 w-4" />} />
+        <Metric label="Active loans" value={workspace.summary.activeLoans} icon={<BookOpenCheck className="h-4 w-4" />} tone={workspace.summary.overdueLoans > 0 ? 'warning' : 'default'} detail={workspace.summary.overdueLoans > 0 ? `${workspace.summary.overdueLoans} overdue` : 'No overdue loans'} />
+        <Metric label="Posted sales" value={workspace.summary.soldQuantity} icon={<ReceiptText className="h-4 w-4" />} detail={`${formatAFN(workspace.summary.salesRevenue)} recognized`} />
+        <Metric label="Returned sales" value={formatAFN(workspace.summary.returnedSalesValue)} icon={<Undo2 className="h-4 w-4" />} tone="default" detail="Full returned-sale contra facts" />
       </div>
 
-      {books.length === 0 && subTab === 'sales' && (
-        <div className="rounded-2xl border border-dashed border-indigo-200 bg-indigo-50/40 px-6 py-10 text-center">
-          <BookOpen className="mx-auto h-10 w-10 text-indigo-400" />
-          <h3 className="mt-3 text-sm font-extrabold text-slate-900">Inventory is empty</h3>
-          <p className="mt-1 text-xs text-slate-500 max-w-md mx-auto">
-            Add real books and skill chapters with purchase and sale prices. Nothing is pre-loaded — your catalog is yours.
-          </p>
-          <button
-            type="button"
-            onClick={() => setSubTab('add')}
-            className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-700"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Add first book
-          </button>
-        </div>
-      )}
-
-      {/* Dynamic Summary Cards Shelf */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="books-stats-bento">
-        
-        {/* Metric 1: Net Profit */}
-        <div className="bg-gradient-to-br from-indigo-50 to-white border border-indigo-150 rounded-2xl p-4.5 shadow-sm flex items-center gap-4 hover:shadow-md transition-all">
-          <div className="p-3 bg-indigo-600 text-white rounded-xl">
-            <TrendingUp className="w-5 h-5 stroke-[2.5]" />
-          </div>
-          <div className="space-y-0.5">
-            <p className="text-[10px] text-indigo-600 font-black uppercase tracking-wider flex items-center gap-1">
-              <Sparkles className="w-3 h-3 animate-pulse" />
-              Net book profit
-            </p>
-            <p className="text-lg font-black text-indigo-950 font-mono">{formatAFN(totalNetProfit)}</p>
-          </div>
-        </div>
-
-        {/* Metric 2: Asset Value / In Stock */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-4.5 shadow-xs flex items-center gap-4 hover:shadow-md transition-shadow">
-          <div className="p-3 bg-amber-50 text-amber-600 rounded-xl">
-            <BookOpen className="w-5 h-5 stroke-[2.5]" />
-          </div>
-          <div className="space-y-0.5">
-            <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">Active bookstore stock</p>
-            <p className="text-base font-black text-slate-900 font-mono">
-              {totalCopiesInStock} copies <span className={text.meta}>({totalDistinctBooks} titles)</span>
-            </p>
-          </div>
-        </div>
-
-        {/* Metric 3: Total Sales Revenue */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-4.5 shadow-xs flex items-center gap-4 hover:shadow-md transition-shadow">
-          <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
-            <ShoppingBag className="w-5 h-5 stroke-[2.5]" />
-          </div>
-          <div className="space-y-0.5">
-            <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">Gross cash sales total</p>
-            <p className="text-base font-black text-emerald-600 font-mono">{formatAFN(totalSalesRevenue)}</p>
-          </div>
-        </div>
-
-        {/* Metric 4: Total Units Sold / Refunds */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-4.5 shadow-xs flex items-center gap-4 hover:shadow-md transition-shadow">
-          <div className="p-3 bg-slate-100 text-slate-600 rounded-xl">
-            <ClipboardList className="w-5 h-5 stroke-[2.5]" />
-          </div>
-          <div className="space-y-0.5">
-            <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">Books sold / reversed</p>
-            <p className="text-base font-black text-slate-800 font-mono">
-              {totalSalesCopies} units <span className="text-[10px] text-rose-500 font-bold">({refundedSales.length} refunded)</span>
-            </p>
-          </div>
-        </div>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <nav aria-label="Books sections" className="flex flex-wrap gap-2">
+          {([
+            ['catalog', 'Catalog'], ['sales', 'Sales'], ['loans', 'Lending'], ['receipts', 'Stock receipts'],
+          ] as Array<[BooksTab, string]>).map(([key, label]) => (
+            <button key={key} type="button" onClick={() => selectTab(key)} aria-current={tab === key ? 'page' : undefined}
+              className={cx(button.secondary, tab === key && 'border-brand-300 bg-brand-50 text-brand-800')}>
+              {label}
+            </button>
+          ))}
+        </nav>
+        {tab === 'catalog' && (
+          <label className="relative block w-full lg:w-80">
+            <span className="sr-only">Search catalog</span>
+            <Search className="pointer-events-none absolute inset-y-0 start-3 my-auto h-4 w-4 text-slate-400" aria-hidden="true" />
+            <input value={search} onChange={(event) => setSearch(event.target.value)} className={cx(control.input, 'ps-9')} placeholder="Search catalog" />
+          </label>
+        )}
       </div>
 
-      {/* Sub tabs switch */}
-      {isAuthorizedToManage && (
-        <div className="flex gap-2 border-b border-slate-200 pb-px">
-          <button
-            onClick={() => setSubTab('sales')}
-            className={`pb-2.5 px-4 font-bold text-xs border-b-2 transition-colors cursor-pointer ${
-              subTab === 'sales'
-                ? 'border-indigo-600 text-indigo-600'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            Book sales & stock
-          </button>
-          <button
-            onClick={() => setSubTab('add')}
-            className={`pb-2.5 px-4 font-bold text-xs border-b-2 transition-colors cursor-pointer ${
-              subTab === 'add'
-                ? 'border-indigo-600 text-indigo-600'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            Add book / chapter
-          </button>
-          <button
-            onClick={() => setSubTab('analytics')}
-            className={`pb-2.5 px-4 font-bold text-xs border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
-              subTab === 'analytics'
-                ? 'border-indigo-600 text-indigo-600'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <BarChart3 className="w-4 h-4" />
-            Sales analysis & net profit
-          </button>
-        </div>
-      )}
-
-      {subTab === 'sales' && (
-        <div className="space-y-6">
-          {/* Critical Inventory Alert Banner */}
-          {criticalBooks.length > 0 && (
-            <div className="bg-rose-50/80 border border-rose-200/60 rounded-3xl p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 animate-in slide-in-from-top-4 duration-300">
-              <div className="flex gap-3.5 text-start">
-                <div className="p-3 bg-rose-100 text-rose-600 rounded-2xl h-fit">
-                  <AlertTriangle className="w-5 h-5 text-rose-600 stroke-[2.5] animate-bounce" />
-                </div>
-                <div className="space-y-0.5">
-                  <h4 className="font-extrabold text-rose-950 text-sm">Critical low-stock alert</h4>
-                  <p className="text-xs text-rose-700/90 leading-relaxed font-medium">
-                    Critical low stock on {criticalBooks.length} book(s)/chapter(s) ({criticalBooks.map(b => `"${b.title}"`).join(', ')}). Please restock soon to avoid stockouts during sales.
-                  </p>
-                </div>
-              </div>
-              <div className="flex gap-2 flex-wrap self-stretch md:self-auto justify-end">
-                {criticalBooks.slice(0, 2).map(b => (
-                  <button
-                    key={b.id}
-                    onClick={() => {
-                      setRestockingBook(b);
-                      setQuickRestockQty(25);
-                    }}
-                    className="bg-white hover:bg-rose-50 text-rose-800 border border-rose-200 hover:border-rose-300 font-extrabold text-[11px] py-2 px-3.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
-                  >
-                    <Plus className="w-3.5 h-3.5 text-rose-600 stroke-[2.5]" />
-                    Quick restock "{b.title.substring(0, 16)}..."
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Books directory list */}
-          <div className="lg:col-span-8 space-y-4">
-            
-            {/* Advanced Search & Filtering HUD */}
-            <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-3">
-              <div className="flex flex-col sm:flex-row gap-3">
-                <div className="flex-1 relative">
-                  <Search className="w-4 h-4 text-slate-400 absolute end-3 top-3" />
-                  <input
-                    type="text"
-                    placeholder="Search books & chapters…"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl pe-9 ps-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:bg-white"
-                  />
-                </div>
-                
-                <div className="flex gap-2 text-xs">
-                  <select
-                    value={typeFilter}
-                    onChange={(e) => setTypeFilter(e.target.value as any)}
-                    className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500/10"
-                  >
-                    <option value="all">All products</option>
-                    <option value="books">Full books only</option>
-                    <option value="chapters">Skill chapters only</option>
-                  </select>
-
-                  <select
-                    value={stockFilter}
-                    onChange={(e) => setStockFilter(e.target.value as any)}
-                    className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500/10"
-                  >
-                    <option value="all">Stock (all)</option>
-                    <option value="low">Low stock</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5">
-              <BookOpen className="w-4 h-4 text-indigo-600" />
-              Book & chapter stock list ({filteredBooks.length} titles)
-            </h3>
-            
-            {filteredBooks.length === 0 ? (
-              <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center text-slate-400 text-xs">
-                {books.length === 0 ? 'No books in inventory yet. Open “Add book / chapter” to build your catalog.' : 'No books match the current filters.'}
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {filteredBooks.map((book) => {
-                  const isLowStock = book.stock <= LOW_STOCK_THRESHOLD;
-                  const restockCount = book.restockHistory?.length || 0;
-                  const purchaseVal = book.purchasePrice ?? 0;
-                  return (
-                    <div key={book.id} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col justify-between hover:border-slate-300 transition-colors">
-                      <div className="flex flex-col space-y-3">
-                        <div className="flex justify-between items-start">
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className={`inline-flex px-2 py-0.5 rounded text-[9px] font-bold ${book.isChapter ? 'bg-amber-50 text-amber-700' : 'bg-indigo-50 text-indigo-700'}`}>
-                                {book.isChapter ? 'Skill chapter' : 'Full book'}
-                              </span>
-                              
-                              {/* Best Seller badge */}
-                              {book.id === bestSellerId && (
-                                <span className="inline-flex items-center gap-0.5 bg-amber-500 text-white px-2 py-0.5 rounded text-[9px] font-black shadow-xs">
-                                  <Sparkles className="w-2.5 h-2.5 animate-pulse" />
-                                  Best seller
-                                </span>
-                              )}
-
-                              {/* Restock indicator */}
-                              {restockCount > 1 && (
-                                <span className="inline-flex items-center gap-0.5 bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded text-[9px] font-bold">
-                                  <History className="w-2.5 h-2.5" />
-                                  {restockCount} restocks
-                                </span>
-                              )}
-                            </div>
-                            
-                            <h4 className="font-bold text-slate-900 text-xs sm:text-sm mt-1">{book.title}</h4>
-                            <div className="space-y-0.5 text-start">
-                              <p className="text-xs font-semibold text-indigo-600 font-mono mt-1">Unit sale price: {formatAFN(book.price)}</p>
-                              {isOwnerOrManager && (
-                                <p className="text-[10px] font-medium text-slate-400 font-mono">Unit purchase: {formatAFN(purchaseVal)}</p>
-                              )}
-                            </div>
-                            
-                            {/* Entry Date */}
-                            <div className="text-[10px] text-slate-400 font-medium flex items-center gap-1 mt-1.5" title="Last stock entry date">
-                              <Calendar className="w-3.5 h-3.5 text-slate-400 stroke-[2]" />
-                              <span>Last restock: {book.entryDate || '1405/04/15'}</span>
-                            </div>
-                          </div>
-                          
-                          <div className="text-start">
-                            <p className="text-[10px] text-slate-400 font-semibold">Stock:</p>
-                            <p className={`text-sm font-extrabold font-mono mt-0.5 ${isLowStock ? 'text-rose-600' : 'text-slate-800'}`}>
-                              {book.stock} units
-                            </p>
-                            {isLowStock && (
-                              <span className="text-[9px] text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded-full font-bold mt-1 inline-block">Low stock</span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Modern Stock Health Progress bar */}
-                        <div className="space-y-1 bg-slate-50/60 p-2 rounded-xl border border-slate-100">
-                          <div className="flex justify-between items-center text-[9px] font-bold">
-                            <span className="text-slate-400">Restock level:</span>
-                            <span className={book.stock === 0 ? 'text-rose-600' : isLowStock ? 'text-amber-600' : 'text-emerald-600'}>
-                              {book.stock === 0 ? 'Out of stock' : isLowStock ? `Critical (${book.stock} units)` : `Adequate (${book.stock} units)`}
-                            </span>
-                          </div>
-                          <div className="w-full bg-slate-200/70 rounded-full h-1.5 overflow-hidden">
-                            <div 
-                              className={`h-full rounded-full transition-all duration-500 ${
-                                book.stock === 0 
-                                  ? 'bg-rose-600' 
-                                  : isLowStock 
-                                    ? 'bg-rose-500 animate-pulse' 
-                                    : book.stock > 30 
-                                      ? 'bg-emerald-500' 
-                                      : 'bg-indigo-500'
-                              }`} 
-                              style={{ width: `${Math.min(100, (book.stock / 50) * 100)}%` }}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center justify-between mt-4 pt-2 border-t border-slate-100">
-                        {/* replenishment history trigger */}
-                        <button
-                          type="button"
-                          onClick={() => setSelectedBookHistory(book)}
-                          className="text-[10px] text-slate-500 hover:text-indigo-600 hover:bg-indigo-50/50 px-2 py-1 rounded-md transition-colors font-semibold flex items-center gap-1 cursor-pointer"
-                        >
-                          <History className="w-3.5 h-3.5" />
-                          Entry history
-                        </button>
-
-                        {isOwnerOrManager && (
-                          <div className="flex gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setRestockingBook(book);
-                                setQuickRestockQty(10);
-                              }}
-                              className="text-[10px] bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold px-2 py-1 rounded-lg border border-emerald-200 transition-colors cursor-pointer flex items-center gap-1"
-                              title="Quick restock"
-                            >
-                              <Plus className="w-3 h-3" />
-                              Restock inventory
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleStartEditBook(book)}
-                              className="text-[10px] bg-slate-50 hover:bg-indigo-50 hover:text-indigo-600 text-slate-600 font-bold px-2 py-1 rounded-lg border border-slate-200 transition-colors cursor-pointer flex items-center gap-1"
-                            >
-                              <Edit className="w-3 h-3" />
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setBookToDelete(book)}
-                              className="text-[10px] bg-slate-50 hover:bg-rose-50 hover:text-rose-600 text-slate-500 font-bold px-2 py-1 rounded-lg border border-slate-200 transition-colors cursor-pointer flex items-center gap-1"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                              Delete
-                            </button>
-                          </div>
-                        )}
-                      </div>
+      {tab === 'catalog' && (
+        <div className={cx(surface.panel, 'overflow-x-auto')}>
+          <table className="min-w-full">
+            <thead className="border-b border-slate-200 bg-slate-50"><tr>
+              <th className={table.headCell}>Catalog item</th><th className={table.headCell}>Availability</th><th className={table.headCell}>Capabilities</th><th className={table.headCell}>Status</th><th className={cx(table.headCell, 'text-end')}>Actions</th>
+            </tr></thead>
+            <tbody className="divide-y divide-slate-100">
+              {filteredCatalog.map((book) => (
+                <tr key={book.id}>
+                  <td className={table.cell}><div className="font-semibold text-slate-900">{book.title}</div><div className={text.meta}>{itemKindLabel(book.itemKind)} · {book.saleEnabled ? formatAFN(book.salePrice ?? 0) : 'Not for sale'}</div></td>
+                  <td className={table.cell}><span className={book.availableQuantity > 0 ? badge.success : badge.danger}>{book.availableQuantity} available</span><div className={text.meta}>Received {book.receivedQuantity} · sold {book.soldQuantity} · loaned {book.loanedQuantity}</div></td>
+                  <td className={table.cell}><div className="flex flex-wrap gap-1">{book.saleEnabled && <span className={badge.neutral}>Sale</span>}{book.lendingEnabled && <span className={badge.neutral}>Lending</span>}</div></td>
+                  <td className={table.cell}><span className={statusTone(book.status)}>{book.status}</span></td>
+                  <td className={cx(table.cell, 'whitespace-nowrap text-end')}>
+                    <div className="inline-flex flex-wrap justify-end gap-2">
+                      {canRestock && book.status === 'active' && <button type="button" className={button.ghost} onClick={() => openReceipt(book)}><PackagePlus className="h-4 w-4" />Stock</button>}
+                      {canSell && book.status === 'active' && book.saleEnabled && <button type="button" className={button.ghost} onClick={() => openSale(book)} disabled={book.availableQuantity <= 0}><HandCoins className="h-4 w-4" />Sell</button>}
+                      {canIssue && book.status === 'active' && book.lendingEnabled && <button type="button" className={button.ghost} onClick={() => openLoan(book)} disabled={book.availableQuantity <= 0}><BookOpenCheck className="h-4 w-4" />Issue</button>}
+                      {canEdit && <button type="button" className={button.ghost} onClick={() => openEdit(book)}><Pencil className="h-4 w-4" />Edit</button>}
                     </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Historical sales logs */}
-            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5">
-                  <ClipboardList className="w-5 h-5 text-indigo-600" />
-                  Sales & refunds ledger
-                </h3>
-                <span className="text-[10px] font-bold bg-slate-50 border border-slate-150 px-2 py-1 rounded-lg text-slate-500">
-                  {bookSales.length} total transactions
-                </span>
-              </div>
-              <div className="overflow-x-auto text-xs">
-                <table className="w-full text-start border-collapse">
-                  <thead>
-                    <tr className="border-b border-slate-100 text-slate-500">
-                      <th className="py-2 px-3 font-bold text-slate-700">Book / chapter</th>
-                      <th className="py-2 px-3 font-bold text-slate-700 text-center">Qty</th>
-                      <th className="py-2 px-3 font-bold text-slate-700">Buyer</th>
-                      <th className="py-2 px-3 font-bold text-slate-700">Method</th>
-                      <th className="py-2 px-3 font-bold text-slate-700">Sale total</th>
-                      <th className="py-2 px-3 font-bold text-slate-700 font-mono">Date</th>
-                      <th className="py-2 px-3 font-bold text-slate-700 text-center">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50 text-slate-600">
-                    {bookSales.length === 0 ? (
-                      <tr>
-                        <td colSpan={7} className="text-center py-6 text-slate-400">No sales recorded yet.</td>
-                      </tr>
-                    ) : (
-                      bookSales.map((sale) => {
-                        const bk = books.find(b => b.id === sale.bookId);
-                        const isRefunded = sale.status === 'refunded';
-                        const paymentMethodLabels = { cash: 'Cash', card: 'Card', transfer: 'Bank transfer' };
-                        const methodLabel = paymentMethodLabels[sale.paymentMethod || 'cash'] || 'Cash';
-                        
-                        const actualAmount = sale.netAmount !== undefined ? sale.netAmount : sale.totalAmount;
-
-                        return (
-                          <tr key={sale.id} className={`hover:bg-slate-50/40 ${isRefunded ? 'bg-rose-50/20 text-slate-400 line-through' : ''}`}>
-                            <td className="py-2.5 px-3 font-semibold text-slate-800">
-                              <span className="flex items-center gap-1.5">
-                                {isRefunded && <span className="bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded text-[8px] font-bold no-underline">Reversed</span>}
-                                {bk ? bk.title : 'Deleted product'}
-                              </span>
-                            </td>
-                            <td className="py-2.5 px-3 text-center font-mono">{sale.quantity} units</td>
-                            <td className="py-2.5 px-3">{sale.customerName}</td>
-                            <td className="py-2.5 px-3">{methodLabel}</td>
-                            <td className={`py-2.5 px-3 font-mono font-bold ${isRefunded ? 'text-rose-500 font-normal' : 'text-emerald-600'}`}>
-                              {isRefunded ? '-' : ''}{formatAFN(actualAmount)}
-                            </td>
-                            <td className="py-2.5 px-3 font-mono text-slate-400">{sale.date}</td>
-                            <td className="py-2.5 px-3 text-center">
-                              <div className="flex items-center justify-center gap-1">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (bk) {
-                                      setSelectedSaleReceipt({ sale, book: bk });
-                                    } else {
-                                      showToastMsg('Product info not found for this invoice.', 'error');
-                                    }
-                                  }}
-                                  className="text-[10px] text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 px-2 py-1 rounded-md transition-all font-bold cursor-pointer inline-flex items-center gap-1 no-underline"
-                                >
-                                  <Printer className="w-3.5 h-3.5" />
-                                  Print invoice
-                                </button>
-
-                                {!isRefunded && isOwnerOrManager && (
-                                  <button
-                                    type="button"
-                                    onClick={() => setSaleToRefund(sale)}
-                                    className="text-[10px] text-rose-600 hover:text-rose-800 hover:bg-rose-50 px-2 py-1 rounded-md transition-all font-bold cursor-pointer inline-flex items-center gap-1 no-underline"
-                                    title="Refund invoice and return stock to inventory"
-                                  >
-                                    <RotateCcw className="w-3 h-3" />
-                                    Refund
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-
-          {/* Sell Book Form panel */}
-          <div className="lg:col-span-4 bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4 h-fit">
-            <h3 className="text-sm font-extrabold text-slate-900 border-b border-slate-100 pb-2.5 flex items-center gap-1.5">
-              <ShoppingBag className="w-5 h-5 text-indigo-600" />
-              New sale invoice (smart discount)
-            </h3>
-            
-            <form onSubmit={handleSaleSubmit} className="space-y-4 text-xs">
-              {/* Book Selector */}
-              <div className="space-y-1">
-                <label className="block text-slate-600 font-medium">Book or skill chapter:</label>
-                <select
-                  value={selectedBookId}
-                  onChange={(e) => {
-                    setSelectedBookId(e.target.value);
-                    setQuantity(1);
-                  }}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 cursor-pointer focus:ring-1 focus:ring-indigo-500"
-                >
-                  <option value="" disabled>--- Select book/chapter ---</option>
-                  {books.map(b => (
-                    <option key={b.id} value={b.id}>{b.title} ({formatAFN(b.price)} - stock: {b.stock})</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Quantity */}
-              <div className="space-y-1">
-                <label className="block text-slate-600 font-medium">Order qty:</label>
-                <input
-                  type="number"
-                  value={quantity}
-                  onChange={(e) => setQuantity(Math.max(1, Number(e.target.value)))}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 font-mono"
-                  min={1}
-                  max={selectedBook ? selectedBook.stock : 10}
-                  required
-                />
-                {quantity >= 5 && (
-                  <div className="bg-amber-50 border border-amber-200 text-amber-800 p-2.5 rounded-lg flex flex-col gap-1.5 mt-1 text-[10px]">
-                    <div className="flex items-center gap-1 font-semibold">
-                      <Sparkles className="w-3.5 h-3.5 text-amber-600 animate-pulse" />
-                      <span>Suggestion: apply bulk purchase discount</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDiscountType('percent');
-                        setDiscountInput('10');
-                      }}
-                      className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-[9px] py-1 px-2 rounded-md transition-colors cursor-pointer self-start"
-                    >
-                      Auto-apply 10% bulk discount
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Discount Input Section */}
-              <div className="space-y-1">
-                <label className="block text-slate-600 font-medium">Apply sale discount:</label>
-                <div className="flex gap-1.5">
-                  <input
-                    type="number"
-                    value={discountInput}
-                    onChange={(e) => setDiscountInput(e.target.value)}
-                    className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-mono text-xs"
-                    placeholder={discountType === 'percent' ? 'Discount % e.g. 10' : 'Discount amount e.g. 50'}
-                    min={0}
-                  />
-                  <div className="flex border border-slate-200 rounded-lg overflow-hidden bg-slate-50 text-[10px] font-bold">
-                    <button
-                      type="button"
-                      onClick={() => setDiscountType('percent')}
-                      className={`px-2.5 py-1 transition-colors cursor-pointer ${discountType === 'percent' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
-                    >
-                      Percent (%)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDiscountType('afn')}
-                      className={`px-2.5 py-1 transition-colors cursor-pointer ${discountType === 'afn' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
-                    >
-                      AFN
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Payment Method Selector */}
-              <div className="space-y-1">
-                <label className="block text-slate-600 font-medium">Customer payment method:</label>
-                <div className="grid grid-cols-3 gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod('cash')}
-                    className={`p-2 rounded-xl border text-[10px] font-bold text-center transition-all cursor-pointer ${
-                      paymentMethod === 'cash' 
-                        ? 'border-indigo-600 bg-indigo-50/50 text-indigo-700' 
-                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-                    }`}
-                  >
-                    Cash (till)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod('card')}
-                    className={`p-2 rounded-xl border text-[10px] font-bold text-center transition-all cursor-pointer ${
-                      paymentMethod === 'card' 
-                        ? 'border-indigo-600 bg-indigo-50/50 text-indigo-700' 
-                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-                    }`}
-                  >
-                    Card reader
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod('transfer')}
-                    className={`p-2 rounded-xl border text-[10px] font-bold text-center transition-all cursor-pointer ${
-                      paymentMethod === 'transfer' 
-                        ? 'border-indigo-600 bg-indigo-50/50 text-indigo-700' 
-                        : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-                    }`}
-                  >
-                    Transfer
-                  </button>
-                </div>
-              </div>
-
-              {/* Student selection toggle */}
-              <div className="space-y-1.5">
-                <label className="block text-slate-600 font-medium">Assign to student? (optional)</label>
-                <select
-                  value={studentId}
-                  onChange={(e) => {
-                    setStudentId(e.target.value);
-                    if (e.target.value) {
-                      setCustomerName(''); // clear generic custom name
-                    }
-                  }}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 cursor-pointer focus:ring-1 focus:ring-indigo-500"
-                >
-                  <option value="">Walk-in customer purchase</option>
-                  {students.map(s => (
-                    <option key={s.id} value={s.id}>{s.fullName} ({s.studentCode})</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Raw Customer Name */}
-              {!studentId && (
-                <div className="space-y-1">
-                  <label className="block text-slate-600 font-medium">Walk-in customer name:</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Ali Akbari"
-                    value={customerName}
-                    onChange={(e) => setCustomerName(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5"
-                    required
-                  />
-                </div>
-              )}
-
-              {/* Total invoice layout indicator */}
-              <div className="bg-slate-50 border border-slate-100 rounded-xl p-4 space-y-1.5">
-                <div className="flex justify-between text-slate-500 text-[11px]">
-                  <span>Gross book price:</span>
-                  <span className="font-mono">{formatAFN(grossCost)}</span>
-                </div>
-                {calculatedDiscount > 0 && (
-                  <div className="flex justify-between text-rose-600 text-[11px]">
-                    <span>Discount applied:</span>
-                    <span className="font-mono">-{formatAFN(calculatedDiscount)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between text-slate-900 font-bold border-t border-slate-200/60 pt-1.5 mt-0.5">
-                  <span>Net payable:</span>
-                  <span className="font-mono text-indigo-600">{formatAFN(totalCost)}</span>
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={selectedBook ? selectedBook.stock < quantity : true}
-                className={`w-full text-white font-bold py-3 rounded-lg transition-colors cursor-pointer shadow-sm text-center ${
-                  selectedBook && selectedBook.stock >= quantity 
-                    ? 'bg-indigo-600 hover:bg-indigo-700' 
-                    : 'bg-slate-300 cursor-not-allowed'
-                }`}
-              >
-                Post cash invoice and update till stock
-              </button>
-            </form>
-          </div>
-        </div>
+                  </td>
+                </tr>
+              ))}
+              {filteredCatalog.length === 0 && <EmptyRow columns={5} title="No catalog items match this view." detail={canCreate ? 'Create a catalog item to record an initial immutable stock receipt.' : 'Ask a Book administrator to create a catalog item.'} />}
+            </tbody>
+          </table>
         </div>
       )}
 
-      {subTab === 'add' && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm max-w-2xl animate-in fade-in slide-in-from-bottom-4 duration-300">
-          <div className="border-b border-slate-100 pb-3 mb-4 flex items-center justify-between">
-            <div>
-              <h3 className="font-extrabold text-slate-900 text-sm">Register new book or chapter</h3>
-              <p className="text-[10px] text-slate-400 mt-0.5">Set sale and purchase prices for live net profit and inventory ROI calculations.</p>
-            </div>
-            <Sparkles className="w-5 h-5 text-indigo-600 animate-pulse" />
-          </div>
-          
-          <form onSubmit={handleAddBookSubmit} className="space-y-4 text-xs">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <label className="block text-slate-600 font-semibold">Product title (exact):</label>
-                <input
-                  type="text"
-                  placeholder="e.g. TOEFL Reading Practice Chapter"
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500/10"
-                  required
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-slate-600 font-semibold">Product type:</label>
-                <select
-                  value={newIsChapter ? 'chapter' : 'book'}
-                  onChange={(e) => setNewIsChapter(e.target.value === 'chapter')}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500/10"
-                >
-                  <option value="chapter">Skill chapter</option>
-                  <option value="book">Full book</option>
-                </select>
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-slate-600 font-semibold">Sale price (AFN):</label>
-                <input
-                  type="number"
-                  value={newPrice}
-                  onChange={(e) => {
-                    setNewPrice(Number(e.target.value));
-                    // Purchase price is entered separately — not auto-estimated
-                  }}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500/10 font-mono"
-                  min={0}
-                  required
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-slate-600 font-semibold">Purchase cost (AFN) — for margin:</label>
-                <input
-                  type="number"
-                  value={newPurchasePrice}
-                  onChange={(e) => setNewPurchasePrice(Number(e.target.value))}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500/10 font-mono"
-                  min={0}
-                  required
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-slate-600 font-semibold">New stock qty (units):</label>
-                <input
-                  type="number"
-                  value={newStock}
-                  onChange={(e) => setNewStock(Number(e.target.value))}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500/10 font-mono"
-                  min={1}
-                  required
-                />
-              </div>
-
-              {/* Entry Date Picker */}
-              <div className="space-y-1">
-                <label className="block text-slate-600 font-semibold">Warehouse entry date:</label>
-                <ShamsiDateInput value={newEntryDate} onChange={(v) => setNewEntryDate(v)} required />
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-lg transition-colors cursor-pointer shadow-sm mt-2 flex items-center gap-1.5"
-            >
-              <Plus className="w-4 h-4" />
-              Add & sync with inventory stock
-            </button>
-          </form>
+      {tab === 'sales' && (
+        <>
+        <div className={cx(surface.panel, 'overflow-x-auto')}>
+          <table className="min-w-full"><thead className="border-b border-slate-200 bg-slate-50"><tr>
+            <th className={table.headCell}>Receipt</th><th className={table.headCell}>Item / purchaser</th><th className={table.headCell}>Date</th><th className={table.numericCell}>Net amount</th><th className={table.headCell}>Lifecycle</th><th className={cx(table.headCell, 'text-end')}>Actions</th>
+          </tr></thead><tbody className="divide-y divide-slate-100">
+            {workspace.sales.items.map((sale) => <tr key={sale.id}>
+              <td className={table.cell}><span className="font-mono text-xs font-semibold text-slate-700">{sale.receiptNumber}</span></td>
+              <td className={table.cell}><div className="font-semibold text-slate-900">{sale.bookTitle} × {sale.quantity}</div><div className={text.meta}>{sale.studentName ?? sale.purchaserName}</div></td>
+              <td className={table.cell}>{sale.soldOn}</td>
+              <td className={table.numericCell}>{formatAFN(sale.netAmount)}</td>
+              <td className={table.cell}>{sale.refunded ? <><span className={badge.neutral}>Returned</span><div className={text.meta}>{sale.returnedOn} · {sale.refundReason}</div></> : <span className={badge.success}>Posted</span>}</td>
+              <td className={cx(table.cell, 'text-end')}><div className="inline-flex gap-2"><button type="button" className={button.ghost} onClick={() => printSale(sale)}><Printer className="h-4 w-4" />Print</button>{canRefund && !sale.refunded && <button type="button" className={button.ghost} onClick={() => { setSaleReturnReason(''); setSaleReturnDate(''); setDialog({ kind: 'saleReturn', sale }); }}><RotateCcw className="h-4 w-4" />Return</button>}</div></td>
+            </tr>)}
+            {workspace.sales.items.length === 0 && <EmptyRow columns={6} title="No Book sales have been recorded." detail="A Book sale creates one linked cash receipt and income fact." />}
+          </tbody></table>
         </div>
+        <HistoryPagination page={workspace.sales.page} pageSize={workspace.sales.pageSize} total={workspace.sales.total} onPage={(page) => { void loadBooksHistoryPage(page); }} />
+        </>
       )}
 
-      {subTab === 'analytics' && (
-        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
-          {/* Header Action Bar */}
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-indigo-50/40 border border-indigo-100 rounded-2xl p-4">
-            <div className="space-y-0.5 text-start">
-              <h3 className="font-extrabold text-slate-900 text-sm">Inventory profit & asset dashboard</h3>
-              <p className="text-[10px] text-slate-500 font-semibold">Live ROI, payment mix, and management reporting</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowAuditModal(true)}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-2 px-4 rounded-xl transition-colors cursor-pointer shadow-md shadow-indigo-600/10 flex items-center gap-1.5"
-            >
-              <Printer className="w-3.5 h-3.5" />
-              Print full inventory audit report
-            </button>
-          </div>
-
-          {/* Stats Bento Layout */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            
-            {/* ROI Card */}
-            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
-              <h3 className="text-xs font-black text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                <TrendingUp className="w-4 h-4 text-emerald-500" />
-                Profitability & ROI
-              </h3>
-              <div className="space-y-2">
-                <div className="flex justify-between text-xs">
-                  <span className="text-slate-500">Inventory value at cost:</span>
-                  <span className="font-mono font-bold text-slate-700">{formatAFN(totalAcquisitionCost)}</span>
-                </div>
-                <div className="flex justify-between text-xs">
-                  <span className="text-slate-500">Inventory retail potential:</span>
-                  <span className="font-mono font-bold text-slate-700">{formatAFN(totalAssetValue)}</span>
-                </div>
-                <div className="flex justify-between text-xs border-t border-slate-100 pt-2 font-bold">
-                  <span className="text-indigo-600">Remaining inventory profit potential:</span>
-                  <span className="font-mono text-indigo-700">{formatAFN(totalAssetValue - totalAcquisitionCost)}</span>
-                </div>
-                <div className="flex justify-between text-xs pt-1 font-bold">
-                  <span className="text-emerald-600">Realized gross profit:</span>
-                  <span className="font-mono text-emerald-700">{formatAFN(totalSalesRevenue)}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Payment Methods Chart Box */}
-            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-3.5">
-              <h3 className="text-xs font-black text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                <CreditCard className="w-4 h-4 text-indigo-500" />
-                Revenue by payment method
-              </h3>
-              
-              <div className="space-y-2.5">
-                {/* Cash Progress bar */}
-                <div className="space-y-1">
-                  <div className="flex justify-between text-[11px] font-semibold text-slate-600">
-                    <span>Cash payment</span>
-                    <span className="font-mono">{formatAFN(paymentMethodsStats.cash)} ({totalSalesWithMethods > 0 ? Math.round((paymentMethodsStats.cash / totalSalesWithMethods) * 100) : 0}%)</span>
-                  </div>
-                  <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                    <div 
-                      className="bg-emerald-500 h-full rounded-full transition-all duration-500" 
-                      style={{ width: `${totalSalesWithMethods > 0 ? (paymentMethodsStats.cash / totalSalesWithMethods) * 100 : 0}%` }}
-                    />
-                  </div>
-                </div>
-
-                {/* Card Progress bar */}
-                <div className="space-y-1">
-                  <div className="flex justify-between text-[11px] font-semibold text-slate-600">
-                    <span>Card (POS)</span>
-                    <span className="font-mono">{formatAFN(paymentMethodsStats.card)} ({totalSalesWithMethods > 0 ? Math.round((paymentMethodsStats.card / totalSalesWithMethods) * 100) : 0}%)</span>
-                  </div>
-                  <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                    <div 
-                      className="bg-indigo-500 h-full rounded-full transition-all duration-500" 
-                      style={{ width: `${totalSalesWithMethods > 0 ? (paymentMethodsStats.card / totalSalesWithMethods) * 100 : 0}%` }}
-                    />
-                  </div>
-                </div>
-
-                {/* Transfer Progress bar */}
-                <div className="space-y-1">
-                  <div className="flex justify-between text-[11px] font-semibold text-slate-600">
-                    <span>Bank transfer</span>
-                    <span className="font-mono">{formatAFN(paymentMethodsStats.transfer)} ({totalSalesWithMethods > 0 ? Math.round((paymentMethodsStats.transfer / totalSalesWithMethods) * 100) : 0}%)</span>
-                  </div>
-                  <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                    <div 
-                      className="bg-amber-500 h-full rounded-full transition-all duration-500" 
-                      style={{ width: `${totalSalesWithMethods > 0 ? (paymentMethodsStats.transfer / totalSalesWithMethods) * 100 : 0}%` }}
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Stock Health Chart Box */}
-            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-3.5">
-              <h3 className="text-xs font-black text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                <AlertCircle className="w-4 h-4 text-amber-500" />
-                Stock health status
-              </h3>
-              
-              <div className="grid grid-cols-2 gap-3 text-center">
-                <div className="bg-rose-50/50 border border-rose-100 rounded-xl p-3">
-                  <span className="block text-[10px] text-slate-400 font-bold">Books needing urgent restock</span>
-                  <span className="text-lg font-black text-rose-600 font-mono mt-0.5 block">
-                    {books.filter(b => b.stock <= 5).length} <span className="text-xs text-rose-400">items</span>
-                  </span>
-                </div>
-                <div className="bg-emerald-50/50 border border-emerald-100 rounded-xl p-3">
-                  <span className="block text-[10px] text-slate-400 font-bold">Adequate stock</span>
-                  <span className="text-lg font-black text-emerald-600 font-mono mt-0.5 block">
-                    {books.filter(b => b.stock > 5).length} <span className="text-xs text-emerald-400">items</span>
-                  </span>
-                </div>
-              </div>
-
-              <div className="text-[10px] text-slate-400 leading-relaxed text-start pt-0.5">
-                * Books with 5 units or fewer are marked “Low stock” so print orders can be placed before semesters start.
-              </div>
-            </div>
-          </div>
-
-          {/* Top Selling Products List */}
-          <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm space-y-4">
-            <h3 className="text-xs font-black text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-              <Sparkles className="w-4 h-4 text-indigo-500" />
-              Product sales ranking and finance yield
-            </h3>
-
-            <div className="overflow-x-auto text-xs">
-              <table className="w-full text-start border-collapse">
-                <thead className="bg-slate-50 text-slate-500">
-                  <tr className="border-b border-slate-200">
-                    <th className="py-2.5 px-3 font-bold text-slate-700">Product name</th>
-                    <th className="py-2.5 px-3 font-bold text-slate-700 text-center">Product type</th>
-                    <th className="py-2.5 px-3 font-bold text-slate-700 text-center">Copies sold</th>
-                    <th className="py-2.5 px-3 font-bold text-slate-700">Total revenue (net sales)</th>
-                    <th className="py-2.5 px-3 font-bold text-slate-700">Purchase cost (investment)</th>
-                    <th className="py-2.5 px-3 font-bold text-slate-700">Net profit earned</th>
-                    <th className="py-2.5 px-3 font-bold text-slate-700 text-center">Net margin</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-slate-600">
-                  {books.map(b => {
-                    const salesForBook = completedSales.filter(s => s.bookId === b.id);
-                    const unitsSold = salesForBook.reduce((sum, s) => sum + s.quantity, 0);
-                    const grossRev = salesForBook.reduce((sum, s) => sum + (s.netAmount !== undefined ? s.netAmount : s.totalAmount), 0);
-                    const purchaseVal = (b.purchasePrice ?? 0);
-                    const totalCostVal = purchaseVal * unitsSold;
-                    const netProfitVal = grossRev - totalCostVal;
-                    const profitMargin = grossRev > 0 ? Math.round((netProfitVal / grossRev) * 100) : 0;
-
-                    return (
-                      <tr key={b.id} className="hover:bg-slate-50/40 font-medium">
-                        <td className="py-2.5 px-3 font-bold text-slate-800">{b.title}</td>
-                        <td className="py-2.5 px-3 text-center">
-                          <span className={`inline-flex px-2 py-0.5 rounded text-[9px] font-bold ${b.isChapter ? 'bg-amber-50 text-amber-700' : 'bg-indigo-50 text-indigo-700'}`}>
-                            {b.isChapter ? 'Skill chapter' : 'Full book'}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-900">{unitsSold} units</td>
-                        <td className="py-2.5 px-3 font-mono">{formatAFN(grossRev)}</td>
-                        <td className="py-2.5 px-3 font-mono text-slate-400">{formatAFN(totalCostVal)}</td>
-                        <td className={`py-2.5 px-3 font-mono font-black ${netProfitVal > 0 ? 'text-emerald-600' : netProfitVal < 0 ? 'text-rose-600' : 'text-slate-400'}`}>
-                          {formatAFN(netProfitVal)}
-                        </td>
-                        <td className="py-2.5 px-3 text-center">
-                          <span className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                            profitMargin >= 40 ? 'bg-emerald-50 text-emerald-700' : profitMargin > 0 ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-100 text-slate-500'
-                          }`}>
-                            {profitMargin}%
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
+      {tab === 'loans' && (
+        <>
+        <div className={cx(surface.panel, 'overflow-x-auto')}>
+          <table className="min-w-full"><thead className="border-b border-slate-200 bg-slate-50"><tr>
+            <th className={table.headCell}>Book</th><th className={table.headCell}>Student</th><th className={table.headCell}>Issued / due</th><th className={table.headCell}>Lifecycle</th><th className={cx(table.headCell, 'text-end')}>Actions</th>
+          </tr></thead><tbody className="divide-y divide-slate-100">
+            {workspace.loans.items.map((loan) => <tr key={loan.id}>
+              <td className={table.cell}><div className="font-semibold text-slate-900">{loan.bookTitle}</div><div className={text.meta}>{itemKindLabel(loan.itemKind)}</div></td>
+              <td className={table.cell}>{loan.studentName}</td>
+              <td className={table.cell}><div>{loan.issuedOn}</div><div className={text.meta}>Due {loan.dueOn}</div></td>
+              <td className={table.cell}>{loan.returned ? <><span className={badge.success}>Returned</span><div className={text.meta}>{loan.returnedOn}</div></> : loan.overdue ? <span className={badge.danger}>Overdue</span> : <span className={badge.warning}>Issued</span>}</td>
+              <td className={cx(table.cell, 'text-end')}>{canReturn && !loan.returned && <button type="button" className={button.ghost} onClick={() => { setLoanReturnDate(''); setLoanReturnNote(''); setDialog({ kind: 'loanReturn', loan }); }}><ClipboardCheck className="h-4 w-4" />Return</button>}</td>
+            </tr>)}
+            {workspace.loans.items.length === 0 && <EmptyRow columns={5} title="No Book loans have been recorded." detail="A loan reserves one available copy without creating a financial transaction." />}
+          </tbody></table>
         </div>
+        <HistoryPagination page={workspace.loans.page} pageSize={workspace.loans.pageSize} total={workspace.loans.total} onPage={(page) => { void loadBooksHistoryPage(page); }} />
+        </>
       )}
 
-      <BooksModals
-        issuer={issuer}
-        editingBook={editingBook}
-        setEditingBook={setEditingBook}
-        editTitle={editTitle}
-        setEditTitle={setEditTitle}
-        editIsChapter={editIsChapter}
-        setEditIsChapter={setEditIsChapter}
-        editPrice={editPrice}
-        setEditPrice={setEditPrice}
-        editPurchasePrice={editPurchasePrice}
-        setEditPurchasePrice={setEditPurchasePrice}
-        editStock={editStock}
-        setEditStock={setEditStock}
-        handleEditBookSubmit={handleEditBookSubmit}
-        selectedBookHistory={selectedBookHistory}
-        setSelectedBookHistory={setSelectedBookHistory}
-        selectedSaleReceipt={selectedSaleReceipt}
-        setSelectedSaleReceipt={setSelectedSaleReceipt}
-        bookToDelete={bookToDelete}
-        setBookToDelete={setBookToDelete}
-        handleDeleteConfirm={handleDeleteConfirm}
-        saleToRefund={saleToRefund}
-        setSaleToRefund={setSaleToRefund}
-        handleRefundConfirm={handleRefundConfirm}
-        restockingBook={restockingBook}
-        setRestockingBook={setRestockingBook}
-        quickRestockQty={quickRestockQty}
-        setQuickRestockQty={setQuickRestockQty}
-        handleQuickRestockSubmit={handleQuickRestockSubmit}
-        showAuditModal={showAuditModal}
-        setShowAuditModal={setShowAuditModal}
-        books={books}
-        totalAcquisitionCost={totalAcquisitionCost}
-        totalAssetValue={totalAssetValue}
-      />
-    </div>
+      {tab === 'receipts' && (
+        <>
+        <div className={cx(surface.panel, 'overflow-x-auto')}>
+          <table className="min-w-full"><thead className="border-b border-slate-200 bg-slate-50"><tr>
+            <th className={table.headCell}>Book</th><th className={table.headCell}>Received</th><th className={table.numericCell}>Quantity</th><th className={table.numericCell}>Unit cost</th><th className={table.headCell}>Recorded by</th>
+          </tr></thead><tbody className="divide-y divide-slate-100">
+            {workspace.receipts.items.map((receipt) => <tr key={receipt.id}><td className={table.cell}>{receipt.bookTitle}</td><td className={table.cell}>{receipt.receivedOn}</td><td className={table.numericCell}>{receipt.quantity}</td><td className={table.numericCell}>{receipt.unitCost == null ? '—' : formatAFN(receipt.unitCost)}</td><td className={table.cell}>{receipt.receivedByName}</td></tr>)}
+            {workspace.receipts.items.length === 0 && <EmptyRow columns={5} title="No stock receipts have been recorded." detail="Catalog creation and every restock write an immutable receipt." />}
+          </tbody></table>
+        </div>
+        <HistoryPagination page={workspace.receipts.page} pageSize={workspace.receipts.pageSize} total={workspace.receipts.total} onPage={(page) => { void loadBooksHistoryPage(page); }} />
+        </>
+      )}
+
+      {dialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" role="presentation">
+          <section role="dialog" aria-modal="true" aria-labelledby="books-dialog-title" className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="mb-5 flex items-center justify-between gap-4 border-b border-slate-200 pb-4">
+              <h2 id="books-dialog-title" className="text-base font-extrabold text-slate-900">{dialogTitle(dialog)}</h2>
+              <button type="button" className={button.ghost} onClick={() => setDialog(null)} disabled={busy}>Close</button>
+            </div>
+
+            {dialog.kind === 'catalog' && <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void submit(() => createBookCatalogItem({ title: catalogTitle, itemKind: catalogKind, saleEnabled: catalogSaleEnabled, salePrice: catalogSaleEnabled ? Number(catalogSalePrice) : null, lendingEnabled: catalogLendingEnabled, initialQuantity: Number(catalogQuantity), receivedOn: catalogReceivedOn || undefined, unitCost: catalogUnitCost === '' ? null : Number(catalogUnitCost) }), 'Catalog item and initial stock receipt created.'); }}>
+              <Field label="Title"><input required value={catalogTitle} onChange={(event) => setCatalogTitle(event.target.value)} className={control.input} /></Field>
+              <Field label="Item kind"><select value={catalogKind} onChange={(event) => setCatalogKind(event.target.value as 'book' | 'chapter')} className={control.select}><option value="book">Book</option><option value="chapter">Skill chapter</option></select></Field>
+              <CapabilityControls saleEnabled={catalogSaleEnabled} onSaleEnabled={setCatalogSaleEnabled} salePrice={catalogSalePrice} onSalePrice={setCatalogSalePrice} lendingEnabled={catalogLendingEnabled} onLendingEnabled={setCatalogLendingEnabled} />
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field label="Initial quantity"><input required min="1" step="1" type="number" value={catalogQuantity} onChange={(event) => setCatalogQuantity(event.target.value)} className={control.input} /></Field><Field label="Unit cost (optional AFN)"><input min="0" step="1" type="number" value={catalogUnitCost} onChange={(event) => setCatalogUnitCost(event.target.value)} className={control.input} /></Field></div>
+              <ShamsiDateInput label="Received on (optional)" value={catalogReceivedOn} onChange={setCatalogReceivedOn} />
+              <SubmitButton busy={busy} label="Create catalog item" />
+            </form>}
+
+            {dialog.kind === 'edit' && <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void submit(() => updateBookCatalogItem(dialog.book.id, { title: editTitle, saleEnabled: editSaleEnabled, salePrice: editSaleEnabled ? Number(editSalePrice) : null, lendingEnabled: editLendingEnabled, defaultUnitCost: editDefaultUnitCost === '' ? null : Number(editDefaultUnitCost), status: editStatus }), 'Catalog item updated.'); }}>
+              <Field label="Title"><input required value={editTitle} onChange={(event) => setEditTitle(event.target.value)} className={control.input} /></Field>
+              <CapabilityControls saleEnabled={editSaleEnabled} onSaleEnabled={setEditSaleEnabled} salePrice={editSalePrice} onSalePrice={setEditSalePrice} lendingEnabled={editLendingEnabled} onLendingEnabled={setEditLendingEnabled} />
+              <Field label="Default unit cost (optional AFN)"><input min="0" step="1" type="number" value={editDefaultUnitCost} onChange={(event) => setEditDefaultUnitCost(event.target.value)} className={control.input} /></Field>
+              <Field label="Catalog status"><select value={editStatus} onChange={(event) => setEditStatus(event.target.value as 'active' | 'archived')} className={control.select}><option value="active">Active</option><option value="archived">Archived — preserves history and blocks new Book commands</option></select></Field>
+              <SubmitButton busy={busy} label="Save catalog item" />
+            </form>}
+
+            {dialog.kind === 'receipt' && <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void submit(() => receiveBookStock(dialog.book.id, { quantity: Number(receiptQuantity), receivedOn: receiptDate || undefined, unitCost: receiptUnitCost === '' ? null : Number(receiptUnitCost), note: receiptNote || undefined }), 'Immutable stock receipt recorded.'); }}>
+              <p className={text.hint}>Current available quantity: {dialog.book.availableQuantity}</p>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field label="Quantity"><input required min="1" step="1" type="number" value={receiptQuantity} onChange={(event) => setReceiptQuantity(event.target.value)} className={control.input} /></Field><Field label="Unit cost (optional AFN)"><input min="0" step="1" type="number" value={receiptUnitCost} onChange={(event) => setReceiptUnitCost(event.target.value)} className={control.input} /></Field></div>
+              <ShamsiDateInput label="Received on (optional)" value={receiptDate} onChange={setReceiptDate} />
+              <Field label="Note (optional)"><textarea value={receiptNote} onChange={(event) => setReceiptNote(event.target.value)} className={control.input} rows={3} /></Field>
+              <SubmitButton busy={busy} label="Record stock receipt" />
+            </form>}
+
+            {dialog.kind === 'sale' && <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void submit(() => recordBookSale(dialog.book.id, { quantity: Number(saleQuantity), studentId: saleStudentId || undefined, purchaserName: saleStudentId ? undefined : salePurchaserName, discountAmount: Number(saleDiscount || 0), paymentMethod: salePaymentMethod, soldOn: saleDate || undefined }), 'Book sale and linked receipt recorded.'); }}>
+              <p className={text.hint}>Available: {dialog.book.availableQuantity} · Listed price: {formatAFN(dialog.book.salePrice ?? 0)}</p>
+              <Field label="Quantity"><input required min="1" max={dialog.book.availableQuantity} step="1" type="number" value={saleQuantity} onChange={(event) => setSaleQuantity(event.target.value)} className={control.input} /></Field>
+              <Field label="Student purchaser (optional)"><select value={saleStudentId} onChange={(event) => setSaleStudentId(event.target.value)} className={control.select}><option value="">Walk-in purchaser</option>{branchStudents.map((student) => <option key={student.id} value={student.id}>{student.fullName}</option>)}</select></Field>
+              {!saleStudentId && <Field label="Walk-in purchaser name"><input required value={salePurchaserName} onChange={(event) => setSalePurchaserName(event.target.value)} className={control.input} /></Field>}
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field label="Discount (AFN)"><input min="0" step="1" type="number" value={saleDiscount} onChange={(event) => setSaleDiscount(event.target.value)} className={control.input} /></Field><Field label="Payment method"><select value={salePaymentMethod} onChange={(event) => setSalePaymentMethod(event.target.value as 'cash' | 'card' | 'bank_transfer')} className={control.select}><option value="cash">Cash</option><option value="card">Card</option><option value="bank_transfer">Bank transfer</option></select></Field></div>
+              <ShamsiDateInput label="Sale date (optional)" value={saleDate} onChange={setSaleDate} />
+              <SubmitButton busy={busy} label="Record sale" />
+            </form>}
+
+            {dialog.kind === 'saleReturn' && <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void submit(() => returnBookSale(dialog.sale.id, { reason: saleReturnReason, returnedOn: saleReturnDate || undefined }), 'Book sale returned and cash contra receipt recorded.'); }}>
+              <p className={text.hint}>This is a full return of {dialog.sale.quantity} copy/copies and {formatAFN(dialog.sale.netAmount)}. It restores availability only with the signed cash contra fact.</p>
+              <Field label="Return reason"><textarea required minLength={1} value={saleReturnReason} onChange={(event) => setSaleReturnReason(event.target.value)} className={control.input} rows={3} /></Field>
+              <ShamsiDateInput label="Returned on (optional)" value={saleReturnDate} onChange={setSaleReturnDate} />
+              <SubmitButton busy={busy} label="Return and refund sale" danger />
+            </form>}
+
+            {dialog.kind === 'loan' && <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void submit(() => issueBookLoan(dialog.book.id, { studentId: loanStudentId, dueOn: loanDueOn, issuedOn: loanIssuedOn || undefined }), 'Book loan issued without a cash transaction.'); }}>
+              <p className={text.hint}>Available: {dialog.book.availableQuantity}. A due date is mandatory; overdue is derived, never charged automatically.</p>
+              <Field label="Student"><select required value={loanStudentId} onChange={(event) => setLoanStudentId(event.target.value)} className={control.select}><option value="">Select student</option>{branchStudents.map((student) => <option key={student.id} value={student.id}>{student.fullName}</option>)}</select></Field>
+              <ShamsiDateInput label="Due on" required value={loanDueOn} onChange={setLoanDueOn} />
+              <ShamsiDateInput label="Issued on (optional; defaults to today)" value={loanIssuedOn} onChange={setLoanIssuedOn} />
+              <SubmitButton busy={busy} label="Issue Book loan" />
+            </form>}
+
+            {dialog.kind === 'loanReturn' && <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void submit(() => returnBookLoan(dialog.loan.id, { returnedOn: loanReturnDate || undefined, note: loanReturnNote || undefined }), 'Book loan return recorded.'); }}>
+              <p className={text.hint}>{dialog.loan.studentName} borrowed this item on {dialog.loan.issuedOn}; it was due {dialog.loan.dueOn}.</p>
+              <ShamsiDateInput label="Returned on (optional; defaults to today)" value={loanReturnDate} onChange={setLoanReturnDate} />
+              <Field label="Return note (optional)"><textarea value={loanReturnNote} onChange={(event) => setLoanReturnNote(event.target.value)} className={control.input} rows={3} /></Field>
+              <SubmitButton busy={busy} label="Record loan return" />
+            </form>}
+          </section>
+        </div>
+      )}
+    </section>
   );
+}
+
+function Metric({ label, value, detail, icon, tone = 'default' }: { label: string; value: string | number; detail?: string; icon: React.ReactNode; tone?: 'default' | 'warning' }) {
+  return <article className={cx(surface.card, tone === 'warning' && 'border-amber-200 bg-amber-50/40')}><div className="flex items-start justify-between gap-3"><div><p className={text.meta}>{label}</p><p className="mt-1 text-xl font-extrabold tabular-nums text-slate-900">{value}</p>{detail && <p className={text.hint}>{detail}</p>}</div><span className="rounded-lg bg-brand-50 p-2 text-brand-700">{icon}</span></div></article>;
+}
+
+function HistoryPagination({ page, pageSize, total, onPage }: { page: number; pageSize: number; total: number; onPage: (page: number) => void }) {
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  if (total <= pageSize) return <p className={cx(text.hint, 'text-end')}>{total} record{total === 1 ? '' : 's'}</p>;
+  return <nav aria-label="Books history pagination" className="flex items-center justify-between gap-3"><p className={text.hint}>Page {page} of {pageCount} · {total} records</p><div className="flex gap-2"><button type="button" className={button.secondary} disabled={page <= 1} onClick={() => onPage(page - 1)}>Previous</button><button type="button" className={button.secondary} disabled={page >= pageCount} onClick={() => onPage(page + 1)}>Next</button></div></nav>;
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return <label className="block"><span className={text.label}>{label}</span>{children}</label>;
+}
+
+function CapabilityControls({ saleEnabled, onSaleEnabled, salePrice, onSalePrice, lendingEnabled, onLendingEnabled }: { saleEnabled: boolean; onSaleEnabled: (value: boolean) => void; salePrice: string; onSalePrice: (value: string) => void; lendingEnabled: boolean; onLendingEnabled: (value: boolean) => void }) {
+  return <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4"><label className="flex items-center gap-2 text-sm font-medium text-slate-800"><input type="checkbox" checked={saleEnabled} onChange={(event) => onSaleEnabled(event.target.checked)} />Available for sale</label>{saleEnabled && <Field label="Sale price (AFN)"><input required min="1" step="1" type="number" value={salePrice} onChange={(event) => onSalePrice(event.target.value)} className={control.input} /></Field>}<label className="flex items-center gap-2 text-sm font-medium text-slate-800"><input type="checkbox" checked={lendingEnabled} onChange={(event) => onLendingEnabled(event.target.checked)} />Available for student lending</label>{!saleEnabled && !lendingEnabled && <p className={text.error}>Enable sale, lending, or both.</p>}</div>;
+}
+
+function SubmitButton({ busy, label, danger = false }: { busy: boolean; label: string; danger?: boolean }) {
+  return <button type="submit" className={danger ? button.danger : button.primary} disabled={busy}>{busy && <RefreshCcw className="h-4 w-4 animate-spin" />}{label}</button>;
+}
+
+function EmptyRow({ columns, title, detail }: { columns: number; title: string; detail: string }) {
+  return <tr><td colSpan={columns} className="px-4 py-10 text-center"><p className="font-semibold text-slate-700">{title}</p><p className={text.hint}>{detail}</p></td></tr>;
 }

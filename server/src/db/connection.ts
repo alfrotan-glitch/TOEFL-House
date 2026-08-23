@@ -8,8 +8,9 @@ import type BetterSqlite3 from 'better-sqlite3';
  *   EMPTY DATABASE -> CANONICAL SCHEMA -> ORGANIZATION HIERARCHY -> READY
  *
  * The schema is written with CREATE ... IF NOT EXISTS throughout, so applying
- * it to an already-initialized database is a no-op and startup stays
- * idempotent. Schema changes are made by editing schema.sql.
+ * it to a database already at this canonical shape is a no-op and startup stays
+ * idempotent. It is not a migration mechanism for an incompatible predecessor
+ * shape; greenfield reconstruction uses a clean database rebuild.
  */
 import Database from 'better-sqlite3';
 import fs from 'node:fs';

@@ -325,7 +325,7 @@ they remain the WP-07 record.
 | File | Cases | Asserted behaviour |
 |---|---:|---|
 | `balance-single-source-of-truth.test.ts` | 7 | the roster page and the single-student read never disagree · the HTTP surfaces carry the authoritative figures · balance arithmetic invariants |
-| `book-price-monetary-validation.test.ts` | 13 | book price monetary validation · teacher base salary monetary validation |
+| `book-price-monetary-validation.test.ts` | 13 | **RETIRED/REPLACED (WP-10):** its nine obsolete mutable-price cases are replaced by `work-packages/wp10/books-authority.attack.test.ts`; its four teacher-money assertions duplicate current teacher/employee money authority (`employee-salary-validation.test.ts`) and are not retained under a Book filename |
 | `bos-profit-withdrawal-integrity.test.ts` | 11 | BOS-1 · the period withdrawal ceiling is cumulative · BOS · withdrawal authorization and input validation |
 | `cash-position-reconciliation.test.ts` | 8 | cash-position reconciliation |
 | `discount-authorization-boundary.test.ts` | 19 | CFG-1 · ordinary discounts are bounded regardless of rules · CFG-1 · Friend Referral is bounded by the ordinary ceiling · CFG-1 · authorized exceptions work when eligibility and approval hold · CFG-1 · invalid authorizations grant nothing · CFG-1 · categories do not stack · CFG-1 · policy constants match the authoritative business policy |
@@ -401,12 +401,26 @@ by the cross-surface WP-07 suites. No WP-09 authority is skipped.
 
 ## WP-10 Books
 
-2 files · 16 cases
+**REPLACED / RETIRED — 2026-08-23.** The two sale-only legacy suites (16 originally
+inventoried cases) and the Book half of the mixed price/salary suite were removed after
+replacement. They asserted a mutable `books.stock`, role-name routes, direct Book
+income, automatic restock on a mutable sale status, and no lending aggregate — all
+contradict the D-16/D-173 authority.
 
-| File | Cases | Asserted behaviour |
+The current package authority is `server/src/tests/work-packages/wp10/`:
+
+| File | Current cases | Authority |
 |---|---:|---|
-| `book-sale-quantity-integrity.test.ts` | 12 | BKS-1 · a book sale moves whole copies only · BOOKS · refund integrity (locking behaviour proven safe) |
-| `books-branch.test.ts` | 4 | Book creation — branch targeting · Book sale — stock and revenue follow the book branch |
+| `books-authority.test.ts` | 5 | catalog/receipt/sale/payment-income pair; history pagination; generic payment boundary; full sale return; issuance/return/Journey chronology |
+| `books-authority.attack.test.ts` | 18 | permission, branch, malformed input, direct-storage, capacity, immutability, date, idempotency and linked-fact attacks |
+| `books-frontend-contract.test.ts` | 3 | server workspace authority, permission affordances, Shamsi date control, canonical print path and obsolete-modal removal |
+| `books.review.test.ts` | 5 | cold authority review: no stock mirror, exact payment/contra links, permission routing, Journey states and residue cleanup |
+
+The replacement count is **31 current cases**. The former whole-copy, oversell, branch,
+refund and duplicate-submit knowledge is represented by these tests and the maintained
+`book-sale-quantity-mutation-test.mjs` harness; zero-price sale and inferred purchase-cost
+behavior are intentionally retired because a lending-only catalog item has no sale price
+and no 60% cost rule is a valid business authority.
 
 ## WP-11 Reporting & Dashboards
 

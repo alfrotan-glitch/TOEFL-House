@@ -4,14 +4,12 @@
  *
  * WHY THIS EXISTS
  * ---------------
- * Several money fields reached the database before they were validated, so an
- * existing installation can hold values that the current code would refuse:
- * the literal string 'abc' in a price column, NULL where an amount is
- * required, negatives, sub-cent fractions, and figures beyond safe monetary
- * precision. The entry points are now closed (every financial input goes
- * through `assertMoney`) and migration 069 adds database-level sign guards,
- * but neither of those rewrites history — deliberately. Silently "correcting"
- * a financial record destroys the evidence of what actually happened.
+ * A database copied from an incompatible or externally altered environment can
+ * hold values that current writers reject: a literal string in a money column,
+ * NULL where an amount is required, negatives, sub-unit fractions, or figures
+ * beyond supported monetary precision. Current entry points and schema guards
+ * prevent new corruption, but this audit never rewrites history. Silently
+ * "correcting" a financial record would destroy the evidence of what happened.
  *
  * This script therefore only LOOKS. It never writes, never migrates, and never
  * deletes. Run it against a production copy before go-live to find out whether
@@ -36,9 +34,9 @@ const MONEY_COLUMNS = {
   finance_accounts: ['main_balance', 'saving_balance'],
   invoices: ['total_amount', 'discount_amount', 'net_amount'],
   invoice_items: ['unit_price', 'amount'],
-  book_sales: ['total_amount', 'discount_amount', 'net_amount'],
-  books: ['price', 'purchase_price'],
-  book_restock_history: ['price', 'purchase_price'],
+  book_sales: ['unit_price', 'gross_amount', 'discount_amount', 'net_amount'],
+  books: ['sale_price', 'default_unit_cost'],
+  book_stock_receipts: ['unit_cost'],
   student_semesters: ['fee_amount', 'net_fee_amount'],
   teacher_salary_ledger: ['due_amount', 'paid_amount'],
   teachers: ['base_salary', 'default_skill_rate'],
@@ -100,10 +98,13 @@ const BLAST_RADIUS = {
   'invoices.net_amount': 'Amount the student is actually asked to pay.',
   'invoice_items.unit_price': 'Invoice line total, then the invoice net.',
   'invoice_items.amount': 'Invoice total and net.',
-  'book_sales.total_amount': 'Book revenue, sale receipt, reconciliation.',
-  'book_sales.net_amount': 'Recorded book income and refund ceiling.',
-  'books.price': 'Every FUTURE sale of this title — /sell computes price * quantity, so a non-numeric price makes the book unsellable (NaN reaches SQLite).',
-  'books.purchase_price': 'Book profit reporting only; no cash effect.',
+  'book_sales.unit_price': 'The price snapshot for one posted Book sale copy.',
+  'book_sales.gross_amount': 'Book sale gross receipt before the explicit discount.',
+  'book_sales.discount_amount': 'The recorded Book sale discount.',
+  'book_sales.net_amount': 'Linked Book-sale payment and income amount; it is the full-return ceiling.',
+  'books.sale_price': 'The configured price for every future sale of this catalog item.',
+  'books.default_unit_cost': 'Optional Book receipt cost reference; it never creates a cash movement.',
+  'book_stock_receipts.unit_cost': 'Optional immutable stock-receipt cost reference; it never creates a cash movement.',
   'student_semesters.fee_amount': 'Tuition owed by the student; drives outstanding balance.',
   'student_semesters.net_fee_amount': 'Tuition after discount — what the student is billed.',
   'teacher_salary_ledger.due_amount': 'Payroll remaining-due calculation; can block or over-permit payment.',
@@ -124,7 +125,8 @@ const BLAST_RADIUS = {
 
 /** Columns whose value is reporting-only: wrong is ugly, not dangerous. */
 const REPORTING_ONLY = new Set([
-  'books.purchase_price',
+  'books.default_unit_cost',
+  'book_stock_receipts.unit_cost',
   'funding_campaigns.target_amount',
 ]);
 

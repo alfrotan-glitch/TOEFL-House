@@ -73,9 +73,11 @@ npm start
 `src/db/schema.sql` is the **single source of truth** for all DDL. Inline
 `CREATE TABLE` blocks are not permitted in application code.
 
-There is no migration chain. Schema changes are made by editing that file,
-which is applied idempotently on every startup, so an empty database becomes a
-complete one on first boot and an existing one is left unchanged.
+There is no migration chain. The schema is idempotently applied to an empty
+database and to a database already at this exact canonical shape. It does **not**
+transform an incompatible historical shape. Under the project’s greenfield/no-production-data
+operating mode, a canonical schema reconstruction requires stopping the server,
+removing the old local database and WAL sidecars, then seeding a fresh database.
 
 Verify a schema change before deploying it:
 
@@ -86,7 +88,7 @@ npm run preflight:fresh-schema
 To reseed from scratch:
 
 ```bash
-rm ./data/erp.sqlite
+rm -f ./data/erp.sqlite ./data/erp.sqlite-wal ./data/erp.sqlite-shm
 npm run seed
 ```
 
@@ -136,7 +138,7 @@ Every route (except `/api/auth/login` and `/api/health`) requires an
 | `GET/POST /api/finance/expense-requests`, `POST /:id/decide` | Expense requests |
 | `POST /api/finance/saving-engine/run`, `PUT /saving-engine/settings` | Saving engine |
 | `GET /api/finance/transactions` | General ledger |
-| `GET/POST/PUT/DELETE /api/books`, `POST /:id/sell`, `POST /sales/:id/refund` | Books |
+| `GET /api/books/workspace`, `POST /catalog`, `PATCH /catalog/:id`, stock-receipt, sale, sale-return, loan and loan-return commands | Books: catalog, immutable inventory, cash-linked sales and student lending |
 | `GET/POST /api/exams`, `GET/POST /:id/results` | Exams |
 | `GET/POST /api/funding/...` | Donors, campaigns, donations, scholarships, sponsorships |
 | `GET/POST /api/impact/...` | Metrics, reports, success stories |

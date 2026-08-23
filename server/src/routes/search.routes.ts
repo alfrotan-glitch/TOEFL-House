@@ -113,9 +113,13 @@ searchRouter.get('/', requirePermission('Student.View', 'Lead.View', 'Teacher.Vi
   push((invoices as any[]).map(r => ({ id: r.id, title: r.title, subtitle: r.subtitle, tab: 'finance', meta: r.status })), 'Invoice');
 
   const books = !mayBooks ? [] : branchId
-    ? db.prepare(`SELECT id, title, title AS subtitle, stock, branch_id FROM books WHERE branch_id = ? AND title LIKE ? ESCAPE '\\' ORDER BY title LIMIT ?`).all(branchId, q, limit)
-    : db.prepare(`SELECT id, title, title AS subtitle, stock FROM books WHERE title LIKE ? ESCAPE '\\' ORDER BY title LIMIT ?`).all(q, limit);
-  push((books as any[]).map(r => ({ id: r.id, title: r.title, subtitle: r.subtitle, tab: 'books', meta: `${r.stock ?? 0} in stock` })), 'Book');
+    ? db.prepare(`SELECT b.id, b.title, b.title AS subtitle, p.available_quantity, b.branch_id
+                    FROM books b JOIN book_inventory_positions p ON p.book_id = b.id
+                   WHERE b.branch_id = ? AND b.title LIKE ? ESCAPE '\\' ORDER BY b.title LIMIT ?`).all(branchId, q, limit)
+    : db.prepare(`SELECT b.id, b.title, b.title AS subtitle, p.available_quantity
+                    FROM books b JOIN book_inventory_positions p ON p.book_id = b.id
+                   WHERE b.title LIKE ? ESCAPE '\\' ORDER BY b.title LIMIT ?`).all(q, limit);
+  push((books as any[]).map(r => ({ id: r.id, title: r.title, subtitle: r.subtitle, tab: 'books', meta: `${r.available_quantity ?? 0} available` })), 'Book');
 
   res.json(results.slice(0, MAX_RESULTS * 4));
 }));

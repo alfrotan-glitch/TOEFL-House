@@ -327,12 +327,16 @@ reportsRouter.get(
       : db.prepare('SELECT COUNT(*) AS c FROM exams WHERE date >= ? AND date <= ? AND branch_id = ?').get(from, to, branchId);
     const examsConducted = Number((examsQ as { c: number }).c || 0);
 
-    // Book sales.
+    // Book sale facts that have no immutable return are the Book commerce authority.
     const booksQ = isAll
-      ? db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(net_amount),0) AS total FROM book_sales
-          WHERE status = 'completed' AND date >= ? AND date <= ?`).get(from, to)
-      : db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(net_amount),0) AS total FROM book_sales
-          WHERE status = 'completed' AND date >= ? AND date <= ? AND branch_id = ?`).get(from, to, branchId);
+      ? db.prepare(`SELECT COALESCE(SUM(s.quantity),0) AS count, COALESCE(SUM(s.net_amount),0) AS total
+          FROM book_sales s
+         WHERE s.sold_on >= ? AND s.sold_on <= ?
+           AND NOT EXISTS (SELECT 1 FROM book_sale_refunds sr WHERE sr.sale_id = s.id)`).get(from, to)
+      : db.prepare(`SELECT COALESCE(SUM(s.quantity),0) AS count, COALESCE(SUM(s.net_amount),0) AS total
+          FROM book_sales s
+         WHERE s.sold_on >= ? AND s.sold_on <= ? AND s.branch_id = ?
+           AND NOT EXISTS (SELECT 1 FROM book_sale_refunds sr WHERE sr.sale_id = s.id)`).get(from, to, branchId);
     const booksSold = { count: Number((booksQ as { count: number }).count || 0), total: Number((booksQ as { total: number }).total || 0) };
 
     // ── Placement exam metrics (authoritative from placement_assessment_attempts) ──
@@ -424,15 +428,17 @@ reportsRouter.get(
       openInvoices: Number(outstandingCountRow.c || 0),
     };
 
-    // ── Operational: books sold by title (authoritative: book_sales JOIN books) ──
+    // ── Operational: Book copies sold by title from final, non-returned sale facts ──
     const booksByTitle = (isAll
       ? db.prepare(`SELECT b.title, COALESCE(SUM(s.quantity),0) AS quantity, COALESCE(SUM(s.net_amount),0) AS net
           FROM book_sales s JOIN books b ON b.id = s.book_id
-          WHERE s.status = 'completed' AND s.date >= ? AND s.date <= ?
+          WHERE s.sold_on >= ? AND s.sold_on <= ?
+            AND NOT EXISTS (SELECT 1 FROM book_sale_refunds sr WHERE sr.sale_id = s.id)
           GROUP BY b.title ORDER BY net DESC`).all(from, to)
       : db.prepare(`SELECT b.title, COALESCE(SUM(s.quantity),0) AS quantity, COALESCE(SUM(s.net_amount),0) AS net
           FROM book_sales s JOIN books b ON b.id = s.book_id
-          WHERE s.status = 'completed' AND s.branch_id = ? AND s.date >= ? AND s.date <= ?
+          WHERE s.branch_id = ? AND s.sold_on >= ? AND s.sold_on <= ?
+            AND NOT EXISTS (SELECT 1 FROM book_sale_refunds sr WHERE sr.sale_id = s.id)
           GROUP BY b.title ORDER BY net DESC`).all(branchId, from, to)) as Array<{ title: string; quantity: number; net: number }>;
 
     // ── Previous-period comparison (server-computed, same span length) ──

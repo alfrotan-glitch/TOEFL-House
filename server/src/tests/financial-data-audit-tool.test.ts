@@ -68,9 +68,13 @@ beforeAll(() => {
   // Insert the exact shapes that reached production-shaped databases before
   // the entry points were validated.
   db.prepare("INSERT INTO branches (id, name, code, is_active) VALUES ('b1','B','B-1',1)").run();
-  db.prepare("INSERT INTO books (id, title, price, stock, branch_id) VALUES ('bk_bad','Bad','abc',5,'b1')").run();
-  db.prepare("INSERT INTO books (id, title, price, stock, branch_id) VALUES ('bk_neg','Neg',-100,5,'b1')").run();
-  db.prepare("INSERT INTO books (id, title, price, stock, branch_id) VALUES ('bk_big','Big',1e15,5,'b1')").run();
+  // This fixture models a damaged historical file: the current database trigger
+  // is removed only in this disposable copy so the audit can prove it detects
+  // records that a current writer would refuse.
+  db.exec('DROP TRIGGER IF EXISTS trg_books_money_insert');
+  db.prepare("INSERT INTO books (id, title, item_kind, sale_enabled, sale_price, lending_enabled, status, branch_id) VALUES ('bk_bad','Bad','book',1,'abc',0,'active','b1')").run();
+  db.prepare("INSERT INTO books (id, title, item_kind, sale_enabled, sale_price, lending_enabled, status, branch_id) VALUES ('bk_neg','Neg','book',1,-100,0,'active','b1')").run();
+  db.prepare("INSERT INTO books (id, title, item_kind, sale_enabled, sale_price, lending_enabled, status, branch_id) VALUES ('bk_big','Big','book',1,1e15,0,'active','b1')").run();
   db.close();
 });
 
@@ -91,7 +95,7 @@ describe('financial data audit tool', { timeout: 60_000 }, () => {
   it('exits 1 and names the corrupt rows', () => {
     const { code, out } = runAudit(corruptDb);
     expect(code).toBe(1);
-    expect(out).toContain('books.price');
+    expect(out).toContain('books.sale_price');
     // The specific record ids must be present so a human can go look at them.
     expect(out).toContain('bk_bad');
     expect(out).toContain('bk_neg');
@@ -109,8 +113,8 @@ describe('financial data audit tool', { timeout: 60_000 }, () => {
     const { out } = runAudit(corruptDb);
     expect(out).toContain('blast radius');
     expect(out).toContain('safe to leave');
-    // books.price is cash-affecting, so it must NOT be marked safe to leave.
-    expect(out).toMatch(/books\.price[\s\S]*?safe to leave: NO/);
+    // books.sale_price is cash-affecting, so it must NOT be marked safe to leave.
+    expect(out).toMatch(/books\.sale_price[\s\S]*?safe to leave: NO/);
   });
 
   it('exits 2 when the database does not exist, rather than passing silently', () => {

@@ -38,10 +38,8 @@ interface StudentsViewProps {
     fromStatus?: Student['status'],
   ) => void;
   updateStudent: (studentId: string, updatedFields: Partial<Student>) => void;
-  recordFeePayment: (studentId: string, amount: number, category: 'fee' | 'book' | 'chapter' | 'exam' | 'card' | 'placement' | 'diploma' | 'other', notes?: string) => void;
   enrollStudentSemester: (studentId: string, semesterName: string, classId: string, tuitionAmount: number, amountPaidNow?: number, notes?: string) => void;
   issueStudentCard: (studentId: string, cardDesign: { primaryColor: string; bgStyle: string }, notes?: string) => Promise<{ feeCharged: number }>;
-  books?: any[]; // Needed for smart book payments
   /** Authoritative roster totals from the server (audit STU-H2). */
   studentSummary?: StudentSummary | null;
 }
@@ -50,7 +48,7 @@ export default function StudentsView({
   attendanceSummary,
   studentBalances,
   students, visitors = [], classes, payments, exams, examResults, attendance, permissionCodes, branches, activeBranchId,
-  addStudentManual, updateStudentStatus, updateStudent, enrollStudentSemester, issueStudentCard, books = [],
+  addStudentManual, updateStudentStatus, updateStudent, enrollStudentSemester, issueStudentCard,
   studentSummary = null
 }: StudentsViewProps) {
   const invalidate = useInvalidate();
@@ -65,12 +63,11 @@ export default function StudentsView({
 
   // Smart Payment Modal State
   const [paymentStudent, setPaymentStudent] = useState<Student | null>(null);
-  const [payCategory, setPayCategory] = useState<'fee' | 'book' | 'card' | 'installment' | 'other'>('fee');
+  const [payCategory, setPayCategory] = useState<'fee' | 'card' | 'installment' | 'other'>('fee');
   const [payReason, setPayReason] = useState('');
   const [payAmount, setPayAmount] = useState(0);
   const [paySemesterId, setPaySemesterId] = useState('');
   const [payInstallmentId, setPayInstallmentId] = useState('');
-  const [payBookId, setPayBookId] = useState('');
   const [payMethod, setPayMethod] = useState<'cash' | 'card' | 'bank_transfer'>('cash');
   const [paymentBusy, setPaymentBusy] = useState(false);
 
@@ -269,7 +266,6 @@ export default function StudentsView({
         paymentMethod: payMethod,
         semesterId: payCategory === 'fee' ? paySemesterId : undefined,
         installmentId: payCategory === 'installment' ? payInstallmentId : undefined,
-        bookId: payCategory === 'book' ? payBookId : undefined,
         notes: payCategory === 'other' ? payReason.trim() : undefined,
       }, undefined, { 'Idempotency-Key': idem });
       triggerToast('Payment recorded successfully.', 'success');
@@ -485,7 +481,6 @@ export default function StudentsView({
                 <select value={payCategory} onChange={(e) => { setPayCategory(e.target.value as any); setPayAmount(0); setPayReason(''); }} className={inputCls}>
                   <option value="fee">Class Tuition Fee</option>
                   <option value="installment">Settle Installment</option>
-                  <option value="book">Book Purchase</option>
                   <option value="card">Smart ID Card</option>
                   <option value="other">Other Fee</option>
                 </select>
@@ -531,15 +526,6 @@ export default function StudentsView({
                 </div>
               )}
 
-              {payCategory === 'book' && (
-                <div>
-                  <label className={text.label}>Select Book:</label>
-                  <select value={payBookId} onChange={(e) => { setPayBookId(e.target.value); const b = books.find(b => b.id === e.target.value); if (b) setPayAmount(b.price); }} className={inputCls} required>
-                    <option value="">-- Select Book --</option>
-                    {books.map(b => <option key={b.id} value={b.id}>{b.title} (Stock: {b.stock}) - {formatAFN(b.price)}</option>)}
-                  </select>
-                </div>
-              )}
 
               <div>
                 <label className={text.label}>Payment method:</label>

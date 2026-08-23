@@ -97,10 +97,10 @@ beforeEach(() => {
   mkSemester('bal_sem_2b', S_TWO_TERMS, 'Term New', 13000, 'active');
   mkPayment('bal_p4', S_TWO_TERMS, 5000, 'fee');
 
-  // Scenario 3: owes 8,000 tuition, but bought a 1,500 book (not tuition).
+  // Scenario 3: owes 8,000 tuition, but paid a 1,500 chapter charge (not tuition).
   mkStudent(S_BOOK, 'BAL-003');
   mkSemester('bal_sem_3', S_BOOK, 'Term C', 8000);
-  mkPayment('bal_p5', S_BOOK, 1500, 'book');
+  mkPayment('bal_p5', S_BOOK, 1500, 'chapter');
 });
 
 describe('S10: the authoritative balance definition', () => {
@@ -117,7 +117,7 @@ describe('S10: the authoritative balance definition', () => {
   it('non-tuition categories never pay down tuition', () => {
     const b = getStudentBalance(db, S_BOOK, 'all');
     expect(b.tuitionDue).toBe(8000);
-    expect(b.tuitionPaid).toBe(0); // the 1,500 book purchase is NOT tuition
+    expect(b.tuitionPaid).toBe(0); // the 1,500 ad-hoc chapter charge is NOT tuition
     expect(b.outstanding).toBe(8000);
     expect(TUITION_PAYMENT_CATEGORIES).not.toContain('book');
   });
@@ -275,16 +275,16 @@ describe('S11: a refund reopens the semester debt it belongs to', () => {
   });
 
   it('a non-tuition purchase never settles the semester', () => {
-    addPayment('balsp_p1', 10000, 'book', SEM_NAME);
+    addPayment('balsp_p1', 10000, 'chapter', SEM_NAME);
     expect(paidTowardSemester()).toBe(0);
     expect(Math.max(0, 10000 - paidTowardSemester())).toBe(10000);
   });
 
   it('a refund of a non-tuition purchase never re-opens the semester', () => {
     addPayment('balsp_p1', 10000, 'fee', SEM_NAME);
-    addPayment('balsp_p2', 2000, 'book', null);
+    addPayment('balsp_p2', 2000, 'chapter', null);
     addPayment('balsp_p3', -2000, 'refund', null, 'balsp_p2');
-    // The book money never settled the term, so returning it cannot un-settle it.
+    // The ad-hoc chapter money never settled the term, so returning it cannot un-settle it.
     expect(paidTowardSemester()).toBe(10000);
   });
 });

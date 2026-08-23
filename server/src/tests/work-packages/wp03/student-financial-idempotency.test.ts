@@ -331,38 +331,3 @@ describe('audit trail reflects one business event, not one per click', () => {
     expect(journey.c).toBe(1);
   });
 });
-
-// ══════════════════════════════════════════════════════════════════════════
-// F5 — BOOK SALE DESK (second money writer, same duplicate-click class)
-// ══════════════════════════════════════════════════════════════════════════
-describe('F5 — book sale duplicate protection', () => {
-  it('5 concurrent identical sales create ONE sale, ONE stock decrement, ONE income row', async () => {
-    const { booksRouter } = await import('../../../routes/books.routes.js');
-    const bookApp = express();
-    bookApp.use(express.json());
-    bookApp.use('/api/books', booksRouter);
-    bookApp.use(errorHandler);
-
-    const sid = await newStudent('Book Buyer');
-    db.prepare(
-      `INSERT OR REPLACE INTO books (id, title, price, stock, is_chapter, branch_id, entry_date)
-       VALUES ('idem_book', 'Idem Book', 250, 100, 0, ?, ?)`,
-    ).run(BRANCH, today());
-
-    const before = (db.prepare(`SELECT stock FROM books WHERE id='idem_book'`).get() as { stock: number }).stock;
-    const responses = await Promise.all(
-      Array.from({ length: 5 }, () =>
-        supertest(bookApp).post('/api/books/idem_book/sell').set(auth()).send({ quantity: 1, studentId: sid, paymentMethod: 'cash' }),
-      ),
-    );
-    expect(responses.filter((r) => r.status === 201)).toHaveLength(1);
-
-    const after = (db.prepare(`SELECT stock FROM books WHERE id='idem_book'`).get() as { stock: number }).stock;
-    const sales = db.prepare(`SELECT COUNT(*) AS c FROM book_sales WHERE student_id = ?`).get(sid) as { c: number };
-    const income = db.prepare(`SELECT COUNT(*) AS c FROM financial_transactions WHERE reference_id='idem_book' AND type='income'`).get() as { c: number };
-
-    expect(sales.c).toBe(1);
-    expect(before - after).toBe(1); // exactly one copy left stock
-    expect(income.c).toBe(1);
-  });
-});

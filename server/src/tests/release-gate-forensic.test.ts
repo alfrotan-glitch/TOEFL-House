@@ -103,43 +103,38 @@ describe('Release-gate forensic — untested student/unauthorized surfaces', () 
   });
 });
 
-describe('Release-gate forensic — cross-writer financial duplication', () => {
+describe('Release-gate forensic — Book commerce has one writer', () => {
   let app: express.Express;
   let registrar: TokenPayload;
+  let bookId: string;
 
   beforeAll(async () => {
     app = createApp();
     registrar = { userId: 'rg_reg', username: 'rg_reg', branchId: BRANCH_A, fullName: 'RG Registrar' };
-    // Seed a book.
-    db.prepare(`INSERT OR IGNORE INTO books (id, title, price, purchase_price, stock, is_chapter, branch_id) VALUES ('rg_book', 'RG Book', 250, 100, 5, 0, ?)`).run(BRANCH_A);
+    const catalog = await supertest(app).post('/api/books/catalog').set(authHeader(registrar)).set('Idempotency-Key', 'rg-book-catalog').send({
+      title: 'RG Book', itemKind: 'book', branchId: BRANCH_A, saleEnabled: true, salePrice: 250, lendingEnabled: false, initialQuantity: 5,
+    }).expect(201);
+    bookId = catalog.body.id;
   });
 
-  it('FIXED: book charged once — sell then manual book payment is rejected (409)', async () => {
+  it('records Book cash only through the Book sale command and rejects the generic Student-payment route', async () => {
     db.prepare(`INSERT OR IGNORE INTO students (id, student_code, full_name, status, registration_date, branch_id, gender, phone)
       VALUES ('rg_bkstu', 'TH-RG-B', 'Book Student', 'active', ?, ?, 'male', '0700111555')`).run(today(), BRANCH_A);
-    const sell = await supertest(app).post('/api/books/rg_book/sell').set(authHeader(registrar)).send({ quantity: 1, studentId: 'rg_bkstu', customerName: 'Book Student' });
-    expect(sell.status).toBe(201);
-    const pay = await supertest(app).post('/api/students/rg_bkstu/payments').set(authHeader(registrar)).send({ amount: 250, category: 'book', bookId: 'rg_book' });
-    expect(pay.status).toBe(409);
-    expect(pay.body.error).toMatch(/already sold/i);
-    const stock = (db.prepare(`SELECT stock FROM books WHERE id='rg_book'`).get() as { stock: number }).stock;
-    expect(stock).toBe(4); // decremented exactly once
-    const totalBookIncome = (db.prepare(`SELECT COALESCE(SUM(amount),0) s FROM financial_transactions WHERE category='book'`).get() as { s: number }).s;
-    expect(totalBookIncome).toBe(250);
-    // Reverse order: manual payment first, then sell → 409.
-    db.prepare(`INSERT OR IGNORE INTO students (id, student_code, full_name, status, registration_date, branch_id, gender, phone)
-      VALUES ('rg_bkstu3', 'TH-RG-B3', 'Book Student 3', 'active', ?, ?, 'male', '0700111777')`).run(today(), BRANCH_A);
-    const manualFirst = await supertest(app).post('/api/students/rg_bkstu3/payments').set(authHeader(registrar)).send({ amount: 250, category: 'book', bookId: 'rg_book' });
-    expect(manualFirst.status).toBe(201);
-    const sellAfter = await supertest(app).post('/api/books/rg_book/sell').set(authHeader(registrar)).send({ quantity: 1, studentId: 'rg_bkstu3', customerName: 'Book Student 3' });
-    expect(sellAfter.status).toBe(409);
-    expect(sellAfter.body.error).toMatch(/already paid/i);
+    const sale = await supertest(app).post(`/api/books/catalog/${bookId}/sales`).set(authHeader(registrar)).set('Idempotency-Key', 'rg-book-sale-a').send({ quantity: 1, studentId: 'rg_bkstu' });
+    expect(sale.status).toBe(201);
+    const genericPayment = await supertest(app).post('/api/students/rg_bkstu/payments').set(authHeader(registrar)).send({ amount: 250, category: 'book', bookId });
+    expect(genericPayment.status).toBe(400);
+    expect(db.prepare('SELECT available_quantity FROM book_inventory_positions WHERE book_id = ?').get(bookId)).toEqual({ available_quantity: 4 });
+    expect(db.prepare(`
+      SELECT COUNT(*) AS count FROM financial_transactions ft
+      JOIN book_sales s ON s.payment_id = ft.payment_id
+      WHERE s.id = ? AND ft.category = 'book'
+    `).get(sale.body.id)).toEqual({ count: 1 });
   });
 
-  it('control: a genuine second sale (different student) still works', async () => {
+  it('control: a genuine second sale to a different student still works', async () => {
     db.prepare(`INSERT OR IGNORE INTO students (id, student_code, full_name, status, registration_date, branch_id, gender, phone)
       VALUES ('rg_bkstu2', 'TH-RG-B2', 'Book Student 2', 'active', ?, ?, 'male', '0700111666')`).run(today(), BRANCH_A);
-    const sell = await supertest(app).post('/api/books/rg_book/sell').set(authHeader(registrar)).send({ quantity: 1, studentId: 'rg_bkstu2', customerName: 'Book Student 2' });
-    expect(sell.status).toBe(201);
+    await supertest(app).post(`/api/books/catalog/${bookId}/sales`).set(authHeader(registrar)).set('Idempotency-Key', 'rg-book-sale-b').send({ quantity: 1, studentId: 'rg_bkstu2' }).expect(201);
   });
 });

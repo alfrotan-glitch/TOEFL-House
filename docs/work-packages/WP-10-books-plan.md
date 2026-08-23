@@ -31,8 +31,13 @@ plan was written.
   student-payment UI entry point, and the generic student-refund path that could reverse
   a Book payment without returning Book inventory. This is a necessary boundary repair:
   Book commerce must have one financial/inventory writer.
+- The existing Student Journey consumer for `journey.book_issued` and
+  `journey.book_returned`, so a completed custody transition is atomically visible in
+  the student's canonical chronology. The unimplemented `BOOK_LOST` vocabulary is
+  removed: loss/charge policy is not invented.
 - The dependent report/catalog consumers only where their current Book source would
-  otherwise become false after the Books reconstruction.
+  otherwise become false after the Books reconstruction, and canonical-rebuild
+  wording that would otherwise promise an impossible migration of the replaced Books shape.
 - Books-specific canonical-authority, invariant, metric, decision and conflict-register
   updates; new package-local test authority; deletion of superseded Books artifacts
   after the deletion protocol.
@@ -58,9 +63,10 @@ plan was written.
 | Catalog/inventory | `books.stock` plus mutable restock history | catalog facts plus immutable receipt/commerce/lending facts; availability derived server-side |
 | Sales money | `book_sales` and separate `payments` writers | one Book command creates exactly one linked payment and ledger income fact |
 | Student book payment | `POST /api/students/:id/payments` with `category='book'` | removed as a second Book writer; student purchases use the Books sale command |
+| Invoice purpose `books` | a WP-07 document/payment category with no catalog source identity | remains an invoice concern, but cannot create/reverse physical Book inventory or lending facts; a catalog sale always has its exact `book_sales` source |
 | Lending | none | explicit student loan and return facts, due date, branch correlation and derived overdue state |
 | Authorization | role-name gates despite `Book.*` permissions | `requirePermission` at every Books boundary |
-| UI truth | `BooksView` browser reducers for stock, revenue, profit and payment mix | server workspace/read model is the only displayed inventory/commerce truth |
+| UI truth | `BooksView` browser reducers for stock, revenue, profit and payment mix | server workspace/read model is the only displayed inventory/commerce truth; loan mutations also invalidate the mounted student Journey consumer |
 | Reporting | `book_sales` queries | consume the final Book sale authority; no browser/report recomputation of a second fact |
 
 ---
@@ -112,7 +118,8 @@ Posted book sale
 Book loan/issuance
   -> one same-branch student + one catalog item + one issued copy quantity
   -> explicit issued-on and due-on dates
-  -> at most one immutable return fact
+  -> one append-only Student Journey issuance event in the same transaction
+  -> at most one immutable return fact plus one append-only return event
   -> current / overdue is derived from absence of a return and canonical server date
 ```
 
@@ -179,11 +186,11 @@ policy that moves money must return to Owner decision under §105 and §20–21.
 | Layer | Planned change |
 |---|---|
 | Schema | Replace the old Books block with catalog, receipt, sale, sale-return, loan and loan-return facts; add deferred Book sale/payment relations; remove mutable stock/restock mirror and duplicate sale guards; add foreign keys, branch/capacity/immutability/status triggers and supporting indexes. Replace `payments.book_id` only after every consumer is re-homed to the Book sale relation. |
-| Domain | Add `server/src/core/books/books-service.ts` for validation, authoritative workspace queries, catalog/receipt commands, sale/refund money lifecycle and loan/return commands inside explicit transactions. |
-| API | Rebuild `server/src/routes/books.routes.ts` around permission checks and the service. Expose a server-rendered workspace plus focused commands; remove the obsolete stock-write and role-name routes. |
+| Domain | Add `server/src/core/books/books-service.ts` for validation, authoritative workspace queries, catalog/receipt commands, sale/refund money lifecycle and loan/return commands inside explicit transactions. Loan issuance/return append the existing canonical Student Journey event atomically; unsupported loss vocabulary is removed. |
+| API | Rebuild `server/src/routes/books.routes.ts` around permission checks and the service. Expose a server-rendered workspace with bounded, paginated sales/loan/receipt histories plus focused commands; remove the obsolete stock-write and role-name routes. |
 | RBAC | Add Book restock/issue/return/refund permissions and assign default scopes consistent with the currently executable Books route behavior; server routes use `requirePermission`. |
 | Student boundary | Remove the generic `category='book'` payment path, its book lookup/stock mutation, its generic refund eligibility, and the Student UI book-payment affordance. Preserve generic finance behavior for non-Book categories. |
-| Frontend | Replace legacy Books components and state with a typed workspace consumer. It renders server totals and supports catalog, stock receipt, sale, sale-return, loan and return workflows; it has intentional loading/empty/error/permission states and never calculates inventory/financial truth locally. |
+| Frontend | Replace legacy Books components and state with a typed workspace consumer. It renders server totals and paginated history pages, supports catalog, stock receipt, sale, sale-return, loan and return workflows, has intentional loading/empty/error/permission states, and never calculates inventory/financial truth locally. |
 | Consumers | Adapt report/catalog and dependent tests only to consume the final sale relation; do not redesign WP-11 reporting architecture. |
 | Tests | Re-home/rebuild Book tests under `server/src/tests/work-packages/wp10/`; add API, direct-schema, RBAC, cross-writer, finance/reconciliation, idempotency/concurrency, lending lifecycle, UI-contract and cold-review attack suites. |
 | Documentation | Update authorities/invariants/metrics/decisions/conflicts/legacy inventory and produce a bounded certification only after all gates pass. |
@@ -196,8 +203,8 @@ policy that moves money must return to Owner decision under §105 and §20–21.
 3. A full sale return/refund is atomic, exactly once, restores availability and writes a
    linked signed contra payment/income fact; insufficient cash leaves no residue.
 4. A valid operator can issue one available lending-enabled book to a same-branch
-   student with an explicit due date, return it once, and see derived availability and
-   overdue status update without a browser refresh.
+   student with an explicit due date, return it once, and see derived availability,
+   overdue status and canonical Student Journey chronology update without a browser refresh.
 5. Cross-branch, archived, disabled-lending, unavailable, malformed-date, double-submit,
    direct SQL mutation and unauthorized command attacks fail without residue.
 6. A report/API/UI Book metric agrees with the same canonical facts; the browser has no

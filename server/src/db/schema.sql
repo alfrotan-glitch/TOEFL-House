@@ -1930,86 +1930,290 @@ CREATE TABLE IF NOT EXISTS certificates (
 CREATE INDEX IF NOT EXISTS idx_certificates_student  ON certificates(student_id);
 
 -- ============================================================================
--- LIBRARY
+-- BOOKS
 -- ============================================================================
--- Book stock and book sales.
+-- Catalog, custody and commerce are deliberately separate facts. A catalog item
+-- is not a mutable stock balance: availability is derived from immutable stock
+-- receipts, posted sales without a return, and issued loans without a return.
 
 CREATE TABLE IF NOT EXISTS books ( 
-  id             TEXT PRIMARY KEY, 
-  title          TEXT NOT NULL, 
-  price          INTEGER NOT NULL DEFAULT 0, 
-  purchase_price INTEGER, 
-  stock          INTEGER NOT NULL DEFAULT 0 CHECK (stock >= 0), 
-  is_chapter     INTEGER NOT NULL DEFAULT 0, 
-  branch_id      TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT, 
-  entry_date     TEXT, 
-  created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+  id                    TEXT PRIMARY KEY,
+  title                 TEXT NOT NULL,
+  item_kind             TEXT NOT NULL CHECK (item_kind IN ('book','chapter')),
+  sale_enabled          INTEGER NOT NULL DEFAULT 1 CHECK (sale_enabled IN (0,1)),
+  sale_price            INTEGER,
+  lending_enabled       INTEGER NOT NULL DEFAULT 0 CHECK (lending_enabled IN (0,1)),
+  default_unit_cost     INTEGER,
+  status                TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived')),
+  branch_id             TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK ((sale_enabled = 1 AND sale_price IS NOT NULL) OR (sale_enabled = 0 AND sale_price IS NULL)),
+  CHECK (sale_enabled = 1 OR lending_enabled = 1)
 );
-CREATE INDEX IF NOT EXISTS idx_books_branch          ON books(branch_id);
-CREATE TRIGGER IF NOT EXISTS trg_books_stock_nonnegative_insert
+CREATE UNIQUE INDEX IF NOT EXISTS uq_books_branch_kind_title
+  ON books(branch_id, item_kind, title COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_books_branch_status ON books(branch_id, status, title);
+CREATE TRIGGER IF NOT EXISTS trg_books_money_insert
 BEFORE INSERT ON books
-WHEN NEW.stock < 0
-BEGIN SELECT RAISE(ABORT, 'Book stock cannot be negative'); END;
-CREATE TRIGGER IF NOT EXISTS trg_books_stock_nonnegative_update
-BEFORE UPDATE OF stock ON books
-WHEN NEW.stock < 0
-BEGIN SELECT RAISE(ABORT, 'Book stock cannot be negative'); END;
+WHEN (NEW.sale_price IS NOT NULL AND (typeof(NEW.sale_price) IS NOT 'integer' OR NEW.sale_price <= 0))
+  OR (NEW.default_unit_cost IS NOT NULL AND (typeof(NEW.default_unit_cost) IS NOT 'integer' OR NEW.default_unit_cost < 0))
+BEGIN SELECT RAISE(ABORT, 'Book prices and unit costs must be whole AFN values; a sale price must be positive'); END;
+CREATE TRIGGER IF NOT EXISTS trg_books_money_update
+BEFORE UPDATE OF sale_price, default_unit_cost, sale_enabled ON books
+WHEN (NEW.sale_price IS NOT NULL AND (typeof(NEW.sale_price) IS NOT 'integer' OR NEW.sale_price <= 0))
+  OR (NEW.default_unit_cost IS NOT NULL AND (typeof(NEW.default_unit_cost) IS NOT 'integer' OR NEW.default_unit_cost < 0))
+BEGIN SELECT RAISE(ABORT, 'Book prices and unit costs must be whole AFN values; a sale price must be positive'); END;
+CREATE TRIGGER IF NOT EXISTS trg_books_title_insert
+BEFORE INSERT ON books
+WHEN NEW.title IS NULL OR TRIM(NEW.title) = '' OR NEW.title IS NOT TRIM(NEW.title)
+BEGIN SELECT RAISE(ABORT, 'Book title must be non-empty trimmed text'); END;
+CREATE TRIGGER IF NOT EXISTS trg_books_title_update
+BEFORE UPDATE OF title ON books
+WHEN NEW.title IS NULL OR TRIM(NEW.title) = '' OR NEW.title IS NOT TRIM(NEW.title)
+BEGIN SELECT RAISE(ABORT, 'Book title must be non-empty trimmed text'); END;
+CREATE TRIGGER IF NOT EXISTS trg_books_identity_immutable
+BEFORE UPDATE OF branch_id, item_kind ON books
+BEGIN SELECT RAISE(ABORT, 'A Book branch and item kind are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS trg_books_no_delete
+BEFORE DELETE ON books
+BEGIN SELECT RAISE(ABORT, 'Book catalog facts are archived, never deleted'); END;
 
-CREATE TABLE IF NOT EXISTS book_restock_history ( 
-  id             TEXT PRIMARY KEY, 
-  book_id        TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE, 
-  date           TEXT NOT NULL, 
-  quantity       INTEGER NOT NULL, 
-  price          INTEGER NOT NULL, 
-  purchase_price INTEGER 
+CREATE TABLE IF NOT EXISTS book_stock_receipts (
+  id                    TEXT PRIMARY KEY,
+  book_id               TEXT NOT NULL REFERENCES books(id) ON DELETE RESTRICT,
+  quantity              INTEGER NOT NULL CHECK (quantity > 0),
+  received_on           TEXT NOT NULL,
+  unit_cost             INTEGER,
+  note                  TEXT,
+  received_by_user_id   TEXT NOT NULL,
+  received_by_name      TEXT NOT NULL,
+  branch_id             TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  idempotency_key       TEXT NOT NULL,
+  created_at            TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS idx_book_restock_book     ON book_restock_history(book_id);
+CREATE INDEX IF NOT EXISTS idx_book_stock_receipts_book_date
+  ON book_stock_receipts(book_id, received_on, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_book_stock_receipts_idempotency
+  ON book_stock_receipts(idempotency_key);
+CREATE TRIGGER IF NOT EXISTS trg_book_stock_receipts_integrity_insert
+BEFORE INSERT ON book_stock_receipts
+WHEN typeof(NEW.quantity) IS NOT 'integer'
+  OR NEW.quantity <= 0
+  OR strftime('%Y-%m-%d', NEW.received_on) IS NOT NEW.received_on
+  OR (NEW.unit_cost IS NOT NULL AND (typeof(NEW.unit_cost) IS NOT 'integer' OR NEW.unit_cost < 0))
+  OR (SELECT branch_id FROM books WHERE id = NEW.book_id) IS NOT NEW.branch_id
+  OR (SELECT status FROM books WHERE id = NEW.book_id) IS NOT 'active'
+  OR NEW.idempotency_key IS NULL OR TRIM(NEW.idempotency_key) = ''
+BEGIN SELECT RAISE(ABORT, 'Book stock receipt is invalid, cross-branch, archived, or unkeyed'); END;
+CREATE TRIGGER IF NOT EXISTS trg_book_stock_receipts_immutable_update
+BEFORE UPDATE ON book_stock_receipts
+BEGIN SELECT RAISE(ABORT, 'Book stock receipts are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS trg_book_stock_receipts_immutable_delete
+BEFORE DELETE ON book_stock_receipts
+BEGIN SELECT RAISE(ABORT, 'Book stock receipts are immutable'); END;
 
 CREATE TABLE IF NOT EXISTS book_sales ( 
-  id              TEXT PRIMARY KEY, 
-  book_id         TEXT NOT NULL REFERENCES books(id) ON DELETE RESTRICT, 
-  quantity        INTEGER NOT NULL, 
-  total_amount    INTEGER NOT NULL, 
-  discount_amount INTEGER DEFAULT 0, 
-  net_amount      INTEGER, 
-  payment_method  TEXT CHECK (payment_method IN ('cash','card','transfer')), 
-  status          TEXT NOT NULL DEFAULT 'completed' CHECK (status IN ('completed','refunded')), 
-  date            TEXT NOT NULL, 
-  customer_name   TEXT, 
-  student_id      TEXT REFERENCES students(id) ON DELETE SET NULL, 
-  branch_id       TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT, 
-  created_at      TEXT NOT NULL DEFAULT (datetime('now')) , 
-  -- Duplicate-click protection for the sale desk (migration 060).
-  idempotency_key  TEXT 
+  id                    TEXT PRIMARY KEY,
+  book_id               TEXT NOT NULL REFERENCES books(id) ON DELETE RESTRICT,
+  quantity              INTEGER NOT NULL CHECK (quantity > 0),
+  unit_price            INTEGER NOT NULL CHECK (unit_price > 0),
+  gross_amount          INTEGER NOT NULL CHECK (gross_amount > 0),
+  discount_amount       INTEGER NOT NULL DEFAULT 0 CHECK (discount_amount >= 0),
+  net_amount            INTEGER NOT NULL CHECK (net_amount > 0),
+  payment_id            TEXT NOT NULL UNIQUE REFERENCES payments(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED,
+  sold_on               TEXT NOT NULL,
+  purchaser_name        TEXT NOT NULL,
+  student_id            TEXT REFERENCES students(id) ON DELETE SET NULL,
+  operator_user_id      TEXT NOT NULL,
+  operator_name         TEXT NOT NULL,
+  branch_id             TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  idempotency_key       TEXT NOT NULL,
+  created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK (gross_amount = quantity * unit_price),
+  CHECK (net_amount = gross_amount - discount_amount)
 );
-CREATE INDEX IF NOT EXISTS idx_book_sales_book       ON book_sales(book_id);
-CREATE INDEX IF NOT EXISTS idx_book_sales_branch     ON book_sales(branch_id);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_book_sales_idempotency
-ON book_sales(idempotency_key) WHERE idempotency_key IS NOT NULL;
-CREATE TRIGGER IF NOT EXISTS trg_book_sales_branch_guard BEFORE INSERT ON book_sales WHEN (SELECT branch_id FROM books WHERE id = NEW.book_id) <> NEW.branch_id OR (NEW.student_id IS NOT NULL AND (SELECT branch_id FROM students WHERE id = NEW.student_id) <> NEW.branch_id) BEGIN SELECT RAISE(ABORT, 'book sale branch mismatch'); END;
-CREATE TRIGGER IF NOT EXISTS trg_book_sales_branch_guard_update BEFORE UPDATE OF book_id, student_id, branch_id ON book_sales WHEN (SELECT branch_id FROM books WHERE id = NEW.book_id) <> NEW.branch_id OR (NEW.student_id IS NOT NULL AND (SELECT branch_id FROM students WHERE id = NEW.student_id) <> NEW.branch_id) BEGIN SELECT RAISE(ABORT, 'book sale branch mismatch'); END;
-CREATE TRIGGER IF NOT EXISTS trg_book_sales_branch_integrity_insert
+CREATE INDEX IF NOT EXISTS idx_book_sales_book_date ON book_sales(book_id, sold_on, created_at);
+CREATE INDEX IF NOT EXISTS idx_book_sales_branch_date ON book_sales(branch_id, sold_on, created_at);
+CREATE INDEX IF NOT EXISTS idx_book_sales_student ON book_sales(student_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_book_sales_idempotency ON book_sales(idempotency_key);
+CREATE TRIGGER IF NOT EXISTS trg_book_sales_integrity_insert
 BEFORE INSERT ON book_sales
-WHEN (SELECT branch_id FROM books WHERE id = NEW.book_id) IS NOT NEW.branch_id
-   OR (NEW.student_id IS NOT NULL AND (SELECT branch_id FROM students WHERE id = NEW.student_id) IS NOT NEW.branch_id)
-BEGIN SELECT RAISE(ABORT, 'Book sale branch does not match book/student branch'); END;
-CREATE TRIGGER IF NOT EXISTS trg_book_sales_branch_integrity_update
-BEFORE UPDATE OF book_id, student_id, branch_id ON book_sales
-WHEN (SELECT branch_id FROM books WHERE id = NEW.book_id) IS NOT NEW.branch_id
-   OR (NEW.student_id IS NOT NULL AND (SELECT branch_id FROM students WHERE id = NEW.student_id) IS NOT NEW.branch_id)
-BEGIN SELECT RAISE(ABORT, 'Book sale branch does not match book/student branch'); END;
-CREATE TRIGGER IF NOT EXISTS trg_book_sales_money_scale_insert
-BEFORE INSERT ON book_sales
-WHEN NEW.total_amount <> CAST(NEW.total_amount AS INTEGER)
-  OR ABS(COALESCE(NEW.discount_amount, 0) - ROUND(COALESCE(NEW.discount_amount, 0), 2)) > 0.0000001
-  OR ABS(COALESCE(NEW.net_amount, 0) - ROUND(COALESCE(NEW.net_amount, 0), 2)) > 0.0000001
-BEGIN SELECT RAISE(ABORT, 'book sale monetary values must be a whole number of AFN'); END;
-CREATE TRIGGER IF NOT EXISTS trg_book_sales_money_scale_update
-BEFORE UPDATE OF total_amount, discount_amount, net_amount ON book_sales
-WHEN NEW.total_amount <> CAST(NEW.total_amount AS INTEGER)
-  OR ABS(COALESCE(NEW.discount_amount, 0) - ROUND(COALESCE(NEW.discount_amount, 0), 2)) > 0.0000001
-  OR ABS(COALESCE(NEW.net_amount, 0) - ROUND(COALESCE(NEW.net_amount, 0), 2)) > 0.0000001
-BEGIN SELECT RAISE(ABORT, 'book sale monetary values must be a whole number of AFN'); END;
+WHEN typeof(NEW.quantity) IS NOT 'integer'
+  OR typeof(NEW.unit_price) IS NOT 'integer'
+  OR typeof(NEW.gross_amount) IS NOT 'integer'
+  OR typeof(NEW.discount_amount) IS NOT 'integer'
+  OR typeof(NEW.net_amount) IS NOT 'integer'
+  OR NEW.quantity <= 0 OR NEW.unit_price <= 0 OR NEW.gross_amount <= 0
+  OR NEW.discount_amount < 0 OR NEW.net_amount <= 0
+  OR strftime('%Y-%m-%d', NEW.sold_on) IS NOT NEW.sold_on
+  OR NEW.gross_amount <> NEW.quantity * NEW.unit_price
+  OR NEW.net_amount <> NEW.gross_amount - NEW.discount_amount
+  OR NEW.purchaser_name IS NULL OR TRIM(NEW.purchaser_name) = ''
+  OR (SELECT branch_id FROM books WHERE id = NEW.book_id) IS NOT NEW.branch_id
+  OR (NEW.student_id IS NOT NULL AND (SELECT branch_id FROM students WHERE id = NEW.student_id) IS NOT NEW.branch_id)
+  OR (
+    EXISTS (SELECT 1 FROM payments p WHERE p.id = NEW.payment_id)
+    AND NOT EXISTS (
+      SELECT 1 FROM payments p
+      WHERE p.id = NEW.payment_id AND p.category = 'book' AND p.status = 'completed' AND p.invoice_id IS NULL
+        AND p.amount = NEW.net_amount AND p.branch_id IS NEW.branch_id
+        AND p.student_id IS NEW.student_id
+    )
+  )
+  OR (SELECT status FROM books WHERE id = NEW.book_id) IS NOT 'active'
+  OR (SELECT sale_enabled FROM books WHERE id = NEW.book_id) IS NOT 1
+  OR (SELECT sale_price FROM books WHERE id = NEW.book_id) IS NOT NEW.unit_price
+  OR NEW.idempotency_key IS NULL OR TRIM(NEW.idempotency_key) = ''
+  OR (
+    COALESCE((SELECT SUM(r.quantity) FROM book_stock_receipts r WHERE r.book_id = NEW.book_id), 0)
+    - COALESCE((SELECT SUM(s.quantity) FROM book_sales s
+                WHERE s.book_id = NEW.book_id
+                  AND NOT EXISTS (SELECT 1 FROM book_sale_refunds sr WHERE sr.sale_id = s.id)), 0)
+    - COALESCE((SELECT COUNT(*) FROM book_loans l
+                WHERE l.book_id = NEW.book_id
+                  AND NOT EXISTS (SELECT 1 FROM book_loan_returns lr WHERE lr.loan_id = l.id)), 0)
+    < NEW.quantity
+  )
+BEGIN SELECT RAISE(ABORT, 'Book sale is invalid, unavailable, cross-branch, archived, or unkeyed'); END;
+CREATE TRIGGER IF NOT EXISTS trg_book_sales_immutable_update
+BEFORE UPDATE ON book_sales
+BEGIN SELECT RAISE(ABORT, 'Book sales are immutable; use a Book sale return'); END;
+CREATE TRIGGER IF NOT EXISTS trg_book_sales_immutable_delete
+BEFORE DELETE ON book_sales
+BEGIN SELECT RAISE(ABORT, 'Book sales are immutable'); END;
+
+CREATE TABLE IF NOT EXISTS book_sale_refunds (
+  id                    TEXT PRIMARY KEY,
+  sale_id               TEXT NOT NULL UNIQUE REFERENCES book_sales(id) ON DELETE RESTRICT,
+  refund_payment_id     TEXT NOT NULL UNIQUE REFERENCES payments(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED,
+  returned_on           TEXT NOT NULL,
+  reason                TEXT NOT NULL,
+  returned_by_user_id   TEXT NOT NULL,
+  returned_by_name      TEXT NOT NULL,
+  branch_id             TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  idempotency_key       TEXT NOT NULL,
+  created_at            TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_book_sale_refunds_branch_date
+  ON book_sale_refunds(branch_id, returned_on, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_book_sale_refunds_idempotency ON book_sale_refunds(idempotency_key);
+CREATE TRIGGER IF NOT EXISTS trg_book_sale_refunds_integrity_insert
+BEFORE INSERT ON book_sale_refunds
+WHEN (SELECT branch_id FROM book_sales WHERE id = NEW.sale_id) IS NOT NEW.branch_id
+  OR strftime('%Y-%m-%d', NEW.returned_on) IS NOT NEW.returned_on
+  OR NEW.returned_on < (SELECT sold_on FROM book_sales WHERE id = NEW.sale_id)
+  OR NEW.reason IS NULL OR TRIM(NEW.reason) = ''
+  OR (
+    EXISTS (SELECT 1 FROM payments p WHERE p.id = NEW.refund_payment_id)
+    AND NOT EXISTS (
+      SELECT 1 FROM payments p JOIN book_sales s ON s.id = NEW.sale_id
+      WHERE p.id = NEW.refund_payment_id AND p.category = 'refund' AND p.status = 'completed'
+        AND p.amount = -s.net_amount AND p.refunds_payment_id = s.payment_id
+        AND p.branch_id IS NEW.branch_id AND p.student_id IS s.student_id
+    )
+  )
+  OR NEW.idempotency_key IS NULL OR TRIM(NEW.idempotency_key) = ''
+BEGIN SELECT RAISE(ABORT, 'Book sale return is cross-branch, unexplained, or unkeyed'); END;
+CREATE TRIGGER IF NOT EXISTS trg_book_sale_refunds_immutable_update
+BEFORE UPDATE ON book_sale_refunds
+BEGIN SELECT RAISE(ABORT, 'Book sale returns are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS trg_book_sale_refunds_immutable_delete
+BEFORE DELETE ON book_sale_refunds
+BEGIN SELECT RAISE(ABORT, 'Book sale returns are immutable'); END;
+
+CREATE TABLE IF NOT EXISTS book_loans (
+  id                    TEXT PRIMARY KEY,
+  book_id               TEXT NOT NULL REFERENCES books(id) ON DELETE RESTRICT,
+  student_id            TEXT NOT NULL REFERENCES students(id) ON DELETE RESTRICT,
+  issued_on             TEXT NOT NULL,
+  due_on                TEXT NOT NULL,
+  issued_by_user_id     TEXT NOT NULL,
+  issued_by_name        TEXT NOT NULL,
+  branch_id             TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  idempotency_key       TEXT NOT NULL,
+  created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK (due_on >= issued_on)
+);
+CREATE INDEX IF NOT EXISTS idx_book_loans_branch_due ON book_loans(branch_id, due_on, issued_on);
+CREATE INDEX IF NOT EXISTS idx_book_loans_student ON book_loans(student_id, due_on);
+CREATE INDEX IF NOT EXISTS idx_book_loans_book ON book_loans(book_id, issued_on);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_book_loans_idempotency ON book_loans(idempotency_key);
+CREATE TRIGGER IF NOT EXISTS trg_book_loans_integrity_insert
+BEFORE INSERT ON book_loans
+WHEN NEW.due_on < NEW.issued_on
+  OR strftime('%Y-%m-%d', NEW.issued_on) IS NOT NEW.issued_on
+  OR strftime('%Y-%m-%d', NEW.due_on) IS NOT NEW.due_on
+  OR (SELECT branch_id FROM books WHERE id = NEW.book_id) IS NOT NEW.branch_id
+  OR (SELECT branch_id FROM students WHERE id = NEW.student_id) IS NOT NEW.branch_id
+  OR (SELECT status FROM books WHERE id = NEW.book_id) IS NOT 'active'
+  OR (SELECT lending_enabled FROM books WHERE id = NEW.book_id) IS NOT 1
+  OR NEW.idempotency_key IS NULL OR TRIM(NEW.idempotency_key) = ''
+  OR (
+    COALESCE((SELECT SUM(r.quantity) FROM book_stock_receipts r WHERE r.book_id = NEW.book_id), 0)
+    - COALESCE((SELECT SUM(s.quantity) FROM book_sales s
+                WHERE s.book_id = NEW.book_id
+                  AND NOT EXISTS (SELECT 1 FROM book_sale_refunds sr WHERE sr.sale_id = s.id)), 0)
+    - COALESCE((SELECT COUNT(*) FROM book_loans l
+                WHERE l.book_id = NEW.book_id
+                  AND NOT EXISTS (SELECT 1 FROM book_loan_returns lr WHERE lr.loan_id = l.id)), 0)
+    < 1
+  )
+BEGIN SELECT RAISE(ABORT, 'Book loan is invalid, unavailable, cross-branch, archived, disabled, or unkeyed'); END;
+CREATE TRIGGER IF NOT EXISTS trg_book_loans_immutable_update
+BEFORE UPDATE ON book_loans
+BEGIN SELECT RAISE(ABORT, 'Book loans are immutable; use a Book loan return'); END;
+CREATE TRIGGER IF NOT EXISTS trg_book_loans_immutable_delete
+BEFORE DELETE ON book_loans
+BEGIN SELECT RAISE(ABORT, 'Book loans are immutable'); END;
+
+CREATE TABLE IF NOT EXISTS book_loan_returns (
+  id                    TEXT PRIMARY KEY,
+  loan_id               TEXT NOT NULL UNIQUE REFERENCES book_loans(id) ON DELETE RESTRICT,
+  returned_on           TEXT NOT NULL,
+  note                  TEXT,
+  returned_by_user_id   TEXT NOT NULL,
+  returned_by_name      TEXT NOT NULL,
+  branch_id             TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  idempotency_key       TEXT NOT NULL,
+  created_at            TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_book_loan_returns_branch_date
+  ON book_loan_returns(branch_id, returned_on, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_book_loan_returns_idempotency ON book_loan_returns(idempotency_key);
+CREATE TRIGGER IF NOT EXISTS trg_book_loan_returns_integrity_insert
+BEFORE INSERT ON book_loan_returns
+WHEN strftime('%Y-%m-%d', NEW.returned_on) IS NOT NEW.returned_on
+  OR NEW.returned_on < (SELECT issued_on FROM book_loans WHERE id = NEW.loan_id)
+  OR (SELECT branch_id FROM book_loans WHERE id = NEW.loan_id) IS NOT NEW.branch_id
+  OR NEW.idempotency_key IS NULL OR TRIM(NEW.idempotency_key) = ''
+BEGIN SELECT RAISE(ABORT, 'Book loan return is invalid, cross-branch, or unkeyed'); END;
+CREATE TRIGGER IF NOT EXISTS trg_book_loan_returns_immutable_update
+BEFORE UPDATE ON book_loan_returns
+BEGIN SELECT RAISE(ABORT, 'Book loan returns are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS trg_book_loan_returns_immutable_delete
+BEFORE DELETE ON book_loan_returns
+BEGIN SELECT RAISE(ABORT, 'Book loan returns are immutable'); END;
+
+DROP VIEW IF EXISTS book_inventory_positions;
+CREATE VIEW book_inventory_positions AS
+SELECT
+  b.id AS book_id,
+  COALESCE((SELECT SUM(r.quantity) FROM book_stock_receipts r WHERE r.book_id = b.id), 0) AS received_quantity,
+  COALESCE((SELECT SUM(s.quantity) FROM book_sales s
+            WHERE s.book_id = b.id
+              AND NOT EXISTS (SELECT 1 FROM book_sale_refunds sr WHERE sr.sale_id = s.id)), 0) AS sold_quantity,
+  COALESCE((SELECT COUNT(*) FROM book_loans l
+            WHERE l.book_id = b.id
+              AND NOT EXISTS (SELECT 1 FROM book_loan_returns lr WHERE lr.loan_id = l.id)), 0) AS loaned_quantity,
+  COALESCE((SELECT SUM(r.quantity) FROM book_stock_receipts r WHERE r.book_id = b.id), 0)
+    - COALESCE((SELECT SUM(s.quantity) FROM book_sales s
+                WHERE s.book_id = b.id
+                  AND NOT EXISTS (SELECT 1 FROM book_sale_refunds sr WHERE sr.sale_id = s.id)), 0)
+    - COALESCE((SELECT COUNT(*) FROM book_loans l
+                WHERE l.book_id = b.id
+                  AND NOT EXISTS (SELECT 1 FROM book_loan_returns lr WHERE lr.loan_id = l.id)), 0) AS available_quantity
+FROM books b;
+
 
 -- ============================================================================
 -- FINANCE
@@ -2363,12 +2567,11 @@ CREATE TABLE IF NOT EXISTS payments (
   id             TEXT PRIMARY KEY, 
   student_id     TEXT REFERENCES students(id) ON DELETE SET NULL, 
   invoice_id     TEXT REFERENCES invoices(id) ON DELETE SET NULL, 
-  book_id        TEXT REFERENCES books(id) ON DELETE SET NULL, -- ADDED for smart payments 
   amount         INTEGER NOT NULL, 
   date           TEXT NOT NULL, 
   payment_method TEXT NOT NULL CHECK (payment_method IN ('cash','card','bank_transfer')), 
   status         TEXT NOT NULL DEFAULT 'completed' CHECK (status IN ('completed','pending','failed','refunded')), 
-  category       TEXT NOT NULL CHECK (category IN ('fee','book','chapter','exam','card','placement','diploma','installment','refund','other')), -- ADDED installment & refund 
+  category       TEXT NOT NULL CHECK (category IN ('fee','book','chapter','exam','card','placement','diploma','installment','refund','other')),
   notes          TEXT, 
   receipt_number TEXT, 
   branch_id      TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT, 
@@ -2381,7 +2584,6 @@ CREATE TABLE IF NOT EXISTS payments (
   idempotency_key TEXT,
   created_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS idx_payments_book         ON payments(book_id);
 CREATE INDEX IF NOT EXISTS idx_payments_branch       ON payments(branch_id);
 CREATE INDEX IF NOT EXISTS idx_payments_branch_date   ON payments(branch_id, date);
 CREATE INDEX IF NOT EXISTS idx_payments_date         ON payments(date);
@@ -2429,13 +2631,11 @@ CREATE TRIGGER IF NOT EXISTS trg_payments_branch_integrity_insert
 BEFORE INSERT ON payments
 WHEN (NEW.student_id IS NOT NULL AND (SELECT branch_id FROM students WHERE id = NEW.student_id) IS NOT NEW.branch_id)
   OR (NEW.invoice_id IS NOT NULL AND (SELECT branch_id FROM invoices WHERE id = NEW.invoice_id) IS NOT NEW.branch_id)
-  OR (NEW.book_id IS NOT NULL AND (SELECT branch_id FROM books WHERE id = NEW.book_id) IS NOT NEW.branch_id)
 BEGIN SELECT RAISE(ABORT, 'Payment branch does not match related resource branch'); END;
 CREATE TRIGGER IF NOT EXISTS trg_payments_branch_integrity_update
-BEFORE UPDATE OF student_id, invoice_id, book_id, branch_id ON payments
+BEFORE UPDATE OF student_id, invoice_id, branch_id ON payments
 WHEN (NEW.student_id IS NOT NULL AND (SELECT branch_id FROM students WHERE id = NEW.student_id) IS NOT NEW.branch_id)
   OR (NEW.invoice_id IS NOT NULL AND (SELECT branch_id FROM invoices WHERE id = NEW.invoice_id) IS NOT NEW.branch_id)
-  OR (NEW.book_id IS NOT NULL AND (SELECT branch_id FROM books WHERE id = NEW.book_id) IS NOT NEW.branch_id)
 BEGIN SELECT RAISE(ABORT, 'Payment branch does not match related resource branch'); END;
 CREATE TRIGGER IF NOT EXISTS trg_payments_idempotency_required_insert
 BEFORE INSERT ON payments
@@ -2459,6 +2659,75 @@ CREATE TRIGGER IF NOT EXISTS trg_payments_money_scale_update
 BEFORE UPDATE OF amount ON payments
 WHEN NEW.amount <> CAST(NEW.amount AS INTEGER)
 BEGIN SELECT RAISE(ABORT, 'payment amount must be a whole number of AFN'); END;
+
+-- A Book sale owns its cash receipt. The sale is inserted first with a deferred
+-- payment foreign key, so this check runs when the matching payment is written.
+CREATE TRIGGER IF NOT EXISTS trg_book_sale_payment_integrity_insert
+BEFORE INSERT ON payments
+WHEN NEW.category = 'book' AND NEW.invoice_id IS NULL AND (
+  NEW.status IS NOT 'completed'
+  OR NEW.amount <= 0
+  OR NOT EXISTS (
+    SELECT 1 FROM book_sales s
+    WHERE s.payment_id = NEW.id
+      AND s.branch_id IS NEW.branch_id
+      AND s.student_id IS NEW.student_id
+      AND s.net_amount = NEW.amount
+  )
+)
+BEGIN SELECT RAISE(ABORT, 'A non-invoice Book payment must be the completed receipt for its Book sale'); END;
+
+-- A Book sale return owns one full signed contra receipt. Its amount, target,
+-- branch and student identity must agree with the sale it reverses.
+CREATE TRIGGER IF NOT EXISTS trg_book_sale_refund_payment_integrity_insert
+BEFORE INSERT ON payments
+WHEN EXISTS (SELECT 1 FROM book_sale_refunds sr WHERE sr.refund_payment_id = NEW.id)
+  AND (
+    NEW.category IS NOT 'refund'
+    OR NEW.status IS NOT 'completed'
+    OR NEW.amount <> -(
+      SELECT s.net_amount
+      FROM book_sale_refunds sr JOIN book_sales s ON s.id = sr.sale_id
+      WHERE sr.refund_payment_id = NEW.id
+    )
+    OR NEW.refunds_payment_id IS NOT (
+      SELECT s.payment_id
+      FROM book_sale_refunds sr JOIN book_sales s ON s.id = sr.sale_id
+      WHERE sr.refund_payment_id = NEW.id
+    )
+    OR NEW.branch_id IS NOT (
+      SELECT s.branch_id
+      FROM book_sale_refunds sr JOIN book_sales s ON s.id = sr.sale_id
+      WHERE sr.refund_payment_id = NEW.id
+    )
+    OR NEW.student_id IS NOT (
+      SELECT s.student_id
+      FROM book_sale_refunds sr JOIN book_sales s ON s.id = sr.sale_id
+      WHERE sr.refund_payment_id = NEW.id
+    )
+  )
+BEGIN SELECT RAISE(ABORT, 'Book sale return payment must exactly reverse its Book sale receipt'); END;
+
+-- A payment that reverses a physical Book sale may exist only after the
+-- immutable Book return fact is present. This blocks a generic refund from
+-- creating cash-only inventory restoration by being inserted first.
+CREATE TRIGGER IF NOT EXISTS trg_book_sale_refund_requires_return_insert
+BEFORE INSERT ON payments
+WHEN NEW.category = 'refund'
+  AND EXISTS (SELECT 1 FROM book_sales s WHERE s.payment_id = NEW.refunds_payment_id)
+  AND NOT EXISTS (SELECT 1 FROM book_sale_refunds sr WHERE sr.refund_payment_id = NEW.id)
+BEGIN SELECT RAISE(ABORT, 'A Book sale refund payment requires its Book sale return fact'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_book_sale_payments_immutable_update
+BEFORE UPDATE ON payments
+WHEN EXISTS (SELECT 1 FROM book_sales s WHERE s.payment_id = OLD.id)
+  OR EXISTS (SELECT 1 FROM book_sale_refunds sr WHERE sr.refund_payment_id = OLD.id)
+BEGIN SELECT RAISE(ABORT, 'Book commerce payments are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS trg_book_sale_payments_immutable_delete
+BEFORE DELETE ON payments
+WHEN EXISTS (SELECT 1 FROM book_sales s WHERE s.payment_id = OLD.id)
+  OR EXISTS (SELECT 1 FROM book_sale_refunds sr WHERE sr.refund_payment_id = OLD.id)
+BEGIN SELECT RAISE(ABORT, 'Book commerce payments are immutable'); END;
 
 CREATE TABLE IF NOT EXISTS financial_transactions ( 
   id            TEXT PRIMARY KEY, 
@@ -2503,6 +2772,48 @@ CREATE TRIGGER IF NOT EXISTS trg_fin_tx_money_scale_update
 BEFORE UPDATE OF amount ON financial_transactions
 WHEN NEW.amount <> CAST(NEW.amount AS INTEGER)
 BEGIN SELECT RAISE(ABORT, 'financial transaction amount must be a whole number of AFN'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_book_sale_income_integrity_insert
+BEFORE INSERT ON financial_transactions
+WHEN EXISTS (SELECT 1 FROM book_sales s WHERE s.payment_id = NEW.payment_id)
+  AND (
+    NEW.type IS NOT 'income'
+    OR NEW.category IS NOT 'book'
+    OR NEW.amount <> (SELECT net_amount FROM book_sales WHERE payment_id = NEW.payment_id)
+    OR NEW.reference_id IS NOT (SELECT id FROM book_sales WHERE payment_id = NEW.payment_id)
+    OR NEW.branch_id IS NOT (SELECT branch_id FROM book_sales WHERE payment_id = NEW.payment_id)
+    OR EXISTS (SELECT 1 FROM financial_transactions ft WHERE ft.payment_id = NEW.payment_id)
+  )
+BEGIN SELECT RAISE(ABORT, 'Book sale income must exactly match its Book sale payment'); END;
+CREATE TRIGGER IF NOT EXISTS trg_book_sale_refund_income_integrity_insert
+BEFORE INSERT ON financial_transactions
+WHEN EXISTS (SELECT 1 FROM book_sale_refunds sr WHERE sr.refund_payment_id = NEW.payment_id)
+  AND (
+    NEW.type IS NOT 'income'
+    OR NEW.category IS NOT 'refund'
+    OR NEW.amount <> -(
+      SELECT s.net_amount FROM book_sale_refunds sr JOIN book_sales s ON s.id = sr.sale_id
+      WHERE sr.refund_payment_id = NEW.payment_id
+    )
+    OR NEW.reference_id IS NOT (
+      SELECT sr.sale_id FROM book_sale_refunds sr WHERE sr.refund_payment_id = NEW.payment_id
+    )
+    OR NEW.branch_id IS NOT (
+      SELECT sr.branch_id FROM book_sale_refunds sr WHERE sr.refund_payment_id = NEW.payment_id
+    )
+    OR EXISTS (SELECT 1 FROM financial_transactions ft WHERE ft.payment_id = NEW.payment_id)
+  )
+BEGIN SELECT RAISE(ABORT, 'Book sale return income must exactly match its contra payment'); END;
+CREATE TRIGGER IF NOT EXISTS trg_book_sale_income_immutable_update
+BEFORE UPDATE ON financial_transactions
+WHEN EXISTS (SELECT 1 FROM book_sales s WHERE s.payment_id = OLD.payment_id)
+  OR EXISTS (SELECT 1 FROM book_sale_refunds sr WHERE sr.refund_payment_id = OLD.payment_id)
+BEGIN SELECT RAISE(ABORT, 'Book commerce income facts are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS trg_book_sale_income_immutable_delete
+BEFORE DELETE ON financial_transactions
+WHEN EXISTS (SELECT 1 FROM book_sales s WHERE s.payment_id = OLD.payment_id)
+  OR EXISTS (SELECT 1 FROM book_sale_refunds sr WHERE sr.refund_payment_id = OLD.payment_id)
+BEGIN SELECT RAISE(ABORT, 'Book commerce income facts are immutable'); END;
 
 -- ============================================================================
 -- PAYROLL

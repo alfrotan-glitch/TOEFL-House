@@ -263,9 +263,8 @@ function AuthenticatedApp() {
             exams={store.exams} examResults={store.examResults} attendance={store.attendance}
             permissionCodes={user?.permissions ? Array.from(user.permissions) : undefined}
             branches={store.settings.branches} activeBranchId={activeBranchId}
-            books={store.books} 
             addStudentManual={store.addStudentManual} updateStudentStatus={store.updateStudentStatus} updateStudent={store.updateStudent}
-            recordFeePayment={store.recordFeePayment} enrollStudentSemester={store.enrollStudentSemester} issueStudentCard={store.issueStudentCard}
+            enrollStudentSemester={store.enrollStudentSemester} issueStudentCard={store.issueStudentCard}
           />
         );
       case 'classes':
@@ -350,7 +349,20 @@ function AuthenticatedApp() {
       case 'impact':
         return <ImpactView reports={store.impactReports} donors={store.donors} campaigns={store.fundingCampaigns} generateReport={store.generateImpactReport} />;
       case 'books':
-        return <BooksView issuer={resolveDocumentIssuer(store.settings.branches.find((b) => b.id === activeBranchId))} books={store.books} bookSales={store.bookSales} students={store.students} recordBookSale={store.recordBookSale} addBook={store.addBook} editBook={store.editBook} deleteBook={store.deleteBook} refundBookSale={store.refundBookSale} activeRole={activeRole} isGlobalOwner={user?.isGlobalOwner ?? false} />;
+        return <BooksView
+          issuer={resolveDocumentIssuer(store.settings.branches.find((branch) => branch.id === activeBranchId))}
+          workspace={store.booksWorkspace}
+          students={store.students}
+          permissionCodes={user?.permissions ? Array.from(user.permissions) : undefined}
+          createBookCatalogItem={store.createBookCatalogItem}
+          updateBookCatalogItem={store.updateBookCatalogItem}
+          receiveBookStock={store.receiveBookStock}
+          recordBookSale={store.recordBookSale}
+          returnBookSale={store.returnBookSale}
+          issueBookLoan={store.issueBookLoan}
+          returnBookLoan={store.returnBookLoan}
+          loadBooksHistoryPage={store.loadBooksHistoryPage}
+        />;
       case 'workflows':
         return <WorkflowsView instances={store.workflows} automations={store.automations} activeRole={activeRole} isGlobalOwner={user?.isGlobalOwner ?? false} approveWorkflowStep={store.approveWorkflowStep} rejectWorkflowStep={store.rejectWorkflowStep} getWorkflowInstanceDetail={store.getWorkflowInstanceDetail} toggleAutomation={store.toggleAutomation} />;
       case 'rules':

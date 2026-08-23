@@ -228,8 +228,9 @@ export const METRIC_CATALOG: readonly MetricDefinition[] = [
     unit: 'afn',
     scopeAlias: 'bs',
     sql: `SELECT COALESCE(SUM(bs.net_amount), 0) AS value FROM book_sales bs
-          WHERE bs.date >= ? AND bs.date <= ?`,
-    note: 'Retail book revenue; distinct from book issuance, which moves no money.',
+          WHERE bs.sold_on >= ? AND bs.sold_on <= ?
+            AND NOT EXISTS (SELECT 1 FROM book_sale_refunds sr WHERE sr.sale_id = bs.id)`,
+    note: 'Final Book-sale revenue; student lending moves no money and returned sales are excluded through their immutable contra fact.',
   }),
   M({
     id: 'audit.actions',

@@ -2,9 +2,10 @@
  * Student Journey Timeline — append-only chronology with current lifecycle and
  * enrollment facts supplied by their canonical server authorities.
  */
-import React, { useEffect, useState , useCallback} from 'react';
-import {Route, Wallet, Loader2, RefreshCw, UserPlus, CreditCard, GraduationCap, BookOpen, AlertCircle, CheckCircle2, ArrowRightCircle, XCircle, PauseCircle, PlayCircle} from 'lucide-react';
+import React, { useState, useCallback } from 'react';
+import {Route, Wallet, Loader2, RefreshCw, UserPlus, CreditCard, GraduationCap, BookOpen, BookOpenCheck, RotateCcw, AlertCircle, CheckCircle2, ArrowRightCircle, XCircle, PauseCircle, PlayCircle} from 'lucide-react';
 import {api} from '../../../api/client';
+import { useVersionedFetch } from '../../../state/serverStateFreshness';
 import {formatAFN} from '../../../utils/format';
 import { formatJalaliDateTime } from '../../../utils/jalali';
 
@@ -58,6 +59,8 @@ function getEventVisuals(eventType: string): { Icon: React.ElementType, color: s
     case 'journey.invoice_issued': return { Icon: Wallet, color: 'text-amber-600', bg: 'bg-amber-50' };
     case 'journey.enrollment_created': return { Icon: ArrowRightCircle, color: 'text-sky-600', bg: 'bg-sky-50' };
     case 'journey.id_card_issued': return { Icon: BookOpen, color: 'text-purple-600', bg: 'bg-purple-50' };
+    case 'journey.book_issued': return { Icon: BookOpenCheck, color: 'text-sky-600', bg: 'bg-sky-50' };
+    case 'journey.book_returned': return { Icon: RotateCcw, color: 'text-emerald-600', bg: 'bg-emerald-50' };
     case 'journey.graduated': return { Icon: GraduationCap, color: 'text-rose-600', bg: 'bg-rose-50' };
     case 'journey.placement_passed': return { Icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-50' };
     case 'journey.placement_failed': return { Icon: XCircle, color: 'text-rose-600', bg: 'bg-rose-50' };
@@ -81,12 +84,17 @@ function payloadChips(item: JourneyTimelineItem, canViewFinance: boolean): Array
   if (p.semesterName) chips.push({ label: 'Semester', value: String(p.semesterName) });
   if (p.enrollmentType) chips.push({ label: 'Type', value: String(p.enrollmentType) });
   if (p.status) chips.push({ label: 'Status', value: String(p.status), type: 'status' });
+  if (p.title) chips.push({ label: 'Book', value: String(p.title) });
+  if (p.dueOn) chips.push({ label: 'Due', value: String(p.dueOn) });
   if (Array.isArray(p.skillsFocus) && p.skillsFocus.length) chips.push({ label: 'Skills', value: p.skillsFocus.join(', ') });
   
   return chips;
 }
 
 export default function StudentJourneyTimeline({ studentId, canViewFinance }: Props) {
+  // Book loan issue/return and student workflow commands append Journey facts.
+  // A mounted timeline subscribes to the canonical Students freshness signal so
+  // it cannot remain stale until the operator closes and reopens the profile.
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [state, setState] = useState<JourneyState | null>(null);
@@ -95,7 +103,7 @@ export default function StudentJourneyTimeline({ studentId, canViewFinance }: Pr
   const [financeSummary, setFinanceSummary] = useState<FinanceSummary | null>(null);
   const [tab, setTab] = useState<'lifecycle' | 'finance'>('lifecycle');
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (isCurrent: () => boolean) => {
     setLoading(true);
     setError(null);
     try {
@@ -105,20 +113,19 @@ export default function StudentJourneyTimeline({ studentId, canViewFinance }: Pr
         financialTimeline: JourneyTimelineItem[];
         financeSummary?: FinanceSummary;
       }>(`/students/${studentId}/journey`);
+      if (!isCurrent()) return;
       setState(data.state);
       setLifecycle(data.timeline || []);
       setFinance(canViewFinance ? data.financialTimeline || [] : []);
       setFinanceSummary(canViewFinance ? data.financeSummary ?? null : null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load journey');
+      if (isCurrent()) setError(err instanceof Error ? err.message : 'Failed to load journey');
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, [studentId, canViewFinance]);
 
-  useEffect(() => {
-    void (async () => { await load(); })();
-  }, [load]);
+  useVersionedFetch(load, ['students'], [studentId, canViewFinance]);
 
   const timeline = canViewFinance && tab === 'finance' ? finance : lifecycle;
 
@@ -136,7 +143,7 @@ export default function StudentJourneyTimeline({ studentId, canViewFinance }: Pr
       <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-xl p-3 flex items-center gap-2">
         <AlertCircle className="w-4 h-4" />
         {error}
-        <button type="button" onClick={load} className="ms-auto font-bold underline">Retry</button>
+        <button type="button" onClick={() => { void load(() => true); }} className="ms-auto font-bold underline">Retry</button>
       </div>
     );
   }
@@ -149,7 +156,7 @@ export default function StudentJourneyTimeline({ studentId, canViewFinance }: Pr
           <Route className="w-4 h-4 text-indigo-600" />
           Student Journey Timeline
         </h4>
-        <button type="button" onClick={load} className="text-[10px] font-bold text-slate-500 hover:text-indigo-600 flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg cursor-pointer">
+        <button type="button" onClick={() => { void load(() => true); }} className="text-[10px] font-bold text-slate-500 hover:text-indigo-600 flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg cursor-pointer">
           <RefreshCw className="w-3 h-3" /> Refresh
         </button>
       </div>

@@ -110,8 +110,8 @@ export const NAVIGATION_SECTIONS: NavSectionConfig[] = [
         id: 'books',
         label: 'Books & Assets',
         icon: 'BookOpen',
-        description: 'Book inventory, sales, and stock levels',
-        keywords: ['book', 'inventory', 'stock', 'sale', 'assets'],
+        description: 'Book catalog, stock receipts, sales, and student lending',
+        keywords: ['book', 'inventory', 'stock', 'sale', 'lending', 'loan'],
       },
       {
         id: 'funding',

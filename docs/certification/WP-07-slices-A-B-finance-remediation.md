@@ -241,8 +241,10 @@ Reviewed cold from the diff, then repaired in the same slice:
 
 WP07-F9 is an instance of a class, not a one-off. A sweep of every money writer
 that accepts a caller-supplied `Idempotency-Key` found the same unscoped replay
-in `POST /api/funding/donations` (WP-09) and `POST /api/books/:id/sell`
+in `POST /api/funding/donations` (WP-09) and the former Books sale writer
 (WP-10), and confirmed that payroll (WP-08) already applies the correct rule.
+The final WP-10 architecture replaces that writer with the scoped Book-domain
+sale command documented in `docs/certification/WP-10-books.md`.
 Rather than silently ignoring defects outside the WP-07 route boundary, the
 slice was deliberately re-scoped to include the cross-cutting rule, which is
 now pinned for all four writers by

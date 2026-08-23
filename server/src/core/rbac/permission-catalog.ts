@@ -105,10 +105,14 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
   { code: 'FeeStructure.Edit', resource: 'FeeStructure', action: 'Edit', description: 'Edit fee structure', category: 'finance' },
   { code: 'Finance.Report', resource: 'Finance', action: 'Report', description: 'Finance reports', category: 'finance' },
   { code: 'Ledger.View', resource: 'Ledger', action: 'View', description: 'View ledger', category: 'finance' },
-  { code: 'Book.View', resource: 'Book', action: 'View', description: 'View books', category: 'inventory' },
-  { code: 'Book.Create', resource: 'Book', action: 'Create', description: 'Add books', category: 'inventory' },
-  { code: 'Book.Edit', resource: 'Book', action: 'Edit', description: 'Edit books', category: 'inventory' },
-  { code: 'Book.Sell', resource: 'Book', action: 'Sell', description: 'Sell books', category: 'inventory' },
+  { code: 'Book.View', resource: 'Book', action: 'View', description: 'View Books workspace', category: 'inventory' },
+  { code: 'Book.Create', resource: 'Book', action: 'Create', description: 'Create Book catalog items', category: 'inventory' },
+  { code: 'Book.Edit', resource: 'Book', action: 'Edit', description: 'Edit or archive Book catalog items', category: 'inventory' },
+  { code: 'Book.Restock', resource: 'Book', action: 'Restock', description: 'Record immutable Book stock receipts', category: 'inventory' },
+  { code: 'Book.Sell', resource: 'Book', action: 'Sell', description: 'Record Book sales and cash receipts', category: 'inventory' },
+  { code: 'Book.Refund', resource: 'Book', action: 'Refund', description: 'Return and refund a Book sale', category: 'inventory' },
+  { code: 'Book.Issue', resource: 'Book', action: 'Issue', description: 'Issue a Book loan to a student', category: 'inventory' },
+  { code: 'Book.Return', resource: 'Book', action: 'Return', description: 'Record a Book loan return', category: 'inventory' },
   { code: 'Funding.View', resource: 'Funding', action: 'View', description: 'View funding', category: 'funding' },
   { code: 'Funding.RecordDonation', resource: 'Funding', action: 'RecordDonation', description: 'Record donation income only', category: 'funding' },
   { code: 'Funding.Edit', resource: 'Funding', action: 'Edit', description: 'Manage donors, campaigns and aid funding', category: 'funding' },
@@ -215,7 +219,7 @@ export const ROLE_DEFINITIONS: RoleDef[] = [
       'Attendance.View','Attendance.Edit','Exam.View','Exam.Create','Exam.Edit','Exam.Publish','Grade.View','Grade.Edit','Promotion.Approve',
       'Certificate.Issue','Certificate.Print','Teacher.View','Teacher.Edit','Teacher.Create','Teacher.Delete','Employee.View','Employee.Edit','Payroll.View','Payroll.Edit',
       'Payment.View','Payment.Create','Invoice.View','Invoice.Create','Discount.View','Expense.View','Expense.Create','Expense.Approve','Budget.View','Budget.Edit','Budget.Allocate','Finance.Report','Refund.Approve','Report.View','Funding.View','Funding.RecordDonation','Funding.Edit','Impact.View','Impact.Edit',
-      'Book.View','Book.Sell','Workflow.View','Workflow.Trigger','Workflow.Approve','Workflow.Reject','Workflow.Cancel','Waitlist.View','Waitlist.Manage','Enrollment.FreezeRequest','Enrollment.TransferRequest','Rule.View','Audit.View','Settings.View','Branch.View','AcademicSetup.View','Curriculum.TestBank',
+      'Book.View','Book.Create','Book.Edit','Book.Restock','Book.Sell','Book.Refund','Book.Issue','Book.Return','Workflow.View','Workflow.Trigger','Workflow.Approve','Workflow.Reject','Workflow.Cancel','Waitlist.View','Waitlist.Manage','Enrollment.FreezeRequest','Enrollment.TransferRequest','Rule.View','Audit.View','Settings.View','Branch.View','AcademicSetup.View','Curriculum.TestBank',
       // Academic Setup authority, encoding access general_manager already
       // exercised through authorize('owner','general_manager') and Class.Create.
       // See the AcademicSetup block in PERMISSION_CATALOG for the evidence.
@@ -237,7 +241,7 @@ export const ROLE_DEFINITIONS: RoleDef[] = [
     permissions: pick([
       'Dashboard.View','Student.View','Payment.View','Payment.Create','Payment.Edit','Invoice.View','Invoice.Create','Invoice.Edit',
       'Refund.View','Refund.Approve','Discount.View','Budget.View','Expense.View','Expense.Create',
-      'Finance.Report','Ledger.View','Report.View','Payroll.View','Payroll.Edit','Teacher.View','Teacher.Create','Teacher.Edit','Employee.View','Book.View','Book.Sell','Funding.View','Funding.RecordDonation','Workflow.View',
+      'Finance.Report','Ledger.View','Report.View','Payroll.View','Payroll.Edit','Teacher.View','Teacher.Create','Teacher.Edit','Employee.View','Book.View','Book.Create','Book.Edit','Book.Restock','Book.Sell','Book.Refund','Funding.View','Funding.RecordDonation','Workflow.View',
     ], 'branch'),
   },
   {
@@ -245,7 +249,7 @@ export const ROLE_DEFINITIONS: RoleDef[] = [
     isSystem: true, sortOrder: 50,
     permissions: pick([
       'Dashboard.View','Lead.View','Lead.Create','Lead.Edit','Lead.Convert','Student.View','Student.Create','Student.Edit','Student.Print','Student.Transfer',
-      'Class.View','Class.Assign','Session.View','Attendance.View','Exam.View','Waitlist.View','Waitlist.Manage','Enrollment.FreezeRequest','Enrollment.TransferRequest','Payment.Create','Payment.View','Invoice.View','Invoice.Create','Book.View','Book.Sell','Report.View',
+      'Class.View','Class.Assign','Session.View','Attendance.View','Exam.View','Waitlist.View','Waitlist.Manage','Enrollment.FreezeRequest','Enrollment.TransferRequest','Payment.Create','Payment.View','Invoice.View','Invoice.Create','Book.View','Book.Create','Book.Edit','Book.Restock','Book.Sell','Book.Issue','Book.Return','Report.View',
     ], 'branch'),
   },
   {

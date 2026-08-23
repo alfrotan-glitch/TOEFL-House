@@ -21,7 +21,12 @@ describe('high-assurance security invariants', () => {
         .all(table) as { name: string; sql: string }[];
       const branchGuards = triggers.filter((t) => /branch/i.test(t.sql) && /RAISE\(ABORT/i.test(t.sql));
       expect(branchGuards.some((t) => /BEFORE INSERT/i.test(t.sql)), `${table} insert guard`).toBe(true);
-      expect(branchGuards.some((t) => /BEFORE UPDATE/i.test(t.sql)), `${table} update guard`).toBe(true);
+      // Book sales are immutable after creation, which is stronger than a
+      // branch-correlation update guard: no update can move a sale anywhere.
+      const updateGuards = table === 'book_sales'
+        ? triggers.filter((t) => /RAISE\(ABORT/i.test(t.sql))
+        : branchGuards;
+      expect(updateGuards.some((t) => /BEFORE UPDATE/i.test(t.sql)), `${table} update guard`).toBe(true);
     }
   });
 });

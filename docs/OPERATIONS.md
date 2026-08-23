@@ -59,9 +59,11 @@ cd server && npm run build && NODE_ENV=production node dist/index.js
 ## 2. Database schema
 
 There is no migration chain. `server/src/db/schema.sql` is the single
-canonical representation of the database, and it is applied — idempotently —
-on every server start. An empty database becomes a complete valid one on first
-boot; an existing one is left unchanged.
+canonical representation of the database, and it is applied idempotently only
+to an empty database or one already at that exact canonical shape. It does not
+transform an incompatible historical shape. The governing greenfield mode has
+no production dataset to preserve: after a canonical schema reconstruction,
+stop the server, remove the old database/WAL sidecars and seed a fresh database.
 
 Schema changes are made by editing that file. Verify before deploying:
 
@@ -161,8 +163,10 @@ Expect `healthy: true`, `state: healthy`, a `lastSuccessAt` timestamp, and a
    node -e "const D=require('better-sqlite3');const d=new D('./data/erp.sqlite',{readonly:true});console.log(d.pragma('integrity_check',{simple:true}));console.log('fk violations:',d.pragma('foreign_key_check').length);d.close()"
    ```
    Expect `ok` and `0`.
-4. Start the server. The canonical schema is re-applied automatically, so a
-   snapshot taken before a schema edit converges on boot.
+4. Start the matching application revision. A snapshot may be re-applied only
+   when it already has that revision’s canonical shape; startup never performs
+   an undocumented schema migration. For the current greenfield reconstruction,
+   use a clean rebuild rather than restoring a predecessor shape.
 
 ## 5. Health verification
 

@@ -96,9 +96,9 @@ beforeEach(async () => {
   mkPayment('balep_p1b', 1, 3000, 'installment');
   mkPayment('balep_p1c', 1, -2000, 'refund', 'balep_p1a');
 
-  // 2: owes 8,000, bought a 1,500 book (not tuition) => owes 8,000
+  // 2: owes 8,000, paid a 1,500 chapter charge (not tuition) => owes 8,000
   mkStudent(2); mkSemester(2, 8000);
-  mkPayment('balep_p2a', 2, 1500, 'book');
+  mkPayment('balep_p2a', 2, 1500, 'chapter');
 
   // 3: overpaid — owes 5,000, paid 6,000 => credit 1,000, outstanding 0
   mkStudent(3); mkSemester(3, 5000);
@@ -123,7 +123,7 @@ describe('S19: balances are aggregated server-side over ALL payments', () => {
     expect(s1.outstanding).toBe(2000);
 
     const s2 = byId.get('balep_s2');
-    expect(s2.tuitionPaid).toBe(0); // a book purchase is not tuition
+    expect(s2.tuitionPaid).toBe(0); // a ad-hoc chapter charge is not tuition
     expect(s2.outstanding).toBe(8000);
   });
 

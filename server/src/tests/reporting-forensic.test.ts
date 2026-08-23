@@ -32,6 +32,7 @@ import { reportsRouter } from '../routes/reports.routes.js';
 import { financeRouter } from '../routes/finance.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 import { id } from '../utils/ids.js';
+import { createBookCatalogItem, postBookSale } from '../core/books/books-service.js';
 
 /** The Shamsi month and quarter the June-2026 fixtures fall inside. */
 const SHAMSI_MONTH = '1405-03';
@@ -152,13 +153,15 @@ describe('Reporting forensic — new required metrics + period consistency', () 
     // Mirror what the real writers do: a payment creates a ledger income row.
     db.prepare(`INSERT INTO financial_transactions (id, type, category, amount, date, description, reference_id, payment_id, operator_name, branch_id)
       VALUES (?, 'income', 'fee', 2000, '2026-06-11', 'Rep invoice payment', 'rep_inv', ?, 'T', ?)`).run(id('tx'), repPayId, BRANCH);
-    db.prepare(`INSERT OR IGNORE INTO books (id, title, price, stock, is_chapter, branch_id) VALUES ('rep_book', 'Rep Title', 300, 5, 0, ?)`).run(BRANCH);
-    const repSaleId = id('sale');
-    db.prepare(`INSERT INTO book_sales (id, book_id, quantity, total_amount, discount_amount, net_amount, status, date, customer_name, branch_id)
-      VALUES (?, 'rep_book', 2, 600, 0, 600, 'completed', '2026-06-12', 'Walk-in', ?)`).run(repSaleId, BRANCH);
-    // Mirror the book-sale income writer.
-    db.prepare(`INSERT INTO financial_transactions (id, type, category, amount, date, description, reference_id, operator_name, branch_id)
-      VALUES (?, 'income', 'book', 600, '2026-06-12', 'Sold 2 copies of Rep Title', 'rep_book', 'T', ?)`).run(id('tx'), BRANCH);
+    const catalog = createBookCatalogItem(db, {
+      title: 'Rep Title', itemKind: 'book', saleEnabled: true, salePrice: 300,
+      lendingEnabled: false, initialQuantity: 5, branchId: BRANCH,
+      idempotencyKey: 'reporting-forensic-book-catalog', actor: { userId: 'rep_owner', fullName: 'Rep Owner', role: 'owner' },
+    });
+    postBookSale(db, catalog.id, BRANCH, {
+      quantity: 2, purchaserName: 'Walk-in', soldOn: '2026-06-12',
+      idempotencyKey: 'reporting-forensic-book-sale', actor: { userId: 'rep_owner', fullName: 'Rep Owner', role: 'owner' },
+    });
   });
 
   it('reports discounts and the receivable from authoritative sources', async () => {

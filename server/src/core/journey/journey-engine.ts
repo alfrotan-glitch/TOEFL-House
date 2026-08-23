@@ -351,14 +351,9 @@ export class StudentJourneyEngine {
           
         case JourneyEventType.BOOK_ISSUED:
         case JourneyEventType.BOOK_RETURNED:
-        case JourneyEventType.BOOK_LOST:
           state.books.push({
             title: safeStr(p.title),
-            status: row.event_type === JourneyEventType.BOOK_RETURNED 
-              ? 'returned' 
-              : row.event_type === JourneyEventType.BOOK_LOST 
-                ? 'lost' 
-                : 'issued',
+            status: row.event_type === JourneyEventType.BOOK_RETURNED ? 'returned' : 'issued',
             at: row.occurred_at,
           });
           break;

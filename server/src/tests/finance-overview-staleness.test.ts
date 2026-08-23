@@ -44,9 +44,8 @@ const CASH_MUTATORS = [
   'payTeacherSalary',
   'payEmployeeSalary',
   'processExpenseApproval',
-  'recordFeePayment',
   'recordBookSale',
-  'refundBookSale',
+  'returnBookSale',
 ];
 
 describe('cash mutations refresh the finance overview', () => {

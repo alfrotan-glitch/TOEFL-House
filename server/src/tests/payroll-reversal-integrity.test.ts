@@ -14,7 +14,7 @@
  *   system (student refunds, book-sale refunds); payroll was the outlier.
  *
  * F-1 MEDIUM — budget_lines.current_amount had no floor.
- *   books.stock has non-negative triggers and finance_accounts has
+ *   Book inventory availability has database capacity guards and finance_accounts has
  *   CHECK (>= 0), but a budget line could be driven to -998,999 by a direct
  *   UPDATE. Two of four application decrement sites guard with
  *   `AND current_amount >= ?`; two do not. Migration 065 puts the floor in the

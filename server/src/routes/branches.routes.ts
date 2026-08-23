@@ -78,7 +78,7 @@ const stmtDeletePartner = db.prepare('DELETE FROM partners WHERE id = ?');
 const BRANCH_DEPENDENT_TABLES = [
   'users', 'students', 'teachers', 'employees', 'classes', 'sessions', 'visitors',
   'payments', 'invoices', 'expense_requests', 'financial_transactions',
-  'books', 'book_sales', 'exams', 'exam_results', 'attendance', 'notifications',
+  'books', 'book_stock_receipts', 'book_sales', 'book_sale_refunds', 'book_loans', 'book_loan_returns', 'exams', 'exam_results', 'attendance', 'notifications',
   'audit_logs', 'programs', 'campaigns'
 ] as const;
 

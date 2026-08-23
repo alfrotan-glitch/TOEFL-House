@@ -19,7 +19,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { api, ApiError } from './api/client';
 import { useAuth } from './contexts/useAuth';
 import {
-  Student, Teacher, Employee, Partner, Class, Visitor, Attendance, Payment, Book, BookSale,
+  Student, Teacher, Employee, Partner, Class, Visitor, Attendance, Payment, BooksWorkspace,
   Exam, ExamResult, BudgetLine, BudgetLineInput, FinanceCategory, ExpenseRequest, FinancialTransaction, AuditLog, Notification,
   Skill, ClassTeacherSkill, OperationalPaymentInput, ExpenseReport, ExpenseKind, Invoice, FinanceConfig, FinanceDashboard,
   // 1.0.0 types
@@ -73,6 +73,8 @@ async function safeGet<T>(path: string, query?: Record<string, string | undefine
  * it grabs a bigger slice and keeps counting locally.
  */
 const VISITOR_PAGE_SIZE = 25;
+/** Books history pages are server-capped independently; this is the desk default. */
+const BOOK_HISTORY_PAGE_SIZE = 50;
 
 export function useApiStore() {
   const { user } = useAuth();
@@ -112,8 +114,7 @@ export function useApiStore() {
   const visitorQueryRef = useRef<VisitorQuery>({ page: 0, pageSize: VISITOR_PAGE_SIZE });
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
-  const [books, setBooks] = useState<Book[]>([]);
-  const [bookSales, setBookSales] = useState<BookSale[]>([]);
+  const [booksWorkspace, setBooksWorkspace] = useState<BooksWorkspace | null>(null);
   const [exams, setExams] = useState<Exam[]>([]);
   const [examResults, setExamResults] = useState<ExamResult[]>([]);
   const [budgetLines, setBudgetLines] = useState<BudgetLine[]>([]);
@@ -151,7 +152,7 @@ export function useApiStore() {
   const [workflows, setWorkflows] = useState<WorkflowInstance[]>([]);
   const [automations, setAutomations] = useState<Automation[]>([]);
   const [businessRules, setBusinessRules] = useState<Record<RuleCategory, BusinessRule[]>>({} as Record<RuleCategory, BusinessRule[]>);
-  
+
   // NEW: Dashboard Profitability Analytics
   const [revenueByClass, setRevenueByClass] = useState<{ name: string; revenue: number }[]>([]);
   const [revenueByTimeSlot, setRevenueByTimeSlot] = useState<{ slot: string; revenue: number }[]>([]);
@@ -495,8 +496,11 @@ export function useApiStore() {
     [bq],
   );
   const reloadPayments = useCallback(() => api.get<Payment[]>('/payments', bq).then(setPayments), [bq]);
-  const reloadBooks = useCallback(() => api.get<Book[]>('/books', bq).then(setBooks), [bq]);
-  const reloadBookSales = useCallback(() => api.get<BookSale[]>('/books/sales/list', bq).then(setBookSales), [bq]);
+  const reloadBooksWorkspace = useCallback(
+    (page = 1) => api.get<BooksWorkspace>('/books/workspace', { ...bq, page: String(page), limit: String(BOOK_HISTORY_PAGE_SIZE) }).then(setBooksWorkspace),
+    [bq],
+  );
+  const loadBooksHistoryPage = useCallback((page: number) => reloadBooksWorkspace(page), [reloadBooksWorkspace]);
   const reloadExams = useCallback(() => api.get<Exam[]>('/exams', bq).then(setExams), [bq]);
   const reloadExamResults = useCallback(() => api.get<ExamResult[]>('/exams/results/all', bq).then(setExamResults), [bq]);
   const reloadBudgetLines = useCallback(
@@ -635,7 +639,7 @@ export function useApiStore() {
     await Promise.all([reloadBranches(), reloadCampuses(), reloadOrganization()]);
     invalidate('organization');
   };
-  
+
   const reloadSkills = useCallback(() => api.get<Skill[]>('/skills').then(setSkills), []);
   const reloadProgramVersions = useCallback(() => api.get<any[]>('/catalog/program-versions', bq).then((rows) => setProgramVersions((rows || []).map((r) => ({ id: r.id, name: r.program_name || r.programName || 'Program', versionLabel: r.version_label || r.versionLabel || 'v1', status: r.status })) )), [bq]);
   const reloadClassTeacherSkills = useCallback(() => api.get<ClassTeacherSkill[]>('/class-teacher-skills').then(setClassTeacherSkills), []);
@@ -735,7 +739,7 @@ export function useApiStore() {
       case 'visitors':
         return Promise.all([reloadVisitors(), reloadStudentsLite(), reloadClasses(), reloadProgramVersions()]);
       case 'books':
-        return Promise.all([reloadBooks(), reloadBookSales(), reloadStudentsLite()]);
+        return Promise.all([reloadBooksWorkspace(), reloadStudentsLite()]);
       case 'finance':
         return Promise.all([reloadBudgetLines(), reloadFinanceOverview()]);
       case 'exams':
@@ -762,7 +766,7 @@ export function useApiStore() {
         return Promise.resolve();
     }
   }, [
-    canSeeFinance, reloadAuditLogs, reloadAttendance, reloadAttendanceSummary, reloadBookSales, reloadBooks, reloadBranches, reloadBudgetLines, reloadCampuses,
+    canSeeFinance, reloadAuditLogs, reloadAttendance, reloadAttendanceSummary, reloadBooksWorkspace, reloadBranches, reloadBudgetLines, reloadCampuses,
     reloadClasses, reloadClassTeacherSkills, reloadDonors, reloadEmployees, reloadExamResults, reloadExams,
     reloadFinanceOverview, reloadFundingCampaigns, reloadImpactReports, reloadFundingWorkspace,
     reloadNotifications, reloadOrganization, reloadPartners, reloadProgramVersions, reloadDashboardSummary,
@@ -895,7 +899,7 @@ export function useApiStore() {
     return created;
   };
 
-  const updateVisitorCRM = async (visitorId: string, interestedCourse: string, 
+  const updateVisitorCRM = async (visitorId: string, interestedCourse: string,
     followUpStatus: 'high_interest' | 'medium_interest' | 'low_interest' | 'not_answering' | 'no_interest',
     nextContactDate: string, notes?: string) => {
     await api.patch(`/visitors/${visitorId}/crm`, { interestedCourse, followUpStatus, nextContactDate, notes });
@@ -977,17 +981,6 @@ export function useApiStore() {
     await api.patch(`/students/${studentId}`, updatedFields);
     await reloadStudents();
     invalidate('students');
-  };
-
-  const recordFeePayment = async (studentId: string, amount: number,
-    category: 'fee' | 'book' | 'chapter' | 'exam' | 'card' | 'placement' | 'diploma' | 'other', notes?: string) => {
-    // Explicit per-submission key so a retry is replayed by the server rather
-    // than charged twice. The backend also derives one when absent, but an
-    // explicit key is the precise signal that this is ONE intent.
-    await api.post(`/students/${studentId}/payments`, { amount, category, notes },
-      undefined, { 'Idempotency-Key': crypto.randomUUID() });
-    await Promise.all([reloadPayments(), reloadTransactions(), reloadFinanceOverview(), reloadNotifications()]);
-    invalidate('finance', 'payments');
   };
 
   const enrollStudentSemester = async (studentId: string, semesterName: string, classId: string,
@@ -1074,38 +1067,73 @@ export function useApiStore() {
     invalidate('finance');
   };
 
-  const addBook = async (title: string, price: number, stock: number, isChapter: boolean, entryDate?: string, purchasePrice?: number) => {
-    // Books are created in the branch the UI is currently scoped to, so the
-    // new title is visible immediately in the list (the backend validates the
-    // caller may access that branch).
-    await api.post('/books', { title, price, stock, isChapter, entryDate, purchasePrice, branchId: currentBranchId });
-    await reloadBooks();
+  const createBookCatalogItem = async (input: {
+    title: string;
+    itemKind: 'book' | 'chapter';
+    saleEnabled: boolean;
+    salePrice?: number | null;
+    lendingEnabled: boolean;
+    initialQuantity: number;
+    receivedOn?: string;
+    unitCost?: number | null;
+    note?: string;
+  }) => {
+    await api.post('/books/catalog', { ...input, branchId: currentBranchId }, undefined, { 'Idempotency-Key': crypto.randomUUID() });
+    await reloadBooksWorkspace();
     invalidate('books');
   };
 
-  const editBook = async (id: string, title: string, price: number, stock: number, isChapter: boolean, purchasePrice?: number) => {
-    await api.put(`/books/${id}`, { title, price, stock, isChapter, purchasePrice });
-    await reloadBooks();
+  const updateBookCatalogItem = async (bookId: string, input: {
+    title?: string;
+    saleEnabled?: boolean;
+    salePrice?: number | null;
+    lendingEnabled?: boolean;
+    defaultUnitCost?: number | null;
+    status?: 'active' | 'archived';
+  }) => {
+    await api.patch(`/books/catalog/${bookId}`, input);
+    await reloadBooksWorkspace();
     invalidate('books');
   };
 
-  const deleteBook = async (id: string) => {
-    await api.delete(`/books/${id}`);
-    await reloadBooks();
+  const receiveBookStock = async (bookId: string, input: { quantity: number; receivedOn?: string; unitCost?: number | null; note?: string }) => {
+    await api.post(`/books/catalog/${bookId}/receipts`, input, undefined, { 'Idempotency-Key': crypto.randomUUID() });
+    await reloadBooksWorkspace();
     invalidate('books');
   };
 
-  const recordBookSale = async (bookId: string, quantity: number, customerName: string, studentId?: string,
-    discountAmount: number = 0, paymentMethod: 'cash' | 'card' | 'transfer' = 'cash') => {
-    await api.post(`/books/${bookId}/sell`, { quantity, customerName, studentId, discountAmount, paymentMethod });
-    await Promise.all([reloadBooks(), reloadBookSales(), reloadFinanceOverview(), reloadTransactions(), reloadNotifications()]);
+  const recordBookSale = async (bookId: string, input: {
+    quantity: number;
+    purchaserName?: string;
+    studentId?: string;
+    discountAmount?: number;
+    paymentMethod?: 'cash' | 'card' | 'bank_transfer';
+    soldOn?: string;
+  }) => {
+    await api.post(`/books/catalog/${bookId}/sales`, input, undefined, { 'Idempotency-Key': crypto.randomUUID() });
+    await Promise.all([reloadBooksWorkspace(), reloadFinanceOverview(), reloadTransactions(), reloadNotifications()]);
     invalidate('books', 'finance');
   };
 
-  const refundBookSale = async (saleId: string) => {
-    await api.post(`/books/sales/${saleId}/refund`);
-    await Promise.all([reloadBooks(), reloadBookSales(), reloadFinanceOverview(), reloadTransactions(), reloadNotifications()]);
+  const returnBookSale = async (saleId: string, input: { reason: string; returnedOn?: string }) => {
+    await api.post(`/books/sales/${saleId}/return`, input, undefined, { 'Idempotency-Key': crypto.randomUUID() });
+    await Promise.all([reloadBooksWorkspace(), reloadFinanceOverview(), reloadTransactions(), reloadNotifications()]);
     invalidate('books', 'finance');
+  };
+
+  const issueBookLoan = async (bookId: string, input: { studentId: string; dueOn: string; issuedOn?: string }) => {
+    await api.post(`/books/catalog/${bookId}/loans`, input, undefined, { 'Idempotency-Key': crypto.randomUUID() });
+    await reloadBooksWorkspace();
+    // The command appends the student's canonical Journey chronology, so a
+    // mounted timeline must refetch as well as the Books workspace.
+    invalidate('books', 'students');
+  };
+
+  const returnBookLoan = async (loanId: string, input: { returnedOn?: string; note?: string }) => {
+    await api.post(`/books/loans/${loanId}/return`, input, undefined, { 'Idempotency-Key': crypto.randomUUID() });
+    await reloadBooksWorkspace();
+    // A return is another Journey fact; it is not a cash mutation.
+    invalidate('books', 'students');
   };
 
   // ================= Exams (Two-Phase Workflow) =================
@@ -1404,7 +1432,7 @@ export function useApiStore() {
   const getStudentAnalytics = async (timeframe?: string) => api.get<any>('/bos/student-analytics', timeframe ? { timeframe } : undefined);
   const getDecisionWarnings = async () => api.get<any>('/bos/decision-warnings');
   const getProfitDistribution = async () => api.get<any>('/bos/profit-distribution/calculate');
-  
+
   const withdrawProfitDistribution = async (amount: number, recipientPartnerId?: string, notes?: string) => {
     await api.post('/bos/profit-distribution/withdraw', { amount, recipientPartnerId, notes });
     await Promise.all([reloadFinanceOverview(), reloadTransactions(), reloadRevenueByClass(), reloadRevenueByTimeSlot()]);
@@ -1617,7 +1645,7 @@ export function useApiStore() {
   return {
     // Raw values
     students, teachers, employees, partners, classes, visitors, visitorSummary, visitorQuery, attendance, payments,
-    books, bookSales, exams, examResults, budgetLines, financeCategories, reloadFinanceCategories, expenseRequests, invoices, financeConfig, transactions, auditLogs, financeReconciliation, financeDashboard, dashboardSummary,
+    booksWorkspace, exams, examResults, budgetLines, financeCategories, reloadFinanceCategories, expenseRequests, invoices, financeConfig, transactions, auditLogs, financeReconciliation, financeDashboard, dashboardSummary,
     savingBalance, mainAccountBalance, expenseAutoApproveThreshold, notifications, settings, currentBranchName, isLoading,
     skills, classTeacherSkills, branches, campuses, organization,
     // 1.0.0 values
@@ -1625,8 +1653,8 @@ export function useApiStore() {
     impactReports, sessions, workflows, automations,
     businessRules,
     // Dashboard Profitability Analytics
-    revenueByClass, revenueByTimeSlot, 
-    
+    revenueByClass, revenueByTimeSlot,
+
     // Organization hierarchy configuration
     reloadBranches, reloadCampuses, reloadOrganization,
     createCampus, updateCampus, deactivateCampus, deleteCampus,
@@ -1641,11 +1669,11 @@ export function useApiStore() {
     attendanceSummary, reloadAttendanceSummary,
     // Existing business operations
     addVisitor, updateVisitorCRM, addVisitorFollowUp, updateVisitor, advanceVisitorStage, registerVisitorToStudent, checkConversionEligibility, checkDuplicateLeads,
-    addStudentManual, updateStudentStatus, updateStudent, recordFeePayment, enrollStudentSemester, issueStudentCard,
+    addStudentManual, updateStudentStatus, updateStudent, enrollStudentSemester, issueStudentCard,
     chargeBudget, createExpenseRequest, recordOperationalPayment, getExpenseReport, updateExpenseAutoApproveThreshold, processExpenseApproval, runSavingEngine, updateSavingSettings, createInvoice, issueInvoice, payInvoice, cancelInvoice, updateFinanceConfig, reloadInvoices,
-    processMonthEnd, addBook, editBook, deleteBook, recordBookSale, refundBookSale, 
+    processMonthEnd, createBookCatalogItem, updateBookCatalogItem, receiveBookStock, recordBookSale, returnBookSale, issueBookLoan, returnBookLoan, loadBooksHistoryPage,
     // Exams (Two-Phase Workflow)
-    registerExam, editExam, deleteExam, enrollExamCandidate, addExamResult, correctExamScore, 
+    registerExam, editExam, deleteExam, enrollExamCandidate, addExamResult, correctExamScore,
     // HR & Payroll
     addTeacher, editTeacher, deleteTeacher, transferTeacher, getTeacherComputedSalary, getTeacherSalaryStatus, addEmployee, editEmployee, deleteEmployee, transferEmployee,
     payEmployeeSalary, payTeacherSalary,

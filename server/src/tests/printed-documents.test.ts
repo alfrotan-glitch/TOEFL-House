@@ -70,9 +70,10 @@ describe('printed documents use authoritative branding', () => {
     expect(src).toMatch(/resolveDocumentIssuer\(branches\.find/);
   });
 
-  it('the book receipt resolves branch contact instead of a literal number', () => {
-    const src = read('src/components/books/BooksModals.tsx');
+  it('the Book sale receipt resolves branch contact instead of a literal number', () => {
+    const src = read('src/components/books/BooksView.tsx');
     expect(src).toContain('issuer.phone');
+    expect(src).toContain('openPrintDocument');
     expect(src).not.toContain('0788223344');
   });
 
@@ -83,8 +84,9 @@ describe('printed documents use authoritative branding', () => {
     expect(src).toContain('null');
     expect(src).not.toMatch(/\|\|\s*['"]0\d{9}['"]/);
 
-    const books = read('src/components/books/BooksModals.tsx');
-    expect(books).toMatch(/\{issuer\.phone\s*&&/);
+    const books = read('src/components/books/BooksView.tsx');
+    expect(books).toContain('issuer.phone');
+    expect(books).toContain('.filter((value): value is string => Boolean(value))');
     const header = read('src/config/branding.ts');
     expect(header).toContain(".filter((line): line is string =>");
   });
