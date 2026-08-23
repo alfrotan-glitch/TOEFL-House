@@ -27,7 +27,6 @@ const TEST_CMD = FULL
 
 const INV = 'src/routes/invoices.routes.ts';
 const STU = 'src/routes/students.routes.ts';
-const FUN = 'src/routes/funding.routes.ts';
 
 const MUTANTS = [
   {
@@ -102,72 +101,7 @@ const MUTANTS = [
     find: "  const amountSupplied = !(amount === undefined || amount === null || amount === '');",
     replace: '  const amountSupplied = true;',
   },
-  {
-    id: 'M9',
-    invariant: 'F-5 donation desk parses the amount (restores the raw-body guard)',
-    file: FUN,
-    find: "    const donationAmount = assertMoney(amount, 'donation amount');\n    if (donationAmount <= 0) throw new HttpError(400, 'Donor and a positive amount are required.');",
-    replace: "    const donationAmount = amount;\n    if (donationAmount <= 0) throw new HttpError(400, 'Donor and a positive amount are required.');",
-  },
-  {
-    id: 'M10',
-    invariant: 'F-5 the donation row stores the parsed amount',
-    file: FUN,
-    find: '        newId, campaignId || null, donorId, donationAmount, donationDate, ',
-    replace: '        newId, campaignId || null, donorId, amount, donationDate, ',
-    // PROVEN EQUIVALENT — TR-4 review, verified by execution (2026-08-22):
-    // a '500' (string) donation produced an identical row under mutant and
-    // baseline ({amount: 500, typeof: 'integer'}): donations.amount is an
-    // INTEGER-affinity column, and only assertMoney-valid numerals — every one
-    // of which affinity-coerces — can reach this write. Evidence:
-    // docs/work-packages/WP-07-TR4-independent-review-verdicts.md.
-    equivalent: true,
-  },
-  {
-    id: 'M11',
-    invariant: 'F-5 the campaign total is credited the parsed amount',
-    file: FUN,
-    find: '        stmtUpdateCampaignRaisedAmount.run(donationAmount, campaignId);',
-    replace: '        stmtUpdateCampaignRaisedAmount.run(amount, campaignId);',
-    // PROVEN EQUIVALENT — TR-4 review, verified by execution (2026-08-22):
-    // raised_amount moved to {500, 'integer'} identically under mutant and
-    // baseline for a '500' string donation — same affinity mechanism as M10.
-    // Evidence: docs/work-packages/WP-07-TR4-independent-review-verdicts.md.
-    equivalent: true,
-  },
-  {
-    id: 'M12',
-    invariant: 'F-5 the donation income ledger posts the parsed amount',
-    file: FUN,
-    find: "        category: 'donation', amount: donationAmount, date: donationDate,",
-    replace: "        category: 'donation', amount, date: donationDate,",
-    // PROVEN EQUIVALENT — verified by live probe, not by inspection.
-    // recordIncome() re-parses its own input through the SAME authority
-    // (utils/income.ts:54 `assertMoney(params.amount, 'income amount',
-    // { allowNegative: true })`), so handing it the raw body value yields a
-    // ledger row identical to handing it the parsed one. Probed with 100.005,
-    // 0.005, '3000.50' and 2500: donation row and ledger row agreed on every
-    // input (100.01, 0.01, 3000.5, 2500).
-    // Passing the parsed value is still correct and is kept — it keeps the
-    // handler's four writes reading from one variable — but no test can
-    // distinguish it, because the ledger has its own boundary. That defence in
-    // depth is the reason, and it is proven rather than assumed.
-    equivalent: true,
-  },
-  {
-    id: 'M13',
-    invariant: 'F-5 the donation idempotency fingerprint uses the parsed amount',
-    file: FUN,
-    find: '      amount: donationAmount,\n      date: donationDate,',
-    replace: '      amount: Number(amount),\n      date: donationDate,',
-    // PROVEN EQUIVALENT — TR-4 review, verified by execution (2026-08-22):
-    // donating '500' twice replayed idempotently under mutant and baseline
-    // alike (second 200, income {sum: 500, count: 1}) — Number(raw) and the
-    // parsed value are the same fingerprint for every valid input; the suite's
-    // own '200'-string replay test pins this contract permanently.
-    // Evidence: docs/work-packages/WP-07-TR4-independent-review-verdicts.md.
-    equivalent: true,
-  },
+
 ]
 
 const selected = ONLY ? MUTANTS.filter((m) => m.id === ONLY) : MUTANTS;

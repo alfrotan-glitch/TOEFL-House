@@ -38,7 +38,8 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
   { code: 'Dashboard.View', resource: 'Dashboard', action: 'View', description: 'View operational dashboard', category: 'dashboard' },
   { code: 'Dashboard.Executive', resource: 'Dashboard', action: 'Executive', description: 'View executive KPI dashboard', category: 'dashboard' },
   { code: 'Analytics.View', resource: 'Analytics', action: 'View', description: 'View analytics', category: 'dashboard' },
-  { code: 'Impact.View', resource: 'Impact', action: 'View', description: 'View impact metrics', category: 'dashboard' },
+  { code: 'Impact.View', resource: 'Impact', action: 'View', description: 'View derived impact reports', category: 'dashboard' },
+  { code: 'Impact.Edit', resource: 'Impact', action: 'Edit', description: 'Generate derived impact reports', category: 'dashboard' },
   { code: 'Student.View', resource: 'Student', action: 'View', description: 'View students', category: 'academic' },
   { code: 'Student.Create', resource: 'Student', action: 'Create', description: 'Register students', category: 'academic' },
   { code: 'Student.Edit', resource: 'Student', action: 'Edit', description: 'Edit students', category: 'academic' },
@@ -109,7 +110,8 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
   { code: 'Book.Edit', resource: 'Book', action: 'Edit', description: 'Edit books', category: 'inventory' },
   { code: 'Book.Sell', resource: 'Book', action: 'Sell', description: 'Sell books', category: 'inventory' },
   { code: 'Funding.View', resource: 'Funding', action: 'View', description: 'View funding', category: 'funding' },
-  { code: 'Funding.Edit', resource: 'Funding', action: 'Edit', description: 'Edit funding', category: 'funding' },
+  { code: 'Funding.RecordDonation', resource: 'Funding', action: 'RecordDonation', description: 'Record donation income only', category: 'funding' },
+  { code: 'Funding.Edit', resource: 'Funding', action: 'Edit', description: 'Manage donors, campaigns and aid funding', category: 'funding' },
   { code: 'Workflow.View', resource: 'Workflow', action: 'View', description: 'View workflows', category: 'automation' },
   { code: 'Workflow.Approve', resource: 'Workflow', action: 'Approve', description: 'Approve workflows', category: 'automation' },
   { code: 'Workflow.Reject', resource: 'Workflow', action: 'Reject', description: 'Reject workflows', category: 'automation' },
@@ -212,7 +214,7 @@ export const ROLE_DEFINITIONS: RoleDef[] = [
       'Class.View','Class.Create','Class.Edit','Class.Assign','Session.View','Session.Create','Session.Edit',
       'Attendance.View','Attendance.Edit','Exam.View','Exam.Create','Exam.Edit','Exam.Publish','Grade.View','Grade.Edit','Promotion.Approve',
       'Certificate.Issue','Certificate.Print','Teacher.View','Teacher.Edit','Teacher.Create','Teacher.Delete','Employee.View','Employee.Edit','Payroll.View','Payroll.Edit',
-      'Payment.View','Payment.Create','Invoice.View','Invoice.Create','Discount.View','Expense.View','Expense.Create','Expense.Approve','Budget.View','Budget.Edit','Budget.Allocate','Finance.Report','Refund.Approve','Report.View','Impact.View',
+      'Payment.View','Payment.Create','Invoice.View','Invoice.Create','Discount.View','Expense.View','Expense.Create','Expense.Approve','Budget.View','Budget.Edit','Budget.Allocate','Finance.Report','Refund.Approve','Report.View','Funding.View','Funding.RecordDonation','Funding.Edit','Impact.View','Impact.Edit',
       'Book.View','Book.Sell','Workflow.View','Workflow.Trigger','Workflow.Approve','Workflow.Reject','Workflow.Cancel','Waitlist.View','Waitlist.Manage','Enrollment.FreezeRequest','Enrollment.TransferRequest','Rule.View','Audit.View','Settings.View','Branch.View','AcademicSetup.View','Curriculum.TestBank',
       // Academic Setup authority, encoding access general_manager already
       // exercised through authorize('owner','general_manager') and Class.Create.
@@ -235,7 +237,7 @@ export const ROLE_DEFINITIONS: RoleDef[] = [
     permissions: pick([
       'Dashboard.View','Student.View','Payment.View','Payment.Create','Payment.Edit','Invoice.View','Invoice.Create','Invoice.Edit',
       'Refund.View','Refund.Approve','Discount.View','Budget.View','Expense.View','Expense.Create',
-      'Finance.Report','Ledger.View','Report.View','Payroll.View','Payroll.Edit','Teacher.View','Teacher.Create','Teacher.Edit','Employee.View','Book.View','Book.Sell','Funding.View','Workflow.View',
+      'Finance.Report','Ledger.View','Report.View','Payroll.View','Payroll.Edit','Teacher.View','Teacher.Create','Teacher.Edit','Employee.View','Book.View','Book.Sell','Funding.View','Funding.RecordDonation','Workflow.View',
     ], 'branch'),
   },
   {
@@ -279,8 +281,8 @@ export const ROLE_DEFINITIONS: RoleDef[] = [
     code: 'donor_manager', name: 'Donor Manager', description: 'Funding and impact',
     isSystem: true, sortOrder: 90,
     permissions: {
-      'Dashboard.View': 'branch', 'Funding.View': 'organization', 'Funding.Edit': 'organization',
-      'Impact.View': 'organization', 'Student.View': 'branch', 'Finance.Report': 'branch',
+      'Dashboard.View': 'branch', 'Funding.View': 'organization', 'Funding.RecordDonation': 'organization', 'Funding.Edit': 'organization',
+      'Impact.View': 'organization', 'Impact.Edit': 'organization', 'Student.View': 'branch', 'Finance.Report': 'branch',
     },
   },
 ];

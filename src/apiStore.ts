@@ -23,8 +23,8 @@ import {
   Exam, ExamResult, BudgetLine, BudgetLineInput, FinanceCategory, ExpenseRequest, FinancialTransaction, AuditLog, Notification,
   Skill, ClassTeacherSkill, OperationalPaymentInput, ExpenseReport, ExpenseKind, Invoice, FinanceConfig, FinanceDashboard,
   // 1.0.0 types
-  Donor, FundingCampaign, Donation, Scholarship, ScholarshipAward, SponsorshipAgreement,
-  ImpactReport, ImpactMetric, WorkflowInstance, Automation, Session,
+  Donor, FundingCampaign, Donation, DonationRestriction, Scholarship, ScholarshipAward, SponsorshipAgreement, FundingSummary,
+  ImpactReport, WorkflowInstance, Automation, Session,
   // Rule Engine types
   BusinessRule, RuleCategory, RuleEngineResult, BusinessRuleVersion, PipelineStage,
   Branch, Campus, Organization, TeacherContractType,
@@ -85,7 +85,9 @@ export function useApiStore() {
   const canViewStudentFinance = user?.permissions?.has('Payment.View') ?? false;
   const canSeeVisitors = user?.tabAccess?.visitors ?? false;
   const canSeeAuditLog = user?.tabAccess?.audit ?? false;
-  const canManageFunding = user?.tabAccess?.funding ?? false;
+  const canViewFunding = user?.tabAccess?.funding ?? false;
+  const canViewImpact = user?.tabAccess?.impact ?? false;
+  const canUseFundingReference = canViewFunding || (user?.permissions?.has('Impact.Edit') ?? false);
 
   const [branches, setBranches] = useState<Branch[]>([]);
   const [campuses, setCampuses] = useState<Campus[]>([]);
@@ -143,8 +145,8 @@ export function useApiStore() {
   const [scholarships, setScholarships] = useState<Scholarship[]>([]);
   const [scholarshipAwards, setScholarshipAwards] = useState<ScholarshipAward[]>([]);
   const [sponsorships, setSponsorships] = useState<SponsorshipAgreement[]>([]);
+  const [fundingSummary, setFundingSummary] = useState<FundingSummary | null>(null);
   const [impactReports, setImpactReports] = useState<ImpactReport[]>([]);
-  const [impactMetrics, setImpactMetrics] = useState<ImpactMetric[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [workflows, setWorkflows] = useState<WorkflowInstance[]>([]);
   const [automations, setAutomations] = useState<Automation[]>([]);
@@ -186,7 +188,7 @@ export function useApiStore() {
     exams:      ['exams'],
     finance:    ['dashboard', 'finance'],
     skills:     ['teachers', 'classes', 'academic-setup'],
-    funding:    ['funding'],
+    funding:    ['funding', 'impact'],
     academic:   ['academic-setup', 'students', 'visitors', 'classes'],
     settings:   ['settings', 'academic-setup'],
     organization: ['settings', 'academic-setup', 'dashboard'],
@@ -640,36 +642,43 @@ export function useApiStore() {
 
   // ---------- 1.0.0 NEW reloaders ----------
   const reloadDonors = useCallback(
-    () => (canManageFunding ? safeGet<Donor[]>('/funding/donors', undefined, []).then(setDonors) : Promise.resolve()),
-    [canManageFunding]
+    () => (canUseFundingReference ? safeGet<Donor[]>('/funding/donors', bq, []).then(setDonors) : Promise.resolve()),
+    [bq, canUseFundingReference]
   );
   const reloadFundingCampaigns = useCallback(
-    () => (canManageFunding ? safeGet<FundingCampaign[]>('/funding/campaigns', bq, []).then(setFundingCampaigns) : Promise.resolve()),
-    [bq, canManageFunding]
+    () => (canUseFundingReference ? safeGet<FundingCampaign[]>('/funding/campaigns', bq, []).then(setFundingCampaigns) : Promise.resolve()),
+    [bq, canUseFundingReference]
   );
   const reloadDonations = useCallback(
-    () => (canManageFunding ? safeGet<Donation[]>('/funding/donations', bq, []).then(setDonations) : Promise.resolve()),
-    [bq, canManageFunding]
+    () => (canViewFunding ? safeGet<Donation[]>('/funding/donations', bq, []).then(setDonations) : Promise.resolve()),
+    [bq, canViewFunding]
   );
   const reloadScholarships = useCallback(
-    () => safeGet<Scholarship[]>('/funding/scholarships', bq, []).then(setScholarships),
-    [bq]
+    () => (canViewFunding ? safeGet<Scholarship[]>('/funding/scholarships', bq, []).then(setScholarships) : Promise.resolve()),
+    [bq, canViewFunding]
   );
   const reloadScholarshipAwards = useCallback(
-    () => safeGet<ScholarshipAward[]>('/funding/scholarships/awards', bq, []).then(setScholarshipAwards),
-    [bq]
+    () => (canViewFunding ? safeGet<ScholarshipAward[]>('/funding/scholarships/awards', bq, []).then(setScholarshipAwards) : Promise.resolve()),
+    [bq, canViewFunding]
   );
   const reloadSponsorships = useCallback(
-    () => (canManageFunding ? safeGet<SponsorshipAgreement[]>('/funding/sponsorships', bq, []).then(setSponsorships) : Promise.resolve()),
-    [bq, canManageFunding]
+    () => (canViewFunding ? safeGet<SponsorshipAgreement[]>('/funding/sponsorships', bq, []).then(setSponsorships) : Promise.resolve()),
+    [bq, canViewFunding]
+  );
+  const reloadFundingSummary = useCallback(
+    () => (canViewFunding ? safeGet<FundingSummary | null>('/funding/summary', bq, null).then(setFundingSummary) : Promise.resolve()),
+    [bq, canViewFunding]
   );
   const reloadImpactReports = useCallback(
-    () => (canManageFunding ? safeGet<ImpactReport[]>('/impact/reports', bq, []).then(setImpactReports) : Promise.resolve()),
-    [bq, canManageFunding]
+    () => (canViewImpact ? safeGet<ImpactReport[]>('/impact/reports', bq, []).then(setImpactReports) : Promise.resolve()),
+    [bq, canViewImpact]
   );
-  const reloadImpactMetrics = useCallback(
-    () => safeGet<ImpactMetric[]>('/impact/metrics', bq, []).then(setImpactMetrics),
-    [bq]
+  const reloadFundingWorkspace = useCallback(
+    () => Promise.all([
+      reloadDonors(), reloadFundingCampaigns(), reloadDonations(), reloadScholarships(),
+      reloadScholarshipAwards(), reloadSponsorships(), reloadFundingSummary(),
+    ]),
+    [reloadDonations, reloadDonors, reloadFundingCampaigns, reloadFundingSummary, reloadScholarshipAwards, reloadScholarships, reloadSponsorships],
   );
   const reloadSessions = useCallback(
     () => safeGet<Session[]>('/sessions', bq, []).then(setSessions),
@@ -738,9 +747,9 @@ export function useApiStore() {
       case 'settings':
         return Promise.all([reloadBranches(), reloadCampuses(), reloadOrganization(), reloadPartners()]);
       case 'funding':
-        return Promise.all([reloadDonors(), reloadFundingCampaigns(), reloadDonations(), reloadScholarships(), reloadScholarshipAwards(), reloadSponsorships()]);
+        return reloadFundingWorkspace();
       case 'impact':
-        return Promise.all([reloadImpactReports(), reloadImpactMetrics()]);
+        return Promise.all([reloadImpactReports(), reloadDonors(), reloadFundingCampaigns()]);
       case 'workflows':
         return Promise.all([reloadWorkflows(), reloadAutomations()]);
       case 'rules':
@@ -754,11 +763,11 @@ export function useApiStore() {
     }
   }, [
     canSeeFinance, reloadAuditLogs, reloadAttendance, reloadAttendanceSummary, reloadBookSales, reloadBooks, reloadBranches, reloadBudgetLines, reloadCampuses,
-    reloadClasses, reloadClassTeacherSkills, reloadDonations, reloadDonors, reloadEmployees, reloadExamResults, reloadExams,
-    reloadFinanceOverview, reloadFundingCampaigns, reloadImpactMetrics, reloadImpactReports,
-    reloadNotifications, reloadOrganization, reloadPartners, reloadProgramVersions,
-    reloadScholarshipAwards, reloadScholarships, reloadSessions, reloadSkills, reloadStudents, reloadStudentsLite, reloadStudentBalances, reloadTeachers,
-    reloadVisitors, reloadWorkflows, reloadAutomations, reloadSponsorships,
+    reloadClasses, reloadClassTeacherSkills, reloadDonors, reloadEmployees, reloadExamResults, reloadExams,
+    reloadFinanceOverview, reloadFundingCampaigns, reloadImpactReports, reloadFundingWorkspace,
+    reloadNotifications, reloadOrganization, reloadPartners, reloadProgramVersions, reloadDashboardSummary,
+    reloadSessions, reloadSkills, reloadStudents, reloadStudentsLite, reloadStudentBalances, reloadTeachers,
+    reloadVisitors, reloadWorkflows, reloadAutomations,
   ]);
 
   const ensureTabData = useCallback(async (tab: string) => {
@@ -1420,51 +1429,59 @@ export function useApiStore() {
   };
 
   // ================= 1.0.0 NEW operations =================
-  const addDonor = async (data: Partial<Donor>) => {
-    await api.post('/funding/donors', data);
-    await reloadDonors();
-    invalidate('funding');
-  };
-
-  const editDonor = async (id: string, data: Partial<Donor>) => {
-    await api.put(`/funding/donors/${id}`, data);
-    await reloadDonors();
-    invalidate('funding');
-  };
-
-  const addFundingCampaign = async (data: Partial<FundingCampaign>) => {
-    await api.post('/funding/campaigns', data);
-    await reloadFundingCampaigns();
-    invalidate('funding');
-  };
-
-  const recordDonation = async (data: Partial<Donation>) => {
-    await api.post('/funding/donations', data);
-    await Promise.all([reloadDonations(), reloadFundingCampaigns(), reloadTransactions(), reloadFinanceOverview()]);
+  const refreshFundingWorkspace = async () => {
+    await Promise.all([reloadFundingWorkspace(), reloadTransactions(), reloadFinanceOverview()]);
     invalidate('finance', 'funding');
   };
 
-  const addScholarship = async (data: Partial<Scholarship>) => {
-    await api.post('/funding/scholarships', data);
-    await reloadScholarships();
+  const addDonor = async (data: Pick<Donor, 'fullName' | 'type'> & Partial<Pick<Donor, 'phone' | 'email' | 'country' | 'notes'>>) => {
+    await api.post('/funding/donors', data);
+    await refreshFundingWorkspace();
     invalidate('funding');
   };
 
-  const awardScholarship = async (data: Partial<ScholarshipAward>) => {
-    await api.post('/funding/scholarships/award', data);
-    await Promise.all([reloadScholarships(), reloadScholarshipAwards(), reloadStudents()]);
-    invalidate('funding', 'students');
-  };
-
-  const addSponsorship = async (data: Partial<SponsorshipAgreement>) => {
-    await api.post('/funding/sponsorships', data);
-    await reloadSponsorships();
+  const editDonor = async (id: string, data: Partial<Pick<Donor, 'fullName' | 'type' | 'phone' | 'email' | 'country' | 'notes'>>) => {
+    await api.put(`/funding/donors/${id}`, data);
+    await refreshFundingWorkspace();
     invalidate('funding');
   };
 
-  const generateImpactReport = async (period: string, donorId?: string) => {
-    const report = await api.post<ImpactReport>('/impact/reports/generate', { period, donorId });
+  const addFundingCampaign = async (data: Pick<FundingCampaign, 'name' | 'targetAmount'> & Partial<Pick<FundingCampaign, 'description' | 'donorId' | 'startDate' | 'endDate'>>) => {
+    await api.post('/funding/campaigns', { ...data, branchId: currentBranchId });
+    await refreshFundingWorkspace();
+    invalidate('funding');
+  };
+
+  const recordDonation = async (data: {
+    donorId: string; amount: number; date?: string; campaignId?: string | null; restriction?: DonationRestriction | null;
+  }) => {
+    await api.post('/funding/donations', { ...data, branchId: currentBranchId });
+    await refreshFundingWorkspace();
+    invalidate('funding', 'finance');
+  };
+
+  const addScholarship = async (data: Pick<Scholarship, 'name' | 'totalBudget'> & Partial<Pick<Scholarship, 'donorId' | 'campaignId' | 'criteria'>>) => {
+    await api.post('/funding/scholarships', { ...data, branchId: currentBranchId });
+    await refreshFundingWorkspace();
+    invalidate('funding');
+  };
+
+  const awardScholarship = async (data: Pick<ScholarshipAward, 'scholarshipId' | 'studentId' | 'amount'> & Partial<Pick<ScholarshipAward, 'awardDate' | 'notes'>>) => {
+    await api.post('/funding/scholarships/award', { ...data, branchId: currentBranchId });
+    await Promise.all([refreshFundingWorkspace(), reloadStudents()]);
+    invalidate('students');
+  };
+
+  const addSponsorship = async (data: Pick<SponsorshipAgreement, 'donorId' | 'monthlyAmount' | 'startDate' | 'endDate'> & Partial<Pick<SponsorshipAgreement, 'studentId' | 'programId' | 'campaignId'>>) => {
+    await api.post('/funding/sponsorships', { ...data, branchId: currentBranchId });
+    await refreshFundingWorkspace();
+    invalidate('funding');
+  };
+
+  const generateImpactReport = async (input: { period: string; scopeKind: 'branch' | 'donor' | 'campaign'; scopeId?: string | null }) => {
+    const report = await api.post<ImpactReport>('/impact/reports/generate', { ...input, branchId: currentBranchId });
     await reloadImpactReports();
+    invalidate('impact');
     return report;
   };
 
@@ -1604,8 +1621,8 @@ export function useApiStore() {
     savingBalance, mainAccountBalance, expenseAutoApproveThreshold, notifications, settings, currentBranchName, isLoading,
     skills, classTeacherSkills, branches, campuses, organization,
     // 1.0.0 values
-    donors, fundingCampaigns, donations, scholarships, scholarshipAwards, sponsorships,
-    impactReports, impactMetrics, sessions, workflows, automations,
+    donors, fundingCampaigns, donations, scholarships, scholarshipAwards, sponsorships, fundingSummary,
+    impactReports, sessions, workflows, automations,
     businessRules,
     // Dashboard Profitability Analytics
     revenueByClass, revenueByTimeSlot, 
@@ -1615,7 +1632,7 @@ export function useApiStore() {
     createCampus, updateCampus, deactivateCampus, deleteCampus,
     createBranch, updateBranch, deactivateBranch, deleteBranch,
     // Utils
-    changeBranch, reloadAll, ensureTabData, ensureFinanceSection, isTabLoading, reloadNotifications, reloadVisitors, reloadFinanceDashboard, reloadDashboardSummary,
+    changeBranch, reloadAll, ensureTabData, ensureFinanceSection, isTabLoading, reloadNotifications, reloadVisitors, reloadFinanceDashboard, reloadDashboardSummary, refreshFundingWorkspace,
     // Canonical server-state freshness surface. `invalidate` is the single
     // write side for cache eviction; `datasetVersion` is the read side that
     // mounted consumers subscribe to. See the dataset dependency graph above.

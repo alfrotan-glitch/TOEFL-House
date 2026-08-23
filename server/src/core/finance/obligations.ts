@@ -198,14 +198,28 @@ export interface FundPosition {
 
 export function getFundPosition(db: Database, scholarshipId: string): FundPosition {
   const received = Number(
-    (db.prepare(`SELECT COALESCE(SUM(amount),0) AS t FROM scholarship_fundings WHERE scholarship_id = ?`)
+    (db.prepare(`SELECT COALESCE(SUM(amount), 0) AS t FROM scholarship_fundings WHERE scholarship_id = ?`)
       .get(scholarshipId) as { t: number }).t,
   ) || 0;
-  const committed = Number(
-    (db.prepare(`SELECT COALESCE(SUM(amount),0) AS t FROM scholarship_awards WHERE scholarship_id = ? AND status = 'active'`)
+  // An active award reserves its full amount. Once an award closes, only the
+  // amount actually applied remains consumed; its unused remainder returns to
+  // the fund. Excluding a closed award wholesale would re-award money already
+  // applied to tuition.
+  const activeAwardCommitments = Number(
+    (db.prepare(`SELECT COALESCE(SUM(amount), 0) AS t FROM scholarship_awards WHERE scholarship_id = ? AND status = 'active'`)
       .get(scholarshipId) as { t: number }).t,
   ) || 0;
-  return { scholarshipId, received, committed, available: received - committed };
+  const closedAwardApplications = Number(
+    (db.prepare(
+      `SELECT COALESCE(SUM(a.amount), 0) AS t
+         FROM obligation_allocations a
+         JOIN scholarship_awards aw ON aw.id = a.scholarship_award_id
+        WHERE aw.scholarship_id = ? AND aw.status = 'closed'
+          AND a.source_kind = 'scholarship' AND a.status = 'active'`,
+    ).get(scholarshipId) as { t: number }).t,
+  ) || 0;
+  const committed = activeAwardCommitments + closedAwardApplications;
+  return { scholarshipId, received, committed, available: Math.max(0, received - committed) };
 }
 
 export interface AwardPosition {
@@ -246,17 +260,65 @@ export function getAwardPosition(db: Database, awardId: string): AwardPosition {
 export function getDonationUnallocated(db: Database, donationId: string): { amount: number; allocated: number; unallocated: number } {
   const donation = db.prepare(`SELECT amount FROM donations WHERE id = ?`).get(donationId) as { amount: number } | undefined;
   if (!donation) throw new HttpError(404, 'Donation not found.');
-  // A donation may be earmarked to a scholarship fund OR to a sponsorship
-  // agreement, and the two compete for the same money. Counting only one lets
-  // the same afghani be committed twice.
+  // A direct donation may enter one scholarship fund, one sponsorship receipt,
+  // or a restricted campaign entry. A later sponsorship return changes the
+  // destination of an already-consumed receipt; it does not make the original
+  // donation newly free money.
   const allocated = Number(
     (db.prepare(
       `SELECT COALESCE((SELECT SUM(amount) FROM scholarship_fundings WHERE donation_id = ?), 0)
-            + COALESCE((SELECT SUM(amount) FROM sponsorship_receipts  WHERE donation_id = ?), 0) AS t`,
-    ).get(donationId, donationId) as { t: number }).t,
+            + COALESCE((SELECT SUM(amount) FROM sponsorship_receipts WHERE donation_id = ?), 0)
+            + COALESCE((SELECT SUM(amount) FROM campaign_funding_entries
+                         WHERE source_donation_id = ? AND origin_kind = 'restricted_donation'), 0) AS t`,
+    ).get(donationId, donationId, donationId) as { t: number }).t,
   ) || 0;
   const amount = Number(donation.amount) || 0;
   return { amount, allocated, unallocated: Math.max(0, amount - allocated) };
+}
+
+export interface FundingSourcePosition {
+  id: string;
+  amount: number;
+  applied: number;
+  returned: number;
+  available: number;
+}
+
+export function getScholarshipFundingPosition(db: Database, fundingId: string): FundingSourcePosition {
+  const row = db.prepare('SELECT amount FROM scholarship_fundings WHERE id = ?').get(fundingId) as { amount: number } | undefined;
+  if (!row) throw new HttpError(404, 'Scholarship funding source not found.');
+  const applied = Number((db.prepare(
+    `SELECT COALESCE(SUM(amount), 0) AS t FROM obligation_allocations
+      WHERE scholarship_funding_id = ? AND status = 'active'`,
+  ).get(fundingId) as { t: number }).t) || 0;
+  const amount = Number(row.amount) || 0;
+  return { id: fundingId, amount, applied, returned: 0, available: Math.max(0, amount - applied) };
+}
+
+export function getSponsorshipReceiptPosition(db: Database, receiptId: string): FundingSourcePosition {
+  const row = db.prepare('SELECT amount FROM sponsorship_receipts WHERE id = ?').get(receiptId) as { amount: number } | undefined;
+  if (!row) throw new HttpError(404, 'Sponsorship receipt source not found.');
+  const applied = Number((db.prepare(
+    `SELECT COALESCE(SUM(amount), 0) AS t FROM obligation_allocations
+      WHERE sponsorship_receipt_id = ? AND status = 'active'`,
+  ).get(receiptId) as { t: number }).t) || 0;
+  const returned = Number((db.prepare(
+    `SELECT COALESCE(SUM(amount), 0) AS t FROM campaign_funding_entries
+      WHERE source_sponsorship_receipt_id = ?`,
+  ).get(receiptId) as { t: number }).t) || 0;
+  const amount = Number(row.amount) || 0;
+  return { id: receiptId, amount, applied, returned, available: Math.max(0, amount - applied - returned) };
+}
+
+export function getCampaignFundingEntryPosition(db: Database, entryId: string): FundingSourcePosition {
+  const row = db.prepare('SELECT amount FROM campaign_funding_entries WHERE id = ?').get(entryId) as { amount: number } | undefined;
+  if (!row) throw new HttpError(404, 'Campaign funding entry not found.');
+  const applied = Number((db.prepare(
+    `SELECT COALESCE((SELECT SUM(amount) FROM scholarship_fundings WHERE campaign_funding_entry_id = ?), 0)
+          + COALESCE((SELECT SUM(amount) FROM sponsorship_receipts WHERE campaign_funding_entry_id = ?), 0) AS t`,
+  ).get(entryId, entryId) as { t: number }).t) || 0;
+  const amount = Number(row.amount) || 0;
+  return { id: entryId, amount, applied, returned: 0, available: Math.max(0, amount - applied) };
 }
 
 // ── Commands ───────────────────────────────────────────────────────────────
@@ -270,7 +332,7 @@ export function getDonationUnallocated(db: Database, donationId: string): { amou
  */
 export function allocateScholarshipToObligation(
   db: Database,
-  params: { awardId: string; obligationId: string; amount: number; operatorName: string; date?: string },
+  params: { awardId: string; scholarshipFundingId: string; obligationId: string; amount: number; operatorName: string; date?: string },
 ): { allocationId: string } {
   if (!db.inTransaction) {
     throw new Error('allocateScholarshipToObligation() called outside a transaction.');
@@ -280,6 +342,17 @@ export function allocateScholarshipToObligation(
 
   const award = getAwardPosition(db, params.awardId);
   if (award.status !== 'active') throw new HttpError(409, 'This award is closed and can no longer be applied.');
+  const funding = db.prepare('SELECT scholarship_id FROM scholarship_fundings WHERE id = ?').get(params.scholarshipFundingId) as
+    | { scholarship_id: string }
+    | undefined;
+  if (!funding) throw new HttpError(404, 'Scholarship funding source not found.');
+  if (funding.scholarship_id !== award.scholarshipId) {
+    throw new HttpError(400, 'The selected funding source belongs to another scholarship.');
+  }
+  const fundingPosition = getScholarshipFundingPosition(db, params.scholarshipFundingId);
+  if (amount > fundingPosition.available) {
+    throw new HttpError(400, `Only ${fundingPosition.available} AFN remains in the selected funding source.`);
+  }
   if (amount > award.remaining) {
     throw new HttpError(400, `Only ${award.remaining} AFN of this award is still unapplied.`);
   }
@@ -296,9 +369,9 @@ export function allocateScholarshipToObligation(
   const allocationId = id('alloc');
   db.prepare(
     `INSERT INTO obligation_allocations
-       (id, obligation_id, amount, source_kind, scholarship_award_id, status, operator_name, date)
-     VALUES (?, ?, ?, 'scholarship', ?, 'active', ?, ?)`,
-  ).run(allocationId, params.obligationId, amount, params.awardId, params.operatorName, params.date ?? today());
+       (id, obligation_id, amount, source_kind, scholarship_award_id, scholarship_funding_id, status, operator_name, date)
+     VALUES (?, ?, ?, 'scholarship', ?, ?, 'active', ?, ?)`,
+  ).run(allocationId, params.obligationId, amount, params.awardId, params.scholarshipFundingId, params.operatorName, params.date ?? today());
   return { allocationId };
 }
 
@@ -321,11 +394,17 @@ export function reverseScholarshipAllocation(
   if (reason.length < 8) throw new HttpError(400, 'A reversal reason of at least 8 characters is required.');
 
   const row = db
-    .prepare(`SELECT id, status, source_kind FROM obligation_allocations WHERE id = ?`)
-    .get(params.allocationId) as { id: string; status: string; source_kind: string } | undefined;
+    .prepare(
+      `SELECT a.id, a.status, a.source_kind, aw.status AS award_status
+         FROM obligation_allocations a
+         JOIN scholarship_awards aw ON aw.id = a.scholarship_award_id
+        WHERE a.id = ?`,
+    )
+    .get(params.allocationId) as { id: string; status: string; source_kind: string; award_status: 'active' | 'closed' } | undefined;
   if (!row) throw new HttpError(404, 'Allocation not found.');
   if (row.source_kind !== 'scholarship') throw new HttpError(400, 'Only a scholarship allocation is reversed here.');
   if (row.status !== 'active') throw new HttpError(409, 'This allocation is already reversed.');
+  if (row.award_status !== 'active') throw new HttpError(409, 'A closed scholarship award cannot reverse an application.');
 
   const updated = db
     .prepare(
@@ -365,25 +444,67 @@ export function closeAward(
   return { returnedToFund: award.remaining };
 }
 
-/** Allocates donation money into a scholarship fund — the only way a fund is backed. */
-export function fundScholarshipFromDonation(
+/** Allocates one explicit received source into a scholarship fund. */
+export function fundScholarshipFromSource(
   db: Database,
-  params: { scholarshipId: string; donationId: string; amount: number; branchId: string; operatorName: string; date?: string },
+  params: {
+    scholarshipId: string;
+    source: { kind: 'donation'; id: string } | { kind: 'campaignFundingEntry'; id: string };
+    amount: number;
+    branchId: string;
+    operatorName: string;
+    date?: string;
+  },
 ): { fundingId: string } {
-  if (!db.inTransaction) throw new Error('fundScholarshipFromDonation() called outside a transaction.');
+  if (!db.inTransaction) throw new Error('fundScholarshipFromSource() called outside a transaction.');
   const amount = assertMoney(params.amount, 'Funding amount');
   if (amount <= 0) throw new HttpError(400, 'A funding amount must be greater than zero.');
 
-  const donation = getDonationUnallocated(db, params.donationId);
-  if (amount > donation.unallocated) {
-    throw new HttpError(400, `Only ${donation.unallocated} AFN of that donation is still unallocated.`);
+  const scholarship = db.prepare('SELECT branch_id, campaign_id FROM scholarships WHERE id = ?').get(params.scholarshipId) as
+    | { branch_id: string; campaign_id: string | null }
+    | undefined;
+  if (!scholarship) throw new HttpError(404, 'Scholarship not found.');
+  if (scholarship.branch_id !== params.branchId) throw new HttpError(400, 'Scholarship belongs to another branch.');
+  if (params.source.kind === 'donation') {
+    const donation = db.prepare('SELECT branch_id FROM donations WHERE id = ?').get(params.source.id) as { branch_id: string } | undefined;
+    if (!donation) throw new HttpError(404, 'Donation source not found.');
+    if (donation.branch_id !== params.branchId) throw new HttpError(400, 'Donation source belongs to another branch.');
+    const restriction = db.prepare('SELECT target_kind, scholarship_id FROM donation_restrictions WHERE donation_id = ?').get(params.source.id) as
+      | { target_kind: string; scholarship_id: string | null }
+      | undefined;
+    if (restriction && (restriction.target_kind !== 'scholarship' || restriction.scholarship_id !== params.scholarshipId)) {
+      throw new HttpError(400, 'This restricted donation cannot fund the selected scholarship.');
+    }
+  } else {
+    const entry = db.prepare('SELECT branch_id, campaign_id FROM campaign_funding_entries WHERE id = ?').get(params.source.id) as
+      | { branch_id: string; campaign_id: string }
+      | undefined;
+    if (!entry) throw new HttpError(404, 'Campaign funding source not found.');
+    if (entry.branch_id !== params.branchId || scholarship.campaign_id !== entry.campaign_id) {
+      throw new HttpError(400, 'Campaign funding source does not match the selected scholarship.');
+    }
+  }
+  const available = params.source.kind === 'donation'
+    ? getDonationUnallocated(db, params.source.id).unallocated
+    : getCampaignFundingEntryPosition(db, params.source.id).available;
+  if (amount > available) {
+    throw new HttpError(400, `Only ${available} AFN remains in the selected funding source.`);
   }
 
   const fundingId = id('schf');
-  db.prepare(
-    `INSERT INTO scholarship_fundings (id, scholarship_id, donation_id, amount, branch_id, operator_name, date)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(fundingId, params.scholarshipId, params.donationId, amount, params.branchId, params.operatorName, params.date ?? today());
+  if (params.source.kind === 'donation') {
+    db.prepare(
+      `INSERT INTO scholarship_fundings
+         (id, scholarship_id, donation_id, amount, branch_id, operator_name, date)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(fundingId, params.scholarshipId, params.source.id, amount, params.branchId, params.operatorName, params.date ?? today());
+  } else {
+    db.prepare(
+      `INSERT INTO scholarship_fundings
+         (id, scholarship_id, campaign_funding_entry_id, amount, branch_id, operator_name, date)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(fundingId, params.scholarshipId, params.source.id, amount, params.branchId, params.operatorName, params.date ?? today());
+  }
   return { fundingId };
 }
 
@@ -543,22 +664,25 @@ export interface SponsorshipPosition {
   agreementId: string;
   donorId: string;
   studentId: string | null;
-  /** Promised per month. Bounds nothing — the same role `total_budget` plays. */
+  campaignId: string | null;
+  /** Promised per month. It is not a received balance. */
   monthlyAmount: number;
-  /** Donation money actually earmarked to this agreement. The only backing. */
+  /** Donation money explicitly received into the agreement. */
   received: number;
   /** Applied to tuition obligations by active allocations. */
   applied: number;
-  /** Still applicable. */
+  /** Moved back to the linked campaign on a terminal transition. */
+  returned: number;
+  /** Still applicable while the agreement is active. */
   available: number;
   status: 'active' | 'completed' | 'terminated';
 }
 
 export function getSponsorshipPosition(db: Database, agreementId: string): SponsorshipPosition {
   const agreement = db
-    .prepare(`SELECT id, donor_id, student_id, monthly_amount, status FROM sponsorship_agreements WHERE id = ?`)
+    .prepare(`SELECT id, donor_id, student_id, campaign_id, monthly_amount, status FROM sponsorship_agreements WHERE id = ?`)
     .get(agreementId) as
-    | { id: string; donor_id: string; student_id: string | null; monthly_amount: number; status: SponsorshipPosition['status'] }
+    | { id: string; donor_id: string; student_id: string | null; campaign_id: string | null; monthly_amount: number; status: SponsorshipPosition['status'] }
     | undefined;
   if (!agreement) throw new HttpError(404, 'Sponsorship agreement not found.');
 
@@ -568,8 +692,14 @@ export function getSponsorshipPosition(db: Database, agreementId: string): Spons
   ) || 0;
   const applied = Number(
     (db.prepare(
-      `SELECT COALESCE(SUM(amount),0) AS t FROM obligation_allocations
+      `SELECT COALESCE(SUM(amount), 0) AS t FROM obligation_allocations
         WHERE sponsorship_agreement_id = ? AND source_kind = 'sponsorship' AND status = 'active'`,
+    ).get(agreementId) as { t: number }).t,
+  ) || 0;
+  const returned = Number(
+    (db.prepare(
+      `SELECT COALESCE(SUM(amount), 0) AS t FROM campaign_funding_entries
+        WHERE sponsorship_agreement_id = ? AND origin_kind = 'sponsorship_return'`,
     ).get(agreementId) as { t: number }).t,
   ) || 0;
 
@@ -577,10 +707,12 @@ export function getSponsorshipPosition(db: Database, agreementId: string): Spons
     agreementId,
     donorId: agreement.donor_id,
     studentId: agreement.student_id,
+    campaignId: agreement.campaign_id,
     monthlyAmount: Number(agreement.monthly_amount) || 0,
     received,
     applied,
-    available: received - applied,
+    returned,
+    available: Math.max(0, received - applied - returned),
     status: agreement.status,
   };
 }
@@ -594,7 +726,14 @@ export function getSponsorshipPosition(db: Database, agreementId: string): Spons
  */
 export function recordSponsorshipReceipt(
   db: Database,
-  params: { agreementId: string; donationId: string; amount: number; branchId: string; operatorName: string; date?: string },
+  params: {
+    agreementId: string;
+    source: { kind: 'donation'; id: string } | { kind: 'campaignFundingEntry'; id: string };
+    amount: number;
+    branchId: string;
+    operatorName: string;
+    date?: string;
+  },
 ): { receiptId: string } {
   if (!db.inTransaction) throw new Error('recordSponsorshipReceipt() called outside a transaction.');
   const amount = assertMoney(params.amount, 'Receipt amount');
@@ -603,16 +742,55 @@ export function recordSponsorshipReceipt(
   const position = getSponsorshipPosition(db, params.agreementId);
   if (position.status !== 'active') throw new HttpError(409, 'This sponsorship is no longer active.');
 
-  const donation = getDonationUnallocated(db, params.donationId);
-  if (amount > donation.unallocated) {
-    throw new HttpError(400, `Only ${donation.unallocated} AFN of that donation is still unallocated.`);
+  const agreement = db.prepare('SELECT branch_id, donor_id, campaign_id FROM sponsorship_agreements WHERE id = ?').get(params.agreementId) as
+    | { branch_id: string; donor_id: string; campaign_id: string | null }
+    | undefined;
+  if (!agreement) throw new HttpError(404, 'Sponsorship agreement not found.');
+  if (agreement.branch_id !== params.branchId) throw new HttpError(400, 'Sponsorship belongs to another branch.');
+  if (params.source.kind === 'donation') {
+    const donation = db.prepare('SELECT branch_id, donor_id FROM donations WHERE id = ?').get(params.source.id) as
+      | { branch_id: string; donor_id: string }
+      | undefined;
+    if (!donation) throw new HttpError(404, 'Donation source not found.');
+    if (donation.branch_id !== params.branchId || donation.donor_id !== agreement.donor_id) {
+      throw new HttpError(400, 'Donation source does not match the sponsorship agreement.');
+    }
+    const restriction = db.prepare('SELECT target_kind, sponsorship_agreement_id FROM donation_restrictions WHERE donation_id = ?').get(params.source.id) as
+      | { target_kind: string; sponsorship_agreement_id: string | null }
+      | undefined;
+    if (restriction && (restriction.target_kind !== 'sponsorship' || restriction.sponsorship_agreement_id !== params.agreementId)) {
+      throw new HttpError(400, 'This restricted donation cannot fund the selected sponsorship.');
+    }
+  } else {
+    const entry = db.prepare(
+      `SELECT cfe.branch_id, cfe.campaign_id, d.donor_id
+         FROM campaign_funding_entries cfe JOIN donations d ON d.id = cfe.source_donation_id
+        WHERE cfe.id = ?`,
+    ).get(params.source.id) as { branch_id: string; campaign_id: string; donor_id: string } | undefined;
+    if (!entry) throw new HttpError(404, 'Campaign funding source not found.');
+    if (entry.branch_id !== params.branchId || entry.campaign_id !== agreement.campaign_id || entry.donor_id !== agreement.donor_id) {
+      throw new HttpError(400, 'Campaign funding source does not match the selected sponsorship.');
+    }
+  }
+  const available = params.source.kind === 'donation'
+    ? getDonationUnallocated(db, params.source.id).unallocated
+    : getCampaignFundingEntryPosition(db, params.source.id).available;
+  if (amount > available) {
+    throw new HttpError(400, `Only ${available} AFN remains in the selected funding source.`);
   }
 
   const receiptId = id('sprc');
-  db.prepare(
-    `INSERT INTO sponsorship_receipts (id, agreement_id, donation_id, amount, branch_id, operator_name, date)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(receiptId, params.agreementId, params.donationId, amount, params.branchId, params.operatorName, params.date ?? today());
+  if (params.source.kind === 'donation') {
+    db.prepare(
+      `INSERT INTO sponsorship_receipts (id, agreement_id, donation_id, amount, branch_id, operator_name, date)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(receiptId, params.agreementId, params.source.id, amount, params.branchId, params.operatorName, params.date ?? today());
+  } else {
+    db.prepare(
+      `INSERT INTO sponsorship_receipts (id, agreement_id, campaign_funding_entry_id, amount, branch_id, operator_name, date)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(receiptId, params.agreementId, params.source.id, amount, params.branchId, params.operatorName, params.date ?? today());
+  }
   return { receiptId };
 }
 
@@ -630,7 +808,7 @@ export function recordSponsorshipReceipt(
  */
 export function allocateSponsorshipToObligation(
   db: Database,
-  params: { agreementId: string; obligationId: string; amount: number; operatorName: string; date?: string },
+  params: { agreementId: string; sponsorshipReceiptId: string; obligationId: string; amount: number; operatorName: string; date?: string },
 ): { allocationId: string } {
   if (!db.inTransaction) throw new Error('allocateSponsorshipToObligation() called outside a transaction.');
   const amount = assertMoney(params.amount, 'Allocation amount');
@@ -638,13 +816,16 @@ export function allocateSponsorshipToObligation(
 
   const sponsorship = getSponsorshipPosition(db, params.agreementId);
   if (sponsorship.status !== 'active') throw new HttpError(409, 'This sponsorship is no longer active.');
-  if (amount > sponsorship.available) {
-    throw new HttpError(
-      400,
-      sponsorship.received === 0
-        ? 'This sponsorship has received no money yet, so it can settle nothing.'
-        : `Only ${sponsorship.available} AFN of this sponsorship is still unapplied.`,
-    );
+  const receipt = db.prepare('SELECT agreement_id FROM sponsorship_receipts WHERE id = ?').get(params.sponsorshipReceiptId) as
+    | { agreement_id: string }
+    | undefined;
+  if (!receipt) throw new HttpError(404, 'Sponsorship receipt source not found.');
+  if (receipt.agreement_id !== params.agreementId) {
+    throw new HttpError(400, 'The selected receipt belongs to another sponsorship agreement.');
+  }
+  const receiptPosition = getSponsorshipReceiptPosition(db, params.sponsorshipReceiptId);
+  if (amount > receiptPosition.available) {
+    throw new HttpError(400, `Only ${receiptPosition.available} AFN remains in the selected sponsorship receipt.`);
   }
 
   const position = getObligationPosition(db, params.obligationId);
@@ -659,9 +840,9 @@ export function allocateSponsorshipToObligation(
   const allocationId = id('alloc');
   db.prepare(
     `INSERT INTO obligation_allocations
-       (id, obligation_id, amount, source_kind, sponsorship_agreement_id, status, operator_name, date)
-     VALUES (?, ?, ?, 'sponsorship', ?, 'active', ?, ?)`,
-  ).run(allocationId, params.obligationId, amount, params.agreementId, params.operatorName, params.date ?? today());
+       (id, obligation_id, amount, source_kind, sponsorship_agreement_id, sponsorship_receipt_id, status, operator_name, date)
+     VALUES (?, ?, ?, 'sponsorship', ?, ?, 'active', ?, ?)`,
+  ).run(allocationId, params.obligationId, amount, params.agreementId, params.sponsorshipReceiptId, params.operatorName, params.date ?? today());
   return { allocationId };
 }
 

@@ -30,6 +30,7 @@ import { errorHandler } from '../../../middleware/errorHandler.js';
 import { reportsRouter } from '../../../routes/reports.routes.js';
 import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
 import { bearerFor, seedUser } from '../../support/identity.js';
+import { seedLinkedDonation } from '../../support/funding.js';
 import { ensureTuitionObligation } from '../../../core/finance/obligations.js';
 import { getBranchOutstanding } from '../../../utils/studentBalance.js';
 import { today } from '../../../utils/ids.js';
@@ -82,22 +83,36 @@ beforeEach(() => {
   owner = bearerFor(`${key}_own`);
 });
 
+function settleByScholarshipSource(amount: number, suffix: string): void {
+  const donorId = `${key}_donor_${suffix}`;
+  const scholarshipId = `${key}_sch_${suffix}`;
+  const donationId = `${key}_don_${suffix}`;
+  const fundingId = `${key}_fund_${suffix}`;
+  const awardId = `${key}_award_${suffix}`;
+  db.prepare(`INSERT INTO donors (id, full_name, type) VALUES (?, 'Receivable Donor', 'individual')`).run(donorId);
+  db.prepare(`INSERT INTO scholarships (id, name, total_budget, branch_id) VALUES (?, 'Receivable Fund', 0, ?)`).run(scholarshipId, branch);
+  seedLinkedDonation(db, { id: donationId, donorId, amount, date: today(), receiptNo: `DON-${suffix}-${key.slice(-5)}`, branchId: branch, idempotencyKey: donationId });
+  db.prepare(
+    `INSERT INTO scholarship_fundings (id, scholarship_id, donation_id, amount, branch_id, date)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(fundingId, scholarshipId, donationId, amount, branch, today());
+  db.prepare(
+    `INSERT INTO scholarship_awards (id, scholarship_id, student_id, amount, status, branch_id, award_date)
+     VALUES (?, ?, ?, ?, 'active', ?, ?)`,
+  ).run(awardId, scholarshipId, studentId, amount, branch, today());
+  db.prepare(
+    `INSERT INTO obligation_allocations
+       (id, obligation_id, amount, source_kind, scholarship_award_id, scholarship_funding_id, status, date)
+     VALUES (?, ?, ?, 'scholarship', ?, ?, 'active', ?)`,
+  ).run(`${key}_alloc_${suffix}`, obligationId, amount, awardId, fundingId, today());
+}
+
 describe('WP-07 · WP07-F18b — the report and the dashboard cannot disagree', () => {
   it('a term settled by a donor is owed by nobody, on either surface', async () => {
     seedInvoice(`${key}_inv`, 'tuition', 10000, obligationId);
 
-    // The approved scholarship lifecycle settles the whole term.
-    const scholarshipId = `${key}_sch`;
-    db.prepare(`INSERT INTO scholarships (id, name, total_budget, branch_id) VALUES (?, 'F', 0, ?)`).run(scholarshipId, branch);
-    const awardId = `${key}_awd`;
-    db.prepare(
-      `INSERT INTO scholarship_awards (id, scholarship_id, student_id, amount, status, branch_id, award_date)
-       VALUES (?, ?, ?, 10000, 'active', ?, ?)`,
-    ).run(awardId, scholarshipId, studentId, branch, today());
-    db.prepare(
-      `INSERT INTO obligation_allocations (id, obligation_id, amount, source_kind, scholarship_award_id, status, date)
-       VALUES (?, ?, 10000, 'scholarship', ?, 'active', ?)`,
-    ).run(`${key}_al`, obligationId, awardId, today());
+    // The source-aware scholarship lifecycle settles the whole term.
+    settleByScholarshipSource(10000, 'full');
 
     const res = await overview().expect(200);
     const o = res.body.financial.outstanding;
@@ -154,19 +169,7 @@ describe('WP-07 · WP07-F18b — the report and the dashboard cannot disagree', 
 // dashboard said owing. Every scholarship- or sponsorship-settled student
 // overstated branch arrears by the full settled amount.
 describe('WP-07 · WP07-F23 — one definition of outstanding tuition, per student and per branch', () => {
-  const settleByAid = (amount: number) => {
-    const scholarshipId = `${key}_sch2`;
-    db.prepare(`INSERT INTO scholarships (id, name, total_budget, branch_id) VALUES (?, 'F', 0, ?)`).run(scholarshipId, branch);
-    const awardId = `${key}_awd2`;
-    db.prepare(
-      `INSERT INTO scholarship_awards (id, scholarship_id, student_id, amount, status, branch_id, award_date)
-       VALUES (?, ?, ?, ?, 'active', ?, ?)`,
-    ).run(awardId, scholarshipId, studentId, amount, branch, today());
-    db.prepare(
-      `INSERT INTO obligation_allocations (id, obligation_id, amount, source_kind, scholarship_award_id, status, date)
-       VALUES (?, ?, ?, 'scholarship', ?, 'active', ?)`,
-    ).run(`${key}_al2`, obligationId, amount, awardId, today());
-  };
+  const settleByAid = (amount: number) => settleByScholarshipSource(amount, `aid_${amount}`);
 
   it('the branch figure equals the sum of the per-student figures, aid included', async () => {
     settleByAid(6000);

@@ -377,13 +377,27 @@ listed explicitly rather than being folded into the historical inventory.
 
 ## WP-09 Funding & Impact
 
-3 files · 47 cases
+**C-2 disposition: REPLACED — 2026-08-23.** The three inventoried top-level
+funding suites are rebased under `server/src/tests/work-packages/wp09/` and
+re-expressed against the canonical restricted-source graph. The two funding
+suites formerly located under WP-07 are re-homed here because §W assigns the
+`funding` and `impact` routes to WP-09; their Finance consumers remain covered
+by the cross-surface WP-07 suites. No WP-09 authority is skipped.
 
-| File | Cases | Asserted behaviour |
+**10 files / 49 executed tests**
+
+| File | Tests | Asserted behaviour |
 |---|---:|---|
-| `funding-amount-integrity.test.ts` | 22 | FND-1 · a created sponsorship persists the validated amount · FND-2 · PATCH /funding/sponsorships/:id validates the monthly amount · FND-3 · PATCH /funding/campaigns/:id validates the target amount · the aggregate corruption these amounts caused |
-| `funding-money-validation.test.ts` | 12 | funding money validation · the award budget check fails closed on a poisoned budget |
-| `sponsorship-lifecycle-guard.test.ts` | 13 | SPL-1 — legal transitions still work · SPL-1 — terminal states are terminal · SPL-1 — renewal happens by creating a NEW agreement · SPL-1 — authority and isolation are unchanged · SPL-1 — concurrent transitions cannot create an invalid state |
+| `work-packages/wp09/funding-amount-integrity.test.ts` | 8 | whole-AFN campaign/sponsorship boundaries and valid ordered dates |
+| `work-packages/wp09/funding-money-validation.test.ts` | 5 | linked immutable donation income, structured restriction and no partial money write |
+| `work-packages/wp09/scholarship-funding-authority.test.ts` | 2 | received-source ceiling, partial close accounting and no closed-award reversal |
+| `work-packages/wp09/sponsorship-money-authority.test.ts` | 3 | received receipt source, signing donor and reversible active application |
+| `work-packages/wp09/sponsorship-lifecycle-guard.test.ts` | 3 | terminal campaign return, unresolved-balance block and immutable terminal history |
+| `work-packages/wp09/impact-period-authority.test.ts` | 4 | Shamsi period, exact donor scope and no manual metric/story authority |
+| `work-packages/wp09/funding-impact-rbac.test.ts` | 3 | permission-based Finance/Donor Manager/Receptionist separation |
+| `work-packages/wp09/funding-impact-authority.attack.test.ts` | 10 | branch/source/restriction/database/provenance/concurrency attacks |
+| `work-packages/wp09/funding-impact-frontend-contract.test.ts` | 5 | server-derived funding UI, exact source controls, derived impact UI and one notification path |
+| `work-packages/wp09/funding-impact.review.test.ts` | 3 | cold review: immutable definitions/snapshots and clean incompatible-source rejection |
 
 ## WP-10 Books
 

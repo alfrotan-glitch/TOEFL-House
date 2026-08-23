@@ -242,7 +242,9 @@ describe('Visitor Module', () => {
   });
 
   beforeEach(() => {
-    // FK-safe deterministic cleanup; foreign keys remain enabled at all times.
+    // The test fixture removes prior synthetic history between cases, then
+    // immediately restores the canonical trigger before exercising a route.
+    db.exec('DROP TRIGGER IF EXISTS trg_allocations_immutable_delete');
     const cleanup = db.transaction(() => {
       db.prepare('DELETE FROM student_journey_events').run();
       db.prepare('DELETE FROM financial_transactions').run();
@@ -267,6 +269,7 @@ describe('Visitor Module', () => {
       db.prepare('DELETE FROM visitors').run();
     });
     cleanup();
+    initSchema();
   });
 
   // ═════════════════════════════════════════════════════════════════════════

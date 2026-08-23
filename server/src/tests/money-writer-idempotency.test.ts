@@ -14,6 +14,7 @@
  * a genuinely distinct business event (two real instalments of equal amount).
  */
 import { assignRole } from './support/identity.js';
+import { seedLinkedDonation } from './support/funding.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
@@ -240,13 +241,10 @@ describe('S6: donations cannot be duplicated by retries', () => {
 
     // Writing the same key twice must be refused by SQLite itself.
     const key = 'mw-donation-dupe-key';
-    const insert = (rowId: string) =>
-      db
-        .prepare(
-          `INSERT INTO donations (id, donor_id, amount, date, receipt_no, branch_id, idempotency_key)
-           VALUES (?, ?, 100, date('now'), ?, ?, ?)`,
-        )
-        .run(rowId, donorId, `RC-${rowId}`, BRANCH, key);
+    const insert = (rowId: string) => seedLinkedDonation(db, {
+      id: rowId, donorId, amount: 100, date: today(), receiptNo: `RC-${rowId}`,
+      branchId: BRANCH, idempotencyKey: key,
+    });
     insert('mw_dn_1');
     expect(() => insert('mw_dn_2')).toThrow();
   });

@@ -2476,7 +2476,10 @@ CREATE TABLE IF NOT EXISTS financial_transactions (
   date          TEXT NOT NULL, 
   description   TEXT, 
   reference_id  TEXT, 
-  payment_id    TEXT REFERENCES payments(id) ON DELETE SET NULL, 
+  payment_id    TEXT REFERENCES payments(id) ON DELETE SET NULL,
+  -- A donation income row is one side of a deferred, one-to-one financial fact
+  -- pair. Other income remains intentionally generic through `reference_id`.
+  donation_id   TEXT UNIQUE REFERENCES donations(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED,
   operator_name TEXT, 
   operator_role TEXT, 
   branch_id     TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT 
@@ -2489,6 +2492,8 @@ CREATE INDEX IF NOT EXISTS idx_fin_tx_date           ON financial_transactions(d
 CREATE INDEX IF NOT EXISTS idx_fin_tx_finance_category
   ON financial_transactions(finance_category_id);
 CREATE INDEX IF NOT EXISTS idx_fin_tx_payment        ON financial_transactions(payment_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_fin_tx_donation
+  ON financial_transactions(donation_id) WHERE donation_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_fin_tx_type           ON financial_transactions(type);
 CREATE TRIGGER IF NOT EXISTS trg_fin_tx_money_scale_insert
 BEFORE INSERT ON financial_transactions
@@ -2751,317 +2756,579 @@ BEGIN SELECT RAISE(ABORT, 'payroll financial facts cannot be deleted'); END;
 -- ============================================================================
 -- FUNDING & IMPACT
 -- ============================================================================
--- Donors, scholarships, sponsorship and impact reporting.
+-- Donations are cash facts. Campaign, scholarship and sponsorship allocations
+-- are separately recorded non-cash funding facts so every reported outcome has
+-- an exact source and cash is never recognized twice.
 
-CREATE TABLE IF NOT EXISTS donors ( 
-  id         TEXT PRIMARY KEY, 
-  full_name  TEXT NOT NULL, 
-  type       TEXT NOT NULL DEFAULT 'individual' CHECK (type IN ('individual','organization','ngo','government')), 
-  phone      TEXT, 
-  email      TEXT, 
-  country    TEXT, 
-  notes      TEXT, 
-  created_at TEXT NOT NULL DEFAULT (datetime('now')) 
+CREATE TABLE IF NOT EXISTS donors (
+  id         TEXT PRIMARY KEY,
+  full_name  TEXT NOT NULL,
+  type       TEXT NOT NULL DEFAULT 'individual' CHECK (type IN ('individual','organization','ngo','government')),
+  phone      TEXT,
+  email      TEXT,
+  country    TEXT,
+  notes      TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS idx_donors_type           ON donors(type);
+CREATE INDEX IF NOT EXISTS idx_donors_type ON donors(type);
 
-CREATE TABLE IF NOT EXISTS funding_campaigns ( 
-  id            TEXT PRIMARY KEY, 
-  name          TEXT NOT NULL, 
-  description   TEXT, 
-  donor_id      TEXT REFERENCES donors(id) ON DELETE SET NULL, 
-  target_amount INTEGER NOT NULL DEFAULT 0, 
-  raised_amount INTEGER NOT NULL DEFAULT 0, 
-  start_date    TEXT NOT NULL, 
-  end_date      TEXT, 
-  status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','completed','cancelled')), 
-  branch_id     TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT, 
-  created_at    TEXT NOT NULL DEFAULT (datetime('now')) 
+CREATE TABLE IF NOT EXISTS funding_campaigns (
+  id            TEXT PRIMARY KEY,
+  name          TEXT NOT NULL,
+  description   TEXT,
+  donor_id      TEXT REFERENCES donors(id) ON DELETE SET NULL,
+  target_amount INTEGER NOT NULL DEFAULT 0 CHECK (target_amount >= 0),
+  start_date    TEXT NOT NULL,
+  end_date      TEXT,
+  status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','completed','cancelled')),
+  branch_id     TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK (end_date IS NULL OR end_date >= start_date)
 );
-CREATE INDEX IF NOT EXISTS idx_funding_camp_branch   ON funding_campaigns(branch_id);
+CREATE INDEX IF NOT EXISTS idx_funding_campaigns_branch ON funding_campaigns(branch_id, start_date DESC);
+CREATE INDEX IF NOT EXISTS idx_funding_campaigns_donor ON funding_campaigns(donor_id);
 
-CREATE TABLE IF NOT EXISTS donations ( 
-  id               TEXT PRIMARY KEY, 
-  campaign_id      TEXT REFERENCES funding_campaigns(id) ON DELETE SET NULL, 
-  donor_id         TEXT NOT NULL REFERENCES donors(id) ON DELETE RESTRICT, 
-  amount           INTEGER NOT NULL, 
-  date             TEXT NOT NULL, 
-  restricted       INTEGER NOT NULL DEFAULT 0, 
-  restriction_note TEXT, 
-  receipt_no       TEXT NOT NULL, 
-  branch_id        TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT, 
-  created_at       TEXT NOT NULL DEFAULT (datetime('now')), 
-  -- Duplicate-click protection for the donation desk (migration 061).
-  idempotency_key  TEXT 
-);
-CREATE INDEX IF NOT EXISTS idx_donations_campaign    ON donations(campaign_id);
-CREATE INDEX IF NOT EXISTS idx_donations_donor       ON donations(donor_id);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_donations_idempotency
-ON donations(idempotency_key) WHERE idempotency_key IS NOT NULL;
-CREATE TRIGGER IF NOT EXISTS trg_donations_money_scale_insert
-BEFORE INSERT ON donations
-WHEN NEW.amount <> CAST(NEW.amount AS INTEGER)
-BEGIN SELECT RAISE(ABORT, 'donation amount must be a whole number of AFN'); END;
-
-CREATE TABLE IF NOT EXISTS scholarships ( 
-  id               TEXT PRIMARY KEY, 
-  name             TEXT NOT NULL, 
-  donor_id         TEXT REFERENCES donors(id) ON DELETE SET NULL, 
-  campaign_id      TEXT REFERENCES funding_campaigns(id) ON DELETE SET NULL, 
-  total_budget     INTEGER NOT NULL DEFAULT 0, 
-  allocated_amount INTEGER NOT NULL DEFAULT 0, 
-  criteria         TEXT, 
-  status           TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','exhausted','closed')), 
-  branch_id        TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT, 
-  created_at       TEXT NOT NULL DEFAULT (datetime('now')) 
-);
-CREATE INDEX IF NOT EXISTS idx_scholarships_branch   ON scholarships(branch_id);
-
--- Money entering a scholarship fund. A fund is backed ONLY by donations
--- explicitly allocated to it (owner decision D-121), so a fund with no funding
--- row can award nothing — which is how "no institution-funded scholarships" is
--- enforced, without making any column mandatory.
-CREATE TABLE IF NOT EXISTS scholarship_fundings (
+CREATE TABLE IF NOT EXISTS donations (
   id             TEXT PRIMARY KEY,
-  scholarship_id TEXT NOT NULL REFERENCES scholarships(id) ON DELETE RESTRICT,
-  donation_id    TEXT NOT NULL REFERENCES donations(id) ON DELETE RESTRICT,
+  campaign_id    TEXT REFERENCES funding_campaigns(id) ON DELETE RESTRICT,
+  donor_id       TEXT NOT NULL REFERENCES donors(id) ON DELETE RESTRICT,
   amount         INTEGER NOT NULL CHECK (amount > 0),
-  branch_id      TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
-  operator_name  TEXT,
   date           TEXT NOT NULL,
-  created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+  receipt_no     TEXT NOT NULL,
+  branch_id      TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  transaction_id TEXT NOT NULL UNIQUE REFERENCES financial_transactions(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED,
+  created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  idempotency_key TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_donations_campaign ON donations(campaign_id, date DESC);
+CREATE INDEX IF NOT EXISTS idx_donations_donor ON donations(donor_id, date DESC);
+CREATE INDEX IF NOT EXISTS idx_donations_branch_date ON donations(branch_id, date DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_donations_branch_receipt ON donations(branch_id, receipt_no);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_donations_idempotency
+  ON donations(idempotency_key) WHERE idempotency_key IS NOT NULL;
+CREATE TRIGGER IF NOT EXISTS trg_donations_campaign_branch_insert
+BEFORE INSERT ON donations
+WHEN NEW.campaign_id IS NOT NULL
+ AND (SELECT branch_id FROM funding_campaigns WHERE id = NEW.campaign_id) IS NOT NEW.branch_id
+BEGIN SELECT RAISE(ABORT, 'donation campaign must belong to the donation branch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_donations_campaign_branch_update
+BEFORE UPDATE OF campaign_id, branch_id ON donations
+WHEN NEW.campaign_id IS NOT NULL
+ AND (SELECT branch_id FROM funding_campaigns WHERE id = NEW.campaign_id) IS NOT NEW.branch_id
+BEGIN SELECT RAISE(ABORT, 'donation campaign must belong to the donation branch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_donations_transaction_integrity_insert
+BEFORE INSERT ON donations
+WHEN (SELECT type FROM financial_transactions WHERE id = NEW.transaction_id) IS NOT 'income'
+  OR (SELECT category FROM financial_transactions WHERE id = NEW.transaction_id) IS NOT 'donation'
+  OR (SELECT donation_id FROM financial_transactions WHERE id = NEW.transaction_id) IS NOT NEW.id
+  OR (SELECT branch_id FROM financial_transactions WHERE id = NEW.transaction_id) IS NOT NEW.branch_id
+  OR (SELECT amount FROM financial_transactions WHERE id = NEW.transaction_id) IS NOT NEW.amount
+  OR (SELECT date FROM financial_transactions WHERE id = NEW.transaction_id) IS NOT NEW.date
+BEGIN SELECT RAISE(ABORT, 'donation must link to its matching income transaction'); END;
+CREATE TRIGGER IF NOT EXISTS trg_donations_immutable_update
+BEFORE UPDATE ON donations
+BEGIN SELECT RAISE(ABORT, 'donation facts cannot be modified'); END;
+CREATE TRIGGER IF NOT EXISTS trg_financial_transactions_donation_immutable_update
+BEFORE UPDATE ON financial_transactions
+WHEN OLD.donation_id IS NOT NULL OR NEW.donation_id IS NOT NULL
+BEGIN SELECT RAISE(ABORT, 'donation income facts cannot be modified'); END;
+CREATE TRIGGER IF NOT EXISTS trg_financial_transactions_donation_immutable_delete
+BEFORE DELETE ON financial_transactions
+WHEN OLD.donation_id IS NOT NULL
+BEGIN SELECT RAISE(ABORT, 'donation income facts cannot be deleted'); END;
+
+CREATE TABLE IF NOT EXISTS scholarships (
+  id           TEXT PRIMARY KEY,
+  name         TEXT NOT NULL,
+  donor_id     TEXT REFERENCES donors(id) ON DELETE SET NULL,
+  campaign_id  TEXT REFERENCES funding_campaigns(id) ON DELETE RESTRICT,
+  total_budget INTEGER NOT NULL DEFAULT 0 CHECK (total_budget >= 0),
+  criteria     TEXT,
+  status       TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','closed')),
+  branch_id    TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_scholarships_branch ON scholarships(branch_id);
+CREATE INDEX IF NOT EXISTS idx_scholarships_campaign ON scholarships(campaign_id);
+CREATE TRIGGER IF NOT EXISTS trg_scholarships_campaign_branch_insert
+BEFORE INSERT ON scholarships
+WHEN NEW.campaign_id IS NOT NULL
+ AND (SELECT branch_id FROM funding_campaigns WHERE id = NEW.campaign_id) IS NOT NEW.branch_id
+BEGIN SELECT RAISE(ABORT, 'scholarship campaign must belong to the scholarship branch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_scholarships_campaign_branch_update
+BEFORE UPDATE OF campaign_id, branch_id ON scholarships
+WHEN NEW.campaign_id IS NOT NULL
+ AND (SELECT branch_id FROM funding_campaigns WHERE id = NEW.campaign_id) IS NOT NEW.branch_id
+BEGIN SELECT RAISE(ABORT, 'scholarship campaign must belong to the scholarship branch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_scholarships_immutable_update
+BEFORE UPDATE ON scholarships
+BEGIN SELECT RAISE(ABORT, 'scholarship definitions cannot be modified after creation'); END;
+
+CREATE TABLE IF NOT EXISTS sponsorship_agreements (
+  id             TEXT PRIMARY KEY,
+  donor_id       TEXT NOT NULL REFERENCES donors(id) ON DELETE RESTRICT,
+  student_id     TEXT REFERENCES students(id) ON DELETE RESTRICT,
+  program_id     TEXT REFERENCES programs(id) ON DELETE SET NULL,
+  campaign_id    TEXT REFERENCES funding_campaigns(id) ON DELETE RESTRICT,
+  monthly_amount INTEGER NOT NULL DEFAULT 0 CHECK (monthly_amount >= 0),
+  start_date     TEXT NOT NULL,
+  end_date       TEXT NOT NULL,
+  status         TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','completed','terminated')),
+  terminal_at    TEXT,
+  terminal_by    TEXT,
+  terminal_reason TEXT,
+  branch_id      TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK (end_date >= start_date),
+  CHECK ((status = 'active' AND terminal_at IS NULL AND terminal_by IS NULL AND terminal_reason IS NULL)
+     OR (status IN ('completed','terminated') AND terminal_at IS NOT NULL AND terminal_by IS NOT NULL AND terminal_reason IS NOT NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_sponsorships_donor ON sponsorship_agreements(donor_id);
+CREATE INDEX IF NOT EXISTS idx_sponsorships_student ON sponsorship_agreements(student_id);
+CREATE INDEX IF NOT EXISTS idx_sponsorships_campaign ON sponsorship_agreements(campaign_id);
+CREATE TRIGGER IF NOT EXISTS trg_sponsorships_scope_insert
+BEFORE INSERT ON sponsorship_agreements
+WHEN (NEW.student_id IS NOT NULL AND (SELECT branch_id FROM students WHERE id = NEW.student_id) IS NOT NEW.branch_id)
+  OR (NEW.program_id IS NOT NULL AND (SELECT branch_id FROM programs WHERE id = NEW.program_id) IS NOT NEW.branch_id)
+  OR (NEW.campaign_id IS NOT NULL AND (SELECT branch_id FROM funding_campaigns WHERE id = NEW.campaign_id) IS NOT NEW.branch_id)
+BEGIN SELECT RAISE(ABORT, 'sponsorship branch scope mismatch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_sponsorships_scope_update
+BEFORE UPDATE OF student_id, program_id, campaign_id, branch_id ON sponsorship_agreements
+WHEN (NEW.student_id IS NOT NULL AND (SELECT branch_id FROM students WHERE id = NEW.student_id) IS NOT NEW.branch_id)
+  OR (NEW.program_id IS NOT NULL AND (SELECT branch_id FROM programs WHERE id = NEW.program_id) IS NOT NEW.branch_id)
+  OR (NEW.campaign_id IS NOT NULL AND (SELECT branch_id FROM funding_campaigns WHERE id = NEW.campaign_id) IS NOT NEW.branch_id)
+BEGIN SELECT RAISE(ABORT, 'sponsorship branch scope mismatch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_sponsorships_immutable_scope_update
+BEFORE UPDATE OF donor_id, student_id, program_id, campaign_id, start_date, branch_id ON sponsorship_agreements
+BEGIN SELECT RAISE(ABORT, 'sponsorship identity and return target cannot be modified'); END;
+
+CREATE TABLE IF NOT EXISTS donation_restrictions (
+  donation_id               TEXT PRIMARY KEY REFERENCES donations(id) ON DELETE RESTRICT,
+  target_kind               TEXT NOT NULL CHECK (target_kind IN ('campaign','scholarship','sponsorship')),
+  campaign_id               TEXT REFERENCES funding_campaigns(id) ON DELETE RESTRICT,
+  scholarship_id            TEXT REFERENCES scholarships(id) ON DELETE RESTRICT,
+  sponsorship_agreement_id  TEXT REFERENCES sponsorship_agreements(id) ON DELETE RESTRICT,
+  created_at                TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK (
+       (target_kind = 'campaign'     AND campaign_id IS NOT NULL AND scholarship_id IS NULL AND sponsorship_agreement_id IS NULL)
+    OR (target_kind = 'scholarship'  AND scholarship_id IS NOT NULL AND campaign_id IS NULL AND sponsorship_agreement_id IS NULL)
+    OR (target_kind = 'sponsorship'  AND sponsorship_agreement_id IS NOT NULL AND campaign_id IS NULL AND scholarship_id IS NULL)
+  )
+);
+CREATE TRIGGER IF NOT EXISTS trg_donation_restrictions_scope_insert
+BEFORE INSERT ON donation_restrictions
+WHEN (NEW.target_kind = 'campaign' AND (
+       (SELECT branch_id FROM funding_campaigns WHERE id = NEW.campaign_id) IS NOT (SELECT branch_id FROM donations WHERE id = NEW.donation_id)
+       OR NEW.campaign_id IS NOT (SELECT campaign_id FROM donations WHERE id = NEW.donation_id)
+     ))
+  OR (NEW.target_kind = 'scholarship' AND
+       (SELECT branch_id FROM scholarships WHERE id = NEW.scholarship_id) IS NOT (SELECT branch_id FROM donations WHERE id = NEW.donation_id))
+  OR (NEW.target_kind = 'sponsorship' AND (
+       (SELECT branch_id FROM sponsorship_agreements WHERE id = NEW.sponsorship_agreement_id) IS NOT (SELECT branch_id FROM donations WHERE id = NEW.donation_id)
+       OR (SELECT donor_id FROM sponsorship_agreements WHERE id = NEW.sponsorship_agreement_id) IS NOT (SELECT donor_id FROM donations WHERE id = NEW.donation_id)
+     ))
+BEGIN SELECT RAISE(ABORT, 'restricted donation target does not match its source'); END;
+CREATE TRIGGER IF NOT EXISTS trg_donation_restrictions_immutable_update
+BEFORE UPDATE ON donation_restrictions
+BEGIN SELECT RAISE(ABORT, 'donation restrictions cannot be modified'); END;
+CREATE TRIGGER IF NOT EXISTS trg_donation_restrictions_immutable_delete
+BEFORE DELETE ON donation_restrictions
+BEGIN SELECT RAISE(ABORT, 'donation restrictions cannot be deleted'); END;
+
+-- An entry is a restricted campaign balance with exact source provenance. It
+-- never changes cash: cash was recognized by the linked donation income row.
+CREATE TABLE IF NOT EXISTS campaign_funding_entries (
+  id                              TEXT PRIMARY KEY,
+  campaign_id                     TEXT NOT NULL REFERENCES funding_campaigns(id) ON DELETE RESTRICT,
+  source_donation_id              TEXT NOT NULL REFERENCES donations(id) ON DELETE RESTRICT,
+  source_sponsorship_receipt_id   TEXT REFERENCES sponsorship_receipts(id) ON DELETE RESTRICT,
+  sponsorship_agreement_id        TEXT REFERENCES sponsorship_agreements(id) ON DELETE RESTRICT,
+  origin_kind                     TEXT NOT NULL CHECK (origin_kind IN ('restricted_donation','sponsorship_return')),
+  amount                          INTEGER NOT NULL CHECK (amount > 0),
+  reason                          TEXT,
+  actor_user_id                   TEXT REFERENCES users(id) ON DELETE SET NULL,
+  operator_name                   TEXT NOT NULL,
+  branch_id                       TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  date                            TEXT NOT NULL,
+  created_at                      TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK (
+       (origin_kind = 'restricted_donation' AND source_sponsorship_receipt_id IS NULL AND sponsorship_agreement_id IS NULL AND reason IS NULL)
+    OR (origin_kind = 'sponsorship_return' AND source_sponsorship_receipt_id IS NOT NULL AND sponsorship_agreement_id IS NOT NULL AND length(trim(reason)) >= 8)
+  )
+);
+CREATE INDEX IF NOT EXISTS idx_campaign_funding_entries_campaign ON campaign_funding_entries(campaign_id, date DESC);
+CREATE INDEX IF NOT EXISTS idx_campaign_funding_entries_donation ON campaign_funding_entries(source_donation_id);
+CREATE INDEX IF NOT EXISTS idx_campaign_funding_entries_receipt ON campaign_funding_entries(source_sponsorship_receipt_id);
+
+CREATE TABLE IF NOT EXISTS scholarship_fundings (
+  id                         TEXT PRIMARY KEY,
+  scholarship_id             TEXT NOT NULL REFERENCES scholarships(id) ON DELETE RESTRICT,
+  donation_id                TEXT REFERENCES donations(id) ON DELETE RESTRICT,
+  campaign_funding_entry_id  TEXT REFERENCES campaign_funding_entries(id) ON DELETE RESTRICT,
+  amount                     INTEGER NOT NULL CHECK (amount > 0),
+  branch_id                  TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  operator_name              TEXT,
+  date                       TEXT NOT NULL,
+  created_at                 TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK ((donation_id IS NOT NULL AND campaign_funding_entry_id IS NULL) OR (donation_id IS NULL AND campaign_funding_entry_id IS NOT NULL))
 );
 CREATE INDEX IF NOT EXISTS idx_scholarship_fundings_fund ON scholarship_fundings(scholarship_id);
 CREATE INDEX IF NOT EXISTS idx_scholarship_fundings_donation ON scholarship_fundings(donation_id);
-CREATE TRIGGER IF NOT EXISTS trg_scholarship_fundings_branch_insert
-BEFORE INSERT ON scholarship_fundings
-WHEN (SELECT branch_id FROM scholarships WHERE id = NEW.scholarship_id) IS NOT NEW.branch_id
-  OR (SELECT branch_id FROM donations    WHERE id = NEW.donation_id)    IS NOT NEW.branch_id
-BEGIN SELECT RAISE(ABORT, 'A scholarship may only be funded by a donation of its own branch'); END;
-CREATE TRIGGER IF NOT EXISTS trg_scholarship_fundings_money_scale_insert
-BEFORE INSERT ON scholarship_fundings
-WHEN NEW.amount <> CAST(NEW.amount AS INTEGER)
-BEGIN SELECT RAISE(ABORT, 'scholarship funding amount must be a whole number of AFN'); END;
+CREATE INDEX IF NOT EXISTS idx_scholarship_fundings_campaign_entry ON scholarship_fundings(campaign_funding_entry_id);
 
-CREATE TABLE IF NOT EXISTS scholarship_awards ( 
-  id             TEXT PRIMARY KEY, 
-  scholarship_id TEXT NOT NULL REFERENCES scholarships(id) ON DELETE CASCADE, 
-  student_id     TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE, 
-  amount         INTEGER NOT NULL, 
-  award_date     TEXT NOT NULL, 
-  semester       TEXT, 
-  notes          TEXT, 
+CREATE TABLE IF NOT EXISTS scholarship_awards (
+  id             TEXT PRIMARY KEY,
+  scholarship_id TEXT NOT NULL REFERENCES scholarships(id) ON DELETE RESTRICT,
+  student_id     TEXT NOT NULL REFERENCES students(id) ON DELETE RESTRICT,
+  amount         INTEGER NOT NULL CHECK (amount > 0),
+  award_date     TEXT NOT NULL,
+  notes          TEXT,
   branch_id      TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
-  -- An award commits fund money to one student. Closing it returns whatever is
-  -- still unallocated to the fund; the allocated part stays with the student.
   status         TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','closed')),
   closed_at      TEXT,
   closed_by      TEXT,
   close_reason   TEXT,
   CHECK ((status = 'active' AND closed_at IS NULL) OR (status = 'closed' AND closed_at IS NOT NULL))
 );
-CREATE INDEX IF NOT EXISTS idx_schol_awards_schol    ON scholarship_awards(scholarship_id);
-CREATE INDEX IF NOT EXISTS idx_schol_awards_stu      ON scholarship_awards(student_id);
-CREATE TRIGGER IF NOT EXISTS trg_scholarship_awards_branch_integrity_insert
-BEFORE INSERT ON scholarship_awards
-WHEN (SELECT branch_id FROM scholarships WHERE id = NEW.scholarship_id) IS NOT NEW.branch_id
-   OR (SELECT branch_id FROM students WHERE id = NEW.student_id) IS NOT NEW.branch_id
-BEGIN SELECT RAISE(ABORT, 'Scholarship award branch does not match scholarship/student branch'); END;
-CREATE TRIGGER IF NOT EXISTS trg_scholarship_awards_money_scale_insert
-BEFORE INSERT ON scholarship_awards
-WHEN NEW.amount <> CAST(NEW.amount AS INTEGER)
-BEGIN SELECT RAISE(ABORT, 'scholarship amount must be a whole number of AFN'); END;
+CREATE INDEX IF NOT EXISTS idx_scholarship_awards_scholarship ON scholarship_awards(scholarship_id);
+CREATE INDEX IF NOT EXISTS idx_scholarship_awards_student ON scholarship_awards(student_id);
 
 -- ============================================================================
 -- OBLIGATIONS AND ALLOCATIONS
 -- ============================================================================
--- THE canonical answer to "what does this money settle?" (owner decision D-120).
---
--- An obligation is something a student owes. An allocation is money applied to
--- one obligation by one funding instrument. Cash and scholarship money settle
--- through the SAME table, so there is one settlement authority rather than one
--- per instrument.
---
--- The obligation deliberately stores NO amount of its own: for tuition the
--- amount is `COALESCE(net_fee_amount, fee_amount)` on the semester row, which is
--- already the tuition authority. Copying it here would create a second store of
--- one figure (§13).
+-- An obligation identifies the tuition debt; it intentionally does not mirror
+-- the fee amount. Every active allocation names one real funding instrument.
 CREATE TABLE IF NOT EXISTS student_obligations (
   id          TEXT PRIMARY KEY,
   student_id  TEXT NOT NULL REFERENCES students(id) ON DELETE RESTRICT,
   branch_id   TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
   kind        TEXT NOT NULL CHECK (kind IN ('tuition')),
-  -- The row that carries the amount for this kind. Tuition points at a semester.
   semester_id TEXT REFERENCES student_semesters(id) ON DELETE RESTRICT,
   status      TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','cancelled')),
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   CHECK (kind <> 'tuition' OR semester_id IS NOT NULL)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS uq_obligation_tuition_semester
-  ON student_obligations(semester_id) WHERE semester_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_obligation_tuition_semester ON student_obligations(semester_id) WHERE semester_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_obligations_student ON student_obligations(student_id, status);
 CREATE TRIGGER IF NOT EXISTS trg_obligations_student_branch_insert
 BEFORE INSERT ON student_obligations
 WHEN (SELECT branch_id FROM students WHERE id = NEW.student_id) IS NOT NEW.branch_id
-BEGIN SELECT RAISE(ABORT, 'Obligation branch does not match student branch'); END;
+BEGIN SELECT RAISE(ABORT, 'obligation branch does not match student branch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_obligations_student_branch_update
+BEFORE UPDATE OF student_id, branch_id ON student_obligations
+WHEN (SELECT branch_id FROM students WHERE id = NEW.student_id) IS NOT NEW.branch_id
+BEGIN SELECT RAISE(ABORT, 'obligation branch does not match student branch'); END;
 CREATE TRIGGER IF NOT EXISTS trg_obligations_semester_owner_insert
 BEFORE INSERT ON student_obligations
-WHEN NEW.semester_id IS NOT NULL
- AND (SELECT student_id FROM student_semesters WHERE id = NEW.semester_id) IS NOT NEW.student_id
-BEGIN SELECT RAISE(ABORT, 'Obligation semester belongs to another student'); END;
+WHEN NEW.semester_id IS NOT NULL AND (SELECT student_id FROM student_semesters WHERE id = NEW.semester_id) IS NOT NEW.student_id
+BEGIN SELECT RAISE(ABORT, 'obligation semester belongs to another student'); END;
+CREATE TRIGGER IF NOT EXISTS trg_obligations_semester_owner_update
+BEFORE UPDATE OF semester_id, student_id ON student_obligations
+WHEN NEW.semester_id IS NOT NULL AND (SELECT student_id FROM student_semesters WHERE id = NEW.semester_id) IS NOT NEW.student_id
+BEGIN SELECT RAISE(ABORT, 'obligation semester belongs to another student'); END;
 
--- A tuition plan: the instalments of ONE obligation (owner decision D-125).
--- The plan hangs off the obligation, so paying an instalment settles the term
--- that obligation bills and the operator never chooses a semester. While the
--- plan lived as JSON on the student it belonged to nobody, and an instalment
--- payment settled no term at all — 14,000 AFN was collectable for a 10,000 AFN
--- term.
 CREATE TABLE IF NOT EXISTS student_installments (
-  id            TEXT PRIMARY KEY,
-  obligation_id TEXT NOT NULL REFERENCES student_obligations(id) ON DELETE RESTRICT,
-  sequence      INTEGER NOT NULL CHECK (sequence > 0),
-  amount        INTEGER NOT NULL CHECK (amount > 0),
-  due_date      TEXT,
-  status        TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','paid')),
+  id              TEXT PRIMARY KEY,
+  obligation_id   TEXT NOT NULL REFERENCES student_obligations(id) ON DELETE RESTRICT,
+  sequence        INTEGER NOT NULL CHECK (sequence > 0),
+  amount          INTEGER NOT NULL CHECK (amount > 0),
+  due_date        TEXT,
+  status          TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','paid')),
   paid_payment_id TEXT REFERENCES payments(id) ON DELETE RESTRICT,
-  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
   CHECK ((status = 'pending' AND paid_payment_id IS NULL) OR (status = 'paid' AND paid_payment_id IS NOT NULL))
 );
-CREATE UNIQUE INDEX IF NOT EXISTS uq_installment_obligation_sequence
-  ON student_installments(obligation_id, sequence);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_installment_obligation_sequence ON student_installments(obligation_id, sequence);
 CREATE INDEX IF NOT EXISTS idx_installments_obligation ON student_installments(obligation_id, status);
 CREATE TRIGGER IF NOT EXISTS trg_installments_money_scale_insert
-BEFORE INSERT ON student_installments
-WHEN NEW.amount <> CAST(NEW.amount AS INTEGER)
+BEFORE INSERT ON student_installments WHEN NEW.amount <> CAST(NEW.amount AS INTEGER)
+BEGIN SELECT RAISE(ABORT, 'installment amount must be a whole number of AFN'); END;
+CREATE TRIGGER IF NOT EXISTS trg_installments_money_scale_update
+BEFORE UPDATE OF amount ON student_installments WHEN NEW.amount <> CAST(NEW.amount AS INTEGER)
 BEGIN SELECT RAISE(ABORT, 'installment amount must be a whole number of AFN'); END;
 
--- One allocation = one instrument applying one amount to one obligation.
--- `source_kind` names the instrument and exactly one instrument key may be set,
--- enforced by CHECK rather than by convention (LAW 3). `payment` is declared
--- here and is populated when the payment desk migrates onto allocations; today
--- cash tuition is still attributed by `payments.semester` and both are read
--- through one settlement authority.
 CREATE TABLE IF NOT EXISTS obligation_allocations (
-  id                   TEXT PRIMARY KEY,
-  obligation_id        TEXT NOT NULL REFERENCES student_obligations(id) ON DELETE RESTRICT,
-  amount               INTEGER NOT NULL CHECK (amount > 0),
-  source_kind          TEXT NOT NULL CHECK (source_kind IN ('payment','scholarship','sponsorship')),
-  payment_id           TEXT REFERENCES payments(id) ON DELETE RESTRICT,
-  scholarship_award_id TEXT REFERENCES scholarship_awards(id) ON DELETE RESTRICT,
-  -- A sponsorship is a THIRD instrument, not a scholarship wearing another name
-  -- (owner decision S5 keeps the two concepts apart). It settles through this
-  -- same authority because there is only one place money meets an obligation.
-  sponsorship_agreement_id TEXT REFERENCES sponsorship_agreements(id) ON DELETE RESTRICT,
-  status               TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','reversed')),
-  reversed_at          TEXT,
-  reversed_by          TEXT,
-  reversal_reason      TEXT,
-  operator_name        TEXT,
-  date                 TEXT NOT NULL,
-  created_at           TEXT NOT NULL DEFAULT (datetime('now')),
+  id                         TEXT PRIMARY KEY,
+  obligation_id              TEXT NOT NULL REFERENCES student_obligations(id) ON DELETE RESTRICT,
+  amount                     INTEGER NOT NULL CHECK (amount > 0),
+  source_kind                TEXT NOT NULL CHECK (source_kind IN ('payment','scholarship','sponsorship')),
+  payment_id                 TEXT REFERENCES payments(id) ON DELETE RESTRICT,
+  scholarship_award_id       TEXT REFERENCES scholarship_awards(id) ON DELETE RESTRICT,
+  scholarship_funding_id     TEXT REFERENCES scholarship_fundings(id) ON DELETE RESTRICT,
+  sponsorship_agreement_id   TEXT REFERENCES sponsorship_agreements(id) ON DELETE RESTRICT,
+  sponsorship_receipt_id     TEXT REFERENCES sponsorship_receipts(id) ON DELETE RESTRICT,
+  status                     TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','reversed')),
+  reversed_at                TEXT,
+  reversed_by                TEXT,
+  reversal_reason            TEXT,
+  operator_name              TEXT,
+  date                       TEXT NOT NULL,
+  created_at                 TEXT NOT NULL DEFAULT (datetime('now')),
   CHECK (
-       (source_kind = 'payment'     AND payment_id IS NOT NULL AND scholarship_award_id IS NULL AND sponsorship_agreement_id IS NULL)
-    OR (source_kind = 'scholarship' AND scholarship_award_id IS NOT NULL AND payment_id IS NULL AND sponsorship_agreement_id IS NULL)
-    OR (source_kind = 'sponsorship' AND sponsorship_agreement_id IS NOT NULL AND payment_id IS NULL AND scholarship_award_id IS NULL)
+       (source_kind = 'payment' AND payment_id IS NOT NULL AND scholarship_award_id IS NULL AND scholarship_funding_id IS NULL AND sponsorship_agreement_id IS NULL AND sponsorship_receipt_id IS NULL)
+    OR (source_kind = 'scholarship' AND scholarship_award_id IS NOT NULL AND scholarship_funding_id IS NOT NULL AND payment_id IS NULL AND sponsorship_agreement_id IS NULL AND sponsorship_receipt_id IS NULL)
+    OR (source_kind = 'sponsorship' AND sponsorship_agreement_id IS NOT NULL AND sponsorship_receipt_id IS NOT NULL AND payment_id IS NULL AND scholarship_award_id IS NULL AND scholarship_funding_id IS NULL)
   ),
-  CHECK (
-       (status = 'active'   AND reversed_at IS NULL)
-    OR (status = 'reversed' AND reversed_at IS NOT NULL)
-  )
+  CHECK ((status = 'active' AND reversed_at IS NULL) OR (status = 'reversed' AND reversed_at IS NOT NULL))
 );
 CREATE INDEX IF NOT EXISTS idx_allocations_obligation ON obligation_allocations(obligation_id, status);
 CREATE INDEX IF NOT EXISTS idx_allocations_award ON obligation_allocations(scholarship_award_id, status);
+CREATE INDEX IF NOT EXISTS idx_allocations_scholarship_funding ON obligation_allocations(scholarship_funding_id, status);
 CREATE INDEX IF NOT EXISTS idx_allocations_payment ON obligation_allocations(payment_id, status);
 CREATE INDEX IF NOT EXISTS idx_allocations_sponsorship ON obligation_allocations(sponsorship_agreement_id, status);
-CREATE TRIGGER IF NOT EXISTS trg_allocations_money_scale_insert
-BEFORE INSERT ON obligation_allocations
-WHEN NEW.amount <> CAST(NEW.amount AS INTEGER)
-BEGIN SELECT RAISE(ABORT, 'allocation amount must be a whole number of AFN'); END;
+CREATE INDEX IF NOT EXISTS idx_allocations_sponsorship_receipt ON obligation_allocations(sponsorship_receipt_id, status);
 
-CREATE TABLE IF NOT EXISTS sponsorship_agreements ( 
-  id             TEXT PRIMARY KEY, 
-  donor_id       TEXT NOT NULL REFERENCES donors(id) ON DELETE RESTRICT, 
-  student_id     TEXT REFERENCES students(id) ON DELETE SET NULL, 
-  program_id     TEXT REFERENCES programs(id) ON DELETE SET NULL, 
-  monthly_amount INTEGER NOT NULL DEFAULT 0, 
-  start_date     TEXT NOT NULL, 
-  end_date       TEXT NOT NULL, 
-  status         TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','completed','terminated')), 
-  branch_id      TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT, 
-  created_at     TEXT NOT NULL DEFAULT (datetime('now')) 
-);
-CREATE INDEX IF NOT EXISTS idx_sponsorships_donor    ON sponsorship_agreements(donor_id);
-CREATE INDEX IF NOT EXISTS idx_sponsorships_student  ON sponsorship_agreements(student_id);
-
--- Money actually RECEIVED under a sponsorship agreement (owner decision S6).
--- `sponsorship_agreements.monthly_amount` is a promise and settles nothing; a
--- receipt is a donation from the sponsoring donor, earmarked to the agreement.
--- The donation is where the income was recognised, which is why applying a
--- receipt to tuition moves no cash — the same rule that governs scholarships.
 CREATE TABLE IF NOT EXISTS sponsorship_receipts (
-  id            TEXT PRIMARY KEY,
-  agreement_id  TEXT NOT NULL REFERENCES sponsorship_agreements(id) ON DELETE RESTRICT,
-  donation_id   TEXT NOT NULL REFERENCES donations(id) ON DELETE RESTRICT,
-  amount        INTEGER NOT NULL CHECK (amount > 0),
-  branch_id     TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
-  operator_name TEXT,
-  date          TEXT NOT NULL,
-  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  id                         TEXT PRIMARY KEY,
+  agreement_id               TEXT NOT NULL REFERENCES sponsorship_agreements(id) ON DELETE RESTRICT,
+  donation_id                TEXT REFERENCES donations(id) ON DELETE RESTRICT,
+  campaign_funding_entry_id  TEXT REFERENCES campaign_funding_entries(id) ON DELETE RESTRICT,
+  amount                     INTEGER NOT NULL CHECK (amount > 0),
+  branch_id                  TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  operator_name              TEXT,
+  date                       TEXT NOT NULL,
+  created_at                 TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK ((donation_id IS NOT NULL AND campaign_funding_entry_id IS NULL) OR (donation_id IS NULL AND campaign_funding_entry_id IS NOT NULL))
 );
 CREATE INDEX IF NOT EXISTS idx_sponsorship_receipts_agreement ON sponsorship_receipts(agreement_id);
-CREATE INDEX IF NOT EXISTS idx_sponsorship_receipts_donation  ON sponsorship_receipts(donation_id);
-CREATE TRIGGER IF NOT EXISTS trg_sponsorship_receipts_money_scale_insert
+CREATE INDEX IF NOT EXISTS idx_sponsorship_receipts_donation ON sponsorship_receipts(donation_id);
+CREATE INDEX IF NOT EXISTS idx_sponsorship_receipts_campaign_entry ON sponsorship_receipts(campaign_funding_entry_id);
+
+-- Source/branch/target backstops. Application services provide clear errors;
+-- these triggers prevent the same corruption through any other writer.
+CREATE TRIGGER IF NOT EXISTS trg_scholarship_fundings_scope_insert
+BEFORE INSERT ON scholarship_fundings
+WHEN (SELECT branch_id FROM scholarships WHERE id = NEW.scholarship_id) IS NOT NEW.branch_id
+  OR (NEW.donation_id IS NOT NULL AND (SELECT branch_id FROM donations WHERE id = NEW.donation_id) IS NOT NEW.branch_id)
+  OR (NEW.campaign_funding_entry_id IS NOT NULL AND (SELECT branch_id FROM campaign_funding_entries WHERE id = NEW.campaign_funding_entry_id) IS NOT NEW.branch_id)
+  OR (NEW.donation_id IS NOT NULL AND EXISTS (SELECT 1 FROM donation_restrictions r WHERE r.donation_id = NEW.donation_id AND (r.target_kind IS NOT 'scholarship' OR r.scholarship_id IS NOT NEW.scholarship_id)))
+  OR (NEW.campaign_funding_entry_id IS NOT NULL AND (SELECT campaign_id FROM scholarships WHERE id = NEW.scholarship_id) IS NOT (SELECT campaign_id FROM campaign_funding_entries WHERE id = NEW.campaign_funding_entry_id))
+BEGIN SELECT RAISE(ABORT, 'scholarship funding source scope mismatch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_sponsorship_receipts_scope_insert
 BEFORE INSERT ON sponsorship_receipts
-WHEN NEW.amount <> CAST(NEW.amount AS INTEGER)
-BEGIN SELECT RAISE(ABORT, 'sponsorship receipt amount must be a whole number of AFN'); END;
--- The money must come from the donor who signed the agreement. Without this a
--- receipt could book any donor's donation against any sponsorship.
-CREATE TRIGGER IF NOT EXISTS trg_sponsorship_receipts_donor_insert
+WHEN (SELECT branch_id FROM sponsorship_agreements WHERE id = NEW.agreement_id) IS NOT NEW.branch_id
+  OR (NEW.donation_id IS NOT NULL AND (SELECT branch_id FROM donations WHERE id = NEW.donation_id) IS NOT NEW.branch_id)
+  OR (NEW.campaign_funding_entry_id IS NOT NULL AND (SELECT branch_id FROM campaign_funding_entries WHERE id = NEW.campaign_funding_entry_id) IS NOT NEW.branch_id)
+  OR (NEW.donation_id IS NOT NULL AND (SELECT donor_id FROM donations WHERE id = NEW.donation_id) IS NOT (SELECT donor_id FROM sponsorship_agreements WHERE id = NEW.agreement_id))
+  OR (NEW.donation_id IS NOT NULL AND EXISTS (SELECT 1 FROM donation_restrictions r WHERE r.donation_id = NEW.donation_id AND (r.target_kind IS NOT 'sponsorship' OR r.sponsorship_agreement_id IS NOT NEW.agreement_id)))
+  OR (NEW.campaign_funding_entry_id IS NOT NULL AND ((SELECT campaign_id FROM sponsorship_agreements WHERE id = NEW.agreement_id) IS NOT (SELECT campaign_id FROM campaign_funding_entries WHERE id = NEW.campaign_funding_entry_id)
+      OR (SELECT donor_id FROM donations WHERE id = (SELECT source_donation_id FROM campaign_funding_entries WHERE id = NEW.campaign_funding_entry_id)) IS NOT (SELECT donor_id FROM sponsorship_agreements WHERE id = NEW.agreement_id)))
+BEGIN SELECT RAISE(ABORT, 'sponsorship receipt source scope mismatch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_campaign_funding_entries_scope_insert
+BEFORE INSERT ON campaign_funding_entries
+WHEN (SELECT branch_id FROM funding_campaigns WHERE id = NEW.campaign_id) IS NOT NEW.branch_id
+  OR (SELECT branch_id FROM donations WHERE id = NEW.source_donation_id) IS NOT NEW.branch_id
+  OR (NEW.origin_kind = 'restricted_donation' AND NOT EXISTS (SELECT 1 FROM donation_restrictions r WHERE r.donation_id = NEW.source_donation_id AND r.target_kind = 'campaign' AND r.campaign_id = NEW.campaign_id))
+  OR (NEW.origin_kind = 'sponsorship_return' AND (
+       (SELECT agreement_id FROM sponsorship_receipts WHERE id = NEW.source_sponsorship_receipt_id) IS NOT NEW.sponsorship_agreement_id
+       OR (SELECT campaign_id FROM sponsorship_agreements WHERE id = NEW.sponsorship_agreement_id) IS NOT NEW.campaign_id
+       OR COALESCE(
+            (SELECT donation_id FROM sponsorship_receipts WHERE id = NEW.source_sponsorship_receipt_id),
+            (SELECT source_donation_id FROM campaign_funding_entries
+              WHERE id = (SELECT campaign_funding_entry_id FROM sponsorship_receipts WHERE id = NEW.source_sponsorship_receipt_id))
+          ) IS NOT NEW.source_donation_id
+  ))
+BEGIN SELECT RAISE(ABORT, 'campaign funding entry source scope mismatch'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_funding_direct_donation_capacity_insert
+BEFORE INSERT ON scholarship_fundings
+WHEN NEW.donation_id IS NOT NULL AND NEW.amount > (
+  (SELECT amount FROM donations WHERE id = NEW.donation_id)
+  - COALESCE((SELECT SUM(amount) FROM scholarship_fundings WHERE donation_id = NEW.donation_id), 0)
+  - COALESCE((SELECT SUM(amount) FROM sponsorship_receipts WHERE donation_id = NEW.donation_id), 0)
+  - COALESCE((SELECT SUM(amount) FROM campaign_funding_entries WHERE source_donation_id = NEW.donation_id AND origin_kind = 'restricted_donation'), 0)
+)
+BEGIN SELECT RAISE(ABORT, 'donation funding source is over-allocated'); END;
+CREATE TRIGGER IF NOT EXISTS trg_sponsorship_direct_donation_capacity_insert
 BEFORE INSERT ON sponsorship_receipts
-WHEN (SELECT donor_id FROM donations WHERE id = NEW.donation_id)
-  IS NOT (SELECT donor_id FROM sponsorship_agreements WHERE id = NEW.agreement_id)
-BEGIN SELECT RAISE(ABORT, 'a sponsorship receipt must come from the donor who signed the agreement'); END;
+WHEN NEW.donation_id IS NOT NULL AND NEW.amount > (
+  (SELECT amount FROM donations WHERE id = NEW.donation_id)
+  - COALESCE((SELECT SUM(amount) FROM scholarship_fundings WHERE donation_id = NEW.donation_id), 0)
+  - COALESCE((SELECT SUM(amount) FROM sponsorship_receipts WHERE donation_id = NEW.donation_id), 0)
+  - COALESCE((SELECT SUM(amount) FROM campaign_funding_entries WHERE source_donation_id = NEW.donation_id AND origin_kind = 'restricted_donation'), 0)
+)
+BEGIN SELECT RAISE(ABORT, 'donation funding source is over-allocated'); END;
+CREATE TRIGGER IF NOT EXISTS trg_campaign_funding_entry_capacity_insert
+BEFORE INSERT ON campaign_funding_entries
+WHEN NEW.origin_kind = 'restricted_donation' AND NEW.amount > (
+  (SELECT amount FROM donations WHERE id = NEW.source_donation_id)
+  - COALESCE((SELECT SUM(amount) FROM scholarship_fundings WHERE donation_id = NEW.source_donation_id), 0)
+  - COALESCE((SELECT SUM(amount) FROM sponsorship_receipts WHERE donation_id = NEW.source_donation_id), 0)
+  - COALESCE((SELECT SUM(amount) FROM campaign_funding_entries WHERE source_donation_id = NEW.source_donation_id AND origin_kind = 'restricted_donation'), 0)
+)
+BEGIN SELECT RAISE(ABORT, 'donation campaign source is over-allocated'); END;
+CREATE TRIGGER IF NOT EXISTS trg_campaign_funding_return_capacity_insert
+BEFORE INSERT ON campaign_funding_entries
+WHEN NEW.origin_kind = 'sponsorship_return' AND NEW.amount > (
+  (SELECT amount FROM sponsorship_receipts WHERE id = NEW.source_sponsorship_receipt_id)
+  - COALESCE((SELECT SUM(amount) FROM obligation_allocations WHERE sponsorship_receipt_id = NEW.source_sponsorship_receipt_id AND status = 'active'), 0)
+  - COALESCE((SELECT SUM(amount) FROM campaign_funding_entries WHERE source_sponsorship_receipt_id = NEW.source_sponsorship_receipt_id), 0)
+)
+BEGIN SELECT RAISE(ABORT, 'sponsorship receipt return exceeds its available balance'); END;
+CREATE TRIGGER IF NOT EXISTS trg_campaign_funding_source_capacity_scholarship_insert
+BEFORE INSERT ON scholarship_fundings
+WHEN NEW.campaign_funding_entry_id IS NOT NULL AND NEW.amount > (
+  (SELECT amount FROM campaign_funding_entries WHERE id = NEW.campaign_funding_entry_id)
+  - COALESCE((SELECT SUM(amount) FROM scholarship_fundings WHERE campaign_funding_entry_id = NEW.campaign_funding_entry_id), 0)
+  - COALESCE((SELECT SUM(amount) FROM sponsorship_receipts WHERE campaign_funding_entry_id = NEW.campaign_funding_entry_id), 0)
+)
+BEGIN SELECT RAISE(ABORT, 'campaign funding source is over-allocated'); END;
+CREATE TRIGGER IF NOT EXISTS trg_campaign_funding_source_capacity_sponsorship_insert
+BEFORE INSERT ON sponsorship_receipts
+WHEN NEW.campaign_funding_entry_id IS NOT NULL AND NEW.amount > (
+  (SELECT amount FROM campaign_funding_entries WHERE id = NEW.campaign_funding_entry_id)
+  - COALESCE((SELECT SUM(amount) FROM scholarship_fundings WHERE campaign_funding_entry_id = NEW.campaign_funding_entry_id), 0)
+  - COALESCE((SELECT SUM(amount) FROM sponsorship_receipts WHERE campaign_funding_entry_id = NEW.campaign_funding_entry_id), 0)
+)
+BEGIN SELECT RAISE(ABORT, 'campaign funding source is over-allocated'); END;
 
-CREATE TABLE IF NOT EXISTS impact_metrics ( 
-  id            TEXT PRIMARY KEY, 
-  name          TEXT NOT NULL, 
-  category      TEXT NOT NULL CHECK (category IN ('academic','social','economic','demographic')), 
-  target_value  REAL NOT NULL DEFAULT 0, 
-  current_value REAL NOT NULL DEFAULT 0, 
-  period        TEXT NOT NULL, 
-  branch_id     TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT, 
-  created_at    TEXT NOT NULL DEFAULT (datetime('now')) 
+CREATE TRIGGER IF NOT EXISTS trg_campaign_funding_entries_immutable_update
+BEFORE UPDATE ON campaign_funding_entries
+BEGIN SELECT RAISE(ABORT, 'campaign funding entries cannot be modified'); END;
+CREATE TRIGGER IF NOT EXISTS trg_campaign_funding_entries_immutable_delete
+BEFORE DELETE ON campaign_funding_entries
+BEGIN SELECT RAISE(ABORT, 'campaign funding entries cannot be deleted'); END;
+CREATE TRIGGER IF NOT EXISTS trg_scholarship_fundings_immutable_update
+BEFORE UPDATE ON scholarship_fundings
+BEGIN SELECT RAISE(ABORT, 'scholarship funding facts cannot be modified'); END;
+CREATE TRIGGER IF NOT EXISTS trg_scholarship_fundings_immutable_delete
+BEFORE DELETE ON scholarship_fundings
+BEGIN SELECT RAISE(ABORT, 'scholarship funding facts cannot be deleted'); END;
+CREATE TRIGGER IF NOT EXISTS trg_sponsorship_receipts_immutable_update
+BEFORE UPDATE ON sponsorship_receipts
+BEGIN SELECT RAISE(ABORT, 'sponsorship receipt facts cannot be modified'); END;
+CREATE TRIGGER IF NOT EXISTS trg_sponsorship_receipts_immutable_delete
+BEFORE DELETE ON sponsorship_receipts
+BEGIN SELECT RAISE(ABORT, 'sponsorship receipt facts cannot be deleted'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_scholarship_awards_scope_insert
+BEFORE INSERT ON scholarship_awards
+WHEN (SELECT branch_id FROM scholarships WHERE id = NEW.scholarship_id) IS NOT NEW.branch_id
+   OR (SELECT branch_id FROM students WHERE id = NEW.student_id) IS NOT NEW.branch_id
+BEGIN SELECT RAISE(ABORT, 'scholarship award branch scope mismatch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_scholarship_awards_fund_capacity_insert
+BEFORE INSERT ON scholarship_awards
+WHEN NEW.status = 'active' AND NEW.amount > (
+  COALESCE((SELECT SUM(amount) FROM scholarship_fundings WHERE scholarship_id = NEW.scholarship_id), 0)
+  - COALESCE((SELECT SUM(amount) FROM scholarship_awards WHERE scholarship_id = NEW.scholarship_id AND status = 'active'), 0)
+  - COALESCE((SELECT SUM(a.amount) FROM obligation_allocations a JOIN scholarship_awards aw ON aw.id = a.scholarship_award_id
+               WHERE aw.scholarship_id = NEW.scholarship_id AND aw.status = 'closed' AND a.status = 'active'), 0)
+)
+BEGIN SELECT RAISE(ABORT, 'scholarship fund has insufficient available money'); END;
+CREATE TRIGGER IF NOT EXISTS trg_allocations_aid_source_scope_insert
+BEFORE INSERT ON obligation_allocations
+WHEN (NEW.source_kind = 'scholarship' AND (
+       (SELECT scholarship_id FROM scholarship_fundings WHERE id = NEW.scholarship_funding_id) IS NOT (SELECT scholarship_id FROM scholarship_awards WHERE id = NEW.scholarship_award_id)
+       OR (SELECT branch_id FROM scholarship_awards WHERE id = NEW.scholarship_award_id) IS NOT (SELECT branch_id FROM student_obligations WHERE id = NEW.obligation_id)
+       OR (SELECT student_id FROM scholarship_awards WHERE id = NEW.scholarship_award_id) IS NOT (SELECT student_id FROM student_obligations WHERE id = NEW.obligation_id)
+     ))
+  OR (NEW.source_kind = 'sponsorship' AND (
+       (SELECT agreement_id FROM sponsorship_receipts WHERE id = NEW.sponsorship_receipt_id) IS NOT NEW.sponsorship_agreement_id
+       OR (SELECT branch_id FROM sponsorship_agreements WHERE id = NEW.sponsorship_agreement_id) IS NOT (SELECT branch_id FROM student_obligations WHERE id = NEW.obligation_id)
+       OR ((SELECT student_id FROM sponsorship_agreements WHERE id = NEW.sponsorship_agreement_id) IS NOT NULL
+           AND (SELECT student_id FROM sponsorship_agreements WHERE id = NEW.sponsorship_agreement_id) IS NOT (SELECT student_id FROM student_obligations WHERE id = NEW.obligation_id))
+     ))
+BEGIN SELECT RAISE(ABORT, 'aid allocation source scope mismatch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_allocations_scholarship_source_capacity_insert
+BEFORE INSERT ON obligation_allocations
+WHEN NEW.source_kind = 'scholarship' AND NEW.status = 'active' AND NEW.amount > (
+  (SELECT amount FROM scholarship_fundings WHERE id = NEW.scholarship_funding_id)
+  - COALESCE((SELECT SUM(amount) FROM obligation_allocations WHERE scholarship_funding_id = NEW.scholarship_funding_id AND status = 'active'), 0)
+)
+BEGIN SELECT RAISE(ABORT, 'scholarship funding source is exhausted'); END;
+CREATE TRIGGER IF NOT EXISTS trg_allocations_sponsorship_source_capacity_insert
+BEFORE INSERT ON obligation_allocations
+WHEN NEW.source_kind = 'sponsorship' AND NEW.status = 'active' AND NEW.amount > (
+  (SELECT amount FROM sponsorship_receipts WHERE id = NEW.sponsorship_receipt_id)
+  - COALESCE((SELECT SUM(amount) FROM obligation_allocations WHERE sponsorship_receipt_id = NEW.sponsorship_receipt_id AND status = 'active'), 0)
+  - COALESCE((SELECT SUM(amount) FROM campaign_funding_entries WHERE source_sponsorship_receipt_id = NEW.sponsorship_receipt_id), 0)
+)
+BEGIN SELECT RAISE(ABORT, 'sponsorship receipt source is exhausted'); END;
+CREATE TRIGGER IF NOT EXISTS trg_allocations_award_capacity_insert
+BEFORE INSERT ON obligation_allocations
+WHEN NEW.source_kind = 'scholarship' AND NEW.status = 'active' AND NEW.amount > (
+  (SELECT amount FROM scholarship_awards WHERE id = NEW.scholarship_award_id)
+  - COALESCE((SELECT SUM(amount) FROM obligation_allocations WHERE scholarship_award_id = NEW.scholarship_award_id AND status = 'active'), 0)
+)
+BEGIN SELECT RAISE(ABORT, 'scholarship award is exhausted'); END;
+CREATE TRIGGER IF NOT EXISTS trg_allocations_closed_award_reverse
+BEFORE UPDATE OF status ON obligation_allocations
+WHEN OLD.source_kind = 'scholarship' AND OLD.status = 'active' AND NEW.status = 'reversed'
+ AND (SELECT status FROM scholarship_awards WHERE id = OLD.scholarship_award_id) IS NOT 'active'
+BEGIN SELECT RAISE(ABORT, 'a closed scholarship award cannot reverse an application'); END;
+CREATE TRIGGER IF NOT EXISTS trg_scholarship_awards_immutable_update
+BEFORE UPDATE ON scholarship_awards
+WHEN NOT (
+  OLD.status = 'active' AND NEW.status = 'closed'
+  AND NEW.id IS OLD.id AND NEW.scholarship_id IS OLD.scholarship_id AND NEW.student_id IS OLD.student_id
+  AND NEW.amount IS OLD.amount AND NEW.award_date IS OLD.award_date AND NEW.notes IS OLD.notes
+  AND NEW.branch_id IS OLD.branch_id AND NEW.closed_at IS NOT NULL AND NEW.closed_by IS NOT NULL
+  AND NEW.close_reason IS NOT NULL AND length(trim(NEW.close_reason)) >= 8
+)
+BEGIN SELECT RAISE(ABORT, 'scholarship award facts are immutable except authorized closure'); END;
+CREATE TRIGGER IF NOT EXISTS trg_scholarship_awards_immutable_delete
+BEFORE DELETE ON scholarship_awards
+BEGIN SELECT RAISE(ABORT, 'scholarship award facts cannot be deleted'); END;
+CREATE TRIGGER IF NOT EXISTS trg_allocations_immutable_update
+BEFORE UPDATE ON obligation_allocations
+WHEN NOT (
+  OLD.status = 'active' AND NEW.status = 'reversed'
+  AND NEW.id IS OLD.id AND NEW.obligation_id IS OLD.obligation_id AND NEW.amount IS OLD.amount
+  AND NEW.source_kind IS OLD.source_kind AND NEW.payment_id IS OLD.payment_id
+  AND NEW.scholarship_award_id IS OLD.scholarship_award_id AND NEW.scholarship_funding_id IS OLD.scholarship_funding_id
+  AND NEW.sponsorship_agreement_id IS OLD.sponsorship_agreement_id AND NEW.sponsorship_receipt_id IS OLD.sponsorship_receipt_id
+  AND NEW.operator_name IS OLD.operator_name AND NEW.date IS OLD.date AND NEW.created_at IS OLD.created_at
+  AND NEW.reversed_at IS NOT NULL AND NEW.reversed_by IS NOT NULL AND NEW.reversal_reason IS NOT NULL
+)
+BEGIN SELECT RAISE(ABORT, 'allocation facts are immutable except reversal'); END;
+CREATE TRIGGER IF NOT EXISTS trg_allocations_immutable_delete
+BEFORE DELETE ON obligation_allocations
+BEGIN SELECT RAISE(ABORT, 'allocation facts cannot be deleted'); END;
+CREATE TRIGGER IF NOT EXISTS trg_sponsorship_terminal_integrity_update
+BEFORE UPDATE ON sponsorship_agreements
+WHEN OLD.status <> 'active'
+  OR (NEW.status IN ('completed','terminated') AND EXISTS (
+    SELECT 1
+      FROM sponsorship_receipts r
+     WHERE r.agreement_id = OLD.id
+       AND r.amount > COALESCE((SELECT SUM(a.amount) FROM obligation_allocations a WHERE a.sponsorship_receipt_id = r.id AND a.status = 'active'), 0)
+                    + COALESCE((SELECT SUM(c.amount) FROM campaign_funding_entries c WHERE c.source_sponsorship_receipt_id = r.id), 0)
+  ))
+BEGIN SELECT RAISE(ABORT, 'terminal sponsorship requires every receipt balance to be resolved'); END;
+
+CREATE TABLE IF NOT EXISTS impact_reports (
+  id              TEXT PRIMARY KEY,
+  title           TEXT NOT NULL,
+  scope_kind      TEXT NOT NULL CHECK (scope_kind IN ('branch','donor','campaign')),
+  donor_id        TEXT REFERENCES donors(id) ON DELETE RESTRICT,
+  campaign_id     TEXT REFERENCES funding_campaigns(id) ON DELETE RESTRICT,
+  period_key      TEXT NOT NULL,
+  period_from     TEXT NOT NULL,
+  period_to       TEXT NOT NULL,
+  generated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  generated_by    TEXT REFERENCES users(id) ON DELETE SET NULL,
+  metrics         TEXT NOT NULL CHECK (json_valid(metrics) AND json_type(metrics) = 'array'),
+  narrative       TEXT NOT NULL,
+  idempotency_key TEXT,
+  branch_id       TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  CHECK (
+       (scope_kind = 'branch' AND donor_id IS NULL AND campaign_id IS NULL)
+    OR (scope_kind = 'donor' AND donor_id IS NOT NULL AND campaign_id IS NULL)
+    OR (scope_kind = 'campaign' AND campaign_id IS NOT NULL AND donor_id IS NULL)
+  ),
+  CHECK (period_from <= period_to)
 );
-CREATE INDEX IF NOT EXISTS idx_impact_metrics_br     ON impact_metrics(branch_id);
+CREATE INDEX IF NOT EXISTS idx_impact_reports_branch_generated ON impact_reports(branch_id, generated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_impact_reports_scope ON impact_reports(scope_kind, donor_id, campaign_id, period_key);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_impact_reports_idempotency ON impact_reports(idempotency_key) WHERE idempotency_key IS NOT NULL;
+CREATE TRIGGER IF NOT EXISTS trg_impact_reports_campaign_scope_insert
+BEFORE INSERT ON impact_reports
+WHEN NEW.scope_kind = 'campaign' AND (SELECT branch_id FROM funding_campaigns WHERE id = NEW.campaign_id) IS NOT NEW.branch_id
+BEGIN SELECT RAISE(ABORT, 'impact report campaign belongs to another branch'); END;
+CREATE TRIGGER IF NOT EXISTS trg_impact_reports_immutable_update
+BEFORE UPDATE ON impact_reports
+BEGIN SELECT RAISE(ABORT, 'impact report snapshots cannot be modified'); END;
 
-CREATE TABLE IF NOT EXISTS impact_reports ( 
-  id           TEXT PRIMARY KEY, 
-  title        TEXT NOT NULL, 
-  donor_id     TEXT REFERENCES donors(id) ON DELETE SET NULL, 
-  campaign_id  TEXT REFERENCES funding_campaigns(id) ON DELETE SET NULL, 
-  period       TEXT NOT NULL, 
-  generated_at TEXT NOT NULL DEFAULT (datetime('now')), 
-  metrics      TEXT, 
-  narrative    TEXT, 
-  status       TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','published','sent')), 
-  branch_id    TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT 
-);
-CREATE INDEX IF NOT EXISTS idx_impact_reports_br     ON impact_reports(branch_id);
-
-CREATE TABLE IF NOT EXISTS success_stories ( 
-  id           TEXT PRIMARY KEY, 
-  student_id   TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE, 
-  title        TEXT NOT NULL, 
-  content      TEXT NOT NULL, 
-  photo_url    TEXT, 
-  published_at TEXT, 
-  tags         TEXT NOT NULL DEFAULT '[]', 
-  branch_id    TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT, 
-  created_at   TEXT NOT NULL DEFAULT (datetime('now')) 
-);
-CREATE INDEX IF NOT EXISTS idx_success_stories_stu   ON success_stories(student_id);
-
--- ============================================================================
 -- WORKFLOW, RULES & EVENTS
 -- ============================================================================
 -- Declarative operational automation and the domain event log.

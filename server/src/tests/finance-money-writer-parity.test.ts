@@ -132,7 +132,7 @@ function latestRefundablePaymentId(studentId: string): string {
 /** Everything a donation is supposed to move, read together. */
 const donationState = () => ({
   donations: Number((db.prepare('SELECT COUNT(*) c FROM donations').get() as { c: number }).c),
-  raised: Number((db.prepare('SELECT raised_amount r FROM funding_campaigns WHERE id = ?').get(CAMPAIGN) as { r: number }).r),
+  raised: Number((db.prepare('SELECT COALESCE(SUM(amount), 0) r FROM donations WHERE campaign_id = ?').get(CAMPAIGN) as { r: number }).r),
   income: Number((db.prepare("SELECT COALESCE(SUM(amount),0) s FROM financial_transactions WHERE category='donation'").get() as { s: number }).s),
 });
 
@@ -162,8 +162,8 @@ beforeAll(async () => {
   const pw = await hashPassword('pw');
   db.prepare("INSERT OR IGNORE INTO donors (id, full_name, type) VALUES (?, 'FMWP Donor', 'individual')").run(DONOR);
   db.prepare(
-    `INSERT OR IGNORE INTO funding_campaigns (id, name, donor_id, target_amount, raised_amount, start_date, status, branch_id)
-     VALUES (?, 'FMWP Campaign', ?, 1000000, 0, ?, 'active', ?)`,
+    `INSERT OR IGNORE INTO funding_campaigns (id, name, donor_id, target_amount, start_date, status, branch_id)
+     VALUES (?, 'FMWP Campaign', ?, 1000000, ?, 'active', ?)`,
   ).run(CAMPAIGN, DONOR, today(), BR);
   for (const [uid, role] of [['fmwp_own', 'owner'], ['fmwp_fin', 'finance']] as const) {
     db.prepare(

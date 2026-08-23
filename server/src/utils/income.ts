@@ -12,8 +12,8 @@ import {
 // ── Performance: Module-level Prepared Statements ──────────────────────────
 const stmtInsertIncomeTx = db.prepare(
   `INSERT INTO financial_transactions
-     (id, type, category, amount, date, description, reference_id, payment_id, operator_name, operator_role, branch_id)
-   VALUES (?, 'income', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     (id, type, category, amount, date, description, reference_id, payment_id, donation_id, operator_name, operator_role, branch_id)
+   VALUES (?, 'income', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
 
 const stmtInsertSavingTx = db.prepare(
@@ -29,6 +29,10 @@ interface RecordIncomeParams {
   description: string;
   referenceId?: string | null;
   paymentId?: string | null;
+  /** Donation identity when this income is the mandatory cash fact for a donation. */
+  donationId?: string | null;
+  /** Caller-supplied only for a deferred one-to-one fact pair such as donation + income. */
+  transactionId?: string;
   operatorName: string;
   /** Position held at write time (identity role code) — preserved for traceability. */
   operatorRole?: string | null;
@@ -41,7 +45,7 @@ percentage into the saving account.
 
 CRITICAL: This function MUST be called from within a db.transaction().
 */
-export function recordIncome(params: RecordIncomeParams): { savingAmount: number } {
+export function recordIncome(params: RecordIncomeParams): { savingAmount: number; transactionId: string } {
   // PHASE 3 SAFETY: Verify we are inside a transaction.
   if (!db.inTransaction) {
     throw new Error(
@@ -55,15 +59,17 @@ export function recordIncome(params: RecordIncomeParams): { savingAmount: number
   }
 
   const date = params.date || today();
+  const transactionId = params.transactionId ?? id('tx');
 
   stmtInsertIncomeTx.run(
-    id('tx'),
+    transactionId,
     params.category,
     normalizedAmount,
     date,
     params.description,
     params.referenceId ?? null,
     params.paymentId ?? null,
+    params.donationId ?? null,
     params.operatorName,
     params.operatorRole ?? null,
     params.branchId
@@ -148,5 +154,5 @@ export function recordIncome(params: RecordIncomeParams): { savingAmount: number
     );
   }
 
-  return { savingAmount };
+  return { savingAmount, transactionId };
 }

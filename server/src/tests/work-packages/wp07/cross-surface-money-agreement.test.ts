@@ -18,6 +18,7 @@
  * cash-flow only) and the per-term report catalog metrics.
  */
 import { bearerFor, seedUser } from '../../support/identity.js';
+import { seedLinkedDonation } from '../../support/funding.js';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
@@ -92,8 +93,8 @@ beforeEach(() => {
 
   scholarshipId = `${key}_sch`;
   db.prepare(
-    `INSERT INTO scholarships (id, name, donor_id, total_budget, allocated_amount, branch_id)
-     VALUES (?, 'Cross-surface fund', ?, 50000, 0, ?)`,
+    `INSERT INTO scholarships (id, name, donor_id, total_budget, branch_id)
+     VALUES (?, 'Cross-surface fund', ?, 50000, ?)`,
   ).run(scholarshipId, donorId, branch);
 
   agreementId = `${key}_spon`;
@@ -112,12 +113,11 @@ const get = (url: string) => supertest(app).get(url).set(owner);
 
 /** Sponsorship receipts are backed by donation rows (a promise settles nothing). */
 function seedDonation(amount: number): string {
-  const id = `${key}_don${++seq}`;
-  db.prepare(
-    `INSERT INTO donations (id, donor_id, amount, date, receipt_no, branch_id, idempotency_key)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(id, donorId, amount, today(), `DON-${id.slice(-8)}`, branch, id);
-  return id;
+  const donationId = `${key}_don${++seq}`;
+  return seedLinkedDonation(db, {
+    id: donationId, donorId, amount, date: today(), receiptNo: `DON-${donationId.slice(-8)}`,
+    branchId: branch, idempotencyKey: donationId,
+  });
 }
 
 describe('WP-07 · TR4-R13 — every surface agrees for cash + refund + scholarship + sponsorship', () => {
@@ -133,11 +133,14 @@ describe('WP-07 · TR4-R13 — every surface agrees for cash + refund + scholars
 
     const donation = await post('/api/funding/donations', { donorId, amount: SCHOLARSHIP }).expect(201);
     await post(`/api/funding/scholarships/${scholarshipId}/fundings`, { donationId: donation.body.id, amount: SCHOLARSHIP }).expect(201);
+    const scholarshipFundingId = (db.prepare('SELECT id FROM scholarship_fundings WHERE donation_id = ?').get(donation.body.id) as { id: string }).id;
     const awarded = await post('/api/funding/scholarships/award', { scholarshipId, studentId, amount: SCHOLARSHIP }).expect(201);
-    await post(`/api/funding/scholarship-awards/${awarded.body.id}/allocations`, { obligationId, amount: SCHOLARSHIP }).expect(201);
+    await post(`/api/funding/scholarship-awards/${awarded.body.id}/allocations`, { obligationId, scholarshipFundingId, amount: SCHOLARSHIP }).expect(201);
 
-    await post(`/api/funding/sponsorships/${agreementId}/receipts`, { donationId: seedDonation(SPONSORSHIP), amount: SPONSORSHIP }).expect(201);
-    await post(`/api/funding/sponsorships/${agreementId}/allocations`, { obligationId, amount: SPONSORSHIP }).expect(201);
+    const sponsorshipDonationId = seedDonation(SPONSORSHIP);
+    await post(`/api/funding/sponsorships/${agreementId}/receipts`, { donationId: sponsorshipDonationId, amount: SPONSORSHIP }).expect(201);
+    const sponsorshipReceiptId = (db.prepare('SELECT id FROM sponsorship_receipts WHERE donation_id = ?').get(sponsorshipDonationId) as { id: string }).id;
+    await post(`/api/funding/sponsorships/${agreementId}/allocations`, { obligationId, sponsorshipReceiptId, amount: SPONSORSHIP }).expect(201);
 
     // ── database truth ──
     const position = getObligationPosition(db, obligationId);

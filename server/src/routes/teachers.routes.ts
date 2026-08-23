@@ -436,7 +436,11 @@ teachersRouter.delete('/:id', requirePermission('Teacher.Delete', 'Teacher.Edit'
 
 teachersRouter.get('/:id/computed-salary', requirePermission('Payroll.View'), ah(async (req, res) => {
   const teacher = requireTeacher(req, req.params.id);
-  const suppliedMonth = (req.query as Record<string, unknown>).month;
+  const query = req.query as Record<string, unknown>;
+  const suppliedMonth = query.month ?? query.monthName;
+  if (query.month !== undefined && query.monthName !== undefined && query.month !== query.monthName) {
+    throw new HttpError(400, 'month and monthName must identify the same payroll period.');
+  }
   const periodKey = suppliedMonth === undefined ? currentJalaliPeriodKey() : requirePayrollPeriod(suppliedMonth);
   // The payroll engine reports the period-correct Skill workload
   // (skillCount / targetSkills / shortfall / excess) for EVERY contract
@@ -511,7 +515,11 @@ teachersRouter.get('/:id/evaluations', requirePermission('Teacher.View'), ah(asy
 
 teachersRouter.get('/:id/salary-status', requirePermission('Payroll.Edit', 'Payroll.View', 'Teacher.View'), ah(async (req, res) => {
   const teacher = requireTeacher(req, req.params.id);
-  const suppliedMonth = (req.query as Record<string, unknown>).month;
+  const query = req.query as Record<string, unknown>;
+  const suppliedMonth = query.month ?? query.monthName;
+  if (query.month !== undefined && query.monthName !== undefined && query.month !== query.monthName) {
+    throw new HttpError(400, 'month and monthName must identify the same payroll period.');
+  }
   const periodKey = suppliedMonth === undefined ? currentJalaliPeriodKey() : requirePayrollPeriod(suppliedMonth);
   const dueInfo = computeTeacherPayroll(teacher, periodKey);
   const paid = sumPaidForPeriod(db, teacher.id, periodKey);

@@ -1,127 +1,85 @@
 #!/usr/bin/env node
 /**
- * FND-1/2/3 mutation harness — funding commitment and target amount integrity.
+ * WP-09 funding monetary-boundary mutation harness.
  *
- * Scope is deliberately narrow: only the money boundary introduced by this
- * audit (the sponsorship monthly amount on create and update, and the campaign
- * target amount on update). Already-frozen logic is not mutated.
- *
- * KILLED = the regression suite failed. Survivors may only be classified
- * equivalent BY EXECUTION, never by inspection.
+ * Each mutation removes a live validation or preservation branch from the
+ * canonical Funding router. The WP-09 amount authority suite must fail. The
+ * harness restores the source after every attempt.
  */
-import { readFileSync, writeFileSync, copyFileSync, unlinkSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
 const ROUTE = 'src/routes/funding.routes.ts';
-const TEST = 'src/tests/funding-amount-integrity.test.ts';
+const TEST = 'src/tests/work-packages/wp09/funding-amount-integrity.test.ts';
+const ONLY = process.argv.includes('--only') ? process.argv[process.argv.indexOf('--only') + 1] : null;
 
-// PROVEN-EQUIVALENT mutants, established by execution rather than inspection.
-// F10 and F11 delete the route-level status whitelist. They survive because
-// they are not the authoritative guard: `sponsorship_agreements.status` and
-// `funding_campaigns.status` each carry a schema CHECK constraint. Verified by
-// running the F10 mutant against a real request — PATCH with status 'nonsense'
-// still returned HTTP 400 ("Invalid data provided") from the constraint and the
-// stored status remained 'active'. The route check is defence-in-depth that
-// yields the clearer message, so removing it changes no observable outcome.
-//
-// F1, F3, F7 — PROVEN EQUIVALENT, TR-4 review by execution (2026-08-22):
-// applying each mutant and creating/updating with numeric strings — including
-// the whitespace edge ' 1250 ' — produced byte-identical observations under
-// mutant and baseline: rows stored {1250, typeof 'integer'}. The columns are
-// INTEGER-affinity, only assertMoney-valid numerals can reach the mutated
-// writes (invalid values 400 at the validator the mutants do not touch), and
-// every valid numeral affinity-coerces; every reader maps through Number().
-// Durable pins: the suite's numeric-string typeof tests.
-// Evidence: docs/work-packages/WP-07-TR4-independent-review-verdicts.md.
-const EQUIVALENT = new Set(['F1', 'F3', 'F7', 'F10', 'F11']);
+// F1 is proven equivalent by execution: validation runs before the mutated
+// write, so every reachable value is a whole-AFN number or numeric string and
+// SQLite INTEGER affinity persists both representations identically. F3 is the
+// discriminating mutation for removal of the actual validation boundary.
+const EQUIVALENT = new Set(['F1']);
 
 const MUTANTS = [
-  // ── FND-1: the created sponsorship must persist the validated amount ──
-  ['F1', 'insert the raw body value instead of the validated one (the original defect)', ROUTE,
-   '        newId, donorId, studentId || null, programId || null, validatedMonthly,',
-   '        newId, donorId, studentId || null, programId || null, monthlyAmount,'],
-
-  // ── FND-2: PATCH /sponsorships/:id ──
-  ['F2', 'drop validation on the sponsorship update (the original defect)', ROUTE,
-   `    const validatedMonthly =
-      monthlyAmount === undefined || monthlyAmount === null
-        ? existing.monthly_amount
-        : assertMoney(monthlyAmount, 'monthly sponsorship amount');`,
-   '    const validatedMonthly = monthlyAmount ?? existing.monthly_amount;'],
-  ['F3', 'sponsorship update validates but then writes the raw value', ROUTE,
-   '      validatedMonthly, endDate ?? existing.end_date, ',
-   '      monthlyAmount ?? existing.monthly_amount, endDate ?? existing.end_date, '],
-  ['F4', 'sponsorship update coerces instead of validating', ROUTE,
-   "        : assertMoney(monthlyAmount, 'monthly sponsorship amount');",
-   '        : Number(monthlyAmount);'],
-  ['F5', 'sponsorship update treats an absent field as zero rather than unchanged', ROUTE,
-   `      monthlyAmount === undefined || monthlyAmount === null
-        ? existing.monthly_amount`,
-   `      monthlyAmount === undefined || monthlyAmount === null
-        ? 0`],
-
-  // ── FND-3: PATCH /campaigns/:id ──
-  ['F6', 'drop validation on the campaign update (the original defect)', ROUTE,
-   `    const validatedTarget =
-      targetAmount === undefined || targetAmount === null
-        ? existing.target_amount
-        : assertMoney(targetAmount, 'campaign target amount');`,
-   '    const validatedTarget = targetAmount ?? existing.target_amount;'],
-  ['F7', 'campaign update validates but then writes the raw value', ROUTE,
-   '      name ?? existing.name, description ?? existing.description, validatedTarget,',
-   '      name ?? existing.name, description ?? existing.description, targetAmount ?? existing.target_amount,'],
-  ['F8', 'campaign update coerces instead of validating', ROUTE,
-   "        : assertMoney(targetAmount, 'campaign target amount');",
-   '        : Number(targetAmount);'],
-  ['F9', 'campaign update treats an absent field as zero rather than unchanged', ROUTE,
-   `      targetAmount === undefined || targetAmount === null
-        ? existing.target_amount`,
-   `      targetAmount === undefined || targetAmount === null
-        ? 0`],
-
-  // ── lifecycle guards the suite also pins ──
-  ['F10', 'accept any sponsorship status', ROUTE,
-   "    if (status && !['active', 'completed', 'terminated'].includes(status)) {",
-   '    if (false) {'],
-  ['F11', 'accept any campaign status', ROUTE,
-   "    if (status && !['active', 'completed', 'cancelled'].includes(status)) {",
-   '    if (false) {'],
+  {
+    id: 'F1',
+    invariant: 'sponsorship PATCH validates a supplied monthly promise',
+    find: ": assertMoney(body.monthlyAmount, 'monthly sponsorship amount');",
+    replace: ': (body.monthlyAmount as number);',
+  },
+  {
+    id: 'F2',
+    invariant: 'sponsorship PATCH preserves an omitted monthly promise',
+    find: "body.monthlyAmount === undefined ? Number(existing.monthly_amount) : assertMoney(body.monthlyAmount, 'monthly sponsorship amount')",
+    replace: "body.monthlyAmount === undefined ? 0 : assertMoney(body.monthlyAmount, 'monthly sponsorship amount')",
+  },
+  {
+    id: 'F3',
+    invariant: 'campaign PATCH validates a supplied target',
+    find: ": assertMoney(body.targetAmount, 'campaign target amount');",
+    replace: ': (body.targetAmount as number);',
+  },
+  {
+    id: 'F4',
+    invariant: 'campaign PATCH preserves an omitted target',
+    find: "body.targetAmount === undefined ? Number(existing.target_amount) : assertMoney(body.targetAmount, 'campaign target amount')",
+    replace: "body.targetAmount === undefined ? 0 : assertMoney(body.targetAmount, 'campaign target amount')",
+  },
 ];
 
-const only = process.argv.includes('--only') ? process.argv[process.argv.indexOf('--only') + 1] : null;
-const originals = new Map();
-for (const f of [ROUTE]) originals.set(f, readFileSync(f, 'utf8'));
-const backups = new Map();
-for (const f of [ROUTE]) { const b = `/tmp/${f.replace(/\W/g, '_')}.bak`; copyFileSync(f, b); backups.set(f, b); }
-const restoreAll = () => { for (const [f, src] of originals) writeFileSync(f, src); };
-
+const selected = ONLY ? MUTANTS.filter((mutant) => mutant.id === ONLY) : MUTANTS;
+if (!selected.length) {
+  console.error(`No mutant matches --only ${ONLY}.`);
+  process.exit(2);
+}
+const original = readFileSync(ROUTE, 'utf8');
+const restore = () => writeFileSync(ROUTE, original);
 const results = [];
 try {
-  for (const [id, desc, file, find, repl] of MUTANTS) {
-    if (only && id !== only) continue;
-    const src = originals.get(file);
-    const hits = src.split(find).length - 1;
+  for (const mutant of selected) {
+    const hits = original.split(mutant.find).length - 1;
     if (hits !== 1) {
-      results.push([id, desc, 'INVALID']);
-      console.log(`${id.padEnd(4)} ${desc.padEnd(72)} INVALID (anchor matched ${hits}x)`);
+      results.push({ ...mutant, status: 'INVALID' });
+      console.log(`${mutant.id} INVALID ${mutant.invariant} (anchor ${hits}x)`);
       continue;
     }
-    writeFileSync(file, src.replace(find, repl));
-    let verdict;
+    writeFileSync(ROUTE, original.replace(mutant.find, mutant.replace));
     try {
       execSync(`rm -f src/tests/test.sqlite*; npx vitest run --no-file-parallelism ${TEST}`, { stdio: 'pipe', timeout: 180000 });
-      verdict = '*** SURVIVED ***';
-    } catch { verdict = 'KILLED'; }
-    results.push([id, desc, verdict]);
-    console.log(`${id.padEnd(4)} ${desc.padEnd(72)} ${verdict}`);
-    restoreAll();
+      const status = EQUIVALENT.has(mutant.id) ? 'EQUIVALENT' : 'SURVIVED';
+      results.push({ ...mutant, status });
+      console.log(`${mutant.id} ${status} ${mutant.invariant}`);
+    } catch {
+      results.push({ ...mutant, status: 'KILLED' });
+      console.log(`${mutant.id} KILLED ${mutant.invariant}`);
+    } finally {
+      restore();
+    }
   }
 } finally {
-  restoreAll();
-  for (const b of backups.values()) if (existsSync(b)) unlinkSync(b);
+  restore();
 }
-const equivalent = results.filter((r) => r[2].includes('SURVIVED') && EQUIVALENT.has(r[0]));
-const survived = results.filter((r) => r[2].includes('SURVIVED') && !EQUIVALENT.has(r[0]));
-if (equivalent.length) console.log(`\n${equivalent.length} proven-equivalent mutant(s): ${equivalent.map((r) => r[0]).join(', ')} (see the note at the top of this file)`);
-console.log(`\n${results.filter((r) => r[2] === 'KILLED').length}/${results.length} killed, ${survived.length} survivors`);
-process.exit(survived.length ? 1 : 0);
+const invalid = results.filter((result) => result.status === 'INVALID');
+const survived = results.filter((result) => result.status === 'SURVIVED');
+const equivalent = results.filter((result) => result.status === 'EQUIVALENT');
+console.log(`\n${results.filter((result) => result.status === 'KILLED').length}/${results.length - equivalent.length} killed, ${equivalent.length} equivalent, ${survived.length} survivors, ${invalid.length} invalid`);
+process.exit(survived.length || invalid.length ? 1 : 0);

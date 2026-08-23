@@ -8,7 +8,7 @@ Validated by `npm run audit:registries`.
 **Executable form.** Metrics consumed by declared reports live in
 `server/src/core/reporting/report-catalog.ts`, where each is defined once with the SQL
 that produces it. This document is the human-readable register; that file is what runs.
-A report names metric ids and never carries SQL, so a metric cannot be computed two ways.
+A report names metric ids and never carries SQL, so a metric cannot be computed two ways. Source-traceable Funding & Impact snapshots are the deliberate specialized exception: `server/src/core/impact/impact-reporting-service.ts` owns their donor/campaign graph because the generic report engine accepts branch scope only; it must not be copied into a route or UI.
 
 | Metric | Formula | Source | Period | Filters | Aggregation | Unit | Precision | Consumers | Test | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -30,6 +30,12 @@ A report names metric ids and never carries SQL, so a metric cannot be computed 
 | Reconciliation variances | four independent differences: amount, cash, saving, budget | `financial_transactions`, `payments`, `finance_accounts`, `budget_lines` | point-in-time | branch scope | difference | AFN | whole AFN (integer) | `/finance/reconciliation`, `/finance/dashboard` | `cash-position-reconciliation.test.ts` | any nonzero integer variance is unhealthy |
 | Teacher payroll paid | `SUM(teacher_salary_ledger.paid_amount)` joined to its linked `financial_transactions` date | teacher salary ledger ⋈ `financial_transactions` | Jalali-derived accounting date range | `status='posted'`, branch scope | sum | AFN | whole AFN (integer) | `payroll-summary` report | `server/src/tests/work-packages/wp08/payroll-certification.review.test.ts` | signed void contra plus voided status leaves reported paid at zero; ledger timestamp is not a reporting boundary |
 | Employee payroll paid | `SUM(employee_salary_ledger.paid_amount)` joined to its linked `financial_transactions` date | employee salary ledger ⋈ `financial_transactions` | Jalali-derived accounting date range | `status='posted'`, branch scope | sum | AFN | whole AFN (integer) | `payroll-summary` report | `server/src/tests/work-packages/wp08/payroll-certification.review.test.ts` | a void removes the payment from the metric; genuine advances remain a payroll payment while their accounting treatment stays non-expense |
+
+
+| Donations received (Impact) | `SUM(donations.amount)` | `donations` | canonical Shamsi-derived date range | branch, optional exact donor/campaign | sum | AFN | whole AFN | `POST /api/impact/reports/generate` | `server/src/tests/work-packages/wp09/impact-period-authority.test.ts` | source identity is direct, never inferred from an aggregate fund |
+| Scholarship aid applied (Impact) | `SUM(active obligation_allocations.amount)` joined through `scholarship_fundings` to the original donation | `obligation_allocations` → `scholarship_fundings` → source | allocation-date range | branch, optional exact donor/campaign | sum | AFN | whole AFN | derived Impact snapshot | `server/src/tests/work-packages/wp09/funding-impact-authority.attack.test.ts` | only an allocation carrying `scholarship_funding_id` is attributable |
+| Sponsorship aid applied (Impact) | `SUM(active obligation_allocations.amount)` joined through `sponsorship_receipts` to the original donation | `obligation_allocations` → `sponsorship_receipts` → source | allocation-date range | branch, optional exact donor/campaign | sum | AFN | whole AFN | derived Impact snapshot | `server/src/tests/work-packages/wp09/sponsorship-money-authority.test.ts` | a promise is excluded; only a received source can be attributed |
+| Students with source-traceable aid applied | `COUNT(DISTINCT student_id)` over active source-aware aid allocations | same source graph | allocation-date range | branch, optional exact donor/campaign | distinct count | count | integer | derived Impact snapshot | `server/src/tests/work-packages/wp09/funding-impact-authority.attack.test.ts` | no branch-wide beneficiary pooling in donor/campaign reports |
 
 ## Precision authority
 

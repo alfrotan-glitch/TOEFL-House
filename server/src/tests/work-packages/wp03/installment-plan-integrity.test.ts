@@ -58,6 +58,9 @@ beforeEach(async () => {
   ).run(BRANCH, pw);
   assignRole('u_inst', 'manager', BRANCH);
 
+  // The fixture clears prior synthetic history, then restores the canonical
+  // allocation trigger before it runs the next case.
+  db.exec('DROP TRIGGER IF EXISTS trg_allocations_immutable_delete');
   // Order matters, and it runs BEFORE the student is re-inserted: an instalment
   // names the payment that paid it, an allocation names its obligation, and an
   // obligation names its student — all ON DELETE RESTRICT, so an
@@ -68,6 +71,7 @@ beforeEach(async () => {
   db.prepare(`DELETE FROM payments WHERE student_id = ?`).run(STUDENT);
   db.prepare(`DELETE FROM student_obligations WHERE student_id = ?`).run(STUDENT);
   db.prepare(`DELETE FROM student_semesters WHERE student_id = ?`).run(STUDENT);
+  initSchema();
   db.prepare(
     `INSERT OR REPLACE INTO students (id, student_code, full_name, gender, phone, status, registration_date, branch_id, discount_percent)
      VALUES (?, 'INST-1', 'Installment Student', 'male', '0700440001', 'active', ?, ?, 0)`,

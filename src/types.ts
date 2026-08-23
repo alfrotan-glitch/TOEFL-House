@@ -1093,55 +1093,80 @@ export interface BookSale {
 }
 
 // ============================================================================
-// BC #11: FUNDING — Sponsorship + Donation + Scholarship (funding schema)
+// FUNDING & IMPACT
 // ============================================================================
+
+export type RestrictionTargetKind = 'campaign' | 'scholarship' | 'sponsorship';
+
+export interface DonationRestriction {
+  kind: RestrictionTargetKind;
+  targetId: string;
+}
+
+export interface FundingSourcePosition {
+  id: string;
+  amount: number;
+  applied: number;
+  returned: number;
+  available: number;
+}
 
 export interface Donor {
   id: string;
   fullName: string;
   type: 'individual' | 'organization' | 'ngo' | 'government';
-  phone?: string;
-  email?: string;
-  country?: string;
-  notes?: string;
+  phone?: string | null;
+  email?: string | null;
+  country?: string | null;
+  notes?: string | null;
   createdAt: string;
 }
 
 export interface FundingCampaign {
   id: string;
   name: string;
-  description?: string;
-  donorId?: string;
+  description?: string | null;
+  donorId?: string | null;
   targetAmount: number;
+  /** Server-derived sum of donation facts; never a browser calculation. */
   raisedAmount: number;
+  /** Server-derived campaign progress; the UI never recomputes the ratio. */
+  progressPercent: number;
   startDate: string;
-  endDate?: string;
+  endDate?: string | null;
   status: 'active' | 'completed' | 'cancelled';
   branchId: string;
 }
 
 export interface Donation {
   id: string;
-  campaignId?: string;
+  campaignId?: string | null;
   donorId: string;
   amount: number;
   date: string;
-  restricted: boolean;
-  restrictionNote?: string;
   receiptNo: string;
   branchId: string;
+  transactionId: string;
+  restrictionKind?: RestrictionTargetKind | null;
+  restrictionCampaignId?: string | null;
+  restrictionScholarshipId?: string | null;
+  restrictionSponsorshipAgreementId?: string | null;
+  allocation?: { amount: number; allocated: number; unallocated: number };
 }
 
 export interface Scholarship {
   id: string;
   name: string;
-  donorId?: string;
-  campaignId?: string;
+  donorId?: string | null;
+  campaignId?: string | null;
+  /** Declared goal only; it does not authorize an award. */
   totalBudget: number;
-  allocatedAmount: number;
-  criteria: string;
-  status: 'active' | 'exhausted' | 'closed';
+  criteria?: string | null;
+  status: 'active' | 'closed';
   branchId: string;
+  received: number;
+  committed: number;
+  available: number;
 }
 
 export interface ScholarshipAward {
@@ -1150,57 +1175,61 @@ export interface ScholarshipAward {
   studentId: string;
   amount: number;
   awardDate: string;
-  semester?: string;
-  notes?: string;
+  notes?: string | null;
+  branchId: string;
+  status: 'active' | 'closed';
 }
 
 export interface SponsorshipAgreement {
   id: string;
   donorId: string;
-  studentId?: string;
-  programId?: string;
+  studentId?: string | null;
+  programId?: string | null;
+  campaignId?: string | null;
   monthlyAmount: number;
   startDate: string;
   endDate: string;
   status: 'active' | 'completed' | 'terminated';
   branchId: string;
+  received: number;
+  applied: number;
+  returned: number;
+  available: number;
 }
 
-// ============================================================================
-// BC #12: IMPACT — NGO/Donor Reporting (analytics schema)
-// ============================================================================
+export interface FundingSummary {
+  donationsReceived: number;
+  restrictedDonations: number;
+  campaignTarget: number;
+  campaignRaised: number;
+  scholarshipDeclaredTarget: number;
+  scholarshipReceived: number;
+  scholarshipCommitted: number;
+  activeCampaigns: number;
+  activeSponsorships: number;
+}
 
-export interface ImpactMetric {
+export interface ImpactMetricSnapshot {
   id: string;
-  name: string;
-  category: 'academic' | 'social' | 'economic' | 'demographic';
-  targetValue: number;
-  currentValue: number;
-  period: string;
-  branchId: string;
+  label: string;
+  unit: 'afn' | 'count';
+  value: number;
+  source: string;
 }
 
 export interface ImpactReport {
   id: string;
   title: string;
-  donorId?: string;
-  campaignId?: string;
+  scopeKind: 'branch' | 'donor' | 'campaign';
+  scopeId: string | null;
   period: string;
+  periodFrom: string;
+  periodTo: string;
   generatedAt: string;
-  metrics: ImpactMetric[];
-  narrative?: string;
-  status: 'draft' | 'published' | 'sent';
+  generatedBy?: string | null;
+  metrics: ImpactMetricSnapshot[];
+  narrative: string;
   branchId: string;
-}
-
-export interface SuccessStory {
-  id: string;
-  studentId: string;
-  title: string;
-  content: string;
-  photoUrl?: string;
-  publishedAt: string;
-  tags: string[];
 }
 
 // ============================================================================

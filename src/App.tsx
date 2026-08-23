@@ -336,9 +336,11 @@ function AuthenticatedApp() {
         return (
           <FundingView
             students={store.students} donors={store.donors} campaigns={store.fundingCampaigns} donations={store.donations}
-            scholarships={store.scholarships} scholarshipAwards={store.scholarshipAwards} sponsorships={store.sponsorships} activeRole={activeRole}
-            isGlobalOwner={user?.isGlobalOwner ?? false} addDonor={store.addDonor} editDonor={store.editDonor} addFundingCampaign={store.addFundingCampaign} recordDonation={store.recordDonation}
+            scholarships={store.scholarships} scholarshipAwards={store.scholarshipAwards} sponsorships={store.sponsorships}
+            fundingSummary={store.fundingSummary} activeBranchId={activeBranchId}
+            addDonor={store.addDonor} addFundingCampaign={store.addFundingCampaign} recordDonation={store.recordDonation}
             addScholarship={store.addScholarship} awardScholarship={store.awardScholarship} addSponsorship={store.addSponsorship}
+            refreshFundingWorkspace={store.refreshFundingWorkspace}
           />
         );
       case 'reports':
@@ -346,7 +348,7 @@ function AuthenticatedApp() {
       case 'operations-report':
         return <OperationsReportView />;
       case 'impact':
-        return <ImpactView reports={store.impactReports} generateReport={store.generateImpactReport} />;
+        return <ImpactView reports={store.impactReports} donors={store.donors} campaigns={store.fundingCampaigns} generateReport={store.generateImpactReport} />;
       case 'books':
         return <BooksView issuer={resolveDocumentIssuer(store.settings.branches.find((b) => b.id === activeBranchId))} books={store.books} bookSales={store.bookSales} students={store.students} recordBookSale={store.recordBookSale} addBook={store.addBook} editBook={store.editBook} deleteBook={store.deleteBook} refundBookSale={store.refundBookSale} activeRole={activeRole} isGlobalOwner={user?.isGlobalOwner ?? false} />;
       case 'workflows':

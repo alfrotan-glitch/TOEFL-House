@@ -124,6 +124,7 @@ beforeEach(() => {
   // ON DELETE RESTRICT — an obligation is money, and money is never swept away
   // by a cascade.
   const converted = `SELECT id FROM students WHERE lead_id LIKE 'vux_%'`;
+  db.exec('DROP TRIGGER IF EXISTS trg_allocations_immutable_delete');
   db.prepare(`DELETE FROM student_installments WHERE obligation_id IN (SELECT id FROM student_obligations WHERE student_id IN (${converted}))`).run();
   db.prepare(`DELETE FROM obligation_allocations WHERE obligation_id IN (SELECT id FROM student_obligations WHERE student_id IN (${converted}))`).run();
   db.prepare(`DELETE FROM payments WHERE student_id IN (${converted}) AND category = 'refund'`).run();
@@ -132,6 +133,7 @@ beforeEach(() => {
   db.prepare(`DELETE FROM student_obligations WHERE student_id IN (${converted})`).run();
   db.prepare(`DELETE FROM students WHERE lead_id LIKE 'vux_%'`).run();
   db.prepare(`DELETE FROM visitors WHERE id LIKE 'vux_v%'`).run();
+  initSchema();
 });
 
 // ===========================================================================

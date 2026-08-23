@@ -26,6 +26,7 @@ import { errorHandler } from '../../../middleware/errorHandler.js';
 import studentsRouter from '../../../routes/students.routes.js';
 import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
 import { bearerFor, seedUser } from '../../support/identity.js';
+import { seedLinkedDonation } from '../../support/funding.js';
 import { getStudentBalance } from '../../../utils/studentBalance.js';
 import { ensureTuitionObligation, getObligationPosition } from '../../../core/finance/obligations.js';
 import { computeReconciliation } from '../../../utils/reconciliation.js';
@@ -230,14 +231,15 @@ describe('WP-07 · E1b · ATTACK', () => {
     const donorId = `${key}_donor`;
     db.prepare(`INSERT INTO donors (id, full_name, type) VALUES (?, 'D', 'individual')`).run(donorId);
     const donationId = `${key}_don`;
-    db.prepare(
-      `INSERT INTO donations (id, donor_id, amount, date, receipt_no, branch_id, idempotency_key)
-       VALUES (?, ?, 6000, ?, ?, ?, ?)`,
-    ).run(donationId, donorId, today(), `DN-${key.slice(-6)}`, branch, donationId);
+    seedLinkedDonation(db, {
+      id: donationId, donorId, amount: 6000, date: today(), receiptNo: `DN-${key.slice(-6)}`,
+      branchId: branch, idempotencyKey: donationId,
+    });
+    const fundingId = `${key}_f`;
     db.prepare(
       `INSERT INTO scholarship_fundings (id, scholarship_id, donation_id, amount, branch_id, operator_name, date)
        VALUES (?, ?, ?, 6000, ?, 'Owner', ?)`,
-    ).run(`${key}_f`, scholarshipId, donationId, branch, today());
+    ).run(fundingId, scholarshipId, donationId, branch, today());
     const awardId = `${key}_awd`;
     db.prepare(
       `INSERT INTO scholarship_awards (id, scholarship_id, student_id, amount, status, branch_id, award_date)
@@ -245,9 +247,9 @@ describe('WP-07 · E1b · ATTACK', () => {
     ).run(awardId, scholarshipId, studentId, branch, today());
     db.transaction(() => {
       db.prepare(
-        `INSERT INTO obligation_allocations (id, obligation_id, amount, source_kind, scholarship_award_id, status, date)
-         VALUES (?, ?, 6000, 'scholarship', ?, 'active', ?)`,
-      ).run(`${key}_alloc`, obligationId, awardId, today());
+        `INSERT INTO obligation_allocations (id, obligation_id, amount, source_kind, scholarship_award_id, scholarship_funding_id, status, date)
+         VALUES (?, ?, 6000, 'scholarship', ?, ?, 'active', ?)`,
+      ).run(`${key}_alloc`, obligationId, awardId, fundingId, today());
     })();
 
     // 6,000 of the 10,000 term is already settled by a donor.

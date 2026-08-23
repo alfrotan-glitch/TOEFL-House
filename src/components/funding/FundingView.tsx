@@ -1,29 +1,23 @@
-/**
- * @license SPDX-License-Identifier: Apache-2.0
- *
- * TOEFL House ERP — Funding & Development Treasury (BC #11)
- * --------------------------------------------------------------
- * A complete development-finance workspace: donors, funding campaigns,
- * donations, scholarships, and sponsorships. Opens on a live treasury
- * command band, then splits into five working tabs with full CRUD.
- *
- * Design notes:
- *  - Opens with the money (total raised, live pulse), not a generic header.
- *  - Tabular-monospace figures against Vazirmatn body type for a ledger feel.
- *  - Emerald = money in, amber = in-flight campaigns, rose = restricted funds.
- *  - Animated progress, hover lift, staggered tab reveals, live pulse.
- */
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import {HandCoins, Users, Target, ReceiptText, GraduationCap, HeartHandshake, Plus, Search, Landmark, Building2, Globe2, User, Lock, Unlock, Calendar, Edit, X, Info, BadgeCheck} from 'lucide-react';
-import {Donor, FundingCampaign, Donation, Scholarship, ScholarshipAward, SponsorshipAgreement, Student, UserRole} from '../../types';
-import Toast from '../common/Toast';
+import React, { useCallback, useMemo, useState } from 'react';
+import {
+  BadgeCheck, CalendarDays, CircleDollarSign, HandCoins, HeartHandshake,
+  LockKeyhole, Plus, ReceiptText, Target, Users,
+} from 'lucide-react';
+import {
+  Donation, DonationRestriction, Donor, FundingCampaign, FundingSourcePosition,
+  FundingSummary, Scholarship, ScholarshipAward, SponsorshipAgreement, Student,
+} from '../../types';
 import { api } from '../../api/client';
+import { useAuth } from '../../contexts/useAuth';
 import { useInvalidate } from '../../state/serverStateFreshness';
+import { formatAFN } from '../../utils/format';
 import { ShamsiDateInput } from '../common/ShamsiDateInput';
+import Toast from '../common/Toast';
 
-// ============================================================================
-// Props
-// ============================================================================
+type Tab = 'donors' | 'campaigns' | 'donations' | 'scholarships' | 'sponsorships';
+type ToastState = { message: string; type: 'success' | 'error' | 'info' } | null;
+type RestrictionKind = '' | DonationRestriction['kind'];
+
 interface FundingViewProps {
   donors: Donor[];
   campaigns: FundingCampaign[];
@@ -32,49 +26,37 @@ interface FundingViewProps {
   scholarshipAwards: ScholarshipAward[];
   sponsorships: SponsorshipAgreement[];
   students: Student[];
-  activeRole: UserRole;
-  isGlobalOwner: boolean;
-  addDonor: (data: Partial<Donor>) => void | Promise<void>;
-  editDonor: (id: string, data: Partial<Donor>) => void | Promise<void>;
-  addFundingCampaign: (data: Partial<FundingCampaign>) => void | Promise<void>;
-  recordDonation: (data: Partial<Donation>) => void | Promise<void>;
-  addScholarship: (data: Partial<Scholarship>) => void | Promise<void>;
-  awardScholarship: (data: Partial<ScholarshipAward>) => void | Promise<void>;
-  addSponsorship: (data: Partial<SponsorshipAgreement>) => void | Promise<void>;
+  fundingSummary: FundingSummary | null;
+  activeBranchId: string;
+  addDonor: (data: Pick<Donor, 'fullName' | 'type'> & Partial<Pick<Donor, 'phone' | 'email' | 'country' | 'notes'>>) => Promise<void>;
+  addFundingCampaign: (data: Pick<FundingCampaign, 'name' | 'targetAmount'> & Partial<Pick<FundingCampaign, 'description' | 'donorId' | 'startDate' | 'endDate'>>) => Promise<void>;
+  recordDonation: (data: { donorId: string; amount: number; date?: string; campaignId?: string | null; restriction?: DonationRestriction | null }) => Promise<void>;
+  addScholarship: (data: Pick<Scholarship, 'name' | 'totalBudget'> & Partial<Pick<Scholarship, 'donorId' | 'campaignId' | 'criteria'>>) => Promise<void>;
+  awardScholarship: (data: Pick<ScholarshipAward, 'scholarshipId' | 'studentId' | 'amount'> & Partial<Pick<ScholarshipAward, 'awardDate' | 'notes'>>) => Promise<void>;
+  addSponsorship: (data: Pick<SponsorshipAgreement, 'donorId' | 'monthlyAmount' | 'startDate' | 'endDate'> & Partial<Pick<SponsorshipAgreement, 'studentId' | 'programId' | 'campaignId'>>) => Promise<void>;
+  refreshFundingWorkspace: () => Promise<void>;
 }
 
-type FundingTab = 'donors' | 'campaigns' | 'donations' | 'scholarships' | 'sponsorships';
+interface SourceChoice extends FundingSourcePosition {
+  kind: 'donation' | 'campaignFundingEntry';
+  label: string;
+}
 
-// ============================================================================
-// Presentation metadata
-// ============================================================================
-const DONOR_TYPE_META: Record<Donor['type'], { label: string; icon: React.ElementType; cls: string }> = {
-  individual:   { label: 'Individual',   icon: User,       cls: 'bg-sky-50 text-sky-700 border-sky-200' },
-  organization: { label: 'Organization', icon: Building2,  cls: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
-  ngo:          { label: 'NGO',          icon: Globe2,     cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-  government:   { label: 'Government',   icon: Landmark,   cls: 'bg-amber-50 text-amber-700 border-amber-200' },
-};
-
-const fmt = (n: number) => `${(n ?? 0).toLocaleString('en-US')} AFN`;
-
-/**
- * A fund's money position, as resolved by the server.
- *
- * `received` is donation money explicitly allocated into the fund and is the
- * only backing an award may draw on (owner decision D-121); `declaredTarget` is
- * the fund's stated goal and bounds nothing. The browser must not compute any
- * of these — a scholarship position is financial truth (LAW 2).
- */
-interface FundPosition {
-  scholarshipId: string;
+interface FundPositionResponse {
   received: number;
   committed: number;
   available: number;
   declaredTarget: number;
-  fundings: Array<{ id: string; donation_id: string; amount: number; date: string; receipt_no: string; donor_name: string }>;
+  fundings: Array<{
+    id: string;
+    amount: number;
+    donationId?: string | null;
+    campaignFundingEntryId?: string | null;
+    source: FundingSourcePosition;
+  }>;
 }
 
-interface AwardPosition {
+interface AwardResponse {
   awardId: string;
   scholarshipId: string;
   studentId: string;
@@ -82,111 +64,44 @@ interface AwardPosition {
   allocated: number;
   remaining: number;
   status: 'active' | 'closed';
-  allocations: Array<{ id: string; amount: number; status: 'active' | 'reversed'; date: string; semester_name: string | null }>;
+  allocations: Array<{ id: string; amount: number; status: 'active' | 'reversed'; semesterName?: string | null; scholarshipFundingId?: string | null }>;
 }
 
-/**
- * A sponsorship agreement's money position, as resolved by the server.
- *
- * `monthlyAmount` is what the donor PROMISED and settles nothing; `received` is
- * donation money actually earmarked to the agreement and is the only backing an
- * application may draw on (owner decision D-131). The browser computes none of
- * these — like a fund position, this is financial truth (LAW 2).
- */
-interface SponsorshipPosition {
+interface SponsorshipResponse {
   agreementId: string;
-  donorId: string;
-  studentId: string | null;
-  monthlyAmount: number;
   received: number;
   applied: number;
+  returned: number;
   available: number;
-  status: 'active' | 'completed' | 'terminated';
-  receipts: Array<{ id: string; donation_id: string; amount: number; date: string; receipt_no: string }>;
-  allocations: Array<{ id: string; amount: number; date: string; status: 'active' | 'reversed'; semester_name: string | null; student_id: string }>;
+  status: SponsorshipAgreement['status'];
+  receipts: Array<{
+    id: string;
+    amount: number;
+    date: string;
+    source: FundingSourcePosition;
+  }>;
+  allocations: Array<{ id: string; amount: number; status: 'active' | 'reversed'; semesterName?: string | null }>;
 }
 
-interface TuitionObligationRow {
+interface ObligationRow {
   id: string;
   semesterName: string;
-  netAmount: number;
-  settledCash: number;
-  /** Scholarship AND sponsorship money applied to this term. */
-  settledAid: number;
   outstanding: number;
+  netAmount: number;
 }
 
-// ============================================================================
-// Small presentational pieces
-// ============================================================================
-function DonorTypeBadge({ type }: { type: Donor['type'] }) {
-  const meta = DONOR_TYPE_META[type] || DONOR_TYPE_META.individual;
-  const Icon = meta.icon;
+const field = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-xs outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100';
+const label = 'mb-1 block text-xs font-bold text-slate-600';
+const primary = 'inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300';
+const secondary = 'inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition hover:border-emerald-300 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50';
+
+function Dialog({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${meta.cls}`}>
-      <Icon className="w-3 h-3" /> {meta.label}
-    </span>
-  );
-}
-
-function RestrictedBadge({ restricted }: { restricted: boolean }) {
-  return restricted ? (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
-      <Lock className="w-3 h-3" /> Restricted
-    </span>
-  ) : (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-      <Unlock className="w-3 h-3" /> Unrestricted
-    </span>
-  );
-}
-
-function StatusPill({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    active: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    completed: 'bg-indigo-50 text-indigo-700 border-indigo-200',
-    cancelled: 'bg-slate-100 text-slate-500 border-slate-200',
-    exhausted: 'bg-amber-50 text-amber-700 border-amber-200',
-    closed: 'bg-slate-100 text-slate-500 border-slate-200',
-    terminated: 'bg-rose-50 text-rose-700 border-rose-200',
-  };
-  return (
-    <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold border ${map[status] || map.active}`}>
-      {status}
-    </span>
-  );
-}
-
-/** Animated goal-progress bar with a shimmering head while in flight. */
-function GoalBar({ raised, target }: { raised: number; target: number }) {
-  const pct = target > 0 ? Math.min(100, Math.round((raised / target) * 100)) : 0;
-  const done = pct >= 100;
-  return (
-    <div className="space-y-1.5">
-      <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all duration-700 ease-out ${done ? 'bg-emerald-500' : 'bg-gradient-to-l from-amber-500 to-amber-400'}`}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <div className="flex justify-between text-[10px] font-mono text-slate-400">
-        <span>{fmt(raised)}</span>
-        <span className={done ? 'text-emerald-600 font-bold' : ''}>{pct}% of {fmt(target)}</span>
-      </div>
-    </div>
-  );
-}
-
-/** Generic modal shell. */
-function ModalShell({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
-  return (
-    <div className="fixed inset-0 bg-slate-900/45 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto animate-in fade-in duration-200">
-      <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-lg my-8 animate-in zoom-in-95 duration-200">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-          <h3 className="font-extrabold text-slate-900 text-sm">{title}</h3>
-          <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors cursor-pointer">
-            <X className="w-4 h-4" />
-          </button>
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 p-4 sm:items-center" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
+        <div className="sticky top-0 flex items-center justify-between border-b border-slate-100 bg-white px-5 py-4">
+          <h2 className="text-base font-black text-slate-900">{title}</h2>
+          <button className="rounded-lg px-2 py-1 text-sm font-bold text-slate-500 hover:bg-slate-100" onClick={onClose}>Close</button>
         </div>
         <div className="p-5">{children}</div>
       </div>
@@ -194,1270 +109,206 @@ function ModalShell({ title, onClose, children }: { title: string; onClose: () =
   );
 }
 
-const inputCls = 'w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/15 focus:bg-white transition-colors';
-const labelCls = 'block text-slate-600 font-bold mb-1 text-[11px]';
+function Stat({ label: metricLabel, value, tone = 'text-slate-900' }: { label: string; value: string; tone?: string }) {
+  return <div className="rounded-xl border border-white/10 bg-white/5 p-3"><p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{metricLabel}</p><p className={`mt-1 font-mono text-xl font-black tabular-nums ${tone}`}>{value}</p></div>;
+}
 
-// ============================================================================
-// Main component
-// ============================================================================
-export default function FundingView({
-  donors, campaigns, donations, scholarships, scholarshipAwards, sponsorships, students,
-  activeRole, isGlobalOwner, addDonor, editDonor, addFundingCampaign, recordDonation, addScholarship,
-  awardScholarship, addSponsorship,
-}: FundingViewProps) {
-  const canManage = isGlobalOwner || ['general_manager', 'donor_manager'].includes(activeRole);
+function Status({ value }: { value: string }) {
+  const cls = value === 'active' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : value === 'closed' || value === 'terminated' || value === 'cancelled' ? 'bg-slate-100 text-slate-600 border-slate-200' : 'bg-amber-50 text-amber-700 border-amber-200';
+  return <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold capitalize ${cls}`}>{value}</span>;
+}
 
-  const [tab, setTab] = useState<FundingTab>('donors');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
-  const notify = (message: string, type: 'success' | 'error' | 'info' = 'success') => setToast({ message, type });
-
-  // ---- Modal + form state ----
-  const [showDonorModal, setShowDonorModal] = useState(false);
-  const [editingDonor, setEditingDonor] = useState<Donor | null>(null);
-  const [donorForm, setDonorForm] = useState({ fullName: '', type: 'individual' as Donor['type'], email: '', phone: '', country: '', notes: '' });
-
-  const [showCampaignModal, setShowCampaignModal] = useState(false);
-  const [campaignForm, setCampaignForm] = useState({ name: '', donorId: '', targetAmount: 0, startDate: '', endDate: '', description: '' });
-
-  const [showDonationModal, setShowDonationModal] = useState(false);
-  const [donationForm, setDonationForm] = useState({ donorId: '', campaignId: '', amount: 0, restricted: false, restrictionNote: '', date: '' });
-
-  const [showScholarshipModal, setShowScholarshipModal] = useState(false);
-  const [scholarshipForm, setScholarshipForm] = useState({ name: '', donorId: '', totalBudget: 0, criteria: '' });
-  // Fund and award positions come from the server on every read; nothing here
-  // recomputes them (LAW 2).
-  // Applying scholarship money changes a student's tuition position, so the
-  // datasets that publish it must be invalidated, not just this screen's state.
+export default function FundingView(props: FundingViewProps) {
+  const {
+    donors, campaigns, donations, scholarships, scholarshipAwards, sponsorships, students, fundingSummary, activeBranchId,
+    addDonor, addFundingCampaign, recordDonation, addScholarship, awardScholarship, addSponsorship, refreshFundingWorkspace,
+  } = props;
+  const { user } = useAuth();
   const invalidate = useInvalidate();
-  const [fundPositions, setFundPositions] = useState<Record<string, FundPosition>>({});
+  const canEdit = !!user?.isGlobalOwner || !!user?.permissions?.has('Funding.Edit');
+  const canRecordDonation = canEdit || !!user?.permissions?.has('Funding.RecordDonation');
+  const [tab, setTab] = useState<Tab>('donors');
+  const [toast, setToast] = useState<ToastState>(null);
+  const announce = useCallback((message: string, type: 'success' | 'error' | 'info' = 'success') => setToast({ message, type }), []);
+  const [dialog, setDialog] = useState<'donor' | 'campaign' | 'donation' | 'scholarship' | 'sponsorship' | null>(null);
+
+  const [donorForm, setDonorForm] = useState({ fullName: '', type: 'individual' as Donor['type'], phone: '', email: '', country: '', notes: '' });
+  const [campaignForm, setCampaignForm] = useState({ name: '', donorId: '', targetAmount: 0, description: '', startDate: '', endDate: '' });
+  const [donationForm, setDonationForm] = useState({ donorId: '', campaignId: '', amount: 0, date: '', restrictionKind: '' as RestrictionKind, restrictionTargetId: '' });
+  const [scholarshipForm, setScholarshipForm] = useState({ name: '', donorId: '', campaignId: '', totalBudget: 0, criteria: '' });
+  const [sponsorshipForm, setSponsorshipForm] = useState({ donorId: '', studentId: '', campaignId: '', monthlyAmount: 0, startDate: '', endDate: '' });
+
   const [fundingScholarship, setFundingScholarship] = useState<Scholarship | null>(null);
-  const [fundingForm, setFundingForm] = useState({ donationId: '', amount: 0 });
-  const [managingAward, setManagingAward] = useState<ScholarshipAward | null>(null);
-  const [awardPosition, setAwardPosition] = useState<AwardPosition | null>(null);
-  const [obligations, setObligations] = useState<TuitionObligationRow[] | null>(null);
-  const [applyForm, setApplyForm] = useState({ obligationId: '', amount: 0 });
-
+  const [fundingSources, setFundingSources] = useState<SourceChoice[]>([]);
+  const [fundingForm, setFundingForm] = useState({ sourceKey: '', amount: 0 });
   const [awardingScholarship, setAwardingScholarship] = useState<Scholarship | null>(null);
-  const [awardForm, setAwardForm] = useState({ studentId: '', amount: 0, semester: '', notes: '' });
+  const [awardForm, setAwardForm] = useState({ studentId: '', amount: 0, awardDate: '', notes: '' });
+  const [managingAward, setManagingAward] = useState<ScholarshipAward | null>(null);
+  const [awardPosition, setAwardPosition] = useState<AwardResponse | null>(null);
+  const [awardFundings, setAwardFundings] = useState<FundPositionResponse['fundings']>([]);
+  const [awardObligations, setAwardObligations] = useState<ObligationRow[]>([]);
+  const [awardApply, setAwardApply] = useState({ obligationId: '', scholarshipFundingId: '', amount: 0 });
 
-  const [showSponsorshipModal, setShowSponsorshipModal] = useState(false);
-  const [sponsorshipForm, setSponsorshipForm] = useState({ donorId: '', studentId: '', monthlyAmount: 0, startDate: '', endDate: '' });
-
-  // Sponsorship money. Every figure below is read from the server.
-  const [sponsorshipPositions, setSponsorshipPositions] = useState<Record<string, SponsorshipPosition>>({});
   const [managingSponsorship, setManagingSponsorship] = useState<SponsorshipAgreement | null>(null);
-  const [sponsorshipPosition, setSponsorshipPosition] = useState<SponsorshipPosition | null>(null);
-  const [sponsorObligations, setSponsorObligations] = useState<TuitionObligationRow[] | null>(null);
-  const [receiptForm, setReceiptForm] = useState({ donationId: '', amount: 0 });
-  const [sponsorApplyForm, setSponsorApplyForm] = useState({ studentId: '', obligationId: '', amount: 0 });
+  const [sponsorshipPosition, setSponsorshipPosition] = useState<SponsorshipResponse | null>(null);
+  const [sponsorshipSources, setSponsorshipSources] = useState<SourceChoice[]>([]);
+  const [sponsorshipObligations, setSponsorshipObligations] = useState<ObligationRow[]>([]);
+  const [sponsorReceipt, setSponsorReceipt] = useState({ sourceKey: '', amount: 0 });
+  const [sponsorApply, setSponsorApply] = useState({ studentId: '', obligationId: '', sponsorshipReceiptId: '', amount: 0 });
 
-  // ---- Derived treasury metrics ----
-  const reloadFundPositions = useCallback(async () => {
-    const entries = await Promise.all(
-      scholarships.map(async (sc) => {
-        try {
-          return [sc.id, await api.get<FundPosition>(`/funding/scholarships/${sc.id}/position`)] as const;
-        } catch {
-          return [sc.id, null] as const;
-        }
-      }),
-    );
-    setFundPositions(Object.fromEntries(entries.filter((e): e is readonly [string, FundPosition] => e[1] !== null)));
-  }, [scholarships]);
+  const donorName = useCallback((donorId?: string | null) => donors.find((entry) => entry.id === donorId)?.fullName ?? '—', [donors]);
+  const campaignName = useCallback((campaignId?: string | null) => campaigns.find((entry) => entry.id === campaignId)?.name ?? 'General fund', [campaigns]);
+  const studentName = useCallback((studentId?: string | null) => students.find((entry) => entry.id === studentId)?.fullName ?? '—', [students]);
+  const selectedRestrictionTargets = donationForm.restrictionKind === 'campaign' ? campaigns : donationForm.restrictionKind === 'scholarship' ? scholarships : sponsorships;
 
-  useEffect(() => { void reloadFundPositions(); }, [reloadFundPositions]);
+  const tabs = useMemo(() => [
+    { id: 'donors' as const, label: 'Donors', icon: Users, count: donors.length },
+    { id: 'campaigns' as const, label: 'Campaigns', icon: Target, count: campaigns.length },
+    { id: 'donations' as const, label: 'Donations', icon: ReceiptText, count: donations.length },
+    { id: 'scholarships' as const, label: 'Scholarships', icon: BadgeCheck, count: scholarships.length },
+    { id: 'sponsorships' as const, label: 'Sponsorships', icon: HeartHandshake, count: sponsorships.length },
+  ], [campaigns.length, donations.length, donors.length, scholarships.length, sponsorships.length]);
 
-  const reloadSponsorshipPositions = useCallback(async () => {
-    const entries = await Promise.all(
-      sponsorships.map(async (sp) => {
-        try {
-          return [sp.id, await api.get<SponsorshipPosition>(`/funding/sponsorships/${sp.id}/position`)] as const;
-        } catch {
-          return [sp.id, null] as const;
-        }
-      }),
-    );
-    setSponsorshipPositions(Object.fromEntries(entries.filter((e): e is readonly [string, SponsorshipPosition] => e[1] !== null)));
-  }, [sponsorships]);
+  const sourceFromKey = (key: string): { donationId?: string; campaignFundingEntryId?: string } => {
+    const [kind, id] = key.split(':', 2);
+    return kind === 'donation' ? { donationId: id } : { campaignFundingEntryId: id };
+  };
 
-  useEffect(() => { void reloadSponsorshipPositions(); }, [reloadSponsorshipPositions]);
-
-  /** The agreement's position, and the obligations its money may settle. */
-  const reloadSponsorship = useCallback(async (agreement: SponsorshipAgreement, studentRef: string) => {
-    const position = await api.get<SponsorshipPosition>(`/funding/sponsorships/${agreement.id}/position`);
-    setSponsorshipPosition(position);
-    if (studentRef) {
-      setSponsorObligations(await api.get<TuitionObligationRow[]>(`/funding/students/${studentRef}/tuition-obligations`));
-    } else {
-      setSponsorObligations(null);
-    }
-  }, []);
-
-  const reloadAward = useCallback(async (award: ScholarshipAward) => {
-    const [position, rows] = await Promise.all([
-      api.get<AwardPosition>(`/funding/scholarship-awards/${award.id}`),
-      api.get<TuitionObligationRow[]>(`/funding/students/${award.studentId}/tuition-obligations`),
+  const loadAward = useCallback(async (award: ScholarshipAward) => {
+    const [position, obligations, scholarshipPosition] = await Promise.all([
+      api.get<AwardResponse>(`/funding/scholarship-awards/${award.id}`),
+      api.get<ObligationRow[]>(`/funding/students/${award.studentId}/tuition-obligations`),
+      api.get<FundPositionResponse>(`/funding/scholarships/${award.scholarshipId}/position`),
     ]);
     setAwardPosition(position);
-    setObligations(rows);
+    setAwardObligations(obligations);
+    setAwardFundings(scholarshipPosition.fundings);
   }, []);
 
-  const treasury = useMemo(() => {
-    const totalRaised = donations.reduce((s, d) => s + d.amount, 0);
-    const restricted = donations.filter((d) => d.restricted).reduce((s, d) => s + d.amount, 0);
-    const campaignTarget = campaigns.reduce((s, c) => s + c.targetAmount, 0);
-    const campaignRaised = campaigns.reduce((s, c) => s + c.raisedAmount, 0);
-    const scholarshipBudget = scholarships.reduce((s, x) => s + x.totalBudget, 0);
-    const scholarshipAllocated = scholarships.reduce((s, x) => s + x.allocatedAmount, 0);
-    return {
-      totalRaised, restricted,
-      unrestricted: totalRaised - restricted,
-      campaignTarget, campaignRaised,
-      campaignPct: campaignTarget > 0 ? Math.round((campaignRaised / campaignTarget) * 100) : 0,
-      scholarshipBudget, scholarshipAllocated,
-      scholarshipPct: scholarshipBudget > 0 ? Math.round((scholarshipAllocated / scholarshipBudget) * 100) : 0,
-      activeCampaigns: campaigns.filter((c) => c.status === 'active').length,
-      activeSponsorships: sponsorships.filter((s) => s.status === 'active').length,
-    };
-  }, [donations, campaigns, scholarships, sponsorships]);
+  const loadSponsorship = useCallback(async (agreement: SponsorshipAgreement, studentId = agreement.studentId ?? '') => {
+    const [position, sourceResult] = await Promise.all([
+      api.get<SponsorshipResponse>(`/funding/sponsorships/${agreement.id}/position`),
+      api.get<{ donations: SourceChoice[]; campaignFundingEntries: SourceChoice[] }>(`/funding/sponsorships/${agreement.id}/funding-sources`),
+    ]);
+    setSponsorshipPosition(position);
+    setSponsorshipSources([
+      ...sourceResult.donations.map((source) => ({ ...source, kind: 'donation' as const, label: `Donation · ${formatAFN(source.available)} available` })),
+      ...sourceResult.campaignFundingEntries.map((source) => ({ ...source, kind: 'campaignFundingEntry' as const, label: `Campaign balance · ${formatAFN(source.available)} available` })),
+    ]);
+    setSponsorshipObligations(studentId ? await api.get<ObligationRow[]>(`/funding/students/${studentId}/tuition-obligations`) : []);
+  }, []);
 
-  const donorName = (id?: string) => donors.find((d) => d.id === id)?.fullName || '—';
-  const studentName = (id?: string) => students.find((s) => s.id === id)?.fullName || '—';
-  const donatedBy = (donorId: string) => donations.filter((d) => d.donorId === donorId).reduce((s, d) => s + d.amount, 0);
-
-  const filteredDonors = donors.filter((d) =>
-    d.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (d.email || '').toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  // ---- Handlers ----
-  const openAddDonor = () => {
-    setEditingDonor(null);
-    setDonorForm({ fullName: '', type: 'individual', email: '', phone: '', country: '', notes: '' });
-    setShowDonorModal(true);
-  };
-  const openEditDonor = (d: Donor) => {
-    setEditingDonor(d);
-    setDonorForm({ fullName: d.fullName, type: d.type, email: d.email || '', phone: d.phone || '', country: d.country || '', notes: d.notes || '' });
-    setShowDonorModal(true);
-  };
-  const submitDonor = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!donorForm.fullName.trim()) return notify('Donor name is required.', 'error');
+  const run = async (work: () => Promise<void>, success: string, datasets: string[] = ['funding']) => {
     try {
-      if (editingDonor) {
-        await editDonor(editingDonor.id, { ...donorForm });
-        notify('Donor profile updated.');
-      } else {
-        await addDonor({ ...donorForm });
-        notify('Donor registered successfully.');
-      }
-      setShowDonorModal(false);
-    } catch (err) {
-      notify(err instanceof Error ? err.message : 'Failed to save donor.', 'error');
+      await work();
+      datasets.forEach((dataset) => invalidate(dataset));
+      announce(success);
+    } catch (error) {
+      announce(error instanceof Error ? error.message : 'The operation could not be completed.', 'error');
     }
   };
 
-  const submitCampaign = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!campaignForm.name.trim() || campaignForm.targetAmount <= 0) return notify('Campaign name and a positive target are required.', 'error');
-    try {
-      await addFundingCampaign({
-        name: campaignForm.name, donorId: campaignForm.donorId || undefined, targetAmount: campaignForm.targetAmount,
-        startDate: campaignForm.startDate || new Date().toISOString().split('T')[0], endDate: campaignForm.endDate || undefined,
-        description: campaignForm.description || undefined,
-      });
-      notify('Funding campaign created.');
-      setShowCampaignModal(false);
-      setCampaignForm({ name: '', donorId: '', targetAmount: 0, startDate: '', endDate: '', description: '' });
-    } catch (err) {
-      notify(err instanceof Error ? err.message : 'Failed to create campaign.', 'error');
-    }
-  };
-
-  const submitDonation = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!donationForm.donorId || donationForm.amount <= 0) return notify('Select a donor and enter a positive amount.', 'error');
-    try {
+  const submitDonation = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!donationForm.donorId || donationForm.amount <= 0) return announce('Choose a donor and enter a positive amount.', 'error');
+    if (donationForm.restrictionKind && !donationForm.restrictionTargetId) return announce('A restricted donation requires one structured target.', 'error');
+    const restriction = donationForm.restrictionKind
+      ? { kind: donationForm.restrictionKind, targetId: donationForm.restrictionTargetId } as DonationRestriction
+      : null;
+    await run(async () => {
       await recordDonation({
-        donorId: donationForm.donorId, campaignId: donationForm.campaignId || undefined, amount: donationForm.amount,
-        restricted: donationForm.restricted, restrictionNote: donationForm.restrictionNote || undefined,
-        date: donationForm.date || new Date().toISOString().split('T')[0],
+        donorId: donationForm.donorId, campaignId: donationForm.restrictionKind === 'campaign' ? donationForm.restrictionTargetId : donationForm.campaignId || null,
+        amount: donationForm.amount, date: donationForm.date || undefined, restriction,
       });
-      notify('Donation recorded and posted to the ledger.');
-      setShowDonationModal(false);
-      setDonationForm({ donorId: '', campaignId: '', amount: 0, restricted: false, restrictionNote: '', date: '' });
-    } catch (err) {
-      notify(err instanceof Error ? err.message : 'Failed to record donation.', 'error');
-    }
+      setDialog(null);
+      setDonationForm({ donorId: '', campaignId: '', amount: 0, date: '', restrictionKind: '', restrictionTargetId: '' });
+    }, restriction ? 'Restricted donation recorded in its named target.' : 'Donation recorded and linked to income.', ['funding', 'finance']);
   };
 
-  const submitScholarship = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!scholarshipForm.name.trim() || scholarshipForm.totalBudget <= 0) return notify('Scholarship name and budget are required.', 'error');
+  const openFunding = async (scholarship: Scholarship) => {
     try {
-      await addScholarship({ name: scholarshipForm.name, donorId: scholarshipForm.donorId || undefined, totalBudget: scholarshipForm.totalBudget, criteria: scholarshipForm.criteria || undefined });
-      notify('Scholarship fund created.');
-      setShowScholarshipModal(false);
-      setScholarshipForm({ name: '', donorId: '', totalBudget: 0, criteria: '' });
-    } catch (err) {
-      notify(err instanceof Error ? err.message : 'Failed to create scholarship.', 'error');
-    }
-  };
-
-  const submitAward = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!awardingScholarship || !awardForm.studentId || awardForm.amount <= 0) return notify('Select a student and enter an amount.', 'error');
-    // The ceiling is money the fund has RECEIVED, and the server owns that
-    // decision. This only avoids a pointless round trip on a figure the server
-    // already published; it never substitutes for the server's answer.
-    const available = fundPositions[awardingScholarship.id]?.available;
-    if (available !== undefined && awardForm.amount > available) {
-      return notify(`Exceeds the ${fmt(available)} this fund has available.`, 'error');
-    }
-    try {
-      await awardScholarship({ scholarshipId: awardingScholarship.id, studentId: awardForm.studentId, amount: awardForm.amount, semester: awardForm.semester || undefined, notes: awardForm.notes || undefined });
-      notify('Scholarship awarded to student.');
-      invalidate('funding');
-      setAwardingScholarship(null);
-      setAwardForm({ studentId: '', amount: 0, semester: '', notes: '' });
-      await reloadFundPositions();
-    } catch (err) {
-      notify(err instanceof Error ? err.message : 'Failed to award scholarship.', 'error');
-    }
-  };
-
-  const submitSponsorship = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!sponsorshipForm.donorId || sponsorshipForm.monthlyAmount <= 0) return notify('Select a donor and enter a monthly amount.', 'error');
-    try {
-      await addSponsorship({
-        donorId: sponsorshipForm.donorId, studentId: sponsorshipForm.studentId || undefined, monthlyAmount: sponsorshipForm.monthlyAmount,
-        startDate: sponsorshipForm.startDate || new Date().toISOString().split('T')[0], endDate: sponsorshipForm.endDate || undefined,
-      });
-      notify('Sponsorship agreement created.');
-      setShowSponsorshipModal(false);
-      setSponsorshipForm({ donorId: '', studentId: '', monthlyAmount: 0, startDate: '', endDate: '' });
-    } catch (err) {
-      notify(err instanceof Error ? err.message : 'Failed to create sponsorship.', 'error');
-    }
-  };
-
-  const submitFunding = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!fundingScholarship) return;
-    try {
-      await api.post(`/funding/scholarships/${fundingScholarship.id}/fundings`, {
-        donationId: fundingForm.donationId,
-        amount: fundingForm.amount,
-      });
-      notify('Donation allocated to the fund.', 'success');
-      invalidate('funding');
-      setFundingScholarship(null);
-      await reloadFundPositions();
-    } catch (err) {
-      notify(err instanceof Error ? err.message : 'Could not fund the scholarship.', 'error');
-    }
-  };
-
-  const openAward = async (awardRow: ScholarshipAward) => {
-    setManagingAward(awardRow);
-    setAwardPosition(null);
-    setObligations(null);
-    setApplyForm({ obligationId: '', amount: 0 });
-    try {
-      await reloadAward(awardRow);
-    } catch (err) {
-      notify(err instanceof Error ? err.message : 'Could not load this award.', 'error');
-    }
-  };
-
-  const submitApplication = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!managingAward) return;
-    try {
-      await api.post(`/funding/scholarship-awards/${managingAward.id}/allocations`, {
-        obligationId: applyForm.obligationId,
-        amount: applyForm.amount,
-      });
-      notify('Scholarship applied to the tuition obligation.', 'success');
-      invalidate('students', 'payments', 'funding');
-      setApplyForm({ obligationId: '', amount: 0 });
-      await Promise.all([reloadAward(managingAward), reloadFundPositions()]);
-    } catch (err) {
-      notify(err instanceof Error ? err.message : 'Could not apply the award.', 'error');
-    }
-  };
-
-  const reverseApplication = async (allocationId: string) => {
-    if (!managingAward) return;
-    const reason = window.prompt('Why is this application being reversed? (at least 8 characters)');
-    if (!reason) return;
-    try {
-      await api.post(`/funding/scholarship-awards/${managingAward.id}/allocations/${allocationId}/reverse`, { reason });
-      notify('Application reversed; the money returned to the award.', 'success');
-      invalidate('students', 'payments', 'funding');
-      await Promise.all([reloadAward(managingAward), reloadFundPositions()]);
-    } catch (err) {
-      notify(err instanceof Error ? err.message : 'Could not reverse the application.', 'error');
-    }
-  };
-
-  const closeManagedAward = async () => {
-    if (!managingAward) return;
-    const reason = window.prompt('Why is this award being closed? (at least 8 characters)');
-    if (!reason) return;
-    try {
-      const res = await api.post<{ returnedToFund: number }>(`/funding/scholarship-awards/${managingAward.id}/close`, { reason });
-      notify(`Award closed; ${fmt(res.returnedToFund)} returned to the fund.`, 'success');
-      invalidate('funding');
-      await Promise.all([reloadAward(managingAward), reloadFundPositions()]);
-    } catch (err) {
-      notify(err instanceof Error ? err.message : 'Could not close the award.', 'error');
-    }
-  };
-
-  const openSponsorship = async (agreement: SponsorshipAgreement) => {
-    setManagingSponsorship(agreement);
-    setSponsorshipPosition(null);
-    setSponsorObligations(null);
-    setReceiptForm({ donationId: '', amount: 0 });
-    setSponsorApplyForm({ studentId: agreement.studentId ?? '', obligationId: '', amount: 0 });
-    try {
-      await reloadSponsorship(agreement, agreement.studentId ?? '');
-    } catch (err) {
-      notify(err instanceof Error ? err.message : 'Could not load this sponsorship.', 'error');
-    }
-  };
-
-  /** Earmark a donation from the signing donor to this agreement. */
-  const submitSponsorshipReceipt = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!managingSponsorship) return;
-    try {
-      await api.post(`/funding/sponsorships/${managingSponsorship.id}/receipts`, {
-        donationId: receiptForm.donationId,
-        amount: receiptForm.amount,
-      });
-      notify('Donation earmarked to the sponsorship.', 'success');
-      // A receipt moves no tuition, so only funding data changes.
-      invalidate('funding');
-      setReceiptForm({ donationId: '', amount: 0 });
-      await Promise.all([
-        reloadSponsorship(managingSponsorship, sponsorApplyForm.studentId),
-        reloadSponsorshipPositions(),
+      const result = await api.get<{ donations: SourceChoice[]; campaignFundingEntries: SourceChoice[] }>(`/funding/scholarships/${scholarship.id}/funding-sources`);
+      setFundingScholarship(scholarship);
+      setFundingSources([
+        ...result.donations.map((source) => ({ ...source, kind: 'donation' as const, label: `Donation · ${formatAFN(source.available)} available` })),
+        ...result.campaignFundingEntries.map((source) => ({ ...source, kind: 'campaignFundingEntry' as const, label: `Campaign balance · ${formatAFN(source.available)} available` })),
       ]);
-    } catch (err) {
-      notify(err instanceof Error ? err.message : 'Could not record the receipt.', 'error');
+      setFundingForm({ sourceKey: '', amount: 0 });
+    } catch (error) {
+      announce(error instanceof Error ? error.message : 'Could not load funding sources.', 'error');
     }
   };
 
-  const submitSponsorshipApplication = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!managingSponsorship) return;
-    try {
-      await api.post(`/funding/sponsorships/${managingSponsorship.id}/allocations`, {
-        obligationId: sponsorApplyForm.obligationId,
-        amount: sponsorApplyForm.amount,
-      });
-      notify('Sponsorship applied to the tuition obligation.', 'success');
-      // This settles tuition, so the datasets that publish a student's balance
-      // are stale the moment it succeeds.
-      invalidate('students', 'payments', 'funding');
-      setSponsorApplyForm({ ...sponsorApplyForm, obligationId: '', amount: 0 });
-      await Promise.all([
-        reloadSponsorship(managingSponsorship, sponsorApplyForm.studentId),
-        reloadSponsorshipPositions(),
-      ]);
-    } catch (err) {
-      notify(err instanceof Error ? err.message : 'Could not apply the sponsorship.', 'error');
-    }
-  };
-
-  const reverseSponsorshipApplication = async (allocationId: string) => {
-    if (!managingSponsorship) return;
-    const reason = window.prompt('Why is this application being reversed? (at least 8 characters)');
-    if (!reason) return;
-    try {
-      await api.post(`/funding/sponsorship-allocations/${allocationId}/reverse`, { reason });
-      notify('Application reversed; the money returned to the agreement.', 'success');
-      invalidate('students', 'payments', 'funding');
-      await Promise.all([
-        reloadSponsorship(managingSponsorship, sponsorApplyForm.studentId),
-        reloadSponsorshipPositions(),
-      ]);
-    } catch (err) {
-      notify(err instanceof Error ? err.message : 'Could not reverse the application.', 'error');
-    }
-  };
-
-  /** Change which student's obligations the apply form offers. */
-  const chooseSponsoredStudent = async (studentRef: string) => {
-    setSponsorApplyForm({ studentId: studentRef, obligationId: '', amount: 0 });
-    if (!managingSponsorship) return;
-    try {
-      await reloadSponsorship(managingSponsorship, studentRef);
-    } catch (err) {
-      notify(err instanceof Error ? err.message : 'Could not load that student.', 'error');
-    }
-  };
-
-  const TABS: { id: FundingTab; label: string; icon: React.ElementType; count: number }[] = [
-    { id: 'donors', label: 'Donors', icon: Users, count: donors.length },
-    { id: 'campaigns', label: 'Campaigns', icon: Target, count: campaigns.length },
-    { id: 'donations', label: 'Donations', icon: ReceiptText, count: donations.length },
-    { id: 'scholarships', label: 'Scholarships', icon: GraduationCap, count: scholarships.length },
-    { id: 'sponsorships', label: 'Sponsorships', icon: HeartHandshake, count: sponsorships.length },
-  ];
+  const selectedAwardReceipt = sponsorshipPosition?.receipts.find((receipt) => receipt.id === sponsorApply.sponsorshipReceiptId);
 
   return (
-    <div className="space-y-6 font-sans text-start" id="funding-view-root">
-      {/* ============ Treasury Command Band (distinctive opening) ============ */}
-      <div className="relative overflow-hidden rounded-2xl bg-slate-900 text-white">
-        {/* layered ledger-line texture + soft glow, not blobs */}
-        <div
-          className="absolute inset-0 opacity-[0.06] pointer-events-none"
-          style={{ backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 27px, #fff 28px)' }}
-        />
-        <div className="absolute -top-24 -left-24 w-72 h-72 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-32 -right-16 w-80 h-80 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
-
-        <div className="relative px-6 py-6 md:px-8 md:py-7 flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 border border-white/15 text-[10px] font-bold tracking-widest uppercase">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Live Development Ledger
-              </span>
-              <span className="text-[10px] text-slate-400 font-semibold tracking-wider uppercase">BC #11 · Funding</span>
-            </div>
-            <h2 className="text-2xl md:text-3xl font-black tracking-tight flex items-center gap-2.5">
-      {donors.length === 0 && campaigns.length === 0 && donations.length === 0 && (
-        <div className="rounded-2xl border border-dashed border-emerald-200 bg-emerald-50/40 px-5 py-8 text-center text-xs text-slate-600">
-          <p className="font-extrabold text-sm text-slate-900">Funding is empty</p>
-          <p className="mt-1 max-w-lg mx-auto text-slate-500">
-            Add real donors and campaigns when you have them. No demo data is loaded — your fundraising ledger starts at zero.
-          </p>
-        </div>
-      )}
-              <HandCoins className="w-7 h-7 text-amber-400" />
-              Funding &amp; Development Treasury
-            </h2>
-            <p className="text-xs text-slate-400 max-w-xl leading-relaxed">
-              Donor relations, capital campaigns, restricted grants, scholarships, and sponsorships —
-              every afghani tracked from pledge to student impact.
-            </p>
-          </div>
-
-          {/* Hero metric + inline supporting strip (not equal cards) */}
-          <div className="flex flex-col sm:flex-row sm:items-end gap-6 sm:gap-8">
-            <div>
-              <p className="text-[10px] font-bold tracking-widest uppercase text-slate-400">Total Capital Raised</p>
-              <p className="text-4xl md:text-5xl font-black font-mono tabular-nums text-emerald-400 leading-none mt-1">
-                {treasury.totalRaised.toLocaleString('en-US')}
-                <span className="text-base font-bold text-slate-500 ms-1.5">AFN</span>
-              </p>
-            </div>
-            <div className="flex items-center gap-6 sm:gap-7 sm:border-s sm:border-white/15 sm:ps-8">
-              <div>
-                <p className="text-[10px] font-bold tracking-widest uppercase text-slate-400">Donors</p>
-                <p className="text-2xl font-black font-mono tabular-nums mt-0.5">{donors.length}</p>
-              </div>
-              <div>
-                <p className="text-[10px] font-bold tracking-widest uppercase text-slate-400">Active Campaigns</p>
-                <p className="text-2xl font-black font-mono tabular-nums mt-0.5">{treasury.activeCampaigns}</p>
-              </div>
-              <div>
-                <p className="text-[10px] font-bold tracking-widest uppercase text-slate-400">Restricted</p>
-                <p className="text-2xl font-black font-mono tabular-nums text-amber-400 mt-0.5">{treasury.restricted.toLocaleString('en-US')}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Capital allocation strip */}
-        <div className="relative border-t border-white/10 px-6 md:px-8 py-4 grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-4">
+    <div className="space-y-6 text-start" id="funding-view-root">
+      <section className="overflow-hidden rounded-2xl bg-slate-950 text-white shadow-sm">
+        <div className="grid gap-5 px-6 py-6 lg:grid-cols-[1.2fr,1fr] lg:px-8">
           <div>
-            <div className="flex justify-between text-[11px] font-bold mb-1.5">
-              <span className="text-slate-300">Campaign progress → {fmt(treasury.campaignRaised)} of {fmt(treasury.campaignTarget)}</span>
-              <span className="text-amber-400 font-mono">{treasury.campaignPct}%</span>
-            </div>
-            <div className="w-full bg-white/10 rounded-full h-2 overflow-hidden">
-              <div className="h-full rounded-full bg-gradient-to-l from-amber-500 to-amber-400 transition-all duration-700" style={{ width: `${treasury.campaignPct}%` }} />
-            </div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-300">Funding workspace</p>
+            <h1 className="mt-2 flex items-center gap-3 text-2xl font-black"><HandCoins className="h-7 w-7 text-amber-300" /> Donor funding with source proof</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">Every donation is linked to cash income. Restricted money names one target, and aid applications retain the source that funded them.</p>
           </div>
-          <div>
-            <div className="flex justify-between text-[11px] font-bold mb-1.5">
-              <span className="text-slate-300">Scholarship allocation → {fmt(treasury.scholarshipAllocated)} of {fmt(treasury.scholarshipBudget)}</span>
-              <span className="text-emerald-400 font-mono">{treasury.scholarshipPct}%</span>
-            </div>
-            <div className="w-full bg-white/10 rounded-full h-2 overflow-hidden">
-              <div className="h-full rounded-full bg-gradient-to-l from-emerald-500 to-emerald-400 transition-all duration-700" style={{ width: `${treasury.scholarshipPct}%` }} />
-            </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-2">
+            <Stat label="Donations received" value={formatAFN(fundingSummary?.donationsReceived ?? 0)} tone="text-emerald-300" />
+            <Stat label="Restricted" value={formatAFN(fundingSummary?.restrictedDonations ?? 0)} tone="text-amber-300" />
+            <Stat label="Active campaigns" value={String(fundingSummary?.activeCampaigns ?? 0)} />
+            <Stat label="Active sponsorships" value={String(fundingSummary?.activeSponsorships ?? 0)} />
           </div>
         </div>
-      </div>
+        <div className="grid border-t border-white/10 px-6 py-4 text-xs text-slate-300 md:grid-cols-2 md:px-8">
+          <p>Campaign progress: <strong className="font-mono text-white">{formatAFN(fundingSummary?.campaignRaised ?? 0)}</strong> of <strong className="font-mono text-white">{formatAFN(fundingSummary?.campaignTarget ?? 0)}</strong></p>
+          <p>Scholarship sources: <strong className="font-mono text-white">{formatAFN(fundingSummary?.scholarshipReceived ?? 0)}</strong> received; <strong className="font-mono text-white">{formatAFN(fundingSummary?.scholarshipCommitted ?? 0)}</strong> committed.</p>
+        </div>
+      </section>
 
-      {/* ============ Tab navigation + primary actions ============ */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-        <div className="flex flex-wrap gap-1 bg-white border border-slate-200 rounded-xl p-1 shadow-xs w-fit">
-          {TABS.map((t) => {
-            const Icon = t.icon;
-            const active = tab === t.id;
-            return (
-              <button
-                key={t.id}
-                onClick={() => setTab(t.id)}
-                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  active ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5" /> {t.label}
-                <span className={`font-mono text-[10px] px-1.5 py-0.5 rounded-full ${active ? 'bg-white/20' : 'bg-slate-100 text-slate-500'}`}>{t.count}</span>
-              </button>
-            );
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div className="flex flex-wrap gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-xs">
+          {tabs.map((entry) => {
+            const Icon = entry.icon;
+            return <button key={entry.id} onClick={() => setTab(entry.id)} className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-bold ${tab === entry.id ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'}`}><Icon className="h-3.5 w-3.5" />{entry.label}<span className="rounded-full bg-black/10 px-1.5 py-0.5 font-mono text-[10px]">{entry.count}</span></button>;
           })}
         </div>
-        {canManage && (
-          <div className="flex flex-wrap gap-2">
-            {tab === 'donors' && (
-              <button onClick={openAddDonor} className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer shadow-sm transition-all hover:-translate-y-0.5">
-                <Plus className="w-4 h-4" /> New Donor
-              </button>
-            )}
-            {tab === 'campaigns' && (
-              <button onClick={() => setShowCampaignModal(true)} className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer shadow-sm transition-all hover:-translate-y-0.5">
-                <Plus className="w-4 h-4" /> New Campaign
-              </button>
-            )}
-            {tab === 'donations' && (
-              <button onClick={() => setShowDonationModal(true)} className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer shadow-sm transition-all hover:-translate-y-0.5">
-                <Plus className="w-4 h-4" /> Record Donation
-              </button>
-            )}
-            {tab === 'scholarships' && (
-              <button onClick={() => setShowScholarshipModal(true)} className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer shadow-sm transition-all hover:-translate-y-0.5">
-                <Plus className="w-4 h-4" /> New Scholarship
-              </button>
-            )}
-            {tab === 'sponsorships' && (
-              <button onClick={() => setShowSponsorshipModal(true)} className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl cursor-pointer shadow-sm transition-all hover:-translate-y-0.5">
-                <Plus className="w-4 h-4" /> New Sponsorship
-              </button>
-            )}
-          </div>
-        )}
+        <div className="flex flex-wrap gap-2">
+          {canEdit && tab === 'donors' && <button className={primary} onClick={() => setDialog('donor')}><Plus className="h-4 w-4" />New donor</button>}
+          {canEdit && tab === 'campaigns' && <button className={primary} onClick={() => setDialog('campaign')}><Plus className="h-4 w-4" />New campaign</button>}
+          {canRecordDonation && tab === 'donations' && <button className={primary} onClick={() => setDialog('donation')}><ReceiptText className="h-4 w-4" />Record donation</button>}
+          {canEdit && tab === 'scholarships' && <button className={primary} onClick={() => setDialog('scholarship')}><Plus className="h-4 w-4" />New scholarship</button>}
+          {canEdit && tab === 'sponsorships' && <button className={primary} onClick={() => setDialog('sponsorship')}><Plus className="h-4 w-4" />New sponsorship</button>}
+        </div>
       </div>
 
-      {/* ============ DONORS ============ */}
-      {tab === 'donors' && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
-            <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5">
-              <Users className="w-5 h-5 text-emerald-600" /> Donor Registry
-            </h3>
-            <div className="relative w-full sm:w-64">
-              <input
-                type="text"
-                placeholder="Search donors by name or email…"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl ps-3 pe-9 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/10 font-semibold"
-              />
-              <Search className="w-4 h-4 text-slate-400 absolute end-3 top-2.5" />
-            </div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs text-start border-collapse">
-              <thead>
-                <tr className="border-b border-slate-100 text-slate-500 font-bold">
-                  <th className="py-2.5 px-3 text-slate-700">Donor</th>
-                  <th className="py-2.5 px-3 text-slate-700">Type</th>
-                  <th className="py-2.5 px-3 text-slate-700">Contact</th>
-                  <th className="py-2.5 px-3 text-slate-700">Total Donated</th>
-                  {canManage && <th className="py-2.5 px-3 text-slate-700 text-start">Actions</th>}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50 text-slate-600">
-                {filteredDonors.length === 0 ? (
-                  <tr><td colSpan={canManage ? 5 : 4} className="text-center py-10 text-slate-400">No donors match your search.</td></tr>
-                ) : (
-                  filteredDonors.map((d) => (
-                    <tr key={d.id} className="hover:bg-emerald-50/30 transition-colors">
-                      <td className="py-3 px-3">
-                        <p className="font-extrabold text-slate-800">{d.fullName}</p>
-                        {d.country && <p className="text-[10px] text-slate-400 mt-0.5">{d.country}</p>}
-                      </td>
-                      <td className="py-3 px-3"><DonorTypeBadge type={d.type} /></td>
-                      <td className="py-3 px-3">
-                        <p className="font-mono text-slate-600">{d.phone || '—'}</p>
-                        <p className="text-[10px] text-slate-400 font-mono">{d.email || ''}</p>
-                      </td>
-                      <td className="py-3 px-3">
-                        <span className="font-black font-mono tabular-nums text-emerald-700">{fmt(donatedBy(d.id))}</span>
-                      </td>
-                      {canManage && (
-                        <td className="py-3 px-3 text-start">
-                          <button onClick={() => openEditDonor(d)} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-indigo-600 cursor-pointer transition-colors" title="Edit donor">
-                            <Edit className="w-4 h-4" />
-                          </button>
-                        </td>
-                      )}
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+      {tab === 'donors' && <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><table className="w-full text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="px-4 py-3 text-start">Donor</th><th className="px-4 py-3 text-start">Type</th><th className="px-4 py-3 text-start">Contact</th></tr></thead><tbody className="divide-y divide-slate-100">{donors.map((donor) => <tr key={donor.id}><td className="px-4 py-3 font-bold text-slate-800">{donor.fullName}</td><td className="px-4 py-3 capitalize text-slate-600">{donor.type}</td><td className="px-4 py-3 text-slate-600">{donor.email || donor.phone || '—'}</td></tr>)}{donors.length === 0 && <tr><td colSpan={3} className="px-4 py-12 text-center text-slate-400">No donor appears in this branch scope.</td></tr>}</tbody></table></section>}
 
-      {/* ============ CAMPAIGNS ============ */}
-      {tab === 'campaigns' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
-          {campaigns.length === 0 ? (
-            <div className="col-span-full bg-white border border-slate-200 rounded-2xl p-12 text-center text-slate-400 text-xs">
-              No funding campaigns defined yet.
-            </div>
-          ) : (
-            campaigns.map((c) => (
-              <div key={c.id} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 flex flex-col justify-between gap-4">
-                <div className="space-y-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <h4 className="font-extrabold text-slate-900 text-sm leading-snug">{c.name}</h4>
-                    <StatusPill status={c.status} />
-                  </div>
-                  {c.description && <p className="text-[11px] text-slate-500 leading-relaxed line-clamp-2">{c.description}</p>}
-                  <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-mono">
-                    <Calendar className="w-3.5 h-3.5" /> {c.startDate} → {c.endDate || 'ongoing'}
-                  </div>
-                  {c.donorId && (
-                    <p className="text-[10px] text-slate-500">Lead donor: <span className="font-bold text-slate-700">{donorName(c.donorId)}</span></p>
-                  )}
-                </div>
-                <GoalBar raised={c.raisedAmount} target={c.targetAmount} />
-              </div>
-            ))
-          )}
-        </div>
-      )}
+      {tab === 'campaigns' && <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{campaigns.map((campaign) => <article key={campaign.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-start justify-between gap-3"><div><h2 className="font-black text-slate-900">{campaign.name}</h2><p className="mt-1 text-xs text-slate-500">Lead donor: {donorName(campaign.donorId)}</p></div><Status value={campaign.status} /></div><div className="mt-5"><div className="flex justify-between text-xs text-slate-500"><span>Raised</span><span className="font-mono font-bold text-slate-800">{formatAFN(campaign.raisedAmount)} / {formatAFN(campaign.targetAmount)}</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-emerald-500" style={{ width: `${Math.min(100, campaign.progressPercent)}%` }} /></div></div><p className="mt-4 text-xs text-slate-500"><CalendarDays className="me-1 inline h-3.5 w-3.5" />{campaign.startDate} → {campaign.endDate || 'ongoing'}</p></article>)}{campaigns.length === 0 && <p className="rounded-2xl border border-dashed border-slate-300 p-12 text-center text-sm text-slate-500 md:col-span-2 xl:col-span-3">No campaigns in this branch.</p>}</section>}
 
-      {/* ============ DONATIONS ============ */}
-      {tab === 'donations' && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
-          <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5 border-b border-slate-100 pb-3">
-            <ReceiptText className="w-5 h-5 text-emerald-600" /> Donation Ledger
-          </h3>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs text-start border-collapse">
-              <thead>
-                <tr className="border-b border-slate-100 text-slate-500 font-bold">
-                  <th className="py-2.5 px-3 text-slate-700">Receipt</th>
-                  <th className="py-2.5 px-3 text-slate-700">Donor</th>
-                  <th className="py-2.5 px-3 text-slate-700">Campaign</th>
-                  <th className="py-2.5 px-3 text-slate-700">Restriction</th>
-                  <th className="py-2.5 px-3 text-slate-700">Date</th>
-                  <th className="py-2.5 px-3 text-slate-700 text-start">Amount</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50 text-slate-600">
-                {donations.length === 0 ? (
-                  <tr><td colSpan={6} className="text-center py-10 text-slate-400">No donations recorded yet.</td></tr>
-                ) : (
-                  donations.map((dn) => (
-                    <tr key={dn.id} className="hover:bg-emerald-50/30 transition-colors">
-                      <td className="py-3 px-3 font-mono text-slate-400">{dn.receiptNo}</td>
-                      <td className="py-3 px-3 font-bold text-slate-800">{donorName(dn.donorId)}</td>
-                      <td className="py-3 px-3 text-slate-500">{campaigns.find((c) => c.id === dn.campaignId)?.name || 'General fund'}</td>
-                      <td className="py-3 px-3"><RestrictedBadge restricted={dn.restricted} /></td>
-                      <td className="py-3 px-3 font-mono text-slate-400">{dn.date}</td>
-                      <td className="py-3 px-3 text-start">
-                        <span className="font-black font-mono tabular-nums text-emerald-700">+{dn.amount.toLocaleString('en-US')}</span>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+      {tab === 'donations' && <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><table className="w-full text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="px-4 py-3 text-start">Receipt</th><th className="px-4 py-3 text-start">Donor</th><th className="px-4 py-3 text-start">Restriction / campaign</th><th className="px-4 py-3 text-start">Remaining source</th><th className="px-4 py-3 text-end">Amount</th></tr></thead><tbody className="divide-y divide-slate-100">{donations.map((donation) => <tr key={donation.id}><td className="px-4 py-3 font-mono text-xs text-slate-500">{donation.receiptNo}</td><td className="px-4 py-3 font-bold text-slate-800">{donorName(donation.donorId)}</td><td className="px-4 py-3 text-xs text-slate-600">{donation.restrictionKind ? <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-1 font-bold text-amber-800"><LockKeyhole className="h-3 w-3" />Restricted · {donation.restrictionKind}</span> : campaignName(donation.campaignId)}</td><td className="px-4 py-3 font-mono text-xs text-slate-600">{formatAFN(donation.allocation?.unallocated ?? 0)}</td><td className="px-4 py-3 text-end font-mono font-black text-emerald-700">{formatAFN(donation.amount)}</td></tr>)}{donations.length === 0 && <tr><td colSpan={5} className="px-4 py-12 text-center text-slate-400">No donations in this branch.</td></tr>}</tbody></table></section>}
 
-      {/* ============ SCHOLARSHIPS ============ */}
-      {tab === 'scholarships' && (
-        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {scholarships.length === 0 ? (
-              <div className="col-span-full bg-white border border-slate-200 rounded-2xl p-12 text-center text-slate-400 text-xs">
-                No scholarship funds yet.
-              </div>
-            ) : (
-              scholarships.map((sc) => {
-                const position = fundPositions[sc.id];
-                return (
-                  <div key={sc.id} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between gap-4">
-                    <div className="space-y-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <h4 className="font-extrabold text-slate-900 text-sm flex items-center gap-1.5">
-                          <GraduationCap className="w-4 h-4 text-indigo-600" /> {sc.name}
-                        </h4>
-                        <StatusPill status={sc.status} />
-                      </div>
-                      {sc.criteria && <p className="text-[11px] text-slate-500 leading-relaxed line-clamp-2">{sc.criteria}</p>}
-                      {sc.donorId && <p className="text-[10px] text-slate-500">Funded by <span className="font-bold text-slate-700">{donorName(sc.donorId)}</span></p>}
-                    </div>
-                    <div className="space-y-2">
-                      {/* Committed against RECEIVED money. The declared target is
-                          a goal and funds nothing (owner decision D-121). */}
-                      <GoalBar raised={position?.committed ?? 0} target={position?.received ?? 0} />
-                      {position ? (
-                        <div className="grid grid-cols-3 gap-2 text-[10px] font-mono">
-                          <div><p className="text-slate-400">Received</p><p className="font-bold text-emerald-700">{fmt(position.received)}</p></div>
-                          <div><p className="text-slate-400">Committed</p><p className="font-bold text-slate-700">{fmt(position.committed)}</p></div>
-                          <div><p className="text-slate-400">Available</p><p className="font-bold text-indigo-700">{fmt(position.available)}</p></div>
-                        </div>
-                      ) : (
-                        <p className="text-[10px] text-slate-400 italic">Loading fund position…</p>
-                      )}
-                      <p className="text-[10px] text-slate-400">
-                        Declared target {fmt(position?.declaredTarget ?? sc.totalBudget)} · funded by {position?.fundings.length ?? 0} donation(s)
-                      </p>
-                      {position && position.received === 0 && (
-                        <p className="text-[10px] text-amber-700 font-bold">Allocate a donation before awarding: a fund can only award money it has received.</p>
-                      )}
-                      <div className="flex items-center justify-between gap-2">
-                        {canManage && (
-                          <button
-                            onClick={() => { setFundingScholarship(sc); setFundingForm({ donationId: '', amount: 0 }); }}
-                            className="flex items-center gap-1 text-[11px] font-bold text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
-                          >
-                            <HandCoins className="w-3.5 h-3.5" /> Fund from donation
-                          </button>
-                        )}
-                        {canManage && sc.status === 'active' && (
-                          <button
-                            onClick={() => { setAwardingScholarship(sc); setAwardForm({ studentId: '', amount: 0, semester: '', notes: '' }); }}
-                            disabled={!position || position.available <= 0}
-                            className="flex items-center gap-1 text-[11px] font-bold text-indigo-700 hover:text-indigo-900 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                          >
-                            <BadgeCheck className="w-3.5 h-3.5" /> Award Student
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
+      {tab === 'scholarships' && <section className="space-y-5"><div className="grid gap-4 md:grid-cols-2">{scholarships.map((scholarship) => <article key={scholarship.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex justify-between gap-3"><div><h2 className="font-black text-slate-900">{scholarship.name}</h2><p className="mt-1 text-xs text-slate-500">Campaign: {campaignName(scholarship.campaignId)}</p></div><Status value={scholarship.status} /></div><div className="mt-4 grid grid-cols-3 gap-2 text-xs"><div><p className="text-slate-400">Received</p><p className="font-mono font-bold text-emerald-700">{formatAFN(scholarship.received)}</p></div><div><p className="text-slate-400">Committed</p><p className="font-mono font-bold text-slate-700">{formatAFN(scholarship.committed)}</p></div><div><p className="text-slate-400">Available</p><p className="font-mono font-bold text-indigo-700">{formatAFN(scholarship.available)}</p></div></div><p className="mt-3 text-xs text-slate-500">Declared target: {formatAFN(scholarship.totalBudget)}</p>{canEdit && <div className="mt-4 flex flex-wrap gap-2"><button className={secondary} onClick={() => void openFunding(scholarship)}><CircleDollarSign className="h-3.5 w-3.5" />Fund source</button><button className={secondary} disabled={scholarship.available <= 0 || scholarship.status !== 'active'} onClick={() => { setAwardingScholarship(scholarship); setAwardForm({ studentId: '', amount: 0, awardDate: '', notes: '' }); }}><BadgeCheck className="h-3.5 w-3.5" />Award student</button></div>}</article>)}{scholarships.length === 0 && <p className="rounded-2xl border border-dashed border-slate-300 p-12 text-center text-sm text-slate-500 md:col-span-2">No scholarships in this branch.</p>}</div><div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="border-b border-slate-100 px-5 py-4"><h2 className="font-black text-slate-900">Scholarship awards</h2></div><table className="w-full text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="px-4 py-3 text-start">Student</th><th className="px-4 py-3 text-start">Scholarship</th><th className="px-4 py-3 text-end">Award</th><th className="px-4 py-3 text-end">Action</th></tr></thead><tbody className="divide-y divide-slate-100">{scholarshipAwards.map((award) => <tr key={award.id}><td className="px-4 py-3 font-bold text-slate-800">{studentName(award.studentId)}</td><td className="px-4 py-3 text-slate-600">{scholarships.find((entry) => entry.id === award.scholarshipId)?.name ?? '—'}</td><td className="px-4 py-3 text-end font-mono font-bold">{formatAFN(award.amount)}</td><td className="px-4 py-3 text-end">{canEdit && <button className={secondary} onClick={() => { setManagingAward(award); setAwardPosition(null); void loadAward(award).catch((error) => announce(error instanceof Error ? error.message : 'Could not load award.', 'error')); }}>Manage</button>}</td></tr>)}{scholarshipAwards.length === 0 && <tr><td colSpan={4} className="px-4 py-10 text-center text-slate-400">No awards issued.</td></tr>}</tbody></table></div></section>}
 
-          {/* Awards list */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-3">
-            <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5 border-b border-slate-100 pb-2.5">
-              <BadgeCheck className="w-5 h-5 text-indigo-600" /> Scholarship Awards
-            </h3>
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs text-start border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-100 text-slate-500 font-bold">
-                    <th className="py-2.5 px-3 text-slate-700">Student</th>
-                    <th className="py-2.5 px-3 text-slate-700">Scholarship</th>
-                    <th className="py-2.5 px-3 text-slate-700">Semester</th>
-                    <th className="py-2.5 px-3 text-slate-700">Award Date</th>
-                    <th className="py-2.5 px-3 text-slate-700 text-start">Amount</th>
-                    <th className="py-2.5 px-3 text-slate-700 text-start">Applied</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50 text-slate-600">
-                  {scholarshipAwards.length === 0 ? (
-                    <tr><td colSpan={6} className="text-center py-8 text-slate-400">No awards issued yet.</td></tr>
-                  ) : (
-                    scholarshipAwards.map((a) => (
-                      <tr key={a.id} className="hover:bg-indigo-50/30 transition-colors">
-                        <td className="py-3 px-3 font-bold text-slate-800">{studentName(a.studentId)}</td>
-                        <td className="py-3 px-3 text-slate-500">{scholarships.find((s) => s.id === a.scholarshipId)?.name || '—'}</td>
-                        <td className="py-3 px-3 text-slate-500">{a.semester || '—'}</td>
-                        <td className="py-3 px-3 font-mono text-slate-400">{a.awardDate}</td>
-                        <td className="py-3 px-3 text-start font-black font-mono tabular-nums text-indigo-700">{fmt(a.amount)}</td>
-                        <td className="py-3 px-3 text-start">
-                          <button
-                            onClick={() => void openAward(a)}
-                            className="text-[11px] font-bold text-indigo-700 hover:text-indigo-900 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
-                          >
-                            Apply / manage
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
+      {tab === 'sponsorships' && <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><table className="w-full text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="px-4 py-3 text-start">Sponsor</th><th className="px-4 py-3 text-start">Student</th><th className="px-4 py-3 text-start">Campaign</th><th className="px-4 py-3 text-end">Received</th><th className="px-4 py-3 text-end">Available</th><th className="px-4 py-3 text-end">Action</th></tr></thead><tbody className="divide-y divide-slate-100">{sponsorships.map((agreement) => <tr key={agreement.id}><td className="px-4 py-3 font-bold text-slate-800">{donorName(agreement.donorId)}</td><td className="px-4 py-3 text-slate-600">{studentName(agreement.studentId)}</td><td className="px-4 py-3 text-slate-600">{campaignName(agreement.campaignId)}</td><td className="px-4 py-3 text-end font-mono">{formatAFN(agreement.received)}</td><td className="px-4 py-3 text-end font-mono text-indigo-700">{formatAFN(agreement.available)}</td><td className="px-4 py-3 text-end">{canEdit && <button className={secondary} onClick={() => { setManagingSponsorship(agreement); setSponsorshipPosition(null); setSponsorApply({ studentId: agreement.studentId ?? '', obligationId: '', sponsorshipReceiptId: '', amount: 0 }); void loadSponsorship(agreement).catch((error) => announce(error instanceof Error ? error.message : 'Could not load sponsorship.', 'error')); }}>Manage</button>}</td></tr>)}{sponsorships.length === 0 && <tr><td colSpan={6} className="px-4 py-12 text-center text-slate-400">No sponsorships in this branch.</td></tr>}</tbody></table></section>}
 
-      {/* ============ SPONSORSHIPS ============ */}
-      {tab === 'sponsorships' && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
-          <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5 border-b border-slate-100 pb-3">
-            <HeartHandshake className="w-5 h-5 text-emerald-600" /> Sponsorship Agreements
-          </h3>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs text-start border-collapse">
-              <thead>
-                <tr className="border-b border-slate-100 text-slate-500 font-bold">
-                  <th className="py-2.5 px-3 text-slate-700">Sponsor</th>
-                  <th className="py-2.5 px-3 text-slate-700">Sponsored Student</th>
-                  <th className="py-2.5 px-3 text-slate-700">Promised / month</th>
-                  <th className="py-2.5 px-3 text-slate-700">Received</th>
-                  <th className="py-2.5 px-3 text-slate-700">Applied</th>
-                  <th className="py-2.5 px-3 text-slate-700">Available</th>
-                  <th className="py-2.5 px-3 text-slate-700">Status</th>
-                  <th className="py-2.5 px-3 text-slate-700 text-end">Money</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50 text-slate-600">
-                {sponsorships.length === 0 ? (
-                  <tr><td colSpan={8} className="text-center py-10 text-slate-400">No sponsorship agreements yet.</td></tr>
-                ) : (
-                  sponsorships.map((sp) => {
-                    const pos = sponsorshipPositions[sp.id];
-                    return (
-                      <tr key={sp.id} className="hover:bg-emerald-50/30 transition-colors">
-                        <td className="py-3 px-3 font-bold text-slate-800">{donorName(sp.donorId)}</td>
-                        <td className="py-3 px-3 text-slate-500">
-                          {sp.studentId ? studentName(sp.studentId) : <span className="italic text-slate-400">any student</span>}
-                          <span className="block font-mono text-[10px] text-slate-400">{sp.startDate} → {sp.endDate}</span>
-                        </td>
-                        {/* A promise, deliberately shown apart from the money. */}
-                        <td className="py-3 px-3 font-mono tabular-nums text-slate-400">{fmt(sp.monthlyAmount)}</td>
-                        <td className="py-3 px-3 font-black font-mono tabular-nums text-emerald-700">{pos ? fmt(pos.received) : '—'}</td>
-                        <td className="py-3 px-3 font-mono tabular-nums text-slate-600">{pos ? fmt(pos.applied) : '—'}</td>
-                        <td className="py-3 px-3 font-black font-mono tabular-nums text-indigo-700">{pos ? fmt(pos.available) : '—'}</td>
-                        <td className="py-3 px-3"><StatusPill status={sp.status} /></td>
-                        <td className="py-3 px-3 text-end">
-                          <button
-                            onClick={() => void openSponsorship(sp)}
-                            className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer"
-                          >
-                            Manage money
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+      {dialog === 'donor' && <Dialog title="Create donor" onClose={() => setDialog(null)}><form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void run(async () => { await addDonor(donorForm); setDialog(null); setDonorForm({ fullName: '', type: 'individual', phone: '', email: '', country: '', notes: '' }); }, 'Donor created.'); }}><div><label className={label}>Full name</label><input required className={field} value={donorForm.fullName} onChange={(event) => setDonorForm({ ...donorForm, fullName: event.target.value })} /></div><div><label className={label}>Type</label><select className={field} value={donorForm.type} onChange={(event) => setDonorForm({ ...donorForm, type: event.target.value as Donor['type'] })}>{(['individual', 'organization', 'ngo', 'government'] as Donor['type'][]).map((type) => <option key={type} value={type}>{type}</option>)}</select></div><div className="grid gap-3 sm:grid-cols-2"><div><label className={label}>Email</label><input className={field} value={donorForm.email} onChange={(event) => setDonorForm({ ...donorForm, email: event.target.value })} /></div><div><label className={label}>Phone</label><input className={field} value={donorForm.phone} onChange={(event) => setDonorForm({ ...donorForm, phone: event.target.value })} /></div></div><button className={primary}>Create donor</button></form></Dialog>}
 
-      {/* ============ MODALS ============ */}
-      {showDonorModal && (
-        <ModalShell title={editingDonor ? 'Edit Donor' : 'Register New Donor'} onClose={() => setShowDonorModal(false)}>
-          <form onSubmit={submitDonor} className="space-y-3.5 text-xs">
-            <div><label className={labelCls}>Full Name *</label>
-              <input className={inputCls} value={donorForm.fullName} onChange={(e) => setDonorForm({ ...donorForm, fullName: e.target.value })} required /></div>
-            <div><label className={labelCls}>Donor Type</label>
-              <select className={inputCls} value={donorForm.type} onChange={(e) => setDonorForm({ ...donorForm, type: e.target.value as Donor['type'] })}>
-                <option value="individual">Individual</option><option value="organization">Organization</option>
-                <option value="ngo">NGO</option><option value="government">Government</option>
-              </select></div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><label className={labelCls}>Email</label><input type="email" className={inputCls} value={donorForm.email} onChange={(e) => setDonorForm({ ...donorForm, email: e.target.value })} /></div>
-              <div><label className={labelCls}>Phone</label><input className={inputCls} value={donorForm.phone} onChange={(e) => setDonorForm({ ...donorForm, phone: e.target.value })} /></div>
-            </div>
-            <div><label className={labelCls}>Country</label><input className={inputCls} value={donorForm.country} onChange={(e) => setDonorForm({ ...donorForm, country: e.target.value })} /></div>
-            <div><label className={labelCls}>Notes</label><textarea className={inputCls} rows={2} value={donorForm.notes} onChange={(e) => setDonorForm({ ...donorForm, notes: e.target.value })} /></div>
-            <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-lg cursor-pointer transition-colors shadow-sm">
-              {editingDonor ? 'Save Changes' : 'Register Donor'}
-            </button>
-          </form>
-        </ModalShell>
-      )}
+      {dialog === 'campaign' && <Dialog title="Create campaign" onClose={() => setDialog(null)}><form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void run(async () => { await addFundingCampaign({ name: campaignForm.name, donorId: campaignForm.donorId || null, targetAmount: campaignForm.targetAmount, description: campaignForm.description || null, startDate: campaignForm.startDate || undefined, endDate: campaignForm.endDate || null }); setDialog(null); setCampaignForm({ name: '', donorId: '', targetAmount: 0, description: '', startDate: '', endDate: '' }); }, 'Campaign created.'); }}><div><label className={label}>Campaign name</label><input required className={field} value={campaignForm.name} onChange={(event) => setCampaignForm({ ...campaignForm, name: event.target.value })} /></div><div><label className={label}>Lead donor</label><select className={field} value={campaignForm.donorId} onChange={(event) => setCampaignForm({ ...campaignForm, donorId: event.target.value })}><option value="">No lead donor</option>{donors.map((donor) => <option key={donor.id} value={donor.id}>{donor.fullName}</option>)}</select></div><div><label className={label}>Target (AFN)</label><input required min={0} step={1} type="number" className={field} value={campaignForm.targetAmount || ''} onChange={(event) => setCampaignForm({ ...campaignForm, targetAmount: Number(event.target.value) })} /></div><div className="grid gap-3 sm:grid-cols-2"><ShamsiDateInput label="Start date" value={campaignForm.startDate} onChange={(startDate) => setCampaignForm({ ...campaignForm, startDate })} /><ShamsiDateInput label="End date" value={campaignForm.endDate} onChange={(endDate) => setCampaignForm({ ...campaignForm, endDate })} /></div><button className={primary}>Create campaign</button></form></Dialog>}
 
-      {showCampaignModal && (
-        <ModalShell title="Create Funding Campaign" onClose={() => setShowCampaignModal(false)}>
-          <form onSubmit={submitCampaign} className="space-y-3.5 text-xs">
-            <div><label className={labelCls}>Campaign Name *</label>
-              <input className={inputCls} value={campaignForm.name} onChange={(e) => setCampaignForm({ ...campaignForm, name: e.target.value })} required /></div>
-            <div><label className={labelCls}>Lead Donor (optional)</label>
-              <select className={inputCls} value={campaignForm.donorId} onChange={(e) => setCampaignForm({ ...campaignForm, donorId: e.target.value })}>
-                <option value="">— None —</option>
-                {donors.map((d) => <option key={d.id} value={d.id}>{d.fullName}</option>)}
-              </select></div>
-            <div><label className={labelCls}>Target Amount (AFN) *</label>
-              <input type="number" min={1} className={inputCls} value={campaignForm.targetAmount || ''} onChange={(e) => setCampaignForm({ ...campaignForm, targetAmount: Number(e.target.value) })} required /></div>
-            <div className="grid grid-cols-2 gap-3">
-              <ShamsiDateInput label="Start Date" value={campaignForm.startDate} onChange={(v) => setCampaignForm({ ...campaignForm, startDate: v })} />
-              <ShamsiDateInput label="End Date" value={campaignForm.endDate} onChange={(v) => setCampaignForm({ ...campaignForm, endDate: v })} />
-            </div>
-            <div><label className={labelCls}>Description</label><textarea className={inputCls} rows={2} value={campaignForm.description} onChange={(e) => setCampaignForm({ ...campaignForm, description: e.target.value })} /></div>
-            <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-lg cursor-pointer transition-colors shadow-sm">Create Campaign</button>
-          </form>
-        </ModalShell>
-      )}
+      {dialog === 'donation' && <Dialog title="Record donation" onClose={() => setDialog(null)}><form className="space-y-4" onSubmit={submitDonation}><div><label className={label}>Donor</label><select required className={field} value={donationForm.donorId} onChange={(event) => setDonationForm({ ...donationForm, donorId: event.target.value })}><option value="">Choose donor</option>{donors.map((donor) => <option key={donor.id} value={donor.id}>{donor.fullName}</option>)}</select></div><div><label className={label}>Campaign provenance (optional)</label><select className={field} value={donationForm.campaignId} onChange={(event) => setDonationForm({ ...donationForm, campaignId: event.target.value })}><option value="">No campaign</option>{campaigns.map((campaign) => <option key={campaign.id} value={campaign.id}>{campaign.name}</option>)}</select></div><div className="grid gap-3 sm:grid-cols-2"><div><label className={label}>Amount (AFN)</label><input required min={1} step={1} type="number" className={field} value={donationForm.amount || ''} onChange={(event) => setDonationForm({ ...donationForm, amount: Number(event.target.value) })} /></div><ShamsiDateInput label="Donation date" value={donationForm.date} onChange={(date) => setDonationForm({ ...donationForm, date })} /></div><fieldset className="rounded-xl border border-amber-200 bg-amber-50 p-3"><legend className="px-1 text-xs font-black text-amber-900">Restriction</legend><label className={label}>Structured target</label><select className={field} value={donationForm.restrictionKind} onChange={(event) => setDonationForm({ ...donationForm, restrictionKind: event.target.value as RestrictionKind, restrictionTargetId: '' })}><option value="">Unrestricted donation</option><option value="campaign">Campaign</option><option value="scholarship">Scholarship</option><option value="sponsorship">Sponsorship</option></select>{donationForm.restrictionKind && <div className="mt-3"><label className={label}>Required target</label><select required className={field} value={donationForm.restrictionTargetId} onChange={(event) => setDonationForm({ ...donationForm, restrictionTargetId: event.target.value })}><option value="">Choose {donationForm.restrictionKind}</option>{selectedRestrictionTargets.map((target: any) => <option key={target.id} value={target.id}>{target.name ?? `${donorName(target.donorId)} sponsorship`}</option>)}</select><p className="mt-2 text-xs text-amber-800">The system posts this donation only into this named target. A note cannot override the target.</p></div>}</fieldset><button className={primary}>Record donation</button></form></Dialog>}
 
-      {showDonationModal && (
-        <ModalShell title="Record Donation" onClose={() => setShowDonationModal(false)}>
-          <form onSubmit={submitDonation} className="space-y-3.5 text-xs">
-            <div><label className={labelCls}>Donor *</label>
-              <select className={inputCls} value={donationForm.donorId} onChange={(e) => setDonationForm({ ...donationForm, donorId: e.target.value })} required>
-                <option value="">Select donor…</option>
-                {donors.map((d) => <option key={d.id} value={d.id}>{d.fullName}</option>)}
-              </select></div>
-            <div><label className={labelCls}>Campaign (optional)</label>
-              <select className={inputCls} value={donationForm.campaignId} onChange={(e) => setDonationForm({ ...donationForm, campaignId: e.target.value })}>
-                <option value="">— General fund —</option>
-                {campaigns.filter((c) => c.status === 'active').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select></div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><label className={labelCls}>Amount (AFN) *</label>
-                <input type="number" min={1} className={inputCls} value={donationForm.amount || ''} onChange={(e) => setDonationForm({ ...donationForm, amount: Number(e.target.value) })} required /></div>
-              <ShamsiDateInput label="Date" value={donationForm.date} onChange={(v) => setDonationForm({ ...donationForm, date: v })} />
-            </div>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={donationForm.restricted} onChange={(e) => setDonationForm({ ...donationForm, restricted: e.target.checked })} className="w-4 h-4 accent-emerald-600 rounded" />
-              <span className="font-bold text-slate-700">Restricted grant</span>
-            </label>
-            {donationForm.restricted && (
-              <div><label className={labelCls}>Restriction Note</label>
-                <input className={inputCls} value={donationForm.restrictionNote} onChange={(e) => setDonationForm({ ...donationForm, restrictionNote: e.target.value })} placeholder="e.g. Female students only" /></div>
-            )}
-            <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-lg cursor-pointer transition-colors shadow-sm">Record Donation</button>
-          </form>
-        </ModalShell>
-      )}
+      {dialog === 'scholarship' && <Dialog title="Create scholarship" onClose={() => setDialog(null)}><form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void run(async () => { await addScholarship({ name: scholarshipForm.name, donorId: scholarshipForm.donorId || null, campaignId: scholarshipForm.campaignId || null, totalBudget: scholarshipForm.totalBudget, criteria: scholarshipForm.criteria || null }); setDialog(null); setScholarshipForm({ name: '', donorId: '', campaignId: '', totalBudget: 0, criteria: '' }); }, 'Scholarship created.'); }}><div><label className={label}>Name</label><input required className={field} value={scholarshipForm.name} onChange={(event) => setScholarshipForm({ ...scholarshipForm, name: event.target.value })} /></div><div className="grid gap-3 sm:grid-cols-2"><div><label className={label}>Donor</label><select className={field} value={scholarshipForm.donorId} onChange={(event) => setScholarshipForm({ ...scholarshipForm, donorId: event.target.value })}><option value="">No donor</option>{donors.map((donor) => <option key={donor.id} value={donor.id}>{donor.fullName}</option>)}</select></div><div><label className={label}>Campaign</label><select className={field} value={scholarshipForm.campaignId} onChange={(event) => setScholarshipForm({ ...scholarshipForm, campaignId: event.target.value })}><option value="">No campaign</option>{campaigns.map((campaign) => <option key={campaign.id} value={campaign.id}>{campaign.name}</option>)}</select></div></div><div><label className={label}>Declared target (AFN)</label><input required min={0} step={1} type="number" className={field} value={scholarshipForm.totalBudget || ''} onChange={(event) => setScholarshipForm({ ...scholarshipForm, totalBudget: Number(event.target.value) })} /></div><div><label className={label}>Criteria</label><textarea className={field} value={scholarshipForm.criteria} onChange={(event) => setScholarshipForm({ ...scholarshipForm, criteria: event.target.value })} /></div><button className={primary}>Create scholarship</button></form></Dialog>}
 
-      {showScholarshipModal && (
-        <ModalShell title="Create Scholarship Fund" onClose={() => setShowScholarshipModal(false)}>
-          <form onSubmit={submitScholarship} className="space-y-3.5 text-xs">
-            <div><label className={labelCls}>Scholarship Name *</label>
-              <input className={inputCls} value={scholarshipForm.name} onChange={(e) => setScholarshipForm({ ...scholarshipForm, name: e.target.value })} required /></div>
-            <div><label className={labelCls}>Funding Donor (optional)</label>
-              <select className={inputCls} value={scholarshipForm.donorId} onChange={(e) => setScholarshipForm({ ...scholarshipForm, donorId: e.target.value })}>
-                <option value="">— None —</option>
-                {donors.map((d) => <option key={d.id} value={d.id}>{d.fullName}</option>)}
-              </select></div>
-            <div><label className={labelCls}>Total Budget (AFN) *</label>
-              <input type="number" min={1} className={inputCls} value={scholarshipForm.totalBudget || ''} onChange={(e) => setScholarshipForm({ ...scholarshipForm, totalBudget: Number(e.target.value) })} required /></div>
-            <div><label className={labelCls}>Eligibility Criteria</label>
-              <textarea className={inputCls} rows={2} value={scholarshipForm.criteria} onChange={(e) => setScholarshipForm({ ...scholarshipForm, criteria: e.target.value })} /></div>
-            <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-lg cursor-pointer transition-colors shadow-sm">Create Scholarship</button>
-          </form>
-        </ModalShell>
-      )}
+      {dialog === 'sponsorship' && <Dialog title="Create sponsorship agreement" onClose={() => setDialog(null)}><form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void run(async () => { await addSponsorship({ donorId: sponsorshipForm.donorId, studentId: sponsorshipForm.studentId || null, campaignId: sponsorshipForm.campaignId || null, monthlyAmount: sponsorshipForm.monthlyAmount, startDate: sponsorshipForm.startDate, endDate: sponsorshipForm.endDate }); setDialog(null); setSponsorshipForm({ donorId: '', studentId: '', campaignId: '', monthlyAmount: 0, startDate: '', endDate: '' }); }, 'Sponsorship agreement created.'); }}><div><label className={label}>Donor</label><select required className={field} value={sponsorshipForm.donorId} onChange={(event) => setSponsorshipForm({ ...sponsorshipForm, donorId: event.target.value })}><option value="">Choose donor</option>{donors.map((donor) => <option key={donor.id} value={donor.id}>{donor.fullName}</option>)}</select></div><div className="grid gap-3 sm:grid-cols-2"><div><label className={label}>Student (optional)</label><select className={field} value={sponsorshipForm.studentId} onChange={(event) => setSponsorshipForm({ ...sponsorshipForm, studentId: event.target.value })}><option value="">Any eligible student</option>{students.map((student) => <option key={student.id} value={student.id}>{student.fullName}</option>)}</select></div><div><label className={label}>Campaign for terminal returns</label><select className={field} value={sponsorshipForm.campaignId} onChange={(event) => setSponsorshipForm({ ...sponsorshipForm, campaignId: event.target.value })}><option value="">No campaign (cannot close with a balance)</option>{campaigns.map((campaign) => <option key={campaign.id} value={campaign.id}>{campaign.name}</option>)}</select></div></div><div><label className={label}>Monthly promise (AFN)</label><input required min={0} step={1} type="number" className={field} value={sponsorshipForm.monthlyAmount || ''} onChange={(event) => setSponsorshipForm({ ...sponsorshipForm, monthlyAmount: Number(event.target.value) })} /></div><div className="grid gap-3 sm:grid-cols-2"><ShamsiDateInput required label="Start date" value={sponsorshipForm.startDate} onChange={(startDate) => setSponsorshipForm({ ...sponsorshipForm, startDate })} /><ShamsiDateInput required label="End date" value={sponsorshipForm.endDate} onChange={(endDate) => setSponsorshipForm({ ...sponsorshipForm, endDate })} /></div><button className={primary}>Create sponsorship</button></form></Dialog>}
 
-      {awardingScholarship && (
-        <ModalShell title={`Award — ${awardingScholarship.name}`} onClose={() => setAwardingScholarship(null)}>
-          <div className="bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2.5 text-[11px] text-emerald-800 font-semibold mb-4 flex items-center gap-2">
-            <Info className="w-4 h-4 shrink-0" />
-            Available to award: {fmt(fundPositions[awardingScholarship.id]?.available ?? 0)} — received {fmt(fundPositions[awardingScholarship.id]?.received ?? 0)}, already committed {fmt(fundPositions[awardingScholarship.id]?.committed ?? 0)}
-          </div>
-          <form onSubmit={submitAward} className="space-y-3.5 text-xs">
-            <div><label className={labelCls}>Student *</label>
-              <select className={inputCls} value={awardForm.studentId} onChange={(e) => setAwardForm({ ...awardForm, studentId: e.target.value })} required>
-                <option value="">Select student…</option>
-                {students.map((s) => <option key={s.id} value={s.id}>{s.fullName} ({s.studentCode})</option>)}
-              </select></div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><label className={labelCls}>Amount (AFN) *</label>
-                <input type="number" min={1} className={inputCls} value={awardForm.amount || ''} onChange={(e) => setAwardForm({ ...awardForm, amount: Number(e.target.value) })} required /></div>
-              <div><label className={labelCls}>Semester</label>
-                <input className={inputCls} value={awardForm.semester} onChange={(e) => setAwardForm({ ...awardForm, semester: e.target.value })} placeholder="e.g. Fall 1405" /></div>
-            </div>
-            <div><label className={labelCls}>Notes</label>
-              <input className={inputCls} value={awardForm.notes} onChange={(e) => setAwardForm({ ...awardForm, notes: e.target.value })} /></div>
-            <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-lg cursor-pointer transition-colors shadow-sm">Award Scholarship</button>
-          </form>
-        </ModalShell>
-      )}
+      {fundingScholarship && <Dialog title={`Fund ${fundingScholarship.name}`} onClose={() => setFundingScholarship(null)}><form className="space-y-3" onSubmit={(event) => { event.preventDefault(); const source = sourceFromKey(fundingForm.sourceKey); void run(async () => { await api.post(`/funding/scholarships/${fundingScholarship.id}/fundings`, { ...source, amount: fundingForm.amount }); await refreshFundingWorkspace(); setFundingScholarship(null); }, 'Funding source allocated to scholarship.'); }}><div><label className={label}>Source</label><select required className={field} value={fundingForm.sourceKey} onChange={(event) => setFundingForm({ ...fundingForm, sourceKey: event.target.value })}><option value="">Choose available source</option>{fundingSources.map((source) => <option key={`${source.kind}:${source.id}`} value={`${source.kind}:${source.id}`}>{source.label}</option>)}</select></div><div><label className={label}>Amount (AFN)</label><input required min={1} step={1} type="number" className={field} value={fundingForm.amount || ''} onChange={(event) => setFundingForm({ ...fundingForm, amount: Number(event.target.value) })} /></div><button className={primary}>Allocate source</button></form></Dialog>}
 
-      {/* Fund a scholarship from a received donation (owner decision D-121) */}
-      {fundingScholarship && (
-        <ModalShell title={`Fund — ${fundingScholarship.name}`} onClose={() => setFundingScholarship(null)}>
-          <div className="bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2.5 text-[11px] text-emerald-800 font-semibold mb-4 flex items-start gap-2">
-            <Info className="w-4 h-4 shrink-0 mt-0.5" />
-            A fund holds money the institute has already received. Allocating a donation here is the only way it is backed — and the donation is not recognised as income again.
-          </div>
-          <form onSubmit={submitFunding} className="space-y-3.5 text-xs">
-            <div><label className={labelCls}>Donation *</label>
-              <select className={inputCls} value={fundingForm.donationId} onChange={(e) => setFundingForm({ ...fundingForm, donationId: e.target.value })} required>
-                <option value="">Select a received donation…</option>
-                {donations.map((d) => (
-                  <option key={d.id} value={d.id}>{d.date} · {donorName(d.donorId)} · {fmt(d.amount)}{d.receiptNo ? ` · ${d.receiptNo}` : ''}</option>
-                ))}
-              </select>
-              <p className="text-[10px] text-slate-400 mt-1">The server refuses more than the donation still has unallocated.</p>
-            </div>
-            <div><label className={labelCls}>Amount to allocate (AFN) *</label>
-              <input type="number" min={1} className={inputCls} value={fundingForm.amount || ''} onChange={(e) => setFundingForm({ ...fundingForm, amount: Number(e.target.value) })} required /></div>
-            <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-lg cursor-pointer transition-colors shadow-sm">Allocate to fund</button>
-          </form>
-          {fundPositions[fundingScholarship.id] && fundPositions[fundingScholarship.id].fundings.length > 0 && (
-            <div className="mt-4 border-t border-slate-100 pt-3">
-              <p className="text-[11px] font-bold text-slate-700 mb-2">Already funded by</p>
-              <ul className="space-y-1 text-[11px] text-slate-500">
-                {fundPositions[fundingScholarship.id].fundings.map((f) => (
-                  <li key={f.id} className="flex items-center justify-between">
-                    <span>{f.date} · {f.donor_name} · {f.receipt_no}</span>
-                    <span className="font-mono font-bold text-slate-700">{fmt(f.amount)}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </ModalShell>
-      )}
+      {awardingScholarship && <Dialog title={`Award ${awardingScholarship.name}`} onClose={() => setAwardingScholarship(null)}><form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void run(async () => { await awardScholarship({ scholarshipId: awardingScholarship.id, studentId: awardForm.studentId, amount: awardForm.amount, awardDate: awardForm.awardDate || undefined, notes: awardForm.notes || null }); setAwardingScholarship(null); }, 'Scholarship award created.', ['funding', 'students']); }}><p className="rounded-lg bg-emerald-50 p-3 text-xs text-emerald-800">The available figure is server-derived: {formatAFN(awardingScholarship.available)}.</p><div><label className={label}>Student</label><select required className={field} value={awardForm.studentId} onChange={(event) => setAwardForm({ ...awardForm, studentId: event.target.value })}><option value="">Choose student</option>{students.map((student) => <option key={student.id} value={student.id}>{student.fullName}</option>)}</select></div><div><label className={label}>Amount (AFN)</label><input required min={1} step={1} type="number" className={field} value={awardForm.amount || ''} onChange={(event) => setAwardForm({ ...awardForm, amount: Number(event.target.value) })} /></div><ShamsiDateInput label="Award date" value={awardForm.awardDate} onChange={(awardDate) => setAwardForm({ ...awardForm, awardDate })} /><button className={primary}>Create award</button></form></Dialog>}
 
-      {/* Apply an award to a tuition obligation, reverse an application, close the award */}
-      {managingAward && (
-        <ModalShell title={`Award — ${studentName(managingAward.studentId)}`} onClose={() => { setManagingAward(null); setAwardPosition(null); setObligations(null); }}>
-          {!awardPosition ? (
-            <p className="text-[11px] text-slate-400 italic py-6 text-center">Loading award position…</p>
-          ) : (
-            <div className="space-y-4 text-xs">
-              <div className="grid grid-cols-3 gap-2 text-[11px] font-mono bg-slate-50 rounded-lg p-3">
-                <div><p className="text-slate-400">Awarded</p><p className="font-bold text-slate-800">{fmt(awardPosition.amount)}</p></div>
-                <div><p className="text-slate-400">Applied</p><p className="font-bold text-emerald-700">{fmt(awardPosition.allocated)}</p></div>
-                <div><p className="text-slate-400">Unapplied</p><p className="font-bold text-indigo-700">{fmt(awardPosition.remaining)}</p></div>
-              </div>
+      {managingAward && <Dialog title="Apply scholarship award" onClose={() => setManagingAward(null)}>{!awardPosition ? <p className="py-8 text-center text-sm text-slate-400">Loading award…</p> : <div className="space-y-5"><div className="grid grid-cols-3 gap-3 rounded-xl bg-slate-50 p-3 text-xs"><div><p className="text-slate-400">Award</p><p className="font-mono font-bold">{formatAFN(awardPosition.amount)}</p></div><div><p className="text-slate-400">Applied</p><p className="font-mono font-bold">{formatAFN(awardPosition.allocated)}</p></div><div><p className="text-slate-400">Remaining</p><p className="font-mono font-bold text-indigo-700">{formatAFN(awardPosition.remaining)}</p></div></div><form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void run(async () => { await api.post(`/funding/scholarship-awards/${managingAward.id}/allocations`, awardApply); await Promise.all([loadAward(managingAward), refreshFundingWorkspace()]); setAwardApply({ obligationId: '', scholarshipFundingId: '', amount: 0 }); }, 'Scholarship application recorded.', ['funding', 'students', 'payments']); }}><div><label className={label}>Tuition obligation</label><select required className={field} value={awardApply.obligationId} onChange={(event) => setAwardApply({ ...awardApply, obligationId: event.target.value })}><option value="">Choose outstanding term</option>{awardObligations.filter((obligation) => obligation.outstanding > 0).map((obligation) => <option key={obligation.id} value={obligation.id}>{obligation.semesterName} · {formatAFN(obligation.outstanding)} outstanding</option>)}</select></div><div><label className={label}>Exact received scholarship source</label><select required className={field} value={awardApply.scholarshipFundingId} onChange={(event) => setAwardApply({ ...awardApply, scholarshipFundingId: event.target.value })}><option value="">Choose source</option>{awardFundings.filter((funding) => funding.source.available > 0).map((funding) => <option key={funding.id} value={funding.id}>{formatAFN(funding.source.available)} available</option>)}</select></div><div><label className={label}>Amount (AFN)</label><input required min={1} step={1} type="number" className={field} value={awardApply.amount || ''} onChange={(event) => setAwardApply({ ...awardApply, amount: Number(event.target.value) })} /></div><button className={primary} disabled={awardPosition.status !== 'active'}>Apply to tuition</button></form><div className="border-t border-slate-100 pt-4"><p className="mb-2 text-xs font-black text-slate-700">Applications</p>{awardPosition.allocations.map((allocation) => <div key={allocation.id} className="flex items-center justify-between py-2 text-xs"><span>{allocation.semesterName || 'Term'} · {formatAFN(allocation.amount)} · {allocation.status}</span>{allocation.status === 'active' && awardPosition.status === 'active' && <button className="text-rose-700 hover:underline" onClick={() => { const reason = window.prompt('Reason for reversal (at least 8 characters)'); if (!reason) return; void run(async () => { await api.post(`/funding/scholarship-awards/${managingAward.id}/allocations/${allocation.id}/reverse`, { reason }); await Promise.all([loadAward(managingAward), refreshFundingWorkspace()]); }, 'Scholarship application reversed.', ['funding', 'students', 'payments']); }}>Reverse</button>}</div>)}{awardPosition.status === 'active' && <button className={secondary} onClick={() => { const reason = window.prompt('Reason for closing this award (at least 8 characters)'); if (!reason) return; void run(async () => { await api.post(`/funding/scholarship-awards/${managingAward.id}/close`, { reason }); await Promise.all([loadAward(managingAward), refreshFundingWorkspace()]); }, 'Award closed; unapplied money returned to the fund.'); }}>Close award</button>}</div></div>}</Dialog>}
 
-              {awardPosition.status === 'active' ? (
-                <form onSubmit={submitApplication} className="space-y-3">
-                  <div><label className={labelCls}>Tuition obligation *</label>
-                    <select
-                      className={inputCls}
-                      value={applyForm.obligationId}
-                      onChange={(e) => {
-                        const picked = obligations?.find((o) => o.id === e.target.value);
-                        setApplyForm({ obligationId: e.target.value, amount: picked ? Math.min(picked.outstanding, awardPosition.remaining) : 0 });
-                      }}
-                      required
-                    >
-                      <option value="">Select the term this pays…</option>
-                      {(obligations ?? []).filter((o) => o.outstanding > 0).map((o) => (
-                        <option key={o.id} value={o.id}>{o.semesterName} · {fmt(o.outstanding)} outstanding of {fmt(o.netAmount)}</option>
-                      ))}
-                    </select>
-                    {obligations && obligations.filter((o) => o.outstanding > 0).length === 0 && (
-                      <p className="text-[10px] text-slate-400 mt-1">This student has no outstanding tuition to apply the award to.</p>
-                    )}
-                  </div>
-                  <div><label className={labelCls}>Amount (AFN) *</label>
-                    <input type="number" min={1} className={inputCls} value={applyForm.amount || ''} onChange={(e) => setApplyForm({ ...applyForm, amount: Number(e.target.value) })} required /></div>
-                  <button type="submit" disabled={!applyForm.obligationId} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-lg cursor-pointer transition-colors shadow-sm disabled:opacity-40 disabled:cursor-not-allowed">
-                    Apply to this term
-                  </button>
-                </form>
-              ) : (
-                <p className="text-[11px] text-slate-500 bg-slate-50 rounded-lg p-3">This award is closed. Applied money stayed where it was applied.</p>
-              )}
-
-              <div className="border-t border-slate-100 pt-3">
-                <p className="text-[11px] font-bold text-slate-700 mb-2">Applications</p>
-                {awardPosition.allocations.length === 0 ? (
-                  <p className="text-[11px] text-slate-400 italic">Nothing applied yet.</p>
-                ) : (
-                  <ul className="space-y-1.5">
-                    {awardPosition.allocations.map((al) => (
-                      <li key={al.id} className="flex items-center justify-between gap-2 text-[11px]">
-                        <span className={al.status === 'reversed' ? 'text-slate-400 line-through' : 'text-slate-600'}>
-                          {al.date} · {al.semester_name ?? 'tuition'} · <span className="font-mono font-bold">{fmt(al.amount)}</span>
-                        </span>
-                        {al.status === 'active' && canManage && (
-                          <button onClick={() => void reverseApplication(al.id)} className="text-[11px] font-bold text-rose-700 hover:text-rose-900 hover:bg-rose-50 px-2 py-1 rounded-lg cursor-pointer transition-colors">
-                            Reverse
-                          </button>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-
-              {canManage && awardPosition.status === 'active' && (
-                <button onClick={() => void closeManagedAward()} className="w-full border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold py-2 rounded-lg cursor-pointer transition-colors text-[11px]">
-                  Close award — return {fmt(awardPosition.remaining)} to the fund
-                </button>
-              )}
-              <p className="text-[10px] text-slate-400">
-                Reversing an application returns the money to this award; closing the award returns whatever is unapplied to the fund. Scholarship money is never paid to a student.
-              </p>
-            </div>
-          )}
-        </ModalShell>
-      )}
-
-      {managingSponsorship && (
-        <ModalShell title={`Sponsorship money — ${donorName(managingSponsorship.donorId)}`} onClose={() => setManagingSponsorship(null)}>
-          {!sponsorshipPosition ? (
-            <p className="text-xs text-slate-400 py-6 text-center">Loading the sponsorship position…</p>
-          ) : (
-            <div className="space-y-4 text-xs">
-              {/* Rendered, never derived: every figure is the server's. */}
-              <div className="grid grid-cols-4 gap-2 bg-slate-50 border border-slate-200 rounded-xl p-3 text-center">
-                <div>
-                  <p className="text-slate-400">Promised / month</p>
-                  <p className="font-bold text-slate-500 font-mono tabular-nums">{fmt(sponsorshipPosition.monthlyAmount)}</p>
-                </div>
-                <div>
-                  <p className="text-slate-400">Received</p>
-                  <p className="font-bold text-emerald-700 font-mono tabular-nums">{fmt(sponsorshipPosition.received)}</p>
-                </div>
-                <div>
-                  <p className="text-slate-400">Applied</p>
-                  <p className="font-bold text-slate-700 font-mono tabular-nums">{fmt(sponsorshipPosition.applied)}</p>
-                </div>
-                <div>
-                  <p className="text-slate-400">Available</p>
-                  <p className="font-bold text-indigo-700 font-mono tabular-nums">{fmt(sponsorshipPosition.available)}</p>
-                </div>
-              </div>
-              <p className="text-[10px] text-slate-500 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                The monthly figure is a <strong>promise</strong> and settles nothing until it is received. Only a
-                donation earmarked below becomes money this agreement can apply to a student&rsquo;s tuition.
-              </p>
-
-              {/* ---- Record a receipt ---- */}
-              <form onSubmit={submitSponsorshipReceipt} className="space-y-2 border-t border-slate-100 pt-3">
-                <p className="font-bold text-slate-800">Record money received</p>
-                <div className="grid grid-cols-2 gap-2">
-                  <select
-                    className={inputCls}
-                    value={receiptForm.donationId}
-                    onChange={(e) => setReceiptForm({ ...receiptForm, donationId: e.target.value })}
-                    required
-                  >
-                    <option value="">Donation from this sponsor…</option>
-                    {donations
-                      .filter((d) => d.donorId === managingSponsorship.donorId)
-                      .map((d) => (
-                        <option key={d.id} value={d.id}>{d.receiptNo} — {fmt(d.amount)} ({d.date})</option>
-                      ))}
-                  </select>
-                  <input
-                    type="number" min={1} step={1} className={inputCls} placeholder="Amount"
-                    value={receiptForm.amount || ''}
-                    onChange={(e) => setReceiptForm({ ...receiptForm, amount: Number(e.target.value) })}
-                    required
-                  />
-                </div>
-                <p className="text-[10px] text-slate-400">
-                  Only a donation from the donor who signed this agreement may back it, and only the part of that
-                  donation nobody else has claimed.
-                </p>
-                <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 rounded-lg cursor-pointer">
-                  Earmark to this sponsorship
-                </button>
-              </form>
-
-              {/* ---- Apply to a tuition obligation ---- */}
-              <form onSubmit={submitSponsorshipApplication} className="space-y-2 border-t border-slate-100 pt-3">
-                <p className="font-bold text-slate-800">Apply to tuition</p>
-                {managingSponsorship.studentId ? (
-                  <p className="text-[10px] text-slate-500">
-                    This agreement names {studentName(managingSponsorship.studentId)} and may settle only their tuition.
-                  </p>
-                ) : (
-                  <select
-                    className={inputCls}
-                    value={sponsorApplyForm.studentId}
-                    onChange={(e) => void chooseSponsoredStudent(e.target.value)}
-                    required
-                  >
-                    <option value="">Choose the student to support…</option>
-                    {students.map((st) => <option key={st.id} value={st.id}>{st.fullName}</option>)}
-                  </select>
-                )}
-                <select
-                  className={inputCls}
-                  value={sponsorApplyForm.obligationId}
-                  onChange={(e) => setSponsorApplyForm({ ...sponsorApplyForm, obligationId: e.target.value })}
-                  required
-                  disabled={!sponsorObligations?.length}
-                >
-                  <option value="">{sponsorObligations?.length ? 'Term to settle…' : 'No open term to settle'}</option>
-                  {(sponsorObligations ?? []).filter((o) => o.outstanding > 0).map((o) => (
-                    <option key={o.id} value={o.id}>{o.semesterName} — {fmt(o.outstanding)} outstanding</option>
-                  ))}
-                </select>
-                <input
-                  type="number" min={1} step={1} className={inputCls} placeholder="Amount to apply"
-                  value={sponsorApplyForm.amount || ''}
-                  onChange={(e) => setSponsorApplyForm({ ...sponsorApplyForm, amount: Number(e.target.value) })}
-                  required
-                />
-                <button
-                  type="submit"
-                  disabled={sponsorshipPosition.available <= 0}
-                  className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold py-2 rounded-lg cursor-pointer"
-                >
-                  {sponsorshipPosition.available > 0 ? 'Apply to this term' : 'Nothing received yet to apply'}
-                </button>
-              </form>
-
-              {/* ---- What this agreement has settled ---- */}
-              <div className="border-t border-slate-100 pt-3 space-y-1.5">
-                <p className="font-bold text-slate-800">Applications</p>
-                {sponsorshipPosition.allocations.length === 0 ? (
-                  <p className="text-[11px] text-slate-400">This sponsorship has settled nothing yet.</p>
-                ) : (
-                  sponsorshipPosition.allocations.map((a) => (
-                    <div key={a.id} className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2">
-                      <span className="text-slate-600">
-                        {a.semester_name ?? 'term'} · <span className="font-mono tabular-nums font-bold">{fmt(a.amount)}</span>
-                        {a.status === 'reversed' && <span className="ms-2 text-[10px] font-bold text-rose-600">reversed</span>}
-                      </span>
-                      {a.status === 'active' && (
-                        <button
-                          onClick={() => void reverseSponsorshipApplication(a.id)}
-                          className="text-[11px] font-bold text-rose-600 hover:text-rose-800 cursor-pointer"
-                        >
-                          Reverse
-                        </button>
-                      )}
-                    </div>
-                  ))
-                )}
-              </div>
-
-              <p className="text-[10px] text-slate-400">
-                Reversing an application returns the money to this agreement, where it stays earmarked and
-                re-applicable. Sponsorship money is never paid to a student and never becomes cash.
-              </p>
-            </div>
-          )}
-        </ModalShell>
-      )}
-
-      {showSponsorshipModal && (
-        <ModalShell title="Create Sponsorship Agreement" onClose={() => setShowSponsorshipModal(false)}>
-          <form onSubmit={submitSponsorship} className="space-y-3.5 text-xs">
-            <div><label className={labelCls}>Sponsor (Donor) *</label>
-              <select className={inputCls} value={sponsorshipForm.donorId} onChange={(e) => setSponsorshipForm({ ...sponsorshipForm, donorId: e.target.value })} required>
-                <option value="">Select donor…</option>
-                {donors.map((d) => <option key={d.id} value={d.id}>{d.fullName}</option>)}
-              </select></div>
-            <div><label className={labelCls}>Sponsored Student (optional)</label>
-              <select className={inputCls} value={sponsorshipForm.studentId} onChange={(e) => setSponsorshipForm({ ...sponsorshipForm, studentId: e.target.value })}>
-                <option value="">— Not assigned yet —</option>
-                {students.map((s) => <option key={s.id} value={s.id}>{s.fullName} ({s.studentCode})</option>)}
-              </select></div>
-            <div><label className={labelCls}>Monthly Amount (AFN) *</label>
-              <input type="number" min={1} className={inputCls} value={sponsorshipForm.monthlyAmount || ''} onChange={(e) => setSponsorshipForm({ ...sponsorshipForm, monthlyAmount: Number(e.target.value) })} required /></div>
-            <div className="grid grid-cols-2 gap-3">
-              <ShamsiDateInput label="Start Date" value={sponsorshipForm.startDate} onChange={(v) => setSponsorshipForm({ ...sponsorshipForm, startDate: v })} />
-              <ShamsiDateInput label="End Date" value={sponsorshipForm.endDate} onChange={(v) => setSponsorshipForm({ ...sponsorshipForm, endDate: v })} />
-            </div>
-            <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-lg cursor-pointer transition-colors shadow-sm">Create Agreement</button>
-          </form>
-        </ModalShell>
-      )}
+      {managingSponsorship && <Dialog title="Manage sponsorship" onClose={() => setManagingSponsorship(null)}>{!sponsorshipPosition ? <p className="py-8 text-center text-sm text-slate-400">Loading sponsorship…</p> : <div className="space-y-5"><div className="grid grid-cols-4 gap-2 rounded-xl bg-slate-50 p-3 text-xs"><div><p className="text-slate-400">Received</p><p className="font-mono font-bold">{formatAFN(sponsorshipPosition.received)}</p></div><div><p className="text-slate-400">Applied</p><p className="font-mono font-bold">{formatAFN(sponsorshipPosition.applied)}</p></div><div><p className="text-slate-400">Returned</p><p className="font-mono font-bold">{formatAFN(sponsorshipPosition.returned)}</p></div><div><p className="text-slate-400">Available</p><p className="font-mono font-bold text-indigo-700">{formatAFN(sponsorshipPosition.available)}</p></div></div><form className="space-y-3 border-t border-slate-100 pt-4" onSubmit={(event) => { event.preventDefault(); const source = sourceFromKey(sponsorReceipt.sourceKey); void run(async () => { await api.post(`/funding/sponsorships/${managingSponsorship.id}/receipts`, { ...source, amount: sponsorReceipt.amount }); await Promise.all([loadSponsorship(managingSponsorship, sponsorApply.studentId), refreshFundingWorkspace()]); setSponsorReceipt({ sourceKey: '', amount: 0 }); }, 'Funding source received by sponsorship.'); }}><p className="text-xs font-black text-slate-800">Receive exact funding source</p><select required className={field} value={sponsorReceipt.sourceKey} onChange={(event) => setSponsorReceipt({ ...sponsorReceipt, sourceKey: event.target.value })}><option value="">Choose source</option>{sponsorshipSources.map((source) => <option key={`${source.kind}:${source.id}`} value={`${source.kind}:${source.id}`}>{source.label}</option>)}</select><input required min={1} step={1} type="number" className={field} placeholder="Amount AFN" value={sponsorReceipt.amount || ''} onChange={(event) => setSponsorReceipt({ ...sponsorReceipt, amount: Number(event.target.value) })} /><button className={primary} disabled={sponsorshipPosition.status !== 'active'}>Record receipt</button></form><form className="space-y-3 border-t border-slate-100 pt-4" onSubmit={(event) => { event.preventDefault(); void run(async () => { await api.post(`/funding/sponsorships/${managingSponsorship.id}/allocations`, sponsorApply); await Promise.all([loadSponsorship(managingSponsorship, sponsorApply.studentId), refreshFundingWorkspace()]); setSponsorApply({ ...sponsorApply, obligationId: '', sponsorshipReceiptId: '', amount: 0 }); }, 'Sponsorship applied to tuition.', ['funding', 'students', 'payments']); }}><p className="text-xs font-black text-slate-800">Apply received source to tuition</p>{!managingSponsorship.studentId && <select required className={field} value={sponsorApply.studentId} onChange={(event) => { const studentId = event.target.value; setSponsorApply({ studentId, obligationId: '', sponsorshipReceiptId: '', amount: 0 }); void loadSponsorship(managingSponsorship, studentId).catch((error) => announce(error instanceof Error ? error.message : 'Could not load student obligations.', 'error')); }}><option value="">Choose student</option>{students.map((student) => <option key={student.id} value={student.id}>{student.fullName}</option>)}</select>}<select required className={field} value={sponsorApply.obligationId} onChange={(event) => setSponsorApply({ ...sponsorApply, obligationId: event.target.value })}><option value="">Choose outstanding term</option>{sponsorshipObligations.filter((obligation) => obligation.outstanding > 0).map((obligation) => <option key={obligation.id} value={obligation.id}>{obligation.semesterName} · {formatAFN(obligation.outstanding)} outstanding</option>)}</select><select required className={field} value={sponsorApply.sponsorshipReceiptId} onChange={(event) => setSponsorApply({ ...sponsorApply, sponsorshipReceiptId: event.target.value })}><option value="">Choose received source</option>{sponsorshipPosition.receipts.filter((receipt) => receipt.source.available > 0).map((receipt) => <option key={receipt.id} value={receipt.id}>{formatAFN(receipt.source.available)} available · {receipt.date}</option>)}</select><input required min={1} step={1} type="number" className={field} placeholder="Amount AFN" value={sponsorApply.amount || ''} onChange={(event) => setSponsorApply({ ...sponsorApply, amount: Number(event.target.value) })} /><button className={primary} disabled={!selectedAwardReceipt && sponsorshipPosition.receipts.length === 0}>Apply to tuition</button></form><div className="border-t border-slate-100 pt-4"><p className="mb-2 text-xs font-black text-slate-800">Lifecycle</p><p className="text-xs leading-5 text-slate-600">A terminal agreement returns every remaining receipt to its linked campaign as restricted funding. Without a campaign, a positive balance blocks termination.</p>{sponsorshipPosition.status === 'active' && <button className={`${secondary} mt-3`} onClick={() => { const reason = window.prompt('Reason for terminating this agreement (at least 8 characters)'); if (!reason) return; void run(async () => { await api.patch(`/funding/sponsorships/${managingSponsorship.id}`, { status: 'terminated', reason }); await Promise.all([loadSponsorship(managingSponsorship, sponsorApply.studentId), refreshFundingWorkspace()]); }, 'Sponsorship terminated with restricted campaign return.'); }}>Terminate agreement</button>}</div></div>}</Dialog>}
 
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+      <p className="sr-only" aria-live="polite">Selected branch {activeBranchId}</p>
     </div>
   );
 }

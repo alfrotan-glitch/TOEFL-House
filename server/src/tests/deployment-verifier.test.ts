@@ -102,12 +102,12 @@ describe('deployment verifier', { timeout: 60_000 }, () => {
     // a deployed database looks like.
     const file = sabotage((db) => {
       db.exec('PRAGMA foreign_keys = OFF');
-      db.exec('DROP TABLE IF EXISTS success_stories');
-      db.exec('CREATE TABLE success_stories (id TEXT PRIMARY KEY)');
+      db.exec('DROP TABLE IF EXISTS impact_reports');
+      db.exec('CREATE TABLE impact_reports (id TEXT PRIMARY KEY)');
     });
     const { code, out } = run(file);
     expect(code).toBe(1);
-    expect(out).toContain('success_stories.');
+    expect(out).toContain('impact_reports.');
   });
 
   it('FAILS when the database carries a table the canonical schema does not declare', () => {

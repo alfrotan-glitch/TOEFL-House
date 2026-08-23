@@ -194,3 +194,14 @@ review-independence risk, not a known defect in the certified payroll behavior;
 it remains explicitly visible rather than being represented as independent
 external review. This certification does not advance any other Work Package or
 assert full-product release readiness.
+
+## Subsequent blocking dependency remediation — 2026-08-23
+
+During WP-09 full-suite verification, `teacher-history-integrity.test.ts` exposed
+one narrow payroll API regression: a payment written for `monthName=1405-05`
+was correct, while `GET /salary-status?monthName=1405-05` silently ignored that
+established query spelling and read the current period. The endpoint now
+resolves either `month` or `monthName` through the same canonical payroll-period
+parser and rejects conflicting values. The targeted test passes. This records a
+blocking dependency repair under D-172; it does not reopen or expand the
+bounded WP-08 certification.

@@ -1,1056 +1,714 @@
-import { nextScopedDocumentNumber } from '../utils/documentNumbers.js';
-/**
-TOEFL House ERP — Funding Routes (BC #11)
-============================================================
-REST endpoints for the Funding Bounded Context: donors, funding
-campaigns, donations, scholarships, scholarship awards, and
-sponsorship agreements.
-
-Access control:
-  donor_manager, manager, owner: full CRUD on all entities
-  finance: read-only + record donations (financial reconciliation)
-  registrar: read-only (view scholarships for student enrollment)
-
-Every mutation publishes a Domain Event via the Event Bus and
-writes an audit log entry.
-
-@module routes/funding.routes
-@version 2.0.0
-@license Apache-2.0
-*/
 import { Router } from 'express';
 import { db } from '../db/connection.js';
-import { authenticate, authorize, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
+import { authenticate, canAccessBranchResource, requirePermission, resolveBranchScope } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
 import { assertMoney } from '../utils/money.js';
-import { addNotification } from '../utils/notifications.js';
-import { recordIncome } from '../utils/income.js';
-import { resolveIdempotency } from '../utils/idempotency.js';
+import { assertDateRange, assertOptionalIsoDate } from '../utils/isoDate.js';
+import { isUniqueViolation, resolveIdempotency } from '../utils/idempotency.js';
+import { eventBus } from '../core/events/event-bus.js';
 import {
   allocateScholarshipToObligation,
+  allocateSponsorshipToObligation,
   closeAward,
-  fundScholarshipFromDonation,
+  fundScholarshipFromSource,
   getAwardPosition,
+  getCampaignFundingEntryPosition,
   getDonationUnallocated,
   getFundPosition,
   getObligationPosition,
-  listTuitionObligations,
-  reverseScholarshipAllocation,
+  getScholarshipFundingPosition,
   getSponsorshipPosition,
+  getSponsorshipReceiptPosition,
+  listTuitionObligations,
   recordSponsorshipReceipt,
-  allocateSponsorshipToObligation,
+  reverseScholarshipAllocation,
   reverseSponsorshipAllocation,
 } from '../core/finance/obligations.js';
-import { eventBus } from '../core/events/event-bus.js';
+import {
+  getFundingSummary,
+  registerDonation,
+  terminalizeSponsorship,
+  type FundingSourceInput,
+  type RestrictionInput,
+} from '../core/funding/funding-service.js';
 
 export const fundingRouter = Router();
 fundingRouter.use(authenticate);
 
-// ── Performance Optimization: Prepared Statements ──────────────────────────
-// Donors
-const stmtGetAllDonors = db.prepare('SELECT * FROM donors ORDER BY created_at DESC');
-const stmtGetDonorById = db.prepare('SELECT * FROM donors WHERE id = ?');
-const stmtInsertDonor = db.prepare(
-  `INSERT INTO donors (id, full_name, type, phone, email, country, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`
-);
-const stmtUpdateDonor = db.prepare(
-  `UPDATE donors SET full_name = ?, type = ?, phone = ?, email = ?, country = ?, notes = ? WHERE id = ?`
-);
-const stmtGetDonorTotalDonated = db.prepare('SELECT COALESCE(SUM(amount), 0) as totalDonated FROM donations WHERE donor_id = ?');
-const stmtGetDonorActiveSponsorships = db.prepare("SELECT COUNT(*) as activeSponsorships FROM sponsorship_agreements WHERE donor_id = ? AND status = 'active'");
-const stmtGetDonorCampaigns = db.prepare('SELECT * FROM funding_campaigns WHERE donor_id = ? ORDER BY start_date DESC');
+type RequestUser = { userId: string; branchId: string; fullName: string };
 
-// Campaigns
-const stmtGetAllCampaigns = db.prepare('SELECT * FROM funding_campaigns ORDER BY start_date DESC');
-const stmtGetCampaignsByBranch = db.prepare('SELECT * FROM funding_campaigns WHERE branch_id = ? ORDER BY start_date DESC');
-const stmtGetCampaignById = db.prepare('SELECT * FROM funding_campaigns WHERE id = ?');
-const stmtInsertCampaign = db.prepare(
-  `INSERT INTO funding_campaigns (id, name, description, donor_id, target_amount, raised_amount, start_date, end_date, status, branch_id) VALUES (?, ?, ?, ?, ?, 0, ?, ?, 'active', ?)`
-);
-const stmtUpdateCampaign = db.prepare(
-  `UPDATE funding_campaigns SET name = ?, description = ?, target_amount = ?, end_date = ?, status = ? WHERE id = ?`
-);
-const stmtUpdateCampaignRaisedAmount = db.prepare('UPDATE funding_campaigns SET raised_amount = raised_amount + ? WHERE id = ?');
-
-// Donations
-const stmtGetAllDonations = db.prepare(
-  `SELECT d.*, dn.full_name as donor_name, fc.name as campaign_name FROM donations d LEFT JOIN donors dn ON dn.id = d.donor_id LEFT JOIN funding_campaigns fc ON fc.id = d.campaign_id ORDER BY d.date DESC`
-);
-const stmtGetDonationsByBranch = db.prepare(
-  `SELECT d.*, dn.full_name as donor_name, fc.name as campaign_name FROM donations d LEFT JOIN donors dn ON dn.id = d.donor_id LEFT JOIN funding_campaigns fc ON fc.id = d.campaign_id WHERE d.branch_id = ? ORDER BY d.date DESC`
-);
-const stmtInsertDonation = db.prepare(
-  `INSERT INTO donations (id, campaign_id, donor_id, amount, date, restricted, restriction_note, receipt_no, branch_id, idempotency_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-);
-
-// Scholarships
-const stmtGetAllScholarships = db.prepare(
-  `SELECT s.*, d.full_name as donor_name, fc.name as campaign_name FROM scholarships s LEFT JOIN donors d ON d.id = s.donor_id LEFT JOIN funding_campaigns fc ON fc.id = s.campaign_id ORDER BY s.created_at DESC`
-);
-const stmtGetScholarshipsByBranch = db.prepare(
-  `SELECT s.*, d.full_name as donor_name, fc.name as campaign_name FROM scholarships s LEFT JOIN donors d ON d.id = s.donor_id LEFT JOIN funding_campaigns fc ON fc.id = s.campaign_id WHERE s.branch_id = ? ORDER BY s.created_at DESC`
-);
-const stmtInsertScholarship = db.prepare(
-  `INSERT INTO scholarships (id, name, donor_id, campaign_id, total_budget, allocated_amount, criteria, status, branch_id) VALUES (?, ?, ?, ?, ?, 0, ?, 'active', ?)`
-);
-const stmtGetScholarshipById = db.prepare('SELECT * FROM scholarships WHERE id = ?');
-const stmtUpdateScholarshipAllocation = db.prepare('UPDATE scholarships SET allocated_amount = ?, status = ? WHERE id = ?');
-
-// Scholarship Awards
-const stmtGetAllAwards = db.prepare(
-  `SELECT sa.*, s.name as scholarship_name, st.full_name as student_name, st.student_code FROM scholarship_awards sa JOIN scholarships s ON s.id = sa.scholarship_id JOIN students st ON st.id = sa.student_id ORDER BY sa.award_date DESC`
-);
-const stmtGetAwardsByBranch = db.prepare(
-  `SELECT sa.*, s.name as scholarship_name, st.full_name as student_name, st.student_code FROM scholarship_awards sa JOIN scholarships s ON s.id = sa.scholarship_id JOIN students st ON st.id = sa.student_id WHERE sa.branch_id = ? ORDER BY sa.award_date DESC`
-);
-const stmtInsertAward = db.prepare(
-  `INSERT INTO scholarship_awards (id, scholarship_id, student_id, amount, award_date, semester, notes, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-);
-const stmtGetStudentById = db.prepare('SELECT * FROM students WHERE id = ?');
-
-// Sponsorships
-const stmtGetAllSponsorships = db.prepare(
-  `SELECT sp.*, d.full_name as donor_name, st.full_name as student_name, st.student_code FROM sponsorship_agreements sp LEFT JOIN donors d ON d.id = sp.donor_id LEFT JOIN students st ON st.id = sp.student_id ORDER BY sp.start_date DESC`
-);
-const stmtGetSponsorshipsByBranch = db.prepare(
-  `SELECT sp.*, d.full_name as donor_name, st.full_name as student_name, st.student_code FROM sponsorship_agreements sp LEFT JOIN donors d ON d.id = sp.donor_id LEFT JOIN students st ON st.id = sp.student_id WHERE sp.branch_id = ? ORDER BY sp.start_date DESC`
-);
-const stmtInsertSponsorship = db.prepare(
-  `INSERT INTO sponsorship_agreements (id, donor_id, student_id, program_id, monthly_amount, start_date, end_date, status, branch_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)`
-);
-const stmtGetSponsorshipById = db.prepare('SELECT * FROM sponsorship_agreements WHERE id = ?');
-// SPL-1: the terminal-state guard is re-checked inside the UPDATE itself, so
-// two concurrent transitions cannot both observe 'active' and both write.
-// Exactly one caller changes `changes` to 1; the loser is reported a 409.
-const stmtUpdateSponsorship = db.prepare(
-  `UPDATE sponsorship_agreements SET monthly_amount = ?, end_date = ?, status = ?
-     WHERE id = ? AND status NOT IN ('completed','terminated')`
-);
-
-// Summary
-const stmtGetTotalDonationsAll = db.prepare('SELECT COALESCE(SUM(amount), 0) as totalDonations FROM donations');
-const stmtGetTotalDonationsByBranch = db.prepare('SELECT COALESCE(SUM(amount), 0) as totalDonations FROM donations WHERE branch_id = ?');
-const stmtGetTotalScholarshipBudgetAll = db.prepare('SELECT COALESCE(SUM(total_budget), 0) as totalScholarshipBudget FROM scholarships');
-const stmtGetTotalScholarshipBudgetByBranch = db.prepare('SELECT COALESCE(SUM(total_budget), 0) as totalScholarshipBudget FROM scholarships WHERE branch_id = ?');
-const stmtGetTotalScholarshipAllocatedAll = db.prepare('SELECT COALESCE(SUM(allocated_amount), 0) as totalScholarshipAllocated FROM scholarships');
-const stmtGetTotalScholarshipAllocatedByBranch = db.prepare('SELECT COALESCE(SUM(allocated_amount), 0) as totalScholarshipAllocated FROM scholarships WHERE branch_id = ?');
-const stmtGetActiveSponsorshipsAll = db.prepare("SELECT COUNT(*) as activeSponsorships FROM sponsorship_agreements WHERE status = 'active'");
-const stmtGetActiveSponsorshipsByBranch = db.prepare("SELECT COUNT(*) as activeSponsorships FROM sponsorship_agreements WHERE branch_id = ? AND status = 'active'");
-const stmtGetActiveCampaignsAll = db.prepare("SELECT COUNT(*) as activeCampaigns FROM funding_campaigns WHERE status = 'active'");
-const stmtGetActiveCampaignsByBranch = db.prepare("SELECT COUNT(*) as activeCampaigns FROM funding_campaigns WHERE branch_id = ? AND status = 'active'");
-const stmtGetDonorCount = db.prepare('SELECT COUNT(*) as donorCount FROM donors');
-const stmtGetStudentsSponsoredAll = db.prepare("SELECT COUNT(DISTINCT student_id) as studentsSponsored FROM sponsorship_agreements WHERE status = 'active' AND student_id IS NOT NULL");
-const stmtGetStudentsSponsoredByBranch = db.prepare("SELECT COUNT(DISTINCT student_id) as studentsSponsored FROM sponsorship_agreements WHERE branch_id = ? AND status = 'active' AND student_id IS NOT NULL");
-
-/** Safely extracts user context required for mutations */
-function getUserContext(req: import('express').Request) {
+function userContext(req: import('express').Request): RequestUser {
   const user = req.user;
-  if (!user?.userId || !user?.branchId || !user?.fullName) {
-    throw new HttpError(403, 'User context is missing for funding operation.');
+  if (!user?.userId || !user.branchId || !user.fullName) {
+    throw new HttpError(403, 'User context is missing for this funding operation.');
   }
-  return user;
+  return { userId: user.userId, branchId: user.branchId, fullName: user.fullName };
 }
 
-function requireFundingBranchAccess(req: import('express').Request, branchId: string | null | undefined) {
-  if (!branchId || !canAccessBranchResource(req, branchId)) {
+function trimmedId(value: unknown, field: string): string {
+  if (typeof value !== 'string' || !value.trim()) throw new HttpError(400, `${field} is required.`);
+  return value.trim();
+}
+
+function optionalId(value: unknown, field: string): string | null {
+  if (value === undefined || value === null || value === '') return null;
+  return trimmedId(value, field);
+}
+
+function mutationBranch(req: import('express').Request, body: Record<string, unknown>): string {
+  const user = userContext(req);
+  const requested = optionalId(body.branchId, 'branchId') ?? user.branchId;
+  if (!canAccessBranchResource(req, requested)) {
+    throw new HttpError(403, 'You are not authorized for the selected branch.');
+  }
+  return requested;
+}
+
+function requireBranchResource(req: import('express').Request, branchId: string): void {
+  if (!canAccessBranchResource(req, branchId)) {
     throw new HttpError(403, 'Funding resource belongs to another branch.');
   }
 }
 
-// ============================================================================
-// §1 — DONORS
-// ============================================================================
+function parseSource(body: Record<string, unknown>): FundingSourceInput {
+  const donationId = optionalId(body.donationId, 'donationId');
+  const campaignFundingEntryId = optionalId(body.campaignFundingEntryId, 'campaignFundingEntryId');
+  if ((donationId ? 1 : 0) + (campaignFundingEntryId ? 1 : 0) !== 1) {
+    throw new HttpError(400, 'Name exactly one funding source: donationId or campaignFundingEntryId.');
+  }
+  return donationId
+    ? { kind: 'donation', id: donationId }
+    : { kind: 'campaignFundingEntry', id: campaignFundingEntryId! };
+}
 
-fundingRouter.get(
-  '/donors',
-  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager'),
-  ah(async (_req, res) => {
-    res.json(stmtGetAllDonors.all());
-  })
-);
+interface DonationReplayCandidate {
+  id: string;
+  receipt_no: string;
+  donor_id: string;
+  campaign_id: string | null;
+  amount: number;
+  branch_id: string;
+  restriction_kind: RestrictionInput['kind'] | null;
+  restriction_target_id: string | null;
+}
 
-fundingRouter.get(
-  '/donors/:id',
-  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager'),
-  ah(async (req, res) => {
-    const donor = stmtGetDonorById.get(req.params.id) as any;
-    if (!donor) throw new HttpError(404, 'Donor not found.');
+function assertSameDonation(
+  candidate: DonationReplayCandidate,
+  expected: { donorId: string; campaignId: string | null; amount: number; branchId: string; restriction: RestrictionInput | null },
+): void {
+  const sameRestriction = candidate.restriction_kind === (expected.restriction?.kind ?? null)
+    && candidate.restriction_target_id === (expected.restriction?.targetId ?? null);
+  // Scholarship/sponsorship targets may carry an explicit campaign provenance
+  // selected by the authoritative donation command. A retry that repeats that
+  // same structured target may omit the redundant campaign field.
+  const sameCampaign = (candidate.campaign_id ?? null) === expected.campaignId
+    || (expected.campaignId === null && expected.restriction !== null && sameRestriction);
+  if (candidate.donor_id !== expected.donorId
+    || !sameCampaign
+    || !sameRestriction
+    || Number(candidate.amount) !== expected.amount
+    || candidate.branch_id !== expected.branchId) {
+    throw new HttpError(409, 'This idempotency key belongs to a different donation.');
+  }
+}
 
-    const totalDonated = (stmtGetDonorTotalDonated.get(req.params.id) as any).totalDonated;
-    const activeSponsorships = (stmtGetDonorActiveSponsorships.get(req.params.id) as any).activeSponsorships;
-    const campaigns = stmtGetDonorCampaigns.all(req.params.id);
+function parseRestriction(body: Record<string, unknown>): RestrictionInput | null {
+  if (body.restricted !== undefined || body.restrictionNote !== undefined) {
+    throw new HttpError(400, 'Use restriction.kind and restriction.targetId; free-text restrictions are not accepted.');
+  }
+  if (body.restriction === undefined || body.restriction === null) return null;
+  if (!body.restriction || typeof body.restriction !== 'object' || Array.isArray(body.restriction)) {
+    throw new HttpError(400, 'restriction must name a structured target.');
+  }
+  const restriction = body.restriction as Record<string, unknown>;
+  const kind = restriction.kind;
+  if (kind !== 'campaign' && kind !== 'scholarship' && kind !== 'sponsorship') {
+    throw new HttpError(400, 'restriction.kind must be campaign, scholarship, or sponsorship.');
+  }
+  return { kind, targetId: trimmedId(restriction.targetId, 'restriction.targetId') };
+}
 
-    res.json({ ...donor, totalDonated, activeSponsorships, campaigns });
-  })
-);
+function listDonors() {
+  // Donor identity is organization-global. Branch scope applies to monetary
+  // relations and totals, not to the minimum reference data a permitted
+  // donation recorder needs in order to name a donor.
+  return db.prepare('SELECT * FROM donors ORDER BY created_at DESC').all();
+}
 
-fundingRouter.post(
-  '/donors',
-  authorize('owner', 'general_manager', 'donor_manager'),
-  ah(async (req, res) => {
-    const user = getUserContext(req);
-    const { fullName, type, phone, email, country, notes } = req.body;
-    
-    if (!fullName) throw new HttpError(400, 'Donor full name is required.');
-    if (!type || !['individual', 'organization', 'ngo', 'government'].includes(type)) {
-      throw new HttpError(400, 'Invalid donor type.');
-    }
+function listCampaigns(branchId: string | null, isAll: boolean) {
+  const rows = (isAll
+    ? db.prepare(
+      `SELECT c.*, COALESCE(SUM(d.amount), 0) AS raised_amount,
+              CASE WHEN c.target_amount > 0 THEN CAST(ROUND(COALESCE(SUM(d.amount), 0) * 100.0 / c.target_amount) AS INTEGER) ELSE 0 END AS progress_percent
+         FROM funding_campaigns c LEFT JOIN donations d ON d.campaign_id = c.id
+        GROUP BY c.id ORDER BY c.start_date DESC, c.id`,
+    ).all()
+    : db.prepare(
+      `SELECT c.*, COALESCE(SUM(d.amount), 0) AS raised_amount,
+              CASE WHEN c.target_amount > 0 THEN CAST(ROUND(COALESCE(SUM(d.amount), 0) * 100.0 / c.target_amount) AS INTEGER) ELSE 0 END AS progress_percent
+         FROM funding_campaigns c LEFT JOIN donations d ON d.campaign_id = c.id
+        WHERE c.branch_id = ?
+        GROUP BY c.id ORDER BY c.start_date DESC, c.id`,
+    ).all(branchId)) as Array<Record<string, unknown>>;
+  return rows;
+}
 
-    const newId = id('donor');
-    const tx = db.transaction(() => {
-      stmtInsertDonor.run(newId, fullName, type, phone || null, email || null, country || null, notes || null);
-      return eventBus.emit('donor.created', 'donor', newId, { fullName, type, country }, { operatorId: user.userId, branchId: user.branchId });
-    });
-    const event = tx();
-    void eventBus.dispatch(event);
+function listScholarships(branchId: string | null, isAll: boolean) {
+  const rows = (isAll
+    ? db.prepare('SELECT * FROM scholarships ORDER BY created_at DESC').all()
+    : db.prepare('SELECT * FROM scholarships WHERE branch_id = ? ORDER BY created_at DESC').all(branchId)) as Array<Record<string, unknown>>;
+  return rows.map((row) => ({ ...row, ...getFundPosition(db, String(row.id)) }));
+}
 
-    writeAudit(req, `Created new donor: ${fullName} (${type})`);
-    res.status(201).json({ id: newId });
-  })
-);
+function listSponsorships(branchId: string | null, isAll: boolean) {
+  const rows = (isAll
+    ? db.prepare('SELECT * FROM sponsorship_agreements ORDER BY start_date DESC, id').all()
+    : db.prepare('SELECT * FROM sponsorship_agreements WHERE branch_id = ? ORDER BY start_date DESC, id').all(branchId)) as Array<Record<string, unknown>>;
+  return rows.map((row) => ({ ...row, ...getSponsorshipPosition(db, String(row.id)) }));
+}
 
-fundingRouter.put(
-  '/donors/:id',
-  authorize('owner', 'general_manager', 'donor_manager'),
-  ah(async (req, res) => {
-    const existing = stmtGetDonorById.get(req.params.id) as any;
-    if (!existing) throw new HttpError(404, 'Donor not found.');
+function donationSourceForFunding(donationId: string): { id: string; amount: number; unallocated: number } {
+  const position = getDonationUnallocated(db, donationId);
+  return { id: donationId, amount: position.amount, unallocated: position.unallocated };
+}
 
-    const { fullName, type, phone, email, country, notes } = req.body;
-    stmtUpdateDonor.run(
-      fullName ?? existing.full_name, type ?? existing.type, phone ?? existing.phone,
-      email ?? existing.email, country ?? existing.country, notes ?? existing.notes, req.params.id
-    );
+// Donor master
+fundingRouter.get('/donors', requirePermission('Funding.View'), ah(async (req, res) => {
+  resolveBranchScope(req);
+  res.json(listDonors());
+}));
 
-    writeAudit(req, `Updated donor: ${existing.full_name}`);
-    res.json({ ok: true });
-  })
-);
+fundingRouter.get('/donors/:id', requirePermission('Funding.View'), ah(async (req, res) => {
+  const donor = db.prepare('SELECT * FROM donors WHERE id = ?').get(req.params.id) as Record<string, unknown> | undefined;
+  if (!donor) throw new HttpError(404, 'Donor not found.');
+  const { branchId, isAll } = resolveBranchScope(req);
+  const donorId = String(donor.id);
+  const donationTotalRow = (isAll
+    ? db.prepare('SELECT COALESCE(SUM(amount), 0) AS total FROM donations WHERE donor_id = ?').get(donorId)
+    : db.prepare('SELECT COALESCE(SUM(amount), 0) AS total FROM donations WHERE donor_id = ? AND branch_id = ?').get(donorId, branchId)) as { total: number };
+  const totalDonated = Number(donationTotalRow.total) || 0;
+  res.json({ ...donor, totalDonated });
+}));
 
-// ============================================================================
-// §2 — FUNDING CAMPAIGNS
-// ============================================================================
+fundingRouter.post('/donors', requirePermission('Funding.Edit'), ah(async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const user = userContext(req);
+  const fullName = typeof body.fullName === 'string' ? body.fullName.trim() : '';
+  const type = body.type;
+  if (!fullName) throw new HttpError(400, 'Donor full name is required.');
+  if (type !== 'individual' && type !== 'organization' && type !== 'ngo' && type !== 'government') {
+    throw new HttpError(400, 'Invalid donor type.');
+  }
+  const donorId = id('donor');
+  let createdEvent: ReturnType<typeof eventBus.emit> | undefined;
+  db.transaction(() => {
+    db.prepare(
+      `INSERT INTO donors (id, full_name, type, phone, email, country, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(donorId, fullName, type, optionalId(body.phone, 'phone'), optionalId(body.email, 'email'), optionalId(body.country, 'country'), optionalId(body.notes, 'notes'));
+    createdEvent = eventBus.emit('donor.created', 'donor', donorId, { fullName, type }, { operatorId: user.userId, branchId: user.branchId });
+  })();
+  if (createdEvent) void eventBus.dispatch(createdEvent);
+  writeAudit(req, `Created donor ${donorId}`, { newValue: JSON.stringify({ fullName, type }) });
+  res.status(201).json({ id: donorId });
+}));
 
-fundingRouter.get(
-  '/campaigns',
-  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager'),
-  ah(async (req, res) => {
-    const { branchId, isAll } = resolveBranchScope(req);
-    const rows = isAll ? stmtGetAllCampaigns.all() : stmtGetCampaignsByBranch.all(branchId);
-    res.json(rows);
-  })
-);
+fundingRouter.put('/donors/:id', requirePermission('Funding.Edit'), ah(async (req, res) => {
+  const existing = db.prepare('SELECT * FROM donors WHERE id = ?').get(req.params.id) as Record<string, unknown> | undefined;
+  if (!existing) throw new HttpError(404, 'Donor not found.');
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const fullName = body.fullName === undefined ? String(existing.full_name) : (typeof body.fullName === 'string' ? body.fullName.trim() : '');
+  const type = body.type === undefined ? existing.type : body.type;
+  if (!fullName) throw new HttpError(400, 'Donor full name is required.');
+  if (type !== 'individual' && type !== 'organization' && type !== 'ngo' && type !== 'government') throw new HttpError(400, 'Invalid donor type.');
+  db.prepare(
+    `UPDATE donors SET full_name = ?, type = ?, phone = ?, email = ?, country = ?, notes = ? WHERE id = ?`,
+  ).run(fullName, type, body.phone ?? existing.phone ?? null, body.email ?? existing.email ?? null, body.country ?? existing.country ?? null, body.notes ?? existing.notes ?? null, req.params.id);
+  writeAudit(req, `Updated donor ${req.params.id}`);
+  res.json({ ok: true });
+}));
 
-fundingRouter.post(
-  '/campaigns',
-  authorize('owner', 'general_manager', 'donor_manager'),
-  ah(async (req, res) => {
-    const user = getUserContext(req);
-    const { name, description, donorId, targetAmount, startDate, endDate } = req.body;
-    
-    if (!name || !targetAmount) throw new HttpError(400, 'Campaign name and target amount are required.');
-    const validatedTarget = assertMoney(targetAmount, 'campaign target amount');
+// Campaigns
+fundingRouter.get('/campaigns', requirePermission('Funding.View'), ah(async (req, res) => {
+  const { branchId, isAll } = resolveBranchScope(req);
+  res.json(listCampaigns(branchId, isAll));
+}));
 
-    const newId = id('camp');
-    const tx = db.transaction(() => {
-      stmtInsertCampaign.run(
-        newId, name, description || null, donorId || null, validatedTarget,
-        startDate || today(), endDate || null, user.branchId
-      );
-      return eventBus.emit('campaign.created', 'campaign', newId, { name, targetAmount }, { operatorId: user.userId, branchId: user.branchId });
-    });
-    const event = tx();
-    void eventBus.dispatch(event);
+fundingRouter.post('/campaigns', requirePermission('Funding.Edit'), ah(async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const user = userContext(req);
+  const branchId = mutationBranch(req, body);
+  const name = typeof body.name === 'string' ? body.name.trim() : '';
+  if (!name) throw new HttpError(400, 'Campaign name is required.');
+  const targetAmount = assertMoney(body.targetAmount, 'campaign target amount');
+  const startDate = assertOptionalIsoDate(body.startDate, 'campaign startDate') ?? today();
+  const endDate = assertOptionalIsoDate(body.endDate, 'campaign endDate');
+  assertDateRange(startDate, endDate, 'campaign startDate', 'campaign endDate');
+  const donorId = optionalId(body.donorId, 'donorId');
+  if (donorId && !db.prepare('SELECT 1 FROM donors WHERE id = ?').get(donorId)) throw new HttpError(404, 'Donor not found.');
+  const campaignId = id('camp');
+  let campaignEvent: ReturnType<typeof eventBus.emit> | undefined;
+  db.transaction(() => {
+    db.prepare(
+      `INSERT INTO funding_campaigns (id, name, description, donor_id, target_amount, start_date, end_date, status, branch_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+    ).run(campaignId, name, typeof body.description === 'string' ? body.description.trim() || null : null, donorId, targetAmount, startDate, endDate, branchId);
+    campaignEvent = eventBus.emit('campaign.created', 'campaign', campaignId, { name, targetAmount }, { operatorId: user.userId, branchId });
+  })();
+  if (campaignEvent) void eventBus.dispatch(campaignEvent);
+  writeAudit(req, `Created funding campaign ${campaignId}`, { branchId, newValue: JSON.stringify({ name, targetAmount }) });
+  res.status(201).json({ id: campaignId });
+}));
 
-    writeAudit(req, `Created funding campaign: ${name} (target: ${targetAmount} AFN)`);
-    res.status(201).json({ id: newId });
-  })
-);
+fundingRouter.patch('/campaigns/:id', requirePermission('Funding.Edit'), ah(async (req, res) => {
+  const existing = db.prepare('SELECT * FROM funding_campaigns WHERE id = ?').get(req.params.id) as Record<string, unknown> | undefined;
+  if (!existing) throw new HttpError(404, 'Campaign not found.');
+  requireBranchResource(req, String(existing.branch_id));
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const name = body.name === undefined ? String(existing.name) : (typeof body.name === 'string' ? body.name.trim() : '');
+  if (!name) throw new HttpError(400, 'Campaign name is required.');
+  const targetAmount = body.targetAmount === undefined ? Number(existing.target_amount) : assertMoney(body.targetAmount, 'campaign target amount');
+  const endDate = body.endDate === undefined ? (existing.end_date as string | null) : assertOptionalIsoDate(body.endDate, 'campaign endDate');
+  const status = body.status === undefined ? existing.status : body.status;
+  if (status !== 'active' && status !== 'completed' && status !== 'cancelled') throw new HttpError(400, 'Invalid campaign status.');
+  assertDateRange(String(existing.start_date), endDate, 'campaign startDate', 'campaign endDate');
+  db.prepare(
+    `UPDATE funding_campaigns SET name = ?, description = ?, target_amount = ?, end_date = ?, status = ? WHERE id = ?`,
+  ).run(name, body.description ?? existing.description ?? null, targetAmount, endDate, status, req.params.id);
+  writeAudit(req, `Updated funding campaign ${req.params.id}`, { branchId: String(existing.branch_id) });
+  res.json({ ok: true });
+}));
 
-fundingRouter.patch(
-  '/campaigns/:id',
-  authorize('owner', 'general_manager', 'donor_manager'),
-  ah(async (req, res) => {
-    const existing = stmtGetCampaignById.get(req.params.id) as any;
-    if (!existing) throw new HttpError(404, 'Campaign not found.');
-    requireFundingBranchAccess(req, existing.branch_id);
+// Donations and funding sources
+fundingRouter.get('/donations', requirePermission('Funding.View'), ah(async (req, res) => {
+  const { branchId, isAll } = resolveBranchScope(req);
+  const rows = (isAll
+    ? db.prepare(
+      `SELECT d.*, r.target_kind AS restriction_kind, r.campaign_id AS restriction_campaign_id,
+              r.scholarship_id AS restriction_scholarship_id, r.sponsorship_agreement_id AS restriction_sponsorship_agreement_id
+         FROM donations d LEFT JOIN donation_restrictions r ON r.donation_id = d.id
+        ORDER BY d.date DESC, d.created_at DESC`,
+    ).all()
+    : db.prepare(
+      `SELECT d.*, r.target_kind AS restriction_kind, r.campaign_id AS restriction_campaign_id,
+              r.scholarship_id AS restriction_scholarship_id, r.sponsorship_agreement_id AS restriction_sponsorship_agreement_id
+         FROM donations d LEFT JOIN donation_restrictions r ON r.donation_id = d.id
+        WHERE d.branch_id = ? ORDER BY d.date DESC, d.created_at DESC`,
+    ).all(branchId)) as Array<Record<string, unknown>>;
+  res.json(rows.map((row) => ({ ...row, allocation: getDonationUnallocated(db, String(row.id)) })));
+}));
 
-    const { name, description, targetAmount, endDate, status } = req.body;
-    if (status && !['active', 'completed', 'cancelled'].includes(status)) {
-      throw new HttpError(400, 'Invalid campaign status.');
-    }
-    // The create handler validates the target with assertMoney; this update did
-    // not validate it at all. Reproduced live: 'abc', -5000 and 0.001 were all
-    // stored (HTTP 200) into a REAL NOT NULL column with no CHECK, and `true`
-    // returned a 500 leaking "SQLite3 can only bind numbers...". One poisoned
-    // row silently removed a campaign from SUM(target_amount), because SQLite
-    // coerces the stored text to 0. Same canonical boundary as the create path.
-    const validatedTarget =
-      targetAmount === undefined || targetAmount === null
-        ? existing.target_amount
-        : assertMoney(targetAmount, 'campaign target amount');
+fundingRouter.post('/donations', requirePermission('Funding.RecordDonation', 'Funding.Edit'), ah(async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const user = userContext(req);
+  const branchId = mutationBranch(req, body);
+  const donorId = trimmedId(body.donorId, 'donorId');
+  const campaignId = optionalId(body.campaignId, 'campaignId');
+  const amount = assertMoney(body.amount, 'donation amount');
+  if (amount <= 0) throw new HttpError(400, 'donation amount must be greater than zero.');
+  const date = assertOptionalIsoDate(body.date, 'donation date') ?? today();
+  const restriction = parseRestriction(body);
+  const { candidates } = resolveIdempotency(req, {
+    route: 'funding-donation', donorId, campaignId, amount, date,
+    restrictionKind: restriction?.kind ?? null, restrictionTargetId: restriction?.targetId ?? null,
+    branchId, actorUserId: user.userId,
+  });
+  const findPrior = () => db.prepare(
+    `SELECT d.id, d.receipt_no, d.donor_id, d.campaign_id, d.amount, d.branch_id,
+            r.target_kind AS restriction_kind,
+            COALESCE(r.campaign_id, r.scholarship_id, r.sponsorship_agreement_id) AS restriction_target_id
+       FROM donations d LEFT JOIN donation_restrictions r ON r.donation_id = d.id
+      WHERE d.idempotency_key IN (${candidates.map(() => '?').join(',')}) LIMIT 1`,
+  ).get(...candidates) as DonationReplayCandidate | undefined;
+  const prior = findPrior();
+  if (prior) {
+    assertSameDonation(prior, { donorId, campaignId, amount, branchId, restriction });
+    return res.status(200).json({ id: prior.id, receiptNo: prior.receipt_no, idempotentReplay: true });
+  }
 
-    stmtUpdateCampaign.run(
-      name ?? existing.name, description ?? existing.description, validatedTarget,
-      endDate ?? existing.end_date, status ?? existing.status, req.params.id
-    );
-
-    writeAudit(req, `Updated campaign: ${existing.name}`);
-    res.json({ ok: true });
-  })
-);
-
-// ============================================================================
-// §3 — DONATIONS
-// ============================================================================
-
-fundingRouter.get(
-  '/donations',
-  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager'),
-  ah(async (req, res) => {
-    const { branchId, isAll } = resolveBranchScope(req);
-    const rows = isAll ? stmtGetAllDonations.all() : stmtGetDonationsByBranch.all(branchId);
-    res.json(rows);
-  })
-);
-
-fundingRouter.post(
-  '/donations',
-  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager'),
-  ah(async (req, res) => {
-    const user = getUserContext(req);
-    const { campaignId, donorId, amount, date, restricted, restrictionNote } = req.body;
-    
-    if (!donorId || !amount) throw new HttpError(400, 'Donor and a positive amount are required.');
-    // `amount <= 0` on the RAW body is a coercion, not a validation, and it is
-    // the only guard the donation desk had. Reproduced on a fresh DB before
-    // this line existed: `true`, `[[7]]` and `{a:1}` reached the driver and
-    // returned 500 "SQLite3 can only bind numbers..." / "Too few parameter
-    // values", and 0.001 surfaced the raw trigger text "donation amount must
-    // have at most two decimal places". No money ever moved and the
-    // transaction rolled back cleanly (donations, campaign raised_amount and
-    // financial_transactions all stayed at 0) — the defect is the contract,
-    // not the cash: client mistakes were reported as server faults with
-    // driver internals leaked to the caller.
-    // Parsed ONCE here so the value that is validated is the same value that
-    // feeds the idempotency fingerprint below and is stored — matching the
-    // scholarship-award boundary in this same file.
-    const donationAmount = assertMoney(amount, 'donation amount');
-    if (donationAmount <= 0) throw new HttpError(400, 'Donor and a positive amount are required.');
-
-    const donor = stmtGetDonorById.get(donorId) as any;
-    if (!donor) throw new HttpError(404, 'Donor not found.');
-    if (campaignId) {
-      const campaign = stmtGetCampaignById.get(campaignId) as any;
-      if (!campaign) throw new HttpError(404, 'Campaign not found.');
-      requireFundingBranchAccess(req, campaign.branch_id);
-    }
-
-    const donationDate = date || today();
-    const newId = id('dn');
-
-    // Duplicate protection: unguarded, a double-click or retry records one
-    // donation and one income row per click. Explicit client key wins;
-    // otherwise a fingerprint of the donation intent within a short window
-    // collapses retries. A genuinely repeated gift (later, or explicitly
-    // keyed) still succeeds.
-    const { candidates: donationIdemCandidates } = resolveIdempotency(req, {
-      route: 'donation',
-      donorId,
-      campaignId: campaignId || null,
-      amount: donationAmount,
-      date: donationDate,
-      actorUserId: user.userId ?? null,
-    });
-    // A replay must be a replay OF THIS GIFT. The key is caller-supplied, so
-    // matching on it alone would hand back another donor's receipt number and
-    // report a gift that was never recorded — on a document a donor keeps.
-    const findPriorDonation = () => db.prepare(
-      `SELECT id, receipt_no, donor_id, campaign_id, amount FROM donations
-        WHERE idempotency_key IN (${donationIdemCandidates.map(() => '?').join(',')}) LIMIT 1`
-    ).get(...donationIdemCandidates) as
-      { id: string; receipt_no: string | null; donor_id: string; campaign_id: string | null; amount: number } | undefined;
-    const assertSameDonation = (candidate: { donor_id: string; campaign_id: string | null; amount: number }) => {
-      if (candidate.donor_id !== donorId || (candidate.campaign_id ?? null) !== (campaignId || null) || Number(candidate.amount) !== donationAmount) {
-        throw new HttpError(409, 'This idempotency key has already been used for a different donation.');
-      }
-    };
-    const priorDonation = findPriorDonation();
-    if (priorDonation?.id) {
-      assertSameDonation(priorDonation);
-      return res.status(200).json({ id: priorDonation.id, receiptNo: priorDonation.receipt_no, idempotentReplay: true });
-    }
-    const donationIdemKey = donationIdemCandidates[0];
-
-    const receiptNo = nextScopedDocumentNumber('donation_receipt', user.branchId, 'DON');
-
-    const tx = db.transaction(() => {
-      stmtInsertDonation.run(
-        newId, campaignId || null, donorId, donationAmount, donationDate, 
-        restricted ? 1 : 0, restrictionNote || null, receiptNo, user.branchId, donationIdemKey
-      );
-
-      if (campaignId) {
-        stmtUpdateCampaignRaisedAmount.run(donationAmount, campaignId);
-      }
-
-      recordIncome({
-        category: 'donation', amount: donationAmount, date: donationDate,
-        description: `Donation received from ${donor.full_name}${campaignId ? ' (campaign)' : ''}${restricted ? ' [RESTRICTED]' : ''}`,
-        referenceId: newId, operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null, branchId: user.branchId,
+  let result: ReturnType<typeof registerDonation>;
+  let event: ReturnType<typeof eventBus.emit> | undefined;
+  try {
+    db.transaction(() => {
+      result = registerDonation(db, {
+        donorId, campaignId, amount, date, branchId, restriction,
+        idempotencyKey: candidates[0],
+        operator: { userId: user.userId, fullName: user.fullName, role: req.rbac?.primaryRole ?? null },
       });
-      return eventBus.emit('donation.received', 'donation', newId, 
-      { donorId, donorName: donor.full_name, amount: donationAmount, campaignId, restricted: !!restricted }, 
-      { operatorId: user.userId, branchId: user.branchId }
-      );
-    });
-    let event;
-    try {
-      event = tx();
-    } catch (err) {
-      // Atomic backstop: several concurrent requests can pass the check
-      // above, but only one wins the unique index. Losers replay the
-      // winner's donation instead of recording the gift twice.
-      if (String((err as { message?: string })?.message ?? '').includes('UNIQUE constraint failed')) {
-        const winner = findPriorDonation();
-        if (winner?.id) {
-          assertSameDonation(winner);
-          return res.status(200).json({ id: winner.id, receiptNo: winner.receipt_no, idempotentReplay: true });
-        }
-        throw new HttpError(409, 'This idempotency key has already been used for a different donation.');
+      event = eventBus.emit('donation.received', 'donation', result.id, {
+        donorId, amount, campaignId, restrictionKind: restriction?.kind ?? null,
+      }, { operatorId: user.userId, branchId });
+    })();
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      const winner = findPrior();
+      if (winner) {
+        assertSameDonation(winner, { donorId, campaignId, amount, branchId, restriction });
+        return res.status(200).json({ id: winner.id, receiptNo: winner.receipt_no, idempotentReplay: true });
       }
-      throw err;
+      throw new HttpError(409, 'This idempotency key belongs to a different donation.');
     }
-    void eventBus.dispatch(event);
+    throw error;
+  }
+  if (event) void eventBus.dispatch(event);
+  writeAudit(req, `Recorded donation ${result!.id}`, { branchId, newValue: JSON.stringify({ amount, donorId, campaignId, restriction }) });
+  res.status(201).json(result!);
+}));
 
-    addNotification('Donation Received', `A donation of ${donationAmount.toLocaleString()} AFN was received from ${donor.full_name}. Receipt: ${receiptNo}`, 'success', user.branchId);
-    writeAudit(req, `Recorded donation: ${donationAmount} AFN from ${donor.full_name} (receipt: ${receiptNo})`);
-    res.status(201).json({ id: newId, receiptNo });
-  })
-);
+fundingRouter.get('/donations/:id/allocation', requirePermission('Funding.View'), ah(async (req, res) => {
+  const donation = db.prepare('SELECT branch_id FROM donations WHERE id = ?').get(req.params.id) as { branch_id: string } | undefined;
+  if (!donation) throw new HttpError(404, 'Donation not found.');
+  requireBranchResource(req, donation.branch_id);
+  res.json(getDonationUnallocated(db, req.params.id));
+}));
 
-// ============================================================================
-// §4 — SCHOLARSHIPS
-// ============================================================================
+// Scholarships and award settlement
+fundingRouter.get('/scholarships', requirePermission('Funding.View'), ah(async (req, res) => {
+  const { branchId, isAll } = resolveBranchScope(req);
+  res.json(listScholarships(branchId, isAll));
+}));
 
-fundingRouter.get(
-  '/scholarships',
-  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager', 'receptionist'),
-  ah(async (req, res) => {
-    const { branchId, isAll } = resolveBranchScope(req);
-    const rows = isAll ? stmtGetAllScholarships.all() : stmtGetScholarshipsByBranch.all(branchId);
-    res.json(rows);
-  })
-);
+fundingRouter.post('/scholarships', requirePermission('Funding.Edit'), ah(async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const branchId = mutationBranch(req, body);
+  const name = typeof body.name === 'string' ? body.name.trim() : '';
+  if (!name) throw new HttpError(400, 'Scholarship name is required.');
+  const totalBudget = assertMoney(body.totalBudget, 'scholarship declared target');
+  const donorId = optionalId(body.donorId, 'donorId');
+  const campaignId = optionalId(body.campaignId, 'campaignId');
+  if (donorId && !db.prepare('SELECT 1 FROM donors WHERE id = ?').get(donorId)) throw new HttpError(404, 'Donor not found.');
+  if (campaignId) {
+    const campaign = db.prepare('SELECT branch_id FROM funding_campaigns WHERE id = ?').get(campaignId) as { branch_id: string } | undefined;
+    if (!campaign) throw new HttpError(404, 'Campaign not found.');
+    if (campaign.branch_id !== branchId) throw new HttpError(400, 'Campaign belongs to another branch.');
+  }
+  const scholarshipId = id('sch');
+  db.prepare(
+    `INSERT INTO scholarships (id, name, donor_id, campaign_id, total_budget, criteria, status, branch_id)
+     VALUES (?, ?, ?, ?, ?, ?, 'active', ?)`,
+  ).run(scholarshipId, name, donorId, campaignId, totalBudget, typeof body.criteria === 'string' ? body.criteria.trim() || null : null, branchId);
+  writeAudit(req, `Created scholarship ${scholarshipId}`, { branchId });
+  res.status(201).json({ id: scholarshipId });
+}));
 
-fundingRouter.post(
-  '/scholarships',
-  authorize('owner', 'general_manager', 'donor_manager'),
-  ah(async (req, res) => {
-    const user = getUserContext(req);
-    const { name, donorId, campaignId, totalBudget, criteria } = req.body;
-    
-    if (!name || !totalBudget) throw new HttpError(400, 'Scholarship name and total budget are required.');
-    // Unvalidated, this stored the literal string 'abc' as a budget. The award
-    // handler then computed `total_budget - allocated_amount` = NaN, and
-    // `amount > NaN` is false, so an award of 999,999 sailed past the budget
-    // check on a fund with no real budget at all.
-    const validatedBudget = assertMoney(totalBudget, 'scholarship budget');
+fundingRouter.get('/scholarships/awards', requirePermission('Funding.View'), ah(async (req, res) => {
+  const { branchId, isAll } = resolveBranchScope(req);
+  const rows = isAll
+    ? db.prepare('SELECT * FROM scholarship_awards ORDER BY award_date DESC, id').all()
+    : db.prepare('SELECT * FROM scholarship_awards WHERE branch_id = ? ORDER BY award_date DESC, id').all(branchId);
+  res.json(rows);
+}));
 
-    const newId = id('sch');
-    stmtInsertScholarship.run(newId, name, donorId || null, campaignId || null, validatedBudget, criteria || null, user.branchId);
+fundingRouter.post('/scholarships/award', requirePermission('Funding.Edit'), ah(async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const branchId = mutationBranch(req, body);
+  const scholarshipId = trimmedId(body.scholarshipId, 'scholarshipId');
+  const studentId = trimmedId(body.studentId, 'studentId');
+  const amount = assertMoney(body.amount, 'award amount');
+  if (amount <= 0) throw new HttpError(400, 'award amount must be greater than zero.');
+  const scholarship = db.prepare('SELECT branch_id, status FROM scholarships WHERE id = ?').get(scholarshipId) as { branch_id: string; status: string } | undefined;
+  if (!scholarship) throw new HttpError(404, 'Scholarship not found.');
+  if (scholarship.branch_id !== branchId) throw new HttpError(400, 'Scholarship belongs to another branch.');
+  if (scholarship.status !== 'active') throw new HttpError(409, 'Scholarship is closed.');
+  const student = db.prepare('SELECT branch_id FROM students WHERE id = ?').get(studentId) as { branch_id: string } | undefined;
+  if (!student) throw new HttpError(404, 'Student not found.');
+  if (student.branch_id !== branchId) throw new HttpError(400, 'Student belongs to another branch.');
+  const fund = getFundPosition(db, scholarshipId);
+  if (amount > fund.available) throw new HttpError(409, `Only ${fund.available} AFN is available in this scholarship fund.`);
+  const awardId = id('scha');
+  const awardDate = assertOptionalIsoDate(body.awardDate, 'awardDate') ?? today();
+  db.prepare(
+    `INSERT INTO scholarship_awards (id, scholarship_id, student_id, amount, award_date, notes, branch_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(awardId, scholarshipId, studentId, amount, awardDate, typeof body.notes === 'string' ? body.notes.trim() || null : null, branchId);
+  writeAudit(req, `Created scholarship award ${awardId}`, { branchId, newValue: JSON.stringify({ scholarshipId, studentId, amount }) });
+  res.status(201).json({ id: awardId, fund: getFundPosition(db, scholarshipId) });
+}));
 
-    writeAudit(req, `Created scholarship fund: ${name} (budget: ${validatedBudget} AFN)`);
-    res.status(201).json({ id: newId });
-  })
-);
+fundingRouter.get('/scholarships/:id/position', requirePermission('Funding.View'), ah(async (req, res) => {
+  const scholarship = db.prepare('SELECT * FROM scholarships WHERE id = ?').get(req.params.id) as Record<string, unknown> | undefined;
+  if (!scholarship) throw new HttpError(404, 'Scholarship not found.');
+  requireBranchResource(req, String(scholarship.branch_id));
+  const fundings = db.prepare(
+    `SELECT sf.*, COALESCE(sf.donation_id, cfe.source_donation_id) AS source_donation_id,
+            COALESCE(cfe.campaign_id, d.campaign_id) AS source_campaign_id
+       FROM scholarship_fundings sf
+       LEFT JOIN campaign_funding_entries cfe ON cfe.id = sf.campaign_funding_entry_id
+       LEFT JOIN donations d ON d.id = sf.donation_id
+      WHERE sf.scholarship_id = ? ORDER BY sf.date DESC, sf.id DESC`,
+  ).all(req.params.id) as Array<Record<string, unknown>>;
+  res.json({ ...getFundPosition(db, req.params.id), declaredTarget: Number(scholarship.total_budget), fundings: fundings.map((row) => ({ ...row, source: getScholarshipFundingPosition(db, String(row.id)) })) });
+}));
 
-fundingRouter.get(
-  '/scholarships/awards',
-  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager', 'receptionist'),
-  ah(async (req, res) => {
-    const { branchId, isAll } = resolveBranchScope(req);
-    const rows = isAll ? stmtGetAllAwards.all() : stmtGetAwardsByBranch.all(branchId);
-    res.json(rows);
-  })
-);
+fundingRouter.get('/scholarships/:id/funding-sources', requirePermission('Funding.Edit'), ah(async (req, res) => {
+  const scholarship = db.prepare('SELECT branch_id, campaign_id FROM scholarships WHERE id = ?').get(req.params.id) as { branch_id: string; campaign_id: string | null } | undefined;
+  if (!scholarship) throw new HttpError(404, 'Scholarship not found.');
+  requireBranchResource(req, scholarship.branch_id);
+  const donations = db.prepare(
+    `SELECT d.id FROM donations d
+      WHERE d.branch_id = ? AND NOT EXISTS (SELECT 1 FROM donation_restrictions r WHERE r.donation_id = d.id)
+      ORDER BY d.date DESC`,
+  ).all(scholarship.branch_id) as Array<{ id: string }>;
+  const campaignEntries = scholarship.campaign_id
+    ? db.prepare('SELECT id FROM campaign_funding_entries WHERE campaign_id = ? ORDER BY date DESC').all(scholarship.campaign_id) as Array<{ id: string }>
+    : [];
+  res.json({
+    donations: donations.map((row) => donationSourceForFunding(row.id)).filter((row) => row.unallocated > 0),
+    campaignFundingEntries: campaignEntries.map((row) => ({ ...getCampaignFundingEntryPosition(db, row.id), id: row.id })).filter((row) => row.available > 0),
+  });
+}));
 
-fundingRouter.post(
-  '/scholarships/award',
-  authorize('owner', 'general_manager', 'donor_manager'),
-  ah(async (req, res) => {
-    const user = getUserContext(req);
-    const { scholarshipId, studentId, amount, awardDate, semester, notes } = req.body;
-    
-    if (!scholarshipId || !studentId || !amount) {
-      throw new HttpError(400, 'Scholarship, student, and a positive amount are required.');
-    }
-    // `amount <= 0` is a coercion, not a validation: NaN <= 0 is false.
-    const awardAmount = assertMoney(amount, 'award amount');
-    if (awardAmount <= 0) throw new HttpError(400, 'Scholarship, student, and a positive amount are required.');
+fundingRouter.post('/scholarships/:id/fundings', requirePermission('Funding.Edit'), ah(async (req, res) => {
+  const scholarship = db.prepare('SELECT branch_id FROM scholarships WHERE id = ?').get(req.params.id) as { branch_id: string } | undefined;
+  if (!scholarship) throw new HttpError(404, 'Scholarship not found.');
+  requireBranchResource(req, scholarship.branch_id);
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const source = parseSource(body);
+  const amount = assertMoney(body.amount, 'funding amount');
+  const user = userContext(req);
+  let fundingId = '';
+  db.transaction(() => {
+    fundingId = fundScholarshipFromSource(db, {
+      scholarshipId: req.params.id, source, amount, branchId: scholarship.branch_id,
+      operatorName: user.fullName, date: assertOptionalIsoDate(body.date, 'funding date') ?? today(),
+    }).fundingId;
+  })();
+  writeAudit(req, `Funded scholarship ${req.params.id}`, { branchId: scholarship.branch_id, newValue: JSON.stringify({ fundingId, source, amount }) });
+  res.status(201).json({ id: fundingId, fund: getFundPosition(db, req.params.id) });
+}));
 
-    const scholarship = stmtGetScholarshipById.get(scholarshipId) as any;
-    if (!scholarship) throw new HttpError(404, 'Scholarship not found.');
-    requireFundingBranchAccess(req, scholarship.branch_id);
-    if (scholarship.status !== 'active') throw new HttpError(409, 'This scholarship is no longer active.');
+fundingRouter.get('/students/:studentId/tuition-obligations', requirePermission('Funding.View'), ah(async (req, res) => {
+  const student = db.prepare('SELECT branch_id FROM students WHERE id = ?').get(req.params.studentId) as { branch_id: string } | undefined;
+  if (!student) throw new HttpError(404, 'Student not found.');
+  requireBranchResource(req, student.branch_id);
+  res.json(listTuitionObligations(db, req.params.studentId).map((obligation) => {
+    const position = getObligationPosition(db, obligation.id);
+    return { id: obligation.id, semesterId: obligation.semesterId, semesterName: obligation.semesterName, netAmount: obligation.netAmount, settledCash: position.settledCash, settledAid: position.settledAid, outstanding: position.outstanding, status: obligation.status };
+  }));
+}));
 
-    // A fund may only award money it has actually RECEIVED (owner decision
-    // D-121). Backing is donation money explicitly allocated into the fund, so a
-    // fund nobody has funded can award nothing — which is how "no
-    // institution-funded scholarships" is enforced, without a declared budget
-    // being able to stand in for money. `total_budget` remains the fund's
-    // declared target and no longer bounds an award.
-    const fund = getFundPosition(db, scholarshipId);
-    if (!(awardAmount <= fund.available)) {
-      throw new HttpError(
-        409,
-        `Insufficient scholarship funding. Received ${fund.received} AFN, already committed ${fund.committed} AFN, available ${fund.available} AFN.`,
-      );
-    }
+fundingRouter.get('/scholarship-awards/:id', requirePermission('Funding.View'), ah(async (req, res) => {
+  const award = db.prepare('SELECT branch_id FROM scholarship_awards WHERE id = ?').get(req.params.id) as { branch_id: string } | undefined;
+  if (!award) throw new HttpError(404, 'Scholarship award not found.');
+  requireBranchResource(req, award.branch_id);
+  const allocations = db.prepare(
+    `SELECT a.*, ss.semester_name
+       FROM obligation_allocations a
+       JOIN student_obligations o ON o.id = a.obligation_id
+       LEFT JOIN student_semesters ss ON ss.id = o.semester_id
+      WHERE a.scholarship_award_id = ? ORDER BY a.date DESC, a.id DESC`,
+  ).all(req.params.id);
+  res.json({ ...getAwardPosition(db, req.params.id), allocations });
+}));
 
-    const student = stmtGetStudentById.get(studentId) as any;
+fundingRouter.post('/scholarship-awards/:id/allocations', requirePermission('Funding.Edit'), ah(async (req, res) => {
+  const award = db.prepare('SELECT branch_id FROM scholarship_awards WHERE id = ?').get(req.params.id) as { branch_id: string } | undefined;
+  if (!award) throw new HttpError(404, 'Scholarship award not found.');
+  requireBranchResource(req, award.branch_id);
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const obligationId = trimmedId(body.obligationId, 'obligationId');
+  const scholarshipFundingId = trimmedId(body.scholarshipFundingId ?? body.sourceId, 'scholarshipFundingId');
+  const amount = assertMoney(body.amount, 'allocation amount');
+  const user = userContext(req);
+  let allocationId = '';
+  db.transaction(() => {
+    allocationId = allocateScholarshipToObligation(db, { awardId: req.params.id, scholarshipFundingId, obligationId, amount, operatorName: user.fullName }).allocationId;
+  })();
+  writeAudit(req, `Applied scholarship award ${req.params.id}`, { branchId: award.branch_id, newValue: JSON.stringify({ allocationId, obligationId, scholarshipFundingId, amount }) });
+  res.status(201).json({ id: allocationId, award: getAwardPosition(db, req.params.id), obligation: getObligationPosition(db, obligationId) });
+}));
+
+fundingRouter.post('/scholarship-awards/:id/allocations/:allocationId/reverse', requirePermission('Funding.Edit'), ah(async (req, res) => {
+  const award = db.prepare('SELECT branch_id FROM scholarship_awards WHERE id = ?').get(req.params.id) as { branch_id: string } | undefined;
+  if (!award) throw new HttpError(404, 'Scholarship award not found.');
+  requireBranchResource(req, award.branch_id);
+  const allocation = db.prepare('SELECT obligation_id, scholarship_award_id FROM obligation_allocations WHERE id = ?').get(req.params.allocationId) as { obligation_id: string; scholarship_award_id: string | null } | undefined;
+  if (!allocation) throw new HttpError(404, 'Allocation not found.');
+  if (allocation.scholarship_award_id !== req.params.id) throw new HttpError(400, 'Allocation belongs to another award.');
+  const reason = typeof (req.body as any)?.reason === 'string' ? (req.body as any).reason : '';
+  db.transaction(() => reverseScholarshipAllocation(db, { allocationId: req.params.allocationId, reason, operatorName: userContext(req).fullName }))();
+  writeAudit(req, `Reversed scholarship allocation ${req.params.allocationId}`, { branchId: award.branch_id });
+  res.json({ ok: true, award: getAwardPosition(db, req.params.id), obligation: getObligationPosition(db, allocation.obligation_id) });
+}));
+
+fundingRouter.post('/scholarship-awards/:id/close', requirePermission('Funding.Edit'), ah(async (req, res) => {
+  const award = db.prepare('SELECT branch_id, scholarship_id FROM scholarship_awards WHERE id = ?').get(req.params.id) as { branch_id: string; scholarship_id: string } | undefined;
+  if (!award) throw new HttpError(404, 'Scholarship award not found.');
+  requireBranchResource(req, award.branch_id);
+  const reason = typeof (req.body as any)?.reason === 'string' ? (req.body as any).reason : '';
+  let returnedToFund = 0;
+  db.transaction(() => { returnedToFund = closeAward(db, { awardId: req.params.id, reason, operatorName: userContext(req).fullName }).returnedToFund; })();
+  writeAudit(req, `Closed scholarship award ${req.params.id}`, { branchId: award.branch_id, newValue: JSON.stringify({ returnedToFund }) });
+  res.json({ ok: true, returnedToFund, fund: getFundPosition(db, award.scholarship_id) });
+}));
+
+// Sponsorships
+fundingRouter.get('/sponsorships', requirePermission('Funding.View'), ah(async (req, res) => {
+  const { branchId, isAll } = resolveBranchScope(req);
+  res.json(listSponsorships(branchId, isAll));
+}));
+
+fundingRouter.post('/sponsorships', requirePermission('Funding.Edit'), ah(async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const branchId = mutationBranch(req, body);
+  const donorId = trimmedId(body.donorId, 'donorId');
+  const monthlyAmount = assertMoney(body.monthlyAmount, 'monthly sponsorship amount');
+  const startDate = assertOptionalIsoDate(body.startDate, 'startDate') ?? today();
+  const endDate = assertOptionalIsoDate(body.endDate, 'endDate');
+  if (!endDate) throw new HttpError(400, 'endDate is required for a sponsorship agreement.');
+  assertDateRange(startDate, endDate, 'startDate', 'endDate');
+  if (!db.prepare('SELECT 1 FROM donors WHERE id = ?').get(donorId)) throw new HttpError(404, 'Donor not found.');
+  const studentId = optionalId(body.studentId, 'studentId');
+  const programId = optionalId(body.programId, 'programId');
+  const campaignId = optionalId(body.campaignId, 'campaignId');
+  if (studentId) {
+    const student = db.prepare('SELECT branch_id FROM students WHERE id = ?').get(studentId) as { branch_id: string } | undefined;
     if (!student) throw new HttpError(404, 'Student not found.');
-    requireFundingBranchAccess(req, student.branch_id);
-    if (student.branch_id !== scholarship.branch_id) {
-      throw new HttpError(400, 'Student and scholarship must belong to the same branch.');
-    }
+    if (student.branch_id !== branchId) throw new HttpError(400, 'Student belongs to another branch.');
+  }
+  if (programId) {
+    const program = db.prepare('SELECT branch_id FROM programs WHERE id = ?').get(programId) as { branch_id: string } | undefined;
+    if (!program) throw new HttpError(404, 'Program not found.');
+    if (program.branch_id !== branchId) throw new HttpError(400, 'Program belongs to another branch.');
+  }
+  if (campaignId) {
+    const campaign = db.prepare('SELECT branch_id FROM funding_campaigns WHERE id = ?').get(campaignId) as { branch_id: string } | undefined;
+    if (!campaign) throw new HttpError(404, 'Campaign not found.');
+    if (campaign.branch_id !== branchId) throw new HttpError(400, 'Campaign belongs to another branch.');
+  }
+  const agreementId = id('spon');
+  db.prepare(
+    `INSERT INTO sponsorship_agreements
+       (id, donor_id, student_id, program_id, campaign_id, monthly_amount, start_date, end_date, status, branch_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+  ).run(agreementId, donorId, studentId, programId, campaignId, monthlyAmount, startDate, endDate, branchId);
+  writeAudit(req, `Created sponsorship agreement ${agreementId}`, { branchId });
+  res.status(201).json({ id: agreementId });
+}));
 
-    const newId = id('scha');
-    const date = awardDate || today();
+fundingRouter.get('/sponsorships/:id/position', requirePermission('Funding.View'), ah(async (req, res) => {
+  const agreement = db.prepare('SELECT branch_id FROM sponsorship_agreements WHERE id = ?').get(req.params.id) as { branch_id: string } | undefined;
+  if (!agreement) throw new HttpError(404, 'Sponsorship agreement not found.');
+  requireBranchResource(req, agreement.branch_id);
+  const receipts = db.prepare(
+    `SELECT r.*, COALESCE(r.donation_id, cfe.source_donation_id) AS source_donation_id
+       FROM sponsorship_receipts r LEFT JOIN campaign_funding_entries cfe ON cfe.id = r.campaign_funding_entry_id
+      WHERE r.agreement_id = ? ORDER BY r.date DESC, r.id DESC`,
+  ).all(req.params.id) as Array<Record<string, unknown>>;
+  const allocations = db.prepare(
+    `SELECT a.*, ss.semester_name, o.student_id
+       FROM obligation_allocations a
+       JOIN student_obligations o ON o.id = a.obligation_id
+       LEFT JOIN student_semesters ss ON ss.id = o.semester_id
+      WHERE a.sponsorship_agreement_id = ? ORDER BY a.date DESC, a.id DESC`,
+  ).all(req.params.id);
+  res.json({ ...getSponsorshipPosition(db, req.params.id), receipts: receipts.map((row) => ({ ...row, source: getSponsorshipReceiptPosition(db, String(row.id)) })), allocations });
+}));
 
-    const tx = db.transaction(() => {
-      stmtInsertAward.run(newId, scholarshipId, studentId, awardAmount, date, semester || null, notes || null, student.branch_id);
-      // `scholarships.allocated_amount` is a display mirror of the derived
-      // committed figure; the authority is `getFundPosition`.
-      const committed = getFundPosition(db, scholarshipId).committed;
-      const newStatus = committed >= getFundPosition(db, scholarshipId).received ? 'exhausted' : 'active';
-      stmtUpdateScholarshipAllocation.run(committed, newStatus, scholarshipId);
-      return eventBus.emit('scholarship.awarded', 'scholarship', newId, 
-      { scholarshipId, studentId, studentName: student.full_name, amount: awardAmount }, 
-      { operatorId: user.userId, branchId: student.branch_id }
-      );
-    });
-    const event = tx();
-    void eventBus.dispatch(event);
+fundingRouter.get('/sponsorships/:id/funding-sources', requirePermission('Funding.Edit'), ah(async (req, res) => {
+  const agreement = db.prepare('SELECT branch_id, donor_id, campaign_id FROM sponsorship_agreements WHERE id = ?').get(req.params.id) as { branch_id: string; donor_id: string; campaign_id: string | null } | undefined;
+  if (!agreement) throw new HttpError(404, 'Sponsorship agreement not found.');
+  requireBranchResource(req, agreement.branch_id);
+  const donations = db.prepare(
+    `SELECT d.id FROM donations d
+      WHERE d.branch_id = ? AND d.donor_id = ?
+        AND NOT EXISTS (SELECT 1 FROM donation_restrictions r WHERE r.donation_id = d.id)
+      ORDER BY d.date DESC`,
+  ).all(agreement.branch_id, agreement.donor_id) as Array<{ id: string }>;
+  const campaignEntries = agreement.campaign_id
+    ? db.prepare(
+      `SELECT cfe.id FROM campaign_funding_entries cfe
+       JOIN donations d ON d.id = cfe.source_donation_id
+       WHERE cfe.campaign_id = ? AND d.donor_id = ? ORDER BY cfe.date DESC`,
+    ).all(agreement.campaign_id, agreement.donor_id) as Array<{ id: string }>
+    : [];
+  res.json({
+    donations: donations.map((row) => donationSourceForFunding(row.id)).filter((row) => row.unallocated > 0),
+    campaignFundingEntries: campaignEntries.map((row) => ({ ...getCampaignFundingEntryPosition(db, row.id), id: row.id })).filter((row) => row.available > 0),
+  });
+}));
 
-    addNotification('Scholarship Awarded', `${student.full_name} was awarded ${awardAmount.toLocaleString()} AFN from "${scholarship.name}".`, 'success', student.branch_id);
-    writeAudit(req, `Awarded scholarship: ${awardAmount} AFN to ${student.full_name} from "${scholarship.name}"`);
-    res.status(201).json({ id: newId });
-  })
-);
+fundingRouter.post('/sponsorships/:id/receipts', requirePermission('Funding.Edit'), ah(async (req, res) => {
+  const agreement = db.prepare('SELECT branch_id FROM sponsorship_agreements WHERE id = ?').get(req.params.id) as { branch_id: string } | undefined;
+  if (!agreement) throw new HttpError(404, 'Sponsorship agreement not found.');
+  requireBranchResource(req, agreement.branch_id);
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const source = parseSource(body);
+  const amount = assertMoney(body.amount, 'receipt amount');
+  const user = userContext(req);
+  let receiptId = '';
+  db.transaction(() => {
+    receiptId = recordSponsorshipReceipt(db, {
+      agreementId: req.params.id, source, amount, branchId: agreement.branch_id,
+      operatorName: user.fullName, date: assertOptionalIsoDate(body.date, 'receipt date') ?? today(),
+    }).receiptId;
+  })();
+  writeAudit(req, `Recorded sponsorship receipt ${receiptId}`, { branchId: agreement.branch_id, newValue: JSON.stringify({ source, amount }) });
+  res.status(201).json({ id: receiptId, sponsorship: getSponsorshipPosition(db, req.params.id) });
+}));
 
-// ============================================================================
-// §4b — SCHOLARSHIP FUNDING AND OBLIGATION ALLOCATION (owner decisions D-120/D-121)
-// ============================================================================
-// A fund holds donation money explicitly allocated to it. An award commits some
-// of that money to one student. Applying an award allocates it to a specific
-// tuition obligation, which settles the obligation and moves NO cash — the
-// donor's money was recognised when the donation was received.
+fundingRouter.post('/sponsorships/:id/allocations', requirePermission('Funding.Edit'), ah(async (req, res) => {
+  const agreement = db.prepare('SELECT branch_id FROM sponsorship_agreements WHERE id = ?').get(req.params.id) as { branch_id: string } | undefined;
+  if (!agreement) throw new HttpError(404, 'Sponsorship agreement not found.');
+  requireBranchResource(req, agreement.branch_id);
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const obligationId = trimmedId(body.obligationId, 'obligationId');
+  const sponsorshipReceiptId = trimmedId(body.sponsorshipReceiptId ?? body.sourceId, 'sponsorshipReceiptId');
+  const amount = assertMoney(body.amount, 'allocation amount');
+  let allocationId = '';
+  db.transaction(() => {
+    allocationId = allocateSponsorshipToObligation(db, { agreementId: req.params.id, sponsorshipReceiptId, obligationId, amount, operatorName: userContext(req).fullName }).allocationId;
+  })();
+  writeAudit(req, `Applied sponsorship ${req.params.id}`, { branchId: agreement.branch_id, newValue: JSON.stringify({ allocationId, obligationId, sponsorshipReceiptId, amount }) });
+  res.status(201).json({ id: allocationId, sponsorship: getSponsorshipPosition(db, req.params.id), obligation: getObligationPosition(db, obligationId) });
+}));
 
-/** What a fund has received, committed and can still award. */
-fundingRouter.get(
-  '/scholarships/:id/position',
-  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager'),
-  ah(async (req, res) => {
-    const scholarship = stmtGetScholarshipById.get(req.params.id) as any;
-    if (!scholarship) throw new HttpError(404, 'Scholarship not found.');
-    requireFundingBranchAccess(req, scholarship.branch_id);
-    const position = getFundPosition(db, scholarship.id);
-    const fundings = db
-      .prepare(
-        `SELECT f.id, f.donation_id, f.amount, f.date, d.receipt_no, dn.full_name AS donor_name
-           FROM scholarship_fundings f
-           JOIN donations d ON d.id = f.donation_id
-           JOIN donors dn ON dn.id = d.donor_id
-          WHERE f.scholarship_id = ? ORDER BY f.date DESC, f.rowid DESC`,
-      )
-      .all(scholarship.id);
-    res.json({ ...position, declaredTarget: Number(scholarship.total_budget) || 0, fundings });
-  }),
-);
+fundingRouter.post('/sponsorship-allocations/:id/reverse', requirePermission('Funding.Edit'), ah(async (req, res) => {
+  const allocation = db.prepare(
+    `SELECT a.obligation_id, a.sponsorship_agreement_id, s.branch_id
+       FROM obligation_allocations a JOIN sponsorship_agreements s ON s.id = a.sponsorship_agreement_id
+      WHERE a.id = ?`,
+  ).get(req.params.id) as { obligation_id: string; sponsorship_agreement_id: string; branch_id: string } | undefined;
+  if (!allocation) throw new HttpError(404, 'Sponsorship allocation not found.');
+  requireBranchResource(req, allocation.branch_id);
+  const reason = typeof (req.body as any)?.reason === 'string' ? (req.body as any).reason : '';
+  db.transaction(() => reverseSponsorshipAllocation(db, { allocationId: req.params.id, reason, operatorName: userContext(req).fullName }))();
+  writeAudit(req, `Reversed sponsorship allocation ${req.params.id}`, { branchId: allocation.branch_id });
+  res.json({ ok: true, sponsorship: getSponsorshipPosition(db, allocation.sponsorship_agreement_id), obligation: getObligationPosition(db, allocation.obligation_id) });
+}));
 
-/** Allocate donation money into a fund. The only way a fund is backed. */
-fundingRouter.post(
-  '/scholarships/:id/fundings',
-  authorize('owner', 'general_manager', 'donor_manager'),
-  ah(async (req, res) => {
-    const user = getUserContext(req);
-    const scholarship = stmtGetScholarshipById.get(req.params.id) as any;
-    if (!scholarship) throw new HttpError(404, 'Scholarship not found.');
-    requireFundingBranchAccess(req, scholarship.branch_id);
-
-    const { donationId, amount } = req.body as { donationId?: string; amount?: unknown };
-    const donationRef = typeof donationId === 'string' ? donationId.trim() : '';
-    if (!donationRef) throw new HttpError(400, 'A donation must be named (donationId).');
-    const donation = db.prepare('SELECT id, branch_id FROM donations WHERE id = ?').get(donationRef) as
-      | { id: string; branch_id: string }
-      | undefined;
-    if (!donation) throw new HttpError(404, 'Donation not found.');
-    if (donation.branch_id !== scholarship.branch_id) {
-      throw new HttpError(400, 'A scholarship may only be funded by a donation of its own branch.');
-    }
-
-    let fundingId = '';
+fundingRouter.patch('/sponsorships/:id', requirePermission('Funding.Edit'), ah(async (req, res) => {
+  const existing = db.prepare('SELECT * FROM sponsorship_agreements WHERE id = ?').get(req.params.id) as Record<string, unknown> | undefined;
+  if (!existing) throw new HttpError(404, 'Sponsorship agreement not found.');
+  requireBranchResource(req, String(existing.branch_id));
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const requestedStatus = body.status;
+  if (requestedStatus === 'completed' || requestedStatus === 'terminated') {
+    if (body.monthlyAmount !== undefined || body.endDate !== undefined) throw new HttpError(400, 'A terminal transition cannot alter agreement terms.');
+    const reason = typeof body.reason === 'string' ? body.reason : '';
+    let result: ReturnType<typeof terminalizeSponsorship>;
     db.transaction(() => {
-      fundingId = fundScholarshipFromDonation(db, {
-        scholarshipId: scholarship.id,
-        donationId: donation.id,
-        amount: amount as number,
-        branchId: scholarship.branch_id,
-        operatorName: user.fullName,
-      }).fundingId;
+      result = terminalizeSponsorship(db, { agreementId: req.params.id, status: requestedStatus, reason, operator: { userId: userContext(req).userId, fullName: userContext(req).fullName, role: req.rbac?.primaryRole ?? null } });
     })();
+    writeAudit(req, `Terminalized sponsorship ${req.params.id}`, { branchId: String(existing.branch_id), newValue: JSON.stringify({ status: requestedStatus, returned: result!.returned, campaignId: result!.campaignId }) });
+    return res.json({ ok: true, ...result! });
+  }
+  if (requestedStatus !== undefined && requestedStatus !== 'active') throw new HttpError(400, 'Invalid sponsorship status.');
+  if (existing.status !== 'active') throw new HttpError(409, 'A terminal sponsorship agreement cannot be modified.');
+  const monthlyAmount = body.monthlyAmount === undefined ? Number(existing.monthly_amount) : assertMoney(body.monthlyAmount, 'monthly sponsorship amount');
+  const endDate = body.endDate === undefined ? String(existing.end_date) : assertOptionalIsoDate(body.endDate, 'endDate');
+  if (!endDate) throw new HttpError(400, 'endDate is required for a sponsorship agreement.');
+  assertDateRange(String(existing.start_date), endDate, 'startDate', 'endDate');
+  db.prepare('UPDATE sponsorship_agreements SET monthly_amount = ?, end_date = ? WHERE id = ? AND status = \'active\'').run(monthlyAmount, endDate, req.params.id);
+  writeAudit(req, `Updated sponsorship ${req.params.id}`, { branchId: String(existing.branch_id) });
+  res.json({ ok: true });
+}));
 
-    const position = getFundPosition(db, scholarship.id);
-    writeAudit(req, `Funded scholarship "${scholarship.name}" with ${position.received} AFN received in total (donation ${donation.id})`, { branchId: scholarship.branch_id });
-    res.status(201).json({ id: fundingId, ...position });
-  }),
-);
-
-/** How much of a donation is still unallocated to any fund. */
-fundingRouter.get(
-  '/donations/:id/allocation',
-  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager'),
-  ah(async (req, res) => {
-    const donation = db.prepare('SELECT id, branch_id FROM donations WHERE id = ?').get(req.params.id) as
-      | { id: string; branch_id: string }
-      | undefined;
-    if (!donation) throw new HttpError(404, 'Donation not found.');
-    requireFundingBranchAccess(req, donation.branch_id);
-    res.json(getDonationUnallocated(db, donation.id));
-  }),
-);
-
-/** The tuition obligations a scholarship award can be applied to. */
-fundingRouter.get(
-  '/students/:studentId/tuition-obligations',
-  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager'),
-  ah(async (req, res) => {
-    const student = stmtGetStudentById.get(req.params.studentId) as any;
-    if (!student) throw new HttpError(404, 'Student not found.');
-    requireFundingBranchAccess(req, student.branch_id);
-    const obligations = listTuitionObligations(db, student.id).map((obligation) => {
-      const position = getObligationPosition(db, obligation.id);
-      return {
-        id: obligation.id,
-        semesterId: obligation.semesterId,
-        semesterName: obligation.semesterName,
-        netAmount: obligation.netAmount,
-        settledCash: position.settledCash,
-        settledAid: position.settledAid,
-        outstanding: position.outstanding,
-        status: obligation.status,
-      };
-    });
-    res.json(obligations);
-  }),
-);
-
-/** An award and what remains unapplied on it. */
-fundingRouter.get(
-  '/scholarship-awards/:id',
-  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager'),
-  ah(async (req, res) => {
-    const award = db.prepare('SELECT branch_id FROM scholarship_awards WHERE id = ?').get(req.params.id) as
-      | { branch_id: string }
-      | undefined;
-    if (!award) throw new HttpError(404, 'Scholarship award not found.');
-    requireFundingBranchAccess(req, award.branch_id);
-    const position = getAwardPosition(db, req.params.id);
-    const allocations = db
-      .prepare(
-        `SELECT a.id, a.amount, a.status, a.date, a.reversal_reason, o.id AS obligation_id, ss.semester_name
-           FROM obligation_allocations a
-           JOIN student_obligations o ON o.id = a.obligation_id
-           LEFT JOIN student_semesters ss ON ss.id = o.semester_id
-          WHERE a.scholarship_award_id = ? ORDER BY a.rowid`,
-      )
-      .all(req.params.id);
-    res.json({ ...position, allocations });
-  }),
-);
-
-/** Apply award money to one tuition obligation. Settles it; moves no cash. */
-fundingRouter.post(
-  '/scholarship-awards/:id/allocations',
-  authorize('owner', 'general_manager', 'donor_manager'),
-  ah(async (req, res) => {
-    const user = getUserContext(req);
-    const award = db.prepare('SELECT id, branch_id FROM scholarship_awards WHERE id = ?').get(req.params.id) as
-      | { id: string; branch_id: string }
-      | undefined;
-    if (!award) throw new HttpError(404, 'Scholarship award not found.');
-    requireFundingBranchAccess(req, award.branch_id);
-
-    const { obligationId, amount } = req.body as { obligationId?: string; amount?: unknown };
-    const obligationRef = typeof obligationId === 'string' ? obligationId.trim() : '';
-    if (!obligationRef) throw new HttpError(400, 'A tuition obligation must be named (obligationId).');
-
-    let allocationId = '';
-    db.transaction(() => {
-      allocationId = allocateScholarshipToObligation(db, {
-        awardId: award.id,
-        obligationId: obligationRef,
-        amount: amount as number,
-        operatorName: user.fullName,
-      }).allocationId;
-    })();
-
-    const position = getObligationPosition(db, obligationRef);
-    writeAudit(req, `Applied scholarship award ${award.id} to obligation ${obligationRef}`, { branchId: award.branch_id, newValue: JSON.stringify({ allocationId, outstanding: position.outstanding }) });
-    res.status(201).json({ id: allocationId, award: getAwardPosition(db, award.id), obligation: position });
-  }),
-);
-
-/** Reverse an application. The money returns to its award, never to the student. */
-fundingRouter.post(
-  '/scholarship-awards/:id/allocations/:allocationId/reverse',
-  authorize('owner', 'general_manager', 'donor_manager'),
-  ah(async (req, res) => {
-    const user = getUserContext(req);
-    const award = db.prepare('SELECT id, branch_id FROM scholarship_awards WHERE id = ?').get(req.params.id) as
-      | { id: string; branch_id: string }
-      | undefined;
-    if (!award) throw new HttpError(404, 'Scholarship award not found.');
-    requireFundingBranchAccess(req, award.branch_id);
-
-    const allocation = db
-      .prepare('SELECT id, scholarship_award_id, obligation_id FROM obligation_allocations WHERE id = ?')
-      .get(req.params.allocationId) as { id: string; scholarship_award_id: string | null; obligation_id: string } | undefined;
-    if (!allocation) throw new HttpError(404, 'Allocation not found.');
-    if (allocation.scholarship_award_id !== award.id) throw new HttpError(400, 'That allocation belongs to another award.');
-
-    db.transaction(() => {
-      reverseScholarshipAllocation(db, {
-        allocationId: allocation.id,
-        reason: String((req.body as { reason?: unknown })?.reason ?? ''),
-        operatorName: user.fullName,
-      });
-    })();
-
-    writeAudit(req, `Reversed scholarship allocation ${allocation.id}`, { branchId: award.branch_id });
-    res.json({ ok: true, award: getAwardPosition(db, award.id), obligation: getObligationPosition(db, allocation.obligation_id) });
-  }),
-);
-
-/** Close an award, returning whatever it never applied to the fund. */
-fundingRouter.post(
-  '/scholarship-awards/:id/close',
-  authorize('owner', 'general_manager', 'donor_manager'),
-  ah(async (req, res) => {
-    const user = getUserContext(req);
-    const award = db.prepare('SELECT id, branch_id, scholarship_id FROM scholarship_awards WHERE id = ?').get(req.params.id) as
-      | { id: string; branch_id: string; scholarship_id: string }
-      | undefined;
-    if (!award) throw new HttpError(404, 'Scholarship award not found.');
-    requireFundingBranchAccess(req, award.branch_id);
-
-    let returned = 0;
-    db.transaction(() => {
-      returned = closeAward(db, {
-        awardId: award.id,
-        reason: String((req.body as { reason?: unknown })?.reason ?? ''),
-        operatorName: user.fullName,
-      }).returnedToFund;
-      const position = getFundPosition(db, award.scholarship_id);
-      stmtUpdateScholarshipAllocation.run(position.committed, position.committed >= position.received ? 'exhausted' : 'active', award.scholarship_id);
-    })();
-
-    writeAudit(req, `Closed scholarship award ${award.id}; ${returned} AFN returned to the fund`, { branchId: award.branch_id });
-    res.json({ ok: true, returnedToFund: returned, fund: getFundPosition(db, award.scholarship_id) });
-  }),
-);
-
-// ============================================================================
-// §5 — SPONSORSHIP AGREEMENTS
-// ============================================================================
-
-fundingRouter.get(
-  '/sponsorships',
-  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager'),
-  ah(async (req, res) => {
-    const { branchId, isAll } = resolveBranchScope(req);
-    const rows = isAll ? stmtGetAllSponsorships.all() : stmtGetSponsorshipsByBranch.all(branchId);
-    res.json(rows);
-  })
-);
-
-fundingRouter.post(
-  '/sponsorships',
-  authorize('owner', 'general_manager', 'donor_manager'),
-  ah(async (req, res) => {
-    const user = getUserContext(req);
-    const { donorId, studentId, programId, monthlyAmount, startDate, endDate } = req.body;
-    
-    if (!donorId || !monthlyAmount) throw new HttpError(400, 'Donor and monthly amount are required.');
-    const validatedMonthly = assertMoney(monthlyAmount, 'monthly sponsorship amount');
-    if (validatedMonthly <= 0) throw new HttpError(400, 'Donor and monthly amount are required.');
-
-    const donor = stmtGetDonorById.get(donorId) as any;
-    if (!donor) throw new HttpError(404, 'Donor not found.');
-
-    const newId = id('spon');
-    const tx = db.transaction(() => {
-      stmtInsertSponsorship.run(
-        newId, donorId, studentId || null, programId || null, validatedMonthly,
-        startDate || today(), endDate || null, user.branchId
-      );
-      return eventBus.emit('sponsorship.created', 'sponsorship', newId,
-        { donorId, donorName: donor.full_name, studentId, monthlyAmount: validatedMonthly },
-        { operatorId: user.userId, branchId: user.branchId }
-      );
-    });
-    const event = tx();
-    void eventBus.dispatch(event);
-
-    writeAudit(req, `Created sponsorship agreement: ${donor.full_name} → ${validatedMonthly} AFN/month`);
-    res.status(201).json({ id: newId });
-  })
-);
-
-fundingRouter.patch(
-  '/sponsorships/:id',
-  authorize('owner', 'general_manager', 'donor_manager'),
-  ah(async (req, res) => {
-    const existing = stmtGetSponsorshipById.get(req.params.id) as any;
-    if (!existing) throw new HttpError(404, 'Sponsorship agreement not found.');
-    requireFundingBranchAccess(req, existing.branch_id);
-
-    const { monthlyAmount, endDate, status } = req.body;
-    if (status && !['active', 'completed', 'terminated'].includes(status)) {
-      throw new HttpError(400, 'Invalid sponsorship status.');
-    }
-
-    // SPL-1: `completed` and `terminated` are TERMINAL. Writing whichever of
-    // the three values arrives would let `active -> terminated -> active`
-    // silently resurrect a closed commitment, and would let a money edit
-    // rewrite a settled agreement.
-    //
-    // Renewal is expressed the way this module already expresses it: POST a
-    // NEW agreement. There is no reactivation endpoint to reuse and inventing
-    // one would be inventing business policy, so the historical row stays
-    // immutable instead.
-    if (existing.status === 'completed' || existing.status === 'terminated') {
-      throw new HttpError(
-        409,
-        `This sponsorship agreement is ${existing.status} and can no longer be modified. Create a new agreement to renew the sponsorship.`,
-      );
-    }
-    // The create handler validates the monthly amount with assertMoney; this
-    // update did not validate it at all. Reproduced live: -99999, 'abc' and
-    // 0.001 were all stored (HTTP 200) — a negative recurring donor commitment
-    // and a text value inside a REAL NOT NULL column — and `true` returned a
-    // 500 leaking the SQLite driver message. Same canonical boundary as create.
-    const validatedMonthly =
-      monthlyAmount === undefined || monthlyAmount === null
-        ? existing.monthly_amount
-        : assertMoney(monthlyAmount, 'monthly sponsorship amount');
-
-    const applied = stmtUpdateSponsorship.run(
-      validatedMonthly, endDate ?? existing.end_date, 
-      status ?? existing.status, req.params.id
-    );
-    // Lost the race: another request moved this agreement to a terminal state
-    // between the check above and this write.
-    if (applied.changes !== 1) {
-      throw new HttpError(409, 'This sponsorship agreement was closed concurrently. Create a new agreement to renew the sponsorship.');
-    }
-
-    writeAudit(req, `Updated sponsorship agreement: ${req.params.id}`, {
-      oldValue: JSON.stringify({ status: existing.status, monthlyAmount: existing.monthly_amount }),
-      newValue: JSON.stringify({ status: status ?? existing.status, monthlyAmount: validatedMonthly }),
-    });
-    res.json({ ok: true });
-  })
-);
-
-// ============================================================================
-// §6 — FUNDING SUMMARY (Dashboard Widget)
-// ============================================================================
-
-fundingRouter.get(
-  '/summary',
-  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager'),
-  ah(async (req, res) => {
-    const { branchId, isAll } = resolveBranchScope(req);
-
-    const totalDonations = isAll 
-      ? (stmtGetTotalDonationsAll.get() as any).totalDonations 
-      : (stmtGetTotalDonationsByBranch.get(branchId) as any).totalDonations;
-
-    const totalScholarshipBudget = isAll 
-      ? (stmtGetTotalScholarshipBudgetAll.get() as any).totalScholarshipBudget 
-      : (stmtGetTotalScholarshipBudgetByBranch.get(branchId) as any).totalScholarshipBudget;
-
-    const totalScholarshipAllocated = isAll 
-      ? (stmtGetTotalScholarshipAllocatedAll.get() as any).totalScholarshipAllocated 
-      : (stmtGetTotalScholarshipAllocatedByBranch.get(branchId) as any).totalScholarshipAllocated;
-
-    const activeSponsorships = isAll 
-      ? (stmtGetActiveSponsorshipsAll.get() as any).activeSponsorships 
-      : (stmtGetActiveSponsorshipsByBranch.get(branchId) as any).activeSponsorships;
-
-    const activeCampaigns = isAll 
-      ? (stmtGetActiveCampaignsAll.get() as any).activeCampaigns 
-      : (stmtGetActiveCampaignsByBranch.get(branchId) as any).activeCampaigns;
-
-    const donorCount = (stmtGetDonorCount.get() as any).donorCount;
-
-    const studentsSponsored = isAll 
-      ? (stmtGetStudentsSponsoredAll.get() as any).studentsSponsored 
-      : (stmtGetStudentsSponsoredByBranch.get(branchId) as any).studentsSponsored;
-
-    res.json({
-      totalDonations,
-      totalScholarshipBudget,
-      totalScholarshipAllocated,
-      scholarshipUtilization: totalScholarshipBudget > 0 ? Math.round((totalScholarshipAllocated / totalScholarshipBudget) * 100) : 0,
-      activeSponsorships,
-      activeCampaigns,
-      donorCount,
-      studentsSponsored,
-    });
-  })
-);
+fundingRouter.get('/summary', requirePermission('Funding.View'), ah(async (req, res) => {
+  const { branchId, isAll } = resolveBranchScope(req);
+  res.json(getFundingSummary(db, isAll ? null : branchId));
+}));
 
 export default fundingRouter;
-
-// ── Sponsorship money (owner decision S6) ──────────────────────────────────
-//
-// `monthly_amount` is a promise and settles nothing. These endpoints record the
-// money that actually arrives under an agreement and apply it to named tuition
-// obligations through the one settlement authority.
-
-/** What an agreement has received, applied and can still apply. */
-fundingRouter.get(
-  '/sponsorships/:id/position',
-  authorize('owner', 'general_manager', 'finance_manager', 'donor_manager'),
-  ah(async (req, res) => {
-    const agreement = stmtGetSponsorshipById.get(req.params.id) as any;
-    if (!agreement) throw new HttpError(404, 'Sponsorship agreement not found.');
-    requireFundingBranchAccess(req, agreement.branch_id);
-    const position = getSponsorshipPosition(db, agreement.id);
-    const receipts = db
-      .prepare(
-        `SELECT r.id, r.donation_id, r.amount, r.date, d.receipt_no
-           FROM sponsorship_receipts r
-           JOIN donations d ON d.id = r.donation_id
-          WHERE r.agreement_id = ? ORDER BY r.date DESC, r.rowid DESC`,
-      )
-      .all(agreement.id);
-    const allocations = db
-      .prepare(
-        `SELECT a.id, a.amount, a.date, a.status, ss.semester_name, o.student_id
-           FROM obligation_allocations a
-           JOIN student_obligations o ON o.id = a.obligation_id
-           JOIN student_semesters ss ON ss.id = o.semester_id
-          WHERE a.sponsorship_agreement_id = ? ORDER BY a.date DESC, a.rowid DESC`,
-      )
-      .all(agreement.id);
-    res.json({ ...position, receipts, allocations });
-  }),
-);
-
-/** Earmark donation money to an agreement. The only way an agreement is backed. */
-fundingRouter.post(
-  '/sponsorships/:id/receipts',
-  authorize('owner', 'general_manager', 'donor_manager'),
-  ah(async (req, res) => {
-    const user = getUserContext(req);
-    const agreement = stmtGetSponsorshipById.get(req.params.id) as any;
-    if (!agreement) throw new HttpError(404, 'Sponsorship agreement not found.');
-    requireFundingBranchAccess(req, agreement.branch_id);
-
-    const { donationId, amount } = req.body as { donationId?: string; amount?: unknown };
-    const donationRef = typeof donationId === 'string' ? donationId.trim() : '';
-    if (!donationRef) throw new HttpError(400, 'A donation must be named (donationId).');
-    const donation = db.prepare('SELECT id, branch_id, donor_id FROM donations WHERE id = ?').get(donationRef) as
-      | { id: string; branch_id: string; donor_id: string }
-      | undefined;
-    if (!donation) throw new HttpError(404, 'Donation not found.');
-    if (donation.branch_id !== agreement.branch_id) {
-      throw new HttpError(400, 'A sponsorship may only be backed by a donation of its own branch.');
-    }
-    if (donation.donor_id !== agreement.donor_id) {
-      throw new HttpError(400, 'A sponsorship receipt must come from the donor who signed the agreement.');
-    }
-
-    let receiptId = '';
-    db.transaction(() => {
-      receiptId = recordSponsorshipReceipt(db, {
-        agreementId: agreement.id,
-        donationId: donation.id,
-        amount: amount as number,
-        branchId: agreement.branch_id,
-        operatorName: user.fullName,
-      }).receiptId;
-    })();
-
-    const position = getSponsorshipPosition(db, agreement.id);
-    writeAudit(req, `Recorded sponsorship receipt on agreement ${agreement.id} (donation ${donation.id}); received ${position.received} AFN in total`, { branchId: agreement.branch_id });
-    res.status(201).json({ id: receiptId, ...position });
-  }),
-);
-
-/** Apply sponsorship money to one tuition obligation. Moves no cash. */
-fundingRouter.post(
-  '/sponsorships/:id/allocations',
-  authorize('owner', 'general_manager', 'donor_manager'),
-  ah(async (req, res) => {
-    const user = getUserContext(req);
-    const agreement = stmtGetSponsorshipById.get(req.params.id) as any;
-    if (!agreement) throw new HttpError(404, 'Sponsorship agreement not found.');
-    requireFundingBranchAccess(req, agreement.branch_id);
-
-    const { obligationId, amount } = req.body as { obligationId?: string; amount?: unknown };
-    const obligationRef = typeof obligationId === 'string' ? obligationId.trim() : '';
-    if (!obligationRef) throw new HttpError(400, 'A tuition obligation must be named (obligationId).');
-
-    let allocationId = '';
-    db.transaction(() => {
-      allocationId = allocateSponsorshipToObligation(db, {
-        agreementId: agreement.id,
-        obligationId: obligationRef,
-        amount: amount as number,
-        operatorName: user.fullName,
-      }).allocationId;
-    })();
-
-    const position = getObligationPosition(db, obligationRef);
-    writeAudit(req, `Applied sponsorship ${agreement.id} to obligation ${obligationRef}`, { branchId: agreement.branch_id });
-    res.status(201).json({ id: allocationId, sponsorship: getSponsorshipPosition(db, agreement.id), obligation: position });
-  }),
-);
-
-/** Reverse a sponsorship allocation. The money returns to its agreement. */
-fundingRouter.post(
-  '/sponsorship-allocations/:id/reverse',
-  authorize('owner', 'general_manager', 'donor_manager'),
-  ah(async (req, res) => {
-    const user = getUserContext(req);
-    const allocation = db
-      .prepare(
-        `SELECT a.id, a.sponsorship_agreement_id, a.obligation_id, sp.branch_id
-           FROM obligation_allocations a
-           JOIN sponsorship_agreements sp ON sp.id = a.sponsorship_agreement_id
-          WHERE a.id = ?`,
-      )
-      .get(req.params.id) as { id: string; sponsorship_agreement_id: string; obligation_id: string; branch_id: string } | undefined;
-    if (!allocation) throw new HttpError(404, 'Allocation not found.');
-    requireFundingBranchAccess(req, allocation.branch_id);
-
-    const { reason } = req.body as { reason?: string };
-    db.transaction(() => {
-      reverseSponsorshipAllocation(db, { allocationId: allocation.id, reason: reason ?? '', operatorName: user.fullName });
-    })();
-
-    writeAudit(req, `Reversed sponsorship allocation ${allocation.id}`, { branchId: allocation.branch_id });
-    res.json({
-      ok: true,
-      sponsorship: getSponsorshipPosition(db, allocation.sponsorship_agreement_id),
-      obligation: getObligationPosition(db, allocation.obligation_id),
-    });
-  }),
-);
