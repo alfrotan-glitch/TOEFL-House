@@ -78,3 +78,5 @@ The presence of a file is not evidence that its contents are complete. Every art
 ## Gate 2 artifact
 
 - `27-gate-2-business-rule-completeness-review.md` — adversarial business-rule completeness audit and Gate 2 disposition
+
+- `28-gate-3-domain-model-completeness-review.md` — adversarial domain model completeness review

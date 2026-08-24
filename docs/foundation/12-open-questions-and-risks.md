@@ -47,3 +47,11 @@ Exact numeric thresholds remain configurable and fail closed; they are not being
 ## Gate 2 disposition
 
 The Gate 2 blocker set is resolved. Remaining risks concern detailed rule catalogs, policy configuration values, acceptance cases, and agreement-specific inputs; no new business-policy blocker was identified.
+
+
+## Gate 3 findings
+
+- CRITICAL: financial transaction, allocation, refund, adjustment, reversal, journal, and reconciliation entities are not individually authoritative in the model.
+- HIGH: per-entity lifecycle transitions, relationship cardinality/effective dating, access authority rows, academic evidence/decision records, HR/payroll contracts, privacy relationships, and derived-data lineage require modeling repair.
+
+Gate 3 is FAIL. No implementation or next gate is authorized until remediation and re-review.
