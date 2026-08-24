@@ -47,9 +47,44 @@ const VT_PROGRAM = 'vt_program';
 const VT_VERSION = 'vt_version';
 const VT_LEVEL_A = 'vt_level_a1';
 const VT_LEVEL_B = 'vt_level_b1';
+type PlacementComponentKey = 'grammar' | 'reading' | 'listening' | 'writing' | 'speaking';
+
 const VT_PLACEMENT_COMPONENTS = [
-  { key: 'skills', type: 'skill_scores', label: 'Skills Assessment', required: true, weight: 100, maxScore: 100, skills: ['grammar', 'vocabulary', 'reading', 'listening', 'writing', 'speaking'] },
-];
+  { key: 'grammar', type: 'grammar', label: 'Grammar', required: true, weight: 25, maxScore: 30, durationMinutes: 30, timeLimitSeconds: 1800, instructions: 'Complete the grammar section.', bankIds: ['vt_bank_grammar'], blueprintBuckets: [{ count: 30, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['mcq'] }] },
+  { key: 'reading', type: 'reading', label: 'Reading', required: true, weight: 16.67, maxScore: 20, durationMinutes: 25, timeLimitSeconds: 1500, instructions: 'Complete the reading section.', bankIds: ['vt_bank_reading'], blueprintBuckets: [{ count: 20, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['mcq'] }] },
+  { key: 'listening', type: 'listening', label: 'Listening', required: true, weight: 16.67, maxScore: 20, durationMinutes: 25, timeLimitSeconds: 1500, instructions: 'Complete the listening section.', bankIds: ['vt_bank_listening'], blueprintBuckets: [{ count: 20, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['mcq'] }] },
+  { key: 'writing', type: 'writing', label: 'Writing', required: true, weight: 20.83, maxScore: 25, durationMinutes: 30, timeLimitSeconds: 1800, instructions: 'Complete the writing section.', bankIds: ['vt_bank_writing'], blueprintBuckets: [{ count: 1, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['essay'] }] },
+  { key: 'speaking', type: 'speaking', label: 'Speaking', required: true, weight: 20.83, maxScore: 25, durationMinutes: 15, timeLimitSeconds: 900, instructions: 'Complete the speaking section.', bankIds: ['vt_bank_speaking'], blueprintBuckets: [{ count: 1, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['speaking'] }] },
+] as const;
+
+type PlacementManualScores = Record<PlacementComponentKey, number>;
+
+function insertPlacementBank(testId: string, testType: PlacementComponentKey, questionCount: number, qtype: 'mcq' | 'essay' | 'speaking') {
+  db.prepare(`
+    INSERT OR REPLACE INTO placement_tests
+      (id, title, test_type, instructions, status, branch_id, duration_seconds, version)
+    VALUES (?, ?, ?, ?, 'active', ?, ?, 1)
+  `).run(testId, `${testType} bank`, testType, `${testType} instructions`, BRANCH_A, Math.max(60, questionCount * 60));
+
+  for (let index = 0; index < questionCount; index += 1) {
+    db.prepare(`
+      INSERT OR REPLACE INTO placement_test_questions
+        (id, test_id, question_key, qtype, prompt, options_json, answer_key, points, order_index, difficulty, cefr_level, topic, subskill, lifecycle_status, version)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, 'medium', 'A1', ?, ?, 'active', 1)
+    `).run(
+      `${testId}_q${index + 1}`,
+      testId,
+      `${testType}_${index + 1}`,
+      qtype,
+      `${testType} prompt ${index + 1}`,
+      qtype === 'mcq' ? JSON.stringify([{ key: 'A', text: 'Correct' }, { key: 'B', text: 'Wrong' }]) : null,
+      qtype === 'mcq' ? 'A' : null,
+      index,
+      testType,
+      testType,
+    );
+  }
+}
 
 /** Seeds the program/version/levels/profile the unified placement workspace needs. */
 function seedPlacementInfrastructure() {
@@ -57,19 +92,76 @@ function seedPlacementInfrastructure() {
   db.prepare(`INSERT OR IGNORE INTO program_versions (id, program_id, version_label, version_number, status, is_default) VALUES (?, ?, 'v1', 1, 'published', 1)`).run(VT_VERSION, VT_PROGRAM);
   db.prepare(`INSERT OR IGNORE INTO levels (id, program_id, name, "order", program_version_id, code, is_active) VALUES (?, ?, 'A1 Beginner', 1, ?, 'A1', 1)`).run(VT_LEVEL_A, VT_PROGRAM, VT_VERSION);
   db.prepare(`INSERT OR IGNORE INTO levels (id, program_id, name, "order", program_version_id, code, is_active) VALUES (?, ?, 'B1 Intermediate', 2, ?, 'B1', 1)`).run(VT_LEVEL_B, VT_PROGRAM, VT_VERSION);
+
+  insertPlacementBank('vt_bank_grammar', 'grammar', 30, 'mcq');
+  insertPlacementBank('vt_bank_reading', 'reading', 20, 'mcq');
+  insertPlacementBank('vt_bank_listening', 'listening', 20, 'mcq');
+  insertPlacementBank('vt_bank_writing', 'writing', 1, 'essay');
+  insertPlacementBank('vt_bank_speaking', 'speaking', 1, 'speaking');
+
   db.prepare(`INSERT OR REPLACE INTO placement_assessment_profiles
     (id, program_version_id, branch_id, components_json, scoring_model, allow_retake,
-     pass_score, requirement_mode, instructions)
-    VALUES (?, ?, ?, ?, 'weighted_average', 1, 60, 'required', 'Complete every configured section.')`)
-    .run(id('pap_vt'), VT_VERSION, BRANCH_A, JSON.stringify(VT_PLACEMENT_COMPONENTS));
+     pass_score, requirement_mode, instructions, decision_rules_json)
+    VALUES (?, ?, ?, ?, 'canonical', 1, 60, 'required', 'Complete every configured component.', ?)` )
+    .run(
+      'pap_vt',
+      VT_VERSION,
+      BRANCH_A,
+      JSON.stringify(VT_PLACEMENT_COMPONENTS),
+      JSON.stringify([
+        { cefrLevel: 'A1', recommendedLevelId: VT_LEVEL_A, minimumScores: { grammar: 5, reading: 3, listening: 3, writing: 8, speaking: 8 } },
+        { cefrLevel: 'A2', recommendedLevelId: VT_LEVEL_A, minimumScores: { grammar: 10, reading: 7, listening: 7, writing: 10, speaking: 10 } },
+        { cefrLevel: 'B1', recommendedLevelId: VT_LEVEL_B, minimumScores: { grammar: 16, reading: 11, listening: 11, writing: 13, speaking: 13 } },
+        { cefrLevel: 'B2', recommendedLevelId: VT_LEVEL_B, minimumScores: { grammar: 22, reading: 15, listening: 15, writing: 17, speaking: 17 } },
+        { cefrLevel: 'C1', recommendedLevelId: VT_LEVEL_B, minimumScores: { grammar: 27, reading: 18, listening: 18, writing: 21, speaking: 21 } },
+      ]),
+    );
+  db.prepare(`
+    INSERT OR REPLACE INTO fee_rules (id, branch_id, program_version_id, fee_type, name, amount, version, is_active)
+    VALUES ('pap_vt_placement_fee', ?, ?, 'placement', 'Placement fee', 0, 1, 1)
+  `).run(BRANCH_A, VT_VERSION);
 }
 
-/** Starts a placement attempt for a visitor and completes it with the given skill scores. */
-async function startAndCompletePlacement(vid: string, skills: Record<string, number>, auth: TokenPayload, testApp: Express.Application) {
-  const start = await supertest(testApp).post(`/api/placement/visitors/${vid}/placement/attempts`).set(authHeader(auth)).send({});
+/** Starts a PHYSICAL placement attempt for a visitor and completes it with per-component manual scores. */
+function ensureLinkedStudentForVisitor(vid: string) {
+  const existing = db.prepare('SELECT id FROM students WHERE lead_id = ?').get(vid) as { id: string } | undefined;
+  if (existing?.id) return existing.id;
+  const visitor = db.prepare('SELECT full_name, branch_id, gender, phone FROM visitors WHERE id = ?').get(vid) as any;
+  const studentId = id('stu');
+  db.prepare(
+    `INSERT INTO students (id, student_code, full_name, status, registration_date, branch_id, gender, phone, lead_id)
+     VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?)`
+  ).run(studentId, `TH-LINK-${Date.now()}`, visitor.full_name, today(), visitor.branch_id, visitor.gender || 'male', visitor.phone || null, vid);
+  return studentId;
+}
+
+async function startAndCompletePlacement(vid: string, scores: PlacementManualScores, auth: TokenPayload, testApp: Express.Application) {
+  ensureLinkedStudentForVisitor(vid);
+  const start = await supertest(testApp)
+    .post(`/api/placement/visitors/${vid}/placement/attempts`)
+    .set(authHeader(auth))
+    .send({ deliveryMode: 'PHYSICAL' });
   const attemptId = start.body?.id;
-  const put = await supertest(testApp).put(`/api/placement/visitors/${vid}/placement/attempts/${attemptId}/components/skills`).set(authHeader(auth)).send({ skills });
-  return { start, attemptId, put, complete: await supertest(testApp).post(`/api/placement/visitors/${vid}/placement/attempts/${attemptId}/complete`).set(authHeader(auth)).send({}) };
+  const updates: Record<PlacementComponentKey, any> = {} as Record<PlacementComponentKey, any>;
+  for (const componentKey of ['grammar', 'reading', 'listening', 'writing', 'speaking'] as const) {
+    await supertest(testApp)
+      .put(`/api/placement/visitors/${vid}/placement/attempts/${attemptId}/tests/${componentKey}/start`)
+      .set(authHeader(auth))
+      .send({});
+    updates[componentKey] = await supertest(testApp)
+      .put(`/api/placement/visitors/${vid}/placement/attempts/${attemptId}/components/${componentKey}`)
+      .set(authHeader(auth))
+      .send({ score: scores[componentKey] });
+  }
+  return {
+    start,
+    attemptId,
+    updates,
+    complete: await supertest(testApp)
+      .post(`/api/placement/visitors/${vid}/placement/attempts/${attemptId}/complete`)
+      .set(authHeader(auth))
+      .send({}),
+  };
 }
 
 function makeUser(overrides: Partial<TokenPayload> & { userId: string }): TokenPayload {
@@ -217,6 +309,14 @@ describe('Visitor Module', () => {
     ensureOrganizationHierarchy(db);
     bootstrapRbacCatalog(db);
     seedBranches();
+    db.prepare(`
+      INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+      VALUES ('visitors_test_registration_fee_a', ?, 'registration', 'Registration fee', 1500, 1, 1)
+    `).run(BRANCH_A);
+    db.prepare(`
+      INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+      VALUES ('visitors_test_registration_fee_b', ?, 'registration', 'Registration fee', 1500, 1, 1)
+    `).run(BRANCH_B);
     seedClasses();
     seedPlacementInfrastructure();
 
@@ -986,7 +1086,7 @@ describe('Visitor Module', () => {
       const vid = createVisitorDirect({ stage: 'placement_booking', branch_id: BRANCH_A, program_version_id: VT_VERSION });
 
       const { start, complete } = await startAndCompletePlacement(vid, {
-        grammar: 20, vocabulary: 19, reading: 18, listening: 21, writing: 17, speaking: 20,
+        grammar: 20, reading: 18, listening: 19, writing: 17, speaking: 20,
       }, registrarA, app);
 
       expect(start.status).toBe(201);
@@ -1006,12 +1106,15 @@ describe('Visitor Module', () => {
     it('should charge placement fee on first test only', async () => {
       const vid = createVisitorDirect({ stage: 'placement_booking', branch_id: BRANCH_A, program_version_id: VT_VERSION });
 
-      // Placement fee now resolves from branch_academic_profiles (Academic
-      // Control Center) via the policy resolver, not system_settings.
-      db.prepare(`INSERT OR REPLACE INTO branch_academic_profiles (branch_id, placement_test_fee) VALUES (?, ?)`).run(BRANCH_A, 500);
+      // Placement fee resolves from the canonical fee-rule registry in the
+      // Academic Control Center, not from legacy branch-profile columns.
+      db.prepare(`
+        INSERT OR REPLACE INTO fee_rules (id, branch_id, program_version_id, fee_type, name, amount, version, is_active)
+        VALUES ('visitors_branch_a_placement', ?, ?, 'placement', 'Placement fee', ?, 1, 1)
+      `).run(BRANCH_A, VT_VERSION, 500);
 
       const res1 = await startAndCompletePlacement(vid, {
-        grammar: 10, vocabulary: 10, reading: 10, listening: 10, writing: 10, speaking: 10,
+        grammar: 10, reading: 10, listening: 10, writing: 10, speaking: 10,
       }, registrarA, app);
 
       expect(res1.start.status).toBe(201);
@@ -1020,7 +1123,7 @@ describe('Visitor Module', () => {
 
       // Second test should NOT charge
       const res2 = await startAndCompletePlacement(vid, {
-        grammar: 20, vocabulary: 19, reading: 18, listening: 20, writing: 18, speaking: 19,
+        grammar: 20, reading: 18, listening: 20, writing: 18, speaking: 19,
       }, registrarA, app);
 
       expect(res2.start.status).toBe(201);
@@ -1032,7 +1135,7 @@ describe('Visitor Module', () => {
       const vid = createVisitorDirect({ stage: 'placement_booking', branch_id: BRANCH_A, program_version_id: VT_VERSION });
 
       const { start, complete } = await startAndCompletePlacement(vid, {
-        grammar: 0, vocabulary: 0, reading: 0, listening: 0, writing: 0, speaking: 0,
+        grammar: 0, reading: 0, listening: 0, writing: 0, speaking: 0,
       }, registrarA, app);
 
       expect(start.status).toBe(201);
@@ -1043,29 +1146,50 @@ describe('Visitor Module', () => {
 
     it('should reject missing score fields instead of silently recording zeros', async () => {
       const vid = createVisitorDirect({ stage: 'placement_booking', branch_id: BRANCH_A, program_version_id: VT_VERSION });
+      ensureLinkedStudentForVisitor(vid);
 
-      const start = await supertest(app).post(`/api/placement/visitors/${vid}/placement/attempts`).set(authHeader(registrarA)).send({});
-      const put = await supertest(app).put(`/api/placement/visitors/${vid}/placement/attempts/${start.body.id}/components/skills`).set(authHeader(registrarA)).send({ skills: { grammar: 80 } });
+      const start = await supertest(app)
+        .post(`/api/placement/visitors/${vid}/placement/attempts`)
+        .set(authHeader(registrarA))
+        .send({ deliveryMode: 'PHYSICAL' });
+      await supertest(app)
+        .put(`/api/placement/visitors/${vid}/placement/attempts/${start.body.id}/tests/grammar/start`)
+        .set(authHeader(registrarA))
+        .send({});
+      const put = await supertest(app)
+        .put(`/api/placement/visitors/${vid}/placement/attempts/${start.body.id}/components/grammar`)
+        .set(authHeader(registrarA))
+        .send({ score: 18 });
+      const complete = await supertest(app)
+        .post(`/api/placement/visitors/${vid}/placement/attempts/${start.body.id}/complete`)
+        .set(authHeader(registrarA))
+        .send({});
 
-      // Integrity hardening: an incomplete skill scorecard is rejected rather
-      // than silently recording zeros for the missing skills.
-      expect(put.status).toBe(400);
+      // Integrity hardening: completing only one canonical component is rejected
+      // instead of silently treating omitted sections as zeroes.
+      expect(put.status).toBe(200);
+      expect(complete.status).toBe(400);
+      expect(complete.body.error).toMatch(/Complete all required assessment sections/i);
     });
 
-    it('should record income transaction for fee', async () => {
+    it('should issue a placement invoice instead of booking income immediately', async () => {
       const vid = createVisitorDirect({ stage: 'placement_booking', branch_id: BRANCH_A, program_version_id: VT_VERSION });
-      db.prepare(`INSERT OR REPLACE INTO branch_academic_profiles (branch_id, placement_test_fee) VALUES (?, ?)`).run(BRANCH_A, 300);
+      db.prepare(`
+        INSERT OR REPLACE INTO fee_rules (id, branch_id, program_version_id, fee_type, name, amount, version, is_active)
+        VALUES ('visitors_branch_a_placement', ?, ?, 'placement', 'Placement fee', ?, 1, 1)
+      `).run(BRANCH_A, VT_VERSION, 300);
 
       const { start, complete } = await startAndCompletePlacement(vid, {
-        grammar: 15, vocabulary: 15, reading: 15, listening: 15, writing: 15, speaking: 15,
+        grammar: 15, reading: 15, listening: 15, writing: 15, speaking: 15,
       }, registrarA, app);
 
       expect(start.status).toBe(201);
       expect(complete.status).toBe(200);
-      // The income transaction references the completed placement attempt.
-      const tx = db.prepare("SELECT * FROM financial_transactions WHERE reference_id = ? AND category = 'placement'").get(start.body.id) as any;
-      expect(tx).toBeDefined();
-      expect(Number(tx.amount)).toBeGreaterThan(0);
+      const linkedStudent = db.prepare('SELECT id FROM students WHERE lead_id = ?').get(vid) as { id: string };
+      const invoice = db.prepare("SELECT * FROM invoices WHERE student_id = ? AND charge_kind = 'placement'").get(linkedStudent.id) as any;
+      expect(invoice).toBeDefined();
+      expect(Number(invoice.net_amount)).toBe(300);
+      expect((db.prepare("SELECT COUNT(*) c FROM financial_transactions WHERE category = 'placement' AND type = 'income'").get() as { c: number }).c).toBe(0);
     });
   });
 
@@ -1120,343 +1244,233 @@ describe('Visitor Module', () => {
         gender: 'male',
         phone: '0775555555',
         branch_id: BRANCH_A,
-        stage: 'placement_completed',
+        program_version_id: VT_VERSION,
       });
 
       const res = await supertest(app)
         .post(`/api/visitors/${vid}/convert`)
         .set(authHeader(registrarA))
-        .send({
-          classId: CLASS_A,
-          amountPaid: 3000,
-          discountPercent: 10,
-          semesterFee: 5000,
-          paymentMethod: 'cash',
-        });
+        .send({ classId: CLASS_A, branchId: BRANCH_A, programVersionId: VT_VERSION, notes: 'Canonical admission' });
 
       expect(res.status).toBe(201);
       expect(res.body.studentId).toBeDefined();
       expect(res.body.studentCode).toMatch(/^TH-\d+$/);
-      expect(res.body.receiptNumber).toBeDefined();
-      expect(res.body.invoiceId).toBeDefined();
-      expect(res.body.invoiceNumber).toMatch(/^INV-\d{4}-\d{5}$/);
-      expect(res.body.netAmount).toBe(4500); // 5000 - 10%
+      expect(Array.isArray(res.body.invoices)).toBe(true);
+      expect(res.body.nextStep).toMatch(/placement/i);
 
-      // Verify student created
       const student = db.prepare('SELECT * FROM students WHERE id = ?').get(res.body.studentId) as any;
       expect(student).toBeDefined();
       expect(student.full_name).toBe('Convert Me');
       expect(student.lead_id).toBe(vid);
       expect(student.branch_id).toBe(BRANCH_A);
-      expect(student.discount_percent).toBe(10);
+      expect(student.gender).toBe('male');
 
-      // Verify visitor status changed
       const visitor = getVisitor(vid);
       expect(visitor.status).toBe('registered');
-      expect(visitor.stage).toBe('enrollment');
+      expect(visitor.stage).toBe('placement_booking');
 
-      // Verify semester
-      const semester = db.prepare('SELECT * FROM student_semesters WHERE student_id = ?').get(res.body.studentId) as any;
-      expect(semester).toBeDefined();
-      expect(semester.class_id).toBe(CLASS_A);
-      expect(semester.fee_amount).toBe(5000);
-      expect(Number(semester.net_fee_amount)).toBe(4500);
+      expect((db.prepare('SELECT COUNT(*) c FROM enrollments WHERE student_id = ?').get(res.body.studentId) as { c: number }).c).toBe(0);
+      expect((db.prepare('SELECT COUNT(*) c FROM student_semesters WHERE student_id = ?').get(res.body.studentId) as { c: number }).c).toBe(0);
+      expect((db.prepare('SELECT COUNT(*) c FROM payments WHERE student_id = ?').get(res.body.studentId) as { c: number }).c).toBe(0);
+      expect((db.prepare('SELECT COUNT(*) c FROM registrations WHERE student_id = ?').get(res.body.studentId) as { c: number }).c).toBe(1);
+    });
 
-      // Verify registration
-      const reg = db.prepare('SELECT * FROM registrations WHERE student_id = ?').get(res.body.studentId) as any;
-      expect(reg).toBeDefined();
-      expect(reg.amount_paid).toBe(3000);
+    it('should preserve completed placement state when admitting an already-assessed visitor', async () => {
+      const score = JSON.stringify({ percentage: 91, recommendation: { levelId: VT_LEVEL_B } });
+      const vid = createVisitorDirect({ full_name: 'Placement Complete', gender: 'female', branch_id: BRANCH_A, program_version_id: VT_VERSION });
+      db.prepare("UPDATE visitors SET placement_status='completed', placement_score=?, stage='placement_completed' WHERE id=?").run(score, vid);
 
-      // Verify invoice
-      const invoice = db.prepare('SELECT * FROM invoices WHERE id = ?').get(res.body.invoiceId) as any;
-      expect(invoice).toBeDefined();
-      expect(invoice.total_amount).toBe(5000);
-      expect(invoice.discount_amount).toBe(500);
-      expect(invoice.net_amount).toBe(4500);
+      const res = await supertest(app)
+        .post(`/api/visitors/${vid}/convert`)
+        .set(authHeader(registrarA))
+        .send({ classId: CLASS_B_FEMALE, branchId: BRANCH_A, programVersionId: VT_VERSION });
 
-      // Verify payment
-      const payment = db.prepare('SELECT * FROM payments WHERE student_id = ?').get(res.body.studentId) as any;
-      expect(payment).toBeDefined();
-      expect(payment.amount).toBe(3000);
-      expect(payment.payment_method).toBe('cash');
-      expect(payment.status).toBe('completed');
-
-      // Verify journey events
-      const events = db.prepare('SELECT * FROM student_journey_events WHERE student_id = ?').all(res.body.studentId) as any[];
-      expect(events.length).toBeGreaterThanOrEqual(3); // STUDENT_REGISTERED, INVOICE_ISSUED, PAYMENT_RECORDED + ENROLLMENT_CREATED, CLASS_ASSIGNED
-      const eventTypes = events.map((e: any) => e.event_type);
-      expect(eventTypes).toContain('journey.student_registered');
-      expect(eventTypes).toContain('journey.invoice_issued');
-      expect(eventTypes).toContain('journey.payment_recorded');
+      expect(res.status).toBe(201);
+      const student = db.prepare('SELECT placement_score FROM students WHERE id = ?').get(res.body.studentId) as any;
+      expect(student.placement_score).toBe(score);
+      expect(getVisitor(vid).stage).toBe('placement_completed');
     });
 
     it('should handle zero payment conversion', async () => {
       const vid = createVisitorDirect({ full_name: 'Zero Pay', gender: 'male', branch_id: BRANCH_A });
-
       const res = await supertest(app)
         .post(`/api/visitors/${vid}/convert`)
         .set(authHeader(registrarA))
         .send({ classId: CLASS_A, amountPaid: 0, semesterFee: 5000 });
 
-      expect(res.status).toBe(201);
-      expect(res.body.status).toBe('issued');
-
-      // No payment record should exist
-      const payments = db.prepare('SELECT * FROM payments WHERE student_id = ?').all(res.body.studentId) as any[];
-      expect(payments).toHaveLength(0);
+      expect(res.status).toBe(409);
+      expect(db.prepare('SELECT id FROM students WHERE lead_id = ?').get(vid)).toBeUndefined();
     });
 
     it('should handle full payment', async () => {
       const vid = createVisitorDirect({ full_name: 'Full Pay', gender: 'male', branch_id: BRANCH_A });
-
       const res = await supertest(app)
         .post(`/api/visitors/${vid}/convert`)
         .set(authHeader(registrarA))
-        .send({ classId: CLASS_A, amountPaid: 5000, semesterFee: 5000 });
+        .send({ classId: CLASS_A, amountPaid: 5000, semesterFee: 5000, paymentMethod: 'cash' });
 
-      expect(res.status).toBe(201);
-      expect(res.body.status).toBe('paid');
+      expect(res.status).toBe(409);
+      expect(db.prepare('SELECT id FROM students WHERE lead_id = ?').get(vid)).toBeUndefined();
     });
 
     it('should handle partial payment', async () => {
       const vid = createVisitorDirect({ full_name: 'Partial Pay', gender: 'male', branch_id: BRANCH_A });
-
       const res = await supertest(app)
         .post(`/api/visitors/${vid}/convert`)
         .set(authHeader(registrarA))
-        .send({ classId: CLASS_A, amountPaid: 2000, semesterFee: 5000 });
+        .send({ classId: CLASS_A, amountPaid: 2000, semesterFee: 5000, paymentMethod: 'cash' });
 
-      expect(res.status).toBe(201);
-      expect(res.body.status).toBe('partial');
+      expect(res.status).toBe(409);
+      expect(db.prepare('SELECT id FROM students WHERE lead_id = ?').get(vid)).toBeUndefined();
     });
   });
-
-  // ═════════════════════════════════════════════════════════════════════════
-  // §12 — CONVERSION FAILURE SCENARIOS
-  // ═════════════════════════════════════════════════════════════════════════
-
   describe('§12 Conversion Failure Scenarios', () => {
     it('should reject conversion of already-registered visitor (status guard)', async () => {
       const vid = createVisitorDirect({ full_name: 'Already Registered', branch_id: BRANCH_A });
       db.prepare("UPDATE visitors SET status = 'registered' WHERE id = ?").run(vid);
-
       const res = await supertest(app)
         .post(`/api/visitors/${vid}/convert`)
         .set(authHeader(registrarA))
-        .send({ classId: CLASS_A, amountPaid: 3000 });
-
+        .send({ classId: CLASS_A });
       expect(res.status).toBe(409);
       expect(res.body.error).toContain('already been converted');
     });
 
     it('should reject duplicate conversion (lead_id guard)', async () => {
       const vid = createVisitorDirect({ full_name: 'Duplicate Convert', gender: 'male', branch_id: BRANCH_A });
-
-      // Create a student with this visitor as lead_id
-      db.prepare(
-        `INSERT INTO students (id, student_code, full_name, status, registration_date, branch_id, gender, lead_id)
-         VALUES (?, ?, ?, 'active', ?, ?, 'male', ?)`
-      ).run(id('stu'), 'TH-DUP-1', 'Pre-existing Student', today(), BRANCH_A, vid);
-
+      db.prepare(`INSERT INTO students (id, student_code, full_name, status, registration_date, branch_id, gender, lead_id)
+         VALUES (?, ?, ?, 'active', ?, ?, 'male', ?)`)
+        .run(id('stu'), 'TH-DUP-1', 'Pre-existing Student', today(), BRANCH_A, vid);
       const res = await supertest(app)
         .post(`/api/visitors/${vid}/convert`)
         .set(authHeader(registrarA))
-        .send({ classId: CLASS_A, amountPaid: 3000 });
-
+        .send({ classId: CLASS_A });
       expect(res.status).toBe(409);
     });
 
-    it('should reject conversion without class', async () => {
-      const vid = createVisitorDirect({ branch_id: BRANCH_A });
-
+    it('allows conversion without class and leaves no enrollment side effects', async () => {
+      const vid = createVisitorDirect({ branch_id: BRANCH_A, program_version_id: VT_VERSION });
       const res = await supertest(app)
         .post(`/api/visitors/${vid}/convert`)
         .set(authHeader(registrarA))
-        .send({ amountPaid: 3000 });
-
-      expect(res.status).toBe(400);
-      expect(res.body.error).toContain('Class is required');
+        .send({ branchId: BRANCH_A, programVersionId: VT_VERSION });
+      expect(res.status).toBe(201);
+      expect((db.prepare('SELECT COUNT(*) c FROM enrollments WHERE student_id = ?').get(res.body.studentId) as { c: number }).c).toBe(0);
+      expect((db.prepare('SELECT COUNT(*) c FROM student_semesters WHERE student_id = ?').get(res.body.studentId) as { c: number }).c).toBe(0);
     });
 
-    it('should reject conversion with negative payment', async () => {
-      const vid = createVisitorDirect({ branch_id: BRANCH_A });
-
-      const res = await supertest(app)
-        .post(`/api/visitors/${vid}/convert`)
-        .set(authHeader(registrarA))
-        .send({ classId: CLASS_A, amountPaid: -100 });
-
-      expect(res.status).toBe(400);
-    });
-
-    it('should reject conversion with payment exceeding net fee', async () => {
-      const vid = createVisitorDirect({ branch_id: BRANCH_A });
-
-      const res = await supertest(app)
-        .post(`/api/visitors/${vid}/convert`)
-        .set(authHeader(registrarA))
-        .send({ classId: CLASS_A, amountPaid: 10000, semesterFee: 5000 });
-
-      expect(res.status).toBe(400);
-      expect(res.body.error).toContain('cannot exceed');
+    it('rejects legacy payment fields during conversion', async () => {
+      for (const payload of [
+        { classId: CLASS_A, amountPaid: -100 },
+        { classId: CLASS_A, amountPaid: 10000, semesterFee: 5000 },
+        { classId: CLASS_A, discountPercent: 10 },
+        { classId: CLASS_A, paymentMethod: 'cash' },
+      ]) {
+        const vid = createVisitorDirect({ branch_id: BRANCH_A });
+        const res = await supertest(app)
+          .post(`/api/visitors/${vid}/convert`)
+          .set(authHeader(registrarA))
+          .send(payload);
+        expect(res.status).toBe(409);
+        expect(db.prepare('SELECT id FROM students WHERE lead_id = ?').get(vid)).toBeUndefined();
+      }
     });
 
     it('should reject conversion to non-existent class', async () => {
       const vid = createVisitorDirect({ branch_id: BRANCH_A });
-
       const res = await supertest(app)
         .post(`/api/visitors/${vid}/convert`)
         .set(authHeader(registrarA))
-        .send({ classId: 'nonexistent_class', amountPaid: 3000 });
-
+        .send({ classId: 'nonexistent_class' });
       expect(res.status).toBe(404);
     });
 
-    it('should reject conversion when class is full (capacity check)', async () => {
-      // Fill the class to capacity
+    it('treats class capacity and gender as later enrollment concerns, not admission-time blockers', async () => {
       fillClass(CLASS_FULL, 1);
-
-      const vid = createVisitorDirect({ gender: 'male', branch_id: BRANCH_A });
-
-      const res = await supertest(app)
-        .post(`/api/visitors/${vid}/convert`)
+      const beforeFullSeats = (db.prepare("SELECT COUNT(*) c FROM enrollments WHERE class_id=? AND status='active'").get(CLASS_FULL) as { c: number }).c;
+      const fullLead = createVisitorDirect({ gender: 'male', branch_id: BRANCH_A, phone: '0770001001' });
+      const full = await supertest(app)
+        .post(`/api/visitors/${fullLead}/convert`)
         .set(authHeader(registrarA))
-        .send({ classId: CLASS_FULL, amountPaid: 3000 });
+        .send({ classId: CLASS_FULL });
+      expect(full.status).toBe(201);
+      expect((db.prepare('SELECT COUNT(*) c FROM enrollments WHERE student_id=?').get(full.body.studentId) as { c: number }).c).toBe(0);
+      expect((db.prepare("SELECT COUNT(*) c FROM enrollments WHERE class_id=? AND status='active'").get(CLASS_FULL) as { c: number }).c).toBe(beforeFullSeats);
 
-      expect(res.status).toBe(400);
-      expect(res.body.error).toContain('full');
-    });
-
-    it('should reject gender policy violation (female → male-only class allowed, male → female-only blocked)', async () => {
-      // CLASS_A is mixed, CLASS_B_FEMALE is female-only
-      // Male student trying to enroll in female-only class should fail
-      const vid = createVisitorDirect({ gender: 'male', branch_id: BRANCH_A });
-
-      const res = await supertest(app)
-        .post(`/api/visitors/${vid}/convert`)
+      const maleLead = createVisitorDirect({ gender: 'male', branch_id: BRANCH_A, phone: '0770001002' });
+      const gender = await supertest(app)
+        .post(`/api/visitors/${maleLead}/convert`)
         .set(authHeader(registrarA))
-        .send({ classId: CLASS_B_FEMALE, amountPaid: 3000 });
-
-      expect(res.status).toBe(400);
-      expect(res.body.error).toContain('female');
+        .send({ classId: CLASS_B_FEMALE });
+      expect(gender.status).toBe(201);
+      expect((db.prepare('SELECT COUNT(*) c FROM enrollments WHERE student_id=?').get(gender.body.studentId) as { c: number }).c).toBe(0);
     });
 
     it('should allow female student into female-only class', async () => {
       const vid = createVisitorDirect({ gender: 'female', full_name: 'Female Student', branch_id: BRANCH_A });
-
       const res = await supertest(app)
         .post(`/api/visitors/${vid}/convert`)
         .set(authHeader(registrarA))
-        .send({ classId: CLASS_B_FEMALE, amountPaid: 3000, semesterFee: 4500 });
-
+        .send({ classId: CLASS_B_FEMALE });
       expect(res.status).toBe(201);
+      expect((db.prepare('SELECT COUNT(*) c FROM enrollments WHERE student_id=?').get(res.body.studentId) as { c: number }).c).toBe(0);
     });
 
     it('should reject unauthorized role (counselor cannot convert)', async () => {
       const vid = createVisitorDirect({ branch_id: BRANCH_A });
-
       const res = await supertest(app)
         .post(`/api/visitors/${vid}/convert`)
         .set(authHeader(counselorA))
-        .send({ classId: CLASS_A, amountPaid: 3000 });
-
+        .send({ classId: CLASS_A });
       expect(res.status).toBe(403);
     });
   });
-
-  // ═════════════════════════════════════════════════════════════════════════
-  // §13 — TRANSACTION ROLLBACK DURING CONVERSION
-  // ═════════════════════════════════════════════════════════════════════════
-
   describe('§13 Transaction Rollback', () => {
     it('should rollback all records on conversion failure', () => {
       const vid = createVisitorDirect({ gender: 'male', full_name: 'Rollback Test', branch_id: BRANCH_A });
-
-      // Attempt conversion that will fail due to gender policy
-      // by using a female-only class with a male student — this should fail BEFORE
-      // the transaction, so let's trigger a failure inside the transaction instead
-      // We'll test by providing a class that exists but causes an internal error
-      // The conversion uses a single transaction, so any SQL error rolls back everything
-
-      // Simulate a failure: use an invalid semesterFee that exceeds what's allowed
-      // Actually the conversion has pre-validation. Let's test with a class that
-      // will pass validation but the enrollment service will fail.
-
-      // We test the atomicity by checking that no partial state is created when
-      // conversion is rejected at any validation gate.
-
-      // First verify no student/semester/registration/invoice/payment exist
       expect(countStudents()).toBe(0);
-
-      // This conversion fails (gender policy)
       try {
         db.transaction(() => {
-          // Simulate the beginning of a conversion: update visitor, create student
           db.prepare("UPDATE visitors SET status = 'registered' WHERE id = ?").run(vid);
           const stuId = id('stu');
-          db.prepare(
-            `INSERT INTO students (id, student_code, full_name, status, registration_date, branch_id, gender, lead_id)
-             VALUES (?, ?, ?, 'active', ?, ?, 'male', ?)`
-          ).run(stuId, 'TH-ROLL-1', 'Rollback Student', today(), BRANCH_A, vid);
-
-          // Now cause an error
+          db.prepare(`INSERT INTO students (id, student_code, full_name, status, registration_date, branch_id, gender, lead_id)
+             VALUES (?, ?, ?, 'active', ?, ?, 'male', ?)`)
+            .run(stuId, 'TH-ROLL-1', 'Rollback Student', today(), BRANCH_A, vid);
           throw new Error('Simulated failure inside transaction');
         })();
       } catch {
-        // Expected
+        // expected: this block verifies the surrounding transaction rolls back cleanly
       }
-
-      // Verify rollback: visitor should NOT be marked registered
       const visitor = getVisitor(vid);
       expect(visitor.status).toBe('visited');
-
-      // No student should exist
       expect(countStudents()).toBe(0);
     });
 
     it('should not create orphan student records on failed conversion', async () => {
       const vid = createVisitorDirect({ gender: 'male', branch_id: BRANCH_A });
       const initialStudentCount = countStudents();
-
-      // Try to convert to female-only class (will fail)
       const res = await supertest(app)
         .post(`/api/visitors/${vid}/convert`)
         .set(authHeader(registrarA))
-        .send({ classId: CLASS_B_FEMALE, amountPaid: 3000 });
-
-      expect(res.status).toBe(400);
-
-      // Verify no student was created
+        .send({ classId: 'nonexistent_class' });
+      expect(res.status).toBe(404);
       expect(countStudents()).toBe(initialStudentCount);
-
-      // Verify visitor is unchanged
       const visitor = getVisitor(vid);
       expect(visitor.status).toBe('visited');
       expect(visitor.stage).toBe('lead');
     });
   });
-
-  // ═════════════════════════════════════════════════════════════════════════
-  // §14 — LEAD → STUDENT LINKAGE & CONSISTENCY
-  // ═════════════════════════════════════════════════════════════════════════
-
   describe('§14 Lead → Student Linkage & Consistency', () => {
     it('should maintain lead_id FK after conversion', async () => {
       const vid = createVisitorDirect({ full_name: 'Linked Visitor', gender: 'male', branch_id: BRANCH_A });
-
       const res = await supertest(app)
         .post(`/api/visitors/${vid}/convert`)
         .set(authHeader(registrarA))
-        .send({ classId: CLASS_A, amountPaid: 5000, semesterFee: 5000 });
-
+        .send({ classId: CLASS_A });
       expect(res.status).toBe(201);
-
       const student = db.prepare('SELECT * FROM students WHERE id = ?').get(res.body.studentId) as any;
       expect(student.lead_id).toBe(vid);
-
-      // Verify reverse lookup
-      const visitor = getVisitor(vid);
-      expect(visitor.status).toBe('registered');
+      expect(getVisitor(vid).status).toBe('registered');
     });
 
     it('should copy demographic data from visitor to student', async () => {
@@ -1475,14 +1489,11 @@ describe('Visitor Module', () => {
         emergency_contact_phone: '0778888888',
         branch_id: BRANCH_A,
       });
-
       const res = await supertest(app)
         .post(`/api/visitors/${vid}/convert`)
         .set(authHeader(registrarA))
-        .send({ classId: CLASS_B_FEMALE, amountPaid: 4500, semesterFee: 4500 });
-
+        .send({ classId: CLASS_B_FEMALE });
       expect(res.status).toBe(201);
-
       const student = db.prepare('SELECT * FROM students WHERE id = ?').get(res.body.studentId) as any;
       expect(student.full_name).toBe('Data Copy');
       expect(student.gender).toBe('female');
@@ -1497,586 +1508,186 @@ describe('Visitor Module', () => {
     it('should copy placement score from visitor to student', async () => {
       const score = JSON.stringify({ grammar: 85, listening: 90, speaking: 88, total: 263 });
       const vid = createVisitorDirect({ gender: 'male', branch_id: BRANCH_A });
-      db.prepare('UPDATE visitors SET placement_score = ? WHERE id = ?').run(score, vid);
-
+      db.prepare("UPDATE visitors SET placement_status='completed', placement_score = ? WHERE id = ?").run(score, vid);
       const res = await supertest(app)
         .post(`/api/visitors/${vid}/convert`)
         .set(authHeader(registrarA))
-        .send({ classId: CLASS_A, amountPaid: 5000, semesterFee: 5000 });
-
+        .send({ classId: CLASS_A });
       expect(res.status).toBe(201);
       const student = db.prepare('SELECT * FROM students WHERE id = ?').get(res.body.studentId) as any;
       expect(student.placement_score).toBe(score);
     });
   });
-
-  // ═════════════════════════════════════════════════════════════════════════
-  // §15 — DATABASE INTEGRITY & FOREIGN KEY INTEGRITY
-  // ═════════════════════════════════════════════════════════════════════════
-
-  describe('§15 Database & Foreign Key Integrity', () => {
-    it('should not allow orphan visitor_followups', () => {
-      // visitor_followups has ON DELETE CASCADE
-      const vid = createVisitorDirect({ branch_id: BRANCH_A });
-      db.prepare(
-        'INSERT INTO visitor_followups (id, visitor_id, date, notes, operator, outcome) VALUES (?, ?, ?, ?, ?, ?)'
-      ).run(id('f'), vid, today(), 'Test note', 'Test', 'interested');
-
-      expect(countFollowups(vid)).toBe(1);
-
-      // Delete the visitor
-      db.prepare('DELETE FROM visitors WHERE id = ?').run(vid);
-
-      // Followup should be cascade-deleted
-      expect(countFollowups(vid)).toBe(0);
-    });
-
-    it('should not allow student with invalid lead_id FK', () => {
-      // Try to insert a student referencing a non-existent visitor
-      // This should fail due to FK constraint
-      expect(() => {
-        db.prepare(
-          `INSERT INTO students (id, student_code, full_name, status, registration_date, branch_id, gender, lead_id)
-           VALUES (?, ?, ?, 'active', ?, ?, 'male', ?)`
-        ).run(id('stu'), 'TH-FK-1', 'FK Test', today(), BRANCH_A, 'nonexistent_visitor');
-      }).toThrow();
-    });
-
-    it('should maintain referential integrity: students.lead_id → visitors.id', async () => {
-      const vid = createVisitorDirect({ full_name: 'FK Test Visitor', gender: 'male', branch_id: BRANCH_A });
-
-      const res = await supertest(app)
-        .post(`/api/visitors/${vid}/convert`)
-        .set(authHeader(registrarA))
-        .send({ classId: CLASS_A, amountPaid: 5000, semesterFee: 5000 });
-
-      expect(res.status).toBe(201);
-
-      // Verify FK link is valid
-      const student = db.prepare('SELECT s.*, v.full_name as visitor_name FROM students s JOIN visitors v ON s.lead_id = v.id WHERE s.id = ?').get(res.body.studentId) as any;
-      expect(student).toBeDefined();
-      expect(student.visitor_name).toBe('FK Test Visitor');
-    });
-
-    it('should not have orphan visitor records after test cleanup', () => {
-      // Verify no visitors exist after cleanup (they should be cleaned in beforeEach)
-      expect(countVisitors()).toBe(0);
-    });
-  });
-
-  // ═════════════════════════════════════════════════════════════════════════
-  // §16 — PIPELINE STATE INTEGRITY
-  // ═════════════════════════════════════════════════════════════════════════
-
   describe('§16 Pipeline State Integrity', () => {
     it('should enforce valid stage values via CHECK constraint', () => {
       const vid = createVisitorDirect({ branch_id: BRANCH_A });
-
-      // Try to set an invalid stage directly (bypasses API validation)
       expect(() => {
         db.prepare('UPDATE visitors SET stage = ? WHERE id = ?').run('invalid_stage_xyz', vid);
       }).toThrow();
     });
 
     it('should allow only sequential valid VISITOR_FLOW transitions via API', async () => {
-      const validStages = [
-        'inquiry', 'follow_up', 'placement_booking', 'placement_fee',
-        'placement_completed', 'class_fee', 'card_issued', 'book_issued',
-        'registration', 'enrollment', 'active', 'graduated', 'alumni',
-      ];
+      const validStages = ['inquiry', 'follow_up', 'placement_booking', 'placement_fee', 'placement_completed', 'class_fee', 'card_issued', 'book_issued', 'registration', 'enrollment', 'active', 'graduated', 'alumni'];
       const vid = createVisitorDirect({ stage: 'lead', branch_id: BRANCH_A });
-
       let priorStage = 'lead';
       for (const stage of validStages) {
-        const res = await supertest(app)
-          .post(`/api/visitors/${vid}/advance-stage`)
-          .set(authHeader(registrarA))
-          .send({ stage, fromStage: priorStage });
+        const res = await supertest(app).post(`/api/visitors/${vid}/advance-stage`).set(authHeader(registrarA)).send({ stage, fromStage: priorStage });
         expect(res.status).toBe(200);
         priorStage = stage;
       }
-
       expect(getVisitor(vid).stage).toBe('alumni');
     });
 
-    it('should prevent broken pipeline: converted visitor should be at enrollment stage', async () => {
+    it('places newly admitted visitors at placement_booking until later workflows progress them', async () => {
       const vid = createVisitorDirect({ stage: 'lead', gender: 'male', branch_id: BRANCH_A });
-
-      await supertest(app)
-        .post(`/api/visitors/${vid}/convert`)
-        .set(authHeader(registrarA))
-        .send({ classId: CLASS_A, amountPaid: 5000, semesterFee: 5000 });
-
+      const res = await supertest(app).post(`/api/visitors/${vid}/convert`).set(authHeader(registrarA)).send({ classId: CLASS_A });
+      expect(res.status).toBe(201);
       const visitor = getVisitor(vid);
-      expect(visitor.stage).toBe('enrollment');
+      expect(visitor.stage).toBe('placement_booking');
       expect(visitor.status).toBe('registered');
     });
   });
-
-  // ═════════════════════════════════════════════════════════════════════════
-  // §17 — EVENT GENERATION
-  // ═════════════════════════════════════════════════════════════════════════
-
   describe('§17 Event Generation', () => {
-    it('should generate STUDENT_REGISTERED event on conversion', async () => {
+    it('emits STUDENT_REGISTERED on conversion', async () => {
       const vid = createVisitorDirect({ gender: 'male', branch_id: BRANCH_A });
-
-      const res = await supertest(app)
-        .post(`/api/visitors/${vid}/convert`)
-        .set(authHeader(registrarA))
-        .send({ classId: CLASS_A, amountPaid: 5000, semesterFee: 5000 });
-
+      const res = await supertest(app).post(`/api/visitors/${vid}/convert`).set(authHeader(registrarA)).send({ classId: CLASS_A });
       expect(res.status).toBe(201);
-
-      const events = db.prepare('SELECT * FROM student_journey_events WHERE student_id = ? AND event_type = ?')
-        .all(res.body.studentId, 'journey.student_registered') as any[];
+      const events = db.prepare('SELECT * FROM student_journey_events WHERE student_id = ? AND event_type = ?').all(res.body.studentId, 'journey.student_registered') as any[];
       expect(events.length).toBe(1);
       expect(events[0].actor_name).toBe('Test User');
     });
 
-    it('should generate INVOICE_ISSUED event', async () => {
+    it('emits INVOICE_ISSUED for canonical admission invoices', async () => {
       const vid = createVisitorDirect({ gender: 'male', branch_id: BRANCH_A });
-
-      const res = await supertest(app)
-        .post(`/api/visitors/${vid}/convert`)
-        .set(authHeader(registrarA))
-        .send({ classId: CLASS_A, amountPaid: 5000, semesterFee: 5000 });
-
-      const events = db.prepare('SELECT * FROM student_journey_events WHERE student_id = ? AND event_type = ?')
-        .all(res.body.studentId, 'journey.invoice_issued') as any[];
-      expect(events.length).toBe(1);
-
-      const payload = JSON.parse(events[0].payload);
-      expect(payload.invoiceId).toBe(res.body.invoiceId);
+      const res = await supertest(app).post(`/api/visitors/${vid}/convert`).set(authHeader(registrarA)).send({ classId: CLASS_A });
+      expect(res.status).toBe(201);
+      const events = db.prepare('SELECT * FROM student_journey_events WHERE student_id = ? AND event_type = ?').all(res.body.studentId, 'journey.invoice_issued') as any[];
+      expect(events.length).toBeGreaterThanOrEqual(1);
+      const payloads = events.map((event) => JSON.parse(event.payload));
+      expect(payloads.some((payload) => payload.chargeKind === 'registration')).toBe(true);
     });
 
-    it('should generate PAYMENT_RECORDED event when payment > 0', async () => {
+    it('does not emit payment or enrollment events on admission-only conversion', async () => {
       const vid = createVisitorDirect({ gender: 'male', branch_id: BRANCH_A });
-
-      const res = await supertest(app)
-        .post(`/api/visitors/${vid}/convert`)
-        .set(authHeader(registrarA))
-        .send({ classId: CLASS_A, amountPaid: 3000, semesterFee: 5000 });
-
-      const events = db.prepare('SELECT * FROM student_journey_events WHERE student_id = ? AND event_type = ?')
-        .all(res.body.studentId, 'journey.payment_recorded') as any[];
-      expect(events.length).toBe(1);
-
-      const payload = JSON.parse(events[0].payload);
-      expect(payload.amount).toBe(3000);
-    });
-
-    it('should NOT generate PAYMENT_RECORDED when payment is 0', async () => {
-      const vid = createVisitorDirect({ gender: 'male', branch_id: BRANCH_A });
-
-      const res = await supertest(app)
-        .post(`/api/visitors/${vid}/convert`)
-        .set(authHeader(registrarA))
-        .send({ classId: CLASS_A, amountPaid: 0, semesterFee: 5000 });
-
-      const events = db.prepare('SELECT * FROM student_journey_events WHERE student_id = ? AND event_type = ?')
-        .all(res.body.studentId, 'journey.payment_recorded') as any[];
-      expect(events.length).toBe(0);
-    });
-
-    it('should generate ENROLLMENT_CREATED event', async () => {
-      const vid = createVisitorDirect({ gender: 'male', branch_id: BRANCH_A });
-
-      const res = await supertest(app)
-        .post(`/api/visitors/${vid}/convert`)
-        .set(authHeader(registrarA))
-        .send({ classId: CLASS_A, amountPaid: 5000, semesterFee: 5000 });
-
-      const events = db.prepare('SELECT * FROM student_journey_events WHERE student_id = ? AND event_type = ?')
-        .all(res.body.studentId, 'journey.enrollment_created') as any[];
-      expect(events.length).toBe(1);
-    });
-
-    it('should generate CLASS_ASSIGNED event', async () => {
-      const vid = createVisitorDirect({ gender: 'male', branch_id: BRANCH_A });
-
-      const res = await supertest(app)
-        .post(`/api/visitors/${vid}/convert`)
-        .set(authHeader(registrarA))
-        .send({ classId: CLASS_A, amountPaid: 5000, semesterFee: 5000 });
-
-      const events = db.prepare('SELECT * FROM student_journey_events WHERE student_id = ? AND event_type = ?')
-        .all(res.body.studentId, 'journey.class_assigned') as any[];
-      expect(events.length).toBe(1);
-
-      const payload = JSON.parse(events[0].payload);
-      expect(payload.classId).toBe(CLASS_A);
-    });
-  });
-
-  // ═════════════════════════════════════════════════════════════════════════
-  // §18 — RULE ENGINE INTERACTION
-  // ═════════════════════════════════════════════════════════════════════════
-
-  describe('§18 Rule Engine Interaction', () => {
-    it('should use the policy resolver for the placement test fee', async () => {
-      const vid = createVisitorDirect({ stage: 'placement_booking', branch_id: BRANCH_A, program_version_id: VT_VERSION });
-
-      // Fee resolves from branch_academic_profiles (Academic Control Center)
-      // through the canonical policy resolver, charged on first completion.
-      db.prepare(`INSERT OR REPLACE INTO branch_academic_profiles (branch_id, placement_test_fee) VALUES (?, ?)`).run(BRANCH_A, 500);
-
-      const { start, complete } = await startAndCompletePlacement(vid, {
-        grammar: 15, vocabulary: 15, reading: 15, listening: 15, writing: 15, speaking: 15,
-      }, registrarA, app);
-
-      expect(start.status).toBe(201);
-      expect(complete.status).toBe(200);
-      expect(complete.body.feeCharged).toBe(500);
-    });
-  });
-
-  // ═════════════════════════════════════════════════════════════════════════
-  // §19 — API VALIDATION EDGE CASES
-  // ═════════════════════════════════════════════════════════════════════════
-
-  describe('§19 API Validation', () => {
-    it('should return 404 for non-existent visitor PATCH', async () => {
-      const res = await supertest(app)
-        .patch('/api/visitors/nonexistent')
-        .set(authHeader(registrarA))
-        .send({ notes: 'test' });
-
-      expect(res.status).toBe(404);
-    });
-
-    it('should return 404 for non-existent visitor followup', async () => {
-      const res = await supertest(app)
-        .post('/api/visitors/nonexistent/followups')
-        .set(authHeader(registrarA))
-        .send({ notes: 'test' });
-
-      expect(res.status).toBe(404);
-    });
-
-    it('should return 404 for a non-existent visitor in the placement workspace', async () => {
-      const res = await supertest(app)
-        .get('/api/placement/visitors/nonexistent/placement')
-        .set(authHeader(registrarA));
-
-      expect(res.status).toBe(404);
-    });
-
-    it('should return 404 for non-existent visitor CRM update', async () => {
-      const res = await supertest(app)
-        .patch('/api/visitors/nonexistent/crm')
-        .set(authHeader(registrarA))
-        .send({ notes: 'test' });
-
-      expect(res.status).toBe(404);
-    });
-
-    it('should return 404 for non-existent visitor conversion', async () => {
-      const res = await supertest(app)
-        .post('/api/visitors/nonexistent/convert')
-        .set(authHeader(registrarA))
-        .send({ classId: CLASS_A, amountPaid: 3000 });
-
-      expect(res.status).toBe(404);
-    });
-
-    it('should return 404 for non-existent visitor advance-stage', async () => {
-      const res = await supertest(app)
-        .post('/api/visitors/nonexistent/advance-stage')
-        .set(authHeader(registrarA))
-        .send({});
-
-      expect(res.status).toBe(404);
-    });
-
-    it('should handle invalid JSON body gracefully', async () => {
-      const res = await supertest(app)
-        .post('/api/visitors/')
-        .set(authHeader(registrarA))
-        .set('Content-Type', 'application/json')
-        .send('invalid json');
-
-      // Express either returns 400 (malformed JSON) or 500 depending on body parser config
-      expect([400, 500]).toContain(res.status);
-    });
-
-    it('should cap page size at maximum', async () => {
-      // Create many visitors
-      for (let i = 0; i < 5; i++) {
-        createVisitorDirect({ branch_id: BRANCH_A });
+      const res = await supertest(app).post(`/api/visitors/${vid}/convert`).set(authHeader(registrarA)).send({ classId: CLASS_A });
+      expect(res.status).toBe(201);
+      for (const eventType of ['journey.payment_recorded', 'journey.enrollment_created', 'journey.class_assigned']) {
+        const events = db.prepare('SELECT * FROM student_journey_events WHERE student_id = ? AND event_type = ?').all(res.body.studentId, eventType) as any[];
+        expect(events.length).toBe(0);
       }
-
-      const res = await supertest(app)
-        .get('/api/visitors/?limit=9999')
-        .set(authHeader(registrarA));
-
-      expect(res.status).toBe(200);
-      expect(res.headers['x-page-limit']).toBe('100'); // MAX_PAGE_SIZE
     });
   });
-
-  // ═════════════════════════════════════════════════════════════════════════
-  // §20 — CONCURRENT OPERATIONS
-  // ═════════════════════════════════════════════════════════════════════════
-
   describe('§20 Concurrent Operations', () => {
     it('should handle concurrent visitor creation without serial duplicates', async () => {
       const count = 20;
       const promises: Promise<any>[] = [];
-
       for (let i = 0; i < count; i++) {
-        promises.push(
-          supertest(app)
-            .post('/api/visitors/')
-            .set(authHeader(registrarA))
-            .send({ fullName: `Concurrent ${i}`, gender: 'male', source: 'walk_in' })
-        );
+        promises.push(supertest(app).post('/api/visitors/').set(authHeader(registrarA)).send({ fullName: `Concurrent ${i}`, gender: 'male', source: 'walk_in' }));
       }
-
       const results = await Promise.all(promises);
       const serials = new Set<string>();
-
       for (const res of results) {
         expect(res.status).toBe(201);
         serials.add(res.body.serialNo);
       }
-
-      // All serials must be unique
       expect(serials.size).toBe(count);
     });
 
     it('should handle concurrent stage updates without data corruption', async () => {
       const vid = createVisitorDirect({ stage: 'lead', branch_id: BRANCH_A });
-
-      // CORRECTED (audit V-7). This test previously asserted that BOTH
-      // concurrent advances succeed and the lead ends two stages further on,
-      // which encoded the defect as intended behaviour: it is why deleting the
-      // compare-and-swap guard did not fail any test. Ten parallel requests
-      // walked a lead from 'lead' to 'enrollment' — through placement_booking,
-      // placement_fee and placement_completed — from one user action.
-      //
-      // Both requests now declare the stage they are leaving, so exactly one
-      // may win and the other is told to reload.
       const promises = [
-        supertest(app)
-          .post(`/api/visitors/${vid}/advance-stage`)
-          .set(authHeader(registrarA))
-          .send({ fromStage: 'lead' }),
-        supertest(app)
-          .post(`/api/visitors/${vid}/advance-stage`)
-          .set(authHeader(registrarA))
-          .send({ fromStage: 'lead' }),
+        supertest(app).post(`/api/visitors/${vid}/advance-stage`).set(authHeader(registrarA)).send({ fromStage: 'lead' }),
+        supertest(app).post(`/api/visitors/${vid}/advance-stage`).set(authHeader(registrarA)).send({ fromStage: 'lead' }),
       ];
-
       const results = await Promise.all(promises);
       expect(results.filter((r) => r.status === 200)).toHaveLength(1);
       expect(results.filter((r) => r.status === 409)).toHaveLength(1);
-
-      // One deliberate action, one transition.
       expect(getVisitor(vid).stage).toBe('inquiry');
     });
 
     it('should prevent concurrent duplicate conversions', async () => {
       const vid = createVisitorDirect({ gender: 'male', full_name: 'Concurrent Convert', branch_id: BRANCH_A });
-
-      const promises = [
-        supertest(app)
-          .post(`/api/visitors/${vid}/convert`)
-          .set(authHeader(registrarA))
-          .send({ classId: CLASS_A, amountPaid: 5000, semesterFee: 5000 }),
-        supertest(app)
-          .post(`/api/visitors/${vid}/convert`)
-          .set(authHeader(registrarA))
-          .send({ classId: CLASS_A, amountPaid: 5000, semesterFee: 5000 }),
-      ];
-
-      const results = await Promise.all(promises);
+      const results = await Promise.all([
+        supertest(app).post(`/api/visitors/${vid}/convert`).set(authHeader(registrarA)).send({ classId: CLASS_A }),
+        supertest(app).post(`/api/visitors/${vid}/convert`).set(authHeader(registrarA)).send({ classId: CLASS_A }),
+      ]);
       const successes = results.filter(r => r.status === 201);
       const failures = results.filter(r => r.status === 409);
-
-      // Exactly one should succeed, one should fail
       expect(successes.length).toBe(1);
       expect(failures.length).toBe(1);
-
-      // Only one student should exist
       expect(countStudents()).toBe(1);
     });
   });
-
-  // ═════════════════════════════════════════════════════════════════════════
-  // §21 — FINANCIAL INTEGRITY IN CONVERSION
-  // ═════════════════════════════════════════════════════════════════════════
-
   describe('§21 Financial Integrity in Conversion', () => {
-    it('should record income for registration payment', async () => {
+    it('does not record income or payments during admission-only conversion', async () => {
       const vid = createVisitorDirect({ gender: 'male', branch_id: BRANCH_A });
-
-      const res = await supertest(app)
-        .post(`/api/visitors/${vid}/convert`)
-        .set(authHeader(registrarA))
-        .send({ classId: CLASS_A, amountPaid: 3000, semesterFee: 5000, paymentMethod: 'cash' });
-
+      const res = await supertest(app).post(`/api/visitors/${vid}/convert`).set(authHeader(registrarA)).send({ classId: CLASS_A });
       expect(res.status).toBe(201);
-
-      const tx = db.prepare("SELECT * FROM financial_transactions WHERE category = 'fee' AND type = 'income'").all() as any[];
-      const feeTx = tx.find(t => t.description?.includes('Registration fee'));
-      expect(feeTx).toBeDefined();
-      expect(Number(feeTx.amount)).toBe(3000);
-    });
-
-    it('should create invoice with correct discount calculation', async () => {
-      const vid = createVisitorDirect({ gender: 'male', branch_id: BRANCH_A });
-
-      const res = await supertest(app)
-        .post(`/api/visitors/${vid}/convert`)
-        .set(authHeader(registrarA))
-        .send({ classId: CLASS_A, amountPaid: 3500, semesterFee: 5000, discountPercent: 20 });
-
-      expect(res.status).toBe(201);
-      expect(res.body.netAmount).toBe(4000); // 5000 - 20%
-
-      const invoice = db.prepare('SELECT * FROM invoices WHERE id = ?').get(res.body.invoiceId) as any;
-      expect(invoice.total_amount).toBe(5000);
-      expect(invoice.discount_amount).toBe(1000);
-      expect(invoice.net_amount).toBe(4000);
+      expect((db.prepare('SELECT COUNT(*) c FROM payments WHERE student_id = ?').get(res.body.studentId) as { c: number }).c).toBe(0);
+      expect((db.prepare("SELECT COUNT(*) c FROM financial_transactions WHERE category = 'fee' AND type = 'income'").get() as { c: number }).c).toBe(0);
     });
 
     it('should create notification on conversion', async () => {
       const vid = createVisitorDirect({ gender: 'male', full_name: 'Notify Test', branch_id: BRANCH_A });
-
-      await supertest(app)
-        .post(`/api/visitors/${vid}/convert`)
-        .set(authHeader(registrarA))
-        .send({ classId: CLASS_A, amountPaid: 3000, semesterFee: 5000 });
-
-      const notifications = db.prepare("SELECT * FROM notifications WHERE title LIKE '%Registration%'").all() as any[];
+      const res = await supertest(app).post(`/api/visitors/${vid}/convert`).set(authHeader(registrarA)).send({ classId: CLASS_A });
+      expect(res.status).toBe(201);
+      const notifications = db.prepare("SELECT * FROM notifications WHERE title LIKE '%Admission%' OR title LIKE '%Registration%'").all() as any[];
       expect(notifications.length).toBeGreaterThan(0);
-
-      const notif = notifications.find(n => n.message.includes('Notify Test'));
+      const notif = notifications.find(n => String(n.message).includes('Notify Test'));
       expect(notif).toBeDefined();
     });
 
     it('should write audit log for conversion', async () => {
       const vid = createVisitorDirect({ gender: 'male', full_name: 'Audit Test', branch_id: BRANCH_A });
-
-      await supertest(app)
-        .post(`/api/visitors/${vid}/convert`)
-        .set(authHeader(registrarA))
-        .send({ classId: CLASS_A, amountPaid: 3000, semesterFee: 5000 });
-
-      const audit = db.prepare("SELECT * FROM audit_logs WHERE action LIKE '%Converted%'").all() as any[];
+      const res = await supertest(app).post(`/api/visitors/${vid}/convert`).set(authHeader(registrarA)).send({ classId: CLASS_A });
+      expect(res.status).toBe(201);
+      const audit = db.prepare("SELECT * FROM audit_logs WHERE action LIKE '%Converted visitor%'").all() as any[];
       expect(audit.length).toBeGreaterThan(0);
       expect(audit[0].action).toContain('Audit Test');
     });
 
-    it('should record saving transfer from placement fee', async () => {
+    it('defers any saving transfer until the placement invoice is actually paid', async () => {
       const vid = createVisitorDirect({ stage: 'placement_booking', branch_id: BRANCH_A, program_version_id: VT_VERSION });
-      db.prepare(`INSERT OR REPLACE INTO branch_academic_profiles (branch_id, placement_test_fee) VALUES (?, ?)`).run(BRANCH_A, 500);
+      db.prepare(`INSERT OR REPLACE INTO fee_rules (id, branch_id, program_version_id, fee_type, name, amount, version, is_active) VALUES ('visitors_branch_a_placement', ?, ?, 'placement', 'Placement fee', ?, 1, 1)`).run(BRANCH_A, VT_VERSION, 500);
       db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('daily_saving_percent', '5')").run();
-
-      const { start, complete } = await startAndCompletePlacement(vid, {
-        grammar: 15, vocabulary: 15, reading: 15, listening: 15, writing: 15, speaking: 15,
-      }, registrarA, app);
-
+      const { start, complete } = await startAndCompletePlacement(vid, { grammar: 15, reading: 15, listening: 15, writing: 15, speaking: 15 }, registrarA, app);
       expect(start.status).toBe(201);
       expect(complete.status).toBe(200);
       expect(complete.body.feeCharged).toBe(500);
-
+      const linkedStudent = db.prepare('SELECT id FROM students WHERE lead_id = ?').get(vid) as { id: string };
+      expect(db.prepare("SELECT * FROM invoices WHERE student_id = ? AND charge_kind = 'placement'").get(linkedStudent.id)).toBeDefined();
       const savingTx = db.prepare("SELECT * FROM financial_transactions WHERE category = 'saving' AND type = 'saving_transfer'").all() as any[];
-      expect(savingTx.length).toBeGreaterThan(0);
-      expect(Number(savingTx[0].amount)).toBe(25); // 5% of 500
+      expect(savingTx.length).toBe(0);
     });
   });
-
-  // ═════════════════════════════════════════════════════════════════════════
-  // §22 — PAYMENT METHOD VALIDATION
-  // ═════════════════════════════════════════════════════════════════════════
-
   describe('§22 Payment Method Validation', () => {
-    it('should accept cash payment method', async () => {
+    it.each(['cash', 'card', 'bank_transfer', 'crypto'])('rejects legacy payment method %s on admission-only conversion', async (paymentMethod) => {
       const vid = createVisitorDirect({ gender: 'male', branch_id: BRANCH_A });
-
       const res = await supertest(app)
         .post(`/api/visitors/${vid}/convert`)
         .set(authHeader(registrarA))
-        .send({ classId: CLASS_A, amountPaid: 3000, semesterFee: 5000, paymentMethod: 'cash' });
-
-      expect(res.status).toBe(201);
-      const payment = db.prepare('SELECT * FROM payments WHERE student_id = ?').get(res.body.studentId) as any;
-      expect(payment.payment_method).toBe('cash');
-    });
-
-    it('should accept card payment method', async () => {
-      const vid = createVisitorDirect({ gender: 'male', branch_id: BRANCH_A });
-
-      const res = await supertest(app)
-        .post(`/api/visitors/${vid}/convert`)
-        .set(authHeader(registrarA))
-        .send({ classId: CLASS_A, amountPaid: 3000, semesterFee: 5000, paymentMethod: 'card' });
-
-      expect(res.status).toBe(201);
-      const payment = db.prepare('SELECT * FROM payments WHERE student_id = ?').get(res.body.studentId) as any;
-      expect(payment.payment_method).toBe('card');
-    });
-
-    it('should accept bank_transfer payment method', async () => {
-      const vid = createVisitorDirect({ gender: 'male', branch_id: BRANCH_A });
-
-      const res = await supertest(app)
-        .post(`/api/visitors/${vid}/convert`)
-        .set(authHeader(registrarA))
-        .send({ classId: CLASS_A, amountPaid: 3000, semesterFee: 5000, paymentMethod: 'bank_transfer' });
-
-      expect(res.status).toBe(201);
-      const payment = db.prepare('SELECT * FROM payments WHERE student_id = ?').get(res.body.studentId) as any;
-      expect(payment.payment_method).toBe('bank_transfer');
-    });
-
-    it('should reject an invalid payment method instead of silently recording cash', async () => {
-      const vid = createVisitorDirect({ gender: 'male', branch_id: BRANCH_A });
-
-      const res = await supertest(app)
-        .post(`/api/visitors/${vid}/convert`)
-        .set(authHeader(registrarA))
-        .send({ classId: CLASS_A, amountPaid: 3000, semesterFee: 5000, paymentMethod: 'crypto' });
-
-      expect(res.status).toBe(400);
+        .send({ classId: CLASS_A, amountPaid: 3000, semesterFee: 5000, paymentMethod });
+      expect(res.status).toBe(409);
       expect(db.prepare('SELECT id FROM students WHERE lead_id = ?').get(vid)).toBeUndefined();
     });
   });
-
-  // ═════════════════════════════════════════════════════════════════════════
-  // §23 — NO DATA CORRUPTION VERIFICATION
-  // ═════════════════════════════════════════════════════════════════════════
-
   describe('§23 Data Corruption Prevention', () => {
     it('should not have duplicate visitors after bulk creation', async () => {
       const ids = new Set<string>();
       for (let i = 0; i < 30; i++) {
-        const res = await supertest(app)
-          .post('/api/visitors/')
-          .set(authHeader(registrarA))
-          .send({ fullName: `Bulk ${i}`, gender: i % 2 === 0 ? 'male' : 'female', source: 'walk_in' });
+        const res = await supertest(app).post('/api/visitors/').set(authHeader(registrarA)).send({ fullName: `Bulk ${i}`, gender: i % 2 === 0 ? 'male' : 'female', source: 'walk_in' });
         expect(res.status).toBe(201);
         ids.add(res.body.id);
       }
       expect(ids.size).toBe(30);
-
-      // Verify DB count matches
       expect(countVisitors(BRANCH_A)).toBe(30);
     });
 
     it('should not have orphan records after failed conversions', async () => {
-      // Attempt multiple failing conversions
       for (let i = 0; i < 5; i++) {
         const vid = createVisitorDirect({ gender: 'male', branch_id: BRANCH_A });
-        await supertest(app)
-          .post(`/api/visitors/${vid}/convert`)
-          .set(authHeader(registrarA))
-          .send({ classId: CLASS_B_FEMALE, amountPaid: 3000 }); // Will fail: male → female class
+        await supertest(app).post(`/api/visitors/${vid}/convert`).set(authHeader(registrarA)).send({ classId: 'nonexistent_class' });
       }
-
-      // No students, no semesters, no registrations, no invoices, no payments
       expect(countStudents()).toBe(0);
       expect(db.prepare('SELECT COUNT(*) as c FROM student_semesters').get() as { c: number }).toEqual({ c: 0 });
       expect(db.prepare('SELECT COUNT(*) as c FROM registrations').get() as { c: number }).toEqual({ c: 0 });
@@ -2085,37 +1696,20 @@ describe('Visitor Module', () => {
     });
 
     it('should maintain consistent Student/Visitor relationships', async () => {
-      // Convert multiple visitors
       const converted = [];
       for (let i = 0; i < 5; i++) {
-        const vid = createVisitorDirect({
-          gender: 'male',
-          full_name: `Consistency ${i}`,
-          branch_id: BRANCH_A,
-          phone: `077000${String(1000 + i).slice(-4)}`,
-        });
-
-        const res = await supertest(app)
-          .post(`/api/visitors/${vid}/convert`)
-          .set(authHeader(registrarA))
-          .send({ classId: CLASS_A, amountPaid: 5000, semesterFee: 5000 });
-
+        const vid = createVisitorDirect({ gender: 'male', full_name: `Consistency ${i}`, branch_id: BRANCH_A, phone: `077000${String(1000 + i).slice(-4)}` });
+        const res = await supertest(app).post(`/api/visitors/${vid}/convert`).set(authHeader(registrarA)).send({ classId: CLASS_A });
         expect(res.status).toBe(201);
         converted.push({ vid, studentId: res.body.studentId });
       }
-
-      // Verify every student has a valid lead_id
-      // Verify every converted visitor is marked registered
       for (const { vid, studentId } of converted) {
         const student = db.prepare('SELECT * FROM students WHERE id = ?').get(studentId) as any;
         expect(student.lead_id).toBe(vid);
-
         const visitor = getVisitor(vid);
         expect(visitor.status).toBe('registered');
-        expect(visitor.stage).toBe('enrollment');
+        expect(['placement_booking', 'placement_completed', 'placement_fee']).toContain(visitor.stage);
       }
-
-      // No visitor should be marked registered without a corresponding student
       const registeredVisitors = db.prepare("SELECT * FROM visitors WHERE status = 'registered'").all() as any[];
       for (const v of registeredVisitors) {
         const student = db.prepare('SELECT id FROM students WHERE lead_id = ?').get(v.id);
@@ -2123,4 +1717,5 @@ describe('Visitor Module', () => {
       }
     });
   });
+
 });

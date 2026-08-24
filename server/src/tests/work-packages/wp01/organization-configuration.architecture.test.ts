@@ -84,9 +84,12 @@ describe('WP-01 selected branch reaches every academic configuration consumer', 
     expect(offerings).toContain('const query = { branchId }');
     expect(offerings).toContain("await api.post('/offerings', { ...form, branchId");
     expect(versions).toContain('const query = branchId ? { branchId } : undefined');
-    expect(versions).toContain('programVersionId: selectedId, ...promoForm, branchId');
-    expect(versions).toContain('programVersionId: selectedId, ...placeForm, branchId');
-    expect(versions).toContain('await api.delete(`/catalog/${type}-rules/${ruleId}`)');
+    expect(versions).toContain("await api.post('/catalog/promotion-rules', {");
+    expect(versions).toContain('programVersionId: selectedId,');
+    expect(versions).toContain('...promoForm,');
+    expect(versions).toContain('branchId,');
+    expect(versions).toContain('await api.put(`/academic/program-versions/${selectedId}/placement-profile`, {');
+    expect(versions).toContain('await api.delete(`/catalog/promotion-rules/${ruleId}`)');
     expect(generation).toContain('/offerings?branchId=${encodeURIComponent(branchId)}');
     expect(generation).toContain('branchId,\n        offeringId: selectedOffering.id');
   });

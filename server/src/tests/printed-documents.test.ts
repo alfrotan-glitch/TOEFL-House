@@ -44,12 +44,13 @@ describe('printed documents use authoritative branding', () => {
     expect(template).not.toContain('@page');
     expect(template).not.toContain('<!DOCTYPE html>');
 
-    // And the modal must call the extracted builder, not rebuild the document
-    // or open a window of its own.
-    const modal = read('src/components/visitors/ConvertToStudentModal.tsx');
-    expect(modal).toContain('printFeeBill');
-    expect(modal).not.toContain('<!DOCTYPE html>');
-    expect(modal).not.toContain('window.open');
+    // The printable entrypoint lives in the extracted utility now, not in the
+    // visitor modal. It must still open through the shared print authority and
+    // never reintroduce inline window/document assembly.
+    expect(template).toContain('export function printFeeBill');
+    expect(template).toContain('openPrintDocument(buildFeeBillDocument');
+    expect(template).not.toContain('<!DOCTYPE html>');
+    expect(template).not.toContain('window.open(');
   });
 
   it('the shared print header emits the logo, brand name and exact slogan', () => {
@@ -63,11 +64,14 @@ describe('printed documents use authoritative branding', () => {
     expect(header).toContain('issuer?.phone');
   });
 
-  it('the student fee bill resolves branch contact from the branch record', () => {
-    const src = read('src/components/visitors/ConvertToStudentModal.tsx');
-    expect(src).toContain('resolveDocumentIssuer');
-    // Resolved from the branch actually being enrolled into, not a global.
-    expect(src).toMatch(/resolveDocumentIssuer\(branches\.find/);
+  it('the student fee bill consumes branch contact through the shared issuer contract', () => {
+    const src = read('src/utils/feeBillTemplate.ts');
+    expect(src).toContain('import type { DocumentIssuer }');
+    expect(src).toContain('issuer: DocumentIssuer');
+    // The header receives the caller-resolved issuer, so contact comes from the
+    // branch record rather than literals embedded in the receipt template.
+    expect(src).toContain("brandPrintHeaderHtml('Registration Receipt', issuer)");
+    expect(src).not.toContain('0788223344');
   });
 
   it('the Book sale receipt resolves branch contact instead of a literal number', () => {

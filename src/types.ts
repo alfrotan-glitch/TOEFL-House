@@ -188,7 +188,7 @@ export interface Lead {
   followUpHistory?: FollowUp[];
   placementScore?: PlacementScore;
   programVersionId?: string | null;
-  placementMethod?: 'skill_scores' | 'level_assessment' | 'written_test' | 'interview' | 'hybrid' | null;
+  placementMethod?: 'canonical_v1' | null;
   placementStatus?: 'not_started' | 'scheduled' | 'in_progress' | 'completed' | 'waived';
   currentPlacementAttemptId?: string | null;
 }
@@ -379,7 +379,7 @@ export interface Student {
   notes?: string;
   placementScore?: PlacementScore;
   programVersionId?: string | null;
-  placementMethod?: 'skill_scores' | 'level_assessment' | 'written_test' | 'interview' | 'hybrid' | null;
+  placementMethod?: 'canonical_v1' | null;
   placementStatus?: 'not_started' | 'scheduled' | 'in_progress' | 'completed' | 'waived';
   currentPlacementAttemptId?: string | null;
   installmentPlan?: Installment[];
@@ -404,7 +404,10 @@ export interface PlacementScore {
   levelRecommendation?: string | null;
   recommendationLevelId?: string | null;
   recommendation?: { levelId?: string | null; text?: string | null; ruleId?: string | null };
-  results?: Array<{ component_key?: string; key?: string; label?: string; score?: number | null; percentage?: number | null }>;
+  overallCefr?: 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | null;
+  deliveryMode?: 'DIGITAL' | 'PHYSICAL' | null;
+  componentEvidence?: Array<{ componentKey: string; score?: number | null; cefrLevel?: string | null }>;
+  results?: Array<{ component_key?: string; key?: string; label?: string; score?: number | null; percentage?: number | null; cefr_level?: string | null }>;
   attemptId?: string;
   method?: string | null;
   date?: string;
@@ -981,6 +984,8 @@ export interface Invoice {
   issuedBy?: string;
   /** What this document bills. A tuition invoice also names the term. */
   purpose: InvoicePurpose;
+  /** Non-tuition classification used by Student Balance and payment attribution. */
+  chargeKind?: 'registration' | 'placement' | 'books' | 'exam' | 'other';
   obligationId?: string;
   semesterName?: string;
   createdAt?: string;
@@ -1617,7 +1622,7 @@ export interface FeeRule {
   programVersionId?: string | null;
   levelId?: string | null;
   branchId?: string | null;
-  feeType: 'registration' | 'placement' | 'semester' | 'book' | 'retake' | 'diploma' | 'card' | 'exam' | 'other';
+  feeType: 'registration' | 'placement' | 'semester' | 'retake' | 'diploma' | 'card';
   name: string;
   amount: number;
   currency: string;
@@ -1751,6 +1756,14 @@ export interface StudentSummary {
   graduated: number;
 }
 
+export interface StudentBalanceBreakdownRow {
+  purpose: 'registration' | 'placement' | 'books' | 'exam' | 'other';
+  due: number;
+  paid: number;
+  outstanding: number;
+  openInvoices: number;
+}
+
 export interface StudentBalanceRow {
   studentId: string;
   tuitionDue: number;
@@ -1759,6 +1772,15 @@ export interface StudentBalanceRow {
   creditBalance: number;
   /** Present on server responses. */
   paidPercentage?: number;
+  nonTuitionDue?: number;
+  nonTuitionPaid?: number;
+  nonTuitionOutstanding?: number;
+  totalDue?: number;
+  totalPaid?: number;
+  totalOutstanding?: number;
+  totalCreditBalance?: number;
+  openInvoices?: number;
+  nonTuitionBreakdown?: StudentBalanceBreakdownRow[];
 }
 
 /**
@@ -1776,6 +1798,15 @@ export interface StudentBalanceFigures {
   outstanding: number;
   creditBalance: number;
   paidPercentage: number;
+  nonTuitionDue: number;
+  nonTuitionPaid: number;
+  nonTuitionOutstanding: number;
+  totalDue: number;
+  totalPaid: number;
+  totalOutstanding: number;
+  totalCreditBalance: number;
+  openInvoices: number;
+  nonTuitionBreakdown: StudentBalanceBreakdownRow[];
 }
 
 export interface StudentBalances {

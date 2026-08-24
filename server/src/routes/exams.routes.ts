@@ -322,9 +322,19 @@ examsRouter.patch(
             SELECT 1 FROM financial_transactions WHERE type = 'income' AND category = 'diploma' AND reference_id = ? AND amount > 0
           ) LIMIT 1
         `).get(result.student_id, result.student_id);
-        diplomaFee = priorCertCount === 0 && !alreadyPaid ? Number(resolveFee(db, exam.branch_id, 'diplomaFee') || 0) : 0;
+        if (priorCertCount === 0 && !alreadyPaid) {
+          const configuredDiplomaFee = resolveFee(db, exam.branch_id, 'diplomaFee');
+          if (configuredDiplomaFee == null) {
+            throw new HttpError(409, 'No active diploma fee is configured for this branch. Configure it in Academic Control Center before issuing the certificate.');
+          }
+          diplomaFee = configuredDiplomaFee;
+        }
       } else {
-        diplomaFee = resolveFee(db, exam.branch_id, 'diplomaFee');
+        const configuredDiplomaFee = resolveFee(db, exam.branch_id, 'diplomaFee');
+        if (configuredDiplomaFee == null) {
+          throw new HttpError(409, 'No active diploma fee is configured for this branch. Configure it in Academic Control Center before issuing the certificate.');
+        }
+        diplomaFee = configuredDiplomaFee;
       }
     }
 
@@ -398,8 +408,13 @@ examsRouter.put(
           SELECT 1 FROM financial_transactions WHERE type = 'income' AND category = 'diploma' AND reference_id = ? AND amount > 0
         ) LIMIT 1
       `).get(result.student_id, result.student_id);
-      correctionDiplomaFee =
-        priorCertCount === 0 && !alreadyPaid ? Number(resolveFee(db, exam.branch_id, 'diplomaFee') || 0) : 0;
+      if (priorCertCount === 0 && !alreadyPaid) {
+        const configuredDiplomaFee = resolveFee(db, exam.branch_id, 'diplomaFee');
+        if (configuredDiplomaFee == null) {
+          throw new HttpError(409, 'No active diploma fee is configured for this branch. Configure it in Academic Control Center before issuing the certificate.');
+        }
+        correctionDiplomaFee = configuredDiplomaFee;
+      }
     }
 
     const correctTx = db.transaction(() => {

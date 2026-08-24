@@ -231,6 +231,7 @@ describe('the financial input inventory stays routed through the boundary', () =
   /** Fields whose names read as money but are not monetary inputs. */
   const NOT_MONEY: Record<string, string> = {
     amountPaidNow: 'alias parsed as "amount paid" in the same handler',
+    amountPaid: 'visitor conversion rejects legacy money fields outright instead of parsing them',
     feeType: 'a taxonomy code, not a figure',
     feeKey: 'a configuration key, not a figure',
     rateType: 'a classification, not a figure',

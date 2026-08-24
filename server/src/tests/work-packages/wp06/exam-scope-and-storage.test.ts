@@ -97,13 +97,18 @@ describe('WP-06 exam scope and storage boundary', () => {
        VALUES (?,?,'Metric Student',?,'active','2026-08-01','male')`,
     ).run(sid, `${sid}-code`, ctx.branchA);
     const exam = await createExam(ctx, ctx.receptionist, { title: 'Revoke Metric', date: '2026-01-01', fee: 0, type: 'final' });
+    db.prepare(`
+      INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+      VALUES (?, ?, 'diploma', 'Diploma fee', 0, 1, 1)
+    `).run(`${ctx.key}_revoke_metric_diploma_fee`, ctx.branchA);
     const enroll = await supertest(ctx.app).post(`/api/exams/${exam.body.id}/enroll`).set(ctx.receptionist).send({ studentId: sid, feePaid: false });
     const resultId = enroll.body.id;
 
-    await supertest(ctx.app)
+    const issued = await supertest(ctx.app)
       .patch(`/api/exams/${exam.body.id}/results/${resultId}`)
       .set(ctx.receptionist)
       .send({ score: 95, certIssued: true });
+    expect(issued.status).toBe(200);
 
     const before = runReport(db, 'academic-delivery', 'today', { branchId: ctx.branchA, isAll: false }, today());
     const issuedBefore = before.metrics.find((m) => m.id === 'academic.certificates_issued')?.value ?? 0;

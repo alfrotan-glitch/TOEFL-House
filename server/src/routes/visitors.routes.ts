@@ -13,23 +13,17 @@ import { ah, HttpError } from '../middleware/errorHandler.js';
 import { assertOptionalIsoDate } from '../utils/isoDate.js';
 import { id, today } from '../utils/ids.js';
 import { resolvePlacementRequirement } from '../core/placement/policy-engine.js';
-import { resolveGoverningProgramVersionId } from '../core/placement/enrollment-gate.js';
+import { readRetakePolicy, evaluateBilling } from '../core/placement/placement-policy.js';
 import { buildVisitorSummary, queryVisitorPage, type VisitorFilters } from '../core/visitors/visitor-query.js';
 import { evaluateConversionEligibilityForVisitor } from '../core/visitors/conversion-eligibility.js';
 import { LEAD_CONVERTED_SQL } from '../core/visitors/lead-lifecycle.js';
 import { findDuplicateCandidates } from '../core/visitors/duplicate-lookup.js';
 import { addNotification } from '../utils/notifications.js';
-import { recordIncome } from '../utils/income.js';
 import { getNumberSetting, incrementNumberSetting } from '../utils/settings.js';
-import { evaluateRules } from '../core/configuration/rule-engine.js';
-import { resolveAuthorizedDiscount } from '../core/configuration/discount-authority.js';
-import { assertClassGenderAllowsStudent } from './classes.routes.js';
-import { getEnrollmentService } from '../core/academic/enrollment-service.js';
-import { countActiveStudentsInClass } from '../core/academic/class-capacity.js';
-import { ensureTuitionObligation, allocatePaymentToObligation } from '../core/finance/obligations.js';
+import { resolveFeeRule } from '../core/configuration/policy-resolver.js';
 import { getJourneyEngine } from '../core/journey/journey-engine.js';
 import { JourneyEventType } from '../core/journey/event-types.js';
-import { nextReceiptNumber, nextStudentCode } from '../utils/receipt.js';
+import { nextStudentCode } from '../utils/receipt.js';
 import { nextInvoiceNumber } from '../utils/invoice.js';
 import { SYSTEM_DEFAULTS } from '../core/configuration/policy-catalog.js';
 import { assertStudentPhoneSyntax, studentPhoneKey } from '../core/students/student-input.js';
@@ -58,7 +52,6 @@ const stmtUpdateVisitor = db.prepare(
 const stmtInsertFollowup = db.prepare('INSERT INTO visitor_followups (id, visitor_id, date, notes, operator, outcome) VALUES (?, ?, ?, ?, ?, ?)');
 const stmtUpdateVisitorCRM = db.prepare(`UPDATE visitors SET interested_course=?, follow_up_status=?, next_contact_date=?, stage=?, notes=COALESCE(?, notes) WHERE id=?`);
 const stmtUpdateVisitorStage = db.prepare('UPDATE visitors SET stage = ? WHERE id = ? AND stage = ?');
-const stmtGetLevelProgramVersion = db.prepare('SELECT program_version_id FROM levels WHERE id = ?');
 const stmtGetProgramVersionById = db.prepare(`SELECT pv.*, p.branch_id, p.name AS program_name FROM program_versions pv JOIN programs p ON p.id = pv.program_id WHERE pv.id = ?`);
 
 // Pipeline aggregation statements
@@ -76,17 +69,14 @@ const stmtGetStudentByPhoneKey = db.prepare(
 );
 const stmtGetStudentByEmail = db.prepare("SELECT id FROM students WHERE lower(trim(email)) = lower(trim(?)) LIMIT 1");
 const stmtGetStudentByTazkira = db.prepare('SELECT id FROM students WHERE tazkira_no = ? LIMIT 1');
-const stmtUpdateVisitorConverted = db.prepare("UPDATE visitors SET status = 'registered', stage = 'enrollment', placement_requirement_mode = COALESCE(?, placement_requirement_mode) WHERE id = ?");
+const stmtUpdateVisitorConverted = db.prepare("UPDATE visitors SET status = 'registered', stage = ?, placement_requirement_mode = COALESCE(?, placement_requirement_mode) WHERE id = ?");
 const stmtInsertConvertedStudent = db.prepare(
   `INSERT INTO students (id, student_code, full_name, phone, email, qr_code, status, registration_date, branch_id, discount_percent, gender, placement_score, notes, father_name, address_region, tazkira_no, whatsapp, dob, school_or_university, emergency_contact_name, emergency_contact_phone, lead_id) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
-const stmtInsertConvertedSemester = db.prepare(`INSERT INTO student_semesters (id, student_id, semester_name, class_id, enroll_date, fee_amount, net_fee_amount) VALUES (?, ?, 'Current Semester', ?, ?, ?, ?)`);
 const stmtInsertConvertedRegistration = db.prepare(`INSERT INTO registrations (id, student_id, class_id, date, amount_paid, receipt_number, discount_applied, branch_id, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-// The conversion invoice bills the term the conversion creates, so its payment
-// settles that term rather than tuition in general (owner decision D-118).
-const stmtInsertConvertedInvoice = db.prepare(`INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, notes, invoice_number, issued_by, student_name, student_code, purpose, obligation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'tuition', ?)`);
+const stmtInsertRegistrationFeeInvoice = db.prepare(`INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, notes, invoice_number, issued_by, student_name, student_code, charge_kind, purpose, obligation_id) VALUES (?, ?, ?, 0, ?, 'issued', ?, ?, ?, ?, ?, ?, ?, ?, 'registration', 'other', NULL)`);
+const stmtInsertPlacementFeeInvoice = db.prepare(`INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, notes, invoice_number, issued_by, student_name, student_code, charge_kind, purpose, obligation_id) VALUES (?, ?, ?, 0, ?, 'issued', ?, ?, ?, ?, ?, ?, ?, ?, 'placement', 'other', NULL)`);
 const stmtInsertInvoiceItem = db.prepare(`INSERT INTO invoice_items (id, invoice_id, description, quantity, unit_price, amount) VALUES (?, ?, ?, 1, ?, ?)`);
-const stmtInsertConvertedPayment = db.prepare(`INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, semester, notes, receipt_number, branch_id, idempotency_key) VALUES (?, ?, ?, ?, ?, ?, 'completed', 'fee', ?, ?, ?, ?, ?)`);
 
 const VISITOR_FLOW = ['lead', 'inquiry', 'follow_up', 'placement_booking', 'placement_fee', 'placement_completed', 'class_fee', 'card_issued', 'book_issued', 'registration', 'enrollment', 'active', 'graduated', 'alumni', 'lost'] as const;
 
@@ -230,6 +220,53 @@ export function getUserContext(req: import('express').Request) {
   const user = req.user;
   if (!user?.userId || !user?.branchId || !user?.fullName) throw new HttpError(403, 'User context missing.');
   return user;
+}
+
+function resolveAdmissionRegistrationRule(branchId: string, scope: { programVersionId?: string | null; levelId?: string | null }) {
+  const rule = resolveFeeRule(db, branchId, 'registration', scope);
+  if (!rule) {
+    throw new HttpError(409, 'No active registration fee is configured for this branch/program. Configure it in Academic Control Center before continuing.');
+  }
+  return rule;
+}
+
+function invoiceDueDate(issueDate: string): string {
+  const dueDays = getNumberSetting('invoice_due_days', SYSTEM_DEFAULTS.invoiceDueDays);
+  const due = new Date(issueDate);
+  due.setDate(due.getDate() + dueDays);
+  return due.toISOString().slice(0, 10);
+}
+
+function latestCompletedPlacementAttempt(visitorId: string): { id: string; snapshot_json: string | null } | null {
+  return (db.prepare(
+    `SELECT id, snapshot_json
+       FROM placement_assessment_attempts
+      WHERE visitor_id = ? AND status = 'completed'
+      ORDER BY completed_at DESC, attempt_number DESC LIMIT 1`,
+  ).get(visitorId) as { id: string; snapshot_json: string | null } | undefined) ?? null;
+}
+
+function resolvePlacementInvoiceRequirement(visitorId: string): { attemptId: string; amount: number } | null {
+  const attempt = latestCompletedPlacementAttempt(visitorId);
+  if (!attempt?.snapshot_json) return null;
+  let snapshot: any;
+  try { snapshot = JSON.parse(attempt.snapshot_json); } catch { return null; }
+  const retakePolicy = readRetakePolicy(snapshot?.profile ?? null);
+  const priorCompleted = Number(snapshot?.billingTerms?.priorCompletedAttempts);
+  const baseFee = Number(snapshot?.billingTerms?.baseFee);
+  if (!Number.isInteger(priorCompleted) || priorCompleted < 0 || !Number.isInteger(baseFee) || baseFee < 0) return null;
+  const billing = evaluateBilling(retakePolicy, priorCompleted, baseFee);
+  if (!billing.billable || billing.amount <= 0) return null;
+  return { attemptId: attempt.id, amount: billing.amount };
+}
+
+function placementInvoiceExists(studentId: string, attemptId: string): boolean {
+  const row = db.prepare(
+    `SELECT 1 FROM invoices
+      WHERE student_id = ? AND charge_kind = 'placement' AND notes = ?
+      LIMIT 1`,
+  ).get(studentId, `Placement assessment fee — attempt ${attemptId}`);
+  return Boolean(row);
 }
 
 /**
@@ -742,34 +779,32 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
   }
 
   const { amountPaid, discountPercent, semesterFee, paymentMethod } = req.body ?? {};
-  const classId = requiredText(req.body?.classId, 'Class', TEXT_LIMITS.short);
+  if (amountPaid != null || discountPercent != null || semesterFee != null || paymentMethod != null) {
+    throw new HttpError(409, 'Visitor admission no longer collects payment or creates enrollment directly. Admit the student first, run placement, settle invoices, then enroll from the student workspace.');
+  }
+
+  const classId = optionalText(req.body?.classId, 'Class', TEXT_LIMITS.short);
   const branchId = optionalText(req.body?.branchId, 'Branch id', TEXT_LIMITS.short);
   const programVersionId = optionalText(req.body?.programVersionId, 'Program version id', TEXT_LIMITS.short);
   const levelId = optionalText(req.body?.levelId, 'Level id', TEXT_LIMITS.short);
   const notes = optionalText(req.body?.notes, 'Conversion notes', TEXT_LIMITS.notes);
-  // `Number(x) < 0` is a coercion, not a validation: NaN < 0 is false, so
-  // "abc" sailed through and reached SQLite as a NOT NULL violation. Both
-  // figures are money and must clear the same bar as every other monetary
-  // input. Reproduced before this guard existed: semesterFee "abc" surfaced a
-  // raw constraint error, semesterFee -6000 wrote an invoice with
-  // total_amount -6000 and discount_amount -6000, and a 0 fee accepted a
-  // 50,000 AFN payment against it.
-  if (amountPaid == null) throw new HttpError(400, 'Received fee amount is required.');
-  const validatedAmountPaid = assertMoney(amountPaid, 'received fee amount');
 
-  if (paymentMethod != null && !['cash', 'card', 'bank_transfer'].includes(paymentMethod)) {
-    throw new HttpError(400, 'Payment method must be cash, card, or bank_transfer.');
-  }
-  const resolvedPaymentMethod = paymentMethod || 'cash';
   const requestedStudentBranchId = branchId || visitor.branch_id || user.branchId;
   if (visitor.branch_id && requestedStudentBranchId !== visitor.branch_id) {
     throw new HttpError(400, 'Converted student must remain in the visitor branch.');
   }
   assertBranchTargetAccess(req, requestedStudentBranchId);
-  const classItem = stmtGetClassForConvert.get(classId) as any;
-  if (!classItem) throw new HttpError(404, 'Class not found.');
+
+  const classItem = classId ? (stmtGetClassForConvert.get(classId) as any) : null;
+  if (classId && !classItem) throw new HttpError(404, 'Class not found.');
+  if (classItem?.branch_id && classItem.branch_id !== requestedStudentBranchId) {
+    throw new HttpError(400, 'Selected class does not belong to the target branch.');
+  }
+
   const effectiveProgramVersionId = visitor.program_version_id || programVersionId || null;
-  if (visitor.program_version_id && programVersionId && String(programVersionId) !== String(visitor.program_version_id)) throw new HttpError(409, 'The enrollment program must match the visitor program.');
+  if (visitor.program_version_id && programVersionId && String(programVersionId) !== String(visitor.program_version_id)) {
+    throw new HttpError(409, 'The admission program must match the visitor program.');
+  }
   if (programVersionId && !visitor.program_version_id) {
     const requestedProgram = stmtGetProgramVersionById.get(programVersionId) as any;
     if (!requestedProgram) throw new HttpError(404, 'Selected program version not found.');
@@ -781,142 +816,92 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
     if (pv.branch_id !== requestedStudentBranchId) throw new HttpError(400, 'Visitor program does not belong to the target branch.');
   }
 
-  // ── PLACEMENT ELIGIBILITY ──────────────────────────────────────────────────
-  // Deliberately NOT evaluated here. `EnrollmentService.enroll()` below is the
-  // single placement authority for every enrollment path, and it resolves the
-  // governing program from the CLASS's level rather than from the visitor row.
-  //
-  // Running a second copy of the rule here, inside
-  // `if (effectiveProgramVersionId)`, is what audit V-1 exploited: that
-  // condition reads the visitor's program, so detaching it with a Lead.Edit
-  // PATCH skipped the check entirely and a candidate with a completed 'failed'
-  // attempt was enrolled into the program version they had failed. A second
-  // implementation of an invariant is a second answer to it.
-  //
-  // The requirement mode is still denormalised onto the visitor for reporting,
-  // resolved the same way the authority resolves it: class level first.
-  let placementRequirementMode: string | null = null;
-  {
-    const governingProgramVersionId = resolveGoverningProgramVersionId(
-      classItem,
-      effectiveProgramVersionId,
-      (levelId) => (stmtGetLevelProgramVersion.get(levelId) as { program_version_id: string | null } | undefined)?.program_version_id ?? null
-    );
-    if (governingProgramVersionId) {
-      const requirement = resolvePlacementRequirement(governingProgramVersionId, requestedStudentBranchId, classItem.level_id || null);
-      placementRequirementMode = requirement.mode;
-    }
-  }
-  if (classItem.status && classItem.status !== 'active') throw new HttpError(400, 'Cannot enroll into an inactive class.');
-  assertClassGenderAllowsStudent(classId, visitor.gender);
-
-  // Check capacity — single authoritative rule (enrollments-based), see
-  // core/academic/class-capacity.ts.
-  if (classItem.capacity && classItem.capacity > 0) {
-    const enrolledCount = countActiveStudentsInClass(db, classId);
-    if (enrolledCount >= classItem.capacity) throw new HttpError(400, `Class "${classItem.name}" is full.`);
-  }
-
+  const effectiveLevelId = levelId || classItem?.level_id || null;
   const studentBranchId = requestedStudentBranchId;
-  if (classItem.branch_id && classItem.branch_id !== studentBranchId) throw new HttpError(400, 'Selected class does not belong to the target branch.');
-  const grossTuition = assertMoney(classItem.fee ?? 0, 'configured class fee');
-  if (semesterFee != null) {
-    const submittedFee = assertMoney(semesterFee, 'semester fee');
-    if (submittedFee !== grossTuition) {
-      throw new HttpError(400, `Semester fee must match the configured class fee of ${grossTuition} AFN.`);
-    }
-  }
-  let requestedDiscount = 0;
-  if (discountPercent != null && discountPercent !== '') {
-    if (typeof discountPercent !== 'number' || !Number.isFinite(discountPercent) || discountPercent < 0 || discountPercent > 100) {
-      throw new HttpError(400, 'Discount percent must be a number from 0 to 100.');
-    }
-    requestedDiscount = discountPercent;
-  }
-  const discountRule = evaluateRules({ category: 'discount', branchId: studentBranchId, data: { discountPercent: requestedDiscount, leadSource: visitor.source }, dryRun: false });
-  // The rule engine IS the discount authority — `rule_default_discount_cap`
-  // holds the institutional ceiling and is editable at runtime by an admin.
-  // Re-capping the engine's answer at a hardcoded 30 here would make raising
-  // the configured cap to 50% silently ineffective: the engine returns 50 and
-  // the route clamps it back to 30. A policy that cannot be changed from the
-  // place it is configured is not a policy.
-  // CFG-1: the rule engine's answer is a candidate, not an authorization. A
-  // visitor being converted has no student row yet, so ordinary policy
-  // (<= 20%) governs; an exception must be authorized after conversion.
-  const ruleDiscount = Math.max(0, Math.min(100, Number(discountRule.finalOutputs.discountPercent ?? requestedDiscount)));
-  const effectiveDiscount = resolveAuthorizedDiscount(db, null, ruleDiscount, { branchId: studentBranchId }).percent;
-  if (effectiveDiscount !== requestedDiscount) {
-    throw new HttpError(400, `Requested discount is not authorized. Maximum allowed for this conversion is ${effectiveDiscount}%.`);
-  }
-  const netTuition = Math.max(0, Math.round(grossTuition - (grossTuition * effectiveDiscount) / 100));
-  const paidNow = validatedAmountPaid;
-  // The `&& netTuition > 0` escape hatch let any amount be collected against a
-  // zero-fee enrolment (50,000 AFN against a 0 fee was accepted and stored).
-  // Money may never exceed what is actually payable, including when nothing is.
-  if (paidNow > netTuition) throw new HttpError(400, `Amount received cannot exceed payable fee: ${netTuition} AFN.`);
+  const placementRequirementMode = effectiveProgramVersionId
+    ? resolvePlacementRequirement(effectiveProgramVersionId, studentBranchId, effectiveLevelId).mode
+    : null;
+  const registrationRule = resolveAdmissionRegistrationRule(studentBranchId, {
+    programVersionId: effectiveProgramVersionId,
+    levelId: effectiveLevelId,
+  });
+  const registrationFeeAmount = assertMoney(registrationRule.amount, 'registration fee');
+  const placementInvoiceRequirement = resolvePlacementInvoiceRequirement(visitor.id);
 
   const studentCode = nextStudentCode();
   const qrCode = `${studentCode}-${String(visitor.full_name).toUpperCase().replace(/\s+/g, '-')}`;
   const newStudentId = id('stu');
   const date = today();
-  const receiptNumber = nextReceiptNumber();
-  const invoiceNumber = nextInvoiceNumber(studentBranchId);
-  const dueDays = getNumberSetting('invoice_due_days', SYSTEM_DEFAULTS.invoiceDueDays);
-  const due = new Date(date); due.setDate(due.getDate() + dueDays);
-  const dueDate = due.toISOString().slice(0, 10);
-  const invoiceId = id('inv');
-  const invoiceStatus = paidNow >= netTuition && netTuition > 0 ? 'paid' : paidNow > 0 ? 'partial' : 'issued';
-  const discountAmount = grossTuition - netTuition;
+  const dueDate = invoiceDueDate(date);
+  const registrationInvoiceId = registrationFeeAmount > 0 ? id('inv') : null;
+  const registrationInvoiceNumber = registrationFeeAmount > 0 ? nextInvoiceNumber(studentBranchId) : null;
+  const placementInvoiceId = placementInvoiceRequirement ? id('inv') : null;
+  const placementInvoiceNumber = placementInvoiceRequirement ? nextInvoiceNumber(studentBranchId) : null;
+  const admissionStage = placementInvoiceRequirement
+    ? 'placement_fee'
+    : (visitor.placement_status === 'completed' || visitor.placement_status === 'waived' ? 'placement_completed' : 'placement_booking');
 
   const journey = getJourneyEngine(db);
+  const issuedInvoices: Array<{ id: string; invoiceNumber: string | null; chargeKind: 'registration' | 'placement'; amount: number; status: string }> = [];
 
   const tx = db.transaction(() => {
-    stmtUpdateVisitorConverted.run(placementRequirementMode, visitor.id);
+    stmtUpdateVisitorConverted.run(admissionStage, placementRequirementMode, visitor.id);
     stmtInsertConvertedStudent.run(
-      newStudentId, studentCode, visitor.full_name, visitor.phone, visitor.email || null, qrCode, date, studentBranchId, effectiveDiscount, visitor.gender, visitor.placement_score, notes || `Converted from visitor. Class: ${classItem.name}`,
+      newStudentId, studentCode, visitor.full_name, visitor.phone, visitor.email || null, qrCode, date, studentBranchId, 0, visitor.gender, visitor.placement_score, notes || 'Admitted from visitor record. Enrollment occurs after placement and payment.',
       visitor.father_name, visitor.address_region, visitor.tazkira_no, visitor.whatsapp, visitor.dob, visitor.school_or_university, visitor.emergency_contact_name, visitor.emergency_contact_phone, visitor.id
     );
-    const semesterRowId = id('sem');
-    stmtInsertConvertedSemester.run(semesterRowId, newStudentId, classId, date, grossTuition, netTuition);
-    stmtInsertConvertedRegistration.run(id('reg'), newStudentId, classId, date, paidNow, receiptNumber, effectiveDiscount, studentBranchId, visitor.source);
+    stmtInsertConvertedRegistration.run(id('reg'), newStudentId, null, date, 0, null, 0, studentBranchId, visitor.source);
 
-    const conversionObligation = ensureTuitionObligation(db, semesterRowId);
-    stmtInsertConvertedInvoice.run(invoiceId, newStudentId, grossTuition, discountAmount, netTuition, invoiceStatus, date, dueDate, studentBranchId, `Registration invoice — ${visitor.full_name}`, invoiceNumber, user.fullName, visitor.full_name, studentCode, conversionObligation.id);
-    stmtInsertInvoiceItem.run(id('invit'), invoiceId, `Tuition fee — ${classItem.name}${effectiveDiscount > 0 ? ` (${effectiveDiscount}% discount)` : ''}`, grossTuition, grossTuition);
-    if (discountAmount > 0) stmtInsertInvoiceItem.run(id('invit'), invoiceId, `Discount (${effectiveDiscount}%)`, -discountAmount, -discountAmount);
-
-    if (paidNow > 0) {
-      const paymentId = id('pay');
-      // Conversion is already serialised by uq_students_lead_id (one student
-      // per visitor), so this payment can never legitimately repeat. Keying it
-      // on the visitor makes that invariant explicit at the database level
-      // instead of depending only on the enclosing uniqueness check.
-      // The term is recorded on the payment, so the money settles the term it
-      // was collected for instead of settling none at all.
-      stmtInsertConvertedPayment.run(paymentId, newStudentId, invoiceId, paidNow, date, resolvedPaymentMethod, conversionObligation.semesterName, `Registration payment for ${classItem.name}`, receiptNumber, studentBranchId, `visitor-convert:${visitor.id}`);
-      allocatePaymentToObligation(db, {
-        paymentId, obligationId: conversionObligation.id, amount: paidNow,
-        operatorName: user.fullName, date,
-      });
-      recordIncome({ category: 'fee', amount: paidNow, date, description: `Registration fee for ${visitor.full_name} (${studentCode})`, referenceId: invoiceId, operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null, branchId: studentBranchId, paymentId });
+    if (registrationFeeAmount > 0 && registrationInvoiceId && registrationInvoiceNumber) {
+      stmtInsertRegistrationFeeInvoice.run(
+        registrationInvoiceId,
+        newStudentId,
+        registrationFeeAmount,
+        registrationFeeAmount,
+        date,
+        dueDate,
+        studentBranchId,
+        registrationRule.name,
+        registrationInvoiceNumber,
+        user.fullName,
+        visitor.full_name,
+        studentCode,
+      );
+      stmtInsertInvoiceItem.run(id('invit'), registrationInvoiceId, registrationRule.name, registrationFeeAmount, registrationFeeAmount);
+      issuedInvoices.push({ id: registrationInvoiceId, invoiceNumber: registrationInvoiceNumber, chargeKind: 'registration', amount: registrationFeeAmount, status: 'issued' });
+      journey.appendEvent({ studentId: newStudentId, eventType: JourneyEventType.INVOICE_ISSUED, occurredAt: date, branchId: studentBranchId, actorUserId: user.userId, actorName: user.fullName, payload: { invoiceId: registrationInvoiceId, invoiceNumber: registrationInvoiceNumber, amount: registrationFeeAmount, category: 'other', label: registrationRule.name, chargeKind: 'registration' } });
     }
 
-    journey.appendEvent({ studentId: newStudentId, eventType: JourneyEventType.STUDENT_REGISTERED, occurredAt: date, branchId: studentBranchId, actorUserId: user.userId, actorName: user.fullName, payload: { studentCode, fromVisitorId: visitor.id, classId, source: visitor.source } });
-    
-    getEnrollmentService(db).enroll({ studentId: newStudentId, branchId: studentBranchId, semesterName: 'Current Semester', classId, enrollmentType: 'new', programVersionId: effectiveProgramVersionId, levelId: levelId || classItem.level_id || null, actorUserId: user.userId, actorName: user.fullName, startedAt: date, autoInvoice: false, notes: notes || null, writeSemester: false });
+    if (placementInvoiceRequirement && placementInvoiceId && placementInvoiceNumber) {
+      if (!placementInvoiceExists(newStudentId, placementInvoiceRequirement.attemptId)) {
+        stmtInsertPlacementFeeInvoice.run(
+          placementInvoiceId,
+          newStudentId,
+          placementInvoiceRequirement.amount,
+          placementInvoiceRequirement.amount,
+          date,
+          dueDate,
+          studentBranchId,
+          `Placement assessment fee — attempt ${placementInvoiceRequirement.attemptId}`,
+          placementInvoiceNumber,
+          user.fullName,
+          visitor.full_name,
+          studentCode,
+        );
+        stmtInsertInvoiceItem.run(id('invit'), placementInvoiceId, 'Placement assessment fee', placementInvoiceRequirement.amount, placementInvoiceRequirement.amount);
+        issuedInvoices.push({ id: placementInvoiceId, invoiceNumber: placementInvoiceNumber, chargeKind: 'placement', amount: placementInvoiceRequirement.amount, status: 'issued' });
+        journey.appendEvent({ studentId: newStudentId, eventType: JourneyEventType.INVOICE_ISSUED, occurredAt: date, branchId: studentBranchId, actorUserId: user.userId, actorName: user.fullName, payload: { invoiceId: placementInvoiceId, invoiceNumber: placementInvoiceNumber, amount: placementInvoiceRequirement.amount, category: 'placement', label: 'Placement assessment fee', chargeKind: 'placement', attemptId: placementInvoiceRequirement.attemptId } });
+      }
+    }
 
-    journey.appendEvent({ studentId: newStudentId, eventType: JourneyEventType.INVOICE_ISSUED, occurredAt: date, branchId: studentBranchId, actorUserId: user.userId, actorName: user.fullName, payload: { invoiceId, invoiceNumber, amount: netTuition, category: 'fee', label: 'Registration invoice' } });
-    if (paidNow > 0) journey.appendEvent({ studentId: newStudentId, eventType: JourneyEventType.PAYMENT_RECORDED, occurredAt: date, branchId: studentBranchId, actorUserId: user.userId, actorName: user.fullName, payload: { amount: paidNow, category: 'fee', receiptNumber, label: 'Conversion payment' } });
+    journey.appendEvent({ studentId: newStudentId, eventType: JourneyEventType.STUDENT_REGISTERED, occurredAt: date, branchId: studentBranchId, actorUserId: user.userId, actorName: user.fullName, payload: { studentCode, fromVisitorId: visitor.id, source: visitor.source, workflow: 'admission_before_placement' } });
   });
   tx();
 
-  // The branch bell is operationally broad; do not turn it into a finance
-  // side-channel for users who lack Payment.View. Invoice and payment figures
-  // remain available on the finance-authorized student record and audit trail.
-  addNotification('New Registration Successful', `Student ${visitor.full_name} registered in ${classItem.name}.`, 'success', studentBranchId);
-  writeAudit(req, `Converted visitor ${visitor.full_name} to student ${studentCode}`, { newValue: `studentId=${newStudentId}, invoice=${invoiceNumber}, paid=${paidNow}/${netTuition}` });
+  addNotification('Student Admission Created', `Student ${visitor.full_name} admitted. Complete placement, settle invoices, then enroll from the student workspace.`, 'success', studentBranchId);
+  writeAudit(req, `Converted visitor ${visitor.full_name} to student ${studentCode}`, { newValue: JSON.stringify({ studentId: newStudentId, stage: admissionStage, invoices: issuedInvoices, workflow: 'admission_before_placement' }) });
 
-  res.status(201).json({ studentId: newStudentId, studentCode, receiptNumber, invoiceId, invoiceNumber, netAmount: netTuition, status: invoiceStatus });
+  res.status(201).json({ studentId: newStudentId, studentCode, invoices: issuedInvoices, nextStep: placementInvoiceRequirement ? 'Settle placement and registration invoices, then enroll from the student workspace.' : 'Run placement, settle invoices, then enroll from the student workspace.' });
 }));
 
 // ============================================================================ 

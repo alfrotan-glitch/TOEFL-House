@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { ensureOrganizationHierarchy } from './organizationHierarchy.js';
 import { setFinanceAccountsDatabase } from '../utils/financeAccounts.js';
 import { createLogger } from '../core/observability/logger.js';
+import { assertMoney } from '../utils/money.js';
 const log = createLogger('connection');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -57,6 +58,96 @@ function verifyCanonicalState(): void {
 }
 
 /**
+ * Reconciles placement-only schema objects with the current canonical state.
+ *
+ * SQLite keeps existing CREATE TRIGGER IF NOT EXISTS bodies, so placement
+ * triggers that changed in the canonical schema are dropped here and recreated
+ * from schema.sql on the same startup. Placement-only objects that are absent
+ * from the canonical schema are removed so the active database has one
+ * placement authority.
+ */
+function reconcileCanonicalPlacementState(): void {
+  db.exec(`
+    DROP TABLE IF EXISTS placement_rules;
+    DROP TRIGGER IF EXISTS trg_placement_rule_require_branch;
+    DROP TRIGGER IF EXISTS trg_placement_rule_sync_level_code;
+    DROP TRIGGER IF EXISTS trg_placement_rule_code_update;
+    DROP TRIGGER IF EXISTS trg_placement_test_rubric_scope_insert;
+    DROP TRIGGER IF EXISTS trg_placement_test_rubric_scope_update;
+    DROP TRIGGER IF EXISTS trg_placement_rubric_kind_scope_update;
+    DROP TRIGGER IF EXISTS trg_placement_attempt_scope_insert;
+    DROP TRIGGER IF EXISTS trg_placement_attempt_scope_update;
+  `);
+}
+
+/**
+ * Copies retired branch-profile fixed-fee values into the canonical fee-rule
+ * registry only when a branch has no explicit rule for that fee type.
+ *
+ * The branch-profile columns remain storage-only; transactions and reads use
+ * the canonical registry. Any non-canonical stored amount is left unresolved so
+ * the live fee resolver blocks the charge instead of guessing one.
+ */
+function ensureInvoiceChargeKindColumn(): void {
+  const columns = db.prepare(`PRAGMA table_info(invoices)`).all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === 'charge_kind')) {
+    db.exec(`ALTER TABLE invoices ADD COLUMN charge_kind TEXT`);
+  }
+}
+
+function reconcileCanonicalFeeAuthority(): void {
+  const rows = db.prepare(`
+    SELECT branch_id, placement_test_fee, registration_fee, card_fee, diploma_fee
+      FROM branch_academic_profiles
+  `).all() as Array<{
+    branch_id: string;
+    placement_test_fee: unknown;
+    registration_fee: unknown;
+    card_fee: unknown;
+    diploma_fee: unknown;
+  }>;
+  const hasRule = db.prepare('SELECT 1 FROM fee_rules WHERE branch_id = ? AND fee_type = ? LIMIT 1');
+  const insertRule = db.prepare(`
+    INSERT INTO fee_rules
+      (id, branch_id, fee_type, name, amount, currency, is_optional, effective_from, effective_to, version, is_active, created_at)
+    VALUES (?, ?, ?, ?, ?, 'AFN', 0, NULL, NULL, 1, 1, datetime('now'))
+  `);
+  const sanitize = (value: string) => value.replace(/[^A-Za-z0-9_-]/g, '_');
+  const nameByType = {
+    placement: 'Placement test fee',
+    registration: 'Registration fee',
+    card: 'ID card fee',
+    diploma: 'Diploma fee',
+  } as const;
+  const tx = db.transaction(() => {
+    for (const row of rows) {
+      for (const [feeType, rawAmount] of [
+        ['placement', row.placement_test_fee],
+        ['registration', row.registration_fee],
+        ['card', row.card_fee],
+        ['diploma', row.diploma_fee],
+      ] as const) {
+        if (hasRule.get(row.branch_id, feeType)) continue;
+        try {
+          const amount = assertMoney(rawAmount ?? 0, `Retired ${feeType} fee storage`);
+          insertRule.run(
+            `legacy_fee_${sanitize(row.branch_id)}_${feeType}`,
+            row.branch_id,
+            feeType,
+            nameByType[feeType],
+            amount,
+          );
+        } catch {
+          // Skip any non-canonical stored amount so live charge resolution must
+          // stop instead of inventing a fee.
+        }
+      }
+    }
+  });
+  tx();
+}
+
+/**
  * Applies the canonical schema, then the organization hierarchy defaults.
  * Safe on every process start (fresh or existing database).
  */
@@ -74,7 +165,10 @@ export function initSchema(): void {
   db.pragma('foreign_keys = OFF');
 
   try {
+    reconcileCanonicalPlacementState();
     db.exec(schema);
+    ensureInvoiceChargeKindColumn();
+    reconcileCanonicalFeeAuthority();
   } catch (error) {
     log.error('Failed to apply the canonical schema.');
     throw error;

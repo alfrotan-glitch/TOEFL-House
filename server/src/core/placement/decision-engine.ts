@@ -1,25 +1,22 @@
 /**
- * Placement Decision Engine — maps component scores to a recommended level
- * using configurable rules (conditional skill thresholds first, score-band
- * fallback) plus required-component and minimum-score checks. No thresholds
- * are hard-coded here; everything comes from placement_rules + policy
- * decision_rules_json.
+ * Placement decision engine.
+ *
+ * Placement Test V1 is governed by one explicit CEFR ladder. Each rule row
+ * defines the minimum score required in every canonical component for a target
+ * CEFR level. Component CEFR evidence is derived from the same ladder, and the
+ * overall placement is the highest level whose full five-component threshold is
+ * satisfied.
  */
 import { HttpError } from '../../middleware/errorHandler.js';
-import type { PolicyComponent } from './store.js';
+import type { PlacementDecisionRule, PolicyComponent } from './store.js';
+import { CEFR_LEVELS, placementPercentageFromResults, type PlacementComponentType } from './v1.js';
 
-export interface DecisionCondition {
-  componentKey: string;
-  field: 'score' | 'percentage';
-  op: 'gte' | 'lte' | 'eq';
-  value: number;
-}
-
-export interface DecisionRule {
-  levelId: string;
-  levelCode?: string | null;
-  label?: string;
-  when: DecisionCondition[];
+export interface ComponentEvidence {
+  componentKey: PlacementComponentType;
+  score: number | null;
+  cefrLevel: string | null;
+  matchedRuleId: string | null;
+  unmetAgainstTarget: string[];
 }
 
 export interface DecisionEvaluation {
@@ -29,190 +26,148 @@ export interface DecisionEvaluation {
   recommendationText: string;
   belowPass: boolean;
   unmetRequirements: string[];
+  overallCefr: string | null;
+  componentEvidence: ComponentEvidence[];
 }
 
-function satisfiesCondition(cond: DecisionCondition, results: any[]): boolean {
-  const row = results.find((r) => r.component_key === cond.componentKey && (r.status === 'completed' || r.status === 'waived'));
-  if (!row || row.status === 'waived' || row.score == null) return false;
-  const actual = cond.field === 'percentage' ? Number(row.percentage ?? (Number(row.score) / Number(row.max_score || 100)) * 100) : Number(row.score);
-  if (!Number.isFinite(actual)) return false;
-  switch (cond.op) {
-    case 'gte': return actual >= cond.value;
-    case 'lte': return actual <= cond.value;
-    case 'eq': return Math.abs(actual - cond.value) < 1e-6;
-    default: return false;
+function sortedRules(input: PlacementDecisionRule[]): PlacementDecisionRule[] {
+  return [...input].sort((left, right) => CEFR_LEVELS.indexOf(left.cefrLevel) - CEFR_LEVELS.indexOf(right.cefrLevel));
+}
+
+function scoreForComponent(results: any[], key: string): number | null {
+  const row = results.find((result) => result.component_key === key && (result.status === 'completed' || result.status === 'waived'));
+  if (!row || row.status === 'waived' || row.score == null) return null;
+  return Number(row.score);
+}
+
+function explainThresholdFailures(rule: PlacementDecisionRule, components: PolicyComponent[], results: any[]): string[] {
+  const failures: string[] = [];
+  for (const component of components) {
+    const key = component.key as PlacementComponentType;
+    const actual = scoreForComponent(results, key);
+    const required = Number(rule.minimumScores[key]);
+    if (actual == null || actual < required) {
+      failures.push(`${component.label} ${actual ?? 0}/${component.maxScore} is below the ${rule.cefrLevel} threshold ${required}/${component.maxScore}`);
+    }
   }
+  return failures;
 }
 
-function matchesConditionalRule(rule: DecisionRule, results: any[]): boolean {
-  return rule.when.every((cond) => satisfiesCondition(cond, results));
+function componentEvidenceForRuleLadder(component: PolicyComponent, rules: PlacementDecisionRule[], results: any[]): ComponentEvidence {
+  const key = component.key as PlacementComponentType;
+  const score = scoreForComponent(results, key);
+  if (score == null) {
+    return {
+      componentKey: key,
+      score: null,
+      cefrLevel: null,
+      matchedRuleId: null,
+      unmetAgainstTarget: [],
+    };
+  }
+  let cefrLevel: string | null = null;
+  let matchedRuleId: string | null = null;
+  for (const rule of rules) {
+    if (score >= Number(rule.minimumScores[key])) {
+      cefrLevel = rule.cefrLevel;
+      matchedRuleId = rule.cefrLevel;
+    }
+  }
+  return {
+    componentKey: key,
+    score,
+    cefrLevel,
+    matchedRuleId,
+    unmetAgainstTarget: [],
+  };
 }
 
 export function evaluateDecision(opts: {
   components: PolicyComponent[];
   results: any[];
-  rules: any[];              // placement_rules rows (band + conditions_json)
-  decisionRulesJson: string | null | undefined; // policy decision_rules_json
+  rules: any[];
+  decisionRulesJson: string | null | undefined;
   levels: any[];
   scoringModel: string;
   passScore: number;
 }): DecisionEvaluation {
-  const { components, results, rules, levels, scoringModel, passScore } = opts;
-  const completed = results.filter((r) => r.status === 'completed' || r.status === 'waived');
-  const doneKeys = new Set(completed.map((r) => r.component_key));
+  const { components, results, levels } = opts;
+  const completed = results.filter((result) => result.status === 'completed' || result.status === 'waived');
+  const doneKeys = new Set(completed.map((result) => result.component_key));
   const unmetRequirements = components
-    .filter((c) => c.required && !doneKeys.has(c.key))
-    .map((c) => c.key);
+    .filter((component) => component.required && !doneKeys.has(component.key))
+    .map((component) => component.key);
 
-  // Minimum-score enforcement: a completed component below its policy minScore
-  // blocks the placement decision (required components) or is flagged.
-  // A management-approved waiver (owner/manager only, reason required, audited)
-  // is an authorised exemption from that component's requirement, so a waived
-  // row satisfies minScore rather than failing it for having a null score.
-  // This matters now that `unmetRequirements` is enforced at the completion and
-  // conversion boundaries: without it, waiving a section with a configured
-  // minScore would make the attempt impossible to complete.
-  const minScoreFailures = components.filter((c) => c.required && c.minScore != null && c.minScore > 0).filter((c) => {
-    const row = completed.find((r) => r.component_key === c.key);
-    if (!row) return true;
-    if (row.status === 'waived') return false;
-    if (row.score == null) return true;
-    return Number(row.score) < Number(c.minScore);
-  });
-  for (const c of minScoreFailures) {
-    if (!unmetRequirements.includes(c.key)) unmetRequirements.push(`${c.key} (below minimum score ${c.minScore})`);
+  let decisionRules: PlacementDecisionRule[];
+  try {
+    decisionRules = opts.decisionRulesJson ? JSON.parse(opts.decisionRulesJson) : [];
+  } catch {
+    throw new HttpError(409, 'The CEFR placement rule set is invalid.');
+  }
+  if (!Array.isArray(decisionRules) || decisionRules.length === 0) {
+    throw new HttpError(409, 'No CEFR placement rule set is configured for this placement profile.');
+  }
+  const orderedRules = sortedRules(decisionRules);
+
+  const componentEvidence = components.map((component) => componentEvidenceForRuleLadder(component, orderedRules, results));
+  const percentage = placementPercentageFromResults(results.filter((result) => result.status === 'completed' && result.score != null));
+
+  let matchedRule: PlacementDecisionRule | null = null;
+  for (const rule of orderedRules) {
+    const failures = explainThresholdFailures(rule, components, results);
+    if (failures.length === 0) matchedRule = rule;
   }
 
-  const scored = results.filter((r) => r.status === 'completed' && r.score != null && (scoringModel === 'average' || Number(r.weight) > 0));
-  const explicitLevels = [...new Set(results.filter((r) => (r.status === 'completed' || r.status === 'waived') && r.selected_level_id).map((r) => String(r.selected_level_id)))];
-  const explicitLevel = explicitLevels.length === 1 ? explicitLevels[0] : null;
-  const weightTotal = scored.reduce((sum, r) => sum + Number(r.weight), 0);
-  const normalizedScores = scored.map((r) => (Number(r.score) / Number(r.max_score || 100)) * 100);
-  const percentage = scored.length > 0 && (scoringModel === 'average' || weightTotal > 0)
-    ? Math.round((scoringModel === 'average'
-      ? normalizedScores.reduce((sum, value) => sum + value, 0) / normalizedScores.length
-      : (scored.reduce((sum, r) => sum + ((Number(r.score) / Number(r.max_score || 100)) * Number(r.weight)), 0) / weightTotal) * 100) * 100) / 100
-    : null;
-
-  // 1) Policy decision rules (conditional skill thresholds).
-  let policyRules: DecisionRule[];
-  try { policyRules = opts.decisionRulesJson ? JSON.parse(opts.decisionRulesJson) : []; } catch { policyRules = []; }
-  if (Array.isArray(policyRules) && policyRules.length > 0 && percentage != null) {
-    for (const rule of policyRules) {
-      if (matchesConditionalRule(rule, results)) {
-        const level = (levels || []).find((l: any) => l.id === rule.levelId);
-        if (!level) throw new HttpError(409, 'A placement decision rule references a level outside the attempt snapshot.');
-        const belowPass = percentage < Number(passScore);
-        return {
-          percentage,
-          recommendedLevelId: rule.levelId,
-          decisionRuleId: `policy:${rule.label || rule.levelId}`,
-          recommendationText: level
-            ? `${level.name}${belowPass ? ' — below the configured pass threshold' : ''}`
-            : `Policy rule matched${belowPass ? ' — below the configured pass threshold' : ''}`,
-          belowPass,
-          unmetRequirements,
-        };
-      }
-    }
-  }
-
-  // 2) Score-band rules (placement_rules, optionally with conditions_json).
-  const sorted = [...(rules || [])].sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-  for (const rule of sorted) {
-    const bandOk = percentage != null && percentage >= Number(rule.min_score) && percentage <= Number(rule.max_score);
-    if (!bandOk) continue;
-    let condOk = true;
-    if (rule.conditions_json) {
-      try {
-        const conds = JSON.parse(rule.conditions_json) as DecisionCondition[];
-        condOk = conds.every((cond) => satisfiesCondition(cond, results));
-      } catch { condOk = false; }
-    }
-    if (condOk) {
-      if (rule.recommended_level_id && !(levels || []).some((level: any) => level.id === rule.recommended_level_id)) {
-        throw new HttpError(409, 'A placement score-band rule references a level outside the attempt snapshot.');
-      }
-      const belowPass = percentage < Number(passScore);
-      return {
-        percentage,
-        recommendedLevelId: rule.recommended_level_id || null,
-        decisionRuleId: rule.id,
-        recommendationText: rule.recommended_level_code
-          ? `${rule.recommended_level_code}${belowPass ? ' — below the configured pass threshold' : ''}`
-          : `Rule: ${rule.name}${belowPass ? ' — below the configured pass threshold' : ''}`,
-        belowPass,
-        unmetRequirements,
-      };
-    }
-  }
-
-  // 3) Explicit level from a level_assessment component.
-  if (explicitLevel) {
-    const level = (levels || []).find((l: any) => l.id === explicitLevel);
+  if (!matchedRule) {
     return {
       percentage,
-      recommendedLevelId: explicitLevel,
+      recommendedLevelId: null,
       decisionRuleId: null,
-      recommendationText: level ? `${level.name} — explicit level assessment` : 'Level recommendation recorded',
-      belowPass: percentage != null && percentage < Number(passScore),
+      recommendationText: 'No CEFR placement rule matched the completed assessment.',
+      belowPass: true,
       unmetRequirements,
+      overallCefr: null,
+      componentEvidence: componentEvidence.map((evidence) => ({
+        ...evidence,
+        unmetAgainstTarget: orderedRules.length > 0 ? explainThresholdFailures(orderedRules[0], components.filter((component) => component.key === evidence.componentKey), results) : [],
+      })),
     };
   }
 
-  // 4) No rule matched.
+  if (!(levels || []).some((level: any) => level.id === matchedRule.recommendedLevelId)) {
+    throw new HttpError(409, `The ${matchedRule.cefrLevel} placement rule references a level outside the attempt snapshot.`);
+  }
+  const level = (levels || []).find((candidate: any) => candidate.id === matchedRule.recommendedLevelId);
   return {
     percentage,
-    recommendedLevelId: null,
-    decisionRuleId: null,
-    recommendationText: percentage != null ? `Overall assessment ${percentage}%` : 'No placement rule matched the assessment result',
-    belowPass: percentage != null && percentage < Number(passScore),
+    recommendedLevelId: matchedRule.recommendedLevelId,
+    decisionRuleId: matchedRule.cefrLevel,
+    recommendationText: `${matchedRule.cefrLevel}${level ? ` — ${level.name}` : ''}`,
+    belowPass: false,
     unmetRequirements,
+    overallCefr: matchedRule.cefrLevel,
+    componentEvidence,
   };
 }
 
-/** Authoritative pass/fail verdict for a finished sitting. */
 export type PlacementOutcome = 'passed' | 'failed';
 
 export interface OutcomeEvaluation {
   outcome: PlacementOutcome;
-  /** Human-readable reasons the policy was not met. Empty when passed. */
   reasons: string[];
 }
 
-/**
- * THE authoritative pass/fail rule for a placement sitting.
- *
- * This is the single place in the system that decides whether a candidate met
- * the configured placement policy. Both the completion boundary and the
- * student-conversion boundary call it, so the two can never disagree.
- *
- * A sitting passes only when ALL of the following hold:
- *   1. every required component has a completed/waived result
- *      (`unmetRequirements` — includes per-component minScore failures), and
- *   2. the overall score meets the policy pass score (`belowPass`), unless the
- *      policy produced no percentage at all and instead recommended an
- *      explicit level (level-assessment style policies).
- *
- * Deliberately derived from `DecisionEvaluation`, which is itself computed from
- * persisted, server-held results against the attempt's immutable policy
- * snapshot. No client-supplied value participates in this decision.
- */
 export function evaluateOutcome(decision: DecisionEvaluation): OutcomeEvaluation {
   const reasons: string[] = [];
   for (const unmet of decision.unmetRequirements) {
     reasons.push(`Required assessment section not satisfied: ${unmet}.`);
   }
-  // A policy that yields no percentage (pure level assessment) is judged on the
-  // recommendation alone; `belowPass` is only meaningful when a score exists.
-  if (decision.percentage != null && decision.belowPass) {
-    reasons.push('Overall placement score is below the configured pass score.');
+  if (!decision.overallCefr) {
+    reasons.push('No CEFR placement rule matched the completed assessment.');
   }
   return { outcome: reasons.length === 0 ? 'passed' : 'failed', reasons };
 }
 
-export function assertNoConflictingLevels(results: any[]): string | null {
-  const explicitLevels = [...new Set(results.filter((r) => (r.status === 'completed' || r.status === 'waived') && r.selected_level_id).map((r) => String(r.selected_level_id)))];
-  if (explicitLevels.length > 1) throw new HttpError(400, 'Assessment sections contain conflicting level recommendations.');
-  return explicitLevels[0] || null;
+export function assertNoConflictingLevels(_results: any[]): string | null {
+  return null;
 }

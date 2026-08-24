@@ -20,6 +20,7 @@ import { resolvePlacementRequirement, isAuthoritativeDecision } from '../placeme
 import { evaluateEnrollmentEligibility } from '../placement/placement-policy.js';
 import { resolveGoverningProgramVersionId, assertPlacementEligibleForClass } from '../placement/enrollment-gate.js';
 import { createLogger } from '../observability/logger.js';
+import { getStudentNonTuitionSummary } from '../../utils/studentBalance.js';
 const log = createLogger('enrollment-service');
 
 export interface EnrollStudentInput {
@@ -40,6 +41,10 @@ export interface EnrollStudentInput {
   startedAt?: string;
   autoInvoice?: boolean;
   discountAmount?: number;
+  /** When true, the enrollment snapshots and bills the canonical registration
+   *  fee alongside tuition. Admission writers opt in; waitlist moves and other
+   *  internal seat changes do not. */
+  includeRegistrationFee?: boolean;
   /** Enrollment Lifecycle Engine — defaults to 'active' to preserve exactly
    *  the historical behavior of every existing caller. Pass 'pending' or
    *  'reserved' to create a not-yet-active enrollment (e.g. for a future
@@ -301,7 +306,33 @@ export class EnrollmentService {
       hasVisitorRecord: Boolean(leadId && visitor),
     });
     if (!verdict.eligible) throw new HttpError(400, verdict.reason);
+    if (input.classId) {
+      assertPlacementEligibleForClass(this.db, input.studentId, input.classId, input.branchId);
+      return;
+    }
     void levelCode;
+  }
+
+  /**
+   * Enrollment cannot bypass required non-tuition debts that are part of the
+   * admission workflow. Registration and placement invoices must be settled
+   * before a class seat is granted; otherwise the UI could hide the blocker and
+   * still create the enrollment through a direct API call.
+   */
+  private assertFinancialEligibility(studentId: string): void {
+    const summary = getStudentNonTuitionSummary(this.db, studentId, ['registration', 'placement']);
+    if (summary.nonTuitionOutstanding <= 0) return;
+    const blockingKinds = summary.nonTuitionBreakdown
+      .filter((row) => row.outstanding > 0)
+      .map((row) => row.purpose === 'registration'
+        ? `registration ${row.outstanding} AFN`
+        : row.purpose === 'placement'
+          ? `placement ${row.outstanding} AFN`
+          : `${row.purpose} ${row.outstanding} AFN`);
+    throw new HttpError(
+      409,
+      `Enrollment is blocked until required invoices are settled. Outstanding: ${blockingKinds.join(', ')}.`
+    );
   }
 
   /**
@@ -432,6 +463,7 @@ export class EnrollmentService {
     // Two gates that resolve their inputs differently are two different rules.
     // This is now the single placement authority for every enrollment path.
     this.assertPlacementEligible(input, programVersionId, levelCode);
+    this.assertFinancialEligibility(input.studentId);
 
     const enrollmentId = makeId('enr');
     const skillsJson = input.skillsFocus ? JSON.stringify(input.skillsFocus) : null;
@@ -450,7 +482,11 @@ export class EnrollmentService {
         this.assertNoDuplicateClassEnrollment(input.studentId, input.classId, input.semesterName ?? null);
       }
       const snapshot = this.catalog.buildFeeSnapshot({
-        programVersionId, levelId: input.levelId, branchId: input.branchId, enrollmentType,
+        programVersionId,
+        levelId: input.levelId,
+        branchId: input.branchId,
+        enrollmentType,
+        includeRegistrationFee: input.includeRegistrationFee ?? false,
       });
       const snapshotJson = JSON.stringify(snapshot);
 

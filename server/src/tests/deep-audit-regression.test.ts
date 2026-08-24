@@ -60,11 +60,20 @@ beforeAll(async () => {
   initSchema();
   bootstrapRbacCatalog(db);
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(BRANCH, 'Audit Branch', 'Loc');
+  db.prepare(`
+    INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+    VALUES ('audit_regression_registration_fee', ?, 'registration', 'Registration fee', 1500, 1, 1)
+  `).run(BRANCH);
   for (const [uid, uname, role] of [['u_ar_owner', 'ar_owner', 'owner'], ['u_ar_mgr', 'ar_mgr', 'manager'], ['u_ar_fin', 'ar_fin', 'finance'], ['u_ar_reg', 'ar_reg', 'registrar']]) {
     db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES (?, ?, ?, ?, ?, 1, 0)`)
       .run(uid, uname, 'Audit ' + role, BRANCH, await hashPassword('x'));
     assignRole(uid, role, BRANCH);
   }
+
+  db.prepare(`
+    INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+    VALUES ('audit_regression_card_fee', ?, 'card', 'ID card fee', 200, 1, 1)
+  `).run(BRANCH);
 
   owner = makeUser({ userId: 'u_ar_owner', branchId: BRANCH });
   manager = makeUser({ userId: 'u_ar_mgr', branchId: BRANCH });
@@ -93,15 +102,18 @@ describe('User creation via API (RBAC param fix)', () => {
 });
 
 describe('Manual student registration & ID card (simple-payment 10-arg fix)', () => {
-  it('registers a student manually with payment (no SQL param error)', async () => {
+  it('rejects legacy manual-admission payment payloads cleanly instead of throwing a SQL param error', async () => {
     db.prepare(`INSERT OR IGNORE INTO classes (id, name, branch_id, capacity, status, lifecycle_stage, level, fee) VALUES (?, ?, ?, 10, 'active', 'activated', 'A1', 5000)`)
       .run('ar_class', 'Audit Class', BRANCH);
+    const beforeStudents = db.prepare('SELECT COUNT(*) c FROM students').get() as { c: number };
+    const beforePayments = db.prepare('SELECT COUNT(*) c FROM payments').get() as { c: number };
     const res = await supertest(app).post('/api/students/manual').set(authHeader(registrar)).send({
       fullName: 'Manual Student', phone: '0700000123', gender: 'male', branchId: BRANCH, classId: 'ar_class', tuitionAmount: 5000, amountPaidNow: 2000,
     });
-    expect(res.status).toBe(201);
-    const payments = db.prepare('SELECT * FROM payments WHERE student_id = ?').all(res.body.id) as any[];
-    expect(payments.length).toBe(1);
+    expect(res.status).toBe(409);
+    expect(String(res.body.error || '')).toMatch(/no longer enrolls or collects payment directly/i);
+    expect(db.prepare('SELECT COUNT(*) c FROM students').get()).toEqual(beforeStudents);
+    expect(db.prepare('SELECT COUNT(*) c FROM payments').get()).toEqual(beforePayments);
   });
 
   it('issues a student ID card without SQL param error', async () => {

@@ -19,7 +19,6 @@ interface AddStudentFormProps {
     discountPercent: number,
     notes?: string,
     classId?: string,
-    tuitionAmount?: number,
     fatherName?: string,
     addressRegion?: string,
     tazkiraNo?: string,
@@ -28,9 +27,8 @@ interface AddStudentFormProps {
     schoolOrUniversity?: string,
     emergencyContactName?: string,
     emergencyContactPhone?: string,
-    amountPaidNow?: number,
     branchId?: string
-  ) => void;
+  ) => Promise<void> | void;
   onCancel: () => void;
   educationalSections?: Array<{ id: string; name: string; fee?: number }>;
   triggerToast: (msg: string, type: 'success' | 'error' | 'info') => void;
@@ -49,7 +47,6 @@ export default function AddStudentForm({
   const [step, setStep] = useState(1);
   const [selectedVisitorId, setSelectedVisitorId] = useState('');
 
-  // Step 1: Identity State
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [email] = useState('');
@@ -63,41 +60,36 @@ export default function AddStudentForm({
   const [emergencyContactName, setEmergencyContactName] = useState('');
   const [emergencyContactPhone, setEmergencyContactPhone] = useState('');
 
-  // Step 2: Enrollment & Finance State
   const [assignedClassId, setAssignedClassId] = useState('');
   const [studentBranchId, setStudentBranchId] = useState('');
   const [discountPercent, setDiscountPercent] = useState(0);
-  const [semesterFee, setSemesterFee] = useState(0);
-  const [initialFee, setInitialFee] = useState(0);
   const [notes, setNotes] = useState('');
 
-  const inputCls = "w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/10 font-bold text-slate-800 text-xs transition-all";
+  const inputCls = 'w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/10 font-bold text-slate-800 text-xs transition-all';
 
   const handleVisitorSelect = (vid: string) => {
     setSelectedVisitorId(vid);
-    if (vid) {
-      const visitor = visitors.find(v => v.id === vid);
-      if (visitor) {
-        setFullName(visitor.fullName);
-        setPhone(visitor.phone);
-        setGender(visitor.gender);
-        setFatherName(visitor.fatherName || '');
-        setAddressRegion(visitor.addressRegion || '');
-        setTazkiraNo(visitor.tazkiraNo || '');
-        setWhatsapp(visitor.whatsapp || '');
-        setDob(visitor.dob || '');
-        setSchoolOrUniversity(visitor.schoolOrUniversity || '');
-        setEmergencyContactName(visitor.emergencyContactName || '');
-        setEmergencyContactPhone(visitor.emergencyContactPhone || '');
-        setNotes(visitor.notes || '');
-        triggerToast(`Visitor «${visitor.fullName}» loaded.`, 'success');
-      }
-    }
+    if (!vid) return;
+    const visitor = visitors.find((candidate) => candidate.id === vid);
+    if (!visitor) return;
+    setFullName(visitor.fullName);
+    setPhone(visitor.phone);
+    setGender(visitor.gender);
+    setFatherName(visitor.fatherName || '');
+    setAddressRegion(visitor.addressRegion || '');
+    setTazkiraNo(visitor.tazkiraNo || '');
+    setWhatsapp(visitor.whatsapp || '');
+    setDob(visitor.dob || '');
+    setSchoolOrUniversity(visitor.schoolOrUniversity || '');
+    setEmergencyContactName(visitor.emergencyContactName || '');
+    setEmergencyContactPhone(visitor.emergencyContactPhone || '');
+    setNotes(visitor.notes || '');
+    triggerToast(`Visitor «${visitor.fullName}» loaded.`, 'success');
   };
 
   const validateStep1 = () => {
     if (!fullName.trim() || !phone.trim() || !fatherName.trim()) {
-      triggerToast("Full name, father's name, and phone are required.", "error");
+      triggerToast("Full name, father's name, and phone are required.", 'error');
       return false;
     }
     if (!validatePhone(phone)) {
@@ -116,13 +108,9 @@ export default function AddStudentForm({
   };
 
   const validateStep2 = () => {
-    const safeSemesterFee = Number(semesterFee || 0);
-    const safeInitialFee = Number(initialFee || 0);
     const safeDiscount = Number(discountPercent || 0);
-    const netTuition = Math.max(0, safeSemesterFee - Math.round(safeSemesterFee * safeDiscount / 100));
-    
-    if (safeInitialFee > netTuition) {
-      triggerToast("Today's payment cannot exceed payable tuition after discount.", "error");
+    if (!Number.isFinite(safeDiscount) || safeDiscount < 0 || safeDiscount > 100) {
+      triggerToast('Discount percent must be between 0 and 100.', 'error');
       return false;
     }
     return true;
@@ -131,15 +119,14 @@ export default function AddStudentForm({
   const nextStep = () => {
     if (step === 1 && !validateStep1()) return;
     if (step === 2 && !validateStep2()) return;
-    setStep(prev => Math.min(3, prev + 1));
+    setStep((prev) => Math.min(3, prev + 1));
   };
 
-  const prevStep = () => setStep(prev => Math.max(1, prev - 1));
+  const prevStep = () => setStep((prev) => Math.max(1, prev - 1));
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     if (!validateStep1() || !validateStep2()) return;
-
     try {
       await addStudentManual(
         fullName,
@@ -148,8 +135,7 @@ export default function AddStudentForm({
         gender,
         Number(discountPercent || 0),
         notes,
-        assignedClassId,
-        Number(semesterFee || 0),
+        assignedClassId || undefined,
         fatherName,
         addressRegion,
         tazkiraNo,
@@ -158,223 +144,180 @@ export default function AddStudentForm({
         schoolOrUniversity,
         emergencyContactName,
         emergencyContactPhone,
-        Number(initialFee || 0),
-        studentBranchId || activeBranchId
+        studentBranchId || activeBranchId,
       );
-      triggerToast('Student registered successfully.', 'success');
+      triggerToast('Student admitted successfully. Continue with placement, invoices, and enrollment from the student workspace.', 'success');
       onCancel();
     } catch (err) {
-      triggerToast(err instanceof Error ? err.message : 'Could not register student. Please try again.', 'error');
+      triggerToast(err instanceof Error ? err.message : 'Could not admit student. Please try again.', 'error');
     }
   };
 
-  // Live Calculation Variables
-  const safeSemesterFee = Number(semesterFee || 0);
-  const safeDiscount = Number(discountPercent || 0);
-  const safeInitialFee = Number(initialFee || 0);
-  const discountAmount = Math.round(safeSemesterFee * safeDiscount / 100);
-  const netTuition = Math.max(0, safeSemesterFee - discountAmount);
-  const remainingDebt = Math.max(0, netTuition - safeInitialFee);
+  const selectedClass = classes.find((candidate) => candidate.id === assignedClassId);
 
   return (
-    <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs max-w-3xl mx-auto animate-in fade-in duration-200">
-      <h3 className="text-base font-black text-slate-900 mb-4 flex items-center gap-1.5 border-b border-slate-100 pb-3">
-        <UserPlus className="w-5 h-5 text-indigo-600 stroke-[2.5]" />
-        Direct Enrollment — New Student
+    <div className="mx-auto max-w-3xl animate-in fade-in duration-200 rounded-3xl border border-slate-200 bg-white p-6 shadow-xs">
+      <h3 className="mb-4 flex items-center gap-1.5 border-b border-slate-100 pb-3 text-base font-black text-slate-900">
+        <UserPlus className="h-5 w-5 text-indigo-600 stroke-[2.5]" />
+        Direct Admission — New Student
       </h3>
 
-      {/* Stepper Indicator */}
-      <div className="flex items-center justify-between mb-8 mt-4">
+      <div className="mb-8 mt-4 flex items-center justify-between">
         {[
           { num: 1, label: 'Identity', icon: ShieldCheck },
-          { num: 2, label: 'Finance', icon: Wallet },
-          { num: 3, label: 'Review', icon: IdCard }
-        ].map((s, i) => (
-          <div key={s.num} className="flex items-center w-full">
+          { num: 2, label: 'Admission', icon: Wallet },
+          { num: 3, label: 'Review', icon: IdCard },
+        ].map((stepper, index) => (
+          <div key={stepper.num} className="flex w-full items-center">
             <div className="flex flex-col items-center">
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs transition-all ${step >= s.num ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-100 text-slate-400'}`}>
-                {step > s.num ? <Check className="w-5 h-5" /> : <s.icon className="w-5 h-5" />}
+              <div className={`flex h-10 w-10 items-center justify-center rounded-full text-xs font-bold transition-all ${step >= stepper.num ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-100 text-slate-400'}`}>
+                {step > stepper.num ? <Check className="h-5 w-5" /> : <stepper.icon className="h-5 w-5" />}
               </div>
-              <span className={`text-[10px] font-bold mt-1 ${step >= s.num ? 'text-indigo-600' : 'text-slate-400'}`}>{s.label}</span>
+              <span className={`mt-1 text-[10px] font-bold ${step >= stepper.num ? 'text-indigo-600' : 'text-slate-400'}`}>{stepper.label}</span>
             </div>
-            {i < 2 && <div className={`h-1 flex-1 mx-2 rounded-full transition-all ${step > s.num ? 'bg-indigo-600' : 'bg-slate-100'}`}></div>}
+            {index < 2 && <div className={`mx-2 h-1 flex-1 rounded-full transition-all ${step > stepper.num ? 'bg-indigo-600' : 'bg-slate-100'}`} />}
           </div>
         ))}
       </div>
 
-      <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-start">
-        
-        {/* STEP 1: IDENTITY & CONTACT */}
+      <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-4 text-start text-xs md:grid-cols-2">
         {step === 1 && (
           <>
             {visitors.length > 0 && (
-              <div className="md:col-span-2 bg-indigo-50/40 border border-indigo-150 rounded-2xl p-4 mb-2">
-                <label className="block text-indigo-900 font-extrabold text-[11px] flex items-center gap-1.5 mb-2">
-                  <Sparkles className="w-4 h-4 text-indigo-600 animate-pulse" /> Auto-fill from registered visitors
+              <div className="mb-2 rounded-2xl border border-indigo-150 bg-indigo-50/40 p-4 md:col-span-2">
+                <label className="mb-2 flex items-center gap-1.5 text-[11px] font-extrabold text-indigo-900">
+                  <Sparkles className="h-4 w-4 animate-pulse text-indigo-600" /> Auto-fill from registered visitors
                 </label>
-                <select 
-                  value={selectedVisitorId} 
-                  onChange={(e) => handleVisitorSelect(e.target.value)} 
-                  className="w-full bg-white border border-indigo-200 text-indigo-950 font-bold rounded-xl px-3 py-2.5 cursor-pointer focus:outline-none text-[11px]"
+                <select
+                  value={selectedVisitorId}
+                  onChange={(event) => handleVisitorSelect(event.target.value)}
+                  className="w-full cursor-pointer rounded-xl border border-indigo-200 bg-white px-3 py-2.5 text-[11px] font-bold text-indigo-950 focus:outline-none"
                 >
                   <option value="">-- Select an active visitor --</option>
-                  {visitors.filter(v => v.branchId === activeBranchId && v.status !== 'registered').map(v => <option key={v.id} value={v.id}>{v.fullName} ({v.phone})</option>)}
+                  {visitors.filter((visitor) => visitor.branchId === activeBranchId && visitor.status !== 'registered').map((visitor) => (
+                    <option key={visitor.id} value={visitor.id}>{visitor.fullName} ({visitor.phone})</option>
+                  ))}
                 </select>
               </div>
             )}
 
             <div className="space-y-1">
-              <label className="block text-slate-600 font-bold mb-1">Student full name *</label>
-              <input type="text" placeholder="e.g. Najibullah Azimi" value={fullName} onChange={(e) => setFullName(e.target.value)} className={inputCls} required />
+              <label className="mb-1 block font-bold text-slate-600">Student full name *</label>
+              <input type="text" placeholder="e.g. Najibullah Azimi" value={fullName} onChange={(event) => setFullName(event.target.value)} className={inputCls} required />
             </div>
             <div className="space-y-1">
-              <label className="block text-slate-600 font-bold mb-1">Father's name *</label>
-              <input type="text" placeholder="e.g. Mohammad Amin" value={fatherName} onChange={(e) => setFatherName(e.target.value)} className={inputCls} required />
+              <label className="mb-1 block font-bold text-slate-600">Father's name *</label>
+              <input type="text" placeholder="e.g. Mohammad Amin" value={fatherName} onChange={(event) => setFatherName(event.target.value)} className={inputCls} required />
             </div>
             <div className="space-y-1">
-              <label className="block text-slate-600 font-bold mb-1">Mobile phone *</label>
-              <input type="tel" placeholder="0799887766" value={phone} onChange={(e) => setPhone(e.target.value)} className={`${inputCls} font-mono`} required />
+              <label className="mb-1 block font-bold text-slate-600">Mobile phone *</label>
+              <input type="tel" placeholder="0799887766" value={phone} onChange={(event) => setPhone(event.target.value)} className={`${inputCls} font-mono`} required />
             </div>
             <div className="space-y-1">
-              <label className="block text-slate-600 font-bold mb-1">Gender</label>
-              <select value={gender} onChange={(e) => setGender(e.target.value as any)} className={inputCls}>
+              <label className="mb-1 block font-bold text-slate-600">Gender</label>
+              <select value={gender} onChange={(event) => setGender(event.target.value as 'male' | 'female')} className={inputCls}>
                 <option value="male">Male</option>
                 <option value="female">Female</option>
               </select>
             </div>
             <div className="space-y-1">
-              <label className="block text-slate-600 font-bold mb-1">Tazkira / ID number</label>
-              <input type="text" value={tazkiraNo} onChange={(e) => setTazkiraNo(e.target.value)} className={`${inputCls} font-mono`} />
+              <label className="mb-1 block font-bold text-slate-600">Tazkira no.</label>
+              <input type="text" value={tazkiraNo} onChange={(event) => setTazkiraNo(event.target.value)} className={inputCls} />
             </div>
             <div className="space-y-1">
-              <label className="block text-slate-600 font-bold mb-1">Date of birth / age</label>
-              <input type="text" placeholder="2003-07-06 or 22" value={dob} onChange={(e) => setDob(e.target.value)} className={inputCls} />
-            </div>
-            <div className="md:col-span-2 space-y-1">
-              <label className="block text-slate-600 font-bold mb-1">School / university</label>
-              <input type="text" value={schoolOrUniversity} onChange={(e) => setSchoolOrUniversity(e.target.value)} className={inputCls} />
+              <label className="mb-1 block font-bold text-slate-600">WhatsApp</label>
+              <input type="tel" value={whatsapp} onChange={(event) => setWhatsapp(event.target.value)} className={`${inputCls} font-mono`} />
             </div>
             <div className="space-y-1">
-              <label className="block text-slate-600 font-bold mb-1">WhatsApp (optional)</label>
-              <input type="tel" value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} className={`${inputCls} font-mono`} />
+              <label className="mb-1 block font-bold text-slate-600">Date of birth</label>
+              <input type="date" value={dob} onChange={(event) => setDob(event.target.value)} className={inputCls} />
             </div>
             <div className="space-y-1">
-              <label className="block text-slate-600 font-bold mb-1">Address / region</label>
-              <input type="text" value={addressRegion} onChange={(e) => setAddressRegion(e.target.value)} className={inputCls} />
+              <label className="mb-1 block font-bold text-slate-600">School / University</label>
+              <input type="text" value={schoolOrUniversity} onChange={(event) => setSchoolOrUniversity(event.target.value)} className={inputCls} />
+            </div>
+            <div className="space-y-1 md:col-span-2">
+              <label className="mb-1 block font-bold text-slate-600">Address</label>
+              <input type="text" value={addressRegion} onChange={(event) => setAddressRegion(event.target.value)} className={inputCls} />
+            </div>
+            <div className="space-y-1">
+              <label className="mb-1 block font-bold text-slate-600">Emergency contact name</label>
+              <input type="text" value={emergencyContactName} onChange={(event) => setEmergencyContactName(event.target.value)} className={inputCls} />
+            </div>
+            <div className="space-y-1">
+              <label className="mb-1 block font-bold text-slate-600">Emergency phone</label>
+              <input type="tel" value={emergencyContactPhone} onChange={(event) => setEmergencyContactPhone(event.target.value)} className={`${inputCls} font-mono`} />
             </div>
           </>
         )}
 
-        {/* STEP 2: CLASS & FINANCE */}
         {step === 2 && (
           <>
+            <div className="rounded-2xl border border-indigo-100 bg-indigo-50 p-4 md:col-span-2">
+              <p className="text-[11px] font-extrabold text-indigo-900">Workflow reminder</p>
+              <p className="mt-1 text-[11px] leading-relaxed text-indigo-700">
+                Admission creates the student identity plus any required registration invoice. Placement, payment, and class enrollment happen afterward from the student workspace.
+              </p>
+            </div>
+
             <div className="space-y-1">
-              <label className="block text-slate-600 font-bold mb-1">Branch</label>
-              <select value={studentBranchId || activeBranchId} onChange={(e) => setStudentBranchId(e.target.value)} className={inputCls}>
-                {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              <label className="mb-1 block font-bold text-slate-600">Owning branch</label>
+              <select value={studentBranchId || activeBranchId} onChange={(event) => setStudentBranchId(event.target.value)} className={inputCls}>
+                {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
               </select>
             </div>
             <div className="space-y-1">
-              <label className="block text-slate-600 font-bold mb-1">Class</label>
-              <select 
-                value={assignedClassId} 
-                onChange={(e) => {
-                  const cId = e.target.value;
-                  setAssignedClassId(cId);
-                  const cls = classes.find(c => c.id === cId);
-                  if (cls) {
-                    const fee = Number(cls.fee || 0);
-                    setSemesterFee(fee);
-                    setInitialFee(fee);
-                  }
-                }} 
-                className={inputCls}
-              >
-                <option value="">-- Select Class --</option>
-                {classes.filter(c => (!c.status || c.status === 'active') && (!c.branchId || c.branchId === (studentBranchId || activeBranchId))).map(c => (
-                  <option key={c.id} value={c.id}>{c.name} ({c.level})</option>
+              <label className="mb-1 block font-bold text-slate-600">Intended class (optional)</label>
+              <select value={assignedClassId} onChange={(event) => setAssignedClassId(event.target.value)} className={inputCls}>
+                <option value="">Choose later after placement</option>
+                {classes.filter((candidate) => candidate.branchId === (studentBranchId || activeBranchId) && candidate.status === 'active').map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>{candidate.name}</option>
                 ))}
               </select>
             </div>
             <div className="space-y-1">
-              <label className="block text-slate-600 font-bold mb-1">Standard tuition (AFN)</label>
-              <input type="number" value={semesterFee} onChange={(e) => { const v = Number(e.target.value); setSemesterFee(v); setInitialFee(v); }} className={`${inputCls} font-mono`} min={0} />
+              <label className="mb-1 block font-bold text-slate-600">Discount percent</label>
+              <input type="number" min={0} max={100} step={1} value={discountPercent} onChange={(event) => setDiscountPercent(Number(event.target.value || 0))} className={inputCls} />
             </div>
-            <div className="space-y-1">
-              <label className="block text-slate-600 font-bold mb-1">Discount (%)</label>
-              <input type="number" value={discountPercent} onChange={(e) => { const next = Number(e.target.value); setDiscountPercent(next); const nextNet = Math.max(0, safeSemesterFee - Math.round(safeSemesterFee * Math.max(0, next) / 100)); setInitialFee((current) => Math.min(current, nextNet)); }} className={`${inputCls} font-mono`} min={0} max={30} />
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-[11px] text-slate-600">
+              <p className="font-extrabold text-slate-800">No payment is collected here.</p>
+              <p className="mt-1">The server will fail closed if required fees are missing from configuration, and enrollment remains blocked until the required invoices are settled.</p>
             </div>
-            <div className="md:col-span-2 space-y-1">
-              <label className="block text-slate-600 font-bold mb-1">Amount paid today (AFN)</label>
-              <input type="number" value={initialFee} onChange={(e) => setInitialFee(Number(e.target.value))} className={`${inputCls} font-mono`} min={0} />
-            </div>
-
-            {/* Live Calculation Summary */}
-            <div className="md:col-span-2 bg-indigo-50/45 border border-indigo-100 rounded-2xl p-4 mt-2 grid grid-cols-3 gap-3 text-[11px]">
-              <div className="space-y-0.5">
-                <span className="text-slate-500 block font-bold">Gross Fee</span>
-                <span className="font-mono font-extrabold text-slate-800 text-sm">{safeSemesterFee.toLocaleString()} AFN</span>
-              </div>
-              <div className="space-y-0.5">
-                <span className="text-slate-500 block font-bold">Discount ({safeDiscount}%)</span>
-                <span className="font-mono font-extrabold text-rose-600 text-sm">{discountAmount.toLocaleString()} AFN</span>
-              </div>
-              <div className="space-y-0.5">
-                <span className="text-indigo-600 font-bold block">Remaining Debt</span>
-                <span className={`font-mono font-black text-sm ${remainingDebt > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                  {remainingDebt.toLocaleString()} AFN
-                </span>
-              </div>
+            <div className="space-y-1 md:col-span-2">
+              <label className="mb-1 block font-bold text-slate-600">Admission note</label>
+              <textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={4} className={`${inputCls} min-h-[110px]`} placeholder="Optional context for the student record" />
             </div>
           </>
         )}
 
-        {/* STEP 3: REVIEW & CONFIRM */}
         {step === 3 && (
-          <div className="md:col-span-2 space-y-4">
-            <div className="text-center bg-emerald-50 p-6 rounded-2xl border border-emerald-100">
-              <Check className="w-12 h-12 text-emerald-600 mx-auto mb-2" />
-              <h4 className="font-extrabold text-slate-900 text-sm">Review & Confirm Registration</h4>
-              <p className="text-slate-500 mt-1 text-[11px]">Please verify the details below before posting to the main account.</p>
-            </div>
-            
-            <div className="bg-slate-50 rounded-2xl p-4 grid grid-cols-2 gap-3 text-[11px] font-semibold">
-              <div><span className="text-slate-400 block">Student Name:</span> <span className="text-slate-900 font-bold">{fullName}</span></div>
-              <div><span className="text-slate-400 block">Father's Name:</span> <span className="text-slate-900 font-bold">{fatherName}</span></div>
-              <div><span className="text-slate-400 block">Phone:</span> <span className="text-slate-900 font-mono">{phone}</span></div>
-              <div><span className="text-slate-400 block">Branch:</span> <span className="text-slate-900">{branches.find(b=>b.id===(studentBranchId||activeBranchId))?.name}</span></div>
-              <div><span className="text-slate-400 block">Class:</span> <span className="text-slate-900">{classes.find(c=>c.id===assignedClassId)?.name || 'N/A'}</span></div>
-              <div><span className="text-slate-400 block">Tuition:</span> <span className="text-slate-900 font-mono">{safeSemesterFee.toLocaleString()} AFN</span></div>
-              <div><span className="text-slate-400 block">Paid Today:</span> <span className="text-emerald-600 font-mono">{safeInitialFee.toLocaleString()} AFN</span></div>
-              <div><span className="text-slate-400 block">Remaining Debt:</span> <span className="text-amber-600 font-mono">{remainingDebt.toLocaleString()} AFN</span></div>
+          <div className="space-y-4 md:col-span-2">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <h4 className="mb-3 text-sm font-black text-slate-900">Admission review</h4>
+              <div className="grid grid-cols-1 gap-3 text-[11px] font-semibold text-slate-700 md:grid-cols-2">
+                <div><span className="block text-slate-400">Student</span>{fullName}</div>
+                <div><span className="block text-slate-400">Phone</span>{phone}</div>
+                <div><span className="block text-slate-400">Branch</span>{branches.find((branch) => branch.id === (studentBranchId || activeBranchId))?.name || 'Current branch'}</div>
+                <div><span className="block text-slate-400">Intended class</span>{selectedClass?.name || 'To be assigned after placement'}</div>
+                <div><span className="block text-slate-400">Discount</span>{discountPercent}%</div>
+                <div><span className="block text-slate-400">Workflow</span>Admission → Placement → Invoice & Payment → Enrollment</div>
+              </div>
             </div>
           </div>
         )}
 
-        {/* Navigation Buttons */}
-        <div className="md:col-span-2 flex gap-2.5 mt-4">
-          <button 
-            type="button" 
-            onClick={() => (step === 1 ? onCancel() : prevStep())} 
-            className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 font-black py-3 rounded-xl transition-all cursor-pointer text-xs flex items-center justify-center gap-1"
-          >
-            {step === 1 ? 'Cancel' : <><ChevronLeft className="w-4 h-4" /> Back</>}
+        <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-4 md:col-span-2">
+          <button type="button" onClick={step === 1 ? onCancel : prevStep} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50">
+            <ChevronLeft className="h-4 w-4" /> {step === 1 ? 'Cancel' : 'Back'}
           </button>
-          
+
           {step < 3 ? (
-            <button 
-              type="button" 
-              onClick={nextStep} 
-              className="flex-[2] bg-indigo-600 hover:bg-indigo-700 text-white font-black py-3 rounded-xl transition-all cursor-pointer shadow-md shadow-indigo-900/15 text-xs flex items-center justify-center gap-1"
-            >
-              Next Step <ChevronRight className="w-4 h-4" />
+            <button type="button" onClick={nextStep} className="inline-flex items-center gap-1 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-700">
+              Next <ChevronRight className="h-4 w-4" />
             </button>
           ) : (
-            <button 
-              type="submit" 
-              className="flex-[2] bg-emerald-600 hover:bg-emerald-700 text-white font-black py-3 rounded-xl transition-all cursor-pointer shadow-md text-xs flex items-center justify-center gap-1"
-            >
-              <Check className="w-4 h-4" /> Save & Post Payment
+            <button type="submit" className="inline-flex items-center gap-1 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-700">
+              <Check className="h-4 w-4" /> Admit student
             </button>
           )}
         </div>

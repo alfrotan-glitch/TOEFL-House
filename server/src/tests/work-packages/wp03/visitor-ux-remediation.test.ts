@@ -58,8 +58,8 @@ function seedPrograms() {
   db.prepare(`INSERT OR IGNORE INTO placement_assessment_profiles
       (id, program_version_id, branch_id, components_json, scoring_model, allow_retake,
        pass_score, requirement_mode, first_level_exempt, max_attempts)
-      VALUES ('vux_pap','vux_pv',?,?,'weighted_average',1,50,'required',0,2)`)
-    .run(BRANCH_A, JSON.stringify([{ key: 'writing', type: 'written_test', label: 'Writing', weight: 100, maxScore: 100, required: true, order: 0 }]));
+      VALUES ('vux_pap','vux_pv',?,?,'canonical',1,50,'required',0,2)`)
+    .run(BRANCH_A, JSON.stringify([{ key: 'grammar', type: 'grammar', label: 'Grammar', required: true, weight: 25, maxScore: 30, bankIds: ['gate-grammar'], blueprintBuckets: [{ count: 30, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['mcq'] }] },{ key: 'reading', type: 'reading', label: 'Reading', required: true, weight: 16.67, maxScore: 20, bankIds: ['gate-reading'], blueprintBuckets: [{ count: 20, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['mcq'] }] },{ key: 'listening', type: 'listening', label: 'Listening', required: true, weight: 16.67, maxScore: 20, bankIds: ['gate-listening'], blueprintBuckets: [{ count: 20, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['mcq'] }] },{ key: 'writing', type: 'writing', label: 'Writing', required: true, weight: 20.83, maxScore: 25, bankIds: ['gate-writing'], blueprintBuckets: [{ count: 1, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['essay'] }] },{ key: 'speaking', type: 'speaking', label: 'Speaking', required: true, weight: 20.83, maxScore: 25, bankIds: ['gate-speaking'], blueprintBuckets: [{ count: 1, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['speaking'] }] }]));
 }
 
 /**
@@ -89,6 +89,14 @@ beforeAll(async () => {
   bootstrapRbacCatalog(db);
   db.prepare(`INSERT OR IGNORE INTO branches (id,name,location) VALUES (?, 'UX A', 'T')`).run(BRANCH_A);
   db.prepare(`INSERT OR IGNORE INTO branches (id,name,location) VALUES (?, 'UX B', 'T')`).run(BRANCH_B);
+  db.prepare(`
+    INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+    VALUES ('vux_registration_fee_a', ?, 'registration', 'Registration fee', 1500, 1, 1)
+  `).run(BRANCH_A);
+  db.prepare(`
+    INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+    VALUES ('vux_registration_fee_b', ?, 'registration', 'Registration fee', 1500, 1, 1)
+  `).run(BRANCH_B);
   seedPrograms();
 
   const pwd = await hashPassword('Str0ng!Pass2026');
@@ -249,7 +257,8 @@ describe('UX-1 — visitor totals are server-computed, never counted from a page
     seedVisitors([{ id: 'vux_vB2', name: 'Branch B Lead 2', phone: '0788000002', branch: BRANCH_B }]);
     const res = await supertest(app).get('/api/visitors/summary?branchId=all').set(authHeader(owner));
     expect(res.body.scope).toBe('organization');
-    expect(res.body.total).toBe(121);
+    const dbTotal = (db.prepare('SELECT COUNT(*) c FROM visitors WHERE branch_id IN (?, ?)').get(BRANCH_A, BRANCH_B) as { c: number }).c;
+    expect(res.body.total).toBe(dbTotal);
   });
 });
 
@@ -342,25 +351,27 @@ describe('UX-3 — conversion eligibility can be checked without attempting a wr
   });
 
   /**
-   * The preview must never disagree with the write path. If it did, it would be
-   * a second implementation of the placement invariant — the V-1 defect class.
+   * The preview now answers the ENROLLMENT question while POST /convert is
+   * admission-only. They no longer share a write contract, but they must still
+   * tell a coherent story: the lead may be admitted now and only enrolled into
+   * the governed class after placement clears the blocker.
    */
-  it('agrees with what POST /convert actually does', async () => {
+  it('can report a later enrollment blocker while admission itself still succeeds', async () => {
     const preview = await supertest(app)
       .get('/api/visitors/vux_vE/conversion-eligibility?classId=vux_cls')
       .set(authHeader(registrarA));
     const write = await supertest(app)
       .post('/api/visitors/vux_vE/convert')
       .set(authHeader(registrarA))
-      .send({ classId: 'vux_cls', amountPaid: 6000 });
+      .send({ classId: 'vux_cls' });
 
     expect(preview.body.eligible).toBe(false);
-    expect(write.status).toBe(400);
-    // Same rule, same words.
-    expect(String(write.body.error)).toBe(preview.body.reason);
+    expect(preview.body.code).toBe('placement_required');
+    expect(write.status).toBe(201);
+    expect((db.prepare("SELECT stage FROM visitors WHERE id='vux_vE'").get() as { stage: string }).stage).toBe('placement_booking');
   });
 
-  it('reports eligible for a class governed by no placement policy, and the write then succeeds', async () => {
+  it('reports eligible for a class governed by no placement policy, and admission then succeeds cleanly', async () => {
     // Detach the visitor program so nothing governs the ungoverned class.
     db.prepare(`UPDATE visitors SET program_version_id=NULL WHERE id='vux_vE'`).run();
     const preview = await supertest(app)
@@ -372,7 +383,7 @@ describe('UX-3 — conversion eligibility can be checked without attempting a wr
     const write = await supertest(app)
       .post('/api/visitors/vux_vE/convert')
       .set(authHeader(registrarA))
-      .send({ classId: 'vux_open', amountPaid: 0 });
+      .send({ classId: 'vux_open' });
     expect(write.status).toBe(201);
   });
 
@@ -391,13 +402,13 @@ describe('UX-3 — conversion eligibility can be checked without attempting a wr
     expect(res.body.code).toBe('placement_required');
     expect(res.body.requirementMode).toBe('required');
 
-    // And the write path refuses on the same grounds, as it must.
+    // Admission itself is still allowed; the preview specifically speaks for
+    // the later class enrollment step.
     const write = await supertest(app)
       .post('/api/visitors/vux_vE/convert')
       .set(authHeader(registrarA))
-      .send({ classId: 'vux_cls', amountPaid: 6000 });
-    expect(write.status).toBe(400);
-    expect(String(write.body.error)).toBe(res.body.reason);
+      .send({ classId: 'vux_cls' });
+    expect(write.status).toBe(201);
   });
 
   it('reports an already-converted lead as blocked outright', async () => {

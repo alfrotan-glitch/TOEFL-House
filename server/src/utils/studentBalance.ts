@@ -1,47 +1,11 @@
 /**
- * Student tuition balance — THE single authoritative definition.
+ * Student balance — ONE canonical student receivable authority.
  * ============================================================================
- * Before this module, five different places each re-derived "how much has this
- * student paid" with a different rule, and they disagreed:
- *
- *   StudentProfileDrawer  fee+installment+refund over ALL semesters
- *   StudentsView (list)   fee+installment+refund over ACTIVE semesters only
- *   StudentPortalView     fee+installment      over ACTIVE semesters (no refund!)
- *   bos dashboard         fee+installment      over ALL semesters (no refund!)
- *   checkAcademicHold     fee+installment+refund over ACTIVE semesters
- *
- * The same student could be shown 11,000 / 11,000 / 13,000 paid and a debt of
- * 2,000 / 2,000 / 0 depending on which screen you opened, and the dashboard
- * silently understated debt for every student who had ever been refunded.
- *
- * The rules, fixed once, here:
- *
- *   TUITION DUE   = SUM(COALESCE(net_fee_amount, fee_amount)) over the
- *                   semesters in scope. net_fee_amount is post-discount; the
- *                   gross amount overstates the debt of a discounted student.
- *
- *   TUITION PAID  = SUM(amount) over completed payments that are either a
- *                   'fee'/'installment' charge, or a refund THAT REVERSES ONE.
- *                   Refunds are stored SIGNED (negative), so including them
- *                   subtracts. Omitting them credits the student with money
- *                   that was handed back.
- *                   Non-tuition categories (book, card, exam, diploma,
- *                   placement, chapter, other) are excluded — they are real
- *                   income but they do not pay down tuition, and neither do
- *                   the refunds that reverse them. Counting every refund
- *                   against tuition made a refunded exam fee re-open tuition
- *                   debt the student did not owe (owner decision D-113:
- *                   `payments.refunds_payment_id` names what a refund
- *                   reverses).
- *
- *   OUTSTANDING   = MAX(0, due - paid). Never negative: an over-refunded or
- *                   over-paid student is a credit balance, reported separately
- *                   rather than as a negative debt.
- *
- * Scope: 'all' counts every semester (lifetime position, used on the profile);
- * 'active' counts only currently-active semesters (what the student owes right
- * now, used for enrollment holds and the roster list). Both are legitimate
- * questions — they just have to be asked explicitly instead of by accident.
+ * Tuition remains the semester/obligation-backed authority. Non-tuition money
+ * remains the invoice-backed authority. This module composes them into ONE
+ * student position so registration and placement invoices participate in the
+ * same balance truth as tuition without turning invoices into a second tuition
+ * engine.
  */
 import type { Database } from 'better-sqlite3';
 
@@ -53,25 +17,52 @@ import type { Database } from 'better-sqlite3';
 export const TUITION_PAYMENT_CATEGORIES = ['fee', 'installment', 'refund'] as const;
 
 export type BalanceScope = 'all' | 'active';
+export type NonTuitionPurpose = 'registration' | 'placement' | 'books' | 'exam' | 'other';
+
+export interface StudentNonTuitionBalanceRow {
+  purpose: NonTuitionPurpose;
+  due: number;
+  paid: number;
+  outstanding: number;
+  openInvoices: number;
+}
 
 export interface StudentBalance {
   /** Total tuition charged, post-discount, for the semesters in scope. */
   tuitionDue: number;
   /** Net tuition paid: fee + installment + refund (refunds are negative). */
   tuitionPaid: number;
-  /** MAX(0, due - paid). */
+  /** Tuition outstanding only. Preserved as the tuition authority. */
   outstanding: number;
-  /** MAX(0, paid - due) — money held beyond what was charged. */
+  /** Tuition credit only. */
   creditBalance: number;
-  /** 0-100, clamped. 100 when nothing was ever charged. */
+  /** 0-100 for tuition only, clamped. 100 when nothing was ever charged. */
   paidPercentage: number;
+  /** Invoice-backed charges that are not tuition. */
+  nonTuitionDue: number;
+  nonTuitionPaid: number;
+  nonTuitionOutstanding: number;
+  /** Whole student receivable position. */
+  totalDue: number;
+  totalPaid: number;
+  totalOutstanding: number;
+  totalCreditBalance: number;
+  /** Open non-draft, non-cancelled non-tuition invoices still carrying debt. */
+  openInvoices: number;
+  /** Per-purpose non-tuition rollup, e.g. registration vs placement. */
+  nonTuitionBreakdown: StudentNonTuitionBalanceRow[];
 }
 
-/** Derive the balance from already-computed totals. Pure — safe to unit test. */
-export function deriveBalance(tuitionDue: number, tuitionPaid: number): StudentBalance {
-  // Whole AFN (D-12/D-22): every stored money column is an INTEGER, so these
-  // sums are already canonical and re-rounding them here would be a second
-  // rounding authority.
+export interface StudentNonTuitionSummary {
+  nonTuitionDue: number;
+  nonTuitionPaid: number;
+  nonTuitionOutstanding: number;
+  openInvoices: number;
+  nonTuitionBreakdown: StudentNonTuitionBalanceRow[];
+}
+
+/** Derive the TUITION position from already-computed totals. Pure — unit safe. */
+function deriveTuitionPosition(tuitionDue: number, tuitionPaid: number) {
   const due = Number(tuitionDue) || 0;
   const paid = Number(tuitionPaid) || 0;
   return {
@@ -80,6 +71,42 @@ export function deriveBalance(tuitionDue: number, tuitionPaid: number): StudentB
     outstanding: Math.max(0, due - paid),
     creditBalance: Math.max(0, paid - due),
     paidPercentage: due > 0 ? Math.min(100, Math.max(0, Math.round((paid / due) * 100))) : 100,
+  };
+}
+
+/** Backwards-safe export name retained for callers/tests that derive tuition only. */
+export function deriveBalance(tuitionDue: number, tuitionPaid: number): StudentBalance {
+  return composeStudentBalance(tuitionDue, tuitionPaid, {
+    nonTuitionDue: 0,
+    nonTuitionPaid: 0,
+    nonTuitionOutstanding: 0,
+    openInvoices: 0,
+    nonTuitionBreakdown: [],
+  });
+}
+
+function composeStudentBalance(
+  tuitionDue: number,
+  tuitionPaid: number,
+  nonTuition: StudentNonTuitionSummary,
+): StudentBalance {
+  const tuition = deriveTuitionPosition(tuitionDue, tuitionPaid);
+  const nonTuitionDue = Number(nonTuition.nonTuitionDue) || 0;
+  const nonTuitionPaid = Number(nonTuition.nonTuitionPaid) || 0;
+  const nonTuitionOutstanding = Number(nonTuition.nonTuitionOutstanding) || 0;
+  const totalDue = tuition.tuitionDue + nonTuitionDue;
+  const totalPaid = tuition.tuitionPaid + nonTuitionPaid;
+  return {
+    ...tuition,
+    nonTuitionDue,
+    nonTuitionPaid,
+    nonTuitionOutstanding,
+    totalDue,
+    totalPaid,
+    totalOutstanding: tuition.outstanding + nonTuitionOutstanding,
+    totalCreditBalance: Math.max(0, totalPaid - totalDue),
+    openInvoices: Number(nonTuition.openInvoices) || 0,
+    nonTuitionBreakdown: nonTuition.nonTuitionBreakdown,
   };
 }
 
@@ -105,26 +132,14 @@ const TUITION_PAYMENT_SQL = `(
       ) IN (${TUITION_CHARGE_SQL}))
 )`;
 
-
 /**
  * SQL fragment: the instruments that settle tuition without moving cash.
- *
- * Scholarship and sponsorship money were both recognised as income when the
- * donation arrived, so applying either settles a term and writes no ledger row
- * (owner decisions D-120 and S6). `payment` is deliberately absent: cash is
- * attributed through `obligation_allocations`, and counting it here as well
- * would settle every cash term twice. Declared once, here, because two read paths
- * in this module and three in the obligation authority ask the same question,
- * and a copy that drifts silently changes what a student owes.
  */
 export const AID_SOURCE_KINDS_SQL = `('scholarship','sponsorship')`;
 
 /**
  * An ACTIVE cash allocation: the source-kind/status pairing every "settled in
- * cash" reader applies. Column references carry the `a.` alias so multi-join
- * aggregates (BOS revenue) and single-table readers (obligation positions)
- * share ONE expression of the rule, exactly as AID_SOURCE_KINDS_SQL does for
- * aid money.
+ * cash" reader applies.
  */
 export const CASH_ALLOCATION_SQL = "a.source_kind = 'payment' AND a.status = 'active'";
 
@@ -140,6 +155,143 @@ function studentScholarshipSettled(db: Database, studentId: string): number {
     )
     .get(studentId) as { total: number };
   return Number(row.total) || 0;
+}
+
+export const NON_TUITION_KIND_SQL = `COALESCE(i.charge_kind, CASE WHEN i.purpose IN ('books','exam') THEN i.purpose ELSE 'other' END)`;
+
+function mapPurpose(value: string): NonTuitionPurpose {
+  if (value === 'registration' || value === 'placement' || value === 'books' || value === 'exam') return value;
+  return 'other';
+}
+
+function emptyNonTuitionSummary(): StudentNonTuitionSummary {
+  return {
+    nonTuitionDue: 0,
+    nonTuitionPaid: 0,
+    nonTuitionOutstanding: 0,
+    openInvoices: 0,
+    nonTuitionBreakdown: [],
+  };
+}
+
+/**
+ * Invoice-backed, non-tuition receivables for one student.
+ *
+ * Tuition is deliberately excluded: tuition debt is semester/obligation truth,
+ * and counting invoices here would reintroduce the very duplicate authority the
+ * tuition settlement work removed.
+ */
+export function getStudentNonTuitionSummary(
+  db: Database,
+  studentId: string,
+  purposes?: readonly string[],
+): StudentNonTuitionSummary {
+  const filter = purposes && purposes.length > 0
+    ? `AND ${NON_TUITION_KIND_SQL} IN (${purposes.map(() => '?').join(',')})`
+    : `AND i.purpose <> 'tuition'`;
+  const rows = db.prepare(
+    `SELECT ${NON_TUITION_KIND_SQL} AS purpose,
+            COALESCE(SUM(i.net_amount), 0) AS due,
+            COALESCE(SUM(COALESCE((
+              SELECT SUM(p.amount) FROM payments p
+               WHERE p.invoice_id = i.id AND p.status = 'completed'
+            ), 0)), 0) AS paid,
+            COALESCE(SUM(MAX(0, i.net_amount - COALESCE((
+              SELECT SUM(p.amount) FROM payments p
+               WHERE p.invoice_id = i.id AND p.status = 'completed'
+            ), 0))), 0) AS outstanding,
+            COALESCE(SUM(CASE WHEN i.status IN ('issued','partial','overdue')
+              AND MAX(0, i.net_amount - COALESCE((
+                SELECT SUM(p.amount) FROM payments p
+                 WHERE p.invoice_id = i.id AND p.status = 'completed'
+              ), 0)) > 0
+            THEN 1 ELSE 0 END), 0) AS open_invoices
+       FROM invoices i
+      WHERE i.student_id = ?
+        AND i.status NOT IN ('draft', 'cancelled')
+        ${filter}
+      GROUP BY ${NON_TUITION_KIND_SQL}
+      ORDER BY ${NON_TUITION_KIND_SQL}`,
+  ).all(studentId, ...(purposes ?? [])) as Array<{
+    purpose: string;
+    due: number;
+    paid: number;
+    outstanding: number;
+    open_invoices: number;
+  }>;
+
+  const nonTuitionBreakdown = rows.map((row) => ({
+    purpose: mapPurpose(String(row.purpose)),
+    due: Number(row.due) || 0,
+    paid: Number(row.paid) || 0,
+    outstanding: Number(row.outstanding) || 0,
+    openInvoices: Number(row.open_invoices) || 0,
+  }));
+  return {
+    nonTuitionDue: nonTuitionBreakdown.reduce((sum, row) => sum + row.due, 0),
+    nonTuitionPaid: nonTuitionBreakdown.reduce((sum, row) => sum + row.paid, 0),
+    nonTuitionOutstanding: nonTuitionBreakdown.reduce((sum, row) => sum + row.outstanding, 0),
+    openInvoices: nonTuitionBreakdown.reduce((sum, row) => sum + row.openInvoices, 0),
+    nonTuitionBreakdown,
+  };
+}
+
+function getStudentNonTuitionSummariesByIds(
+  db: Database,
+  studentIds: readonly string[],
+): Map<string, StudentNonTuitionSummary> {
+  const ids = [...new Set(studentIds.filter(Boolean))];
+  const out = new Map<string, StudentNonTuitionSummary>();
+  if (ids.length === 0) return out;
+  const rows = db.prepare(
+    `SELECT i.student_id AS student_id,
+            ${NON_TUITION_KIND_SQL} AS purpose,
+            COALESCE(SUM(i.net_amount), 0) AS due,
+            COALESCE(SUM(COALESCE((
+              SELECT SUM(p.amount) FROM payments p
+               WHERE p.invoice_id = i.id AND p.status = 'completed'
+            ), 0)), 0) AS paid,
+            COALESCE(SUM(MAX(0, i.net_amount - COALESCE((
+              SELECT SUM(p.amount) FROM payments p
+               WHERE p.invoice_id = i.id AND p.status = 'completed'
+            ), 0))), 0) AS outstanding,
+            COALESCE(SUM(CASE WHEN i.status IN ('issued','partial','overdue')
+              AND MAX(0, i.net_amount - COALESCE((
+                SELECT SUM(p.amount) FROM payments p
+                 WHERE p.invoice_id = i.id AND p.status = 'completed'
+              ), 0)) > 0
+            THEN 1 ELSE 0 END), 0) AS open_invoices
+       FROM invoices i
+      WHERE i.student_id IN (SELECT value FROM json_each(?))
+        AND i.status NOT IN ('draft', 'cancelled')
+        AND i.purpose <> 'tuition'
+      GROUP BY i.student_id, ${NON_TUITION_KIND_SQL}`,
+  ).all(JSON.stringify(ids)) as Array<{
+    student_id: string;
+    purpose: string;
+    due: number;
+    paid: number;
+    outstanding: number;
+    open_invoices: number;
+  }>;
+
+  for (const row of rows) {
+    const current = out.get(row.student_id) ?? emptyNonTuitionSummary();
+    const mapped: StudentNonTuitionBalanceRow = {
+      purpose: mapPurpose(String(row.purpose)),
+      due: Number(row.due) || 0,
+      paid: Number(row.paid) || 0,
+      outstanding: Number(row.outstanding) || 0,
+      openInvoices: Number(row.open_invoices) || 0,
+    };
+    current.nonTuitionBreakdown = [...current.nonTuitionBreakdown, mapped];
+    current.nonTuitionDue += mapped.due;
+    current.nonTuitionPaid += mapped.paid;
+    current.nonTuitionOutstanding += mapped.outstanding;
+    current.openInvoices += mapped.openInvoices;
+    out.set(row.student_id, current);
+  }
+  return out;
 }
 
 /** Authoritative single-student balance, read straight from the database. */
@@ -160,9 +312,8 @@ export function getStudentBalance(db: Database, studentId: string, scope: Balanc
     )
     .get(studentId) as { total: number };
 
-  // Tuition is settled by cash AND by scholarship money; a student whose term a
-  // donor paid does not owe it (owner decision D-120).
-  return deriveBalance(due.total, Number(paid.total) + studentScholarshipSettled(db, studentId));
+  const tuitionPaid = Number(paid.total) + studentScholarshipSettled(db, studentId);
+  return composeStudentBalance(due.total, tuitionPaid, getStudentNonTuitionSummary(db, studentId));
 }
 
 /** One roster row: a student id plus their authoritative balance. */
@@ -171,23 +322,8 @@ export interface StudentBalanceRow extends StudentBalance {
 }
 
 /**
- * Balances for a page of the roster, in one query.
- *
- * The roster endpoint calls this rather than inlining its own copy of the SQL.
- * A second copy diverges silently: summing only `status = 'active'` semesters
- * while getStudentBalance('all') sums every semester makes the list and the
- * profile disagree the moment a semester completes. Both scopes are legitimate
- * questions, but they must come from ONE definition — this one.
- *
- * `scope` matches getStudentBalance exactly, so a row here always equals
- * getStudentBalance(db, id, scope) for the same student.
- */
-/**
- * Batch balances must equal getStudentBalance for the same student and scope:
- * tuition is settled by cash AND by aid money (D-120), so both terms are
- * summed here exactly as the single-student authority does — all tuition
- * obligations, active allocations, scholarship + sponsorship. Pinned by
- * server/src/tests/work-packages/wp07/cross-surface-money-agreement.test.ts.
+ * Balances for a page of the roster, in one query, then enriched with the same
+ * non-tuition receivable truth used by the single-student reader.
  */
 export function getStudentBalancesPage(
   db: Database,
@@ -227,7 +363,11 @@ export function getStudentBalancesPage(
     )
     .all(...params, limit, offset) as Array<{ student_id: string; tuition_due: number; tuition_paid: number }>;
 
-  return rows.map((r) => ({ studentId: r.student_id, ...deriveBalance(r.tuition_due, r.tuition_paid) }));
+  const nonTuitionByStudent = getStudentNonTuitionSummariesByIds(db, rows.map((row) => row.student_id));
+  return rows.map((row) => ({
+    studentId: row.student_id,
+    ...composeStudentBalance(row.tuition_due, row.tuition_paid, nonTuitionByStudent.get(row.student_id) ?? emptyNonTuitionSummary()),
+  }));
 }
 
 /** Authoritative balances for an explicit, already-authorized student set. */
@@ -263,24 +403,15 @@ export function getStudentBalancesByIds(
        ) aid ON aid.student_id = st.id
       WHERE st.id IN (SELECT value FROM json_each(?))`,
   ).all(JSON.stringify(ids)) as Array<{ student_id: string; tuition_due: number; tuition_paid: number }>;
+  const nonTuitionByStudent = getStudentNonTuitionSummariesByIds(db, ids);
   return rows.map((row) => ({
     studentId: row.student_id,
-    ...deriveBalance(row.tuition_due, row.tuition_paid),
+    ...composeStudentBalance(row.tuition_due, row.tuition_paid, nonTuitionByStudent.get(row.student_id) ?? emptyNonTuitionSummary()),
   }));
 }
 
 /**
  * Outstanding tuition for one branch, or for the whole organization.
- *
- * Sums per-student outstanding (each floored at zero) so one student's credit
- * balance cannot mask another's debt. Aid-aware by construction: it measures
- * what `student_semesters` bills against what has settled it, and a term
- * settled by a scholarship or a sponsorship is not outstanding.
- *
- * `branchId = null` means every branch. Expressed as one query rather than two
- * so the organization-wide figure can never drift from the per-branch one
- * (LAW 1) — the operations report and the executive dashboard read the same
- * definition of what students owe.
  */
 export function getBranchOutstanding(db: Database, branchId: string | null): number {
   const scope = branchId ? 'AND st.branch_id = ?' : '';
@@ -309,4 +440,26 @@ export function getBranchOutstanding(db: Database, branchId: string | null): num
     )
     .get(...params) as { outstanding: number };
   return Number(row.outstanding) || 0;
+}
+
+/** Outstanding NON-tuition receivables for one branch, or the whole organization. */
+export function getBranchNonTuitionOutstanding(db: Database, branchId: string | null): number {
+  const row = (branchId
+    ? db.prepare(
+      `SELECT COALESCE(SUM(MAX(0, i.net_amount - COALESCE((
+          SELECT SUM(p.amount) FROM payments p
+           WHERE p.invoice_id = i.id AND p.status = 'completed'
+        ), 0))), 0) AS remaining
+         FROM invoices i
+        WHERE i.branch_id = ? AND i.purpose <> 'tuition' AND i.status IN ('issued','partial','overdue')`
+    ).get(branchId)
+    : db.prepare(
+      `SELECT COALESCE(SUM(MAX(0, i.net_amount - COALESCE((
+          SELECT SUM(p.amount) FROM payments p
+           WHERE p.invoice_id = i.id AND p.status = 'completed'
+        ), 0))), 0) AS remaining
+         FROM invoices i
+        WHERE i.purpose <> 'tuition' AND i.status IN ('issued','partial','overdue')`
+    ).get()) as { remaining: number };
+  return Number(row.remaining) || 0;
 }

@@ -30,7 +30,7 @@ interface DashboardViewProps {
   mainAccountBalance: number;
   auditLogs: AuditLog[];
   activeRole: UserRole;
-  registerVisitorToStudent: (visitorId: string, classId: string, amountPaid: number, discountPercent: number) => Promise<any>;
+  registerVisitorToStudent: (visitorId: string, payload: { classId?: string; notes?: string; branchId?: string; programVersionId?: string; levelId?: string }) => Promise<any>;
   runSavingEngine: () => void;
   savingPercent: number;
   getExecutiveDashboard: (period?: string) => Promise<any>;
@@ -87,8 +87,7 @@ export default function DashboardView({
   
   const [quickRegVisitorId, setQuickRegVisitorId] = useState('');
   const [quickClassId, setQuickClassId] = useState('');
-  const [quickAmount, setQuickAmount] = useState(0);
-  const [quickDiscount, setQuickDiscount] = useState(0);
+  const [quickAdmissionNotes, setQuickAdmissionNotes] = useState('');
 
   useEffect(() => {
     if (toast) {
@@ -208,9 +207,9 @@ export default function DashboardView({
     if (!quickRegVisitorId || !quickClassId) return triggerToast('Select a visitor and a target class.', 'error');
     setIsEnrolling(true);
     try {
-      await registerVisitorToStudent(quickRegVisitorId, quickClassId, quickAmount, quickDiscount);
-      setQuickRegVisitorId(''); setQuickClassId(''); setQuickDiscount(0); setQuickAmount(0);
-      triggerToast('Visitor enrolled successfully.', 'success');
+      await registerVisitorToStudent(quickRegVisitorId, { classId: quickClassId, notes: quickAdmissionNotes || undefined });
+      setQuickRegVisitorId(''); setQuickClassId(''); setQuickAdmissionNotes('');
+      triggerToast('Visitor admitted successfully.', 'success');
     } catch (err: any) {
       triggerToast(err?.message || 'Enrollment failed', 'error');
     } finally {
@@ -557,20 +556,17 @@ export default function DashboardView({
                 </h3>
                 <form onSubmit={handleQuickRegister} className="space-y-3 mb-6">
                   <select value={quickRegVisitorId} onChange={(e) => setQuickRegVisitorId(e.target.value)} className="w-full rounded-xl border border-slate-200/80 bg-white/50 backdrop-blur-sm px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-all font-medium">
-                    <option value="">Select a Visitor to Enroll...</option>
+                    <option value="">Select a Visitor to Admit...</option>
                     {metrics.pendingLeadsList.map((v) => <option key={v.id} value={v.id}>{v.fullName} ({v.phone || 'No Phone'})</option>)}
                   </select>
                   <select value={quickClassId} onChange={(e) => setQuickClassId(e.target.value)} className="w-full rounded-xl border border-slate-200/80 bg-white/50 backdrop-blur-sm px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-all font-medium">
-                    <option value="">Assign to Class...</option>
+                    <option value="">Mark Intended Class...</option>
                     {activeClassOptions.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
-                  <div className="grid grid-cols-2 gap-3">
-                    <input type="number" placeholder="Amount Paid" value={quickAmount || ''} onChange={(e) => setQuickAmount(Number(e.target.value) || 0)} className="rounded-xl border border-slate-200/80 bg-white/50 backdrop-blur-sm px-4 py-3 text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-all tabular-nums" />
-                    <input type="number" placeholder="Discount %" value={quickDiscount || ''} onChange={(e) => setQuickDiscount(Number(e.target.value) || 0)} className="rounded-xl border border-slate-200/80 bg-white/50 backdrop-blur-sm px-4 py-3 text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-all tabular-nums" />
-                  </div>
+                  <textarea placeholder="Admission note (optional)" value={quickAdmissionNotes} onChange={(e) => setQuickAdmissionNotes(e.target.value)} className="w-full rounded-xl border border-slate-200/80 bg-white/50 backdrop-blur-sm px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-all font-medium min-h-[88px]" />
                   <button type="submit" disabled={isEnrolling} className="w-full bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-bold py-3 rounded-xl shadow-md hover:shadow-lg hover:from-indigo-700 hover:to-violet-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50">
                     {isEnrolling ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                    {isEnrolling ? 'Processing...' : 'Confirm Enrollment'}
+                    {isEnrolling ? 'Processing...' : 'Admit Student'}
                   </button>
                 </form>
                 <div className="border-t border-slate-200/50 pt-6">

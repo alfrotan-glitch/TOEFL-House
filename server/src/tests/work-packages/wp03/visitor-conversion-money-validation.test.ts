@@ -47,57 +47,33 @@ const visitorRouteSource = fs.readFileSync(
 );
 const overpays = (paid: number, net: number) => paid > net;
 
-describe('visitor conversion validates money', () => {
-  it('rejects a non-numeric semester fee instead of leaking a DB constraint error', () => {
+describe('visitor conversion no longer accepts money payloads', () => {
+  it('the legacy fee/paid coercion cases are still rejected at the money boundary helpers', () => {
     expect(() => resolveFee('abc', null)).toThrow(/finite number/i);
-  });
-
-  it('rejects a negative semester fee that would create a negative invoice', () => {
     expect(() => resolveFee(-6000, null)).toThrow(/negative/i);
-  });
-
-  it('rejects a non-numeric amount paid', () => {
-    // NaN < 0 is false, which is exactly why the old guard let this through.
-    expect(Number.isNaN(Number('abc'))).toBe(true);
-    expect(Number('abc') < 0).toBe(false);
     expect(() => resolvePaid('abc')).toThrow(/finite number/i);
-  });
-
-  it('rejects a negative amount paid', () => {
     expect(() => resolvePaid(-1)).toThrow(/negative/i);
-  });
-
-  it('rejects amounts beyond supported monetary precision', () => {
     expect(() => resolvePaid(1e15)).toThrow(/precision/i);
     expect(() => resolveFee('1e309', null)).toThrow(/finite number/i);
   });
 
-  it('refuses payment collected against a zero-fee enrolment', () => {
-    // The old guard was `paid > net && net > 0`, so a 0 fee accepted any sum.
-    expect(overpays(50_000, 0)).toBe(true);
-    // And the shipped route must not carry that escape hatch back.
-    expect(visitorRouteSource).toContain('if (paidNow > netTuition)');
-    expect(visitorRouteSource).not.toContain('paidNow > netTuition && netTuition > 0');
+  it('the visitor conversion route refuses any payment or tuition fields outright', () => {
+    expect(visitorRouteSource).toContain('Visitor admission no longer collects payment or creates enrollment directly');
+    expect(visitorRouteSource).toContain('amountPaid != null || discountPercent != null || semesterFee != null || paymentMethod != null');
   });
 
-  it('the route runs both money figures through assertMoney', () => {
-    expect(visitorRouteSource).toContain("assertMoney(amountPaid, 'received fee amount')");
-    expect(visitorRouteSource).toContain("'semester fee')");
-    // The coercion that started all of this must not return.
+  it('the old overpay arithmetic escape hatch cannot return because conversion performs no money arithmetic', () => {
+    expect(overpays(50_000, 0)).toBe(true);
+    expect(visitorRouteSource).not.toContain('paidNow > netTuition && netTuition > 0');
+    expect(visitorRouteSource).not.toContain('if (paidNow > netTuition)');
     expect(visitorRouteSource).not.toContain('Number(amountPaid) < 0');
   });
 
-  it('still refuses ordinary overpayment', () => {
-    expect(overpays(9_000, 6_000)).toBe(true);
-  });
-
-  it('allows a legitimate partial payment and an exact payment', () => {
-    expect(overpays(5_000, 6_000)).toBe(false);
-    expect(overpays(6_000, 6_000)).toBe(false);
-  });
-
-  it('falls back to the class fee when no semester fee is supplied', () => {
+  it('falls back to the class fee when no semester fee is supplied in the canonical enrollment flow helper', () => {
     expect(resolveFee(null, 6_000)).toBe(6_000);
     expect(resolveFee(undefined, undefined)).toBe(0);
+    expect(overpays(9_000, 6_000)).toBe(true);
+    expect(overpays(5_000, 6_000)).toBe(false);
+    expect(overpays(6_000, 6_000)).toBe(false);
   });
 });

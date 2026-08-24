@@ -4,23 +4,27 @@ import { assertMoney } from '../../utils/money.js';
 import {
   stmtAnyProfileForVersion,
   stmtGlobalProfile,
-  stmtPlacementRules,
   stmtProfile,
   stmtProgramVersion,
   stmtVersionLevels,
-  type PlacementComponentType,
+  type PlacementDecisionRule,
   type PolicyComponent,
   type RequirementMode,
-  type ScoringMethod,
 } from './store.js';
+import {
+  CEFR_LEVELS,
+  type PlacementComponentType,
+  type PlacementDeliveryMode,
+  CANONICAL_COMPONENT_KEYS,
+  CANONICAL_COMPONENT_WEIGHTS,
+  componentSpec,
+  isCefrLevel,
+  isDeliveryMode,
+} from './v1.js';
+import { assertBlueprintComponentShape } from './blueprint-engine.js';
 
-const COMPONENT_TYPES = new Set<PlacementComponentType>([
-  'skill_scores', 'written_test', 'interview', 'level_assessment', 'custom_score', 'content_test',
-]);
-const SKILLS = new Set(['grammar', 'vocabulary', 'reading', 'listening', 'writing', 'speaking']);
-const SCORING_MODELS = new Set(['weighted_average', 'average']);
-const CONDITION_FIELDS = new Set(['score', 'percentage']);
-const CONDITION_OPERATORS = new Set(['gte', 'lte', 'eq']);
+const SCORING_MODELS = new Set(['canonical']);
+const DELIVERY_MODE_SET = new Set<PlacementDeliveryMode>(['DIGITAL', 'PHYSICAL']);
 
 function finiteNumber(value: unknown, field: string, min?: number, max?: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value) || (min != null && value < min) || (max != null && value > max)) {
@@ -37,140 +41,139 @@ export function normalizeRequirementMode(value: unknown): RequirementMode {
   return value;
 }
 
-function scoringMethodFor(type: PlacementComponentType, value: unknown): ScoringMethod {
-  const defaultMethod: ScoringMethod = type === 'content_test' ? 'hybrid' : 'manual';
-  const method = value == null ? defaultMethod : String(value) as ScoringMethod;
-  if (!['auto', 'manual', 'hybrid'].includes(method)) {
-    throw new HttpError(400, 'scoringMethod must be auto, manual, or hybrid.');
+function scoringMethodFor(type: PlacementComponentType): 'auto' | 'manual' {
+  return type === 'grammar' || type === 'reading' || type === 'listening' ? 'auto' : 'manual';
+}
+
+function normalizeDeliveryModes(input: unknown): PlacementDeliveryMode[] {
+  if (input == null) return ['DIGITAL', 'PHYSICAL'];
+  if (!Array.isArray(input) || input.length === 0) throw new HttpError(400, 'deliveryModes must be a non-empty array.');
+  const modes = input.map((mode) => String(mode)) as PlacementDeliveryMode[];
+  if (modes.some((mode) => !isDeliveryMode(mode))) {
+    throw new HttpError(400, 'deliveryModes must contain only DIGITAL and PHYSICAL.');
   }
-  if (type !== 'content_test' && method !== 'manual') {
-    throw new HttpError(400, `${type} components use manual scoring.`);
+  const unique = [...new Set(modes)];
+  if (unique.length !== 2 || !unique.every((mode) => DELIVERY_MODE_SET.has(mode))) {
+    throw new HttpError(400, 'Placement V1 must enable exactly DIGITAL and PHYSICAL delivery modes.');
   }
-  return method;
+  return unique;
 }
 
 export function validatePolicyComponents(input: unknown, requirementMode: RequirementMode = 'required'): PolicyComponent[] {
   if (!Array.isArray(input)) throw new HttpError(400, 'components must be an array.');
-  if (requirementMode !== 'not_required' && input.length === 0) {
-    throw new HttpError(400, 'At least one placement component is required.');
+  if (requirementMode !== 'not_required' && input.length !== CANONICAL_COMPONENT_KEYS.length) {
+    throw new HttpError(400, 'Placement Test V1 requires exactly five canonical components.');
   }
   if (requirementMode === 'not_required' && input.length > 0) {
     throw new HttpError(400, 'A not_required placement policy cannot define assessment components.');
   }
+  if (requirementMode === 'not_required') return [];
 
-  const keys = new Set<string>();
   const components = input.map((raw: any, index): PolicyComponent => {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new HttpError(400, `Component ${index + 1} is invalid.`);
-    if (typeof raw.key !== 'string' || typeof raw.label !== 'string') throw new HttpError(400, `Component ${index + 1} key and label must be text.`);
-    const key = raw.key.trim();
-    const label = raw.label.trim();
-    const type = raw.type as PlacementComponentType;
-    if (!key || !/^[A-Za-z0-9_-]{1,80}$/.test(key)) throw new HttpError(400, `Component ${index + 1} requires a valid key.`);
-    if (keys.has(key)) throw new HttpError(400, `Duplicate component key: ${key}.`);
-    keys.add(key);
-    if (!label || label.length > 160) throw new HttpError(400, `Component ${key} requires a label no longer than 160 characters.`);
-    if (!COMPONENT_TYPES.has(type)) throw new HttpError(400, `Unsupported component type for ${key}.`);
-
-    if (raw.required !== undefined && typeof raw.required !== 'boolean') throw new HttpError(400, `${key}.required must be boolean.`);
-    const maxScore = finiteNumber(raw.maxScore, `${key}.maxScore`, 0.000001);
-    const weight = finiteNumber(raw.weight, `${key}.weight`, 0, 100);
-    const order = raw.order == null ? index : finiteNumber(raw.order, `${key}.order`, 0);
-    if (!Number.isSafeInteger(order)) throw new HttpError(400, `${key}.order must be a non-negative integer.`);
-    const minScore = raw.minScore == null ? null : finiteNumber(raw.minScore, `${key}.minScore`, 0, maxScore);
-    const durationMinutes = raw.durationMinutes == null ? undefined : finiteNumber(raw.durationMinutes, `${key}.durationMinutes`, 0.000001);
-    const timeLimitSeconds = raw.timeLimitSeconds == null
-      ? (durationMinutes == null ? null : Math.round(durationMinutes * 60))
-      : finiteNumber(raw.timeLimitSeconds, `${key}.timeLimitSeconds`, 1);
-    if (timeLimitSeconds != null && (!Number.isSafeInteger(timeLimitSeconds) || timeLimitSeconds < 1)) {
-      throw new HttpError(400, `${key}.timeLimitSeconds must be a positive whole number of seconds.`);
+    const type = String(raw.type || raw.key || '').trim() as PlacementComponentType;
+    if (!(CANONICAL_COMPONENT_KEYS as readonly string[]).includes(type)) {
+      throw new HttpError(400, `Placement component ${index + 1} must be one of ${CANONICAL_COMPONENT_KEYS.join(', ')}.`);
     }
-    const testId = raw.testId == null ? undefined : String(raw.testId).trim();
-    if (type === 'content_test' && !testId) throw new HttpError(400, `Content-test component ${key} requires testId.`);
-    if (type !== 'content_test' && testId) throw new HttpError(400, `Only content-test components may reference testId.`);
-
-    if (raw.instructions !== undefined && raw.instructions !== null && typeof raw.instructions !== 'string') {
-      throw new HttpError(400, `${key}.instructions must be text.`);
-    }
-    if (typeof raw.instructions === 'string' && raw.instructions.length > 2000) {
-      throw new HttpError(400, `${key}.instructions must be no longer than 2000 characters.`);
-    }
-
-    let skills: PolicyComponent['skills'];
-    if (raw.skills != null) {
-      if (type !== 'skill_scores' || !Array.isArray(raw.skills) || raw.skills.length === 0) {
-        throw new HttpError(400, `${key}.skills is only valid as a non-empty skill_scores list.`);
-      }
-      const values = raw.skills.map((skill: unknown) => String(skill));
-      if (new Set(values).size !== values.length || values.some((skill: string) => !SKILLS.has(skill))) {
-        throw new HttpError(400, `${key}.skills contains an invalid or duplicate skill.`);
-      }
-      skills = values as PolicyComponent['skills'];
-    }
-
-    return {
+    const spec = componentSpec(type);
+    const key = String(raw.key || type).trim();
+    if (key !== type) throw new HttpError(400, `${type} key must equal its canonical component code.`);
+    const label = typeof raw.label === 'string' && raw.label.trim() ? raw.label.trim() : spec.label;
+    const durationMinutes = raw.durationMinutes == null ? spec.defaultDurationMinutes : finiteNumber(raw.durationMinutes, `${key}.durationMinutes`, 0.000001);
+    const timeLimitSeconds = raw.timeLimitSeconds == null ? Math.round(durationMinutes * 60) : finiteNumber(raw.timeLimitSeconds, `${key}.timeLimitSeconds`, 1);
+    if (!Number.isSafeInteger(timeLimitSeconds)) throw new HttpError(400, `${key}.timeLimitSeconds must be a positive whole number of seconds.`);
+    const bankIds = Array.isArray(raw.bankIds) ? raw.bankIds.map((bankId: unknown) => String(bankId).trim()).filter(Boolean) : [];
+    const blueprintBuckets = Array.isArray(raw.blueprintBuckets) ? raw.blueprintBuckets : [];
+    const component: PolicyComponent = {
       key,
       type,
       label,
       required: raw.required !== false,
-      order,
-      weight,
-      maxScore,
-      minScore,
-      scoringMethod: scoringMethodFor(type, raw.scoringMethod),
+      order: index,
+      weight: CANONICAL_COMPONENT_WEIGHTS[type],
+      maxScore: spec.maxScore,
+      minScore: null,
+      scoringMethod: scoringMethodFor(type),
       durationMinutes,
       timeLimitSeconds,
-      instructions: raw.instructions == null ? null : raw.instructions,
-      skills,
-      testId,
+      instructions: raw.instructions == null ? null : String(raw.instructions),
+      bankIds,
+      blueprintBuckets,
     };
+    assertBlueprintComponentShape(component);
+    return component;
   });
 
-  const totalWeight = components.reduce((sum, component) => sum + component.weight, 0);
-  if (components.length > 0 && Math.abs(totalWeight - 100) > 0.01) {
-    throw new HttpError(400, `Component weights must total 100; received ${totalWeight}.`);
+  for (const key of CANONICAL_COMPONENT_KEYS) {
+    const matched = components.filter((component) => component.key === key);
+    if (matched.length !== 1) throw new HttpError(400, `Placement V1 requires exactly one ${key} component.`);
+    if (matched[0].required !== true) throw new HttpError(400, `${key} must be required in Placement Test V1.`);
+    const spec = componentSpec(key);
+    if (matched[0].maxScore !== spec.maxScore) throw new HttpError(400, `${key} maxScore must be ${spec.maxScore}.`);
   }
-  return components.sort((a, b) => a.order - b.order);
+
+  return components;
 }
 
-export function validateDecisionRules(input: unknown, components: PolicyComponent[], levelIds: Set<string>) {
-  if (input == null) return [];
-  if (!Array.isArray(input)) throw new HttpError(400, 'decisionRules must be an array.');
+export function validateDecisionRules(input: unknown, components: PolicyComponent[], levelIds: Set<string>): PlacementDecisionRule[] {
+  if (!Array.isArray(input) || input.length === 0) {
+    throw new HttpError(400, 'decisionRules must define the explicit CEFR placement rule set for A1 through C1.');
+  }
   const componentKeys = new Set(components.map((component) => component.key));
-  return input.map((raw: any, ruleIndex) => {
+  const seenLevels = new Set<string>();
+  const normalized = input.map((raw: any, ruleIndex): PlacementDecisionRule => {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new HttpError(400, `Decision rule ${ruleIndex + 1} is invalid.`);
-    const levelId = String(raw.levelId || '').trim();
-    if (!levelIds.has(levelId)) throw new HttpError(400, `Decision rule ${ruleIndex + 1} references a level outside this program.`);
-    if (raw.label !== undefined && raw.label !== null && (typeof raw.label !== 'string' || !raw.label.trim() || raw.label.trim().length > 160)) {
-      throw new HttpError(400, `Decision rule ${ruleIndex + 1} label must be non-empty text no longer than 160 characters.`);
+    const cefrLevel = String(raw.cefrLevel || '').trim();
+    if (!isCefrLevel(cefrLevel)) throw new HttpError(400, `Decision rule ${ruleIndex + 1} must declare CEFR level A1/A2/B1/B2/C1.`);
+    if (seenLevels.has(cefrLevel)) throw new HttpError(400, `Decision rule ${cefrLevel} is duplicated.`);
+    seenLevels.add(cefrLevel);
+    const recommendedLevelId = String(raw.recommendedLevelId || '').trim();
+    if (!levelIds.has(recommendedLevelId)) {
+      throw new HttpError(400, `Decision rule ${cefrLevel} references a recommended level outside this program.`);
     }
-    if (!Array.isArray(raw.when) || raw.when.length === 0) throw new HttpError(400, `Decision rule ${ruleIndex + 1} requires conditions.`);
-    const when = raw.when.map((condition: any, conditionIndex: number) => {
-      const componentKey = String(condition?.componentKey || '').trim();
-      const field = String(condition?.field || 'percentage');
-      const op = String(condition?.op || 'gte');
-      if (!componentKeys.has(componentKey)) throw new HttpError(400, `Decision condition references unknown component ${componentKey}.`);
-      if (!CONDITION_FIELDS.has(field) || !CONDITION_OPERATORS.has(op)) throw new HttpError(400, `Decision condition ${conditionIndex + 1} is invalid.`);
-      const value = finiteNumber(condition?.value, `Decision condition ${conditionIndex + 1}.value`);
-      if (field === 'percentage' && (value < 0 || value > 100)) throw new HttpError(400, 'Decision percentages must be between 0 and 100.');
-      const component = components.find((candidate) => candidate.key === componentKey)!;
-      if (field === 'score' && (value < 0 || value > component.maxScore)) throw new HttpError(400, `Decision score for ${componentKey} must be within its component range.`);
-      return { componentKey, field, op, value };
-    });
+    const minimumScores = raw.minimumScores;
+    if (!minimumScores || typeof minimumScores !== 'object' || Array.isArray(minimumScores)) {
+      throw new HttpError(400, `Decision rule ${cefrLevel} requires minimumScores for all five components.`);
+    }
+    const normalizedScores = {} as Record<PlacementComponentType, number>;
+    for (const component of components) {
+      const key = component.key as PlacementComponentType;
+      if (!componentKeys.has(key)) throw new HttpError(400, `Unknown component ${key}.`);
+      normalizedScores[key] = finiteNumber((minimumScores as Record<string, unknown>)[key], `${cefrLevel}.${key}`, 0, component.maxScore);
+    }
+    if (raw.label !== undefined && raw.label !== null && (typeof raw.label !== 'string' || !raw.label.trim() || raw.label.trim().length > 160)) {
+      throw new HttpError(400, `Decision rule ${cefrLevel} label must be non-empty text no longer than 160 characters.`);
+    }
     return {
-      levelId,
-      // levelId is the authority. A client-supplied levelCode would duplicate
-      // the level row and could drift; recommendation projections read the
-      // snapshotted level identified above.
+      cefrLevel,
+      recommendedLevelId,
+      minimumScores: normalizedScores,
       label: raw.label == null ? undefined : raw.label.trim(),
-      when,
     };
   });
+
+  for (const cefrLevel of CEFR_LEVELS) {
+    if (!seenLevels.has(cefrLevel)) throw new HttpError(400, `The CEFR rule set must include ${cefrLevel}.`);
+  }
+
+  const ordered = [...normalized].sort((left, right) => CEFR_LEVELS.indexOf(left.cefrLevel) - CEFR_LEVELS.indexOf(right.cefrLevel));
+  for (let index = 1; index < ordered.length; index += 1) {
+    const previous = ordered[index - 1];
+    const current = ordered[index];
+    for (const component of components) {
+      const key = component.key as PlacementComponentType;
+      if (current.minimumScores[key] < previous.minimumScores[key]) {
+        throw new HttpError(400, `Decision rule ${current.cefrLevel} cannot lower the ${key} threshold below ${previous.cefrLevel}.`);
+      }
+    }
+  }
+  return ordered;
 }
 
-export function validateScoringModel(value: unknown): 'weighted_average' | 'average' {
-  const model = value == null ? 'weighted_average' : String(value);
-  if (!SCORING_MODELS.has(model)) throw new HttpError(400, 'scoringModel must be weighted_average or average.');
-  return model as 'weighted_average' | 'average';
+export function validateScoringModel(value: unknown): 'canonical' {
+  const model = value == null ? 'canonical' : String(value);
+  if (!SCORING_MODELS.has(model)) throw new HttpError(400, 'scoringModel must be canonical.');
+  return 'canonical';
 }
 
 export function validatePositiveInteger(value: unknown, field: string, nullable = true, maximum = Number.MAX_SAFE_INTEGER): number | null {
@@ -256,7 +259,7 @@ export function resolvePolicyForVisitor(visitor: any, targetLevelId?: string | n
   const version = stmtProgramVersion.get(visitor.program_version_id) as any;
   const requirement = resolvePlacementRequirement(visitor.program_version_id, visitor.branch_id, targetLevelId);
   const profile = requirement.profile;
-  const ruleBranch = profile?.branch_id ?? visitor.branch_id;
-  const rules = version ? stmtPlacementRules.all(visitor.program_version_id, ruleBranch) as any[] : [];
-  return { version, profile, rules, requirement };
+  return { version, profile, rules: [], requirement };
 }
+
+export { normalizeDeliveryModes };

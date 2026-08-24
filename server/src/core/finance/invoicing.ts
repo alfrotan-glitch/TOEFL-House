@@ -173,8 +173,11 @@ export function assertTuitionInvoiceFits(
   }
 }
 
+export type InvoiceChargeKind = 'registration' | 'placement' | 'books' | 'exam' | 'other';
+
 export interface InvoiceAttribution {
   purpose: InvoicePurpose;
+  chargeKind: InvoiceChargeKind;
   /** The `payments.category` this collection is recorded under. */
   category: string;
   /** The term this collection settles, or null when it settles no term. */
@@ -190,13 +193,30 @@ export interface InvoiceAttribution {
  * settles whichever term happens to be open rather than the one that was
  * billed.
  */
+function normalizeInvoiceChargeKind(invoice: { purpose: unknown; charge_kind?: unknown }): InvoiceChargeKind {
+  if (typeof invoice.charge_kind === 'string' && ['registration', 'placement', 'books', 'exam', 'other'].includes(invoice.charge_kind)) {
+    return invoice.charge_kind as InvoiceChargeKind;
+  }
+  const purpose = assertInvoicePurpose(invoice.purpose);
+  if (purpose === 'books' || purpose === 'exam') return purpose;
+  return 'other';
+}
+
+function chargeKindPaymentCategory(kind: InvoiceChargeKind): string {
+  if (kind === 'books') return 'book';
+  if (kind === 'exam') return 'exam';
+  if (kind === 'placement') return 'placement';
+  return 'other';
+}
+
 export function invoicePaymentAttribution(
   db: Database,
-  invoice: { id: string; purpose: unknown; obligation_id: string | null },
+  invoice: { id: string; purpose: unknown; obligation_id: string | null; charge_kind?: unknown },
 ): InvoiceAttribution {
   const purpose = assertInvoicePurpose(invoice.purpose);
   if (purpose !== 'tuition') {
-    return { purpose, category: PURPOSE_PAYMENT_CATEGORY[purpose], semesterName: null, obligationId: null };
+    const chargeKind = normalizeInvoiceChargeKind(invoice);
+    return { purpose, chargeKind, category: chargeKindPaymentCategory(chargeKind), semesterName: null, obligationId: null };
   }
   if (!invoice.obligation_id) {
     throw new HttpError(409, 'This tuition invoice names no term and cannot accept payment.');
@@ -211,6 +231,7 @@ export function invoicePaymentAttribution(
   if (!row) throw new HttpError(409, 'The term this invoice bills no longer exists.');
   return {
     purpose,
+    chargeKind: 'other',
     category: PURPOSE_PAYMENT_CATEGORY.tuition,
     semesterName: row.semester_name,
     obligationId: invoice.obligation_id,

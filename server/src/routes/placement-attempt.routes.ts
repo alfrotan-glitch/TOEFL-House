@@ -1,7 +1,5 @@
 /**
- * Placement Attempt Router — attempt lifecycle with server-authoritative
- * timing, policy-mode resolution, auto/manual scoring, decision engine,
- * audited overrides and score corrections.
+ * Placement Attempt Router — canonical Placement Test V1 lifecycle.
  */
 import { Router } from 'express';
 import { db } from '../db/connection.js';
@@ -10,17 +8,39 @@ import { writeAudit } from '../middleware/audit.js';
 import { hasAnyRole } from '../core/rbac/rbac-service.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
-import { nextReceiptNumber } from '../utils/receipt.js';
 import { addNotification } from '../utils/notifications.js';
-import { recordIncome } from '../utils/income.js';
 import { resolveFee } from '../core/configuration/policy-resolver.js';
+import { nextInvoiceNumber } from '../utils/invoice.js';
+import { getJourneyEngine } from '../core/journey/journey-engine.js';
+import { JourneyEventType } from '../core/journey/event-types.js';
 import {
-  stmtAttempt, stmtCurrentAttempt, stmtAttempts, stmtResults, stmtInsertAttempt, stmtLastAttemptNumber,
-  stmtCompleteAttempt, stmtInsertPlacementFeePayment, stmtUpdateVisitorPlacement, stmtVisitorCompletedCount,
-  stmtUpsertResponse, stmtResponsesByAttemptTest, stmtTestById, stmtQuestionsByTest, stmtSectionsByTest,
-  stmtRubricById, stmtVersionLevels,
-  getVisitorOr404, assertVisitorBranchAccess, getUserContext, mapProfile, mapAttempt,
-  parseComponents, upsertResult, getRequiredMissing, type PolicyComponent,
+  stmtAttempt,
+  stmtCurrentAttempt,
+  stmtAttempts,
+  stmtResults,
+  stmtInsertAttempt,
+  stmtLastAttemptNumber,
+  stmtCompleteAttempt,
+  stmtUpdateVisitorPlacement,
+  stmtVisitorCompletedCount,
+  stmtUpsertResponse,
+  stmtResponsesByAttemptTest,
+  stmtTestById,
+  stmtQuestionsByTest,
+  stmtSectionsByTest,
+  stmtRubricById,
+  stmtVersionLevels,
+  getVisitorOr404,
+  assertVisitorBranchAccess,
+  getUserContext,
+  mapProfile,
+  mapAttempt,
+  parseComponents,
+  upsertResult,
+  getRequiredMissing,
+  type PolicyComponent,
+  type PlacementDecisionRule,
+  type PlacementDeliveryMode,
 } from '../core/placement/store.js';
 import {
   resolvePlacementRequirement,
@@ -31,17 +51,105 @@ import {
   validateScoringModel,
 } from '../core/placement/policy-engine.js';
 import {
-  assertAttemptEditable, expireAttemptIfNeeded, enforceComponentTimeout, recordSubmissionTiming,
-  startComponentTimer, pauseAttempt, resumeAttempt, componentTimingView, computeDeadline, nowIso, componentTimeLimitSeconds,
+  assertAttemptEditable,
+  expireAttemptIfNeeded,
+  enforceComponentTimeout,
+  recordSubmissionTiming,
+  startComponentTimer,
+  pauseAttempt,
+  resumeAttempt,
+  componentTimingView,
+  computeDeadline,
+  nowIso,
+  componentTimeLimitSeconds,
 } from '../core/placement/timing-engine.js';
 import { autoScoreQuestion, normalizeAutoScore, scoreProvenance, scoreComponentBody } from '../core/placement/scoring-engine.js';
 import { evaluateDecision, assertNoConflictingLevels, evaluateOutcome } from '../core/placement/decision-engine.js';
 import { readRetakePolicy, evaluateStartEligibility, evaluateBilling, WAIVED_STATUS } from '../core/placement/placement-policy.js';
 import { placementActivityReport } from '../core/placement/reporting.js';
+import { assembleComponentSnapshot, type SnapshotTest } from '../core/placement/blueprint-engine.js';
+import { placementPercentageFromResults } from '../core/placement/v1.js';
 
 export const placementAttemptRouter = Router();
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+type SnapshotShape = {
+  profile: ReturnType<typeof mapProfile>;
+  components: PolicyComponent[];
+  tests: SnapshotTest[];
+  requirementMode: string;
+  policyVersion: number;
+  decisionRules: PlacementDecisionRule[];
+  deliveryMode: PlacementDeliveryMode;
+  billingTerms: { baseFee: number; priorCompletedAttempts: number };
+  capturedAt: string;
+};
+
+type SnapshotBankRow = {
+  id: string;
+  title: string;
+  test_type: string;
+  instructions: string | null;
+  audio_url: string | null;
+  transcript: string | null;
+  passage: string | null;
+  status: string;
+  branch_id: string | null;
+  difficulty: string | null;
+  duration_seconds: number | null;
+  version: number;
+  rubric_id: string | null;
+  word_target: number | null;
+  sections: any[];
+  questions: any[];
+  rubric: { id: string; title: string; kind: string; version: number; criteria: unknown[] } | null;
+};
+
+const stmtGetStudentByLeadId = db.prepare('SELECT id, student_code, full_name, branch_id FROM students WHERE lead_id = ? LIMIT 1');
+
+function linkedStudentForVisitor(visitorId: string) {
+  return (stmtGetStudentByLeadId.get(visitorId) as { id: string; student_code: string; full_name: string; branch_id: string } | undefined) ?? null;
+}
+
+function syncStudentPlacementFromVisitor(visitorId: string) {
+  const student = linkedStudentForVisitor(visitorId);
+  if (!student) return null;
+  const visitor = getVisitorOr404(visitorId);
+  db.prepare('UPDATE students SET placement_score = ? WHERE id = ?').run(visitor.placement_score ?? null, student.id);
+  return student;
+}
+
+function placementJourneyPayload(resultSnapshot: string, recommendationText: string, outcome: 'passed' | 'failed') {
+  const parsed = JSON.parse(resultSnapshot) as Record<string, any>;
+  return {
+    overall: parsed.percentage ?? parsed.totalScore ?? null,
+    overallCefr: parsed.overallCefr ?? null,
+    outcome,
+    recommendedLevel: parsed.recommendation?.text ?? recommendationText,
+    recommendedLevelId: parsed.recommendation?.levelId ?? null,
+    deliveryMode: parsed.deliveryMode ?? null,
+    assessedAt: nowIso(),
+    scores: Object.fromEntries(
+      Array.isArray(parsed.results)
+        ? parsed.results.flatMap((result: Record<string, unknown>) => {
+            const key = String(result.component_key ?? result.key ?? '');
+            const value = typeof result.score === 'number' ? result.score : null;
+            return key && value != null ? [[key, value]] : [];
+          })
+        : [],
+    ),
+    componentEvidence: Array.isArray(parsed.componentEvidence) ? parsed.componentEvidence : [],
+  };
+}
+
+function placementInvoiceExistsForAttempt(studentId: string, attemptId: string): boolean {
+  const row = db.prepare(
+    `SELECT 1 FROM invoices
+      WHERE student_id = ? AND charge_kind = 'placement' AND notes = ?
+      LIMIT 1`,
+  ).get(studentId, `Placement assessment fee — attempt ${attemptId}`);
+  return Boolean(row);
+}
+
 function loadAttemptContext(req: any, visitorId: string, attemptId: string) {
   const visitor = getVisitorOr404(visitorId);
   assertVisitorBranchAccess(req, visitor);
@@ -50,11 +158,13 @@ function loadAttemptContext(req: any, visitorId: string, attemptId: string) {
   return { visitor, attempt };
 }
 
-function parseSnapshot(attempt: any) {
+function parseSnapshot(attempt: any): SnapshotShape {
   try {
-    const snapshot = JSON.parse(attempt.snapshot_json || '{}');
-    if (!snapshot || !Array.isArray(snapshot.components) || !Array.isArray(snapshot.tests)) throw new Error('invalid shape');
-    return snapshot;
+    const snapshot = JSON.parse(attempt.snapshot_json || '{}') as Partial<SnapshotShape>;
+    if (!snapshot || !Array.isArray(snapshot.components) || !Array.isArray(snapshot.tests) || !snapshot.profile) {
+      throw new Error('invalid shape');
+    }
+    return snapshot as SnapshotShape;
   } catch {
     throw new HttpError(409, 'Placement attempt snapshot is corrupted.');
   }
@@ -68,44 +178,13 @@ function validateStoredProfileForAttempt(profile: any, components: PolicyCompone
     validatePositiveInteger(profile.expires_minutes, 'expiresMinutes', true, 525600);
     validateMoney(profile.retake_fee_amount, 'retakeFeeAmount');
     validateScoringModel(profile.scoring_model);
-    if (typeof profile.pass_score !== 'number' || !Number.isFinite(profile.pass_score) || profile.pass_score < 0 || profile.pass_score > 100) {
+    if (typeof profile.pass_score !== 'number' || !Number.isFinite(profile.pass_score) || profile.pass_score < 0 || profile.pass_score > 120) {
       throw new Error('invalid pass score');
     }
     const decisionRules = profile.decision_rules_json == null ? [] : JSON.parse(profile.decision_rules_json);
     return validateDecisionRules(decisionRules, components, new Set(levels.map((level) => String(level.id))));
   } catch {
     throw new HttpError(409, 'Stored placement policy is invalid. Correct it in Academic Setup before starting an attempt.');
-  }
-}
-
-function snapshotContentTest(test: any) {
-  const rubric = test.rubric_id ? stmtRubricById.get(test.rubric_id) as any : null;
-  return {
-    id: test.id,
-    title: test.title,
-    test_type: test.test_type,
-    instructions: test.instructions,
-    audio_url: test.audio_url,
-    transcript: test.transcript,
-    passage: test.passage,
-    difficulty: test.difficulty,
-    duration_seconds: test.duration_seconds,
-    version: Number(test.version ?? 1),
-    rubric: rubric ? {
-      id: rubric.id,
-      title: rubric.title,
-      kind: rubric.kind,
-      version: Number(rubric.version ?? 1),
-      criteria: JSON.parse(rubric.criteria_json || '[]'),
-    } : null,
-    sections: stmtSectionsByTest.all(test.id),
-    questions: stmtQuestionsByTest.all(test.id),
-  };
-}
-
-function requireStartedTimer(component: PolicyComponent, result: any) {
-  if (componentTimeLimitSeconds(component) != null && !result?.started_at) {
-    throw new HttpError(409, `Start the server timer for "${component.label}" before submitting it.`);
   }
 }
 
@@ -127,36 +206,183 @@ function boundedText(value: unknown, field: string, maxLength: number, required 
   return normalized || null;
 }
 
-// ============================================================================
-// §VIEW — profile + requirement mode + attempts + live component timing
-// ============================================================================
+function parseDeliveryMode(value: unknown): PlacementDeliveryMode {
+  if (value !== 'DIGITAL' && value !== 'PHYSICAL') throw new HttpError(400, 'deliveryMode must be DIGITAL or PHYSICAL.');
+  return value;
+}
+
+function findComponent(snapshot: SnapshotShape, componentKey: string): PolicyComponent {
+  const component = snapshot.components.find((candidate) => candidate.key === componentKey);
+  if (!component) throw new HttpError(404, 'Assessment component not found.');
+  return component;
+}
+
+function findResult(attemptId: string, componentKey: string): any {
+  const result = (stmtResults.all(attemptId) as any[]).find((candidate) => candidate.component_key === componentKey);
+  if (!result) throw new HttpError(404, 'Component result not found.');
+  return result;
+}
+
+function findSnapshotTest(snapshot: SnapshotShape, component: PolicyComponent): SnapshotTest {
+  const test = snapshot.tests.find((candidate) => candidate.component_key === component.key || candidate.id === component.testId);
+  if (!test) throw new HttpError(404, 'Test content not found in the attempt snapshot.');
+  return test;
+}
+
+function loadSnapshotBank(bankId: string): SnapshotBankRow {
+  const bank = stmtTestById.get(bankId) as any;
+  if (!bank) throw new HttpError(409, `Configured placement bank ${bankId} no longer exists.`);
+  const rubric = bank.rubric_id ? stmtRubricById.get(bank.rubric_id) as any : null;
+  return {
+    ...bank,
+    sections: stmtSectionsByTest.all(bank.id) as any[],
+    questions: stmtQuestionsByTest.all(bank.id) as any[],
+    rubric: rubric ? {
+      id: rubric.id,
+      title: rubric.title,
+      kind: rubric.kind,
+      version: Number(rubric.version ?? 1),
+      criteria: JSON.parse(rubric.criteria_json || '[]'),
+    } : null,
+  };
+}
+
+function requireStartedTimer(component: PolicyComponent, result: any) {
+  if (componentTimeLimitSeconds(component) != null && !result?.started_at) {
+    throw new HttpError(409, `Start the server timer for "${component.label}" before submitting it.`);
+  }
+}
+
+function manualEntryAllowed(deliveryMode: PlacementDeliveryMode, component: PolicyComponent): boolean {
+  if (component.type === 'writing' || component.type === 'speaking') return true;
+  return deliveryMode === 'PHYSICAL';
+}
+
+function buildDecisionRulesJson(snapshot: SnapshotShape): string {
+  return JSON.stringify(snapshot.decisionRules || []);
+}
+
+function attemptMaxScore(components: PolicyComponent[]): number {
+  return Math.round(components.reduce((sum, component) => sum + Number(component.maxScore || 0), 0) * 100) / 100;
+}
+
+function computeAttemptTotalScore(results: any[]): number | null {
+  const scored = results.filter((result) => result.status === 'completed' && result.score != null);
+  if (scored.length === 0) return null;
+  return Math.round(scored.reduce((sum, result) => sum + Number(result.score || 0), 0) * 100) / 100;
+}
+
+function persistComponentCefrEvidence(attemptId: string, componentEvidence: Array<{ componentKey: string; cefrLevel: string | null }>) {
+  const update = db.prepare(`
+    UPDATE placement_assessment_results
+    SET cefr_level=?,
+        cefr_evidence_json=?,
+        updated_at=datetime('now')
+    WHERE attempt_id=? AND component_key=?
+  `);
+  for (const evidence of componentEvidence) {
+    const result = findResult(attemptId, evidence.componentKey);
+    const payload = JSON.stringify({
+      componentKey: evidence.componentKey,
+      score: result.score == null ? null : Number(result.score),
+      maxScore: result.max_score == null ? null : Number(result.max_score),
+      cefrLevel: evidence.cefrLevel,
+    });
+    update.run(evidence.cefrLevel, payload, attemptId, evidence.componentKey);
+  }
+}
+
+function updateVisitorPlacementFailure(profile: any, attemptId: string, visitorId: string, resultSnapshot: string) {
+  db.prepare(`
+    UPDATE visitors
+    SET placement_score=?, placement_method=?, placement_status='scheduled',
+        placement_status_at=datetime('now'), current_placement_attempt_id=NULL,
+        stage=CASE WHEN stage IN ('placement_completed','placement_fee') THEN 'placement_booking' ELSE stage END
+    WHERE id=?
+  `).run(resultSnapshot, String(profile.method || 'canonical_v1'), visitorId);
+}
+
+function normalizeResponseByType(question: any, response: unknown, visitorBranchId: string) {
+  if (question.qtype === 'mcq') {
+    const options = JSON.parse(String(question.options_json || '[]')) as Array<{ key: string }>;
+    const optionKeys = options.map((option) => String(option.key));
+    if (typeof response !== 'string' || !optionKeys.includes(response)) {
+      throw new HttpError(400, `Invalid option for question "${question.question_key}".`);
+    }
+    return response;
+  }
+  if (['short_answer', 'fill_blank', 'sentence_completion', 'error_identification', 'essay'].includes(String(question.qtype))) {
+    if (typeof response !== 'string' || !response.trim()) {
+      throw new HttpError(400, `Question "${question.question_key}" requires a text response.`);
+    }
+    return response.trim();
+  }
+  if (question.qtype === 'speaking') {
+    if (!response || typeof response !== 'object' || Array.isArray(response) || typeof (response as any).audioMediaId !== 'string') {
+      throw new HttpError(400, `Speaking question "${question.question_key}" requires an audio recording.`);
+    }
+    const media = db.prepare('SELECT id, branch_id, kind, mime FROM placement_media WHERE id = ?').get((response as any).audioMediaId) as { id: string; branch_id: string | null; kind: string; mime: string } | undefined;
+    if (!media) throw new HttpError(400, `Unknown audio media id "${(response as any).audioMediaId}" for speaking question "${question.question_key}".`);
+    if (media.branch_id && media.branch_id !== visitorBranchId) throw new HttpError(403, 'Audio media belongs to another branch.');
+    if (media.kind !== 'audio' || !String(media.mime).startsWith('audio/')) throw new HttpError(400, `Media id "${(response as any).audioMediaId}" is not an audio recording.`);
+    return response;
+  }
+  throw new HttpError(400, `Unsupported question type "${question.qtype}".`);
+}
+
 placementAttemptRouter.get('/visitors/:visitorId/placement', authorize('owner', 'receptionist', 'general_manager', 'counselor'), ah(async (req, res) => {
   const visitor = getVisitorOr404(req.params.visitorId);
   assertVisitorBranchAccess(req, visitor);
   const targetLevelId = typeof req.query.targetLevelId === 'string' ? req.query.targetLevelId : null;
-  const { version, profile, rules, requirement } = resolvePolicyForVisitor(visitor, targetLevelId);
+  const { version, profile, requirement } = resolvePolicyForVisitor(visitor, targetLevelId);
   const levels = version ? stmtVersionLevels.all(version.id, version.id) as any[] : [];
   const openAttempt = stmtCurrentAttempt.get(visitor.id) as any;
   if (openAttempt) expireAttemptIfNeeded(openAttempt);
   const current = stmtCurrentAttempt.get(visitor.id) as any;
+  const linkedStudent = linkedStudentForVisitor(visitor.id);
   res.json({
     visitorId: visitor.id,
     programVersionId: visitor.program_version_id,
-    requirement: { mode: requirement.mode, decision: requirement.decision, reason: requirement.reason, firstLevelExemptApplied: requirement.firstLevelExemptApplied, policySource: requirement.policySource },
-    profile: profile ? mapProfile(profile, version, levels, rules) : { configured: false, enabled: false, required: false, requirementMode: 'not_required', components: [], levels, placementRules: rules, allowRetake: true, passScore: 60, maxScore: 100, instructions: null },
-    attempts: (stmtAttempts.all(visitor.id) as any[]).map((a) => mapAttempt(a)),
+    linkedStudentId: linkedStudent?.id ?? null,
+    admissionRequired: !linkedStudent,
+    requirement: {
+      mode: requirement.mode,
+      decision: requirement.decision,
+      reason: requirement.reason,
+      firstLevelExemptApplied: requirement.firstLevelExemptApplied,
+      policySource: requirement.policySource,
+    },
+    profile: profile
+      ? mapProfile(profile, version, levels)
+      : {
+          configured: false,
+          enabled: false,
+          required: false,
+          requirementMode: 'not_required',
+          components: [],
+          levels,
+          decisionRules: [],
+          allowRetake: true,
+          passScore: 0,
+          maxScore: 120,
+          instructions: null,
+          scoringModel: 'canonical',
+          deliveryModes: ['DIGITAL', 'PHYSICAL'],
+        },
+    attempts: (stmtAttempts.all(visitor.id) as any[]).map((attempt) => mapAttempt(attempt)),
     current: current ? mapAttempt(current, true) : null,
   });
 }));
 
-// ============================================================================
-// §START — policy-mode gate, immutable snapshot, timers, expiry
-// ============================================================================
 placementAttemptRouter.post('/visitors/:visitorId/placement/attempts', authorize('owner', 'receptionist', 'general_manager', 'counselor'), ah(async (req, res) => {
   const user = getUserContext(req);
   const visitor = getVisitorOr404(req.params.visitorId);
   assertVisitorBranchAccess(req, visitor);
+  if (!linkedStudentForVisitor(visitor.id)) {
+    throw new HttpError(409, 'Admit this candidate to a student record before starting placement. Placement fees and balance authority now require the student financial identity first.');
+  }
   const targetLevelId = typeof req.body?.targetLevelId === 'string' ? req.body.targetLevelId : null;
+  const deliveryMode = parseDeliveryMode(req.body?.deliveryMode ?? 'DIGITAL');
   const requirement = resolvePlacementRequirement(visitor.program_version_id, visitor.branch_id, targetLevelId);
 
   if (requirement.decision === 'CONFIGURATION_ERROR') {
@@ -165,7 +391,6 @@ placementAttemptRouter.post('/visitors/:visitorId/placement/attempts', authorize
   if (requirement.mode === 'not_required') {
     throw new HttpError(400, `Placement is not required for this program (${requirement.reason}).`);
   }
-  // Optional mode: waiver and any open attempt close in the same transaction.
   if (requirement.mode === 'optional' && req.body?.skip === true) {
     const reason = boundedText(req.body?.reason, 'Waiver reason', 500, true)!;
     const current = stmtCurrentAttempt.get(visitor.id) as any;
@@ -190,82 +415,105 @@ placementAttemptRouter.post('/visitors/:visitorId/placement/attempts', authorize
     return;
   }
 
-  const { version, profile, rules } = resolvePolicyForVisitor(visitor, targetLevelId);
+  const { version, profile } = resolvePolicyForVisitor(visitor, targetLevelId);
   if (!profile || !version) throw new HttpError(409, 'Placement is required but no placement policy is configured for this program.');
   const levels = stmtVersionLevels.all(version.id, version.id) as any[];
   const components = parseComponents(profile);
   if (components.length === 0) throw new HttpError(409, 'Placement policy has no assessment components.');
   const validatedDecisionRules = validateStoredProfileForAttempt(profile, components, levels);
-  // Retake eligibility comes from the shared domain policy so the rule cannot
-  // drift from the conversion/billing logic. This check is the friendly error
-  // path; the hard guarantee is the partial unique index
-  // `uq_placement_open_attempt` (migration 070), which makes "at most one open
-  // attempt per visitor" atomic. Before that index, opening several attempts
-  // before completing any bypassed allowRetake=false entirely.
   const retakePolicy = readRetakePolicy(profile);
   const eligibility = evaluateStartEligibility(retakePolicy, Number((stmtVisitorCompletedCount.get(visitor.id) as any).c || 0));
   if (!eligibility.allowed) throw new HttpError(409, eligibility.reason);
 
-  const now = nowIso();
-  const startedAt = now;
+  const startedAt = nowIso();
   const expiresMinutes = profile.expires_minutes ? Number(profile.expires_minutes) : null;
   const expiresAt = expiresMinutes ? computeDeadline(startedAt, expiresMinutes * 60) : null;
+  const attemptNumber = Number((stmtLastAttemptNumber.get(visitor.id) as any).n || 0) + 1;
+  const attemptId = id('pat');
 
-  // Immutable snapshot: policy, answer-bearing test content, rubric versions and
-  // the billing terms resolved at start. Only mapAttempt's sanitized projection
-  // leaves the server boundary.
-  const contentTests: any[] = [];
+  const snapshotTests: SnapshotTest[] = [];
+  const snapshotComponents: PolicyComponent[] = [];
   for (const component of components) {
-    if (component.type !== 'content_test' || !component.testId) continue;
-    const test = stmtTestById.get(component.testId) as any;
-    if (!test || test.status !== 'active') throw new HttpError(409, `Placement test for component "${component.label}" is no longer active.`);
-    if (test.branch_id != null && test.branch_id !== visitor.branch_id && test.branch_id !== profile.branch_id) {
-      throw new HttpError(409, `Placement test for component "${component.label}" is outside the policy branch.`);
+    const banks = component.bankIds.map(loadSnapshotBank);
+    for (const bank of banks) {
+      if (bank.status !== 'active') throw new HttpError(409, `${component.label} bank "${bank.title}" is not active.`);
+      if (bank.test_type !== component.type) throw new HttpError(409, `${component.label} bank "${bank.title}" has the wrong component type.`);
+      if (bank.branch_id && bank.branch_id !== visitor.branch_id && bank.branch_id !== profile.branch_id) {
+        throw new HttpError(409, `${component.label} bank "${bank.title}" belongs to another branch.`);
+      }
     }
-    contentTests.push(snapshotContentTest(test));
+    const assembled = assembleComponentSnapshot({ attemptId, deliveryMode, component, banks });
+    snapshotComponents.push(assembled.component as PolicyComponent);
+    snapshotTests.push(assembled.test);
   }
+
   const priorCompletedAttempts = Number((stmtVisitorCompletedCount.get(visitor.id) as any).c || 0);
-  const resolvedBaseFee = Number(resolveFee(db, visitor.branch_id, 'placementTestFee') || 0);
-  if (!Number.isInteger(resolvedBaseFee) || resolvedBaseFee < 0) throw new HttpError(409, 'The configured placement fee is invalid.');
-  const profileSnapshot = { ...mapProfile(profile, version, levels, rules), decisionRules: validatedDecisionRules };
+  const resolvedBaseFee = resolveFee(db, visitor.branch_id, 'placementTestFee', {
+    programVersionId: version.id,
+  });
+  if (resolvedBaseFee != null && (!Number.isInteger(resolvedBaseFee) || resolvedBaseFee < 0)) {
+    throw new HttpError(409, 'The configured placement fee is invalid.');
+  }
+  const requiresBasePlacementFee =
+    (priorCompletedAttempts === 0 && retakePolicy.firstAttemptBillable) ||
+    (priorCompletedAttempts > 0 && retakePolicy.retakeBillable && retakePolicy.retakeFeeAmount == null);
+  if (requiresBasePlacementFee && resolvedBaseFee == null) {
+    throw new HttpError(409, 'No active placement fee is configured for this branch/program. Configure it in Academic Control Center before starting a billable attempt.');
+  }
+  const profileSnapshot = mapProfile(profile, version, levels);
   const snapshot = JSON.stringify({
     profile: profileSnapshot,
-    components,
-    tests: contentTests,
+    components: snapshotComponents,
+    tests: snapshotTests,
     requirementMode: requirement.mode,
     policyVersion: Number(profile.version ?? 1),
     decisionRules: validatedDecisionRules,
-    billingTerms: { baseFee: resolvedBaseFee, priorCompletedAttempts },
+    deliveryMode,
+    billingTerms: { baseFee: resolvedBaseFee ?? 0, priorCompletedAttempts },
     capturedAt: startedAt,
-  });
+  } satisfies SnapshotShape);
 
-  const attemptNumber = Number((stmtLastAttemptNumber.get(visitor.id) as any).n || 0) + 1;
-  const attemptId = id('pat');
   const insertAttempt = db.transaction(() => {
-    stmtInsertAttempt.run(attemptId, visitor.id, visitor.program_version_id, profile.id, visitor.branch_id, attemptNumber, snapshot, user.userId, null, expiresAt, Number(profile.version ?? 1));
-    for (const c of components) {
+    stmtInsertAttempt.run(
+      attemptId,
+      visitor.id,
+      visitor.program_version_id,
+      profile.id,
+      visitor.branch_id,
+      attemptNumber,
+      snapshot,
+      user.userId,
+      null,
+      expiresAt,
+      Number(profile.version ?? 1),
+      deliveryMode,
+    );
+    for (const component of snapshotComponents) {
       upsertResult({
-        attemptId, key: c.key, type: c.type, label: c.label, status: 'pending', score: null,
-        maxScore: c.maxScore, weight: c.weight, evaluatorUserId: user.userId,
-        startedAt: null, deadlineAt: null,
+        attemptId,
+        key: component.key,
+        type: component.type,
+        label: component.label,
+        status: 'pending',
+        score: null,
+        maxScore: component.maxScore,
+        weight: component.weight,
+        evaluatorUserId: user.userId,
+        startedAt: null,
+        deadlineAt: null,
       });
     }
-    db.prepare(`UPDATE visitors SET placement_status='in_progress', placement_status_at=datetime('now'), placement_requirement_mode=?, placement_method=?, current_placement_attempt_id=?, stage=CASE WHEN stage IN ('lead','inquiry','follow_up','placement_booking') THEN 'placement_booking' ELSE stage END WHERE id=?`)
-      .run(requirement.mode, profileSnapshot.method, attemptId, visitor.id);
+    db.prepare(`
+      UPDATE visitors
+      SET placement_status='in_progress', placement_status_at=datetime('now'), placement_requirement_mode=?,
+          placement_method=?, current_placement_attempt_id=?,
+          stage=CASE WHEN stage IN ('lead','inquiry','follow_up','placement_booking') THEN 'placement_booking' ELSE stage END
+      WHERE id=?
+    `).run(requirement.mode, profileSnapshot.method, attemptId, visitor.id);
   });
   try {
     insertAttempt();
   } catch (err) {
-    // The database is the authority on both placement uniqueness invariants:
-    //   uq_placement_open_attempt      — one open attempt per visitor
-    //   UNIQUE(visitor_id, attempt_number) — no duplicate attempt numbering
-    // Concurrent or duplicated requests land here; surface a precise 409
-    // instead of leaking a raw SQLITE_CONSTRAINT error as a 500/400.
-    // SQLite reports the offending COLUMNS, not the index name, e.g.
-    //   "UNIQUE constraint failed: placement_assessment_attempts.visitor_id"
-    //        → uq_placement_open_attempt (one open attempt per visitor)
-    //   "...visitor_id, placement_assessment_attempts.attempt_number"
-    //        → UNIQUE(visitor_id, attempt_number) (numbering race)
     const e = err as { code?: string; message?: string } | null;
     if (e?.code === 'SQLITE_CONSTRAINT_UNIQUE') {
       const message = String(e.message ?? '');
@@ -278,192 +526,221 @@ placementAttemptRouter.post('/visitors/:visitorId/placement/attempts', authorize
     }
     throw err;
   }
-  writeAudit(req, `Started placement assessment for ${visitor.full_name} (policy v${profile.version ?? 1}, mode ${requirement.mode})`, { newValue: JSON.stringify({ attemptId, policyVersion: profile.version ?? 1, expiresAt }) });
+
+  writeAudit(req, `Started placement assessment for ${visitor.full_name} (policy v${profile.version ?? 1}, mode ${requirement.mode}, delivery ${deliveryMode})`, { newValue: JSON.stringify({ attemptId, policyVersion: profile.version ?? 1, expiresAt, deliveryMode }) });
   res.status(201).json(mapAttempt(stmtAttempt.get(attemptId)));
 }));
 
-// ============================================================================
-// §TIMER — start a component's server timer (idempotent)
-// ============================================================================
 placementAttemptRouter.put('/visitors/:visitorId/placement/attempts/:attemptId/tests/:componentKey/start', authorize('owner', 'receptionist', 'general_manager', 'counselor'), ah(async (req, res) => {
   const user = getUserContext(req);
   const { visitor, attempt } = loadAttemptContext(req, req.params.visitorId, req.params.attemptId);
   assertAttemptEditable(attempt);
   const snapshot = parseSnapshot(attempt);
-  const component = snapshot.components.find((c: any) => c.key === req.params.componentKey);
-  if (!component) throw new HttpError(404, 'Assessment component not found.');
-  const result = (stmtResults.all(attempt.id) as any[]).find((r) => r.component_key === component.key);
-  if (!result) throw new HttpError(404, 'Component result not found.');
-  if (['completed', 'waived', 'timed_out'].includes(result.status)) throw new HttpError(409, 'This assessment component is already closed.');
+  const component = findComponent(snapshot, req.params.componentKey);
+  const result = findResult(attempt.id, component.key);
+  if (['completed', 'waived', 'timed_out'].includes(String(result.status))) throw new HttpError(409, 'This assessment component is already closed.');
   startComponentTimer(attempt.id, component.key, component, result, user.userId);
   writeAudit(req, `Started placement component timer "${component.label}" for ${visitor.full_name}`);
-  const updated = (stmtResults.all(attempt.id) as any[]).find((r) => r.component_key === component.key);
+  const updated = findResult(attempt.id, component.key);
   res.json({ componentKey: component.key, ...componentTimingView(component, updated) });
 }));
 
-// ============================================================================
-// §RESPONSES — candidate answers + auto-scoring + timing enforcement
-// ============================================================================
 placementAttemptRouter.put('/visitors/:visitorId/placement/attempts/:attemptId/tests/:componentKey/responses', authorize('owner', 'receptionist', 'general_manager', 'counselor'), ah(async (req, res) => {
   const user = getUserContext(req);
   const { visitor, attempt } = loadAttemptContext(req, req.params.visitorId, req.params.attemptId);
   assertAttemptEditable(attempt);
   const snapshot = parseSnapshot(attempt);
-  const component = snapshot.components.find((c: PolicyComponent) => c.key === req.params.componentKey);
-  if (!component || component.type !== 'content_test' || !component.testId) throw new HttpError(404, 'Content assessment component not found.');
-  const test = (snapshot.tests || []).find((t: any) => t.id === component.testId);
-  if (!test) throw new HttpError(404, 'Test content not found in the attempt snapshot.');
-  const result = (stmtResults.all(attempt.id) as any[]).find((r) => r.component_key === component.key);
-  if (!result) throw new HttpError(404, 'Component result not found.');
-  if (['completed', 'waived', 'timed_out'].includes(result.status)) throw new HttpError(409, 'This assessment component is already closed.');
+  const component = findComponent(snapshot, req.params.componentKey);
+  if (!['grammar', 'reading', 'listening', 'writing', 'speaking'].includes(component.type)) {
+    throw new HttpError(404, 'Content assessment component not found.');
+  }
+  if (attempt.delivery_mode !== 'DIGITAL') throw new HttpError(409, 'Direct response capture is only available for DIGITAL delivery mode.');
+  const test = findSnapshotTest(snapshot, component);
+  const result = findResult(attempt.id, component.key);
+  if (['completed', 'waived', 'timed_out'].includes(String(result.status))) throw new HttpError(409, 'This assessment component is already closed.');
   requireStartedTimer(component, result);
 
-  // Enforce the server-side timer BEFORE accepting anything.
   const { elapsedSeconds } = recordSubmissionTiming(attempt.id, component.key, component, result);
-
   if (!Array.isArray(req.body?.answers)) throw new HttpError(400, 'answers must be an array.');
-  const answers = req.body.answers;
+  const answers = req.body.answers as Array<{ questionKey?: string; response?: unknown }>;
   if (answers.length === 0) throw new HttpError(400, 'Submit at least one answer.');
-  const submittedKeys = answers.map((answer: any) => String(answer?.questionKey ?? ''));
-  if (submittedKeys.some((key: string) => !key) || new Set(submittedKeys).size !== submittedKeys.length) {
+  const submittedKeys = answers.map((answer) => String(answer?.questionKey ?? ''));
+  if (submittedKeys.some((key) => !key) || new Set(submittedKeys).size !== submittedKeys.length) {
     throw new HttpError(400, 'Each submitted answer must have a unique questionKey.');
   }
-  const feedbacks: Record<string, string> = {};
-  // ATOMIC: every submitted answer plus the component result derived from them
-  // is one submission. A partial write (some answers stored, the derived score
-  // not updated) would leave the component's recorded score disagreeing with
-  // the responses it was computed from.
+
   let stored: any[] = [];
   let earned = 0;
   let max = 0;
   let answered = 0;
-  let autoComplete = false;
+  let complete = false;
+  const feedbacks: Record<string, string> = {};
   const applySubmission = db.transaction(() => {
-  for (const a of answers) {
-    const q = test.questions.find((tq: any) => String(tq.question_key) === String(a?.questionKey));
-    if (!q) throw new HttpError(400, `Unknown question key "${a?.questionKey}" in test "${test.title}".`);
-    const response = a?.response;
-    if (response === undefined || response === null || response === '') throw new HttpError(400, `Question "${q.question_key}" requires a response.`);
-    if (q.qtype === 'mcq') {
-      const optionKeys = (JSON.parse(q.options_json || '[]') as any[]).map((option) => String(option.key));
-      if (typeof response !== 'string' || !optionKeys.includes(response)) throw new HttpError(400, `Invalid option for question "${q.question_key}".`);
-    } else if (q.qtype === 'short_answer' || q.qtype === 'essay') {
-      if (typeof response !== 'string' || !response.trim()) throw new HttpError(400, `Question "${q.question_key}" requires a text response.`);
-    } else if (q.qtype === 'speaking') {
-      if (!response || typeof response !== 'object' || Array.isArray(response) || typeof (response as any).audioMediaId !== 'string') {
-        throw new HttpError(400, `Speaking question "${q.question_key}" requires an audio recording.`);
+    for (const answer of answers) {
+      const question = test.questions.find((candidate) => String(candidate.question_key) === String(answer.questionKey));
+      if (!question) throw new HttpError(400, `Unknown question key "${answer.questionKey}" in test "${test.title}".`);
+      const normalizedResponse = normalizeResponseByType(question, answer.response, visitor.branch_id);
+      const graded = autoScoreQuestion(question, normalizedResponse);
+      feedbacks[String(question.question_key)] = graded.feedback;
+      stmtUpsertResponse.run(
+        id('pr'),
+        attempt.id,
+        test.id,
+        question.id,
+        question.question_key,
+        JSON.stringify(normalizedResponse),
+        graded.score,
+        Number(question.points || 0),
+        graded.feedback,
+      );
+    }
+
+    stored = stmtResponsesByAttemptTest.all(attempt.id, test.id) as any[];
+    const storedByKey = new Map(stored.map((row) => [String(row.question_key), row]));
+    earned = 0;
+    max = 0;
+    answered = 0;
+    for (const question of test.questions) {
+      const points = Number(question.points || 0);
+      max += points;
+      const row = storedByKey.get(String(question.question_key));
+      if (row) {
+        answered += 1;
+        earned += Number(row.auto_score || 0);
       }
     }
-    // Speaking answers attach a recorded-audio media reference (validated
-    // server-side: the media must exist and belong to the candidate branch or be global).
-    if (q.qtype === 'speaking') {
-      const media = db.prepare('SELECT id, branch_id, kind, mime FROM placement_media WHERE id = ?').get((response as any).audioMediaId) as { id: string; branch_id: string | null; kind: string; mime: string } | undefined;
-      if (!media) throw new HttpError(400, `Unknown audio media id "${(response as any).audioMediaId}" for speaking question "${q.question_key}".`);
-      if (media.branch_id && media.branch_id !== visitor.branch_id) {
-        throw new HttpError(403, 'Audio media belongs to another branch.');
-      }
-      if (media.kind !== 'audio' || !String(media.mime).startsWith('audio/')) {
-        throw new HttpError(400, `Media id "${(response as any).audioMediaId}" is not an audio recording.`);
-      }
+    const allAnswered = answered === test.questions.length;
+    const requiresHumanScoring = component.type === 'writing' || component.type === 'speaking' || test.questions.some((question) => question.qtype === 'essay' || question.qtype === 'speaking');
+    complete = allAnswered && !requiresHumanScoring;
+
+    if (complete) {
+      const normalizedScore = normalizeAutoScore(earned, max, component.maxScore);
+      const provenance = scoreProvenance(normalizedScore, component.maxScore, component.weight);
+      upsertResult({
+        attemptId: attempt.id,
+        key: component.key,
+        type: component.type,
+        label: component.label,
+        status: 'completed',
+        score: normalizedScore,
+        maxScore: component.maxScore,
+        weight: component.weight,
+        evaluatorUserId: user.userId,
+        rawScore: earned,
+        percentage: provenance.percentage,
+        weightedScore: provenance.weightedScore,
+        payloadJson: JSON.stringify({ mode: 'auto', earned, max, answered, total: test.questions.length, testId: test.id, testVersion: test.version }),
+        submittedAt: nowIso(),
+        elapsedSeconds,
+      });
+    } else {
+      upsertResult({
+        attemptId: attempt.id,
+        key: component.key,
+        type: component.type,
+        label: component.label,
+        status: result.started_at ? 'in_progress' : 'pending',
+        score: null,
+        maxScore: component.maxScore,
+        weight: component.weight,
+        evaluatorUserId: user.userId,
+        payloadJson: JSON.stringify({ mode: 'capture', earned, max, answered, total: test.questions.length, testId: test.id, testVersion: test.version }),
+        submittedAt: allAnswered ? nowIso() : null,
+        elapsedSeconds: allAnswered ? elapsedSeconds : null,
+      });
     }
-    const graded = autoScoreQuestion(q, response);
-    feedbacks[String(q.question_key)] = graded.feedback;
-    stmtUpsertResponse.run(id('pr'), attempt.id, test.id, q.id, q.question_key, JSON.stringify(response), graded.score, Number(q.points || 0), graded.feedback);
-  }
-
-  // Component state derives from ALL stored responses (server truth).
-  stored = stmtResponsesByAttemptTest.all(attempt.id, test.id) as any[];
-  const storedByKey = new Map(stored.map((r) => [String(r.question_key), r]));
-  earned = 0;
-  max = 0;
-  answered = 0;
-  for (const q of test.questions) {
-    const pts = Number(q.points || 0);
-    max += pts;
-    const row = storedByKey.get(String(q.question_key));
-    if (row) { answered += 1; earned += Number(row.auto_score || 0); }
-  }
-  const allAnswered = answered === test.questions.length;
-  const hasManual = test.questions.some((q: any) => q.qtype === 'essay' || q.qtype === 'speaking');
-  autoComplete = allAnswered && !hasManual;
-  const autoResult = normalizeAutoScore(earned, max, component.maxScore);
-
-  if (autoComplete) {
-    const prov = scoreProvenance(autoResult, component.maxScore, component.weight);
-    upsertResult({
-      attemptId: attempt.id, key: component.key, type: component.type, label: component.label,
-      status: 'completed', score: autoResult, maxScore: component.maxScore, weight: component.weight,
-      evaluatorUserId: user.userId, rawScore: earned, percentage: prov.percentage, weightedScore: prov.weightedScore,
-      payloadJson: JSON.stringify({ mode: 'auto', earned, max, testId: test.id, testVersion: test.version ?? 1 }),
-      submittedAt: nowIso(), elapsedSeconds,
-    });
-  } else {
-    upsertResult({
-      attemptId: attempt.id, key: component.key, type: component.type, label: component.label,
-      status: result.started_at ? 'in_progress' : 'pending', score: null, maxScore: component.maxScore, weight: component.weight,
-      evaluatorUserId: user.userId,
-      payloadJson: JSON.stringify({ mode: 'auto', earned, max, answered, total: test.questions.length, testId: test.id, testVersion: test.version ?? 1 }),
-      submittedAt: allAnswered ? nowIso() : null, elapsedSeconds: allAnswered ? elapsedSeconds : null,
-    });
-  }
   });
   applySubmission();
 
-  writeAudit(req, `Recorded content responses for ${visitor.full_name} on test "${test.title}" (${answered}/${test.questions.length} answered, ${earned}/${max} auto points)`);
+  writeAudit(req, `Recorded placement responses for ${visitor.full_name} on ${component.label} (${answered}/${test.questions.length} answered)`);
+  const updated = findResult(attempt.id, component.key);
   res.json({
     componentKey: component.key,
-    answered, total: test.questions.length,
-    autoScore: earned, maxScore: max,
-    complete: autoComplete,
-    timing: componentTimingView(component, stmtResults.all(attempt.id).find((r: any) => r.component_key === component.key)),
+    answered,
+    total: test.questions.length,
+    autoScore: earned,
+    maxScore: max,
+    complete,
+    timing: componentTimingView(component, updated),
     feedback: feedbacks,
-    responses: stored.map((r) => ({ questionKey: r.question_key, response: JSON.parse(r.response_json || 'null'), autoScore: r.auto_score, feedback: r.feedback })),
+    responses: stored.map((row) => ({
+      questionKey: row.question_key,
+      response: JSON.parse(row.response_json || 'null'),
+      autoScore: row.auto_score,
+      feedback: row.feedback,
+    })),
   });
 }));
 
-// ============================================================================
-// §COMPONENT SCORE — staff scoring (manual/hybrid) with provenance
-// ============================================================================
 placementAttemptRouter.put('/visitors/:visitorId/placement/attempts/:attemptId/components/:componentKey', authorize('owner', 'receptionist', 'general_manager', 'counselor'), ah(async (req, res) => {
   const user = getUserContext(req);
   const { visitor, attempt } = loadAttemptContext(req, req.params.visitorId, req.params.attemptId);
   assertAttemptEditable(attempt);
   const snapshot = parseSnapshot(attempt);
-  const component = snapshot.components.find((c: PolicyComponent) => c.key === req.params.componentKey);
-  if (!component) throw new HttpError(404, 'Assessment component not found.');
+  const component = findComponent(snapshot, req.params.componentKey);
   const selectedLevelId = req.body?.selectedLevelId == null || req.body.selectedLevelId === ''
     ? null
     : boundedText(req.body.selectedLevelId, 'selectedLevelId', 160, true);
-  if (selectedLevelId && !(snapshot.profile.levels || []).some((l: any) => l.id === selectedLevelId)) throw new HttpError(400, 'Selected level is not part of this program.');
+  if (selectedLevelId && !(snapshot.profile.levels || []).some((level: any) => level.id === selectedLevelId)) {
+    throw new HttpError(400, 'Selected level is not part of this program.');
+  }
   const notes = boundedText(req.body?.notes, 'notes', 1000);
   const resultText = boundedText(req.body?.resultText, 'resultText', 4000);
-  const result = (stmtResults.all(attempt.id) as any[]).find((r) => r.component_key === component.key) as any;
-  if (!result) throw new HttpError(404, 'Component result not found.');
+  const result = findResult(attempt.id, component.key);
 
   const status = req.body?.status === 'waived' ? 'waived' : 'completed';
   if (status === 'waived') {
     const canWaive = !!req.rbac && hasAnyRole(req.rbac, ['owner', 'general_manager']);
     if (component.required && !canWaive) throw new HttpError(403, 'Only management can waive a required assessment section.');
     if (!notes) throw new HttpError(400, 'A reason is required when waiving an assessment section.');
-    upsertResult({ attemptId: attempt.id, key: component.key, type: component.type, label: component.label, status: 'waived', score: null, maxScore: component.maxScore, weight: component.weight, selectedLevelId, notes, evaluatorUserId: user.userId, payloadJson: JSON.stringify({ waived: true }) });
+    upsertResult({
+      attemptId: attempt.id,
+      key: component.key,
+      type: component.type,
+      label: component.label,
+      status: 'waived',
+      score: null,
+      maxScore: component.maxScore,
+      weight: component.weight,
+      selectedLevelId,
+      notes,
+      evaluatorUserId: user.userId,
+      payloadJson: JSON.stringify({ waived: true }),
+    });
     res.json(stmtResults.all(attempt.id));
     return;
   }
 
+  if (!manualEntryAllowed(attempt.delivery_mode as PlacementDeliveryMode, component)) {
+    throw new HttpError(409, `${component.label} is scored from captured DIGITAL responses and cannot be manually entered.`);
+  }
   if (result.status === 'completed' || result.status === 'waived') {
     throw new HttpError(409, 'This component result is already final. Use the audited correction workflow after attempt completion.');
   }
-  if (result.timeout_flag || result.status === 'timed_out') throw new HttpError(409, `Component "${component.label}" timed out; it can only be waived with management approval.`);
+  if (result.timeout_flag || result.status === 'timed_out') {
+    throw new HttpError(409, `Component "${component.label}" timed out; it can only be waived with management approval.`);
+  }
   requireStartedTimer(component, result);
   const submissionTiming = recordSubmissionTiming(attempt.id, component.key, component, result);
+  const scored = scoreComponentBody(component, req.body ?? {}, snapshot.tests, attempt.id);
+  const provenance = scoreProvenance(scored.score ?? 0, component.maxScore, component.weight);
 
-  const scored = scoreComponentBody(component, req.body ?? {}, snapshot.tests || [], attempt.id);
-  const prov = scoreProvenance(scored.score ?? 0, component.maxScore, component.weight);
   upsertResult({
-    attemptId: attempt.id, key: component.key, type: component.type, label: component.label,
-    status: 'completed', score: scored.score, maxScore: component.maxScore, weight: component.weight,
-    selectedLevelId, notes, resultText,
-    evaluatorUserId: user.userId, rawScore: scored.rawScore ?? scored.score, percentage: prov.percentage, weightedScore: prov.weightedScore,
+    attemptId: attempt.id,
+    key: component.key,
+    type: component.type,
+    label: component.label,
+    status: 'completed',
+    score: scored.score,
+    maxScore: component.maxScore,
+    weight: component.weight,
+    selectedLevelId,
+    notes,
+    resultText,
+    evaluatorUserId: user.userId,
+    rawScore: scored.rawScore ?? scored.score,
+    percentage: provenance.percentage,
+    weightedScore: provenance.weightedScore,
     payloadJson: JSON.stringify(scored.payload),
     submittedAt: nowIso(),
     elapsedSeconds: submissionTiming.elapsedSeconds,
@@ -472,49 +749,34 @@ placementAttemptRouter.put('/visitors/:visitorId/placement/attempts/:attemptId/c
   res.json(stmtResults.all(attempt.id));
 }));
 
-// ============================================================================
-// §COMPLETE — weighted total → decision engine → recommendation → fee
-// ============================================================================
 placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/complete', authorize('owner', 'receptionist', 'general_manager', 'counselor'), ah(async (req, res) => {
   const user = getUserContext(req);
   const { visitor, attempt } = loadAttemptContext(req, req.params.visitorId, req.params.attemptId);
   assertAttemptEditable(attempt);
   const snapshot = parseSnapshot(attempt);
-  const components: PolicyComponent[] = snapshot.components;
+  const components = snapshot.components;
   const results = stmtResults.all(attempt.id) as any[];
-  // Lazily mark any expired component timers before evaluating completeness.
-  for (const r of results) enforceComponentTimeout(attempt.id, r.component_key, r);
-  const profile = snapshot.profile || {};
-
-  const missing = getRequiredMissing(components, results);
+  for (const result of results) enforceComponentTimeout(attempt.id, result.component_key, result);
+  const finalResults = stmtResults.all(attempt.id) as any[];
+  const missing = getRequiredMissing(components, finalResults);
   if (missing.length > 0) throw new HttpError(400, `Complete all required assessment sections first: ${missing.join(', ')}`);
-  const explicitLevel = assertNoConflictingLevels(results);
+  assertNoConflictingLevels(finalResults);
 
-  const scored = results.filter((r) => r.status === 'completed' && Number(r.weight) > 0 && r.score != null);
-  if (scored.length === 0 && !explicitLevel) throw new HttpError(400, 'At least one scored section or an explicit level assessment is required.');
-
-  const decisionRulesJson = profile.decisionRules != null ? JSON.stringify(profile.decisionRules) : (snapshot.decisionRules != null ? JSON.stringify(snapshot.decisionRules) : null);
   const decision = evaluateDecision({
-    components, results, rules: snapshot.profile?.placementRules || [],
-    decisionRulesJson,
-    levels: profile.levels || [], scoringModel: String(profile.scoringModel || 'weighted_average'),
-    passScore: Number(profile.passScore ?? 60),
+    components,
+    results: finalResults,
+    rules: [],
+    decisionRulesJson: buildDecisionRulesJson(snapshot),
+    levels: snapshot.profile.levels || [],
+    scoringModel: String(snapshot.profile.scoringModel || 'canonical'),
+    passScore: Number(snapshot.profile.passScore ?? 0),
   });
-  const { percentage, recommendedLevelId, decisionRuleId, recommendationText } = decision;
-  const totalScore = percentage == null ? null : Math.round(percentage * 100) / 100;
-  const maxScore = 100;
-
-  // AUTHORITATIVE OUTCOME. The decision engine already knows whether the policy
-  // was met (required components, per-component minScore, overall passScore);
-  // before this hardening every caller discarded that verdict, which is how a
-  // 10% candidate completed and enrolled. The sitting is still RECORDED — a
-  // failed exam is a real, auditable, billable business event — but the
-  // outcome is persisted so the conversion boundary can refuse it.
+  const totalScore = computeAttemptTotalScore(finalResults);
+  const maxScore = attemptMaxScore(components);
+  const percentage = decision.percentage ?? placementPercentageFromResults(finalResults.filter((result) => result.status === 'completed' && result.score != null));
   const { outcome, reasons } = evaluateOutcome(decision);
 
-  // Billing is policy-driven and snapshotted with the attempt, so changing the
-  // academic configuration mid-flight cannot alter what this sitting costs.
-  const retakePolicy = readRetakePolicy(profile);
+  const retakePolicy = readRetakePolicy(snapshot.profile);
   const priorCompleted = Number(snapshot.billingTerms?.priorCompletedAttempts);
   const baseFee = Number(snapshot.billingTerms?.baseFee);
   if (!Number.isInteger(priorCompleted) || priorCompleted < 0 || !Number.isInteger(baseFee) || baseFee < 0) {
@@ -523,41 +785,123 @@ placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/
   const billing = evaluateBilling(retakePolicy, priorCompleted, baseFee);
   const placementFee = billing.amount;
   const date = today();
-  const resultSnapshot = JSON.stringify({ percentage, totalScore, maxScore, outcome, unmetRequirements: decision.unmetRequirements, recommendation: { levelId: recommendedLevelId, text: recommendationText, ruleId: decisionRuleId }, results, policyVersion: snapshot.policyVersion ?? profile.policyVersion ?? 1 });
+  const resultSnapshot = JSON.stringify({
+    totalScore,
+    maxScore,
+    percentage,
+    outcome,
+    overallCefr: decision.overallCefr,
+    unmetRequirements: decision.unmetRequirements,
+    recommendation: {
+      levelId: decision.recommendedLevelId,
+      text: decision.recommendationText,
+      ruleId: decision.decisionRuleId,
+    },
+    componentEvidence: decision.componentEvidence,
+    results: finalResults,
+    policyVersion: snapshot.policyVersion,
+    deliveryMode: snapshot.deliveryMode,
+  });
 
-  let feeReceipt: string | null = null;
-  let feePaymentId: string | null = null;
+  const linkedStudent = linkedStudentForVisitor(visitor.id);
+  if (billing.billable && placementFee > 0 && !linkedStudent) {
+    throw new HttpError(409, 'Admit this candidate to a student record before completing a billable placement. Placement billing now uses the canonical invoice and student-balance architecture.');
+  }
+
   const tx = db.transaction(() => {
-    const updated = stmtCompleteAttempt.run(totalScore, maxScore, percentage, recommendedLevelId, recommendationText, user.userId, decisionRuleId, outcome, attempt.id) as any;
+    let placementInvoice: { id: string; invoiceNumber: string; amount: number; status: 'issued' } | null = null;
+    persistComponentCefrEvidence(attempt.id, decision.componentEvidence);
+    const updated = stmtCompleteAttempt.run(
+      totalScore,
+      maxScore,
+      percentage,
+      decision.recommendedLevelId,
+      decision.recommendationText,
+      user.userId,
+      decision.decisionRuleId,
+      outcome,
+      attempt.id,
+    ) as any;
     if (updated.changes !== 1) throw new HttpError(409, 'This placement attempt is already closed.');
     if (outcome === 'passed') {
-      stmtUpdateVisitorPlacement.run(resultSnapshot, profile.method, attempt.id, visitor.id);
+      stmtUpdateVisitorPlacement.run(resultSnapshot, snapshot.profile.method, attempt.id, visitor.id);
     } else {
+      updateVisitorPlacementFailure(snapshot.profile, attempt.id, visitor.id, resultSnapshot);
+    }
+    const stage = billing.billable && placementFee > 0 ? 'placement_fee' : 'placement_completed';
+    db.prepare('UPDATE visitors SET stage = ? WHERE id = ?').run(stage, visitor.id);
+
+    if (billing.billable && placementFee > 0 && linkedStudent && !placementInvoiceExistsForAttempt(linkedStudent.id, attempt.id)) {
+      const invoiceId = id('inv');
+      const invoiceNumber = nextInvoiceNumber(linkedStudent.branch_id);
+      const dueDate = date;
       db.prepare(`
-        UPDATE visitors
-        SET placement_score=?, placement_method=?, placement_status='scheduled',
-            placement_status_at=datetime('now'), current_placement_attempt_id=NULL,
-            stage=CASE WHEN stage IN ('placement_completed','placement_fee') THEN 'placement_booking' ELSE stage END
-        WHERE id=?
-      `).run(resultSnapshot, profile.method, visitor.id);
+        INSERT INTO invoices
+          (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, notes, invoice_number, issued_by, student_name, student_code, charge_kind, purpose)
+        VALUES (?, ?, ?, 0, ?, 'issued', ?, ?, ?, ?, ?, ?, ?, ?, 'placement', 'other')
+      `).run(
+        invoiceId,
+        linkedStudent.id,
+        placementFee,
+        placementFee,
+        date,
+        dueDate,
+        linkedStudent.branch_id,
+        `Placement assessment fee — attempt ${attempt.id}`,
+        invoiceNumber,
+        user.fullName,
+        linkedStudent.full_name,
+        linkedStudent.student_code,
+      );
+      db.prepare(`
+        INSERT INTO invoice_items (id, invoice_id, description, quantity, unit_price, amount)
+        VALUES (?, ?, 'Placement assessment fee', 1, ?, ?)
+      `).run(id('ii'), invoiceId, placementFee, placementFee);
+      placementInvoice = { id: invoiceId, invoiceNumber, amount: placementFee, status: 'issued' };
     }
-    if (billing.billable && placementFee > 0) {
-      const paymentId = id('pay');
-      const receiptNumber = nextReceiptNumber();
-      stmtInsertPlacementFeePayment.run(paymentId, placementFee, date, `Placement assessment fee — ${visitor.full_name}`, receiptNumber, visitor.branch_id, `placement:${attempt.id}`);
-      recordIncome({ category: 'placement', amount: placementFee, date, description: `Placement assessment fee for ${visitor.full_name}`, referenceId: attempt.id, paymentId, operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null, branchId: visitor.branch_id });
-      feeReceipt = receiptNumber;
-      feePaymentId = paymentId;
+
+    const syncedStudent = syncStudentPlacementFromVisitor(visitor.id);
+    if (syncedStudent) {
+      const payload = placementJourneyPayload(resultSnapshot, decision.recommendationText, outcome);
+      getJourneyEngine(db).appendEvent({
+        studentId: syncedStudent.id,
+        eventType: JourneyEventType.PLACEMENT_TEST_RECORDED,
+        occurredAt: nowIso(),
+        branchId: syncedStudent.branch_id,
+        actorUserId: user.userId,
+        actorName: user.fullName,
+        payload,
+      });
+      getJourneyEngine(db).appendEvent({
+        studentId: syncedStudent.id,
+        eventType: outcome === 'passed' ? JourneyEventType.PLACEMENT_PASSED : JourneyEventType.PLACEMENT_FAILED,
+        occurredAt: nowIso(),
+        branchId: syncedStudent.branch_id,
+        actorUserId: user.userId,
+        actorName: user.fullName,
+        payload,
+      });
+      if (placementInvoice) {
+        getJourneyEngine(db).appendEvent({
+          studentId: syncedStudent.id,
+          eventType: JourneyEventType.INVOICE_ISSUED,
+          occurredAt: nowIso(),
+          branchId: syncedStudent.branch_id,
+          actorUserId: user.userId,
+          actorName: user.fullName,
+          payload: { invoiceId: placementInvoice.id, invoiceNumber: placementInvoice.invoiceNumber, amount: placementInvoice.amount, category: 'placement', label: 'Placement assessment fee', chargeKind: 'placement', attemptId: attempt.id },
+        });
+      }
     }
+    return placementInvoice;
   });
-  tx();
-  if (billing.billable && placementFee > 0) addNotification('Placement Assessment Recorded', `Placement assessment completed for ${visitor.full_name}. Fee: ${placementFee} AFN.`, 'success', visitor.branch_id);
-  writeAudit(req, `Completed placement assessment for ${visitor.full_name}: ${percentage}% — ${outcome.toUpperCase()} — ${recommendationText}`, {
-    newValue: JSON.stringify({ ...JSON.parse(resultSnapshot), decisionRuleId, fee: { amount: placementFee, receipt: feeReceipt, paymentId: feePaymentId, attemptId: attempt.id, reason: billing.reason } }),
+  const issuedPlacementInvoice = tx();
+  if (issuedPlacementInvoice) {
+    addNotification('Placement Assessment Recorded', `Placement completed for ${visitor.full_name}. Placement invoice ${issuedPlacementInvoice.invoiceNumber} was issued for ${issuedPlacementInvoice.amount} AFN.`, 'success', visitor.branch_id);
+  }
+  writeAudit(req, `Completed placement assessment for ${visitor.full_name}: ${decision.recommendationText} — ${outcome.toUpperCase()}`, {
+    newValue: JSON.stringify({ ...JSON.parse(resultSnapshot), fee: { amount: placementFee, invoice: issuedPlacementInvoice, attemptId: attempt.id, reason: billing.reason } }),
   });
-  // A failed sitting is a successful recording of a real outcome, so this stays
-  // HTTP 200 and reports the authoritative verdict in the body. Enrollment is
-  // blocked independently at the conversion boundary.
   res.json({
     ok: true,
     outcome,
@@ -565,14 +909,21 @@ placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/
     unmetRequirements: decision.unmetRequirements,
     failureReasons: reasons,
     feeCharged: placementFee,
-    decision: { percentage, recommendedLevelId, decisionRuleId, recommendationText },
+    placementInvoice: issuedPlacementInvoice,
+    decision: {
+      totalScore,
+      maxScore,
+      percentage,
+      overallCefr: decision.overallCefr,
+      recommendedLevelId: decision.recommendedLevelId,
+      decisionRuleId: decision.decisionRuleId,
+      recommendationText: decision.recommendationText,
+      componentEvidence: decision.componentEvidence,
+    },
     attempt: mapAttempt(stmtAttempt.get(attempt.id)),
   });
 }));
 
-// ============================================================================
-// §PAUSE / RESUME
-// ============================================================================
 placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/pause', authorize('owner', 'general_manager', 'counselor'), ah(async (req, res) => {
   const user = getUserContext(req);
   const { visitor, attempt } = loadAttemptContext(req, req.params.visitorId, req.params.attemptId);
@@ -590,35 +941,27 @@ placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/
   res.json({ ok: true, status: 'in_progress', resumedAt, pauseSeconds });
 }));
 
-// ============================================================================
-// §CANCEL
-// ============================================================================
 placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/cancel', authorize('owner', 'receptionist', 'general_manager', 'counselor'), ah(async (req, res) => {
   const user = getUserContext(req);
   const { visitor, attempt } = loadAttemptContext(req, req.params.visitorId, req.params.attemptId);
-  if (!['in_progress', 'paused'].includes(attempt.status)) throw new HttpError(409, 'Only an in-progress placement attempt can be cancelled.');
+  if (!['in_progress', 'paused'].includes(String(attempt.status))) throw new HttpError(409, 'Only an in-progress placement attempt can be cancelled.');
   const reason = req.body?.reason == null ? 'Cancelled by operator' : boundedText(req.body.reason, 'Cancellation reason', 500, true)!;
   db.transaction(() => {
-    db.prepare(`UPDATE placement_assessment_attempts SET status='cancelled', completed_at=datetime('now'), updated_at=datetime('now'), notes=? WHERE id=?`)
-      .run(reason, attempt.id);
-    db.prepare(`UPDATE visitors SET placement_status='scheduled', placement_status_at=datetime('now'), current_placement_attempt_id=NULL WHERE id=? AND current_placement_attempt_id=?`)
-      .run(visitor.id, attempt.id);
+    db.prepare(`UPDATE placement_assessment_attempts SET status='cancelled', completed_at=datetime('now'), updated_at=datetime('now'), notes=? WHERE id=?`).run(reason, attempt.id);
+    db.prepare(`UPDATE visitors SET placement_status='scheduled', placement_status_at=datetime('now'), current_placement_attempt_id=NULL WHERE id=? AND current_placement_attempt_id=?`).run(visitor.id, attempt.id);
   })();
   writeAudit(req, `Cancelled placement assessment for ${visitor.full_name}`, { newValue: JSON.stringify({ attemptId: attempt.id, reason, operatorId: user.userId }) });
   res.json({ ok: true, status: 'cancelled' });
 }));
 
-// ============================================================================
-// §OVERRIDE — authorized manual placement decision (audited)
-// ============================================================================
-placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/override', authorize('owner', 'general_manager'), ah(async (req, res) => {
+placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/override', authorize('owner', 'general_manager'), requirePermission('Placement.Override'), ah(async (req, res) => {
   const user = getUserContext(req);
   const { visitor, attempt } = loadAttemptContext(req, req.params.visitorId, req.params.attemptId);
   if (attempt.status !== 'completed') throw new HttpError(409, 'Only a completed placement attempt can be overridden.');
   const levelId = boundedText(req.body?.levelId, 'levelId', 160, true)!;
   const reason = boundedText(req.body?.reason, 'Override reason', 500, true)!;
   const snapshot = parseSnapshot(attempt);
-  const level = (snapshot.profile?.levels || []).find((l: any) => l.id === levelId);
+  const level = (snapshot.profile.levels || []).find((candidate: any) => candidate.id === levelId);
   if (!level) throw new HttpError(400, 'Override level is not part of this program.');
   const before = { recommendedLevelId: attempt.recommended_level_id, recommendationText: attempt.recommendation_text };
   const visitorRow = getVisitorOr404(req.params.visitorId);
@@ -632,65 +975,66 @@ placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/
       throw new HttpError(409, 'Stored visitor placement result is corrupted. Correct it before applying an override.');
     }
   }
-  // ATOMIC: the attempt row and the visitor's denormalised placement_score copy
-  // describe the same decision. Writing them outside a transaction allowed a
-  // failure between the two to leave the enrolled level contradicting the
-  // audited override, with no error surfaced.
-  const applyOverride = db.transaction(() => {
-    db.prepare(`UPDATE placement_assessment_attempts SET override_level_id=?, override_reason=?, override_by=?, override_at=datetime('now'), recommended_level_id=?, recommendation_text=?, updated_at=datetime('now') WHERE id=?`)
-      .run(levelId, reason, user.userId, levelId, `${level.name} — manual override: ${reason}`, attempt.id);
+
+  db.transaction(() => {
+    db.prepare(`
+      UPDATE placement_assessment_attempts
+      SET override_level_id=?, override_reason=?, override_by=?, override_at=datetime('now'),
+          recommended_level_id=?, recommendation_text=?, updated_at=datetime('now')
+      WHERE id=?
+    `).run(levelId, reason, user.userId, levelId, `${level.name} — manual override: ${reason}`, attempt.id);
     if (visitorScore) {
       const previousRecommendation = visitorScore.recommendation && typeof visitorScore.recommendation === 'object' && !Array.isArray(visitorScore.recommendation)
         ? visitorScore.recommendation
         : {};
       visitorScore.recommendation = { ...previousRecommendation, levelId, text: `${level.name} — manual override: ${reason}`, overridden: true, overrideBy: user.userId, overrideAt: nowIso() };
-      db.prepare(`UPDATE visitors SET placement_score=? WHERE id=?`).run(JSON.stringify(visitorScore), visitorRow.id);
+      db.prepare('UPDATE visitors SET placement_score=? WHERE id=?').run(JSON.stringify(visitorScore), visitorRow.id);
+      syncStudentPlacementFromVisitor(visitorRow.id);
     }
-  });
-  applyOverride();
+  })();
   writeAudit(req, `Manual placement override for ${visitor.full_name}: ${before.recommendedLevelId} → ${levelId}`, { oldValue: JSON.stringify(before), newValue: JSON.stringify({ recommendedLevelId: levelId, reason, operatorId: user.userId, attemptId: attempt.id }) });
   res.json({ ok: true, recommendedLevelId: levelId, recommendationText: `${level.name} — manual override: ${reason}` });
 }));
 
-// ============================================================================
-// §SCORE CORRECTION — audited post-completion correction (recomputes decision)
-// ============================================================================
 placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/components/:componentKey/correct', authorize('owner', 'general_manager'), ah(async (req, res) => {
   const user = getUserContext(req);
   const { visitor, attempt } = loadAttemptContext(req, req.params.visitorId, req.params.attemptId);
   if (attempt.status !== 'completed') throw new HttpError(409, 'Only a completed placement attempt can have scores corrected.');
   const reason = boundedText(req.body?.reason, 'Correction reason', 500, true)!;
-  const resultText = req.body?.resultText === undefined
-    ? null
-    : boundedText(req.body.resultText, 'resultText', 4000);
+  const resultText = req.body?.resultText === undefined ? null : boundedText(req.body.resultText, 'resultText', 4000);
   const snapshot = parseSnapshot(attempt);
-  const component = snapshot.components.find((c: PolicyComponent) => c.key === req.params.componentKey);
-  if (!component) throw new HttpError(404, 'Assessment component not found.');
-  const results = stmtResults.all(attempt.id) as any[];
-  const existing = results.find((r) => r.component_key === component.key);
+  const component = findComponent(snapshot, req.params.componentKey);
+  const existingResults = stmtResults.all(attempt.id) as any[];
+  const existing = existingResults.find((result) => result.component_key === component.key);
   if (!existing || existing.status !== 'completed') throw new HttpError(409, 'Only completed components can be corrected.');
 
-  const scored = scoreComponentBody(component, req.body ?? {}, snapshot.tests || [], attempt.id);
-  const prov = scoreProvenance(scored.score ?? 0, component.maxScore, component.weight);
+  const scored = scoreComponentBody(component, req.body ?? {}, snapshot.tests, attempt.id);
+  const provenance = scoreProvenance(scored.score ?? 0, component.maxScore, component.weight);
   const nextVersion = Number(existing.score_version || 1) + 1;
-  const profile = snapshot.profile || {};
   const visitorRow = getVisitorOr404(req.params.visitorId);
 
-  // ATOMIC: a correction rewrites the component result, its correction
-  // metadata, the attempt's recomputed decision AND the visitor's denormalised
-  // copy. These are one business fact; a partial write would leave the
-  // recorded decision disagreeing with the scores it was derived from.
   let decision!: ReturnType<typeof evaluateDecision>;
   let outcome!: 'passed' | 'failed';
   let finalRecommendedLevelId: string | null = null;
   let finalRecommendationText = '';
-  const applyCorrection = db.transaction(() => {
+  db.transaction(() => {
     upsertResult({
-      attemptId: attempt.id, key: component.key, type: component.type, label: component.label,
-      status: 'completed', score: scored.score, maxScore: component.maxScore, weight: component.weight,
-      notes: existing.notes, resultText: resultText ?? existing.result_text ?? null,
-      evaluatorUserId: user.userId, rawScore: scored.rawScore ?? scored.score, percentage: prov.percentage, weightedScore: prov.weightedScore,
-      scoreVersion: nextVersion, payloadJson: JSON.stringify(scored.payload),
+      attemptId: attempt.id,
+      key: component.key,
+      type: component.type,
+      label: component.label,
+      status: 'completed',
+      score: scored.score,
+      maxScore: component.maxScore,
+      weight: component.weight,
+      notes: existing.notes,
+      resultText: resultText ?? existing.result_text ?? null,
+      evaluatorUserId: user.userId,
+      rawScore: scored.rawScore ?? scored.score,
+      percentage: provenance.percentage,
+      weightedScore: provenance.weightedScore,
+      scoreVersion: nextVersion,
+      payloadJson: JSON.stringify(scored.payload),
     });
     db.prepare(`
       UPDATE placement_assessment_results
@@ -698,103 +1042,112 @@ placementAttemptRouter.post('/visitors/:visitorId/placement/attempts/:attemptId/
       WHERE attempt_id=? AND component_key=?
     `).run(user.userId, reason.slice(0, 500), attempt.id, component.key);
 
-    // Re-run the decision engine and re-derive the authoritative outcome, so a
-    // correction can legitimately flip a sitting between passed and failed.
+    const updatedResults = stmtResults.all(attempt.id) as any[];
     decision = evaluateDecision({
-      components: snapshot.components, results: stmtResults.all(attempt.id) as any[],
-      rules: snapshot.profile?.placementRules || [], decisionRulesJson: profile.decisionRules != null ? JSON.stringify(profile.decisionRules) : null,
-      levels: profile.levels || [], scoringModel: String(profile.scoringModel || 'weighted_average'), passScore: Number(profile.passScore ?? 60),
+      components: snapshot.components,
+      results: updatedResults,
+      rules: [],
+      decisionRulesJson: buildDecisionRulesJson(snapshot),
+      levels: snapshot.profile.levels || [],
+      scoringModel: String(snapshot.profile.scoringModel || 'canonical'),
+      passScore: Number(snapshot.profile.passScore ?? 0),
     });
     outcome = evaluateOutcome(decision).outcome;
     finalRecommendedLevelId = attempt.override_level_id ?? decision.recommendedLevelId;
     finalRecommendationText = attempt.override_level_id
       ? String(attempt.recommendation_text || decision.recommendationText)
       : decision.recommendationText;
+
+    persistComponentCefrEvidence(attempt.id, decision.componentEvidence);
     db.prepare(`
       UPDATE placement_assessment_attempts
-      SET total_score=?, percentage=?, recommended_level_id=?, recommendation_text=?,
+      SET total_score=?, max_score=?, percentage=?, recommended_level_id=?, recommendation_text=?,
           decision_rule_id=?, outcome=?, updated_at=datetime('now')
       WHERE id=?
-    `).run(decision.percentage, decision.percentage, finalRecommendedLevelId, finalRecommendationText, decision.decisionRuleId, outcome, attempt.id);
-    const resultSnapshot = JSON.stringify({
-      percentage: decision.percentage,
-      totalScore: decision.percentage,
-      maxScore: 100,
+    `).run(
+      computeAttemptTotalScore(updatedResults),
+      attemptMaxScore(snapshot.components),
+      decision.percentage,
+      finalRecommendedLevelId,
+      finalRecommendationText,
+      decision.decisionRuleId,
       outcome,
+      attempt.id,
+    );
+
+    const resultSnapshot = JSON.stringify({
+      totalScore: computeAttemptTotalScore(updatedResults),
+      maxScore: attemptMaxScore(snapshot.components),
+      percentage: decision.percentage,
+      outcome,
+      overallCefr: decision.overallCefr,
       unmetRequirements: decision.unmetRequirements,
       recommendation: { levelId: finalRecommendedLevelId, text: finalRecommendationText, ruleId: decision.decisionRuleId, overridden: Boolean(attempt.override_level_id) },
-      results: stmtResults.all(attempt.id),
-      policyVersion: snapshot.policyVersion ?? 1,
+      componentEvidence: decision.componentEvidence,
+      results: updatedResults,
+      policyVersion: snapshot.policyVersion,
+      deliveryMode: snapshot.deliveryMode,
     });
+
     if (outcome === 'passed') {
       db.prepare(`
         UPDATE visitors
         SET placement_score=?, placement_method=?, placement_status='completed', placement_status_at=datetime('now'),
             current_placement_attempt_id=?, stage=CASE WHEN stage IN ('placement_booking','placement_fee') THEN 'placement_completed' ELSE stage END
         WHERE id=?
-      `).run(resultSnapshot, profile.method, attempt.id, visitorRow.id);
+      `).run(resultSnapshot, snapshot.profile.method, attempt.id, visitorRow.id);
     } else {
-      db.prepare(`
-        UPDATE visitors
-        SET placement_score=?, placement_method=?, placement_status='scheduled', placement_status_at=datetime('now'),
-            current_placement_attempt_id=NULL,
-            stage=CASE WHEN stage IN ('placement_completed','placement_fee') THEN 'placement_booking' ELSE stage END
-        WHERE id=?
-      `).run(resultSnapshot, profile.method, visitorRow.id);
+      updateVisitorPlacementFailure(snapshot.profile, attempt.id, visitorRow.id, resultSnapshot);
     }
-  });
-  applyCorrection();
+  })();
 
   writeAudit(req, `Score correction for ${visitor.full_name} component "${component.label}" (v${existing.score_version || 1} → v${nextVersion})`, {
     oldValue: JSON.stringify({ score: existing.score, percentage: existing.percentage, resultText: existing.result_text }),
-    newValue: JSON.stringify({ score: scored.score, percentage: prov.percentage, outcome, reason, operatorId: user.userId }),
+    newValue: JSON.stringify({ score: scored.score, percentage: provenance.percentage, outcome, reason, operatorId: user.userId }),
   });
-  res.json({ ok: true, score: scored.score, percentage: prov.percentage, scoreVersion: nextVersion, outcome, decision: { percentage: decision.percentage, recommendedLevelId: finalRecommendedLevelId, decisionRuleId: decision.decisionRuleId, recommendationText: finalRecommendationText } });
+  res.json({
+    ok: true,
+    score: scored.score,
+    percentage: provenance.percentage,
+    scoreVersion: nextVersion,
+    outcome,
+    decision: {
+      percentage: decision.percentage,
+      overallCefr: decision.overallCefr,
+      recommendedLevelId: finalRecommendedLevelId,
+      decisionRuleId: decision.decisionRuleId,
+      recommendationText: finalRecommendationText,
+      componentEvidence: decision.componentEvidence,
+    },
+  });
 }));
 
-// ============================================================================
-// §HISTORY
-// ============================================================================
 placementAttemptRouter.get('/visitors/:visitorId/placement/attempts', authorize('owner', 'receptionist', 'general_manager', 'counselor'), ah(async (req, res) => {
   const visitor = getVisitorOr404(req.params.visitorId);
   assertVisitorBranchAccess(req, visitor);
-  res.json((stmtAttempts.all(visitor.id) as any[]).map((a) => mapAttempt(a)));
+  res.json((stmtAttempts.all(visitor.id) as any[]).map((attempt) => mapAttempt(attempt)));
 }));
 
-// ============================================================================
-// §MAINTENANCE — on-demand expiry sweep (owner/manager)
-// ============================================================================
 placementAttemptRouter.post('/maintenance/expire', authorize('owner', 'general_manager'), ah(async (req, res) => {
   const user = getUserContext(req);
   const now = nowIso();
   let expiredCount = 0;
-  // Branch scope is mandatory for this sweep. Unfiltered, a manager at ANY
-  // branch expires live attempts across every other branch — which would be the
-  // only cross-branch mutation in the subsystem (certification finding C-3). `resolveBranchScope` is the established convention: it silently
-  // re-scopes a foreign ?branchId= to the caller's own branch, and only grants
-  // isAll to a role that genuinely holds all-branch access.
   const scope = resolveBranchScope(req);
   db.transaction(() => {
-    // Expire both in-progress AND paused attempts that are past their expiry
-    // (pause freezes component timers; it does not exempt the attempt from its
-    // overall deadline).
     const due = (scope.isAll
       ? db.prepare(`SELECT id, visitor_id FROM placement_assessment_attempts WHERE status IN ('in_progress','paused') AND expires_at IS NOT NULL AND expires_at < ?`).all(now)
       : db.prepare(`SELECT id, visitor_id FROM placement_assessment_attempts WHERE status IN ('in_progress','paused') AND expires_at IS NOT NULL AND expires_at < ? AND branch_id = ?`).all(now, scope.branchId)
     ) as Array<{ id: string; visitor_id: string }>;
     expiredCount = due.length;
-    for (const a of due) {
-      db.prepare(`UPDATE placement_assessment_attempts SET status='expired', completed_at=datetime('now'), updated_at=datetime('now') WHERE id=? AND status IN ('in_progress','paused')`).run(a.id);
-      db.prepare(`UPDATE visitors SET placement_status='not_started', placement_status_at=datetime('now'), current_placement_attempt_id=NULL WHERE id=? AND current_placement_attempt_id=?`).run(a.visitor_id, a.id);
+    for (const attempt of due) {
+      db.prepare(`UPDATE placement_assessment_attempts SET status='expired', completed_at=datetime('now'), updated_at=datetime('now') WHERE id=? AND status IN ('in_progress','paused')`).run(attempt.id);
+      db.prepare(`UPDATE visitors SET placement_status='not_started', placement_status_at=datetime('now'), current_placement_attempt_id=NULL WHERE id=? AND current_placement_attempt_id=?`).run(attempt.visitor_id, attempt.id);
     }
   })();
   writeAudit(req, `Placement expiry sweep: ${expiredCount} attempt(s) marked expired`, { newValue: JSON.stringify({ count: expiredCount, operatorId: user.userId, scope: scope.isAll ? 'all_branches' : scope.branchId }) });
   res.json({ ok: true, expired: expiredCount });
 }));
 
-// ============================================================================
-// §REPORT — placement activity (actual-activity-only)
-// ============================================================================
 placementAttemptRouter.get('/report', requirePermission('Report.View', 'Finance.Report'), ah(async (req, res) => {
   const { from, to } = req.query as Record<string, string | undefined>;
   if (!from || !to || !validDate(from) || !validDate(to)) throw new HttpError(400, 'from and to must be valid YYYY-MM-DD dates.');

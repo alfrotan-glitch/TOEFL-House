@@ -82,11 +82,11 @@ beforeAll(async () => {
     `INSERT OR IGNORE INTO exams (id, title, date, fee, type, branch_id)
      VALUES ('exm_exam', 'Final Exam', ?, 500, 'certification', ?)`
   ).run(today(), BRANCH);
-  // A diploma fee must be configured for the entitlement charge to exist.
+  // A diploma fee must be configured in the canonical fee-rule registry for
+  // the entitlement charge to exist.
   db.prepare(
-    `INSERT INTO branch_academic_profiles (branch_id, diploma_fee)
-     VALUES (?, 500)
-     ON CONFLICT(branch_id) DO UPDATE SET diploma_fee = 500`
+    `INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+     VALUES ('exm_diploma_fee', ?, 'diploma', 'Diploma fee', 500, 1, 1)`
   ).run(BRANCH);
   db.prepare(
     `INSERT OR IGNORE INTO exam_results (id, exam_id, student_id, candidate_name, score, status, exam_fee_paid, certificate_issued, branch_id)

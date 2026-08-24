@@ -90,6 +90,7 @@ function mapInvoice(row: any, items: any[] = []) {
     invoiceNumber: row.invoice_number || undefined,
     issuedBy: row.issued_by || undefined,
     purpose: row.purpose,
+    chargeKind: row.charge_kind || undefined,
     obligationId: row.obligation_id || undefined,
     semesterName: row.semester_name || undefined,
     createdAt: row.created_at,

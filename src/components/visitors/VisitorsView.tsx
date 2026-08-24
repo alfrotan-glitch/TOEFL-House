@@ -53,9 +53,9 @@ interface VisitorsViewProps {
   permissionCodes?: string[];
   advanceVisitorStage: (visitorId: string, stage?: Visitor['stage']) => Promise<void>;
   registerVisitorToStudent: (
-    visitorId: string, classId: string, amountPaid: number, discountPercent: number, notes?: string,
-    semesterFee?: number, branchId?: string, paymentMethod?: 'cash' | 'card' | 'bank_transfer'
-  ) => Promise<{ studentId: string; studentCode: string; receiptNumber: string; invoiceId: string; invoiceNumber: string; netAmount: number; status: string }>;
+    visitorId: string,
+    payload: { classId?: string; notes?: string; branchId?: string; programVersionId?: string; levelId?: string }
+  ) => Promise<{ studentId: string; studentCode: string; invoices: Array<{ id: string; invoiceNumber: string | null; chargeKind: 'registration' | 'placement'; amount: number; status: string }>; nextStep: string }>;
   /** Read-only pre-flight for conversion (UX-3). */
   checkConversionEligibility: (visitorId: string, classId?: string) => Promise<ConversionEligibility>;
   /** Advisory duplicate lookup for the registration form (UX-9). */

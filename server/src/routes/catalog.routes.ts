@@ -6,6 +6,7 @@ import { db } from '../db/connection.js';
 import { authenticate, requirePermission, canAccessBranchResource } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { assertMoney } from '../utils/money.js';
+import { assertDateRange, assertOptionalIsoDate } from '../utils/isoDate.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id } from '../utils/ids.js';
 import { getCatalogService } from '../core/academic/catalog-service.js';
@@ -51,11 +52,51 @@ const stmtInsertPromotionRule = db.prepare(
 );
 const stmtGetPromotionRuleById = db.prepare('SELECT * FROM promotion_rules WHERE id = ?');
 
-const stmtInsertPlacementRule = db.prepare(
-  `INSERT INTO placement_rules (id, program_version_id, name, min_score, max_score, recommended_level_id, recommended_level_code, branch_id, sort_order, is_active, version, created_at)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, datetime('now'))`
+const stmtListFeeRules = db.prepare(
+  `SELECT fr.*, pv.version_label, l.name AS level_name
+     FROM fee_rules fr
+     LEFT JOIN program_versions pv ON pv.id = fr.program_version_id
+     LEFT JOIN levels l ON l.id = fr.level_id
+    WHERE fr.branch_id = ?
+      AND (? IS NULL OR fr.fee_type = ?)
+      AND (? IS NULL OR fr.program_version_id = ?)
+      AND (? IS NULL OR fr.level_id = ?)
+    ORDER BY fr.fee_type, COALESCE(fr.program_version_id, ''), COALESCE(fr.level_id, ''), fr.version DESC, fr.created_at DESC, fr.id DESC`
 );
-const stmtGetPlacementRuleById = db.prepare('SELECT * FROM placement_rules WHERE id = ?');
+const stmtGetFeeRuleById = db.prepare(
+  `SELECT fr.*, pv.version_label, l.name AS level_name
+     FROM fee_rules fr
+     LEFT JOIN program_versions pv ON pv.id = fr.program_version_id
+     LEFT JOIN levels l ON l.id = fr.level_id
+    WHERE fr.id = ?`
+);
+const stmtInsertFeeRule = db.prepare(
+  `INSERT INTO fee_rules
+     (id, program_version_id, level_id, branch_id, fee_type, name, amount, currency, is_optional, effective_from, effective_to, version, is_active, created_at)
+   VALUES (?, ?, ?, ?, ?, ?, ?, 'AFN', ?, ?, ?, ?, ?, datetime('now'))`
+);
+const stmtUpdateFeeRule = db.prepare(
+  `UPDATE fee_rules
+      SET program_version_id = ?,
+          level_id = ?,
+          fee_type = ?,
+          name = ?,
+          amount = ?,
+          is_optional = ?,
+          effective_from = ?,
+          effective_to = ?,
+          version = ?,
+          is_active = ?
+    WHERE id = ?`
+);
+const stmtGetMaxFeeRuleVersion = db.prepare(
+  `SELECT MAX(version) AS v
+     FROM fee_rules
+    WHERE branch_id = ?
+      AND fee_type = ?
+      AND COALESCE(program_version_id, '') = COALESCE(?, '')
+      AND COALESCE(level_id, '') = COALESCE(?, '')`
+);
 
 const stmtGetBranchProfile = db.prepare('SELECT * FROM branch_academic_profiles WHERE branch_id = ?');
 // OR IGNORE so seeding a default row is idempotent: the branch-profile PUT
@@ -101,8 +142,6 @@ const stmtGetLevelVersion = db.prepare(
     WHERE l.id = ?`
 );
 const stmtDeletePromotionRule = db.prepare('DELETE FROM promotion_rules WHERE id = ?');
-const stmtDeletePlacementRule = db.prepare('UPDATE placement_rules SET is_active=0, version=version+1 WHERE id = ? AND is_active=1');
-
 function isOrganizationOwner(req: import('express').Request): boolean {
   return !!req.rbac && isGlobalOwner(req.rbac);
 }
@@ -174,6 +213,89 @@ function assertOptionalBoolean(value: unknown, field: string, fallback: boolean)
   if (value === undefined || value === null) return fallback;
   if (typeof value !== 'boolean') throw new HttpError(400, `${field} must be a boolean.`);
   return value;
+}
+
+const LEGACY_PROFILE_FEE_FIELDS = new Set(['placementTestFee', 'registrationFee', 'cardFee', 'diplomaFee']);
+const FEE_RULE_COMPATIBILITY_BOUNDARY = 'Fee rules are legacy compatibility data only at the storage boundary.';
+const MANAGED_FEE_TYPES = ['registration', 'placement', 'card', 'diploma', 'semester', 'retake'] as const;
+type ManagedFeeType = (typeof MANAGED_FEE_TYPES)[number];
+
+function assertFeeType(value: unknown): ManagedFeeType {
+  if (typeof value !== 'string' || !(MANAGED_FEE_TYPES as readonly string[]).includes(value)) {
+    throw new HttpError(400, `feeType must be one of: ${MANAGED_FEE_TYPES.join(', ')}.`);
+  }
+  return value as ManagedFeeType;
+}
+
+function formatFeeRule(row: any) {
+  return {
+    id: row.id,
+    branchId: row.branch_id,
+    feeType: row.fee_type,
+    name: row.name,
+    amount: row.amount,
+    currency: row.currency,
+    isOptional: !!row.is_optional,
+    effectiveFrom: row.effective_from ?? null,
+    effectiveTo: row.effective_to ?? null,
+    version: Number(row.version ?? 1),
+    isActive: !!row.is_active,
+    programVersionId: row.program_version_id ?? null,
+    versionLabel: row.version_label ?? null,
+    levelId: row.level_id ?? null,
+    levelName: row.level_name ?? null,
+    createdAt: row.created_at,
+  };
+}
+
+function formatBranchProfile(row: any) {
+  if (!row) return row;
+  const clone = { ...row };
+  delete clone.placement_test_fee;
+  delete clone.registration_fee;
+  delete clone.card_fee;
+  delete clone.diploma_fee;
+  return clone;
+}
+
+function assertFeeRuleScope(req: import('express').Request, branchId: string, programVersionId: string | null, levelId: string | null) {
+  requireCatalogBranch(req, branchId);
+  if (programVersionId) {
+    const version = requireVersionScope(req, programVersionId);
+    if (version.branch_id !== branchId) throw new HttpError(400, 'Fee-rule branch must match the selected program version branch.');
+  }
+  if (levelId) {
+    const level = stmtGetLevelVersion.get(levelId) as { branch_id: string; program_version_id: string | null } | undefined;
+    if (!level) throw new HttpError(404, 'Level not found.');
+    if (level.branch_id !== branchId) throw new HttpError(400, 'Fee-rule branch must match the selected level branch.');
+    if (programVersionId && level.program_version_id !== programVersionId) {
+      throw new HttpError(400, 'Fee-rule level must belong to the selected program version.');
+    }
+    if (!programVersionId && level.program_version_id) {
+      throw new HttpError(400, 'Select the program version before scoping a fee rule to one of its levels.');
+    }
+  }
+}
+
+function parseFeeRuleBody(req: import('express').Request, body: Record<string, unknown>) {
+  const branchId = typeof body.branchId === 'string' && body.branchId.trim()
+    ? body.branchId.trim()
+    : (typeof req.query.branchId === 'string' && req.query.branchId.trim() ? req.query.branchId.trim() : req.user?.branchId ?? null);
+  if (!branchId) throw new HttpError(400, 'A branch is required.');
+  const feeType = assertFeeType(body.feeType);
+  const name = typeof body.name === 'string' && body.name.trim()
+    ? body.name.trim()
+    : `${feeType.charAt(0).toUpperCase()}${feeType.slice(1)} fee`;
+  const amount = assertMoney(body.amount ?? 0, `${feeType} fee amount`);
+  const isOptional = assertOptionalBoolean(body.isOptional, 'isOptional', false);
+  const isActive = assertOptionalBoolean(body.isActive, 'isActive', true);
+  const effectiveFrom = assertOptionalIsoDate(body.effectiveFrom, 'effectiveFrom');
+  const effectiveTo = assertOptionalIsoDate(body.effectiveTo, 'effectiveTo');
+  assertDateRange(effectiveFrom, effectiveTo, 'effectiveFrom', 'effectiveTo');
+  const programVersionId = typeof body.programVersionId === 'string' && body.programVersionId.trim() ? body.programVersionId.trim() : null;
+  const levelId = typeof body.levelId === 'string' && body.levelId.trim() ? body.levelId.trim() : null;
+  assertFeeRuleScope(req, branchId, programVersionId, levelId);
+  return { branchId, feeType, name, amount, isOptional, isActive, effectiveFrom, effectiveTo, programVersionId, levelId };
 }
 
 // ── Program versions ──────────────────────────────────────────────────────
@@ -341,43 +463,8 @@ catalogRouter.post('/promotion-rules', requirePermission('Promotion.Approve'), a
   res.status(201).json(stmtGetPromotionRuleById.get(newId));
 }));
 
-catalogRouter.post('/placement-rules', requirePermission('Curriculum.PlacementPolicy'), ah(async (req, res) => {
-  const b = req.body ?? {};
-  if (typeof b.programVersionId !== 'string' || typeof b.name !== 'string' || !b.name.trim()) {
-    throw new HttpError(400, 'programVersionId and name required.');
-  }
-  const version = requireVersionScope(req, b.programVersionId);
-  if (b.branchId !== undefined && b.branchId !== null &&
-      (typeof b.branchId !== 'string' || !b.branchId)) {
-    throw new HttpError(400, 'Placement-rule branch must be a branch id.');
-  }
-  const branchId = b.branchId ?? version.branch_id;
-  if (branchId !== version.branch_id) throw new HttpError(403, 'Placement rule branch is outside the program scope.');
-  requireCatalogBranch(req, branchId);
-  const minScore = b.minScore == null ? 0 : assertPercent(b.minScore, 'minimum score');
-  const maxScore = b.maxScore == null ? 100 : assertPercent(b.maxScore, 'maximum score');
-  if (maxScore < minScore) throw new HttpError(400, 'Placement rule score range must be within 0–100.');
-  const recommendedLevelId = b.recommendedLevelId === '' ? null : b.recommendedLevelId;
-  if (recommendedLevelId !== undefined && recommendedLevelId !== null && typeof recommendedLevelId !== 'string') {
-    throw new HttpError(400, 'Recommended level must be a level id.');
-  }
-  let recommendedLevelCode = assertOptionalText(b.recommendedLevelCode, 'Recommended level code');
-  if (recommendedLevelId) {
-    assertLevelInVersion(recommendedLevelId, b.programVersionId, 'Recommended level');
-    const level = db.prepare('SELECT code FROM levels WHERE id=?').get(recommendedLevelId) as { code: string | null };
-    if (recommendedLevelCode && level.code && recommendedLevelCode !== level.code) {
-      throw new HttpError(400, 'Recommended level code does not match the selected level.');
-    }
-    recommendedLevelCode = level.code ?? recommendedLevelCode;
-  }
-  const sortOrder = b.sortOrder == null ? 0 : assertWholeNumber(b.sortOrder, 'Placement-rule sort order');
-  const overlap = db.prepare(`SELECT 1 FROM placement_rules WHERE program_version_id=? AND (branch_id=? OR branch_id IS NULL) AND is_active=1 AND NOT (max_score < ? OR min_score > ?) LIMIT 1`).get(b.programVersionId, branchId, minScore, maxScore);
-  if (overlap) throw new HttpError(409, 'Placement rule range overlaps an existing active rule.');
-  const newId = id('place');
-  stmtInsertPlacementRule.run(newId, b.programVersionId, b.name.trim(), minScore, maxScore, recommendedLevelId ?? null, recommendedLevelCode, branchId, sortOrder);
-  writeAudit(req, `Created placement rule: ${b.name.trim()}`);
-  res.status(201).json(stmtGetPlacementRuleById.get(newId));
-}));
+
+
 
 catalogRouter.delete('/promotion-rules/:id', requirePermission('Promotion.Approve'), ah(async (req, res) => {
   const rule = stmtGetPromotionRuleById.get(req.params.id) as { id: string; program_version_id: string; branch_id: string | null; name: string } | undefined;
@@ -390,30 +477,8 @@ catalogRouter.delete('/promotion-rules/:id', requirePermission('Promotion.Approv
   res.json({ ok: true });
 }));
 
-catalogRouter.delete('/placement-rules/:id', requirePermission('Curriculum.PlacementPolicy'), ah(async (req, res) => {
-  const rule = stmtGetPlacementRuleById.get(req.params.id) as { id: string; program_version_id: string; branch_id: string | null; name: string } | undefined;
-  if (!rule) throw new HttpError(404, 'Placement rule not found.');
-  requireVersionScope(req, rule.program_version_id);
-  if (rule.branch_id) requireCatalogBranch(req, rule.branch_id);
-  else if (!isOrganizationOwner(req)) throw new HttpError(403, 'Only an organization-scoped owner may delete a global placement rule.');
-  const retired = stmtDeletePlacementRule.run(rule.id) as any;
-  if (retired.changes !== 1) throw new HttpError(409, 'Placement rule is already retired.');
-  writeAudit(req, `Retired placement rule: ${rule.name}`);
-  res.json({ ok: true });
-}));
 
-catalogRouter.post('/placement/recommend', requirePermission('Lead.Edit', 'Student.Edit', 'Exam.View'), ah(async (req, res) => {
-  const { programVersionId, totalScore, branchId } = req.body ?? {};
-  if (typeof programVersionId !== 'string' || totalScore == null) throw new HttpError(400, 'programVersionId and totalScore required.');
-  const effectiveBranchId = branchId ?? req.user?.branchId;
-  requireCatalogBranch(req, effectiveBranchId);
-  const version = requireVersionScope(req, programVersionId);
-  if (version.branch_id !== effectiveBranchId) {
-    throw new HttpError(400, 'Placement branch must match the program version branch.');
-  }
-  const score = assertPercent(totalScore, 'totalScore');
-  res.json(catalog().recommendLevel(programVersionId, score, effectiveBranchId));
-}));
+
 
 catalogRouter.post('/promotion/evaluate', requirePermission('Promotion.Approve', 'Exam.View'), ah(async (req, res) => {
   const { programVersionId, fromLevelId, score, attendancePct, branchId } = req.body ?? {};
@@ -435,8 +500,115 @@ catalogRouter.post('/promotion/evaluate', requirePermission('Promotion.Approve',
   }));
 }));
 
-catalogRouter.post('/fee-rules', requirePermission('FeeStructure.Edit'), ah(async () => {
-  throw new HttpError(409, 'Fee rules are legacy compatibility data. Configure fees only in the Academic Catalog and branch level fee override screens.');
+catalogRouter.get('/fee-rules', requirePermission('AcademicSetup.View', 'FeeStructure.Edit'), ah(async (req, res) => {
+  const branchId = typeof req.query.branchId === 'string' && req.query.branchId.trim()
+    ? req.query.branchId.trim()
+    : req.user?.branchId;
+  if (!branchId) throw new HttpError(400, 'A branch is required.');
+  requireCatalogBranch(req, branchId);
+  const feeType = req.query.feeType == null ? null : assertFeeType(req.query.feeType);
+  const programVersionId = typeof req.query.programVersionId === 'string' && req.query.programVersionId.trim()
+    ? req.query.programVersionId.trim()
+    : null;
+  const levelId = typeof req.query.levelId === 'string' && req.query.levelId.trim()
+    ? req.query.levelId.trim()
+    : null;
+  if (programVersionId) {
+    const version = requireVersionScope(req, programVersionId);
+    if (version.branch_id !== branchId) throw new HttpError(400, 'Fee-rule branch must match the selected program version branch.');
+  }
+  if (levelId) {
+    const level = stmtGetLevelVersion.get(levelId) as { branch_id: string; program_version_id: string | null } | undefined;
+    if (!level) throw new HttpError(404, 'Level not found.');
+    if (level.branch_id !== branchId) throw new HttpError(400, 'Fee-rule branch must match the selected level branch.');
+    if (programVersionId && level.program_version_id !== programVersionId) {
+      throw new HttpError(400, 'Fee-rule level must belong to the selected program version.');
+    }
+  }
+  const rows = stmtListFeeRules.all(branchId, feeType, feeType, programVersionId, programVersionId, levelId, levelId) as any[];
+  const visibleRows = rows.filter((row) => (MANAGED_FEE_TYPES as readonly string[]).includes(row.fee_type));
+  res.json(visibleRows.map(formatFeeRule));
+}));
+
+catalogRouter.post('/fee-rules', requirePermission('FeeStructure.Edit'), ah(async (req, res) => {
+  const parsed = parseFeeRuleBody(req, (req.body ?? {}) as Record<string, unknown>);
+  const nextVersion = ((stmtGetMaxFeeRuleVersion.get(
+    parsed.branchId,
+    parsed.feeType,
+    parsed.programVersionId,
+    parsed.levelId,
+  ) as { v: number | null } | undefined)?.v ?? 0) + 1;
+  const newId = id('fee');
+  stmtInsertFeeRule.run(
+    newId,
+    parsed.programVersionId,
+    parsed.levelId,
+    parsed.branchId,
+    parsed.feeType,
+    parsed.name,
+    parsed.amount,
+    parsed.isOptional ? 1 : 0,
+    parsed.effectiveFrom,
+    parsed.effectiveTo,
+    nextVersion,
+    parsed.isActive ? 1 : 0,
+  );
+  const created = stmtGetFeeRuleById.get(newId) as any;
+  writeAudit(req, `Created fee rule: ${parsed.name}`, { newValue: JSON.stringify(formatFeeRule(created)) });
+  res.status(201).json(formatFeeRule(created));
+}));
+
+catalogRouter.put('/fee-rules/:id', requirePermission('FeeStructure.Edit'), ah(async (req, res) => {
+  const existing = stmtGetFeeRuleById.get(req.params.id) as any;
+  if (!existing) throw new HttpError(404, 'Fee rule not found.');
+  requireCatalogBranch(req, existing.branch_id);
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const parsed = parseFeeRuleBody(req, {
+    ...body,
+    branchId: existing.branch_id,
+    feeType: body.feeType ?? existing.fee_type,
+    name: body.name ?? existing.name,
+    amount: body.amount ?? existing.amount,
+    isOptional: body.isOptional ?? !!existing.is_optional,
+    isActive: body.isActive ?? !!existing.is_active,
+    effectiveFrom: body.effectiveFrom ?? existing.effective_from,
+    effectiveTo: body.effectiveTo ?? existing.effective_to,
+    programVersionId: body.programVersionId ?? existing.program_version_id,
+    levelId: body.levelId ?? existing.level_id,
+  });
+  const before = formatFeeRule(existing);
+  const sameScope =
+    parsed.branchId === existing.branch_id &&
+    parsed.feeType === existing.fee_type &&
+    (parsed.programVersionId ?? null) === (existing.program_version_id ?? null) &&
+    (parsed.levelId ?? null) === (existing.level_id ?? null);
+  const nextVersion = sameScope
+    ? Number(existing.version ?? 1) + 1
+    : ((stmtGetMaxFeeRuleVersion.get(
+        parsed.branchId,
+        parsed.feeType,
+        parsed.programVersionId,
+        parsed.levelId,
+      ) as { v: number | null } | undefined)?.v ?? 0) + 1;
+  stmtUpdateFeeRule.run(
+    parsed.programVersionId,
+    parsed.levelId,
+    parsed.feeType,
+    parsed.name,
+    parsed.amount,
+    parsed.isOptional ? 1 : 0,
+    parsed.effectiveFrom,
+    parsed.effectiveTo,
+    nextVersion,
+    parsed.isActive ? 1 : 0,
+    req.params.id,
+  );
+  const updated = stmtGetFeeRuleById.get(req.params.id) as any;
+  writeAudit(req, `Updated fee rule: ${updated.name}`, {
+    oldValue: JSON.stringify(before),
+    newValue: JSON.stringify(formatFeeRule(updated)),
+  });
+  res.json(formatFeeRule(updated));
 }));
 
 catalogRouter.post('/fees/snapshot', requirePermission('Payment.View', 'Invoice.Create', 'Student.Create'), ah(async (req, res) => {
@@ -531,27 +703,8 @@ catalogRouter.get('/branch-profile/:branchId', requirePermission('AcademicSetup.
     stmtInsertDefaultBranchProfile.run(req.params.branchId);
     row = stmtGetBranchProfile.get(req.params.branchId);
   }
-  res.json(row);
+  res.json(formatBranchProfile(row));
 }));
-
-/**
- * Fee fields on a branch profile are MONEY, so they are validated by the same
- * canonical authority Finance uses (`assertMoney`) rather than a second,
- * divergent validator. Configuration is the right place to reject a bad
- * amount. Unvalidated, `-100`, `0.001`, `1e20` and even the text `"abc"` reach
- * the stored columns, and `resolveFee()` could then hand them to downstream
- * money writers long after the bad configuration was accepted.
- *
- * Invalid configuration must never become authoritative money. `assertMoney`
- * enforces the canonical whole-AFN representation and rejects fractions rather
- * than rounding them into a different fee (for example, 0.001 into a free fee).
- */
-const FEE_FIELDS = [
-  ['placementTestFee', 'placement test fee'],
-  ['registrationFee', 'registration fee'],
-  ['cardFee', 'card fee'],
-  ['diplomaFee', 'diploma fee'],
-] as const;
 
 /** Percentage-style profile fields: finite, 0..100, not money. */
 function assertPercent(value: unknown, field: string): number {
@@ -564,15 +717,10 @@ function assertPercent(value: unknown, field: string): number {
 catalogRouter.put('/branch-profile/:branchId', requirePermission('FeeStructure.Edit', 'Settings.Edit'), ah(async (req, res) => {
   requireCatalogBranch(req, req.params.branchId);
   const b = (req.body ?? {}) as Record<string, unknown>;
-
-  // Validate BEFORE any write. An omitted field means "leave unchanged" and
-  // is skipped; a field that is present must be valid.
-  const fees: Record<string, number | null> = {};
-  for (const [key, label] of FEE_FIELDS) {
-    if (b[key] === undefined || b[key] === null) { fees[key] = null; continue; }
-    // assertMoney rejects a value that is not exact money, so a fee is never
-    // silently substituted with one the operator did not enter.
-    fees[key] = assertMoney(b[key], label);
+  for (const key of LEGACY_PROFILE_FEE_FIELDS) {
+    if (b[key] !== undefined) {
+      throw new HttpError(400, `${FEE_RULE_COMPATIBILITY_BOUNDARY} Fixed fees are configured through the canonical fee-rule registry, not through the branch profile.`);
+    }
   }
   const passMark = b.defaultPassMark === undefined || b.defaultPassMark === null
     ? null : assertPercent(b.defaultPassMark, 'default pass mark');
@@ -594,17 +742,6 @@ catalogRouter.put('/branch-profile/:branchId', requirePermission('FeeStructure.E
     }
   }
 
-  // CFG-4: the UPSERT cannot express "leave unchanged" for a NOT NULL column.
-  // SQLite validates the INSERT tuple's NOT NULL constraints BEFORE the
-  // ON CONFLICT clause runs, so a NULL placeholder aborts the statement even
-  // when the COALESCE in DO UPDATE would have preserved the old value —
-  // proven by execution. That is why the first write for a branch, and every
-  // partial payload, returned HTTP 500.
-  //
-  // Resolving each value against the existing row in code (rather than in SQL)
-  // keeps PUT's established semantics: a supplied field is written, an omitted
-  // field keeps its current value, and a brand new profile falls back to the
-  // column defaults.
   const existing = stmtGetBranchProfile.get(req.params.branchId) as
     | Record<string, unknown>
     | undefined;
@@ -614,17 +751,17 @@ catalogRouter.put('/branch-profile/:branchId', requirePermission('FeeStructure.E
   stmtUpsertBranchProfile.run(
     req.params.branchId,
     b.defaultProgramVersionId ?? existing?.default_program_version_id ?? null,
-    keep(fees.placementTestFee, 'placement_test_fee', 0),
-    keep(fees.registrationFee, 'registration_fee', 0),
-    keep(fees.cardFee, 'card_fee', 0),
-    keep(fees.diplomaFee, 'diploma_fee', 0),
+    keep(null, 'placement_test_fee', 0),
+    keep(null, 'registration_fee', 0),
+    keep(null, 'card_fee', 0),
+    keep(null, 'diploma_fee', 0),
     keep(passMark, 'default_pass_mark', 60),
     keep(minAttendance, 'default_min_attendance', 75),
     b.academicYearLabel ?? existing?.academic_year_label ?? null,
     b.notes ?? existing?.notes ?? null
   );
   writeAudit(req, `Updated branch academic profile ${req.params.branchId}`);
-  res.json(stmtGetBranchProfile.get(req.params.branchId));
+  res.json(formatBranchProfile(stmtGetBranchProfile.get(req.params.branchId)));
 }));
 
 export default catalogRouter;

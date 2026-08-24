@@ -32,12 +32,12 @@ describe('WP-04 placement canonical architecture', () => {
       'trg_placement_response_snapshot_update',
       'trg_placement_result_snapshot_insert',
       'trg_placement_result_snapshot_update',
+      'trg_placement_result_level_scope_insert',
+      'trg_placement_result_level_scope_update',
+      'trg_placement_attempt_level_scope_update',
       'trg_placement_test_rubric_scope_insert',
       'trg_placement_test_rubric_scope_update',
       'trg_placement_rubric_kind_scope_update',
-      'trg_placement_rule_branch_scope_insert',
-      'trg_placement_rule_level_scope_insert',
-      'trg_placement_rule_level_code_insert',
     ]));
   });
 
@@ -55,14 +55,15 @@ describe('WP-04 placement canonical architecture', () => {
     expect(source).toContain('evaluateOutcome');
   });
 
-  it('makes both enrollment writers delegate to the shared placement gate', () => {
+  it('keeps placement gating centralized while admission-only writers do not bypass it', () => {
     const service = read('server/src/core/academic/enrollment-service.ts');
     const directRoute = read('server/src/routes/students.routes.ts');
     const conversion = read('server/src/routes/visitors.routes.ts');
     expect(service).toContain('evaluateEnrollmentEligibility');
     expect(directRoute).toContain('assertPlacementEligibleForClass');
-    expect(conversion).toContain('getEnrollmentService(db).enroll');
-    expect(conversion).toContain('resolveGoverningProgramVersionId');
+    expect(directRoute).toContain('getEnrollmentService(db).enroll');
+    expect(conversion).toContain('Visitor admission no longer collects payment or creates enrollment directly');
+    expect(conversion).not.toContain('getEnrollmentService(db).enroll');
   });
 
   it('keeps overall scoring percentage-based in the academic configuration UI', () => {
@@ -70,8 +71,9 @@ describe('WP-04 placement canonical architecture', () => {
     expect(source).not.toContain('placementConfig.maxScore');
     expect(source).not.toMatch(/Overall[^\n]{0,80}max(?:imum)?\s*score/i);
     expect(source).toContain('passScore');
-    expect(source).toContain('maxScore:100');
-    expect(source).toContain('version: pp.version ?? null');
+    expect(source).toContain('maxScore: spec.maxScore');
+    expect(source).toContain('version: raw?.version ?? null');
+    expect(source).toContain("const COMPONENT_ORDER: ComponentKey[] = ['grammar', 'reading', 'listening', 'writing', 'speaking']");
   });
 
   it('uses explicit CAS lifecycle calls in the test-bank UI instead of mutating status fields', () => {
@@ -82,12 +84,11 @@ describe('WP-04 placement canonical architecture', () => {
     expect(source).not.toContain('status: editing.status');
   });
 
-  it('keeps operational content scoring on manualScore while custom score components retain their typed contract', () => {
-    const modal = read('src/components/visitors/PlacementTestModal.tsx');
+  it('keeps scoring normalization centralized while retaining the canonical manual-entry contract', () => {
     const scorer = read('server/src/core/placement/scoring-engine.ts');
     const store = read('server/src/core/placement/store.ts');
-    expect(modal).toContain('manualScore');
-    expect(scorer).toContain('body?.manualScore');
+    expect(scorer).toContain('body?.score ?? body?.manualScore');
     expect(store).toContain('body?.score');
+    expect(store).not.toContain("type: 'custom_score'");
   });
 });

@@ -1,34 +1,30 @@
 /**
- * Placement Engine extensions — closed-state verification.
- * ============================================================================
- * Originally reproduced the absence of speaking audio responses, rubric
- * criteria scoring, and an expiry sweep. After implementation these
- * assertions guard the CLOSED state.
+ * Placement engine extensions — canonical V1 closed-state regression.
  */
 import { beforeAll, describe, expect, it } from 'vitest';
 import { initSchema } from '../db/connection.js';
-import { readFileSync } from 'fs';
+import { readRepo } from './support/repo-read.js';
 
-describe.skip('Placement Engine extensions (closed-state regression)', () => {
+describe('Placement Engine extensions (closed-state regression)', () => {
   beforeAll(() => initSchema());
 
-  it('CLOSED-S1: speaking answers support validated audio media references', () => {
-    const src = readFileSync('src/routes/placement-attempt.routes.ts', 'utf8');
-    expect(src).toMatch(/audioMediaId/);
-    expect(src).toMatch(/placement_media/);
-    expect(src).toMatch(/belongs to another branch/);
+  it('supports validated speaking audio media references', () => {
+    const attemptRoute = readRepo('server/src/routes/placement-attempt.routes.ts');
+    expect(attemptRoute).toContain('audioMediaId');
+    expect(attemptRoute).toContain('placement_media');
+    expect(attemptRoute).toContain('Audio media belongs to another branch');
   });
 
-  it('CLOSED-S2: manual scoring supports rubric criteriaScores', () => {
-    const engine = readFileSync('src/core/placement/scoring-engine.ts', 'utf8');
-    expect(engine).toMatch(/criteriaScores/);
-    expect(engine).toMatch(/criteria_json/);
-    // The attempt router forwards the whole body to the scoring engine, which
-    // validates criteriaScores (verified by placement-engine-extensions.test.ts).
+  it('supports rubric criteria scoring for productive skills', () => {
+    const engine = readRepo('server/src/core/placement/scoring-engine.ts');
+    expect(engine).toContain('criteriaScores');
+    expect(engine).toContain('manualScoreFromRubric');
+    expect(engine).toContain('rubric has no criteria');
   });
 
-  it('CLOSED-S3: expiry maintenance endpoint exists (owner/manager)', () => {
-    const src = readFileSync('src/routes/placement-attempt.routes.ts', 'utf8');
-    expect(src).toMatch(/maintenance\/expire/);
+  it('keeps the expiry maintenance endpoint on the canonical attempt route', () => {
+    const attemptRoute = readRepo('server/src/routes/placement-attempt.routes.ts');
+    expect(attemptRoute).toContain('/maintenance/expire');
+    expect(attemptRoute).toContain("authorize('owner', 'general_manager')");
   });
 });

@@ -6,13 +6,14 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   BookOpen, Clock, DoorOpen, Layers, Plus, RefreshCw, CalendarRange,
   ChevronDown, ChevronRight, Pencil, Trash2, Archive, Power, X, Check, Building2,
-  GitBranch, Wand2, Lock, CheckCircle2, Settings, Package, Loader2
+  GitBranch, Wand2, Lock, CheckCircle2, Settings, Package, Loader2, DollarSign
 } from 'lucide-react';
 import { api } from '../../api/client';
 import { formatAFN } from '../../utils/format';
 import ProgramVersionsPanel from './ProgramVersionsPanel';
 import ClassGenerationWizard from './ClassGenerationWizard';
 import OfferingsPanel from './OfferingsPanel';
+import FeePoliciesPanel from './FeePoliciesPanel';
 import { ShamsiDateInput } from '../common/ShamsiDateInput';
 import { useDatasetVersion, useInvalidate } from '../../state/serverStateFreshness';
 
@@ -23,7 +24,7 @@ import { useDatasetVersion, useInvalidate } from '../../state/serverStateFreshne
  *                       completion block for why).
  *   3 Course delivery — binds curriculum to infrastructure.
  */
-type Tab = 'terms' | 'slots' | 'rooms' | 'catalog' | 'versions' | 'offerings' | 'generate';
+type Tab = 'terms' | 'slots' | 'rooms' | 'catalog' | 'versions' | 'fees' | 'offerings' | 'generate';
 
 function NavButton({ t, label, icon, isLocked, tab, setTab }: { t: Tab; label: string; icon: React.ReactNode; isLocked: boolean; tab: Tab; setTab: React.Dispatch<React.SetStateAction<Tab>> }) {
   return (
@@ -84,6 +85,8 @@ export default function AcademicSetupView({ branchId, permissionCodes }: { branc
   const canEditAcademicInfrastructure = hasPermissionCode('AcademicSetup.Edit');
   /** Program versions, subjects, modules — `Curriculum.Author`. */
   const canAuthorCurriculum = hasPermissionCode('Curriculum.Author');
+  /** Operational fee registry — `FeeStructure.Edit`. */
+  const canEditFeeStructure = hasPermissionCode('FeeStructure.Edit');
   const [tab, setTab] = useState<Tab>('terms');
   // Tracks which heavy panels have been opened at least once, so each mounts
   // lazily but then STAYS mounted instead of refetching on every revisit.
@@ -304,6 +307,7 @@ export default function AcademicSetupView({ branchId, permissionCodes }: { branc
             <div className="space-y-2">
               <NavButton tab={tab} setTab={setTab} t="catalog" label="2.1 Programs & Levels" icon={<Layers className="w-3.5 h-3.5" />} isLocked={false} />
               <NavButton tab={tab} setTab={setTab} t="versions" label="2.2 Versions & Rules" icon={<GitBranch className="w-3.5 h-3.5" />} isLocked={false} />
+              <NavButton tab={tab} setTab={setTab} t="fees" label="2.3 Operational Fees" icon={<DollarSign className="w-3.5 h-3.5" />} isLocked={false} />
             </div>
             {!phase2Complete && <p className="text-[10px] text-slate-500 font-bold mt-2">Curriculum can be authored at any time — it does not depend on rooms or time slots.</p>}
             {phase2Complete && <p className="text-[10px] text-emerald-600 font-bold mt-2 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Phase 2 Complete</p>}
@@ -596,6 +600,10 @@ export default function AcademicSetupView({ branchId, permissionCodes }: { branc
                 </div>
               )}
             </div>
+          )}
+
+          {tab === 'fees' && (
+            <FeePoliciesPanel branchId={branchId} canEdit={canEditFeeStructure} />
           )}
 
           {/* These three panels each load their own data on mount. Rendering

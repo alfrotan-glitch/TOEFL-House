@@ -2,14 +2,25 @@
  * Placement persistence and API projection authority.
  *
  * HTTP routes load placement rows through this module and never expose raw
- * attempt snapshots. Operational profile projections intentionally exclude
- * answer keys; the scorer reads the immutable database snapshot directly.
+ * attempt snapshots. Operational attempt projections intentionally exclude
+ * answer keys while preserving the immutable assessment structure.
  */
 import { db } from '../../db/connection.js';
 import { id } from '../../utils/ids.js';
 import { canAccessBranchResource } from '../../middleware/auth.js';
 import { HttpError } from '../../middleware/errorHandler.js';
 import { PLACEMENT_DEFAULTS } from '../configuration/policy-catalog.js';
+import {
+  type BlueprintBucket,
+  type PlacementDeliveryMode,
+  type PlacementDecisionRule,
+  type PlacementComponentType,
+  CANONICAL_COMPONENT_KEYS,
+  CANONICAL_COMPONENT_WEIGHTS,
+  componentSpec,
+  DELIVERY_MODES,
+} from './v1.js';
+import { assertBlueprintComponentShape, type BlueprintComponent } from './blueprint-engine.js';
 
 interface StmtLike {
   run(...args: any[]): any;
@@ -18,31 +29,26 @@ interface StmtLike {
 }
 type Stmt = StmtLike;
 
-export type PlacementComponentType = 'skill_scores' | 'written_test' | 'interview' | 'level_assessment' | 'custom_score' | 'content_test';
-export type RequirementMode = 'required' | 'optional' | 'not_required';
-export type ScoringMethod = 'auto' | 'manual' | 'hybrid';
+export { type PlacementComponentType, type PlacementDeliveryMode, type PlacementDecisionRule, type BlueprintBucket };
 
-export interface PlacementComponentConfig {
-  key: string;
-  type: PlacementComponentType;
-  label: string;
-  required: boolean;
-  weight: number;
-  maxScore: number;
-  durationMinutes?: number;
-  instructions?: string | null;
-  skills?: readonly ('grammar' | 'vocabulary' | 'reading' | 'listening' | 'writing' | 'speaking')[];
-  testId?: string;
+export type RequirementMode = 'required' | 'optional' | 'not_required';
+export type ScoringMethod = 'auto' | 'manual';
+
+export interface PlacementComponentConfig extends BlueprintComponent {
+  order: number;
+  scoringMethod: ScoringMethod;
 }
 
 export interface PolicyComponent extends PlacementComponentConfig {
-  order: number;
-  timeLimitSeconds?: number | null;
   minScore?: number | null;
-  scoringMethod?: ScoringMethod;
 }
 
-export const DEFAULT_COMPONENTS: PlacementComponentConfig[] = [...PLACEMENT_DEFAULTS.components] as PlacementComponentConfig[];
+export const DEFAULT_COMPONENTS: PlacementComponentConfig[] = [...PLACEMENT_DEFAULTS.components].map((component: any, index) => ({
+  ...component,
+  order: index,
+  timeLimitSeconds: component.durationMinutes ? Math.round(component.durationMinutes * 60) : null,
+  scoringMethod: component.type === 'grammar' || component.type === 'reading' || component.type === 'listening' ? 'auto' : 'manual',
+})) as PlacementComponentConfig[];
 
 export const stmtVisitor: Stmt = db.prepare('SELECT * FROM visitors WHERE id = ?');
 export const stmtProgramVersion: Stmt = db.prepare(`
@@ -62,13 +68,6 @@ export const stmtVersionLevels: Stmt = db.prepare(`
   )
   ORDER BY "order"
 `);
-export const stmtPlacementRules: Stmt = db.prepare(`
-  SELECT id, name, min_score, max_score, recommended_level_id, recommended_level_code,
-         branch_id, sort_order, is_active, conditions_json
-  FROM placement_rules
-  WHERE program_version_id = ? AND (branch_id = ? OR branch_id IS NULL) AND is_active = 1
-  ORDER BY branch_id IS NULL, sort_order, min_score
-`);
 
 export const stmtAttempt: Stmt = db.prepare('SELECT * FROM placement_assessment_attempts WHERE id = ?');
 export const stmtCurrentAttempt: Stmt = db.prepare(`
@@ -81,7 +80,7 @@ export const stmtAttempts: Stmt = db.prepare(`
          started_at, completed_at, total_score, max_score, percentage, outcome,
          recommended_level_id, recommendation_text, examiner_user_id, notes,
          expires_at, paused_at, resumed_at, policy_version, decision_rule_id,
-         override_level_id, override_reason, override_by, override_at
+         override_level_id, override_reason, override_by, override_at, delivery_mode
   FROM placement_assessment_attempts WHERE visitor_id = ? ORDER BY attempt_number DESC
 `);
 export const stmtResults: Stmt = db.prepare('SELECT * FROM placement_assessment_results WHERE attempt_id = ? ORDER BY rowid');
@@ -90,18 +89,18 @@ export const stmtLastAttemptNumber: Stmt = db.prepare('SELECT COALESCE(MAX(attem
 export const stmtInsertAttempt: Stmt = db.prepare(`
   INSERT INTO placement_assessment_attempts
     (id, visitor_id, program_version_id, profile_id, branch_id, attempt_number,
-     status, started_at, snapshot_json, examiner_user_id, notes, expires_at, policy_version)
-  VALUES (?, ?, ?, ?, ?, ?, 'in_progress', datetime('now'), ?, ?, ?, ?, ?)
+     status, started_at, snapshot_json, examiner_user_id, notes, expires_at, policy_version, delivery_mode)
+  VALUES (?, ?, ?, ?, ?, ?, 'in_progress', datetime('now'), ?, ?, ?, ?, ?, ?)
 `);
 export const stmtUpsertResult: Stmt = db.prepare(`
   INSERT INTO placement_assessment_results
     (id, attempt_id, component_key, component_type, label, status, score, max_score,
      weight, selected_level_id, notes, result_text, payload_json, evaluator_user_id,
      completed_at, updated_at, raw_score, percentage, weighted_score, score_version,
-     started_at, deadline_at, submitted_at, elapsed_seconds, timeout_flag)
+     started_at, deadline_at, submitted_at, elapsed_seconds, timeout_flag, cefr_level, cefr_evidence_json)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
           CASE WHEN ? = 'completed' THEN datetime('now') ELSE NULL END,
-          datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(attempt_id, component_key) DO UPDATE SET
     status=excluded.status,
     score=excluded.score,
@@ -121,6 +120,8 @@ export const stmtUpsertResult: Stmt = db.prepare(`
     submitted_at=COALESCE(excluded.submitted_at, placement_assessment_results.submitted_at),
     elapsed_seconds=COALESCE(excluded.elapsed_seconds, placement_assessment_results.elapsed_seconds),
     timeout_flag=excluded.timeout_flag,
+    cefr_level=excluded.cefr_level,
+    cefr_evidence_json=excluded.cefr_evidence_json,
     completed_at=CASE WHEN excluded.status='completed' THEN datetime('now') ELSE placement_assessment_results.completed_at END,
     updated_at=datetime('now')
 `);
@@ -166,14 +167,23 @@ export const stmtUpdateTest: Stmt = db.prepare(`
       content_json=?, version=version+1, updated_at=datetime('now')
   WHERE id=? AND version=?
 `);
-export const stmtQuestionsByTest: Stmt = db.prepare('SELECT * FROM placement_test_questions WHERE test_id = ? ORDER BY order_index, rowid');
+export const stmtQuestionsByTest: Stmt = db.prepare(`
+  SELECT * FROM placement_test_questions WHERE test_id = ? ORDER BY order_index, rowid
+`);
 export const stmtDeleteQuestion: Stmt = db.prepare('DELETE FROM placement_test_questions WHERE id = ?');
-export const stmtUpdateQuestion: Stmt = db.prepare('UPDATE placement_test_questions SET qtype=?, prompt=?, options_json=?, answer_key=?, points=?, order_index=?, difficulty=?, section_key=? WHERE id=?');
+export const stmtUpdateQuestion: Stmt = db.prepare(`
+  UPDATE placement_test_questions
+  SET qtype=?, prompt=?, options_json=?, answer_key=?, points=?, order_index=?, difficulty=?, section_key=?,
+      cefr_level=?, topic=?, subskill=?, lifecycle_status=?, reviewed_by=?, approved_at=?, content_json=?,
+      version=version+1
+  WHERE id=?
+`);
 export const stmtInsertQuestion: Stmt = db.prepare(`
   INSERT INTO placement_test_questions
     (id, test_id, question_key, qtype, prompt, options_json, answer_key, points,
-     order_index, difficulty, section_key)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     order_index, difficulty, section_key, cefr_level, topic, subskill, lifecycle_status,
+     version, created_by, reviewed_by, approved_at, content_json)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 export const stmtUpsertResponse: Stmt = db.prepare(`
   INSERT INTO placement_assessment_responses
@@ -208,9 +218,32 @@ export const stmtMediaById: Stmt = db.prepare('SELECT * FROM placement_media WHE
 export const stmtInsertMedia: Stmt = db.prepare('INSERT INTO placement_media (id, filename, mime, size_bytes, sha256, storage_path, kind, branch_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
 export const stmtMediaByBranch: Stmt = db.prepare('SELECT * FROM placement_media WHERE branch_id IS NULL OR branch_id = ? ORDER BY created_at DESC');
 
-function parseJson(value: unknown, fallback: unknown) {
+function parseJson<T>(value: unknown, fallback: T): T {
   if (typeof value !== 'string' || value === '') return fallback;
-  try { return JSON.parse(value); } catch { return fallback; }
+  try { return JSON.parse(value) as T; } catch { return fallback; }
+}
+
+function serializeQuestion(question: any) {
+  return {
+    id: question.id,
+    key: question.question_key,
+    qtype: question.qtype,
+    prompt: question.prompt,
+    options: parseJson(question.options_json, null),
+    answerKey: question.answer_key,
+    points: question.points,
+    orderIndex: question.order_index,
+    difficulty: question.difficulty ?? null,
+    sectionKey: question.section_key ?? null,
+    cefrLevel: question.cefr_level ?? null,
+    topic: question.topic ?? null,
+    subskill: question.subskill ?? null,
+    lifecycleStatus: question.lifecycle_status,
+    version: Number(question.version ?? 1),
+    reviewedBy: question.reviewed_by ?? null,
+    approvedAt: question.approved_at ?? null,
+    contentJson: parseJson(question.content_json, null),
+  };
 }
 
 export function serializeTest(test: any) {
@@ -244,93 +277,50 @@ export function serializeTest(test: any) {
       durationSeconds: section.duration_seconds,
       orderIndex: section.order_index,
     })),
-    questions: (stmtQuestionsByTest.all(test.id) as any[]).map((question) => ({
-      id: question.id,
-      key: question.question_key,
-      qtype: question.qtype,
-      prompt: question.prompt,
-      options: parseJson(question.options_json, null),
-      answerKey: question.answer_key,
-      points: question.points,
-      orderIndex: question.order_index,
-      difficulty: question.difficulty ?? null,
-      sectionKey: question.section_key ?? null,
-    })),
+    questions: (stmtQuestionsByTest.all(test.id) as any[]).map(serializeQuestion),
   };
 }
 
 function normalizeStoredComponents(profile: any): PolicyComponent[] {
-  const raw = parseJson(profile.components_json, null);
+  const raw = parseJson<any[]>(profile.components_json, null as any);
   if (!Array.isArray(raw)) throw new HttpError(409, 'Stored placement blueprint is invalid.');
-  const components = raw.map((item: any, index: number): PolicyComponent => {
-    if (!item || typeof item !== 'object' || Array.isArray(item)
-        || typeof item.key !== 'string' || typeof item.label !== 'string' || typeof item.type !== 'string'
-        || (item.required !== undefined && typeof item.required !== 'boolean')
-        || (item.order != null && (typeof item.order !== 'number' || !Number.isSafeInteger(item.order)))
-        || typeof item.weight !== 'number' || typeof item.maxScore !== 'number'
-        || (item.durationMinutes != null && typeof item.durationMinutes !== 'number')
-        || (item.timeLimitSeconds != null && typeof item.timeLimitSeconds !== 'number')
-        || (item.minScore != null && typeof item.minScore !== 'number')
-        || (item.scoringMethod != null && typeof item.scoringMethod !== 'string')
-        || (item.instructions != null && typeof item.instructions !== 'string')
-        || (item.skills != null && (!Array.isArray(item.skills) || item.skills.some((skill: unknown) => typeof skill !== 'string')))
-        || (item.testId != null && typeof item.testId !== 'string')) {
-      throw new HttpError(409, 'Stored placement blueprint has invalid field types.');
-    }
-    return {
-      key: item.key.trim(),
-      type: item.type as PlacementComponentType,
-      label: item.label.trim(),
+  const seen = new Set<string>();
+  const components = raw.map((item, index): PolicyComponent => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new HttpError(409, 'Stored placement blueprint is invalid.');
+    const type = String(item.type || item.key || '').trim() as PlacementComponentType;
+    if (!(CANONICAL_COMPONENT_KEYS as readonly string[]).includes(type)) throw new HttpError(409, 'Stored placement blueprint uses a non-canonical component.');
+    const spec = componentSpec(type);
+    const key = String(item.key || type).trim();
+    if (key !== type) throw new HttpError(409, 'Stored placement component key must equal its canonical component type.');
+    if (seen.has(key)) throw new HttpError(409, 'Stored placement blueprint contains a duplicate component key.');
+    seen.add(key);
+    const bankIds = Array.isArray(item.bankIds) ? item.bankIds.map((bankId: unknown) => String(bankId).trim()).filter(Boolean) : [];
+    const blueprintBuckets = Array.isArray(item.blueprintBuckets) ? item.blueprintBuckets as BlueprintBucket[] : [];
+    const component: PolicyComponent = {
+      key,
+      type,
+      label: typeof item.label === 'string' && item.label.trim() ? item.label.trim() : spec.label,
       required: item.required !== false,
-      order: item.order == null ? index : item.order,
-      weight: item.weight,
-      maxScore: item.maxScore,
-      durationMinutes: item.durationMinutes == null ? undefined : item.durationMinutes,
-      timeLimitSeconds: item.timeLimitSeconds == null
-        ? (item.durationMinutes == null ? null : Math.round(item.durationMinutes * 60))
-        : item.timeLimitSeconds,
-      minScore: item.minScore == null ? null : item.minScore,
-      scoringMethod: (item.scoringMethod == null
-        ? (item.type === 'content_test' ? 'hybrid' : 'manual')
-        : item.scoringMethod) as ScoringMethod,
-      instructions: item.instructions == null ? null : item.instructions,
-      skills: Array.isArray(item.skills) ? item.skills as PolicyComponent['skills'] : undefined,
-      testId: item.testId == null ? undefined : item.testId.trim(),
+      order: typeof item.order === 'number' && Number.isSafeInteger(item.order) ? item.order : index,
+      weight: typeof item.weight === 'number' ? item.weight : CANONICAL_COMPONENT_WEIGHTS[type],
+      maxScore: typeof item.maxScore === 'number' ? item.maxScore : spec.maxScore,
+      durationMinutes: item.durationMinutes == null ? spec.defaultDurationMinutes : Number(item.durationMinutes),
+      timeLimitSeconds: item.timeLimitSeconds == null ? Math.round((item.durationMinutes == null ? spec.defaultDurationMinutes : Number(item.durationMinutes)) * 60) : Number(item.timeLimitSeconds),
+      instructions: typeof item.instructions === 'string' ? item.instructions : spec.label,
+      bankIds,
+      blueprintBuckets,
+      scoringMethod: type === 'grammar' || type === 'reading' || type === 'listening' ? 'auto' : 'manual',
+      minScore: item.minScore == null ? null : Number(item.minScore),
     };
+    assertBlueprintComponentShape(component);
+    if (component.maxScore !== spec.maxScore) throw new HttpError(409, `${component.label} maxScore must remain ${spec.maxScore}.`);
+    if (Math.abs(component.weight - CANONICAL_COMPONENT_WEIGHTS[type]) > 0.01) throw new HttpError(409, `${component.label} weight is not canonical.`);
+    return component;
   });
-  const validTypes = new Set<PlacementComponentType>(['skill_scores','written_test','interview','level_assessment','custom_score','content_test']);
-  const validSkills = new Set(['grammar','vocabulary','reading','listening','writing','speaking']);
-  const keys = new Set<string>();
-  let totalWeight = 0;
-  for (const component of components) {
-    if (!/^[A-Za-z0-9_-]{1,80}$/.test(component.key) || !component.label || component.label.length > 160
-        || (component.instructions != null && component.instructions.length > 2000)
-        || keys.has(component.key) || !validTypes.has(component.type)) {
-      throw new HttpError(409, 'Stored placement blueprint is invalid.');
+  for (const key of CANONICAL_COMPONENT_KEYS) {
+    if (!components.some((component) => component.key === key)) {
+      throw new HttpError(409, `Stored placement blueprint is missing the canonical ${key} component.`);
     }
-    if (!Number.isFinite(component.order) || component.order < 0 ||
-        !Number.isFinite(component.weight) || component.weight < 0 || component.weight > 100 ||
-        !Number.isFinite(component.maxScore) || component.maxScore <= 0 ||
-        (component.minScore != null && (!Number.isFinite(component.minScore) || component.minScore < 0 || component.minScore > component.maxScore)) ||
-        (component.durationMinutes != null && (!Number.isFinite(component.durationMinutes) || component.durationMinutes <= 0)) ||
-        (component.timeLimitSeconds != null && (!Number.isSafeInteger(component.timeLimitSeconds) || component.timeLimitSeconds <= 0))) {
-      throw new HttpError(409, 'Stored placement blueprint contains invalid scoring or timing configuration.');
-    }
-    if (!['auto','manual','hybrid'].includes(String(component.scoringMethod)) ||
-        (component.type !== 'content_test' && component.scoringMethod !== 'manual') ||
-        (component.type === 'content_test' && !component.testId) ||
-        (component.type !== 'content_test' && component.testId)) {
-      throw new HttpError(409, 'Stored placement blueprint contains invalid content or scoring configuration.');
-    }
-    if (component.skills != null && (component.type !== 'skill_scores' || component.skills.length === 0 ||
-        new Set(component.skills).size !== component.skills.length || component.skills.some((skill) => !validSkills.has(skill)))) {
-      throw new HttpError(409, 'Stored placement blueprint contains invalid skill configuration.');
-    }
-    keys.add(component.key);
-    totalWeight += component.weight;
-  }
-  if (components.length > 0 && Math.abs(totalWeight - 100) > 0.01) {
-    throw new HttpError(409, 'Stored placement blueprint weights must total 100%.');
   }
   return components.sort((left, right) => left.order - right.order);
 }
@@ -339,65 +329,21 @@ export function parseComponents(profile: any): PolicyComponent[] {
   return normalizeStoredComponents(profile);
 }
 
-function serializeContentTest(test: any) {
-  const rubric = test.rubric_id ? stmtRubricById.get(test.rubric_id) as any : null;
-  return {
-    id: test.id,
-    title: test.title,
-    testType: test.test_type,
-    instructions: test.instructions,
-    audioUrl: test.audio_url,
-    transcript: test.transcript,
-    passage: test.passage,
-    status: test.status,
-    difficulty: test.difficulty ?? null,
-    durationSeconds: test.duration_seconds ?? null,
-    version: Number(test.version ?? 1),
-    rubric: rubric ? {
-      id: rubric.id,
-      title: rubric.title,
-      kind: rubric.kind,
-      version: Number(rubric.version ?? 1),
-      criteria: parseJson(rubric.criteria_json, []),
-    } : null,
-    sections: (stmtSectionsByTest.all(test.id) as any[]).map((section) => ({
-      key: section.section_key,
-      title: section.title,
-      kind: section.kind,
-      audioUrl: section.audio_url,
-      transcript: section.transcript,
-      body: section.body,
-      durationSeconds: section.duration_seconds,
-      orderIndex: section.order_index,
-    })),
-    questions: (stmtQuestionsByTest.all(test.id) as any[]).map((question) => ({
-      id: question.id,
-      questionKey: question.question_key,
-      qtype: question.qtype,
-      prompt: question.prompt,
-      options: parseJson(question.options_json, null),
-      points: question.points,
-      orderIndex: question.order_index,
-      difficulty: question.difficulty ?? null,
-      sectionKey: question.section_key ?? null,
-    })),
-  };
+function parseDecisionRules(profile: any): PlacementDecisionRule[] {
+  const parsed = parseJson<any[]>(profile.decision_rules_json, []);
+  return Array.isArray(parsed) ? parsed as PlacementDecisionRule[] : [];
 }
 
-export function mapProfile(profile: any, version: any, levels: any[], rules: any[]) {
+function serializeBankPreview(bankId: string) {
+  const bank = stmtTestById.get(bankId) as any;
+  return bank ? serializeTest(bank) : null;
+}
+
+export function mapProfile(profile: any, version: any, levels: any[]) {
   const components = parseComponents(profile);
   const requirementMode = String(profile.requirement_mode) as RequirementMode;
-  const method = components.length > 1 ? 'hybrid' : (components[0]?.type ?? 'skill_scores');
-  const decisionRules = profile.decision_rules_json == null
-    ? []
-    : parseJson(profile.decision_rules_json, null);
-  if (!Array.isArray(decisionRules)) throw new HttpError(409, 'Stored placement decision rules are invalid.');
+  const decisionRules = parseDecisionRules(profile);
   return {
-    contentTests: components
-      .filter((component) => component.type === 'content_test' && component.testId)
-      .map((component) => stmtTestById.get(component.testId!) as any)
-      .filter(Boolean)
-      .map(serializeContentTest),
     configured: true,
     enabled: requirementMode !== 'not_required',
     required: requirementMode === 'required',
@@ -405,14 +351,14 @@ export function mapProfile(profile: any, version: any, levels: any[], rules: any
     firstLevelExempt: Boolean(profile.first_level_exempt),
     expiresMinutes: profile.expires_minutes == null ? null : Number(profile.expires_minutes),
     decisionRules,
-    method,
+    deliveryModes: [...DELIVERY_MODES],
+    method: 'canonical_v1',
     programVersionId: version.id,
     programId: version.program_id,
     programName: version.program_name,
     versionLabel: version.version_label,
     components,
     levels,
-    placementRules: rules,
     allowRetake: Boolean(profile.allow_retake),
     maxAttempts: profile.max_attempts == null ? null : Number(profile.max_attempts),
     firstAttemptBillable: profile.first_attempt_billable == null ? true : Boolean(Number(profile.first_attempt_billable)),
@@ -420,9 +366,10 @@ export function mapProfile(profile: any, version: any, levels: any[], rules: any
     retakeFeeAmount: profile.retake_fee_amount == null ? null : Number(profile.retake_fee_amount),
     passScore: Number(profile.pass_score ?? PLACEMENT_DEFAULTS.passScore),
     instructions: profile.instructions ?? null,
-    scoringModel: String(profile.scoring_model || 'weighted_average'),
+    scoringModel: String(profile.scoring_model || 'canonical'),
     profileId: profile.id,
     policyVersion: Number(profile.version ?? 1),
+    banks: components.flatMap((component) => component.bankIds).map(serializeBankPreview).filter(Boolean),
   };
 }
 
@@ -486,35 +433,16 @@ export function normalizeScore(value: unknown, maxScore: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > maxScore) {
     throw new HttpError(400, `Score must be a number between 0 and ${maxScore}.`);
   }
-  return value;
+  return Math.round(value * 100) / 100;
 }
 
 export function componentScore(component: PlacementComponentConfig, body: any): { score: number | null; payload: any } {
-  if (component.type === 'skill_scores') {
-    const skills = Array.isArray(component.skills) && component.skills.length > 0
-      ? component.skills
-      : ['grammar', 'vocabulary', 'reading', 'listening', 'writing', 'speaking'];
-    const perSkillMax = 25;
-    const normalized: Record<string, number> = {};
-    for (const skill of skills) {
-      if (body?.skills?.[skill] == null || body?.skills?.[skill] === '') {
-        throw new HttpError(400, `Score for ${skill} is required.`);
-      }
-      normalized[skill] = normalizeScore(body.skills[skill], perSkillMax);
-    }
-    const score = Math.round(
-      (Object.values(normalized).reduce((sum, value) => sum + value, 0) / (skills.length * perSkillMax))
-      * component.maxScore * 100,
-    ) / 100;
-    return { score, payload: { skills: normalized } };
-  }
-  if (component.type === 'level_assessment' && body?.score == null && body?.selectedLevelId) {
-    return { score: null, payload: { selectedLevelId: body.selectedLevelId } };
-  }
   const score = normalizeScore(body?.score, component.maxScore);
   return {
     score,
     payload: {
+      mode: 'manual_entry',
+      deliveryMode: body?.deliveryMode ?? null,
       selectedLevelId: body?.selectedLevelId ?? null,
       answerSummary: body?.answerSummary ?? null,
       rubric: body?.rubric ?? null,
@@ -552,6 +480,8 @@ export interface UpsertResultArgs {
   submittedAt?: string | null;
   elapsedSeconds?: number | null;
   timeoutFlag?: number;
+  cefrLevel?: string | null;
+  cefrEvidenceJson?: string | null;
 }
 
 export function upsertResult(args: UpsertResultArgs) {
@@ -562,6 +492,7 @@ export function upsertResult(args: UpsertResultArgs) {
     args.evaluatorUserId, args.status, args.rawScore ?? null,
     args.percentage ?? null, args.weightedScore ?? null, args.scoreVersion ?? 1,
     args.startedAt ?? null, args.deadlineAt ?? null, args.submittedAt ?? null,
-    args.elapsedSeconds ?? null, args.timeoutFlag ?? 0,
+    args.elapsedSeconds ?? null, args.timeoutFlag ?? 0, args.cefrLevel ?? null,
+    args.cefrEvidenceJson ?? null,
   );
 }

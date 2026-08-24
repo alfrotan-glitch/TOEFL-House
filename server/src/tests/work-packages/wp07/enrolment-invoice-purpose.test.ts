@@ -51,6 +51,7 @@ const enrol = (overrides: Record<string, unknown> = {}) =>
     actorUserId: `${key}_u`,
     actorName: 'Enrolment Officer',
     autoInvoice: true,
+    includeRegistrationFee: true,
     ...overrides,
   } as never) as { enrollmentId: string; invoiceId: string | null; invoiceNumber: string | null };
 

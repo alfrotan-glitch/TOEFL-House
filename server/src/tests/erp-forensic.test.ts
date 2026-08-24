@@ -64,10 +64,21 @@ describe('ERP cross-system forensic audit', () => {
     bootstrapRbacCatalog(db);
     db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(BRANCH_A, 'XF Branch A', 'A');
     db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(BRANCH_B, 'XF Branch B', 'B');
+    db.prepare(`
+      INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+      VALUES ('xf_registration_fee_a', ?, 'registration', 'Registration fee', 0, 1, 1)
+    `).run(BRANCH_A);
+    db.prepare(`
+      INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+      VALUES ('xf_registration_fee_b', ?, 'registration', 'Registration fee', 0, 1, 1)
+    `).run(BRANCH_B);
     db.prepare(`INSERT OR IGNORE INTO programs (id, name, duration_months, branch_id, is_active) VALUES (?, 'XF Program', 12, ?, 1)`).run(PROGRAM, BRANCH_A);
     db.prepare(`INSERT OR IGNORE INTO program_versions (id, program_id, version_label, version_number, status, is_default) VALUES (?, ?, 'v1', 1, 'published', 1)`).run(VERSION, PROGRAM);
     db.prepare(`INSERT OR IGNORE INTO levels (id, program_id, name, "order", program_version_id, code, is_active) VALUES (?, ?, 'A1', 1, ?, 'A1', 1)`).run(LEVEL_A1, PROGRAM, VERSION);
-    db.prepare(`INSERT OR IGNORE INTO branch_academic_profiles (branch_id, diploma_fee) VALUES (?, 500)`).run(BRANCH_A);
+    db.prepare(`
+      INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+      VALUES ('xf_diploma_fee', ?, 'diploma', 'Diploma fee', 500, 1, 1)
+    `).run(BRANCH_A);
     for (const [uid, uname, role] of [
       ['xf_owner', 'xf_owner', 'owner'], ['xf_mgr', 'xf_mgr', 'manager'],
       ['xf_reg', 'xf_reg', 'registrar'], ['xf_tea', 'xf_tea', 'teacher'],
@@ -132,46 +143,109 @@ describe('ERP cross-system forensic audit', () => {
   });
 
   // ── CONTROL: full lifecycle E2E ──────────────────────────────────────────
-  it('control: visitor → placement → conversion → student → payment → report → audit preserves identity/branch/finance', async () => {
-    // Placement program + profile.
+  it('control: visitor → admission → placement → enrollment/payment → report → audit preserves identity/branch/finance', async () => {
+    // Placement program + canonical profile.
+    const banks = [
+      ['xf_bank_grammar', 'grammar', 30, 'mcq'],
+      ['xf_bank_reading', 'reading', 20, 'mcq'],
+      ['xf_bank_listening', 'listening', 20, 'mcq'],
+      ['xf_bank_writing', 'writing', 1, 'essay'],
+      ['xf_bank_speaking', 'speaking', 1, 'speaking'],
+    ] as const;
+    for (const [testId, testType, questionCount, qtype] of banks) {
+      db.prepare(`
+        INSERT OR IGNORE INTO placement_tests
+          (id, title, test_type, instructions, status, branch_id, duration_seconds, version)
+        VALUES (?, ?, ?, ?, 'active', ?, ?, 1)
+      `).run(testId, `${testType} bank`, testType, `${testType} instructions`, BRANCH_A, Math.max(60, questionCount * 60));
+      for (let index = 0; index < questionCount; index += 1) {
+        db.prepare(`
+          INSERT OR IGNORE INTO placement_test_questions
+            (id, test_id, question_key, qtype, prompt, options_json, answer_key, points, order_index, difficulty, cefr_level, topic, subskill, lifecycle_status, version)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, 'medium', 'A1', ?, ?, 'active', 1)
+        `).run(
+          `${testId}_q${index + 1}`,
+          testId,
+          `${testType}_${index + 1}`,
+          qtype,
+          `${testType} prompt ${index + 1}`,
+          qtype === 'mcq' ? JSON.stringify([{ key: 'A', text: 'Correct' }, { key: 'B', text: 'Wrong' }]) : null,
+          qtype === 'mcq' ? 'A' : null,
+          index,
+          testType,
+          testType,
+        );
+      }
+    }
     db.prepare(`INSERT OR IGNORE INTO placement_assessment_profiles
       (id, program_version_id, branch_id, components_json, scoring_model, allow_retake,
-       pass_score, requirement_mode, instructions)
-      VALUES ('xf_prof', ?, ?, ?, 'weighted_average', 0, 60, 'required', 'req')`)
-      .run(VERSION, BRANCH_A, JSON.stringify([{ key: 'skills', type: 'skill_scores', label: 'Skills', required: true, weight: 100, maxScore: 100, skills: ['grammar', 'vocabulary', 'reading', 'listening', 'writing', 'speaking'] }]));
-    db.prepare(`INSERT OR IGNORE INTO placement_rules (id, program_version_id, name, min_score, max_score, recommended_level_id, recommended_level_code, branch_id, sort_order, is_active)
-      VALUES ('xf_rule', ?, 'A1', 0, 100, ?, 'A1', ?, 1, 1)`).run(VERSION, LEVEL_A1, BRANCH_A);
+       pass_score, requirement_mode, instructions, decision_rules_json)
+      VALUES ('xf_prof', ?, ?, ?, 'canonical', 0, 60, 'required', 'req', ?)`)
+      .run(
+        VERSION,
+        BRANCH_A,
+        JSON.stringify([
+          { key: 'grammar', type: 'grammar', label: 'Grammar', required: true, weight: 25, maxScore: 30, bankIds: ['xf_bank_grammar'], blueprintBuckets: [{ count: 30, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['mcq'] }] },
+          { key: 'reading', type: 'reading', label: 'Reading', required: true, weight: 16.67, maxScore: 20, bankIds: ['xf_bank_reading'], blueprintBuckets: [{ count: 20, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['mcq'] }] },
+          { key: 'listening', type: 'listening', label: 'Listening', required: true, weight: 16.67, maxScore: 20, bankIds: ['xf_bank_listening'], blueprintBuckets: [{ count: 20, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['mcq'] }] },
+          { key: 'writing', type: 'writing', label: 'Writing', required: true, weight: 20.83, maxScore: 25, bankIds: ['xf_bank_writing'], blueprintBuckets: [{ count: 1, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['essay'] }] },
+          { key: 'speaking', type: 'speaking', label: 'Speaking', required: true, weight: 20.83, maxScore: 25, bankIds: ['xf_bank_speaking'], blueprintBuckets: [{ count: 1, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['speaking'] }] }
+        ]),
+        JSON.stringify([
+          { cefrLevel: 'A1', recommendedLevelId: LEVEL_A1, minimumScores: { grammar: 5, reading: 3, listening: 3, writing: 8, speaking: 8 } },
+          { cefrLevel: 'A2', recommendedLevelId: LEVEL_A1, minimumScores: { grammar: 10, reading: 7, listening: 7, writing: 10, speaking: 10 } },
+          { cefrLevel: 'B1', recommendedLevelId: LEVEL_A1, minimumScores: { grammar: 16, reading: 11, listening: 11, writing: 13, speaking: 13 } },
+          { cefrLevel: 'B2', recommendedLevelId: LEVEL_A1, minimumScores: { grammar: 22, reading: 15, listening: 15, writing: 17, speaking: 17 } },
+          { cefrLevel: 'C1', recommendedLevelId: LEVEL_A1, minimumScores: { grammar: 27, reading: 18, listening: 18, writing: 21, speaking: 21 } }
+        ]),
+      );
+    db.prepare(`
+      INSERT OR REPLACE INTO fee_rules (id, branch_id, program_version_id, fee_type, name, amount, version, is_active)
+      VALUES ('xf_placement_fee_zero', ?, ?, 'placement', 'Placement fee', 0, 1, 1)
+    `).run(BRANCH_A, VERSION);
     db.prepare(`INSERT OR IGNORE INTO visitors (id, serial_no, full_name, phone, gender, source, visit_date, status, branch_id, interested_course, program_version_id, placement_status)
       VALUES ('xf_vis', 'V-XF-1', 'XF Visitor', '0700111002', 'female', 'social', ?, 'visited', ?, 'XF Program', ?, 'not_started')`).run(today(), BRANCH_A, VERSION);
 
-    // Placement complete.
-    const start = await supertest(app).post('/api/placement/visitors/xf_vis/placement/attempts').set(authHeader(registrar)).send({});
-    const aid = start.body.id;
-    await supertest(app).put(`/api/placement/visitors/xf_vis/placement/attempts/${aid}/components/skills`).set(authHeader(registrar)).send({ skills: { grammar: 20, vocabulary: 20, reading: 20, listening: 20, writing: 20, speaking: 20 } });
-    const comp = await supertest(app).post(`/api/placement/visitors/xf_vis/placement/attempts/${aid}/complete`).set(authHeader(registrar)).send({});
-    expect(comp.status).toBe(200);
-    expect(comp.body.feeCharged).toBe(0); // no placement fee configured on this branch profile row (only diploma_fee set)
-
-    // Conversion.
-    const conv = await supertest(app).post('/api/visitors/xf_vis/convert').set(authHeader(registrar)).send({ classId: 'xf_class', amountPaid: 1000, branchId: BRANCH_A, programVersionId: VERSION });
+    // Admission happens before placement in the canonical workflow.
+    const conv = await supertest(app)
+      .post('/api/visitors/xf_vis/convert')
+      .set(authHeader(registrar))
+      .send({ classId: 'xf_class', branchId: BRANCH_A, programVersionId: VERSION });
     expect(conv.status).toBe(201);
     const stu = db.prepare('SELECT id, branch_id, gender, lead_id, placement_score FROM students WHERE lead_id=?').get('xf_vis') as any;
     expect(stu).toBeTruthy();
     expect(stu.branch_id).toBe(BRANCH_A);
     expect(stu.gender).toBe('female');
-    expect(stu.placement_score).toBeTruthy();
-    // Payment + income recorded at conversion (income reference_id is the invoice).
+    expect(stu.placement_score).toBeNull();
+
+    // Placement completes against the admitted student identity.
+    const start = await supertest(app).post('/api/placement/visitors/xf_vis/placement/attempts').set(authHeader(registrar)).send({ deliveryMode: 'PHYSICAL' });
+    expect(start.status).toBe(201);
+    const aid = start.body.id;
+    for (const [componentKey, score] of [['grammar', 20], ['reading', 20], ['listening', 20], ['writing', 20], ['speaking', 20]] as const) {
+      await supertest(app).put(`/api/placement/visitors/xf_vis/placement/attempts/${aid}/tests/${componentKey}/start`).set(authHeader(registrar)).send({});
+      await supertest(app).put(`/api/placement/visitors/xf_vis/placement/attempts/${aid}/components/${componentKey}`).set(authHeader(registrar)).send({ score });
+    }
+    const comp = await supertest(app).post(`/api/placement/visitors/xf_vis/placement/attempts/${aid}/complete`).set(authHeader(registrar)).send({});
+    expect(comp.status).toBe(200);
+    expect(comp.body.feeCharged).toBe(0);
+    expect((db.prepare('SELECT placement_score FROM students WHERE id=?').get(stu.id) as any).placement_score).toBeTruthy();
+
+    // Enrollment and payment happen after placement.
+    const enroll = await supertest(app)
+      .post(`/api/students/${stu.id}/enroll-semester`)
+      .set(authHeader(registrar))
+      .send({ classId: 'xf_class', semesterName: 'XF Term', amountPaidNow: 1000 });
+    expect(enroll.status).toBe(201);
     const convPay = (db.prepare(`SELECT COUNT(*) c FROM payments WHERE student_id=? AND category='fee'`).get(stu.id) as { c: number }).c;
     expect(convPay).toBe(1);
-    const convIncome = (db.prepare(`SELECT COUNT(*) c FROM financial_transactions WHERE category='fee' AND description LIKE ?`).get(`%XF Visitor%`) as { c: number }).c;
-    expect(convIncome).toBe(1);
-    // Report reconciles.
+    const convIncome = (db.prepare(`SELECT COALESCE(SUM(amount),0) s FROM financial_transactions WHERE payment_id IN (SELECT id FROM payments WHERE student_id=?) AND category='fee' AND type='income'`).get(stu.id) as { s: number }).s;
+    expect(convIncome).toBe(1000);
+
     const rep = await supertest(app).get('/api/reports/overview?period=month').set(authHeader(owner));
     expect(rep.status).toBe(200);
-    // Audit trail for conversion.
     const audit = db.prepare(`SELECT COUNT(*) c FROM audit_logs WHERE action LIKE 'Converted visitor%' AND new_value LIKE ?`).get(`%${stu.id}%`) as { c: number };
     expect(audit.c).toBe(1);
-    // Visitor marked registered.
     const vis = db.prepare(`SELECT status FROM visitors WHERE id='xf_vis'`).get() as { status: string };
     expect(vis.status).toBe('registered');
   });

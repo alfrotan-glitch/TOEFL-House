@@ -62,6 +62,10 @@ beforeAll(async () => {
   initSchema();
   bootstrapRbacCatalog(db);
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(BRANCH, 'Cap Branch', 'Loc');
+  db.prepare(`
+    INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+    VALUES ('cap_registration_fee', ?, 'registration', 'Registration fee', 1500, 1, 1)
+  `).run(BRANCH);
   await db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES (?, ?, ?, ?, ?, 1, 0)`)
     .run('u_cap_reg', 'cap_reg', 'Cap Registrar', BRANCH, await hashPassword('x'));
   assignRole('u_cap_reg', 'registrar', BRANCH);
@@ -108,7 +112,7 @@ describe('EnrollmentService.enroll — single writer of the projection', () => {
     const classId = freshClass(10);
     const s = id('stu');
     seedStudent(s);
-    const result = getEnrollmentService(db).enroll({ studentId: s, branchId: BRANCH, classId, semesterName: 'Atomic Term', enrollmentType: 'new', startedAt: today() });
+    const result = getEnrollmentService(db).enroll({ studentId: s, branchId: BRANCH, classId, semesterName: 'Atomic Term', enrollmentType: 'new', startedAt: today(), autoInvoice: false });
     const enrollment = db.prepare('SELECT * FROM enrollments WHERE id = ?').get(result.enrollmentId) as any;
     expect(enrollment.status).toBe('active');
     const semesters = db.prepare('SELECT * FROM student_semesters WHERE student_id = ? AND class_id = ?').all(s, classId) as any[];
@@ -130,36 +134,39 @@ describe('EnrollmentService.enroll — single writer of the projection', () => {
 });
 
 describe('Route-level capacity enforcement — HTTP', () => {
-  it('manual student registration into a full class is rejected atomically (no orphan student)', async () => {
+  it('manual student admission does NOT consume a seat in a full class; enrollment remains a later step', async () => {
     const classId = freshClass(1);
     const filler = id('stu'); seedStudent(filler);
     getEnrollmentService(db).enroll({ studentId: filler, branchId: BRANCH, classId, enrollmentType: 'new', startedAt: today() });
     expect(countActiveStudentsInClass(db, classId)).toBe(1);
 
-    const before = (db.prepare('SELECT COUNT(*) AS c FROM students').get() as { c: number }).c;
     const res = await supertest(app).post('/api/students/manual').set(authHeader(registrar)).send({
-      fullName: 'Orphan Risk', phone: '0799888777', gender: 'male', branchId: BRANCH, classId,
+      fullName: 'Admission Only', phone: '0799888777', gender: 'male', branchId: BRANCH, classId,
     });
-    expect(res.status).toBe(409);
-    const after = (db.prepare('SELECT COUNT(*) AS c FROM students').get() as { c: number }).c;
-    expect(after).toBe(before); // rollback — no orphan student
+    expect(res.status).toBe(201);
+    expect((db.prepare('SELECT id FROM students WHERE id = ?').get(res.body.id) as { id: string } | undefined)?.id).toBe(res.body.id);
+    expect(countActiveStudentsInClass(db, classId)).toBe(1);
+    expect(db.prepare('SELECT COUNT(*) AS c FROM enrollments WHERE student_id = ?').get(res.body.id) as { c: number }).toMatchObject({ c: 0 });
+    expect(db.prepare('SELECT COUNT(*) AS c FROM student_semesters WHERE student_id = ?').get(res.body.id) as { c: number }).toMatchObject({ c: 0 });
   });
 
-  it('visitor conversion writes exactly one enrollment + one semester row', async () => {
+  it('visitor conversion is admission-only and leaves class capacity untouched until later enrollment', async () => {
     const classId = freshClass(10);
+    db.prepare(`
+      INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+      VALUES ('cap_route_registration_fee', ?, 'registration', 'Registration fee', 0, 1, 1)
+    `).run(BRANCH);
     const v = id('v');
     db.prepare(`INSERT INTO visitors (id, serial_no, full_name, phone, gender, source, visit_date, status, branch_id, interested_course) VALUES (?, ?, 'Cap Visitor', '0700111222', 'male', 'social', ?, 'visited', ?, 'TOEFL')`)
       .run(v, `V-${Date.now()}`, today(), BRANCH);
 
-    const res = await supertest(app).post(`/api/visitors/${v}/convert`).set(authHeader(registrar)).send({
-      classId, amountPaid: 4000,
-    });
+    const res = await supertest(app).post(`/api/visitors/${v}/convert`).set(authHeader(registrar)).send({ classId });
     expect(res.status).toBe(201);
     const studentId = res.body.studentId as string;
     const enrollments = db.prepare('SELECT * FROM enrollments WHERE student_id = ? AND class_id = ?').all(studentId, classId) as any[];
     const semesters = db.prepare('SELECT * FROM student_semesters WHERE student_id = ? AND class_id = ?').all(studentId, classId) as any[];
-    expect(enrollments).toHaveLength(1);
-    expect(semesters).toHaveLength(1); // no duplicate projection rows
-    expect(countActiveStudentsInClass(db, classId)).toBe(1);
+    expect(enrollments).toHaveLength(0);
+    expect(semesters).toHaveLength(0);
+    expect(countActiveStudentsInClass(db, classId)).toBe(0);
   });
 });

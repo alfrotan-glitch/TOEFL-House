@@ -68,7 +68,7 @@ export function assertPlacementEligibleForClass(
     ? (db.prepare('SELECT placement_status FROM visitors WHERE id = ?').get(leadId) as { placement_status: string | null } | undefined)
     : undefined;
   const attempt = leadId
-    ? (db.prepare(`SELECT status, outcome FROM placement_assessment_attempts WHERE visitor_id = ? AND status = 'completed' ORDER BY completed_at DESC, attempt_number DESC LIMIT 1`).get(leadId) as { status: string; outcome: string | null } | undefined)
+    ? (db.prepare(`SELECT status, outcome, recommended_level_id, override_level_id FROM placement_assessment_attempts WHERE visitor_id = ? AND status = 'completed' ORDER BY completed_at DESC, attempt_number DESC LIMIT 1`).get(leadId) as { status: string; outcome: string | null; recommended_level_id: string | null; override_level_id: string | null } | undefined)
     : undefined;
 
   const verdict = evaluateEnrollmentEligibility(requirement.mode, {
@@ -77,4 +77,17 @@ export function assertPlacementEligibleForClass(
     hasVisitorRecord: Boolean(leadId && visitor),
   });
   if (!verdict.eligible) throw new HttpError(400, verdict.reason);
+
+  const effectiveRecommendedLevelId = attempt?.override_level_id ?? attempt?.recommended_level_id ?? null;
+  if (!effectiveRecommendedLevelId) {
+    throw new HttpError(409, 'The completed placement result has no authoritative level recommendation. Enrollment cannot proceed until placement is completed or corrected.');
+  }
+  const targetLevel = db.prepare('SELECT id, name, "order" FROM levels WHERE id = ?').get(cls.level_id) as { id: string; name: string; order: number | null } | undefined;
+  const recommendedLevel = db.prepare('SELECT id, name, "order" FROM levels WHERE id = ?').get(effectiveRecommendedLevelId) as { id: string; name: string; order: number | null } | undefined;
+  if (!targetLevel?.id || !recommendedLevel?.id || targetLevel.order == null || recommendedLevel.order == null) {
+    throw new HttpError(409, 'Placement recommendation cannot be matched to the academic level catalog. Enrollment cannot proceed until the catalog is corrected.');
+  }
+  if (targetLevel.order > recommendedLevel.order) {
+    throw new HttpError(409, `Placement recommendation allows enrollment up to ${recommendedLevel.name}. ${targetLevel.name} is above the authorized level.`);
+  }
 }

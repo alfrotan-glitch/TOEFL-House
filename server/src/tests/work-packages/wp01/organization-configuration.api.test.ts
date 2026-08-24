@@ -26,6 +26,18 @@ const CAMPUS_MANAGER = 'wp01_api_campus_manager';
 
 const PROFILE_FEE_FIELDS = ['placementTestFee', 'registrationFee', 'cardFee', 'diplomaFee'] as const;
 
+async function createFeeRule(payload: {
+  branchId: string;
+  feeType: 'registration' | 'placement' | 'card' | 'diploma' | 'semester' | 'retake';
+  amount: number;
+  programVersionId?: string;
+  levelId?: string;
+  name?: string;
+  isActive?: boolean;
+}) {
+  return http.post('/api/catalog/fee-rules').set(as(OWNER)).send(payload);
+}
+
 function makeApp() {
   const app = express();
   app.use(express.json());
@@ -83,25 +95,15 @@ beforeAll(() => {
   seedUser({ id: MANAGER_A, role: 'general_manager', branchId: BRANCH_A });
   seedUser({ id: CAMPUS_MANAGER, role: 'general_manager', branchId: BRANCH_A, scopeType: 'campus', scopeId: CAMPUS });
 
-  for (const [id, table, branch] of [
-    ['wp01_api_promo_branch', 'promotion_rules', BRANCH_A],
-    ['wp01_api_promo_global', 'promotion_rules', null],
-    ['wp01_api_place_branch', 'placement_rules', BRANCH_A],
-    ['wp01_api_place_global', 'placement_rules', null],
+  for (const [id, branch] of [
+    ['wp01_api_promo_branch', BRANCH_A],
+    ['wp01_api_promo_global', null],
   ] as const) {
-    if (table === 'promotion_rules') {
-      db.prepare(
-        `INSERT OR REPLACE INTO promotion_rules
-           (id, program_version_id, name, min_score, min_attendance_pct, branch_id)
-         VALUES (?, ?, ?, 60, 75, ?)`,
-      ).run(id, VERSION_A, id, branch);
-    } else {
-      db.prepare(
-        `INSERT OR REPLACE INTO placement_rules
-           (id, program_version_id, name, min_score, max_score, branch_id)
-         VALUES (?, ?, ?, 0, 20, ?)`,
-      ).run(id, VERSION_A, id, branch);
-    }
+    db.prepare(
+      `INSERT OR REPLACE INTO promotion_rules
+         (id, program_version_id, name, min_score, min_attendance_pct, branch_id)
+       VALUES (?, ?, ?, 60, 75, ?)`
+    ).run(id, VERSION_A, id, branch);
   }
 
   http = supertest(makeApp());
@@ -210,11 +212,24 @@ describe('WP-01 academic configuration contracts', () => {
     ['object', {}],
     ['hex text', '0x10'],
     ['exponent text', '1e3'],
-  ] as const)('rejects every invalid authoritative profile fee shape: %s', async (_label, fee) => {
+  ] as const)('rejects every invalid canonical fee-rule amount shape: %s', async (_label, fee) => {
+    const before = (db.prepare('SELECT COUNT(*) AS c FROM fee_rules WHERE branch_id = ?').get(BRANCH_A) as { c: number }).c;
+    const response = await http.post('/api/catalog/fee-rules').set(as(OWNER)).send({
+      branchId: BRANCH_A,
+      programVersionId: VERSION_A,
+      levelId: LEVEL_A,
+      feeType: 'registration',
+      amount: fee,
+      name: 'Registration fee',
+    });
+    expect(response.status).toBe(400);
+    expect((db.prepare('SELECT COUNT(*) AS c FROM fee_rules WHERE branch_id = ?').get(BRANCH_A) as { c: number }).c).toBe(before);
+  });
+
+  it('rejects legacy fee fields on the branch-profile endpoint', async () => {
     for (const field of PROFILE_FEE_FIELDS) {
       const before = db.prepare('SELECT * FROM branch_academic_profiles WHERE branch_id = ?').get(BRANCH_A);
-      const response = await http.put(`/api/catalog/branch-profile/${BRANCH_A}`).set(as(OWNER))
-        .send({ [field]: fee });
+      const response = await http.put(`/api/catalog/branch-profile/${BRANCH_A}`).set(as(OWNER)).send({ [field]: 100 });
       expect(response.status, field).toBe(400);
       expect(db.prepare('SELECT * FROM branch_academic_profiles WHERE branch_id = ?').get(BRANCH_A)).toEqual(before);
     }
@@ -222,12 +237,14 @@ describe('WP-01 academic configuration contracts', () => {
 
   it('supports partial branch-profile updates without erasing prior values', async () => {
     const first = await http.put(`/api/catalog/branch-profile/${BRANCH_A}`).set(as(OWNER)).send({
-      registrationFee: 1500, defaultPassMark: 70,
+      defaultPassMark: 70,
+      academicYearLabel: '2031',
     });
     expect(first.status).toBe(200);
     const second = await http.put(`/api/catalog/branch-profile/${BRANCH_A}`).set(as(OWNER)).send({ notes: 'kept' });
     expect(second.status).toBe(200);
-    expect(second.body).toMatchObject({ registration_fee: 1500, default_pass_mark: 70, notes: 'kept' });
+    expect(second.body).toMatchObject({ default_pass_mark: 70, academic_year_label: '2031', notes: 'kept' });
+    expect(second.body.registration_fee).toBeUndefined();
   });
 
   it('rejects a default program version from another branch', async () => {
@@ -243,17 +260,23 @@ describe('WP-01 academic configuration contracts', () => {
        VALUES ('wp01_api_historical_money', 'income', 'fee', 4321, '2031-01-01', 'Historical', ?)`,
     ).run(BRANCH_A);
     const before = db.prepare("SELECT amount, description FROM financial_transactions WHERE id = 'wp01_api_historical_money'").get();
-    const response = await http.put(`/api/catalog/branch-profile/${BRANCH_A}`).set(as(OWNER))
-      .send({ registrationFee: 2500 });
-    expect(response.status).toBe(200);
+    const response = await createFeeRule({
+      branchId: BRANCH_A,
+      programVersionId: VERSION_A,
+      levelId: LEVEL_A,
+      feeType: 'registration',
+      amount: 2500,
+      name: 'Registration fee',
+    });
+    expect(response.status).toBe(201);
     expect(db.prepare("SELECT amount, description FROM financial_transactions WHERE id = 'wp01_api_historical_money'").get()).toEqual(before);
   });
 
   it('fails closed when legacy fee-rule storage contains non-canonical money', async () => {
     db.prepare(
       `INSERT INTO fee_rules
-         (id, program_version_id, level_id, branch_id, fee_type, name, amount)
-       VALUES ('wp01_api_corrupt_fee_rule', ?, ?, ?, 'registration', 'Corrupt fee', 0.5)`,
+         (id, program_version_id, level_id, branch_id, fee_type, name, amount, version, is_active)
+       VALUES ('wp01_api_corrupt_fee_rule', ?, ?, ?, 'registration', 'Corrupt fee', 0.5, 999, 1)`,
     ).run(VERSION_A, LEVEL_A, BRANCH_A);
     try {
       const response = await http.post('/api/catalog/fees/snapshot').set(as(OWNER)).send({
@@ -264,6 +287,19 @@ describe('WP-01 academic configuration contracts', () => {
     } finally {
       db.prepare("DELETE FROM fee_rules WHERE id = 'wp01_api_corrupt_fee_rule'").run();
     }
+  });
+
+  it.each(['book', 'exam', 'other'] as const)('rejects retired managed fee type %s', async (feeType) => {
+    const response = await http.post('/api/catalog/fee-rules').set(as(OWNER)).send({
+      branchId: BRANCH_A,
+      programVersionId: VERSION_A,
+      levelId: LEVEL_A,
+      feeType,
+      amount: 2500,
+      name: `Retired ${feeType} fee`,
+    });
+    expect(response.status).toBe(400);
+    expect(String(response.body.error || '')).toMatch(/feeType must be one of/i);
   });
 });
 
@@ -281,8 +317,8 @@ describe('WP-01 catalog scalar boundaries fail as client errors', () => {
     ['promotion boolean', 'post', '/api/catalog/promotion-rules', {
       programVersionId: VERSION_A, name: 'Bad Boolean', requireAllSubjects: 'false',
     }],
-    ['placement sort order', 'post', '/api/catalog/placement-rules', {
-      programVersionId: VERSION_A, name: 'Bad Sort', minScore: 21, maxScore: 40, sortOrder: 1.5,
+    ['placement requirement mode', 'put', `/api/academic/program-versions/${VERSION_A}/placement-profile`, {
+      requirementMode: 'broken',
     }],
     ['promotion evaluation score', 'post', '/api/catalog/promotion/evaluate', {
       programVersionId: VERSION_A, fromLevelId: LEVEL_A, score: true, attendancePct: 90, branchId: BRANCH_A,
@@ -298,7 +334,6 @@ describe('WP-01 catalog scalar boundaries fail as client errors', () => {
 
 describe('WP-01 catalog evaluation relationships and deletion controls', () => {
   it.each([
-    ['/api/catalog/placement/recommend', { programVersionId: VERSION_B, totalScore: 10, branchId: BRANCH_A }],
     ['/api/catalog/promotion/evaluate', { programVersionId: VERSION_B, fromLevelId: LEVEL_B, score: 80, attendancePct: 90, branchId: BRANCH_A }],
     ['/api/catalog/fees/snapshot', { programVersionId: VERSION_B, levelId: LEVEL_B, branchId: BRANCH_A }],
   ])('rejects cross-branch relationship input at %s', async (path, payload) => {
@@ -306,19 +341,23 @@ describe('WP-01 catalog evaluation relationships and deletion controls', () => {
     expect(response.status).toBe(403);
   });
 
-  it.each([
-    ['promotion-rules', 'wp01_api_promo_branch'],
-    ['placement-rules', 'wp01_api_place_branch'],
-  ])('lets a scoped manager delete an authorized branch %s record', async (route, id) => {
-    expect((await http.delete(`/api/catalog/${route}/${id}`).set(as(MANAGER_A))).status).toBe(200);
+  it('lets a scoped manager delete an authorized branch promotion rule record', async () => {
+    expect((await http.delete('/api/catalog/promotion-rules/wp01_api_promo_branch').set(as(MANAGER_A))).status).toBe(200);
   });
 
-  it.each([
-    ['promotion-rules', 'wp01_api_promo_global'],
-    ['placement-rules', 'wp01_api_place_global'],
-  ])('protects global %s deletion from scoped users and permits the global owner', async (route, id) => {
-    expect((await http.delete(`/api/catalog/${route}/${id}`).set(as(MANAGER_A))).status).toBe(403);
-    expect((await http.delete(`/api/catalog/${route}/${id}`).set(as(OWNER))).status).toBe(200);
+  it('protects global promotion-rule deletion from scoped users and permits the global owner', async () => {
+    expect((await http.delete('/api/catalog/promotion-rules/wp01_api_promo_global').set(as(MANAGER_A))).status).toBe(403);
+    expect((await http.delete('/api/catalog/promotion-rules/wp01_api_promo_global').set(as(OWNER))).status).toBe(200);
+  });
+
+  it('retires the legacy placement-rules catalog surface', async () => {
+    expect((await http.post('/api/catalog/placement-rules').set(as(MANAGER_A)).send({ programVersionId: VERSION_A, name: 'Legacy', minScore: 0, maxScore: 100 })).status).toBe(404);
+    expect((await http.delete('/api/catalog/placement-rules/legacy-id').set(as(OWNER))).status).toBe(404);
+    expect((await http.post('/api/catalog/placement/recommend').set(as(MANAGER_A)).send({ programVersionId: VERSION_A, totalScore: 10, branchId: BRANCH_A })).status).toBe(404);
+  });
+
+  it('blocks cross-branch placement-profile access at the canonical authority', async () => {
+    expect((await http.get(`/api/academic/program-versions/${VERSION_B}/placement-profile`).set(as(MANAGER_A))).status).toBe(403);
   });
 });
 

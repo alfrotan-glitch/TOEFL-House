@@ -732,9 +732,6 @@ academicRouter.get('/program-versions/:id/placement-profile', ah(async (req, res
   const decisionRules = (() => {
     try { return JSON.parse(profile.decision_rules_json || '[]'); } catch { throw new HttpError(500, 'Stored placement decision rules are invalid.'); }
   })();
-  const types = new Set(components.map((component: any) => component.type));
-  const method = components.length === 0 ? PLACEMENT_DEFAULTS.method : types.size > 1 ? 'hybrid' : components[0].type;
-  const sections = Array.from(new Set(components.flatMap((component: any) => component.skills ?? [])));
   res.json({
     configured: true,
     version: Number(profile.version),
@@ -747,10 +744,10 @@ academicRouter.get('/program-versions/:id/placement-profile', ah(async (req, res
     firstLevelExempt: Boolean(profile.first_level_exempt),
     expiresMinutes: profile.expires_minutes == null ? null : Number(profile.expires_minutes),
     decisionRules,
-    method,
-    sections,
+    method: PLACEMENT_DEFAULTS.method,
+    deliveryModes: ['DIGITAL', 'PHYSICAL'],
     components,
-    scoringModel: profile.scoring_model || 'weighted_average',
+    scoringModel: profile.scoring_model || 'canonical',
     allowRetake: Boolean(profile.allow_retake),
     maxAttempts: profile.max_attempts == null ? null : Number(profile.max_attempts),
     firstAttemptBillable: profile.first_attempt_billable == null ? true : Boolean(profile.first_attempt_billable),
@@ -779,27 +776,21 @@ academicRouter.put('/program-versions/:id/placement-profile', requirePermission(
   if (body.required !== undefined && placementBoolean(body.required, 'required', required) !== required) throw new HttpError(400, 'required contradicts requirementMode.');
 
   const normalized = validatePolicyComponents(body.components ?? [], requirementMode);
-  if (required && !normalized.some((component) => component.required)) {
-    throw new HttpError(400, 'A required placement policy needs at least one required component.');
-  }
   for (const component of normalized) {
-    if (component.type !== 'content_test' || !component.testId) continue;
-    const test = db.prepare('SELECT id, status, branch_id FROM placement_tests WHERE id=?').get(component.testId) as any;
-    if (!test) throw new HttpError(400, `Component ${component.key} references a missing placement test.`);
-    if (test.status !== 'active') throw new HttpError(400, `Component ${component.key} references a test that is not active.`);
-    if (test.branch_id != null && test.branch_id !== version.branch_id) throw new HttpError(400, `Component ${component.key} references a test from another branch.`);
-    const questionTypes = (db.prepare('SELECT qtype FROM placement_test_questions WHERE test_id=?').all(test.id) as Array<{ qtype: string }>).map((question) => question.qtype);
-    if (questionTypes.length === 0) throw new HttpError(400, `Component ${component.key} references a test with no questions.`);
-    const hasAuto = questionTypes.some((type) => type === 'mcq' || type === 'short_answer');
-    const hasManual = questionTypes.some((type) => type === 'essay' || type === 'speaking');
-    const expectedScoring = hasAuto && hasManual ? 'hybrid' : hasManual ? 'manual' : 'auto';
-    if (component.scoringMethod !== expectedScoring) {
-      throw new HttpError(400, `Component ${component.key} scoringMethod must be ${expectedScoring} for the selected test content.`);
+    if (!Array.isArray(component.bankIds) || component.bankIds.length === 0) {
+      throw new HttpError(400, `Component ${component.key} must reference at least one active bank.`);
+    }
+    for (const bankId of component.bankIds) {
+      const test = db.prepare('SELECT id, test_type, status, branch_id FROM placement_tests WHERE id=?').get(bankId) as any;
+      if (!test) throw new HttpError(400, `Component ${component.key} references a missing placement bank.`);
+      if (test.status !== 'active') throw new HttpError(400, `Component ${component.key} references a bank that is not active.`);
+      if (test.test_type !== component.type) throw new HttpError(400, `Component ${component.key} bank ${bankId} has test type ${test.test_type}.`);
+      if (test.branch_id != null && test.branch_id !== version.branch_id) throw new HttpError(400, `Component ${component.key} references a bank from another branch.`);
+      const questionCount = Number((db.prepare('SELECT COUNT(*) AS c FROM placement_test_questions WHERE test_id=? AND lifecycle_status=?').get(test.id, 'active') as any)?.c || 0);
+      if (questionCount === 0) throw new HttpError(400, `Component ${component.key} references a bank with no active approved questions.`);
     }
   }
-  const componentTypes = new Set(normalized.map((component) => component.type));
-  const method = normalized.length === 0 ? PLACEMENT_DEFAULTS.method : componentTypes.size > 1 ? 'hybrid' : normalized[0].type;
-  const sections = Array.from(new Set(normalized.flatMap((component) => component.skills ?? [])));
+  const method = PLACEMENT_DEFAULTS.method;
   const levelIds = new Set((db.prepare(`
     SELECT l.id FROM levels l
     JOIN program_versions pv ON pv.id=? AND pv.program_id=l.program_id
@@ -807,9 +798,9 @@ academicRouter.put('/program-versions/:id/placement-profile', requirePermission(
   `).all(version.id, version.id) as any[]).map((level) => String(level.id)));
   const decisionRules = validateDecisionRules(body.decisionRules ?? [], normalized, levelIds);
   const scoringModel = validateScoringModel(body.scoringModel);
-  if (body.maxScore !== undefined) throw new HttpError(400, 'Overall maxScore is derived as 100%; configure each component maxScore instead.');
-  const passScore = body.passScore ?? 60;
-  if (typeof passScore !== 'number' || !Number.isFinite(passScore) || passScore < 0 || passScore > 100) throw new HttpError(400, 'passScore must be between 0 and 100.');
+  if (body.maxScore !== undefined && body.maxScore !== 120) throw new HttpError(400, 'Overall maxScore is fixed at 120 for Placement Test V1.');
+  const passScore = body.passScore ?? 0;
+  if (typeof passScore !== 'number' || !Number.isFinite(passScore) || passScore < 0 || passScore > 120) throw new HttpError(400, 'passScore must be between 0 and 120.');
   const expiresMinutes = body.expiresMinutes == null || body.expiresMinutes === ''
     ? null
     : validatePositiveInteger(body.expiresMinutes, 'expiresMinutes', false, 525600);
@@ -865,7 +856,7 @@ academicRouter.put('/program-versions/:id/placement-profile', requirePermission(
     expiresMinutes: row.expires_minutes == null ? null : Number(row.expires_minutes),
     decisionRules,
     method,
-    sections,
+    deliveryModes: ['DIGITAL', 'PHYSICAL'],
     components: normalized,
     scoringModel,
     allowRetake,

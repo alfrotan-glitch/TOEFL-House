@@ -61,6 +61,10 @@ describe('Student subsystem deep audit', () => {
     }
     await db.prepare(`INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password ) VALUES ('stu_stu', 'stu_stu', 'Stu Student', ?, ?, 1, 0)`).run(BRANCH_A, await hashPassword('x'));
     assignRole('stu_stu', 'student', BRANCH_A);
+    db.prepare(`
+      INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+      VALUES ('stu_deep_card_fee', ?, 'card', 'ID card fee', 200, 1, 1)
+    `).run(BRANCH_A);
 
     owner = { userId: 'stu_owner', username: 'stu_owner', branchId: BRANCH_A, fullName: 'Stu Owner' };
     registrar = { userId: 'stu_reg', username: 'stu_reg', branchId: BRANCH_A, fullName: 'Stu Registrar' };

@@ -19,7 +19,7 @@ import { hasPermission } from '../../config/permissions';
 interface StudentsViewProps {
   /** Server-aggregated attendance rates (GET /attendance/summary). */
   attendanceSummary?: AttendanceSummaryRow[];
-  /** Server-aggregated tuition balances (GET /payments/balances). */
+  /** Server-aggregated student balances (GET /payments/balances). */
   studentBalances: StudentBalanceRow[];
   students: Student[];
   visitors?: Visitor[];
@@ -31,7 +31,7 @@ interface StudentsViewProps {
   permissionCodes?: string[];
   branches: Branch[];
   activeBranchId: string;
-  addStudentManual: (fullName: string, phone: string, email: string, gender: 'male' | 'female', discountPercent: number, notes?: string, classId?: string, tuitionAmount?: number, fatherName?: string, addressRegion?: string, tazkiraNo?: string, whatsapp?: string, dob?: string, schoolOrUniversity?: string, emergencyContactName?: string, emergencyContactPhone?: string, amountPaidNow?: number, branchId?: string) => void;
+  addStudentManual: (fullName: string, phone: string, email: string, gender: 'male' | 'female', discountPercent: number, notes?: string, classId?: string, fatherName?: string, addressRegion?: string, tazkiraNo?: string, whatsapp?: string, dob?: string, schoolOrUniversity?: string, emergencyContactName?: string, emergencyContactPhone?: string, branchId?: string) => void;
   updateStudentStatus: (
     studentId: string,
     status: 'active' | 'inactive' | 'graduated' | 'suspended',
@@ -124,14 +124,32 @@ export default function StudentsView({
   // despite having paid. The server sums all payments per student in SQL, using
   // the same authoritative rule as studentBalance.
   const financeByStudent = useMemo(() => {
-    const map = new Map<string, { total: number; paid: number; debt: number }>();
+    const map = new Map<string, {
+      total: number;
+      paid: number;
+      debt: number;
+      tuitionTotal: number;
+      tuitionPaid: number;
+      tuitionDebt: number;
+      nonTuitionDebt: number;
+      openInvoices: number;
+    }>();
     for (const b of studentBalances) {
-      map.set(b.studentId, { total: b.tuitionDue, paid: b.tuitionPaid, debt: b.outstanding });
+      map.set(b.studentId, {
+        total: b.totalDue ?? b.tuitionDue,
+        paid: b.totalPaid ?? b.tuitionPaid,
+        debt: b.totalOutstanding ?? b.outstanding,
+        tuitionTotal: b.tuitionDue,
+        tuitionPaid: b.tuitionPaid,
+        tuitionDebt: b.outstanding,
+        nonTuitionDebt: b.nonTuitionOutstanding ?? 0,
+        openInvoices: b.openInvoices ?? 0,
+      });
     }
     return map;
   }, [studentBalances]);
 
-  const getStudentFinance = (studentId: string) => financeByStudent.get(studentId) || { total: 0, paid: 0, debt: 0 };
+  const getStudentFinance = (studentId: string) => financeByStudent.get(studentId) || { total: 0, paid: 0, debt: 0, tuitionTotal: 0, tuitionPaid: 0, tuitionDebt: 0, nonTuitionDebt: 0, openInvoices: 0 };
   // A unioned permission code is not enough for an individual row. The server
   // omits finance fields outside the assignment's branch, and the balances
   // endpoint may legitimately return only one branch of an organization-wide
@@ -407,7 +425,7 @@ export default function StudentsView({
                             ? <span className="text-slate-400 text-[10px] font-bold">Restricted</span>
                             : fin.debt <= 0
                               ? <span className="text-emerald-600 font-bold">Paid ✅</span>
-                              : <span className="text-amber-700 bg-amber-50 px-2 py-1 rounded-full text-[10px] font-bold">{formatAFN(fin.debt)}</span>}
+                              : <span className="text-amber-700 bg-amber-50 px-2 py-1 rounded-full text-[10px] font-bold">{formatAFN(fin.debt)}{fin.openInvoices > 0 ? ` · ${fin.openInvoices} inv` : ''}</span>}
                         </td>
                       )}
                       <td className="py-3.5 px-4 text-start" onClick={(e) => e.stopPropagation()}>
@@ -490,7 +508,7 @@ export default function StudentsView({
               {payCategory === 'fee' && (
                 <div>
                   <label className={text.label}>Select Semester:</label>
-                  <select value={paySemesterId} onChange={(e) => { setPaySemesterId(e.target.value); if (canViewPaymentFinance) { const fin = getStudentFinance(paymentStudent.id); setPayAmount(fin.debt); } else { setPayAmount(0); } }} className={inputCls} required>
+                  <select value={paySemesterId} onChange={(e) => { setPaySemesterId(e.target.value); if (canViewPaymentFinance) { const fin = getStudentFinance(paymentStudent.id); setPayAmount(fin.tuitionDebt); } else { setPayAmount(0); } }} className={inputCls} required>
                     <option value="">-- Select Semester --</option>
                     {paymentStudent.semesters?.map(sem => <option key={sem.id} value={sem.id}>{sem.semesterName}{canViewPaymentFinance ? ` (${formatAFN(sem.feeAmount ?? 0)})` : ''}</option>)}
                   </select>
@@ -544,14 +562,17 @@ export default function StudentsView({
                 const fin = getStudentFinance(paymentStudent.id);
                 return (
                   <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-1">
-                    <div className="flex justify-between"><span className="text-slate-500">Total tuition</span><span className="font-mono font-bold">{formatAFN(fin.total)}</span></div>
-                    <div className="flex justify-between"><span className="text-slate-500">Already paid</span><span className="font-mono font-bold">{formatAFN(fin.paid)}</span></div>
+                    <div className="flex justify-between"><span className="text-slate-500">Total tuition</span><span className="font-mono font-bold">{formatAFN(fin.tuitionTotal)}</span></div>
+                    <div className="flex justify-between"><span className="text-slate-500">Already paid</span><span className="font-mono font-bold">{formatAFN(fin.tuitionPaid)}</span></div>
                     <div className="flex justify-between border-t border-slate-200 pt-1">
-                      <span className="text-slate-600 font-semibold">Remaining</span>
-                      <span className={`font-mono font-extrabold ${fin.debt > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>{formatAFN(fin.debt)}</span>
+                      <span className="text-slate-600 font-semibold">Remaining tuition</span>
+                      <span className={`font-mono font-extrabold ${fin.tuitionDebt > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>{formatAFN(fin.tuitionDebt)}</span>
                     </div>
-                    {fin.debt <= 0 && (
-                      <p className="text-emerald-700 font-bold pt-1">Fully Paid — No outstanding balance.</p>
+                    {fin.nonTuitionDebt > 0 && (
+                      <p className="pt-1 text-[11px] font-semibold text-amber-700">Open non-tuition invoices: {formatAFN(fin.nonTuitionDebt)}{fin.openInvoices > 0 ? ` across ${fin.openInvoices} invoice${fin.openInvoices === 1 ? '' : 's'}` : ''}.</p>
+                    )}
+                    {fin.tuitionDebt <= 0 && (
+                      <p className="text-emerald-700 font-bold pt-1">Fully paid for tuition — use the invoice workspace for registration and placement invoices.</p>
                     )}
                   </div>
                 );
@@ -565,19 +586,19 @@ export default function StudentsView({
                   onChange={(e) => setPayAmount(Number(e.target.value))}
                   className={`${inputCls} font-mono`}
                   min={1}
-                  max={canViewPaymentFinance && payCategory === 'fee' ? getStudentFinance(paymentStudent.id).debt || undefined : undefined}
+                  max={canViewPaymentFinance && payCategory === 'fee' ? getStudentFinance(paymentStudent.id).tuitionDebt || undefined : undefined}
                   required
                 />
                 {/* UX only. The backend rejects an over-payment independently —
                     see the overpayment regression suite. */}
-                {canViewPaymentFinance && payCategory === 'fee' && payAmount > getStudentFinance(paymentStudent.id).debt && (
-                  <p className="text-rose-600 font-semibold mt-1">Amount exceeds the remaining balance of {formatAFN(getStudentFinance(paymentStudent.id).debt)}.</p>
+                {canViewPaymentFinance && payCategory === 'fee' && payAmount > getStudentFinance(paymentStudent.id).tuitionDebt && (
+                  <p className="text-rose-600 font-semibold mt-1">Amount exceeds the remaining tuition balance of {formatAFN(getStudentFinance(paymentStudent.id).tuitionDebt)}.</p>
                 )}
               </div>
 
               <div className="flex gap-2 justify-end pt-3 border-t">
                 <button type="button" onClick={() => setPaymentStudent(null)} className={btnSecondary}>Cancel</button>
-                <button type="submit" disabled={paymentBusy || (canViewPaymentFinance && payCategory === 'fee' && getStudentFinance(paymentStudent.id).debt <= 0)} className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-semibold hover:bg-emerald-700 cursor-pointer shadow-sm text-xs disabled:opacity-50 disabled:cursor-not-allowed">{paymentBusy ? 'Recording…' : 'Confirm Payment'}</button>
+                <button type="submit" disabled={paymentBusy || (canViewPaymentFinance && payCategory === 'fee' && getStudentFinance(paymentStudent.id).tuitionDebt <= 0)} className="px-4 py-2 bg-emerald-600 text-white rounded-lg font-semibold hover:bg-emerald-700 cursor-pointer shadow-sm text-xs disabled:opacity-50 disabled:cursor-not-allowed">{paymentBusy ? 'Recording…' : 'Confirm Payment'}</button>
               </div>
             </form>
           </div>

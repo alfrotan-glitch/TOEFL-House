@@ -43,9 +43,9 @@ interface PipelineStep {
 
 const PIPELINE_STEPS: PipelineStep[] = [
   { key: 'register', label: 'Registered', icon: <UserPlus className="w-3.5 h-3.5" />, isDone: () => true, isCurrent: () => false, hint: 'Visitor registered.' },
-  { key: 'followup', label: 'Follow-up', icon: <PhoneCall className="w-3.5 h-3.5" />, isDone: (v) => (v.followUpHistory?.length ?? 0) > 0, isCurrent: (v) => (v.followUpHistory?.length ?? 0) === 0 && !v.placementScore, hint: 'Log contact attempts and gauge interest.' },
-  { key: 'placement', label: 'Placement', icon: <Award className="w-3.5 h-3.5" />, isDone: (v) => !!v.placementScore, isCurrent: (v) => !v.placementScore && (v.followUpHistory?.length ?? 0) > 0, hint: 'Assess grammar, listening, speaking.' },
-  { key: 'enroll', label: 'Enroll', icon: <UserCheck className="w-3.5 h-3.5" />, isDone: (v) => v.status === 'registered', isCurrent: (v) => !!v.placementScore && v.status !== 'registered', hint: 'Convert to student: assign class, take payment.' },
+  { key: 'followup', label: 'Follow-up', icon: <PhoneCall className="w-3.5 h-3.5" />, isDone: (v) => (v.followUpHistory?.length ?? 0) > 0, isCurrent: (v) => (v.followUpHistory?.length ?? 0) === 0 && v.status !== 'registered', hint: 'Log contact attempts and gauge interest.' },
+  { key: 'admit', label: 'Admit', icon: <UserCheck className="w-3.5 h-3.5" />, isDone: (v) => v.status === 'registered', isCurrent: (v) => v.status !== 'registered', hint: 'Create the student identity and canonical invoices first.' },
+  { key: 'placement', label: 'Placement', icon: <Award className="w-3.5 h-3.5" />, isDone: (v) => !!v.placementScore, isCurrent: (v) => v.status === 'registered' && !v.placementScore, hint: 'Run placement from the student-linked workspace, then settle invoices before enrollment.' },
 ];
 
 export default function VisitorDeskPanel({
@@ -173,6 +173,8 @@ export default function VisitorDeskPanel({
     ?? visitor.placementScore?.recommendation?.text
     ?? visitor.placementScore?.recommendation?.levelId
     ?? 'Not assigned';
+  const placementOverallCefr = visitor.placementScore?.overallCefr ?? null;
+  const placementOutcome = visitor.placementScore?.outcome ?? null;
 
   return (
     <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto animate-in fade-in duration-200" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -186,7 +188,7 @@ export default function VisitorDeskPanel({
               <h3 className="font-extrabold text-slate-900 text-sm flex items-center gap-2">
                 {visitor.fullName}
                 {visitor.serialNo && <span className="text-[10px] text-slate-400 font-mono font-semibold">#{visitor.serialNo}</span>}
-                {visitor.status === 'registered' && <span className="bg-emerald-100 text-emerald-800 text-[9px] px-2 py-0.5 rounded-full font-black">Enrolled</span>}
+                {visitor.status === 'registered' && <span className="bg-emerald-100 text-emerald-800 text-[9px] px-2 py-0.5 rounded-full font-black">Admitted</span>}
               </h3>
               <p className="text-[11px] text-slate-500 font-mono font-bold mt-0.5">{visitor.phone}{visitor.whatsapp && visitor.whatsapp !== visitor.phone && <span className="text-slate-400"> · WA: {visitor.whatsapp}</span>}</p>
             </div>
@@ -235,10 +237,10 @@ export default function VisitorDeskPanel({
             {canConvertLead && (
               <button
                 onClick={onOpenConvert}
-                disabled={Boolean(eligibility && !eligibility.eligible && !eligibility.placementActionable)}
+                disabled={Boolean(eligibility && !eligibility.eligible && ['already_converted', 'lead_lost', 'student_exists'].includes(eligibility.code))}
                 title={eligibility && !eligibility.eligible ? eligibility.reason : undefined}
-                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl font-bold text-xs cursor-pointer transition-colors shadow-sm disabled:opacity-40 disabled:cursor-not-allowed ${currentStep?.key === 'enroll' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}
-              ><UserCheck className="w-3.5 h-3.5" /> Enroll</button>
+                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl font-bold text-xs cursor-pointer transition-colors shadow-sm disabled:opacity-40 disabled:cursor-not-allowed ${currentStep?.key === 'admit' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}
+              ><UserCheck className="w-3.5 h-3.5" /> Admit student</button>
             )}
           </div>
         )}
@@ -271,7 +273,7 @@ export default function VisitorDeskPanel({
                   <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0"><Award className="w-4 h-4 text-emerald-700" /></div>
                   <div className="flex-1">
                     <p className="font-extrabold text-emerald-900 text-[11px]">Placement completed{placementTotal != null ? ` — ${placementTotal}/100` : ''}</p>
-                    <p className="text-[10px] text-emerald-700 mt-0.5">Recommended: <span className="font-black">{placementRecommendation}</span> {visitor.placementScore.examiner ? <> · by {visitor.placementScore.examiner}</> : null}</p>
+                    <p className="text-[10px] text-emerald-700 mt-0.5">Recommended: <span className="font-black">{placementRecommendation}</span>{placementOverallCefr ? <> · CEFR <span className="font-black">{placementOverallCefr}</span></> : null}{placementOutcome ? <> · <span className="font-black uppercase">{placementOutcome}</span></> : null}{visitor.placementScore.examiner ? <> · by {visitor.placementScore.examiner}</> : null}</p>
                   </div>
                   <button onClick={onOpenPlacementTest} className="px-2.5 py-1.5 bg-white border border-emerald-200 text-emerald-700 rounded-lg text-[10px] font-bold hover:bg-emerald-50 cursor-pointer">Re-test</button>
                 </div>

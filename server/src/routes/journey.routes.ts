@@ -297,6 +297,7 @@ journeyRouter.post(
       actorName: user.fullName,
       autoInvoice: autoInvoice !== false,
       discountAmount: requestedDiscount,
+      includeRegistrationFee: false,
     });
 
     writeAudit(req, `Enrollment ${result.enrollmentId} for student ${student.full_name}`);

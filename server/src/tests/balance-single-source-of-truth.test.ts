@@ -80,6 +80,10 @@ beforeAll(async () => {
     `INSERT OR IGNORE INTO classes (id,name,level,branch_id,status,lifecycle_stage,schedule_time,fee)
      VALUES (?,?,'A1',?,'active','in_progress','08:00',1000)`,
   ).run(CLASS_ID, 'SoT Class', BRANCH);
+  db.prepare(`
+    INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+    VALUES ('sot_registration_fee', ?, 'registration', 'Registration fee', 0, 1, 1)
+  `).run(BRANCH);
 
   app = createApp();
 });

@@ -70,6 +70,14 @@ beforeAll(() => {
     .run(BRANCH_A, 'WP03 Attack A', 'A');
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)')
     .run(BRANCH_B, 'WP03 Attack B', 'B');
+  db.prepare(`
+    INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+    VALUES ('wp03_attack_registration_fee_a', ?, 'registration', 'Registration fee', 1500, 1, 1)
+  `).run(BRANCH_A);
+  db.prepare(`
+    INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+    VALUES ('wp03_attack_registration_fee_b', ?, 'registration', 'Registration fee', 1500, 1, 1)
+  `).run(BRANCH_B);
 
   seedUser({ id: 'wp03_gm', role: 'general_manager', branchId: BRANCH_A });
   seedUser({ id: 'wp03_data', role: 'data_entry', branchId: BRANCH_A });
@@ -496,19 +504,20 @@ describe('visitor admission and conversion attacks', () => {
     const result = await supertest(app)
       .post('/api/visitors/wp03_cross_convert/convert')
       .set(bearerFor('wp03_owner'))
-      .send({ classId: 'wp03_cross_class', branchId: BRANCH_B, semesterFee: 5000, amountPaid: 0 });
+      .send({ classId: 'wp03_cross_class', branchId: BRANCH_B });
     expect(result.status).toBe(400);
     expect(db.prepare('SELECT id FROM students WHERE lead_id=?').get('wp03_cross_convert')).toBeUndefined();
   });
 
-  it('uses the configured class fee rather than accepting a client gross-fee override', async () => {
+  it('rejects legacy client fee overrides on conversion; pricing belongs to later enrollment', async () => {
     insertVisitor('wp03_fee_override', BRANCH_A, { phone: '0700003203' });
     insertClass('wp03_fee_class', BRANCH_A, 5000);
     const result = await supertest(app)
       .post('/api/visitors/wp03_fee_override/convert')
       .set(bearerFor('wp03_owner'))
       .send({ classId: 'wp03_fee_class', branchId: BRANCH_A, semesterFee: 1, amountPaid: 1 });
-    expect(result.status).toBe(400);
+    expect(result.status).toBe(409);
+    expect(String(result.body.error)).toMatch(/no longer collects payment|creates enrollment directly/i);
     expect(db.prepare('SELECT id FROM students WHERE lead_id=?').get('wp03_fee_override')).toBeUndefined();
   });
 
@@ -566,7 +575,7 @@ describe('visitor admission and conversion attacks', () => {
     const invalidConversionId = await supertest(app)
       .post('/api/visitors/wp03_invalid_foreign_id/convert')
       .set(bearerFor('wp03_owner'))
-      .send({ classId: { nested: true }, amountPaid: 0 });
+      .send({ classId: { nested: true } });
     expect(invalidConversionId.status).toBe(400);
 
     insertVisitor('wp03_invalid_phone_convert', BRANCH_A, { phone: 'not-a-phone' });
@@ -574,7 +583,7 @@ describe('visitor admission and conversion attacks', () => {
     const invalidPhoneConversion = await supertest(app)
       .post('/api/visitors/wp03_invalid_phone_convert/convert')
       .set(bearerFor('wp03_owner'))
-      .send({ classId: 'wp03_invalid_phone_class', amountPaid: 0 });
+      .send({ classId: 'wp03_invalid_phone_class' });
     expect(invalidPhoneConversion.status).toBe(400);
     expect(db.prepare("SELECT id FROM students WHERE lead_id='wp03_invalid_phone_convert'").get()).toBeUndefined();
 
@@ -584,11 +593,11 @@ describe('visitor admission and conversion attacks', () => {
       .post('/api/visitors/wp03_discount_transform/convert')
       .set(bearerFor('wp03_owner'))
       .send({ classId: 'wp03_discount_class', semesterFee: 5000, discountPercent: 30, amountPaid: 0 });
-    expect(unauthorizedDiscount.status).toBe(400);
+    expect(unauthorizedDiscount.status).toBe(409);
     expect(db.prepare("SELECT id FROM students WHERE lead_id='wp03_discount_transform'").get()).toBeUndefined();
   });
 
-  it('rolls back the visitor, student, finance, and placement writes when late enrollment eligibility fails', async () => {
+  it('keeps visitor conversion admission-only so late enrollment eligibility is deferred to the student workspace', async () => {
     db.prepare("INSERT INTO programs (id, name, branch_id) VALUES ('wp03_atomic_program', 'Atomic Program', ?)").run(BRANCH_A);
     db.prepare("INSERT INTO program_versions (id, program_id, version_label, version_number, status) VALUES ('wp03_atomic_version', 'wp03_atomic_program', 'v1', 1, 'published')").run();
     db.prepare(`INSERT INTO levels (id, program_id, name, "order", program_version_id, code, default_fee)
@@ -596,7 +605,7 @@ describe('visitor admission and conversion attacks', () => {
     db.prepare(`INSERT INTO placement_assessment_profiles
                 (id, program_version_id, branch_id, requirement_mode, first_level_exempt, components_json)
                 VALUES ('wp03_atomic_profile', 'wp03_atomic_version', ?, 'required', 0, ?)`)
-      .run(BRANCH_A, JSON.stringify([{ key: 'placement', type: 'custom_score', label: 'Placement', required: true, weight: 100, maxScore: 100 }]));
+      .run(BRANCH_A, JSON.stringify([{ key: 'grammar', type: 'grammar', label: 'Grammar', required: true, weight: 25, maxScore: 30, bankIds: ['gate-grammar'], blueprintBuckets: [{ count: 30, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['mcq'] }] },{ key: 'reading', type: 'reading', label: 'Reading', required: true, weight: 16.67, maxScore: 20, bankIds: ['gate-reading'], blueprintBuckets: [{ count: 20, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['mcq'] }] },{ key: 'listening', type: 'listening', label: 'Listening', required: true, weight: 16.67, maxScore: 20, bankIds: ['gate-listening'], blueprintBuckets: [{ count: 20, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['mcq'] }] },{ key: 'writing', type: 'writing', label: 'Writing', required: true, weight: 20.83, maxScore: 25, bankIds: ['gate-writing'], blueprintBuckets: [{ count: 1, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['essay'] }] },{ key: 'speaking', type: 'speaking', label: 'Speaking', required: true, weight: 20.83, maxScore: 25, bankIds: ['gate-speaking'], blueprintBuckets: [{ count: 1, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['speaking'] }] }]));
     insertVisitor('wp03_atomic_visitor', BRANCH_A, { phone: '0700003206' });
     insertClass('wp03_atomic_class', BRANCH_A, 5000);
     db.prepare("UPDATE classes SET level_id='wp03_atomic_level', program_id='wp03_atomic_program' WHERE id='wp03_atomic_class'").run();
@@ -604,11 +613,13 @@ describe('visitor admission and conversion attacks', () => {
     const result = await supertest(app)
       .post('/api/visitors/wp03_atomic_visitor/convert')
       .set(bearerFor('wp03_owner'))
-      .send({ classId: 'wp03_atomic_class', branchId: BRANCH_A, semesterFee: 5000, amountPaid: 0 });
-    expect(result.status).toBe(400);
-    expect(db.prepare("SELECT id FROM students WHERE lead_id='wp03_atomic_visitor'").get()).toBeUndefined();
+      .send({ classId: 'wp03_atomic_class', branchId: BRANCH_A });
+    expect(result.status).toBe(201);
+    const student = db.prepare("SELECT id FROM students WHERE lead_id='wp03_atomic_visitor'").get() as { id: string } | undefined;
+    expect(student).toBeDefined();
     expect((db.prepare("SELECT status, stage, placement_requirement_mode FROM visitors WHERE id='wp03_atomic_visitor'").get() as Record<string, unknown>))
-      .toMatchObject({ status: 'visited', stage: 'lead', placement_requirement_mode: null });
-    expect((db.prepare("SELECT COUNT(*) c FROM invoices WHERE notes LIKE '%wp03_atomic_visitor%'").get() as { c: number }).c).toBe(0);
+      .toMatchObject({ status: 'registered', stage: 'placement_booking', placement_requirement_mode: null });
+    expect((db.prepare('SELECT COUNT(*) c FROM enrollments WHERE student_id = ?').get(student!.id) as { c: number }).c).toBe(0);
+    expect((db.prepare('SELECT COUNT(*) c FROM student_semesters WHERE student_id = ?').get(student!.id) as { c: number }).c).toBe(0);
   });
 });

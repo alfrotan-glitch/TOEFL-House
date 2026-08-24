@@ -92,6 +92,10 @@ beforeAll(async () => {
      VALUES (?, ?, ?, ?, ?, 1, 0)`
   ).run('u_overpay', 'overpay_mgr', 'Overpay Mgr', BRANCH, await hashPassword('x'));
   assignRole('u_overpay', 'manager', BRANCH);
+  db.prepare(`
+    INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+    VALUES ('overpay_registration_fee', ?, 'registration', 'Registration fee', 0, 1, 1)
+  `).run(BRANCH);
 
   app = express();
   app.use(express.json());
@@ -291,13 +295,20 @@ describe('ad-hoc charges are unbacked by design but must be explained', () => {
  */
 /** A level carrying a real fee, so the invoice branch under test is reached. */
 function ensurePaidLevel(): string {
-  const existing = db.prepare('SELECT id FROM levels WHERE default_fee > 0 LIMIT 1').get() as { id: string } | undefined;
-  if (existing) return existing.id;
   db.prepare(`INSERT OR IGNORE INTO programs (id, name, code, branch_id) VALUES ('prog_overpay', 'Overpay Program', 'OP', ?)`).run(BRANCH);
+  db.prepare(`
+    INSERT OR IGNORE INTO program_versions (id, program_id, version_label, version_number, status)
+    VALUES ('pv_overpay', 'prog_overpay', 'v1', 1, 'published')
+  `).run();
   db.prepare(
-    `INSERT INTO levels (id, program_id, name, code, "order", default_fee)
-     VALUES ('lvl_overpay', 'prog_overpay', 'Overpay Level', 'OL', 1, 5000)`
+    `INSERT OR REPLACE INTO levels (id, program_id, program_version_id, name, code, "order", default_fee)
+     VALUES ('lvl_overpay', 'prog_overpay', 'pv_overpay', 'Overpay Level', 'OL', 1, 5000)`
   ).run();
+  db.prepare(`
+    INSERT OR REPLACE INTO placement_assessment_profiles
+      (id, program_version_id, branch_id, requirement_mode, components_json, scoring_model, pass_score, decision_rules_json)
+    VALUES ('pap_overpay', 'pv_overpay', ?, 'not_required', '[]', 'canonical', 60, '[]')
+  `).run(BRANCH);
   return 'lvl_overpay';
 }
 

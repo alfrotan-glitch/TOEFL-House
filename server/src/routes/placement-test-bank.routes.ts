@@ -26,9 +26,10 @@ import {
 
 export const placementTestBankRouter = Router();
 
-const VALID_TEST_TYPES = ['listening', 'reading', 'writing', 'speaking'];
-const VALID_QTYPES = ['mcq', 'short_answer', 'essay', 'speaking'];
+const VALID_TEST_TYPES = ['grammar', 'listening', 'reading', 'writing', 'speaking'];
+const VALID_QTYPES = ['mcq', 'short_answer', 'fill_blank', 'sentence_completion', 'error_identification', 'essay', 'speaking'];
 const VALID_SECTION_KINDS = ['audio_track', 'passage', 'prompt_block', 'instructions'];
+const VALID_QUESTION_LIFECYCLE = ['draft', 'reviewed', 'approved', 'active', 'retired'];
 
 /**
  * PTB-1: by-id access must obey the same branch authority the list already
@@ -36,9 +37,7 @@ const VALID_SECTION_KINDS = ['audio_track', 'passage', 'prompt_block', 'instruct
  * scoping on the list was decorative — the row stayed reachable by id, and a
  * manager of another branch could rewrite, archive/activate or preview it.
  * Preview matters on its own: serializeTest() returns `answerKey` for every
- * question, and policy-engine.ts refuses any content_test whose test is not
- * `status='active'`, so a foreign archive breaks the owning branch's
- * placement assessment.
+ * question, so a foreign archive breaks the owning branch's placement assessment.
  *
  * `branch_id IS NULL` means "global template": it remains readable wherever
  * the global template is applicable, but mutation requires the canonical
@@ -66,9 +65,9 @@ function assertRubricScope(rubricId: unknown, assetBranchId: string | null, test
     throw new HttpError(400, 'Rubric belongs to another branch.');
   }
   const allowedKinds = testType === 'writing'
-    ? new Set(['writing', 'interview'])
+    ? new Set(['writing'])
     : testType === 'speaking'
-      ? new Set(['speaking', 'interview'])
+      ? new Set(['speaking'])
       : new Set<string>();
   if (!allowedKinds.has(String(rubric.kind))) {
     throw new HttpError(400, 'Rubric kind does not match the placement test type.');
@@ -136,6 +135,10 @@ function validateQuestions(questions: any[], sections: any[] | null = null) {
     if (q.answerKey != null && typeof q.answerKey !== 'string') throw new HttpError(400, `Question ${key} answerKey must be text.`);
     if (q.sectionKey != null && typeof q.sectionKey !== 'string') throw new HttpError(400, `Question ${key} sectionKey must be text.`);
     if (q.difficulty != null && typeof q.difficulty !== 'string') throw new HttpError(400, `Question ${key} difficulty must be text.`);
+    if (q.cefrLevel != null && !['A1', 'A2', 'B1', 'B2', 'C1'].includes(String(q.cefrLevel))) throw new HttpError(400, `Question ${key} CEFR level must be A1/A2/B1/B2/C1.`);
+    if (q.topic != null && typeof q.topic !== 'string') throw new HttpError(400, `Question ${key} topic must be text.`);
+    if (q.subskill != null && typeof q.subskill !== 'string') throw new HttpError(400, `Question ${key} subskill must be text.`);
+    if (q.lifecycleStatus != null && !VALID_QUESTION_LIFECYCLE.includes(String(q.lifecycleStatus))) throw new HttpError(400, `Question ${key} lifecycleStatus is invalid.`);
     if (q.qtype === 'mcq') {
       const options = normalizedOptions(q.options);
       if (options.length < 2) throw new HttpError(400, `MCQ ${key} needs at least two options.`);
@@ -148,7 +151,7 @@ function validateQuestions(questions: any[], sections: any[] | null = null) {
     } else if (q.options != null) {
       throw new HttpError(400, `Only MCQ ${key} may define options.`);
     }
-    if (q.qtype !== 'essay' && q.qtype !== 'speaking' && !String(q.answerKey || '').trim()) throw new HttpError(400, `Question ${key} needs an answer key.`);
+    if (!['essay', 'speaking'].includes(String(q.qtype)) && !String(q.answerKey || '').trim()) throw new HttpError(400, `Question ${key} needs an answer key.`);
     if (typeof q.points !== 'number' || !Number.isFinite(q.points) || q.points <= 0) throw new HttpError(400, `Question ${key} needs positive numeric points.`);
     if (typeof q.sectionKey === 'string') q.sectionKey = q.sectionKey.trim() || null;
     if (q.sectionKey && sectionKeys && !sectionKeys.has(q.sectionKey)) throw new HttpError(400, `Question ${key} references an unknown section.`);
@@ -175,7 +178,7 @@ function validateSections(sections: unknown): asserts sections is any[] {
   }
 }
 
-function replaceQuestions(testId: string, questions: any[]) {
+function replaceQuestions(testId: string, questions: any[], userId: string) {
   const existingQs = stmtQuestionsByTest.all(testId) as any[];
   const existingByKey = new Map(existingQs.map((q) => [String(q.question_key), q]));
   const newKeys = new Set(questions.map((q) => String(q.key)));
@@ -183,9 +186,49 @@ function replaceQuestions(testId: string, questions: any[]) {
   for (const q of questions) {
     const prior = existingByKey.get(String(q.key));
     const qid = prior ? prior.id : id('ptq');
-    const payload = [String(q.qtype), String(q.prompt), q.qtype === 'mcq' ? JSON.stringify(normalizedOptions(q.options)) : null, q.answerKey || null, Number(q.points || 1), idx++, q.difficulty || null, q.sectionKey || null];
-    if (prior) stmtUpdateQuestion.run(...payload, qid);
-    else stmtInsertQuestion.run(qid, testId, String(q.key), ...payload);
+    const optionsJson = q.qtype === 'mcq' ? JSON.stringify(normalizedOptions(q.options)) : null;
+    const contentJson = q.contentJson == null ? null : JSON.stringify(q.contentJson);
+    const orderIndex = idx++;
+    const updatePayload = [
+      String(q.qtype),
+      String(q.prompt),
+      optionsJson,
+      q.answerKey || null,
+      Number(q.points || 1),
+      orderIndex,
+      q.difficulty || null,
+      q.sectionKey || null,
+      q.cefrLevel || null,
+      q.topic || null,
+      q.subskill || null,
+      q.lifecycleStatus || 'draft',
+      q.reviewedBy || null,
+      q.approvedAt || null,
+      contentJson,
+    ];
+    if (prior) stmtUpdateQuestion.run(...updatePayload, qid);
+    else stmtInsertQuestion.run(
+      qid,
+      testId,
+      String(q.key),
+      String(q.qtype),
+      String(q.prompt),
+      optionsJson,
+      q.answerKey || null,
+      Number(q.points || 1),
+      orderIndex,
+      q.difficulty || null,
+      q.sectionKey || null,
+      q.cefrLevel || null,
+      q.topic || null,
+      q.subskill || null,
+      q.lifecycleStatus || 'draft',
+      1,
+      userId,
+      q.reviewedBy || null,
+      q.approvedAt || null,
+      contentJson,
+    );
   }
   for (const prior of existingQs) {
     if (!newKeys.has(String(prior.question_key))) {
@@ -236,7 +279,7 @@ placementTestBankRouter.post('/test-bank', requirePermission('Curriculum.TestBan
   const normalizedWordTarget = positiveOptionalInteger(wordTarget, 'wordTarget');
   const tx = db.transaction(() => {
     stmtInsertTest.run(testId, String(title).trim(), testType, instructions || null, audioUrl || null, transcript || null, passage || null, 'draft', resolvedBranch, user.userId, difficulty || null, normalizedDuration, resolvedRubricId, normalizedWordTarget, contentJson == null ? null : JSON.stringify(contentJson));
-    replaceQuestions(testId, Array.isArray(questions) ? questions : []);
+    replaceQuestions(testId, Array.isArray(questions) ? questions : [], user.userId);
     if (Array.isArray(sections)) replaceSections(testId, sections);
   });
   tx();
@@ -245,6 +288,7 @@ placementTestBankRouter.post('/test-bank', requirePermission('Curriculum.TestBan
 }));
 
 placementTestBankRouter.put('/test-bank/:id', requirePermission('Curriculum.TestBank'), ah(async (req, res) => {
+  const user = getUserContext(req);
   const existing = stmtTestById.get(req.params.id) as any;
   if (!existing) throw new HttpError(404, 'Test not found.');
   assertPlacementAssetBranch(req, existing.branch_id, true);
@@ -303,7 +347,7 @@ placementTestBankRouter.put('/test-bank/:id', requirePermission('Curriculum.Test
       version,
     ) as any;
     if (updated.changes !== 1) throw new HttpError(409, 'Test content changed since it was loaded. Refresh and retry.');
-    if (Array.isArray(questions)) replaceQuestions(existing.id, questions);
+    if (Array.isArray(questions)) replaceQuestions(existing.id, questions, user.userId);
     if (Array.isArray(sections)) replaceSections(existing.id, sections);
   });
   tx();
@@ -346,7 +390,7 @@ placementTestBankRouter.get('/test-bank/:id/preview', requirePermission('Curricu
 }));
 
 // ============================================================================
-// §RUBRICS (writing / speaking / interview)
+// §RUBRICS (writing / speaking)
 // ============================================================================
 placementTestBankRouter.get('/rubrics', requirePermission('Curriculum.TestBank'), ah(async (req, res) => {
   const scope = resolveBranchScope(req);
@@ -359,7 +403,7 @@ placementTestBankRouter.get('/rubrics', requirePermission('Curriculum.TestBank')
 placementTestBankRouter.post('/rubrics', requirePermission('Curriculum.TestBank'), ah(async (req, res) => {
   const user = getUserContext(req);
   const { title, kind, criteria } = req.body ?? {};
-  if (typeof title !== 'string' || !title.trim() || title.trim().length > 240 || !['writing', 'speaking', 'interview'].includes(kind)) throw new HttpError(400, 'Rubric needs a text title no longer than 240 characters and kind (writing/speaking/interview).');
+  if (typeof title !== 'string' || !title.trim() || title.trim().length > 240 || !['writing', 'speaking'].includes(kind)) throw new HttpError(400, 'Rubric needs a text title no longer than 240 characters and kind (writing/speaking).');
   const normalizedCriteria = validateCriteria(criteria);
   const rubricId = id('prub');
   stmtInsertRubric.run(rubricId, title.trim(), kind, JSON.stringify(normalizedCriteria), user.branchId, user.userId);
@@ -377,11 +421,11 @@ placementTestBankRouter.put('/rubrics/:id', requirePermission('Curriculum.TestBa
   if (kind !== undefined && typeof kind !== 'string') throw new HttpError(400, 'Rubric kind must be text.');
   const nextTitle = title !== undefined ? title.trim() : existing.title;
   const nextKind = kind !== undefined ? kind : existing.kind;
-  if (!nextTitle || nextTitle.length > 240 || !['writing', 'speaking', 'interview'].includes(nextKind)) throw new HttpError(400, 'Rubric needs a text title no longer than 240 characters and valid kind.');
+  if (!nextTitle || nextTitle.length > 240 || !['writing', 'speaking'].includes(nextKind)) throw new HttpError(400, 'Rubric needs a text title no longer than 240 characters and valid kind.');
   const nextCriteria = validateCriteria(criteria !== undefined ? criteria : JSON.parse(existing.criteria_json || '[]'));
   const referencingTests = db.prepare('SELECT test_type FROM placement_tests WHERE rubric_id = ?').all(existing.id) as Array<{ test_type: string }>;
   if (referencingTests.some(({ test_type }) => test_type !== 'writing' && test_type !== 'speaking'
-      || (nextKind !== 'interview' && nextKind !== test_type))) {
+      || nextKind !== test_type)) {
     throw new HttpError(409, 'Rubric kind cannot be changed while linked tests require its current kind.');
   }
   const updated = stmtUpdateRubric.run(nextTitle, nextKind, JSON.stringify(nextCriteria), existing.id, version) as any;

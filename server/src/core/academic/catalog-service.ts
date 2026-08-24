@@ -1,6 +1,7 @@
 import { ACADEMIC_DEFAULTS } from '../configuration/policy-catalog.js';
 import type Database from 'better-sqlite3';
 import { id as makeId } from '../../utils/ids.js';
+import { HttpError } from '../../middleware/errorHandler.js';
 import { assertMoney } from '../../utils/money.js';
 
 export interface CreateVersionInput {
@@ -22,7 +23,6 @@ export class AcademicCatalogService {
   private stmtGetSubjectsByVersion: Database.Statement;
   private stmtGetModulesBySubjects: Database.Statement;
   private stmtGetPromotionRules: Database.Statement;
-  private stmtGetPlacementRules: Database.Statement;
   private stmtGetFeeRules: Database.Statement;
   
   private stmtGetProgram: Database.Statement;
@@ -40,8 +40,8 @@ export class AcademicCatalogService {
   private stmtInsertModuleForCopy: Database.Statement;
   private stmtGetPromosForCopy: Database.Statement;
   private stmtInsertPromoForCopy: Database.Statement;
-  private stmtGetPlacementsForCopy: Database.Statement;
-  private stmtInsertPlacementForCopy: Database.Statement;
+  private stmtGetPlacementProfilesForCopy: Database.Statement;
+  private stmtInsertPlacementProfileForCopy: Database.Statement;
   private stmtGetFeesForCopy: Database.Statement;
   private stmtInsertFeeForCopy: Database.Statement;
 
@@ -52,13 +52,11 @@ export class AcademicCatalogService {
   private stmtUnsetDefaultVersions: Database.Statement;
 
   // Evaluation & Fee statements
-  private stmtGetPlacementRulesForRecommend: Database.Statement;
   private stmtGetLevelById: Database.Statement;
   private stmtGetPromoRuleForEval: Database.Statement;
   private stmtGetFeeRuleByType: Database.Statement;
   private stmtGetBranchFee: Database.Statement;
   private stmtGetLevelDefaultFee: Database.Statement;
-  private stmtGetBranchProfile: Database.Statement;
 
   constructor(private db: Database.Database) {
     this.stmtListAll = db.prepare(`SELECT pv.*, p.name AS program_name, p.branch_id FROM program_versions pv JOIN programs p ON p.id = pv.program_id ORDER BY p.name, pv.version_number DESC`);
@@ -78,7 +76,6 @@ export class AcademicCatalogService {
     this.stmtGetSubjectsByVersion = db.prepare(`SELECT * FROM subjects WHERE program_version_id = ? ORDER BY sort_order, code`);
     this.stmtGetModulesBySubjects = db.prepare(`SELECT * FROM modules WHERE subject_id IN (SELECT value FROM json_each(?)) ORDER BY sort_order`);
     this.stmtGetPromotionRules = db.prepare(`SELECT * FROM promotion_rules WHERE program_version_id = ? AND is_active = 1`);
-    this.stmtGetPlacementRules = db.prepare(`SELECT * FROM placement_rules WHERE program_version_id = ? AND is_active = 1 ORDER BY sort_order, min_score`);
     this.stmtGetFeeRules = db.prepare(`SELECT * FROM fee_rules WHERE program_version_id = ? AND is_active = 1`);
 
     this.stmtGetProgram = db.prepare('SELECT * FROM programs WHERE id = ?');
@@ -110,10 +107,14 @@ export class AcademicCatalogService {
       `INSERT INTO promotion_rules (id, program_version_id, from_level_id, to_level_id, name, min_score, min_attendance_pct, require_all_subjects, auto_promote, branch_id, is_active, version, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, datetime('now'))`
     );
-    this.stmtGetPlacementsForCopy = db.prepare('SELECT * FROM placement_rules WHERE program_version_id = ?');
-    this.stmtInsertPlacementForCopy = db.prepare(
-      `INSERT INTO placement_rules (id, program_version_id, name, min_score, max_score, recommended_level_id, recommended_level_code, branch_id, sort_order, is_active, version, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, datetime('now'))`
+    this.stmtGetPlacementProfilesForCopy = db.prepare('SELECT * FROM placement_assessment_profiles WHERE program_version_id = ?');
+    this.stmtInsertPlacementProfileForCopy = db.prepare(
+      `INSERT INTO placement_assessment_profiles
+         (id, program_version_id, branch_id, pass_score, instructions, version,
+          requirement_mode, first_level_exempt, expires_minutes, decision_rules_json,
+          created_at, updated_at, components_json, scoring_model, allow_retake,
+          max_attempts, first_attempt_billable, retake_billable, retake_fee_amount)
+       VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, datetime('now'), datetime('now'), ?, ?, ?, ?, ?, ?, ?)`
     );
     this.stmtGetFeesForCopy = db.prepare('SELECT * FROM fee_rules WHERE program_version_id = ?');
     this.stmtInsertFeeForCopy = db.prepare(
@@ -126,19 +127,15 @@ export class AcademicCatalogService {
     this.stmtPublishVersion = db.prepare(`UPDATE program_versions SET status = 'published', is_default = 1, published_at = datetime('now'), effective_from = COALESCE(effective_from, date('now')) WHERE id = ?`);
     this.stmtUnsetDefaultVersions = db.prepare(`UPDATE program_versions SET is_default = 0 WHERE program_id = ? AND id != ?`);
 
-    this.stmtGetPlacementRulesForRecommend = db.prepare(
-      `SELECT * FROM placement_rules WHERE program_version_id = ? AND is_active = 1 AND (branch_id IS NULL OR branch_id = ?) ORDER BY branch_id DESC, sort_order, min_score`
-    );
     this.stmtGetLevelById = db.prepare('SELECT * FROM levels WHERE id = ?');
     this.stmtGetPromoRuleForEval = db.prepare(
       `SELECT * FROM promotion_rules WHERE program_version_id = ? AND is_active = 1 AND (from_level_id IS NULL OR from_level_id = ?) AND (branch_id IS NULL OR branch_id = ?) ORDER BY branch_id DESC LIMIT 1`
     );
     this.stmtGetFeeRuleByType = db.prepare(
-      `SELECT * FROM fee_rules WHERE fee_type = ? AND is_active = 1 AND (branch_id IS NULL OR branch_id = ?) AND (program_version_id IS NULL OR program_version_id = ?) AND (level_id IS NULL OR level_id = ?) AND (effective_from IS NULL OR effective_from <= date('now')) AND (effective_to IS NULL OR effective_to >= date('now')) ORDER BY branch_id DESC, level_id DESC, version DESC LIMIT 1`
+      `SELECT * FROM fee_rules WHERE fee_type = ? AND is_active = 1 AND branch_id = ? AND (program_version_id IS NULL OR program_version_id = ?) AND (level_id IS NULL OR level_id = ?) AND (effective_from IS NULL OR effective_from <= date('now')) AND (effective_to IS NULL OR effective_to >= date('now')) ORDER BY CASE WHEN level_id = ? THEN 1 ELSE 0 END DESC, CASE WHEN program_version_id = ? THEN 1 ELSE 0 END DESC, version DESC, created_at DESC LIMIT 1`
     );
     this.stmtGetBranchFee = db.prepare('SELECT fee FROM level_branch_fees WHERE level_id = ? AND branch_id = ?');
     this.stmtGetLevelDefaultFee = db.prepare('SELECT name, default_fee FROM levels WHERE id = ?');
-    this.stmtGetBranchProfile = db.prepare('SELECT * FROM branch_academic_profiles WHERE branch_id = ?');
   }
 
   listProgramVersions(programId?: string) {
@@ -165,7 +162,6 @@ export class AcademicCatalogService {
         modules: modules.filter(m => m.subject_id === s.id),
       })),
       promotionRules: this.stmtGetPromotionRules.all(versionId),
-      placementRules: this.stmtGetPlacementRules.all(versionId),
     };
   }
 
@@ -304,12 +300,39 @@ export class AcademicCatalogService {
       );
     }
 
-    const placements = this.stmtGetPlacementsForCopy.all(fromId) as any[];
-    for (const r of placements) {
-      this.stmtInsertPlacementForCopy.run(
-        makeId('place'), toId, r.name, r.min_score, r.max_score,
-        r.recommended_level_id ? levelMap.get(r.recommended_level_id) ?? null : null,
-        r.recommended_level_code, r.branch_id, r.sort_order
+    const placementProfiles = this.stmtGetPlacementProfilesForCopy.all(fromId) as any[];
+    for (const profile of placementProfiles) {
+      const decisionRules = (() => {
+        try {
+          const parsed = JSON.parse(profile.decision_rules_json || '[]');
+          if (!Array.isArray(parsed)) throw new Error('decision_rules_json must be an array');
+          return parsed.map((rule: any) => ({
+            ...rule,
+            recommendedLevelId: typeof rule?.recommendedLevelId === 'string'
+              ? (levelMap.get(rule.recommendedLevelId) ?? rule.recommendedLevelId)
+              : rule?.recommendedLevelId ?? '',
+          }));
+        } catch {
+          throw new Error(`Invalid placement decision rules for copied profile ${profile.id}.`);
+        }
+      })();
+      this.stmtInsertPlacementProfileForCopy.run(
+        makeId('pap'),
+        toId,
+        profile.branch_id ?? null,
+        profile.pass_score,
+        profile.instructions ?? null,
+        profile.requirement_mode,
+        profile.first_level_exempt,
+        profile.expires_minutes ?? null,
+        JSON.stringify(decisionRules),
+        profile.components_json,
+        profile.scoring_model,
+        profile.allow_retake,
+        profile.max_attempts ?? null,
+        profile.first_attempt_billable,
+        profile.retake_billable,
+        profile.retake_fee_amount ?? null,
       );
     }
 
@@ -338,14 +361,7 @@ export class AcademicCatalogService {
     return this.getVersionTree(versionId);
   }
 
-  recommendLevel(programVersionId: string, totalScore: number, branchId?: string | null) {
-    const rules = this.stmtGetPlacementRulesForRecommend.all(programVersionId, branchId ?? null) as any[];
-    const match = rules.find(r => totalScore >= r.min_score && totalScore <= r.max_score);
-    if (!match) return null;
-    
-    const level = match.recommended_level_id ? this.stmtGetLevelById.get(match.recommended_level_id) : null;
-    return { rule: match, level };
-  }
+
 
   evaluatePromotion(params: { programVersionId: string; fromLevelId: string; score: number; attendancePct: number; branchId?: string | null; }) {
     const rule = this.stmtGetPromoRuleForEval.get(params.programVersionId, params.fromLevelId, params.branchId ?? null) as any;
@@ -363,13 +379,26 @@ export class AcademicCatalogService {
     return { eligible: scoreOk && attOk, rule, toLevelId: rule.to_level_id, autoPromote: !!rule.auto_promote, reasons };
   }
 
-  buildFeeSnapshot(params: { programVersionId?: string | null; levelId?: string | null; branchId: string; enrollmentType?: string; }) {
+  buildFeeSnapshot(params: {
+    programVersionId?: string | null;
+    levelId?: string | null;
+    branchId: string;
+    enrollmentType?: string;
+    includeRegistrationFee?: boolean;
+  }) {
     const fees: { feeType: string; name: string; amount: number }[] = [];
 
+    const lookupRule = (feeType: string) => this.stmtGetFeeRuleByType.get(
+      feeType,
+      params.branchId,
+      params.programVersionId ?? null,
+      params.levelId ?? null,
+      params.levelId ?? null,
+      params.programVersionId ?? null,
+    ) as any;
+
     const addFromRules = (feeType: string) => {
-      const row = this.stmtGetFeeRuleByType.get(
-        feeType, params.branchId, params.programVersionId ?? null, params.levelId ?? null
-      ) as any;
+      const row = lookupRule(feeType);
       if (row) {
         fees.push({
           feeType: row.fee_type,
@@ -377,9 +406,15 @@ export class AcademicCatalogService {
           amount: assertMoney(row.amount, `Stored ${row.fee_type} fee`),
         });
       }
+      return row;
     };
 
-    addFromRules('registration');
+    if (params.includeRegistrationFee !== false) {
+      const registrationRule = addFromRules('registration');
+      if (!registrationRule) {
+        throw new HttpError(409, 'No active registration fee is configured for this branch/program. Configure it in Academic Control Center before continuing.');
+      }
+    }
     addFromRules('semester');
     if (params.enrollmentType === 'repeat' || params.enrollmentType === 'partial_repeat') {
       addFromRules('retake');
@@ -391,14 +426,6 @@ export class AcademicCatalogService {
       const amount = assertMoney(branchFee?.fee ?? level?.default_fee ?? 0, 'Stored tuition fee');
       if (amount > 0) {
         fees.push({ feeType: 'semester', name: `Tuition — ${level?.name || 'Level'}`, amount });
-      }
-    }
-
-    const profile = this.stmtGetBranchProfile.get(params.branchId) as any;
-    if (profile) {
-      const registrationFee = assertMoney(profile.registration_fee ?? 0, 'Stored registration fee');
-      if (registrationFee > 0 && !fees.some(f => f.feeType === 'registration')) {
-        fees.push({ feeType: 'registration', name: 'Registration fee', amount: registrationFee });
       }
     }
 

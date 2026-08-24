@@ -13,6 +13,7 @@
   "compilerOptions": {
     "rootDir": "..",
     "noEmit": true,
+    "jsx": "react-jsx",
     // React resolves from THIS package's dependencies.
     //
     // Frontend modules live at ../src, so Node resolution walks up from there —

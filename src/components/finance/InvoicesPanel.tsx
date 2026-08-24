@@ -339,7 +339,9 @@ export default function InvoicesPanel({
                       </p>
                       {/* What the money collected here will settle. */}
                       <span className={`inline-block mt-1 text-[9px] font-black px-1.5 py-0.5 rounded-full ${PURPOSE_STYLE[inv.purpose] || 'bg-slate-100 text-slate-600'}`}>
-                        {inv.purpose === 'tuition' ? `tuition · ${inv.semesterName || 'term'}` : inv.purpose}
+                        {inv.purpose === 'tuition'
+                          ? `tuition · ${inv.semesterName || 'term'}`
+                          : (inv.chargeKind || inv.purpose)}
                       </span>
                     </div>
                     <div className="text-start">

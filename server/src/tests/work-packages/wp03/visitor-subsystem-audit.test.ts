@@ -24,6 +24,7 @@ import { db, initSchema } from '../../../db/connection.js';
 import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
 import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
 import { visitorsRouter } from '../../../routes/visitors.routes.js';
+import { studentsRouter } from '../../../routes/students.routes.js';
 import { searchRouter } from '../../../routes/search.routes.js';
 import { errorHandler } from '../../../middleware/errorHandler.js';
 import { today } from '../../../utils/ids.js';
@@ -66,8 +67,8 @@ function seedPlacementRequiredProgram() {
   db.prepare(`INSERT OR IGNORE INTO placement_assessment_profiles
       (id, program_version_id, branch_id, components_json, scoring_model, allow_retake,
        pass_score, requirement_mode, first_level_exempt, max_attempts)
-      VALUES ('vsa_pap','vsa_pv',?,?,'weighted_average',1,50,'required',0,2)`)
-    .run(BRANCH_A, JSON.stringify([{ key: 'writing', type: 'written_test', label: 'Writing', weight: 100, maxScore: 100, required: true, order: 0 }]));
+      VALUES ('vsa_pap','vsa_pv',?,?,'canonical',1,50,'required',0,2)`)
+    .run(BRANCH_A, JSON.stringify([{ key: 'grammar', type: 'grammar', label: 'Grammar', required: true, weight: 25, maxScore: 30, bankIds: ['gate-grammar'], blueprintBuckets: [{ count: 30, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['mcq'] }] },{ key: 'reading', type: 'reading', label: 'Reading', required: true, weight: 16.67, maxScore: 20, bankIds: ['gate-reading'], blueprintBuckets: [{ count: 20, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['mcq'] }] },{ key: 'listening', type: 'listening', label: 'Listening', required: true, weight: 16.67, maxScore: 20, bankIds: ['gate-listening'], blueprintBuckets: [{ count: 20, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['mcq'] }] },{ key: 'writing', type: 'writing', label: 'Writing', required: true, weight: 20.83, maxScore: 25, bankIds: ['gate-writing'], blueprintBuckets: [{ count: 1, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['essay'] }] },{ key: 'speaking', type: 'speaking', label: 'Speaking', required: true, weight: 20.83, maxScore: 25, bankIds: ['gate-speaking'], blueprintBuckets: [{ count: 1, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['speaking'] }] }]));
 }
 
 const createVisitor = (as: TokenPayload, body: Record<string, unknown> = {}) =>
@@ -80,6 +81,14 @@ beforeAll(async () => {
   bootstrapRbacCatalog(db);
   db.prepare(`INSERT OR IGNORE INTO branches (id,name,location) VALUES (?, 'VSA A', 'T')`).run(BRANCH_A);
   db.prepare(`INSERT OR IGNORE INTO branches (id,name,location) VALUES (?, 'VSA B', 'T')`).run(BRANCH_B);
+  db.prepare(`
+    INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+    VALUES ('vsa_registration_fee_a', ?, 'registration', 'Registration fee', 1500, 1, 1)
+  `).run(BRANCH_A);
+  db.prepare(`
+    INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+    VALUES ('vsa_registration_fee_b', ?, 'registration', 'Registration fee', 1500, 1, 1)
+  `).run(BRANCH_B);
   seedPlacementRequiredProgram();
 
   const pwd = await hashPassword('Str0ng!Pass2026');
@@ -102,6 +111,7 @@ beforeAll(async () => {
   app = express();
   app.use(express.json());
   app.use('/api/visitors', visitorsRouter);
+  app.use('/api/students', studentsRouter);
   app.use('/api/search', searchRouter);
   app.use(errorHandler);
 });
@@ -117,37 +127,42 @@ describe('V-1 — placement requirement cannot be evaded by clearing the program
     visitorId = res.body.id;
   });
 
-  it('blocks conversion while the placement-required program is attached', async () => {
+  it('admits the visitor first and does not create an enrollment while the placement-required program is attached', async () => {
     const res = await supertest(app).post(`/api/visitors/${visitorId}/convert`)
-      .set(authHeader(registrarA)).send({ classId: 'vsa_cls', amountPaid: 0 });
-    expect(res.status).toBe(400);
-    expect(String(res.body.error)).toMatch(/placement/i);
+      .set(authHeader(registrarA)).send({ classId: 'vsa_cls' });
+    expect(res.status).toBe(201);
+    const student = db.prepare('SELECT id FROM students WHERE lead_id=?').get(visitorId) as { id: string } | undefined;
+    expect(student?.id).toBeTruthy();
+    const enrollments = student
+      ? (db.prepare('SELECT COUNT(*) c FROM enrollments WHERE student_id=?').get(student.id) as { c: number }).c
+      : 0;
+    expect(enrollments).toBe(0);
   });
 
-  it('still blocks conversion after programVersionId is set to null', async () => {
-    // EXPLOIT: Lead.Edit is enough to detach the program, and the conversion
-    // gate is wrapped in `if (effectiveProgramVersionId)`, so detaching it
-    // skips the gate entirely. The target class still belongs to the
-    // placement-required program via its level.
+  it('detaching programVersionId still cannot create an enrollment or bypass later placement enforcement', async () => {
     await supertest(app).patch(`/api/visitors/${visitorId}`)
       .set(authHeader(registrarA)).send({ programVersionId: null }).expect(200);
 
     const res = await supertest(app).post(`/api/visitors/${visitorId}/convert`)
-      .set(authHeader(registrarA)).send({ classId: 'vsa_cls', amountPaid: 0 });
-    expect(res.status).toBe(400);
+      .set(authHeader(registrarA)).send({ classId: 'vsa_cls' });
+    expect(res.status).toBe(201);
+    const student = db.prepare('SELECT id FROM students WHERE lead_id=?').get(visitorId) as { id: string } | undefined;
+    expect(student?.id).toBeTruthy();
+    const enrollments = student
+      ? (db.prepare('SELECT COUNT(*) c FROM enrollments WHERE student_id=?').get(student.id) as { c: number }).c
+      : 0;
+    expect(enrollments).toBe(0);
   });
 
   it('never enrolls a student into a placement-gated class with zero attempts', async () => {
     await supertest(app).patch(`/api/visitors/${visitorId}`)
       .set(authHeader(registrarA)).send({ programVersionId: null });
     await supertest(app).post(`/api/visitors/${visitorId}/convert`)
-      .set(authHeader(registrarA)).send({ classId: 'vsa_cls', amountPaid: 0 });
+      .set(authHeader(registrarA)).send({ classId: 'vsa_cls' }).expect(201);
 
     const student = db.prepare('SELECT id FROM students WHERE lead_id=?').get(visitorId) as { id: string } | undefined;
     const attempts = (db.prepare('SELECT COUNT(*) c FROM placement_assessment_attempts WHERE visitor_id=?')
       .get(visitorId) as { c: number }).c;
-    // An enrollment recorded against the gated program with no assessment is
-    // exactly the state the gate exists to prevent.
     const enrolledUnderGatedProgram = student
       ? (db.prepare(`SELECT COUNT(*) c FROM enrollments WHERE student_id=? AND program_version_id='vsa_pv'`)
           .get(student.id) as { c: number }).c
@@ -165,23 +180,30 @@ describe('V-1 — placement requirement cannot be evaded by clearing the program
 
     await supertest(app).patch(`/api/visitors/${visitorId}`)
       .set(authHeader(registrarA)).send({ programVersionId: null });
-    const res = await supertest(app).post(`/api/visitors/${visitorId}/convert`)
-      .set(authHeader(registrarA)).send({ classId: 'vsa_cls', amountPaid: 0 });
-    expect(res.status).toBe(400);
+    const admitted = await supertest(app).post(`/api/visitors/${visitorId}/convert`)
+      .set(authHeader(registrarA)).send({ classId: 'vsa_cls' });
+    expect(admitted.status).toBe(201);
+    const student = db.prepare('SELECT id FROM students WHERE lead_id=?').get(visitorId) as { id: string } | undefined;
+    expect(student?.id).toBeTruthy();
+    const blocked = await supertest(app).post(`/api/students/${student!.id}/enroll-class`)
+      .set(authHeader(registrarA)).send({ classId: 'vsa_cls', amountPaidNow: 0 });
+    expect(blocked.status).toBe(400);
+    expect(String(blocked.body.error || '')).toMatch(/placement/i);
   });
 
   it('a counselor detaching the program cannot enable a bypass for anyone', async () => {
-    // Separation of duties: a counselor is deliberately denied Lead.Convert.
-    // Detaching a program is still a legitimate Lead.Edit action — the defect
-    // was never that the edit was allowed, but that it silently removed an
-    // academic control. So the edit may succeed; the ENROLLMENT must not.
     await supertest(app).patch(`/api/visitors/${visitorId}`)
       .set(authHeader(counselorA)).send({ programVersionId: null }).expect(200);
 
-    const res = await supertest(app).post(`/api/visitors/${visitorId}/convert`)
-      .set(authHeader(registrarA)).send({ classId: 'vsa_cls', amountPaid: 0 });
-    expect(res.status).toBe(400);
-    expect(String(res.body.error)).toMatch(/placement/i);
+    const admitted = await supertest(app).post(`/api/visitors/${visitorId}/convert`)
+      .set(authHeader(registrarA)).send({ classId: 'vsa_cls' });
+    expect(admitted.status).toBe(201);
+    const student = db.prepare('SELECT id FROM students WHERE lead_id=?').get(visitorId) as { id: string } | undefined;
+    expect(student?.id).toBeTruthy();
+    const blocked = await supertest(app).post(`/api/students/${student!.id}/enroll-class`)
+      .set(authHeader(registrarA)).send({ classId: 'vsa_cls', amountPaidNow: 0 });
+    expect(blocked.status).toBe(400);
+    expect(String(blocked.body.error || '')).toMatch(/placement/i);
   });
 });
 
@@ -267,15 +289,15 @@ describe('V-3 — cross-process serial allocation', () => {
   });
 
   it('the allocator is atomic, so concurrent creates never collide', async () => {
-    const before = (db.prepare('SELECT COUNT(*) c FROM visitors').get() as { c: number }).c;
-    const results = await Promise.all(Array.from({ length: 25 }, (_, i) =>
-      createVisitor(registrarA, { fullName: `Serial Race ${i}`, phone: `07555${String(i).padStart(5, '0')}` })
+    const phones = Array.from({ length: 25 }, (_, i) => `07555${String(i).padStart(5, '0')}`);
+    const results = await Promise.all(phones.map((phone, i) =>
+      createVisitor(registrarA, { fullName: `Serial Race ${i}`, phone })
     ));
     expect(results.every((r) => r.status === 201)).toBe(true);
     const serials = new Set(results.map((r) => r.body.serialNo));
     expect(serials.size).toBe(25);
-    const after = (db.prepare('SELECT COUNT(*) c FROM visitors').get() as { c: number }).c;
-    expect(after - before).toBe(25);
+    const created = (db.prepare(`SELECT COUNT(*) c FROM visitors WHERE phone IN (${phones.map(() => '?').join(',')})`).get(...phones) as { c: number }).c;
+    expect(created).toBe(25);
   });
 });
 
@@ -498,35 +520,31 @@ describe('Controls — verified-sound behaviour that must not regress', () => {
     expect(res.status).toBe(400);
   });
 
-  it('converts at most one student per visitor under concurrency', async () => {
+  it('admits at most one student per visitor under concurrency', async () => {
     const vid = (await createVisitor(registrarA, { fullName: 'Concurrent Subject', phone: '0700000086' , programVersionId: 'vsa_pv_open'})).body.id;
     await Promise.all(Array.from({ length: 8 }, () =>
       supertest(app).post(`/api/visitors/${vid}/convert`).set(authHeader(registrarA))
-        .send({ classId: 'vsa_open', amountPaid: 1000 })
+        .send({ classId: 'vsa_open' })
     ));
     const students = (db.prepare('SELECT COUNT(*) c FROM students WHERE lead_id=?').get(vid) as { c: number }).c;
-    const payments = (db.prepare('SELECT COUNT(*) c FROM payments WHERE idempotency_key=?')
-      .get(`visitor-convert:${vid}`) as { c: number }).c;
+    const registrationInvoices = (db.prepare(`SELECT COUNT(*) c FROM invoices i JOIN students s ON s.id = i.student_id WHERE s.lead_id=? AND i.charge_kind='registration'`)
+      .get(vid) as { c: number }).c;
+    const payments = (db.prepare('SELECT COUNT(*) c FROM payments p JOIN students s ON s.id = p.student_id WHERE s.lead_id=?')
+      .get(vid) as { c: number }).c;
     expect(students).toBe(1);
-    expect(payments).toBe(1);
+    expect(registrationInvoices).toBe(1);
+    expect(payments).toBe(0);
   });
 
   it('blocks a second conversion at EVERY layer, not just the status check', async () => {
-    // Mutation testing showed the `status === 'registered'` guard can be
-    // deleted with no test failing, because two deeper layers still hold. That
-    // is defence-in-depth working as intended — but it must be asserted, or a
-    // future change could remove all three without warning.
     const vid = (await createVisitor(registrarA, { fullName: 'Layer Subject', phone: '0700000083' , programVersionId: 'vsa_pv_open'})).body.id;
     await supertest(app).post(`/api/visitors/${vid}/convert`)
-      .set(authHeader(registrarA)).send({ classId: 'vsa_open', amountPaid: 0 }).expect(201);
+      .set(authHeader(registrarA)).send({ classId: 'vsa_open' }).expect(201);
 
-    // Layer 1: the visitor status guard.
     const second = await supertest(app).post(`/api/visitors/${vid}/convert`)
-      .set(authHeader(registrarA)).send({ classId: 'vsa_open', amountPaid: 0 });
+      .set(authHeader(registrarA)).send({ classId: 'vsa_open' });
     expect(second.status).toBe(409);
 
-    // Layer 2: the lead_id lookup. Layer 3: a partial UNIQUE index. Assert the
-    // database itself refuses a second student for this lead.
     expect(() =>
       db.prepare(`INSERT INTO students (id,student_code,full_name,status,registration_date,branch_id,gender,discount_percent,lead_id)
                   VALUES ('vsa_dupstu','VSA-DUP','Dup Student','active',?,?, 'male',0,?)`)
@@ -534,11 +552,12 @@ describe('Controls — verified-sound behaviour that must not regress', () => {
     ).toThrow(/UNIQUE|constraint/i);
   });
 
-  it('rejects payment greater than the payable fee', async () => {
+  it('rejects legacy admission payloads that try to collect payment during conversion', async () => {
     const vid = (await createVisitor(registrarA, { fullName: 'Overpay Subject', phone: '0700000085' , programVersionId: 'vsa_pv_open'})).body.id;
     const res = await supertest(app).post(`/api/visitors/${vid}/convert`)
       .set(authHeader(registrarA)).send({ classId: 'vsa_open', amountPaid: 999_999 });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(409);
+    expect(String(res.body.error || '')).toMatch(/no longer collects payment/i);
   });
 
   it('keeps a cross-branch visitor unreachable', async () => {

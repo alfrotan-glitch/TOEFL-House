@@ -124,9 +124,8 @@ beforeAll(async () => {
   }
 
   db.prepare(
-    `INSERT OR REPLACE INTO branch_academic_profiles
-       (branch_id, placement_test_fee, registration_fee, card_fee, diploma_fee, default_pass_mark, default_min_attendance, updated_at)
-     VALUES (?, 300, 0, 200, ?, 60, 75, datetime('now'))`,
+    `INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+     VALUES ('exmt_diploma_fee', ?, 'diploma', 'Diploma fee', ?, 1, 1)`,
   ).run(BR, DIPLOMA_FEE);
   app = createApp();
 });

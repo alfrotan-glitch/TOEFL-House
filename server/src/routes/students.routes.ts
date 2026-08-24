@@ -32,9 +32,11 @@ import { ah, HttpError } from '../middleware/errorHandler.js';
 import { toCsv } from '../utils/csv.js';
 import { id, today } from '../utils/ids.js';
 import { recordIncome } from '../utils/income.js';
+import { getNumberSetting } from '../utils/settings.js';
 import { evaluateRules } from '../core/configuration/rule-engine.js';
 import { resolveAuthorizedDiscount } from '../core/configuration/discount-authority.js';
-import { resolveFee } from '../core/configuration/policy-resolver.js';
+import { resolveFee, resolveFeeRule } from '../core/configuration/policy-resolver.js';
+import { SYSTEM_DEFAULTS } from '../core/configuration/policy-catalog.js';
 import { nextReceiptNumber, nextStudentCode } from '../utils/receipt.js';
 import { getJourneyEngine } from '../core/journey/journey-engine.js';
 import { getEnrollmentService } from '../core/academic/enrollment-service.js';
@@ -77,6 +79,7 @@ const stmtGetPaymentsByBranch = db.prepare<[string, number, number], PaymentRow>
 
 const stmtGetClassDetails = db.prepare('SELECT * FROM classes WHERE id = ?');
 const stmtGetClassFee = db.prepare('SELECT fee FROM classes WHERE id = ?');
+const stmtGetLevelProgramVersion = db.prepare('SELECT program_version_id FROM levels WHERE id = ?');
 /**
  * Phone identity lookup, normalized (audit STU-H3).
  *
@@ -124,10 +127,16 @@ const stmtInsertRoster = db.prepare('INSERT INTO rosters (id, session_id, studen
 // An extra class creates no `student_semesters` row, so there is no tuition
 // obligation for this document to name and D-118 forbids calling it tuition.
 // It bills its own charge and settles only that.
-const stmtInsertInvoice = db.prepare(
-  `INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, notes, invoice_number, issued_by, purpose) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'other')`
+const stmtInsertOtherChargeInvoice = db.prepare(
+  `INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, notes, invoice_number, issued_by, charge_kind, purpose) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'other', 'other')`
+);
+const stmtInsertRegistrationInvoice = db.prepare(
+  `INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, notes, invoice_number, issued_by, charge_kind, purpose) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'registration', 'other')`
 );
 const stmtInsertExtraClassInvoiceItem = db.prepare(
+  `INSERT INTO invoice_items (id, invoice_id, description, quantity, unit_price, amount) VALUES (?, ?, ?, 1, ?, ?)`
+);
+const stmtInsertInvoiceItem = db.prepare(
   `INSERT INTO invoice_items (id, invoice_id, description, quantity, unit_price, amount) VALUES (?, ?, ?, 1, ?, ?)`
 );
 
@@ -157,16 +166,6 @@ const stmtInsertPayment = db.prepare(
 const stmtGetPaymentByIdempotency = db.prepare(
   'SELECT id, receipt_number, amount FROM payments WHERE idempotency_key = ? AND student_id = ?',
 );
-// Placement fees are auto-booked once at assessment completion (payment row
-// with idempotency key 'placement:<attemptId>' linked to the candidate's
-// visitor). This detects that booking for a converted student so a manual
-// 'placement' payment cannot duplicate it.
-const stmtHasBookedPlacementFee = db.prepare(`
-  SELECT 1 FROM payments p
-  JOIN placement_assessment_attempts a ON p.idempotency_key = 'placement:' || a.id
-  WHERE a.visitor_id = ? AND a.status = 'completed' AND p.category = 'placement'
-  LIMIT 1
-`);
 // Fixed-fee categories (ID card, diploma) are charged once per student.
 // The fee can be booked by either the payment desk OR an issuing workflow
 // (issue-card creates a payment row; the certificate path books diploma
@@ -258,6 +257,21 @@ function getUserContext(req: import('express').Request) {
   const user = req.user;
   if (!user?.userId || !user?.branchId || !user?.fullName) throw new HttpError(403, 'User context missing.');
   return user;
+}
+
+function resolveAdmissionRegistrationRule(branchId: string, scope: { programVersionId?: string | null; levelId?: string | null }) {
+  const rule = resolveFeeRule(db, branchId, 'registration', scope);
+  if (!rule) {
+    throw new HttpError(409, 'No active registration fee is configured for this branch/program. Configure it in Academic Control Center before continuing.');
+  }
+  return rule;
+}
+
+function invoiceDueDate(issueDate: string): string {
+  const dueDays = getNumberSetting('invoice_due_days', SYSTEM_DEFAULTS.invoiceDueDays);
+  const due = new Date(issueDate);
+  due.setDate(due.getDate() + dueDays);
+  return due.toISOString().slice(0, 10);
 }
 
 /**
@@ -428,7 +442,12 @@ function checkAcademicHold(req: import('express').Request, studentId: string) {
 
   // Uses the shared authoritative balance so the hold threshold agrees with the
   // debt shown on the profile, the roster, the portal and the dashboard.
-  const totalDebt = getStudentBalance(db, studentId, 'active').outstanding;
+  // Enrollment-gating must honor the FULL outstanding balance, not only tuition:
+  // unpaid registration/placement invoices are required payment conditions too.
+  // Looking only at `outstanding` (tuition) let a student bypass blocker #3 by
+  // enrolling in an extra class while required non-tuition invoices remained
+  // issued and unpaid.
+  const totalDebt = getStudentBalance(db, studentId, 'active').totalOutstanding;
 
   if (totalDebt > 0) {
     throw new HttpError(403, `Academic Hold: Student has an outstanding debt of ${totalDebt} AFN. Please clear the balance before new enrollment.`);
@@ -810,17 +829,15 @@ studentsRouter.post('/manual', requirePermission('Student.Create'), ah(async (re
   const user = getUserContext(req);
   const body = req.body ?? {};
   const { tuitionAmount, amountPaidNow } = body;
+  if (tuitionAmount != null || amountPaidNow != null) {
+    throw new HttpError(409, 'Manual student admission no longer enrolls or collects payment directly. Admit the student first, run placement if required, settle invoices, then enroll from the student workspace.');
+  }
   const classId = optionalText(body.classId, 'Class id', TEXT_LIMITS.short);
   const branchId = optionalText(body.branchId, 'Branch id', TEXT_LIMITS.short);
   const discountPercent = body.discountPercent ?? 0;
   if (typeof discountPercent !== 'number' || !Number.isFinite(discountPercent)) {
     throw new HttpError(400, 'Discount must be a finite number.');
   }
-  // ONE validation authority, shared with PATCH (audit STU-H1). It type-checks,
-  // trims and bounds every text field, validates gender against the same
-  // allow-list the gender-policy engine enforces, and rejects impossible
-  // calendar dates. A PATCH that skipped this would persist values this path
-  // rejects.
   const input = normalizeStudentInput(body, 'create');
   const {
     fullName = null, phone = null, email = null, notes = null, fatherName = null,
@@ -832,8 +849,6 @@ studentsRouter.post('/manual', requirePermission('Student.Create'), ah(async (re
   const safePhone = phone ?? '';
   const safeEmail = email ?? '';
   const safeTazkira = tazkiraNo ?? '';
-  // Phone identity is compared on the NORMALIZED key (audit STU-H3), matching
-  // migration 073's unique index.
   if (findStudentByPhoneKey(safePhone)) throw new HttpError(409, 'A student with this phone number already exists.');
   if (safeEmail && stmtFindStudentByEmail.get(safeEmail)) throw new HttpError(409, 'A student with this email already exists.');
   if (safeTazkira && stmtFindStudentByTazkira.get(safeTazkira)) throw new HttpError(409, 'A student with this Tazkira/ID number already exists.');
@@ -847,11 +862,6 @@ studentsRouter.post('/manual', requirePermission('Student.Create'), ah(async (re
     const cap = evaluateRules({ category: 'discount', branchId: branchId || user.branchId, data: { discountPercent: effDiscount } });
     if (typeof cap.finalOutputs.discountPercent === 'number') effDiscount = cap.finalOutputs.discountPercent;
   }
-  // CFG-1: the Rule Engine computes a candidate; it is not authorization. The
-  // student does not exist yet, so no authorization record can apply and
-  // ordinary policy (<= 20%) governs. Without this, a manager rule
-  // (`conditions: []`, `discountPercent: 95`) set the discount directly —
-  // reproduced at every priority (1/10/199 -> 95, 201/999/10000 -> 30).
   effDiscount = resolveAuthorizedDiscount(db, null, effDiscount, { branchId: branchId || user.branchId }).percent;
 
   const studentCode = nextStudentCode();
@@ -859,70 +869,63 @@ studentsRouter.post('/manual', requirePermission('Student.Create'), ah(async (re
   const studentBranches = resolveBranchScope(req);
   if (!studentBranches.isAll && !studentBranchId) throw new HttpError(403, 'No branch scope is available for student registration.');
   if (!canAccessBranchResource(req, studentBranchId)) throw new HttpError(403, 'Target branch is outside your authorized scope.');
+  let selectedClass: { id: string; name: string; branch_id: string; status?: string; level_id?: string | null } | undefined;
   if (classId) {
-    const targetClass = stmtGetClassDetails.get(classId) as { id: string; branch_id: string; fee: number; status?: string; capacity?: number | null } | undefined;
-    if (!targetClass) throw new HttpError(404, 'Class not found.');
-    if (targetClass.branch_id !== studentBranchId) throw new HttpError(400, 'Class and student branch must match.');
-    if (targetClass.status !== 'active') throw new HttpError(400, 'Selected class is not active.');
-    const enrolledCount = countActiveStudentsInClass(db, classId);
-    const capacity = Number((targetClass as any).capacity ?? 0);
-    if (capacity > 0 && enrolledCount >= capacity) throw new HttpError(409, 'Selected class is full.');
+    selectedClass = stmtGetClassDetails.get(classId) as typeof selectedClass;
+    if (!selectedClass) throw new HttpError(404, 'Class not found.');
+    if (selectedClass.branch_id !== studentBranchId) throw new HttpError(400, 'Class and student branch must match.');
+    if (selectedClass.status !== 'active') throw new HttpError(400, 'Selected class is not active.');
     assertClassGenderAllowsStudent(classId, gender);
   }
   const newId = id('stu');
   const regDate = today();
+  const programVersionId = selectedClass?.level_id
+    ? ((stmtGetLevelProgramVersion.get(selectedClass.level_id) as { program_version_id?: string | null } | undefined)?.program_version_id ?? null)
+    : null;
+  const registrationRule = resolveAdmissionRegistrationRule(studentBranchId, {
+    programVersionId,
+    levelId: selectedClass?.level_id ?? null,
+  });
+  const registrationFeeAmount = assertMoney(registrationRule.amount, 'registration fee');
+  const registrationInvoiceDueDate = invoiceDueDate(regDate);
+  const registrationInvoiceId = registrationFeeAmount > 0 ? id('inv') : null;
+  const registrationInvoiceNumber = registrationFeeAmount > 0 ? nextInvoiceNumber(studentBranchId) : null;
+  const issuedInvoices: Array<{ id: string; invoiceNumber: string | null; chargeKind: 'registration'; amount: number; status: string }> = [];
 
-  let resolvedTuition = tuitionAmount;
-  if (resolvedTuition == null && classId) {
-    const cls = stmtGetClassFee.get(classId) as any;
-    resolvedTuition = cls ? cls.fee : 0;
-  }
-  // finite + non-negative was not enough: 1e15 passed and became a tuition of
-  // one quadrillion. assertMoney adds the two-decimal rounding and the
-  // safe-integer-cents ceiling used by every other money field.
-  try { resolvedTuition = assertMoney(resolvedTuition ?? 0, 'tuition amount'); }
-  catch { throw new HttpError(400, 'Tuition amount must be zero or greater.'); }
-
-  let paidNow: number;
-  try { paidNow = assertMoney(amountPaidNow ?? 0, 'amount paid'); }
-  catch { throw new HttpError(400, 'Amount paid must be zero or greater.'); }
-  const netTuitionDue = Math.max(0, resolvedTuition - Math.round((resolvedTuition * effDiscount) / 100));
-  // The `&& netTuitionDue > 0` escape hatch let any sum be collected against a
-  // zero-fee enrolment — the same hole already closed in the visitor
-  // conversion path. Money may never exceed what is payable, including zero.
-  if (paidNow > netTuitionDue) throw new HttpError(400, 'Amount received cannot exceed payable fee.');
-
-  let receiptNumber: string | null = null;
   const tx = db.transaction(() => {
-    stmtInsertStudent.run(newId, studentCode, fullName, phone || null, email || null, `${studentCode}-${String(fullName).toUpperCase().replace(/\s+/g, '-')}`, regDate, studentBranchId, effDiscount, gender, fatherName || null, addressRegion || null, tazkiraNo || null, whatsapp || null, dob || null, schoolOrUniversity || null, emergencyContactName || null, emergencyContactPhone || null, notes || null);
-    if (classId) stmtInsertSemester.run(id('sem'), newId, 'Current Semester', classId, regDate, resolvedTuition, netTuitionDue);
-    if (paidNow > 0) {
-      const pid = id('pay');
-      receiptNumber = nextReceiptNumber();
-      // Registration is guarded by unique phone/email/tazkira, so this payment
-      // cannot legitimately repeat; keying it on the new student makes that
-      // explicit to the database rather than leaving the column NULL (which
-      // silently disables uq_payments_idempotency).
-      stmtInsertSimplePayment.run(pid, newId, paidNow, regDate, 'cash', 'fee', 'Class fee payment', receiptNumber, studentBranchId, `register:${newId}`);
-      recordIncome({ category: 'fee', amount: paidNow, date: regDate, description: `Registration fee for ${fullName}`, referenceId: newId, paymentId: pid, operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null, branchId: studentBranchId });
+    stmtInsertStudent.run(newId, studentCode, fullName, phone || null, email || null, `${studentCode}-${String(fullName).toUpperCase().replace(/\s+/g, '-')}`, regDate, studentBranchId, effDiscount, gender, fatherName || null, addressRegion || null, tazkiraNo || null, whatsapp || null, dob || null, schoolOrUniversity || null, emergencyContactName || null, emergencyContactPhone || null, notes || (selectedClass ? `Admitted for ${selectedClass.name}. Enrollment occurs after placement and payment.` : 'Admitted. Enrollment occurs after placement and payment.'));
+    stmtInsertRegistration.run(id('reg'), newId, null, regDate, 0, null, 0, studentBranchId, 'manual', null);
+    if (registrationFeeAmount > 0 && registrationInvoiceId && registrationInvoiceNumber) {
+      stmtInsertRegistrationInvoice.run(
+        registrationInvoiceId,
+        newId,
+        registrationFeeAmount,
+        0,
+        registrationFeeAmount,
+        'issued',
+        regDate,
+        registrationInvoiceDueDate,
+        studentBranchId,
+        registrationRule.name,
+        registrationInvoiceNumber,
+        user.fullName,
+      );
+      stmtInsertInvoiceItem.run(id('ii'), registrationInvoiceId, registrationRule.name, registrationFeeAmount, registrationFeeAmount);
+      issuedInvoices.push({ id: registrationInvoiceId, invoiceNumber: registrationInvoiceNumber, chargeKind: 'registration', amount: registrationFeeAmount, status: 'issued' });
     }
-    stmtInsertRegistration.run(id('reg'), newId, classId || null, regDate, paidNow, receiptNumber, resolvedTuition - netTuitionDue, studentBranchId, 'manual', 'Current Semester');
-    // Enrollment (and its capacity check) happens in the same transaction so
-    // a full-class race rolls the whole student creation back — never an
-    // orphan student with a committed semester but no enrollment. The
-    // semester projection above is explicit (carries the real fee amounts),
-    // so enroll() skips its own projection write.
-    if (classId) getEnrollmentService(db).enroll({ studentId: newId, branchId: studentBranchId, semesterName: 'Current Semester', classId, enrollmentType: 'new', actorUserId: user.userId, actorName: user.fullName, startedAt: regDate, autoInvoice: resolvedTuition <= 0, writeSemester: false });
   });
   tx();
 
   try {
     const journey = getJourneyEngine(db);
-    journey.appendEvent({ studentId: newId, eventType: JourneyEventType.STUDENT_REGISTERED, occurredAt: regDate, branchId: studentBranchId, actorUserId: user.userId, actorName: user.fullName, payload: { studentCode, fullName } });
+    journey.appendEvent({ studentId: newId, eventType: JourneyEventType.STUDENT_REGISTERED, occurredAt: regDate, branchId: studentBranchId, actorUserId: user.userId, actorName: user.fullName, payload: { studentCode, fullName, workflow: 'admission_before_placement' } });
+    if (registrationFeeAmount > 0 && registrationInvoiceId && registrationInvoiceNumber) {
+      journey.appendEvent({ studentId: newId, eventType: JourneyEventType.INVOICE_ISSUED, occurredAt: regDate, branchId: studentBranchId, actorUserId: user.userId, actorName: user.fullName, payload: { invoiceId: registrationInvoiceId, invoiceNumber: registrationInvoiceNumber, amount: registrationFeeAmount, category: 'other', label: registrationRule.name, chargeKind: 'registration' } });
+    }
   } catch (err) { log.warn('[journey] failed', err); }
 
-  writeAudit(req, `Registered student ${fullName} (${studentCode})`, { newValue: JSON.stringify({ studentId: newId, branchId: studentBranchId, gender, discountPercent: effDiscount, receipt: receiptNumber }) });
-  res.status(201).json({ id: newId, studentCode, receiptNumber });
+  writeAudit(req, `Registered student ${fullName} (${studentCode})`, { newValue: JSON.stringify({ studentId: newId, branchId: studentBranchId, gender, discountPercent: effDiscount, workflow: 'admission_before_placement', invoices: issuedInvoices }) });
+  res.status(201).json({ id: newId, studentCode, invoices: issuedInvoices, nextStep: 'Run placement if required, settle invoices, then enroll from the student workspace.' });
 }));
 
 // ============================================================================
@@ -995,45 +998,18 @@ studentsRouter.post('/:id/enroll-class', requirePermission('Class.Assign'), ah(a
       }
     }
 
-    if (paidNow > 0) {
-      const pid = id('pay');
-      // idempotency_key was NULL here, which migration 063's trigger rejects
-      // ("payment idempotency_key is required"). Every paid extra-class
-      // enrollment therefore failed with HTTP 500 and rolled back entirely —
-      // the feature was unusable whenever money was collected with it, while
-      // the unpaid path (amountPaidNow omitted) worked, which is why the gap
-      // went unnoticed. Reproduced live against an ordinary numeric class fee,
-      // so it is not a side effect of any other finding (audit C-6).
-      //
-      // KEYED ON THE ENROLLMENT, NOT ON (student, class).
-      //
-      // A (student, class) key looks tempting but is WRONG, and the audit's own
-      // mutation testing caught it: a student who enrolls, pays, DROPS, and
-      // later legitimately re-enrolls in the same class must be able to pay
-      // again. With a (student, class) key that second, entirely valid payment
-      // collided with the first and was refused 409 — silently destroying
-      // billable revenue, the same class of mistake migration 074 documents for
-      // the enrollment index.
-      //
-      // `enrollId` is minted once per enrollment above, so the key is unique per
-      // real financial event and stays traceable back to it. Double-submit
-      // protection does not depend on this key at all: it comes from the
-      // duplicate-seat guard (assertNotAlreadySeatedInClass) backed by
-      // uq_enrollment_active_seat_per_class (074) — verified live, 5 concurrent
-      // submits yield exactly 1x201 and 4x409 "Already enrolled in this class."
-      // Recorded as what it is. Booked as `fee` it counted as TUITION paid,
-      // and because an extra class charges no term, it paid down other terms'
-      // debt — the WP07-F17 leak arriving through a second door.
-      stmtInsertPayment.run(pid, student.id, paidNow, date, 'cash', 'other', `Extra class fee: ${cls.name}`, nextReceiptNumber(), student.branch_id, null, null, `extra-class:${enrollId}`);
-      recordIncome({ category: 'other', amount: paidNow, date, description: `Extra class fee from ${student.full_name}`, referenceId: student.id, paymentId: pid, operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null, branchId: student.branch_id });
+    const invId = id('inv');
+    const invoiceStatus = netFee <= 0 ? 'paid' : paidNow >= netFee ? 'paid' : paidNow > 0 ? 'partial' : 'issued';
+    stmtInsertOtherChargeInvoice.run(invId, student.id, baseFee, (baseFee - netFee), netFee, invoiceStatus, date, date, student.branch_id, `Fee for extra class: ${cls.name}`, nextInvoiceNumber(student.branch_id), user.fullName);
+    stmtInsertExtraClassInvoiceItem.run(id('invit'), invId, `Extra class — ${cls.name}`, baseFee, baseFee);
+    if (baseFee - netFee > 0) {
+      stmtInsertInvoiceItem.run(id('invit'), invId, `Discount (${discount}%)`, -(baseFee - netFee), -(baseFee - netFee));
     }
 
-    if (netFee - paidNow > 0) {
-      const invId = id('inv');
-      stmtInsertInvoice.run(invId, student.id, baseFee, (baseFee - netFee), netFee, paidNow >= netFee ? 'paid' : 'issued', date, date, student.branch_id, `Fee for extra class: ${cls.name}`, nextInvoiceNumber(student.branch_id), user.fullName);
-      // A document with a net amount and no line said what it cost without
-      // ever saying what it was for, and the payment boundary now refuses one.
-      stmtInsertExtraClassInvoiceItem.run(id('invit'), invId, `Extra class — ${cls.name}`, baseFee, baseFee);
+    if (paidNow > 0) {
+      const pid = id('pay');
+      stmtInsertPayment.run(pid, student.id, paidNow, date, 'cash', 'other', `Extra class fee: ${cls.name}`, nextReceiptNumber(), student.branch_id, null, invId, `extra-class:${enrollId}`);
+      recordIncome({ category: 'other', amount: paidNow, date, description: `Extra class fee from ${student.full_name}`, referenceId: invId, paymentId: pid, operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null, branchId: student.branch_id });
     }
   });
   tx();
@@ -1058,7 +1034,7 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
   const semesterId = optionalText(req.body?.semesterId, 'Semester id', TEXT_LIMITS.short);
   const installmentId = optionalText(req.body?.installmentId, 'Installment id', TEXT_LIMITS.short);
 
-  if (!category || !['fee', 'chapter', 'exam', 'card', 'placement', 'diploma', 'installment', 'other'].includes(category)) throw new HttpError(400, 'Invalid category.');
+  if (!category || !['fee', 'chapter', 'exam', 'card', 'diploma', 'installment', 'other'].includes(category)) throw new HttpError(400, 'Invalid category.');
   if (paymentMethod != null && !['cash', 'card', 'bank_transfer'].includes(paymentMethod)) {
     throw new HttpError(400, 'Invalid payment method.');
   }
@@ -1111,7 +1087,7 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
   // the key was written as NULL for guarded categories, SQLite treated every
   // NULL as distinct, the unique index never fired, and 12 concurrent un-keyed
   // `fee` payments produced 12 payments and 12 income rows from one intent.
-  const GUARDED_CATEGORIES = ['fee', 'installment', 'card', 'diploma', 'placement'];
+  const GUARDED_CATEGORIES = ['fee', 'installment', 'card', 'diploma'];
   const replayEligible = clientSuppliedKey || !GUARDED_CATEGORIES.includes(category);
   if (replayEligible) {
     for (const candidate of idempotencyCandidates) {
@@ -1184,23 +1160,20 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
     }
     resolvedAmount = requestedAmount;
   }
-  else if (['card', 'diploma', 'placement'].includes(category)) {
-    const feeKey = category === 'card' ? 'cardIssuanceFee' : category === 'diploma' ? 'diplomaFee' : 'placementTestFee';
-    resolvedAmount = Number(resolveFee(db, student.branch_id, feeKey) || 0);
+  else if (['card', 'diploma'].includes(category)) {
+    const feeKey = category === 'card' ? 'cardIssuanceFee' : 'diplomaFee';
+    const configuredFee = resolveFee(db, student.branch_id, feeKey);
+    const feeLabel = category === 'card' ? 'ID card' : 'diploma';
+    if (configuredFee == null) {
+      throw new HttpError(409, `No active ${feeLabel} fee is configured for this branch. Configure it in Academic Control Center before taking payment.`);
+    }
+    resolvedAmount = configuredFee;
     if (requestedAmount !== null && requestedAmount !== resolvedAmount) throw new HttpError(400, 'This fee must be paid at its configured amount.');
-    // Financial integrity: fixed fees are charged once per student.
-    //  - placement: auto-booked at assessment completion (see below).
-    //  - card: auto-booked on first ID-card issuance.
-    //  - diploma: one diploma per student.
-    // A manual/API payment of the same category would duplicate income.
-    if (category === 'placement' && student.lead_id) {
-      const booked = stmtHasBookedPlacementFee.get(student.lead_id);
-      if (booked) throw new HttpError(409, 'The placement fee was already recorded for this candidate at assessment completion. No additional placement payment is due.');
+    if (resolvedAmount === 0) {
+      throw new HttpError(409, `The configured ${feeLabel} fee is 0 AFN, so no payment is due.`);
     }
-    if (category !== 'placement') {
-      const paid = stmtHasPaidFixedFee.get(student.id, category, category, student.id);
-      if (paid) throw new HttpError(409, `The ${category === 'card' ? 'ID card' : 'diploma'} fee was already recorded for this student. No additional ${category} payment is due.`);
-    }
+    const paid = stmtHasPaidFixedFee.get(student.id, category, category, student.id);
+    if (paid) throw new HttpError(409, `The ${category === 'card' ? 'ID card' : 'diploma'} fee was already recorded for this student. No additional ${category} payment is due.`);
   }
 
   if (resolvedAmount <= 0) throw new HttpError(400, 'Amount must be greater than 0.');
@@ -1564,7 +1537,13 @@ studentsRouter.post('/:id/issue-card', requirePermission('Student.Print'), ah(as
   // fee was already paid through the payment desk, issuing the card must not
   // charge it again — the student still gets their card (feeCharged = 0).
   const cardFeeAlreadyPaid = isFirstIssuance ? !!stmtHasPaidFixedFee.get(student.id, 'card', 'card', student.id) : false;
-  const cardFee = isFirstIssuance && !cardFeeAlreadyPaid ? Number(resolveFee(db, student.branch_id, 'cardIssuanceFee') || 0) : 0;
+  const configuredCardFee = isFirstIssuance && !cardFeeAlreadyPaid
+    ? resolveFee(db, student.branch_id, 'cardIssuanceFee')
+    : 0;
+  if (isFirstIssuance && !cardFeeAlreadyPaid && configuredCardFee == null) {
+    throw new HttpError(409, 'No active ID card fee is configured for this branch. Configure it in Academic Control Center before issuing the first card.');
+  }
+  const cardFee = typeof configuredCardFee === 'number' ? configuredCardFee : 0;
 
   // The card fee is a once-per-student business event, so its idempotency key
   // is the event identity itself — not a time-bucketed fingerprint. Two

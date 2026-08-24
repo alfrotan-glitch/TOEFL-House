@@ -173,6 +173,10 @@ beforeAll(async () => {
     assignRole(uid, role, BR);
     U[uid] = { userId: uid, username: uid, branchId: BR, fullName: uid };
   }
+  db.prepare(`
+    INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+    VALUES ('fmwp_card_fee', ?, 'card', 'ID card fee', 200, 1, 1)
+  `).run(BR);
 
   app = express();
   app.use(express.json());

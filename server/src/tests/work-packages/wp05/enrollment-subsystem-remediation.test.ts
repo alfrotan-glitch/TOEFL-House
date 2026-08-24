@@ -71,11 +71,20 @@ function nextPhone(): string {
 }
 
 async function createStudent(body: Record<string, unknown> = {}) {
+  const { classId, semesterName, ...admissionBody } = body;
   const res = await supertest(app).post('/api/students/manual').set(authHeader(reg)).send({
-    fullName: 'Enrollment Fixture', gender: 'male', phone: nextPhone(), ...body,
+    fullName: 'Enrollment Fixture', gender: 'male', phone: nextPhone(), ...admissionBody, ...(classId ? { classId } : {}),
   });
   expect(res.status).toBe(201);
-  return res.body.id as string;
+  const studentId = res.body.id as string;
+  if (typeof classId === 'string' && classId) {
+    const enroll = await supertest(app)
+      .post(`/api/students/${studentId}/enroll-semester`)
+      .set(authHeader(reg))
+      .send({ classId, semesterName: typeof semesterName === 'string' && semesterName.trim() ? semesterName : 'Current Semester' });
+    expect(enroll.status).toBe(201);
+  }
+  return studentId;
 }
 function makeClass(
   cid: string,
@@ -114,6 +123,14 @@ beforeAll(async () => {
   for (const [b, n] of [[BRANCH, 'Enrollment Branch'], [OTHER_BRANCH, 'Other Branch']]) {
     db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(b, n, 'Loc');
   }
+  db.prepare(`
+    INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+    VALUES ('enr_rem_registration_fee', ?, 'registration', 'Registration fee', 0, 1, 1)
+  `).run(BRANCH);
+  db.prepare(`
+    INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+    VALUES ('enr_rem_registration_fee_other', ?, 'registration', 'Registration fee', 0, 1, 1)
+  `).run(OTHER_BRANCH);
   db.prepare(
     `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
      VALUES (?, ?, ?, ?, ?, 1, 0)`
@@ -292,7 +309,13 @@ describe('E-1 — transfer requires a valid active source enrollment', () => {
       `INSERT OR REPLACE INTO placement_assessment_profiles
          (id, program_version_id, branch_id, requirement_mode, first_level_exempt, components_json)
        VALUES ('e1_pap', 'e1_pv', ?, 'required', 0, ?)`
-    ).run(BRANCH, JSON.stringify([{ key: 'placement', type: 'custom_score', label: 'Placement', required: true, weight: 100, maxScore: 100 }]));
+    ).run(BRANCH, JSON.stringify([
+      { key: 'grammar', type: 'grammar', label: 'Grammar', required: true, weight: 25, maxScore: 30, bankIds: ['gate-grammar'], blueprintBuckets: [{ count: 30, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['mcq'] }] },
+      { key: 'reading', type: 'reading', label: 'Reading', required: true, weight: 16.67, maxScore: 20, bankIds: ['gate-reading'], blueprintBuckets: [{ count: 20, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['mcq'] }] },
+      { key: 'listening', type: 'listening', label: 'Listening', required: true, weight: 16.67, maxScore: 20, bankIds: ['gate-listening'], blueprintBuckets: [{ count: 20, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['mcq'] }] },
+      { key: 'writing', type: 'writing', label: 'Writing', required: true, weight: 20.83, maxScore: 25, bankIds: ['gate-writing'], blueprintBuckets: [{ count: 1, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['essay'] }] },
+      { key: 'speaking', type: 'speaking', label: 'Speaking', required: true, weight: 20.83, maxScore: 25, bankIds: ['gate-speaking'], blueprintBuckets: [{ count: 1, cefrLevel: 'ANY', difficulty: 'ANY', qtypes: ['speaking'] }] }
+    ]));
 
     makeClass('e1_pl_src', 10);
     makeClass('e1_pl_dst', 10);

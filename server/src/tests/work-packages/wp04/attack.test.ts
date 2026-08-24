@@ -1,7 +1,7 @@
 import supertest from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { db } from '../../../db/connection.js';
-import { createActiveTest, putProfile, scoreComponent, seedContext, startAttempt } from './fixtures.js';
+import { canonicalComponents, canonicalDecisionRules, createActiveTest, putProfile, seedContext, startAttempt } from './fixtures.js';
 
 describe('WP-04 adversarial authorization and integrity attacks', () => {
   it('rejects unauthenticated placement reads, writes, authoring, reports, and maintenance', async () => {
@@ -24,8 +24,8 @@ describe('WP-04 adversarial authorization and integrity attacks', () => {
     expect(started.status).toBe(201);
     const urls = [
       supertest(context.app).get(`/api/placement/visitors/${context.visitorId}/placement`).set(context.managerB),
-      supertest(context.app).post(`/api/placement/visitors/${context.visitorId}/placement/attempts`).set(context.managerB).send({}),
-      supertest(context.app).put(`/api/placement/visitors/${context.visitorId}/placement/attempts/${started.body.id}/components/main`).set(context.managerB).send({ score: 90 }),
+      supertest(context.app).post(`/api/placement/visitors/${context.visitorId}/placement/attempts`).set(context.managerB).send({ deliveryMode: 'PHYSICAL' }),
+      supertest(context.app).put(`/api/placement/visitors/${context.visitorId}/placement/attempts/${started.body.id}/components/grammar`).set(context.managerB).send({ score: 30 }),
       supertest(context.app).post(`/api/placement/visitors/${context.visitorId}/placement/attempts/${started.body.id}/cancel`).set(context.managerB).send({}),
     ];
     for (const probe of urls) expect((await probe).status).toBe(403);
@@ -42,18 +42,18 @@ describe('WP-04 adversarial authorization and integrity attacks', () => {
       VALUES (?,?,?,?, 'male','walk_in','visited','placement_booking',?,date('now'),?,'not_started')`)
       .run(otherVisitor, `${context.key}-OTHER`, 'Other', `${context.key}-phone`, context.branchA, context.versionA);
     const forged = await supertest(context.app)
-      .put(`/api/placement/visitors/${otherVisitor}/placement/attempts/${started.body.id}/components/main`)
-      .set(context.receptionistA).send({ score: 100 });
+      .put(`/api/placement/visitors/${otherVisitor}/placement/attempts/${started.body.id}/components/grammar`)
+      .set(context.receptionistA)
+      .send({ score: 30 });
     expect(forged.status).toBe(404);
-    expect((db.prepare("SELECT status FROM placement_assessment_results WHERE attempt_id=? AND component_key='main'").get(started.body.id) as any).status).toBe('pending');
+    expect((db.prepare("SELECT status FROM placement_assessment_results WHERE attempt_id=? AND component_key='grammar'").get(started.body.id) as any).status).toBe('pending');
   });
 
   it('fails closed on structurally valid JSON that contains corrupted stored policy facts', async () => {
     const context = seedContext();
     expect((await putProfile(context)).status).toBe(200);
-    const corrupt = scoreComponent({ required: 'false' });
-    db.prepare('UPDATE placement_assessment_profiles SET components_json=? WHERE program_version_id=? AND branch_id=?')
-      .run(JSON.stringify([corrupt]), context.versionA, context.branchA);
+    db.prepare('UPDATE placement_assessment_profiles SET decision_rules_json=? WHERE program_version_id=? AND branch_id=?')
+      .run(JSON.stringify([{ cefrLevel: 'A1', recommendedLevelId: context.levelA1, minimumScores: { grammar: 5 } }]), context.versionA, context.branchA);
     const denied = await startAttempt(context);
     expect(denied.status).toBe(409);
     expect(db.prepare('SELECT id FROM placement_assessment_attempts WHERE visitor_id=?').get(context.visitorId)).toBeUndefined();
@@ -64,13 +64,13 @@ describe('WP-04 adversarial authorization and integrity attacks', () => {
     expect((await putProfile(context)).status).toBe(200);
     const profile = db.prepare('SELECT id FROM placement_assessment_profiles WHERE program_version_id=? AND branch_id=?').get(context.versionA, context.branchA) as any;
     expect(() => db.prepare(`INSERT INTO placement_assessment_attempts
-      (id,visitor_id,program_version_id,profile_id,branch_id,attempt_number,snapshot_json)
-      VALUES (?,?,?,?,?,1,'{"components":[],"tests":[]}')`)
+      (id,visitor_id,program_version_id,profile_id,branch_id,attempt_number,snapshot_json,delivery_mode)
+      VALUES (?,?,?,?,?,1,'{"profile":{},"components":[],"tests":[]}','PHYSICAL')`)
       .run(`${context.key}_bad_branch`, context.visitorId, context.versionA, profile.id, context.branchB))
       .toThrow(/scope mismatch/i);
     expect(() => db.prepare(`INSERT INTO placement_assessment_attempts
-      (id,visitor_id,program_version_id,profile_id,branch_id,attempt_number,snapshot_json)
-      VALUES (?,?,?,?,?,1,'{"components":[],"tests":[]}')`)
+      (id,visitor_id,program_version_id,profile_id,branch_id,attempt_number,snapshot_json,delivery_mode)
+      VALUES (?,?,?,?,?,1,'{"profile":{},"components":[],"tests":[]}','PHYSICAL')`)
       .run(`${context.key}_bad_version`, context.visitorId, context.versionB, profile.id, context.branchA))
       .toThrow(/scope mismatch/i);
   });
@@ -81,8 +81,8 @@ describe('WP-04 adversarial authorization and integrity attacks', () => {
     const started = await startAttempt(context);
     const profile = db.prepare('SELECT id FROM placement_assessment_profiles WHERE program_version_id=? AND branch_id=?').get(context.versionA, context.branchA) as any;
     expect(() => db.prepare(`INSERT INTO placement_assessment_attempts
-      (id,visitor_id,program_version_id,profile_id,branch_id,attempt_number,snapshot_json)
-      VALUES (?,?,?,?,?,2,'{"components":[],"tests":[]}')`)
+      (id,visitor_id,program_version_id,profile_id,branch_id,attempt_number,snapshot_json,delivery_mode)
+      VALUES (?,?,?,?,?,2,'{"profile":{},"components":[],"tests":[]}','PHYSICAL')`)
       .run(`${context.key}_second_open`, context.visitorId, context.versionA, profile.id, context.branchA))
       .toThrow(/UNIQUE constraint failed/i);
     expect((db.prepare('SELECT status FROM placement_assessment_attempts WHERE id=?').get(started.body.id) as any).status).toBe('in_progress');
@@ -90,12 +90,8 @@ describe('WP-04 adversarial authorization and integrity attacks', () => {
 
   it('rejects forged response and result rows not present in the immutable attempt snapshot', async () => {
     const context = seedContext();
-    const test = await createActiveTest(context);
-    expect((await putProfile(context, { components: [{
-      key: 'content', type: 'content_test', label: 'Content', required: true,
-      weight: 100, maxScore: 10, scoringMethod: 'auto', testType: 'listening', testId: test.id,
-    }] })).status).toBe(200);
-    const started = await startAttempt(context);
+    expect((await putProfile(context)).status).toBe(200);
+    const started = await startAttempt(context, context.receptionistA, { deliveryMode: 'DIGITAL' });
     expect(() => db.prepare(`INSERT INTO placement_assessment_responses
       (id,attempt_id,test_id,question_id,question_key,response_json,max_points)
       VALUES (?,?,?,?,?,'"A"',1)`)
@@ -103,7 +99,7 @@ describe('WP-04 adversarial authorization and integrity attacks', () => {
       .toThrow(/not in the attempt snapshot/i);
     expect(() => db.prepare(`INSERT INTO placement_assessment_results
       (id,attempt_id,component_key,component_type,label,status,max_score,weight)
-      VALUES (?,?,?,'custom_score','Forged','pending',100,0)`)
+      VALUES (?,?,?,'grammar','Forged','pending',30,25)`)
       .run(`${context.key}_result`, started.body.id, 'forged-component'))
       .toThrow(/not in the attempt snapshot/i);
   });
@@ -121,14 +117,14 @@ describe('WP-04 adversarial authorization and integrity attacks', () => {
       .run(visitorB, `${context.key}-B`, 'Branch B candidate', `${context.key}-b-phone`, context.branchB, context.versionB);
     const profileB = `${context.key}_profile_b`;
     db.prepare(`INSERT INTO placement_assessment_profiles
-      (id,program_version_id,branch_id,requirement_mode,components_json,scoring_model,pass_score)
-      VALUES (?,?,?,?,?,'weighted_average',60)`)
-      .run(profileB, context.versionB, context.branchB, 'required', JSON.stringify([scoreComponent()]));
+      (id,program_version_id,branch_id,requirement_mode,components_json,scoring_model,pass_score,decision_rules_json)
+      VALUES (?,?,?,?,?,'canonical',60,?)`)
+      .run(profileB, context.versionB, context.branchB, 'required', JSON.stringify(canonicalComponents(context)), JSON.stringify(canonicalDecisionRules(context)));
     const attemptB = `${context.key}_attempt_b`;
     db.prepare(`INSERT INTO placement_assessment_attempts
-      (id,visitor_id,program_version_id,profile_id,branch_id,attempt_number,snapshot_json,expires_at)
-      VALUES (?,?,?,?,?,1,?,datetime('now','-1 minute'))`)
-      .run(attemptB, visitorB, context.versionB, profileB, context.branchB, JSON.stringify({ components: [scoreComponent()], tests: [] }));
+      (id,visitor_id,program_version_id,profile_id,branch_id,attempt_number,snapshot_json,expires_at,delivery_mode)
+      VALUES (?,?,?,?,?,1,?,datetime('now','-1 minute'),'PHYSICAL')`)
+      .run(attemptB, visitorB, context.versionB, profileB, context.branchB, JSON.stringify({ profile: {}, components: canonicalComponents(context), tests: [] }));
     db.prepare('UPDATE visitors SET current_placement_attempt_id=? WHERE id=?').run(attemptB, visitorB);
 
     const swept = await supertest(context.app).post('/api/placement/maintenance/expire?branchId=all').set(context.managerA).send({});
@@ -140,11 +136,19 @@ describe('WP-04 adversarial authorization and integrity attacks', () => {
 
   it('rejects cross-branch content references even when the caller can manage both branches', async () => {
     const context = seedContext();
-    const foreignTest = await createActiveTest(context, { branchId: context.branchB }, context.owner);
-    const response = await putProfile(context, { components: [{
-      key: 'foreign', type: 'content_test', label: 'Foreign', required: true,
-      weight: 100, maxScore: 10, scoringMethod: 'auto', testType: 'listening', testId: foreignTest.id,
-    }] }, context.owner);
+    const foreignTest = await createActiveTest(context, { branchId: context.branchB, testType: 'grammar', questions: Array.from({ length: 30 }, (_, index) => ({
+      key: `q${index + 1}`,
+      qtype: 'mcq',
+      prompt: `Foreign ${index + 1}`,
+      options: [{ key: 'A', text: 'A' }, { key: 'B', text: 'B' }],
+      answerKey: 'A',
+      points: 1,
+      difficulty: 'easy',
+      cefrLevel: 'A1',
+    })) }, context.owner);
+    const response = await putProfile(context, {
+      components: canonicalComponents(context, { grammar: { bankIds: [foreignTest.id] } }),
+    }, context.owner);
     expect(response.status).toBe(400);
   });
 });

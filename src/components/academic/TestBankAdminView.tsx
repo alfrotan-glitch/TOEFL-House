@@ -3,7 +3,7 @@ import { Plus, FileText, Trash2, X, Save, Eye, Archive, CheckCircle2, Upload, Lo
 import { api } from '../../api/client';
 import { useInvalidate } from '../../state/serverStateFreshness';
 
-interface Question { id?: string; key: string; qtype: string; prompt: string; options: Array<{ key: string; text: string }> | null; answerKey: string; points: number; orderIndex?: number; difficulty?: string | null; sectionKey?: string | null; }
+interface Question { id?: string; key: string; qtype: string; prompt: string; options: Array<{ key: string; text: string }> | null; answerKey: string; points: number; orderIndex?: number; difficulty?: string | null; sectionKey?: string | null; cefrLevel?: string | null; topic?: string | null; subskill?: string | null; lifecycleStatus?: string; }
 interface Section { id?: string; key: string; kind: string; title?: string | null; audioUrl?: string | null; transcript?: string | null; body?: string | null; durationSeconds?: number | null; }
 interface Test { id: string; title: string; testType: string; instructions?: string | null; audioUrl?: string | null; transcript?: string | null; passage?: string | null; status: string; difficulty?: string | null; durationSeconds?: number | null; version?: number; rubricId?: string | null; wordTarget?: number | null; sections: Section[]; questions: Question[]; }
 interface Rubric { id: string; title: string; kind: string; version: number; criteria: Array<{ key: string; label: string; weight: number; maxScore: number }>; }
@@ -13,7 +13,7 @@ const inputCls = 'w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm 
 const labelCls = 'block text-[11px] font-black text-slate-500 uppercase tracking-wide mb-1.5';
 const btn = 'px-4 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 disabled:opacity-50';
 
-function emptyQuestion(): Question { return { key: '', qtype: 'mcq', prompt: '', options: [{ key: 'A', text: '' }, { key: 'B', text: '' }], answerKey: 'A', points: 1 }; }
+function emptyQuestion(): Question { return { key: '', qtype: 'mcq', prompt: '', options: [{ key: 'A', text: '' }, { key: 'B', text: '' }], answerKey: 'A', points: 1, lifecycleStatus: 'draft', cefrLevel: 'A1', difficulty: 'easy' }; }
 function emptySection(): Section { return { key: '', kind: 'audio_track', title: '', audioUrl: null, transcript: null, body: null, durationSeconds: null }; }
 
 export default function TestBankAdminView({ triggerToast }: { triggerToast: (m: string, t: 'success' | 'error' | 'info') => void }) {
@@ -53,7 +53,7 @@ export default function TestBankAdminView({ triggerToast }: { triggerToast: (m: 
         difficulty: editing.difficulty || null, durationSeconds: editing.durationSeconds ?? null,
         rubricId: editing.rubricId || null, wordTarget: editing.wordTarget ?? null,
         sections: editing.sections.filter((s) => s.key).map((s) => ({ key: s.key, kind: s.kind, title: s.title || null, audioUrl: s.audioUrl || null, transcript: s.transcript || null, body: s.body || null, durationSeconds: s.durationSeconds ?? null })),
-        questions: editing.questions.filter((q) => q.key).map((q) => ({ key: q.key, qtype: q.qtype, prompt: q.prompt, options: q.qtype === 'mcq' ? q.options : null, answerKey: q.answerKey, points: Number(q.points), difficulty: q.difficulty || null, sectionKey: q.sectionKey || null })),
+        questions: editing.questions.filter((q) => q.key).map((q) => ({ key: q.key, qtype: q.qtype, prompt: q.prompt, options: q.qtype === 'mcq' ? q.options : null, answerKey: q.answerKey, points: Number(q.points), difficulty: q.difficulty || null, sectionKey: q.sectionKey || null, cefrLevel: q.cefrLevel || null, topic: q.topic || null, subskill: q.subskill || null, lifecycleStatus: q.lifecycleStatus || 'draft' })),
       };
       if (isNew) await api.post<Test>('/placement/test-bank', payload);
       else await api.put<Test>(`/placement/test-bank/${editing.id}`, payload);
@@ -107,7 +107,7 @@ export default function TestBankAdminView({ triggerToast }: { triggerToast: (m: 
     <div className="p-6 max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div><h2 className="text-lg font-black text-slate-800">Placement Test Bank</h2><p className="text-xs text-slate-500">Reusable content: listening tracks, reading passages, writing prompts, speaking blocks, rubrics, audio.</p></div>
-        <button onClick={() => { setEditing({ id: '', title: '', testType: 'listening', status: 'draft', sections: [], questions: [emptyQuestion()] }); setIsNew(true); }} className={`${btn} bg-indigo-600 hover:bg-indigo-700 text-white`}><Plus className="w-3.5 h-3.5" /> New test</button>
+        <button onClick={() => { setEditing({ id: '', title: '', testType: 'grammar', status: 'draft', sections: [], questions: [emptyQuestion()] }); setIsNew(true); }} className={`${btn} bg-indigo-600 hover:bg-indigo-700 text-white`}><Plus className="w-3.5 h-3.5" /> New test</button>
       </div>
 
       {editing && (
@@ -120,7 +120,7 @@ export default function TestBankAdminView({ triggerToast }: { triggerToast: (m: 
           <div key={t.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-start justify-between gap-2">
               <div className="flex items-center gap-2 min-w-0">
-                <span className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">{t.testType === 'listening' ? <Mic className="w-4 h-4" /> : t.testType === 'reading' ? <BookOpen className="w-4 h-4" /> : t.testType === 'writing' ? <PenLine className="w-4 h-4" /> : <MessageSquareText className="w-4 h-4" />}</span>
+                <span className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">{t.testType === 'grammar' ? <FileText className="w-4 h-4" /> : t.testType === 'listening' ? <Mic className="w-4 h-4" /> : t.testType === 'reading' ? <BookOpen className="w-4 h-4" /> : t.testType === 'writing' ? <PenLine className="w-4 h-4" /> : <MessageSquareText className="w-4 h-4" />}</span>
                 <div className="min-w-0"><div className="text-sm font-black text-slate-800 break-words">{t.title}</div><div className="text-[10px] text-slate-400 uppercase tracking-wide">{t.testType} · v{t.version ?? 1} · {t.difficulty || 'no difficulty'}</div></div>
               </div>
               <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase shrink-0 ${t.status === 'active' ? 'bg-emerald-100 text-emerald-700' : t.status === 'archived' ? 'bg-slate-100 text-slate-500' : 'bg-amber-100 text-amber-700'}`}>{t.status}</span>
@@ -149,7 +149,7 @@ export default function TestBankAdminView({ triggerToast }: { triggerToast: (m: 
             {(!rubrics || rubrics.length === 0) && <p className="text-[11px] text-slate-400">No rubrics yet.</p>}
           </div>
           <div className="rounded-xl border border-indigo-100 bg-indigo-50/40 p-3 space-y-2">
-            <div className="flex gap-2"><input value={rubricForm.title} onChange={(e) => setRubricForm({ ...rubricForm, title: e.target.value })} placeholder="Rubric title…" className={inputCls} /><select value={rubricForm.kind} onChange={(e) => setRubricForm({ ...rubricForm, kind: e.target.value })} className={inputCls + ' w-36'}><option value="writing">Writing</option><option value="speaking">Speaking</option><option value="interview">Interview</option></select></div>
+            <div className="flex gap-2"><input value={rubricForm.title} onChange={(e) => setRubricForm({ ...rubricForm, title: e.target.value })} placeholder="Rubric title…" className={inputCls} /><select value={rubricForm.kind} onChange={(e) => setRubricForm({ ...rubricForm, kind: e.target.value })} className={inputCls + ' w-36'}><option value="writing">Writing</option><option value="speaking">Speaking</option></select></div>
             {(rubricForm.criteria || []).map((c, i) => (
               <div key={i} className="flex gap-2 items-center">
                 <input value={c.key} onChange={(e) => setRubricForm((f) => ({ ...f, criteria: f.criteria.map((x, xi) => xi === i ? { ...x, key: e.target.value } : x) }))} placeholder="key" className={inputCls + ' w-24'} />
@@ -233,14 +233,14 @@ function TestEditor({ test, isNew, rubrics, setTest, onCancel, onSave, saving }:
       </div>
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         <div><label className={labelCls}>Title</label><input value={test.title} onChange={(e) => set({ title: e.target.value })} className={inputCls} /></div>
-        <div><label className={labelCls}>Type</label><select value={test.testType} onChange={(e) => { const testType = e.target.value; const rubric = (rubrics || []).find((r: any) => r.id === test.rubricId); const rubricId = rubric && (rubric.kind === testType || rubric.kind === 'interview') && (testType === 'writing' || testType === 'speaking') ? test.rubricId : null; set({ testType, rubricId, wordTarget: testType === 'writing' ? test.wordTarget : null }); }} className={inputCls}><option value="listening">Listening</option><option value="reading">Reading</option><option value="writing">Writing</option><option value="speaking">Speaking</option></select></div>
+        <div><label className={labelCls}>Type</label><select value={test.testType} onChange={(e) => { const testType = e.target.value; const rubric = (rubrics || []).find((r: any) => r.id === test.rubricId); const rubricId = rubric && rubric.kind === testType && (testType === 'writing' || testType === 'speaking') ? test.rubricId : null; set({ testType, rubricId, wordTarget: testType === 'writing' ? test.wordTarget : null }); }} className={inputCls}><option value="grammar">Grammar</option><option value="listening">Listening</option><option value="reading">Reading</option><option value="writing">Writing</option><option value="speaking">Speaking</option></select></div>
         <div><label className={labelCls}>Difficulty</label><select value={test.difficulty || ''} onChange={(e) => set({ difficulty: e.target.value || null })} className={inputCls}><option value="">—</option><option value="easy">Easy</option><option value="medium">Medium</option><option value="hard">Hard</option></select></div>
         <div><label className={labelCls}>Duration (seconds)</label><input type="number" value={test.durationSeconds ?? ''} onChange={(e) => set({ durationSeconds: e.target.value === '' ? null : Number(e.target.value) })} className={inputCls} /></div>
       </div>
       <div className="mt-3"><label className={labelCls}>Instructions</label><textarea value={test.instructions || ''} onChange={(e) => set({ instructions: e.target.value })} rows={2} className={inputCls} /></div>
       {(test.testType === 'writing' || test.testType === 'speaking') && (
         <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div><label className={labelCls}>Rubric</label><select value={test.rubricId || ''} onChange={(e) => set({ rubricId: e.target.value || null })} className={inputCls}><option value="">— none —</option>{(rubrics || []).filter((r: any) => test.testType === 'writing' ? (r.kind === 'writing' || r.kind === 'interview') : test.testType === 'speaking' ? (r.kind === 'speaking' || r.kind === 'interview') : false).map((r: any) => <option key={r.id} value={r.id}>{r.title}</option>)}</select></div>
+          <div><label className={labelCls}>Rubric</label><select value={test.rubricId || ''} onChange={(e) => set({ rubricId: e.target.value || null })} className={inputCls}><option value="">— none —</option>{(rubrics || []).filter((r: any) => test.testType === 'writing' ? r.kind === 'writing' : test.testType === 'speaking' ? r.kind === 'speaking' : false).map((r: any) => <option key={r.id} value={r.id}>{r.title}</option>)}</select></div>
           {test.testType === 'writing' && <div><label className={labelCls}>Word target</label><input type="number" value={test.wordTarget ?? ''} onChange={(e) => set({ wordTarget: e.target.value === '' ? null : Number(e.target.value) })} className={inputCls} /></div>}
         </div>
       )}
@@ -272,11 +272,11 @@ function TestEditor({ test, isNew, rubrics, setTest, onCancel, onSave, saving }:
             <div key={i} className="rounded-xl border border-slate-100 bg-slate-50 p-3 space-y-2">
               <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
                 <input value={q.key} onChange={(e) => setQuestion(i, { key: e.target.value })} placeholder="key" className={inputCls + ' md:col-span-2'} />
-                <select value={q.qtype} onChange={(e) => setQuestion(i, { qtype: e.target.value, options: e.target.value === 'mcq' ? (q.options?.length ? q.options : [{ key: 'A', text: '' }, { key: 'B', text: '' }]) : null })} className={inputCls + ' md:col-span-2'}><option value="mcq">MCQ</option><option value="short_answer">Short answer</option><option value="essay">Essay</option><option value="speaking">Speaking</option></select>
+                <select value={q.qtype} onChange={(e) => setQuestion(i, { qtype: e.target.value, options: e.target.value === 'mcq' ? (q.options?.length ? q.options : [{ key: 'A', text: '' }, { key: 'B', text: '' }]) : null })} className={inputCls + ' md:col-span-2'}><option value="mcq">MCQ</option><option value="short_answer">Short answer</option><option value="fill_blank">Fill blank</option><option value="sentence_completion">Sentence completion</option><option value="error_identification">Error identification</option><option value="essay">Essay</option><option value="speaking">Speaking</option></select>
                 <input value={q.prompt} onChange={(e) => setQuestion(i, { prompt: e.target.value })} placeholder="Question prompt" className={inputCls + ' md:col-span-4'} />
                 <input type="number" value={q.points} onChange={(e) => setQuestion(i, { points: Number(e.target.value) })} placeholder="pts" className={inputCls + ' md:col-span-1'} />
-                <input value={q.difficulty || ''} onChange={(e) => setQuestion(i, { difficulty: e.target.value || null })} placeholder="difficulty" className={inputCls + ' md:col-span-1'} />
-                <select value={q.sectionKey || ''} onChange={(e) => setQuestion(i, { sectionKey: e.target.value || null })} className={inputCls + ' md:col-span-1'}><option value="">section…</option>{(test.sections || []).map((s: Section) => <option key={s.key} value={s.key}>{s.key}</option>)}</select>
+                <select value={q.difficulty || ''} onChange={(e) => setQuestion(i, { difficulty: e.target.value || null })} className={inputCls + ' md:col-span-1'}><option value="">difficulty…</option><option value="easy">Easy</option><option value="medium">Medium</option><option value="hard">Hard</option></select>
+                <select value={q.cefrLevel || ''} onChange={(e) => setQuestion(i, { cefrLevel: e.target.value || null })} className={inputCls + ' md:col-span-1'}><option value="">CEFR…</option><option value="A1">A1</option><option value="A2">A2</option><option value="B1">B1</option><option value="B2">B2</option><option value="C1">C1</option></select>
                 <button onClick={() => set({ questions: test.questions.filter((_: Question, qi: number) => qi !== i) })} className="text-rose-400 md:col-span-1"><Trash2 className="w-4 h-4" /></button>
               </div>
               {q.qtype === 'mcq' && (
@@ -294,6 +294,12 @@ function TestEditor({ test, isNew, rubrics, setTest, onCancel, onSave, saving }:
                 </div>
               )}
               {q.qtype !== 'mcq' && <div className="grid grid-cols-1 md:grid-cols-3 gap-2"><input value={q.answerKey} onChange={(e) => setQuestion(i, { answerKey: e.target.value })} placeholder="Answer key (auto-graded types)" className={inputCls} /></div>}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                <select value={q.sectionKey || ''} onChange={(e) => setQuestion(i, { sectionKey: e.target.value || null })} className={inputCls}><option value="">Section…</option>{(test.sections || []).map((s: Section) => <option key={s.key} value={s.key}>{s.key}</option>)}</select>
+                <input value={q.topic || ''} onChange={(e) => setQuestion(i, { topic: e.target.value || null })} placeholder="Topic" className={inputCls} />
+                <input value={q.subskill || ''} onChange={(e) => setQuestion(i, { subskill: e.target.value || null })} placeholder="Subskill" className={inputCls} />
+                <select value={q.lifecycleStatus || 'draft'} onChange={(e) => setQuestion(i, { lifecycleStatus: e.target.value })} className={inputCls}><option value="draft">Draft</option><option value="reviewed">Reviewed</option><option value="approved">Approved</option><option value="active">Active</option><option value="retired">Retired</option></select>
+              </div>
             </div>
           ))}
         </div>

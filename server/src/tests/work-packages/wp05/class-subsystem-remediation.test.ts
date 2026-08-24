@@ -88,9 +88,15 @@ function makeClass(
   return cid;
 }
 async function createStudent(body: Record<string, unknown> = {}) {
+  const { classId, semesterName, ...studentBody } = body as { classId?: string; semesterName?: string } & Record<string, unknown>;
   const res = await supertest(app).post('/api/students/manual').set(authHeader(reg))
-    .send({ fullName: 'Class Fixture', gender: 'male', phone: nextPhone(), ...body });
+    .send({ fullName: 'Class Fixture', gender: 'male', phone: nextPhone(), ...studentBody, classId });
   expect(res.status).toBe(201);
+  if (classId) {
+    const enrolled = await supertest(app).post(`/api/students/${res.body.id}/enroll-semester`)
+      .set(authHeader(reg)).send({ classId, semesterName: typeof semesterName === 'string' && semesterName.trim() ? semesterName : 'Current Semester' });
+    expect(enrolled.status).toBe(201);
+  }
   return res.body.id as string;
 }
 const liveSeats = (classId: string) => (db.prepare(
@@ -103,6 +109,10 @@ beforeAll(async () => {
   initSchema();
   bootstrapRbacCatalog(db);
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?,?,?)').run(BRANCH, 'Class Branch', 'Loc');
+  db.prepare(`
+    INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+    VALUES ('cls_rem_registration_fee', ?, 'registration', 'Registration fee', 0, 1, 1)
+  `).run(BRANCH);
   for (const [uid, role] of [['u_cls_owner', 'owner'], ['u_cls_reg', 'registrar'], ['u_cls_hod', 'head_of_department']]) {
     db.prepare(
       `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
@@ -508,7 +518,7 @@ describe('C-6 — extra-class enrollment accepts a payment', () => {
 
     const income = db.prepare(
       `SELECT COALESCE(SUM(amount),0) amt FROM financial_transactions
-        WHERE reference_id = ? AND type = 'income'`
+        WHERE payment_id IN (SELECT id FROM payments WHERE student_id = ?) AND type = 'income'`
     ).get(sid) as { amt: number };
     expect(income.amt).toBe(3000);
   });
@@ -523,7 +533,7 @@ describe('C-6 — extra-class enrollment accepts a payment', () => {
     const paid = (db.prepare('SELECT COALESCE(SUM(amount),0) a FROM payments WHERE student_id=?')
       .get(sid) as { a: number }).a;
     const income = (db.prepare(
-      `SELECT COALESCE(SUM(amount),0) a FROM financial_transactions WHERE reference_id=? AND type='income'`
+      `SELECT COALESCE(SUM(amount),0) a FROM financial_transactions WHERE payment_id IN (SELECT id FROM payments WHERE student_id = ?) AND type='income'`
     ).get(sid) as { a: number }).a;
     expect(paid).toBe(4000);
     expect(income).toBe(4000);
@@ -548,7 +558,7 @@ describe('C-6 — extra-class enrollment accepts a payment', () => {
       enr: (db.prepare('SELECT COUNT(*) c FROM enrollments WHERE student_id=?').get(sid) as any).c,
       pay: (db.prepare('SELECT COUNT(*) c FROM payments WHERE student_id=?').get(sid) as any).c,
       inv: (db.prepare('SELECT COUNT(*) c FROM invoices WHERE student_id=?').get(sid) as any).c,
-      led: (db.prepare('SELECT COUNT(*) c FROM financial_transactions WHERE reference_id=?').get(sid) as any).c,
+      led: (db.prepare('SELECT COUNT(*) c FROM financial_transactions WHERE payment_id IN (SELECT id FROM payments WHERE student_id = ?)').get(sid) as any).c,
     });
     const before = snap();
     // Overpayment is refused: the whole transaction must roll back.
@@ -583,7 +593,7 @@ describe('C-6 — extra-class enrollment accepts a payment', () => {
     expect(payments.length).toBe(2);
     expect(new Set(payments.map((p) => p.idempotency_key)).size).toBe(2);
     const income = (db.prepare(
-      `SELECT COALESCE(SUM(amount),0) a FROM financial_transactions WHERE reference_id=? AND type='income'`
+      `SELECT COALESCE(SUM(amount),0) a FROM financial_transactions WHERE payment_id IN (SELECT id FROM payments WHERE student_id = ?) AND type='income'`
     ).get(sid) as { a: number }).a;
     expect(income).toBe(4000);
   });
@@ -619,7 +629,7 @@ describe('C-6 — extra-class enrollment accepts a payment', () => {
 
     const payCount = (db.prepare('SELECT COUNT(*) c FROM payments WHERE student_id=?').get(sid) as any).c;
     const income = (db.prepare(
-      `SELECT COALESCE(SUM(amount),0) a FROM financial_transactions WHERE reference_id=? AND type='income'`
+      `SELECT COALESCE(SUM(amount),0) a FROM financial_transactions WHERE payment_id IN (SELECT id FROM payments WHERE student_id = ?) AND type='income'`
     ).get(sid) as { a: number }).a;
     expect(payCount).toBe(1);
     expect(income).toBe(2000);

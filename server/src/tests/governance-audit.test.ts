@@ -61,6 +61,10 @@ beforeAll(async () => {
   bootstrapRbacCatalog(db);
   for (const [id, name] of [[HOME, 'Gov Home'], [OTHER, 'Gov Other']]) {
     db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)').run(id, name, 'Loc');
+    db.prepare(`
+      INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+      VALUES (?, ?, 'registration', 'Registration fee', 0, 1, 1)
+    `).run(`gov_registration_fee_${id}`, id);
   }
   db.prepare(
     `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )

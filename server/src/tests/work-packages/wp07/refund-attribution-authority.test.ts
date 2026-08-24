@@ -90,6 +90,10 @@ beforeEach(() => {
      VALUES (?, ?, ?, ?, 10000, 10000, 'active')`,
   ).run(semesterId, studentId, SEMESTER, today());
   seedUser({ id: `${key}_owner`, role: 'owner', branchId: branch, fullName: 'Owner' });
+  db.prepare(`
+    INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+    VALUES (?, ?, 'card', 'ID card fee', 200, 1, 1)
+  `).run(`${key}_card_fee`, branch);
   owner = bearerFor(`${key}_owner`);
 });
 

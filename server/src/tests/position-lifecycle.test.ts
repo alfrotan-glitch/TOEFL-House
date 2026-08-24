@@ -58,6 +58,10 @@ beforeAll(async () => {
   db.prepare('INSERT OR IGNORE INTO campuses (id, organization_id, name, code, is_active) VALUES (?, ?, ?, ?, 1)')
     .run(CAMPUS, FIXED_ORG_ID, 'PLC Campus', 'PLC-C');
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location, campus_id) VALUES (?, ?, ?, ?)').run(BRANCH_A, 'PLC Branch A', 'Loc A', CAMPUS);
+  db.prepare(`
+    INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+    VALUES ('plc_registration_fee', ?, 'registration', 'Registration fee', 0, 1, 1)
+  `).run(BRANCH_A);
 
   // Three owner accounts.
   await seedUser('u_plc_owner_a', 'plc_owner_a', 'owner');

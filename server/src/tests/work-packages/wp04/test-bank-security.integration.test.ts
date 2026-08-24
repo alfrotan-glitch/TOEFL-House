@@ -1,7 +1,7 @@
 import supertest from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { db } from '../../../db/connection.js';
-import { createActiveTest, putProfile, seedContext, startAttempt } from './fixtures.js';
+import { canonicalComponents, createActiveTest, putProfile, seedContext, startAttempt } from './fixtures.js';
 
 const question = (key = 'q1') => ({
   key,
@@ -167,12 +167,21 @@ describe('WP-04 test-bank, rubric, and media security boundary', () => {
 
   it('keeps answer keys on the authoring surface but removes them from operational attempt projections', async () => {
     const context = seedContext();
-    const test = await createActiveTest(context);
+    const test = await createActiveTest(context, {
+      testType: 'listening',
+      questions: Array.from({ length: 20 }, (_, index) => ({
+        key: `q${index + 1}`,
+        qtype: 'mcq',
+        prompt: index === 0 ? 'Choose A' : `Prompt ${index + 1}`,
+        options: [{ key: 'A', text: 'A' }, { key: 'B', text: 'B' }],
+        answerKey: 'A',
+        points: 1,
+        difficulty: 'easy',
+        cefrLevel: 'A1',
+      })),
+    });
     const profile = await putProfile(context, {
-      components: [{
-        key: 'listening', type: 'content_test', label: 'Listening', required: true,
-        weight: 100, maxScore: 10, scoringMethod: 'auto', testType: 'listening', testId: test.id,
-      }],
+      components: canonicalComponents(context, { listening: { bankIds: [test.id] } }) as any,
     });
     expect(profile.status).toBe(200);
     const started = await startAttempt(context);
@@ -185,6 +194,6 @@ describe('WP-04 test-bank, rubric, and media security boundary', () => {
       .set(context.receptionistA);
     expect(current.status).toBe(200);
     expect(JSON.stringify(current.body.current)).not.toContain('answer_key');
-    expect(current.body.current.snapshot.tests[0].questions[0].prompt).toBe('Choose A');
+    expect(current.body.current.snapshot.tests.find((row: any) => row.component_key === 'listening').questions.some((question: any) => question.prompt === 'Choose A')).toBe(true);
   });
 });

@@ -44,6 +44,13 @@ interface FinanceSummary {
   tuitionPaid: number;
   outstanding: number;
   paidPercentage: number;
+  nonTuitionDue?: number;
+  nonTuitionPaid?: number;
+  nonTuitionOutstanding?: number;
+  totalDue?: number;
+  totalPaid?: number;
+  totalOutstanding?: number;
+  openInvoices?: number;
 }
 
 interface Props {
@@ -177,9 +184,9 @@ export default function StudentJourneyTimeline({ studentId, canViewFinance }: Pr
             <p className="font-extrabold text-slate-900 mt-0.5 break-words">{state.currentProgram || '—'}</p>
           </div>
           {canViewFinance && financeSummary && (
-            <div className={`border rounded-xl p-2 ${financeSummary.outstanding > 0 ? 'bg-rose-50/50 border-rose-100' : 'bg-emerald-50/50 border-emerald-100'}`}>
-              <p className={`font-bold uppercase tracking-wide ${financeSummary.outstanding > 0 ? 'text-rose-500' : 'text-emerald-500'}`}>Balance Due</p>
-              <p className={`font-extrabold mt-0.5 font-mono ${financeSummary.outstanding > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>{formatAFN(financeSummary.outstanding)}</p>
+            <div className={`border rounded-xl p-2 ${(financeSummary.totalOutstanding ?? financeSummary.outstanding) > 0 ? 'bg-rose-50/50 border-rose-100' : 'bg-emerald-50/50 border-emerald-100'}`}>
+              <p className={`font-bold uppercase tracking-wide ${(financeSummary.totalOutstanding ?? financeSummary.outstanding) > 0 ? 'text-rose-500' : 'text-emerald-500'}`}>Balance Due</p>
+              <p className={`font-extrabold mt-0.5 font-mono ${(financeSummary.totalOutstanding ?? financeSummary.outstanding) > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>{formatAFN(financeSummary.totalOutstanding ?? financeSummary.outstanding)}</p>
             </div>
           )}
         </div>
@@ -189,8 +196,8 @@ export default function StudentJourneyTimeline({ studentId, canViewFinance }: Pr
       {state && (
         <div className="text-[10px] text-slate-500 flex flex-wrap gap-2 bg-slate-50 p-2 rounded-lg border border-slate-100">
           <span className="font-bold flex items-center gap-1"><Route className="w-3 h-3" /> {state.eventCount} Events</span>
-          {canViewFinance && financeSummary && <span className="font-bold flex items-center gap-1"><Wallet className="w-3 h-3" /> Paid: {formatAFN(financeSummary.tuitionPaid)}</span>}
-          {canViewFinance && financeSummary && <span className="font-bold flex items-center gap-1"><CreditCard className="w-3 h-3" /> Due: {formatAFN(financeSummary.tuitionDue)}</span>}
+          {canViewFinance && financeSummary && <span className="font-bold flex items-center gap-1"><Wallet className="w-3 h-3" /> Paid: {formatAFN(financeSummary.totalPaid ?? financeSummary.tuitionPaid)}</span>}
+          {canViewFinance && financeSummary && <span className="font-bold flex items-center gap-1"><CreditCard className="w-3 h-3" /> Due: {formatAFN(financeSummary.totalDue ?? financeSummary.tuitionDue)}{(financeSummary.openInvoices ?? 0) > 0 ? ` · ${financeSummary.openInvoices} open inv` : ''}</span>}
           <span className="font-bold flex items-center gap-1"><BookOpen className="w-3 h-3" /> ID: {state.idCard.issued ? 'Issued' : 'Not Issued'}</span>
         </div>
       )}

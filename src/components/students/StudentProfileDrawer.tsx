@@ -177,8 +177,26 @@ export default function StudentProfileDrawer({
   const totalTuition = serverFigures?.tuitionDue ?? 0;
   const totalPaidFees = serverFigures?.tuitionPaid ?? 0;
   const remainingDebt = serverFigures?.outstanding ?? 0;
+  const nonTuitionDue = serverFigures?.nonTuitionDue ?? 0;
+  const nonTuitionPaid = serverFigures?.nonTuitionPaid ?? 0;
+  const nonTuitionOutstanding = serverFigures?.nonTuitionOutstanding ?? 0;
+  const totalReceivable = serverFigures?.totalDue ?? totalTuition + nonTuitionDue;
+  const totalPaidAll = serverFigures?.totalPaid ?? totalPaidFees + nonTuitionPaid;
+  const totalOutstanding = serverFigures?.totalOutstanding ?? remainingDebt + nonTuitionOutstanding;
+  const openInvoices = serverFigures?.openInvoices ?? 0;
+  const nonTuitionBreakdown = serverFigures?.nonTuitionBreakdown ?? [];
   const paidPercentage = serverFigures?.paidPercentage
     ?? (totalTuition > 0 ? Math.min(100, Math.max(0, Math.round((totalPaidFees / totalTuition) * 100))) : 100);
+  const placementOutcome = student.placementScore?.outcome ?? null;
+  const placementCefr = student.placementScore?.overallCefr ?? null;
+  const placementRecommendation = student.placementScore?.recommendation?.text
+    ?? student.placementScore?.levelRecommendation
+    ?? student.placementScore?.recommendationLevelId
+    ?? 'Not assigned';
+  const placementPercentage = student.placementScore?.percentage
+    ?? student.placementScore?.total
+    ?? student.placementScore?.totalScore
+    ?? null;
 
   // Attendance. The recent-days strip below is drawn from the loaded page, but
   // the RATE comes from the server, which aggregates the complete history:
@@ -322,14 +340,34 @@ export default function StudentProfileDrawer({
           <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
             <div className="flex justify-between items-center mb-2">
               <span className="font-bold text-slate-700 text-xs flex items-center gap-1"><CreditCard className="w-4 h-4 text-indigo-500" /> Finance</span>
-              <span className="font-mono font-black text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded text-[10px]">{paidPercentage}% Paid</span>
+              <span className="font-mono font-black text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded text-[10px]">{paidPercentage}% Tuition Paid</span>
             </div>
             <div className="w-full bg-slate-200 rounded-full h-2 mb-3"><div className="bg-indigo-600 h-2 rounded-full" style={{ width: `${paidPercentage}%` }}></div></div>
-            <div className="grid grid-cols-3 text-[10px] text-slate-500 font-bold">
-              <div><span className="block text-slate-400">Total</span><span className="font-mono text-slate-800 text-xs">{formatAFN(Number(totalTuition||0))}</span></div>
-              <div className="text-center"><span className="block text-slate-400">Paid</span><span className="font-mono text-emerald-600 text-xs">{formatAFN(Number(totalPaidFees||0))}</span></div>
-              <div className="text-end"><span className="block text-slate-400">Due</span><span className={`font-mono text-xs ${remainingDebt > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>{formatAFN(Number(remainingDebt||0))}</span></div>
+            <div className="grid grid-cols-3 gap-2 text-[10px] text-slate-500 font-bold">
+              <div><span className="block text-slate-400">Total</span><span className="font-mono text-slate-800 text-xs">{formatAFN(Number(totalReceivable || 0))}</span></div>
+              <div className="text-center"><span className="block text-slate-400">Paid</span><span className="font-mono text-emerald-600 text-xs">{formatAFN(Number(totalPaidAll || 0))}</span></div>
+              <div className="text-end"><span className="block text-slate-400">Due</span><span className={`font-mono text-xs ${totalOutstanding > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>{formatAFN(Number(totalOutstanding || 0))}</span></div>
             </div>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-[10px]">
+              <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                <p className="font-bold text-slate-500">Tuition</p>
+                <p className="font-mono font-black text-slate-800">{formatAFN(Number(remainingDebt || 0))}</p>
+              </div>
+              <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                <p className="font-bold text-slate-500">Non-tuition</p>
+                <p className="font-mono font-black text-slate-800">{formatAFN(Number(nonTuitionOutstanding || 0))}</p>
+              </div>
+            </div>
+            {nonTuitionBreakdown.length > 0 && (
+              <div className="mt-3 space-y-1">
+                {nonTuitionBreakdown.map((row) => (
+                  <div key={row.purpose} className="flex items-center justify-between text-[10px] text-slate-600">
+                    <span className="font-bold capitalize">{row.purpose}</span>
+                    <span className="font-mono">{formatAFN(row.outstanding)}{row.openInvoices > 0 ? ` · ${row.openInvoices} open` : ''}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -353,12 +391,12 @@ export default function StudentProfileDrawer({
         </div>
 
         {/* Alerts Widget */}
-        {((attendanceRate !== null && attendanceRate < 85) || (canViewFinance && remainingDebt > 0)) ? (
+        {((attendanceRate !== null && attendanceRate < 85) || (canViewFinance && totalOutstanding > 0)) ? (
           <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 shadow-xs flex flex-col justify-center">
             <div className="flex items-center gap-1.5 text-rose-800 mb-1"><AlertCircle className="w-4 h-4 text-rose-600 shrink-0" /><span className="font-extrabold text-[11px]">Alerts Active</span></div>
             <p className="text-[10px] text-rose-700 leading-relaxed font-semibold">
               {attendanceRate !== null && attendanceRate < 85 && `⚠️ Low attendance (${attendanceRate}%). `}
-              {canViewFinance && remainingDebt > 0 && `💳 Outstanding debt: ${formatAFN(Number(remainingDebt||0))} AFN.`}
+              {canViewFinance && totalOutstanding > 0 && `💳 Outstanding balance: ${formatAFN(Number(totalOutstanding || 0))} AFN${openInvoices > 0 ? ` across ${openInvoices} open invoice${openInvoices === 1 ? '' : 's'}` : ''}.`}
             </p>
           </div>
         ) : (
@@ -436,6 +474,31 @@ export default function StudentProfileDrawer({
 
           {/* Right Column: Details & Journey */}
           <div className="space-y-5">
+            <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
+              <h4 className="font-extrabold text-slate-800 text-xs flex items-center gap-1.5 border-b border-slate-100 pb-2 mb-3"><Award className="w-4 h-4 text-emerald-500" /> Placement Result & CEFR</h4>
+              {student.placementScore ? (
+                <div className="space-y-3 text-[11px] text-slate-700">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2"><span className="block text-slate-400">Outcome</span><span className="font-black text-slate-900 uppercase">{placementOutcome || 'recorded'}</span></div>
+                    <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2"><span className="block text-slate-400">Overall CEFR</span><span className="font-black text-slate-900">{placementCefr || '—'}</span></div>
+                    <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2"><span className="block text-slate-400">Recommendation</span><span className="font-black text-slate-900">{placementRecommendation}</span></div>
+                    <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2"><span className="block text-slate-400">Overall score</span><span className="font-black text-slate-900">{placementPercentage != null ? `${placementPercentage}%` : '—'}</span></div>
+                  </div>
+                  {student.placementScore.componentEvidence?.length ? (
+                    <div className="space-y-2">
+                      {student.placementScore.componentEvidence.map((component) => (
+                        <div key={component.componentKey} className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                          <span className="font-bold capitalize text-slate-700">{component.componentKey}</span>
+                          <span className="font-mono text-slate-900">{component.cefrLevel || '—'}{component.score != null ? ` · ${component.score}` : ''}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="py-2 text-[11px] italic text-slate-400">No placement result has been recorded for this student yet.</p>
+              )}
+            </div>
             <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
               <h4 className="font-extrabold text-slate-800 text-xs flex items-center gap-1.5 border-b border-slate-100 pb-2 mb-3">Identity & Contact</h4>
               <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-600 font-semibold">

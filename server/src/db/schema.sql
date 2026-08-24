@@ -513,7 +513,7 @@ CREATE TABLE IF NOT EXISTS placement_assessment_profiles (
   id TEXT PRIMARY KEY,
   program_version_id TEXT NOT NULL REFERENCES program_versions(id) ON DELETE CASCADE,
   branch_id TEXT REFERENCES branches(id) ON DELETE CASCADE,
-  pass_score REAL NOT NULL DEFAULT 60 CHECK (pass_score >= 0 AND pass_score <= 100),
+  pass_score REAL NOT NULL DEFAULT 0 CHECK (pass_score >= 0 AND pass_score <= 120),
   instructions TEXT,
   version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1 AND version = CAST(version AS INTEGER)),
   requirement_mode TEXT NOT NULL DEFAULT 'required' CHECK (requirement_mode IN ('required','optional','not_required')),
@@ -523,7 +523,7 @@ CREATE TABLE IF NOT EXISTS placement_assessment_profiles (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   components_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(components_json) AND json_type(components_json) = 'array'),
-  scoring_model TEXT NOT NULL DEFAULT 'weighted_average' CHECK (scoring_model IN ('weighted_average','average')),
+  scoring_model TEXT NOT NULL DEFAULT 'canonical' CHECK (scoring_model IN ('canonical')),
   allow_retake INTEGER NOT NULL DEFAULT 1 CHECK (allow_retake IN (0,1)),
   max_attempts INTEGER CHECK (max_attempts IS NULL OR (max_attempts >= 1 AND max_attempts <= 100 AND max_attempts = CAST(max_attempts AS INTEGER))),
   first_attempt_billable INTEGER NOT NULL DEFAULT 1 CHECK (first_attempt_billable IN (0,1)),
@@ -542,7 +542,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_placement_profile_global
 CREATE TABLE IF NOT EXISTS placement_tests (
   id            TEXT PRIMARY KEY,
   title         TEXT NOT NULL,
-  test_type     TEXT NOT NULL CHECK (test_type IN ('listening','reading','writing','speaking')),
+  test_type     TEXT NOT NULL CHECK (test_type IN ('grammar','listening','reading','writing','speaking')),
   instructions  TEXT,
   audio_url     TEXT,
   transcript    TEXT,
@@ -580,7 +580,7 @@ CREATE TABLE IF NOT EXISTS placement_test_questions (
   id           TEXT PRIMARY KEY,
   test_id      TEXT NOT NULL REFERENCES placement_tests(id) ON DELETE CASCADE,
   question_key TEXT NOT NULL,
-  qtype        TEXT NOT NULL CHECK (qtype IN ('mcq','short_answer','essay','speaking')),
+  qtype        TEXT NOT NULL CHECK (qtype IN ('mcq','short_answer','fill_blank','sentence_completion','error_identification','essay','speaking')),
   prompt       TEXT NOT NULL,
   options_json TEXT CHECK (options_json IS NULL OR (json_valid(options_json) AND json_type(options_json) = 'array')),
   answer_key   TEXT,
@@ -588,6 +588,15 @@ CREATE TABLE IF NOT EXISTS placement_test_questions (
   order_index  INTEGER NOT NULL DEFAULT 0 CHECK (order_index >= 0 AND order_index = CAST(order_index AS INTEGER)),
   difficulty   TEXT,
   section_key  TEXT,
+  cefr_level   TEXT CHECK (cefr_level IS NULL OR cefr_level IN ('A1','A2','B1','B2','C1')),
+  topic        TEXT,
+  subskill     TEXT,
+  lifecycle_status TEXT NOT NULL DEFAULT 'draft' CHECK (lifecycle_status IN ('draft','reviewed','approved','active','retired')),
+  version      INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1 AND version = CAST(version AS INTEGER)),
+  created_by   TEXT REFERENCES users(id) ON DELETE SET NULL,
+  reviewed_by  TEXT REFERENCES users(id) ON DELETE SET NULL,
+  approved_at  TEXT,
+  content_json TEXT CHECK (content_json IS NULL OR json_valid(content_json)),
   UNIQUE(test_id, question_key)
 );
 CREATE INDEX IF NOT EXISTS idx_placement_questions_test ON placement_test_questions(test_id, order_index);
@@ -595,7 +604,7 @@ CREATE INDEX IF NOT EXISTS idx_placement_questions_test ON placement_test_questi
 CREATE TABLE IF NOT EXISTS placement_rubrics (
   id            TEXT PRIMARY KEY,
   title         TEXT NOT NULL,
-  kind          TEXT NOT NULL CHECK (kind IN ('writing','speaking','interview')),
+  kind          TEXT NOT NULL CHECK (kind IN ('writing','speaking')),
   criteria_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(criteria_json) AND json_type(criteria_json) = 'array'),
   branch_id     TEXT REFERENCES branches(id) ON DELETE SET NULL,
   created_by    TEXT REFERENCES users(id) ON DELETE SET NULL,
@@ -628,8 +637,8 @@ CREATE TABLE IF NOT EXISTS placement_assessment_attempts (
   status TEXT NOT NULL DEFAULT 'in_progress' CHECK (status IN ('in_progress','paused','completed','expired','cancelled')),
   started_at TEXT NOT NULL DEFAULT (datetime('now')),
   completed_at TEXT,
-  total_score REAL CHECK (total_score IS NULL OR (total_score >= 0 AND total_score <= 100)),
-  max_score REAL CHECK (max_score IS NULL OR max_score = 100),
+  total_score REAL CHECK (total_score IS NULL OR total_score >= 0),
+  max_score REAL CHECK (max_score IS NULL OR max_score > 0),
   percentage REAL CHECK (percentage IS NULL OR (percentage >= 0 AND percentage <= 100)),
   recommended_level_id TEXT REFERENCES levels(id) ON DELETE SET NULL,
   recommendation_text TEXT,
@@ -646,8 +655,9 @@ CREATE TABLE IF NOT EXISTS placement_assessment_attempts (
   override_level_id TEXT REFERENCES levels(id) ON DELETE SET NULL,
   override_reason TEXT,
   override_by TEXT REFERENCES users(id) ON DELETE SET NULL,
-  override_at TEXT, outcome TEXT
-  CHECK (outcome IS NULL OR outcome IN ('passed', 'failed')),
+  override_at TEXT,
+  outcome TEXT CHECK (outcome IS NULL OR outcome IN ('passed', 'failed')),
+  delivery_mode TEXT NOT NULL DEFAULT 'DIGITAL' CHECK (delivery_mode IN ('DIGITAL','PHYSICAL')),
   UNIQUE(visitor_id, attempt_number)
 );
 CREATE INDEX IF NOT EXISTS idx_placement_attempts_branch ON placement_assessment_attempts(branch_id, status, started_at);
@@ -679,7 +689,7 @@ CREATE TABLE IF NOT EXISTS placement_assessment_results (
   id TEXT PRIMARY KEY,
   attempt_id TEXT NOT NULL REFERENCES placement_assessment_attempts(id) ON DELETE CASCADE,
   component_key TEXT NOT NULL,
-  component_type TEXT NOT NULL CHECK (component_type IN ('skill_scores','written_test','interview','level_assessment','custom_score','content_test')),
+  component_type TEXT NOT NULL CHECK (component_type IN ('grammar','reading','listening','writing','speaking')),
   label TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','in_progress','completed','waived','timed_out')),
   score REAL CHECK (score IS NULL OR (score >= 0 AND score <= max_score)),
@@ -692,7 +702,7 @@ CREATE TABLE IF NOT EXISTS placement_assessment_results (
   evaluator_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   completed_at TEXT,
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-  raw_score REAL CHECK (raw_score IS NULL OR (raw_score >= 0 AND raw_score <= max_score)),
+  raw_score REAL CHECK (raw_score IS NULL OR raw_score >= 0),
   percentage REAL CHECK (percentage IS NULL OR (percentage >= 0 AND percentage <= 100)),
   weighted_score REAL CHECK (weighted_score IS NULL OR (weighted_score >= 0 AND weighted_score <= weight)),
   score_version INTEGER NOT NULL DEFAULT 1 CHECK (score_version >= 1 AND score_version = CAST(score_version AS INTEGER)),
@@ -705,6 +715,8 @@ CREATE TABLE IF NOT EXISTS placement_assessment_results (
   elapsed_seconds INTEGER CHECK (elapsed_seconds IS NULL OR (elapsed_seconds >= 0 AND elapsed_seconds = CAST(elapsed_seconds AS INTEGER))),
   timeout_flag INTEGER NOT NULL DEFAULT 0 CHECK (timeout_flag IN (0,1)),
   paused_at TEXT,
+  cefr_level TEXT CHECK (cefr_level IS NULL OR cefr_level IN ('A1','A2','B1','B2','C1')),
+  cefr_evidence_json TEXT CHECK (cefr_evidence_json IS NULL OR json_valid(cefr_evidence_json)),
   UNIQUE(attempt_id, component_key)
 );
 CREATE INDEX IF NOT EXISTS idx_placement_results_attempt ON placement_assessment_results(attempt_id, status);
@@ -718,8 +730,8 @@ WHEN NEW.rubric_id IS NOT NULL
    SELECT 1 FROM placement_rubrics r
    WHERE r.id = NEW.rubric_id
      AND ((r.branch_id IS NOT NULL AND r.branch_id IS NOT NEW.branch_id)
-       OR NOT ((NEW.test_type = 'writing' AND r.kind IN ('writing','interview'))
-            OR (NEW.test_type = 'speaking' AND r.kind IN ('speaking','interview'))))
+       OR NOT ((NEW.test_type = 'writing' AND r.kind = 'writing')
+            OR (NEW.test_type = 'speaking' AND r.kind = 'speaking')))
  )
 BEGIN SELECT RAISE(ABORT, 'placement test rubric scope or kind mismatch'); END;
 CREATE TRIGGER IF NOT EXISTS trg_placement_test_rubric_scope_update
@@ -729,8 +741,8 @@ WHEN NEW.rubric_id IS NOT NULL
    SELECT 1 FROM placement_rubrics r
    WHERE r.id = NEW.rubric_id
      AND ((r.branch_id IS NOT NULL AND r.branch_id IS NOT NEW.branch_id)
-       OR NOT ((NEW.test_type = 'writing' AND r.kind IN ('writing','interview'))
-            OR (NEW.test_type = 'speaking' AND r.kind IN ('speaking','interview'))))
+       OR NOT ((NEW.test_type = 'writing' AND r.kind = 'writing')
+            OR (NEW.test_type = 'speaking' AND r.kind = 'speaking')))
  )
 BEGIN SELECT RAISE(ABORT, 'placement test rubric scope or kind mismatch'); END;
 CREATE TRIGGER IF NOT EXISTS trg_placement_rubric_kind_scope_update
@@ -738,8 +750,8 @@ BEFORE UPDATE OF kind ON placement_rubrics
 WHEN EXISTS (
   SELECT 1 FROM placement_tests t
   WHERE t.rubric_id = NEW.id
-    AND NOT ((t.test_type = 'writing' AND NEW.kind IN ('writing','interview'))
-          OR (t.test_type = 'speaking' AND NEW.kind IN ('speaking','interview')))
+    AND NOT ((t.test_type = 'writing' AND NEW.kind = 'writing')
+          OR (t.test_type = 'speaking' AND NEW.kind = 'speaking'))
 )
 BEGIN SELECT RAISE(ABORT, 'placement rubric kind conflicts with linked tests'); END;
 CREATE TRIGGER IF NOT EXISTS trg_placement_attempt_scope_insert
@@ -850,72 +862,6 @@ WHEN (NEW.recommended_level_id IS NOT NULL OR NEW.override_level_id IS NOT NULL)
      )
  )
 BEGIN SELECT RAISE(ABORT, 'placement recommendation level program mismatch'); END;
-
-CREATE TABLE IF NOT EXISTS placement_rules ( 
-  id                  TEXT PRIMARY KEY, 
-  program_version_id  TEXT NOT NULL REFERENCES program_versions(id) ON DELETE CASCADE, 
-  name                TEXT NOT NULL, 
-  min_score           REAL NOT NULL DEFAULT 0 CHECK (min_score >= 0 AND min_score <= 100),
-  max_score           REAL NOT NULL DEFAULT 100 CHECK (max_score >= min_score AND max_score <= 100),
-  recommended_level_id TEXT REFERENCES levels(id) ON DELETE SET NULL,
-  recommended_level_code TEXT,
-  branch_id           TEXT REFERENCES branches(id) ON DELETE CASCADE,
-  sort_order          INTEGER NOT NULL DEFAULT 0,
-  is_active           INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
-  version             INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1 AND version = CAST(version AS INTEGER)),
-  -- Structured rule conditions for the placement decision engine (migration 058).
-  conditions_json     TEXT CHECK (conditions_json IS NULL OR (json_valid(conditions_json) AND json_type(conditions_json) = 'array')),
-  created_at          TEXT NOT NULL DEFAULT (datetime('now')) 
-);
-CREATE INDEX IF NOT EXISTS idx_placement_rules_version   ON placement_rules(program_version_id, is_active);
-
-CREATE TRIGGER IF NOT EXISTS trg_placement_rule_branch_scope_insert
-BEFORE INSERT ON placement_rules
-WHEN NEW.branch_id IS NOT NULL
- AND NEW.branch_id IS NOT (
-   SELECT p.branch_id FROM program_versions pv JOIN programs p ON p.id = pv.program_id
-   WHERE pv.id = NEW.program_version_id
- )
-BEGIN SELECT RAISE(ABORT, 'placement rule branch program mismatch'); END;
-CREATE TRIGGER IF NOT EXISTS trg_placement_rule_branch_scope_update
-BEFORE UPDATE OF branch_id, program_version_id ON placement_rules
-WHEN NEW.branch_id IS NOT NULL
- AND NEW.branch_id IS NOT (
-   SELECT p.branch_id FROM program_versions pv JOIN programs p ON p.id = pv.program_id
-   WHERE pv.id = NEW.program_version_id
- )
-BEGIN SELECT RAISE(ABORT, 'placement rule branch program mismatch'); END;
-
-CREATE TRIGGER IF NOT EXISTS trg_placement_rule_level_scope_insert
-BEFORE INSERT ON placement_rules
-WHEN NEW.recommended_level_id IS NOT NULL
- AND NOT EXISTS (
-   SELECT 1 FROM levels l
-   JOIN program_versions pv ON pv.program_id = l.program_id
-   WHERE pv.id = NEW.program_version_id AND l.id = NEW.recommended_level_id
- )
-BEGIN SELECT RAISE(ABORT, 'placement rule level program mismatch'); END;
-CREATE TRIGGER IF NOT EXISTS trg_placement_rule_level_scope_update
-BEFORE UPDATE OF recommended_level_id, program_version_id ON placement_rules
-WHEN NEW.recommended_level_id IS NOT NULL
- AND NOT EXISTS (
-   SELECT 1 FROM levels l
-   JOIN program_versions pv ON pv.program_id = l.program_id
-   WHERE pv.id = NEW.program_version_id AND l.id = NEW.recommended_level_id
- )
-BEGIN SELECT RAISE(ABORT, 'placement rule level program mismatch'); END;
-CREATE TRIGGER IF NOT EXISTS trg_placement_rule_level_code_insert
-BEFORE INSERT ON placement_rules
-WHEN NEW.recommended_level_id IS NOT NULL
- AND NEW.recommended_level_code IS NOT NULL
- AND NEW.recommended_level_code IS NOT (SELECT code FROM levels WHERE id = NEW.recommended_level_id)
-BEGIN SELECT RAISE(ABORT, 'placement rule level code mismatch'); END;
-CREATE TRIGGER IF NOT EXISTS trg_placement_rule_level_code_update
-BEFORE UPDATE OF recommended_level_id, recommended_level_code ON placement_rules
-WHEN NEW.recommended_level_id IS NOT NULL
- AND NEW.recommended_level_code IS NOT NULL
- AND NEW.recommended_level_code IS NOT (SELECT code FROM levels WHERE id = NEW.recommended_level_id)
-BEGIN SELECT RAISE(ABORT, 'placement rule level code mismatch'); END;
 
 -- ============================================================================
 -- ACADEMIC STRUCTURE
@@ -2417,7 +2363,7 @@ CREATE TABLE IF NOT EXISTS fee_rules (
   program_version_id  TEXT REFERENCES program_versions(id) ON DELETE CASCADE, 
   level_id            TEXT REFERENCES levels(id) ON DELETE SET NULL, 
   branch_id           TEXT REFERENCES branches(id) ON DELETE CASCADE, 
-  fee_type            TEXT NOT NULL CHECK (fee_type IN ('registration','placement','semester','book','retake','diploma','card','exam','other')), 
+  fee_type            TEXT NOT NULL CHECK (fee_type IN ('registration','placement','semester','retake','diploma','card')), 
   name                TEXT NOT NULL, 
   amount              INTEGER NOT NULL DEFAULT 0, 
   currency            TEXT NOT NULL DEFAULT 'AFN', 
@@ -2483,6 +2429,11 @@ CREATE TABLE IF NOT EXISTS invoices (
   issued_by      TEXT, 
   student_name   TEXT, 
   student_code   TEXT,
+  -- Non-tuition classification within the one invoice table. Purpose remains
+  -- the money authority (tuition vs not-tuition); charge_kind distinguishes
+  -- admission charges such as registration and placement without creating a
+  -- second invoice system.
+  charge_kind    TEXT CHECK (charge_kind IS NULL OR charge_kind IN ('registration','placement','books','exam','other')),
   -- What this document bills (owner decision D-118). An invoice payment
   -- settles the thing the invoice names; it is never tuition merely because it
   -- arrived through the invoice system. While every invoice payment was booked

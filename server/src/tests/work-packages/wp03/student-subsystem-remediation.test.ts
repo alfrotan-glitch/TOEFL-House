@@ -20,6 +20,8 @@ import { assignRole } from '../../support/identity.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import supertest from 'supertest';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import { db, initSchema } from '../../../db/connection.js';
 import { id, today } from '../../../utils/ids.js';
 import { signToken, hashPassword, type TokenPayload } from '../../../utils/auth.js';
@@ -64,9 +66,15 @@ function nextPhone(): string {
 }
 
 async function createStudent(body: Record<string, unknown>) {
-  return supertest(app).post('/api/students/manual').set(authHeader(reg)).send({
-    fullName: 'Fixture Student', gender: 'male', phone: nextPhone(), ...body,
+  const { classId, semesterName, ...studentBody } = body as { classId?: string; semesterName?: string } & Record<string, unknown>;
+  const admitted = await supertest(app).post('/api/students/manual').set(authHeader(reg)).send({
+    fullName: 'Fixture Student', gender: 'male', phone: nextPhone(), ...studentBody, classId,
   });
+  if (admitted.status >= 400 || !classId) return admitted;
+  const enrolled = await supertest(app).post(`/api/students/${admitted.body.id}/enroll-semester`).set(authHeader(reg))
+    .send({ semesterName: typeof semesterName === 'string' && semesterName.trim() ? semesterName : 'Current Semester', classId });
+  if (enrolled.status >= 400) return enrolled;
+  return admitted;
 }
 function statusOf(sid: string): string {
   return (db.prepare('SELECT status FROM students WHERE id = ?').get(sid) as { status: string }).status;
@@ -91,6 +99,10 @@ beforeAll(async () => {
   bootstrapRbacCatalog(db);
   db.prepare('INSERT OR IGNORE INTO branches (id, name, location) VALUES (?, ?, ?)')
     .run(BRANCH, 'Remediation Branch', 'Loc');
+  db.prepare(`
+    INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+    VALUES ('stu_rem_registration_fee', ?, 'registration', 'Registration fee', 0, 1, 1)
+  `).run(BRANCH);
   await db.prepare(
     `INSERT OR IGNORE INTO users ( id, username, full_name, branch_id, password_hash, is_active, must_change_password )
      VALUES (?, ?, ?, ?, ?, 1, 0)`
@@ -210,8 +222,7 @@ describe('STU-C2 — Student lifecycle transition matrix', () => {
 describe('STU-C1 — journey/events is not a second status authority', () => {
   it('source: no module other than students.routes writes students.status', async () => {
     const fs = await import('node:fs');
-    const path = await import('node:path');
-    const routesDir = path.join(process.cwd(), 'src', 'routes');
+    const routesDir = path.resolve(fileURLToPath(new URL('.', import.meta.url)), '..', '..', '..', 'routes');
     const offenders: string[] = [];
     for (const f of fs.readdirSync(routesDir)) {
       if (!f.endsWith('.ts')) continue;

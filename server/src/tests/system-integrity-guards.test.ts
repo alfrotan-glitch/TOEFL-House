@@ -99,7 +99,6 @@ describe('G1 — schema.sql must be the sole schema authority', () => {
         'SELECT idempotency_key, status, voided_at, voided_by, void_reason FROM teacher_salary_ledger LIMIT 1',
         'SELECT requester_user_id, approved_by_user_id FROM expense_requests LIMIT 1',
         'SELECT components_json, scoring_model, allow_retake FROM placement_assessment_profiles LIMIT 1',
-        'SELECT conditions_json FROM placement_rules LIMIT 1',
       ];
       for (const sql of probes) {
         expect(() => fresh.prepare(sql).all(), `fresh install would crash on: ${sql}`).not.toThrow();

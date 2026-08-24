@@ -940,10 +940,10 @@ export function useApiStore() {
   };
 
   const registerVisitorToStudent = async (
-    visitorId: string, classId: string, amountPaid: number, discountPercent: number,
-    notes?: string, semesterFee?: number, branchId?: string, paymentMethod?: 'cash' | 'card' | 'bank_transfer'
+    visitorId: string,
+    payload: { classId?: string; notes?: string; branchId?: string; programVersionId?: string; levelId?: string }
   ) => {
-    const result = await api.post<{ studentId: string; studentCode: string; receiptNumber: string; invoiceId: string; invoiceNumber: string; netAmount: number; status: string }>(`/visitors/${visitorId}/convert`, { classId, amountPaid, discountPercent, notes, semesterFee, branchId, paymentMethod });
+    const result = await api.post<{ studentId: string; studentCode: string; invoices: Array<{ id: string; invoiceNumber: string | null; chargeKind: 'registration' | 'placement'; amount: number; status: string }>; nextStep: string }>(`/visitors/${visitorId}/convert`, payload);
     await Promise.all([reloadVisitors(), reloadStudents(), reloadPayments(), reloadTransactions(), reloadFinanceOverview(), reloadNotifications(), reloadInvoices()]);
     invalidate('finance', 'payments', 'students', 'visitors');
     return result;
@@ -952,15 +952,15 @@ export function useApiStore() {
 
   const addStudentManual = async (
     fullName: string, phone: string, email: string, gender: 'male' | 'female', discountPercent: number,
-    notes?: string, classId?: string, tuitionAmount?: number, fatherName?: string, addressRegion?: string,
+    notes?: string, classId?: string, fatherName?: string, addressRegion?: string,
     tazkiraNo?: string, whatsapp?: string, dob?: string, schoolOrUniversity?: string,
-    emergencyContactName?: string, emergencyContactPhone?: string, amountPaidNow?: number, branchId?: string
+    emergencyContactName?: string, emergencyContactPhone?: string, branchId?: string
   ) => {
     await api.post('/students/manual', {
-      fullName, phone, email, gender, discountPercent, notes, classId, tuitionAmount, fatherName, addressRegion,
-      tazkiraNo, whatsapp, dob, schoolOrUniversity, emergencyContactName, emergencyContactPhone, amountPaidNow, branchId,
+      fullName, phone, email, gender, discountPercent, notes, classId, fatherName, addressRegion,
+      tazkiraNo, whatsapp, dob, schoolOrUniversity, emergencyContactName, emergencyContactPhone, branchId,
     });
-    await Promise.all([reloadStudents(), reloadPayments(), reloadTransactions(), reloadFinanceOverview()]);
+    await Promise.all([reloadStudents(), reloadPayments(), reloadTransactions(), reloadFinanceOverview(), reloadInvoices()]);
     invalidate('finance', 'payments', 'students');
   };
 

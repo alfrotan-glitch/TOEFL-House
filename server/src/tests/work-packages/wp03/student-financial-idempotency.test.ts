@@ -80,6 +80,14 @@ beforeAll(async () => {
      VALUES (?, ?, ?, ?, ?, 1, 0)`
   ).run('u_fin_idem', 'fin_idem', 'Fin Idem Mgr', BRANCH, await hashPassword('x'));
   assignRole('u_fin_idem', 'manager', BRANCH);
+  db.prepare(`
+    INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+    VALUES ('fin_idem_card_fee', ?, 'card', 'ID card fee', 200, 1, 1)
+  `).run(BRANCH);
+  db.prepare(`
+    INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+    VALUES ('fin_idem_registration_fee', ?, 'registration', 'Registration fee', 0, 1, 1)
+  `).run(BRANCH);
 
   app = createApp();
 });

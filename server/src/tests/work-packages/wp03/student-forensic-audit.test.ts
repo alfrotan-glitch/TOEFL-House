@@ -70,7 +70,10 @@ describe('Student forensic audit', () => {
   }
 
   it('FIXED: card fee is charged once — issue-card then manual card payment is rejected (409)', async () => {
-    db.prepare(`INSERT OR IGNORE INTO branch_academic_profiles (branch_id, card_fee) VALUES (?, 150)`).run(BRANCH_A);
+    db.prepare(`
+      INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+      VALUES ('fa_card_fee', ?, 'card', 'ID card fee', 150, 1, 1)
+    `).run(BRANCH_A);
     seedStudent('fa_card', 'Card Fee Student', BRANCH_A, '0700000101');
     const issue = await supertest(app).post('/api/students/fa_card/issue-card').set(authHeader(registrar)).send({ cardDesign: { primaryColor: 'rose' } });
     expect(issue.status).toBe(201);
@@ -93,7 +96,10 @@ describe('Student forensic audit', () => {
   });
 
   it('FIXED: diploma fee is charged once — a second diploma payment is rejected (409)', async () => {
-    db.prepare(`UPDATE branch_academic_profiles SET diploma_fee = 500 WHERE branch_id = ?`).run(BRANCH_A);
+    db.prepare(`
+      INSERT OR REPLACE INTO fee_rules (id, branch_id, fee_type, name, amount, version, is_active)
+      VALUES ('fa_diploma_fee', ?, 'diploma', 'Diploma fee', 500, 1, 1)
+    `).run(BRANCH_A);
     seedStudent('fa_dip', 'Diploma Student', BRANCH_A, '0700000102');
     const p1 = await supertest(app).post('/api/students/fa_dip/payments').set(authHeader(owner)).send({ amount: 500, category: 'diploma' });
     const p2 = await supertest(app).post('/api/students/fa_dip/payments').set(authHeader(owner)).send({ amount: 500, category: 'diploma' });
