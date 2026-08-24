@@ -41,12 +41,20 @@ export default defineConfig({
         replacement: path.join(serverRoot, 'node_modules', 'react', 'jsx-runtime.js'),
       },
       {
+        find: /^react\/jsx-dev-runtime$/,
+        replacement: path.join(serverRoot, 'node_modules', 'react', 'jsx-dev-runtime.js'),
+      },
+      {
         find: /^react-dom$/,
         replacement: path.join(serverRoot, 'node_modules', 'react-dom', 'index.js'),
       },
       {
         find: /^react-dom\/client$/,
         replacement: path.join(serverRoot, 'node_modules', 'react-dom', 'client.js'),
+      },
+      {
+        find: /^lucide-react$/,
+        replacement: path.join(serverRoot, 'src', 'tests', 'support', 'lucide-react.tsx'),
       },
     ],
   },
