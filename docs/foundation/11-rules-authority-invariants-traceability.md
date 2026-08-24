@@ -85,3 +85,8 @@ Traceability for the remediation is recorded in `41-gate-3-remediation-review.md
 ## Gate 4 architecture contract extensions
 
 Artifacts `42`–`49` define business-level boundary contracts, authoritative flows, forbidden writers, financial invariants, authorization/scope enforcement, lifecycle preconditions, metric lineage, privacy/audit controls, and resilience requirements. No technology-specific enforcement is selected at Gate 4.
+
+
+## Gate 5 architecture mapping
+
+Architecture enforcement points for Foundation rules and invariants are recorded in `docs/architecture/24-architecture-invariant-registry.md` and traced end-to-end in `docs/architecture/25-architecture-traceability.md`.

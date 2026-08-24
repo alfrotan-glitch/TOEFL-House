@@ -1,7 +1,7 @@
 # TOEFL House Foundation State
 
 **Phase:** Foundation / discovery
-**Current gate:** Gate 4 — Architecture Readiness and System Boundary Review (`PASS WITH NON-BLOCKING OPEN ITEMS`)
+**Current gate:** Gate 5 — Formal System Architecture Design (`PASS WITH NON-BLOCKING OPEN ITEMS`)
 **Certification:** `NOT CLAIMED` — business discovery is complete; Gates 1–16 and Foundation Certification remain pending
 **Updated:** 2026-08-25
 
@@ -50,7 +50,7 @@ Gate 0 cannot pass until:
 - contradictions between the directive, repository, and user decisions are recorded;
 - the next discovery cluster is approved.
 
-**Current result:** Gate 4 is `PASS WITH NON-BLOCKING OPEN ITEMS`; see `50-gate-4-architecture-readiness-review.md`. Gate 5 is not automatically started.
+**Current result:** Gate 5 is `PASS WITH NON-BLOCKING OPEN ITEMS`; see `docs/architecture/26-gate-5-architecture-review.md`. Gate 6 is not automatically started.
 
 ## Prohibited claims
 

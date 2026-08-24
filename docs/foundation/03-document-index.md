@@ -109,3 +109,8 @@ The presence of a file is not evidence that its contents are complete. Every art
 - `48-reporting-and-derived-data-contract.md` — reporting lineage and period contract
 - `49-privacy-audit-resilience-architecture-contract.md` — privacy, history, audit, and resilience boundary
 - `50-gate-4-architecture-readiness-review.md` — formal Gate 4 audit and disposition
+
+
+## Gate 5 architecture package
+
+The formal architecture package is maintained under `docs/architecture/`: artifacts `01`–`26` cover topology, style, module boundaries, dependencies, transactions, finance, authorization/scope, approvals, lifecycles, academics, HR/payroll, reporting, audit, privacy/documents, integrations, background work, consistency, errors, observability, resilience/security, testing, legacy migration, ADRs, invariants, traceability, and the Gate 5 review.

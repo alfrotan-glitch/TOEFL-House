@@ -69,3 +69,8 @@ The Gate 3 remediation package establishes explicit requirements that every mate
 ## Gate 4 architecture-readiness requirements
 
 The Foundation must translate to architecture through explicit domain boundaries, one authoritative owner per critical fact, authorized mutations, deterministic lifecycles, non-circular contracts, derived-only reporting, configuration isolation, privacy/audit history, and resilience requirements. These are documented in artifacts `42`–`49` and reviewed in `50`.
+
+
+## Gate 5 architecture implications
+
+Requirements are mapped to owner-bound modules, server authorization, transaction boundaries, financial invariants, append-only history, privacy gates, resilient integration contracts, and future test categories in `docs/architecture/25-architecture-traceability.md`. No business requirement was changed.
