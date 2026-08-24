@@ -489,7 +489,7 @@ placementTestBankRouter.get('/media', authorize('owner', 'general_manager', 'hea
   const rows = (scope.isAll
     ? db.prepare('SELECT * FROM placement_media ORDER BY created_at DESC').all()
     : stmtMediaByBranch.all(scope.branchId)) as any[];
-  res.json(rows.map((media) => ({ id: media.id, filename: media.filename, mime: media.mime, sizeBytes: media.size_bytes, sha256: media.sha256, kind: media.kind, createdAt: media.created_at, url: `/api/placement/media/${media.id}/file` })));
+  res.json(rows.map((media) => ({ id: media.id, filename: media.filename, mime: media.mime, sizeBytes: media.size_bytes, sha256: media.sha256, kind: media.kind, branchId: media.branch_id, createdAt: media.created_at, url: `/api/placement/media/${media.id}/file` })));
 }));
 
 placementTestBankRouter.get('/media/:id/file', authorize('owner', 'general_manager', 'head_of_department', 'receptionist', 'counselor'), ah(async (req, res) => {

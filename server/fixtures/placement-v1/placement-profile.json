@@ -1,0 +1,99 @@
+{
+  "requirementMode": "required",
+  "firstLevelExempt": false,
+  "expiresMinutes": 240,
+  "passScore": 60,
+  "allowRetake": true,
+  "maxAttempts": 3,
+  "firstAttemptBillable": true,
+  "retakeBillable": true,
+  "retakeFeeAmount": 300,
+  "scoringModel": "canonical",
+  "instructions": "Reference Placement Test V1. Five canonical components (Grammar, Reading, Listening, Writing, Speaking), 120 points overall. DIGITAL delivery auto-scores objective sections and captures the writing response; Writing and Speaking are always human-scored against the analytic rubrics by a trained examiner. PHYSICAL delivery enters all five component scores from the paper booklet after the sitting.",
+  "components": [
+    {
+      "key": "grammar",
+      "type": "grammar",
+      "label": "Grammar",
+      "required": true,
+      "durationMinutes": 30,
+      "timeLimitSeconds": 1800,
+      "instructions": "40 minutes total for Grammar. Choose or type the correct answer. Each item is worth one point.",
+      "bankKeys": ["grammar-bank-v1"],
+      "blueprintBuckets": [
+        { "count": 6, "cefrLevel": "A1", "difficulty": "easy", "qtypes": ["mcq", "fill_blank", "sentence_completion", "error_identification"] },
+        { "count": 6, "cefrLevel": "A2", "difficulty": "easy", "qtypes": ["mcq", "fill_blank", "short_answer", "error_identification"] },
+        { "count": 6, "cefrLevel": "B1", "difficulty": "medium", "qtypes": ["mcq", "sentence_completion", "error_identification", "short_answer"] },
+        { "count": 6, "cefrLevel": "B2", "difficulty": "hard", "qtypes": ["mcq", "fill_blank", "error_identification", "sentence_completion"] },
+        { "count": 6, "cefrLevel": "C1", "difficulty": "hard", "qtypes": ["mcq", "short_answer", "error_identification", "sentence_completion"] }
+      ]
+    },
+    {
+      "key": "reading",
+      "type": "reading",
+      "label": "Reading",
+      "required": true,
+      "durationMinutes": 25,
+      "timeLimitSeconds": 1500,
+      "instructions": "Read each passage and answer the questions. Each item is worth one point.",
+      "bankKeys": ["reading-bank-v1"],
+      "blueprintBuckets": [
+        { "count": 4, "cefrLevel": "A1", "difficulty": "easy", "qtypes": ["mcq", "short_answer"] },
+        { "count": 4, "cefrLevel": "A2", "difficulty": "easy", "qtypes": ["mcq", "short_answer"] },
+        { "count": 4, "cefrLevel": "B1", "difficulty": "medium", "qtypes": ["mcq", "short_answer"] },
+        { "count": 4, "cefrLevel": "B2", "difficulty": "hard", "qtypes": ["mcq", "short_answer"] },
+        { "count": 4, "cefrLevel": "C1", "difficulty": "hard", "qtypes": ["mcq", "short_answer"] }
+      ]
+    },
+    {
+      "key": "listening",
+      "type": "listening",
+      "label": "Listening",
+      "required": true,
+      "durationMinutes": 25,
+      "timeLimitSeconds": 1500,
+      "instructions": "Listen to each track twice and answer the questions. Each item is worth one point.",
+      "bankKeys": ["listening-bank-v1"],
+      "blueprintBuckets": [
+        { "count": 4, "cefrLevel": "A1", "difficulty": "easy", "qtypes": ["mcq", "short_answer"] },
+        { "count": 4, "cefrLevel": "A2", "difficulty": "easy", "qtypes": ["mcq", "short_answer"] },
+        { "count": 4, "cefrLevel": "B1", "difficulty": "medium", "qtypes": ["mcq", "short_answer"] },
+        { "count": 4, "cefrLevel": "B2", "difficulty": "hard", "qtypes": ["mcq", "short_answer"] },
+        { "count": 4, "cefrLevel": "C1", "difficulty": "hard", "qtypes": ["mcq", "short_answer"] }
+      ]
+    },
+    {
+      "key": "writing",
+      "type": "writing",
+      "label": "Writing",
+      "required": true,
+      "durationMinutes": 30,
+      "timeLimitSeconds": 1800,
+      "instructions": "Write the essay in the response box (DIGITAL) or on the answer sheet (PHYSICAL). 200–250 words. Scored by a trained examiner against the analytic writing rubric.",
+      "bankKeys": ["writing-bank-v1"],
+      "blueprintBuckets": [
+        { "count": 1, "cefrLevel": "ANY", "difficulty": "ANY", "qtypes": ["essay"] }
+      ]
+    },
+    {
+      "key": "speaking",
+      "type": "speaking",
+      "label": "Speaking",
+      "required": true,
+      "durationMinutes": 15,
+      "timeLimitSeconds": 900,
+      "instructions": "Structured interview with a trained examiner (Parts 1 and 2). The examiner records the official rubric result; recording equipment is optional.",
+      "bankKeys": ["speaking-bank-v1"],
+      "blueprintBuckets": [
+        { "count": 1, "cefrLevel": "ANY", "difficulty": "ANY", "qtypes": ["speaking"] }
+      ]
+    }
+  ],
+  "decisionRules": [
+    { "cefrLevel": "A1", "levelCode": "A1", "minimumScores": { "grammar": 6, "reading": 4, "listening": 4, "writing": 9, "speaking": 9 }, "label": "A1 — Foundation entry" },
+    { "cefrLevel": "A2", "levelCode": "A2", "minimumScores": { "grammar": 13, "reading": 8, "listening": 8, "writing": 12, "speaking": 12 }, "label": "A2 — Elementary entry" },
+    { "cefrLevel": "B1", "levelCode": "B1", "minimumScores": { "grammar": 19, "reading": 12, "listening": 12, "writing": 15, "speaking": 15 }, "label": "B1 — Intermediate entry" },
+    { "cefrLevel": "B2", "levelCode": "B2", "minimumScores": { "grammar": 24, "reading": 16, "listening": 16, "writing": 19, "speaking": 19 }, "label": "B2 — Upper-Intermediate entry" },
+    { "cefrLevel": "C1", "levelCode": "C1", "minimumScores": { "grammar": 28, "reading": 18, "listening": 18, "writing": 22, "speaking": 22 }, "label": "C1 — Advanced entry" }
+  ]
+}

@@ -16,7 +16,9 @@
     "preflight:fresh-schema": "node scripts/verify-canonical-schema.mjs",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
     "audit:config-data": "tsx scripts/config-data-integrity-audit.mjs",
-    "audit:mutation": "node scripts/run-mutation-harnesses.mjs"
+    "audit:mutation": "node scripts/run-mutation-harnesses.mjs",
+    "import:placement-reference": "tsx scripts/import-placement-v1-reference.mjs",
+    "verify:placement-reference": "tsx scripts/verify-placement-v1-reference.mjs"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

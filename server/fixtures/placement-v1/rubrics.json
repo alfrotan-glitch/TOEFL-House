@@ -1,0 +1,24 @@
+[
+  {
+    "key": "writing-rubric-v1",
+    "title": "Placement V1 — Analytic Writing Rubric (CEFR-aligned)",
+    "kind": "writing",
+    "criteria": [
+      { "key": "task_achievement", "label": "Task Achievement & Relevance", "weight": 30, "maxScore": 5 },
+      { "key": "coherence_cohesion", "label": "Coherence & Cohesion", "weight": 25, "maxScore": 5 },
+      { "key": "lexical_range", "label": "Lexical Range & Accuracy", "weight": 20, "maxScore": 5 },
+      { "key": "grammatical_range", "label": "Grammatical Range & Accuracy", "weight": 25, "maxScore": 5 }
+    ]
+  },
+  {
+    "key": "speaking-rubric-v1",
+    "title": "Placement V1 — Analytic Speaking Rubric (CEFR-aligned)",
+    "kind": "speaking",
+    "criteria": [
+      { "key": "fluency_coherence", "label": "Fluency & Coherence", "weight": 30, "maxScore": 5 },
+      { "key": "interactive_communication", "label": "Interactive Communication & Task Completion", "weight": 20, "maxScore": 5 },
+      { "key": "pronunciation", "label": "Pronunciation & Intelligibility", "weight": 20, "maxScore": 5 },
+      { "key": "language_range", "label": "Grammatical & Lexical Range", "weight": 30, "maxScore": 5 }
+    ]
+  }
+]

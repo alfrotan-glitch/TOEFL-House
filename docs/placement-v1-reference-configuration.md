@@ -111,11 +111,41 @@ when all five required components are complete and a CEFR rule matched.
 
 ## Reproducibility
 
-The saved configuration is live data in `server/data/erp.sqlite` (gitignored by
-design). To reproduce it on a fresh install: bootstrap the backend, then follow
-the same Admin/Owner surfaces (Academic Control Center → Programs & Levels →
-Program Versions → Placement Test V1 panel; Test Bank → rubrics/banks/audio;
-Fee Policies) with the values in this document. All behavior above is governed
-by the canonical Placement V1 engines (blueprint, timing, scoring, decision,
-policy, enrollment gate) — nothing in the reference configuration requires
-code changes or hard-coded test assumptions.
+The configuration itself is live policy data in the operational database
+(`server/data/erp.sqlite`, gitignored by design). It is **fully reproducible
+from Git** through tracked, machine-readable fixtures and a canonical importer
+— no database files are ever committed:
+
+- Fixtures: `server/fixtures/placement-v1/` (manifest, academic tree, fee
+  rules, rubrics, 5 banks / 94 questions, placement profile, listening audio
+  asset). References are fixture keys (bank keys, rubric keys, level codes,
+  audio keys), remapped to real database ids at import time. The fixtures
+  contain configuration and assessment content only — no candidates,
+  attempts, payments, audit history, credentials, or PII.
+- Import: `npm --prefix server run import:placement-reference` with
+  `PLACEMENT_IMPORT_USERNAME` / `PLACEMENT_IMPORT_PASSWORD` (or
+  `SEED_OWNER_*` fallbacks). The importer mounts the real routers in-process,
+  performs a real owner login, and writes every object through the canonical
+  Placement V1 HTTP surfaces — the same validators, RBAC permissions
+  (`Curriculum.PlacementPolicy`, `Curriculum.TestBank`, `FeeStructure.Edit`),
+  persistence, versioning and audit trail the Admin/Owner UI uses. It is
+  idempotent and non-destructive: existing objects are matched by natural key
+  and reused, and an Owner-edited placement profile is never overwritten.
+- Automated proof: `npm --prefix server run verify:placement-reference`
+  creates an empty throwaway database, runs the canonical bootstrap, imports
+  the fixtures, and asserts the complete configuration (academic tree, fees,
+  rubrics, media, 94 questions, blueprint — including bucket-satisfiability
+  replay — and the CEFR ladder). It then deletes the placement profile and one
+  bank, re-imports, and asserts exact self-repair without duplication, and
+  finishes with a functional DIGITAL smoke (candidate → admission → attempt
+  snapshot 30/20/20/1/1 with rubrics, no answer-key leakage → cancel).
+  86/86 checks pass.
+
+Fresh-install sequence: clone → `bootstrap.bat` (or `npm --prefix server run
+bootstrap`) → first owner login (clears credential quarantine) →
+`import:placement-reference`. The imported configuration is ordinary policy
+data and remains editable through the Academic Control Center and Test Bank
+admin UI. All behavior is governed by the canonical Placement V1 engines
+(blueprint, timing, scoring, decision, policy, enrollment gate) — nothing in
+the reference configuration requires code changes or hard-coded test
+assumptions.
