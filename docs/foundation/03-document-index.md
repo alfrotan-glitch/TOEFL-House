@@ -129,3 +129,5 @@ The implementation readiness package is maintained under `docs/implementation/`,
 
 - `docs/implementation/00-implementation-state.md` — current package state and execution boundary
 - `docs/implementation/20-package-01-contract-harness-checkpoint.md` — Package 01 certification and verification record
+- `docs/implementation/21-implementation-quality-directive.md` — standing implementation quality and verification contract
+- `docs/implementation/22-environment-blocker-report.md` — environment blocker record for the framework-free stack substitution (ADR-013-A, D-F-102)

@@ -12,8 +12,12 @@ The Implementation Quality Directive — Absolute Engineering Standard was adopt
 
 ## Technology selection
 
-The previously open technology decision (Decision Ledger `D-F-003`; legacy findings L-002/L-003) was resolved by user decision on 2026-08-25: **PHP + Laravel** application technology and **PostgreSQL** persistence, remaining a modular monolith with strict contexts. Recorded as ADR-013 in `docs/architecture/23-architecture-decision-records.md` and Decision Ledger `D-F-100`.
+The previously open technology decision (Decision Ledger `D-F-003`; legacy findings L-002/L-003) was resolved by user decision on 2026-08-25: **PHP + Laravel** application technology and **PostgreSQL** persistence, remaining a modular monolith with strict contexts. Recorded as ADR-013 in `docs/architecture/23-architecture-decision-records.md` and Decision Ledger `D-F-100`. Amended the same day by environment blocker (Composer/Packagist unreachable; `docs/implementation/22-environment-blocker-report.md`): **PHP + PostgreSQL, framework-free modular monolith**, per user decision (ADR-013-A, Decision Ledger `D-F-102`).
 
 ## Package boundary
 
 Package 02 — Identity and Organization has not started. The Package 01 checkpoint does not authorize it, and this directive does not authorize it. Production implementation proceeds only through the package protocol.
+
+## Environment blocker
+
+Composer/Packagist and the Laravel framework are unobtainable in this build environment; the environment-forced framework-free stack substitution is recorded in `docs/implementation/22-environment-blocker-report.md` (ADR-013-A, Decision Ledger `D-F-102`).
