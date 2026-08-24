@@ -369,6 +369,7 @@ describe('UX-3 — conversion eligibility can be checked without attempting a wr
     expect(preview.body.code).toBe('placement_required');
     expect(write.status).toBe(201);
     expect((db.prepare("SELECT stage FROM visitors WHERE id='vux_vE'").get() as { stage: string }).stage).toBe('placement_booking');
+    expect((db.prepare('SELECT class_id FROM registrations WHERE student_id = ?').get(write.body.studentId) as { class_id: string | null }).class_id).toBe('vux_cls');
   });
 
   it('reports eligible for a class governed by no placement policy, and admission then succeeds cleanly', async () => {
@@ -438,6 +439,18 @@ describe('UX-3 — conversion eligibility can be checked without attempting a wr
       .set(authHeader(registrarA));
     expect(res.body.eligible).toBe(false);
     expect(res.body.code).toBe('class_inactive');
+  });
+
+  it('refuses to save an inactive class as the target admission class', async () => {
+    db.prepare(`INSERT OR REPLACE INTO classes (id,name,level,branch_id,status,lifecycle_stage,capacity,fee,gender_policy)
+                VALUES ('vux_dead','Dead Class','Open',?, 'cancelled','cancelled',50,6000,'mixed')`).run(BRANCH_A);
+    const res = await supertest(app)
+      .post('/api/visitors/vux_vE/convert')
+      .set(authHeader(registrarA))
+      .send({ classId: 'vux_dead' });
+    expect(res.status).toBe(400);
+    expect(String(res.body.error || '')).toMatch(/inactive/i);
+    expect(db.prepare("SELECT id FROM students WHERE lead_id='vux_vE'").get()).toBeUndefined();
   });
 
   it('answers lead-level questions with no class selected', async () => {

@@ -795,11 +795,19 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
   }
   assertBranchTargetAccess(req, requestedStudentBranchId);
 
-  const classItem = classId ? (stmtGetClassForConvert.get(classId) as any) : null;
-  if (classId && !classItem) throw new HttpError(404, 'Class not found.');
-  if (classItem?.branch_id && classItem.branch_id !== requestedStudentBranchId) {
-    throw new HttpError(400, 'Selected class does not belong to the target branch.');
+  const targetClassEligibility = classId
+    ? evaluateConversionEligibilityForVisitor(db, visitor, classId, requestedStudentBranchId)
+    : null;
+  if (targetClassEligibility?.code === 'class_not_found') {
+    throw new HttpError(404, targetClassEligibility.reason);
   }
+  if (targetClassEligibility && ['class_wrong_branch', 'class_inactive'].includes(targetClassEligibility.code)) {
+    throw new HttpError(400, targetClassEligibility.reason);
+  }
+  if (targetClassEligibility?.code === 'placement_policy_unconfigured') {
+    throw new HttpError(409, targetClassEligibility.reason);
+  }
+  const classItem = classId ? (stmtGetClassForConvert.get(classId) as any) : null;
 
   const effectiveProgramVersionId = visitor.program_version_id || programVersionId || null;
   if (visitor.program_version_id && programVersionId && String(programVersionId) !== String(visitor.program_version_id)) {
@@ -850,7 +858,11 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
       newStudentId, studentCode, visitor.full_name, visitor.phone, visitor.email || null, qrCode, date, studentBranchId, 0, visitor.gender, visitor.placement_score, notes || 'Admitted from visitor record. Enrollment occurs after placement and payment.',
       visitor.father_name, visitor.address_region, visitor.tazkira_no, visitor.whatsapp, visitor.dob, visitor.school_or_university, visitor.emergency_contact_name, visitor.emergency_contact_phone, visitor.id
     );
-    stmtInsertConvertedRegistration.run(id('reg'), newStudentId, null, date, 0, null, 0, studentBranchId, visitor.source);
+    // Admission remains enrollment-free. When the operator supplied a valid
+    // target class, record it here as the intended class on the registration
+    // document so the UI/API contract stays truthful without creating an
+    // enrollment prematurely.
+    stmtInsertConvertedRegistration.run(id('reg'), newStudentId, classItem?.id ?? null, date, 0, null, 0, studentBranchId, visitor.source);
 
     if (registrationFeeAmount > 0 && registrationInvoiceId && registrationInvoiceNumber) {
       stmtInsertRegistrationFeeInvoice.run(
@@ -894,12 +906,12 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
       }
     }
 
-    journey.appendEvent({ studentId: newStudentId, eventType: JourneyEventType.STUDENT_REGISTERED, occurredAt: date, branchId: studentBranchId, actorUserId: user.userId, actorName: user.fullName, payload: { studentCode, fromVisitorId: visitor.id, source: visitor.source, workflow: 'admission_before_placement' } });
+    journey.appendEvent({ studentId: newStudentId, eventType: JourneyEventType.STUDENT_REGISTERED, occurredAt: date, branchId: studentBranchId, actorUserId: user.userId, actorName: user.fullName, payload: { studentCode, fromVisitorId: visitor.id, source: visitor.source, targetClassId: classItem?.id ?? null, workflow: 'admission_before_placement' } });
   });
   tx();
 
   addNotification('Student Admission Created', `Student ${visitor.full_name} admitted. Complete placement, settle invoices, then enroll from the student workspace.`, 'success', studentBranchId);
-  writeAudit(req, `Converted visitor ${visitor.full_name} to student ${studentCode}`, { newValue: JSON.stringify({ studentId: newStudentId, stage: admissionStage, invoices: issuedInvoices, workflow: 'admission_before_placement' }) });
+  writeAudit(req, `Converted visitor ${visitor.full_name} to student ${studentCode}`, { newValue: JSON.stringify({ studentId: newStudentId, stage: admissionStage, targetClassId: classItem?.id ?? null, invoices: issuedInvoices, workflow: 'admission_before_placement' }) });
 
   res.status(201).json({ studentId: newStudentId, studentCode, invoices: issuedInvoices, nextStep: placementInvoiceRequirement ? 'Settle placement and registration invoices, then enroll from the student workspace.' : 'Run placement, settle invoices, then enroll from the student workspace.' });
 }));

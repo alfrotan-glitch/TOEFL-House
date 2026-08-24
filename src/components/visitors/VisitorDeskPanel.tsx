@@ -8,6 +8,7 @@ import React, { useState, useEffect } from 'react';
 import {X, Award, Check, Copy, UserCog, PhoneCall, CheckCircle2, Plus, User, UserCheck, UserPlus, ChevronRight} from 'lucide-react';
 import {Visitor, ConversionEligibility} from '../../types';
 import { BRAND_NAME } from '../../config/branding';
+import { SOURCE_LABELS } from '../../config/visitorSources';
 
 interface VisitorDeskPanelProps {
   visitor: Visitor;
@@ -145,9 +146,7 @@ export default function VisitorDeskPanel({
     }
   };
 
-  const getSourceLabel = (src: string) => {
-    switch (src) { case 'ads': return 'Facebook ads'; case 'friend': return 'Referral'; case 'social': return 'Social media'; default: return 'Other'; }
-  };
+  const sourceLabel = SOURCE_LABELS[visitor.source] || visitor.source;
 
   const templates = [
     { title: 'Welcome message 👋 (Dari)', text: `محترم ${visitor.gender === 'male' ? 'آقای' : 'خانم'} ${visitor.fullName}، سلام!\nاز مراجعه شما به ${BRAND_NAME} تشکر می‌کنیم. مشوره امروز شما ثبت گردید.\nدوره مورد علاقه: ${visitor.interestedCourse || 'the selected program'}\nمنتظر حضور شما در صنف استیم.\n— ${BRAND_NAME}` },
@@ -301,7 +300,7 @@ export default function VisitorDeskPanel({
                   </div>
                   <div>
                     <label className="block text-slate-500 font-bold mb-1">Initial source:</label>
-                    <div className="bg-slate-100 border border-slate-150 rounded-xl px-2.5 py-2 font-bold text-slate-700 text-center">{getSourceLabel(visitor.source)}</div>
+                    <div className="bg-slate-100 border border-slate-150 rounded-xl px-2.5 py-2 font-bold text-slate-700 text-center">{sourceLabel}</div>
                   </div>
                 </div>
 

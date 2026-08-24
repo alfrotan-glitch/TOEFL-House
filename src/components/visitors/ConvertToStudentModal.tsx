@@ -31,6 +31,17 @@ interface ConvertToStudentModalProps {
   onOpenPlacementTest?: () => void;
 }
 
+function fallbackEligibility(message: string, placementStatus: Visitor['placementStatus']): ConversionEligibility {
+  return {
+    eligible: false,
+    code: 'placement_required',
+    reason: message,
+    requirementMode: 'unknown',
+    placementStatus: placementStatus || 'not_started',
+    placementActionable: false,
+  };
+}
+
 export default function ConvertToStudentModal({
   convertingVisitor,
   classes,
@@ -45,8 +56,10 @@ export default function ConvertToStudentModal({
   const [classId, setClassId] = useState('');
   const [convNotes, setConvNotes] = useState('');
   const [converting, setConverting] = useState(false);
-  const [checkingEligibility, setCheckingEligibility] = useState(true);
-  const [eligibility, setEligibility] = useState<ConversionEligibility | null>(null);
+  const [checkingAdmissionEligibility, setCheckingAdmissionEligibility] = useState(true);
+  const [admissionEligibility, setAdmissionEligibility] = useState<ConversionEligibility | null>(null);
+  const [checkingClassEligibility, setCheckingClassEligibility] = useState(false);
+  const [classEligibility, setClassEligibility] = useState<ConversionEligibility | null>(null);
   const [result, setResult] = useState<ConversionResult | null>(null);
 
   const conversionBranchId = convertingVisitor.branchId || activeBranchId;
@@ -63,27 +76,44 @@ export default function ConvertToStudentModal({
     ?? convertingVisitor.placementScore?.total
     ?? convertingVisitor.placementScore?.totalScore
     ?? null;
+  const admissionBannerText = admissionEligibility?.eligible
+    ? (classId
+        ? 'Admission can proceed. The selected class is validated separately below and will not enroll the student yet.'
+        : 'Admission can proceed. Leave the class blank, or choose one to save the intended academic track on the admission record.')
+    : admissionEligibility?.reason ?? null;
 
   useEffect(() => {
     let cancelled = false;
-    setCheckingEligibility(true);
     checkConversionEligibility(convertingVisitor.id)
-      .then((res) => { if (!cancelled) setEligibility(res); })
+      .then((res) => { if (!cancelled) setAdmissionEligibility(res); })
       .catch((err: any) => {
         if (!cancelled) {
-          setEligibility({
-            eligible: false,
-            code: 'placement_required',
-            reason: err?.message || 'Could not verify admission readiness. Please retry.',
-            requirementMode: 'unknown',
-            placementStatus: convertingVisitor.placementStatus || 'not_started',
-            placementActionable: false,
-          });
+          setAdmissionEligibility(fallbackEligibility(
+            err?.message || 'Could not verify admission readiness. Please retry.',
+            convertingVisitor.placementStatus,
+          ));
         }
       })
-      .finally(() => { if (!cancelled) setCheckingEligibility(false); });
+      .finally(() => { if (!cancelled) setCheckingAdmissionEligibility(false); });
     return () => { cancelled = true; };
   }, [checkConversionEligibility, convertingVisitor.id, convertingVisitor.placementStatus]);
+
+  useEffect(() => {
+    if (!classId) return;
+    let cancelled = false;
+    checkConversionEligibility(convertingVisitor.id, classId)
+      .then((res) => { if (!cancelled) setClassEligibility(res); })
+      .catch((err: any) => {
+        if (!cancelled) {
+          setClassEligibility(fallbackEligibility(
+            err?.message || 'Could not verify the selected class. Please retry.',
+            convertingVisitor.placementStatus,
+          ));
+        }
+      })
+      .finally(() => { if (!cancelled) setCheckingClassEligibility(false); });
+    return () => { cancelled = true; };
+  }, [checkConversionEligibility, convertingVisitor.id, convertingVisitor.placementStatus, classId]);
 
   const availableClasses = useMemo(
     () => classes.filter((candidate) => {
@@ -113,13 +143,32 @@ export default function ConvertToStudentModal({
   }, [availableClasses, recommendedLevelId, recommendedLevelLabel]);
 
   const blockedOutright = Boolean(
-    eligibility && !eligibility.eligible && ['already_converted', 'lead_lost', 'student_exists'].includes(eligibility.code),
+    admissionEligibility && !admissionEligibility.eligible && ['already_converted', 'lead_lost', 'student_exists'].includes(admissionEligibility.code),
   );
+  const selectedClassInvalid = Boolean(
+    classEligibility && ['class_not_found', 'class_wrong_branch', 'class_inactive', 'placement_policy_unconfigured'].includes(classEligibility.code),
+  );
+  const placementActionability = classId ? classEligibility : admissionEligibility;
+  const classValidationTone = !classEligibility
+    ? null
+    : selectedClassInvalid
+      ? 'error'
+      : classEligibility.code === 'placement_required'
+        ? 'warning'
+        : 'success';
 
   const handleConvertConfirm = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (eligibility && !eligibility.eligible && blockedOutright) {
-      triggerToast(eligibility.reason, 'error');
+    if (checkingAdmissionEligibility || checkingClassEligibility) {
+      triggerToast('Please wait for the admission checks to finish.', 'info');
+      return;
+    }
+    if (admissionEligibility && !admissionEligibility.eligible && blockedOutright) {
+      triggerToast(admissionEligibility.reason, 'error');
+      return;
+    }
+    if (selectedClassInvalid && classEligibility) {
+      triggerToast(classEligibility.reason, 'error');
       return;
     }
     setConverting(true);
@@ -200,17 +249,17 @@ export default function ConvertToStudentModal({
         </div>
       </div>
 
-      {checkingEligibility ? (
+      {checkingAdmissionEligibility ? (
         <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
           <Loader2 className="h-4 w-4 animate-spin text-indigo-600" /> Checking admission readiness…
         </div>
-      ) : eligibility ? (
-        <div className={`rounded-2xl border px-4 py-3 text-xs ${eligibility.eligible ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
+      ) : admissionEligibility ? (
+        <div className={`rounded-2xl border px-4 py-3 text-xs ${admissionEligibility.eligible ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
           <div className="flex items-start gap-2">
-            {eligibility.eligible ? <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" /> : <AlertCircle className="mt-0.5 h-4 w-4 text-amber-600" />}
+            {admissionEligibility.eligible ? <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" /> : <AlertCircle className="mt-0.5 h-4 w-4 text-amber-600" />}
             <div>
-              <p className="font-black">{eligibility.eligible ? 'Admission is allowed' : 'Attention required'}</p>
-              <p className="mt-1">{eligibility.reason}</p>
+              <p className="font-black">{admissionEligibility.eligible ? 'Admission is allowed' : 'Attention required'}</p>
+              <p className="mt-1">{admissionBannerText}</p>
             </div>
           </div>
         </div>
@@ -264,10 +313,19 @@ export default function ConvertToStudentModal({
         <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-xs">
           <h4 className="mb-3 text-xs font-extrabold text-slate-900">Optional target class</h4>
           <p className="mb-3 text-[11px] text-slate-500">
-            This does not enroll the student. It only helps keep the intended academic track visible before placement and payment are completed.
+            If you choose a valid class, admission saves it on the registration record as the intended class. This does not enroll the student; placement, payment, and enrollment still happen later.
           </p>
-          <select value={classId} onChange={(event) => setClassId(event.target.value)} className={control.select}>
-            <option value="">No class selected yet</option>
+          <select
+            value={classId}
+            onChange={(event) => {
+              const nextClassId = event.target.value;
+              setClassId(nextClassId);
+              setClassEligibility(null);
+              setCheckingClassEligibility(Boolean(nextClassId));
+            }}
+            className={control.select}
+          >
+            <option value="">Do not record a target class yet</option>
             {recommendedClasses.map((candidate) => (
               <option key={candidate.id} value={candidate.id}>{candidate.name} — recommended</option>
             ))}
@@ -276,9 +334,34 @@ export default function ConvertToStudentModal({
             ))}
           </select>
           {selectedClass && (
-            <p className="mt-2 text-[11px] font-semibold text-indigo-700">
-              Intended class: {selectedClass.name}{selectedClass.level ? ` · ${selectedClass.level}` : ''}
-            </p>
+            <>
+              <p className="mt-2 text-[11px] font-semibold text-indigo-700">
+                Intended class: {selectedClass.name}{selectedClass.level ? ` · ${selectedClass.level}` : ''}
+              </p>
+              {checkingClassEligibility ? (
+                <div className="mt-3 flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[11px] text-slate-600">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-600" /> Checking target class…
+                </div>
+              ) : classEligibility ? (
+                <div className={`mt-3 rounded-2xl border px-3 py-2.5 text-[11px] ${classValidationTone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : classValidationTone === 'warning' ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-rose-200 bg-rose-50 text-rose-900'}`}>
+                  <p className="font-black">
+                    {classValidationTone === 'success'
+                      ? 'Target class validated'
+                      : classValidationTone === 'warning'
+                        ? 'Target class saved; placement still required later'
+                        : 'This class cannot be saved'}
+                  </p>
+                  <p className="mt-1">
+                    {classValidationTone === 'success'
+                      ? 'This class will be saved on the admission registration record.'
+                      : classValidationTone === 'warning'
+                        ? 'This class will be saved as the intended class, but the student must still clear placement before later enrollment.'
+                        : 'Choose another active class, or clear this field and admit without a target class.'}
+                  </p>
+                  <p className="mt-1 text-[10px] opacity-90">{classEligibility.reason}</p>
+                </div>
+              ) : null}
+            </>
           )}
         </div>
       </div>
@@ -313,14 +396,14 @@ export default function ConvertToStudentModal({
             Cancel
           </button>
           <div className="flex items-center gap-2">
-            {eligibility && !eligibility.eligible && eligibility.placementActionable && onOpenPlacementTest && (
+            {placementActionability && !placementActionability.eligible && placementActionability.placementActionable && onOpenPlacementTest && (
               <button type="button" onClick={onOpenPlacementTest} className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2 text-xs font-bold text-amber-800 hover:bg-amber-100">
                 Open placement
               </button>
             )}
             <button
               type="submit"
-              disabled={converting || blockedOutright}
+              disabled={converting || checkingAdmissionEligibility || checkingClassEligibility || blockedOutright || selectedClassInvalid}
               className="inline-flex items-center gap-2 rounded-2xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {converting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserCheck className="h-4 w-4" />}
