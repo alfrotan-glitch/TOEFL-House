@@ -53,3 +53,7 @@
 | REQ-ORG-007 | BR-ACCESS-003 | Approval governance | Threshold policy | Action/resource scope | Relevant workspace | Planned | No threshold is invented or bypassed | OPEN |
 | REQ-ACCESS-001 | BR-SCOPE-001 | Access governance | Scope assignment | Scope-specific | System Administration | Planned | Each scope type has named authority | OPEN |
 | REQ-WORK-001 | — | Workspace governance | Workspace priority record | Position scope | All listed workspaces | Planned | Priority order is preserved without implying workflow completion | OPEN |
+
+## Gate 1 traceability finding
+
+The existing seeds are not a complete traceability matrix. Every critical domain still requires business-level links from requirement to rule, entity, authority, scope, workspace, report, notification, acceptance criterion, exception, and recovery. Implementation links remain prohibited until later architecture gates.

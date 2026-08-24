@@ -1,6 +1,6 @@
 # Foundation Requirements Registry
 
-**Status:** Discovery in progress
+**Status:** Gate 1 review — blocked pending requirements remediation
 
 | ID | Requirement | Source | Classification | Status |
 |---|---|---|---|---|
@@ -38,3 +38,7 @@
 | REQ-ORG-017 | Acting Heads of Department are recommended by the department and appointed by the General Manager for defined start and end dates. | O-87 | AUTHORITATIVE BUSINESS DECISION | DECIDED |
 
 No requirement in this registry authorizes production implementation.
+
+## Gate 1 quality status
+
+The registry is materially incomplete for an implementation contract. See `26-gate-1-requirements-completeness-review.md` for missing acceptance, lifecycle, authority, scope, financial, academic, HR, privacy, reporting, and resilience requirements.

@@ -70,3 +70,7 @@ This index maps the directive's required foundation artifacts to their current s
 ## Gate rule
 
 The presence of a file is not evidence that its contents are complete. Every artifact must be cross-referenced, decision-aware, and evidence-gated before its owning gate can pass.
+
+## Gate 1 artifact
+
+- `26-gate-1-requirements-completeness-review.md` — requirements completeness audit and Gate 1 disposition
