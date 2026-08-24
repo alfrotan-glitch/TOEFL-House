@@ -1,6 +1,0 @@
-[
-  { "feeType": "placement", "name": "Placement Test fee", "amount": 300, "isOptional": false, "isActive": true, "effectiveFrom": "2026-08-01" },
-  { "feeType": "registration", "name": "Registration fee", "amount": 500, "isOptional": false, "isActive": true, "effectiveFrom": "2026-08-01" },
-  { "feeType": "card", "name": "Student ID card fee", "amount": 100, "isOptional": true, "isActive": true, "effectiveFrom": "2026-08-01" },
-  { "feeType": "diploma", "name": "Diploma / certificate fee", "amount": 200, "isOptional": true, "isActive": true, "effectiveFrom": "2026-08-01" }
-]

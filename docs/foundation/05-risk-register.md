@@ -1,0 +1,12 @@
+# Foundation Risk and Contradiction Register
+
+| ID | Type | Risk / contradiction | Impact | Control | Status |
+|---|---|---|---|---|---|
+| R-F-001 | Foundation boundary | Existing branch contains production implementation although the directive prohibits production implementation before certification. | High: greenfield claims could be false. | Keep current work documentation-only; classify existing code as reference evidence. | OPEN |
+| R-F-002 | Architecture | Current implementation uses Express/TypeScript + SQLite; directive lists Laravel + PostgreSQL as preferred. | High: affects domain, persistence, deployment, testing, and API design. | Ask architecture decision only after business discovery; do not silently migrate or extend. | OPEN |
+| R-F-003 | Business policy | Existing bootstrap hard-codes Kabul Campus/Main Branch values. | High: may encode seed convenience as institutional policy. | Confirm organization facts and seed policy with user. | OPEN |
+| R-F-004 | Authority | Existing docs contain prior decisions and certifications. | High: stale or unapproved decisions may be mistaken for requirements. | Treat as historical evidence; record explicit confirmation before promotion. | OPEN |
+| R-F-005 | Completeness | Existing domain/test breadth may create false confidence about omitted domains, actors, failure paths, and traceability. | High: certification could be invalid. | Use directive domain checklist and registries; no certification by test count. | OPEN |
+| R-F-006 | Calendar | Existing code contains date/calendar implementation, but business period semantics have not been user-confirmed in this session. | High: affects finance, payroll, academic periods, and reporting. | Calendar discovery before implementation. | OPEN |
+| R-F-007 | Finance | Existing financial behavior is substantial, but accounting policy and authority must be confirmed independently. | Critical: money and historical truth. | Financial decision cluster; fail closed. | OPEN |
+| R-F-008 | Authorization | Existing RBAC/ABAC behavior is evidence, not proof of complete position/permission/scope/projection policy. | Critical: privilege escalation and branch leakage. | Model organization and authorization before implementation. | OPEN |
