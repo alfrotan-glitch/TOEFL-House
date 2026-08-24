@@ -90,3 +90,8 @@ Artifacts `42`–`49` define business-level boundary contracts, authoritative fl
 ## Gate 5 architecture mapping
 
 Architecture enforcement points for Foundation rules and invariants are recorded in `docs/architecture/24-architecture-invariant-registry.md` and traced end-to-end in `docs/architecture/25-architecture-traceability.md`.
+
+
+## Gate 6 disposition
+
+Executable enforcement and future test obligations are specified in `docs/implementation/14-testing-implementation-contract.md` and traced in the implementation package.

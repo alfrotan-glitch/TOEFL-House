@@ -1,0 +1,3 @@
+# Reporting Implementation Contract
+
+Every metric definition records canonical source, calculation, Financial/Academic Period semantics, filters, scope, as-of behavior, projection freshness, version, and reconciliation rule. Reporting projections are rebuildable and read-only. Finance defines revenue/receivable/payment/cash/payroll financial sources; Students/Academic define enrollment/attendance/success; HR/Payroll defines approved payroll; Funding and Assets define their facts. Dashboards cannot write or redefine sources. Undefined metrics are recorded as undefined, not invented. Tests compare projections to owner facts and period/scope definitions.

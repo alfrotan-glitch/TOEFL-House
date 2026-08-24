@@ -114,3 +114,12 @@ The presence of a file is not evidence that its contents are complete. Every art
 ## Gate 5 architecture package
 
 The formal architecture package is maintained under `docs/architecture/`: artifacts `01`–`26` cover topology, style, module boundaries, dependencies, transactions, finance, authorization/scope, approvals, lifecycles, academics, HR/payroll, reporting, audit, privacy/documents, integrations, background work, consistency, errors, observability, resilience/security, testing, legacy migration, ADRs, invariants, traceability, and the Gate 5 review.
+
+
+## Architecture state
+
+- `docs/architecture/00-architecture-state.md` — current approved architecture state and implementation boundary
+
+## Gate 6 implementation contract package
+
+The implementation readiness package is maintained under `docs/implementation/`, artifacts `01`–`19`, covering gap audit, module/command contracts, finance, authorization, lifecycle, academic, HR/payroll, reporting, integration, concurrency, errors, testing, migration, legacy disposition, sequence, risks, and Gate 6 review.

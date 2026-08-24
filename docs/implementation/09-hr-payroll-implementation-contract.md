@@ -1,0 +1,3 @@
+# HR and Payroll Implementation Contract
+
+Identity owns person; HR owns employment, position assignment, contract, compensation terms, leave, termination, and entitlement facts; Academic owns teaching/work evidence; Payroll owns period calculation/result; Finance owns journal/payment. Payroll snapshots effective terms/evidence, separates preparation/review/approval, and holds contract-silent cases for HR/Finance. Period close prevents mutation; correction appends adjustment/reversal. Termination requires clearance and access expiry. Tests cover contract precedence, SoD, period races, recalculation, payment linkage, and history.

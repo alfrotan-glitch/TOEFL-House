@@ -74,3 +74,8 @@ The Foundation must translate to architecture through explicit domain boundaries
 ## Gate 5 architecture implications
 
 Requirements are mapped to owner-bound modules, server authorization, transaction boundaries, financial invariants, append-only history, privacy gates, resilient integration contracts, and future test categories in `docs/architecture/25-architecture-traceability.md`. No business requirement was changed.
+
+
+## Gate 6 disposition
+
+Implementation contract mappings are recorded in `docs/implementation/02-implementation-contract.md` and `03-command-query-registry.md`; no business requirement was changed.
