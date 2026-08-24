@@ -1,6 +1,7 @@
 # Environment Blocker Report — Laravel/Composer Unobtainable
 
-**Status:** OPEN — implementation blocker. Not a technology decision.
+**Status:** CLOSED (remediated 2026-08-25) — the approved stack is now reproducibly obtainable. See "Remediation" below.
+**Original status:** OPEN — implementation blocker. Not a technology decision.
 **Date:** 2026-08-25
 **Environment:** sandboxed build environment for this repository session
 
@@ -47,10 +48,42 @@ Because the environment blocks package distribution, the following were built fr
 
 PHP 8.2.27 runs with the required extension set verified: `pdo_pgsql`, `pgsql`, `mbstring`, `curl`, `openssl`, `bcmath`, `pcntl`, `posix`, `xml`, `dom`, `simplexml`, `iconv`, `zlib`.
 
-## Verification consequence
+## Verification consequence (original)
 
-Per the Quality Directive Verification Gate Matrix (clause 27), production verification under ADR-013 uses Laravel-native tooling (Artisan, PHPUnit, Laravel Pint, Larastan or equivalent) plus the migration validator. That tooling requires Composer/Packagist and is therefore not runnable while this blocker stands.
+Per the Quality Directive Verification Gate Matrix (clause 27), production verification under ADR-013 uses Laravel-native tooling (Artisan, PHPUnit, Laravel Pint, Larastan or equivalent) plus the migration validator. That tooling requires Composer/Packagist and was therefore not runnable while this blocker stood.
 
-## Closure condition
+## Remediation (2026-08-25) — blocker closed
 
-This blocker closes only when Composer/Packagist (and therefore Laravel and its tooling) are reproducibly obtainable in a maintained build environment. Until then, production implementation under ADR-013 is **IMPLEMENTATION BLOCKED BY ENVIRONMENT**.
+The blocker is **CLOSED**: the approved stack (PHP + Laravel + PostgreSQL, ADR-013) is now reproducibly obtainable and operational in this build environment, using only legitimate sources.
+
+**Discovered root causes (from the remediation work):**
+
+1. **Packagist hosts (`packagist.org`, `repo.packagist.org`) and `getcomposer.org` are unreachable** from this environment (`SSL_ERROR_SYSCALL` on connect — network-path block, not a certificate problem). This made the standard Composer path unusable. These hosts remain blocked; this is an egress property of the sandbox, not a configurable issue.
+2. **`raw.githubusercontent.com` / `objects.githubusercontent.com` / `release-assets.githubusercontent.com` are unreachable** (`SSL_ERROR_SYSCALL`), blocking raw-file, object-CDN, and release-asset downloads.
+3. **`github.com`, `api.github.com`, and `codeload.github.com` are reachable** with verified TLS (`ssl_verify_result=0`), including git smart-HTTP clones.
+
+**Remediation (all within the legitimate-source rule):**
+
+1. **Composer 2.10.2** bootstrapped from its official repository `github.com/composer/composer` (annotated release tag `2.10.2`, commit `8d4439f572a97670a9edc039eb3b093cc976b4bc`), with its runtime dependencies installed from their official GitHub repositories at composer's own committed `composer.lock` references. Runs as `/opt/th/dev/bin/composer`.
+2. **Project dependency acquisition:** project `composer.json` disables Packagist and declares the 75 packages of the Laravel 12.67.0 dependency closure as `vcs` repositories pointing at each package's **canonical official GitHub repository** (e.g. `github.com/laravel/framework`), each with `"no-api": true` so Composer uses the generic git driver (one verified-TLS git clone per repository, zero `api.github.com` metadata calls — the API metadata route was rate-limited and is not used).
+3. **Laravel 12.67.0 installed through that Composer** with a committed `composer.lock` (73 packages, all from canonical official sources; `composer audit` reports **no known security advisories**).
+4. **PHP 8.2.27** (official release tarball) with all Laravel-required extensions (`ext-ctype, ext-filter, ext-hash, ext-mbstring, ext-openssl, ext-session, ext-tokenizer`, plus `pdo_pgsql`, `pgsql`, `curl`, `dom`, `xml`, `fileinfo`, `iconv`, `zlib`, `bcmath`, `pcntl`, `posix`) verified present.
+5. **PostgreSQL 18.4** server running locally; connectivity verified both standalone (PDO) and **through Laravel** (`php artisan db:show` connects to database `toefl_house` as `postgres`; `select version()` returns `PostgreSQL 18.4`).
+
+**Verified results (evidence in `docs/implementation/23-environment-readiness.md`):**
+
+- `php -v` → PHP 8.2.27 (CLI, NTS)
+- `composer --version` → Composer 2.10.2
+- `php artisan --version` → Laravel Framework 12.67.0 (boots)
+- `composer validate` → `composer.json is valid`; lock content-hash matches
+- `composer install --dry-run` from lock → in sync (reproducible)
+- `php artisan db:show` → connects to `toefl_house` as `postgres` (Laravel ↔ PostgreSQL OK)
+- TLS verification enabled on every transfer; no `secure-http=false`; no insecure source
+
+**Constraints honored during remediation:** no third-party Laravel archives, no unverified mirrors, no unofficial bundles, no copied vendor trees of unknown provenance, no TLS-verification bypass, no insecure HTTP package sources, no arbitrary internet workarounds. All sources are the packages' canonical official GitHub repositories or the official `php/web-php-distributions` release tarball.
+
+**Final status:** **ENVIRONMENT READY** (2026-08-25). Package 02 (Identity and Organization) remains **NOT STARTED**; it may begin per the standing authorization now that the readiness checkpoint has passed, following the mandatory Package 02 internal sequence. The environment is reproducible: committed `composer.json` + committed `composer.lock` + documented bootstrapping steps reproduce the same vendor tree from the same pinned references.
+
+## Closure condition (original, superseded by Remediation above)
+
+This blocker closes only when Composer/Packagist (and therefore Laravel and its tooling) are reproducibly obtainable in a maintained build environment. Until then, production implementation under ADR-013 is **IMPLEMENTATION BLOCKED BY ENVIRONMENT**. — *Met 2026-08-25 via the remediation above.*

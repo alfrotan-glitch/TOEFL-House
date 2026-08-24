@@ -1,0 +1,21 @@
+# Environment / dependency artifacts
+/vendor/
+/.env
+/.env.backup
+/.env.*.local
+composer.phar
+
+# Laravel runtime artifacts
+/storage/*.key
+/bootstrap/cache/*
+/storage/framework/cache/*
+/storage/framework/sessions/*
+/storage/framework/views/*
+/storage/logs/*
+!/storage/framework/.gitkeep
+!/storage/app/.gitkeep
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
