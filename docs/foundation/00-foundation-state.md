@@ -1,8 +1,8 @@
 # TOEFL House Foundation State
 
 **Phase:** Foundation / discovery
-**Current gate:** Gate 0 — Discovery Initialization (`IN_PROGRESS`)
-**Certification:** `REJECTED / NOT ELIGIBLE` — no foundation certification claim is made
+**Current gate:** Gate 0 — Discovery Initialization (`READY FOR GATE REVIEW`)
+**Certification:** `NOT CLAIMED` — business discovery is complete; Gates 1–16 and Foundation Certification remain pending
 **Updated:** 2026-08-24
 
 ## Branch and repository boundary
@@ -50,7 +50,7 @@ Gate 0 cannot pass until:
 - contradictions between the directive, repository, and user decisions are recorded;
 - the next discovery cluster is approved.
 
-**Current result:** `BLOCKED` pending user answers in `02-organization-discovery.md`.
+**Current result:** `READY FOR GATE REVIEW`; residual non-blocking unknowns are recorded in `18-master-processing-record.md`.
 
 ## Prohibited claims
 
