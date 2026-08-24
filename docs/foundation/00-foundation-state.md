@@ -1,7 +1,7 @@
 # TOEFL House Foundation State
 
 **Phase:** Foundation / discovery
-**Current gate:** Gate 3 — Domain Model Completeness Review (`FAIL`)
+**Current gate:** Gate 3 — Domain Model Completeness Review (`PASS WITH NON-BLOCKING OPEN ITEMS`)
 **Certification:** `NOT CLAIMED` — business discovery is complete; Gates 1–16 and Foundation Certification remain pending
 **Updated:** 2026-08-25
 
@@ -50,7 +50,7 @@ Gate 0 cannot pass until:
 - contradictions between the directive, repository, and user decisions are recorded;
 - the next discovery cluster is approved.
 
-**Current result:** Gate 3 is `FAIL`; see `28-gate-3-domain-model-completeness-review.md`.
+**Current result:** Gate 3 is `PASS WITH NON-BLOCKING OPEN ITEMS`; see `41-gate-3-remediation-review.md`. Gate 4 is not automatically started.
 
 ## Prohibited claims
 

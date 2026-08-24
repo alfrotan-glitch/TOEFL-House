@@ -54,4 +54,4 @@ The Gate 2 blocker set is resolved. Remaining risks concern detailed rule catalo
 - CRITICAL: financial transaction, allocation, refund, adjustment, reversal, journal, and reconciliation entities are not individually authoritative in the model.
 - HIGH: per-entity lifecycle transitions, relationship cardinality/effective dating, access authority rows, academic evidence/decision records, HR/payroll contracts, privacy relationships, and derived-data lineage require modeling repair.
 
-Gate 3 is FAIL. No implementation or next gate is authorized until remediation and re-review.
+Gate 3 initial FAIL is resolved by artifacts 29–40. Independent re-review is recorded in artifact 41 as PASS WITH NON-BLOCKING OPEN ITEMS. Gate 4 is not automatically started.

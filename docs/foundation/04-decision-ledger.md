@@ -134,3 +134,11 @@ Existing repository decisions about currency, language, notifications, treasury 
 ## Decision protocol
 
 Each future critical decision must include the plain-language question, options, recommendation, operational consequences, affected domains, rules, invariants, permissions/scopes, and the user's explicit decision.
+
+## Gate 3 remediation decisions
+
+- **D-G3-001:** Financial balances are derived from posted source facts; payment, refund, discount, adjustment, reversal, journal, allocation, and reconciliation remain distinct.
+- **D-G3-002:** Academic evidence is not an official academic decision; appeals and corrections preserve prior history.
+- **D-G3-003:** Contractual entitlement, payroll calculation, payroll result, and actual payment remain distinct.
+- **D-G3-004:** Authority is modeled as Position + Assignment + Permission + Scope + Policy, with default deny and expiration for temporary authority.
+- **D-G3-005:** Gate 3 remediation passes with non-blocking open items; Gate 4 is not automatically started.

@@ -60,3 +60,7 @@ The registry is materially incomplete for an implementation contract. See `26-ga
 - G2-REQ-003: No automatic progression occurs without a program-specific rule; Academic Management must decide.
 - G2-REQ-004: Contract-silent payroll entries are held for HR and Finance review.
 - G2-REQ-005: Contract-silent restricted funds remain on hold and restricted.
+
+## Gate 3 domain-model requirements
+
+The Gate 3 remediation package establishes explicit requirements that every material money, authority, identity, academic, employment, privacy, historical, reporting, and reconciliation concept has a canonical owner, source record, relationship, lifecycle, authority path, and lineage rule. See artifacts `29`–`40` and the independent disposition in `41`.

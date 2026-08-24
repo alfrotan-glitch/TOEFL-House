@@ -79,4 +79,20 @@ The presence of a file is not evidence that its contents are complete. Every art
 
 - `27-gate-2-business-rule-completeness-review.md` — adversarial business-rule completeness audit and Gate 2 disposition
 
-- `28-gate-3-domain-model-completeness-review.md` — adversarial domain model completeness review
+- `28-gate-3-domain-model-completeness-review.md` — initial adversarial domain model completeness review (failed)
+
+## Gate 3 remediation package
+
+- `29-canonical-entity-registry.md` — canonical entity inventory and ownership
+- `30-source-of-truth-registry.md` — authoritative records and writer boundaries
+- `31-relationship-registry.md` — cardinality, ownership, dating, transfer, and deletion
+- `32-lifecycle-transition-registry.md` — entity states and valid transitions
+- `33-authority-scope-operation-registry.md` — operation authority, scope, and segregation
+- `34-financial-domain-model.md` — source financial entities and invariants
+- `35-academic-evidence-decision-model.md` — evidence versus official decisions
+- `36-hr-payroll-domain-model.md` — employment, entitlement, calculation, and payment separation
+- `37-privacy-consent-disclosure-model.md` — consent, disclosure, verification, and retention
+- `38-derived-data-lineage-registry.md` — derivation sources and reproducibility
+- `39-domain-contracts.md` — domain ownership and cross-domain boundaries
+- `40-configuration-domain-classification.md` — configuration, entities, facts, and derived data
+- `41-gate-3-remediation-review.md` — independent remediation re-review and disposition

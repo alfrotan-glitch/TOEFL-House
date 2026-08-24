@@ -67,3 +67,16 @@ The existing seeds are not a complete traceability matrix. Every critical domain
 ## Gate 2 rule-completeness finding
 
 Global control invariants are established, but domain-level rules for refunds, discounts, academic progression fallback, contract-silent payroll treatment, and silent restricted-fund agreements remain non-deterministic. These are business rules, not technical implementation details, and block Gate 2.
+
+## Gate 3 remediation extensions
+
+The authoritative domain package is now `29` through `40`. It supersedes only the incompleteness identified by the initial Gate 3 review; prior decisions and historical evidence remain retained. Key controls include:
+
+- canonical financial source entities and no mutable authoritative balances;
+- immutable evidence and official academic decision separation;
+- contractual entitlement, payroll calculation, payroll result, and actual payment separation;
+- Position + Assignment + Permission + Scope + Policy authority;
+- append-only correction/reversal, effective dating, consent/disclosure evidence, and derived-data lineage;
+- explicit domain ownership and forbidden direct mutation across boundaries.
+
+Traceability for the remediation is recorded in `41-gate-3-remediation-review.md`. Implementation tests and technical enforcement remain outside this gate.
