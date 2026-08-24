@@ -126,6 +126,8 @@
 | G2-D-003 | If no program-specific progression rule exists, a student does not advance automatically; Academic Management must review and decide. | G2-B03 | User response, 2026-08-25 | USER-DECIDED |
 | G2-D-004 | If an employment contract is silent on absence, overtime, advances, or deductions, Payroll holds the affected entry for HR and Finance review and does not invent a charge or payment. | G2-B04 | User response, 2026-08-25 | USER-DECIDED |
 | G2-D-005 | If a restricted-fund agreement is silent after its supported student or program ends, funds remain restricted and on hold until authorized clarification. | G2-B05 | User response, 2026-08-25 | USER-DECIDED |
+| D-F-100 | Application technology is PHP with the Laravel framework; the database is PostgreSQL. The system remains a modular monolith with strict contexts. This resolves the previously open D-F-003 and legacy findings L-002/L-003; ADR-013 records the architectural decision. | User response, 2026-08-25 | USER-DECIDED; supersedes D-F-003 |
+| D-F-101 | The Implementation Quality Directive is adopted as the mandatory standing engineering standard for every implementation artifact in every package, codified at `docs/implementation/21-implementation-quality-directive.md`. It does not by itself authorize any package. | User directive, 2026-08-25 | USER-DIRECTED |
 
 ## Decisions explicitly not imported
 

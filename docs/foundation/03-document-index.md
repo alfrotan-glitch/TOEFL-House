@@ -40,8 +40,8 @@ This index maps the directive's required foundation artifacts to their current s
 | 32 | Reporting Model | `docs/foundation/reporting.md` | PLANNED |
 | 33 | Integration Model | `docs/foundation/integrations.md` | PLANNED |
 | 34 | Data Model | `docs/foundation/data-model.md` | PLANNED after domain discovery |
-| 35 | Database Architecture | `docs/foundation/database-architecture.md` | BLOCKED by target architecture decision |
-| 36 | API Architecture | `docs/foundation/api-architecture.md` | BLOCKED by target architecture decision |
+| 35 | Database Architecture | `docs/foundation/database-architecture.md` | PLANNED (target architecture decided 2026-08-25; ADR-013) |
+| 36 | API Architecture | `docs/foundation/api-architecture.md` | PLANNED (target architecture decided 2026-08-25; ADR-013) |
 | 37 | API Contracts | `docs/foundation/api-contracts/` | PROHIBITED before architecture |
 | 38 | Application Architecture | `docs/foundation/application-architecture.md` | BLOCKED by discovery |
 | 39 | Frontend Architecture | `docs/foundation/frontend-architecture.md` | BLOCKED by workspace discovery |
