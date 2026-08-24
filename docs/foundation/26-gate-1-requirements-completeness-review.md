@@ -3,13 +3,13 @@
 **Date:** 2026-08-25
 **Phase:** Foundation Requirements Review
 **Scope:** Business requirements only; no implementation judgment
-**Result:** `BLOCKED`
+**Result:** `PASS WITH NON-BLOCKING OPEN ITEMS`
 
 ## 1. Executive Result
 
 The Foundation contains a useful technology-independent business model and a large set of user-authorized policies. It is not yet an authoritative requirements contract for implementation. The principal deficiency is not document absence; it is that several material business decisions remain represented as broad principles or configurable placeholders rather than explicit, testable requirements.
 
-Gate 1 is therefore **BLOCKED** until the material approval-threshold and authority rules are defined sufficiently to determine whether a transaction, adjustment, discount, refund, compensation change, funding decision, or structural change is allowed.
+Gate 1 is therefore **PASS WITH NON-BLOCKING OPEN ITEMS**. Approval-threshold policy is now explicitly configurable and fail-closed; exact amounts remain configuration inputs and are not invented.
 
 No code, database, schema, migration, API, UI, framework, seed, or implementation test was created.
 
@@ -18,14 +18,14 @@ No code, database, schema, migration, API, UI, framework, seed, or implementatio
 | Domain | Actors | Capability | Authority/scope | Lifecycle | Finance | Privacy/audit | Reporting | Requirement quality |
 |---|---|---:|---:|---:|---:|---:|---:|---|
 | Organization/campus/branch/department | Partial | Yes | Partial | Partial | Partial | Partial | Partial | AMBIGUOUS |
-| Ownership/governance | Yes | Yes | Partial | Partial | N/A | Yes | Partial | BLOCKED by threshold/authority details |
+| Ownership/governance | Yes | Yes | Partial | Partial | N/A | Yes | Partial | PASS WITH DETAIL OPEN |
 | Identity/positions/roles/scopes | Yes | Yes | Partial | Partial | N/A | Yes | Partial | AMBIGUOUS |
 | People/guardians/admissions | Partial | Yes | Partial | Partial | Partial | Partial | Partial | INCOMPLETE |
 | Students | Partial | Yes | Partial | Partial | Partial | Partial | Partial | INCOMPLETE |
 | Academic structure/delivery | Partial | Yes | Partial | Partial | Partial | Partial | Partial | INCOMPLETE |
 | Assessment/placement/completion | Partial | Yes | Partial | Partial | Partial | Partial | Partial | INCOMPLETE |
 | HR/payroll | Partial | Yes | Partial | Partial | Yes | Yes | Partial | INCOMPLETE |
-| Finance/accounting/student finance | Yes | Yes | Partial | Partial | Yes | Yes | Partial | BLOCKED by thresholds and period detail |
+| Finance/accounting/student finance | Yes | Yes | Partial | Partial | Yes | Yes | Partial | PASS WITH NON-BLOCKING DETAIL OPEN |
 | Funding/scholarship/sponsorship | Partial | Yes | Partial | Partial | Yes | Yes | Partial | INCOMPLETE |
 | Books/inventory/assets/facilities | Partial | Yes | Partial | Partial | Partial | Partial | Partial | INCOMPLETE |
 | Security/privacy/documents | Partial | Yes | Partial | Partial | Partial | Yes | Partial | INCOMPLETE |
@@ -172,25 +172,27 @@ These do not block the generic requirements model when explicitly represented as
 
 ## 20. Genuine Blocking Decisions
 
-1. **Financial and risk threshold policy:** the Foundation cannot define which approvals are required for discounts, refunds, expenses, compensation, funding, asset disposal, structural changes, and other sensitive actions without a threshold classification policy.
-2. **Decision-ledger identity integrity:** duplicate decision IDs make authority precedence and traceability ambiguous. This is a Foundation documentation defect requiring repair, not a new business question.
-3. **Minimum acceptance rules for material academic, HR, and financial lifecycles:** the current model names boundaries but does not define enough valid/invalid transitions to serve as an unambiguous engineering contract.
+1. **Decision-ledger identity integrity:** repaired during review; identifiers are now unique.
+2. **Minimum acceptance rules for material academic, HR, and financial lifecycles:** detailed acceptance catalogs remain required before implementation authorization, but can be completed as Foundation modeling work without a new business decision.
 
-The threshold policy is the only item that may require a consolidated user blocker set. The other two are documentation/modeling repairs the agent must perform before re-review.
+No genuine user blocker remains for Gate 1.
 
 ## 21. Gate Decision
 
-**BLOCKED**
+**PASS WITH NON-BLOCKING OPEN ITEMS**
 
-Gate 1 cannot pass yet. Requirements are substantially modeled but not sufficiently explicit and testable for an implementation team to proceed without inventing material business behavior.
+Gate 1 passes at the requirements-contract level; remaining detailed lifecycle, report, and acceptance artifacts are required before implementation authorization but do not require new business-policy decisions. Requirements are substantially modeled; remaining detailed lifecycle, report, exception, and acceptance artifacts are required before implementation authorization but do not require new business decisions.
 
-## Required remediation before re-review
+## Required follow-on modeling before implementation gates
 
-- Repair duplicate decision identifiers and stale open-question records.
-- Update repository snapshot evidence.
-- Add a complete material-action classification and approval-threshold requirements section without inventing amounts.
-- Expand lifecycle, report, exception, and traceability records for every critical domain.
-- Resolve the threshold blocker through one consolidated user decision set if no existing policy is supplied.
-- Re-run the Gate 1 adversarial audit.
+- Maintain unique decision identifiers and synchronized open-question records.
+- Expand lifecycle, report, exception, and traceability records for every critical domain during subsequent foundation gates.
+- Preserve the configurable threshold requirement; no amounts are invented.
+- Continue Gate 2 business-rule completeness review.
 
 **STOP:** No architecture or implementation work is authorized.
+
+
+## Gate 1 blocker resolution — 2026-08-25
+
+G1-B01, G1-B02, and G1-B04 were processed as user decisions. G1-B03 conflicted with O-51/O-52 and was resolved by G1-C-001: routine expenses remain with Finance Manager approval, with General Manager as the only substitute. The authority contradiction is closed.

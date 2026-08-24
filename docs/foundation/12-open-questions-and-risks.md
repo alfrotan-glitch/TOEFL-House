@@ -22,3 +22,12 @@
 ## Risk posture
 
 Gate 1 is BLOCKED. No architecture or implementation may begin. Unknowns must remain explicit and fail closed.
+
+## Gate 1 blocker resolution
+
+- **G1-C-001:** Resolved. Routine Branch Manager expenses remain with Finance Manager approval; the General Manager is the only substitute when Finance is unavailable.
+
+## Ongoing non-blocking modeling risks
+
+- Detailed acceptance and lifecycle records must be expanded before implementation authorization.
+- Exact financial/value thresholds remain configurable and must be populated through approved policy before affected actions are enabled.

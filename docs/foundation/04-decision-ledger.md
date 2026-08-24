@@ -54,12 +54,12 @@
 | D-F-046 | A Head of Department may temporarily remove a team member from duties for an urgent safety, misconduct, or serious operational concern, with documentation and mandatory HR/General Manager review within a defined period. | O-86 | User response, 2026-08-24 | DECIDED / REVIEW PERIOD OPEN |
 | D-F-047 | An acting Head of Department is recommended by the department and appointed by the General Manager for a defined start and end date. | O-87 | User response, 2026-08-24 | DECIDED |
 
-| D-F-042 | Owner approval is required for senior, sensitive, or organization-wide positions; ordinary team appointments remain with HR and the General Manager. | O-88 | User response, 2026-08-24 | DECIDED / POSITION CATEGORIES OPEN |
-| D-F-043 | An urgent temporary removal from duties requires HR and General Manager initial review within 24 hours. | O-89 | User response, 2026-08-24 | DECIDED / FULL REVIEW PERIOD OPEN |
-| D-F-044 | During temporary removal, only protective access or scheduling restrictions may occur; permanent pay or employment changes require separate approval. | O-90 | User response, 2026-08-24 | DECIDED |
-| D-F-045 | A Head of Department's own leave, expense, bonus, or schedule exception is approved by the General Manager after HR or Finance review as relevant; higher-risk matters escalate. | O-91 | User response, 2026-08-24 | DECIDED |
-| D-F-046 | A Head of Department may approve routine team leave, schedule changes, or duty swaps within staffing rules; material effects require higher review. | O-92 | User response, 2026-08-24 | DECIDED / IMPACT RULES OPEN |
-| D-F-047 | A Head of Department may formally evaluate team members; HR and the General Manager review consequences affecting pay, position, or employment. | O-93 | User response, 2026-08-24 | DECIDED |
+| D-F-084 | Owner approval is required for senior, sensitive, or organization-wide positions; ordinary team appointments remain with HR and the General Manager. | O-88 | User response, 2026-08-24 | DECIDED / POSITION CATEGORIES OPEN |
+| D-F-085 | An urgent temporary removal from duties requires HR and General Manager initial review within 24 hours. | O-89 | User response, 2026-08-24 | DECIDED / FULL REVIEW PERIOD OPEN |
+| D-F-086 | During temporary removal, only protective access or scheduling restrictions may occur; permanent pay or employment changes require separate approval. | O-90 | User response, 2026-08-24 | DECIDED |
+| D-F-087 | A Head of Department's own leave, expense, bonus, or schedule exception is approved by the General Manager after HR or Finance review as relevant; higher-risk matters escalate. | O-91 | User response, 2026-08-24 | DECIDED |
+| D-F-088 | A Head of Department may approve routine team leave, schedule changes, or duty swaps within staffing rules; material effects require higher review. | O-92 | User response, 2026-08-24 | DECIDED / IMPACT RULES OPEN |
+| D-F-089 | A Head of Department may formally evaluate team members; HR and the General Manager review consequences affecting pay, position, or employment. | O-93 | User response, 2026-08-24 | DECIDED |
 
 | D-F-048 | At least two Owners approve appointments or replacements for General Manager, Finance Manager, HR Manager, Security lead, System Administrator, and every Head of Department; ordinary positions remain with HR and the General Manager. | O-94, C-F-002, O-75 | User responses, 2026-08-24 | DECIDED |
 | D-F-049 | After an urgent temporary removal, the full employment decision must be completed within seven days. | O-95 | User response, 2026-08-24 | DECIDED |
@@ -109,10 +109,17 @@
 | D-F-082 | A requester should receive the reason when a permission change is rejected, without disclosure of confidential reviewer information. | O-128 | User response, 2026-08-24 | DECIDED |
 | D-F-083 | Sensitive or organization-wide access must be reviewed at least annually. | O-129 | User response, 2026-08-24 | DECIDED |
 
-| D-F-078 | Consolidated decisions MD-001 through MD-065 are accepted as the current TOEFL House business-policy baseline; earlier compatible decisions remain active, and conflicting earlier recommendations are superseded. | Consolidated user decision document | User response, 2026-08-24 | DECIDED |
-| D-F-079 | Residual exact campus/branch inventory, legal succession details, agreement-specific scholarship/funding rules, and additional contract variations are recorded as non-blocking UNKNOWN items and must be resolved before their specific configuration or implementation. | OPEN-01 through OPEN-04 | User response, 2026-08-24 | UNKNOWN / NON-BLOCKING |
-| D-F-080 | The earlier agent default allowing temporary replacement during a teacher reassignment appeal is superseded by the user decision to pause reassignment; no replacement is assumed without explicit policy. | O-117 and AD-001 | User response, 2026-08-24 | SUPERSEDED |
-| D-F-081 | The earlier permissive permission-combination answer is superseded by the consolidated rule that one person must never initiate, approve, record, and reconcile the same financial transaction. | MD-007 | User response, 2026-08-24 | SUPERSEDED |
+| D-F-096 | Consolidated decisions MD-001 through MD-065 are accepted as the current TOEFL House business-policy baseline; earlier compatible decisions remain active, and conflicting earlier recommendations are superseded. | Consolidated user decision document | User response, 2026-08-24 | DECIDED |
+| D-F-097 | Residual exact campus/branch inventory, legal succession details, agreement-specific scholarship/funding rules, and additional contract variations are recorded as non-blocking UNKNOWN items and must be resolved before their specific configuration or implementation. | OPEN-01 through OPEN-04 | User response, 2026-08-24 | UNKNOWN / NON-BLOCKING |
+| D-F-098 | The earlier agent default allowing temporary replacement during a teacher reassignment appeal is superseded by the user decision to pause reassignment; no replacement is assumed without explicit policy. | O-117 and AD-001 | User response, 2026-08-24 | SUPERSEDED |
+| D-F-099 | The earlier permissive permission-combination answer is superseded by the consolidated rule that one person must never initiate, approve, record, and reconcile the same financial transaction. | MD-007 | User response, 2026-08-24 | SUPERSEDED |
+
+| G1-D-001 | Approval thresholds are configurable by action type with fail-closed behavior when no applicable threshold exists. | G1-B01 | User response, 2026-08-25 | USER-DECIDED |
+| G1-D-002 | Refunds or discounts outside standard policy require Finance review and General Manager final approval; higher-risk cases escalate. | G1-B02 | User response, 2026-08-25 | USER-DECIDED |
+| G1-C-001 | G1-B03 selected General Manager approval for all expenses, conflicting with O-51/O-52, which establish Finance Manager as normal approver and General Manager only as substitute. | G1-B03 vs O-51/O-52 | User response, 2026-08-25 | CONFLICT / CLARIFICATION REQUIRED |
+| G1-D-004 | Compensation changes, restricted-fund allocations, material asset disposal, and financial-period reopening require approval from at least two Owners. | G1-B04 | User response, 2026-08-25 | USER-DECIDED |
+
+| G1-D-003 | Routine Branch Manager expense requests are normally approved by the Finance Manager; the General Manager is the only substitute when Finance is unavailable. | G1-C-001 clarification | User response, 2026-08-25 | USER-DECIDED; supersedes G1-B03 interpretation |
 
 ## Decisions explicitly not imported
 

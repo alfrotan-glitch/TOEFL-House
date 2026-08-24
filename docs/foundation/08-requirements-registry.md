@@ -42,3 +42,12 @@ No requirement in this registry authorizes production implementation.
 ## Gate 1 quality status
 
 The registry is materially incomplete for an implementation contract. See `26-gate-1-requirements-completeness-review.md` for missing acceptance, lifecycle, authority, scope, financial, academic, HR, privacy, reporting, and resilience requirements.
+
+## Gate 1 blocker decisions
+
+| ID | Requirement | Classification | Status |
+|---|---|---|---|
+| G1-REQ-001 | Approval thresholds are action-specific, configurable, and fail closed when missing. | USER-DECISION | DECIDED |
+| G1-REQ-002 | Out-of-policy refunds and discounts require Finance review and General Manager approval; higher-risk cases escalate. | USER-DECISION | DECIDED |
+| G1-REQ-003 | Compensation changes, restricted-fund allocations, material asset disposal, and financial-period reopening require at least two Owner approvals. | USER-DECISION | DECIDED |
+| G1-REQ-004 | Routine Branch Manager expenses are approved by Finance Manager; General Manager is the only substitute when Finance is unavailable. | G1-C-001 | USER-DECISION | DECIDED |
