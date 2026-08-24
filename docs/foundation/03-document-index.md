@@ -57,6 +57,16 @@ This index maps the directive's required foundation artifacts to their current s
 | 49 | Change Management | `docs/foundation/change-management.md` | PLANNED |
 | 50 | Foundation Certification Report | `docs/foundation/50-foundation-certification.md` | PROHIBITED until Gate 16 evidence exists |
 
+## Modeling package
+
+- `19-canonical-domain-model.md` — canonical technology-independent domain map
+- `20-entity-relationship-registry.md` — business entities and relationships
+- `21-governance-and-access-model.md` — authority, scope, roles, permissions, delegation, segregation of duties
+- `22-lifecycle-and-control-model.md` — business lifecycle and exception model
+- `23-finance-academic-hr-controls.md` — financial, academic, HR/payroll, privacy, and reporting controls
+- `24-data-privacy-resilience-model.md` — data classification, audit, retention, recovery, and integrations
+- `25-foundation-modeling-review.md` — modeling review and gate disposition
+
 ## Gate rule
 
 The presence of a file is not evidence that its contents are complete. Every artifact must be cross-referenced, decision-aware, and evidence-gated before its owning gate can pass.
