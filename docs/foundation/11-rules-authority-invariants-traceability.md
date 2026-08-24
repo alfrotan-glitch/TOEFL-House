@@ -17,6 +17,12 @@
 | BR-FIN-001 | A Branch Manager may request eligible routine financial actions but must not approve their own request. | O-48 | Approval workflow | Required | Planned | DECIDED |
 | BR-SCOPE-001 | Scope assignment authority differs by scope type and is controlled by an explicit matrix. | O-23 | To be defined | Required | Planned | DECIDED / ROWS OPEN |
 
+| BR-FIN-002 | Refund/cancellation requires documented conditions, immutable source payment, approval, and Finance recording. | G2-B01 | Controlled financial workflow | Required | Planned | DECIDED |
+| BR-FIN-003 | Discounts require published or separately approved eligibility, dates, and audit; reversal is a controlled correction. | G2-B02 | Student finance policy | Required | Planned | DECIDED |
+| BR-ACAD-002 | Without a program-specific progression rule, no student advances automatically; Academic Management must decide. | G2-B03 | Academic decision workflow | Required | Planned | DECIDED |
+| BR-HR-002 | Contract-silent payroll treatment is held for HR and Finance review; no charge or payment is invented. | G2-B04 | Payroll control | Required | Planned | DECIDED |
+| BR-FUND-002 | Contract-silent restricted funds remain restricted and on hold pending authorized clarification. | G2-B05 | Funding control | Required | Planned | DECIDED |
+
 ## Source-of-truth registry
 
 | Concept | Owner | Authoritative record | Readers | Writers | Forbidden duplicate | Test | Status |
@@ -57,3 +63,7 @@
 ## Gate 1 traceability finding
 
 The existing seeds are not a complete traceability matrix. Every critical domain still requires business-level links from requirement to rule, entity, authority, scope, workspace, report, notification, acceptance criterion, exception, and recovery. Implementation links remain prohibited until later architecture gates.
+
+## Gate 2 rule-completeness finding
+
+Global control invariants are established, but domain-level rules for refunds, discounts, academic progression fallback, contract-silent payroll treatment, and silent restricted-fund agreements remain non-deterministic. These are business rules, not technical implementation details, and block Gate 2.

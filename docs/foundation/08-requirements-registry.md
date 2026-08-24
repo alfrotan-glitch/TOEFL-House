@@ -51,3 +51,12 @@ The registry is materially incomplete for an implementation contract. See `26-ga
 | G1-REQ-002 | Out-of-policy refunds and discounts require Finance review and General Manager approval; higher-risk cases escalate. | USER-DECISION | DECIDED |
 | G1-REQ-003 | Compensation changes, restricted-fund allocations, material asset disposal, and financial-period reopening require at least two Owner approvals. | USER-DECISION | DECIDED |
 | G1-REQ-004 | Routine Branch Manager expenses are approved by Finance Manager; General Manager is the only substitute when Finance is unavailable. | G1-C-001 | USER-DECISION | DECIDED |
+
+
+## Gate 2 business-rule decisions
+
+- G2-REQ-001: Refunds and cancellations require documented conditions, approval, immutable source payment, and Finance recording.
+- G2-REQ-002: Discounts require published or separately approved eligibility, dates, audit, and controlled reversal.
+- G2-REQ-003: No automatic progression occurs without a program-specific rule; Academic Management must decide.
+- G2-REQ-004: Contract-silent payroll entries are held for HR and Finance review.
+- G2-REQ-005: Contract-silent restricted funds remain on hold and restricted.

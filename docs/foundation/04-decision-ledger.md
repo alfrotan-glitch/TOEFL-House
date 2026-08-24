@@ -121,6 +121,12 @@
 
 | G1-D-003 | Routine Branch Manager expense requests are normally approved by the Finance Manager; the General Manager is the only substitute when Finance is unavailable. | G1-C-001 clarification | User response, 2026-08-25 | USER-DECIDED; supersedes G1-B03 interpretation |
 
+| G2-D-001 | Refunds/cancellations are permitted only under documented conditions; original payment remains immutable and Finance records the refund. | G2-B01 | User response, 2026-08-25 | USER-DECIDED |
+| G2-D-002 | Discounts may be applied only when published or separately approved, with eligibility, dates, and audit; reversal is a controlled correction. | G2-B02 | User response, 2026-08-25 | USER-DECIDED |
+| G2-D-003 | If no program-specific progression rule exists, a student does not advance automatically; Academic Management must review and decide. | G2-B03 | User response, 2026-08-25 | USER-DECIDED |
+| G2-D-004 | If an employment contract is silent on absence, overtime, advances, or deductions, Payroll holds the affected entry for HR and Finance review and does not invent a charge or payment. | G2-B04 | User response, 2026-08-25 | USER-DECIDED |
+| G2-D-005 | If a restricted-fund agreement is silent after its supported student or program ends, funds remain restricted and on hold until authorized clarification. | G2-B05 | User response, 2026-08-25 | USER-DECIDED |
+
 ## Decisions explicitly not imported
 
 Existing repository decisions about currency, language, notifications, treasury thresholds, backup, placement, finance, or prior work packages remain legacy evidence. They are not part of this session's approved business decision set until explicitly confirmed.

@@ -31,3 +31,19 @@ Gate 1 is BLOCKED. No architecture or implementation may begin. Unknowns must re
 
 - Detailed acceptance and lifecycle records must be expanded before implementation authorization.
 - Exact financial/value thresholds remain configurable and must be populated through approved policy before affected actions are enabled.
+
+
+## Gate 2 blockers
+
+- Standard refund and cancellation eligibility.
+- Standard discount eligibility, expiry, and reversal.
+- Minimum progression rule when a program-specific rule is absent.
+- Minimum payroll treatment when a contract is silent.
+- Minimum restricted-fund treatment when an agreement is silent.
+
+Exact numeric thresholds remain configurable and fail closed; they are not being invented.
+
+
+## Gate 2 disposition
+
+The Gate 2 blocker set is resolved. Remaining risks concern detailed rule catalogs, policy configuration values, acceptance cases, and agreement-specific inputs; no new business-policy blocker was identified.
