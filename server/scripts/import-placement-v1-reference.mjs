@@ -24,12 +24,17 @@
  * USAGE
  * -----
  *   PLACEMENT_IMPORT_USERNAME=owner \
- *   PLACEMENT_IMPORT_PASSWORD=... \
+ *   PLACEMENT_IMPORT_PASSWORD=<current owner password> \
  *   npm --prefix server run import:placement-reference
  *
- * Falls back to SEED_OWNER_USERNAME / SEED_OWNER_PASSWORD when the explicit
- * variables are not set. The account must have completed the first-login
- * password change (initial credentials are API-quarantined by design).
+ * CREDENTIAL CONTRACT — PLACEMENT_IMPORT_USERNAME / PLACEMENT_IMPORT_PASSWORD
+ * hold the owner account's CURRENT credentials. When they are not set the
+ * importer falls back to SEED_OWNER_USERNAME / SEED_OWNER_PASSWORD (normally
+ * loaded from server/.env), but that value is the ONE-TIME bootstrap
+ * credential: it is API-quarantined until the mandatory first-login password
+ * change and permanently rejected (HTTP 401) after it, so on any install past
+ * first login the explicit variables are required. Authentication is always
+ * canonical — no bypass, no password storage.
  */
 import 'dotenv/config';
 import { createHash } from 'node:crypto';
@@ -119,10 +124,19 @@ async function withSession(app, username, password, fn) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
     });
-    const body = response.status === 200 ? await response.json() : null;
+    // Parse the body for every status so the server's own error message is
+    // surfaced instead of being discarded on failures.
+    let body = null;
+    try {
+      body = await response.json();
+    } catch {
+      /* non-JSON error body; fall through to the generic message */
+    }
     if (!response.ok) {
       const message = body?.error || `Login failed (HTTP ${response.status}).`;
-      throw new Error(message);
+      const error = new Error(message);
+      error.statusCode = response.status;
+      throw error;
     }
     if (body?.user?.mustChangePassword) {
       throw new Error(
@@ -427,13 +441,40 @@ const invokedDirectly = (() => {
 })();
 
 if (invokedDirectly) {
-  const username = process.env.PLACEMENT_IMPORT_USERNAME || process.env.SEED_OWNER_USERNAME;
-  const password = process.env.PLACEMENT_IMPORT_PASSWORD || process.env.SEED_OWNER_PASSWORD;
+  const explicitUsername = process.env.PLACEMENT_IMPORT_USERNAME?.trim();
+  const explicitPassword = process.env.PLACEMENT_IMPORT_PASSWORD?.trim();
+  const seedUsername = process.env.SEED_OWNER_USERNAME?.trim();
+  const seedPassword = process.env.SEED_OWNER_PASSWORD?.trim();
+  // Credential source tracking: PLACEMENT_IMPORT_* is the contract for this
+  // tool. The SEED_OWNER_* fallback is the one-time bootstrap credential from
+  // server/.env — it is API-quarantined until the mandatory first-login
+  // password change and permanently invalid after it, so on any real install
+  // the explicit variables (current owner credentials) are required.
+  const usingSeedFallback = !(explicitUsername && explicitPassword);
+  const username = explicitUsername || seedUsername;
+  const password = explicitPassword || seedPassword;
+  const credentialSource = usingSeedFallback
+    ? 'SEED_OWNER_USERNAME / SEED_OWNER_PASSWORD (the one-time bootstrap credential from server/.env)'
+    : 'PLACEMENT_IMPORT_USERNAME / PLACEMENT_IMPORT_PASSWORD (environment variables)';
   if (!username || !password) {
     console.error(
-      'Set PLACEMENT_IMPORT_USERNAME / PLACEMENT_IMPORT_PASSWORD (or SEED_OWNER_* fallbacks) to the owner account.',
+      'No credentials found. Set PLACEMENT_IMPORT_USERNAME / PLACEMENT_IMPORT_PASSWORD to the ' +
+        'owner account\u2019s CURRENT username and password (the SEED_OWNER_* values in server/.env ' +
+        'are one-time bootstrap credentials and stop working after the mandatory first-login ' +
+        'password change).' +
+        '\n  PowerShell:  $env:PLACEMENT_IMPORT_USERNAME=\'owner\'; $env:PLACEMENT_IMPORT_PASSWORD=\'<current owner password>\'' +
+        '\n  CMD:         set PLACEMENT_IMPORT_USERNAME=owner && set PLACEMENT_IMPORT_PASSWORD=<current owner password>' +
+        '\n  bash:        PLACEMENT_IMPORT_USERNAME=owner PLACEMENT_IMPORT_PASSWORD=\'...\' npm --prefix server run import:placement-reference',
     );
     process.exit(2);
+  }
+  if (usingSeedFallback) {
+    console.log(
+      'NOTE: using the SEED_OWNER_* fallback credential. This is the one-time bootstrap ' +
+        'password; it is rejected with HTTP 401 once the mandatory first-login password change ' +
+        'has happened. If login fails, rerun with PLACEMENT_IMPORT_USERNAME / ' +
+        'PLACEMENT_IMPORT_PASSWORD set to the owner account\u2019s current credentials.',
+    );
   }
   const app = createImporterApp();
   importPlacementReference({ app, username, password, log: (line) => console.log(line) })
@@ -446,6 +487,27 @@ if (invokedDirectly) {
     })
     .catch((error) => {
       console.error(`\n${error.message}`);
+      if (error.statusCode === 401) {
+        console.error(
+          `\nLogin was rejected for username "${username}" using credentials from:\n  ${credentialSource}` +
+            '\nThis means the password does not match the account\u2019s CURRENT password. Common causes:' +
+            '\n  1. The owner already completed the mandatory first-login password change, so the' +
+            '\n     bootstrap password in server/.env is no longer valid (by design — accounts never' +
+            '\n     keep bootstrap credentials).'
+        );
+        if (usingSeedFallback) {
+          console.error(
+            '  2. This run used the SEED_OWNER_* fallback, which only works before that change.'
+          );
+        }
+        console.error(
+          '\nFix — rerun with the current owner credentials (never the bootstrap password):' +
+            '\n  PowerShell:  $env:PLACEMENT_IMPORT_USERNAME=\'owner\'; $env:PLACEMENT_IMPORT_PASSWORD=\'<current owner password>\'' +
+            '\n  CMD:         set PLACEMENT_IMPORT_USERNAME=owner && set PLACEMENT_IMPORT_PASSWORD=<current owner password>' +
+            '\n  bash:        PLACEMENT_IMPORT_USERNAME=owner PLACEMENT_IMPORT_PASSWORD=\'...\' npm --prefix server run import:placement-reference' +
+            '\nAuthentication is canonical and was not bypassed; the importer only reads/writes reference data.'
+        );
+      }
       process.exit(1);
     });
 }

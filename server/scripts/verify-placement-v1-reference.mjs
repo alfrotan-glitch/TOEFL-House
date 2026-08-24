@@ -33,7 +33,7 @@
 import 'dotenv/config';
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -71,7 +71,17 @@ const env = {
   BACKUP_EXTERNAL_DIR: path.join(tempDir, 'external-backups'),
 };
 
+// Shared SQLite connection handle; assigned once the importer's module graph
+// opens the database (step [2/6]), so the exit handler can close it before the
+// temp directory is removed — Windows refuses to delete files that are open.
+let sqlite = null;
+
 process.on('exit', () => {
+  try {
+    sqlite?.db.close();
+  } catch {
+    /* best effort; the process is exiting anyway */
+  }
   try {
     rmSync(tempDir, { recursive: true, force: true });
   } catch {
@@ -85,9 +95,31 @@ function die(message) {
 }
 
 // ── 1–2. Canonical bootstrap against the empty database ────────────────────
-console.log('\n[1/6] Canonical bootstrap on a fresh database (npm run seed)');
-const seed = spawnSync('npm', ['run', 'seed'], { cwd: serverDir, env, encoding: 'utf8' });
-if (seed.status !== 0) die(`bootstrap failed:\n${seed.stdout}\n${seed.stderr}`);
+console.log('\n[1/6] Canonical bootstrap on a fresh database (tsx src/db/seed.ts)');
+// Spawn the seed script through the local tsx CLI with the current Node
+// executable. This is deliberately shell-free: on Windows `spawnSync('npm')`
+// cannot execute `npm.cmd` without a shell, which failed with a silent ENOENT
+// (stdout/stderr undefined). `process.execPath` plus the tsx `bin` entry is
+// identical on every platform and adds no shell-quoting surface.
+const tsxCli = path.join(serverDir, 'node_modules', 'tsx', 'dist', 'cli.mjs');
+if (!existsSync(tsxCli)) {
+  die(
+    `tsx CLI not found at ${tsxCli}. Install server dependencies first: npm --prefix server ci`,
+  );
+}
+const seed = spawnSync(process.execPath, [tsxCli, 'src/db/seed.ts'], {
+  cwd: serverDir,
+  env,
+  encoding: 'utf8',
+});
+if (seed.status !== 0) {
+  die(
+    `bootstrap failed — exit code ${seed.status ?? 'null'}` +
+      (seed.error ? `, spawn error ${seed.error.code ?? ''} ${seed.error.message}` : ', no spawn error') +
+      `\n--- seed stdout ---\n${seed.stdout ?? '(no stdout)'}` +
+      `\n--- seed stderr ---\n${seed.stderr ?? '(no stderr)'}`,
+  );
+}
 console.log('  PASS   schema + hierarchy + owner account created');
 
 // ── 3–4. Import through the canonical routers, in-process ──────────────────
@@ -97,6 +129,7 @@ process.env.JWT_SECRET = env.JWT_SECRET;
 const { createImporterApp, importPlacementReference, DEFAULT_FIXTURE_DIR } = await import(
   './import-placement-v1-reference.mjs'
 );
+sqlite = await import('../src/db/connection.js');
 check('fixture directory resolves inside the repository', DEFAULT_FIXTURE_DIR.startsWith(serverDir));
 
 const app = createImporterApp();

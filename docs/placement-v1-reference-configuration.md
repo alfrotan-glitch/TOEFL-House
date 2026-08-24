@@ -123,8 +123,14 @@ from Git** through tracked, machine-readable fixtures and a canonical importer
   contain configuration and assessment content only — no candidates,
   attempts, payments, audit history, credentials, or PII.
 - Import: `npm --prefix server run import:placement-reference` with
-  `PLACEMENT_IMPORT_USERNAME` / `PLACEMENT_IMPORT_PASSWORD` (or
-  `SEED_OWNER_*` fallbacks). The importer mounts the real routers in-process,
+  `PLACEMENT_IMPORT_USERNAME` / `PLACEMENT_IMPORT_PASSWORD` set to the owner
+  account's **current** credentials (PowerShell:
+  `$env:PLACEMENT_IMPORT_USERNAME='owner'; $env:PLACEMENT_IMPORT_PASSWORD='<current owner password>'`).
+  When unset, the importer falls back to `SEED_OWNER_*` — but that value in
+  `server/.env` is the **one-time bootstrap credential**: it is API-quarantined
+  until the mandatory first-login password change and permanently rejected
+  (HTTP 401) afterwards, so after first login the explicit variables are
+  required. The importer mounts the real routers in-process,
   performs a real owner login, and writes every object through the canonical
   Placement V1 HTTP surfaces — the same validators, RBAC permissions
   (`Curriculum.PlacementPolicy`, `Curriculum.TestBank`, `FeeStructure.Edit`),
