@@ -96,3 +96,16 @@ The presence of a file is not evidence that its contents are complete. Every art
 - `39-domain-contracts.md` — domain ownership and cross-domain boundaries
 - `40-configuration-domain-classification.md` — configuration, entities, facts, and derived data
 - `41-gate-3-remediation-review.md` — independent remediation re-review and disposition
+
+
+## Gate 4 architecture readiness package
+
+- `42-architecture-boundary-model.md` — business and system boundary responsibilities
+- `43-domain-boundary-contract-registry.md` — cross-domain fact contracts and failure behavior
+- `44-authoritative-data-flow-model.md` — canonical fact ownership and flow
+- `45-authorization-and-scope-architecture-contract.md` — authority and scope architecture contract
+- `46-financial-architecture-contract.md` — financial truth and invariant contract
+- `47-lifecycle-architecture-contract.md` — deterministic lifecycle contract
+- `48-reporting-and-derived-data-contract.md` — reporting lineage and period contract
+- `49-privacy-audit-resilience-architecture-contract.md` — privacy, history, audit, and resilience boundary
+- `50-gate-4-architecture-readiness-review.md` — formal Gate 4 audit and disposition

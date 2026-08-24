@@ -80,3 +80,8 @@ The authoritative domain package is now `29` through `40`. It supersedes only th
 - explicit domain ownership and forbidden direct mutation across boundaries.
 
 Traceability for the remediation is recorded in `41-gate-3-remediation-review.md`. Implementation tests and technical enforcement remain outside this gate.
+
+
+## Gate 4 architecture contract extensions
+
+Artifacts `42`–`49` define business-level boundary contracts, authoritative flows, forbidden writers, financial invariants, authorization/scope enforcement, lifecycle preconditions, metric lineage, privacy/audit controls, and resilience requirements. No technology-specific enforcement is selected at Gate 4.

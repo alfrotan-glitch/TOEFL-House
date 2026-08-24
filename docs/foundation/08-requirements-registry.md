@@ -64,3 +64,8 @@ The registry is materially incomplete for an implementation contract. See `26-ga
 ## Gate 3 domain-model requirements
 
 The Gate 3 remediation package establishes explicit requirements that every material money, authority, identity, academic, employment, privacy, historical, reporting, and reconciliation concept has a canonical owner, source record, relationship, lifecycle, authority path, and lineage rule. See artifacts `29`–`40` and the independent disposition in `41`.
+
+
+## Gate 4 architecture-readiness requirements
+
+The Foundation must translate to architecture through explicit domain boundaries, one authoritative owner per critical fact, authorized mutations, deterministic lifecycles, non-circular contracts, derived-only reporting, configuration isolation, privacy/audit history, and resilience requirements. These are documented in artifacts `42`–`49` and reviewed in `50`.
