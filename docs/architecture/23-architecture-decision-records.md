@@ -15,7 +15,7 @@
 | ADR-011 | Anti-corruption integration adapters, idempotent jobs | vendor coupling and unsafe retries rejected |
 | ADR-012 | RPO/RTO and migration values deferred as explicit operations | invented policy and legacy reuse rejected |
 | ADR-013 | Application technology: PHP with Laravel; persistence: PostgreSQL; remains a modular monolith per ADR-001 | Express/TypeScript + SQLite (legacy stack) rejected as untrusted legacy with trigger-heavy cross-domain schema; Node/TypeScript + PostgreSQL rejected by user decision; distributed services rejected per ADR-001 |
-| ADR-013-A | AMENDMENT (2026-08-25): PHP + PostgreSQL remain; the Laravel framework is replaced by a framework-free modular monolith implementing the same approved architecture intent | Laravel/Composer/Packagist are unreachable in the build environment (SSL connect failures; see `docs/implementation/22-environment-blocker-report.md`); user decision selected the framework-free variant; approved architecture (ADR-001–012, module contracts, authorization/lifecycle/audit contracts) preserved without framework substitution |
+| ADR-013-A | **REJECTED/WITHDRAWN 2026-08-25.** Original amendment text (historical record): "PHP + PostgreSQL remain; the Laravel framework is replaced by a framework-free modular monolith implementing the same approved architecture intent" | Historical alternatives text: "Laravel/Composer/Packagist are unreachable in the build environment (SSL connect failures; see `docs/implementation/22-environment-blocker-report.md`); user decision selected the framework-free variant". **Correction:** no user decision selected the framework-free variant; the environment blocker is not a technology decision. See the ADR-013-A rejection record below. ADR-013 remains authoritative. |
 
 ## ADR-013 record — technology selection
 
@@ -27,7 +27,11 @@
   - Verification gates (typecheck, lint, static analysis, tests, migration validation) run under `docs/implementation/21-implementation-quality-directive.md` with the tooling chosen in each package plan.
   - No UI-first sequencing is authorized; package order follows `docs/implementation/17-implementation-sequence.md`.
 
-## ADR-013-A amendment — environment-forced framework substitution
+## ADR-013-A amendment — environment-forced framework substitution — REJECTED/WITHDRAWN
+
+> **Status: REJECTED/WITHDRAWN (2026-08-25) — does not take effect.**
+> The text below is preserved verbatim as the historical record of the withdrawn amendment.
+> The correction is recorded in the ADR-013-A rejection record that follows.
 
 - **Decision:** PHP + PostgreSQL remain the application technology and persistence. The Laravel framework is substituted by a **framework-free modular monolith** that implements the approved architecture intent directly: module-owned contexts and persistence (ADR-001/002), owner-bound commands with atomic fact-plus-audit commits (ADR-003/010), policy-based Position + Assignment + Permission + Scope + Policy authorization (ADR-005), context-owned state machines (ADR-007), and contract-grade error/idempotency/audit behavior per `docs/implementation/`.
 - **Authority:** Environment blocker verified 2026-08-25 (Composer/Packagist/getcomposer.org/raw.githubusercontent.com unreachable — SSL connection failures; evidence in `docs/implementation/22-environment-blocker-report.md`); user decision 2026-08-25 selecting the framework-free variant; Decision Ledger `D-F-102`.
@@ -38,4 +42,18 @@
   - No third-party PHP package is required; dependency discipline (directive clause 20) is satisfied by construction.
   - The substitution is environment-forced, not a preference; if Composer/Packagist ever become reachable in a maintained environment, this amendment must be re-reviewed before any framework reintroduction.
 
-Consequences of ADR-001–012 are captured in artifacts `01`–`22`; those ADRs select no technology. ADR-013 (user decision, 2026-08-25) selects PHP + Laravel + PostgreSQL; ADR-013-A (user decision, 2026-08-25) amends the framework selection to framework-free PHP while keeping PostgreSQL, per the environment blocker report.
+## ADR-013-A rejection record — environment blocker is not a technology decision
+
+- **Status:** REJECTED/WITHDRAWN — the amendment does not take effect and does not override ADR-013.
+- **Date:** 2026-08-25 (user correction).
+- **Authority:** User correction, 2026-08-25; recorded in Decision Ledger `D-F-103`.
+- **Decision:** ADR-013 is authoritative and remains in force: **PHP + Laravel** application technology, **PostgreSQL** persistence, **strict modular monolith** (ADR-001). The framework-free PHP variant is not adopted. No framework substitution is authorized — neither a custom framework nor Node.js, Express, Symfony, another PHP framework, or any other framework.
+- **Reason:** The inability to obtain Laravel/Composer/Packagist in the current build environment is an **environment blocker**, not authorization to replace the approved technology. The statement in the withdrawn amendment that a "user decision selected the framework-free variant" is not an approved user decision and must not be treated as such.
+- **Consequences:**
+  - The environment blocker report `docs/implementation/22-environment-blocker-report.md` remains as evidence that Laravel could not currently be obtained; it records a blocker, not a technology decision.
+  - Package 02 (Identity and Organization) **MUST NOT begin production implementation** while the approved Laravel dependency cannot be reproducibly obtained in the build environment. Status: **IMPLEMENTATION BLOCKED BY ENVIRONMENT**.
+  - Business rules, architecture, module boundaries, authorization contracts, lifecycle contracts, persistence contracts, and implementation contracts are unchanged; none were rewritten to accommodate the environment limitation.
+  - No production code exists in this repository, and none is created by this correction.
+  - If the environment becomes able to provide Composer/Packagist reproducibly, implementation may resume under ADR-013 without a further technology decision.
+
+Consequences of ADR-001–012 are captured in artifacts `01`–`22`; those ADRs select no technology. ADR-013 (user decision, 2026-08-25) selects PHP + Laravel + PostgreSQL and is authoritative. ADR-013-A was proposed as an amendment on 2026-08-25 and was rejected/withdrawn on 2026-08-25; it does not take effect.

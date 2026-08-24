@@ -12,12 +12,12 @@ The Implementation Quality Directive — Absolute Engineering Standard was adopt
 
 ## Technology selection
 
-The previously open technology decision (Decision Ledger `D-F-003`; legacy findings L-002/L-003) was resolved by user decision on 2026-08-25: **PHP + Laravel** application technology and **PostgreSQL** persistence, remaining a modular monolith with strict contexts. Recorded as ADR-013 in `docs/architecture/23-architecture-decision-records.md` and Decision Ledger `D-F-100`. Amended the same day by environment blocker (Composer/Packagist unreachable; `docs/implementation/22-environment-blocker-report.md`): **PHP + PostgreSQL, framework-free modular monolith**, per user decision (ADR-013-A, Decision Ledger `D-F-102`).
-
-## Package boundary
-
-Package 02 — Identity and Organization has not started. The Package 01 checkpoint does not authorize it, and this directive does not authorize it. Production implementation proceeds only through the package protocol.
+The previously open technology decision (Decision Ledger `D-F-003`; legacy findings L-002/L-003) was resolved by user decision on 2026-08-25: **PHP + Laravel** application technology and **PostgreSQL** persistence, remaining a modular monolith with strict contexts. Recorded as ADR-013 in `docs/architecture/23-architecture-decision-records.md` and Decision Ledger `D-F-100`. ADR-013 is authoritative. The proposed ADR-013-A amendment (framework-free variant) was rejected/withdrawn on 2026-08-25 (Decision Ledger `D-F-103`); it does not take effect and no framework substitution is authorized.
 
 ## Environment blocker
 
-Composer/Packagist and the Laravel framework are unobtainable in this build environment; the environment-forced framework-free stack substitution is recorded in `docs/implementation/22-environment-blocker-report.md` (ADR-013-A, Decision Ledger `D-F-102`).
+Composer/Packagist and therefore the Laravel framework are unobtainable in this build environment. This is an **environment blocker, not a technology decision**; it is recorded as evidence in `docs/implementation/22-environment-blocker-report.md`. The approved stack remains PHP + Laravel + PostgreSQL (ADR-013).
+
+## Package boundary
+
+Package 02 — Identity and Organization has **NOT STARTED** and is **IMPLEMENTATION BLOCKED BY ENVIRONMENT**: it must not begin production implementation while the approved Laravel dependency cannot be reproducibly obtained in the build environment. Business rules, architecture, module boundaries, and implementation contracts are unchanged. No production code is authorized by this correction.
