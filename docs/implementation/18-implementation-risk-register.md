@@ -12,3 +12,7 @@
 | overly broad module dependencies | Medium | acyclic contract graph and no shared writes |
 
 No Critical or High readiness blocker remains; controls are implementation acceptance gates.
+
+## Package 01 update
+
+The absence of source/tooling is recorded as expected baseline state, not an implementation failure. It becomes a prerequisite for the next package's implementation work; no legacy code was recreated or adopted.

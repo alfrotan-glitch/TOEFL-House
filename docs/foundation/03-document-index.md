@@ -123,3 +123,9 @@ The formal architecture package is maintained under `docs/architecture/`: artifa
 ## Gate 6 implementation contract package
 
 The implementation readiness package is maintained under `docs/implementation/`, artifacts `01`–`19`, covering gap audit, module/command contracts, finance, authorization, lifecycle, academic, HR/payroll, reporting, integration, concurrency, errors, testing, migration, legacy disposition, sequence, risks, and Gate 6 review.
+
+
+## Implementation state
+
+- `docs/implementation/00-implementation-state.md` — current package state and execution boundary
+- `docs/implementation/20-package-01-contract-harness-checkpoint.md` — Package 01 certification and verification record
