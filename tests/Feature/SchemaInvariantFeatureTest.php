@@ -31,6 +31,8 @@ final class SchemaInvariantFeatureTest extends TestCase
         $this->assertContains('access_policies_one_open_position_role', $this->indexNames('access_policies'));
         $this->assertContains('delegations_one_open_authority', $this->indexNames('delegations'));
         $this->assertContains('consents_one_open_per_subject_purpose', $this->indexNames('consents'));
+        $this->assertContains('students_one_per_person', $this->indexNames('students'));
+        $this->assertContains('guardian_relationships_one_open_per_pair', $this->indexNames('guardian_relationships'));
     }
 
     public function test_lifecycle_states_are_constrained_by_the_schema(): void
@@ -144,6 +146,35 @@ final class SchemaInvariantFeatureTest extends TestCase
             'action' => 'shred',
             'basis' => 'schema-guard',
             'decided_by' => '00000000-0000-4000-8000-00000000015d',
+        ]);
+    }
+
+    public function test_applicant_lifecycle_states_are_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('applicants')->insert([
+            'id' => '00000000-0000-4000-8000-00000000016a',
+            'person_id' => '00000000-0000-4000-8000-00000000016b',
+            'program_interest' => 'schema-guard',
+            'lifecycle_state' => 'waitlisted',
+            'recorded_by' => '00000000-0000-4000-8000-00000000016c',
+        ]);
+    }
+
+    public function test_guardian_lifecycle_states_are_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('guardian_relationships')->insert([
+            'id' => '00000000-0000-4000-8000-00000000017a',
+            'student_id' => '00000000-0000-4000-8000-00000000017b',
+            'guardian_person_id' => '00000000-0000-4000-8000-00000000017c',
+            'relationship' => 'schema-guard',
+            'permissions' => '[]',
+            'verification_state' => 'verified',
+            'lifecycle_state' => 'paused',
+            'effective_from' => '2026-01-01',
+            'effective_to' => null,
+            'recorded_by' => '00000000-0000-4000-8000-00000000017d',
         ]);
     }
 }

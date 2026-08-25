@@ -94,6 +94,41 @@ trait BuildsActors
         return new Actor($actorId, 'Documents Officer');
     }
 
+    private function admissionsClerk(string $actorId = 'adm-reception-1'): Actor
+    {
+        $this->personWithAuthority($actorId, ['admissions.register', 'admissions.initiate']);
+
+        return new Actor($actorId, 'Admissions Clerk');
+    }
+
+    private function admissionsReviewer(string $actorId = 'adm-review-1'): Actor
+    {
+        $this->personWithAuthority($actorId, ['admissions.review']);
+
+        return new Actor($actorId, 'Admissions Reviewer');
+    }
+
+    private function admissionsApprover(string $actorId = 'adm-approve-1'): Actor
+    {
+        $this->personWithAuthority($actorId, ['admissions.approve']);
+
+        return new Actor($actorId, 'Admissions Approver');
+    }
+
+    private function studentManager(string $actorId = 'stu-mgr-1'): Actor
+    {
+        $this->personWithAuthority($actorId, ['students.manage', 'students.guardian']);
+
+        return new Actor($actorId, 'Student Manager');
+    }
+
+    private function studentReactivator(string $actorId = 'stu-react-1'): Actor
+    {
+        $this->personWithAuthority($actorId, ['students.reactivate']);
+
+        return new Actor($actorId, 'Reactivation Approver');
+    }
+
     private function organizationIdFromScopeKey(string $scopeKey): string
     {
         return str_contains($scopeKey, ':') ? explode(':', $scopeKey, 2)[1] : $this->bootstrapOrganizationId;
