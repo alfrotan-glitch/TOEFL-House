@@ -19,6 +19,16 @@
         },
         {
             "type": "vcs",
+            "url": "https://github.com/mockery/mockery.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/hamcrest/hamcrest-php.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
             "url": "https://github.com/brick/math.git",
             "no-api": true
         },
@@ -391,6 +401,246 @@
             "type": "vcs",
             "url": "https://github.com/ralouphie/getallheaders.git",
             "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/iamcal/SQLParser.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/illuminate/bus.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/illuminate/collections.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/illuminate/conditionable.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/illuminate/console.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/illuminate/container.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/illuminate/contracts.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/illuminate/database.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/illuminate/events.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/illuminate/filesystem.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/illuminate/http.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/illuminate/macroable.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/illuminate/pipeline.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/illuminate/reflection.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/illuminate/session.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/illuminate/support.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/illuminate/view.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/larastan/larastan.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/laravel/pint.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/myclabs/DeepCopy.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/nikic/PHP-Parser.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/phar-io/manifest.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/phar-io/version.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/phpstan/phpstan.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/sebastianbergmann/cli-parser.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/sebastianbergmann/code-unit.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/sebastianbergmann/code-unit-reverse-lookup.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/sebastianbergmann/comparator.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/sebastianbergmann/complexity.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/sebastianbergmann/diff.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/sebastianbergmann/environment.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/sebastianbergmann/exporter.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/sebastianbergmann/git-state.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/sebastianbergmann/global-state.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/sebastianbergmann/lines-of-code.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/sebastianbergmann/object-enumerator.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/sebastianbergmann/object-reflector.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/sebastianbergmann/php-code-coverage.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/sebastianbergmann/php-file-iterator.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/sebastianbergmann/php-invoker.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/sebastianbergmann/php-text-template.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/sebastianbergmann/php-timer.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/sebastianbergmann/phpunit.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/sebastianbergmann/recursion-context.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/sebastianbergmann/type.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/sebastianbergmann/version.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/staabm/side-effects-detector.git",
+            "no-api": true
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/theseer/tokenizer.git",
+            "no-api": true
         }
     ],
     "config": {
@@ -399,8 +649,28 @@
         },
         "optimize-autoloader": true,
         "sort-packages": true,
-        "platform-check": true
+        "platform-check": true,
+        "process-timeout": 3600
     },
     "minimum-stability": "stable",
-    "prefer-stable": true
+    "prefer-stable": true,
+    "require-dev": {
+        "laravel/pint": "^1.30.4",
+        "phpunit/phpunit": "^11.5.50",
+        "phpstan/phpstan": "^2.2.0",
+        "larastan/larastan": "^3.10.0",
+        "mockery/mockery": "^1.6.12"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/",
+            "Database\\Factories\\": "database/factories/",
+            "Database\\Seeders\\": "database/seeders/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        }
+    }
 }

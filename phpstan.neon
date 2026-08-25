@@ -1,0 +1,12 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    level: 6
+    paths:
+        - app/Modules
+        - app/Support
+    tmpDir: /tmp/phpstan-p02
+    parallel:
+        maximumNumberOfProcesses: 2
+    treatPhpDocTypesAsCertain: false
