@@ -43,7 +43,8 @@ final class QueryReadOnlyFeatureTest extends TestCase
         $after = $this->rowCounts();
 
         $this->assertSame($before, $after);
-        $this->assertSame($organization->id, $structure['organizations'][0]['id'] ?? null);
+        $organizationEntry = collect($structure['organizations'])->firstWhere('id', $organization->id);
+        $this->assertNotNull($organizationEntry);
         $this->assertSame('Queried Person', $directory['legal_name'] ?? null);
         $this->assertNotEmpty($verified);
         $this->assertSame('branch', $this->unitTypeOf($structure['branches'], $branch->id));

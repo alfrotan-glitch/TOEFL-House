@@ -32,6 +32,7 @@ trait OperatesStructure
     {
         $decision = $this->structureDecisionForGlobalActors();
         $created = $this->createCommand()->createOrganization($decision, $name, RandomIdentifier::new());
+        $this->grantStructureAuthorityOn('organization', $created['id']);
         /** @var Organization $organization */
         $organization = Organization::query()->findOrFail($created['id']);
         $this->transitionCommand()->activate($organization, $this->structureDecisionForGlobalActors(), RandomIdentifier::new());
@@ -72,6 +73,19 @@ trait OperatesStructure
         $refreshed = Branch::query()->findOrFail($branch->id);
 
         return $refreshed;
+    }
+
+    private function grantStructureAuthorityOn(string $scopeType, string $scopeId): void
+    {
+        $this->grantKnownAuthorityOn($scopeType, $scopeId);
+    }
+
+    private function establishDraftOrganization(string $name = 'Draft Unit'): Organization
+    {
+        $created = $this->createCommand()->createOrganization($this->structureDecisionForGlobalActors(), $name, RandomIdentifier::new());
+        $this->grantKnownAuthorityOn('organization', $created['id']);
+
+        return Organization::query()->findOrFail($created['id']);
     }
 
     private function createCommand(): CreateStructureUnit

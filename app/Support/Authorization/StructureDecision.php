@@ -28,12 +28,12 @@ final class StructureDecision
 
     public function authorize(AccessDecision $accessDecision, ?StructureScope $scope): void
     {
-        AuthorizationGate::require($accessDecision, $this->initiator, self::CAPABILITY_INITIATE, $scope, 'organization.structure.initiator_denied');
+        self::requireCapability($accessDecision, $this->initiator, self::CAPABILITY_INITIATE, $scope, 'organization.structure.initiator_denied');
 
         if ($this->reviewer->actorId === $this->initiator->actorId) {
             throw AuthorizationDenied::forCode('organization.structure.single_actor', 'reviewer must differ from initiator');
         }
-        AuthorizationGate::require($accessDecision, $this->reviewer, self::CAPABILITY_REVIEW, $scope, 'organization.structure.reviewer_denied');
+        self::requireCapability($accessDecision, $this->reviewer, self::CAPABILITY_REVIEW, $scope, 'organization.structure.reviewer_denied');
 
         if (count($this->owners) < 2) {
             throw AuthorizationDenied::forCode('organization.structure.owner_count', 'two owner approvals required');
@@ -45,7 +45,7 @@ final class StructureDecision
                 throw AuthorizationDenied::forCode('organization.structure.single_actor', 'owner approval must come from distinct actors outside the initiator and reviewer');
             }
             $seenOwnerIds[] = $owner->actorId;
-            AuthorizationGate::require($accessDecision, $owner, self::CAPABILITY_APPROVE, $scope, 'organization.structure.owner_denied');
+            self::requireCapability($accessDecision, $owner, self::CAPABILITY_APPROVE, $scope, 'organization.structure.owner_denied');
             $approvedBy[] = $owner->actorId;
         }
         if (count(array_unique($approvedBy, SORT_STRING)) < 2) {
@@ -60,5 +60,13 @@ final class StructureDecision
             [$this->initiator->actorId, $this->reviewer->actorId],
             array_map(static fn (Actor $owner): string => $owner->actorId, $this->owners),
         ), SORT_STRING));
+    }
+
+    private static function requireCapability(AccessDecision $accessDecision, Actor $actor, string $capability, ?StructureScope $scope, string $errorCode): void
+    {
+        $outcome = $accessDecision->decide($actor, $capability, $scope);
+        if (! $outcome->allowed) {
+            throw AuthorizationDenied::forCode($errorCode, $outcome->reason);
+        }
     }
 }

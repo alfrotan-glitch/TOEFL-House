@@ -9,7 +9,6 @@ use App\Modules\Audit\AuditRecorder;
 use App\Modules\Identity\Models\Person;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
-use App\Support\Authorization\AuthorizationGate;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Errors\DomainError;
@@ -41,7 +40,10 @@ final class VerifyPerson
         try {
             return $this->idempotency->execute('identity.verify', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($administrator, $person, $identityKey, $evidenceRef): array {
-                    AuthorizationGate::require($this->access, $administrator, self::CAPABILITY, null, 'identity.verify_denied');
+                    $outcome = $this->access->decide($administrator, self::CAPABILITY, null);
+                    if (! $outcome->allowed) {
+                        throw AuthorizationDenied::forCode('identity.verify_denied', $outcome->reason);
+                    }
 
                     /** @var Person $locked */
                     $locked = Person::query()->whereKey($person->id)->lockForUpdate()->firstOrFail();

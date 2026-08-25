@@ -1,10 +1,10 @@
 # Implementation State
 
-**Current package:** Package 02 — Identity and Organization
-**Status:** CERTIFIED — PASS (checkpoint: `24-package-02-identity-organization-checkpoint.md`)
-**Environment status:** ENVIRONMENT READY (2026-08-25 — restored via `P02-environment-recovery.sh --recover`; artifacts published and digest-verified on release `p02-artifacts`)
-**Package 03 status (Authorization and Scope):** NOT STARTED (cleared to begin through the package protocol when authorized)
-**Updated:** 2026-08-25
+**Current package:** Package 03 — Authorization and Scope
+**Status:** CERTIFIED — PASS (checkpoint: `25-package-03-authorization-scope-checkpoint.md`)
+**Environment status:** ENVIRONMENT READY (2026-08-25 — restored via `P02-environment-recovery.sh --recover`; artifacts published and digest-verified on release `p02-artifacts`; re-verified 2026-08-26 → ENVIRONMENT VALID)
+**Package 02 status (Identity and Organization):** CERTIFIED (checkpoint `24-package-02-identity-organization-checkpoint.md`, commit `1ea387a`)
+**Updated:** 2026-08-26
 
 The repository baseline was inspected and verified as documentation-only. No production source, database, schema, migrations, package tooling, or tests are present in this checkout. The implementation contract, deferred-input boundaries, package order, traceability convention, and verification expectations are established without changing business behavior.
 
@@ -30,4 +30,4 @@ The technology decision is unchanged and authoritative: **PHP + Laravel + Postgr
 
 Package 02 — Identity and Organization is **CERTIFIED** (2026-08-25, checkpoint `24-package-02-identity-organization-checkpoint.md`): Organization module (structure units, registry lifecycle, effective-dated campus attribution, two-Owner authority chain), Identity module (person verification, account link/deactivate with history), append-only Audit module with structural immutability, and the shared kernel (error taxonomy, default-deny authorization port, idempotency store). Gates: phpunit **OK (78 tests, 371 assertions)**, phpstan level 6 clean, pint clean, schema/migration, authorization, lifecycle, invariant, idempotency and adversarial suites pass; financial gates recorded NOT APPLICABLE. The implementation was created from the governance records after recorded evidence established no prior implementation existed anywhere reachable.
 
-Package 03 — Authorization and Scope is **NOT STARTED**; it begins only through the package protocol. Business rules, architecture, module boundaries, and implementation contracts are unchanged.
+Package 03 — Authorization and Scope is **CERTIFIED** (2026-08-26, checkpoint `25-package-03-authorization-scope-checkpoint.md`): the canonical authority registry (positions, effective-dated assignments, versioned role/permission policies, named-scope grants, dated and reasoned delegations) with the `AccessResolution` server policy decision replacing the interim capability-map adapter behind the unchanged default-deny `AccessDecision` port; lifecycle `proposed→active→expired|revoked` with terminal states; organization-wide grants require two distinct eligible approvers; emergency grants are dated ≤ 30 days and flagged for mandatory review. Gates: phpunit **OK (118 tests, 477 assertions)**, phpstan level 6 clean (53 files), pint clean (97 files); schema, invariant, authorization, temporal, adversarial and idempotency suites pass; financial gates recorded NOT APPLICABLE. The environment was reused, not rebuilt; the P02 suite passes unchanged on the canonical resolver. Business rules, architecture, module boundaries, and implementation contracts are unchanged.

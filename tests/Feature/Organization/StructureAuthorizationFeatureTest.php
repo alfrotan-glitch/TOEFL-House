@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Organization;
 
-use App\Support\Authorization\Actor;
 use App\Support\Authorization\StructureDecision;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Identifiers\RandomIdentifier;
@@ -33,10 +32,10 @@ final class StructureAuthorizationFeatureTest extends TestCase
 
     public function test_single_actor_holding_every_role_is_denied(): void
     {
-        $organization = $this->establishActiveOrganization();
-        $oneActor = new Actor('solo-1', 'Single Actor', ['*' => [
+        $oneActor = $this->actorWithStructureCapabilities('solo-1', [
             'organization.structure.initiate', 'organization.structure.review', 'organization.structure.approve',
-        ]]);
+        ]);
+        $organization = $this->establishActiveOrganization();
         $decision = new StructureDecision($oneActor, $oneActor, [$oneActor, $this->structureOwner('*', 'owner-2')]);
 
         $this->expectException(AuthorizationDenied::class);
@@ -46,10 +45,10 @@ final class StructureAuthorizationFeatureTest extends TestCase
 
     public function test_owner_acting_as_approver_and_initiator_is_denied(): void
     {
-        $organization = $this->establishActiveOrganization();
-        $initiatorWhoIsAlsoOwner = new Actor('solo-2', 'Initiating Owner', ['*' => [
+        $initiatorWhoIsAlsoOwner = $this->actorWithStructureCapabilities('solo-2', [
             'organization.structure.initiate', 'organization.structure.approve',
-        ]]);
+        ]);
+        $organization = $this->establishActiveOrganization();
         $decision = new StructureDecision(
             $initiatorWhoIsAlsoOwner,
             $this->structureManager('*'),
@@ -71,7 +70,7 @@ final class StructureAuthorizationFeatureTest extends TestCase
         );
 
         $this->expectException(AuthorizationDenied::class);
-        $this->expectExceptionMessage('capability organization.structure.initiate not granted in scope');
+        $this->expectExceptionMessage('no active authority grants organization.structure.initiate in scope');
         $this->transitionCommand()->close($organization, $decision, RandomIdentifier::new());
     }
 
@@ -86,7 +85,7 @@ final class StructureAuthorizationFeatureTest extends TestCase
         );
 
         $this->expectException(AuthorizationDenied::class);
-        $this->expectExceptionMessage('capability organization.structure.approve not granted in scope');
+        $this->expectExceptionMessage('no active authority grants organization.structure.approve in scope');
         $this->transitionCommand()->close($organization, $decision, RandomIdentifier::new());
     }
 

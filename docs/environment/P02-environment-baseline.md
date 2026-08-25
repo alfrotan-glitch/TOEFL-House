@@ -225,7 +225,7 @@ php vendor/bin/phpunit                                        # full suite: Unit
 php vendor/bin/phpunit tests/Unit/Organization/...            # focused suites as needed
 ```
 
-Expected result (Package 02 certified suite): **OK (78 tests, 371 assertions)**.
+Expected result (certified cumulative suite since Package 03, 2026-08-26): **OK (118 tests, 477 assertions)**. (Package 02 closed at 78/371; the cumulative suite only grows.)
 
 ## 15. PHPStan configuration / command
 
@@ -284,7 +284,7 @@ Expected result (Package 02 certified suite): **OK (78 tests, 371 assertions)**.
 | 6 | `composer install --dry-run` | `in sync` (nothing to install/update/remove) |
 | 7 | `composer audit` | no known security advisories |
 | 8 | `php artisan db:show` | connects to `toefl_house` as `postgres`; server version `PostgreSQL 18.4` |
-| 9 | `php vendor/bin/phpunit` | `OK (78 tests, 371 assertions)` (Package 02 suite; the earlier 52/229 R3-closure state was never committed and no longer exists) |
+| 9 | `php vendor/bin/phpunit` | `OK (118 tests, 477 assertions)` (cumulative Package 02+03 suite; Package 02 alone closed at 78/371; the earlier 52/229 R3-closure state was never committed and no longer exists) |
 | 10 | `php vendor/bin/phpstan analyse --memory-limit=1G` | `[OK] No errors` |
 | 11 | `php vendor/bin/pint --test` | `PASS` |
 

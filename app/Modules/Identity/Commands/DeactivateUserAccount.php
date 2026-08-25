@@ -9,7 +9,6 @@ use App\Modules\Audit\AuditRecorder;
 use App\Modules\Identity\Models\UserAccount;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
-use App\Support\Authorization\AuthorizationGate;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Errors\DomainError;
@@ -39,7 +38,10 @@ final class DeactivateUserAccount
         try {
             return $this->idempotency->execute('identity.deactivate_account', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($administrator, $account, $reason): array {
-                    AuthorizationGate::require($this->access, $administrator, self::CAPABILITY, null, 'identity.deactivate_denied');
+                    $outcome = $this->access->decide($administrator, self::CAPABILITY, null);
+                    if (! $outcome->allowed) {
+                        throw AuthorizationDenied::forCode('identity.deactivate_denied', $outcome->reason);
+                    }
 
                     /** @var UserAccount $locked */
                     $locked = UserAccount::query()->whereKey($account->id)->lockForUpdate()->firstOrFail();

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Tests\Feature\Organization;
 
 use App\Modules\Audit\Models\AuditEvent;
-use App\Modules\Organization\Models\Organization;
 use App\Support\Authorization\StructureDecision;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Identifiers\RandomIdentifier;
@@ -66,9 +65,7 @@ final class StructureLifecycleFeatureTest extends TestCase
 
     public function test_draft_unit_cannot_be_suspended(): void
     {
-        $created = $this->createCommand()->createOrganization($this->structureDecisionForGlobalActors(), 'Draft Unit', RandomIdentifier::new());
-        /** @var Organization $draft */
-        $draft = Organization::query()->findOrFail($created['id']);
+        $draft = $this->establishDraftOrganization('Draft Unit');
 
         $this->expectException(BusinessRejection::class);
         $this->expectExceptionMessage('transition draft -> suspended is not allowed');
