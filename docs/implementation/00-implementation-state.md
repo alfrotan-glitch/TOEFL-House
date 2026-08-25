@@ -1,9 +1,9 @@
 # Implementation State
 
-**Current package:** Package 01 — Contract Harness and Deferred Inputs
-**Status:** CERTIFIED — PASS
-**Environment status:** ENVIRONMENT READY (2026-08-25 — Laravel 12.67.0 reproducibly obtained and operational; PostgreSQL connectivity verified)
-**Package 02 status:** NOT STARTED (environment readiness checkpoint passed; cleared to begin per standing authorization, following the mandatory Package 02 internal sequence)
+**Current package:** Package 02 — Identity and Organization
+**Status:** CERTIFIED — PASS (checkpoint: `24-package-02-identity-organization-checkpoint.md`)
+**Environment status:** ENVIRONMENT READY (2026-08-25 — restored via `P02-environment-recovery.sh --recover`; artifacts published and digest-verified on release `p02-artifacts`)
+**Package 03 status (Authorization and Scope):** NOT STARTED (cleared to begin through the package protocol when authorized)
 **Updated:** 2026-08-25
 
 The repository baseline was inspected and verified as documentation-only. No production source, database, schema, migrations, package tooling, or tests are present in this checkout. The implementation contract, deferred-input boundaries, package order, traceability convention, and verification expectations are established without changing business behavior.
@@ -28,4 +28,6 @@ The technology decision is unchanged and authoritative: **PHP + Laravel + Postgr
 
 ## Package boundary
 
-Package 02 — Identity and Organization is **NOT STARTED**. The environment readiness checkpoint has **PASSED** (ENVIRONMENT READY, 2026-08-25), so the implementation-blocker condition no longer applies; per the standing authorization, Package 02 may begin following the mandatory Package 02 internal sequence (Discover → map contracts → canonical entities/ownership → invariants → lifecycle/effective-date → authorization boundaries → persistence → design → implement → migrations → commands/queries → authz → tests → verify → adversarial → repair → reverify → independent review → clean → certify → checkpoint), **never beginning with migrations**. Business rules, architecture, module boundaries, and implementation contracts are unchanged. No production code has been created.
+Package 02 — Identity and Organization is **CERTIFIED** (2026-08-25, checkpoint `24-package-02-identity-organization-checkpoint.md`): Organization module (structure units, registry lifecycle, effective-dated campus attribution, two-Owner authority chain), Identity module (person verification, account link/deactivate with history), append-only Audit module with structural immutability, and the shared kernel (error taxonomy, default-deny authorization port, idempotency store). Gates: phpunit **OK (78 tests, 371 assertions)**, phpstan level 6 clean, pint clean, schema/migration, authorization, lifecycle, invariant, idempotency and adversarial suites pass; financial gates recorded NOT APPLICABLE. The implementation was created from the governance records after recorded evidence established no prior implementation existed anywhere reachable.
+
+Package 03 — Authorization and Scope is **NOT STARTED**; it begins only through the package protocol. Business rules, architecture, module boundaries, and implementation contracts are unchanged.

@@ -19,3 +19,6 @@ composer.phar
 .DS_Store
 .idea/
 .vscode/
+
+# Test runner cache
+/.phpunit.cache
