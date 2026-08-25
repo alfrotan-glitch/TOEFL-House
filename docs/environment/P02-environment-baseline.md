@@ -1,8 +1,9 @@
 # P02 Environment Baseline — Canonical, Repository-Backed Specification
 
 **Status:** ACTIVE — source of truth for reconstructing the Package 02 build/test environment.
-**Version:** 1.0
+**Version:** 1.1
 **Date:** 2026-08-25
+**Revision 1.1 (2026-08-25):** aligned with the environment as actually built and verified: exact PHP configure flags (incl. the pgsql pair, sqlite disabled), libpq header acquisition route, PyPI build tools with PEP 668 fallback, `CMAKE_POLICY_VERSION_MINIMUM`, pkgconf static build at a neutral prefix, pkg-config metadata consolidation, PHP-based PostgreSQL client-tool shims, composer autoloader generator requirements, and the recovery-script exit-code fix. Earlier basis unchanged:
 **Basis:** authoritative records `docs/implementation/22-environment-blocker-report.md` (remediation table + verified results), `docs/implementation/23-environment-readiness.md` (DISCOVER table, acquisition method, verification table), `docs/implementation/28-package-02-identity-organization-implementation.md` §3 (tooling versions), plus repository-pinned facts (`composer.json`, `composer.lock` content-hash, `phpunit.xml`, `phpstan.neon`, `.env.example`).
 **Recovery procedure:** `docs/environment/P02-environment-recovery.sh` (same directory).
 
@@ -29,6 +30,21 @@
 - Source: official release tarball `php-8.2.27.tar.gz` from the canonical `php/web-php-distributions` GitHub repository (acquired via the GitHub API raw-content endpoint because `raw.githubusercontent.com` is blocked).
 - Tarball SHA-256 (verified 2026-08-25 from the fetched artifact): `179cc901760d478ffd545d10702ebc2a1270d8c13471bdda729d20055140809a`.
 - Expected `php -v` first line: `PHP 8.2.27 (cli) (built: Aug 24 2026) (NTS)`.
+- **Exact configure line (verified build, rev 1.1)** — prerequisites: the §3 libraries installed under `${TH_ROOT}`, `pkg-config` available on `PATH`, and libpq 5.18 + headers at `${TH_ROOT}/pgsql` (see §6):
+
+```sh
+./configure --prefix="${TH_ROOT}/php" --with-config-file-path="${TH_ROOT}/php/etc" --enable-cli \
+  --with-openssl="${TH_ROOT}" --with-curl="${TH_ROOT}" --with-zlib="${TH_ROOT}" --with-libxml="${TH_ROOT}" --with-iconv \
+  --enable-mbstring \
+  --enable-bcmath --enable-pcntl --enable-posix \
+  --enable-dom --enable-simplexml --enable-xml --enable-xmlreader --enable-xmlwriter \
+  --enable-session --enable-tokenizer --enable-fileinfo --enable-filter --enable-ctype \
+  --without-sqlite3 --without-pdo-sqlite \
+  --with-pgsql="${TH_ROOT}/pgsql" --with-pdo-pgsql="${TH_ROOT}/pgsql" \
+  LDFLAGS="-Wl,-rpath-link,${TH_ROOT}/pgsql/lib -Wl,-rpath-link,${PG_NPM_DIR}/native/lib"
+```
+
+  Flag notes: `--with-oniguruma` is **not** a recognized PHP 8.2 option (ext/mbstring finds the external oniguruma 6.9.9 via `pkg-config`); `--enable-hash` is always-on; `sqlite3`/`pdo_sqlite` **must be disabled** — configure enables them by default and hard-fails on hosts without sqlite dev headers (apt unreachable, and sqlite is not part of the recorded dependency set or §3 extension set); the `rpath-link` LDFLAGS are required because ld does not search `-L` dirs for transitive `NEEDED` entries of `libpq.so.5` (its bundled `libssl.so.1.1`/`libcrypto.so.1.1` live in the npm package's `native/lib`).
 
 ## 3. Required PHP extensions (exact set, verified)
 
@@ -44,12 +60,20 @@ Laravel-12 hard requirements among these: `ctype, filter, hash, mbstring, openss
 PostgreSQL access requires `pdo_pgsql` (+ `pgsql`). Concurrency test harness requires `pcntl, posix`.
 Source-build dependency libraries (pinned, per record 22): zlib 1.3.1, OpenSSL 3.0.13, curl 8.5.0-DEV, oniguruma 6.9.9, libxml2 2.16.0, pkgconf 2.1.0 — installed under `${TH_ROOT}` and made visible via `LD_LIBRARY_PATH`.
 
+**Metadata/layout contract (rev 1.1)** — builds drop artifacts in `lib64` (OpenSSL), `lib/x86_64-linux-gnu` (meson) and `share/pkgconfig` (cmake). The recovery script consolidates after building pkgconf:
+
+- `${TH_ROOT}/bin/pkgconf` and `${TH_ROOT}/bin/pkg-config` → the **static** pkgconf at `${TH_ROOT}/tools/pkgconf/bin/pkgconf` (neutral prefix — see §8).
+- `.pc` files for openssl/libssl/libcrypto/libxml-2.0/zlib symlinked into `${TH_ROOT}/lib/pkgconfig` (the script's `PKG_CONFIG_PATH`); `Cflags: -I${includedir}` appended to the OpenSSL `.pc` files when missing (`make install_sw` omits it — without it PHP's configure gets no `-I${TH_ROOT}/include`).
+- Runtime libs symlinked into `${TH_ROOT}/lib` per the `LD_LIBRARY_PATH` contract: `libssl.so.3`, `libcrypto.so.3` (from `../lib64`), `libxml2.so(.16)` (from `x86_64-linux-gnu`).
+
 ## 4. Composer — exact version
 
 - **Composer 2.10.2**, at `${TH_ROOT}/dev/bin/composer`.
 - Bootstrapped from the canonical `github.com/composer/composer` at annotated tag `2.10.2` (commit `8d4439f572a97670a9edc039eb3b093cc976b4bc`); runtime dependencies installed from their official GitHub repositories at composer's own committed `composer.lock` references.
 - Expected `composer --version`: `Composer version 2.10.2 2026-07-01`.
 - `COMPOSER_HOME` is set to `${TH_ROOT}/composer-home`.
+- **Deterministic autoloader requirements (rev 1.1)** — the generated `vendor/autoload.php` in the composer source tree must: give psr-4 dirs a trailing separator (Composer ClassLoader semantics — `"src" . "Foo.php"` ≠ `"src/Foo.php"`); load classmap stub entries on demand (symfony polyfill `Resources/stubs` → global classes such as `Normalizer`; php-enum stubs) — eager loading is forbidden (would redeclare PHP ≥ 8 classes like `ValueError`); load `files` entries (`React\Promise\resolve()` etc.); and **return a `Composer\Autoload\ClassLoader` instance** — composer's `src/bootstrap.php` type-checks the include result as `?ClassLoader` and dies otherwise.
+- **Wrapper note:** `${TH_ROOT}/dev/bin/composer` merges stderr into stdout (`exec … "$@" 2>&1`). Composer 2.10.2 writes install/verify output to **stderr** while the recovery script's lock-sync check greps the wrapper's **stdout**; without the merge a fully-in-sync vendor tree is reported as out of sync.
 
 ## 5. Laravel / framework — exact version
 
@@ -61,8 +85,11 @@ Source-build dependency libraries (pinned, per record 22): zlib 1.3.1, OpenSSL 3
 ## 6. PostgreSQL — exact version
 
 - **PostgreSQL 18.4** server, running locally at `127.0.0.1:5432`, user `postgres` / password `postgres`.
-- Binaries from npm `@embedded-postgres/linux-x64` (`initdb`, `pg_ctl`, `postgres` in the package's `native/` dir).
-- Client lib `libpq.so.5.18` (REL_16_4 era) + headers from the same npm package, installed at `${TH_ROOT}/pgsql`.
+- Binaries from npm `@embedded-postgres/linux-x64` (`initdb`, `pg_ctl`, `postgres` in the package's `native/` dir — the package ships **no other binaries and no headers**).
+- Client lib `libpq.so.5.18` (REL_16_4 era) copied from the same npm package to `${TH_ROOT}/pgsql/lib`.
+- **libpq headers (rev 1.1):** the npm package ships none, and tag tarballs of `postgres/postgres` ship no `./configure` (autotools chain unavailable) — the public headers (`libpq-fe.h`, `libpq-events.h`, `libpq/libpq-fs.h`, `postgres_ext.h`, generated `pg_config_ext.h` with `#define PG_INT64_TYPE long long int`) are extracted from the canonical `codeload.github.com/postgres/postgres/tar.gz/REL_16_4` tag tarball into `${TH_ROOT}/pgsql/include`. `REL_16_4` matches the `libpq.so.5.18` ABI era.
+- **Client tools (rev 1.1):** the base image has no `psql`/`createdb`/`pg_isready` (apt unreachable) — deterministic shims implementing exactly the invocation modes the recovery script uses are installed at `${TH_ROOT}/pgdev/bin/{psql,createdb,pg_isready}`, dispatching to `${TH_ROOT}/pgdev/lib/p02-pg-shim.php` (the environment's own PHP 8.2.27 + `pdo_pgsql`). `psql -lqt` output keeps the `name | owner | …` pipe layout the script's `cut -d'|' -f1` expects.
+- Server data dir: `${TH_ROOT}/pgdata`; log: `${TH_ROOT}/pg.log`; start via the package's `pg_ctl` with `-o "-p 5432 -k /tmp -h 127.0.0.1"`.
 - Expected `select version()`: `PostgreSQL 18.4 on x86_64-pc-linux-gnu`.
 
 ## 7. Node / npm — exact versions
@@ -72,7 +99,14 @@ Source-build dependency libraries (pinned, per record 22): zlib 1.3.1, OpenSSL 3
 
 ## 8. Required system packages
 
-Base image provides: `gcc`, `g++`, `make`, `perl`, `git`, `curl`, `wget`, `python3` (3.11), `pip3` (23.0.1). No apt packages are used (apt is unreachable). The pinned dependency libraries (zlib, OpenSSL, curl, oniguruma, libxml2, pkgconf) are built from source into `${TH_ROOT}` from canonical codeload tag tarballs. Build-system tools are obtained deterministically from PyPI wheels (reachable): `python3 -m pip install --user cmake ninja meson`. Build routes per component (all CMake/Meson — no autotools chain is required):
+Base image provides: `gcc`, `g++`, `make`, `perl`, `git`, `curl`, `wget`, `python3` (3.11), `pip3` (23.0.1). No apt packages are used (apt is unreachable). The pinned dependency libraries (zlib, OpenSSL, curl, oniguruma, libxml2, pkgconf) are built from source into `${TH_ROOT}` from canonical codeload tag tarballs. Build-system tools are obtained deterministically from PyPI wheels (reachable): `python3 -m pip install --user cmake ninja meson`, with a `--break-system-packages --user` fallback for PEP 668 externally-managed pythons (installs only into `~/.local`). Two environment floors are exported by the recovery script before any build:
+
+```sh
+export CMAKE_POLICY_VERSION_MINIMUM=3.5   # oniguruma 6.9.9 declares cmake_minimum_required < 3.5;
+                                          # PyPI wheels ship CMake >= 4, which rejects it otherwise
+```
+
+Build routes per component (all CMake/Meson — no autotools chain is required):
 
 | Component | Recorded version (record 22) | Deterministic recovery pin | Build system |
 |---|---|---|---|
@@ -81,7 +115,9 @@ Base image provides: `gcc`, `g++`, `make`, `perl`, `git`, `curl`, `wget`, `pytho
 | curl | 8.5.0-DEV (snapshot, no pinned ref) | codeload `curl/curl` tag `curl-8_5_0` (release line; **documented divergence** — recorded DEV snapshot had no recorded ref; PHP requires curl ≥ 7.61) | CMake |
 | oniguruma | 6.9.9 | codeload `kkos/oniguruma` tag `v6.9.9` | CMake |
 | libxml2 | 2.16.0 | codeload `GNOME/libxml2` tag `v2.15.3` (GitHub mirror max; **documented divergence** — 2.16.0 tarball exists only on the blocked GNOME gitlab) | Meson |
-| pkgconf | 2.1.0 | codeload `pkgconf/pkgconf` tag `pkgconf-2.1.0` | Meson |
+| pkgconf | 2.1.0 | codeload `pkgconf/pkgconf` tag `pkgconf-2.1.0` — built **static** at the neutral prefix `${TH_ROOT}/tools/pkgconf` (**rev 1.1 change**) | Meson |
+
+**pkgconf neutral-prefix requirement (rev 1.1):** a pkgconf installed at `${TH_ROOT}` itself resolves its "system include dir" to `${TH_ROOT}/include` and **silently strips `-I${TH_ROOT}/include` from `pkg-config --cflags`** — standard system-dir filtering, misdirected — which broke PHP's OpenSSL header detection (empty `OPENSSL_CFLAGS`). The static build at `${TH_ROOT}/tools/pkgconf` has no runtime library dependency and its filter list points at its own (nonexistent) include dir. Canonical names `${TH_ROOT}/bin/pkgconf` and `${TH_ROOT}/bin/pkg-config` are symlinks to it.
 
 All tarballs downloaded from `codeload.github.com/<owner>/<repo>/tar.gz/<tag>` (verified reachable, TLS verified). Every build is followed by its own verification step; a component that cannot be reconstructed deterministically stops the recovery with an explicit missing-component report (per the CRITICAL RULE — no fresh investigation).
 
@@ -101,8 +137,9 @@ Runtime/test variables (used by the recovery script and verification commands):
 
 ```sh
 export TH_ROOT="${TH_ROOT:-/opt/th}"                                   # toolchain root (symlink to workspace toolchain dir)
-export PATH="${TH_ROOT}/php/bin:${TH_ROOT}/bin:${TH_ROOT}/dev/bin:${TH_ROOT}/pgdev/bin:$PATH"
-export LD_LIBRARY_PATH="${TH_ROOT}/lib:${PG_NPM_DIR}/native/lib:${LD_LIBRARY_PATH:-}"
+export PATH="${TH_ROOT}/php/bin:${TH_ROOT}/bin:${TH_ROOT}/dev/bin:${TH_ROOT}/pgdev/bin:$HOME/.local/bin:$PATH"
+export LD_LIBRARY_PATH="${TH_ROOT}/lib:${TH_ROOT}/pgsql/lib:${PG_NPM_DIR}/native/lib:${LD_LIBRARY_PATH:-}"
+export PKG_CONFIG_PATH="${TH_ROOT}/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 export COMPOSER_HOME="${TH_ROOT}/composer-home"
 export PGUSER=postgres PGPASSWORD=postgres PGHOST=127.0.0.1 PGPORT=5432
 export APP_ENV=testing                                                  # for test runs
@@ -170,11 +207,21 @@ Expected result (recorded at R3 closure): **OK (52 tests, 229 assertions)**.
 
 | Path/var | Meaning |
 |---|---|
-| `${TH_ROOT}` (default `/opt/th`) | toolchain root; `/opt/th` is a symlink into the persistent workspace (`/home/user/toolchain`) |
+| `${TH_ROOT}` (default `/opt/th`) | toolchain root; `/opt/th` is a symlink into the persistent workspace (`/home/user/toolchain`). One-time host prep (requires sudo, nothing else does): `mkdir -p /home/user/toolchain && sudo ln -sfn /home/user/toolchain /opt/th` |
+| `/home/user/toolchain` | real toolchain directory (user-writable; `/opt` itself is root-owned) |
 | `${TH_ROOT}/php` | PHP 8.2.27 prefix |
-| `${TH_ROOT}/dev/bin/composer` | Composer 2.10.2 |
+| `${TH_ROOT}/bin/pkgconf`, `${TH_ROOT}/bin/pkg-config` | symlinks to the static pkgconf at `${TH_ROOT}/tools/pkgconf/bin/pkgconf` |
+| `${TH_ROOT}/tools/pkgconf` | pkgconf 2.1.0 static install (neutral prefix — see §8) |
+| `${TH_ROOT}/lib/pkgconfig` | the consolidated `PKG_CONFIG_PATH` dir (openssl/libssl/libcrypto/libxml-2.0/zlib/oniguruma/libcurl `.pc`) |
+| `${TH_ROOT}/dev/bin/composer` | Composer 2.10.2 (stderr→stdout merging wrapper) |
 | `${TH_ROOT}/composer-home` | COMPOSER_HOME cache |
-| `${TH_ROOT}/pgsql`, `${TH_ROOT}/lib` | libpq + built dependency libs |
+| `${TH_ROOT}/pgsql` | libpq 5.18 (`lib/`) + REL_16_4 headers (`include/`) |
+| `${TH_ROOT}/pgdev/bin` | `initdb`/`pg_ctl`/`postgres` symlinks into the npm package + the `psql`/`createdb`/`pg_isready` shims |
+| `${TH_ROOT}/pgdev/lib/p02-pg-shim.php` | shared PHP backend of the client-tool shims |
+| `${TH_ROOT}/lib` | built dependency libs + consolidated runtime symlinks (see §3 metadata contract) |
+| `${TH_ROOT}/src` | downloaded source tarballs + extracted build trees |
+| `${TH_ROOT}/pgdata`, `${TH_ROOT}/pg.log` | PostgreSQL 18.4 data dir / server log |
+| `${TH_ROOT}/pg-npm` | npm staging dir for `@embedded-postgres/linux-x64` |
 | `${PG_NPM_DIR}` (`…/node_modules/@embedded-postgres/linux-x64`) | PostgreSQL 18.4 binaries + bundled libpq |
 | `APP_ENV=testing` | required for phpunit runs |
 | `/tmp/pg-npm` | historical npm staging dir for embedded-postgres (recovery script re-creates as needed) |
@@ -192,6 +239,7 @@ Expected result (recorded at R3 closure): **OK (52 tests, 229 assertions)**.
 
 | # | Command | Expected result |
 |---|---|---|
+| 0 | `bash docs/environment/P02-environment-recovery.sh --verify` | all component checks OK; final line `ENVIRONMENT VALID — reuse it. Do not rebuild.`; **exit code 0** (rev 1.1 — the script previously returned 1 for a fully valid environment due to an inverted success flag in `check_tools`) |
 | 1 | `php -v` | `PHP 8.2.27 (cli) (built: Aug 24 2026) (NTS)` |
 | 2 | `composer --version` | `Composer version 2.10.2 2026-07-01` |
 | 3 | `php artisan --version` | `Laravel Framework 12.67.0` |

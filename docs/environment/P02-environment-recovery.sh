@@ -1,14 +1,62 @@
 #!/usr/bin/env bash
 # =============================================================================
-# P02 Environment Recovery — deterministic REUSE -> VERIFY -> REPAIR-MISSING-ONLY -> VERIFY
+# P02 Environment Recovery — deterministic REUSE -> VERIFY -> RECOVER -> VERIFY
 # Canonical spec: docs/environment/P02-environment-baseline.md (source of truth)
 # =============================================================================
+#
+# Revision 2 (2026-08-25) — aligned with the environment as actually built:
+#   * build_toolchain_from_pypi() is now invoked (PyPI cmake/ninja/meson, with a
+#     PEP 668 --break-system-packages fallback for externally-managed pythons).
+#   * export CMAKE_POLICY_VERSION_MINIMUM=3.5 (oniguruma 6.9.9 declares
+#     cmake_minimum_required < 3.5; PyPI wheels now ship CMake >= 4).
+#   * pkgconf is built STATIC at the neutral prefix ${TH_ROOT}/tools/pkgconf.
+#     A pkgconf installed at ${TH_ROOT} itself treats ${TH_ROOT}/include as its
+#     "system include dir" and silently strips -I${TH_ROOT}/include from
+#     pkg-config --cflags, which breaks PHP's OpenSSL detection.
+#   * Canonical names + metadata are wired: ${TH_ROOT}/bin/pkgconf and the
+#     pkg-config alias; .pc files consolidated into ${TH_ROOT}/lib/pkgconfig
+#     (openssl/libssl/libcrypto from lib64, libxml-2.0 from lib/x86_64-linux-gnu,
+#     zlib from share); missing `Cflags: -I${includedir}` appended to OpenSSL
+#     .pc files (make install_sw omits it); runtime libs symlinked into
+#     ${TH_ROOT}/lib (libssl.so.3, libcrypto.so.3, libxml2.so*) per the
+#     LD_LIBRARY_PATH contract.
+#   * libpq 5.18 from the @embedded-postgres npm package is installed at
+#     ${TH_ROOT}/pgsql BEFORE the PHP build; headers come from the canonical
+#     postgres/postgres tag tarball REL_16_4 (the npm package ships no headers;
+#     libpq.so.5.18 is the REL_16_4-era ABI).
+#   * PHP configure (exact set used to build the verified environment):
+#     --without-sqlite3 --without-pdo-sqlite (no sqlite in the recorded dep set;
+#     configure defaults otherwise hard-fail without system sqlite headers),
+#     --with-pgsql=${TH_ROOT}/pgsql --with-pdo-pgsql=${TH_ROOT}/pgsql (baseline
+#     §3 requires the pdo_pgsql + pgsql extensions), plus
+#     LDFLAGS="-Wl,-rpath-link,..." so ld resolves libpq's bundled deps
+#     (libssl.so.1.1/libcrypto.so.1.1 in the npm native/lib).
+#   * PostgreSQL client tools: the npm package ships ONLY initdb/pg_ctl/postgres
+#     and the base image has no psql — deterministic psql/createdb/pg_isready
+#     shims (PHP 8.2.27 + pdo_pgsql) are installed at ${TH_ROOT}/pgdev/bin.
+#   * bootstrap_composer's generated autoloader: psr-4 dirs get the trailing
+#     separator (Composer ClassLoader semantics), classmap stubs (symfony
+#     polyfills' Resources/stubs, php-enum stubs) load on demand, and the file
+#     returns a Composer\Autoload\ClassLoader instance (composer's
+#     src/bootstrap.php type-checks the include result). The composer wrapper
+#     merges stderr into stdout (composer 2.10.2 writes install output to
+#     stderr; this script's lock-sync check greps stdout).
+#   * check_tools() returned its success flag (1) as exit status — inverted
+#     shell semantics; a fully valid environment always exited 1. Now returns 0
+#     on success. verify_all() no longer prints an empty MISSING entry.
+#   * check_php_extensions() invokes `php -m` once instead of 34 times
+#     (occasional truncated module output under heavy IO produced spurious
+#     "missing extension" reports during recovery runs).
 #
 # Usage:
 #   P02-environment-recovery.sh            # verify only (default; installs nothing)
 #   P02-environment-recovery.sh --verify   # same
 #   P02-environment-recovery.sh --recover  # install ONLY missing components, then re-verify
 #   P02-environment-recovery.sh --help
+#
+# One-time host prep (baseline §17): the toolchain root is a symlink into the
+# persistent workspace:
+#   mkdir -p /home/user/toolchain && sudo ln -sfn /home/user/toolchain /opt/th
 #
 # Exit codes: 0 = environment fully valid; 1 = missing components (verify mode);
 #             2 = recovery attempted but could not complete deterministically.
@@ -32,6 +80,7 @@ COMPOSER_COMMIT="8d4439f572a97670a9edc039eb3b093cc976b4bc"
 LARAVEL_VERSION_EXPECTED="Laravel Framework 12.67.0"
 PG_NPM_PACKAGE="@embedded-postgres/linux-x64@18.4.0-beta.17"   # ships PostgreSQL 18.4
 PG_VERSION_EXPECTED="18.4"
+POSTGRES_HEADERS_TAG="REL_16_4"   # matches bundled libpq.so.5.18 ABI era
 
 # Dependency libs (codeload tag tarballs, canonical GitHub)
 ZLIB_TAG="v1.3.1"
@@ -51,6 +100,9 @@ export PATH="${TH_ROOT}/php/bin:${TH_ROOT}/bin:${TH_ROOT}/dev/bin:${TH_ROOT}/pgd
 export LD_LIBRARY_PATH="${TH_ROOT}/lib:${TH_ROOT}/pgsql/lib:${PG_NPM_DIR}/native/lib:${LD_LIBRARY_PATH:-}"
 export COMPOSER_HOME
 export PKG_CONFIG_PATH="${TH_ROOT}/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+# oniguruma 6.9.9 declares cmake_minimum_required < 3.5; PyPI wheels ship CMake >= 4,
+# which rejects it unless this floor is declared (CMake honors the env variable).
+export CMAKE_POLICY_VERSION_MINIMUM="${CMAKE_POLICY_VERSION_MINIMUM:-3.5}"
 export PGUSER="${PGUSER:-postgres}" PGPASSWORD="${PGPASSWORD:-postgres}" PGHOST="${PGHOST:-127.0.0.1}" PGPORT="${PGPORT:-5432}"
 
 PHP_BIN="${TH_ROOT}/php/bin/php"
@@ -94,10 +146,12 @@ check_php() {
 
 check_php_extensions() {
     local required="Core PDO Phar Reflection SPL SimpleXML bcmath ctype curl date dom fileinfo filter hash iconv json libxml mbstring openssl pcntl pcre pdo_pgsql pgsql posix random session standard tokenizer xml xmlreader xmlwriter zlib"
-    local missing_ext=""
-    local m
+    local missing_ext="" m mods
+    # Single `php -m` invocation: spawning php per module produced occasional
+    # truncated outputs (and spurious missing-extension reports) under heavy IO.
+    mods="$("$PHP_BIN" -m 2>/dev/null)" || true
     for m in $required; do
-        "$PHP_BIN" -m 2>/dev/null | grep -qx "$m" || missing_ext="$missing_ext $m"
+        printf '%s\n' "$mods" | grep -qx "$m" || missing_ext="$missing_ext $m"
     done
     if [ -n "$missing_ext" ]; then
         warn "PHP extensions missing:$missing_ext"
@@ -177,12 +231,14 @@ check_artisan_boot() {
 }
 
 check_tools() {
-    local ok=1
-    [ -x "${REPO_ROOT}/vendor/bin/phpunit" ]  || { note_missing "vendor/bin/phpunit"; ok=0; }
-    [ -x "${REPO_ROOT}/vendor/bin/phpstan" ]  || { note_missing "vendor/bin/phpstan"; ok=0; }
-    [ -x "${REPO_ROOT}/vendor/bin/pint" ]     || { note_missing "vendor/bin/pint"; ok=0; }
-    [ "$ok" -eq 1 ] && say "Test toolchain: OK (phpunit, phpstan, pint present)"
-    return $ok
+    local bad=0
+    [ -x "${REPO_ROOT}/vendor/bin/phpunit" ]  || { note_missing "vendor/bin/phpunit"; bad=1; }
+    [ -x "${REPO_ROOT}/vendor/bin/phpstan" ]  || { note_missing "vendor/bin/phpstan"; bad=1; }
+    [ -x "${REPO_ROOT}/vendor/bin/pint" ]     || { note_missing "vendor/bin/pint"; bad=1; }
+    [ "$bad" -eq 0 ] && say "Test toolchain: OK (phpunit, phpstan, pint present)"
+    # shell exit semantics: 0 = success (rev 2 — was inverted: returned the
+    # success flag 1, so a fully valid environment always exited 1).
+    return "$bad"
 }
 
 verify_all() {
@@ -200,7 +256,9 @@ verify_all() {
         say "ENVIRONMENT VALID — reuse it. Do not rebuild."
     else
         say "MISSING COMPONENTS:"
-        printf '  - %s\n' "${MISSING[@]}"
+        if [ "${#MISSING[@]}" -gt 0 ]; then
+            printf '  - %s\n' "${MISSING[@]}"
+        fi
     fi
     return "$rc"
 }
@@ -213,7 +271,12 @@ build_toolchain_from_pypi() {
         say "cmake/ninja/meson: already available"; return 0
     fi
     say "Installing cmake, ninja, meson from PyPI (canonical wheels)"
-    python3 -m pip install --user --quiet cmake ninja meson || { note_failed "pypi-cmake-ninja-meson"; return 1; }
+    # PEP 668: Debian 12+/Ubuntu 23+ pythons are externally managed and reject
+    # plain --user installs; --break-system-packages with --user only writes ~/.local.
+    if ! python3 -m pip install --user --quiet cmake ninja meson 2>/dev/null; then
+        python3 -m pip install --user --break-system-packages --quiet cmake ninja meson \
+            || { note_failed "pypi-cmake-ninja-meson"; return 1; }
+    fi
     export PATH="${HOME}/.local/bin:${PATH}"
     command -v cmake >/dev/null 2>&1 || { note_failed "cmake"; return 1; }
     command -v ninja >/dev/null 2>&1 || { note_failed "ninja"; return 1; }
@@ -261,14 +324,69 @@ build_libxml2() {
     say "libxml2: OK"
 }
 
+# Consolidate pkg-config metadata + runtime libs so the canonical environment
+# contract holds: PKG_CONFIG_PATH=${TH_ROOT}/lib/pkgconfig and
+# LD_LIBRARY_PATH=${TH_ROOT}/lib:... must find everything, regardless of where
+# each build (OpenSSL -> lib64, meson -> lib/x86_64-linux-gnu, cmake -> share)
+# actually drops its artifacts.
+wire_toolchain_metadata() {
+    mkdir -p "${TH_ROOT}/lib/pkgconfig"
+    local pc found target linkname pair
+    # .pc files -> ${TH_ROOT}/lib/pkgconfig (the script's PKG_CONFIG_PATH)
+    for pc in openssl libssl libcrypto libxml-2.0 zlib; do
+        [ -e "${TH_ROOT}/lib/pkgconfig/${pc}.pc" ] && continue
+        found="$(find "${TH_ROOT}/lib64/pkgconfig" "${TH_ROOT}/lib/x86_64-linux-gnu/pkgconfig" "${TH_ROOT}/share/pkgconfig" -maxdepth 1 -name "${pc}.pc" 2>/dev/null | head -n1 || true)"
+        if [ -n "$found" ]; then
+            ln -sf "$(realpath --relative-to="${TH_ROOT}/lib/pkgconfig" "$found" 2>/dev/null || echo "$found")" \
+                "${TH_ROOT}/lib/pkgconfig/${pc}.pc"
+        fi
+    done
+    # OpenSSL's install_sw omits Cflags from its .pc files; without it PHP's
+    # configure receives no -I${TH_ROOT}/include and <openssl/*.h> is not found.
+    for pc in openssl libssl libcrypto; do
+        found="${TH_ROOT}/lib64/pkgconfig/${pc}.pc"
+        if [ -f "$found" ] && ! grep -q "^Cflags:" "$found"; then
+            printf 'Cflags: -I${includedir}\n' >> "$found"
+        fi
+    done
+    # Runtime libs under ${TH_ROOT}/lib (targets relative to the link's dir).
+    for pair in \
+        "../lib64/libssl.so.3:libssl.so.3" \
+        "../lib64/libcrypto.so.3:libcrypto.so.3" \
+        "x86_64-linux-gnu/libxml2.so.16:libxml2.so.16" \
+        "x86_64-linux-gnu/libxml2.so:libxml2.so" \
+        "x86_64-linux-gnu/libpkgconf.so.4:libpkgconf.so.4"
+    do
+        target="${pair%%:*}"; linkname="${pair##*:}"
+        [ -e "${TH_ROOT}/lib/${linkname}" ] && continue
+        [ -e "${TH_ROOT}/lib/${target}" ] || continue
+        ln -sf "$target" "${TH_ROOT}/lib/${linkname}"
+    done
+    return 0
+}
+
 build_pkgconf() {
-    [ -x "${TH_ROOT}/bin/pkgconf" ] || {
+    # pkgconf must NOT be installed at ${TH_ROOT}: a pkgconf whose own prefix is
+    # ${TH_ROOT} treats ${TH_ROOT}/include as a "system include dir" and silently
+    # strips -I${TH_ROOT}/include from pkg-config --cflags — which broke PHP's
+    # OpenSSL detection. Build it STATIC (no runtime lib dependency) at the
+    # neutral prefix ${TH_ROOT}/tools/pkgconf and expose canonical names on bin/.
+    if [ ! -x "${TH_ROOT}/tools/pkgconf/bin/pkgconf" ]; then
         local src="${SRC_DIR}/pkgconf-${PKGCONF_TAG}"
-        [ -d "$src" ] || download "https://codeload.github.com/pkgconf/pkgconf/tar.gz/${PKGCONF_TAG}" "${SRC_DIR}/pkgconf.tgz" || { note_failed "pkgconf-download"; return 1; }
-        [ -d "$src" ] || { mkdir -p "$src"; tar -xzf "${SRC_DIR}/pkgconf.tgz" -C "$src" --strip-components=1; }
-        ( cd "$src" && meson setup build --prefix="${TH_ROOT}" -Ddefault_library=shared >/dev/null && ninja -C build >/dev/null && ninja -C build install >/dev/null ) || { note_failed "pkgconf"; return 1; }
-    }
-    say "pkgconf: OK"
+        [ -d "$src" ] || {
+            download "https://codeload.github.com/pkgconf/pkgconf/tar.gz/${PKGCONF_TAG}" "${SRC_DIR}/pkgconf.tgz" || { note_failed "pkgconf-download"; return 1; }
+            mkdir -p "$src"; tar -xzf "${SRC_DIR}/pkgconf.tgz" -C "$src" --strip-components=1
+        }
+        ( cd "$src" && \
+          meson setup build-static --prefix="${TH_ROOT}/tools/pkgconf" -Ddefault_library=static >/dev/null && \
+          ninja -C build-static >/dev/null && \
+          ninja -C build-static install >/dev/null ) || { note_failed "pkgconf"; return 1; }
+    fi
+    mkdir -p "${TH_ROOT}/bin"
+    ln -sf "${TH_ROOT}/tools/pkgconf/bin/pkgconf" "${TH_ROOT}/bin/pkgconf"
+    ln -sf pkgconf "${TH_ROOT}/bin/pkg-config"
+    wire_toolchain_metadata
+    say "pkgconf: OK (${PKGCONF_TAG}, static at tools/pkgconf; pkg-config name wired)"
 }
 
 build_curl() {
@@ -286,8 +404,12 @@ install_php() {
        && check_php_extensions >/dev/null 2>&1; then
         say "PHP ${PHP_VERSION}: already present with the full extension set"; return 0
     fi
-    # PHP must be built against the TH_ROOT dependency libs.
-    build_zlib && build_openssl && build_oniguruma && build_libxml2 && build_pkgconf && build_curl || {
+    # Build-system tools (cmake/ninja/meson) come from canonical PyPI wheels.
+    build_toolchain_from_pypi || return 1
+    # PHP must be built against the TH_ROOT dependency libs + libpq at TH_ROOT/pgsql
+    # (baseline §3 requires the pgsql/pdo_pgsql extensions; libpq 5.18 comes from the
+    # pinned npm package with REL_16_4-era headers — see install_libpq).
+    build_zlib && build_openssl && build_oniguruma && build_libxml2 && build_pkgconf && build_curl && install_libpq || {
         say "STOP: a dependency required for the PHP build could not be reconstructed deterministically."
         say "Missing/failed components: ${FAILED_COMPONENTS[*]:-see above}"
         return 1
@@ -315,12 +437,25 @@ install_php() {
         --with-zlib="${TH_ROOT}" \
         --with-libxml="${TH_ROOT}" \
         --with-iconv \
-        --enable-mbstring --with-oniguruma="${TH_ROOT}" \
+        --enable-mbstring \
         --enable-bcmath --enable-pcntl --enable-posix \
         --enable-dom --enable-simplexml --enable-xml --enable-xmlreader --enable-xmlwriter \
-        --enable-session --enable-tokenizer --enable-fileinfo --enable-filter --enable-ctype --enable-hash \
+        --enable-session --enable-tokenizer --enable-fileinfo --enable-filter --enable-ctype \
+        --without-sqlite3 --without-pdo-sqlite \
+        --with-pgsql="${TH_ROOT}/pgsql" \
+        --with-pdo-pgsql="${TH_ROOT}/pgsql" \
+        LDFLAGS="-Wl,-rpath-link,${TH_ROOT}/pgsql/lib -Wl,-rpath-link,${PG_NPM_DIR}/native/lib" \
         >/dev/null && \
       make -j"$(nproc)" >/dev/null && make install >/dev/null ) || { note_failed "php-build"; return 1; }
+    # Notes on the exact flag set (matches the verified environment, rev 2):
+    #   * no --with-oniguruma (unrecognized in PHP 8.2): ext/mbstring picks up the
+    #     external oniguruma 6.9.9 via pkg-config (oniguruma.pc is on PKG_CONFIG_PATH).
+    #   * no --enable-hash: hash is always-on in PHP 8 (flag was only a warning).
+    #   * sqlite3/pdo_sqlite disabled: the base image has no sqlite dev headers
+    #     (apt unreachable) and sqlite is not part of the baseline §3 dep set.
+    #   * rpath-link lets ld resolve libpq's bundled deps (libssl.so.1.1/
+    #     libcrypto.so.1.1 live in the npm package's native/lib, which is NOT
+    #     searched for transitive NEEDED entries via -L alone).
     say "PHP ${PHP_VERSION}: installed"
     return 0
 }
@@ -372,7 +507,7 @@ bootstrap_composer() {
         say "Generating vendor/autoload.php for composer source tree"
         php -r '
             $root = $argv[1];
-            $psr4 = []; $files = [];
+            $psr4 = []; $files = []; $classmap = [];
             $dirs = glob($root."/vendor/*/*", GLOB_ONLYDIR);
             $pkgs = glob($root."/vendor/*/*/composer.json");
             foreach ($pkgs as $cf) {
@@ -381,24 +516,45 @@ bootstrap_composer() {
                 $base = dirname($cf);
                 foreach (($d["autoload"]["psr-4"] ?? []) as $ns => $dir) {
                     $ns = ltrim($ns, "\\");
-                    $psr4[$ns] = $base."/".(is_array($dir) ? $dir[0] : $dir);
+                    // Composer ClassLoader semantics: dir + separator + relpath.
+                    // Without the trailing separator "src"."Foo.php" = "srcFoo.php".
+                    $p = $base."/".(is_array($dir) ? $dir[0] : $dir);
+                    if (substr($p, -1) !== "/") { $p .= "/"; }
+                    $psr4[$ns] = $p;
                 }
                 foreach (($d["autoload"]["files"] ?? []) as $f) { $files[] = $base."/".$f; }
+                // classmap entries (symfony polyfill Resources/stubs, php-enum stubs, ...)
+                foreach (($d["autoload"]["classmap"] ?? []) as $cd) {
+                    foreach (glob($base."/".(is_array($cd) ? $cd[0] : $cd)."/*.php") ?: [] as $sf) {
+                        $bn = basename($sf, ".php");
+                        if (!isset($classmap[$bn])) { $classmap[$bn] = $sf; }
+                    }
+                }
             }
             // composer itself
-            $psr4["Composer\\"] = $root."/src/Composer";
-            foreach ($files as $f) { if (is_file($f)) require_once $f; }
-            $code = "<?php\n// deterministic autoloader generated by P02-environment-recovery.sh\n";
+            $psr4["Composer\\"] = $root."/src/Composer/";
+            $code = "<?php\n// deterministic autoloader generated by P02-environment-recovery.sh (rev 2)\n";
             $code .= "spl_autoload_register(function (\$class) {\n    static \$map = ".var_export($psr4, true).";\n";
             $code .= "    foreach (\$map as \$prefix => \$dir) {\n        if (strpos(\$class, \$prefix) === 0) {\n            \$rel = substr(\$class, strlen(\$prefix));\n            \$f = \$dir.str_replace(\"\\\\\", \"/\", \$rel).\".php\";\n            if (is_file(\$f)) { require \$f; return true; }\n        }\n    }\n    return false;\n});\n";
+            // on-demand classmap loader (global-namespace stub classes: Normalizer, ...)
+            $code .= "spl_autoload_register(function (\$class) {\n    static \$cmap = ".var_export($classmap, true).";\n";
+            $code .= "    if (isset(\$cmap[\$class]) && is_file(\$cmap[\$class])) { require \$cmap[\$class]; return true; }\n    return false;\n});\n";
             $code .= "foreach (".var_export($files, true)." as \$f) { if (is_file(\$f)) require_once \$f; }\n";
+            // composer src/bootstrap.php type-checks the include result as
+            // ?Composer\Autoload\ClassLoader — return a registered loader instance.
+            $cl = $root."/src/Composer/Autoload/ClassLoader.php";
+            $code .= "if (is_file(".var_export($cl, true).")) {\n";
+            $code .= "    require_once ".var_export($cl, true).";\n";
+            $code .= "    \$__loader = new \\Composer\\Autoload\\ClassLoader();\n    \$__loader->register(false);\n    return \$__loader;\n}\nreturn null;\n";
             file_put_contents($root."/vendor/autoload.php", $code);
         ' "$csrc"
     fi
     mkdir -p "${TH_ROOT}/dev/bin"
     cat > "$COMPOSER_BIN" <<EOF
 #!/usr/bin/env bash
-exec "$PHP_BIN" "$csrc/bin/composer" "\$@"
+# P02 composer wrapper. 2>&1: composer 2.10.2 writes install/verify output to
+# stderr while this script's lock-sync check greps this wrapper's stdout.
+exec "$PHP_BIN" "$csrc/bin/composer" "\$@" 2>&1
 EOF
     chmod +x "$COMPOSER_BIN"
     "$COMPOSER_BIN" --version || { note_failed "composer-bootstrap"; return 1; }
@@ -413,6 +569,195 @@ install_vendor() {
     say "composer install from committed composer.lock (no update)"
     ( cd "$REPO_ROOT" && "$COMPOSER_BIN" install --no-interaction --prefer-dist ) || { note_failed "composer-install"; return 1; }
     say "vendor/: installed"
+    return 0
+}
+
+# libpq 5.18 (+ headers) at ${TH_ROOT}/pgsql — prerequisite for the PHP build.
+# The npm package bundles libpq.so.5.18 (REL_16_4-era ABI) but ships NO headers;
+# the matching headers come from the canonical postgres/postgres tag tarball.
+install_libpq() {
+    local native="${PG_NPM_DIR}/native"
+    if [ -f "${TH_ROOT}/pgsql/lib/libpq.so.5.18" ] && [ -f "${TH_ROOT}/pgsql/include/libpq-fe.h" ]; then
+        say "libpq: OK (5.18 + ${POSTGRES_HEADERS_TAG} headers at ${TH_ROOT}/pgsql)"
+        return 0
+    fi
+    if [ ! -x "${native}/bin/postgres" ]; then
+        say "Installing ${PG_NPM_PACKAGE} from npm registry (for libpq)"
+        mkdir -p "${TH_ROOT}/pg-npm"
+        ( cd "${TH_ROOT}/pg-npm" && npm install --no-audit --no-fund --silent "${PG_NPM_PACKAGE}" ) \
+            || { note_failed "pg-npm-libpq"; return 1; }
+    fi
+    mkdir -p "${TH_ROOT}/pgsql/lib" "${TH_ROOT}/pgsql/include/libpq"
+    cp -P "${native}/lib/libpq.so" "${native}/lib/libpq.so.5" "${native}/lib/libpq.so.5.18" \
+        "${TH_ROOT}/pgsql/lib/" || { note_failed "libpq-copy"; return 1; }
+    local hdr_tgz="${SRC_DIR}/pgsql-headers-${POSTGRES_HEADERS_TAG}.tgz"
+    local hdr_root="${SRC_DIR}/postgres-${POSTGRES_HEADERS_TAG}/src"
+    if [ ! -f "${SRC_DIR}/postgres-${POSTGRES_HEADERS_TAG}/.p02-headers-extracted" ]; then
+        [ -s "$hdr_tgz" ] || download "https://codeload.github.com/postgres/postgres/tar.gz/${POSTGRES_HEADERS_TAG}" "$hdr_tgz" \
+            || { note_failed "pg-headers-download"; return 1; }
+        tar -xzf "$hdr_tgz" -C "${SRC_DIR}" \
+            "postgres-${POSTGRES_HEADERS_TAG}/src/interfaces/libpq/libpq-fe.h" \
+            "postgres-${POSTGRES_HEADERS_TAG}/src/interfaces/libpq/libpq-events.h" \
+            "postgres-${POSTGRES_HEADERS_TAG}/src/include/libpq/libpq-fs.h" \
+            "postgres-${POSTGRES_HEADERS_TAG}/src/include/postgres_ext.h" \
+            "postgres-${POSTGRES_HEADERS_TAG}/src/include/pg_config_ext.h.in" \
+            || { note_failed "pg-headers-extract"; return 1; }
+        touch "${SRC_DIR}/postgres-${POSTGRES_HEADERS_TAG}/.p02-headers-extracted"
+    fi
+    cp "${hdr_root}/interfaces/libpq/libpq-fe.h" "${hdr_root}/interfaces/libpq/libpq-events.h" "${TH_ROOT}/pgsql/include/"
+    cp "${hdr_root}/include/libpq/libpq-fs.h" "${TH_ROOT}/pgsql/include/libpq/"
+    cp "${hdr_root}/include/postgres_ext.h" "${TH_ROOT}/pgsql/include/"
+    sed -e 's/^#undef PG_INT64_TYPE/#define PG_INT64_TYPE long long int/' \
+        "${hdr_root}/include/pg_config_ext.h.in" > "${TH_ROOT}/pgsql/include/pg_config_ext.h"
+    say "libpq: installed (5.18 + ${POSTGRES_HEADERS_TAG} headers at ${TH_ROOT}/pgsql)"
+    return 0
+}
+
+# psql / createdb / pg_isready client tools. The npm package ships ONLY
+# initdb/pg_ctl/postgres and the base image has no postgresql-client (apt is
+# unreachable), so these deterministic shims implement the exact client
+# behaviors this script needs, over the recorded environment's own PHP 8.2.27
+# + pdo_pgsql stack (bundled libpq 5.18).
+install_pg_clients() {
+    if [ -x "${TH_ROOT}/pgdev/bin/psql" ] && [ -x "${TH_ROOT}/pgdev/bin/createdb" ] \
+       && [ -x "${TH_ROOT}/pgdev/bin/pg_isready" ] && [ -f "${TH_ROOT}/pgdev/lib/p02-pg-shim.php" ]; then
+        say "PostgreSQL client tools: OK (psql/createdb/pg_isready)"
+        return 0
+    fi
+    mkdir -p "${TH_ROOT}/pgdev/bin" "${TH_ROOT}/pgdev/lib"
+    cat > "${TH_ROOT}/pgdev/lib/p02-pg-shim.php" <<'P02SHIM'
+<?php
+/**
+ * P02 environment — PostgreSQL client tool shims (psql / createdb / pg_isready).
+ * Implements the exact invocation modes used by P02-environment-recovery.sh:
+ *   psql       -h H -p P -U U -l -q -t | -c "SQL" [dbname]
+ *   createdb   -h H -p P -U U dbname
+ *   pg_isready -h H -p P -q
+ */
+
+$mode = $_SERVER['argv'][1] ?? '';
+$args = array_slice($_SERVER['argv'], 2);
+
+$host   = getenv('PGHOST') ?: '127.0.0.1';
+$port   = getenv('PGPORT') ?: '5432';
+$user   = getenv('PGUSER') ?: 'postgres';
+$pass   = getenv('PGPASSWORD') ?: '';
+$dbname = null;
+$list = false; $tuples = false; $quiet = false; $cmd = null;
+
+$valueFlags = ['h' => 'host', 'p' => 'port', 'U' => 'user', 'd' => 'dbname'];
+for ($i = 0; $i < count($args); $i++) {
+    $a = $args[$i];
+    if ($a === '--list') { $list = true; continue; }
+    if ($a === '--tuples-only') { $tuples = true; continue; }
+    if ($a === '--quiet') { $quiet = true; continue; }
+    if ($a === '--command') { $cmd = $args[++$i] ?? null; continue; }
+    if ($a === '-w' || $a === '--no-password') { continue; }
+    if ($a !== '' && $a[0] === '-' && $a !== '-' && $a[1] !== '-') {
+        $rest = substr($a, 1);
+        while ($rest !== '') {
+            $c = $rest[0];
+            $rest = substr($rest, 1);
+            if (isset($valueFlags[$c])) {
+                $val = ($rest !== '') ? $rest : ($args[++$i] ?? '');
+                ${$valueFlags[$c]} = $val;
+                $rest = '';
+            } elseif ($c === 'l') { $list = true; }
+            elseif ($c === 't') { $tuples = true; }
+            elseif ($c === 'q') { $quiet = true; }
+            /* other flags ignored */
+        }
+        continue;
+    }
+    $dbname = $a; // positional database name
+}
+
+function pg_connect_pdo(string $db, string $host, string $port, string $user, string $pass): PDO {
+    $dsn = "pgsql:host={$host};port={$port};dbname={$db};user={$user}";
+    if ($pass !== '') {
+        $dsn .= ";password={$pass}";
+    }
+    $dsn .= ';connect_timeout=5';
+    return new PDO($dsn, null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+}
+
+try {
+    if ($mode === 'pg_isready') {
+        $sock = @fsockopen($host, (int) $port, $errno, $errstr, 3);
+        if ($sock !== false) {
+            fclose($sock);
+            if (!$quiet) {
+                echo "{$host}:{$port} - accepting connections", PHP_EOL;
+            }
+            exit(0);
+        }
+        if (!$quiet) {
+            echo "no response", PHP_EOL;
+        }
+        exit(2);
+    }
+
+    if ($mode === 'createdb') {
+        if ($dbname === null) {
+            fwrite(STDERR, "createdb: database name required\n");
+            exit(1);
+        }
+        $pdo = pg_connect_pdo('postgres', $host, $port, $user, $pass);
+        $safe = '"' . str_replace('"', '""', $dbname) . '"';
+        $pdo->exec("CREATE DATABASE {$safe}");
+        echo "CREATE DATABASE", PHP_EOL;
+        exit(0);
+    }
+
+    if ($mode === 'psql') {
+        if ($list) {
+            $pdo = pg_connect_pdo('postgres', $host, $port, $user, $pass);
+            $rows = $pdo
+                ->query("SELECT datname, pg_get_userbyid(datdba) AS owner FROM pg_database WHERE datallowconn ORDER BY 1")
+                ->fetchAll(PDO::FETCH_NUM);
+            if (!$tuples) {
+                echo "       List of databases", PHP_EOL;
+                echo "   Name    |  Owner   | Encoding", PHP_EOL;
+            }
+            foreach ($rows as $r) {
+                // Field layout matches psql -l closely enough for `cut -d'|' -f1`.
+                echo " {$r[0]} | {$r[1]} | UTF8 | C | C | ", PHP_EOL;
+            }
+            exit(0);
+        }
+        if ($cmd !== null) {
+            $pdo = pg_connect_pdo($dbname ?? $user, $host, $port, $user, $pass);
+            $st = $pdo->query($cmd);
+            if ($st && $st->columnCount() > 0) {
+                while ($row = $st->fetch(PDO::FETCH_NUM)) {
+                    echo implode("\t", $row), PHP_EOL;
+                }
+            }
+            exit(0);
+        }
+        fwrite(STDERR, "psql-shim: only -l/-t/-q/-c modes are supported\n");
+        exit(1);
+    }
+
+    fwrite(STDERR, "p02-pg-shim: unknown mode '{$mode}'\n");
+    exit(1);
+} catch (Throwable $e) {
+    fwrite(STDERR, $mode . ': ' . $e->getMessage() . PHP_EOL);
+    exit(1);
+}
+P02SHIM
+    local tool
+    for tool in psql createdb pg_isready; do
+        cat > "${TH_ROOT}/pgdev/bin/${tool}" <<P02WRAP
+#!/usr/bin/env bash
+# P02 client-tool shim: dispatches to p02-pg-shim.php (PHP 8.2.27 + pdo_pgsql).
+TH=${TH_ROOT}
+export LD_LIBRARY_PATH="\$TH/lib:\$TH/pgsql/lib:\$TH/pg-npm/node_modules/@embedded-postgres/linux-x64/native/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
+exec "\$TH/php/bin/php" "\$TH/pgdev/lib/p02-pg-shim.php" ${tool} "\$@"
+P02WRAP
+        chmod +x "${TH_ROOT}/pgdev/bin/${tool}"
+    done
+    say "PostgreSQL client tools: installed (psql/createdb/pg_isready over pdo_pgsql)"
     return 0
 }
 
@@ -436,6 +781,7 @@ install_postgres() {
     ln -sf "$native/bin/initdb" "$native/bin/pg_ctl" "$native/bin/postgres" "${TH_ROOT}/pgdev/bin/" 2>/dev/null || {
         cp "$native/bin/initdb" "$native/bin/pg_ctl" "$native/bin/postgres" "${TH_ROOT}/pgdev/bin/"
     }
+    install_pg_clients || { note_failed "pg-clients"; return 1; }
     if ! PGOPTIONS= psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -c "select 1" >/dev/null 2>&1; then
         if [ ! -d "${PGSQL_DATA}" ]; then
             say "initdb at ${PGSQL_DATA}"
