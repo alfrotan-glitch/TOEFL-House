@@ -76,6 +76,24 @@ trait BuildsActors
         return new Actor($actorId, 'Multi-Capability Actor');
     }
 
+    private function privacyOfficer(string $actorId = 'priv-1'): Actor
+    {
+        $this->personWithAuthority($actorId, [
+            'privacy.define_purpose', 'privacy.consent', 'privacy.disclose', 'privacy.export',
+        ]);
+
+        return new Actor($actorId, 'Privacy Officer');
+    }
+
+    private function documentsOfficer(string $actorId = 'doc-1'): Actor
+    {
+        $this->personWithAuthority($actorId, [
+            'documents.classify', 'documents.register', 'documents.verify', 'documents.retention',
+        ]);
+
+        return new Actor($actorId, 'Documents Officer');
+    }
+
     private function organizationIdFromScopeKey(string $scopeKey): string
     {
         return str_contains($scopeKey, ':') ? explode(':', $scopeKey, 2)[1] : $this->bootstrapOrganizationId;

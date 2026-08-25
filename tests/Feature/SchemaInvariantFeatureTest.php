@@ -30,6 +30,7 @@ final class SchemaInvariantFeatureTest extends TestCase
         $this->assertContains('scope_grants_one_open_grant', $this->indexNames('scope_grants'));
         $this->assertContains('access_policies_one_open_position_role', $this->indexNames('access_policies'));
         $this->assertContains('delegations_one_open_authority', $this->indexNames('delegations'));
+        $this->assertContains('consents_one_open_per_subject_purpose', $this->indexNames('consents'));
     }
 
     public function test_lifecycle_states_are_constrained_by_the_schema(): void
@@ -104,6 +105,45 @@ final class SchemaInvariantFeatureTest extends TestCase
             'effective_to' => '2026-02-01',
             'reason' => 'schema guard',
             'created_by' => '00000000-0000-4000-8000-00000000012c',
+        ]);
+    }
+
+    public function test_consent_lifecycle_states_are_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('consents')->insert([
+            'id' => '00000000-0000-4000-8000-00000000013a',
+            'subject_person_id' => '00000000-0000-4000-8000-00000000013b',
+            'purpose_id' => '00000000-0000-4000-8000-00000000013c',
+            'lifecycle_state' => 'paused',
+            'effective_from' => '2026-01-01',
+            'effective_to' => null,
+            'evidence_ref' => 'schema-guard',
+            'recorded_by' => '00000000-0000-4000-8000-00000000013d',
+        ]);
+    }
+
+    public function test_document_access_classes_are_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('document_classifications')->insert([
+            'id' => '00000000-0000-4000-8000-00000000014a',
+            'category' => 'schema-guard-class',
+            'owner_module' => 'Documents',
+            'access_class' => 'top-secret',
+        ]);
+    }
+
+    public function test_retention_actions_are_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('retention_decisions')->insert([
+            'id' => '00000000-0000-4000-8000-00000000015a',
+            'document_id' => '00000000-0000-4000-8000-00000000015b',
+            'rule_id' => '00000000-0000-4000-8000-00000000015c',
+            'action' => 'shred',
+            'basis' => 'schema-guard',
+            'decided_by' => '00000000-0000-4000-8000-00000000015d',
         ]);
     }
 }
