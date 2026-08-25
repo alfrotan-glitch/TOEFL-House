@@ -4,6 +4,22 @@
 # Canonical spec: docs/environment/P02-environment-baseline.md (source of truth)
 # =============================================================================
 #
+# Revision 3 (2026-08-25) — artifact-first recovery:
+#   * A successful environment can be snapshotted into versioned, checksummed
+#     bundles (see --bundle): p02-toolchain-<id>.tar.gz (php, libs, bin, tools,
+#     pgsql, pgdev shims, dev/composer source, pg-npm — WITHOUT the 842MB src/
+#     build trees, WITHOUT pgdata, WITHOUT caches) and p02-vendor-<id>.tar.gz
+#     (the repo vendor/ tree), described by p02-manifest.json (sha256 + pinned
+#     versions + composer.lock sha256).
+#   * --recover now tries restore-from-artifacts FIRST (local cache
+#     ${P02_ARTIFACT_DIR}, then the GitHub release download URL). Bundles are
+#     sha256-verified before extraction; manifest versions must match the
+#     script pins; a vendor bundle is only applied when the repo composer.lock
+#     sha256 matches the manifest. Any failure => the untouched rev-2
+#     source-build chain runs as FALLBACK for whatever is still missing.
+#   * --publish uploads the bundles + manifest to a GitHub Release (gh) so a
+#     fresh sandbox can restore in minutes instead of rebuilding ~11 min.
+#
 # Revision 2 (2026-08-25) — aligned with the environment as actually built:
 #   * build_toolchain_from_pypi() is now invoked (PyPI cmake/ninja/meson, with a
 #     PEP 668 --break-system-packages fallback for externally-managed pythons).
@@ -51,7 +67,13 @@
 # Usage:
 #   P02-environment-recovery.sh            # verify only (default; installs nothing)
 #   P02-environment-recovery.sh --verify   # same
-#   P02-environment-recovery.sh --recover  # install ONLY missing components, then re-verify
+#   P02-environment-recovery.sh --recover  # artifacts first (if available), source build as fallback,
+#                                          # for whatever is still missing; then re-verify
+#   P02-environment-recovery.sh --bundle [DIR]   # snapshot the CURRENT valid environment into
+#                                          # DIR (default: /home/user/p02-artifacts) as checksummed
+#                                          # bundles + p02-manifest.json
+#   P02-environment-recovery.sh --publish [DIR]  # upload DIR's bundles + manifest to a GitHub
+#                                          # Release (gh; requires push permission)
 #   P02-environment-recovery.sh --help
 #
 # One-time host prep (baseline §17): the toolchain root is a symlink into the
@@ -82,6 +104,7 @@ PG_NPM_PACKAGE="@embedded-postgres/linux-x64@18.4.0-beta.17"   # ships PostgreSQ
 PG_VERSION_EXPECTED="18.4"
 POSTGRES_HEADERS_TAG="REL_16_4"   # matches bundled libpq.so.5.18 ABI era
 
+
 # Dependency libs (codeload tag tarballs, canonical GitHub)
 ZLIB_TAG="v1.3.1"
 OPENSSL_TAG="openssl-3.0.13"
@@ -104,6 +127,22 @@ export PKG_CONFIG_PATH="${TH_ROOT}/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 # which rejects it unless this floor is declared (CMake honors the env variable).
 export CMAKE_POLICY_VERSION_MINIMUM="${CMAKE_POLICY_VERSION_MINIMUM:-3.5}"
 export PGUSER="${PGUSER:-postgres}" PGPASSWORD="${PGPASSWORD:-postgres}" PGHOST="${PGHOST:-127.0.0.1}" PGPORT="${PGPORT:-5432}"
+
+# Artifact-first recovery (rev 3). Bundles are produced by --bundle from a
+# verified environment and consumed by --recover before any source build.
+# Remote source is a GitHub Release; override via env for forks/mirrors:
+#   P02_ARTIFACT_ID / P02_ARTIFACT_DIR / P02_ARTIFACT_REPO / P02_ARTIFACT_TAG
+#   P02_ARTIFACT_BASE_URL (full base, e.g. a different release or a mirror)
+#   P02_ARTIFACT_MANIFEST (explicit path or URL to p02-manifest.json)
+P02_ARTIFACT_ID="${P02_ARTIFACT_ID:-1}"
+P02_ARTIFACT_DIR="${P02_ARTIFACT_DIR:-/home/user/p02-artifacts}"
+P02_ARTIFACT_REPO="${P02_ARTIFACT_REPO:-$(git -C "${REPO_ROOT}" remote get-url origin 2>/dev/null | sed -E 's#.*github\.com[:/]##; s#\.git$##')}"
+P02_ARTIFACT_REPO="${P02_ARTIFACT_REPO:-alfrotan-glitch/TOEFL-House}"
+P02_ARTIFACT_TAG="${P02_ARTIFACT_TAG:-p02-artifacts}"
+P02_ARTIFACT_BASE_URL="${P02_ARTIFACT_BASE_URL:-https://github.com/${P02_ARTIFACT_REPO}/releases/download/${P02_ARTIFACT_TAG}}"
+P02_TOOLCHAIN_BUNDLE="p02-toolchain-${P02_ARTIFACT_ID}.tar.gz"
+P02_VENDOR_BUNDLE="p02-vendor-${P02_ARTIFACT_ID}.tar.gz"
+P02_MANIFEST_NAME="p02-manifest.json"
 
 PHP_BIN="${TH_ROOT}/php/bin/php"
 COMPOSER_BIN="${TH_ROOT}/dev/bin/composer"
@@ -808,6 +847,202 @@ install_databases() {
 }
 
 # -----------------------------------------------------------------------------
+# Artifact-first recovery (rev 3)
+# -----------------------------------------------------------------------------
+p02_json() { # p02_json <json-file> <python-expr over d>  — manifest reader
+    python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(eval(sys.argv[2]))' "$1" "$2"
+}
+
+artifact_manifest_path() { # echo local manifest path or empty
+    printf '%s\n' "${P02_ARTIFACT_DIR}/${P02_MANIFEST_NAME}"
+}
+
+ensure_th_root() { # one-time host prep (baseline §17); idempotent
+    [ -d "${TH_ROOT}" ] && return 0
+    if [ "${TH_ROOT}" = "/opt/th" ]; then
+        mkdir -p /home/user/toolchain
+        if [ ! -e /opt/th ]; then
+            sudo ln -sfn /home/user/toolchain /opt/th 2>/dev/null \
+                || die "cannot create /opt/th — run: sudo ln -sfn /home/user/toolchain /opt/th"
+        fi
+        return 0
+    fi
+    mkdir -p "${TH_ROOT}"
+}
+
+artifact_fetch_bundle() { # $1=file-name $2=sha256 -> echo local path on success, else return 1
+    local name="$1"
+    local sha="$2"
+    local dest="${P02_ARTIFACT_DIR}/${name}"
+    if [ -s "$dest" ] && echo "${sha}  ${dest}" | sha256sum -c - >/dev/null 2>&1; then
+        printf '%s\n' "$dest"; return 0
+    fi
+    # remote fetch 1: plain https (release download URL) — works wherever
+    # release-assets.githubusercontent.com is not firewalled
+    mkdir -p "${P02_ARTIFACT_DIR}"
+    if curl -fL --retry 3 --connect-timeout 20 -o "${dest}.download" \
+            "${P02_ARTIFACT_BASE_URL}/${name}" 2>/dev/null \
+       && echo "${sha}  ${dest}.download" | sha256sum -c - >/dev/null 2>&1; then
+        mv "${dest}.download" "$dest"; printf '%s\n' "$dest"; return 0
+    fi
+    rm -f "${dest}.download"
+    # remote fetch 2: authenticated gh release download (same bytes; some
+    # egress paths allow the authenticated route where anonymous is blocked)
+    if command -v gh >/dev/null 2>&1 \
+       && gh release download "${P02_ARTIFACT_TAG}" -R "${P02_ARTIFACT_REPO}" \
+              -p "${name}" -O "${dest}.download" --clobber >/dev/null 2>&1 \
+       && echo "${sha}  ${dest}.download" | sha256sum -c - >/dev/null 2>&1; then
+        mv "${dest}.download" "$dest"; printf '%s\n' "$dest"; return 0
+    fi
+    rm -f "${dest}.download"
+    return 1
+}
+
+restore_from_artifacts() {
+    # Non-fatal by design: any failure returns 1 and --recover continues with
+    # the source-build chain (fallback) for whatever is still missing.
+    local manifest tc_sha v_sha lock_sha mver
+    manifest="${P02_ARTIFACT_MANIFEST:-}"
+    if [ -z "$manifest" ] || [ ! -f "$manifest" ]; then
+        manifest="$(artifact_manifest_path)"
+        # not cached locally? try the remote release: anonymous https first,
+        # then authenticated gh release download
+        if [ ! -f "$manifest" ] && [ -n "${P02_ARTIFACT_BASE_URL}" ]; then
+            mkdir -p "${P02_ARTIFACT_DIR}"
+            if curl -fsL --retry 2 --connect-timeout 20 -o "${manifest}.download" \
+                "${P02_ARTIFACT_BASE_URL}/${P02_MANIFEST_NAME}" 2>/dev/null; then
+                mv "${manifest}.download" "$manifest"
+            else
+                rm -f "${manifest}.download"
+                command -v gh >/dev/null 2>&1 \
+                    && gh release download "${P02_ARTIFACT_TAG}" -R "${P02_ARTIFACT_REPO}" \
+                           -p "${P02_MANIFEST_NAME}" -O "${manifest}" --clobber >/dev/null 2>&1 || true
+            fi
+        fi
+    fi
+    [ -f "$manifest" ] || { say "Artifacts: no manifest found (cache: ${P02_ARTIFACT_DIR}; remote tag: ${P02_ARTIFACT_TAG})"; return 1; }
+    say "Artifacts: manifest found ($(p02_json "$manifest" 'd["id"]'))"
+
+    # Manifest must describe exactly the pinned environment.
+    mver="$(p02_json "$manifest" 'd.get("versions",{}).get("php","")')"
+    [ "$mver" = "${PHP_VERSION}" ] || { warn "Artifacts: php ${mver:-?} != pinned ${PHP_VERSION}; ignoring artifacts"; return 1; }
+    mver="$(p02_json "$manifest" 'd.get("versions",{}).get("composer","")')"
+    [ "$mver" = "${COMPOSER_VERSION}" ] || { warn "Artifacts: composer ${mver:-?} != pinned ${COMPOSER_VERSION}; ignoring artifacts"; return 1; }
+    mver="$(p02_json "$manifest" 'd.get("versions",{}).get("postgres","")')"
+    [ "$mver" = "${PG_VERSION_EXPECTED}" ] || { warn "Artifacts: postgres ${mver:-?} != pinned ${PG_VERSION_EXPECTED}; ignoring artifacts"; return 1; }
+
+    tc_sha="$(p02_json "$manifest" 'd["bundles"]["toolchain"]["sha256"]')"
+    v_sha="$(p02_json "$manifest" 'd["bundles"]["vendor"]["sha256"]')"
+    lock_sha="$(p02_json "$manifest" 'd.get("composer_lock_sha256","")')"
+
+    # Toolchain bundle -> ${TH_ROOT}
+    local tc
+    tc="$(artifact_fetch_bundle "${P02_TOOLCHAIN_BUNDLE}" "$tc_sha")" || { warn "Artifacts: toolchain bundle unavailable"; return 1; }
+    if [ ! -d "${TH_ROOT}" ] && [ "${TH_ROOT}" = "/opt/th" ]; then
+        # one-time host prep (baseline §17)
+        mkdir -p /home/user/toolchain && sudo ln -sfn /home/user/toolchain /opt/th 2>/dev/null \
+            || { warn "Artifacts: create /opt/th symlink manually (baseline §17)"; return 1; }
+    fi
+    mkdir -p "${TH_ROOT}"
+    say "Extracting ${P02_TOOLCHAIN_BUNDLE} -> ${TH_ROOT}"
+    tar -xzf "$tc" -C "${TH_ROOT}" || { warn "Artifacts: toolchain extraction failed"; return 1; }
+    [ -x "${PHP_BIN}" ] || { warn "Artifacts: ${PHP_BIN} missing after extraction"; return 1; }
+    say "Artifacts: toolchain restored (PHP ${PHP_VERSION}, Composer ${COMPOSER_VERSION}, PG ${PG_VERSION_EXPECTED})"
+
+    # Vendor bundle -> only when the repo composer.lock is the one bundled
+    local actual_lock
+    actual_lock="$(sha256sum "${REPO_ROOT}/composer.lock" 2>/dev/null | awk '{print $1}')"
+    if [ -n "$lock_sha" ] && [ "$actual_lock" = "$lock_sha" ]; then
+        local v
+        v="$(artifact_fetch_bundle "${P02_VENDOR_BUNDLE}" "$v_sha")" || { warn "Artifacts: vendor bundle unavailable (composer install will run instead)"; return 0; }
+        say "Extracting ${P02_VENDOR_BUNDLE} -> ${REPO_ROOT}/vendor"
+        tar -xzf "$v" -C "${REPO_ROOT}" || { warn "Artifacts: vendor extraction failed (composer install will run instead)"; rm -rf "${REPO_ROOT}/vendor"; return 0; }
+    else
+        say "Artifacts: composer.lock differs from manifest — skipping vendor bundle (composer install from lock will run)"
+    fi
+    return 0
+}
+
+bundle_create() { # $1=output dir
+    local outdir="${1:-${P02_ARTIFACT_DIR}}"
+    mkdir -p "$outdir"
+    [ -x "${PHP_BIN}" ] || die "--bundle requires the built environment (PHP at ${PHP_BIN} missing)."
+    [ -d "${REPO_ROOT}/vendor" ] || die "--bundle requires vendor/ present at ${REPO_ROOT}."
+
+    say "Bundling toolchain -> ${outdir}/${P02_TOOLCHAIN_BUNDLE} (excludes: src build trees, pgdata, composer-home, .git)"
+    tar -C "${TH_ROOT}" --exclude-vcs \
+        -czf "${outdir}/${P02_TOOLCHAIN_BUNDLE}" \
+        php lib lib64 include share bin tools pgdev pgsql dev pg-npm \
+        src/composer-2.10.2 || die "toolchain bundling failed"
+    say "Bundling vendor -> ${outdir}/${P02_VENDOR_BUNDLE}"
+    tar -C "${REPO_ROOT}" -czf "${outdir}/${P02_VENDOR_BUNDLE}" vendor || die "vendor bundling failed"
+
+    local tc_sha v_sha lock_sha tc_bytes v_bytes
+    tc_sha="$(sha256sum "${outdir}/${P02_TOOLCHAIN_BUNDLE}" | awk '{print $1}')"
+    v_sha="$(sha256sum "${outdir}/${P02_VENDOR_BUNDLE}" | awk '{print $1}')"
+    lock_sha="$(sha256sum "${REPO_ROOT}/composer.lock" | awk '{print $1}')"
+    tc_bytes="$(stat -c%s "${outdir}/${P02_TOOLCHAIN_BUNDLE}")"
+    v_bytes="$(stat -c%s "${outdir}/${P02_VENDOR_BUNDLE}")"
+
+    python3 - "$outdir" "$tc_sha" "$v_sha" "$lock_sha" "$tc_bytes" "$v_bytes" <<'PYEOF' || die "manifest generation failed"
+import json, sys, datetime
+outdir, tc_sha, v_sha, lock_sha, tc_bytes, v_bytes = sys.argv[1:7]
+manifest = {
+    "id": "p02-artifacts-1",
+    "created": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+    "generator": "P02-environment-recovery.sh rev 3 --bundle",
+    "versions": {
+        "php": "8.2.27", "composer": "2.10.2", "postgres": "18.4",
+        "pg_npm": "@embedded-postgres/linux-x64@18.4.0-beta.17", "libpq": "5.18",
+    },
+    "composer_lock_sha256": lock_sha,
+    "bundles": {
+        "toolchain": {
+            "file": "p02-toolchain-1.tar.gz", "sha256": tc_sha, "bytes": int(tc_bytes),
+            "contents": "php/ lib/ lib64/ include/ share/ bin/ tools/ pgdev/ pgsql/ dev/ pg-npm/ src/composer-2.10.2 (no build trees, no pgdata, no caches, no .git)",
+        },
+        "vendor": {
+            "file": "p02-vendor-1.tar.gz", "sha256": v_sha, "bytes": int(v_bytes),
+            "contents": "repo vendor/ tree matching composer_lock_sha256",
+        },
+    },
+}
+with open(f"{outdir}/p02-manifest.json", "w") as f:
+    json.dump(manifest, f, indent=2)
+    f.write("\n")
+print(json.dumps({k: manifest[k] for k in ("id", "created")}))
+PYEOF
+    say "Manifest: ${outdir}/${P02_MANIFEST_NAME}"
+    say "Bundles complete — restore with: $0 --recover   (artifacts at ${outdir})"
+    say "Publish when ready:  $0 --publish ${outdir}"
+    return 0
+}
+
+bundle_publish() { # $1=bundle dir
+    local outdir="${1:-${P02_ARTIFACT_DIR}}"
+    [ -f "${outdir}/${P02_MANIFEST_NAME}" ] || die "--publish: ${outdir}/${P02_MANIFEST_NAME} not found (run --bundle first)."
+    command -v gh >/dev/null 2>&1 || die "--publish requires the gh CLI (authenticated)."
+    say "Publishing artifacts to release ${P02_ARTIFACT_TAG} of ${P02_ARTIFACT_REPO}"
+    if ! gh release view "${P02_ARTIFACT_TAG}" -R "${P02_ARTIFACT_REPO}" >/dev/null 2>&1; then
+        # anchor the tag to the exact script commit that produced the artifacts
+        local target
+        target="$(git -C "${REPO_ROOT}" rev-parse HEAD 2>/dev/null || echo)"
+        gh release create "${P02_ARTIFACT_TAG}" -R "${P02_ARTIFACT_REPO}" \
+            ${target:+--target "$target"} \
+            --title "P02 environment artifacts (${P02_ARTIFACT_ID})" \
+            --notes "Checksummed prebuilt toolchain + vendor bundles for docs/environment/P02-environment-recovery.sh. See p02-manifest.json." \
+            || die "gh release create failed"
+    fi
+    gh release upload "${P02_ARTIFACT_TAG}" -R "${P02_ARTIFACT_REPO}" --clobber \
+        "${outdir}/${P02_MANIFEST_NAME}" \
+        "${outdir}/${P02_TOOLCHAIN_BUNDLE}" \
+        "${outdir}/${P02_VENDOR_BUNDLE}" \
+        || die "gh release upload failed"
+    say "Published: ${P02_ARTIFACT_BASE_URL}/${P02_MANIFEST_NAME}"
+    return 0
+}
+
+# -----------------------------------------------------------------------------
 # Entry point
 # -----------------------------------------------------------------------------
 mode="${1:---verify}"
@@ -818,7 +1053,7 @@ case "$mode" in
         exit "$rc"
         ;;
     --recover)
-        say "=== P02 environment recovery (repair-missing-only) ==="
+        say "=== P02 environment recovery (artifacts first, source build as fallback) ==="
         # 1. Verify first — reuse whatever is present.
         set +e
         verify_all
@@ -828,13 +1063,24 @@ case "$mode" in
             say "Environment already valid — nothing to recover."
             exit 0
         fi
-        # 2. Repair missing components in dependency order.
+        # 2. One-time host prep (creates the /opt/th symlink if missing), then
+        #    artifact-first restore of prebuilt bundles when available (rev 3).
+        #    Non-fatal — on any failure the source-build chain below remains
+        #    the fallback and only repairs what is actually missing.
+        ensure_th_root
+        if restore_from_artifacts; then
+            say "=== artifacts restored; continuing with component checks ==="
+        else
+            say "=== no usable artifacts; falling back to source build ==="
+        fi
+        # 3. Repair missing components in dependency order (source build only
+        #    for components the artifact restore could not provide).
         check_php >/dev/null 2>&1 || install_php || die "PHP recovery failed."
         check_composer >/dev/null 2>&1 || bootstrap_composer || die "Composer recovery failed."
         check_vendor >/dev/null 2>&1 || install_vendor || die "vendor/ recovery failed."
         check_postgres >/dev/null 2>&1 || install_postgres || die "PostgreSQL recovery failed."
         check_databases >/dev/null 2>&1 || install_databases || die "Database recovery failed."
-        # 3. Re-verify everything.
+        # 4. Re-verify everything.
         say "=== re-verification after recovery ==="
         verify_all
         rc=$?
@@ -844,12 +1090,20 @@ case "$mode" in
         fi
         die "Recovery incomplete — see missing components above. Do NOT rediscover; consult docs/environment/P02-environment-baseline.md."
         ;;
+    --bundle)
+        bundle_create "${2:-}"
+        exit $?
+        ;;
+    --publish)
+        bundle_publish "${2:-}"
+        exit $?
+        ;;
     --help|-h)
-        sed -n '2,14p' "$0"
+        sed -n '2,31p' "$0"
         exit 0
         ;;
     *)
-        echo "Unknown option: $mode (use --verify, --recover, or --help)" >&2
+        echo "Unknown option: $mode (use --verify, --recover, --bundle, --publish, or --help)" >&2
         exit 2
         ;;
 esac

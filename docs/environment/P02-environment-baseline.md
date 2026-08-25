@@ -1,11 +1,11 @@
 # P02 Environment Baseline — Canonical, Repository-Backed Specification
 
 **Status:** ACTIVE — source of truth for reconstructing the Package 02 build/test environment.
-**Version:** 1.1
+**Version:** 1.2
 **Date:** 2026-08-25
-**Revision 1.1 (2026-08-25):** aligned with the environment as actually built and verified: exact PHP configure flags (incl. the pgsql pair, sqlite disabled), libpq header acquisition route, PyPI build tools with PEP 668 fallback, `CMAKE_POLICY_VERSION_MINIMUM`, pkgconf static build at a neutral prefix, pkg-config metadata consolidation, PHP-based PostgreSQL client-tool shims, composer autoloader generator requirements, and the recovery-script exit-code fix. Earlier basis unchanged:
+**Revision 1.2 (2026-08-25):** artifact-first recovery — checksummed prebuilt bundles (toolchain + vendor) with a versioned manifest restore the environment in seconds; the §8 source-build chain is now the FALLBACK for components an artifact restore cannot provide. Producer/consumer flows, exclusions and integrity rules in §8a. Revision 1.1 aligned the spec with the environment as actually built and verified: exact PHP configure flags (incl. the pgsql pair, sqlite disabled), libpq header acquisition route, PyPI build tools with PEP 668 fallback, `CMAKE_POLICY_VERSION_MINIMUM`, pkgconf static build at a neutral prefix, pkg-config metadata consolidation, PHP-based PostgreSQL client-tool shims, composer autoloader generator requirements, and the recovery-script exit-code fix. Earlier basis unchanged:
 **Basis:** authoritative records `docs/implementation/22-environment-blocker-report.md` (remediation table + verified results), `docs/implementation/23-environment-readiness.md` (DISCOVER table, acquisition method, verification table), `docs/implementation/28-package-02-identity-organization-implementation.md` §3 (tooling versions), plus repository-pinned facts (`composer.json`, `composer.lock` content-hash, `phpunit.xml`, `phpstan.neon`, `.env.example`).
-**Recovery procedure:** `docs/environment/P02-environment-recovery.sh` (same directory).
+**Recovery procedure:** `docs/environment/P02-environment-recovery.sh` (same directory) — `--recover` restores the checksummed prebuilt bundles of §8a first (local cache or the GitHub Release) and falls back to the §8 source build only for components still missing.
 
 > **CRITICAL RULE:** If the environment disappears or becomes corrupted, FIRST read this baseline, then execute
 > `docs/environment/P02-environment-recovery.sh --recover`. Do NOT perform a fresh environment investigation
@@ -121,6 +121,41 @@ Build routes per component (all CMake/Meson — no autotools chain is required):
 
 All tarballs downloaded from `codeload.github.com/<owner>/<repo>/tar.gz/<tag>` (verified reachable, TLS verified). Every build is followed by its own verification step; a component that cannot be reconstructed deterministically stops the recovery with an explicit missing-component report (per the CRITICAL RULE — no fresh investigation).
 
+## 8a. Artifact-first recovery (rev 1.2)
+
+The §8 source build takes ~11 minutes on 2 vCPU. A **verified** environment can instead be snapshotted once into checksummed bundles and restored in seconds. Nothing large ever enters Git — bundles are attached to a **GitHub Release** (`gh`), which is the artifact/cache mechanism.
+
+**Artifacts** (produced by `bash docs/environment/P02-environment-recovery.sh --bundle [DIR]`, default `DIR=/home/user/p02-artifacts`):
+
+| File | ~Size | Contents (tar roots) | Excluded |
+|---|---|---|---|
+| `p02-toolchain-<id>.tar.gz` | ~79 MB | `php/ lib/ lib64/ include/ share/ bin/ tools/ pgdev/ pgsql/ dev/ pg-npm/ src/composer-2.10.2` | the 842 MB `src/` build trees, `pgdata/`, `composer-home/` cache, all `.git` dirs |
+| `p02-vendor-<id>.tar.gz` | ~39 MB | repo `vendor/` tree | — |
+| `p02-manifest.json` | 1 KB | bundle `sha256` + bytes; pinned versions (php/composer/postgres/pg_npm/libpq); **`composer_lock_sha256`** | — |
+
+`<id>` is `P02_ARTIFACT_ID` (default `1`); bump it when producing a new artifact generation.
+
+**Publication** (when the bundles should serve fresh sandboxes):
+
+```sh
+bash docs/environment/P02-environment-recovery.sh --publish [DIR]   # gh release upload -> tag p02-artifacts
+```
+
+Release asset URL base: `https://github.com/<repo>/releases/download/p02-artifacts` (override with `P02_ARTIFACT_REPO` / `P02_ARTIFACT_TAG` / `P02_ARTIFACT_BASE_URL`).
+
+**Consumption — `--recover` order (rev 3 script):**
+
+1. Verify; if already valid, stop (never restores over a working environment).
+2. One-time host prep: create `/opt/th -> /home/user/toolchain` (§17) if missing.
+3. `restore_from_artifacts` — manifest located from `${P02_ARTIFACT_DIR}` (local cache) first, then the release (anonymous https; on TLS-blocked asset CDNs the authenticated `gh release download` route is attempted — restricted sandboxes that firewall `release-assets.githubusercontent.com` fall back to the local cache or, last resort, the §8 source build). Integrity gates, all non-fatal:
+   - manifest pinned versions must equal the script pins (php 8.2.27 / composer 2.10.2 / postgres 18.4), else artifacts are ignored;
+   - every bundle is `sha256`-verified before extraction (cached copy first, then download);
+   - the vendor bundle is extracted **only** when the repo `composer.lock` sha256 equals the manifest's `composer_lock_sha256` — otherwise it is skipped and `composer install` from the committed lock (§5) runs instead.
+4. Any component still missing is repaired by the untouched §8 source-build chain — **source compilation is fallback-only**.
+5. PostgreSQL is never bundled: `pgdata/` is re-`initdb`'d and the two empty databases re-created (§12); the schema stays owned by the application's migrations.
+
+**Measured (2026-08-25, 2 vCPU sandbox):** clean host → `--recover` → `RECOVERY COMPLETE … exit 0` in **~7 s** (bundle extraction + initdb + createdb + full verification), versus ~11 min for the source build. Idempotent re-run reports `Environment already valid` immediately.
+
 ## 9. Composer dependencies — authoritative lockfile
 
 - `composer.json` (committed): `require { php ^8.2, laravel/framework ^12.67.0 }`; `require-dev { laravel/pint ^1.30.4, phpunit/phpunit ^11.5.50, phpstan/phpstan ^2.2.0, larastan/larastan ^3.10.0, mockery/mockery ^1.6.12 }`.
@@ -208,6 +243,7 @@ Expected result (recorded at R3 closure): **OK (52 tests, 229 assertions)**.
 | Path/var | Meaning |
 |---|---|
 | `${TH_ROOT}` (default `/opt/th`) | toolchain root; `/opt/th` is a symlink into the persistent workspace (`/home/user/toolchain`). One-time host prep (requires sudo, nothing else does): `mkdir -p /home/user/toolchain && sudo ln -sfn /home/user/toolchain /opt/th` |
+| `/home/user/p02-artifacts` | local artifact cache: `p02-manifest.json` + toolchain/vendor bundles (§8a) |
 | `/home/user/toolchain` | real toolchain directory (user-writable; `/opt` itself is root-owned) |
 | `${TH_ROOT}/php` | PHP 8.2.27 prefix |
 | `${TH_ROOT}/bin/pkgconf`, `${TH_ROOT}/bin/pkg-config` | symlinks to the static pkgconf at `${TH_ROOT}/tools/pkgconf/bin/pkgconf` |
