@@ -56,6 +56,89 @@ final class SchemaInvariantFeatureTest extends TestCase
         $this->assertContains('asset_disposals_one_per_asset', $this->indexNames('asset_disposals'));
         $this->assertContains('book_copies_code_unique', $this->indexNames('book_copies'));
         $this->assertContains('book_issuances_one_open_per_copy', $this->indexNames('book_issuances'));
+        $this->assertContains('metric_definitions_key_unique', $this->indexNames('metric_definitions'));
+        $this->assertContains('metric_versions_one_per_no', $this->indexNames('metric_versions'));
+        $this->assertContains('metric_projections_one_slice', $this->indexNames('metric_projections'));
+        $this->assertContains('dashboards_name_unique', $this->indexNames('dashboards'));
+        $this->assertContains('dashboard_pins_one_per_slice', $this->indexNames('dashboard_pins'));
+    }
+
+    public function test_reporting_metric_shape_is_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('metric_definitions')->insert([
+            'id' => '00000000-0000-4000-8000-00000000030a',
+            'key' => 'probe.metric',
+            'name' => 'Probe',
+            'source_owner' => 'marketing',
+            'period_authority' => 'financial_period',
+            'current_version' => 1,
+            'defined_by' => '00000000-0000-4000-8000-00000000030b',
+        ]);
+    }
+
+    public function test_reporting_period_authority_is_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('metric_definitions')->insert([
+            'id' => '00000000-0000-4000-8000-00000000031a',
+            'key' => 'probe.metric',
+            'name' => 'Probe',
+            'source_owner' => 'finance',
+            'period_authority' => 'lunar_month',
+            'current_version' => 1,
+            'defined_by' => '00000000-0000-4000-8000-00000000031b',
+        ]);
+    }
+
+    public function test_reporting_projection_completeness_is_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('metric_projections')->insert([
+            'id' => '00000000-0000-4000-8000-00000000032a',
+            'metric_version_id' => '00000000-0000-4000-8000-00000000032b',
+            'period_key' => '2026-12',
+            'scope_type' => 'global',
+            'scope_id' => null,
+            'value' => '1.00',
+            'completeness' => 'approximate',
+            'computed_by' => '00000000-0000-4000-8000-00000000032c',
+        ]);
+    }
+
+    public function test_reporting_reconciliation_variance_identity_is_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('metric_reconciliations')->insert([
+            'id' => '00000000-0000-4000-8000-00000000033a',
+            'metric_id' => '00000000-0000-4000-8000-00000000033b',
+            'period_key' => '2026-12',
+            'scope_type' => 'global',
+            'scope_id' => null,
+            'reported_value' => '10.00',
+            'authoritative_value' => '8.00',
+            'variance' => '1.00',
+            'status' => 'diverged',
+            'reconciled_by' => '00000000-0000-4000-8000-00000000033c',
+        ]);
+    }
+
+    public function test_reporting_immutability_triggers_exist(): void
+    {
+        $versionTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'metric_versions')->pluck('tgname')->all();
+        $this->assertContains('metric_versions_immutable_trigger', $versionTriggers, 'metric versions must be immutable at the schema level');
+
+        $projectionTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'metric_projections')->pluck('tgname')->all();
+        $this->assertContains('metric_projections_rebuild_only_trigger', $projectionTriggers, 'projections may only be rebuilt in place, never re-keyed');
+
+        $runTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'report_runs')->pluck('tgname')->all();
+        $this->assertContains('report_runs_immutable_trigger', $runTriggers, 'report runs must be immutable at the schema level');
+
+        $reconciliationTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'metric_reconciliations')->pluck('tgname')->all();
+        $this->assertContains('metric_reconciliations_immutable_trigger', $reconciliationTriggers, 'reconciliation evidence must be immutable at the schema level');
+
+        $pinTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'dashboard_pins')->pluck('tgname')->all();
+        $this->assertContains('dashboard_pins_immutable_trigger', $pinTriggers, 'dashboard pins must be immutable at the schema level');
     }
 
     public function test_lifecycle_states_are_constrained_by_the_schema(): void

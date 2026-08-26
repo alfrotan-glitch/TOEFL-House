@@ -225,7 +225,7 @@ php vendor/bin/phpunit                                        # full suite: Unit
 php vendor/bin/phpunit tests/Unit/Organization/...            # focused suites as needed
 ```
 
-Expected result (certified cumulative suite since Package 12, 2026-08-26): **OK (265 tests, 1043 assertions)**. (Package 02 closed at 78/371, P03 at 118/477, P04 at 158/590, P05 at 179/657, P06 at 193/732, P07 at 209/792, P08 at 222/847, P09 at 233/901, P10 at 245/943, P11 at 255/989; the cumulative suite only grows.)
+Expected result (certified cumulative suite since Package 13, 2026-08-26): **OK (278 tests, 1118 assertions)**. (Package 02 closed at 78/371, P03 at 118/477, P04 at 158/590, P05 at 179/657, P06 at 193/732, P07 at 209/792, P08 at 222/847, P09 at 233/901, P10 at 245/943, P11 at 255/989, P12 at 265/1043; the cumulative suite only grows.)
 
 ## 15. PHPStan configuration / command
 
@@ -284,7 +284,7 @@ Expected result (certified cumulative suite since Package 12, 2026-08-26): **OK 
 | 6 | `composer install --dry-run` | `in sync` (nothing to install/update/remove) |
 | 7 | `composer audit` | no known security advisories |
 | 8 | `php artisan db:show` | connects to `toefl_house` as `postgres`; server version `PostgreSQL 18.4` |
-| 9 | `php vendor/bin/phpunit` | `OK (265 tests, 1043 assertions)` (cumulative Package 02–12 suite; Package 02 closed at 78/371, P03 at 118/477, P04 at 158/590, P05 at 179/657, P06 at 193/732, P07 at 209/792, P08 at 222/847, P09 at 233/901, P10 at 245/943, P11 at 255/989; the earlier 52/229 R3-closure state was never committed and no longer exists) |
+| 9 | `php vendor/bin/phpunit` | `OK (278 tests, 1118 assertions)` (cumulative Package 02–13 suite; Package 02 closed at 78/371, P03 at 118/477, P04 at 158/590, P05 at 179/657, P06 at 193/732, P07 at 209/792, P08 at 222/847, P09 at 233/901, P10 at 245/943, P11 at 255/989, P12 at 265/1043; the earlier 52/229 R3-closure state was never committed and no longer exists) |
 | 10 | `php vendor/bin/phpstan analyse --memory-limit=1G` | `[OK] No errors` |
 | 11 | `php vendor/bin/pint --test` | `PASS` |
 
