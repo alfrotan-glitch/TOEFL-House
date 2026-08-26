@@ -61,6 +61,116 @@ final class SchemaInvariantFeatureTest extends TestCase
         $this->assertContains('metric_projections_one_slice', $this->indexNames('metric_projections'));
         $this->assertContains('dashboards_name_unique', $this->indexNames('dashboards'));
         $this->assertContains('dashboard_pins_one_per_slice', $this->indexNames('dashboard_pins'));
+        $this->assertContains('integration_endpoints_key_unique', $this->indexNames('integration_endpoints'));
+        $this->assertContains('integration_deliveries_one_per_key', $this->indexNames('integration_deliveries'));
+        $this->assertContains('inbound_events_one_accepted_per_external_id', $this->indexNames('inbound_events'));
+        $this->assertContains('job_schedules_key_unique', $this->indexNames('job_schedules'));
+        $this->assertContains('job_runs_one_per_occurrence', $this->indexNames('job_runs'));
+    }
+
+    public function test_integration_channel_is_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('integration_endpoints')->insert([
+            'id' => '00000000-0000-4000-8000-00000000040a',
+            'key' => 'probe.gateway',
+            'name' => 'Probe',
+            'channel' => 'fax',
+            'contract_version' => 'v1',
+            'credential_ref' => 'vault://probe',
+            'endpoint_ref' => 'https://probe.example',
+            'state' => 'active',
+            'approved_by' => '00000000-0000-4000-8000-00000000040b',
+            'created_by' => '00000000-0000-4000-8000-00000000040b',
+        ]);
+    }
+
+    public function test_integration_retry_bounds_are_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('integration_deliveries')->insert([
+            'id' => '00000000-0000-4000-8000-00000000041a',
+            'endpoint_id' => '00000000-0000-4000-8000-00000000041b',
+            'idempotency_key' => 'probe-1',
+            'correlation_id' => '00000000-0000-4000-8000-00000000041c',
+            'source_type' => 'payment',
+            'source_id' => '00000000-0000-4000-8000-00000000041d',
+            'contract_action' => 'probe.action',
+            'payload' => json_encode(['probe' => 1]),
+            'payload_digest' => hash('sha256', 'probe'),
+            'status' => 'queued',
+            'attempts' => 0,
+            'max_attempts' => 0,
+            'created_by' => '00000000-0000-4000-8000-00000000041b',
+        ]);
+    }
+
+    public function test_integration_delivery_evidence_is_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('integration_deliveries')->insert([
+            'id' => '00000000-0000-4000-8000-00000000042a',
+            'endpoint_id' => '00000000-0000-4000-8000-00000000042b',
+            'idempotency_key' => 'probe-2',
+            'correlation_id' => '00000000-0000-4000-8000-00000000042c',
+            'source_type' => 'payment',
+            'source_id' => '00000000-0000-4000-8000-00000000042d',
+            'contract_action' => 'probe.action',
+            'payload' => json_encode(['probe' => 1]),
+            'payload_digest' => hash('sha256', 'probe'),
+            'status' => 'delivered',
+            'attempts' => 1,
+            'max_attempts' => 5,
+            'created_by' => '00000000-0000-4000-8000-00000000042b',
+        ]);
+    }
+
+    public function test_inbound_event_status_is_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('inbound_events')->insert([
+            'id' => '00000000-0000-4000-8000-00000000043a',
+            'endpoint_id' => '00000000-0000-4000-8000-00000000043b',
+            'external_id' => 'probe-ext',
+            'event_type' => 'probe.event',
+            'payload' => json_encode(['probe' => 1]),
+            'payload_digest' => hash('sha256', 'probe'),
+            'signature_verified' => true,
+            'status' => 'lost',
+            'received_by' => '00000000-0000-4000-8000-00000000043b',
+        ]);
+    }
+
+    public function test_job_run_status_is_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('job_runs')->insert([
+            'id' => '00000000-0000-4000-8000-00000000044a',
+            'job_key' => 'integrations.retry_sweep',
+            'run_key' => 'probe-occurrence',
+            'status' => 'running',
+            'attempts' => 0,
+            'max_attempts' => 3,
+            'run_by' => '00000000-0000-4000-8000-00000000044b',
+        ]);
+    }
+
+    public function test_integration_immutability_triggers_exist(): void
+    {
+        $endpointTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'integration_endpoints')->pluck('tgname')->all();
+        $this->assertContains('integration_endpoints_retired_immutable_trigger', $endpointTriggers, 'retired endpoints must be immutable and undeletable at the schema level');
+
+        $deliveryTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'integration_deliveries')->pluck('tgname')->all();
+        $this->assertContains('integration_deliveries_progress_only_trigger', $deliveryTriggers, 'deliveries keep their identity; only progress may change');
+
+        $inboundTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'inbound_events')->pluck('tgname')->all();
+        $this->assertContains('inbound_events_history_retained_trigger', $inboundTriggers, 'inbound history is retained and identity-locked at the schema level');
+
+        $scheduleTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'job_schedules')->pluck('tgname')->all();
+        $this->assertContains('job_schedules_history_retained_trigger', $scheduleTriggers, 'job schedule history cannot be deleted');
+
+        $jobRunTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'job_runs')->pluck('tgname')->all();
+        $this->assertContains('job_runs_identity_retained_trigger', $jobRunTriggers, 'job runs keep their identity and terminal outcomes at the schema level');
     }
 
     public function test_reporting_metric_shape_is_constrained_by_the_schema(): void
