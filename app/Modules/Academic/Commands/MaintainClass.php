@@ -9,7 +9,9 @@ use App\Modules\Academic\Models\AcademicPeriod;
 use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\ClassSession;
 use App\Modules\Academic\Models\ProgramVersion;
+use App\Modules\Academic\Models\Skill;
 use App\Modules\Academic\Models\TeacherAssignment;
+use App\Modules\Academic\Models\TeacherAssignmentSkill;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Identity\Models\Person;
@@ -110,13 +112,13 @@ final class MaintainClass
     }
 
     /** @return array{session_id: string, correlation_id: string} */
-    public function scheduleSession(Actor $actor, ClassModel $class, CarbonImmutable $scheduledOn, string $startsAt, string $endsAt, string $idempotencyKey): array
+    public function scheduleSession(Actor $actor, ClassModel $class, CarbonImmutable $scheduledOn, string $startsAt, string $endsAt, string $idempotencyKey, ?string $skillId = null): array
     {
-        $payload = hash('sha256', implode('|', ['academic.session.schedule', $class->id, $scheduledOn->toDateString(), $startsAt, $endsAt, $actor->actorId]));
+        $payload = hash('sha256', implode('|', ['academic.session.schedule', $class->id, $scheduledOn->toDateString(), $startsAt, $endsAt, $skillId ?? '', $actor->actorId]));
 
         try {
             return $this->idempotency->execute('academic.session.schedule', $idempotencyKey, $payload,
-                fn (): array => DB::transaction(function () use ($actor, $class, $scheduledOn, $startsAt, $endsAt): array {
+                fn (): array => DB::transaction(function () use ($actor, $class, $scheduledOn, $startsAt, $endsAt, $skillId): array {
                     $this->requireCapability($actor);
                     if ($class->lifecycle_state !== ClassLifecycle::STATE_ACTIVE) {
                         throw BusinessRejection::forCode('academic.session_class_not_active', 'sessions are scheduled only on active classes');
@@ -124,16 +126,24 @@ final class MaintainClass
                     if ($endsAt <= $startsAt) {
                         throw BusinessRejection::forCode('academic.session_window', 'a session must end after it starts');
                     }
+                    if ($skillId !== null) {
+                        /** @var Skill|null $skill */
+                        $skill = Skill::query()->find($skillId);
+                        if ($skill === null || $skill->lifecycle_state !== Skill::STATE_ACTIVE) {
+                            throw BusinessRejection::forCode('academic.session_skill_unknown', 'a session may deliver only an active skill');
+                        }
+                    }
 
                     $session = ClassSession::query()->create([
                         'id' => RandomIdentifier::new(),
                         'class_id' => $class->id,
+                        'skill_id' => $skillId,
                         'scheduled_on' => $scheduledOn->startOfDay()->toDateString(),
                         'starts_at' => $startsAt,
                         'ends_at' => $endsAt,
                     ]);
                     $event = $this->audit->record($actor->actorId, 'academic.session.schedule', 'class_session', $session->id, null, [
-                        'class_id' => $class->id, 'scheduled_on' => $session->scheduled_on,
+                        'class_id' => $class->id, 'scheduled_on' => $session->scheduled_on, 'skill_id' => $skillId,
                     ]);
 
                     return ['session_id' => $session->id, 'correlation_id' => $event->correlation_id];
@@ -141,6 +151,50 @@ final class MaintainClass
             );
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.session.schedule', 'class_session', $class->id);
+        }
+    }
+
+    /**
+     * Skill dimension of a teaching assignment: which skill the teacher
+     * delivers in this class. Rows are append-only evidence; a change is a
+     * new effective-dated assignment.
+     *
+     * @return array{assignment_skill_id: string, correlation_id: string}
+     */
+    public function assignSkill(Actor $actor, TeacherAssignment $assignment, string $skillId, string $idempotencyKey): array
+    {
+        $payload = hash('sha256', implode('|', ['academic.teacher.assign_skill', $assignment->id, $skillId, $actor->actorId]));
+
+        try {
+            return $this->idempotency->execute('academic.teacher.assign_skill', $idempotencyKey, $payload,
+                fn (): array => DB::transaction(function () use ($actor, $assignment, $skillId): array {
+                    $this->requireCapability($actor);
+
+                    /** @var TeacherAssignment $locked */
+                    $locked = TeacherAssignment::query()->where('id', $assignment->id)->lockForUpdate()->firstOrFail();
+                    /** @var Skill|null $skill */
+                    $skill = Skill::query()->find($skillId);
+                    if ($skill === null || $skill->lifecycle_state !== Skill::STATE_ACTIVE) {
+                        throw BusinessRejection::forCode('academic.assignment_skill_unknown', 'an assignment skill must be an active catalog skill');
+                    }
+                    if (TeacherAssignmentSkill::query()->where('teacher_assignment_id', $locked->id)->where('skill_id', $skillId)->exists()) {
+                        throw BusinessRejection::forCode('academic.assignment_skill_duplicate', 'this assignment already carries this skill');
+                    }
+
+                    $row = TeacherAssignmentSkill::query()->create([
+                        'id' => RandomIdentifier::new(),
+                        'teacher_assignment_id' => $locked->id,
+                        'skill_id' => $skillId,
+                    ]);
+                    $event = $this->audit->record($actor->actorId, 'academic.teacher.assign_skill', 'teacher_assignment_skill', $row->id, null, [
+                        'teacher_assignment_id' => $locked->id, 'skill_id' => $skillId,
+                    ]);
+
+                    return ['assignment_skill_id' => $row->id, 'correlation_id' => $event->correlation_id];
+                }),
+            );
+        } catch (AuthorizationDenied $denial) {
+            $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.teacher.assign_skill', 'teacher_assignment_skill', $assignment->id);
         }
     }
 

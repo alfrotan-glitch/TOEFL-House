@@ -1,7 +1,7 @@
 # Implementation State
 
 **Current package:** Packages 02–15 certified (P15: Opening Financial State by user directive)
-**Status:** FINAL SYSTEM REVIEW CERTIFIED — PASS (final certification: `37-final-system-review-p02-p14-certification.md`, baseline commit `afe3228`; cumulative suite **295 tests / 1230 assertions** at close)
+**Status:** CURRENT — teacher compensation architecture (Skill / Scale / versioned contracts with FM→GM approval, evidence-derived teaching volume, immutable payroll snapshots) implemented and verified on top of the certified P02–P15 baseline; cumulative suite **329 tests / 1425 assertions**, phpstan level 6 clean, pint clean, fresh-database migration rebuild and schema-invariant gates green (final system review certification for the baseline remains `37-final-system-review-p02-p14-certification.md`, commit `afe3228`)
 **Environment status:** ENVIRONMENT READY (2026-08-25 — restored via `P02-environment-recovery.sh --recover`; artifacts published and digest-verified on release `p02-artifacts`; re-verified 2026-08-26 → ENVIRONMENT VALID)
 **Package 02 status (Identity and Organization):** CERTIFIED (checkpoint `24-package-02-identity-organization-checkpoint.md`, commit `1ea387a`)
 **Package 03 status (Authorization and Scope):** CERTIFIED (checkpoint `25-package-03-authorization-scope-checkpoint.md`, commit `7be1272`)
@@ -10,6 +10,21 @@
 **Updated:** 2026-08-26
 
 The repository baseline was inspected and verified as documentation-only. No production source, database, schema, migrations, package tooling, or tests are present in this checkout. The implementation contract, deferred-input boundaries, package order, traceability convention, and verification expectations are established without changing business behavior.
+
+
+## Current system capability: teacher compensation architecture
+
+The current system design includes an integrated teacher compensation architecture spanning the authoritative modules:
+
+- **Skill ownership (Academic):** the teaching skill catalog (Speaking & Listening, Writing & Grammar, Reading & Vocabulary as the registered initial set) is a first-class Academic concept — registered and retired under control, never deleted, independent of student level. Teaching assignments carry their skills as append-only evidence (`teacher_assignment_skills`), and each class session delivers at most one skill, keeping delivered teaching attributable by skill identity.
+- **Scale ownership (HR):** the compensation scale catalog is an HR concept, independent of skill and student level; a contract version pins at most one scale, and scale changes are governed contract amendments, never retroactive edits.
+- **Contract lifecycle and FM→GM approval (HR):** contracts are chains of immutable versions with lifecycle `draft → submitted → approved → active → superseded|expired` (withdrawal only before approval). The Finance Manager prepares and submits (`hr.contract.prepare`); the General Manager approves (`hr.contract.approve`); the approver is never the preparer and never the beneficiary — enforced in the command layer and in the schema (approval-evidence, approver-independence, immutability and no-delete constraints). Approval records approver, timestamp and a digest reproducing exactly what was approved.
+- **Compensation-rule resolution (HR):** rules attach to a contract version and are addressable by `method + skill + scale` (fixed monthly, labeled allowance, per-session rate, hourly rate). Per-unit rates share one resolution space per version with the deterministic precedence ladder exact skill×scale > skill-only > scale-only > generic; overlap inside the space is impossible (unique index). A delivered skill with no matching rule holds the calculation — never a silent zero.
+- **Teaching-volume authority (Academic → Payroll):** a payable unit is a delivered session — scheduled with a skill, covered by the teacher's effective assignment for that class and skill, with attendance/delivery evidence. Sessions without evidence, outside assignment coverage, or without skill attribution are not payable volume. Manual work evidence conflicting with authoritative session volume holds the calculation. Each qualifying session is claimed exactly once (`teaching_delivery_facts`, unique per session; claims migrate only from superseded calculations of the same period and employment).
+- **Payroll snapshot guarantees (Payroll):** calculations resolve contract version → rules → skill/scale → authoritative volume and store a complete immutable snapshot (contract/version identity, scale, rules and rates, per-skill session and hour volumes, evidence identifiers, period, amount). Approved results are immutable; corrections append adjustments/reversals. Later contract, scale, skill, rate, assignment or session changes never alter approved payroll.
+- **Finance boundary:** payroll results continue to cross into Finance through the certified journal boundary (`source_type='payroll_result'`); the P15 opening payables remain independent; there is no second accounting engine, and the reporting catalog is unchanged.
+
+Cumulative verification after integration: **329 tests / 1425 assertions** (phpunit OK), phpstan level 6 clean (238 files), pint clean (398 files), `migrate:fresh` rebuild from 95 migrations green, schema-invariant suite extended with the new catalog/version/rule/delivery guards, environment verification ENVIRONMENT VALID.
 
 ## Standing implementation standard
 

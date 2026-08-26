@@ -69,6 +69,38 @@ final class SchemaInvariantFeatureTest extends TestCase
         $this->assertContains('opening_states_one_per_organization', $this->indexNames('opening_states'));
         $this->assertContains('opening_entries_one_source_ref', $this->indexNames('opening_entries'));
         $this->assertContains('opening_materializations_one_per_entry', $this->indexNames('opening_materializations'));
+        $this->assertContains('skills_key_unique', $this->indexNames('skills'));
+        $this->assertContains('scales_key_unique', $this->indexNames('scales'));
+        $this->assertContains('scales_rank_order_unique', $this->indexNames('scales'));
+        $this->assertContains('contract_versions_no_unique', $this->indexNames('contract_versions'));
+        $this->assertContains('contract_versions_one_in_preparation_per_contract', $this->indexNames('contract_versions'));
+        $this->assertContains('compensation_rules_one_per_unit_rate_per_version', $this->indexNames('compensation_rules'));
+        $this->assertContains('compensation_rules_one_fixed_per_version', $this->indexNames('compensation_rules'));
+        $this->assertContains('compensation_rules_one_allowance_label_per_version', $this->indexNames('compensation_rules'));
+        $this->assertContains('teacher_assignment_skills_one_per_assignment_skill', $this->indexNames('teacher_assignment_skills'));
+        $this->assertContains('teaching_delivery_facts_one_per_session', $this->indexNames('teaching_delivery_facts'));
+    }
+
+    /** @return list<string> */
+    private function triggerNames(string $table): array
+    {
+        return DB::table('pg_trigger')
+            ->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')
+            ->where('pg_class.relname', $table)
+            ->where('pg_trigger.tgisinternal', false)
+            ->pluck('pg_trigger.tgname')->all();
+    }
+
+    public function test_skill_scale_contract_and_delivery_guards_exist_at_schema_level(): void
+    {
+        $this->assertContains('skills_catalog_guard_trigger', $this->triggerNames('skills'));
+        $this->assertContains('scales_catalog_guard_trigger', $this->triggerNames('scales'));
+        $this->assertContains('contract_versions_lifecycle_guard_trigger', $this->triggerNames('contract_versions'));
+        $this->assertContains('contract_versions_no_delete_trigger', $this->triggerNames('contract_versions'));
+        $this->assertContains('compensation_rules_version_gate_trigger', $this->triggerNames('compensation_rules'));
+        $this->assertContains('class_sessions_skill_delivery_guard_trigger', $this->triggerNames('class_sessions'));
+        $this->assertContains('teacher_assignment_skills_append_only_trigger', $this->triggerNames('teacher_assignment_skills'));
+        $this->assertContains('teaching_delivery_facts_claim_trigger', $this->triggerNames('teaching_delivery_facts'));
     }
 
     public function test_opening_state_status_is_constrained_by_the_schema(): void
