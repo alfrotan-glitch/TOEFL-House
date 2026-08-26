@@ -46,6 +46,9 @@ final class SchemaInvariantFeatureTest extends TestCase
         $this->assertContains('payroll_calculations_one_live_per_period_employment', $this->indexNames('payroll_calculations'));
         $this->assertContains('payroll_results_one_per_calculation', $this->indexNames('payroll_results'));
         $this->assertContains('payroll_clearances_one_per_domain', $this->indexNames('payroll_clearances'));
+        $this->assertContains('accounts_code_unique', $this->indexNames('accounts'));
+        $this->assertContains('financial_periods_key_unique', $this->indexNames('financial_periods'));
+        $this->assertContains('reconciliations_one_per_period_subject', $this->indexNames('reconciliations'));
     }
 
     public function test_lifecycle_states_are_constrained_by_the_schema(): void
@@ -345,6 +348,44 @@ final class SchemaInvariantFeatureTest extends TestCase
         ]);
     }
 
+    public function test_account_types_are_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('accounts')->insert([
+            'id' => '00000000-0000-4000-8000-00000000031a',
+            'code' => '9999',
+            'name' => 'schema probe',
+            'type' => 'profit',
+        ]);
+    }
+
+    public function test_journal_directions_are_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('journal_lines')->insert([
+            'id' => '00000000-0000-4000-8000-00000000032a',
+            'journal_id' => '00000000-0000-4000-8000-00000000032b',
+            'account_id' => '00000000-0000-4000-8000-00000000032c',
+            'direction' => 'maybe',
+            'amount' => 5,
+        ]);
+    }
+
+    public function test_reconciliation_variance_is_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('reconciliations')->insert([
+            'id' => '00000000-0000-4000-8000-00000000033a',
+            'period_id' => '00000000-0000-4000-8000-00000000033b',
+            'subject' => 'schema-probe',
+            'expected' => 100,
+            'observed' => 90,
+            'variance' => 0,
+            'lifecycle_state' => 'draft',
+            'observed_by' => '00000000-0000-4000-8000-00000000033c',
+        ]);
+    }
+
     public function test_append_only_triggers_exist_in_the_schema(): void
     {
         $certificateTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'certificates')->pluck('tgname')->all();
@@ -377,5 +418,17 @@ final class SchemaInvariantFeatureTest extends TestCase
 
         $settlementTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'final_settlements')->pluck('tgname')->all();
         $this->assertContains('final_settlements_immutable_trigger', $settlementTriggers, 'final settlements must be immutable at the schema level');
+
+        $accountTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'accounts')->pluck('tgname')->all();
+        $this->assertContains('accounts_immutable_trigger', $accountTriggers, 'chart-of-accounts entries must be immutable at the schema level');
+
+        $financialPeriodTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'financial_periods')->pluck('tgname')->all();
+        $this->assertContains('financial_periods_closed_immutable_trigger', $financialPeriodTriggers, 'closed financial periods must be immutable at the schema level');
+
+        $journalTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'journals')->pluck('tgname')->all();
+        $this->assertContains('journals_immutable_trigger', $journalTriggers, 'posted journals must be immutable at the schema level');
+
+        $obligationTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'obligations')->pluck('tgname')->all();
+        $this->assertContains('obligations_immutable_trigger', $obligationTriggers, 'posted obligations must be immutable at the schema level');
     }
 }
