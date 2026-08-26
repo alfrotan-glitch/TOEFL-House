@@ -51,6 +51,11 @@ final class SchemaInvariantFeatureTest extends TestCase
         $this->assertContains('reconciliations_one_per_period_subject', $this->indexNames('reconciliations'));
         $this->assertContains('payments_payer_ref_unique', $this->indexNames('payments'));
         $this->assertContains('payment_allocations_one_per_pair', $this->indexNames('payment_allocations'));
+        $this->assertContains('assets_code_unique', $this->indexNames('assets'));
+        $this->assertContains('custodies_one_open_per_asset', $this->indexNames('custodies'));
+        $this->assertContains('asset_disposals_one_per_asset', $this->indexNames('asset_disposals'));
+        $this->assertContains('book_copies_code_unique', $this->indexNames('book_copies'));
+        $this->assertContains('book_issuances_one_open_per_copy', $this->indexNames('book_issuances'));
     }
 
     public function test_lifecycle_states_are_constrained_by_the_schema(): void
@@ -419,6 +424,32 @@ final class SchemaInvariantFeatureTest extends TestCase
         ]);
     }
 
+    public function test_work_order_states_are_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('work_orders')->insert([
+            'id' => '00000000-0000-4000-8000-00000000036a',
+            'facility_note' => 'probe',
+            'description' => 'probe',
+            'lifecycle_state' => 'daydreaming',
+            'requested_by' => '00000000-0000-4000-8000-00000000036b',
+        ]);
+    }
+
+    public function test_message_states_are_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('messages')->insert([
+            'id' => '00000000-0000-4000-8000-00000000037a',
+            'subject_person_id' => '00000000-0000-4000-8000-00000000037b',
+            'purpose_id' => '00000000-0000-4000-8000-00000000037c',
+            'channel' => 'sms',
+            'content_ref' => 'probe/x',
+            'lifecycle_state' => 'telepathized',
+            'created_by' => '00000000-0000-4000-8000-00000000037d',
+        ]);
+    }
+
     public function test_append_only_triggers_exist_in_the_schema(): void
     {
         $certificateTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'certificates')->pluck('tgname')->all();
@@ -481,5 +512,24 @@ final class SchemaInvariantFeatureTest extends TestCase
 
         $fundAllocationTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'fund_allocations')->pluck('tgname')->all();
         $this->assertContains('fund_allocations_immutable_trigger', $fundAllocationTriggers, 'fund allocations must be immutable at the schema level');
+
+        $assetTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'assets')->pluck('tgname')->all();
+        $this->assertContains('assets_disposed_immutable_trigger', $assetTriggers, 'disposed assets must be immutable at the schema level');
+
+        $custodyTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'custodies')->pluck('tgname')->all();
+        $this->assertContains('custodies_release_only_trigger', $custodyTriggers, 'custody rows may only be released, never rewritten');
+        $this->assertContains('custodies_no_delete_trigger', $custodyTriggers, 'custody history cannot be deleted');
+
+        $disposalTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'asset_disposals')->pluck('tgname')->all();
+        $this->assertContains('asset_disposals_immutable_trigger', $disposalTriggers, 'asset disposals must be immutable at the schema level');
+
+        $workOrderTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'work_orders')->pluck('tgname')->all();
+        $this->assertContains('work_orders_terminal_immutable_trigger', $workOrderTriggers, 'terminal work orders must be immutable at the schema level');
+
+        $issuanceTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'book_issuances')->pluck('tgname')->all();
+        $this->assertContains('book_issuances_terminal_immutable_trigger', $issuanceTriggers, 'terminal book issuances must be immutable at the schema level');
+
+        $messageTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'messages')->pluck('tgname')->all();
+        $this->assertContains('messages_terminal_immutable_trigger', $messageTriggers, 'delivered messages must be immutable at the schema level');
     }
 }
