@@ -52,3 +52,17 @@
 ## Certification
 
 The complete Packages 02–14 system is **CERTIFIED** at this review's commit. One authorization-ordering defect (F-1) was found, proven, repaired, and reverified with the full regression; no other defects, contract violations, regressions, contradictions, missing invariants, or cross-package integration failures were found. The implementation matches the authoritative contracts, registries, and source-of-truth rules. The conditional migration/cutover row remains untouched pending an explicit business decision.
+
+
+## Release closure (2026-08-26)
+
+Final release-readiness verification performed against the repository at `afe3228` (remote HEAD = local HEAD, working tree clean, `P02-environment-recovery.sh --verify` → ENVIRONMENT VALID — reused, no rebuild):
+
+- PHPUnit cumulative regression: **OK — 295 tests, 1230 assertions** (reproduced from the repository)
+- PHPStan level 6: `[OK] No errors`; Pint: `PASS 369 files`
+- Migrations: testing + dev databases both **86/86 Ran, 0 Pending**; schema invariants suite **OK (42 tests, 119 assertions)**
+- Record alignment correction (the only closure change; no code touched): the authoritative state and environment-baseline records cited the P14-time suite count (295/1229) — aligned to the final certified count **295/1230** at `afe3228`.
+
+The conditional migration/cutover row (sequence row 14) remains **untouched** — it is the only governance blocker: no business decision authorizing migration exists in the Decision Ledger (architecture 22 requires an approved migration decision before any cutover work).
+
+**Release status: P02–P14 CERTIFIED AND CLOSED.**
