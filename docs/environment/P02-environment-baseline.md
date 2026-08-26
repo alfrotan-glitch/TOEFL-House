@@ -225,7 +225,7 @@ php vendor/bin/phpunit                                        # full suite: Unit
 php vendor/bin/phpunit tests/Unit/Organization/...            # focused suites as needed
 ```
 
-Expected result (certified cumulative suite since the final system review, 2026-08-26, commit `afe3228`): **OK (295 tests, 1230 assertions)**. (Package 02 closed at 78/371, P03 at 118/477, P04 at 158/590, P05 at 179/657, P06 at 193/732, P07 at 209/792, P08 at 222/847, P09 at 233/901, P10 at 245/943, P11 at 255/989, P12 at 265/1043, P13 at 278/1118; the cumulative suite only grows.)
+Expected result (certified cumulative suite since Package 15, 2026-08-26): **OK (308 tests, 1300 assertions)**. (Package 02 closed at 78/371, P03 at 118/477, P04 at 158/590, P05 at 179/657, P06 at 193/732, P07 at 209/792, P08 at 222/847, P09 at 233/901, P10 at 245/943, P11 at 255/989, P12 at 265/1043, P13 at 278/1118, final review 295/1230; the cumulative suite only grows.)
 
 ## 15. PHPStan configuration / command
 
@@ -284,7 +284,7 @@ Expected result (certified cumulative suite since the final system review, 2026-
 | 6 | `composer install --dry-run` | `in sync` (nothing to install/update/remove) |
 | 7 | `composer audit` | no known security advisories |
 | 8 | `php artisan db:show` | connects to `toefl_house` as `postgres`; server version `PostgreSQL 18.4` |
-| 9 | `php vendor/bin/phpunit` | `OK (295 tests, 1230 assertions)` (cumulative Package 02–14 suite, final system review state at `afe3228`; Package 02 closed at 78/371, P03 at 118/477, P04 at 158/590, P05 at 179/657, P06 at 193/732, P07 at 209/792, P08 at 222/847, P09 at 233/901, P10 at 245/943, P11 at 255/989, P12 at 265/1043, P13 at 278/1118; the earlier 52/229 R3-closure state was never committed and no longer exists) |
+| 9 | `php vendor/bin/phpunit` | `OK (308 tests, 1300 assertions)` (cumulative Package 02–15 suite; Package 02 closed at 78/371, P03 at 118/477, P04 at 158/590, P05 at 179/657, P06 at 193/732, P07 at 209/792, P08 at 222/847, P09 at 233/901, P10 at 245/943, P11 at 255/989, P12 at 265/1043, P13 at 278/1118; the earlier 52/229 R3-closure state was never committed and no longer exists) |
 | 10 | `php vendor/bin/phpstan analyse --memory-limit=1G` | `[OK] No errors` |
 | 11 | `php vendor/bin/pint --test` | `PASS` |
 

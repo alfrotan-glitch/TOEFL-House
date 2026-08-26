@@ -66,6 +66,67 @@ final class SchemaInvariantFeatureTest extends TestCase
         $this->assertContains('inbound_events_one_accepted_per_external_id', $this->indexNames('inbound_events'));
         $this->assertContains('job_schedules_key_unique', $this->indexNames('job_schedules'));
         $this->assertContains('job_runs_one_per_occurrence', $this->indexNames('job_runs'));
+        $this->assertContains('opening_states_one_per_organization', $this->indexNames('opening_states'));
+        $this->assertContains('opening_entries_one_source_ref', $this->indexNames('opening_entries'));
+        $this->assertContains('opening_materializations_one_per_entry', $this->indexNames('opening_materializations'));
+    }
+
+    public function test_opening_state_status_is_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('opening_states')->insert([
+            'id' => '00000000-0000-4000-8000-00000000050a',
+            'organization_id' => '00000000-0000-4000-8000-00000000b005',
+            'status' => 'reopened',
+            'effective_on' => '2026-08-01',
+            'opening_period_key' => 'OPENING',
+            'prepared_by' => '00000000-0000-4000-8000-00000000050b',
+        ]);
+    }
+
+    public function test_opening_entry_amount_and_currency_are_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('opening_entries')->insert([
+            'id' => '00000000-0000-4000-8000-00000000051a',
+            'opening_state_id' => '00000000-0000-4000-8000-00000000051b',
+            'category' => 'other_payable',
+            'amount' => '-10.00',
+            'currency' => 'USD',
+            'source_ref' => 'paper/probe',
+            'effective_on' => '2026-08-01',
+            'description' => 'probe',
+            'prepared_by' => '00000000-0000-4000-8000-00000000051b',
+        ]);
+    }
+
+    public function test_opening_entry_teacher_shape_is_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('opening_entries')->insert([
+            'id' => '00000000-0000-4000-8000-00000000052a',
+            'opening_state_id' => '00000000-0000-4000-8000-00000000052b',
+            'category' => 'teacher_salary_payable',
+            'amount' => '10.00',
+            'currency' => 'AFN',
+            'source_ref' => 'paper/probe-2',
+            'effective_on' => '2026-08-01',
+            'description' => 'probe',
+            'prepared_by' => '00000000-0000-4000-8000-00000000052b',
+        ]);
+    }
+
+    public function test_opening_immutability_triggers_exist(): void
+    {
+        $stateTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'opening_states')->pluck('tgname')->all();
+        $this->assertContains('opening_states_controlled_path_trigger', $stateTriggers, 'opening states may only move draft -> submitted -> approved and are never deleted');
+
+        $entryTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'opening_entries')->pluck('tgname')->all();
+        $this->assertContains('opening_entries_immutable_trigger', $entryTriggers, 'opening entries are immutable evidence');
+        $this->assertContains('opening_entries_draft_only_insert_trigger', $entryTriggers, 'entries are recordable only while the state is a draft');
+
+        $materializationTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'opening_materializations')->pluck('tgname')->all();
+        $this->assertContains('opening_materializations_retained_trigger', $materializationTriggers, 'opening materialization history is retained');
     }
 
     public function test_integration_channel_is_constrained_by_the_schema(): void
