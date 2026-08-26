@@ -49,6 +49,8 @@ final class SchemaInvariantFeatureTest extends TestCase
         $this->assertContains('accounts_code_unique', $this->indexNames('accounts'));
         $this->assertContains('financial_periods_key_unique', $this->indexNames('financial_periods'));
         $this->assertContains('reconciliations_one_per_period_subject', $this->indexNames('reconciliations'));
+        $this->assertContains('payments_payer_ref_unique', $this->indexNames('payments'));
+        $this->assertContains('payment_allocations_one_per_pair', $this->indexNames('payment_allocations'));
     }
 
     public function test_lifecycle_states_are_constrained_by_the_schema(): void
@@ -386,6 +388,37 @@ final class SchemaInvariantFeatureTest extends TestCase
         ]);
     }
 
+    public function test_payment_amounts_are_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('payments')->insert([
+            'id' => '00000000-0000-4000-8000-00000000034a',
+            'period_id' => '00000000-0000-4000-8000-00000000034b',
+            'student_id' => '00000000-0000-4000-8000-00000000034c',
+            'amount' => -5,
+            'method' => 'cash',
+            'payer_ref' => 'SCHEMA-PROBE-34',
+            'received_on' => '2026-11-01',
+            'recorded_by' => '00000000-0000-4000-8000-00000000034d',
+        ]);
+    }
+
+    public function test_discount_states_are_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('discounts')->insert([
+            'id' => '00000000-0000-4000-8000-00000000035a',
+            'obligation_id' => '00000000-0000-4000-8000-00000000035b',
+            'period_id' => '00000000-0000-4000-8000-00000000035c',
+            'amount' => 100,
+            'eligibility' => 'schema probe',
+            'effective_from' => '2026-11-01',
+            'reason' => 'probe',
+            'lifecycle_state' => 'whispered',
+            'proposed_by' => '00000000-0000-4000-8000-00000000035d',
+        ]);
+    }
+
     public function test_append_only_triggers_exist_in_the_schema(): void
     {
         $certificateTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'certificates')->pluck('tgname')->all();
@@ -430,5 +463,23 @@ final class SchemaInvariantFeatureTest extends TestCase
 
         $obligationTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'obligations')->pluck('tgname')->all();
         $this->assertContains('obligations_immutable_trigger', $obligationTriggers, 'posted obligations must be immutable at the schema level');
+
+        $paymentTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'payments')->pluck('tgname')->all();
+        $this->assertContains('payments_immutable_trigger', $paymentTriggers, 'posted payments must be immutable at the schema level');
+
+        $allocationTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'payment_allocations')->pluck('tgname')->all();
+        $this->assertContains('payment_allocations_immutable_trigger', $allocationTriggers, 'payment allocations must be immutable at the schema level');
+
+        $refundTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'refunds')->pluck('tgname')->all();
+        $this->assertContains('refunds_immutable_trigger', $refundTriggers, 'refunds must be immutable at the schema level');
+
+        $discountTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'discounts')->pluck('tgname')->all();
+        $this->assertContains('discounts_approved_immutable_trigger', $discountTriggers, 'approved discounts must be immutable at the schema level');
+
+        $fundTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'funding_sources')->pluck('tgname')->all();
+        $this->assertContains('funding_sources_immutable_trigger', $fundTriggers, 'funding agreements must be immutable at the schema level');
+
+        $fundAllocationTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'fund_allocations')->pluck('tgname')->all();
+        $this->assertContains('fund_allocations_immutable_trigger', $fundAllocationTriggers, 'fund allocations must be immutable at the schema level');
     }
 }
