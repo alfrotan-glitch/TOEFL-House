@@ -5,15 +5,12 @@
 /.env.*.local
 composer.phar
 
-# Laravel runtime artifacts
+# Laravel runtime artifacts — each runtime directory is kept in the repo via
+# a .gitignore file inside it (matching the Laravel skeleton) so a fresh
+# clone/deploy always has the directory present; only runtime contents are
+# ignored. Without storage/framework/views tracked, Blade fails at boot with
+# "Please provide a valid cache path".
 /storage/*.key
-/bootstrap/cache/*
-/storage/framework/cache/*
-/storage/framework/sessions/*
-/storage/framework/views/*
-/storage/logs/*
-!/storage/framework/.gitkeep
-!/storage/app/.gitkeep
 
 # OS / editor
 .DS_Store

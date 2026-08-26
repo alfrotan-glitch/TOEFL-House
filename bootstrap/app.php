@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\EnsureEmployeeSession;
+use App\Http\Middleware\SecurityHeaders;
 use App\Support\Errors\DomainError;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -15,6 +16,10 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // Baseline security headers on every response (web + API). The web
+        // server (deploy/nginx) sets the same headers for static assets.
+        $middleware->append(SecurityHeaders::class);
+
         $middleware->alias([
             'employee' => EnsureEmployeeSession::class,
         ]);

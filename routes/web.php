@@ -4,6 +4,7 @@ use App\Http\Controllers\AcademicController;
 use App\Http\Controllers\AuditController;
 use App\Http\Controllers\AuthenticationController;
 use App\Http\Controllers\FinanceController;
+use App\Http\Controllers\HealthController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\HrController;
 use App\Http\Controllers\IdentityController;
@@ -28,7 +29,13 @@ use Illuminate\Support\Facades\Route;
 */
 
 Route::get('/login', [AuthenticationController::class, 'show'])->name('login');
-Route::post('/login', [AuthenticationController::class, 'login'])->name('login.submit');
+// Brute-force protection: small per-(IP, username) allowance (throttle:login).
+Route::post('/login', [AuthenticationController::class, 'login'])->middleware('throttle:login')->name('login.submit');
+
+// Production health/readiness probe — public, minimal, no secrets. Distinct
+// from /up (framework liveness): /health also verifies the database and the
+// runtime configuration, so an orchestrator can gate traffic on it.
+Route::get('/health', HealthController::class)->name('health');
 
 Route::middleware('employee')->group(function (): void {
     Route::post('/logout', [AuthenticationController::class, 'logout'])->name('logout');
