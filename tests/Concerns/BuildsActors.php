@@ -143,6 +143,13 @@ trait BuildsActors
         return new Actor($actorId, 'Enrollment Clerk');
     }
 
+    private function grantedActor(string $actorId, array $capabilities): Actor
+    {
+        $this->personWithAuthority($actorId, $capabilities);
+
+        return new Actor($actorId, 'Granted Actor');
+    }
+
     private function organizationIdFromScopeKey(string $scopeKey): string
     {
         return str_contains($scopeKey, ':') ? explode(':', $scopeKey, 2)[1] : $this->bootstrapOrganizationId;

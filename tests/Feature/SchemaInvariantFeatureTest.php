@@ -35,6 +35,10 @@ final class SchemaInvariantFeatureTest extends TestCase
         $this->assertContains('guardian_relationships_one_open_per_pair', $this->indexNames('guardian_relationships'));
         $this->assertContains('enrollments_one_active_seat', $this->indexNames('enrollments'));
         $this->assertContains('teacher_assignments_one_open_per_class_teacher', $this->indexNames('teacher_assignments'));
+        $this->assertContains('assessment_results_one_live_per_attempt', $this->indexNames('assessment_results'));
+        $this->assertContains('progression_decisions_one_open_per_student_class', $this->indexNames('progression_decisions'));
+        $this->assertContains('graduation_decisions_one_open_per_student_version', $this->indexNames('graduation_decisions'));
+        $this->assertContains('certificates_serial_unique', $this->indexNames('certificates'));
     }
 
     public function test_lifecycle_states_are_constrained_by_the_schema(): void
@@ -200,5 +204,80 @@ final class SchemaInvariantFeatureTest extends TestCase
             'status' => 'maybe',
             'recorded_by' => '00000000-0000-4000-8000-00000000019d',
         ]);
+    }
+
+    public function test_assessment_attempts_kind_and_state_are_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('assessment_attempts')->insert([
+            'id' => '00000000-0000-4000-8000-00000000020a',
+            'enrollment_id' => '00000000-0000-4000-8000-00000000020b',
+            'kind' => 'crystal-ball',
+            'evidence_ref' => 'probe/ref',
+            'lifecycle_state' => 'submitted',
+            'recorded_by' => '00000000-0000-4000-8000-00000000020c',
+        ]);
+    }
+
+    public function test_assessment_result_states_and_scores_are_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('assessment_results')->insert([
+            'id' => '00000000-0000-4000-8000-00000000021a',
+            'attempt_id' => '00000000-0000-4000-8000-00000000021b',
+            'score' => -1,
+            'lifecycle_state' => 'final',
+            'scored_by' => '00000000-0000-4000-8000-00000000021c',
+        ]);
+    }
+
+    public function test_academic_appeal_subjects_are_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('academic_appeals')->insert([
+            'id' => '00000000-0000-4000-8000-00000000022a',
+            'student_id' => '00000000-0000-4000-8000-00000000022b',
+            'subject_type' => 'vibe',
+            'subject_id' => '00000000-0000-4000-8000-00000000022c',
+            'reason' => 'schema probe',
+            'lifecycle_state' => 'open',
+        ]);
+    }
+
+    public function test_progression_and_graduation_outcomes_are_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('progression_decisions')->insert([
+            'id' => '00000000-0000-4000-8000-00000000023a',
+            'student_id' => '00000000-0000-4000-8000-00000000023b',
+            'class_id' => '00000000-0000-4000-8000-00000000023c',
+            'outcome' => 'teleport',
+            'reason' => 'schema probe',
+            'lifecycle_state' => 'proposed',
+            'proposed_by' => '00000000-0000-4000-8000-00000000023d',
+        ]);
+    }
+
+    public function test_graduation_outcomes_are_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('graduation_decisions')->insert([
+            'id' => '00000000-0000-4000-8000-00000000024a',
+            'student_id' => '00000000-0000-4000-8000-00000000024b',
+            'program_version_id' => '00000000-0000-4000-8000-00000000024c',
+            'outcome' => 'maybe',
+            'basis' => 'schema probe',
+            'lifecycle_state' => 'proposed',
+            'proposed_by' => '00000000-0000-4000-8000-00000000024d',
+        ]);
+    }
+
+    public function test_append_only_triggers_exist_in_the_schema(): void
+    {
+        $certificateTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'certificates')->pluck('tgname')->all();
+        $this->assertContains('certificates_immutable_trigger', $certificateTriggers, 'certificate issuance records must be immutable at the schema level');
+
+        $attemptTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'assessment_attempts')->pluck('tgname')->all();
+        $this->assertContains('assessment_attempts_submitted_immutable_trigger', $attemptTriggers, 'submitted attempts must be frozen at the schema level');
     }
 }
