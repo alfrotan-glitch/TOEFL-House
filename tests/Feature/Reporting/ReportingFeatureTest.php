@@ -209,6 +209,15 @@ final class ReportingFeatureTest extends TestCase
         app(DefineMetric::class)->define($this->grantedActor('rep-analyst', ['reporting.catalog']), 'student_outstanding_balance', 'Outstanding balance per student', 'spec', '2026-01-01', 'rep-def-11');
         $nobody = $this->actorWithoutAnyCapability('rep-nobody');
 
+        // authorization precedes validation: an unknown metric key must still be DENIED for an
+        // unprivileged actor (capability first, catalog validation after, denial audited)
+        try {
+            app(DefineMetric::class)->define($nobody, 'invented_kpi', 'X', 'spec', '2026-01-01', 'rep-neg-2');
+            $this->fail('an unprivileged actor must be denied before metric validation runs');
+        } catch (AuthorizationDenied) {
+            $this->assertDatabaseHas('audit_events', ['operation' => 'reporting.metric.define.denied', 'actor_id' => 'rep-nobody']);
+        }
+
         $this->expectException(AuthorizationDenied::class);
         app(ComputeProjection::class)->compute($nobody, 'student_outstanding_balance', $this->financialPeriodKey, 'student', $this->studentId, 'rep-neg-1');
 

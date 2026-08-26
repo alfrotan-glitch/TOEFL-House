@@ -40,13 +40,14 @@ final class RunReport
      * @return array{run_id: string, result: string, reproducibility_hash: string, correlation_id: string} */
     public function run(Actor $actor, string $metricKey, string $periodKey, string $scopeType, ?string $scopeId, array $filters, string $idempotencyKey): array
     {
-        $entry = MetricCatalog::entry($metricKey);
         $payload = hash('sha256', implode('|', ['reporting.report.run', $metricKey, $periodKey, $scopeType, (string) $scopeId, json_encode($filters), $actor->actorId]));
 
         try {
             return $this->idempotency->execute('reporting.report.run', $idempotencyKey, $payload,
-                fn (): array => DB::transaction(function () use ($actor, $metricKey, $periodKey, $scopeType, $scopeId, $filters, $entry): array {
+                fn (): array => DB::transaction(function () use ($actor, $metricKey, $periodKey, $scopeType, $scopeId, $filters): array {
                     $this->require($actor);
+
+                    $entry = MetricCatalog::entry($metricKey);
                     if (! in_array($scopeType, $entry['scopes'], true)) {
                         throw BusinessRejection::forCode('reporting.scope_not_allowed', sprintf('metric %s allows scopes %s', $metricKey, implode(', ', $entry['scopes'])));
                     }

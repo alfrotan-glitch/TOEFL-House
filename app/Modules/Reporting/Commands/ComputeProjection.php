@@ -39,13 +39,14 @@ final class ComputeProjection
     /** @return array{projection_id: string, value: string, correlation_id: string} */
     public function compute(Actor $actor, string $metricKey, string $periodKey, string $scopeType, ?string $scopeId, string $idempotencyKey): array
     {
-        $entry = MetricCatalog::entry($metricKey);
         $payload = hash('sha256', implode('|', ['reporting.projection.compute', $metricKey, $periodKey, $scopeType, (string) $scopeId, $actor->actorId]));
 
         try {
             return $this->idempotency->execute('reporting.projection.compute', $idempotencyKey, $payload,
-                fn (): array => DB::transaction(function () use ($actor, $metricKey, $periodKey, $scopeType, $scopeId, $entry): array {
+                fn (): array => DB::transaction(function () use ($actor, $metricKey, $periodKey, $scopeType, $scopeId): array {
                     $this->require($actor);
+
+                    $entry = MetricCatalog::entry($metricKey);
                     if (! in_array($scopeType, $entry['scopes'], true)) {
                         throw BusinessRejection::forCode('reporting.scope_not_allowed', sprintf('metric %s allows scopes %s', $metricKey, implode(', ', $entry['scopes'])));
                     }

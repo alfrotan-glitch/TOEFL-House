@@ -40,13 +40,14 @@ final class ReconcileMetric
     /** @return array{reconciliation_id: string, status: string, variance: string, correlation_id: string} */
     public function reconcile(Actor $actor, string $metricKey, string $periodKey, string $scopeType, ?string $scopeId, string $idempotencyKey): array
     {
-        $entry = MetricCatalog::entry($metricKey);
         $payload = hash('sha256', implode('|', ['reporting.reconcile', $metricKey, $periodKey, $scopeType, (string) $scopeId, $actor->actorId]));
 
         try {
             return $this->idempotency->execute('reporting.reconcile', $idempotencyKey, $payload,
-                fn (): array => DB::transaction(function () use ($actor, $metricKey, $periodKey, $scopeType, $scopeId, $entry): array {
+                fn (): array => DB::transaction(function () use ($actor, $metricKey, $periodKey, $scopeType, $scopeId): array {
                     $this->require($actor);
+
+                    $entry = MetricCatalog::entry($metricKey);
 
                     /** @var MetricDefinition $metric */
                     $metric = MetricDefinition::query()->where('key', $metricKey)->firstOrFail();

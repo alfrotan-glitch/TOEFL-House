@@ -38,13 +38,14 @@ final class DefineMetric
     /** @return array{metric_id: string, version_no: int, correlation_id: string} */
     public function define(Actor $actor, string $metricKey, string $name, string $spec, string $effectiveFrom, string $idempotencyKey): array
     {
-        $entry = MetricCatalog::entry($metricKey);
         $payload = hash('sha256', implode('|', ['reporting.metric.define', $metricKey, $name, $spec, $effectiveFrom, $actor->actorId]));
 
         try {
             return $this->idempotency->execute('reporting.metric.define', $idempotencyKey, $payload,
-                fn (): array => DB::transaction(function () use ($actor, $metricKey, $name, $spec, $effectiveFrom, $entry): array {
+                fn (): array => DB::transaction(function () use ($actor, $metricKey, $name, $spec, $effectiveFrom): array {
                     $this->require($actor);
+
+                    $entry = MetricCatalog::entry($metricKey);
                     if ($spec === '') {
                         throw BusinessRejection::forCode('reporting.metric_spec', 'a metric requires its calculation specification');
                     }
