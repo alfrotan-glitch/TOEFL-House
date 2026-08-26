@@ -129,6 +129,20 @@ trait BuildsActors
         return new Actor($actorId, 'Reactivation Approver');
     }
 
+    private function academicOfficer(string $actorId = 'acad-officer-1'): Actor
+    {
+        $this->personWithAuthority($actorId, ['academic.structure', 'academic.schedule', 'academic.enroll_approve', 'academic.attendance']);
+
+        return new Actor($actorId, 'Academic Officer');
+    }
+
+    private function enrollmentClerk(string $actorId = 'acad-clerk-1'): Actor
+    {
+        $this->personWithAuthority($actorId, ['academic.enroll']);
+
+        return new Actor($actorId, 'Enrollment Clerk');
+    }
+
     private function organizationIdFromScopeKey(string $scopeKey): string
     {
         return str_contains($scopeKey, ':') ? explode(':', $scopeKey, 2)[1] : $this->bootstrapOrganizationId;

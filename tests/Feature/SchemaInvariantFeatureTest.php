@@ -33,6 +33,8 @@ final class SchemaInvariantFeatureTest extends TestCase
         $this->assertContains('consents_one_open_per_subject_purpose', $this->indexNames('consents'));
         $this->assertContains('students_one_per_person', $this->indexNames('students'));
         $this->assertContains('guardian_relationships_one_open_per_pair', $this->indexNames('guardian_relationships'));
+        $this->assertContains('enrollments_one_active_seat', $this->indexNames('enrollments'));
+        $this->assertContains('teacher_assignments_one_open_per_class_teacher', $this->indexNames('teacher_assignments'));
     }
 
     public function test_lifecycle_states_are_constrained_by_the_schema(): void
@@ -175,6 +177,28 @@ final class SchemaInvariantFeatureTest extends TestCase
             'effective_from' => '2026-01-01',
             'effective_to' => null,
             'recorded_by' => '00000000-0000-4000-8000-00000000017d',
+        ]);
+    }
+
+    public function test_class_lifecycle_states_are_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('programs')->insert([
+            'id' => '00000000-0000-4000-8000-00000000018a',
+            'name' => 'schema-guard-program',
+            'lifecycle_state' => 'rumored',
+        ]);
+    }
+
+    public function test_attendance_statuses_are_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('attendance_facts')->insert([
+            'id' => '00000000-0000-4000-8000-00000000019a',
+            'session_id' => '00000000-0000-4000-8000-00000000019b',
+            'enrollment_id' => '00000000-0000-4000-8000-00000000019c',
+            'status' => 'maybe',
+            'recorded_by' => '00000000-0000-4000-8000-00000000019d',
         ]);
     }
 }
