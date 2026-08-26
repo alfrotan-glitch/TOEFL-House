@@ -49,7 +49,7 @@ teaching_delivery_facts (Payroll-owned claim rows; unique(session_id)) → payro
 - Table `scales` (HR-owned): `id, key unique (e.g. 'S1'..'S4'), name, rank_order int unique, state ∈ {active, retired}`; retired immutable; no delete.
 - **Scale is pinned on the ContractVersion** (`scale_id NOT NULL` for versions that use scale-dependent rules; nullable for pure fixed contracts). Rationale: compensation rank only exists inside a compensation instrument — this keeps ONE source of truth (no parallel employment-level scale history), makes "one active scale at a time" a consequence of "one active contract version", and makes scale changes explicit governed amendments. (Alternative rejected — see V.)
 - A teacher's current scale = scale of the active contract version. Changing S2→S3 = new version effective from a date; approved payroll untouched (snapshot). Rules MAY also be written scale-independently (skill-only) — then the version's scale is recorded in the snapshot for reporting only.
-- Actual scale set (S1–S4 names/thresholds): **NEEDS BUSINESS DECISION**; schema takes any registered set.
+- Actual scale set: **DECIDED** — the approved initial catalog is S1 Junior, S2 Standard, S3 Senior, S4 Expert (independent of Academic Level and Skill); the schema takes any registered set, registered under control through MaintainScale.
 
 ## F. Contract lifecycle (target) — DECIDED
 ```
@@ -86,7 +86,7 @@ For each payable delivered unit with skill S, under version V with scale K:
 4. `(skill=∅, scale=∅)` — generic per-unit rate
 5. **no match → calculation HELD** (`payroll.rule_missing`), never a silent zero or fallback to another skill.
 - Ambiguity is structurally impossible: the overlap uniqueness guarantees at most one rule per key; precedence ladder is total. Identical amounts never matter; the resolved rule id is snapshotted.
-- Additive lines always apply (fixed_monthly proration **NEEDS BUSINESS DECISION**: full month vs pro-rata by calendar days).
+- Additive lines (fixed_monthly, allowance) are **DECIDED** prorated by calendar days: payable = contract amount × active days / period days, where active days is the inclusive calendar overlap of the version effective window and the payroll period; full-period coverage pays the full amount; partial coverage is computed in exact integer-cent arithmetic, round half up. Per-unit rates are not prorated.
 - Conflict cases 22–24 (challenge): skill-only vs skill×scale → **exact wins**; scale-only vs skill×scale → **exact wins**; two overlapping rules of the same key → **cannot exist** (rejected at approval).
 
 ## J. Teaching Assignment model — DECIDED
@@ -99,10 +99,10 @@ For each payable delivered unit with skill S, under version V with scale K:
 - **Payable unit = one delivered session of one skill by one attributed teacher**, defined as:
   - session exists with `skill_id` set (Academic adds the column; CHECK skill exists & active at schedule time — retired skills not schedulable);
   - session date within the teacher's assignment(+skill) window;
-  - **at least one attendance fact** exists for the session (delivered evidence; threshold **NEEDS BUSINESS DECISION**, default proposal: ≥1 recorded fact regardless of status, with per-status rules configurable later);
+  - **at least one final attendance fact with status present or late** exists for the session (delivered evidence; **DECIDED** — final means the uncorrected tip of the authoritative corrects_id chain, so corrections, not timestamps, resolve qualification; absent and excused never qualify);
   - cancelled/never-held sessions simply carry **no attendance facts** → not payable (no session lifecycle needed in v1);
   - teacher absence = reassignment to another teacher's assignment before/at delivery — the facts follow attribution, not presence heuristics.
-- Manual `work_bases` remain ONLY for the legacy path; **for new contracts they may not co-exist with per-unit rules** (calculation rejects a period where both manual quantity and delivery facts would bill the same employment — fail-closed `payroll.volume_conflict`). (**NEEDS BUSINESS DECISION** if manual hourly entry must survive for non-session work → then it becomes an additive line instead.)
+- Manual `work_bases` and the per-kind compensation-component architecture: **DECIDED — hard-retired in P16 finalization**. Tables, triggers, models, commands, and the legacy calculation fallback path are removed from the active system; the contract version with its compensation rules is the single compensation path and volume comes exclusively from academic delivery evidence.
 - Hours (method `hourly_rate`) = Σ(session duration `ends_at−starts_at`) over qualifying sessions, computed from academic evidence, not manual entry.
 
 ## L. Multi-Skill class model — DECIDED
@@ -115,13 +115,13 @@ For each payable delivered unit with skill S, under version V with scale K:
 2. Claim delivery: for each qualifying session in the period attributed to this employment, insert `teaching_delivery_facts(id, payroll_calculation_id, session_id, skill_id, hours, evidence_digest)` — **unique(session_id)** (DB) makes double counting impossible across periods, calcs, and reruns.
 3. Group facts by skill → resolve rule (ladder I) → `Σ rate × sessions` (session_rate) or `rate × Σ hours` (hourly_rate).
 4. Add `fixed_monthly` + `allowance` lines.
-5. Any unresolved skill / missing version / volume conflict → **HELD** with reason (existing held pattern reused).
+5. Unresolved skill / no in-force version / unattributed delivered session → **HELD** with reason (existing held pattern reused); no legacy fallback exists.
 6. Supersede prior prepared/held calculations (existing semantics), store snapshot (N).
 Adjustments/reversals/approval: unchanged (P09 certified).
 
 ## N. Historical snapshot model — DECIDED
 `payroll_calculations.snapshot` (existing jsonb, immutable trigger already certified) extended with:
-`contract_id, contract_version_id, version_no, scale_id, rules: [{rule_id, method, skill_id, rate}], delivery: [{fact_id, session_id, skill_id, hours, digest}], per_skill: [{skill, sessions, hours, rate, amount}], additive: [...], formula_version: 'p16-v1'`.
+`contract_id, contract_version_id, version_no, scale_id, rules: [{id, method, skill_id, scale_id, label, rate}], delivery: [{session_id, skill_id, scheduled_on, hours, fact_id}] (fact_id = the qualifying attendance fact evidence), per_skill: [{skill_id, sessions, hours, rule_id, method, rate, amount}], additive: [{rule_id, method, label, contract_amount, active_days, period_days, amount}], proration: {period_from, period_to, period_days, version_effective_from, version_effective_to, active_days}, formula: 'skill-scale-v1'`.
 Immutable results + append-only adjustments + frozen versions ⇒ future Skill/Scale/rate/contract changes can never alter approved payroll; reproducibility = snapshot alone.
 
 ## O. FM → GM approval model — DECIDED
@@ -154,7 +154,7 @@ All new commands (`RegisterSkill`, `RegisterScale`, `PrepareContractVersion`, `S
 
 ## T. Migration strategy — DECIDED (technical, not business-data)
 - **No historical business data migration** (none exists). New schema lands as **normal new migrations** (append-only schema history, ~7–8 migrations).
-- Legacy tables (`compensation_components`, `work_bases` per-unit use) stay in schema; the **write path is retired**: new-contract validation rejects legacy components for contracts that have versions; legacy commands remain for certified history until a later cleanup package removes them with test migration. (**NEEDS TECHNICAL DECISION**: hard-retire legacy commands in P16 vs deprecate-with-reject.)
+- Legacy tables (`compensation_components`, `work_bases`): **DECIDED — hard-retired in P16 finalization**: migrations 000096/000097 drop the tables with their triggers and functions (with full down-migrations for reversibility), the legacy models and commands are deleted, and the legacy tests are removed; no historical business data exists (P02–P15 certified baseline, no production data), so no data migration is required and no fallback path remains.
 - Squash/dump strategy: **deferred** — revisit after architecture stabilizes; it is a deployment-baseline decision, not required for P16.
 
 ## U. Adversarial challenge results (27 cases)
@@ -207,8 +207,9 @@ All new commands (`RegisterSkill`, `RegisterScale`, `PrepareContractVersion`, `S
 7. Gates: phpunit / phpstan L6 / pint / fresh-DB migrations / P02 `--verify`; checkpoint; certification. (Reporting metrics change = separate governed change.)
 
 ## X. Risks and unresolved decisions
-- **NEEDS BUSINESS DECISION**: final Scale set (names/thresholds); contract-type set; class-unit definition (Model G) if ever needed; attendance-qualification threshold (default ≥1 fact); fixed-salary proration; whether manual hourly entry survives (as additive line) for non-session work.
-- **NEEDS TECHNICAL DECISION**: hard-retire vs deprecate legacy compensation path in P16; snapshot `formula_version` governance; schema squash timing (deferred).
+- **RESOLVED by user directive in P16 finalization (2026-08-26)**: final Scale set (S1 Junior, S2 Standard, S3 Senior, S4 Expert); attendance qualification (≥1 final present/late fact via the corrects_id chain); fixed-salary proration (calendar days, exact cent arithmetic, round half up); legacy compensation path (hard-retired — single contract version + compensation rule path); manual hourly entry (retired with work_bases).
+- **Still open (out of P16 finalization scope)**: contract-type set (enum on versions); class-unit definition (Model G) if ever needed.
+- **NEEDS TECHNICAL DECISION**: snapshot `formula_version` governance; schema squash timing (deferred).
 - **Risk (HIGH)**: P16 touches two certified modules (Academic sessions/assignments, HR/Payroll) — must follow "extend, don't rewrite" with full cumulative regression; the proven per-kind conflict justifies the retirement.
 - **Risk (MEDIUM)**: unique(session_id) makes accidental co-teaching unpayable — operational reassignment discipline required.
 
@@ -227,15 +228,17 @@ All new commands (`RegisterSkill`, `RegisterScale`, `PrepareContractVersion`, `S
 | FM prepares/submits (`hr.contract.prepare`), GM approves (`hr.contract.approve`), ≠preparer, ≠beneficiary (command+DB) | **DECIDED** |
 | Compensation rules keyed (method, skill?, scale?); per-unit single resolution space; overlap-free per version | **DECIDED** (fixes proven conflict) |
 | Precedence ladder exact > skill-only > scale-only > generic; no-match → HELD | **DECIDED** |
+| Fixed/allowance calendar-day proration (amount × active days / period days, exact cents, round half up) | **DECIDED** |
 | `teacher_assignment_skills` separate entity; one session = one skill; attribution validated | **DECIDED** |
-| Payable unit = delivered session (skill-attributed, ≥1 attendance fact); hours from session duration | **DECIDED** (threshold value: needs business) |
-| `teaching_delivery_facts` with unique(session_id); manual+academic conflict → HELD | **DECIDED** |
+| Payable unit = delivered session (skill-attributed, ≥1 final present/late attendance fact via the corrects_id chain); hours from session duration | **DECIDED** |
+| `teaching_delivery_facts` with unique(session_id); delivery claims carry the qualifying attendance fact as evidence; double payment impossible | **DECIDED** |
 | Snapshot extension (version/rules/scale/skill breakdown/evidence) | **DECIDED** |
 | Finance unchanged (manual journal posting, adjustments/reversals); P15 untouched | **DECIDED** |
-| v1 method set (fixed_monthly, allowance, session_rate, hourly_rate); class_based/volume-based deferred | **RECOMMENDED** |
-| Legacy compensation_components/work-basis per-unit path retired for new contracts | **RECOMMENDED** (hard-retire vs deprecate: **NEEDS TECHNICAL DECISION**) |
+| v1 method set (fixed_monthly, allowance, session_rate, hourly_rate); class_based/volume-based deferred | **DECIDED** (implemented) |
+| Legacy compensation_components/work-basis path hard-retired (tables, commands, fallback, tests removed) | **DECIDED** (executed in P16 finalization) |
 | Reporting metrics for skill/scale payroll | **NEEDS BUSINESS DECISION** (separate governed change) |
-| Final scale set S1–S4, contract types, proration, qualification threshold, manual hourly survival | **NEEDS BUSINESS DECISION** |
+| Final scale set S1–S4 (Junior/Standard/Senior/Expert); calendar-day proration; final present/late attendance qualification; manual hourly entry retired | **DECIDED** (user directive, P16 finalization) |
+| Contract types set (enum on versions) | **NEEDS BUSINESS DECISION** (out of P16 finalization scope) |
 | Schema squash/dump baseline | **NEEDS TECHNICAL DECISION** (deferred) |
 
-**END OF DESIGN — HARD STOP. Nothing implemented; no file outside this artifact touched; no commit; no push.**
+**END OF DESIGN.** P16 v1 was implemented on 2026-08-26 (commit `1c233df`), and the remaining decisions above were resolved by user directive in the P16 finalization, implemented and certified in `docs/implementation/39-package-16-skill-scale-contract-payroll-checkpoint.md` (branch `arena/01a03d22-toefl-house`). This design record is historical; the authoritative description of the final system is `docs/architecture/11-hr-payroll-architecture.md` and `docs/implementation/09-hr-payroll-implementation-contract.md`.

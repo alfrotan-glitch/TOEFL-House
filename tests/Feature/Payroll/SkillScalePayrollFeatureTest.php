@@ -10,6 +10,7 @@ use App\Modules\Academic\Commands\MaintainEnrollment;
 use App\Modules\Academic\Commands\MaintainSkill;
 use App\Modules\Academic\Commands\RecordAttendance;
 use App\Modules\Academic\Models\AcademicPeriod;
+use App\Modules\Academic\Models\AttendanceFact;
 use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\ClassSession;
 use App\Modules\Academic\Models\Enrollment;
@@ -24,7 +25,6 @@ use App\Modules\Audit\Models\AuditEvent;
 use App\Modules\Hr\Commands\MaintainContractVersion;
 use App\Modules\Hr\Commands\MaintainEmployment;
 use App\Modules\Hr\Commands\MaintainScale;
-use App\Modules\Hr\Commands\RecordWorkBasis;
 use App\Modules\Hr\Models\ContractVersion;
 use App\Modules\Hr\Models\Employment;
 use App\Modules\Payroll\Commands\ApprovePayrollResult;
@@ -80,7 +80,7 @@ final class SkillScalePayrollFeatureTest extends TestCase
         foreach (['speaking_listening' => 'Speaking & Listening', 'writing_grammar' => 'Writing & Grammar', 'reading_vocabulary' => 'Reading & Vocabulary'] as $key => $name) {
             $this->skillIds[$key] = $skills->register($skillRegistrar, $key, $name, 'p16-pay-sk-'.$key)['skill_id'];
         }
-        $this->scaleS3Id = app(MaintainScale::class)->register($this->grantedActor('p16-pay-scale-1', ['hr.scale']), 'S3', 'Senior instructor', 3, 'p16-pay-scale-reg-1')['scale_id'];
+        $this->scaleS3Id = app(MaintainScale::class)->register($this->grantedActor('p16-pay-scale-1', ['hr.scale']), 'S3', 'Senior', 3, 'p16-pay-scale-reg-1')['scale_id'];
 
         $fm = $this->financeManager();
         $commands = app(MaintainContractVersion::class);
@@ -182,6 +182,17 @@ final class SkillScalePayrollFeatureTest extends TestCase
         $this->assertCount(5, $row->snapshot['rules']);
         $this->assertSame(4, TeachingDeliveryFact::query()->count());
         $this->assertSame('2.00', TeachingDeliveryFact::query()->firstOrFail()->hours);
+        // Full-period version (2026-08-01.., period 2026-08-01..31): additive
+        // lines pay in full — 31/31 calendar days, no proration loss.
+        $this->assertSame(31, $row->snapshot['proration']['period_days']);
+        $this->assertSame(31, $row->snapshot['proration']['active_days']);
+        $fixedLine = collect($row->snapshot['additive'])->firstWhere('method', 'fixed_monthly');
+        $this->assertSame('20000.00', $fixedLine['contract_amount']);
+        $this->assertSame('20000.00', $fixedLine['amount']);
+        $this->assertSame(31, $fixedLine['active_days']);
+        $this->assertSame(31, $fixedLine['period_days']);
+        // Delivery evidence references the qualifying attendance fact.
+        $this->assertNotSame('', (string) $row->snapshot['delivery'][0]['fact_id']);
     }
 
     public function test_rate_resolution_ladder_is_deterministic(): void
@@ -260,16 +271,150 @@ final class SkillScalePayrollFeatureTest extends TestCase
         $this->assertStringContainsString('payroll.skill_attribution_missing', (string) $row->held_reason);
     }
 
-    public function test_manual_volume_conflicting_with_authoritative_evidence_holds(): void
+    public function test_fixed_and_allowance_prorate_by_calendar_day_overlap(): void
     {
-        $this->deliveredSession('2026-08-05', 'speaking_listening', 'p16-t6-s1');
-        app(RecordWorkBasis::class)->recordManual($this->grantedActor('p16-pay-wb-1', ['hr.workbasis']), Employment::query()->findOrFail($this->employmentId), '2026-08-01', '2026-08-31', '40', 'hours', 'timesheet/aug', 'p16-t6-wb');
+        // New version from 2026-08-16: the prior version is superseded with
+        // its window closed at 08-15, so the in-force version covers 16 of
+        // the period's 31 calendar days.
+        $fm = $this->financeManager();
+        $commands = app(MaintainContractVersion::class);
+        $prepared = $commands->prepare($fm, Employment::query()->findOrFail($this->employmentId), 'contract/2026-08-v2.pdf', null, '2026-08-16', null, 'p16-t6-prep');
+        $version = ContractVersion::query()->findOrFail($prepared['version_id']);
+        $commands->addRule($fm, $version, 'fixed_monthly', '3100.00', null, null, null, 'p16-t6-r1');
+        $commands->addRule($fm, $version, 'allowance', '310.00', null, null, 'transport', 'p16-t6-r2');
+        $commands->addRule($fm, $version, 'session_rate', '100.00', $this->skillIds['speaking_listening'], null, null, 'p16-t6-r3');
+        $commands->submit($fm, $version, 'p16-t6-sub');
+        $commands->approve($this->generalManager(), $version, 'p16-t6-appr');
+
+        $this->deliveredSession('2026-08-20', 'speaking_listening', 'p16-t6-s1');
 
         $calculation = $this->calculate('p16-t6-calc');
-        $this->assertSame('held', $calculation['lifecycle_state']);
+        $this->assertSame('prepared', $calculation['lifecycle_state']);
         /** @var PayrollCalculation $row */
         $row = PayrollCalculation::query()->findOrFail($calculation['calculation_id']);
-        $this->assertStringContainsString('payroll.volume_conflict', (string) $row->held_reason);
+        // 3100 x 16/31 = 1600.00 + 310 x 16/31 = 160.00 + 1 x 100.00
+        $this->assertSame('1860.00', $row->base_amount);
+        $this->assertSame(16, $row->snapshot['proration']['active_days']);
+        $this->assertSame(31, $row->snapshot['proration']['period_days']);
+        $fixedLine = collect($row->snapshot['additive'])->firstWhere('method', 'fixed_monthly');
+        $this->assertSame('3100.00', $fixedLine['contract_amount']);
+        $this->assertSame(16, $fixedLine['active_days']);
+        $this->assertSame(31, $fixedLine['period_days']);
+        $this->assertSame('1600.00', $fixedLine['amount']);
+        $allowanceLine = collect($row->snapshot['additive'])->firstWhere('method', 'allowance');
+        $this->assertSame('310.00', $allowanceLine['contract_amount']);
+        $this->assertSame('160.00', $allowanceLine['amount']);
+        $this->assertSame('100.00', $row->snapshot['per_skill'][0]['amount']);
+    }
+
+    public function test_proration_uses_exact_cent_arithmetic_with_round_half_up(): void
+    {
+        $fm = $this->financeManager();
+        $commands = app(MaintainContractVersion::class);
+
+        // 1000.00 x 16/31 = 516.1290... -> 516.13
+        $prepared = $commands->prepare($fm, Employment::query()->findOrFail($this->employmentId), 'contract/round-1.pdf', null, '2026-08-16', null, 'p16-t11-prep-1');
+        $version = ContractVersion::query()->findOrFail($prepared['version_id']);
+        $commands->addRule($fm, $version, 'fixed_monthly', '1000.00', null, null, null, 'p16-t11-r1');
+        $commands->submit($fm, $version, 'p16-t11-sub-1');
+        $commands->approve($this->generalManager(), $version, 'p16-t11-appr-1');
+        $august = $this->calculate('p16-t11-calc-1');
+        /** @var PayrollCalculation $augustRow */
+        $augustRow = PayrollCalculation::query()->findOrFail($august['calculation_id']);
+        $this->assertSame('516.13', $augustRow->base_amount);
+        $this->assertSame(16, $augustRow->snapshot['proration']['active_days']);
+
+        // 1000.00 x 29/30 = 966.6666... -> 966.67 (round up, non-tie)
+        $prepared = $commands->prepare($fm, Employment::query()->findOrFail($this->employmentId), 'contract/round-2.pdf', null, '2026-09-02', null, 'p16-t11-prep-2');
+        $version = ContractVersion::query()->findOrFail($prepared['version_id']);
+        $commands->addRule($fm, $version, 'fixed_monthly', '1000.00', null, null, null, 'p16-t11-r2');
+        $commands->submit($fm, $version, 'p16-t11-sub-2');
+        $commands->approve($this->generalManager(), $version, 'p16-t11-appr-2');
+        $september = app(MaintainPayrollPeriod::class)->open($this->grantedActor('p16-pay-period-1', ['payroll.period']), '2026-09', '2026-09-01', '2026-09-30', 'p16-t11-period');
+        $septCalc = app(CalculatePayroll::class)->prepare($this->payrollPreparer(), PayrollPeriod::query()->findOrFail($september['period_id']), Employment::query()->findOrFail($this->employmentId), 'p16-t11-calc-2');
+        /** @var PayrollCalculation $septRow */
+        $septRow = PayrollCalculation::query()->findOrFail($septCalc['calculation_id']);
+        $this->assertSame('966.67', $septRow->base_amount);
+        $this->assertSame(29, $septRow->snapshot['proration']['active_days']);
+        $this->assertSame(30, $septRow->snapshot['proration']['period_days']);
+
+        // 1000.01 x 15/30 = 500.005 exactly -> round half up -> 500.01
+        $prepared = $commands->prepare($fm, Employment::query()->findOrFail($this->employmentId), 'contract/round-3.pdf', null, '2026-09-16', null, 'p16-t11-prep-3');
+        $version = ContractVersion::query()->findOrFail($prepared['version_id']);
+        $commands->addRule($fm, $version, 'fixed_monthly', '1000.01', null, null, null, 'p16-t11-r3');
+        $commands->submit($fm, $version, 'p16-t11-sub-3');
+        $commands->approve($this->generalManager(), $version, 'p16-t11-appr-3');
+        $septReCalc = app(CalculatePayroll::class)->prepare($this->payrollPreparer(), PayrollPeriod::query()->findOrFail($september['period_id']), Employment::query()->findOrFail($this->employmentId), 'p16-t11-calc-3');
+        /** @var PayrollCalculation $tieRow */
+        $tieRow = PayrollCalculation::query()->findOrFail($septReCalc['calculation_id']);
+        $this->assertSame('500.01', $tieRow->base_amount);
+        $this->assertSame(15, $tieRow->snapshot['proration']['active_days']);
+    }
+
+    public function test_session_qualifies_only_on_final_present_or_late_attendance(): void
+    {
+        $officer = $this->academicOfficer();
+        // absent and excused never qualify; late and present do.
+        $s1 = app(MaintainClass::class)->scheduleSession($officer, ClassModel::query()->findOrFail($this->classId), new CarbonImmutable('2026-08-05'), '09:00', '11:00', 'p16-t12-s1', $this->skillIds['speaking_listening']);
+        app(RecordAttendance::class)->record($officer, ClassSession::query()->findOrFail($s1['session_id']), Enrollment::query()->findOrFail($this->enrollmentId), 'absent', 'p16-t12-a1');
+        $s2 = app(MaintainClass::class)->scheduleSession($officer, ClassModel::query()->findOrFail($this->classId), new CarbonImmutable('2026-08-06'), '09:00', '11:00', 'p16-t12-s2', $this->skillIds['speaking_listening']);
+        app(RecordAttendance::class)->record($officer, ClassSession::query()->findOrFail($s2['session_id']), Enrollment::query()->findOrFail($this->enrollmentId), 'excused', 'p16-t12-a2');
+        $s3 = app(MaintainClass::class)->scheduleSession($officer, ClassModel::query()->findOrFail($this->classId), new CarbonImmutable('2026-08-07'), '09:00', '11:00', 'p16-t12-s3', $this->skillIds['speaking_listening']);
+        app(RecordAttendance::class)->record($officer, ClassSession::query()->findOrFail($s3['session_id']), Enrollment::query()->findOrFail($this->enrollmentId), 'late', 'p16-t12-a3');
+        $s4 = app(MaintainClass::class)->scheduleSession($officer, ClassModel::query()->findOrFail($this->classId), new CarbonImmutable('2026-08-08'), '09:00', '11:00', 'p16-t12-s4', $this->skillIds['speaking_listening']);
+        app(RecordAttendance::class)->record($officer, ClassSession::query()->findOrFail($s4['session_id']), Enrollment::query()->findOrFail($this->enrollmentId), 'present', 'p16-t12-a4');
+
+        $calculation = $this->calculate('p16-t12-calc');
+        $this->assertSame('prepared', $calculation['lifecycle_state']);
+        /** @var PayrollCalculation $row */
+        $row = PayrollCalculation::query()->findOrFail($calculation['calculation_id']);
+        // Only the late and present sessions bill: 20000 + 1500 + 2 x 500.
+        $this->assertSame('22500.00', $row->base_amount);
+        $this->assertCount(2, $row->snapshot['delivery']);
+        $this->assertSame('2', $row->snapshot['per_skill'][0]['sessions']);
+        $paidSessions = array_map(static fn (array $delivery): string => $delivery['session_id'], $row->snapshot['delivery']);
+        $this->assertSame([$s3['session_id'], $s4['session_id']], $paidSessions);
+    }
+
+    public function test_attendance_corrections_resolve_through_the_authoritative_chain(): void
+    {
+        $officer = $this->academicOfficer();
+        // s1: present corrected to absent -> final absent -> not payable.
+        $s1 = app(MaintainClass::class)->scheduleSession($officer, ClassModel::query()->findOrFail($this->classId), new CarbonImmutable('2026-08-05'), '09:00', '11:00', 'p16-t13-s1', $this->skillIds['speaking_listening']);
+        $s1Fact = app(RecordAttendance::class)->record($officer, ClassSession::query()->findOrFail($s1['session_id']), Enrollment::query()->findOrFail($this->enrollmentId), 'present', 'p16-t13-a1');
+        app(RecordAttendance::class)->correct($officer, AttendanceFact::query()->findOrFail($s1Fact['fact_id']), 'absent', 'student never arrived', 'p16-t13-c1');
+        // s2: absent corrected to present -> final present -> payable.
+        $s2 = app(MaintainClass::class)->scheduleSession($officer, ClassModel::query()->findOrFail($this->classId), new CarbonImmutable('2026-08-06'), '09:00', '11:00', 'p16-t13-s2', $this->skillIds['speaking_listening']);
+        $s2Fact = app(RecordAttendance::class)->record($officer, ClassSession::query()->findOrFail($s2['session_id']), Enrollment::query()->findOrFail($this->enrollmentId), 'absent', 'p16-t13-a2');
+        app(RecordAttendance::class)->correct($officer, AttendanceFact::query()->findOrFail($s2Fact['fact_id']), 'present', 'late-marked by mistake', 'p16-t13-c2');
+        // s3: present -> absent -> late, a two-step chain; final late -> payable.
+        $s3 = app(MaintainClass::class)->scheduleSession($officer, ClassModel::query()->findOrFail($this->classId), new CarbonImmutable('2026-08-07'), '09:00', '11:00', 'p16-t13-s3', $this->skillIds['speaking_listening']);
+        $s3Fact = app(RecordAttendance::class)->record($officer, ClassSession::query()->findOrFail($s3['session_id']), Enrollment::query()->findOrFail($this->enrollmentId), 'present', 'p16-t13-a3');
+        $s3FirstCorrection = app(RecordAttendance::class)->correct($officer, AttendanceFact::query()->findOrFail($s3Fact['fact_id']), 'absent', 'roll called absent', 'p16-t13-c3');
+        $s3FinalCorrection = app(RecordAttendance::class)->correct($officer, AttendanceFact::query()->findOrFail($s3FirstCorrection['fact_id']), 'late', 'arrived in the second half', 'p16-t13-c4');
+
+        $calculation = $this->calculate('p16-t13-calc');
+        $this->assertSame('prepared', $calculation['lifecycle_state']);
+        /** @var PayrollCalculation $row */
+        $row = PayrollCalculation::query()->findOrFail($calculation['calculation_id']);
+        // s2 (final present) and s3 (final late) bill; s1 (final absent) does not.
+        $this->assertSame('22500.00', $row->base_amount);
+        $this->assertCount(2, $row->snapshot['delivery']);
+        $paidSessions = array_map(static fn (array $delivery): string => $delivery['session_id'], $row->snapshot['delivery']);
+        $this->assertSame([$s2['session_id'], $s3['session_id']], $paidSessions);
+
+        // The chain is append-only history: the original present fact of s1
+        // is untouched, and the final fact is the uncorrected chain tip.
+        $this->assertSame('present', AttendanceFact::query()->findOrFail($s1Fact['fact_id'])->status);
+        $this->assertSame('absent', AttendanceFact::query()->findOrFail($s2Fact['fact_id'])->status);
+        $this->assertSame('present', AttendanceFact::query()->findOrFail($s3Fact['fact_id'])->status);
+        $this->assertSame('absent', AttendanceFact::query()->findOrFail($s3FirstCorrection['fact_id'])->status);
+        $this->assertSame(7, AttendanceFact::query()->count());
+        // The uncorrected chain tip of s3 is the final 'late' correction.
+        $s3Tip = AttendanceFact::query()->findOrFail($s3FinalCorrection['fact_id']);
+        $this->assertSame('late', $s3Tip->status);
+        $this->assertFalse(AttendanceFact::query()->where('corrects_id', $s3Tip->id)->exists(), 'the chain tip must be uncorrected');
+        $this->assertSame(2, AttendanceFact::query()->where('session_id', $s3['session_id'])->whereNotNull('corrects_id')->count());
     }
 
     public function test_double_count_defense_and_replay_safe_recalculation(): void
@@ -329,7 +474,7 @@ final class SkillScalePayrollFeatureTest extends TestCase
         $augustRow = PayrollCalculation::query()->findOrFail($august['calculation_id']);
         $augustSnapshot = $augustRow->snapshot;
 
-        $scaleS4Id = app(MaintainScale::class)->register($this->grantedActor('p16-pay-scale-1', ['hr.scale']), 'S4', 'Lead instructor', 4, 'p16-t8-scale')['scale_id'];
+        $scaleS4Id = app(MaintainScale::class)->register($this->grantedActor('p16-pay-scale-1', ['hr.scale']), 'S4', 'Expert', 4, 'p16-t8-scale')['scale_id'];
         $fm = $this->financeManager();
         $commands = app(MaintainContractVersion::class);
         $prepared = $commands->prepare($fm, Employment::query()->findOrFail($this->employmentId), 'contract/2026-09.pdf', $scaleS4Id, '2026-09-01', null, 'p16-t8-prep');

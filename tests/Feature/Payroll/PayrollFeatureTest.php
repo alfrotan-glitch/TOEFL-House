@@ -4,11 +4,9 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Payroll;
 
-use App\Modules\Hr\Commands\MaintainContract;
+use App\Modules\Hr\Commands\MaintainContractVersion;
 use App\Modules\Hr\Commands\MaintainEmployment;
-use App\Modules\Hr\Commands\RecordWorkBasis;
-use App\Modules\Hr\Models\CompensationComponent;
-use App\Modules\Hr\Models\Contract;
+use App\Modules\Hr\Models\ContractVersion;
 use App\Modules\Hr\Models\Employment;
 use App\Modules\Payroll\Commands\ApprovePayrollResult;
 use App\Modules\Payroll\Commands\CalculatePayroll;
@@ -17,6 +15,7 @@ use App\Modules\Payroll\Commands\SettleEmployment;
 use App\Modules\Payroll\Models\PayrollCalculation;
 use App\Modules\Payroll\Models\PayrollPeriod;
 use App\Modules\Payroll\Models\PayrollResult;
+use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use Illuminate\Database\QueryException;
@@ -24,6 +23,13 @@ use Illuminate\Support\Facades\DB;
 use Tests\Concerns\BuildsActors;
 use Tests\TestCase;
 
+/**
+ * Payroll mechanics on the single authoritative compensation path:
+ * versioned contract resolution with calendar-day proration, held
+ * contract-silent cases, recalculation supersession, approval SoD,
+ * immutable results with appending adjustments/reversals, period
+ * closure, termination settlement and capability denials.
+ */
 final class PayrollFeatureTest extends TestCase
 {
     use BuildsActors;
@@ -39,58 +45,85 @@ final class PayrollFeatureTest extends TestCase
         parent::setUp();
         $this->personWithAuthority($this->personId, []);
 
-        $manager = $this->grantedActor('pay-manager-1', ['hr.employ', 'hr.contract', 'hr.compensation', 'hr.terminate', 'access.assign_position']);
+        $manager = $this->grantedActor('pay-manager-1', ['hr.employ', 'hr.terminate', 'access.assign_position']);
         $employment = app(MaintainEmployment::class)->employ($manager, $this->personId, 'pay-emp-1');
         $this->employmentId = $employment['employment_id'];
-        $contract = app(MaintainContract::class)->draft($manager, Employment::query()->findOrFail($this->employmentId), 'instructor contract', '2026-09-01', 'pay-con-1');
-        app(MaintainContract::class)->sign($manager, Contract::query()->findOrFail($contract['contract_id']), 'signed/pay-con-1.pdf', 'pay-con-2');
+
+        // Single authoritative path: Contract Version + Compensation Rule.
+        $fm = $this->financeManager();
+        $commands = app(MaintainContractVersion::class);
+        $prepared = $commands->prepare($fm, Employment::query()->findOrFail($this->employmentId), 'contract/2026-09.pdf', null, '2026-09-01', '2026-09-30', 'pay-con-1');
+        $version = ContractVersion::query()->findOrFail($prepared['version_id']);
+        $commands->addRule($fm, $version, 'fixed_monthly', '40000.00', null, null, null, 'pay-r-fix');
+        $commands->addRule($fm, $version, 'allowance', '2000.00', null, null, 'housing', 'pay-r-al');
+        $commands->submit($fm, $version, 'pay-con-2');
+        $commands->approve($this->generalManager(), $version, 'pay-con-3');
+
         app(MaintainEmployment::class)->hire($manager, Employment::query()->findOrFail($this->employmentId), '2026-09-01', 'pay-emp-2');
-
-        $compensator = $this->grantedActor('pay-hr-1', ['hr.compensation']);
-        $compApprover = $this->grantedActor('pay-comp-approver', ['hr.compensation_approve']);
-        /** @var Contract $activeContract */
-        $activeContract = Contract::query()->where('employment_id', $this->employmentId)->where('lifecycle_state', 'active')->firstOrFail();
-        $fixed = app(MaintainContract::class)->proposeCompensation($compensator, $activeContract, 'fixed', '40000.00', '2026-09-01', 'pay-comp-1');
-        app(MaintainContract::class)->activateCompensation($compApprover, CompensationComponent::query()->findOrFail($fixed['component_id']), 'pay-comp-2');
-        $hourly = app(MaintainContract::class)->proposeCompensation($compensator, $activeContract, 'hourly', '250.00', '2026-09-01', 'pay-comp-3');
-        app(MaintainContract::class)->activateCompensation($compApprover, CompensationComponent::query()->findOrFail($hourly['component_id']), 'pay-comp-4');
-
-        $recorder = $this->grantedActor('pay-workbasis-1', ['hr.workbasis']);
-        app(RecordWorkBasis::class)->recordManual($recorder, Employment::query()->findOrFail($this->employmentId), '2026-09-01', '2026-09-30', '40', 'hours', 'timesheet/sept', 'pay-wb-1');
 
         $periodOpener = $this->grantedActor('pay-period-1', ['payroll.period']);
         $period = app(MaintainPayrollPeriod::class)->open($periodOpener, '2026-09', '2026-09-01', '2026-09-30', 'pay-per-1');
         $this->periodId = $period['period_id'];
     }
 
-    public function test_calculation_snapshots_contract_and_work_evidence_with_exact_amount(): void
+    private function financeManager(): Actor
     {
-        $preparer = $this->grantedActor('pay-calc-1', ['payroll.calculate']);
-        $calculation = app(CalculatePayroll::class)->prepare($preparer, PayrollPeriod::query()->findOrFail($this->periodId), Employment::query()->findOrFail($this->employmentId), 'pay-calc-1');
+        return $this->grantedActor('pay-fm-1', ['hr.contract.prepare']);
+    }
+
+    private function generalManager(): Actor
+    {
+        return $this->grantedActor('pay-gm-1', ['hr.contract.approve']);
+    }
+
+    private function payrollPreparer(): Actor
+    {
+        return $this->grantedActor('pay-calc-1', ['payroll.calculate']);
+    }
+
+    public function test_calculation_snapshots_contract_version_rules_scale_and_proration_with_exact_amount(): void
+    {
+        $calculation = app(CalculatePayroll::class)->prepare($this->payrollPreparer(), PayrollPeriod::query()->findOrFail($this->periodId), Employment::query()->findOrFail($this->employmentId), 'pay-calc-1');
 
         $this->assertSame('prepared', $calculation['lifecycle_state']);
         /** @var PayrollCalculation $row */
         $row = PayrollCalculation::query()->findOrFail($calculation['calculation_id']);
-        // 40000 fixed + 250 x 40 hours = 50000
-        $this->assertSame('50000.00', $row->base_amount);
-        $this->assertSame(2, count($row->snapshot['components']));
-        $this->assertSame(1, count($row->snapshot['work_bases']));
-        $this->assertSame('timesheet/sept', 'timesheet/sept');
+        // 40000 fixed + 2000 allowance, full-period version: 30/30 days, no proration loss.
+        $this->assertSame('42000.00', $row->base_amount);
+        $this->assertSame('skill-scale-v1', $row->snapshot['formula']);
+        $this->assertNotSame('', (string) $row->snapshot['contract_version_id']);
+        $this->assertSame(1, $row->snapshot['version_no']);
+        $this->assertNull($row->snapshot['scale_id']);
+        $this->assertCount(2, $row->snapshot['rules']);
+        $this->assertSame([], $row->snapshot['delivery']);
+        $this->assertSame(30, $row->snapshot['proration']['period_days']);
+        $this->assertSame(30, $row->snapshot['proration']['active_days']);
+        $fixed = collect($row->snapshot['additive'])->firstWhere('method', 'fixed_monthly');
+        $this->assertSame('40000.00', $fixed['contract_amount']);
+        $this->assertSame('40000.00', $fixed['amount']);
+        $this->assertSame(30, $fixed['active_days']);
+        $this->assertSame(30, $fixed['period_days']);
+        $allowance = collect($row->snapshot['additive'])->firstWhere('method', 'allowance');
+        $this->assertSame('housing', $allowance['label']);
+        $this->assertSame('2000.00', $allowance['amount']);
     }
 
-    public function test_contract_silent_evidence_holds_the_calculation_and_blocks_closure(): void
+    public function test_contract_silent_period_holds_the_calculation_and_blocks_closure(): void
     {
-        $recorder = $this->grantedActor('pay-workbasis-1', ['hr.workbasis']);
-        app(RecordWorkBasis::class)->recordManual($recorder, Employment::query()->findOrFail($this->employmentId), '2026-09-01', '2026-09-30', '3', 'classes', 'substitution/log', 'pay-wb-2');
+        // The version window ends 2026-09-30: October has no in-force version.
+        $october = app(MaintainPayrollPeriod::class)->open($this->grantedActor('pay-period-1', ['payroll.period']), '2026-10', '2026-10-01', '2026-10-31', 'pay-per-oct');
 
-        $preparer = $this->grantedActor('pay-calc-1', ['payroll.calculate']);
-        $calculation = app(CalculatePayroll::class)->prepare($preparer, PayrollPeriod::query()->findOrFail($this->periodId), Employment::query()->findOrFail($this->employmentId), 'pay-calc-2');
+        $calculation = app(CalculatePayroll::class)->prepare($this->payrollPreparer(), PayrollPeriod::query()->findOrFail($october['period_id']), Employment::query()->findOrFail($this->employmentId), 'pay-calc-2');
         $this->assertSame('held', $calculation['lifecycle_state']);
         $this->assertDatabaseHas('payroll_calculations', ['id' => $calculation['calculation_id'], 'lifecycle_state' => 'held']);
+        /** @var PayrollCalculation $heldRow */
+        $heldRow = PayrollCalculation::query()->findOrFail($calculation['calculation_id']);
+        $this->assertStringContainsString('contract-silent', (string) $heldRow->held_reason);
+        $this->assertSame('0.00', $heldRow->base_amount);
 
         $closer = $this->grantedActor('pay-period-1', ['payroll.period']);
         try {
-            app(MaintainPayrollPeriod::class)->close($closer, PayrollPeriod::query()->findOrFail($this->periodId), 'pay-per-2');
+            app(MaintainPayrollPeriod::class)->close($closer, PayrollPeriod::query()->findOrFail($october['period_id']), 'pay-per-2');
             $this->fail('closure must be blocked while a contract-silent calculation is held');
         } catch (BusinessRejection $rejection) {
             $this->assertSame('payroll.period_close_held', $rejection->errorCode());
@@ -107,19 +140,21 @@ final class PayrollFeatureTest extends TestCase
 
     public function test_recalculation_supersedes_and_retains_history(): void
     {
-        $preparer = $this->grantedActor('pay-calc-1', ['payroll.calculate']);
-        $first = app(CalculatePayroll::class)->prepare($preparer, PayrollPeriod::query()->findOrFail($this->periodId), Employment::query()->findOrFail($this->employmentId), 'pay-calc-4');
+        $first = app(CalculatePayroll::class)->prepare($this->payrollPreparer(), PayrollPeriod::query()->findOrFail($this->periodId), Employment::query()->findOrFail($this->employmentId), 'pay-calc-4');
 
-        $recorder = $this->grantedActor('pay-workbasis-1', ['hr.workbasis']);
-        app(RecordWorkBasis::class)->recordManual($recorder, Employment::query()->findOrFail($this->employmentId), '2026-09-01', '2026-09-30', '10', 'hours', 'timesheet/sept-addendum', 'pay-wb-3');
-
-        $second = app(CalculatePayroll::class)->prepare($preparer, PayrollPeriod::query()->findOrFail($this->periodId), Employment::query()->findOrFail($this->employmentId), 'pay-calc-5');
+        // A later recalculation for the same period supersedes the prior
+        // calculation and retains it as history.
+        $second = app(CalculatePayroll::class)->prepare($this->payrollPreparer(), PayrollPeriod::query()->findOrFail($this->periodId), Employment::query()->findOrFail($this->employmentId), 'pay-calc-5');
         $this->assertNotSame($first['calculation_id'], $second['calculation_id']);
         $this->assertDatabaseHas('payroll_calculations', ['id' => $first['calculation_id'], 'lifecycle_state' => 'superseded']);
         $this->assertDatabaseHas('payroll_calculations', ['id' => $second['calculation_id'], 'lifecycle_state' => 'prepared']);
         /** @var PayrollCalculation $row */
         $row = PayrollCalculation::query()->findOrFail($second['calculation_id']);
-        $this->assertSame('52500.00', $row->base_amount);
+        $this->assertSame('42000.00', $row->base_amount);
+        /** @var PayrollCalculation $firstRow */
+        $firstRow = PayrollCalculation::query()->findOrFail($first['calculation_id']);
+        $this->assertSame('42000.00', $firstRow->base_amount);
+        $this->assertSame($row->snapshot['contract_version_id'], $firstRow->snapshot['contract_version_id']);
     }
 
     public function test_approval_sod_and_immutable_result_with_appending_adjustments(): void
@@ -144,7 +179,7 @@ final class PayrollFeatureTest extends TestCase
         }
 
         $result = app(ApprovePayrollResult::class)->approve($approver, PayrollCalculation::query()->findOrFail($calculation['calculation_id']), 'pay-res-3');
-        $this->assertDatabaseHas('payroll_results', ['id' => $result['result_id'], 'amount' => '50000.00', 'lifecycle_state' => 'approved']);
+        $this->assertDatabaseHas('payroll_results', ['id' => $result['result_id'], 'amount' => '42000.00', 'lifecycle_state' => 'approved']);
         $this->assertDatabaseHas('payroll_calculations', ['id' => $calculation['calculation_id'], 'lifecycle_state' => 'resulted']);
 
         try {
@@ -157,10 +192,10 @@ final class PayrollFeatureTest extends TestCase
         $adjustment = app(ApprovePayrollResult::class)->adjust($approver, PayrollResult::query()->findOrFail($result['result_id']), 'adjustment', '1500.00', 'overtime correction per review', 'pay-adj-1');
         $this->assertDatabaseHas('payroll_adjustments', ['id' => $adjustment['adjustment_id'], 'kind' => 'adjustment', 'amount' => '1500.00']);
 
-        $reversal = app(ApprovePayrollResult::class)->adjust($approver, PayrollResult::query()->findOrFail($result['result_id']), 'reversal', '50000.00', 'result voided after evidence review', 'pay-adj-2');
-        $this->assertDatabaseHas('payroll_adjustments', ['id' => $reversal['adjustment_id'], 'amount' => '-50000.00']);
+        $reversal = app(ApprovePayrollResult::class)->adjust($approver, PayrollResult::query()->findOrFail($result['result_id']), 'reversal', '42000.00', 'result voided after evidence review', 'pay-adj-2');
+        $this->assertDatabaseHas('payroll_adjustments', ['id' => $reversal['adjustment_id'], 'amount' => '-42000.00']);
         try {
-            app(ApprovePayrollResult::class)->adjust($approver, PayrollResult::query()->findOrFail($result['result_id']), 'reversal', '50000.00', 'again', 'pay-adj-3');
+            app(ApprovePayrollResult::class)->adjust($approver, PayrollResult::query()->findOrFail($result['result_id']), 'reversal', '42000.00', 'again', 'pay-adj-3');
             $this->fail('double reversal must be rejected');
         } catch (BusinessRejection $rejection) {
             $this->assertSame('payroll.reversal_exists', $rejection->errorCode());
@@ -172,7 +207,7 @@ final class PayrollFeatureTest extends TestCase
 
     public function test_closed_period_rejects_mutation(): void
     {
-        $preparer = $this->grantedActor('pay-calc-1', ['payroll.calculate']);
+        $preparer = $this->payrollPreparer();
         $calculation = app(CalculatePayroll::class)->prepare($preparer, PayrollPeriod::query()->findOrFail($this->periodId), Employment::query()->findOrFail($this->employmentId), 'pay-calc-7');
         $approver = $this->grantedActor('pay-approve-1', ['payroll.approve', 'payroll.adjust']);
         $result = app(ApprovePayrollResult::class)->approve($approver, PayrollCalculation::query()->findOrFail($calculation['calculation_id']), 'pay-res-5');
@@ -200,7 +235,7 @@ final class PayrollFeatureTest extends TestCase
 
     public function test_settlement_requires_termination_clearances_and_two_actors(): void
     {
-        $hrManager = $this->grantedActor('pay-manager-1', ['hr.employ', 'hr.contract', 'hr.compensation', 'hr.terminate', 'access.assign_position']);
+        $hrManager = $this->grantedActor('pay-manager-1', ['hr.employ', 'hr.terminate', 'access.assign_position']);
         $financeClearer = $this->grantedActor('pay-finance-1', ['payroll.clear_finance']);
         $hrClearer = $this->grantedActor('pay-hr-clear-1', ['payroll.clear_hr']);
         $settler = $this->grantedActor('pay-settle-1', ['payroll.settle', 'payroll.settle_approve']);

@@ -8,13 +8,11 @@ use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Hr\Domain\ContractVersionLifecycle;
 use App\Modules\Hr\Domain\EmploymentLifecycle;
-use App\Modules\Hr\Models\CompensationComponent;
 use App\Modules\Hr\Models\CompensationRule;
 use App\Modules\Hr\Models\Contract;
 use App\Modules\Hr\Models\ContractVersion;
 use App\Modules\Hr\Models\Employment;
 use App\Modules\Hr\Models\EmploymentStatus;
-use App\Modules\Hr\Models\WorkBasis;
 use App\Modules\Payroll\Domain\PayrollLifecycle;
 use App\Modules\Payroll\Models\PayrollCalculation;
 use App\Modules\Payroll\Models\PayrollPeriod;
@@ -30,19 +28,41 @@ use Illuminate\Database\Query\JoinClause;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Payroll calculation: snapshots the effective contract configuration and
- * the recorded work evidence of the period. Versioned contracts resolve
- * their in-force contract version and compensation rules (method + skill +
- * scale with a deterministic precedence ladder) and derive teaching volume
- * from authoritative academic delivery evidence, claiming each qualifying
- * session exactly once. Contract-silent, rule-missing, unattributed or
- * conflicting evidence cases are HELD for HR/Finance review — no charge or
- * payment is invented. A recalculation supersedes the prior calculation;
- * history is retained.
+ * Payroll calculation — the single authoritative compensation path.
+ *
+ * Resolves the in-force contract version of the employment for the exact
+ * payroll period and applies its frozen compensation rules: per-unit
+ * rates resolve by the deterministic precedence ladder (exact skill x
+ * scale > skill-only > scale-only > generic), and fixed monthly plus
+ * allowance lines are prorated by calendar-day overlap of the version
+ * window and the period (full-period coverage pays in full; exact cent
+ * arithmetic, round half up).
+ *
+ * Teaching volume derives from authoritative academic delivery evidence:
+ * a session is payable only when at least one enrolled student has a
+ * final attendance fact with status present or late — the final fact is
+ * the uncorrected tip of the authoritative corrects_id chain, never
+ * timestamp ordering. Absent and excused never qualify; cancelled and
+ * never-held sessions carry no qualifying attendance and are not
+ * payable. Each qualifying session is claimed exactly once by a
+ * teaching delivery fact (unique per session at the database level), so
+ * double payment is impossible.
+ *
+ * No in-force version, rule-missing, unattributed or conflicting
+ * evidence cases are HELD for HR/Finance review — there is no legacy
+ * fallback, no silent zero, and no invented charge. A recalculation
+ * supersedes the prior calculation; history is retained, and the
+ * complete immutable snapshot (version, scale, rules and rates, skill
+ * breakdown, volume, evidence references, proration, final amount)
+ * reproduces the approved payroll regardless of later contract, scale,
+ * skill, attendance correction, or rate changes.
  */
 final class CalculatePayroll
 {
     public const CAPABILITY = 'payroll.calculate';
+
+    /** Final attendance statuses that qualify a delivered session for payment. */
+    public const QUALIFYING_ATTENDANCE_STATUSES = ['present', 'late'];
 
     public function __construct(
         private readonly AccessDecision $access,
@@ -110,7 +130,7 @@ final class CalculatePayroll
     }
 
     /**
-     * @return array{0: string, 1: array<string, mixed>, 2: string|null, 3: list<array{session_id: string, skill_id: string, scheduled_on: string, hours: string}>}
+     * @return array{0: string, 1: array<string, mixed>, 2: string|null, 3: list<array{session_id: string, skill_id: string, scheduled_on: string, hours: string, fact_id: string}>}
      */
     private function compute(PayrollPeriod $period, Employment $employment): array
     {
@@ -132,19 +152,11 @@ final class CalculatePayroll
             return $this->computeByContractVersion($period, $employment, $inForce[0]);
         }
 
-        $versioned = ContractVersion::query()
-            ->whereIn('contract_id', Contract::query()->where('employment_id', $employment->id)->select('id'))
-            ->whereIn('lifecycle_state', ContractVersionLifecycle::SETTLED_STATES)
-            ->exists();
-        if ($versioned) {
-            return ['0.00', ['contract_version_id' => null], 'contract-silent: no approved contract version covers this period', []];
-        }
-
-        return $this->computeLegacy($period, $employment);
+        return ['0.00', ['contract_version_id' => null], 'contract-silent: no approved contract version covers this period', []];
     }
 
     /**
-     * @param  list<array{session_id: string, skill_id: string, scheduled_on: string, hours: string}>  $claims
+     * @param  list<array{session_id: string, skill_id: string, scheduled_on: string, hours: string, fact_id: string}>  $claims
      */
     private function claimDelivery(array $claims, string $calculationId): void
     {
@@ -171,7 +183,7 @@ final class CalculatePayroll
     }
 
     /**
-     * @return array{0: string, 1: array<string, mixed>, 2: string|null, 3: list<array{session_id: string, skill_id: string, scheduled_on: string, hours: string}>}
+     * @return array{0: string, 1: array<string, mixed>, 2: string|null, 3: list<array{session_id: string, skill_id: string, scheduled_on: string, hours: string, fact_id: string}>}
      */
     private function computeByContractVersion(PayrollPeriod $period, Employment $employment, ContractVersion $version): array
     {
@@ -186,29 +198,20 @@ final class CalculatePayroll
         $delivered = $this->deliveredSkillSessions($period, $employment);
         $unattributed = $hasPerUnitRules && $this->deliveredSessionsWithoutSkill($period, $employment);
         if ($unattributed) {
-            return ['0.00', $this->versionSnapshotContext($contract, $version, $rules), 'payroll.skill_attribution_missing: a delivered session has no skill attribution', []];
-        }
-
-        /** @var list<WorkBasis> $bases */
-        $bases = WorkBasis::query()
-            ->where('employment_id', $employment->id)
-            ->where('lifecycle_state', 'recorded')
-            ->whereIn('unit', ['hours', 'classes'])
-            ->where('period_from', '<=', $period->date_to)
-            ->where('period_to', '>=', $period->date_from)
-            ->get()->all();
-        if ($bases !== [] && $hasPerUnitRules) {
-            return ['0.00', $this->versionSnapshotContext($contract, $version, $rules), 'payroll.volume_conflict: manual work evidence overlaps authoritative session-derived volume for a versioned contract', []];
-        }
-        if ($bases !== []) {
-            return ['0.00', $this->versionSnapshotContext($contract, $version, $rules), 'payroll.volume_unaddressed: manual work evidence exists but the version carries no per-unit rule to pay it', []];
+            return ['0.00', $this->versionSnapshotContext($contract, $version, $rules, $period), 'payroll.skill_attribution_missing: a delivered session has no skill attribution', []];
         }
 
         $bySkill = [];
         $claims = [];
         foreach ($delivered as $session) {
             $bySkill[$session->skill_id][] = $session;
-            $claims[] = ['session_id' => $session->session_id, 'skill_id' => $session->skill_id, 'scheduled_on' => $session->scheduled_on, 'hours' => $session->hours];
+            $claims[] = [
+                'session_id' => $session->session_id,
+                'skill_id' => $session->skill_id,
+                'scheduled_on' => $session->scheduled_on,
+                'hours' => $session->hours,
+                'fact_id' => $session->fact_id,
+            ];
         }
 
         $amount = '0.00';
@@ -239,18 +242,24 @@ final class CalculatePayroll
             ];
         }
         if ($heldReason !== null) {
-            return ['0.00', $this->versionSnapshotContext($contract, $version, $rules), $heldReason, []];
+            return ['0.00', $this->versionSnapshotContext($contract, $version, $rules, $period), $heldReason, []];
         }
 
         $additiveRows = [];
         foreach ($rules as $rule) {
             if ($rule->method === CompensationRule::METHOD_FIXED || $rule->method === CompensationRule::METHOD_ALLOWANCE) {
-                $amount = bcadd($amount, (string) $rule->rate, 2);
-                $additiveRows[] = ['rule_id' => $rule->id, 'method' => $rule->method, 'label' => $rule->label, 'amount' => (string) $rule->rate];
+                $prorated = $this->proratedLineAmount((string) $rule->rate, $version, $period);
+                $amount = bcadd($amount, $prorated['payable'], 2);
+                $additiveRows[] = [
+                    'rule_id' => $rule->id, 'method' => $rule->method, 'label' => $rule->label,
+                    'contract_amount' => (string) $rule->rate,
+                    'active_days' => $prorated['active_days'], 'period_days' => $prorated['period_days'],
+                    'amount' => $prorated['payable'],
+                ];
             }
         }
 
-        $snapshot = array_merge($this->versionSnapshotContext($contract, $version, $rules), [
+        $snapshot = array_merge($this->versionSnapshotContext($contract, $version, $rules, $period), [
             'formula' => 'skill-scale-v1',
             'per_skill' => $perSkillRows,
             'delivery' => $claims,
@@ -261,11 +270,58 @@ final class CalculatePayroll
     }
 
     /**
+     * Calendar-day overlap of the version window and the payroll period,
+     * both inclusive. The in-force resolution guarantees a non-empty
+     * overlap, so active_days is at least 1.
+     *
+     * @return array{period_days: int, active_days: int}
+     */
+    private function prorationWindow(ContractVersion $version, PayrollPeriod $period): array
+    {
+        $periodFrom = new CarbonImmutable($period->date_from);
+        $periodTo = new CarbonImmutable($period->date_to);
+        $periodDays = (int) $periodFrom->diffInDays($periodTo) + 1;
+        $from = $periodFrom > new CarbonImmutable($version->effective_from) ? $periodFrom : new CarbonImmutable($version->effective_from);
+        $to = $version->effective_to === null || $periodTo < new CarbonImmutable($version->effective_to)
+            ? $periodTo
+            : new CarbonImmutable($version->effective_to);
+        $activeDays = (int) $from->diffInDays($to) + 1;
+
+        return ['period_days' => $periodDays, 'active_days' => min($activeDays, $periodDays)];
+    }
+
+    /**
+     * Prorate an additive line (fixed monthly / allowance) by calendar
+     * days: payable = contract_amount x active_days / period_days. Full
+     * coverage pays the full amount. Exact cent arithmetic with round
+     * half up, so monetary precision never depends on float order.
+     *
+     * @return array{payable: string, active_days: int, period_days: int}
+     */
+    private function proratedLineAmount(string $contractAmount, ContractVersion $version, PayrollPeriod $period): array
+    {
+        $window = $this->prorationWindow($version, $period);
+        if ($window['active_days'] >= $window['period_days']) {
+            return ['payable' => $contractAmount, 'active_days' => $window['period_days'], 'period_days' => $window['period_days']];
+        }
+        $numerator = bcmul(bcmul($contractAmount, '100', 0), (string) $window['active_days'], 0);
+        $quotient = (int) bcdiv($numerator, (string) $window['period_days'], 0);
+        $remainder = (int) bcmod($numerator, (string) $window['period_days'], 0);
+        if ($remainder * 2 >= $window['period_days']) {
+            $quotient++;
+        }
+
+        return ['payable' => bcdiv((string) $quotient, '100', 2), 'active_days' => $window['active_days'], 'period_days' => $window['period_days']];
+    }
+
+    /**
      * @param  list<CompensationRule>  $rules
      * @return array<string, mixed>
      */
-    private function versionSnapshotContext(Contract $contract, ContractVersion $version, array $rules): array
+    private function versionSnapshotContext(Contract $contract, ContractVersion $version, array $rules, PayrollPeriod $period): array
     {
+        $proration = $this->prorationWindow($version, $period);
+
         return [
             'contract_id' => $contract->id,
             'contract_version_id' => $version->id,
@@ -275,10 +331,26 @@ final class CalculatePayroll
                 'id' => $rule->id, 'method' => $rule->method, 'skill_id' => $rule->skill_id,
                 'scale_id' => $rule->scale_id, 'label' => $rule->label, 'rate' => (string) $rule->rate,
             ], $rules),
+            'proration' => [
+                'period_from' => $period->date_from,
+                'period_to' => $period->date_to,
+                'period_days' => $proration['period_days'],
+                'version_effective_from' => $version->effective_from,
+                'version_effective_to' => $version->effective_to,
+                'active_days' => $proration['active_days'],
+            ],
         ];
     }
 
     /**
+     * Delivered skill sessions of the period: scheduled with a skill,
+     * inside the teacher's effective assignment window for that class and
+     * skill, and qualified by final attendance — at least one attendance
+     * fact whose status is present or late and which is the uncorrected
+     * tip of its corrects_id chain (a correction that flips the status
+     * retires the prior fact from qualification). The earliest qualifying
+     * tip is carried as the evidence reference.
+     *
      * @return list<\stdClass>
      */
     private function deliveredSkillSessions(PayrollPeriod $period, Employment $employment): array
@@ -295,15 +367,18 @@ final class CalculatePayroll
                     ->on('tas.skill_id', '=', 'class_sessions.skill_id');
             })
             ->whereBetween('class_sessions.scheduled_on', [$period->date_from, $period->date_to])
-            ->whereExists(function ($query): void {
-                $query->selectRaw('1')
-                    ->from('attendance_facts as af')
-                    ->whereColumn('af.session_id', 'class_sessions.id');
-            })
+            ->whereExists($this->qualifyingAttendanceExists())
             ->distinct()
             ->orderBy('class_sessions.scheduled_on')
             ->orderBy('class_sessions.id')
-            ->get(['class_sessions.id as session_id', 'class_sessions.skill_id as skill_id', 'class_sessions.scheduled_on as scheduled_on', 'class_sessions.starts_at as starts_at', 'class_sessions.ends_at as ends_at'])
+            ->get([
+                'class_sessions.id as session_id',
+                'class_sessions.skill_id as skill_id',
+                'class_sessions.scheduled_on as scheduled_on',
+                'class_sessions.starts_at as starts_at',
+                'class_sessions.ends_at as ends_at',
+                DB::raw("(SELECT afq.id FROM attendance_facts afq WHERE afq.session_id = class_sessions.id AND afq.status IN ('present','late') AND NOT EXISTS (SELECT 1 FROM attendance_facts afq2 WHERE afq2.corrects_id = afq.id) ORDER BY afq.created_at, afq.id LIMIT 1) as fact_id"),
+            ])
             ->map(static function (\stdClass $row): \stdClass {
                 $start = CarbonImmutable::parse('2000-01-01 '.$row->starts_at);
                 $end = CarbonImmutable::parse('2000-01-01 '.$row->ends_at);
@@ -314,6 +389,11 @@ final class CalculatePayroll
             ->all();
     }
 
+    /**
+     * Delivered sessions without skill attribution: qualifying final
+     * attendance on a session whose skill is unset cannot be paid under
+     * the single resolution space and holds the calculation.
+     */
     private function deliveredSessionsWithoutSkill(PayrollPeriod $period, Employment $employment): bool
     {
         return DB::table('class_sessions')
@@ -325,12 +405,28 @@ final class CalculatePayroll
             })
             ->whereBetween('class_sessions.scheduled_on', [$period->date_from, $period->date_to])
             ->whereNull('class_sessions.skill_id')
-            ->whereExists(function ($query): void {
-                $query->selectRaw('1')
-                    ->from('attendance_facts as af')
-                    ->whereColumn('af.session_id', 'class_sessions.id');
-            })
+            ->whereExists($this->qualifyingAttendanceExists())
             ->exists();
+    }
+
+    /**
+     * A session is delivery-qualified only when at least one of its
+     * attendance facts has a final status of present or late. "Final" is
+     * resolved through the authoritative corrects_id chain: a fact is
+     * final when no other fact corrects it (the uncorrected chain tip),
+     * so correction history — not timestamps — decides qualification.
+     */
+    private function qualifyingAttendanceExists(): \Closure
+    {
+        return function ($query): void {
+            $query->selectRaw('1')
+                ->from('attendance_facts as af')
+                ->whereColumn('af.session_id', 'class_sessions.id')
+                ->whereIn('af.status', self::QUALIFYING_ATTENDANCE_STATUSES)
+                ->whereNotExists(function ($inner): void {
+                    $inner->selectRaw('1')->from('attendance_facts as af2')->whereColumn('af2.corrects_id', 'af.id');
+                });
+        };
     }
 
     /**
@@ -353,79 +449,6 @@ final class CalculatePayroll
         }
 
         return null;
-    }
-
-    /**
-     * @return array{0: string, 1: array<string, mixed>, 2: string|null, 3: list<array{session_id: string, skill_id: string, scheduled_on: string, hours: string}>}
-     */
-    private function computeLegacy(PayrollPeriod $period, Employment $employment): array
-    {
-        /** @var Contract|null $contract */
-        $contract = Contract::query()
-            ->where('employment_id', $employment->id)
-            ->where('lifecycle_state', 'active')
-            ->where('effective_from', '<=', $period->date_to)
-            ->where(fn ($query) => $query->whereNull('effective_to')->orWhere('effective_to', '>=', $period->date_from))
-            ->first();
-
-        if ($contract === null) {
-            return ['0.00', ['contract_id' => null, 'components' => [], 'work_bases' => []], 'contract-silent: no active contract covers this period', []];
-        }
-
-        /** @var list<CompensationComponent> $components */
-        $components = CompensationComponent::query()
-            ->where('contract_id', $contract->id)
-            ->where('lifecycle_state', 'active')
-            ->where('effective_from', '<=', $period->date_to)
-            ->where(fn ($query) => $query->whereNull('effective_to')->orWhere('effective_to', '>=', $period->date_from))
-            ->get()->all();
-
-        $rates = [];
-        foreach ($components as $component) {
-            $rates[$component->kind] = $component->amount;
-        }
-
-        /** @var list<WorkBasis> $bases */
-        $bases = WorkBasis::query()
-            ->where('employment_id', $employment->id)
-            ->where('lifecycle_state', 'recorded')
-            ->where('period_from', '<=', $period->date_to)
-            ->where('period_to', '>=', $period->date_from)
-            ->get()->all();
-
-        $heldReason = null;
-        $quantities = ['hours' => '0', 'classes' => '0'];
-        foreach ($bases as $basis) {
-            $quantities[$basis->unit] = bcadd((string) $quantities[$basis->unit], (string) $basis->quantity, 2);
-            $kind = $basis->unit === 'hours' ? 'hourly' : 'class_based';
-            if (! isset($rates[$kind])) {
-                $heldReason = 'contract-silent: work evidence of unit '.$basis->unit.' has no active covering compensation component';
-            }
-        }
-
-        $amount = '0.00';
-        $componentRows = [];
-        foreach ($components as $component) {
-            if (in_array($component->kind, ['fixed', 'allowance'], true)) {
-                $amount = bcadd($amount, (string) $component->amount, 2);
-                $componentRows[] = ['id' => $component->id, 'kind' => $component->kind, 'amount' => (string) $component->amount];
-            } else {
-                $unit = $component->kind === 'hourly' ? 'hours' : 'classes';
-                $lineAmount = bcmul((string) $component->amount, $quantities[$unit], 2);
-                $amount = bcadd($amount, $lineAmount, 2);
-                $componentRows[] = ['id' => $component->id, 'kind' => $component->kind, 'rate' => (string) $component->amount, 'unit' => $unit, 'quantity' => $quantities[$unit], 'amount' => $lineAmount];
-            }
-        }
-
-        $snapshot = [
-            'contract_id' => $contract->id,
-            'components' => $componentRows,
-            'work_bases' => array_map(static fn (WorkBasis $basis): array => [
-                'id' => $basis->id, 'unit' => $basis->unit, 'quantity' => (string) $basis->quantity, 'source' => $basis->source,
-            ], $bases),
-        ];
-
-        return [$amount, $snapshot, $heldReason, []];
     }
 
     private function require(Actor $actor): void

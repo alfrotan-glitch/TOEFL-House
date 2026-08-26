@@ -103,6 +103,20 @@ final class SchemaInvariantFeatureTest extends TestCase
         $this->assertContains('teaching_delivery_facts_claim_trigger', $this->triggerNames('teaching_delivery_facts'));
     }
 
+    public function test_retired_legacy_compensation_tables_are_absent_from_the_schema(): void
+    {
+        $tables = DB::table('pg_tables')
+            ->where('schemaname', 'public')
+            ->pluck('tablename')
+            ->all();
+        // The competing per-kind compensation architecture and the manual
+        // work-basis evidence are retired: the active system resolves
+        // compensation exclusively from contract versions and their
+        // compensation rules, and volume from academic delivery evidence.
+        $this->assertNotContains('compensation_components', $tables);
+        $this->assertNotContains('work_bases', $tables);
+    }
+
     public function test_opening_state_status_is_constrained_by_the_schema(): void
     {
         $this->expectException(QueryException::class);
@@ -597,23 +611,6 @@ final class SchemaInvariantFeatureTest extends TestCase
         ]);
     }
 
-    public function test_work_basis_sources_and_leave_states_are_constrained_by_the_schema(): void
-    {
-        $this->expectException(QueryException::class);
-        DB::table('work_bases')->insert([
-            'id' => '00000000-0000-4000-8000-00000000028a',
-            'employment_id' => '00000000-0000-4000-8000-00000000028b',
-            'source' => 'rumor',
-            'period_from' => '2026-01-01',
-            'period_to' => '2026-01-31',
-            'quantity' => 10,
-            'unit' => 'hours',
-            'evidence_ref' => 'probe/ref',
-            'lifecycle_state' => 'recorded',
-            'recorded_by' => '00000000-0000-4000-8000-00000000028c',
-        ]);
-    }
-
     public function test_payroll_states_are_constrained_by_the_schema(): void
     {
         $this->expectException(QueryException::class);
@@ -747,15 +744,9 @@ final class SchemaInvariantFeatureTest extends TestCase
         $employmentStatusTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'employment_statuses')->pluck('tgname')->all();
         $this->assertContains('employment_statuses_append_only_trigger', $employmentStatusTriggers, 'employment status history must be append-only at the schema level');
 
-        $workBasisTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'work_bases')->pluck('tgname')->all();
-        $this->assertContains('work_bases_append_only_trigger', $workBasisTriggers, 'work basis evidence must be retained at the schema level');
-
         $contractTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'contracts')->pluck('tgname')->all();
         $this->assertContains('contracts_signed_terms_immutable_trigger', $contractTriggers, 'signed contract terms must be immutable at the schema level');
         $this->assertContains('contracts_no_delete_trigger', $contractTriggers, 'contracts must never be deleted');
-
-        $compensationTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'compensation_components')->pluck('tgname')->all();
-        $this->assertContains('compensation_components_active_immutable_trigger', $compensationTriggers, 'active compensation components must be immutable at the schema level');
 
         $payrollPeriodTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'payroll_periods')->pluck('tgname')->all();
         $this->assertContains('payroll_periods_closed_immutable_trigger', $payrollPeriodTriggers, 'closed payroll periods must be immutable at the schema level');

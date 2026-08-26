@@ -50,8 +50,11 @@ final class ScaleContractVersionFeatureTest extends TestCase
         $employment = app(MaintainEmployment::class)->employ($manager, $this->teacherPersonId, 'p16-emp-1');
         $this->employmentId = $employment['employment_id'];
 
+        // Approved initial Scale catalog: S1 Junior, S2 Standard, S3 Senior,
+        // S4 Expert — independent of Academic Level and Skill. The catalog
+        // test registers the remaining approved ranks around this fixture.
         $scaleRegistrar = $this->grantedActor('p16-scale-1', ['hr.scale']);
-        $this->scaleId = app(MaintainScale::class)->register($scaleRegistrar, 'S3', 'Senior instructor', 3, 'p16-scale-reg-1')['scale_id'];
+        $this->scaleId = app(MaintainScale::class)->register($scaleRegistrar, 'S3', 'Senior', 3, 'p16-scale-reg-1')['scale_id'];
 
         $skillRegistrar = $this->grantedActor('p16-skillreg-1', ['academic.skill']);
         $skills = app(MaintainSkill::class);
@@ -95,8 +98,13 @@ final class ScaleContractVersionFeatureTest extends TestCase
         $registrar = $this->grantedActor('p16-scale-1', ['hr.scale']);
         $command = app(MaintainScale::class);
 
-        $command->register($registrar, 'S4', 'Lead instructor', 4, 'p16-scale-reg-2');
-        $this->assertDatabaseHas('scales', ['key' => 'S4', 'rank_order' => 4]);
+        // Complete the approved initial catalog around the S3 fixture.
+        $command->register($registrar, 'S1', 'Junior', 1, 'p16-scale-reg-1a');
+        $command->register($registrar, 'S2', 'Standard', 2, 'p16-scale-reg-1b');
+        $command->register($registrar, 'S4', 'Expert', 4, 'p16-scale-reg-2');
+        foreach ([['S1', 'Junior', 1], ['S2', 'Standard', 2], ['S3', 'Senior', 3], ['S4', 'Expert', 4]] as [$key, $name, $rank]) {
+            $this->assertDatabaseHas('scales', ['key' => $key, 'name' => $name, 'rank_order' => $rank, 'lifecycle_state' => 'active']);
+        }
 
         try {
             $command->register($registrar, 'S3', 'Duplicate key', 5, 'p16-scale-reg-3');
@@ -356,7 +364,7 @@ final class ScaleContractVersionFeatureTest extends TestCase
             $this->assertSame('hr.compensation_rule_dimension', $rejection->errorCode());
         }
 
-        $scaleS4Id = app(MaintainScale::class)->register($this->grantedActor('p16-scale-1', ['hr.scale']), 'S4', 'Lead instructor', 4, 'p16-l5-scale-4')['scale_id'];
+        $scaleS4Id = app(MaintainScale::class)->register($this->grantedActor('p16-scale-1', ['hr.scale']), 'S4', 'Expert', 4, 'p16-l5-scale-4')['scale_id'];
         try {
             $commands->addRule($fm, $version, 'session_rate', '100.00', null, $scaleS4Id, null, 'p16-l5-r7');
             $this->fail('a scale-keyed rate must match the version scale');
