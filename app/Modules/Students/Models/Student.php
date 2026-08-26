@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Modules\Students\Models;
 
+use App\Modules\Identity\Models\Person;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
@@ -29,5 +31,11 @@ final class Student extends Model
     public function statuses(): HasMany
     {
         return $this->hasMany(StudentStatus::class);
+    }
+
+    /** @return BelongsTo<Person, $this> */
+    public function person(): BelongsTo
+    {
+        return $this->belongsTo(Person::class);
     }
 }

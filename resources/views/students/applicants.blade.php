@@ -1,0 +1,87 @@
+@extends('layouts.app')
+
+@section('title', 'Applicants & Admissions')
+
+@section('content')
+<div class="card">
+    <h1>Applicants &amp; Admissions</h1>
+    <p class="sub">Register a verified person as an applicant, run the three-signature admission decision (initiator, reviewer, approver — distinct people, enforced server-side), then enroll the admitted applicant.</p>
+</div>
+
+<div class="card">
+    <h2>Register an applicant</h2>
+    <form method="POST" action="{{ route('students.register') }}">
+        @csrf
+        <div class="row">
+            <div>
+                <label>Verified person</label>
+                <select name="person_id" required>
+                    <option value="">Select a person…</option>
+                    @foreach ($people as $person)
+                        <option value="{{ $person->id }}">{{ $person->legal_name }}</option>
+                    @endforeach
+                </select>
+            </div>
+            <div>
+                <label>Program interest</label>
+                <input name="program_interest" type="text" required>
+            </div>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Register applicant</button></div>
+    </form>
+</div>
+
+<div class="card">
+    <h2>Applicants</h2>
+    @if ($applicants->isEmpty())
+        <p class="empty">No applicants yet.</p>
+    @else
+        <table class="grid">
+            <tr><th>Person</th><th>Interest</th><th>State</th><th></th></tr>
+            @foreach ($applicants as $applicant)
+                <tr>
+                    <td>{{ $applicant->person?->legal_name ?? $applicant->person_id }}</td>
+                    <td>{{ $applicant->program_interest }}</td>
+                    <td><span class="pill {{ in_array($applicant->lifecycle_state, ['admitted'], true) ? 'ok' : (in_array($applicant->lifecycle_state, ['rejected'], true) ? 'held' : '') }}">{{ $applicant->lifecycle_state }}</span></td>
+                    <td>
+                        @if (in_array($applicant->lifecycle_state, ['prospect', 'applicant'], true))
+                            <details>
+                                <summary class="btn small secondary" style="display:inline-block; cursor:pointer">Decide admission</summary>
+                                <form method="POST" action="{{ route('students.decide', $applicant->id) }}" style="margin-top:8px">
+                                    @csrf
+                                    <label>Decision</label>
+                                    <select name="decision" required>
+                                        <option value="admit">Admit</option>
+                                        <option value="reject">Reject</option>
+                                    </select>
+                                    <label>Reason</label>
+                                    <input name="reason" type="text" required>
+                                    <label>Evidence reference</label>
+                                    <input name="evidence_ref" type="text" required>
+                                    <div class="row">
+                                        <div>
+                                            <label>Reviewer (person id)</label>
+                                            <input name="reviewer_id" type="text" required>
+                                        </div>
+                                        <div>
+                                            <label>Approver (person id)</label>
+                                            <input name="approver_id" type="text" required>
+                                        </div>
+                                    </div>
+                                    <div class="actions"><button type="submit" class="btn small">Record decision</button></div>
+                                </form>
+                            </details>
+                        @endif
+                        @if ($applicant->lifecycle_state === 'admitted')
+                            <form method="POST" action="{{ route('students.enroll', $applicant->id) }}" style="display:inline">
+                                @csrf
+                                <button type="submit" class="btn small">Enroll as student</button>
+                            </form>
+                        @endif
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
+@endsection

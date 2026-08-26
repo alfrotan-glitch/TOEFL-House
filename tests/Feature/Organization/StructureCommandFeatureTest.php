@@ -22,15 +22,15 @@ final class StructureCommandFeatureTest extends TestCase
 
     public function test_organization_creation_persists_draft_fact_with_audit_evidence(): void
     {
-        $outcome = $this->createCommand()->createOrganization($this->structureDecisionForGlobalActors(), 'TOEFL House', RandomIdentifier::new());
+        $outcome = $this->createCommand()->createOrganization($this->structureDecisionForGlobalActors(), 'The TOEFL House', RandomIdentifier::new());
 
         $this->assertSame('organization', $outcome['unit_type']);
-        $this->assertDatabaseHas('organizations', ['id' => $outcome['id'], 'name' => 'TOEFL House', 'lifecycle_state' => 'draft']);
+        $this->assertDatabaseHas('organizations', ['id' => $outcome['id'], 'name' => 'The TOEFL House', 'lifecycle_state' => 'draft']);
         $this->assertDatabaseHas('audit_events', [
             'operation' => 'organization.structure.create',
             'target_type' => 'organization',
             'target_id' => $outcome['id'],
-            'after_state' => json_encode(['name' => 'TOEFL House', 'lifecycle_state' => 'draft']),
+            'after_state' => json_encode(['name' => 'The TOEFL House', 'lifecycle_state' => 'draft']),
         ]);
     }
 
@@ -93,19 +93,19 @@ final class StructureCommandFeatureTest extends TestCase
 
         $outcome = app(RenameStructureUnit::class)->rename(
             $organization,
-            'TOEFL House',
+            'The TOEFL House',
             $this->structureDecisionForGlobalActors(),
             RandomIdentifier::new(),
         );
 
-        $this->assertSame('TOEFL House', $outcome['name']);
-        $this->assertDatabaseHas('organizations', ['id' => $organization->id, 'name' => 'TOEFL House']);
+        $this->assertSame('The TOEFL House', $outcome['name']);
+        $this->assertDatabaseHas('organizations', ['id' => $organization->id, 'name' => 'The TOEFL House']);
         $this->assertDatabaseHas('audit_events', [
             'operation' => 'organization.structure.rename',
             'target_type' => 'organization',
             'target_id' => $organization->id,
             'before_state' => json_encode(['name' => 'Previous Name']),
-            'after_state' => json_encode(['name' => 'TOEFL House']),
+            'after_state' => json_encode(['name' => 'The TOEFL House']),
         ]);
     }
 

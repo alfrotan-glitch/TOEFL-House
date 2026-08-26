@@ -28,7 +28,7 @@ trait OperatesStructure
         );
     }
 
-    private function establishActiveOrganization(string $name = 'TOEFL House'): Organization
+    private function establishActiveOrganization(string $name = 'The TOEFL House'): Organization
     {
         $decision = $this->structureDecisionForGlobalActors();
         $created = $this->createCommand()->createOrganization($decision, $name, RandomIdentifier::new());

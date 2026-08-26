@@ -6,6 +6,7 @@ parameters:
     paths:
         - app/Modules
         - app/Support
+        - app/Http
     tmpDir: /tmp/phpstan-p02
     parallel:
         maximumNumberOfProcesses: 2
