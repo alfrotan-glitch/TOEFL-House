@@ -39,6 +39,9 @@ final class SchemaInvariantFeatureTest extends TestCase
         $this->assertContains('progression_decisions_one_open_per_student_class', $this->indexNames('progression_decisions'));
         $this->assertContains('graduation_decisions_one_open_per_student_version', $this->indexNames('graduation_decisions'));
         $this->assertContains('certificates_serial_unique', $this->indexNames('certificates'));
+        $this->assertContains('employments_one_open_per_person', $this->indexNames('employments'));
+        $this->assertContains('contracts_one_open_per_employment', $this->indexNames('contracts'));
+        $this->assertContains('leaves_one_pending_per_employment', $this->indexNames('leaves'));
     }
 
     public function test_lifecycle_states_are_constrained_by_the_schema(): void
@@ -272,6 +275,45 @@ final class SchemaInvariantFeatureTest extends TestCase
         ]);
     }
 
+    public function test_employment_states_are_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('employments')->insert([
+            'id' => '00000000-0000-4000-8000-00000000026a',
+            'person_id' => '00000000-0000-4000-8000-00000000026b',
+            'lifecycle_state' => 'vanished',
+        ]);
+    }
+
+    public function test_contract_states_are_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('contracts')->insert([
+            'id' => '00000000-0000-4000-8000-00000000027a',
+            'employment_id' => '00000000-0000-4000-8000-00000000027b',
+            'terms_summary' => 'schema probe',
+            'lifecycle_state' => 'whispered',
+            'effective_from' => '2026-01-01',
+        ]);
+    }
+
+    public function test_work_basis_sources_and_leave_states_are_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('work_bases')->insert([
+            'id' => '00000000-0000-4000-8000-00000000028a',
+            'employment_id' => '00000000-0000-4000-8000-00000000028b',
+            'source' => 'rumor',
+            'period_from' => '2026-01-01',
+            'period_to' => '2026-01-31',
+            'quantity' => 10,
+            'unit' => 'hours',
+            'evidence_ref' => 'probe/ref',
+            'lifecycle_state' => 'recorded',
+            'recorded_by' => '00000000-0000-4000-8000-00000000028c',
+        ]);
+    }
+
     public function test_append_only_triggers_exist_in_the_schema(): void
     {
         $certificateTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'certificates')->pluck('tgname')->all();
@@ -279,5 +321,18 @@ final class SchemaInvariantFeatureTest extends TestCase
 
         $attemptTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'assessment_attempts')->pluck('tgname')->all();
         $this->assertContains('assessment_attempts_submitted_immutable_trigger', $attemptTriggers, 'submitted attempts must be frozen at the schema level');
+
+        $employmentStatusTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'employment_statuses')->pluck('tgname')->all();
+        $this->assertContains('employment_statuses_append_only_trigger', $employmentStatusTriggers, 'employment status history must be append-only at the schema level');
+
+        $workBasisTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'work_bases')->pluck('tgname')->all();
+        $this->assertContains('work_bases_append_only_trigger', $workBasisTriggers, 'work basis evidence must be retained at the schema level');
+
+        $contractTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'contracts')->pluck('tgname')->all();
+        $this->assertContains('contracts_signed_terms_immutable_trigger', $contractTriggers, 'signed contract terms must be immutable at the schema level');
+        $this->assertContains('contracts_no_delete_trigger', $contractTriggers, 'contracts must never be deleted');
+
+        $compensationTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'compensation_components')->pluck('tgname')->all();
+        $this->assertContains('compensation_components_active_immutable_trigger', $compensationTriggers, 'active compensation components must be immutable at the schema level');
     }
 }
