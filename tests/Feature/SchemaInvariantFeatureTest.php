@@ -42,6 +42,10 @@ final class SchemaInvariantFeatureTest extends TestCase
         $this->assertContains('employments_one_open_per_person', $this->indexNames('employments'));
         $this->assertContains('contracts_one_open_per_employment', $this->indexNames('contracts'));
         $this->assertContains('leaves_one_pending_per_employment', $this->indexNames('leaves'));
+        $this->assertContains('payroll_periods_key_unique', $this->indexNames('payroll_periods'));
+        $this->assertContains('payroll_calculations_one_live_per_period_employment', $this->indexNames('payroll_calculations'));
+        $this->assertContains('payroll_results_one_per_calculation', $this->indexNames('payroll_results'));
+        $this->assertContains('payroll_clearances_one_per_domain', $this->indexNames('payroll_clearances'));
     }
 
     public function test_lifecycle_states_are_constrained_by_the_schema(): void
@@ -314,6 +318,33 @@ final class SchemaInvariantFeatureTest extends TestCase
         ]);
     }
 
+    public function test_payroll_states_are_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('payroll_calculations')->insert([
+            'id' => '00000000-0000-4000-8000-00000000029a',
+            'period_id' => '00000000-0000-4000-8000-00000000029b',
+            'employment_id' => '00000000-0000-4000-8000-00000000029c',
+            'base_amount' => 100,
+            'snapshot' => '{}',
+            'lifecycle_state' => 'guessed',
+            'prepared_by' => '00000000-0000-4000-8000-00000000029d',
+        ]);
+    }
+
+    public function test_payroll_adjustment_kinds_are_constrained_by_the_schema(): void
+    {
+        $this->expectException(QueryException::class);
+        DB::table('payroll_adjustments')->insert([
+            'id' => '00000000-0000-4000-8000-00000000030a',
+            'result_id' => '00000000-0000-4000-8000-00000000030b',
+            'kind' => 'nudge',
+            'amount' => 5,
+            'reason' => 'schema probe',
+            'approved_by' => '00000000-0000-4000-8000-00000000030c',
+        ]);
+    }
+
     public function test_append_only_triggers_exist_in_the_schema(): void
     {
         $certificateTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'certificates')->pluck('tgname')->all();
@@ -334,5 +365,17 @@ final class SchemaInvariantFeatureTest extends TestCase
 
         $compensationTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'compensation_components')->pluck('tgname')->all();
         $this->assertContains('compensation_components_active_immutable_trigger', $compensationTriggers, 'active compensation components must be immutable at the schema level');
+
+        $payrollPeriodTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'payroll_periods')->pluck('tgname')->all();
+        $this->assertContains('payroll_periods_closed_immutable_trigger', $payrollPeriodTriggers, 'closed payroll periods must be immutable at the schema level');
+
+        $payrollResultTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'payroll_results')->pluck('tgname')->all();
+        $this->assertContains('payroll_results_immutable_trigger', $payrollResultTriggers, 'approved payroll results must be immutable at the schema level');
+
+        $payrollAdjustmentTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'payroll_adjustments')->pluck('tgname')->all();
+        $this->assertContains('payroll_adjustments_append_only_trigger', $payrollAdjustmentTriggers, 'payroll adjustments must be append-only at the schema level');
+
+        $settlementTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'final_settlements')->pluck('tgname')->all();
+        $this->assertContains('final_settlements_immutable_trigger', $settlementTriggers, 'final settlements must be immutable at the schema level');
     }
 }
