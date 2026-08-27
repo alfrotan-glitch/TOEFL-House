@@ -809,4 +809,32 @@ final class SchemaInvariantFeatureTest extends TestCase
         $messageTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'messages')->pluck('tgname')->all();
         $this->assertContains('messages_terminal_immutable_trigger', $messageTriggers, 'delivered messages must be immutable at the schema level');
     }
+
+    public function test_payment_settlement_balance_guards_exist_at_schema_level(): void
+    {
+        // A direct SQL INSERT (bypassing the application) must never be able
+        // to settle a payment/obligation for more than it owes: the balance
+        // guards enforce BR-FIN-001/002 at the authoritative database boundary.
+        $allocationTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'payment_allocations')->pluck('tgname')->all();
+        $this->assertContains('payment_allocations_balance_guard_trigger', $allocationTriggers, 'payment allocations must be balance-capped at the schema level');
+
+        $refundTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'refunds')->pluck('tgname')->all();
+        $this->assertContains('refunds_balance_guard_trigger', $refundTriggers, 'refunds must be balance-capped at the schema level');
+    }
+
+    public function test_finance_accounting_guards_exist_at_schema_level(): void
+    {
+        // Fund allocations are capped (pool, line, obligation, restriction);
+        // journals must balance; obligation lines must total the amount.
+        $fundTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'fund_allocations')->pluck('tgname')->all();
+        $this->assertContains('fund_allocations_balance_guard_trigger', $fundTriggers, 'fund allocations must be capped at the schema level');
+
+        $journalConstraint = DB::table('pg_constraint')->where('conname', 'journal_lines_balance_guard')->first();
+        $this->assertNotNull($journalConstraint, 'journals must balance exactly at the schema level');
+        $this->assertTrue((bool) $journalConstraint->condeferrable, 'the journal balance guard must be deferrable (checked at commit)');
+
+        $obligationConstraint = DB::table('pg_constraint')->where('conname', 'obligation_lines_total_guard')->first();
+        $this->assertNotNull($obligationConstraint, 'obligation lines must total the obligation amount at the schema level');
+        $this->assertTrue((bool) $obligationConstraint->condeferrable, 'the obligation line-total guard must be deferrable (checked at commit)');
+    }
 }

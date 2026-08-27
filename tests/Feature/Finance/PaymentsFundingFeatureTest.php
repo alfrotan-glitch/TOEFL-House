@@ -24,6 +24,7 @@ use App\Modules\Finance\Models\Payment;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
+use App\Support\Identifiers\RandomIdentifier;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Tests\Concerns\BuildsActors;
@@ -281,5 +282,239 @@ final class PaymentsFundingFeatureTest extends TestCase
 
         $this->assertDatabaseHas('audit_events', ['operation' => 'finance.payment.record.denied', 'actor_id' => 'pay-fin-nobody']);
         $this->assertDatabaseMissing('payments', ['payer_ref' => 'RCPT-DENIED']);
+    }
+
+    // ------------------------------------------------------------------
+    // Direct database attacks: bypassing the application entirely, the
+    // schema itself must reject fabricated settlement (BR-FIN-001/002 at
+    // the authoritative boundary).
+    // ------------------------------------------------------------------
+
+    public function test_direct_sql_cannot_over_settle_a_payment(): void
+    {
+        $teller = $this->teller();
+        $payment = app(RecordPayment::class)->record($teller, FinancialPeriod::query()->findOrFail($this->periodId), $this->studentId, '7000.00', 'bank-transfer', 'RCPT-DB-1', '2026-11-05', 'pay-fin-db-1');
+
+        $this->expectException(QueryException::class);
+        DB::table('payment_allocations')->insert([
+            'id' => RandomIdentifier::new(),
+            'payment_id' => $payment['payment_id'],
+            'obligation_id' => $this->obligationId,
+            'amount' => '7000.01',
+            'allocated_by' => 'direct-sql-attacker',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
+    public function test_direct_sql_cannot_over_refund_a_payment(): void
+    {
+        $teller = $this->teller();
+        $payment = app(RecordPayment::class)->record($teller, FinancialPeriod::query()->findOrFail($this->periodId), $this->studentId, '7000.00', 'bank-transfer', 'RCPT-DB-2', '2026-11-05', 'pay-fin-db-2');
+
+        $this->expectException(QueryException::class);
+        DB::table('refunds')->insert([
+            'id' => RandomIdentifier::new(),
+            'payment_id' => $payment['payment_id'],
+            'period_id' => $this->periodId,
+            'amount' => '7000.01',
+            'reason' => 'fabricated',
+            'requested_by' => 'direct-sql-attacker',
+            'approved_by' => 'direct-sql-attacker-two',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
+    public function test_direct_sql_allocation_plus_refund_cannot_exceed_the_payment(): void
+    {
+        $teller = $this->teller();
+        $payment = app(RecordPayment::class)->record($teller, FinancialPeriod::query()->findOrFail($this->periodId), $this->studentId, '7000.00', 'bank-transfer', 'RCPT-DB-3', '2026-11-05', 'pay-fin-db-3');
+
+        // Exactly covering the payment is consistent and must be accepted.
+        DB::table('payment_allocations')->insert([
+            'id' => RandomIdentifier::new(),
+            'payment_id' => $payment['payment_id'],
+            'obligation_id' => $this->obligationId,
+            'amount' => '7000.00',
+            'allocated_by' => 'direct-sql-attacker',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        // One cent of refund on top of a fully allocated payment exceeds the
+        // amount received: the schema rejects it.
+        $this->expectException(QueryException::class);
+        DB::table('refunds')->insert([
+            'id' => RandomIdentifier::new(),
+            'payment_id' => $payment['payment_id'],
+            'period_id' => $this->periodId,
+            'amount' => '0.01',
+            'reason' => 'fabricated',
+            'requested_by' => 'direct-sql-attacker',
+            'approved_by' => 'direct-sql-attacker-two',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
+    public function test_direct_sql_cannot_over_cover_an_obligation(): void
+    {
+        $teller = $this->teller();
+        // A payment larger than the obligation (8500.00): the payment-side
+        // cap passes, so the obligation-side cap must be what rejects it.
+        $payment = app(RecordPayment::class)->record($teller, FinancialPeriod::query()->findOrFail($this->periodId), $this->studentId, '9000.00', 'bank-transfer', 'RCPT-DB-4', '2026-11-05', 'pay-fin-db-4');
+
+        $this->expectException(QueryException::class);
+        DB::table('payment_allocations')->insert([
+            'id' => RandomIdentifier::new(),
+            'payment_id' => $payment['payment_id'],
+            'obligation_id' => $this->obligationId,
+            'amount' => '8500.01',
+            'allocated_by' => 'direct-sql-attacker',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
+    public function test_direct_sql_cannot_post_an_unbalanced_journal(): void
+    {
+        $arId = RandomIdentifier::new();
+        $revenueId = RandomIdentifier::new();
+        DB::table('accounts')->insert([
+            ['id' => $arId, 'code' => '1100', 'name' => 'Accounts Receivable', 'type' => 'asset', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => $revenueId, 'code' => '4100', 'name' => 'Tuition Revenue', 'type' => 'revenue', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+
+        $journalId = RandomIdentifier::new();
+        DB::table('journals')->insert([
+            'id' => $journalId,
+            'period_id' => $this->periodId,
+            'source_type' => 'other',
+            'source_id' => null,
+            'reason' => 'direct sql attack',
+            'posted_by' => 'direct-sql-attacker',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        // One debit leg and no credit leg: the deferred balance guard must
+        // reject the journal when the statement commits.
+        $this->expectException(QueryException::class);
+        DB::table('journal_lines')->insert([
+            'id' => RandomIdentifier::new(),
+            'journal_id' => $journalId,
+            'account_id' => $arId,
+            'direction' => 'debit',
+            'amount' => '100.00',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
+    public function test_direct_sql_cannot_fund_beyond_the_line_remainder(): void
+    {
+        // A large unrestricted pool (10000) so only the line cap can fire.
+        $fundId = RandomIdentifier::new();
+        DB::table('funding_sources')->insert([
+            'id' => $fundId,
+            'name' => 'Attack Fund',
+            'agreement_ref' => 'ATTACK/AG-1',
+            'committed_amount' => '10000.00',
+            'restricted_category' => '',
+            'restriction_note' => '',
+            'established_by' => 'direct-sql-attacker',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        // The tuition line is 8000.00 in setUp; 8000.01 exceeds it.
+        $this->expectException(QueryException::class);
+        DB::table('fund_allocations')->insert([
+            'id' => RandomIdentifier::new(),
+            'fund_id' => $fundId,
+            'obligation_line_id' => $this->tuitionLineId,
+            'amount' => '8000.01',
+            'reason' => 'fabricated',
+            'allocated_by' => 'direct-sql-attacker',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
+    public function test_direct_sql_cannot_exhaust_a_fund_pool_beyond_commitment(): void
+    {
+        $fundId = RandomIdentifier::new();
+        DB::table('funding_sources')->insert([
+            'id' => $fundId,
+            'name' => 'Small Attack Fund',
+            'agreement_ref' => 'ATTACK/AG-2',
+            'committed_amount' => '100.00',
+            'restricted_category' => '',
+            'restriction_note' => '',
+            'established_by' => 'direct-sql-attacker',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        // 100.01 is within the line remainder (8000) but exceeds the pool.
+        $this->expectException(QueryException::class);
+        DB::table('fund_allocations')->insert([
+            'id' => RandomIdentifier::new(),
+            'fund_id' => $fundId,
+            'obligation_line_id' => $this->tuitionLineId,
+            'amount' => '100.01',
+            'reason' => 'fabricated',
+            'allocated_by' => 'direct-sql-attacker',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
+    public function test_direct_sql_cannot_breach_a_fund_category_restriction(): void
+    {
+        $fundId = RandomIdentifier::new();
+        DB::table('funding_sources')->insert([
+            'id' => $fundId,
+            'name' => 'Restricted Attack Fund',
+            'agreement_ref' => 'ATTACK/AG-3',
+            'committed_amount' => '1000.00',
+            'restricted_category' => 'tuition',
+            'restriction_note' => 'tuition only',
+            'established_by' => 'direct-sql-attacker',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        // The transport line (500.00, category "transport") cannot receive
+        // tuition-restricted funding.
+        $transportLineId = (string) ObligationLine::query()->where('obligation_id', $this->obligationId)->where('category', 'transport')->value('id');
+        $this->expectException(QueryException::class);
+        DB::table('fund_allocations')->insert([
+            'id' => RandomIdentifier::new(),
+            'fund_id' => $fundId,
+            'obligation_line_id' => $transportLineId,
+            'amount' => '100.00',
+            'reason' => 'fabricated',
+            'allocated_by' => 'direct-sql-attacker',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
+    public function test_direct_sql_cannot_add_lines_beyond_the_obligation_amount(): void
+    {
+        // setUp's obligation is 8500.00 (8000 + 500, complete). An extra
+        // line makes the lines total 8600 <> 8500: rejected at commit.
+        $this->expectException(QueryException::class);
+        DB::table('obligation_lines')->insert([
+            'id' => RandomIdentifier::new(),
+            'obligation_id' => $this->obligationId,
+            'category' => 'late',
+            'amount' => '100.00',
+            'source_ref' => 'fabricated',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
     }
 }
