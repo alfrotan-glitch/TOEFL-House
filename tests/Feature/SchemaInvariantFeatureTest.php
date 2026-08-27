@@ -822,6 +822,21 @@ final class SchemaInvariantFeatureTest extends TestCase
         $this->assertContains('refunds_balance_guard_trigger', $refundTriggers, 'refunds must be balance-capped at the schema level');
     }
 
+    public function test_hr_lifecycle_guards_exist_at_schema_level(): void
+    {
+        // Employment and leave state machines, decision evidence, and the
+        // one-open-employment-per-person rule are enforced at the schema
+        // level: a raw INSERT/UPDATE can never skip or replay a transition.
+        $employmentTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'employments')->pluck('tgname')->all();
+        $this->assertContains('employments_lifecycle_guard_trigger', $employmentTriggers, 'employments must enforce the lifecycle state machine at the schema level');
+
+        $leaveTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'leaves')->pluck('tgname')->all();
+        $this->assertContains('leaves_lifecycle_guard_trigger', $leaveTriggers, 'leaves must enforce the lifecycle state machine and decision evidence at the schema level');
+
+        $indexes = DB::table('pg_indexes')->where('tablename', 'employments')->pluck('indexname')->all();
+        $this->assertContains('employments_one_open_per_person', $indexes, 'only one open employment per person may exist at the schema level');
+    }
+
     public function test_payroll_derivation_guards_exist_at_schema_level(): void
     {
         // A raw INSERT must never forge a payable: results derive exactly
