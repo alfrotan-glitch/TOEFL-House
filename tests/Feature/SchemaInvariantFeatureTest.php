@@ -822,6 +822,22 @@ final class SchemaInvariantFeatureTest extends TestCase
         $this->assertContains('refunds_balance_guard_trigger', $refundTriggers, 'refunds must be balance-capped at the schema level');
     }
 
+    public function test_payroll_derivation_guards_exist_at_schema_level(): void
+    {
+        // A raw INSERT must never forge a payable: results derive exactly
+        // from their calculation, adjustments respect period closure and the
+        // single-reversal rule, and settlements respect clearance, SoD and
+        // the one-settlement-per-employment invariant.
+        $resultTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'payroll_results')->pluck('tgname')->all();
+        $this->assertContains('payroll_results_derivation_guard_trigger', $resultTriggers, 'payroll results must derive from their calculation at the schema level');
+
+        $adjustmentTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'payroll_adjustments')->pluck('tgname')->all();
+        $this->assertContains('payroll_adjustments_guard_trigger', $adjustmentTriggers, 'payroll adjustments must respect period closure and reversal rules at the schema level');
+
+        $settlementTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'final_settlements')->pluck('tgname')->all();
+        $this->assertContains('final_settlements_guard_trigger', $settlementTriggers, 'final settlements must respect clearance, SoD and uniqueness at the schema level');
+    }
+
     public function test_finance_accounting_guards_exist_at_schema_level(): void
     {
         // Fund allocations are capped (pool, line, obligation, restriction);
