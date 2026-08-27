@@ -33,7 +33,7 @@ final class SchemaInvariantFeatureTest extends TestCase
         $this->assertContains('consents_one_open_per_subject_purpose', $this->indexNames('consents'));
         $this->assertContains('students_one_per_person', $this->indexNames('students'));
         $this->assertContains('guardian_relationships_one_open_per_pair', $this->indexNames('guardian_relationships'));
-        $this->assertContains('enrollments_one_active_seat', $this->indexNames('enrollments'));
+        $this->assertContains('enrollments_one_open_seat', $this->indexNames('enrollments'));
         $this->assertContains('teacher_assignments_one_open_per_class_teacher', $this->indexNames('teacher_assignments'));
         $this->assertContains('assessment_results_one_live_per_attempt', $this->indexNames('assessment_results'));
         $this->assertContains('progression_decisions_one_open_per_student_class', $this->indexNames('progression_decisions'));
