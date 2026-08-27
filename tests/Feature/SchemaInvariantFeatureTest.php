@@ -903,4 +903,38 @@ final class SchemaInvariantFeatureTest extends TestCase
         $this->assertNotNull($obligationConstraint, 'obligation lines must total the obligation amount at the schema level');
         $this->assertTrue((bool) $obligationConstraint->condeferrable, 'the obligation line-total guard must be deferrable (checked at commit)');
     }
+
+    public function test_enrollment_boundary_guards_exist_at_schema_level(): void
+    {
+        // Cross-module boundary (PHASE_2): a seat is born requested for an
+        // active student in an active class; the state machine, class_id
+        // immutability, capacity and terminal states hold at the schema
+        // level; a closed financial period cannot close into payroll
+        // overlap, lose its date scope, or reopen.
+        $enrollmentTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'enrollments')->pluck('tgname')->all();
+        $this->assertContains('enrollments_guard_trigger', $enrollmentTriggers, 'new enrollment seats must be admitted only for active students in active classes at the schema level');
+        $this->assertContains('enrollments_update_guard_trigger', $enrollmentTriggers, 'the enrollment state machine, class immutability and capacity must hold at the schema level');
+
+        $enrollmentIndexes = DB::table('pg_indexes')->where('tablename', 'enrollments')->pluck('indexname')->all();
+        $this->assertContains('enrollments_one_open_seat', $enrollmentIndexes, 'only one open (requested/active/frozen) seat per student and class may exist at the schema level');
+        $this->assertNotContains('enrollments_one_active_seat', $enrollmentIndexes, 'the narrower superseded active-only index must not coexist with its replacement');
+
+        $periodTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'financial_periods')->pluck('tgname')->all();
+        $this->assertContains('financial_periods_close_guard_trigger', $periodTriggers, 'financial period closure, date scope and terminality must hold at the schema level');
+    }
+
+    public function test_period_window_guards_exist_at_schema_level(): void
+    {
+        // Cross-module boundary (PHASE_2): no money-scoped write may land
+        // in a period that is no longer open, and a payroll calculation
+        // snapshot is write-once — all at the schema level.
+        foreach (['obligations', 'journals', 'payments', 'refunds', 'discounts'] as $table) {
+            $triggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', $table)->pluck('tgname')->all();
+            $this->assertContains($table.'_period_window_trigger', $triggers, "writes to $table must be gated to open financial periods at the schema level");
+        }
+
+        $calcTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'payroll_calculations')->pluck('tgname')->all();
+        $this->assertContains('payroll_calculations_period_window_trigger', $calcTriggers, 'payroll calculations must be gated to open or calculating payroll periods at the schema level');
+        $this->assertContains('payroll_calculations_snapshot_trigger', $calcTriggers, 'payroll calculation snapshots must be write-once at the schema level');
+    }
 }

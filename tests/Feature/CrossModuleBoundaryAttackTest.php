@@ -17,6 +17,11 @@ use App\Modules\Admissions\Commands\RegisterApplicant;
 use App\Modules\Admissions\Models\Applicant;
 use App\Modules\Finance\Commands\MaintainFinancialPeriod;
 use App\Modules\Finance\Models\FinancialPeriod;
+use App\Modules\Hr\Commands\MaintainContractVersion;
+use App\Modules\Hr\Commands\MaintainEmployment;
+use App\Modules\Hr\Models\ContractVersion;
+use App\Modules\Hr\Models\Employment;
+use App\Modules\Payroll\Commands\CalculatePayroll;
 use App\Modules\Payroll\Commands\MaintainPayrollPeriod;
 use App\Modules\Payroll\Models\PayrollPeriod;
 use App\Modules\Students\Commands\TransitionStudentStatus;
@@ -322,5 +327,213 @@ final class CrossModuleBoundaryAttackTest extends TestCase
 
         DB::table('teacher_assignments')->where('id', $open)->update(['effective_to' => '2026-09-30']);
         $this->assertDatabaseHas('teacher_assignments', ['id' => $open, 'effective_to' => '2026-09-30']);
+    }
+
+    private function closedFinancialPeriod(string $actorId, string $month, string $from, string $to): string
+    {
+        $accountant = $this->grantedActor($actorId, ['finance.chart', 'finance.period']);
+        $period = app(MaintainFinancialPeriod::class)->open($accountant, $month, $from, $to, $this->k('fp'));
+        app(MaintainFinancialPeriod::class)->close($accountant, FinancialPeriod::query()->findOrFail($period['period_id']), $this->k('fp-close'));
+
+        return $period['period_id'];
+    }
+
+    private string $payrollPeriodId = '';
+
+    /** Employment with an in-force contract, hired into the open 2026-09 payroll period. */
+    private function payrollWorld(): string
+    {
+        $personId = 'bd-payroll-person';
+        $this->personWithAuthority($personId, []);
+        $manager = $this->grantedActor('bd-hr-mgr', ['hr.employ', 'hr.terminate', 'access.assign_position']);
+        $employment = app(MaintainEmployment::class)->employ($manager, $personId, $this->k('emp'));
+        $employmentId = $employment['employment_id'];
+
+        $fm = $this->grantedActor('bd-fm', ['hr.contract.prepare']);
+        $commands = app(MaintainContractVersion::class);
+        $prepared = $commands->prepare($fm, Employment::query()->findOrFail($employmentId), 'contract/2026-09.pdf', null, '2026-09-01', '2026-09-30', $this->k('con'));
+        $version = ContractVersion::query()->findOrFail($prepared['version_id']);
+        $commands->addRule($fm, $version, 'fixed_monthly', '40000.00', null, null, null, $this->k('rule-fix'));
+        $commands->submit($fm, $version, $this->k('con-sub'));
+        $commands->approve($this->grantedActor('bd-gm', ['hr.contract.approve']), $version, $this->k('con-apr'));
+
+        app(MaintainEmployment::class)->hire($manager, Employment::query()->findOrFail($employmentId), '2026-09-01', $this->k('hire'));
+        $period = app(MaintainPayrollPeriod::class)->open($this->grantedActor('bd-pay-open', ['payroll.period']), '2026-09', '2026-09-01', '2026-09-30', $this->k('pay-per'));
+        $this->payrollPeriodId = $period['period_id'];
+
+        return $employmentId;
+    }
+
+    public function test_direct_sql_cannot_post_an_obligation_into_a_closed_period(): void
+    {
+        $periodId = $this->closedFinancialPeriod('bd-acc-obl', '2026-09', '2026-09-01', '2026-09-30');
+        $studentId = $this->newStudent('bd-person-obl');
+
+        $this->expectException(QueryException::class);
+        $this->expectExceptionMessage('requires an open financial period');
+        DB::table('obligations')->insert([
+            'id' => 'eeeeeeee-ffff-4000-8000-0000000000c1',
+            'period_id' => $periodId,
+            'student_id' => $studentId,
+            'source' => 'tuition',
+            'original_amount' => '1000.00',
+            'reason' => 'forged obligation into a closed period',
+            'posted_by' => 'bd-forger-1',
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+    }
+
+    public function test_direct_sql_cannot_post_a_journal_into_a_closed_period(): void
+    {
+        $periodId = $this->closedFinancialPeriod('bd-acc-jnl', '2026-09', '2026-09-01', '2026-09-30');
+
+        $this->expectException(QueryException::class);
+        $this->expectExceptionMessage('requires an open financial period');
+        DB::table('journals')->insert([
+            'id' => 'eeeeeeee-ffff-4000-8000-0000000000c2',
+            'period_id' => $periodId,
+            'source_type' => 'other',
+            'reason' => 'forged journal into a closed period',
+            'posted_by' => 'bd-forger-1',
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+    }
+
+    public function test_direct_sql_cannot_record_a_payment_into_a_closed_period(): void
+    {
+        $periodId = $this->closedFinancialPeriod('bd-acc-pay', '2026-09', '2026-09-01', '2026-09-30');
+        $studentId = $this->newStudent('bd-person-pay');
+
+        $this->expectException(QueryException::class);
+        $this->expectExceptionMessage('requires an open financial period');
+        DB::table('payments')->insert([
+            'id' => 'eeeeeeee-ffff-4000-8000-0000000000c3',
+            'period_id' => $periodId,
+            'student_id' => $studentId,
+            'amount' => '250.00',
+            'method' => 'cash',
+            'payer_ref' => 'bd-ref-closed',
+            'received_on' => '2026-09-05',
+            'recorded_by' => 'bd-forger-1',
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+    }
+
+    public function test_direct_sql_cannot_record_a_refund_into_a_closed_period(): void
+    {
+        $accountant = $this->grantedActor('bd-acc-rfd', ['finance.chart', 'finance.period']);
+        $period = app(MaintainFinancialPeriod::class)->open($accountant, '2026-09', '2026-09-01', '2026-09-30', $this->k('fp-rfd'));
+        $studentId = $this->newStudent('bd-person-rfd');
+        DB::table('payments')->insert([
+            'id' => 'eeeeeeee-ffff-4000-8000-0000000000c4',
+            'period_id' => $period['period_id'],
+            'student_id' => $studentId,
+            'amount' => '250.00',
+            'method' => 'cash',
+            'payer_ref' => 'bd-ref-rfd',
+            'received_on' => '2026-09-05',
+            'recorded_by' => 'bd-forger-1',
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+        app(MaintainFinancialPeriod::class)->close($accountant, FinancialPeriod::query()->findOrFail($period['period_id']), $this->k('fp-rfd-close'));
+
+        $this->expectException(QueryException::class);
+        $this->expectExceptionMessage('requires an open financial period');
+        DB::table('refunds')->insert([
+            'id' => 'eeeeeeee-ffff-4000-8000-0000000000c5',
+            'payment_id' => 'eeeeeeee-ffff-4000-8000-0000000000c4',
+            'period_id' => $period['period_id'],
+            'amount' => '100.00',
+            'reason' => 'forged refund into a closed period',
+            'requested_by' => 'bd-forger-1',
+            'approved_by' => 'bd-forger-2',
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+    }
+
+    public function test_direct_sql_cannot_attach_a_discount_into_a_closed_period(): void
+    {
+        $accountant = $this->grantedActor('bd-acc-dsc', ['finance.chart', 'finance.period']);
+        $period = app(MaintainFinancialPeriod::class)->open($accountant, '2026-09', '2026-09-01', '2026-09-30', $this->k('fp-dsc'));
+        $studentId = $this->newStudent('bd-person-dsc');
+        DB::table('obligations')->insert([
+            'id' => 'eeeeeeee-ffff-4000-8000-0000000000c6',
+            'period_id' => $period['period_id'],
+            'student_id' => $studentId,
+            'source' => 'tuition',
+            'original_amount' => '1000.00',
+            'reason' => 'tuition for the forged discount target',
+            'posted_by' => 'bd-forger-1',
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+        app(MaintainFinancialPeriod::class)->close($accountant, FinancialPeriod::query()->findOrFail($period['period_id']), $this->k('fp-dsc-close'));
+
+        $this->expectException(QueryException::class);
+        $this->expectExceptionMessage('requires an open financial period');
+        DB::table('discounts')->insert([
+            'id' => 'eeeeeeee-ffff-4000-8000-0000000000c7',
+            'obligation_id' => 'eeeeeeee-ffff-4000-8000-0000000000c6',
+            'period_id' => $period['period_id'],
+            'amount' => '500.00',
+            'eligibility' => 'sibling',
+            'effective_from' => '2026-09-01',
+            'reason' => 'forged discount into a closed period',
+            'lifecycle_state' => 'proposed',
+            'proposed_by' => 'bd-forger-1',
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+    }
+
+    public function test_direct_sql_cannot_prepare_a_payroll_calculation_into_a_closed_period(): void
+    {
+        $this->payrollWorld();
+        app(MaintainPayrollPeriod::class)->close($this->grantedActor('bd-pay-close-c', ['payroll.period']), PayrollPeriod::query()->findOrFail($this->payrollPeriodId), $this->k('pay-close-c'));
+
+        $this->expectException(QueryException::class);
+        $this->expectExceptionMessage('open or calculating payroll period');
+        DB::table('payroll_calculations')->insert([
+            'id' => 'eeeeeeee-ffff-4000-8000-0000000000c8',
+            'period_id' => $this->payrollPeriodId,
+            'employment_id' => 'eeeeeeee-ffff-4000-8000-0000000000c9',
+            'base_amount' => '40000.00',
+            'snapshot' => json_encode(['forged' => true]),
+            'lifecycle_state' => 'prepared',
+            'prepared_by' => 'bd-forger-1',
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+    }
+
+    public function test_direct_sql_cannot_rewrite_a_payroll_calculation_snapshot(): void
+    {
+        $employmentId = $this->payrollWorld();
+        $preparer = $this->grantedActor('bd-calc-snap', ['payroll.calculate']);
+        $calc = app(CalculatePayroll::class)->prepare($preparer, PayrollPeriod::query()->findOrFail($this->payrollPeriodId), Employment::query()->findOrFail($employmentId), $this->k('calc-snap'));
+
+        // The 000103 derivation guard accepts any result whose amount
+        // equals the calculation's base amount; a forged base amount is a
+        // forged payable. Only the lifecycle state may ever change.
+        $this->expectException(QueryException::class);
+        $this->expectExceptionMessage('write-once');
+        DB::table('payroll_calculations')->where('id', $calc['calculation_id'])->update(['base_amount' => '999999.99']);
+    }
+
+    public function test_direct_sql_can_record_a_payment_into_an_open_period(): void
+    {
+        $accountant = $this->grantedActor('bd-acc-pos', ['finance.chart', 'finance.period']);
+        $period = app(MaintainFinancialPeriod::class)->open($accountant, '2026-09', '2026-09-01', '2026-09-30', $this->k('fp-pos'));
+        $studentId = $this->newStudent('bd-person-pos');
+
+        DB::table('payments')->insert([
+            'id' => 'eeeeeeee-ffff-4000-8000-0000000000ca',
+            'period_id' => $period['period_id'],
+            'student_id' => $studentId,
+            'amount' => '250.00',
+            'method' => 'cash',
+            'payer_ref' => 'bd-ref-open',
+            'received_on' => '2026-09-05',
+            'recorded_by' => 'bd-acc-pos',
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $this->assertDatabaseHas('payments', ['id' => 'eeeeeeee-ffff-4000-8000-0000000000ca', 'period_id' => $period['period_id']]);
     }
 }
