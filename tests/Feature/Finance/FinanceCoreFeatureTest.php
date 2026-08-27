@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Finance;
 
-use App\Modules\Admissions\Commands\DecideAdmission;
 use App\Modules\Admissions\Commands\EnrollAdmittedApplicant;
 use App\Modules\Admissions\Commands\RegisterApplicant;
 use App\Modules\Admissions\Models\Applicant;
@@ -24,11 +23,13 @@ use App\Support\Errors\BusinessRejection;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Tests\Concerns\BuildsActors;
+use Tests\Concerns\DecidesAdmissions;
 use Tests\TestCase;
 
 final class FinanceCoreFeatureTest extends TestCase
 {
     use BuildsActors;
+    use DecidesAdmissions;
 
     private string $periodId;
 
@@ -54,7 +55,7 @@ final class FinanceCoreFeatureTest extends TestCase
         $registered = app(RegisterApplicant::class)->register($this->admissionsClerk('fin-clerk'), 'fin-person-1', 'Program', 'fin-reg-1');
         /** @var Applicant $applicant */
         $applicant = Applicant::query()->findOrFail($registered['applicant_id']);
-        app(DecideAdmission::class)->decide($this->admissionsClerk('fin-clerk'), $this->admissionsReviewer('fin-review'), $this->admissionsApprover('fin-approve'), $applicant, true, 'meets policy', 'ev/fin', 'fin-adm-1');
+        $this->runAdmissionDecision($this->admissionsClerk('fin-clerk'), $this->admissionsReviewer('fin-review'), $this->admissionsApprover('fin-approve'), $applicant, true, 'meets policy', 'ev/fin', 'fin-adm-1');
         $this->studentId = app(EnrollAdmittedApplicant::class)->convert($this->admissionsApprover('fin-approve'), $applicant, 'fin-conv-1')['student_id'];
     }
 

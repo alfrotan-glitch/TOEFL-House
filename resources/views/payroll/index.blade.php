@@ -12,6 +12,7 @@
     <h2>Open a payroll period</h2>
     <form method="POST" action="{{ route('payroll.period') }}">
         @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
         <div class="row">
             <div>
                 <label>Period key</label>
@@ -48,6 +49,7 @@
                                 <summary class="btn small secondary" style="display:inline-block; cursor:pointer">Calculate</summary>
                                 <form method="POST" action="{{ route('payroll.calculate', $period->id) }}" style="margin-top:8px">
                                     @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
                                     <label>Employment</label>
                                     <select name="employment_id" required>
                                         @foreach ($employments as $employment)
@@ -59,6 +61,7 @@
                             </details>
                             <form method="POST" action="{{ route('payroll.period.close', $period->id) }}" style="display:inline">
                                 @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
                                 <button type="submit" class="btn small secondary">Close</button>
                             </form>
                         @endif
@@ -85,6 +88,7 @@
                         @if ($calculation->lifecycle_state === 'prepared')
                             <form method="POST" action="{{ route('payroll.approve', $calculation->id) }}" style="display:inline">
                                 @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
                                 <button type="submit" class="btn small">Approve &amp; produce result</button>
                             </form>
                         @endif

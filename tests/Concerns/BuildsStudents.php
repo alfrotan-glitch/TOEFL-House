@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Tests\Concerns;
 
-use App\Modules\Admissions\Commands\DecideAdmission;
 use App\Modules\Admissions\Commands\EnrollAdmittedApplicant;
 use App\Modules\Admissions\Commands\RegisterApplicant;
 use App\Modules\Admissions\Models\Applicant;
@@ -20,6 +19,7 @@ use App\Support\Identifiers\RandomIdentifier;
 trait BuildsStudents
 {
     use BuildsActors;
+    use DecidesAdmissions;
 
     /**
      * @param  array<string, string>  $ids  deterministic ids: ['initiator','reviewer','approver','applicant','student']
@@ -55,7 +55,7 @@ trait BuildsStudents
         );
         $applicant = Applicant::query()->where('person_id', $applicantPersonId)->firstOrFail();
 
-        app(DecideAdmission::class)->decide(
+        $this->runAdmissionDecision(
             $this->grantedActor($initiatorId, []),
             $this->grantedActor($reviewerId, []),
             $this->grantedActor($approverId, []),

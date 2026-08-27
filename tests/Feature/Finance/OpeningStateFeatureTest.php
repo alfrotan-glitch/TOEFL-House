@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Finance;
 
-use App\Modules\Admissions\Commands\DecideAdmission;
 use App\Modules\Admissions\Commands\EnrollAdmittedApplicant;
 use App\Modules\Admissions\Commands\RegisterApplicant;
 use App\Modules\Admissions\Models\Applicant;
@@ -32,11 +31,13 @@ use App\Support\Errors\BusinessRejection;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Tests\Concerns\BuildsActors;
+use Tests\Concerns\DecidesAdmissions;
 use Tests\TestCase;
 
 final class OpeningStateFeatureTest extends TestCase
 {
     use BuildsActors;
+    use DecidesAdmissions;
 
     private string $organizationId = '00000000-0000-4000-8000-00000000b005';
 
@@ -59,7 +60,7 @@ final class OpeningStateFeatureTest extends TestCase
         $registered = app(RegisterApplicant::class)->register($this->admissionsClerk('op-adm'), 'op-person-student', 'Program', 'op-reg-1');
         /** @var Applicant $applicant */
         $applicant = Applicant::query()->findOrFail($registered['applicant_id']);
-        app(DecideAdmission::class)->decide($this->admissionsClerk('op-adm'), $this->admissionsReviewer('op-adm-r'), $this->admissionsApprover('op-adm-a'), $applicant, true, 'live student', 'ev/op', 'op-adm-2');
+        $this->runAdmissionDecision($this->admissionsClerk('op-adm'), $this->admissionsReviewer('op-adm-r'), $this->admissionsApprover('op-adm-a'), $applicant, true, 'live student', 'ev/op', 'op-adm-2');
         $this->studentId = app(EnrollAdmittedApplicant::class)->convert($this->admissionsApprover('op-adm-a'), $applicant, 'op-conv-1')['student_id'];
         $this->personWithAuthority($this->teacherPersonId, []);
     }

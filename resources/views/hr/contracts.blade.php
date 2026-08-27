@@ -12,6 +12,7 @@
     <h2>Prepare a contract version</h2>
     <form method="POST" action="{{ route('hr.version.prepare') }}">
         @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
         <div class="row">
             <div>
                 <label>Employment</label>
@@ -68,6 +69,7 @@
                             @if ($version->lifecycle_state === 'draft')
                                 <form method="POST" action="{{ route('hr.version.rule', $version->id) }}" style="margin-top:8px">
                                     @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
                                     <label>Method</label>
                                     <select name="method" required>
                                         <option value="fixed_monthly">Fixed monthly</option>
@@ -83,18 +85,21 @@
                             @if ($version->lifecycle_state === 'draft')
                                 <form method="POST" action="{{ route('hr.version.submit', $version->id) }}" style="margin-top:8px">
                                     @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
                                     <button type="submit" class="btn small">Submit for approval</button>
                                 </form>
                             @endif
                             @if ($version->lifecycle_state === 'submitted')
                                 <form method="POST" action="{{ route('hr.version.approve', $version->id) }}" style="margin-top:8px">
                                     @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
                                     <button type="submit" class="btn small">Approve version</button>
                                 </form>
                             @endif
                             @if ($version->lifecycle_state === 'draft')
                                 <form method="POST" action="{{ route('hr.version.withdraw', $version->id) }}" style="margin-top:8px">
                                     @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
                                     <button type="submit" class="btn small secondary">Withdraw</button>
                                 </form>
                             @endif

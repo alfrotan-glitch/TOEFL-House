@@ -8,9 +8,9 @@ use App\Http\Controllers\Controller;
 use App\Modules\Admissions\Commands\DecideAdmission;
 use App\Modules\Admissions\Commands\EnrollAdmittedApplicant;
 use App\Modules\Admissions\Commands\RegisterApplicant;
+use App\Modules\Admissions\Models\AdmissionDecision;
 use App\Modules\Admissions\Models\Applicant;
 use App\Modules\Students\Models\Student;
-use App\Support\Authorization\Actor;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -52,28 +52,51 @@ final class StudentsApiController extends Controller
         return response()->json(['status' => 'registered'], 201);
     }
 
-    public function decide(Request $request, string $applicantId): JsonResponse
+    /**
+     * The signed-in session INITIATES the decision. A different session
+     * signed in as a reviewer reviews it, and a third session signed in as
+     * an approver finalizes it — no person-id may be supplied in the body.
+     */
+    public function initiate(Request $request, string $applicantId): JsonResponse
     {
         $input = $request->validate([
             'decision' => ['required', 'in:admit,reject'],
             'reason' => ['required', 'string', 'max:1000'],
             'evidence_ref' => ['required', 'string', 'max:255'],
-            'reviewer_id' => ['required', 'string'],
-            'approver_id' => ['required', 'string'],
         ]);
 
-        app(DecideAdmission::class)->decide(
+        $result = app(DecideAdmission::class)->initiate(
             $this->actor(),
-            new Actor($input['reviewer_id'], 'Admission Reviewer'),
-            new Actor($input['approver_id'], 'Admission Approver'),
             Applicant::query()->findOrFail($applicantId),
             $input['decision'] === 'admit',
             $input['reason'],
             $input['evidence_ref'],
-            $this->idempotencyKey('admissions.decide'),
+            $this->idempotencyKey('admissions.initiate'),
         );
 
-        return response()->json(['status' => 'decided']);
+        return response()->json(['status' => 'initiated', 'decision_id' => $result['decision_id']], 201);
+    }
+
+    public function review(Request $request, string $decisionId): JsonResponse
+    {
+        $result = app(DecideAdmission::class)->review(
+            $this->actor(),
+            AdmissionDecision::query()->findOrFail($decisionId),
+            $this->idempotencyKey('admissions.review'),
+        );
+
+        return response()->json(['status' => 'reviewed', 'decision_id' => $result['decision_id']]);
+    }
+
+    public function approve(Request $request, string $decisionId): JsonResponse
+    {
+        $result = app(DecideAdmission::class)->approve(
+            $this->actor(),
+            AdmissionDecision::query()->findOrFail($decisionId),
+            $this->idempotencyKey('admissions.approve'),
+        );
+
+        return response()->json(['status' => 'final', 'decision_id' => $result['decision_id'], 'outcome' => $result['outcome']]);
     }
 
     public function enroll(Request $request, string $applicantId): JsonResponse

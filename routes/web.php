@@ -59,7 +59,9 @@ Route::middleware('employee')->group(function (): void {
         Route::get('/', [StudentsController::class, 'index'])->name('index');
         Route::get('applicants', [StudentsController::class, 'applicants'])->name('applicants');
         Route::post('applicants', [StudentsController::class, 'registerApplicant'])->name('register');
-        Route::post('applicants/{applicantId}/decide', [StudentsController::class, 'decideAdmission'])->name('decide');
+        Route::post('applicants/{applicantId}/initiate', [StudentsController::class, 'initiateAdmission'])->name('initiate');
+        Route::post('decisions/{decisionId}/review', [StudentsController::class, 'reviewAdmission'])->name('decision.review');
+        Route::post('decisions/{decisionId}/approve', [StudentsController::class, 'approveAdmission'])->name('decision.approve');
         Route::post('applicants/{applicantId}/enroll', [StudentsController::class, 'enroll'])->name('enroll');
         Route::get('students/{studentId}', [StudentsController::class, 'show'])->name('show');
     });
@@ -97,6 +99,7 @@ Route::middleware('employee')->group(function (): void {
         Route::get('/', [FinanceController::class, 'index'])->name('index');
         Route::post('payments', [FinanceController::class, 'recordPayment'])->name('payment');
         Route::post('payments/{paymentId}/refund', [FinanceController::class, 'refund'])->name('refund');
+        Route::post('refunds/{refundId}/approve', [FinanceController::class, 'approveRefund'])->name('refund.approve');
         Route::post('obligations/{obligationId}/allocate', [FinanceController::class, 'allocate'])->name('allocate');
     });
 

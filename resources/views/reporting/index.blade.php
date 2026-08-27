@@ -16,6 +16,7 @@
         @else
             <form method="POST" action="{{ route('reporting.run') }}">
                 @csrf
+                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
                 <label>Metric</label>
                 <select name="metric_key" required>
                     @foreach ($metrics as $metric)
@@ -83,6 +84,7 @@
     <h2>Dashboards</h2>
     <form method="POST" action="{{ route('reporting.dashboard.create') }}">
         @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
         <div class="row">
             <div>
                 <label>Name</label>
@@ -109,6 +111,7 @@
                             @else
                                 <form method="POST" action="{{ route('reporting.dashboard.pin', $dashboard->id) }}" style="margin-top:8px">
                                     @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
                                     <label>Metric</label>
                                     <select name="metric_key" required>
                                         @foreach ($metrics as $metric)

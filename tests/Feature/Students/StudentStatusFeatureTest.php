@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Students;
 
-use App\Modules\Admissions\Commands\DecideAdmission;
 use App\Modules\Admissions\Commands\EnrollAdmittedApplicant;
 use App\Modules\Admissions\Commands\RegisterApplicant;
 use App\Modules\Admissions\Models\Applicant;
@@ -18,11 +17,13 @@ use App\Support\Errors\BusinessRejection;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Tests\Concerns\BuildsActors;
+use Tests\Concerns\DecidesAdmissions;
 use Tests\TestCase;
 
 final class StudentStatusFeatureTest extends TestCase
 {
     use BuildsActors;
+    use DecidesAdmissions;
 
     private Student $student;
 
@@ -33,7 +34,7 @@ final class StudentStatusFeatureTest extends TestCase
         $registered = app(RegisterApplicant::class)->register($this->admissionsClerk('stu-clerk'), 'stu-person-1', 'Program', 'stu-reg-1');
         /** @var Applicant $applicant */
         $applicant = Applicant::query()->findOrFail($registered['applicant_id']);
-        app(DecideAdmission::class)->decide(
+        $this->runAdmissionDecision(
             $this->admissionsClerk('stu-clerk'),
             $this->admissionsReviewer('stu-review'),
             $this->admissionsApprover('stu-approve'),

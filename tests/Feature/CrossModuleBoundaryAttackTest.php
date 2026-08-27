@@ -11,7 +11,6 @@ use App\Modules\Academic\Models\AcademicPeriod;
 use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Academic\Models\Program;
-use App\Modules\Admissions\Commands\DecideAdmission;
 use App\Modules\Admissions\Commands\EnrollAdmittedApplicant;
 use App\Modules\Admissions\Commands\RegisterApplicant;
 use App\Modules\Admissions\Models\Applicant;
@@ -31,6 +30,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Tests\Concerns\BuildsActors;
+use Tests\Concerns\DecidesAdmissions;
 use Tests\TestCase;
 
 /**
@@ -44,6 +44,7 @@ use Tests\TestCase;
 final class CrossModuleBoundaryAttackTest extends TestCase
 {
     use BuildsActors;
+    use DecidesAdmissions;
 
     private string $teacherPersonId = 'bd-teacher-1';
 
@@ -109,7 +110,7 @@ final class CrossModuleBoundaryAttackTest extends TestCase
         $registered = app(RegisterApplicant::class)->register($this->admissionsClerk('bd-clerk-'.$personId), $personId, 'IELTS Preparation', $this->k('reg'));
         /** @var Applicant $applicant */
         $applicant = Applicant::query()->findOrFail($registered['applicant_id']);
-        app(DecideAdmission::class)->decide(
+        $this->runAdmissionDecision(
             $this->admissionsClerk('bd-clerk-'.$personId), $this->admissionsReviewer('bd-review-'.$personId), $this->admissionsApprover('bd-approve-'.$personId),
             $applicant, true, 'meets entry policy', 'interview-notes/'.$personId, $this->k('dec'),
         );
@@ -446,7 +447,7 @@ final class CrossModuleBoundaryAttackTest extends TestCase
             'amount' => '100.00',
             'reason' => 'forged refund into a closed period',
             'requested_by' => 'bd-forger-1',
-            'approved_by' => 'bd-forger-2',
+            'lifecycle_state' => 'proposed',
             'created_at' => now(), 'updated_at' => now(),
         ]);
     }

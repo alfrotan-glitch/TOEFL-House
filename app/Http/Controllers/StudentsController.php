@@ -8,11 +8,11 @@ use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Admissions\Commands\DecideAdmission;
 use App\Modules\Admissions\Commands\EnrollAdmittedApplicant;
 use App\Modules\Admissions\Commands\RegisterApplicant;
+use App\Modules\Admissions\Models\AdmissionDecision;
 use App\Modules\Admissions\Models\Applicant;
 use App\Modules\Identity\Models\Person;
 use App\Modules\Students\Models\Student;
 use App\Modules\Students\Models\StudentStatus;
-use App\Support\Authorization\Actor;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -54,6 +54,9 @@ final class StudentsController extends Controller
         return view('students.applicants', [
             'applicants' => Applicant::query()->orderByDesc('created_at')->limit(200)->get(),
             'people' => Person::query()->where('verification_state', 'verified')->orderBy('legal_name')->limit(300)->get(),
+            'pendingDecisions' => AdmissionDecision::query()
+                ->whereIn('lifecycle_state', ['proposed', 'reviewed'])
+                ->orderByDesc('created_at')->limit(200)->get(),
         ]);
     }
 
@@ -74,29 +77,54 @@ final class StudentsController extends Controller
         return redirect()->route('students.applicants')->with('success', 'Applicant registered.');
     }
 
-    public function decideAdmission(Request $request, string $applicantId): RedirectResponse
+    /**
+     * The signed-in session INITIATES the decision (outcome, reason, and
+     * evidence are fixed up front). A different session signed in as a
+     * reviewer reviews it, and a third session signed in as an approver
+     * finalizes it — the transport can no longer type a colleague's person
+     * id into the form.
+     */
+    public function initiateAdmission(Request $request, string $applicantId): RedirectResponse
     {
         $input = $request->validate([
             'decision' => ['required', 'in:admit,reject'],
             'reason' => ['required', 'string', 'max:1000'],
             'evidence_ref' => ['required', 'string', 'max:255'],
-            'reviewer_id' => ['required', 'string'],
-            'approver_id' => ['required', 'string'],
         ]);
         $applicant = Applicant::query()->findOrFail($applicantId);
 
-        app(DecideAdmission::class)->decide(
+        app(DecideAdmission::class)->initiate(
             $this->actor(),
-            new Actor($input['reviewer_id'], 'Admission Reviewer'),
-            new Actor($input['approver_id'], 'Admission Approver'),
             $applicant,
             $input['decision'] === 'admit',
             $input['reason'],
             $input['evidence_ref'],
-            $this->idempotencyKey('admissions.decide'),
+            $this->idempotencyKey('admissions.initiate'),
         );
 
-        return redirect()->route('students.applicants')->with('success', 'Admission decision recorded.');
+        return redirect()->route('students.applicants')->with('success', 'Admission decision initiated; it takes effect once a distinct reviewer and approver act on it.');
+    }
+
+    public function reviewAdmission(Request $request, string $decisionId): RedirectResponse
+    {
+        app(DecideAdmission::class)->review(
+            $this->actor(),
+            AdmissionDecision::query()->findOrFail($decisionId),
+            $this->idempotencyKey('admissions.review'),
+        );
+
+        return redirect()->route('students.applicants')->with('success', 'Admission decision reviewed; it takes effect once a distinct approver finalizes it.');
+    }
+
+    public function approveAdmission(Request $request, string $decisionId): RedirectResponse
+    {
+        app(DecideAdmission::class)->approve(
+            $this->actor(),
+            AdmissionDecision::query()->findOrFail($decisionId),
+            $this->idempotencyKey('admissions.approve'),
+        );
+
+        return redirect()->route('students.applicants')->with('success', 'Admission decision finalized and the applicant has been admitted or rejected.');
     }
 
     public function enroll(Request $request, string $applicantId): RedirectResponse

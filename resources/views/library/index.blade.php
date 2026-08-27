@@ -39,6 +39,7 @@
                                 <summary class="btn small secondary" style="display:inline-block; cursor:pointer">Issue</summary>
                                 <form method="POST" action="{{ route('library.issue', $copy->id) }}" style="margin-top:8px">
                                     @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
                                     <label>Borrower</label>
                                     <select name="borrower_id" required>
                                         @foreach ($borrowers as $borrower)
@@ -78,11 +79,13 @@
                         @if ($issuance->lifecycle_state === 'issued')
                             <form method="POST" action="{{ route('library.return', $issuance->id) }}" style="display:inline">
                                 @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
                                 <input type="date" name="returned_on" required>
                                 <button type="submit" class="btn small">Return</button>
                             </form>
                             <form method="POST" action="{{ route('library.loss', $issuance->id) }}" style="display:inline">
                                 @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
                                 <input name="loss_evidence" type="text" placeholder="loss evidence ref" required>
                                 <button type="submit" class="btn small secondary">Report loss</button>
                             </form>

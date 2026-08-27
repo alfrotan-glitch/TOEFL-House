@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Console;
 
+use App\Modules\Admissions\Models\AdmissionDecision;
 use App\Modules\Admissions\Models\Applicant;
 use App\Modules\Identity\Models\Person;
 use App\Modules\Identity\Models\UserAccount;
@@ -15,12 +16,15 @@ use Tests\Concerns\BuildsActors;
 use Tests\TestCase;
 
 /**
- * The flagship end-to-end employee console scenario, exercised over the real
- * HTTP surface: an authenticated admissions clerk registers a verified
- * person as an applicant, a three-signature decision admits them, the
- * admitted applicant converts to a student, and the student is visible with
- * its status. This proves the Discover→Enter→Confirm→Result workflow through
- * the intended interface, with authorization enforced server-side.
+ * The flagship end-to-end employee console scenario, exercised over the
+ * real HTTP surface: an authenticated admissions clerk registers a verified
+ * person as an applicant and INITIATES a decision; a DIFFERENT session
+ * signed in as the reviewer reviews it; a THIRD session signed in as the
+ * approver finalizes it; the admitted applicant converts to a student.
+ *
+ * Each signature is captured in its own authenticated session — the
+ * transport has no field for typing a colleague's person id — and only the
+ * third signature transitions the applicant.
  */
 final class ConsoleWorkflowFeatureTest extends TestCase
 {
@@ -41,11 +45,22 @@ final class ConsoleWorkflowFeatureTest extends TestCase
         return [$person, $account];
     }
 
+    private function signIn(string $username): void
+    {
+        $this->post('/login', ['username' => $username, 'password' => 'console-password-1'])->assertRedirect('/');
+        $this->assertAuthenticated();
+    }
+
+    private function signOut(): void
+    {
+        $this->post('/logout')->assertRedirect('/login');
+        $this->assertGuest();
+    }
+
     public function test_admissions_lifecycle_end_to_end_through_the_console(): void
     {
-        // The signed-in clerk initiates; reviewer and approver are distinct
-        // people, as the admission decision requires (SoD).
-        [$clerk] = $this->makeEmployee('clerk-1', ['admissions.register', 'admissions.initiate', 'admissions.approve'], 'clerk');
+        // Three distinct employees, one session per signature.
+        [$clerk] = $this->makeEmployee('clerk-1', ['admissions.register', 'admissions.initiate'], 'clerk');
         [$reviewer] = $this->makeEmployee('rev-1', ['admissions.review'], 'reviewer');
         [$approver] = $this->makeEmployee('appr-1', ['admissions.approve'], 'approver');
 
@@ -62,8 +77,7 @@ final class ConsoleWorkflowFeatureTest extends TestCase
         ]);
 
         // Sign in as the clerk.
-        $this->post('/login', ['username' => 'clerk', 'password' => 'console-password-1'])->assertRedirect('/');
-        $this->assertAuthenticated();
+        $this->signIn('clerk');
 
         // Discover + home.
         $this->get('/')->assertOk();
@@ -77,17 +91,41 @@ final class ConsoleWorkflowFeatureTest extends TestCase
         $applicant = Applicant::query()->where('person_id', $applicantPerson->id)->firstOrFail();
         $this->assertSame('applicant', $applicant->lifecycle_state);
 
-        // Three-signature decision (clerk initiates; distinct reviewer/approver).
-        $this->post('/students/applicants/'.$applicant->id.'/decide', [
+        // Stage 1: the clerk INITIATES (no person-id fields on the form).
+        // The decision is born proposed; the applicant is not touched yet.
+        $this->post('/students/applicants/'.$applicant->id.'/initiate', [
             'decision' => 'admit',
             'reason' => 'Meets placement criteria',
             'evidence_ref' => 'placement-assessment-2026-08',
-            'reviewer_id' => $reviewer->id,
-            'approver_id' => $approver->id,
         ])->assertRedirect(route('students.applicants'));
 
-        $applicant->refresh();
-        $this->assertSame('admitted', $applicant->lifecycle_state);
+        $decision = AdmissionDecision::query()->where('applicant_id', $applicant->id)->firstOrFail();
+        $this->assertSame('proposed', $decision->lifecycle_state);
+        $this->assertSame('clerk-1', trim((string) $decision->initiator_id));
+        $this->assertNull($decision->reviewer_id);
+        $this->assertNull($decision->approver_id);
+        $this->assertSame('applicant', $applicant->refresh()->lifecycle_state);
+
+        // Stage 2: a DIFFERENT session, signed in as the reviewer.
+        $this->signOut();
+        $this->signIn('reviewer');
+        $this->post('/students/decisions/'.$decision->id.'/review')->assertRedirect(route('students.applicants'));
+
+        $decision->refresh();
+        $this->assertSame('reviewed', $decision->lifecycle_state);
+        $this->assertSame('rev-1', trim((string) $decision->reviewer_id));
+        $this->assertSame('applicant', $applicant->refresh()->lifecycle_state);
+
+        // Stage 3: a THIRD session, signed in as the approver — only now
+        // does the applicant become admitted.
+        $this->signOut();
+        $this->signIn('approver');
+        $this->post('/students/decisions/'.$decision->id.'/approve')->assertRedirect(route('students.applicants'));
+
+        $decision->refresh();
+        $this->assertSame('final', $decision->lifecycle_state);
+        $this->assertSame('appr-1', trim((string) $decision->approver_id));
+        $this->assertSame('admitted', $applicant->refresh()->lifecycle_state);
 
         // Enroll the admitted applicant as a student.
         $this->post('/students/applicants/'.$applicant->id.'/enroll')
@@ -102,11 +140,12 @@ final class ConsoleWorkflowFeatureTest extends TestCase
         $this->get('/students/students/'.$student->id)->assertOk();
     }
 
-    public function test_decision_rejects_non_distinct_actors(): void
+    public function test_one_session_cannot_carry_two_decision_stages(): void
     {
         [$clerk] = $this->makeEmployee('clerk-2', ['admissions.register', 'admissions.initiate'], 'clerk2');
-        // One person who holds BOTH review and approve: legitimate capabilities,
-        // but using them for both seats violates the distinct-actor rule.
+        // One person who holds BOTH review and approve: legitimate
+        // capabilities, but carrying both seats violates the distinct-actor
+        // rule — the schema and the commands enforce it per stage.
         [$combo] = $this->makeEmployee('combo-1', ['admissions.review', 'admissions.approve'], 'combo');
         $applicantPerson = Person::query()->create([
             'id' => 'applicant-person-2',
@@ -119,23 +158,40 @@ final class ConsoleWorkflowFeatureTest extends TestCase
             'verified_at' => now()->toDateTimeString(),
         ]);
 
-        $this->post('/login', ['username' => 'clerk2', 'password' => 'console-password-1'])->assertRedirect('/');
+        $this->signIn('clerk2');
         $this->post('/students/applicants', [
             'person_id' => $applicantPerson->id,
             'program_interest' => 'General',
         ])->assertRedirect();
         $applicant = Applicant::query()->where('person_id', $applicantPerson->id)->firstOrFail();
 
-        // Reviewer and approver are the same person → separation-of-duties denial.
-        $this->post('/students/applicants/'.$applicant->id.'/decide', [
+        // The clerk initiates...
+        $this->post('/students/applicants/'.$applicant->id.'/initiate', [
             'decision' => 'admit',
             'reason' => 'attempt',
             'evidence_ref' => 'e-1',
-            'reviewer_id' => $combo->id,
-            'approver_id' => $combo->id,
         ])->assertRedirect();
+        $decision = AdmissionDecision::query()->where('applicant_id', $applicant->id)->firstOrFail();
+        $this->assertSame('proposed', $decision->lifecycle_state);
 
-        $this->assertNotSame('admitted', $applicant->refresh()->lifecycle_state);
+        // ...but cannot review their own proposal (no review capability).
+        $this->post('/students/decisions/'.$decision->id.'/review')->assertRedirect();
+        $decision->refresh();
+        $this->assertSame('proposed', $decision->lifecycle_state);
+
+        // A real reviewer advances it to 'reviewed'...
+        $this->signOut();
+        $this->signIn('combo');
+        $this->post('/students/decisions/'.$decision->id.'/review')->assertRedirect();
+        $decision->refresh();
+        $this->assertSame('reviewed', $decision->lifecycle_state);
+
+        // ...but the reviewer cannot be the approver of their own review.
+        $this->post('/students/decisions/'.$decision->id.'/approve')->assertRedirect();
+        $decision->refresh();
+        $this->assertSame('reviewed', $decision->lifecycle_state);
+        $this->assertNull($decision->approver_id);
+        $this->assertSame('applicant', $applicant->refresh()->lifecycle_state);
     }
 
     public function test_anonymous_cannot_reach_any_workflow_route(): void
@@ -143,5 +199,11 @@ final class ConsoleWorkflowFeatureTest extends TestCase
         foreach (['/students', '/students/applicants', '/finance', '/payroll', '/reporting', '/library', '/hr', '/academic'] as $path) {
             $this->get($path)->assertRedirect('/login');
         }
+
+        // The staged mutation endpoints are session-gated too.
+        $this->post('/students/applicants/some-applicant/initiate')->assertRedirect('/login');
+        $this->post('/students/decisions/some-decision/review')->assertRedirect('/login');
+        $this->post('/students/decisions/some-decision/approve')->assertRedirect('/login');
+        $this->post('/finance/refunds/some-refund/approve')->assertRedirect('/login');
     }
 }

@@ -12,6 +12,7 @@
     <h2>Schedule a session</h2>
     <form method="POST" action="{{ route('academic.schedule') }}">
         @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
         <div class="row">
             <div>
                 <label>Active class</label>
@@ -69,6 +70,7 @@
                                 <summary class="btn small secondary" style="display:inline-block; cursor:pointer">Record attendance</summary>
                                 <form method="POST" action="{{ route('academic.attendance', $session->id) }}" style="margin-top:8px">
                                     @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
                                     <label>Enrollment</label>
                                     <select name="enrollment_id" required>
                                         @foreach ($classEnrollments as $enrollment)

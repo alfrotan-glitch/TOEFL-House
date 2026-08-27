@@ -8,13 +8,18 @@ use Illuminate\Database\Eloquent\Model;
 
 /**
  * Authorized return of received money — references its immutable source
- * payment, never exceeds the refundable remainder, immutable once approved.
+ * payment, is born proposed (requester session), becomes recorded only
+ * through a distinct approver's session, never exceeds the refundable
+ * remainder, and is immutable once recorded.
  *
  * @property string $id
  * @property string $payment_id
  * @property string $period_id
  * @property string $amount
  * @property string $reason
+ * @property string $requested_by
+ * @property string|null $approved_by
+ * @property string $lifecycle_state
  */
 final class Refund extends Model
 {
@@ -22,5 +27,5 @@ final class Refund extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'payment_id', 'period_id', 'amount', 'reason', 'requested_by', 'approved_by'];
+    protected $fillable = ['id', 'payment_id', 'period_id', 'amount', 'reason', 'requested_by', 'approved_by', 'lifecycle_state'];
 }

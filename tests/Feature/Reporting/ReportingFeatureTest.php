@@ -13,7 +13,6 @@ use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\ClassSession;
 use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Academic\Models\Program;
-use App\Modules\Admissions\Commands\DecideAdmission;
 use App\Modules\Admissions\Commands\EnrollAdmittedApplicant;
 use App\Modules\Admissions\Commands\RegisterApplicant;
 use App\Modules\Admissions\Models\Applicant;
@@ -43,11 +42,13 @@ use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Tests\Concerns\BuildsActors;
+use Tests\Concerns\DecidesAdmissions;
 use Tests\TestCase;
 
 final class ReportingFeatureTest extends TestCase
 {
     use BuildsActors;
+    use DecidesAdmissions;
 
     private string $financialPeriodKey = '2026-12';
 
@@ -234,7 +235,7 @@ final class ReportingFeatureTest extends TestCase
         $registered = app(RegisterApplicant::class)->register($this->admissionsClerk('rep-adm-clerk'), 'rep-person-1', 'Program', 'rep-reg-1');
         /** @var Applicant $applicant */
         $applicant = Applicant::query()->findOrFail($registered['applicant_id']);
-        app(DecideAdmission::class)->decide($this->admissionsClerk('rep-adm-clerk'), $this->admissionsReviewer('rep-adm-rev'), $this->admissionsApprover('rep-adm-appr'), $applicant, true, 'meets policy', 'ev/rep', 'rep-adm-1');
+        $this->runAdmissionDecision($this->admissionsClerk('rep-adm-clerk'), $this->admissionsReviewer('rep-adm-rev'), $this->admissionsApprover('rep-adm-appr'), $applicant, true, 'meets policy', 'ev/rep', 'rep-adm-1');
         $this->studentId = app(EnrollAdmittedApplicant::class)->convert($this->admissionsApprover('rep-adm-appr'), $applicant, 'rep-conv-1')['student_id'];
 
         $obligation = app(PostObligation::class)->post($clerk, FinancialPeriod::query()->findOrFail($period['period_id']), $this->studentId, 'tuition', 'December tuition', [
@@ -271,7 +272,7 @@ final class ReportingFeatureTest extends TestCase
             $registered = app(RegisterApplicant::class)->register($this->admissionsClerk('rep-adm-clerk'), $personId, 'Program', 'rep-reg-'.($i + 2));
             /** @var Applicant $applicant */
             $applicant = Applicant::query()->findOrFail($registered['applicant_id']);
-            app(DecideAdmission::class)->decide($this->admissionsClerk('rep-adm-clerk'), $this->admissionsReviewer('rep-adm-rev'), $this->admissionsApprover('rep-adm-appr'), $applicant, true, 'meets policy', 'ev/rep'.$i, 'rep-adm-'.($i + 2));
+            $this->runAdmissionDecision($this->admissionsClerk('rep-adm-clerk'), $this->admissionsReviewer('rep-adm-rev'), $this->admissionsApprover('rep-adm-appr'), $applicant, true, 'meets policy', 'ev/rep'.$i, 'rep-adm-'.($i + 2));
             $studentId = app(EnrollAdmittedApplicant::class)->convert($this->admissionsApprover('rep-adm-appr'), $applicant, 'rep-conv-'.($i + 2))['student_id'];
             $seat = app(MaintainEnrollment::class)->request($this->enrollmentClerk('rep-enr-clerk'), $studentId, $this->classId, 'rep-enr-'.($i + 1));
             app(MaintainEnrollment::class)->activate($officer, Enrollment::query()->findOrFail($seat['enrollment_id']), 'rep-enr-a-'.($i + 1));

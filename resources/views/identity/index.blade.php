@@ -24,6 +24,7 @@
                                 <summary class="btn small secondary" style="display:inline-block; cursor:pointer">Verify</summary>
                                 <form method="POST" action="{{ route('identity.verify', $person->id) }}" style="margin-top:8px">
                                     @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
                                     <label>Identity key</label>
                                     <input name="identity_key" type="text" required>
                                     <label>Evidence reference</label>
@@ -57,6 +58,7 @@
                                 <summary class="btn small secondary" style="display:inline-block; cursor:pointer">Set password</summary>
                                 <form method="POST" action="{{ route('identity.password', $account->id) }}" style="margin-top:8px">
                                     @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
                                     <label>New password</label>
                                     <input name="password" type="password" minlength="10" required>
                                     <div class="actions"><button type="submit" class="btn small">Set credential</button></div>
@@ -75,6 +77,7 @@
     <h2>Issue a user account</h2>
     <form method="POST" action="{{ route('identity.link') }}">
         @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
         <div class="row">
             <div>
                 <label>Verified person</label>

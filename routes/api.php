@@ -38,7 +38,9 @@ Route::middleware('employee')->group(function (): void {
     Route::prefix('students')->name('api.students.')->group(function (): void {
         Route::get('/', [StudentsApiController::class, 'index'])->name('index');
         Route::post('/applicants', [StudentsApiController::class, 'registerApplicant'])->name('register');
-        Route::post('/applicants/{applicantId}/decide', [StudentsApiController::class, 'decide'])->name('decide');
+        Route::post('/applicants/{applicantId}/initiate', [StudentsApiController::class, 'initiate'])->name('initiate');
+        Route::post('/decisions/{decisionId}/review', [StudentsApiController::class, 'review'])->name('decision.review');
+        Route::post('/decisions/{decisionId}/approve', [StudentsApiController::class, 'approve'])->name('decision.approve');
         Route::post('/applicants/{applicantId}/enroll', [StudentsApiController::class, 'enroll'])->name('enroll');
     });
 
@@ -59,7 +61,8 @@ Route::middleware('employee')->group(function (): void {
         Route::get('/obligations', [FinanceApiController::class, 'obligations'])->name('obligations');
         Route::get('/payments', [FinanceApiController::class, 'payments'])->name('payments');
         Route::post('/payments', [FinanceApiController::class, 'record'])->name('record');
-        Route::post('/payments/{paymentId}/refund', [FinanceApiController::class, 'refund'])->name('refund');
+        Route::post('/payments/{paymentId}/refund', [FinanceApiController::class, 'proposeRefund'])->name('refund.propose');
+        Route::post('/refunds/{refundId}/approve', [FinanceApiController::class, 'approveRefund'])->name('refund.approve');
     });
 
     Route::prefix('payroll')->name('api.payroll.')->group(function (): void {

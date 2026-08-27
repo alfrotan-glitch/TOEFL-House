@@ -779,7 +779,9 @@ final class SchemaInvariantFeatureTest extends TestCase
         $this->assertContains('payment_allocations_immutable_trigger', $allocationTriggers, 'payment allocations must be immutable at the schema level');
 
         $refundTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'refunds')->pluck('tgname')->all();
-        $this->assertContains('refunds_immutable_trigger', $refundTriggers, 'refunds must be immutable at the schema level');
+        // Recorded refunds are immutable; the lifecycle guard enforces that
+        // plus the proposal -> approval path (a refund is born proposed).
+        $this->assertContains('refunds_lifecycle_guard_trigger', $refundTriggers, 'recorded refunds must be immutable at the schema level');
 
         $discountTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'discounts')->pluck('tgname')->all();
         $this->assertContains('discounts_approved_immutable_trigger', $discountTriggers, 'approved discounts must be immutable at the schema level');
@@ -819,7 +821,9 @@ final class SchemaInvariantFeatureTest extends TestCase
         $this->assertContains('payment_allocations_balance_guard_trigger', $allocationTriggers, 'payment allocations must be balance-capped at the schema level');
 
         $refundTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'refunds')->pluck('tgname')->all();
-        $this->assertContains('refunds_balance_guard_trigger', $refundTriggers, 'refunds must be balance-capped at the schema level');
+        // The same guard caps proposed and approved refunds at the amount
+        // received, checking the remainder under the payment row lock.
+        $this->assertContains('refunds_lifecycle_guard_trigger', $refundTriggers, 'refunds must be balance-capped at the schema level');
     }
 
     public function test_student_invariants_exist_at_schema_level(): void
@@ -843,8 +847,11 @@ final class SchemaInvariantFeatureTest extends TestCase
         $peopleTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'people')->pluck('tgname')->all();
         $this->assertContains('people_identity_guard_trigger', $peopleTriggers, 'verified identities must carry decision evidence and be final at the schema level');
 
+        // The staged lifecycle guard enforces progressive SoD, evidence, a
+        // decidable applicant, and the initiation -> review -> final path,
+        // and is what transitions the applicant on finalization.
         $decisionTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'admission_decisions')->pluck('tgname')->all();
-        $this->assertContains('admission_decisions_guard_trigger', $decisionTriggers, 'admission decisions must enforce SoD, evidence, and decidable applicants at the schema level');
+        $this->assertContains('admission_decisions_lifecycle_guard_trigger', $decisionTriggers, 'admission decisions must enforce progressive SoD, evidence, and decidable applicants at the schema level');
     }
 
     public function test_delivery_facts_evidence_guard_exists_at_schema_level(): void

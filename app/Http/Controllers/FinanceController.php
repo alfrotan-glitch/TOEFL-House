@@ -14,7 +14,6 @@ use App\Modules\Finance\Models\Obligation;
 use App\Modules\Finance\Models\Payment;
 use App\Modules\Finance\Models\Refund;
 use App\Modules\Students\Models\Student;
-use App\Support\Authorization\Actor;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -32,7 +31,8 @@ final class FinanceController extends Controller
         return view('finance.index', [
             'obligations' => Obligation::query()->orderByDesc('id')->limit(200)->get(),
             'payments' => Payment::query()->orderByDesc('received_on')->limit(200)->get(),
-            'refunds' => Refund::query()->orderByDesc('id')->limit(200)->get(),
+            'refunds' => Refund::query()->where('lifecycle_state', 'recorded')->orderByDesc('id')->limit(200)->get(),
+            'proposedRefunds' => Refund::query()->where('lifecycle_state', 'proposed')->orderByDesc('id')->limit(200)->get(),
             'discounts' => Discount::query()->orderByDesc('id')->limit(100)->get(),
             'fundingSources' => FundingSource::query()->orderBy('name')->get(),
             'periods' => FinancialPeriod::query()->orderBy('period_key')->get(),
@@ -65,26 +65,41 @@ final class FinanceController extends Controller
         return redirect()->route('finance.index')->with('success', 'Payment recorded.');
     }
 
+    /**
+     * The signed-in session PROPOSES the refund. A different session,
+     * signed in as an approver holding finance.refund_approve, records it
+     * via approveRefund() — the transport can no longer type a colleague's
+     * person id into the form.
+     */
     public function refund(Request $request, string $paymentId): RedirectResponse
     {
         $input = $request->validate([
             'period_id' => ['required', 'string'],
             'amount' => ['required', 'numeric', 'gt:0'],
             'reason' => ['required', 'string', 'max:1000'],
-            'approver_id' => ['required', 'string'],
         ]);
 
-        app(RefundPayment::class)->refund(
+        app(RefundPayment::class)->propose(
             $this->actor(),
-            new Actor($input['approver_id'], 'Refund Approver'),
             Payment::query()->findOrFail($paymentId),
             FinancialPeriod::query()->findOrFail($input['period_id']),
             $input['amount'],
             $input['reason'],
-            $this->idempotencyKey('finance.refund'),
+            $this->idempotencyKey('finance.refund.propose'),
         );
 
-        return redirect()->route('finance.index')->with('success', 'Refund recorded.');
+        return redirect()->route('finance.index')->with('success', 'Refund proposed; it takes effect once a distinct approver records it.');
+    }
+
+    public function approveRefund(Request $request, string $refundId): RedirectResponse
+    {
+        app(RefundPayment::class)->approve(
+            $this->actor(),
+            Refund::query()->findOrFail($refundId),
+            $this->idempotencyKey('finance.refund.approve'),
+        );
+
+        return redirect()->route('finance.index')->with('success', 'Refund approved and recorded.');
     }
 
     public function allocate(Request $request, string $obligationId): RedirectResponse

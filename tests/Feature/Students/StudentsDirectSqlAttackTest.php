@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Students;
 
-use App\Modules\Admissions\Commands\DecideAdmission;
 use App\Modules\Admissions\Commands\EnrollAdmittedApplicant;
 use App\Modules\Admissions\Commands\RegisterApplicant;
 use App\Modules\Admissions\Models\Applicant;
@@ -12,6 +11,7 @@ use App\Modules\Identity\Models\Person;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Tests\Concerns\BuildsActors;
+use Tests\Concerns\DecidesAdmissions;
 use Tests\TestCase;
 
 /**
@@ -22,6 +22,7 @@ use Tests\TestCase;
 final class StudentsDirectSqlAttackTest extends TestCase
 {
     use BuildsActors;
+    use DecidesAdmissions;
 
     private Person $personA;
 
@@ -50,7 +51,7 @@ final class StudentsDirectSqlAttackTest extends TestCase
     {
         $registered = app(RegisterApplicant::class)->register($this->admissionsClerk(), $person->id, 'TOEFL Intensive', $prefix.'-reg');
         $applicant = Applicant::query()->findOrFail($registered['applicant_id']);
-        $decision = app(DecideAdmission::class)->decide($this->admissionsClerk(), $this->admissionsReviewer(), $this->admissionsApprover(), $applicant, true, 'meets entry policy', 'interview-notes/'.$prefix, $prefix.'-dec');
+        $decision = $this->runAdmissionDecision($this->admissionsClerk(), $this->admissionsReviewer(), $this->admissionsApprover(), $applicant, true, 'meets entry policy', 'interview-notes/'.$prefix, $prefix.'-dec');
 
         return ['applicant_id' => $registered['applicant_id'], 'decision_id' => $decision['decision_id']];
     }

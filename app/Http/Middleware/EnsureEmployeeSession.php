@@ -45,6 +45,10 @@ final class EnsureEmployeeSession
         /** @var Person|null $person */
         $person = Person::query()->whereKey($account->person_id)->first();
 
-        return new Actor($account->person_id, $person === null ? $account->username : $person->legal_name);
+        // person_id is a fixed-width char column: the bound actor identity
+        // must be the trimmed person id, so every downstream SoD comparison
+        // (command against stored signatures, schema against signatures)
+        // sees one canonical form.
+        return new Actor(trim((string) $account->person_id), $person === null ? $account->username : $person->legal_name);
     }
 }

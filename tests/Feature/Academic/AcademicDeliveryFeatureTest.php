@@ -15,7 +15,6 @@ use App\Modules\Academic\Models\ClassSession;
 use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Academic\Models\Program;
 use App\Modules\Academic\Queries\ClassRosterQuery;
-use App\Modules\Admissions\Commands\DecideAdmission;
 use App\Modules\Admissions\Commands\EnrollAdmittedApplicant;
 use App\Modules\Admissions\Commands\RegisterApplicant;
 use App\Modules\Admissions\Models\Applicant;
@@ -27,11 +26,13 @@ use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Tests\Concerns\BuildsActors;
+use Tests\Concerns\DecidesAdmissions;
 use Tests\TestCase;
 
 final class AcademicDeliveryFeatureTest extends TestCase
 {
     use BuildsActors;
+    use DecidesAdmissions;
 
     private string $classId;
 
@@ -68,7 +69,7 @@ final class AcademicDeliveryFeatureTest extends TestCase
         $registered = app(RegisterApplicant::class)->register($this->admissionsClerk('acad-clerk-a'), $personId, 'Program', 'acad-reg-'.$personId);
         /** @var Applicant $applicant */
         $applicant = Applicant::query()->findOrFail($registered['applicant_id']);
-        app(DecideAdmission::class)->decide(
+        $this->runAdmissionDecision(
             $this->admissionsClerk('acad-clerk-a'), $this->admissionsReviewer('acad-review-a'), $this->admissionsApprover('acad-approve-a'),
             $applicant, true, 'meets policy', 'ev/acad', 'acad-dec-'.$personId,
         );

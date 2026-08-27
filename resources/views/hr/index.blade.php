@@ -15,6 +15,7 @@
     <h2>Create an employment</h2>
     <form method="POST" action="{{ route('hr.employ') }}">
         @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
         <div class="row">
             <div>
                 <label>Verified person</label>

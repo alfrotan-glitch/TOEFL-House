@@ -7,8 +7,10 @@ namespace App\Modules\Admissions\Models;
 use Illuminate\Database\Eloquent\Model;
 
 /**
- * Recorded admission outcome with reason, evidence, and the three-role
- * authority chain. Append-only: prior decisions are retained.
+ * Recorded admission outcome with reason, evidence, and the staged
+ * three-role authority chain: proposed (initiator) -> reviewed (distinct
+ * reviewer) -> final (distinct approver). Append-only: prior decisions are
+ * retained, and a final decision is immutable.
  *
  * @property string $id
  * @property string $applicant_id
@@ -16,8 +18,9 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $reason
  * @property string $evidence_ref
  * @property string $initiator_id
- * @property string $reviewer_id
- * @property string $approver_id
+ * @property string|null $reviewer_id
+ * @property string|null $approver_id
+ * @property string $lifecycle_state
  */
 final class AdmissionDecision extends Model
 {
@@ -25,5 +28,5 @@ final class AdmissionDecision extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'applicant_id', 'outcome', 'reason', 'evidence_ref', 'initiator_id', 'reviewer_id', 'approver_id'];
+    protected $fillable = ['id', 'applicant_id', 'outcome', 'reason', 'evidence_ref', 'initiator_id', 'reviewer_id', 'approver_id', 'lifecycle_state'];
 }

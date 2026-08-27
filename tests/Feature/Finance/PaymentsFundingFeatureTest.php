@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Finance;
 
-use App\Modules\Admissions\Commands\DecideAdmission;
 use App\Modules\Admissions\Commands\EnrollAdmittedApplicant;
 use App\Modules\Admissions\Commands\RegisterApplicant;
 use App\Modules\Admissions\Models\Applicant;
@@ -21,6 +20,7 @@ use App\Modules\Finance\Models\FundingSource;
 use App\Modules\Finance\Models\Obligation;
 use App\Modules\Finance\Models\ObligationLine;
 use App\Modules\Finance\Models\Payment;
+use App\Modules\Finance\Models\Refund;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
@@ -28,11 +28,13 @@ use App\Support\Identifiers\RandomIdentifier;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Tests\Concerns\BuildsActors;
+use Tests\Concerns\DecidesAdmissions;
 use Tests\TestCase;
 
 final class PaymentsFundingFeatureTest extends TestCase
 {
     use BuildsActors;
+    use DecidesAdmissions;
 
     private string $periodId;
 
@@ -49,7 +51,7 @@ final class PaymentsFundingFeatureTest extends TestCase
         $registered = app(RegisterApplicant::class)->register($this->admissionsClerk('pay-fin-clerk'), 'pay-fin-person-1', 'Program', 'pay-fin-reg-1');
         /** @var Applicant $applicant */
         $applicant = Applicant::query()->findOrFail($registered['applicant_id']);
-        app(DecideAdmission::class)->decide($this->admissionsClerk('pay-fin-clerk'), $this->admissionsReviewer('pay-fin-review'), $this->admissionsApprover('pay-fin-approve'), $applicant, true, 'meets policy', 'ev/pay', 'pay-fin-adm-1');
+        $this->runAdmissionDecision($this->admissionsClerk('pay-fin-clerk'), $this->admissionsReviewer('pay-fin-review'), $this->admissionsApprover('pay-fin-approve'), $applicant, true, 'meets policy', 'ev/pay', 'pay-fin-adm-1');
         $this->studentId = app(EnrollAdmittedApplicant::class)->convert($this->admissionsApprover('pay-fin-approve'), $applicant, 'pay-fin-conv-1')['student_id'];
 
         $clerk = $this->grantedActor('pay-fin-acc', ['finance.period', 'finance.obligation', 'finance.payment']);
@@ -122,7 +124,7 @@ final class PaymentsFundingFeatureTest extends TestCase
         $registered = app(RegisterApplicant::class)->register($this->admissionsClerk('pay-fin-clerk'), 'pay-fin-person-2', 'Program', 'pay-fin-reg-2');
         /** @var Applicant $applicant */
         $applicant = Applicant::query()->findOrFail($registered['applicant_id']);
-        app(DecideAdmission::class)->decide($this->admissionsClerk('pay-fin-clerk'), $this->admissionsReviewer('pay-fin-review'), $this->admissionsApprover('pay-fin-approve'), $applicant, true, 'meets policy', 'ev/pay2', 'pay-fin-adm-2');
+        $this->runAdmissionDecision($this->admissionsClerk('pay-fin-clerk'), $this->admissionsReviewer('pay-fin-review'), $this->admissionsApprover('pay-fin-approve'), $applicant, true, 'meets policy', 'ev/pay2', 'pay-fin-adm-2');
         $otherStudent = app(EnrollAdmittedApplicant::class)->convert($this->admissionsApprover('pay-fin-approve'), $applicant, 'pay-fin-conv-2')['student_id'];
 
         app(PostObligation::class)->post($teller, FinancialPeriod::query()->findOrFail($this->periodId), $otherStudent, 'tuition', 'other student tuition', [
@@ -137,7 +139,7 @@ final class PaymentsFundingFeatureTest extends TestCase
         }
     }
 
-    public function test_refund_requires_two_actors_and_cannot_exceed_refundable_remainder(): void
+    public function test_refund_is_proposed_then_approved_by_a_distinct_session_and_cannot_exceed_the_remainder(): void
     {
         $teller = $this->teller();
         $approver = $this->grantedActor('pay-fin-ref-appr', ['finance.refund_approve']);
@@ -145,24 +147,40 @@ final class PaymentsFundingFeatureTest extends TestCase
         app(AllocatePayment::class)->allocate($teller, Payment::query()->findOrFail($payment['payment_id']), Obligation::query()->findOrFail($this->obligationId), '4000.00', 'pay-fin-all-6');
 
         try {
-            app(RefundPayment::class)->refund($teller, $teller, Payment::query()->findOrFail($payment['payment_id']), FinancialPeriod::query()->findOrFail($this->periodId), '2000.00', 'duplicate transfer', 'pay-fin-ref-1');
-            $this->fail('requester and approver must differ');
-        } catch (AuthorizationDenied $denial) {
-            $this->assertSame('finance.refund_not_independent', $denial->errorCode());
-        }
-
-        try {
-            app(RefundPayment::class)->refund($teller, $approver, Payment::query()->findOrFail($payment['payment_id']), FinancialPeriod::query()->findOrFail($this->periodId), '2000.01', 'over-refund', 'pay-fin-ref-2');
+            app(RefundPayment::class)->propose($teller, Payment::query()->findOrFail($payment['payment_id']), FinancialPeriod::query()->findOrFail($this->periodId), '2000.01', 'over-refund', 'pay-fin-ref-1');
             $this->fail('the refund cannot exceed the unallocated remainder');
         } catch (BusinessRejection $rejection) {
             $this->assertSame('finance.refund_exceeds_source', $rejection->errorCode());
         }
 
-        $refund = app(RefundPayment::class)->refund($teller, $approver, Payment::query()->findOrFail($payment['payment_id']), FinancialPeriod::query()->findOrFail($this->periodId), '2000.00', 'overpayment returned per policy doc 4.2', 'pay-fin-ref-3');
-        $this->assertDatabaseHas('refunds', ['id' => $refund['refund_id'], 'amount' => '2000.00']);
+        // The requester proposes; the refund is born 'proposed' — no money
+        // has moved yet.
+        $refund = app(RefundPayment::class)->propose($teller, Payment::query()->findOrFail($payment['payment_id']), FinancialPeriod::query()->findOrFail($this->periodId), '2000.00', 'overpayment returned per policy doc 4.2', 'pay-fin-ref-2');
+        $this->assertDatabaseHas('refunds', ['id' => $refund['refund_id'], 'amount' => '2000.00', 'lifecycle_state' => 'proposed', 'approved_by' => null]);
+
+        // The requester cannot approve their own proposal.
+        try {
+            app(RefundPayment::class)->approve($teller, Refund::query()->findOrFail($refund['refund_id']), 'pay-fin-ref-3');
+            $this->fail('requester and approver must differ');
+        } catch (AuthorizationDenied $denial) {
+            $this->assertSame('finance.refund_not_independent', $denial->errorCode());
+        }
+
+        // A distinct approver, in their own session, records it.
+        app(RefundPayment::class)->approve($approver, Refund::query()->findOrFail($refund['refund_id']), 'pay-fin-ref-4');
+        $this->assertDatabaseHas('refunds', ['id' => $refund['refund_id'], 'lifecycle_state' => 'recorded', 'approved_by' => 'pay-fin-ref-appr']);
+
+        // A recorded refund is terminal: it cannot be approved again, and
+        // nothing is left of the payment to refund.
+        try {
+            app(RefundPayment::class)->approve($approver, Refund::query()->findOrFail($refund['refund_id']), 'pay-fin-ref-5');
+            $this->fail('a recorded refund is terminal');
+        } catch (BusinessRejection $rejection) {
+            $this->assertSame('finance.refund_not_proposed', $rejection->errorCode());
+        }
 
         try {
-            app(RefundPayment::class)->refund($teller, $approver, Payment::query()->findOrFail($payment['payment_id']), FinancialPeriod::query()->findOrFail($this->periodId), '1.00', 'again', 'pay-fin-ref-4');
+            app(RefundPayment::class)->propose($teller, Payment::query()->findOrFail($payment['payment_id']), FinancialPeriod::query()->findOrFail($this->periodId), '1.00', 'again', 'pay-fin-ref-6');
             $this->fail('nothing is left to refund');
         } catch (BusinessRejection $rejection) {
             $this->assertSame('finance.refund_exceeds_source', $rejection->errorCode());
@@ -312,6 +330,8 @@ final class PaymentsFundingFeatureTest extends TestCase
         $teller = $this->teller();
         $payment = app(RecordPayment::class)->record($teller, FinancialPeriod::query()->findOrFail($this->periodId), $this->studentId, '7000.00', 'bank-transfer', 'RCPT-DB-2', '2026-11-05', 'pay-fin-db-2');
 
+        // Even a well-formed PROPOSAL that would exceed the amount received
+        // is rejected: an impossible proposal must not enter the ledger.
         $this->expectException(QueryException::class);
         DB::table('refunds')->insert([
             'id' => RandomIdentifier::new(),
@@ -320,10 +340,57 @@ final class PaymentsFundingFeatureTest extends TestCase
             'amount' => '7000.01',
             'reason' => 'fabricated',
             'requested_by' => 'direct-sql-attacker',
-            'approved_by' => 'direct-sql-attacker-two',
+            'lifecycle_state' => 'proposed',
             'created_at' => now(),
             'updated_at' => now(),
         ]);
+    }
+
+    public function test_direct_sql_cannot_record_a_refund_skipping_its_proposal(): void
+    {
+        $teller = $this->teller();
+        $payment = app(RecordPayment::class)->record($teller, FinancialPeriod::query()->findOrFail($this->periodId), $this->studentId, '7000.00', 'bank-transfer', 'RCPT-DB-5', '2026-11-05', 'pay-fin-db-5');
+
+        // A refund cannot be born 'recorded': recorded is reachable only by
+        // approving a proposal, which is where the distinct approver and the
+        // re-checked balance live.
+        $this->expectException(QueryException::class);
+        DB::table('refunds')->insert([
+            'id' => RandomIdentifier::new(),
+            'payment_id' => $payment['payment_id'],
+            'period_id' => $this->periodId,
+            'amount' => '100.00',
+            'reason' => 'fabricated',
+            'requested_by' => 'direct-sql-attacker',
+            'approved_by' => 'direct-sql-attacker-two',
+            'lifecycle_state' => 'recorded',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
+    public function test_direct_sql_cannot_approve_a_refund_with_a_changed_amount(): void
+    {
+        $teller = $this->teller();
+        $payment = app(RecordPayment::class)->record($teller, FinancialPeriod::query()->findOrFail($this->periodId), $this->studentId, '7000.00', 'bank-transfer', 'RCPT-DB-6', '2026-11-05', 'pay-fin-db-6');
+
+        DB::table('refunds')->insert([
+            'id' => RandomIdentifier::new(),
+            'payment_id' => $payment['payment_id'],
+            'period_id' => $this->periodId,
+            'amount' => '500.00',
+            'reason' => 'proposed within the remainder',
+            'requested_by' => 'direct-sql-attacker',
+            'lifecycle_state' => 'proposed',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $refundId = (string) DB::table('refunds')->where('payment_id', $payment['payment_id'])->value('id');
+
+        // Approval may only flip lifecycle_state and set approved_by — it may
+        // not rewrite the amount (and 7000.01 would also breach the cap).
+        $this->expectException(QueryException::class);
+        DB::statement('UPDATE refunds SET lifecycle_state = ?, approved_by = ?, amount = ? WHERE id = ?', ['recorded', 'direct-sql-attacker-two', '7000.01', $refundId]);
     }
 
     public function test_direct_sql_allocation_plus_refund_cannot_exceed_the_payment(): void
@@ -343,7 +410,7 @@ final class PaymentsFundingFeatureTest extends TestCase
         ]);
 
         // One cent of refund on top of a fully allocated payment exceeds the
-        // amount received: the schema rejects it.
+        // amount received: the schema rejects the proposal.
         $this->expectException(QueryException::class);
         DB::table('refunds')->insert([
             'id' => RandomIdentifier::new(),
@@ -352,7 +419,7 @@ final class PaymentsFundingFeatureTest extends TestCase
             'amount' => '0.01',
             'reason' => 'fabricated',
             'requested_by' => 'direct-sql-attacker',
-            'approved_by' => 'direct-sql-attacker-two',
+            'lifecycle_state' => 'proposed',
             'created_at' => now(),
             'updated_at' => now(),
         ]);

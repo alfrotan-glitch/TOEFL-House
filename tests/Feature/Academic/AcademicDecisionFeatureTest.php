@@ -20,7 +20,6 @@ use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Academic\Models\GraduationDecision;
 use App\Modules\Academic\Models\Program;
 use App\Modules\Academic\Models\ProgressionDecision;
-use App\Modules\Admissions\Commands\DecideAdmission;
 use App\Modules\Admissions\Commands\EnrollAdmittedApplicant;
 use App\Modules\Admissions\Commands\RegisterApplicant;
 use App\Modules\Admissions\Models\Applicant;
@@ -30,11 +29,13 @@ use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Tests\Concerns\BuildsActors;
+use Tests\Concerns\DecidesAdmissions;
 use Tests\TestCase;
 
 final class AcademicDecisionFeatureTest extends TestCase
 {
     use BuildsActors;
+    use DecidesAdmissions;
 
     private string $classId;
 
@@ -61,7 +62,7 @@ final class AcademicDecisionFeatureTest extends TestCase
         $registered = app(RegisterApplicant::class)->register($this->admissionsClerk('dec-clerk'), 'dec-person-1', 'Program', 'dec-reg-1');
         /** @var Applicant $applicant */
         $applicant = Applicant::query()->findOrFail($registered['applicant_id']);
-        app(DecideAdmission::class)->decide($this->admissionsClerk('dec-clerk'), $this->admissionsReviewer('dec-review'), $this->admissionsApprover('dec-approve'), $applicant, true, 'meets policy', 'ev/dec', 'dec-adm-1');
+        $this->runAdmissionDecision($this->admissionsClerk('dec-clerk'), $this->admissionsReviewer('dec-review'), $this->admissionsApprover('dec-approve'), $applicant, true, 'meets policy', 'ev/dec', 'dec-adm-1');
         $this->studentId = app(EnrollAdmittedApplicant::class)->convert($this->admissionsApprover('dec-approve'), $applicant, 'dec-conv-1')['student_id'];
         $seat = app(MaintainEnrollment::class)->request($this->enrollmentClerk('dec-enroll'), $this->studentId, $this->classId, 'dec-enr-1');
         app(MaintainEnrollment::class)->activate($this->academicOfficer('dec-officer'), Enrollment::query()->findOrFail($seat['enrollment_id']), 'dec-enr-2');

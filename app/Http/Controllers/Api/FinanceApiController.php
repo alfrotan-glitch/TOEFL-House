@@ -10,7 +10,7 @@ use App\Modules\Finance\Commands\RefundPayment;
 use App\Modules\Finance\Models\FinancialPeriod;
 use App\Modules\Finance\Models\Obligation;
 use App\Modules\Finance\Models\Payment;
-use App\Support\Authorization\Actor;
+use App\Modules\Finance\Models\Refund;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -56,25 +56,39 @@ final class FinanceApiController extends Controller
         return response()->json(['status' => 'recorded'], 201);
     }
 
-    public function refund(Request $request, string $paymentId): JsonResponse
+    /**
+     * The signed-in session PROPOSES the refund (requester). A different
+     * session signed in as an approver records it via approve() — no
+     * person-id may be supplied in the body.
+     */
+    public function proposeRefund(Request $request, string $paymentId): JsonResponse
     {
         $input = $request->validate([
             'period_id' => ['required', 'string'],
             'amount' => ['required', 'numeric', 'gt:0'],
             'reason' => ['required', 'string', 'max:1000'],
-            'approver_id' => ['required', 'string'],
         ]);
 
-        app(RefundPayment::class)->refund(
+        $result = app(RefundPayment::class)->propose(
             $this->actor(),
-            new Actor($input['approver_id'], 'Refund Approver'),
             Payment::query()->findOrFail($paymentId),
             FinancialPeriod::query()->findOrFail($input['period_id']),
             $input['amount'],
             $input['reason'],
-            $this->idempotencyKey('finance.refund'),
+            $this->idempotencyKey('finance.refund.propose'),
         );
 
-        return response()->json(['status' => 'refunded']);
+        return response()->json(['status' => 'proposed', 'refund_id' => $result['refund_id']], 201);
+    }
+
+    public function approveRefund(Request $request, string $refundId): JsonResponse
+    {
+        $result = app(RefundPayment::class)->approve(
+            $this->actor(),
+            Refund::query()->findOrFail($refundId),
+            $this->idempotencyKey('finance.refund.approve'),
+        );
+
+        return response()->json(['status' => 'refunded', 'refund_id' => $result['refund_id']]);
     }
 }

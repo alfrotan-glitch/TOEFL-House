@@ -12,6 +12,7 @@
     <h2>Record a payment</h2>
     <form method="POST" action="{{ route('finance.payment') }}">
         @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
         <div class="row">
             <div>
                 <label>Financial period</label>
@@ -69,6 +70,7 @@
                                 <summary class="btn small secondary" style="display:inline-block; cursor:pointer">Allocate</summary>
                                 <form method="POST" action="{{ route('finance.allocate', $obligation->id) }}" style="margin-top:8px">
                                     @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
                                     <label>Payment</label>
                                     <select name="payment_id" required>
                                         @foreach ($payments as $payment)
@@ -106,6 +108,7 @@
                                 <summary class="btn small secondary" style="display:inline-block; cursor:pointer">Refund</summary>
                                 <form method="POST" action="{{ route('finance.refund', $payment->id) }}" style="margin-top:8px">
                                     @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
                                     <label>Period</label>
                                     <select name="period_id" required>
                                         @foreach ($periods as $period)
@@ -116,9 +119,8 @@
                                     <input name="amount" type="text" inputmode="decimal" required>
                                     <label>Reason</label>
                                     <input name="reason" type="text" required>
-                                    <label>Approver (person id)</label>
-                                    <input name="approver_id" type="text" required>
-                                    <div class="actions"><button type="submit" class="btn small">Refund</button></div>
+                                    <p class="muted" style="font-size:12px">You are proposing this refund. A different employee holding the refund-approval authority records it from their own session.</p>
+                                    <div class="actions"><button type="submit" class="btn small">Propose refund</button></div>
                                 </form>
                             </details>
                         </td>
@@ -131,7 +133,29 @@
 
 <div class="row">
     <div class="card" style="flex:1 1 320px">
-        <h2>Refunds</h2>
+        <h2>Proposed refunds (awaiting approval)</h2>
+        @if ($proposedRefunds->isEmpty())
+            <p class="empty">No refunds awaiting approval.</p>
+        @else
+            <table class="grid">
+                <tr><th>Payment</th><th>Amount</th><th>Reason</th><th></th></tr>
+                @foreach ($proposedRefunds as $refund)
+                    <tr>
+                        <td>{{ \Illuminate\Support\Str::limit($refund->payment_id, 16) }}</td>
+                        <td>{{ $refund->amount }}</td>
+                        <td class="muted">{{ \Illuminate\Support\Str::limit($refund->reason, 24) }}</td>
+                        <td>
+                            <form method="POST" action="{{ route('finance.refund.approve', $refund->id) }}">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small" title="Records this refund under your authority (must differ from the requester)">Approve</button>
+                            </form>
+                        </td>
+                    </tr>
+                @endforeach
+            </table>
+        @endif
+        <h2 style="margin-top:16px">Refunds (recorded)</h2>
         @if ($refunds->isEmpty())
             <p class="empty">No refunds recorded.</p>
         @else

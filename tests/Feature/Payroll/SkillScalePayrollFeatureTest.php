@@ -17,7 +17,6 @@ use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Academic\Models\Program;
 use App\Modules\Academic\Models\Skill;
 use App\Modules\Academic\Models\TeacherAssignment;
-use App\Modules\Admissions\Commands\DecideAdmission;
 use App\Modules\Admissions\Commands\EnrollAdmittedApplicant;
 use App\Modules\Admissions\Commands\RegisterApplicant;
 use App\Modules\Admissions\Models\Applicant;
@@ -39,6 +38,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Tests\Concerns\BuildsActors;
+use Tests\Concerns\DecidesAdmissions;
 use Tests\TestCase;
 
 /**
@@ -50,6 +50,7 @@ use Tests\TestCase;
 final class SkillScalePayrollFeatureTest extends TestCase
 {
     use BuildsActors;
+    use DecidesAdmissions;
 
     private string $teacherPersonId = 'p16-pay-teacher-1';
 
@@ -139,7 +140,7 @@ final class SkillScalePayrollFeatureTest extends TestCase
         $registered = app(RegisterApplicant::class)->register($this->admissionsClerk('p16-pay-adm-clerk'), $personId, 'Program', $keyPrefix.'-reg');
         /** @var Applicant $applicant */
         $applicant = Applicant::query()->findOrFail($registered['applicant_id']);
-        app(DecideAdmission::class)->decide(
+        $this->runAdmissionDecision(
             $this->admissionsClerk('p16-pay-adm-clerk'), $this->admissionsReviewer('p16-pay-adm-rev'), $this->admissionsApprover('p16-pay-adm-appr'),
             $applicant, true, 'meets policy', 'ev/p16', $keyPrefix.'-dec',
         );
