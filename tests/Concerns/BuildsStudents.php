@@ -41,6 +41,10 @@ trait BuildsStudents
             'legal_name' => 'Print Fixture Student',
             'date_of_birth' => '1999-03-03',
             'verification_state' => Person::VERIFICATION_VERIFIED,
+            'identity_key' => 'fixture-'.$applicantPersonId,
+            'identity_evidence_ref' => 'evidence/fixture/'.$applicantPersonId,
+            'verified_by' => 'fixture-verifier',
+            'verified_at' => now()->toDateTimeString(),
         ]);
 
         app(RegisterApplicant::class)->register(

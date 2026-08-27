@@ -20,11 +20,16 @@ final class AuthenticationFeatureTest extends TestCase
 {
     private function makeEmployee(string $username = 'login.employee', string $password = 'correct-horse-99', string $state = UserAccount::STATE_ACTIVE): UserAccount
     {
+        $personId = RandomIdentifier::new();
         $person = Person::query()->create([
-            'id' => RandomIdentifier::new(),
+            'id' => $personId,
             'legal_name' => 'Login Employee',
             'date_of_birth' => '1990-01-01',
             'verification_state' => Person::VERIFICATION_VERIFIED,
+            'identity_key' => 'fixture-'.$personId,
+            'identity_evidence_ref' => 'evidence/fixture/'.$personId,
+            'verified_by' => 'fixture-verifier',
+            'verified_at' => now()->toDateTimeString(),
         ]);
 
         return UserAccount::query()->create([

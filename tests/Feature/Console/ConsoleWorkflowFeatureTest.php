@@ -55,6 +55,10 @@ final class ConsoleWorkflowFeatureTest extends TestCase
             'legal_name' => 'Prospective Student',
             'date_of_birth' => '2000-05-05',
             'verification_state' => Person::VERIFICATION_VERIFIED,
+            'identity_key' => 'fixture-applicant-person-1',
+            'identity_evidence_ref' => 'evidence/fixture/applicant-person-1',
+            'verified_by' => 'fixture-verifier',
+            'verified_at' => now()->toDateTimeString(),
         ]);
 
         // Sign in as the clerk.
@@ -109,6 +113,10 @@ final class ConsoleWorkflowFeatureTest extends TestCase
             'legal_name' => 'Second Prospect',
             'date_of_birth' => '2001-01-01',
             'verification_state' => Person::VERIFICATION_VERIFIED,
+            'identity_key' => 'fixture-applicant-person-2',
+            'identity_evidence_ref' => 'evidence/fixture/applicant-person-2',
+            'verified_by' => 'fixture-verifier',
+            'verified_at' => now()->toDateTimeString(),
         ]);
 
         $this->post('/login', ['username' => 'clerk2', 'password' => 'console-password-1'])->assertRedirect('/');

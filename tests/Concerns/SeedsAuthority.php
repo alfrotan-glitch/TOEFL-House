@@ -61,6 +61,10 @@ trait SeedsAuthority
                 'legal_name' => 'Authority Fixture '.$personId,
                 'date_of_birth' => '1980-01-01',
                 'verification_state' => Person::VERIFICATION_VERIFIED,
+                'identity_key' => 'fixture-'.$personId,
+                'identity_evidence_ref' => 'evidence/fixture/'.$personId,
+                'verified_by' => 'fixture-verifier',
+                'verified_at' => now()->toDateTimeString(),
             ]);
         }
         $person = $this->authorityPeople[$personId];
@@ -141,6 +145,10 @@ trait SeedsAuthority
                 'legal_name' => 'Authority Fixture '.$personId,
                 'date_of_birth' => '1980-01-01',
                 'verification_state' => Person::VERIFICATION_VERIFIED,
+                'identity_key' => 'fixture-'.$personId,
+                'identity_evidence_ref' => 'evidence/fixture/'.$personId,
+                'verified_by' => 'fixture-verifier',
+                'verified_at' => now()->toDateTimeString(),
             ]);
         }
 

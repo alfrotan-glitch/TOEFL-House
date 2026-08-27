@@ -149,6 +149,10 @@ final class HrFeatureTest extends TestCase
             'legal_name' => 'Second Verified Person',
             'date_of_birth' => '1991-02-02',
             'verification_state' => Person::VERIFICATION_VERIFIED,
+            'identity_key' => 'fixture-hr-person-2',
+            'identity_evidence_ref' => 'evidence/fixture/hr-person-2',
+            'verified_by' => 'fixture-verifier',
+            'verified_at' => now()->toDateTimeString(),
         ]);
 
         $this->expectException(AuthorizationDenied::class);

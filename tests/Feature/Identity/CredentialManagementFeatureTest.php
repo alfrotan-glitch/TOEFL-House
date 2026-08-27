@@ -23,12 +23,19 @@ final class CredentialManagementFeatureTest extends TestCase
 
     private function makeAccount(string $username, ?string $password = null, ?Person $person = null): UserAccount
     {
-        $person ??= Person::query()->create([
-            'id' => RandomIdentifier::new(),
-            'legal_name' => 'Account Holder',
-            'date_of_birth' => '1991-01-01',
-            'verification_state' => Person::VERIFICATION_VERIFIED,
-        ]);
+        if ($person === null) {
+            $personId = RandomIdentifier::new();
+            $person = Person::query()->create([
+                'id' => $personId,
+                'legal_name' => 'Account Holder',
+                'date_of_birth' => '1991-01-01',
+                'verification_state' => Person::VERIFICATION_VERIFIED,
+                'identity_key' => 'fixture-'.$personId,
+                'identity_evidence_ref' => 'evidence/fixture/'.$personId,
+                'verified_by' => 'fixture-verifier',
+                'verified_at' => now()->toDateTimeString(),
+            ]);
+        }
 
         return UserAccount::query()->create([
             'id' => RandomIdentifier::new(),

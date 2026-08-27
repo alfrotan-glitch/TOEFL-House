@@ -58,11 +58,16 @@ final class ApiFeatureTest extends TestCase
     {
         $clerk = $this->personWithAuthority('api-clerk-1', ['admissions.register']);
         $this->signInAs($clerk->id, 'api.clerk');
+        $prospectId = RandomIdentifier::new();
         $prospect = Person::query()->create([
-            'id' => RandomIdentifier::new(),
+            'id' => $prospectId,
             'legal_name' => 'API Prospect',
             'date_of_birth' => '2002-02-02',
             'verification_state' => Person::VERIFICATION_VERIFIED,
+            'identity_key' => 'fixture-'.$prospectId,
+            'identity_evidence_ref' => 'evidence/fixture/'.$prospectId,
+            'verified_by' => 'fixture-verifier',
+            'verified_at' => now()->toDateTimeString(),
         ]);
 
         $this->postJson('/api/students/applicants', [

@@ -822,6 +822,18 @@ final class SchemaInvariantFeatureTest extends TestCase
         $this->assertContains('refunds_balance_guard_trigger', $refundTriggers, 'refunds must be balance-capped at the schema level');
     }
 
+    public function test_identity_and_admissions_guards_exist_at_schema_level(): void
+    {
+        // Verified identities require decision evidence and are final;
+        // admission decisions require SoD, evidence, and a decidable
+        // applicant — all at the authoritative database boundary.
+        $peopleTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'people')->pluck('tgname')->all();
+        $this->assertContains('people_identity_guard_trigger', $peopleTriggers, 'verified identities must carry decision evidence and be final at the schema level');
+
+        $decisionTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'admission_decisions')->pluck('tgname')->all();
+        $this->assertContains('admission_decisions_guard_trigger', $decisionTriggers, 'admission decisions must enforce SoD, evidence, and decidable applicants at the schema level');
+    }
+
     public function test_delivery_facts_evidence_guard_exists_at_schema_level(): void
     {
         // Payroll evidence cannot be forged: a raw INSERT of a teaching
