@@ -822,6 +822,19 @@ final class SchemaInvariantFeatureTest extends TestCase
         $this->assertContains('refunds_balance_guard_trigger', $refundTriggers, 'refunds must be balance-capped at the schema level');
     }
 
+    public function test_student_invariants_exist_at_schema_level(): void
+    {
+        // One student per person and per admission decision (no duplicate
+        // enrollment or tuition), and status history only via the registry
+        // state machine — all at the schema level.
+        $indexes = DB::table('pg_indexes')->where('tablename', 'students')->pluck('indexname')->all();
+        $this->assertContains('students_one_per_person', $indexes, 'a person may have at most one student record at the schema level');
+        $this->assertContains('students_one_per_admission_decision', $indexes, 'an admission decision may produce at most one student at the schema level');
+
+        $triggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'student_statuses')->pluck('tgname')->all();
+        $this->assertContains('student_statuses_guard_trigger', $triggers, 'student status history must follow the registry state machine at the schema level');
+    }
+
     public function test_identity_and_admissions_guards_exist_at_schema_level(): void
     {
         // Verified identities require decision evidence and are final;
