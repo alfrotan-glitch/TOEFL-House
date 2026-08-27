@@ -822,6 +822,16 @@ final class SchemaInvariantFeatureTest extends TestCase
         $this->assertContains('refunds_balance_guard_trigger', $refundTriggers, 'refunds must be balance-capped at the schema level');
     }
 
+    public function test_delivery_facts_evidence_guard_exists_at_schema_level(): void
+    {
+        // Payroll evidence cannot be forged: a raw INSERT of a teaching
+        // delivery fact must match its session, teacher attribution,
+        // claiming period, attendance, and duration at the schema level.
+        $triggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'teaching_delivery_facts')->pluck('tgname')->all();
+        $this->assertContains('teaching_delivery_facts_evidence_trigger', $triggers, 'teaching delivery facts must be evidence-validated at the schema level');
+        $this->assertContains('teaching_delivery_facts_claim_trigger', $triggers, 'teaching delivery facts must remain immutable after creation');
+    }
+
     public function test_hr_lifecycle_guards_exist_at_schema_level(): void
     {
         // Employment and leave state machines, decision evidence, and the
