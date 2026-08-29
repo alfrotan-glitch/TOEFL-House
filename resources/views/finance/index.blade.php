@@ -53,6 +53,55 @@
     </form>
 </div>
 
+<div class="card">
+    <h2>Post an obligation</h2>
+    <p class="sub">Obligations post only to an open financial period; the line total becomes the obligation amount.</p>
+    <form method="POST" action="{{ route('finance.obligation.post') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="row">
+            <div>
+                <label>Financial period</label>
+                <select name="period_id" required>
+                    <option value="">Select an open period…</option>
+                    @foreach ($periods as $period)
+                        <option value="{{ $period->id }}">{{ $period->period_key }} ({{ $period->lifecycle_state }})</option>
+                    @endforeach
+                </select>
+            </div>
+            <div>
+                <label>Student</label>
+                <select name="student_id" required>
+                    <option value="">Select a student…</option>
+                    @foreach ($students as $student)
+                        <option value="{{ $student->id }}">{{ $student->student_code }}</option>
+                    @endforeach
+                </select>
+            </div>
+            <div>
+                <label>Source</label>
+                <input name="source" type="text" placeholder="e.g. tuition" required>
+            </div>
+            <div>
+                <label>Line category</label>
+                <input name="category" type="text" required>
+            </div>
+            <div>
+                <label>Line amount</label>
+                <input name="amount" type="text" inputmode="decimal" required>
+            </div>
+            <div>
+                <label>Line source reference</label>
+                <input name="source_ref" type="text" required>
+            </div>
+        </div>
+        <div class="fields">
+            <input name="reason" type="text" placeholder="Reason" required>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Post obligation</button></div>
+    </form>
+</div>
+
 <div class="row">
     <div class="card" style="flex:1 1 320px">
         <h2>Obligations (newest first)</h2>

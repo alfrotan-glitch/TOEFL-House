@@ -72,6 +72,11 @@ Route::middleware('employee')->group(function (): void {
         Route::get('sessions', [AcademicController::class, 'sessions'])->name('sessions');
         Route::post('sessions', [AcademicController::class, 'scheduleSession'])->name('schedule');
         Route::post('sessions/{sessionId}/attendance', [AcademicController::class, 'recordAttendance'])->name('attendance');
+        Route::post('enrollments', [AcademicController::class, 'requestEnrollment'])->name('enrollment.request');
+        Route::post('enrollments/{enrollmentId}/activate', [AcademicController::class, 'activateEnrollment'])->name('enrollment.activate');
+        Route::post('progressions', [AcademicController::class, 'proposeProgression'])->name('progression.propose');
+        Route::post('progressions/{decisionId}/review', [AcademicController::class, 'reviewProgression'])->name('progression.review');
+        Route::post('progressions/{decisionId}/approve', [AcademicController::class, 'approveProgression'])->name('progression.approve');
     });
 
     // Teachers & HR
@@ -98,6 +103,7 @@ Route::middleware('employee')->group(function (): void {
     Route::prefix('finance')->name('finance.')->group(function (): void {
         Route::get('/', [FinanceController::class, 'index'])->name('index');
         Route::post('payments', [FinanceController::class, 'recordPayment'])->name('payment');
+        Route::post('obligations', [FinanceController::class, 'postObligation'])->name('obligation.post');
         Route::post('payments/{paymentId}/refund', [FinanceController::class, 'refund'])->name('refund');
         Route::post('refunds/{refundId}/approve', [FinanceController::class, 'approveRefund'])->name('refund.approve');
         Route::post('obligations/{obligationId}/allocate', [FinanceController::class, 'allocate'])->name('allocate');

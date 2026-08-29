@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Modules\Finance\Commands\AllocatePayment;
+use App\Modules\Finance\Commands\PostObligation;
 use App\Modules\Finance\Commands\RecordPayment;
 use App\Modules\Finance\Commands\RefundPayment;
 use App\Modules\Finance\Models\Discount;
@@ -118,5 +119,30 @@ final class FinanceController extends Controller
         );
 
         return redirect()->route('finance.index')->with('success', 'Payment allocated to the obligation.');
+    }
+
+    public function postObligation(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'period_id' => ['required', 'string'],
+            'student_id' => ['required', 'string'],
+            'source' => ['required', 'string', 'max:120'],
+            'reason' => ['required', 'string', 'max:1000'],
+            'category' => ['required', 'string', 'max:120'],
+            'amount' => ['required', 'numeric', 'gt:0'],
+            'source_ref' => ['required', 'string', 'max:120'],
+        ]);
+
+        app(PostObligation::class)->post(
+            $this->actor(),
+            FinancialPeriod::query()->findOrFail($input['period_id']),
+            $input['student_id'],
+            $input['source'],
+            $input['reason'],
+            [['category' => $input['category'], 'amount' => $input['amount'], 'source_ref' => $input['source_ref']]],
+            $this->idempotencyKey('finance.obligation.post'),
+        );
+
+        return redirect()->route('finance.index')->with('success', 'Obligation posted.');
     }
 }

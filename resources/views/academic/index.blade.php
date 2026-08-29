@@ -73,4 +73,110 @@
         </table>
     @endif
 </div>
+
+<div class="card">
+    <h2>Seats</h2>
+    <p class="sub">A seat is requested by the clerk and activated by an approver; capacity and the active student/class state are owned by the academic module.</p>
+    <form method="POST" action="{{ route('academic.enrollment.request') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <select name="student_id" required>
+                <option value="">Select a student…</option>
+                @foreach ($students as $student)
+                    <option value="{{ $student->id }}">{{ $student->student_code }}</option>
+                @endforeach
+            </select>
+            <select name="class_id" required>
+                <option value="">Select an active class…</option>
+                @foreach ($classes as $class)
+                    @if ($class->lifecycle_state === 'active')
+                        <option value="{{ $class->id }}">{{ \Illuminate\Support\Str::limit($class->id, 14) }} (cap {{ $class->capacity }})</option>
+                    @endif
+                @endforeach
+            </select>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Request seat</button></div>
+    </form>
+    @if ($requestedEnrollments->isEmpty())
+        <p class="empty">No seats awaiting activation.</p>
+    @else
+        <table class="grid">
+            <tr><th>Student</th><th>Class</th><th>Activate</th></tr>
+            @foreach ($requestedEnrollments as $seat)
+                <tr>
+                    <td>{{ \Illuminate\Support\Str::limit($seat->student_id, 18) }}</td>
+                    <td>{{ \Illuminate\Support\Str::limit($seat->class_id, 18) }}</td>
+                    <td>
+                        <form method="POST" action="{{ route('academic.enrollment.activate', $seat->id) }}" style="display:inline">
+                            @csrf
+                            <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                            <button type="submit" class="btn">Activate</button>
+                        </form>
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
+
+<div class="card">
+    <h2>Progression decisions</h2>
+    <p class="sub">Propose, review and approve are signed by three distinct employees in their own sessions.</p>
+    <form method="POST" action="{{ route('academic.progression.propose') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <select name="student_id" required>
+                <option value="">Select a student…</option>
+                @foreach ($students as $student)
+                    <option value="{{ $student->id }}">{{ $student->student_code }}</option>
+                @endforeach
+            </select>
+            <select name="class_id" required>
+                <option value="">Select a class…</option>
+                @foreach ($classes as $class)
+                    <option value="{{ $class->id }}">{{ \Illuminate\Support\Str::limit($class->id, 14) }}</option>
+                @endforeach
+            </select>
+            <select name="outcome" required>
+                <option value="advance">Advance</option>
+                <option value="repeat">Repeat</option>
+            </select>
+            <input name="reason" type="text" placeholder="Reason" required>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Propose progression</button></div>
+    </form>
+    @if ($progressions->isEmpty())
+        <p class="empty">No progression decisions awaiting review or approval.</p>
+    @else
+        <table class="grid">
+            <tr><th>Student</th><th>Class</th><th>Outcome</th><th>State</th><th>Signatures</th></tr>
+            @foreach ($progressions as $decision)
+                <tr>
+                    <td>{{ \Illuminate\Support\Str::limit($decision->student_id, 18) }}</td>
+                    <td>{{ \Illuminate\Support\Str::limit($decision->class_id, 18) }}</td>
+                    <td>{{ $decision->outcome }}</td>
+                    <td><span class="pill">{{ $decision->lifecycle_state }}</span></td>
+                    <td>
+                        @if ($decision->lifecycle_state === 'proposed')
+                            <form method="POST" action="{{ route('academic.progression.review', $decision->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn">Review</button>
+                            </form>
+                        @endif
+                        @if ($decision->lifecycle_state === 'reviewed')
+                            <form method="POST" action="{{ route('academic.progression.approve', $decision->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn">Approve</button>
+                            </form>
+                        @endif
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
 @endsection
