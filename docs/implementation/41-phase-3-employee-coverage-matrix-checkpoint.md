@@ -1,0 +1,85 @@
+# PHASE_3 Checkpoint (in progress) — Employee Coverage Matrix: Module × Capability × Workflow
+
+**Purpose:** prove — not assert — that every employee-facing business capability is reachable through the production HTTP surface (web console and JSON API), delegated to exactly one authoritative command, with authorization, validation, state transitions, error taxonomy, idempotency and audit owned by the domain.
+
+**Method (all machine-derived, no hand-waving):**
+- **Capabilities:** the 90 capability strings authorized by `AccessDecision` across `app/Modules` (every command's `decide()` gate is a capability; the union is the authoritative employee-facing capability set).
+- **Transport:** `routes/web.php` + `routes/api.php` under the `employee` session guard; a capability is *reachable* iff the command(s) that gate on it are referenced from `app/Http` controllers (the only code that may call commands).
+- **Classification:** COMPLETE = reachable and its workflow is proven by HTTP feature tests; PARTIAL = some stages reachable, others not; MISSING = no transport (domain-only); BLOCKED = transport exists but is unusable (none found — the transport is verified pure); NOT-APPLICABLE = not an employee workflow (system-internal jobs, one-time initialization, or closed catalogs) — justified per row below.
+
+## Matrix (90 capabilities)
+
+### COMPLETE (33) — reachable + workflow-proven
+
+| Module | Capability | Command | Transport (web/API) |
+|---|---|---|---|
+| Admissions | admissions.register / initiate / review / approve | RegisterApplicant, DecideAdmission (staged, 000111), EnrollAdmittedApplicant | web `/students/*` + api `/api/students/*` |
+| Academic | academic.schedule | MaintainClass | web `/academic/*` |
+| Academic | academic.enroll / enroll_approve | MaintainEnrollment | web `/academic/enrollments*` |
+| Academic | academic.progression_propose / review / approve | DecideProgression (staged) | web `/academic/progressions*` |
+| Academic | academic.attendance | RecordAttendance | web `/academic/sessions/{id}/attendance` |
+| Students | (identity verify) identity.verify | VerifyPerson | web `/identity/people/{id}/verify` + api |
+| Identity | identity.admin (password) | SetAccountPassword | web `/identity/accounts/{id}/password` + api |
+| Identity | (account linking) | LinkUserAccount | web `/identity/accounts` + api |
+| HR | hr.employ / hr.terminate | MaintainEmployment | web `/hr/employ` |
+| HR | hr.contract.prepare / hr.contract.approve | MaintainContractVersion | web `/hr/versions/*` |
+| Payroll | payroll.period | MaintainPayrollPeriod | web `/payroll/periods*` |
+| Payroll | payroll.calculate / payroll.approve | CalculatePayroll, ApprovePayrollResult | web `/payroll/*` |
+| Payroll | payroll.clear_hr / clear_finance / settle / settle_approve | SettleEmployment (staged, 000112) | web `/payroll/employments/*`, `/payroll/settlements/*` |
+| Finance | finance.period | MaintainFinancialPeriod | web `/finance/periods*` |
+| Finance | finance.obligation | PostObligation | web `/finance/obligations` |
+| Finance | finance.payment | RecordPayment | web `/finance/payments` + api |
+| Finance | finance.refund / refund_approve | RefundPayment (staged, 000110) | web `/finance/refunds*` + api |
+| Finance | (allocation) | AllocatePayment | web `/finance/obligations/{id}/allocate` |
+| Library | (books) | CirculateBooks | web `/library/*` |
+| Reporting | reporting.run / dashboard | RunReport, MaintainDashboard | web `/reporting/*` |
+| Payroll/Finance read | (pay slips, invoices) | Printing (read-only) | web `/print/*` |
+
+### PARTIAL (1) — stages missing
+
+| Module | Capability | Exposed | Missing stage | Disposition |
+|---|---|---|---|---|
+| Identity | identity.admin | SetAccountPassword (web+api) | `DeactivateUserAccount` (deactivation is dead — an account can never be deactivated through the console) | FIX — Increment B |
+
+### NOT-APPLICABLE (14) — not an employee workflow, justified
+
+| Module | Capabilities | Commands | Justification |
+|---|---|---|---|
+| Finance | finance.opening.prepare / approve | MaintainOpeningState, ApproveOpeningState | One-time opening snapshot (P15); already executed; no re-run business scenario |
+| Integrations | integrations.endpoint / inbound / dispatch / process / review / jobs | RegisterEndpoint, ReceiveInbound, ProcessInbound, DispatchDelivery, ProcessDeliveries, RequeueDelivery, RegisterJob, EnqueueJobRun, ProcessJobRun | System-internal outbox/webhook/job machinery (P17 §2 marked system-only); no employee performs these; absence is not an operational dead end |
+| Reporting | reporting.catalog / compute / reconcile | DefineMetric, ComputeProjection, ReconcileMetric | Closed canonical metric catalog (5 metrics — nothing outside it is definable by design); projection rebuild/reconciliation is an operational system function; the employee reporting workflow (run + dashboards) is COMPLETE |
+
+### MISSING (42) — employee workflows with no transport; ordered fix plan
+
+| Increment | Module | Capability(ies) | Command | Actions | Why it is an operational dead end |
+|---|---|---|---|---|---|
+| A | Academic | academic.structure | MaintainAcademicStructure | defineProgram, publishVersion, definePeriod, transitionPeriod | No program/period ⇒ nothing else on the console can be created; the console advertises these as read-only pills |
+| A ✅ | Academic | academic.skill | MaintainSkill | register, retire | Skills drive delivery + payroll evidence; catalog unmanageable through the console |
+| A ✅ | HR | hr.contract | MaintainContract | draft, sign, close | **hire() requires a signed active contract** — the hire path is dead past contract-version approval |
+| A ✅ | HR | hr.employ (completion) / hr.terminate | MaintainEmployment | hire, placeOnLeave, suspend, reinstate, terminate | Matrix correction: only `employ` was exposed — hire/terminate were dead ends on the certified employ→payroll→settle path; the full employment state machine is now console-operable |
+| B | Students | students.manage / reactivate | TransitionStudentStatus | suspend, withdraw, reactivate, complete, graduate | Student record cannot leave active state through the console (the show view is read-only) |
+| B | HR | hr.leave_request / approve | MaintainLeave | request, decide, cancel | Leave evidence feeds payroll proration; leave is unmanageable through the console |
+| B | Students | students.guardian | MaintainGuardianRelationship | record, verify, revoke | Verified guardian relationships (minimum-field privacy) unmanageable |
+| B | Identity | identity.admin (completion) | DeactivateUserAccount | deactivate | PARTIAL item above |
+| C | Academic | academic.assess / moderate / approve_result / release | ManageAssessmentResult | submitAttempt, score, moderate, approve, release, **correct** | Assessment→result→release is the evidence chain for progression/graduation; `correct(moderator, approver, …)` is the last two-actor-in-one-call command and must be **staged** (000113) like refunds/admissions/settlements before exposure |
+| C | Academic | academic.completion / completion_approve / certify | DecideGraduation | propose, review, approve, reject, issueCertificate | Progression endpoint + certificate (print route `/print/certificate/{id}` exists but the command that creates certificates is unreachable) |
+| C | Academic | academic.appeal_manage | ManageAcademicAppeal | (per signature) | Appeals on decisions — independent reviewer workflow |
+| D | Finance | finance.journal / chart | PostJournal, MaintainChartOfAccounts | post, (chart register) | Bookkeeping: balanced source-linked journals unreachable; journaling requires chart codes |
+| D | Finance | finance.discount / discount_approve | MaintainDiscount | propose/approve | The finance view lists discounts but none can be created (UI dead end) |
+| D | Finance | finance.reconcile / reconcile_approve | RecordReconciliation | record/approve | Period-end close is dead without reconciliation |
+| D | Finance | finance.fund / fund_allocate | AllocateFunds | allocate (+agreement) | Restricted-fund pool management unreachable |
+| E | Documents | documents.classify / register / verify / retention | DefineDocumentClassification, RegisterDocument, TransitionDocument, DecideRetention | (per signatures) | Evidence-document management (versions, verifier≠uploader, retention) — referenced by contract/admissions evidence |
+| E | Privacy | privacy.define_purpose / consent / disclose / export / approve_bulk_export | DefineConsentPurpose, RecordConsent, TransitionConsent, RecordDisclosure, ExportSubjectData | (per signatures) | Subject-rights + consent evidence workflows |
+| E | Resources | resources.asset / dispose_request / dispose_approve; facilities.work / work_approve | MaintainAsset, DisposeAsset, MaintainWorkOrder | (per signatures) | Asset custody/disposal + work orders (3-actor disposal) |
+| E | Access | access.assign_position / define_policy / grant / revoke / delegate / approve_org_wide | AssignPosition, TransitionPositionAssignment, DefineAccessPolicy, GrantScopePermission, RevokeScopePermission, DelegateAuthority, RevokeDelegation | (per signatures) | Access administration (positions, policies, grants, delegations) — the identity console is read-only here |
+| E | HR | hr.scale | MaintainScale | (per signatures) | Skill-scale catalog management (compensation) |
+| E | Communication | communication.send | SendMessage | send | Employee→subject communication under active consent |
+
+## Rules applied
+
+- One authoritative command per workflow — transports are thin (no model writes, no business logic, no duplicate rules).
+- Staged SoD before exposure: any command taking two actors in one call (`correct`) is restaged to the house pattern (session-per-signature) with a schema guard — never exposed with a typed colleague id (the 0c1e28f defect class).
+- No speculative features: only capabilities with a real employee business scenario or an operational dead end are added; NOT-APPLICABLE rows above are the exclusion list.
+- Every increment: TRACE (signatures + capabilities) → FIX (routes/controller/views) → TEST (HTTP feature tests) → ATTACK (direct-SQL / denial cases where the increment touches guarded invariants) → REGRESSION (full gate) → VERIFY (commit + push + remote-equal).
+
+**Status:** matrix established at `ae0c967`. **Increment A complete** (academic structure + skills + contract lifecycle + full employment state machine; 3 new HTTP tests, 56 assertions; gates phpunit OK 455/2065, phpstan L6 0, pint 460). Increments B–E in progress. Target: 0 MISSING, 0 PARTIAL, 0 BLOCKED, 0 duplicate implementations, then the complete gate set and the PHASE_3 certification.

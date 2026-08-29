@@ -50,6 +50,69 @@
 </div>
 
 <div class="card">
+    <h2>Contracts</h2>
+    <p class="sub">A hire requires an active signed contract: draft → sign (terms immutable) → close. Terminating the employment closes its active contract automatically.</p>
+    <form method="POST" action="{{ route('hr.contract.draft') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="row">
+            <div>
+                <label>Employment</label>
+                <select name="employment_id" required>
+                    <option value="">Select an employment…</option>
+                    @foreach ($employments as $employment)
+                        <option value="{{ $employment->id }}">{{ \Illuminate\Support\Str::limit($employment->person_id, 16) }} ({{ $employment->lifecycle_state }})</option>
+                    @endforeach
+                </select>
+            </div>
+            <div>
+                <label>Terms summary</label>
+                <input name="terms_summary" type="text" placeholder="e.g. S2 standard, 5 sessions/week" required>
+            </div>
+            <div>
+                <label>Effective from</label>
+                <input type="date" name="effective_from" required>
+            </div>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Draft contract</button></div>
+    </form>
+    @if ($contracts->isEmpty())
+        <p class="empty">No contracts drafted yet.</p>
+    @else
+        <table class="grid" style="margin-top:8px">
+            <tr><th>Contract</th><th>Employment</th><th>State</th><th>Effective</th><th>Signed ref</th><th>Actions</th></tr>
+            @foreach ($contracts as $contract)
+                <tr>
+                    <td>{{ \Illuminate\Support\Str::limit($contract->id, 16) }}</td>
+                    <td>{{ \Illuminate\Support\Str::limit($contract->employment_id, 16) }}</td>
+                    <td><span class="pill {{ $contract->lifecycle_state === 'active' ? 'ok' : '' }}">{{ $contract->lifecycle_state }}</span></td>
+                    <td>{{ $contract->effective_from }} @if ($contract->effective_to)→ {{ $contract->effective_to }} @endif</td>
+                    <td>{{ $contract->signed_ref ? \Illuminate\Support\Str::limit($contract->signed_ref, 14) : '—' }}</td>
+                    <td>
+                        @if ($contract->lifecycle_state === 'draft')
+                            <form method="POST" action="{{ route('hr.contract.sign', $contract->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <input name="signed_ref" type="text" placeholder="Signed evidence ref" required>
+                                <button type="submit" class="btn small">Sign &amp; activate</button>
+                            </form>
+                        @endif
+                        @if ($contract->lifecycle_state === 'active')
+                            <form method="POST" action="{{ route('hr.contract.close', $contract->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <input type="date" name="effective_to" required>
+                                <button type="submit" class="btn small secondary">Close</button>
+                            </form>
+                        @endif
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
+
+<div class="card">
     <h2>Versions (newest first)</h2>
     @if ($versions->isEmpty())
         <p class="empty">No contract versions prepared yet.</p>

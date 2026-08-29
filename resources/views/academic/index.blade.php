@@ -11,31 +11,97 @@
     </div>
 </div>
 
-<div class="row">
-    <div class="card" style="flex:1 1 220px">
-        <h2>Programs</h2>
-        @forelse ($programs as $program)
-            <div class="pill">{{ $program->name }} <span class="muted">({{ $program->lifecycle_state }})</span></div>
-        @empty
-            <p class="empty">No programs recorded.</p>
-        @endforelse
-    </div>
-    <div class="card" style="flex:1 1 220px">
-        <h2>Periods</h2>
-        @forelse ($periods as $period)
-            <div class="pill">{{ $period->name }} <span class="muted">({{ $period->starts_on }} → {{ $period->ends_on }})</span></div>
-        @empty
-            <p class="empty">No periods recorded.</p>
-        @endforelse
-    </div>
-    <div class="card" style="flex:1 1 220px">
-        <h2>Skills</h2>
-        @forelse ($skills as $skill)
-            <div class="pill">{{ $skill->name }} <span class="muted">({{ $skill->key }})</span></div>
-        @empty
-            <p class="empty">No skills recorded.</p>
-        @endforelse
-    </div>
+<div class="card">
+    <h2>Structure</h2>
+    <p class="sub">Programs publish immutable versions; periods move draft → published → closed; skills drive delivery and payroll evidence.</p>
+    <form method="POST" action="{{ route('academic.program.define') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <input name="name" type="text" placeholder="Program name" required>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Define program</button></div>
+    </form>
+    @if ($programs->isEmpty())
+        <p class="empty">No programs recorded.</p>
+    @else
+        <table class="grid" style="margin-top:8px">
+            <tr><th>Program</th><th>Publish an immutable version</th></tr>
+            @foreach ($programs as $program)
+                <tr>
+                    <td>{{ $program->name }}</td>
+                    <td>
+                        <form method="POST" action="{{ route('academic.version.publish', $program->id) }}" style="display:inline">
+                            @csrf
+                            <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                            <input name="summary" type="text" placeholder="Version summary" required>
+                            <button type="submit" class="btn small">Publish version</button>
+                        </form>
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+    <form method="POST" action="{{ route('academic.period.define') }}" style="margin-top:8px">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <input name="name" type="text" placeholder="Period name" required>
+            <input type="date" name="starts_on" required>
+            <input type="date" name="ends_on" required>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Define period</button></div>
+    </form>
+    @if ($periods->isEmpty())
+        <p class="empty">No periods recorded.</p>
+    @else
+        <table class="grid" style="margin-top:8px">
+            <tr><th>Period</th><th>Window</th><th>Transition</th></tr>
+            @foreach ($periods as $period)
+                <tr>
+                    <td>{{ $period->name }}</td>
+                    <td>{{ $period->starts_on }} → {{ $period->ends_on }}</td>
+                    <td><span class="pill">{{ $period->lifecycle_state }}</span>
+                        @if ($period->lifecycle_state === 'draft')
+                            <form method="POST" action="{{ route('academic.period.transition', $period->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <input type="hidden" name="to_state" value="published">
+                                <button type="submit" class="btn small">Publish</button>
+                            </form>
+                        @endif
+                        @if ($period->lifecycle_state === 'published')
+                            <form method="POST" action="{{ route('academic.period.transition', $period->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <input type="hidden" name="to_state" value="closed">
+                                <button type="submit" class="btn small">Close</button>
+                            </form>
+                        @endif
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+    <form method="POST" action="{{ route('academic.skill.register') }}" style="margin-top:8px">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <input name="key" type="text" placeholder="Skill key (e.g. reading)" required>
+            <input name="name" type="text" placeholder="Skill name" required>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Register skill</button></div>
+    </form>
+    @foreach ($skills as $skill)
+        <form method="POST" action="{{ route('academic.skill.retire', $skill->id) }}" style="display:inline;margin-top:8px">
+            @csrf
+            <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+            <span class="pill">{{ $skill->name }} ({{ $skill->key }})</span>
+            @if ($skill->lifecycle_state !== 'retired')
+                <button type="submit" class="btn small">Retire</button>
+            @endif
+        </form>
+    @endforeach
 </div>
 
 <div class="card">

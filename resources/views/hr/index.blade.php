@@ -38,11 +38,57 @@
             <p class="empty">No employments recorded.</p>
         @else
             <table class="grid">
-                <tr><th>Person</th><th>State</th></tr>
+                <tr><th>Person</th><th>State</th><th>Actions</th></tr>
                 @foreach ($employments as $employment)
                     <tr>
                         <td>{{ \Illuminate\Support\Str::limit($employment->person_id, 18) }}</td>
                         <td><span class="pill {{ $employment->lifecycle_state === 'active' ? 'ok' : '' }}">{{ $employment->lifecycle_state }}</span></td>
+                        <td>
+                            @if ($employment->lifecycle_state === 'candidate')
+                                <form method="POST" action="{{ route('hr.employment.hire') }}" style="display:inline">
+                                    @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                    <input type="hidden" name="employment_id" value="{{ $employment->id }}">
+                                    <input type="date" name="effective_from" required>
+                                    <button type="submit" class="btn small">Hire</button>
+                                </form>
+                            @endif
+                            @if ($employment->lifecycle_state === 'active')
+                                <form method="POST" action="{{ route('hr.employment.leave') }}" style="display:inline">
+                                    @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                    <input type="hidden" name="employment_id" value="{{ $employment->id }}">
+                                    <input type="date" name="effective_from" required>
+                                    <button type="submit" class="btn small">Leave</button>
+                                </form>
+                                <form method="POST" action="{{ route('hr.employment.suspend') }}" style="display:inline">
+                                    @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                    <input type="hidden" name="employment_id" value="{{ $employment->id }}">
+                                    <input type="date" name="effective_from" required>
+                                    <button type="submit" class="btn small secondary">Suspend</button>
+                                </form>
+                            @endif
+                            @if (in_array($employment->lifecycle_state, ['on_leave', 'suspended'], true))
+                                <form method="POST" action="{{ route('hr.employment.reinstate') }}" style="display:inline">
+                                    @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                    <input type="hidden" name="employment_id" value="{{ $employment->id }}">
+                                    <input type="date" name="effective_from" required>
+                                    <button type="submit" class="btn small">Reinstate</button>
+                                </form>
+                            @endif
+                            @if (in_array($employment->lifecycle_state, ['candidate', 'active', 'on_leave', 'suspended'], true))
+                                <form method="POST" action="{{ route('hr.employment.terminate') }}" style="display:inline">
+                                    @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                    <input type="hidden" name="employment_id" value="{{ $employment->id }}">
+                                    <input type="date" name="effective_from" required>
+                                    <input name="reason" type="text" placeholder="Reason" required>
+                                    <button type="submit" class="btn small secondary">Terminate</button>
+                                </form>
+                            @endif
+                        </td>
                     </tr>
                 @endforeach
             </table>

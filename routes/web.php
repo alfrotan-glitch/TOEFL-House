@@ -69,6 +69,12 @@ Route::middleware('employee')->group(function (): void {
     // Academic
     Route::prefix('academic')->name('academic.')->group(function (): void {
         Route::get('/', [AcademicController::class, 'index'])->name('index');
+        Route::post('programs', [AcademicController::class, 'defineProgram'])->name('program.define');
+        Route::post('programs/{programId}/versions', [AcademicController::class, 'publishProgramVersion'])->name('version.publish');
+        Route::post('periods', [AcademicController::class, 'definePeriod'])->name('period.define');
+        Route::post('periods/{periodId}/transition', [AcademicController::class, 'transitionPeriod'])->name('period.transition');
+        Route::post('skills', [AcademicController::class, 'registerSkill'])->name('skill.register');
+        Route::post('skills/{skillId}/retire', [AcademicController::class, 'retireSkill'])->name('skill.retire');
         Route::get('sessions', [AcademicController::class, 'sessions'])->name('sessions');
         Route::post('sessions', [AcademicController::class, 'scheduleSession'])->name('schedule');
         Route::post('sessions/{sessionId}/attendance', [AcademicController::class, 'recordAttendance'])->name('attendance');
@@ -83,7 +89,15 @@ Route::middleware('employee')->group(function (): void {
     Route::prefix('hr')->name('hr.')->group(function (): void {
         Route::get('/', [HrController::class, 'index'])->name('index');
         Route::post('employ', [HrController::class, 'employ'])->name('employ');
+        Route::post('employments/hire', [HrController::class, 'hire'])->name('employment.hire');
+        Route::post('employments/leave', [HrController::class, 'placeOnLeave'])->name('employment.leave');
+        Route::post('employments/suspend', [HrController::class, 'suspendEmployment'])->name('employment.suspend');
+        Route::post('employments/reinstate', [HrController::class, 'reinstateEmployment'])->name('employment.reinstate');
+        Route::post('employments/terminate', [HrController::class, 'terminateEmployment'])->name('employment.terminate');
         Route::get('contracts', [HrController::class, 'contracts'])->name('contracts');
+        Route::post('contracts/draft', [HrController::class, 'draftContract'])->name('contract.draft');
+        Route::post('contracts/{contractId}/sign', [HrController::class, 'signContract'])->name('contract.sign');
+        Route::post('contracts/{contractId}/close', [HrController::class, 'closeContract'])->name('contract.close');
         Route::post('versions/prepare', [HrController::class, 'prepareVersion'])->name('version.prepare');
         Route::post('versions/{versionId}/rule', [HrController::class, 'addRule'])->name('version.rule');
         Route::post('versions/{versionId}/submit', [HrController::class, 'submitVersion'])->name('version.submit');

@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Modules\Academic\Commands\DecideProgression;
+use App\Modules\Academic\Commands\MaintainAcademicStructure;
 use App\Modules\Academic\Commands\MaintainClass;
 use App\Modules\Academic\Commands\MaintainEnrollment;
+use App\Modules\Academic\Commands\MaintainSkill;
 use App\Modules\Academic\Commands\RecordAttendance;
 use App\Modules\Academic\Models\AcademicPeriod;
 use App\Modules\Academic\Models\ClassModel;
@@ -164,5 +166,99 @@ final class AcademicController extends Controller
         );
 
         return redirect()->route('academic.index')->with('success', 'Progression approved.');
+    }
+
+    public function defineProgram(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'name' => ['required', 'string', 'max:160'],
+        ]);
+
+        app(MaintainAcademicStructure::class)->defineProgram(
+            $this->actor(),
+            $input['name'],
+            $this->idempotencyKey('academic.program.define'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Program defined.');
+    }
+
+    public function publishProgramVersion(Request $request, string $programId): RedirectResponse
+    {
+        $input = $request->validate([
+            'summary' => ['required', 'string', 'max:1000'],
+        ]);
+
+        app(MaintainAcademicStructure::class)->publishVersion(
+            $this->actor(),
+            Program::query()->findOrFail($programId),
+            $input['summary'],
+            $this->idempotencyKey('academic.version.publish'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Program version published (immutable).');
+    }
+
+    public function definePeriod(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'name' => ['required', 'string', 'max:160'],
+            'starts_on' => ['required', 'date'],
+            'ends_on' => ['required', 'date', 'after_or_equal:starts_on'],
+        ]);
+
+        app(MaintainAcademicStructure::class)->definePeriod(
+            $this->actor(),
+            $input['name'],
+            CarbonImmutable::parse($input['starts_on']),
+            CarbonImmutable::parse($input['ends_on']),
+            $this->idempotencyKey('academic.period.define'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Academic period defined.');
+    }
+
+    public function transitionPeriod(Request $request, string $periodId): RedirectResponse
+    {
+        $input = $request->validate([
+            'to_state' => ['required', 'in:published,closed'],
+        ]);
+
+        app(MaintainAcademicStructure::class)->transitionPeriod(
+            $this->actor(),
+            AcademicPeriod::query()->findOrFail($periodId),
+            $input['to_state'],
+            $this->idempotencyKey('academic.period.transition'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Academic period transitioned.');
+    }
+
+    public function registerSkill(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'key' => ['required', 'string', 'max:60'],
+            'name' => ['required', 'string', 'max:160'],
+        ]);
+
+        app(MaintainSkill::class)->register(
+            $this->actor(),
+            $input['key'],
+            $input['name'],
+            $this->idempotencyKey('academic.skill.register'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Skill registered.');
+    }
+
+    public function retireSkill(Request $request, string $skillId): RedirectResponse
+    {
+        app(MaintainSkill::class)->retire(
+            $this->actor(),
+            Skill::query()->findOrFail($skillId),
+            $this->idempotencyKey('academic.skill.retire'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Skill retired.');
     }
 }

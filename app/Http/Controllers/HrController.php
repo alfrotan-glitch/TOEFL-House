@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Modules\Hr\Commands\MaintainContract;
 use App\Modules\Hr\Commands\MaintainContractVersion;
 use App\Modules\Hr\Commands\MaintainEmployment;
 use App\Modules\Hr\Models\Contract;
@@ -140,5 +141,143 @@ final class HrController extends Controller
         );
 
         return redirect()->route('hr.contracts')->with('success', 'Contract version withdrawn.');
+    }
+
+    public function draftContract(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'employment_id' => ['required', 'string'],
+            'terms_summary' => ['required', 'string', 'max:2000'],
+            'effective_from' => ['required', 'date'],
+        ]);
+
+        app(MaintainContract::class)->draft(
+            $this->actor(),
+            Employment::query()->findOrFail($input['employment_id']),
+            $input['terms_summary'],
+            $input['effective_from'],
+            $this->idempotencyKey('hr.contract.draft'),
+        );
+
+        return redirect()->route('hr.contracts')->with('success', 'Contract drafted; it becomes active once signed.');
+    }
+
+    public function signContract(Request $request, string $contractId): RedirectResponse
+    {
+        $input = $request->validate([
+            'signed_ref' => ['required', 'string', 'max:255'],
+        ]);
+
+        app(MaintainContract::class)->sign(
+            $this->actor(),
+            Contract::query()->findOrFail($contractId),
+            $input['signed_ref'],
+            $this->idempotencyKey('hr.contract.sign'),
+        );
+
+        return redirect()->route('hr.contracts')->with('success', 'Contract signed and active; its terms are now immutable.');
+    }
+
+    public function closeContract(Request $request, string $contractId): RedirectResponse
+    {
+        $input = $request->validate([
+            'effective_to' => ['required', 'date'],
+        ]);
+
+        app(MaintainContract::class)->close(
+            $this->actor(),
+            Contract::query()->findOrFail($contractId),
+            $input['effective_to'],
+            $this->idempotencyKey('hr.contract.close'),
+        );
+
+        return redirect()->route('hr.contracts')->with('success', 'Contract closed.');
+    }
+
+    public function hire(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'employment_id' => ['required', 'string'],
+            'effective_from' => ['required', 'date'],
+        ]);
+
+        app(MaintainEmployment::class)->hire(
+            $this->actor(),
+            Employment::query()->findOrFail($input['employment_id']),
+            $input['effective_from'],
+            $this->idempotencyKey('hr.employment.hire'),
+        );
+
+        return redirect()->route('hr.index')->with('success', 'Employment hired.');
+    }
+
+    public function placeOnLeave(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'employment_id' => ['required', 'string'],
+            'effective_from' => ['required', 'date'],
+        ]);
+
+        app(MaintainEmployment::class)->placeOnLeave(
+            $this->actor(),
+            Employment::query()->findOrFail($input['employment_id']),
+            $input['effective_from'],
+            $this->idempotencyKey('hr.employment.leave'),
+        );
+
+        return redirect()->route('hr.index')->with('success', 'Employment placed on leave.');
+    }
+
+    public function suspendEmployment(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'employment_id' => ['required', 'string'],
+            'effective_from' => ['required', 'date'],
+        ]);
+
+        app(MaintainEmployment::class)->suspend(
+            $this->actor(),
+            Employment::query()->findOrFail($input['employment_id']),
+            $input['effective_from'],
+            $this->idempotencyKey('hr.employment.suspend'),
+        );
+
+        return redirect()->route('hr.index')->with('success', 'Employment suspended.');
+    }
+
+    public function reinstateEmployment(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'employment_id' => ['required', 'string'],
+            'effective_from' => ['required', 'date'],
+        ]);
+
+        app(MaintainEmployment::class)->reinstate(
+            $this->actor(),
+            Employment::query()->findOrFail($input['employment_id']),
+            $input['effective_from'],
+            $this->idempotencyKey('hr.employment.reinstate'),
+        );
+
+        return redirect()->route('hr.index')->with('success', 'Employment reinstated.');
+    }
+
+    public function terminateEmployment(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'employment_id' => ['required', 'string'],
+            'effective_from' => ['required', 'date'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        app(MaintainEmployment::class)->terminate(
+            $this->actor(),
+            Employment::query()->findOrFail($input['employment_id']),
+            $input['effective_from'],
+            $input['reason'],
+            $this->idempotencyKey('hr.employment.terminate'),
+        );
+
+        return redirect()->route('hr.index')->with('success', 'Employment terminated.');
     }
 }
