@@ -117,4 +117,71 @@
         </table>
     @endif
 </div>
+
+<div class="card">
+    <h2>Termination settlement</h2>
+    <p class="sub">A terminated employment is cleared by HR and Finance, then a preparer proposes the settlement and a distinct approver records it. Each signature is signed in its own session.</p>
+    @if ($terminatedEmployments->isEmpty())
+        <p class="empty">No terminated employments to settle.</p>
+    @else
+        <table class="grid">
+            <tr><th>Employment</th><th>Clearances</th><th>Propose settlement</th></tr>
+            @foreach ($terminatedEmployments as $employment)
+                <tr>
+                    <td>{{ \Illuminate\Support\Str::limit($employment->id, 18) }}</td>
+                    <td>
+                        @foreach (['hr', 'finance'] as $domain)
+                            @if ($clearances->contains(fn ($c) => $c->employment_id === $employment->id && $c->domain === $domain))
+                                <span class="pill ok">{{ $domain }} cleared</span>
+                            @else
+                                <form method="POST" action="{{ route('payroll.clearance', $employment->id) }}" style="display:inline">
+                                    @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                    <input type="hidden" name="domain" value="{{ $domain }}">
+                                    <input name="note" type="text" placeholder="{{ $domain }} clearance note" required>
+                                    <button type="submit" class="btn small">Clear {{ $domain }}</button>
+                                </form>
+                            @endif
+                        @endforeach
+                    </td>
+                    <td>
+                        <form method="POST" action="{{ route('payroll.settlement.propose', $employment->id) }}" style="display:inline">
+                            @csrf
+                            <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                            <input name="amount" type="text" inputmode="decimal" placeholder="Amount" required>
+                            <input name="basis" type="text" placeholder="Basis evidence" required>
+                            <button type="submit" class="btn small">Propose</button>
+                        </form>
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
+
+<div class="card">
+    <h2>Settlement proposals (awaiting approval)</h2>
+    @if ($settlementProposals->isEmpty())
+        <p class="empty">No settlement proposals awaiting approval.</p>
+    @else
+        <table class="grid">
+            <tr><th>Employment</th><th>Amount</th><th>Basis</th><th>Prepared by</th><th>Approve</th></tr>
+            @foreach ($settlementProposals as $proposal)
+                <tr>
+                    <td>{{ \Illuminate\Support\Str::limit($proposal->employment_id, 18) }}</td>
+                    <td>{{ $proposal->amount }}</td>
+                    <td>{{ \Illuminate\Support\Str::limit($proposal->basis, 30) }}</td>
+                    <td>{{ \Illuminate\Support\Str::limit($proposal->prepared_by, 16) }}</td>
+                    <td>
+                        <form method="POST" action="{{ route('payroll.settlement.approve', $proposal->id) }}" style="display:inline">
+                            @csrf
+                            <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                            <button type="submit" class="btn">Approve</button>
+                        </form>
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
 @endsection

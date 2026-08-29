@@ -102,6 +102,8 @@ Route::middleware('employee')->group(function (): void {
     // Finance
     Route::prefix('finance')->name('finance.')->group(function (): void {
         Route::get('/', [FinanceController::class, 'index'])->name('index');
+        Route::post('periods', [FinanceController::class, 'openFinancialPeriod'])->name('period.open');
+        Route::post('periods/{periodId}/close', [FinanceController::class, 'closeFinancialPeriod'])->name('period.close');
         Route::post('payments', [FinanceController::class, 'recordPayment'])->name('payment');
         Route::post('obligations', [FinanceController::class, 'postObligation'])->name('obligation.post');
         Route::post('payments/{paymentId}/refund', [FinanceController::class, 'refund'])->name('refund');
@@ -116,6 +118,9 @@ Route::middleware('employee')->group(function (): void {
         Route::post('periods/{periodId}/close', [PayrollController::class, 'closePeriod'])->name('period.close');
         Route::post('periods/{periodId}/calculate', [PayrollController::class, 'calculate'])->name('calculate');
         Route::post('calculations/{calculationId}/approve', [PayrollController::class, 'approve'])->name('approve');
+        Route::post('employments/{employmentId}/clearance', [PayrollController::class, 'clear'])->name('clearance');
+        Route::post('employments/{employmentId}/settlements', [PayrollController::class, 'proposeSettlement'])->name('settlement.propose');
+        Route::post('settlements/{proposalId}/approve', [PayrollController::class, 'approveSettlement'])->name('settlement.approve');
     });
 
     // Reporting & Dashboards

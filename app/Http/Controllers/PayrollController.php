@@ -8,9 +8,12 @@ use App\Modules\Hr\Models\Employment;
 use App\Modules\Payroll\Commands\ApprovePayrollResult;
 use App\Modules\Payroll\Commands\CalculatePayroll;
 use App\Modules\Payroll\Commands\MaintainPayrollPeriod;
+use App\Modules\Payroll\Commands\SettleEmployment;
 use App\Modules\Payroll\Models\PayrollCalculation;
+use App\Modules\Payroll\Models\PayrollClearance;
 use App\Modules\Payroll\Models\PayrollPeriod;
 use App\Modules\Payroll\Models\PayrollResult;
+use App\Modules\Payroll\Models\SettlementProposal;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -31,6 +34,9 @@ final class PayrollController extends Controller
             'calculations' => PayrollCalculation::query()->orderByDesc('id')->limit(200)->get(),
             'results' => PayrollResult::query()->orderByDesc('id')->limit(200)->get(),
             'employments' => Employment::query()->where('lifecycle_state', 'active')->orderBy('id')->get(),
+            'terminatedEmployments' => Employment::query()->where('lifecycle_state', 'terminated')->orderBy('id')->limit(200)->get(),
+            'clearances' => PayrollClearance::query()->orderBy('id')->limit(500)->get(),
+            'settlementProposals' => SettlementProposal::query()->where('lifecycle_state', SettlementProposal::STATE_PROPOSED)->orderBy('id')->limit(200)->get(),
         ]);
     }
 
@@ -89,5 +95,52 @@ final class PayrollController extends Controller
         );
 
         return redirect()->route('payroll.index')->with('success', 'Payroll result approved and versioned.');
+    }
+
+    public function clear(Request $request, string $employmentId): RedirectResponse
+    {
+        $input = $request->validate([
+            'domain' => ['required', 'in:hr,finance'],
+            'note' => ['required', 'string', 'max:1000'],
+        ]);
+
+        app(SettleEmployment::class)->clear(
+            $this->actor(),
+            Employment::query()->findOrFail($employmentId),
+            $input['domain'],
+            $input['note'],
+            $this->idempotencyKey('payroll.clearance'),
+        );
+
+        return redirect()->route('payroll.index')->with('success', 'Clearance recorded.');
+    }
+
+    public function proposeSettlement(Request $request, string $employmentId): RedirectResponse
+    {
+        $input = $request->validate([
+            'amount' => ['required', 'numeric', 'min:0', 'max:99999999999999'],
+            'basis' => ['required', 'string', 'max:1000'],
+        ]);
+
+        app(SettleEmployment::class)->propose(
+            $this->actor(),
+            Employment::query()->findOrFail($employmentId),
+            $input['amount'],
+            $input['basis'],
+            $this->idempotencyKey('payroll.settlement.propose'),
+        );
+
+        return redirect()->route('payroll.index')->with('success', 'Settlement proposed; it is recorded only when a distinct approver approves it.');
+    }
+
+    public function approveSettlement(Request $request, string $proposalId): RedirectResponse
+    {
+        app(SettleEmployment::class)->approve(
+            $this->actor(),
+            SettlementProposal::query()->findOrFail($proposalId),
+            $this->idempotencyKey('payroll.settlement.approve'),
+        );
+
+        return redirect()->route('payroll.index')->with('success', 'Settlement approved and recorded.');
     }
 }

@@ -289,4 +289,39 @@ final class TransportWorkflowFeatureTest extends TestCase
             'id' => $decisionId, 'lifecycle_state' => 'reviewed',
         ]);
     }
+
+    public function test_financial_period_lifecycle_through_the_console(): void
+    {
+        $this->makeEmployee('twt-fp-1', ['finance.period'], 'period-keeper');
+
+        $this->signIn('period-keeper');
+        $this->post('/finance/periods', [
+            'period_key' => 'SY2026-C1',
+            'date_from' => '2026-08-01',
+            'date_to' => '2027-07-31',
+        ])->assertRedirect('/finance');
+        $periodId = DB::table(DB::connection()->getTablePrefix().'financial_periods')->where('period_key', 'SY2026-C1')->value('id');
+        $this->assertDatabaseHas(DB::connection()->getTablePrefix().'financial_periods', [
+            'period_key' => 'SY2026-C1', 'lifecycle_state' => 'open',
+        ]);
+
+        // The same key cannot be opened twice.
+        $this->post('/finance/periods', [
+            'period_key' => 'SY2026-C1',
+            'date_from' => '2026-08-01',
+            'date_to' => '2027-07-31',
+        ], ['referer' => 'http://localhost/finance'])
+            ->assertRedirect('/finance')
+            ->assertSessionHas('error_code', 'finance.period_key_exists');
+
+        // Closure is a session-signed, terminal transition.
+        $this->post('/finance/periods/'.$periodId.'/close')->assertRedirect('/finance');
+        $this->assertDatabaseHas(DB::connection()->getTablePrefix().'financial_periods', [
+            'id' => $periodId, 'lifecycle_state' => 'closed',
+        ]);
+
+        $this->post('/finance/periods/'.$periodId.'/close', [], ['referer' => 'http://localhost/finance'])
+            ->assertRedirect('/finance')
+            ->assertSessionHas('error_code', 'finance.period_transition_forbidden');
+    }
 }

@@ -9,6 +9,53 @@
 </div>
 
 <div class="card">
+    <h2>Financial periods</h2>
+    <p class="sub">Payments, obligations and refunds post only to an open period; closure is terminal (an overlapping open payroll period blocks it).</p>
+    <form method="POST" action="{{ route('finance.period.open') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="row">
+            <div>
+                <label>Period key</label>
+                <input name="period_key" type="text" placeholder="e.g. SY2026-1" required>
+            </div>
+            <div>
+                <label>From</label>
+                <input type="date" name="date_from" required>
+            </div>
+            <div>
+                <label>To</label>
+                <input type="date" name="date_to" required>
+            </div>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Open period</button></div>
+    </form>
+    @if ($periods->isEmpty())
+        <p class="empty">No financial periods.</p>
+    @else
+        <table class="grid" style="margin-top:8px">
+            <tr><th>Period</th><th>Window</th><th>State</th><th></th></tr>
+            @foreach ($periods as $period)
+                <tr>
+                    <td>{{ $period->period_key }}</td>
+                    <td>{{ $period->date_from }} → {{ $period->date_to }}</td>
+                    <td><span class="pill {{ $period->lifecycle_state === 'open' ? 'ok' : '' }}">{{ $period->lifecycle_state }}</span></td>
+                    <td>
+                        @if ($period->lifecycle_state === 'open')
+                            <form method="POST" action="{{ route('finance.period.close', $period->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Close</button>
+                            </form>
+                        @endif
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
+
+<div class="card">
     <h2>Record a payment</h2>
     <form method="POST" action="{{ route('finance.payment') }}">
         @csrf

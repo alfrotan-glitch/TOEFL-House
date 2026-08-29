@@ -14,6 +14,7 @@ use App\Modules\Payroll\Commands\MaintainPayrollPeriod;
 use App\Modules\Payroll\Commands\SettleEmployment;
 use App\Modules\Payroll\Models\PayrollCalculation;
 use App\Modules\Payroll\Models\PayrollPeriod;
+use App\Modules\Payroll\Models\SettlementProposal;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Tests\Concerns\BuildsActors;
@@ -190,7 +191,8 @@ final class PayrollDirectSqlAttackTest extends TestCase
 
         $settler = $this->grantedActor('atk-settle-1', ['payroll.settle']);
         $settleApprover = $this->grantedActor('atk-settle-2', ['payroll.settle_approve']);
-        app(SettleEmployment::class)->settle($settler, $settleApprover, Employment::query()->findOrFail($this->employmentId), '5000.00', 'final dues per ledger review', 'atk-set-1');
+        $proposal = app(SettleEmployment::class)->propose($settler, Employment::query()->findOrFail($this->employmentId), '5000.00', 'final dues per ledger review', 'atk-set-1');
+        app(SettleEmployment::class)->approve($settleApprover, SettlementProposal::query()->findOrFail($proposal['proposal_id']), 'atk-set-2');
 
         // Two distinct, non-beneficiary actors: a second settlement must be impossible.
         $this->expectException(QueryException::class);
@@ -224,5 +226,118 @@ final class PayrollDirectSqlAttackTest extends TestCase
             'approved_by' => $this->personId,
             'created_at' => now(), 'updated_at' => now(),
         ]);
+    }
+
+    public function test_direct_sql_cannot_propose_a_settlement_without_both_clearances(): void
+    {
+        $manager = $this->grantedActor('atk-manager-1', ['hr.employ', 'hr.terminate', 'access.assign_position']);
+        app(MaintainEmployment::class)->terminate($manager, Employment::query()->findOrFail($this->employmentId), '2026-10-01', 'contract ended', 'atk-emp-p1');
+        app(SettleEmployment::class)->clear($this->grantedActor('atk-hr-clear-p1', ['payroll.clear_hr']), Employment::query()->findOrFail($this->employmentId), 'hr', 'no outstanding HR items', 'atk-cl-p1');
+
+        // Terminated with only the hr clearance: a raw proposal INSERT must fail.
+        $this->expectException(QueryException::class);
+        DB::table('settlement_proposals')->insert([
+            'id' => 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeee10',
+            'employment_id' => $this->employmentId,
+            'amount' => '5000.00',
+            'basis' => 'raw sql settlement proposal',
+            'lifecycle_state' => 'proposed',
+            'prepared_by' => 'atk-prop-1',
+            'approved_by' => null,
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+    }
+
+    public function test_direct_sql_cannot_propose_a_settlement_for_an_active_employment(): void
+    {
+        // Not terminated, no clearances: the guard must reject the proposal.
+        $this->expectException(QueryException::class);
+        DB::table('settlement_proposals')->insert([
+            'id' => 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeee11',
+            'employment_id' => $this->employmentId,
+            'amount' => '5000.00',
+            'basis' => 'raw sql proposal for active employment',
+            'lifecycle_state' => 'proposed',
+            'prepared_by' => 'atk-prop-1',
+            'approved_by' => null,
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+    }
+
+    public function test_direct_sql_cannot_open_a_second_settlement_proposal(): void
+    {
+        $manager = $this->grantedActor('atk-manager-1', ['hr.employ', 'hr.terminate', 'access.assign_position']);
+        app(MaintainEmployment::class)->terminate($manager, Employment::query()->findOrFail($this->employmentId), '2026-10-01', 'contract ended', 'atk-emp-p2');
+        app(SettleEmployment::class)->clear($this->grantedActor('atk-hr-clear-p2', ['payroll.clear_hr']), Employment::query()->findOrFail($this->employmentId), 'hr', 'no outstanding HR items', 'atk-cl-p2');
+        app(SettleEmployment::class)->clear($this->grantedActor('atk-fin-clear-p2', ['payroll.clear_finance']), Employment::query()->findOrFail($this->employmentId), 'finance', 'accounts reconciled', 'atk-cl-p3');
+        $proposal = app(SettleEmployment::class)->propose($this->grantedActor('atk-settle-p2', ['payroll.settle']), Employment::query()->findOrFail($this->employmentId), '5000.00', 'final dues per ledger review', 'atk-set-p2');
+
+        // A second open proposal for the same employment must be impossible.
+        $this->expectException(QueryException::class);
+        DB::table('settlement_proposals')->insert([
+            'id' => 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeee12',
+            'employment_id' => $this->employmentId,
+            'amount' => '1.00',
+            'basis' => 'forged second proposal via raw sql',
+            'lifecycle_state' => 'proposed',
+            'prepared_by' => 'atk-prop-2',
+            'approved_by' => null,
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+    }
+
+    public function test_direct_sql_cannot_self_approve_a_settlement_proposal(): void
+    {
+        $manager = $this->grantedActor('atk-manager-1', ['hr.employ', 'hr.terminate', 'access.assign_position']);
+        app(MaintainEmployment::class)->terminate($manager, Employment::query()->findOrFail($this->employmentId), '2026-10-01', 'contract ended', 'atk-emp-p3');
+        app(SettleEmployment::class)->clear($this->grantedActor('atk-hr-clear-p3', ['payroll.clear_hr']), Employment::query()->findOrFail($this->employmentId), 'hr', 'no outstanding HR items', 'atk-cl-p4');
+        app(SettleEmployment::class)->clear($this->grantedActor('atk-fin-clear-p3', ['payroll.clear_finance']), Employment::query()->findOrFail($this->employmentId), 'finance', 'accounts reconciled', 'atk-cl-p5');
+        $proposal = app(SettleEmployment::class)->propose($this->grantedActor('atk-settle-p3', ['payroll.settle']), Employment::query()->findOrFail($this->employmentId), '5000.00', 'final dues per ledger review', 'atk-set-p3');
+        $proposalId = $proposal['proposal_id'];
+
+        // The preparer may not approve their own proposal via raw sql.
+        $this->expectException(QueryException::class);
+        DB::statement("UPDATE settlement_proposals SET lifecycle_state = 'approved', approved_by = 'atk-settle-p3' WHERE id = ?", [$proposalId]);
+    }
+
+    public function test_direct_sql_cannot_approve_a_settlement_proposal_with_the_beneficiary(): void
+    {
+        $manager = $this->grantedActor('atk-manager-1', ['hr.employ', 'hr.terminate', 'access.assign_position']);
+        app(MaintainEmployment::class)->terminate($manager, Employment::query()->findOrFail($this->employmentId), '2026-10-01', 'contract ended', 'atk-emp-p4');
+        app(SettleEmployment::class)->clear($this->grantedActor('atk-hr-clear-p4', ['payroll.clear_hr']), Employment::query()->findOrFail($this->employmentId), 'hr', 'no outstanding HR items', 'atk-cl-p6');
+        app(SettleEmployment::class)->clear($this->grantedActor('atk-fin-clear-p4', ['payroll.clear_finance']), Employment::query()->findOrFail($this->employmentId), 'finance', 'accounts reconciled', 'atk-cl-p7');
+        $proposal = app(SettleEmployment::class)->propose($this->grantedActor('atk-settle-p4', ['payroll.settle']), Employment::query()->findOrFail($this->employmentId), '5000.00', 'final dues per ledger review', 'atk-set-p4');
+        $proposalId = $proposal['proposal_id'];
+
+        // The beneficiary may never be the approver, even via raw sql.
+        $this->expectException(QueryException::class);
+        DB::statement("UPDATE settlement_proposals SET lifecycle_state = 'approved', approved_by = ? WHERE id = ?", [$this->personId, $proposalId]);
+    }
+
+    public function test_direct_sql_cannot_mutate_a_settlement_proposal(): void
+    {
+        $manager = $this->grantedActor('atk-manager-1', ['hr.employ', 'hr.terminate', 'access.assign_position']);
+        app(MaintainEmployment::class)->terminate($manager, Employment::query()->findOrFail($this->employmentId), '2026-10-01', 'contract ended', 'atk-emp-p5');
+        app(SettleEmployment::class)->clear($this->grantedActor('atk-hr-clear-p5', ['payroll.clear_hr']), Employment::query()->findOrFail($this->employmentId), 'hr', 'no outstanding HR items', 'atk-cl-p8');
+        app(SettleEmployment::class)->clear($this->grantedActor('atk-fin-clear-p5', ['payroll.clear_finance']), Employment::query()->findOrFail($this->employmentId), 'finance', 'accounts reconciled', 'atk-cl-p9');
+        $proposal = app(SettleEmployment::class)->propose($this->grantedActor('atk-settle-p5', ['payroll.settle']), Employment::query()->findOrFail($this->employmentId), '5000.00', 'final dues per ledger review', 'atk-set-p5');
+        $proposalId = $proposal['proposal_id'];
+
+        // Only the lifecycle state and approved_by may change.
+        $this->expectException(QueryException::class);
+        DB::statement('UPDATE settlement_proposals SET amount = 999999 WHERE id = ?', [$proposalId]);
+    }
+
+    public function test_direct_sql_cannot_delete_a_settlement_proposal(): void
+    {
+        $manager = $this->grantedActor('atk-manager-1', ['hr.employ', 'hr.terminate', 'access.assign_position']);
+        app(MaintainEmployment::class)->terminate($manager, Employment::query()->findOrFail($this->employmentId), '2026-10-01', 'contract ended', 'atk-emp-p6');
+        app(SettleEmployment::class)->clear($this->grantedActor('atk-hr-clear-p6', ['payroll.clear_hr']), Employment::query()->findOrFail($this->employmentId), 'hr', 'no outstanding HR items', 'atk-cl-p10');
+        app(SettleEmployment::class)->clear($this->grantedActor('atk-fin-clear-p6', ['payroll.clear_finance']), Employment::query()->findOrFail($this->employmentId), 'finance', 'accounts reconciled', 'atk-cl-p11');
+        $proposal = app(SettleEmployment::class)->propose($this->grantedActor('atk-settle-p6', ['payroll.settle']), Employment::query()->findOrFail($this->employmentId), '5000.00', 'final dues per ledger review', 'atk-set-p6');
+
+        // A proposal is an auditable fact; deleting it must be impossible.
+        $this->expectException(QueryException::class);
+        DB::statement('DELETE FROM settlement_proposals WHERE id = ?', [$proposal['proposal_id']]);
     }
 }

@@ -15,6 +15,7 @@ use App\Modules\Payroll\Commands\SettleEmployment;
 use App\Modules\Payroll\Models\PayrollCalculation;
 use App\Modules\Payroll\Models\PayrollPeriod;
 use App\Modules\Payroll\Models\PayrollResult;
+use App\Modules\Payroll\Models\SettlementProposal;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
@@ -233,46 +234,65 @@ final class PayrollFeatureTest extends TestCase
         DB::statement("UPDATE payroll_periods SET lifecycle_state = 'open' WHERE id = ?", [$this->periodId]);
     }
 
-    public function test_settlement_requires_termination_clearances_and_two_actors(): void
+    public function test_settlement_is_staged_with_termination_clearances_and_two_sessions(): void
     {
         $hrManager = $this->grantedActor('pay-manager-1', ['hr.employ', 'hr.terminate', 'access.assign_position']);
         $financeClearer = $this->grantedActor('pay-finance-1', ['payroll.clear_finance']);
         $hrClearer = $this->grantedActor('pay-hr-clear-1', ['payroll.clear_hr']);
-        $settler = $this->grantedActor('pay-settle-1', ['payroll.settle', 'payroll.settle_approve']);
+        $preparer = $this->grantedActor('pay-settle-1', ['payroll.settle', 'payroll.settle_approve']);
         $settleApprover = $this->grantedActor('pay-settle-2', ['payroll.settle_approve']);
+        $employment = fn (): Employment => Employment::query()->findOrFail($this->employmentId);
 
         try {
-            app(SettleEmployment::class)->settle($settler, $settleApprover, Employment::query()->findOrFail($this->employmentId), '5000.00', 'remaining balance', 'pay-set-1');
-            $this->fail('settlement requires a terminated employment');
+            app(SettleEmployment::class)->propose($preparer, $employment(), '5000.00', 'remaining balance', 'pay-set-1');
+            $this->fail('settlement proposal requires a terminated employment');
         } catch (BusinessRejection $rejection) {
             $this->assertSame('payroll.settlement_requires_termination', $rejection->errorCode());
         }
 
-        app(MaintainEmployment::class)->terminate($hrManager, Employment::query()->findOrFail($this->employmentId), '2026-10-01', 'contract ended', 'pay-emp-3');
+        app(MaintainEmployment::class)->terminate($hrManager, $employment(), '2026-10-01', 'contract ended', 'pay-emp-3');
 
         try {
-            app(SettleEmployment::class)->settle($settler, $settleApprover, Employment::query()->findOrFail($this->employmentId), '5000.00', 'remaining balance', 'pay-set-2');
-            $this->fail('settlement requires both clearances');
+            app(SettleEmployment::class)->propose($preparer, $employment(), '5000.00', 'remaining balance', 'pay-set-2');
+            $this->fail('settlement proposal requires both clearances');
         } catch (BusinessRejection $rejection) {
             $this->assertSame('payroll.settlement_requires_clearance', $rejection->errorCode());
         }
 
-        app(SettleEmployment::class)->clear($hrClearer, Employment::query()->findOrFail($this->employmentId), 'hr', 'no outstanding HR items', 'pay-cl-1');
-        app(SettleEmployment::class)->clear($financeClearer, Employment::query()->findOrFail($this->employmentId), 'finance', 'accounts reconciled', 'pay-cl-2');
+        app(SettleEmployment::class)->clear($hrClearer, $employment(), 'hr', 'no outstanding HR items', 'pay-cl-1');
+        app(SettleEmployment::class)->clear($financeClearer, $employment(), 'finance', 'accounts reconciled', 'pay-cl-2');
+
+        $proposal = app(SettleEmployment::class)->propose($preparer, $employment(), '5000.00', 'final dues per ledger review', 'pay-set-3');
+        $proposalModel = SettlementProposal::query()->findOrFail($proposal['proposal_id']);
 
         try {
-            app(SettleEmployment::class)->settle($settler, $settler, Employment::query()->findOrFail($this->employmentId), '5000.00', 'remaining balance', 'pay-set-3');
-            $this->fail('settlement needs two distinct actors');
+            app(SettleEmployment::class)->propose($preparer, $employment(), '5000.00', 'again', 'pay-set-9');
+            $this->fail('a second open proposal must be rejected');
+        } catch (BusinessRejection $rejection) {
+            $this->assertSame('payroll.settlement_proposal_exists', $rejection->errorCode());
+        }
+
+        try {
+            app(SettleEmployment::class)->approve($preparer, $proposalModel, 'pay-set-4');
+            $this->fail('the preparer cannot approve their own proposal');
         } catch (AuthorizationDenied $denial) {
             $this->assertSame('payroll.settlement_not_independent', $denial->errorCode());
         }
 
-        $settlement = app(SettleEmployment::class)->settle($settler, $settleApprover, Employment::query()->findOrFail($this->employmentId), '5000.00', 'final dues per ledger review', 'pay-set-4');
-        $this->assertDatabaseHas('final_settlements', ['id' => $settlement['settlement_id'], 'amount' => '5000.00']);
+        $settlement = app(SettleEmployment::class)->approve($settleApprover, $proposalModel, 'pay-set-5');
+        $this->assertDatabaseHas('final_settlements', ['id' => $settlement['settlement_id'], 'amount' => '5000.00', 'approved_by' => $settleApprover->actorId]);
+        $this->assertDatabaseHas('settlement_proposals', ['id' => $proposalModel->id, 'lifecycle_state' => 'approved', 'approved_by' => $settleApprover->actorId]);
 
         try {
-            app(SettleEmployment::class)->settle($settler, $settleApprover, Employment::query()->findOrFail($this->employmentId), '6000.00', 'again', 'pay-set-5');
-            $this->fail('a second settlement must be rejected');
+            app(SettleEmployment::class)->approve($settleApprover, $proposalModel, 'pay-set-6');
+            $this->fail('an approved proposal cannot be approved again');
+        } catch (BusinessRejection $rejection) {
+            $this->assertSame('payroll.settlement_proposal_state', $rejection->errorCode());
+        }
+
+        try {
+            app(SettleEmployment::class)->propose($preparer, $employment(), '6000.00', 'again', 'pay-set-7');
+            $this->fail('a settled employment cannot carry a new proposal');
         } catch (BusinessRejection $rejection) {
             $this->assertSame('payroll.settlement_exists', $rejection->errorCode());
         }

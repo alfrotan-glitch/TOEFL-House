@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Modules\Finance\Commands\AllocatePayment;
+use App\Modules\Finance\Commands\MaintainFinancialPeriod;
 use App\Modules\Finance\Commands\PostObligation;
 use App\Modules\Finance\Commands\RecordPayment;
 use App\Modules\Finance\Commands\RefundPayment;
@@ -144,5 +145,35 @@ final class FinanceController extends Controller
         );
 
         return redirect()->route('finance.index')->with('success', 'Obligation posted.');
+    }
+
+    public function openFinancialPeriod(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'period_key' => ['required', 'string', 'max:40'],
+            'date_from' => ['required', 'date'],
+            'date_to' => ['required', 'date', 'after_or_equal:date_from'],
+        ]);
+
+        app(MaintainFinancialPeriod::class)->open(
+            $this->actor(),
+            $input['period_key'],
+            $input['date_from'],
+            $input['date_to'],
+            $this->idempotencyKey('finance.period.open'),
+        );
+
+        return redirect()->route('finance.index')->with('success', 'Financial period opened.');
+    }
+
+    public function closeFinancialPeriod(Request $request, string $periodId): RedirectResponse
+    {
+        app(MaintainFinancialPeriod::class)->close(
+            $this->actor(),
+            FinancialPeriod::query()->findOrFail($periodId),
+            $this->idempotencyKey('finance.period.close'),
+        );
+
+        return redirect()->route('finance.index')->with('success', 'Financial period closed.');
     }
 }
