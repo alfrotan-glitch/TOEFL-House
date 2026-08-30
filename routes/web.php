@@ -52,6 +52,7 @@ Route::middleware('employee')->group(function (): void {
         Route::post('people/{personId}/verify', [IdentityController::class, 'verifyPerson'])->name('verify');
         Route::post('accounts', [IdentityController::class, 'linkAccount'])->name('link');
         Route::post('accounts/{accountId}/password', [IdentityController::class, 'setPassword'])->name('password');
+        Route::post('accounts/{accountId}/deactivate', [IdentityController::class, 'deactivateAccount'])->name('deactivate');
     });
 
     // Students & Admissions
@@ -64,6 +65,10 @@ Route::middleware('employee')->group(function (): void {
         Route::post('decisions/{decisionId}/approve', [StudentsController::class, 'approveAdmission'])->name('decision.approve');
         Route::post('applicants/{applicantId}/enroll', [StudentsController::class, 'enroll'])->name('enroll');
         Route::get('students/{studentId}', [StudentsController::class, 'show'])->name('show');
+        Route::post('students/{studentId}/status/{action}', [StudentsController::class, 'transitionStatus'])->where('action', 'suspend|withdraw|reactivate|complete|graduate')->name('status');
+        Route::post('students/{studentId}/guardians', [StudentsController::class, 'recordGuardian'])->name('guardian.record');
+        Route::post('guardians/{relationshipId}/verify', [StudentsController::class, 'verifyGuardian'])->name('guardian.verify');
+        Route::post('guardians/{relationshipId}/revoke', [StudentsController::class, 'revokeGuardian'])->name('guardian.revoke');
     });
 
     // Academic
@@ -103,6 +108,9 @@ Route::middleware('employee')->group(function (): void {
         Route::post('versions/{versionId}/submit', [HrController::class, 'submitVersion'])->name('version.submit');
         Route::post('versions/{versionId}/withdraw', [HrController::class, 'withdrawVersion'])->name('version.withdraw');
         Route::post('versions/{versionId}/approve', [HrController::class, 'approveVersion'])->name('version.approve');
+        Route::post('employments/{employmentId}/leave', [HrController::class, 'requestLeave'])->name('leave.request');
+        Route::post('leaves/{leaveId}/decide', [HrController::class, 'decideLeave'])->name('leave.decide');
+        Route::post('leaves/{leaveId}/cancel', [HrController::class, 'cancelLeave'])->name('leave.cancel');
     });
 
     // Library & Resources

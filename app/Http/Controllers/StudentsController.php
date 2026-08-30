@@ -11,6 +11,9 @@ use App\Modules\Admissions\Commands\RegisterApplicant;
 use App\Modules\Admissions\Models\AdmissionDecision;
 use App\Modules\Admissions\Models\Applicant;
 use App\Modules\Identity\Models\Person;
+use App\Modules\Students\Commands\MaintainGuardianRelationship;
+use App\Modules\Students\Commands\TransitionStudentStatus;
+use App\Modules\Students\Models\GuardianRelationship;
 use App\Modules\Students\Models\Student;
 use App\Modules\Students\Models\StudentStatus;
 use Illuminate\Database\Eloquent\Builder;
@@ -150,10 +153,77 @@ final class StudentsController extends Controller
         return view('students.show', [
             'student' => $student,
             'statuses' => $statuses,
+            'guardians' => GuardianRelationship::query()
+                ->where('student_id', $student->id)
+                ->orderBy('id')->limit(100)->get(),
+            'people' => Person::query()->where('verification_state', 'verified')->orderBy('legal_name')->limit(300)->get(),
             'enrollments' => Enrollment::query()
                 ->where('student_id', $student->id)
                 ->orderByDesc('created_at')->limit(50)->get(),
         ]);
+    }
+
+    public function transitionStatus(Request $request, string $studentId, string $action): RedirectResponse
+    {
+        $input = $request->validate([
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+        if (! in_array($action, ['suspend', 'withdraw', 'reactivate', 'complete', 'graduate'], true)) {
+            abort(404);
+        }
+
+        app(TransitionStudentStatus::class)->{$action}(
+            $this->actor(),
+            Student::query()->findOrFail($studentId),
+            $input['reason'],
+            $this->idempotencyKey('students.status.'.$action),
+        );
+
+        return redirect()->route('students.show', $studentId)->with('success', 'Student status changed to '.$action.'.');
+    }
+
+    public function recordGuardian(Request $request, string $studentId): RedirectResponse
+    {
+        $input = $request->validate([
+            'guardian_person_id' => ['required', 'string'],
+            'relationship' => ['required', 'string', 'max:120'],
+            'permissions' => ['required', 'string', 'max:500'],
+        ]);
+
+        $permissions = array_values(array_filter(array_map('trim', explode(',', $input['permissions']))));
+
+        app(MaintainGuardianRelationship::class)->record(
+            $this->actor(),
+            Student::query()->findOrFail($studentId),
+            $input['guardian_person_id'],
+            $input['relationship'],
+            $permissions,
+            $this->idempotencyKey('students.guardian.record'),
+        );
+
+        return redirect()->route('students.show', $studentId)->with('success', 'Guardian relationship recorded (unverified until a verifier confirms it).');
+    }
+
+    public function verifyGuardian(Request $request, string $relationshipId): RedirectResponse
+    {
+        app(MaintainGuardianRelationship::class)->verify(
+            $this->actor(),
+            GuardianRelationship::query()->findOrFail($relationshipId),
+            $this->idempotencyKey('students.guardian.verify'),
+        );
+
+        return redirect()->back()->with('success', 'Guardian relationship verified.');
+    }
+
+    public function revokeGuardian(Request $request, string $relationshipId): RedirectResponse
+    {
+        app(MaintainGuardianRelationship::class)->revoke(
+            $this->actor(),
+            GuardianRelationship::query()->findOrFail($relationshipId),
+            $this->idempotencyKey('students.guardian.revoke'),
+        );
+
+        return redirect()->back()->with('success', 'Guardian relationship revoked.');
     }
 
     /** @return Builder<Student> */

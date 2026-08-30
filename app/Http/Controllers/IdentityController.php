@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Modules\Identity\Commands\DeactivateUserAccount;
 use App\Modules\Identity\Commands\LinkUserAccount;
 use App\Modules\Identity\Commands\SetAccountPassword;
 use App\Modules\Identity\Commands\VerifyPerson;
@@ -81,5 +82,21 @@ final class IdentityController extends Controller
         );
 
         return redirect()->route('identity.index')->with('success', 'Credential set for '.$account->username.'. The employee can now sign in.');
+    }
+
+    public function deactivateAccount(Request $request, string $accountId): RedirectResponse
+    {
+        $input = $request->validate([
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        app(DeactivateUserAccount::class)->deactivate(
+            $this->actor(),
+            UserAccount::query()->findOrFail($accountId),
+            $input['reason'],
+            $this->idempotencyKey('identity.deactivate'),
+        );
+
+        return redirect()->route('identity.index')->with('success', 'Account deactivated; it can no longer authenticate.');
     }
 }

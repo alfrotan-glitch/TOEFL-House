@@ -7,6 +7,7 @@ namespace App\Http\Controllers;
 use App\Modules\Hr\Commands\MaintainContract;
 use App\Modules\Hr\Commands\MaintainContractVersion;
 use App\Modules\Hr\Commands\MaintainEmployment;
+use App\Modules\Hr\Commands\MaintainLeave;
 use App\Modules\Hr\Models\Contract;
 use App\Modules\Hr\Models\ContractVersion;
 use App\Modules\Hr\Models\Employment;
@@ -279,5 +280,54 @@ final class HrController extends Controller
         );
 
         return redirect()->route('hr.index')->with('success', 'Employment terminated.');
+    }
+
+    public function requestLeave(Request $request, string $employmentId): RedirectResponse
+    {
+        $input = $request->validate([
+            'category' => ['required', 'string', 'max:120'],
+            'date_from' => ['required', 'date'],
+            'date_to' => ['required', 'date', 'after_or_equal:date_from'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        app(MaintainLeave::class)->request(
+            $this->actor(),
+            Employment::query()->findOrFail($employmentId),
+            $input['category'],
+            $input['date_from'],
+            $input['date_to'],
+            $input['reason'],
+            $this->idempotencyKey('hr.leave.request'),
+        );
+
+        return redirect()->route('hr.index')->with('success', 'Leave requested; a distinct decider approves or rejects it.');
+    }
+
+    public function decideLeave(Request $request, string $leaveId): RedirectResponse
+    {
+        $input = $request->validate([
+            'decision' => ['required', 'in:approve,reject'],
+        ]);
+
+        app(MaintainLeave::class)->decide(
+            $this->actor(),
+            Leave::query()->findOrFail($leaveId),
+            $input['decision'] === 'approve',
+            $this->idempotencyKey('hr.leave.decide'),
+        );
+
+        return redirect()->route('hr.index')->with('success', 'Leave decision recorded.');
+    }
+
+    public function cancelLeave(Request $request, string $leaveId): RedirectResponse
+    {
+        app(MaintainLeave::class)->cancel(
+            $this->actor(),
+            Leave::query()->findOrFail($leaveId),
+            $this->idempotencyKey('hr.leave.cancel'),
+        );
+
+        return redirect()->route('hr.index')->with('success', 'Leave request cancelled.');
     }
 }

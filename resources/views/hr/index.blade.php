@@ -112,18 +112,68 @@
 
 <div class="card">
     <h2>Leave</h2>
+    <p class="sub">Leave attaches to an open employment; a decider distinct from the requester approves or rejects; approved periods never overlap. Decisions feed payroll proration evidence.</p>
+    @foreach ($employments as $employment)
+        @if (in_array($employment->lifecycle_state, ['active', 'on_leave'], true))
+            <form method="POST" action="{{ route('hr.leave.request', $employment->id) }}" style="margin-bottom:8px">
+                @csrf
+                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                <div class="row">
+                    <div>
+                        <label>Employment</label>
+                        <input type="text" value="{{ \Illuminate\Support\Str::limit($employment->id, 18) }}" readonly>
+                    </div>
+                    <div>
+                        <label>Category</label>
+                        <input name="category" type="text" placeholder="e.g. sick, annual" required>
+                    </div>
+                    <div>
+                        <label>From</label>
+                        <input type="date" name="date_from" required>
+                    </div>
+                    <div>
+                        <label>To</label>
+                        <input type="date" name="date_to" required>
+                    </div>
+                    <div>
+                        <label>Reason</label>
+                        <input name="reason" type="text" required>
+                    </div>
+                </div>
+                <div class="actions"><button type="submit" class="btn small">Request leave</button></div>
+            </form>
+        @endif
+    @endforeach
     @if ($leaves->isEmpty())
         <p class="empty">No leave recorded.</p>
     @else
         <table class="grid">
-            <tr><th>Employment</th><th>Category</th><th>From</th><th>To</th><th>State</th></tr>
+            <tr><th>Employment</th><th>Category</th><th>From</th><th>To</th><th>State</th><th>Actions</th></tr>
             @foreach ($leaves as $leave)
                 <tr>
                     <td>{{ \Illuminate\Support\Str::limit($leave->employment_id, 16) }}</td>
                     <td>{{ $leave->category }}</td>
                     <td>{{ $leave->date_from }}</td>
                     <td>{{ $leave->date_to }}</td>
-                    <td><span class="pill">{{ $leave->lifecycle_state }}</span></td>
+                    <td><span class="pill {{ $leave->lifecycle_state === 'approved' ? 'ok' : '' }}">{{ $leave->lifecycle_state }}</span></td>
+                    <td>
+                        @if ($leave->lifecycle_state === 'requested')
+                            <form method="POST" action="{{ route('hr.leave.decide', $leave->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <select name="decision" style="display:inline">
+                                    <option value="approve">Approve</option>
+                                    <option value="reject">Reject</option>
+                                </select>
+                                <button type="submit" class="btn small">Decide</button>
+                            </form>
+                            <form method="POST" action="{{ route('hr.leave.cancel', $leave->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small secondary">Cancel</button>
+                            </form>
+                        @endif
+                    </td>
                 </tr>
             @endforeach
         </table>

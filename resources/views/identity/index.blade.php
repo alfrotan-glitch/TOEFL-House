@@ -64,6 +64,16 @@
                                     <div class="actions"><button type="submit" class="btn small">Set credential</button></div>
                                 </form>
                             </details>
+                            <details>
+                                <summary class="btn small secondary" style="display:inline-block; cursor:pointer">Deactivate</summary>
+                                <form method="POST" action="{{ route('identity.deactivate', $account->id) }}" style="margin-top:8px">
+                                    @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                    <label>Reason</label>
+                                    <input name="reason" type="text" required>
+                                    <div class="actions"><button type="submit" class="btn small">Deactivate account</button></div>
+                                </form>
+                            </details>
                         @endif
                     </td>
                 </tr>

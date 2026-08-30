@@ -35,11 +35,11 @@
 | Reporting | reporting.run / dashboard | RunReport, MaintainDashboard | web `/reporting/*` |
 | Payroll/Finance read | (pay slips, invoices) | Printing (read-only) | web `/print/*` |
 
-### PARTIAL (1) — stages missing
+### PARTIAL (0) — resolved
 
 | Module | Capability | Exposed | Missing stage | Disposition |
 |---|---|---|---|---|
-| Identity | identity.admin | SetAccountPassword (web+api) | `DeactivateUserAccount` (deactivation is dead — an account can never be deactivated through the console) | FIX — Increment B |
+| Identity | identity.admin | SetAccountPassword + `DeactivateUserAccount` (web+api) | ~~deactivation dead~~ — `POST /identity/accounts/{id}/deactivate` added in Increment B; deactivation proven over HTTP incl. login rejection and the terminal `identity.account_not_active` re-deactivation denial | DONE ✅ — Increment B
 
 ### NOT-APPLICABLE (14) — not an employee workflow, justified
 
@@ -49,7 +49,7 @@
 | Integrations | integrations.endpoint / inbound / dispatch / process / review / jobs | RegisterEndpoint, ReceiveInbound, ProcessInbound, DispatchDelivery, ProcessDeliveries, RequeueDelivery, RegisterJob, EnqueueJobRun, ProcessJobRun | System-internal outbox/webhook/job machinery (P17 §2 marked system-only); no employee performs these; absence is not an operational dead end |
 | Reporting | reporting.catalog / compute / reconcile | DefineMetric, ComputeProjection, ReconcileMetric | Closed canonical metric catalog (5 metrics — nothing outside it is definable by design); projection rebuild/reconciliation is an operational system function; the employee reporting workflow (run + dashboards) is COMPLETE |
 
-### MISSING (42) — employee workflows with no transport; ordered fix plan
+### MISSING (38 remaining of 42) — employee workflows with no transport; ordered fix plan
 
 | Increment | Module | Capability(ies) | Command | Actions | Why it is an operational dead end |
 |---|---|---|---|---|---|
@@ -57,10 +57,10 @@
 | A ✅ | Academic | academic.skill | MaintainSkill | register, retire | Skills drive delivery + payroll evidence; catalog unmanageable through the console |
 | A ✅ | HR | hr.contract | MaintainContract | draft, sign, close | **hire() requires a signed active contract** — the hire path is dead past contract-version approval |
 | A ✅ | HR | hr.employ (completion) / hr.terminate | MaintainEmployment | hire, placeOnLeave, suspend, reinstate, terminate | Matrix correction: only `employ` was exposed — hire/terminate were dead ends on the certified employ→payroll→settle path; the full employment state machine is now console-operable |
-| B | Students | students.manage / reactivate | TransitionStudentStatus | suspend, withdraw, reactivate, complete, graduate | Student record cannot leave active state through the console (the show view is read-only) |
-| B | HR | hr.leave_request / approve | MaintainLeave | request, decide, cancel | Leave evidence feeds payroll proration; leave is unmanageable through the console |
-| B | Students | students.guardian | MaintainGuardianRelationship | record, verify, revoke | Verified guardian relationships (minimum-field privacy) unmanageable |
-| B | Identity | identity.admin (completion) | DeactivateUserAccount | deactivate | PARTIAL item above |
+| B ✅ | Students | students.manage / reactivate | TransitionStudentStatus | suspend, withdraw, reactivate, complete, graduate | Student record cannot leave active state through the console (the show view is read-only) |
+| B ✅ | HR | hr.leave_request / approve | MaintainLeave | request, decide, cancel | Leave evidence feeds payroll proration; leave is unmanageable through the console |
+| B ✅ | Students | students.guardian | MaintainGuardianRelationship | record, verify, revoke | Verified guardian relationships (minimum-field privacy) unmanageable |
+| B ✅ | Identity | identity.admin (completion) | DeactivateUserAccount | deactivate | PARTIAL item above |
 | C | Academic | academic.assess / moderate / approve_result / release | ManageAssessmentResult | submitAttempt, score, moderate, approve, release, **correct** | Assessment→result→release is the evidence chain for progression/graduation; `correct(moderator, approver, …)` is the last two-actor-in-one-call command and must be **staged** (000113) like refunds/admissions/settlements before exposure |
 | C | Academic | academic.completion / completion_approve / certify | DecideGraduation | propose, review, approve, reject, issueCertificate | Progression endpoint + certificate (print route `/print/certificate/{id}` exists but the command that creates certificates is unreachable) |
 | C | Academic | academic.appeal_manage | ManageAcademicAppeal | (per signature) | Appeals on decisions — independent reviewer workflow |
@@ -82,4 +82,4 @@
 - No speculative features: only capabilities with a real employee business scenario or an operational dead end are added; NOT-APPLICABLE rows above are the exclusion list.
 - Every increment: TRACE (signatures + capabilities) → FIX (routes/controller/views) → TEST (HTTP feature tests) → ATTACK (direct-SQL / denial cases where the increment touches guarded invariants) → REGRESSION (full gate) → VERIFY (commit + push + remote-equal).
 
-**Status:** matrix established at `ae0c967`. **Increment A complete** (academic structure + skills + contract lifecycle + full employment state machine; 3 new HTTP tests, 56 assertions; gates phpunit OK 455/2065, phpstan L6 0, pint 460). Increments B–E in progress. Target: 0 MISSING, 0 PARTIAL, 0 BLOCKED, 0 duplicate implementations, then the complete gate set and the PHASE_3 certification.
+**Status:** matrix established at `ae0c967`. **Increment A complete** (academic structure + skills + contract lifecycle + full employment state machine; 3 new HTTP tests, 56 assertions; gates phpunit OK 455/2065, phpstan L6 0, pint 460). **Increment B complete** (student status transitions incl. the separate reactivate capability, the full leave lifecycle with SoD + overlap + cancel, guardian record/verify/revoke, account deactivation with login rejection; 4 new HTTP tests, 111 assertions). Increments C–E in progress. Target: 0 MISSING, 0 PARTIAL, 0 BLOCKED, 0 duplicate implementations, then the complete gate set and the PHASE_3 certification.
