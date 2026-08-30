@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Modules\Academic\Commands\DecideGraduation;
 use App\Modules\Academic\Commands\DecideProgression;
 use App\Modules\Academic\Commands\MaintainAcademicStructure;
 use App\Modules\Academic\Commands\MaintainClass;
@@ -17,7 +18,9 @@ use App\Modules\Academic\Models\AssessmentResult;
 use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\ClassSession;
 use App\Modules\Academic\Models\Enrollment;
+use App\Modules\Academic\Models\GraduationDecision;
 use App\Modules\Academic\Models\Program;
+use App\Modules\Academic\Models\ProgramVersion;
 use App\Modules\Academic\Models\ProgressionDecision;
 use App\Modules\Academic\Models\ResultCorrection;
 use App\Modules\Academic\Models\Skill;
@@ -49,6 +52,8 @@ final class AcademicController extends Controller
             'attempts' => AssessmentAttempt::query()->where('lifecycle_state', 'submitted')->orderByDesc('id')->limit(200)->get(),
             'results' => AssessmentResult::query()->whereIn('lifecycle_state', ['scored', 'moderated', 'approved'])->orderByDesc('id')->limit(200)->get(),
             'corrections' => ResultCorrection::query()->where('lifecycle_state', ResultCorrection::STATE_PROPOSED)->orderByDesc('id')->limit(200)->get(),
+            'programVersions' => ProgramVersion::query()->orderBy('id')->limit(200)->get(),
+            'graduations' => GraduationDecision::query()->whereIn('lifecycle_state', ['proposed', 'reviewed', 'approved'])->orderByDesc('id')->limit(200)->get(),
             'requestedEnrollments' => Enrollment::query()->where('lifecycle_state', 'requested')->orderBy('id')->limit(200)->get(),
             'progressions' => ProgressionDecision::query()->whereIn('lifecycle_state', ['proposed', 'reviewed'])->orderBy('id')->limit(200)->get(),
         ]);
@@ -365,5 +370,70 @@ final class AcademicController extends Controller
         );
 
         return redirect()->route('academic.index')->with('success', 'Correction approved; the original result is closed as corrected.');
+    }
+
+    public function proposeGraduation(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'student_id' => ['required', 'string'],
+            'program_version_id' => ['required', 'string'],
+            'outcome' => ['required', 'in:eligible,not_eligible'],
+            'basis' => ['required', 'string', 'max:1000'],
+        ]);
+
+        app(DecideGraduation::class)->propose(
+            $this->actor(),
+            $input['student_id'],
+            $input['program_version_id'],
+            $input['outcome'],
+            $input['basis'],
+            $this->idempotencyKey('academic.graduation.propose'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Graduation proposed; it takes effect once reviewed and approved by distinct signers.');
+    }
+
+    public function reviewGraduation(Request $request, string $decisionId): RedirectResponse
+    {
+        app(DecideGraduation::class)->review(
+            $this->actor(),
+            GraduationDecision::query()->findOrFail($decisionId),
+            $this->idempotencyKey('academic.graduation.review'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Graduation reviewed.');
+    }
+
+    public function approveGraduation(Request $request, string $decisionId): RedirectResponse
+    {
+        app(DecideGraduation::class)->approve(
+            $this->actor(),
+            GraduationDecision::query()->findOrFail($decisionId),
+            $this->idempotencyKey('academic.graduation.approve'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Graduation approved.');
+    }
+
+    public function rejectGraduation(Request $request, string $decisionId): RedirectResponse
+    {
+        app(DecideGraduation::class)->reject(
+            $this->actor(),
+            GraduationDecision::query()->findOrFail($decisionId),
+            $this->idempotencyKey('academic.graduation.reject'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Graduation rejected.');
+    }
+
+    public function issueCertificate(Request $request, string $decisionId): RedirectResponse
+    {
+        app(DecideGraduation::class)->issueCertificate(
+            $this->actor(),
+            GraduationDecision::query()->findOrFail($decisionId),
+            $this->idempotencyKey('academic.certificate.issue'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Certificate issued with its unique serial.');
     }
 }

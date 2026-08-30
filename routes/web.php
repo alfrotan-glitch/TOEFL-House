@@ -95,6 +95,11 @@ Route::middleware('employee')->group(function (): void {
         Route::post('results/{resultId}/release', [AcademicController::class, 'releaseResult'])->name('result.release');
         Route::post('results/{resultId}/corrections', [AcademicController::class, 'proposeCorrection'])->name('result.correction');
         Route::post('corrections/{correctionId}/approve', [AcademicController::class, 'approveCorrection'])->name('correction.approve');
+        Route::post('graduations', [AcademicController::class, 'proposeGraduation'])->name('graduation.propose');
+        Route::post('graduations/{decisionId}/review', [AcademicController::class, 'reviewGraduation'])->name('graduation.review');
+        Route::post('graduations/{decisionId}/approve', [AcademicController::class, 'approveGraduation'])->name('graduation.approve');
+        Route::post('graduations/{decisionId}/reject', [AcademicController::class, 'rejectGraduation'])->name('graduation.reject');
+        Route::post('graduations/{decisionId}/certificate', [AcademicController::class, 'issueCertificate'])->name('graduation.certificate');
     });
 
     // Teachers & HR

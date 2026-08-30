@@ -361,4 +361,75 @@
         </table>
     @endif
 </div>
+
+<div class="card">
+    <h2>Graduation decisions &amp; certificates</h2>
+    <p class="sub">Propose (with the requirements basis), review and approve with distinct signers; a certificate is issued only from an approved eligible decision, with a unique serial.</p>
+    <form method="POST" action="{{ route('academic.graduation.propose') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <select name="student_id" required>
+                <option value="">Select a student…</option>
+                @foreach ($students as $student)
+                    <option value="{{ $student->id }}">{{ $student->student_code }}</option>
+                @endforeach
+            </select>
+            <select name="program_version_id" required>
+                <option value="">Select a program version…</option>
+                @foreach ($programVersions as $version)
+                    <option value="{{ $version->id }}">{{ \Illuminate\Support\Str::limit($version->id, 14) }}</option>
+                @endforeach
+            </select>
+            <select name="outcome" required>
+                <option value="eligible">Eligible</option>
+                <option value="not_eligible">Not eligible</option>
+            </select>
+            <input name="basis" type="text" placeholder="Requirements basis" required>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Propose graduation</button></div>
+    </form>
+    @if ($graduations->isEmpty())
+        <p class="empty">No graduation decisions in flight.</p>
+    @else
+        <table class="grid" style="margin-top:8px">
+            <tr><th>Student</th><th>Outcome</th><th>State</th><th>Actions</th></tr>
+            @foreach ($graduations as $decision)
+                <tr>
+                    <td>{{ \Illuminate\Support\Str::limit($decision->student_id, 18) }}</td>
+                    <td>{{ $decision->outcome }}</td>
+                    <td><span class="pill">{{ $decision->lifecycle_state }}</span></td>
+                    <td>
+                        @if ($decision->lifecycle_state === 'proposed')
+                            <form method="POST" action="{{ route('academic.graduation.review', $decision->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Review</button>
+                            </form>
+                        @endif
+                        @if ($decision->lifecycle_state === 'reviewed')
+                            <form method="POST" action="{{ route('academic.graduation.approve', $decision->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Approve</button>
+                            </form>
+                            <form method="POST" action="{{ route('academic.graduation.reject', $decision->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small secondary">Reject</button>
+                            </form>
+                        @endif
+                        @if ($decision->lifecycle_state === 'approved' && $decision->outcome === 'eligible')
+                            <form method="POST" action="{{ route('academic.graduation.certificate', $decision->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Issue certificate</button>
+                            </form>
+                        @endif
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
 @endsection
