@@ -9,7 +9,7 @@
 
 ## Matrix (90 capabilities)
 
-### COMPLETE (35) — reachable + workflow-proven
+### COMPLETE (36) — reachable + workflow-proven
 
 | Module | Capability | Command | Transport (web/API) |
 |---|---|---|---|
@@ -34,6 +34,7 @@
 | Library | (books) | CirculateBooks | web `/library/*` |
 | Academic | academic.assess / moderate / approve_result / release | ManageAssessmentResult (staged correction, 000113) | web `/academic/attempts*`, `/academic/results*`, `/academic/corrections*` |
 | Academic | academic.completion / completion_approve / certify | DecideGraduation (staged, pre-existing SoD) | web `/academic/graduations*` + certificate print route |
+| Academic | academic.appeal_manage | ManageAcademicAppeal (7 verbs, pre-existing SoD + lifecycle) | web `/academic/appeals*` — file, assign, investigate, resolve, reject, escalate, close |
 | Reporting | reporting.run / dashboard | RunReport, MaintainDashboard | web `/reporting/*` |
 | Payroll/Finance read | (pay slips, invoices) | Printing (read-only) | web `/print/*` |
 
@@ -51,11 +52,11 @@
 | Integrations | integrations.endpoint / inbound / dispatch / process / review / jobs | RegisterEndpoint, ReceiveInbound, ProcessInbound, DispatchDelivery, ProcessDeliveries, RequeueDelivery, RegisterJob, EnqueueJobRun, ProcessJobRun | System-internal outbox/webhook/job machinery (P17 §2 marked system-only); no employee performs these; absence is not an operational dead end |
 | Reporting | reporting.catalog / compute / reconcile | DefineMetric, ComputeProjection, ReconcileMetric | Closed canonical metric catalog (5 metrics — nothing outside it is definable by design); projection rebuild/reconciliation is an operational system function; the employee reporting workflow (run + dashboards) is COMPLETE |
 
-### MISSING (38 remaining of 42) — employee workflows with no transport; ordered fix plan
+### MISSING (10 rows remaining) — employee workflows with no transport; ordered fix plan (✅ rows completed and kept for provenance)
 
 | Increment | Module | Capability(ies) | Command | Actions | Why it is an operational dead end |
 |---|---|---|---|---|---|
-| A | Academic | academic.structure | MaintainAcademicStructure | defineProgram, publishVersion, definePeriod, transitionPeriod | No program/period ⇒ nothing else on the console can be created; the console advertises these as read-only pills |
+| A ✅ | Academic | academic.structure | MaintainAcademicStructure | defineProgram, publishVersion, definePeriod, transitionPeriod | No program/period ⇒ nothing else on the console can be created; the console advertises these as read-only pills |
 | A ✅ | Academic | academic.skill | MaintainSkill | register, retire | Skills drive delivery + payroll evidence; catalog unmanageable through the console |
 | A ✅ | HR | hr.contract | MaintainContract | draft, sign, close | **hire() requires a signed active contract** — the hire path is dead past contract-version approval |
 | A ✅ | HR | hr.employ (completion) / hr.terminate | MaintainEmployment | hire, placeOnLeave, suspend, reinstate, terminate | Matrix correction: only `employ` was exposed — hire/terminate were dead ends on the certified employ→payroll→settle path; the full employment state machine is now console-operable |
@@ -63,7 +64,9 @@
 | B ✅ | HR | hr.leave_request / approve | MaintainLeave | request, decide, cancel | Leave evidence feeds payroll proration; leave is unmanageable through the console |
 | B ✅ | Students | students.guardian | MaintainGuardianRelationship | record, verify, revoke | Verified guardian relationships (minimum-field privacy) unmanageable |
 | B ✅ | Identity | identity.admin (completion) | DeactivateUserAccount | deactivate | PARTIAL item above |
-| C | Academic | academic.appeal_manage | ManageAcademicAppeal | (per signature) | Appeals on decisions — independent reviewer workflow |
+| C ✅ | Academic | academic.assess / moderate / approve_result / release | ManageAssessmentResult (staged correction, 000113) | submitAttempt, score, moderate, approve, release, proposeCorrection, approveCorrection | COMPLETE — Increment C (part one, `eddb92d`): full evidence chain over HTTP with the staged correction |
+| C ✅ | Academic | academic.completion / completion_approve / certify | DecideGraduation | propose, review, approve, reject, issueCertificate | COMPLETE — Increment C (part two, `e503bc7`): decision chain + one-shot certificates over HTTP |
+| C ✅ | Academic | academic.appeal_manage | ManageAcademicAppeal | file, assign, investigate, resolve, reject, escalate, close | COMPLETE — Increment C (part three): full lifecycle over HTTP; the original decision-maker (scorer / progression approver) can never review; only the assigned reviewer decides; no silent closure; idempotent filing |
 | D | Finance | finance.journal / chart | PostJournal, MaintainChartOfAccounts | post, (chart register) | Bookkeeping: balanced source-linked journals unreachable; journaling requires chart codes |
 | D | Finance | finance.discount / discount_approve | MaintainDiscount | propose/approve | The finance view lists discounts but none can be created (UI dead end) |
 | D | Finance | finance.reconcile / reconcile_approve | RecordReconciliation | record/approve | Period-end close is dead without reconciliation |
@@ -82,4 +85,4 @@
 - No speculative features: only capabilities with a real employee business scenario or an operational dead end are added; NOT-APPLICABLE rows above are the exclusion list.
 - Every increment: TRACE (signatures + capabilities) → FIX (routes/controller/views) → TEST (HTTP feature tests) → ATTACK (direct-SQL / denial cases where the increment touches guarded invariants) → REGRESSION (full gate) → VERIFY (commit + push + remote-equal).
 
-**Status:** matrix established at `ae0c967`. **Increment A complete** (academic structure + skills + contract lifecycle + full employment state machine; 3 new HTTP tests, 56 assertions; gates phpunit OK 455/2065, phpstan L6 0, pint 460). **Increment B complete** (student status transitions incl. the separate reactivate capability, the full leave lifecycle with SoD + overlap + cancel, guardian record/verify/revoke, account deactivation with login rejection; 4 new HTTP tests, 111 assertions). **Increment C in progress** (part one, commit `eddb92d`: assessment chain over HTTP with the staged correction 000113 — `correct` was the last two-actor-in-one-call command; part two: graduation decision chain + one-shot certificates). Remaining: C (appeals), D, E. Target: 0 MISSING, 0 PARTIAL, 0 BLOCKED, 0 duplicate implementations, then the complete gate set and the PHASE_3 certification.
+**Status:** matrix established at `ae0c967`. **Increment A complete** (academic structure + skills + contract lifecycle + full employment state machine; 3 new HTTP tests, 56 assertions; gates phpunit OK 455/2065, phpstan L6 0, pint 460). **Increment B complete** (student status transitions incl. the separate reactivate capability, the full leave lifecycle with SoD + overlap + cancel, guardian record/verify/revoke, account deactivation with login rejection; 4 new HTTP tests, 111 assertions). **Increment C complete** (part one, commit `eddb92d`: assessment chain over HTTP with the staged correction 000113 — `correct` was the last two-actor-in-one-call command; part two, commit `e503bc7`: graduation decision chain + one-shot certificates; part three, this commit: the academic appeal lifecycle — the original decision-maker can never review the appealed subject, only the assigned reviewer can investigate and decide, no silent closure, escalation returns the appeal to re-assignment, filing is idempotent). Remaining: D (finance journal/chart, discounts, reconciliation, funds), E (documents, privacy, resources, access administration, hr.scale, communication). Target: 0 MISSING, 0 PARTIAL, 0 BLOCKED, 0 duplicate implementations, then the complete gate set and the PHASE_3 certification.

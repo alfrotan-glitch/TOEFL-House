@@ -100,6 +100,13 @@ Route::middleware('employee')->group(function (): void {
         Route::post('graduations/{decisionId}/approve', [AcademicController::class, 'approveGraduation'])->name('graduation.approve');
         Route::post('graduations/{decisionId}/reject', [AcademicController::class, 'rejectGraduation'])->name('graduation.reject');
         Route::post('graduations/{decisionId}/certificate', [AcademicController::class, 'issueCertificate'])->name('graduation.certificate');
+        Route::post('appeals', [AcademicController::class, 'fileAppeal'])->name('appeal.file');
+        Route::post('appeals/{appealId}/assign', [AcademicController::class, 'assignAppeal'])->name('appeal.assign');
+        Route::post('appeals/{appealId}/investigate', [AcademicController::class, 'investigateAppeal'])->name('appeal.investigate');
+        Route::post('appeals/{appealId}/resolve', [AcademicController::class, 'resolveAppeal'])->name('appeal.resolve');
+        Route::post('appeals/{appealId}/reject', [AcademicController::class, 'rejectAppeal'])->name('appeal.reject');
+        Route::post('appeals/{appealId}/escalate', [AcademicController::class, 'escalateAppeal'])->name('appeal.escalate');
+        Route::post('appeals/{appealId}/close', [AcademicController::class, 'closeAppeal'])->name('appeal.close');
     });
 
     // Teachers & HR

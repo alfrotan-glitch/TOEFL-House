@@ -10,8 +10,10 @@ use App\Modules\Academic\Commands\MaintainAcademicStructure;
 use App\Modules\Academic\Commands\MaintainClass;
 use App\Modules\Academic\Commands\MaintainEnrollment;
 use App\Modules\Academic\Commands\MaintainSkill;
+use App\Modules\Academic\Commands\ManageAcademicAppeal;
 use App\Modules\Academic\Commands\ManageAssessmentResult;
 use App\Modules\Academic\Commands\RecordAttendance;
+use App\Modules\Academic\Models\AcademicAppeal;
 use App\Modules\Academic\Models\AcademicPeriod;
 use App\Modules\Academic\Models\AssessmentAttempt;
 use App\Modules\Academic\Models\AssessmentResult;
@@ -25,6 +27,7 @@ use App\Modules\Academic\Models\ProgressionDecision;
 use App\Modules\Academic\Models\ResultCorrection;
 use App\Modules\Academic\Models\Skill;
 use App\Modules\Academic\Models\TeacherAssignment;
+use App\Modules\Identity\Models\Person;
 use App\Modules\Students\Models\Student;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
@@ -56,6 +59,10 @@ final class AcademicController extends Controller
             'graduations' => GraduationDecision::query()->whereIn('lifecycle_state', ['proposed', 'reviewed', 'approved'])->orderByDesc('id')->limit(200)->get(),
             'requestedEnrollments' => Enrollment::query()->where('lifecycle_state', 'requested')->orderBy('id')->limit(200)->get(),
             'progressions' => ProgressionDecision::query()->whereIn('lifecycle_state', ['proposed', 'reviewed'])->orderBy('id')->limit(200)->get(),
+            'appeals' => AcademicAppeal::query()->whereIn('lifecycle_state', ['open', 'assigned', 'investigating', 'escalated', 'resolved', 'rejected'])->orderByDesc('id')->limit(200)->get(),
+            'releasedResults' => AssessmentResult::query()->where('lifecycle_state', 'released')->orderByDesc('id')->limit(200)->get(),
+            'approvedProgressions' => ProgressionDecision::query()->where('lifecycle_state', 'approved')->orderBy('id')->limit(200)->get(),
+            'people' => Person::query()->where('verification_state', 'verified')->orderBy('legal_name')->limit(300)->get(),
         ]);
     }
 
@@ -435,5 +442,111 @@ final class AcademicController extends Controller
         );
 
         return redirect()->route('academic.index')->with('success', 'Certificate issued with its unique serial.');
+    }
+
+    public function fileAppeal(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'student_id' => ['required', 'string'],
+            'subject_type' => ['required', 'in:assessment_result,progression_decision'],
+            'subject_id' => ['required', 'string'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        app(ManageAcademicAppeal::class)->file(
+            $this->actor(),
+            $input['student_id'],
+            $input['subject_type'],
+            $input['subject_id'],
+            $input['reason'],
+            $this->idempotencyKey('academic.appeal.file'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Appeal filed; it opens the independent review chain.');
+    }
+
+    public function assignAppeal(Request $request, string $appealId): RedirectResponse
+    {
+        $input = $request->validate([
+            'reviewer_person_id' => ['required', 'string'],
+        ]);
+
+        app(ManageAcademicAppeal::class)->assign(
+            $this->actor(),
+            AcademicAppeal::query()->findOrFail($appealId),
+            $input['reviewer_person_id'],
+            $this->idempotencyKey('academic.appeal.assign'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Appeal assigned to the reviewer.');
+    }
+
+    public function investigateAppeal(Request $request, string $appealId): RedirectResponse
+    {
+        app(ManageAcademicAppeal::class)->investigate(
+            $this->actor(),
+            AcademicAppeal::query()->findOrFail($appealId),
+            $this->idempotencyKey('academic.appeal.investigate'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Appeal investigation opened.');
+    }
+
+    public function resolveAppeal(Request $request, string $appealId): RedirectResponse
+    {
+        $input = $request->validate([
+            'outcome' => ['required', 'string', 'max:500'],
+            'outcome_evidence' => ['required', 'string', 'max:1000'],
+        ]);
+
+        app(ManageAcademicAppeal::class)->resolve(
+            $this->actor(),
+            AcademicAppeal::query()->findOrFail($appealId),
+            $input['outcome'],
+            $input['outcome_evidence'],
+            $this->idempotencyKey('academic.appeal.resolve'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Appeal resolved with its outcome and evidence.');
+    }
+
+    public function rejectAppeal(Request $request, string $appealId): RedirectResponse
+    {
+        $input = $request->validate([
+            'outcome' => ['required', 'string', 'max:500'],
+            'outcome_evidence' => ['required', 'string', 'max:1000'],
+        ]);
+
+        app(ManageAcademicAppeal::class)->reject(
+            $this->actor(),
+            AcademicAppeal::query()->findOrFail($appealId),
+            $input['outcome'],
+            $input['outcome_evidence'],
+            $this->idempotencyKey('academic.appeal.reject'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Appeal rejected with its outcome and evidence.');
+    }
+
+    public function escalateAppeal(Request $request, string $appealId): RedirectResponse
+    {
+        app(ManageAcademicAppeal::class)->escalate(
+            $this->actor(),
+            AcademicAppeal::query()->findOrFail($appealId),
+            $this->idempotencyKey('academic.appeal.escalate'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Appeal escalated for re-assignment.');
+    }
+
+    public function closeAppeal(Request $request, string $appealId): RedirectResponse
+    {
+        app(ManageAcademicAppeal::class)->close(
+            $this->actor(),
+            AcademicAppeal::query()->findOrFail($appealId),
+            $this->idempotencyKey('academic.appeal.close'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Appeal closed; the decision record is final.');
     }
 }

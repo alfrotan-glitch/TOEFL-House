@@ -432,4 +432,127 @@
         </table>
     @endif
 </div>
+
+<div class="card">
+    <h2>Appeals</h2>
+    <p class="sub">Independent review of a released result or an approved progression decision: open → assigned → investigating → resolved / rejected / escalated → closed. The original decision-maker can never review their own decision; only the assigned reviewer can decide; a decided appeal is closed only with outcome and evidence.</p>
+    <form method="POST" action="{{ route('academic.appeal.file') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <input type="hidden" name="subject_type" value="assessment_result">
+        <div class="fields">
+            <select name="student_id" required>
+                <option value="">Select a student…</option>
+                @foreach ($students as $student)
+                    <option value="{{ $student->id }}">{{ $student->student_code }}</option>
+                @endforeach
+            </select>
+            <select name="subject_id" required>
+                <option value="">Select a released result…</option>
+                @foreach ($releasedResults as $result)
+                    <option value="{{ $result->id }}">{{ \Illuminate\Support\Str::limit($result->id, 14) }} (score {{ $result->score }})</option>
+                @endforeach
+            </select>
+            <input name="reason" type="text" placeholder="Why this result is contested" required>
+        </div>
+        <div class="actions"><button type="submit" class="btn">File appeal (result)</button></div>
+    </form>
+    <form method="POST" action="{{ route('academic.appeal.file') }}" style="margin-top:8px">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <input type="hidden" name="subject_type" value="progression_decision">
+        <div class="fields">
+            <select name="student_id" required>
+                <option value="">Select a student…</option>
+                @foreach ($students as $student)
+                    <option value="{{ $student->id }}">{{ $student->student_code }}</option>
+                @endforeach
+            </select>
+            <select name="subject_id" required>
+                <option value="">Select an approved progression decision…</option>
+                @foreach ($approvedProgressions as $decision)
+                    <option value="{{ $decision->id }}">{{ \Illuminate\Support\Str::limit($decision->student_id, 14) }} / {{ $decision->outcome }}</option>
+                @endforeach
+            </select>
+            <input name="reason" type="text" placeholder="Why this decision is contested" required>
+        </div>
+        <div class="actions"><button type="submit" class="btn">File appeal (progression)</button></div>
+    </form>
+    @if ($appeals->isEmpty())
+        <p class="empty">No appeals in flight.</p>
+    @else
+        <table class="grid" style="margin-top:8px">
+            <tr><th>Student</th><th>Subject</th><th>Reason</th><th>State</th><th>Reviewer</th><th>Actions</th></tr>
+            @foreach ($appeals as $appeal)
+                <tr>
+                    <td>{{ \Illuminate\Support\Str::limit($appeal->student_id, 18) }}</td>
+                    <td>{{ $appeal->subject_type }}: {{ \Illuminate\Support\Str::limit($appeal->subject_id, 14) }}</td>
+                    <td>{{ \Illuminate\Support\Str::limit($appeal->reason, 30) }}</td>
+                    <td>
+                        <span class="pill">{{ $appeal->lifecycle_state }}</span>
+                        @if ($appeal->outcome !== null)
+                            <div class="sub">{{ $appeal->outcome }}</div>
+                        @endif
+                    </td>
+                    <td>{{ $appeal->assigned_reviewer_id !== null ? \Illuminate\Support\Str::limit($appeal->assigned_reviewer_id, 14) : '—' }}</td>
+                    <td>
+                        @if ($appeal->lifecycle_state === 'open' || $appeal->lifecycle_state === 'escalated')
+                            <form method="POST" action="{{ route('academic.appeal.assign', $appeal->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <select name="reviewer_person_id" required>
+                                    <option value="">Assign reviewer…</option>
+                                    @foreach ($people as $person)
+                                        <option value="{{ $person->id }}">{{ $person->legal_name }}</option>
+                                    @endforeach
+                                </select>
+                                <button type="submit" class="btn small">Assign</button>
+                            </form>
+                        @endif
+                        @if ($appeal->lifecycle_state === 'assigned')
+                            <form method="POST" action="{{ route('academic.appeal.investigate', $appeal->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Investigate</button>
+                            </form>
+                            <form method="POST" action="{{ route('academic.appeal.escalate', $appeal->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small secondary">Escalate</button>
+                            </form>
+                        @endif
+                        @if ($appeal->lifecycle_state === 'investigating')
+                            <form method="POST" action="{{ route('academic.appeal.resolve', $appeal->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <input name="outcome" type="text" placeholder="Outcome" required>
+                                <input name="outcome_evidence" type="text" placeholder="Evidence reference" required>
+                                <button type="submit" class="btn small">Resolve</button>
+                            </form>
+                            <form method="POST" action="{{ route('academic.appeal.reject', $appeal->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <input name="outcome" type="text" placeholder="Outcome" required>
+                                <input name="outcome_evidence" type="text" placeholder="Evidence reference" required>
+                                <button type="submit" class="btn small secondary">Reject</button>
+                            </form>
+                            <form method="POST" action="{{ route('academic.appeal.escalate', $appeal->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small secondary">Escalate</button>
+                            </form>
+                        @endif
+                        @if ($appeal->lifecycle_state === 'resolved' || $appeal->lifecycle_state === 'rejected')
+                            <form method="POST" action="{{ route('academic.appeal.close', $appeal->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Close</button>
+                            </form>
+                        @endif
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
 @endsection
