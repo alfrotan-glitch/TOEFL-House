@@ -150,6 +150,15 @@ Route::middleware('employee')->group(function (): void {
         Route::post('payments/{paymentId}/refund', [FinanceController::class, 'refund'])->name('refund');
         Route::post('refunds/{refundId}/approve', [FinanceController::class, 'approveRefund'])->name('refund.approve');
         Route::post('obligations/{obligationId}/allocate', [FinanceController::class, 'allocate'])->name('allocate');
+        Route::post('accounts', [FinanceController::class, 'defineAccount'])->name('account.define');
+        Route::post('journals', [FinanceController::class, 'postJournal'])->name('journal.post');
+        Route::post('journals/{journalId}/reverse', [FinanceController::class, 'reverseJournal'])->name('journal.reverse');
+        Route::post('discounts', [FinanceController::class, 'proposeDiscount'])->name('discount.propose');
+        Route::post('discounts/{discountId}/approve', [FinanceController::class, 'approveDiscount'])->name('discount.approve');
+        Route::post('reconciliations', [FinanceController::class, 'observeReconciliation'])->name('reconciliation.observe');
+        Route::post('reconciliations/{reconciliationId}/approve', [FinanceController::class, 'approveReconciliation'])->name('reconciliation.approve');
+        Route::post('funds', [FinanceController::class, 'establishFund'])->name('fund.establish');
+        Route::post('funds/{fundId}/allocations', [FinanceController::class, 'allocateFund'])->name('fund.allocate');
     });
 
     // Payroll

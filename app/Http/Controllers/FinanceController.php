@@ -4,20 +4,32 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Modules\Finance\Commands\AllocateFunds;
 use App\Modules\Finance\Commands\AllocatePayment;
+use App\Modules\Finance\Commands\MaintainChartOfAccounts;
+use App\Modules\Finance\Commands\MaintainDiscount;
 use App\Modules\Finance\Commands\MaintainFinancialPeriod;
+use App\Modules\Finance\Commands\PostJournal;
 use App\Modules\Finance\Commands\PostObligation;
 use App\Modules\Finance\Commands\RecordPayment;
+use App\Modules\Finance\Commands\RecordReconciliation;
 use App\Modules\Finance\Commands\RefundPayment;
+use App\Modules\Finance\Models\Account;
 use App\Modules\Finance\Models\Discount;
 use App\Modules\Finance\Models\FinancialPeriod;
+use App\Modules\Finance\Models\FundAllocation;
 use App\Modules\Finance\Models\FundingSource;
+use App\Modules\Finance\Models\Journal;
+use App\Modules\Finance\Models\JournalLine;
 use App\Modules\Finance\Models\Obligation;
+use App\Modules\Finance\Models\ObligationLine;
 use App\Modules\Finance\Models\Payment;
+use App\Modules\Finance\Models\Reconciliation;
 use App\Modules\Finance\Models\Refund;
 use App\Modules\Students\Models\Student;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
 /**
@@ -37,8 +49,14 @@ final class FinanceController extends Controller
             'proposedRefunds' => Refund::query()->where('lifecycle_state', 'proposed')->orderByDesc('id')->limit(200)->get(),
             'discounts' => Discount::query()->orderByDesc('id')->limit(100)->get(),
             'fundingSources' => FundingSource::query()->orderBy('name')->get(),
+            'fundAllocations' => FundAllocation::query()->orderByDesc('id')->limit(200)->get(),
             'periods' => FinancialPeriod::query()->orderBy('period_key')->get(),
             'students' => Student::query()->orderBy('student_code')->limit(300)->get(),
+            'accounts' => Account::query()->orderBy('code')->get(),
+            'journals' => Journal::query()->orderByDesc('id')->limit(100)->get(),
+            'journalLines' => JournalLine::query()->orderByDesc('id')->limit(500)->get(),
+            'reconciliations' => Reconciliation::query()->orderByDesc('id')->limit(100)->get(),
+            'obligationLines' => ObligationLine::query()->orderByDesc('id')->limit(500)->get(),
         ]);
     }
 
@@ -175,5 +193,202 @@ final class FinanceController extends Controller
         );
 
         return redirect()->route('finance.index')->with('success', 'Financial period closed.');
+    }
+
+    public function defineAccount(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'code' => ['required', 'string', 'max:40'],
+            'name' => ['required', 'string', 'max:120'],
+            'type' => ['required', 'in:asset,liability,equity,revenue,expense'],
+        ]);
+
+        app(MaintainChartOfAccounts::class)->define(
+            $this->actor(),
+            $input['code'],
+            $input['name'],
+            $input['type'],
+            $this->idempotencyKey('finance.account.define'),
+        );
+
+        return redirect()->route('finance.index')->with('success', 'Account defined; the chart is immutable — a changed definition is a new account.');
+    }
+
+    public function postJournal(Request $request): RedirectResponse
+    {
+        // The form offers four line slots; unfilled slots are dropped before
+        // the command sees the lines. A partially filled slot is invalid.
+        $input = $request->validate([
+            'period_id' => ['required', 'string'],
+            'source_type' => ['required', 'in:obligation,payroll_result,journal,other'],
+            'source_id' => ['nullable', 'string'],
+            'reason' => ['required', 'string', 'max:1000'],
+            'lines' => ['required', 'array', 'min:1', 'max:4'],
+            'lines.*.account_id' => ['nullable', 'string'],
+            'lines.*.direction' => ['nullable', 'in:debit,credit'],
+            'lines.*.amount' => ['nullable', 'numeric', 'gt:0'],
+        ]);
+
+        $lines = [];
+        foreach ($input['lines'] as $slot) {
+            $filled = array_filter([$slot['account_id'] ?? '', $slot['direction'] ?? '', $slot['amount'] ?? ''], static fn (mixed $value): bool => $value !== '');
+            if ($filled === []) {
+                continue;
+            }
+            if (count($filled) !== 3) {
+                throw ValidationException::withMessages(['lines' => 'every journal line needs an account, a direction and an amount']);
+            }
+            $lines[] = [
+                'account_id' => $slot['account_id'],
+                'direction' => $slot['direction'],
+                'amount' => (string) $slot['amount'],
+            ];
+        }
+        if ($lines === []) {
+            throw ValidationException::withMessages(['lines' => 'at least one complete journal line is required']);
+        }
+
+        app(PostJournal::class)->post(
+            $this->actor(),
+            FinancialPeriod::query()->findOrFail($input['period_id']),
+            $input['source_type'],
+            (($input['source_id'] ?? '') !== '') ? $input['source_id'] : null,
+            $input['reason'],
+            $lines,
+            $this->idempotencyKey('finance.journal.post'),
+        );
+
+        return redirect()->route('finance.index')->with('success', 'Journal posted; it must balance exactly and stays immutable (corrections append reversals).');
+    }
+
+    public function reverseJournal(Request $request, string $journalId): RedirectResponse
+    {
+        $input = $request->validate([
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        app(PostJournal::class)->reverse(
+            $this->actor(),
+            Journal::query()->findOrFail($journalId),
+            $input['reason'],
+            $this->idempotencyKey('finance.journal.reverse'),
+        );
+
+        return redirect()->route('finance.index')->with('success', 'Reversal journal posted, linked to its original.');
+    }
+
+    public function proposeDiscount(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'obligation_id' => ['required', 'string'],
+            'period_id' => ['required', 'string'],
+            'amount' => ['required', 'numeric', 'gt:0'],
+            'eligibility' => ['required', 'string', 'max:500'],
+            'effective_from' => ['required', 'date'],
+            'effective_to' => ['nullable', 'date', 'after_or_equal:effective_from'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        app(MaintainDiscount::class)->propose(
+            $this->actor(),
+            Obligation::query()->findOrFail($input['obligation_id']),
+            FinancialPeriod::query()->findOrFail($input['period_id']),
+            $input['amount'],
+            $input['eligibility'],
+            $input['effective_from'],
+            (($input['effective_to'] ?? '') !== '') ? $input['effective_to'] : null,
+            $input['reason'],
+            $this->idempotencyKey('finance.discount.propose'),
+        );
+
+        return redirect()->route('finance.index')->with('success', 'Discount proposed; it takes effect once a distinct approver approves it.');
+    }
+
+    public function approveDiscount(Request $request, string $discountId): RedirectResponse
+    {
+        app(MaintainDiscount::class)->approve(
+            $this->actor(),
+            Discount::query()->findOrFail($discountId),
+            $this->idempotencyKey('finance.discount.approve'),
+        );
+
+        return redirect()->route('finance.index')->with('success', 'Discount approved; the original charge is never rewritten.');
+    }
+
+    public function observeReconciliation(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'period_id' => ['required', 'string'],
+            'subject' => ['required', 'string', 'max:120'],
+            'expected' => ['required', 'numeric'],
+            'observed' => ['required', 'numeric'],
+            'explanation' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        app(RecordReconciliation::class)->observe(
+            $this->actor(),
+            FinancialPeriod::query()->findOrFail($input['period_id']),
+            $input['subject'],
+            $input['expected'],
+            $input['observed'],
+            (($input['explanation'] ?? '') !== '') ? $input['explanation'] : null,
+            $this->idempotencyKey('finance.reconciliation.observe'),
+        );
+
+        return redirect()->route('finance.index')->with('success', 'Reconciliation recorded; a variance is only valid with its explanation.');
+    }
+
+    public function approveReconciliation(Request $request, string $reconciliationId): RedirectResponse
+    {
+        app(RecordReconciliation::class)->approve(
+            $this->actor(),
+            Reconciliation::query()->findOrFail($reconciliationId),
+            $this->idempotencyKey('finance.reconciliation.approve'),
+        );
+
+        return redirect()->route('finance.index')->with('success', 'Reconciliation approved; the observation is locked.');
+    }
+
+    public function establishFund(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'name' => ['required', 'string', 'max:120'],
+            'agreement_ref' => ['required', 'string', 'max:120'],
+            'committed_amount' => ['required', 'numeric', 'gt:0'],
+            'restricted_category' => ['nullable', 'string', 'max:120'],
+            'restriction_note' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        app(AllocateFunds::class)->establish(
+            $this->actor(),
+            $input['name'],
+            $input['agreement_ref'],
+            $input['committed_amount'],
+            (($input['restricted_category'] ?? '') !== '') ? $input['restricted_category'] : null,
+            (($input['restriction_note'] ?? '') !== '') ? $input['restriction_note'] : null,
+            $this->idempotencyKey('finance.fund.establish'),
+        );
+
+        return redirect()->route('finance.index')->with('success', 'Funding source established; the pool and its restriction are immutable.');
+    }
+
+    public function allocateFund(Request $request, string $fundId): RedirectResponse
+    {
+        $input = $request->validate([
+            'obligation_line_id' => ['required', 'string'],
+            'amount' => ['required', 'numeric', 'gt:0'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        app(AllocateFunds::class)->allocate(
+            $this->actor(),
+            FundingSource::query()->findOrFail($fundId),
+            ObligationLine::query()->findOrFail($input['obligation_line_id']),
+            $input['amount'],
+            $input['reason'],
+            $this->idempotencyKey('finance.fund.allocate'),
+        );
+
+        return redirect()->route('finance.index')->with('success', 'Fund allocated to the obligation line.');
     }
 }
