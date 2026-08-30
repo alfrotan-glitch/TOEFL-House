@@ -245,4 +245,120 @@
         </table>
     @endif
 </div>
+
+<div class="card">
+    <h2>Assessment &amp; results</h2>
+    <p class="sub">Attempt → scored → moderated → approved → released; a released result is corrected by a proposed new score that a distinct approver approves. A score never becomes a decision automatically.</p>
+    <form method="POST" action="{{ route('academic.attempt.submit') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <select name="enrollment_id" required>
+                <option value="">Select an active enrollment…</option>
+                @foreach ($activeEnrollments as $enrollment)
+                    <option value="{{ $enrollment->id }}">{{ \Illuminate\Support\Str::limit($enrollment->student_id, 14) }} / {{ \Illuminate\Support\Str::limit($enrollment->class_id, 14) }}</option>
+                @endforeach
+            </select>
+            <select name="kind" required>
+                <option value="placement">Placement</option>
+                <option value="assessment">Assessment</option>
+            </select>
+            <input name="evidence_ref" type="text" placeholder="Evidence reference" required>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Submit attempt</button></div>
+    </form>
+</div>
+
+<div class="card">
+    <h2>Attempts awaiting a score</h2>
+    @if ($attempts->isEmpty())
+        <p class="empty">No submitted attempts awaiting a score.</p>
+    @else
+        <table class="grid">
+            <tr><th>Enrollment</th><th>Kind</th><th>Evidence</th><th>Score</th></tr>
+            @foreach ($attempts as $attempt)
+                <tr>
+                    <td>{{ \Illuminate\Support\Str::limit($attempt->enrollment_id, 18) }}</td>
+                    <td>{{ $attempt->kind }}</td>
+                    <td>{{ \Illuminate\Support\Str::limit($attempt->evidence_ref, 24) }}</td>
+                    <td>
+                        <form method="POST" action="{{ route('academic.attempt.score', $attempt->id) }}" style="display:inline">
+                            @csrf
+                            <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                            <input name="score" type="text" inputmode="decimal" placeholder="Score" required>
+                            <button type="submit" class="btn small">Score</button>
+                        </form>
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
+
+<div class="card">
+    <h2>Results in flight</h2>
+    @if ($results->isEmpty())
+        <p class="empty">No results awaiting moderation, approval or release.</p>
+    @else
+        <table class="grid">
+            <tr><th>Attempt</th><th>Score</th><th>State</th><th>Next stage</th></tr>
+            @foreach ($results as $result)
+                <tr>
+                    <td>{{ \Illuminate\Support\Str::limit($result->attempt_id, 18) }}</td>
+                    <td>{{ $result->score }}</td>
+                    <td><span class="pill">{{ $result->lifecycle_state }}</span></td>
+                    <td>
+                        @if ($result->lifecycle_state === 'scored')
+                            <form method="POST" action="{{ route('academic.result.moderate', $result->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Moderate</button>
+                            </form>
+                        @endif
+                        @if ($result->lifecycle_state === 'moderated')
+                            <form method="POST" action="{{ route('academic.result.approve', $result->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Approve</button>
+                            </form>
+                        @endif
+                        @if ($result->lifecycle_state === 'approved')
+                            <form method="POST" action="{{ route('academic.result.release', $result->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Release</button>
+                            </form>
+                        @endif
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
+
+<div class="card">
+    <h2>Corrections awaiting approval</h2>
+    @if ($corrections->isEmpty())
+        <p class="empty">No correction proposals awaiting approval.</p>
+    @else
+        <table class="grid">
+            <tr><th>Result</th><th>New score</th><th>Reason</th><th>Proposed by</th><th>Approve</th></tr>
+            @foreach ($corrections as $correction)
+                <tr>
+                    <td>{{ \Illuminate\Support\Str::limit($correction->result_id, 18) }}</td>
+                    <td>{{ $correction->score }}</td>
+                    <td>{{ \Illuminate\Support\Str::limit($correction->reason, 30) }}</td>
+                    <td>{{ \Illuminate\Support\Str::limit($correction->proposed_by, 16) }}</td>
+                    <td>
+                        <form method="POST" action="{{ route('academic.correction.approve', $correction->id) }}" style="display:inline">
+                            @csrf
+                            <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                            <button type="submit" class="btn">Approve</button>
+                        </form>
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
 @endsection

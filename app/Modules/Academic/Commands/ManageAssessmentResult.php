@@ -8,6 +8,7 @@ use App\Modules\Academic\Domain\AssessmentResultLifecycle;
 use App\Modules\Academic\Models\AssessmentAttempt;
 use App\Modules\Academic\Models\AssessmentResult;
 use App\Modules\Academic\Models\Enrollment;
+use App\Modules\Academic\Models\ResultCorrection;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Support\Authorization\AccessDecision;
@@ -153,18 +154,15 @@ final class ManageAssessmentResult
      *
      * @return array{result_id: string, corrects_id: string, correlation_id: string}
      */
-    public function correct(Actor $moderator, Actor $approver, AssessmentResult $original, string $score, string $reason, string $idempotencyKey): array
+    /** @return array{correction_id: string, correlation_id: string} */
+    public function proposeCorrection(Actor $moderator, AssessmentResult $original, string $score, string $reason, string $idempotencyKey): array
     {
-        $payload = hash('sha256', implode('|', ['academic.result.correct', $original->id, $score, $reason, $moderator->actorId, $approver->actorId]));
+        $payload = hash('sha256', implode('|', ['academic.result.correction.propose', $original->id, $score, $reason, $moderator->actorId]));
 
         try {
-            return $this->idempotency->execute('academic.result.correct', $idempotencyKey, $payload,
-                fn (): array => DB::transaction(function () use ($moderator, $approver, $original, $score, $reason): array {
+            return $this->idempotency->execute('academic.result.correction.propose', $idempotencyKey, $payload,
+                fn (): array => DB::transaction(function () use ($moderator, $original, $score, $reason): array {
                     $this->require($moderator, self::CAPABILITY_MODERATE, 'academic.moderate_denied');
-                    $this->require($approver, self::CAPABILITY_APPROVE, 'academic.approve_result_denied');
-                    if ($moderator->actorId === $approver->actorId) {
-                        throw AuthorizationDenied::forCode('academic.correction_single_actor', 'a correction needs a moderator and an approver as distinct actors');
-                    }
                     if ($reason === '') {
                         throw BusinessRejection::forCode('academic.correction_reason', 'a correction requires a reason');
                     }
@@ -175,6 +173,52 @@ final class ManageAssessmentResult
                     /** @var AssessmentResult $locked */
                     $locked = AssessmentResult::query()->whereKey($original->id)->lockForUpdate()->firstOrFail();
                     AssessmentResultLifecycle::requireTransition($locked->lifecycle_state, AssessmentResultLifecycle::STATE_CORRECTED);
+                    if (ResultCorrection::query()->where('result_id', $locked->id)->where('lifecycle_state', ResultCorrection::STATE_PROPOSED)->exists()) {
+                        throw BusinessRejection::forCode('academic.correction_exists', 'this result already has an open correction');
+                    }
+
+                    $correction = ResultCorrection::query()->create([
+                        'id' => RandomIdentifier::new(),
+                        'result_id' => $locked->id,
+                        'score' => $score,
+                        'reason' => $reason,
+                        'lifecycle_state' => ResultCorrection::STATE_PROPOSED,
+                        'proposed_by' => $moderator->actorId,
+                    ]);
+                    $event = $this->audit->record($moderator->actorId, 'academic.result.correction.propose', 'result_correction', $correction->id, null, [
+                        'result_id' => $locked->id, 'score' => $score,
+                    ]);
+
+                    return ['correction_id' => $correction->id, 'correlation_id' => $event->correlation_id];
+                }),
+            );
+        } catch (AuthorizationDenied $denial) {
+            $this->attemptedOperation->deniedByActor($denial, $moderator, 'academic.result.correction.propose', 'result_correction', $original->id);
+        }
+    }
+
+    /** @return array{result_id: string, corrects_id: string, correlation_id: string} */
+    public function approveCorrection(Actor $approver, ResultCorrection $correction, string $idempotencyKey): array
+    {
+        $payload = hash('sha256', implode('|', ['academic.result.correction.approve', $correction->id, $approver->actorId]));
+
+        try {
+            return $this->idempotency->execute('academic.result.correction.approve', $idempotencyKey, $payload,
+                fn (): array => DB::transaction(function () use ($approver, $correction): array {
+                    $this->require($approver, self::CAPABILITY_APPROVE, 'academic.approve_result_denied');
+
+                    /** @var ResultCorrection $lockedCorrection */
+                    $lockedCorrection = ResultCorrection::query()->whereKey($correction->id)->lockForUpdate()->firstOrFail();
+                    if ($lockedCorrection->lifecycle_state !== ResultCorrection::STATE_PROPOSED) {
+                        throw BusinessRejection::forCode('academic.correction_state', sprintf('only a proposed correction can be approved, state is %s', $lockedCorrection->lifecycle_state));
+                    }
+                    if (trim((string) $lockedCorrection->proposed_by) === $approver->actorId) {
+                        throw AuthorizationDenied::forCode('academic.correction_single_actor', 'a correction needs a moderator and an approver as distinct actors');
+                    }
+
+                    /** @var AssessmentResult $locked */
+                    $locked = AssessmentResult::query()->whereKey($lockedCorrection->result_id)->lockForUpdate()->firstOrFail();
+                    AssessmentResultLifecycle::requireTransition($locked->lifecycle_state, AssessmentResultLifecycle::STATE_CORRECTED);
 
                     $locked->forceFill(['lifecycle_state' => AssessmentResultLifecycle::STATE_CORRECTED]);
                     $locked->save();
@@ -182,22 +226,26 @@ final class ManageAssessmentResult
                     $corrected = AssessmentResult::query()->create([
                         'id' => RandomIdentifier::new(),
                         'attempt_id' => $locked->attempt_id,
-                        'score' => $score,
+                        'score' => $lockedCorrection->score,
                         'lifecycle_state' => AssessmentResultLifecycle::STATE_RELEASED,
                         'corrects_id' => $locked->id,
-                        'correction_reason' => $reason,
-                        'scored_by' => $moderator->actorId,
+                        'correction_reason' => $lockedCorrection->reason,
+                        'scored_by' => $lockedCorrection->proposed_by,
                     ]);
 
-                    $event = $this->audit->record($moderator->actorId, 'academic.result.correct', 'assessment_result', $corrected->id, ['score' => $locked->score], [
-                        'corrects_id' => $locked->id, 'score' => $score, 'reason' => $reason, 'approved_by' => $approver->actorId,
+                    $lockedCorrection->forceFill([
+                        'lifecycle_state' => ResultCorrection::STATE_APPROVED,
+                        'approved_by' => $approver->actorId,
+                    ])->save();
+                    $event = $this->audit->record($approver->actorId, 'academic.result.correction.approve', 'assessment_result', $corrected->id, ['score' => $locked->score], [
+                        'corrects_id' => $locked->id, 'score' => $lockedCorrection->score, 'correction_id' => $lockedCorrection->id,
                     ]);
 
                     return ['result_id' => $corrected->id, 'corrects_id' => $locked->id, 'correlation_id' => $event->correlation_id];
                 }),
             );
         } catch (AuthorizationDenied $denial) {
-            $this->attemptedOperation->deniedByActor($denial, $moderator, 'academic.result.correct', 'assessment_result', $original->id);
+            $this->attemptedOperation->deniedByActor($denial, $approver, 'academic.result.correction.approve', 'assessment_result', $correction->id);
         }
     }
 

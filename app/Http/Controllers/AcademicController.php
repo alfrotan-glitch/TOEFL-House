@@ -9,13 +9,17 @@ use App\Modules\Academic\Commands\MaintainAcademicStructure;
 use App\Modules\Academic\Commands\MaintainClass;
 use App\Modules\Academic\Commands\MaintainEnrollment;
 use App\Modules\Academic\Commands\MaintainSkill;
+use App\Modules\Academic\Commands\ManageAssessmentResult;
 use App\Modules\Academic\Commands\RecordAttendance;
 use App\Modules\Academic\Models\AcademicPeriod;
+use App\Modules\Academic\Models\AssessmentAttempt;
+use App\Modules\Academic\Models\AssessmentResult;
 use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\ClassSession;
 use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Academic\Models\Program;
 use App\Modules\Academic\Models\ProgressionDecision;
+use App\Modules\Academic\Models\ResultCorrection;
 use App\Modules\Academic\Models\Skill;
 use App\Modules\Academic\Models\TeacherAssignment;
 use App\Modules\Students\Models\Student;
@@ -41,6 +45,10 @@ final class AcademicController extends Controller
             'classes' => ClassModel::query()->orderBy('id')->limit(100)->get(),
             'assignments' => TeacherAssignment::query()->orderBy('id')->limit(100)->get(),
             'students' => Student::query()->orderBy('student_code')->limit(300)->get(),
+            'activeEnrollments' => Enrollment::query()->where('lifecycle_state', 'active')->orderBy('id')->limit(300)->get(),
+            'attempts' => AssessmentAttempt::query()->where('lifecycle_state', 'submitted')->orderByDesc('id')->limit(200)->get(),
+            'results' => AssessmentResult::query()->whereIn('lifecycle_state', ['scored', 'moderated', 'approved'])->orderByDesc('id')->limit(200)->get(),
+            'corrections' => ResultCorrection::query()->where('lifecycle_state', ResultCorrection::STATE_PROPOSED)->orderByDesc('id')->limit(200)->get(),
             'requestedEnrollments' => Enrollment::query()->where('lifecycle_state', 'requested')->orderBy('id')->limit(200)->get(),
             'progressions' => ProgressionDecision::query()->whereIn('lifecycle_state', ['proposed', 'reviewed'])->orderBy('id')->limit(200)->get(),
         ]);
@@ -260,5 +268,102 @@ final class AcademicController extends Controller
         );
 
         return redirect()->route('academic.index')->with('success', 'Skill retired.');
+    }
+
+    public function submitAssessmentAttempt(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'enrollment_id' => ['required', 'string'],
+            'kind' => ['required', 'in:placement,assessment'],
+            'evidence_ref' => ['required', 'string', 'max:500'],
+        ]);
+
+        app(ManageAssessmentResult::class)->submitAttempt(
+            $this->actor(),
+            Enrollment::query()->findOrFail($input['enrollment_id']),
+            $input['kind'],
+            $input['evidence_ref'],
+            $this->idempotencyKey('academic.attempt.submit'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Attempt submitted; it can now be scored.');
+    }
+
+    public function scoreAttempt(Request $request, string $attemptId): RedirectResponse
+    {
+        $input = $request->validate([
+            'score' => ['required', 'numeric', 'min:0', 'max:9999.99'],
+        ]);
+
+        app(ManageAssessmentResult::class)->score(
+            $this->actor(),
+            AssessmentAttempt::query()->findOrFail($attemptId),
+            $input['score'],
+            $this->idempotencyKey('academic.result.score'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Result recorded; it moves scored to moderated to approved to released.');
+    }
+
+    public function moderateResult(Request $request, string $resultId): RedirectResponse
+    {
+        app(ManageAssessmentResult::class)->moderate(
+            $this->actor(),
+            AssessmentResult::query()->findOrFail($resultId),
+            $this->idempotencyKey('academic.result.moderate'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Result moderated.');
+    }
+
+    public function approveResult(Request $request, string $resultId): RedirectResponse
+    {
+        app(ManageAssessmentResult::class)->approve(
+            $this->actor(),
+            AssessmentResult::query()->findOrFail($resultId),
+            $this->idempotencyKey('academic.result.approve'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Result approved.');
+    }
+
+    public function releaseResult(Request $request, string $resultId): RedirectResponse
+    {
+        app(ManageAssessmentResult::class)->release(
+            $this->actor(),
+            AssessmentResult::query()->findOrFail($resultId),
+            $this->idempotencyKey('academic.result.release'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Result released; only released results exist for the student.');
+    }
+
+    public function proposeCorrection(Request $request, string $resultId): RedirectResponse
+    {
+        $input = $request->validate([
+            'score' => ['required', 'numeric', 'min:0', 'max:9999.99'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        app(ManageAssessmentResult::class)->proposeCorrection(
+            $this->actor(),
+            AssessmentResult::query()->findOrFail($resultId),
+            $input['score'],
+            $input['reason'],
+            $this->idempotencyKey('academic.result.correction.propose'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Correction proposed; it records only when a distinct approver approves it.');
+    }
+
+    public function approveCorrection(Request $request, string $correctionId): RedirectResponse
+    {
+        app(ManageAssessmentResult::class)->approveCorrection(
+            $this->actor(),
+            ResultCorrection::query()->findOrFail($correctionId),
+            $this->idempotencyKey('academic.result.correction.approve'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Correction approved; the original result is closed as corrected.');
     }
 }

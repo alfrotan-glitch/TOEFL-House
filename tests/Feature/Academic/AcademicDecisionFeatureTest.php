@@ -20,6 +20,7 @@ use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Academic\Models\GraduationDecision;
 use App\Modules\Academic\Models\Program;
 use App\Modules\Academic\Models\ProgressionDecision;
+use App\Modules\Academic\Models\ResultCorrection;
 use App\Modules\Admissions\Commands\EnrollAdmittedApplicant;
 use App\Modules\Admissions\Commands\RegisterApplicant;
 use App\Modules\Admissions\Models\Applicant;
@@ -120,21 +121,26 @@ final class AcademicDecisionFeatureTest extends TestCase
     public function test_correction_appends_a_reasoned_row_and_marks_the_original_corrected(): void
     {
         $ids = $this->releasedResult();
-        $moderator = $this->grantedActor('dec-moderator-b', ['academic.moderate', 'academic.approve_result']);
+        $dual = $this->grantedActor('dec-moderator-b', ['academic.moderate', 'academic.approve_result']);
         $approver = $this->grantedActor('dec-approver-b', ['academic.approve_result']);
 
+        // Staged: the moderator proposes in her own session; approval needs a distinct approver.
+        $proposal = app(ManageAssessmentResult::class)->proposeCorrection($dual, AssessmentResult::query()->findOrFail($ids['result_id']), '91.00', 'recount verified against source responses', 'dec-cor-1');
+        $correctionModel = ResultCorrection::query()->findOrFail($proposal['correction_id']);
+
         try {
-            app(ManageAssessmentResult::class)->correct($moderator, $moderator, AssessmentResult::query()->findOrFail($ids['result_id']), '91.00', 'recount', 'dec-cor-1');
-            $this->fail('a single actor may not both moderate and approve a correction');
+            app(ManageAssessmentResult::class)->approveCorrection($dual, $correctionModel, 'dec-cor-1b');
+            $this->fail('a single actor may not both propose and approve a correction');
         } catch (AuthorizationDenied $denial) {
             $this->assertSame('academic.correction_single_actor', $denial->errorCode());
         }
 
-        $correction = app(ManageAssessmentResult::class)->correct($moderator, $approver, AssessmentResult::query()->findOrFail($ids['result_id']), '91.00', 'recount verified against source responses', 'dec-cor-2');
+        $correction = app(ManageAssessmentResult::class)->approveCorrection($approver, $correctionModel, 'dec-cor-2');
 
         $this->assertDatabaseHas('assessment_results', ['id' => $ids['result_id'], 'lifecycle_state' => 'corrected']);
         $this->assertDatabaseHas('assessment_results', ['id' => $correction['result_id'], 'lifecycle_state' => 'released', 'corrects_id' => $ids['result_id'], 'correction_reason' => 'recount verified against source responses']);
-        $this->assertDatabaseHas('audit_events', ['operation' => 'academic.result.correct', 'target_type' => 'assessment_result']);
+        $this->assertDatabaseHas('result_corrections', ['id' => $proposal['correction_id'], 'lifecycle_state' => 'approved', 'approved_by' => $approver->actorId]);
+        $this->assertDatabaseHas('audit_events', ['operation' => 'academic.result.correction.approve', 'target_type' => 'assessment_result']);
     }
 
     public function test_appeal_flow_requires_independent_reviewer_and_outcome_evidence(): void
