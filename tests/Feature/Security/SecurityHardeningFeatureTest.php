@@ -76,6 +76,36 @@ final class SecurityHardeningFeatureTest extends TestCase
             ->assertHeader('Retry-After');
     }
 
+    public function test_login_with_keep_me_signed_in_persists_the_recaller(): void
+    {
+        $this->makeEmployee();
+
+        // The advertised "keep me signed in" must work end-to-end: the
+        // guard stores its token in user_accounts.remember_token (000117)
+        // and issues the recaller cookie. Without the column this was a 500.
+        $withRemember = $this->post('/login', ['username' => 'security.employee', 'password' => 'correct-horse-99', 'remember' => '1']);
+        $withRemember->assertRedirect('/');
+        $this->assertTrue(
+            collect($withRemember->headers->all('set-cookie'))
+                ->contains(fn (string $header): bool => preg_match('/^remember_web_[a-f0-9]+=[^;]+/', $header) === 1),
+            'the remember-enabled sign-in must issue the recaller cookie',
+        );
+    }
+
+    public function test_login_without_remember_issues_no_recaller(): void
+    {
+        $this->makeEmployee();
+
+        // A session-only sign-in must not create a long-lived credential.
+        $withoutRemember = $this->post('/login', ['username' => 'security.employee', 'password' => 'correct-horse-99']);
+        $withoutRemember->assertRedirect('/');
+        $this->assertFalse(
+            collect($withoutRemember->headers->all('set-cookie'))
+                ->contains(fn (string $header): bool => preg_match('/^remember_web_[a-f0-9]+=[^;]+/', $header) === 1),
+            'a session-only sign-in must not issue a recaller cookie',
+        );
+    }
+
     public function test_health_endpoint_reports_healthy_with_database_check(): void
     {
         $response = $this->getJson('/health');

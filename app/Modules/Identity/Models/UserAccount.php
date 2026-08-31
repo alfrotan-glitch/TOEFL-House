@@ -21,6 +21,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string $person_id
  * @property string $username
  * @property string|null $password_hash
+ * @property string|null $remember_token
  * @property string|null $password_changed_at
  * @property string $account_state
  * @property string|null $deactivated_at
