@@ -6,7 +6,7 @@ namespace Tests\Feature\Privacy;
 
 use App\Modules\Privacy\Commands\ExportSubjectData;
 use App\Modules\Privacy\Commands\RecordDisclosure;
-use App\Support\Authorization\Actor;
+use App\Modules\Privacy\Models\PrivacyExportRequest;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use Illuminate\Database\QueryException;
@@ -81,10 +81,10 @@ final class DisclosureExportFeatureTest extends TestCase
 
         $before = ['consents' => DB::table('consents')->count(), 'disclosures' => DB::table('disclosures')->count()];
         $result = app(ExportSubjectData::class)->export(
-            $officer, 'export-subject-1', 'subject-data-request', 'subject', 'export-subject-1', [], 'export-key-1',
+            $officer, 'export-subject-1', 'subject-data-request', 'subject', 'export-subject-1', 'export-key-1',
         );
         $replay = app(ExportSubjectData::class)->export(
-            $officer, 'export-subject-1', 'subject-data-request', 'subject', 'export-subject-1', [], 'export-key-1',
+            $officer, 'export-subject-1', 'subject-data-request', 'subject', 'export-subject-1', 'export-key-1',
         );
 
         $this->assertSame($result['export_id'], $replay['export_id']);
@@ -95,41 +95,52 @@ final class DisclosureExportFeatureTest extends TestCase
 
     public function test_organization_wide_export_requires_two_distinct_eligible_approvers(): void
     {
-        $approvers = [
-            $this->actorWithStructureCapabilities('export-owner-1', ['privacy.approve_bulk_export']),
-            $this->actorWithStructureCapabilities('export-owner-2', ['privacy.approve_bulk_export']),
-        ];
-        $officer = $this->privacyOfficer();
+        // Two distinct privileged approvers, each signing from their own session — the
+        // only legal path to an organization-wide export (the house staged pattern).
+        $exporter = $this->privacyOfficer();
+        $approverOne = $this->actorWithStructureCapabilities('export-owner-1', ['privacy.approve_bulk_export']);
+        $approverTwo = $this->actorWithStructureCapabilities('export-owner-2', ['privacy.approve_bulk_export']);
         $this->personWithAuthority('export-subject-2', []);
         $command = app(ExportSubjectData::class);
 
         try {
-            $command->export($officer, 'export-subject-2', 'bulk-export', 'organization', $this->bootstrapOrganizationId, [new Actor('export-owner-1', 'Approver One')], 'export-key-2');
+            $command->export($exporter, 'export-subject-2', 'bulk-export', 'organization', $this->bootstrapOrganizationId, 'export-key-2');
+            $this->fail('direct organization export must require the staged approval chain');
+        } catch (BusinessRejection $denied) {
+            $this->assertSame('privacy.export_bulk_requires_request', $denied->errorCode());
+        }
+
+        $requestResult = $command->request($exporter, 'export-subject-2', 'bulk-export', $this->bootstrapOrganizationId, 'export-key-3');
+        $request = PrivacyExportRequest::query()->findOrFail($requestResult['request_id']);
+
+        // One approver (however privileged) is not enough to execute.
+        $this->assertSame('requested', $command->approve($approverOne, $request, 'export-approve-1')['lifecycle_state']);
+        try {
+            $command->execute($exporter, $request, 'export-execute-1');
             $this->fail('one approver must not suffice');
-        } catch (AuthorizationDenied $denial) {
-            $this->assertSame('privacy.bulk_export_owner_count', $denial->errorCode());
+        } catch (BusinessRejection $denied) {
+            $this->assertSame('privacy.export_request_state', $denied->errorCode());
         }
 
         try {
-            $twice = [new Actor('export-owner-1', 'A'), new Actor('export-owner-1', 'A')];
-            $command->export($officer, 'export-subject-2', 'bulk-export', 'organization', $this->bootstrapOrganizationId, $twice, 'export-key-3');
+            $command->approve($approverOne, $request, 'export-approve-2');
             $this->fail('the same actor twice must not suffice');
         } catch (AuthorizationDenied $denial) {
             $this->assertSame('privacy.bulk_export_single_actor', $denial->errorCode());
         }
 
+        $nobody = $this->actorWithoutAnyCapability('export-nobody-3');
         try {
-            $unprivileged = [new Actor('export-owner-1', 'A'), new Actor('export-nobody', 'B')];
-            $command->export($officer, 'export-subject-2', 'bulk-export', 'organization', $this->bootstrapOrganizationId, $unprivileged, 'export-key-4');
+            $command->approve($nobody, $request, 'export-approve-3');
             $this->fail('an unprivileged approver must not suffice');
         } catch (AuthorizationDenied $denial) {
             $this->assertSame('privacy.bulk_export_approver_denied', $denial->errorCode());
         }
 
-        $approved = $command->export($officer, 'export-subject-2', 'bulk-export', 'organization', $this->bootstrapOrganizationId, [
-            new Actor('export-owner-1', 'A'), new Actor('export-owner-2', 'B'),
-        ], 'export-key-5');
-        $this->assertDatabaseHas('disclosures', ['id' => $approved['disclosure_id']]);
+        $this->assertSame('approved', $command->approve($approverTwo, $request, 'export-approve-4')['lifecycle_state']);
+        $executed = $command->execute($exporter, $request, 'export-execute-2');
+        $this->assertDatabaseHas('disclosures', ['id' => $executed['disclosure_id']]);
+        $this->assertDatabaseHas('privacy_export_requests', ['id' => $request->id, 'lifecycle_state' => 'exported', 'exported_by' => $exporter->actorId]);
     }
 
     public function test_unprivileged_exporter_is_denied_and_audited(): void
@@ -139,7 +150,7 @@ final class DisclosureExportFeatureTest extends TestCase
 
         $this->expectException(AuthorizationDenied::class);
         $this->expectExceptionMessage('no active authority grants privacy.export');
-        app(ExportSubjectData::class)->export($nobody, 'export-subject-3', 'illicit-export', 'subject', 'export-subject-3', [], 'export-key-6');
+        app(ExportSubjectData::class)->export($nobody, 'export-subject-3', 'illicit-export', 'subject', 'export-subject-3', 'export-key-6');
 
         $this->assertDatabaseHas('audit_events', ['operation' => 'privacy.export.denied', 'actor_id' => 'export-nobody-2']);
     }

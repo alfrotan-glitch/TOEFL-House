@@ -13,6 +13,7 @@ use App\Http\Controllers\LibraryController;
 use App\Http\Controllers\OrganizationController;
 use App\Http\Controllers\PayrollController;
 use App\Http\Controllers\PrintingController;
+use App\Http\Controllers\PrivacyController;
 use App\Http\Controllers\ReportingController;
 use App\Http\Controllers\StudentsController;
 use Illuminate\Support\Facades\Route;
@@ -194,6 +195,23 @@ Route::middleware('employee')->group(function (): void {
         Route::post('{documentId}/expire', [DocumentsController::class, 'expireDocument'])->name('expire');
         Route::post('{documentId}/archive', [DocumentsController::class, 'archiveDocument'])->name('archive');
         Route::post('{documentId}/retention', [DocumentsController::class, 'decideRetention'])->name('retention.decide');
+    });
+
+    // Privacy
+    Route::prefix('privacy')->name('privacy.')->group(function (): void {
+        Route::get('/', [PrivacyController::class, 'index'])->name('index');
+        Route::post('purposes', [PrivacyController::class, 'definePurpose'])->name('purpose.define');
+        Route::post('consents', [PrivacyController::class, 'recordConsent'])->name('consent.record');
+        Route::post('consents/{consentId}/submit', [PrivacyController::class, 'submitConsent'])->name('consent.submit');
+        Route::post('consents/{consentId}/verify', [PrivacyController::class, 'verifyConsent'])->name('consent.verify');
+        Route::post('consents/{consentId}/activate', [PrivacyController::class, 'activateConsent'])->name('consent.activate');
+        Route::post('consents/{consentId}/revoke', [PrivacyController::class, 'revokeConsent'])->name('consent.revoke');
+        Route::post('consents/{consentId}/archive', [PrivacyController::class, 'archiveConsent'])->name('consent.archive');
+        Route::post('disclosures', [PrivacyController::class, 'recordDisclosure'])->name('disclosure.record');
+        Route::post('exports', [PrivacyController::class, 'directExport'])->name('export.direct');
+        Route::post('exports/bulk', [PrivacyController::class, 'requestExport'])->name('export.request');
+        Route::post('exports/{requestId}/approve', [PrivacyController::class, 'approveExport'])->name('export.approve');
+        Route::post('exports/{requestId}/execute', [PrivacyController::class, 'executeExport'])->name('export.execute');
     });
 
     // Audit & Governance
