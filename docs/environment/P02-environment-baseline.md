@@ -183,7 +183,7 @@ export APP_ENV=testing                                                  # for te
 Safe committed `.env.example` (gitignored `.env` is derived from it; no secrets):
 
 ```dotenv
-APP_NAME="TOEFL House"
+APP_NAME="The TOEFL House"
 APP_ENV=local
 APP_KEY=                 # generated locally: php artisan key:generate
 APP_DEBUG=true
