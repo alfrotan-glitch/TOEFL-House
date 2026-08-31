@@ -47,7 +47,7 @@ final class AcademicController extends Controller
         return view('academic.index', [
             'programs' => Program::query()->orderBy('name')->limit(100)->get(),
             'periods' => AcademicPeriod::query()->orderBy('starts_on')->limit(100)->get(),
-            'skills' => Skill::query()->orderBy('rank_order')->limit(100)->get(),
+            'skills' => Skill::query()->orderBy('key')->limit(100)->get(),
             'classes' => ClassModel::query()->orderBy('id')->limit(100)->get(),
             'assignments' => TeacherAssignment::query()->orderBy('id')->limit(100)->get(),
             'students' => Student::query()->orderBy('student_code')->limit(300)->get(),
@@ -71,7 +71,7 @@ final class AcademicController extends Controller
         return view('academic.sessions', [
             'sessions' => ClassSession::query()->orderByDesc('scheduled_on')->limit(200)->get(),
             'classes' => ClassModel::query()->where('lifecycle_state', 'active')->orderBy('id')->get(),
-            'skills' => Skill::query()->where('lifecycle_state', 'active')->orderBy('rank_order')->get(),
+            'skills' => Skill::query()->where('lifecycle_state', 'active')->orderBy('key')->get(),
             'enrollments' => Enrollment::query()->where('lifecycle_state', 'active')->orderBy('class_id')->limit(1000)->get(),
         ]);
     }
