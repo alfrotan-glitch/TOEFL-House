@@ -67,12 +67,37 @@ log "source: commit $COMMIT"
 cp "$ENV_FILE" "$RELEASE_DIR/.env"
 ( cd "$RELEASE_DIR" && grep -q '^APP_ENV=production' .env ) || die ".env must set APP_ENV=production"
 ( cd "$RELEASE_DIR" && grep -q '^APP_DEBUG=false' .env ) || die ".env must set APP_DEBUG=false"
+# APP_KEY must be present and non-empty BEFORE the release goes live: with an
+# empty key the first request fails session encryption and the health check
+# would only catch it after the symlink has switched (forcing a rollback of a
+# deploy that could have been refused up front).
+( cd "$RELEASE_DIR" && grep -q '^APP_KEY=..' .env ) || die ".env must set a non-empty APP_KEY (php artisan key:generate)"
 
-# 4. Schema: forward-only migrations. Never destructive; a failing migration
+# 4. Pre-deploy backup: migrations are forward-only and run against the live
+#    database, so a backup is taken immediately before they run. The backup
+#    uses the persistent .env's DB settings; without the client tools this
+#    deploy is refused (a migration without a fresh backup is not a deploy
+#    this script will perform).
+DB_NAME_VAL="$(grep -m1 '^DB_DATABASE=' "$ENV_FILE" | cut -d= -f2-)"
+DB_HOST_VAL="$(grep -m1 '^DB_HOST=' "$ENV_FILE" | cut -d= -f2-)"
+DB_PORT_VAL="$(grep -m1 '^DB_PORT=' "$ENV_FILE" | cut -d= -f2-)"
+DB_USER_VAL="$(grep -m1 '^DB_USERNAME=' "$ENV_FILE" | cut -d= -f2-)"
+DB_PASS_VAL="$(grep -m1 '^DB_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)"
+if command -v pg_dump >/dev/null 2>&1; then
+    BACKUP_DIR="${BACKUP_DIR:-/var/backups/toefl-house}" \
+        DB_NAME="${DB_NAME_VAL:-toefl_house}" DB_HOST="${DB_HOST_VAL:-127.0.0.1}" \
+        DB_PORT="${DB_PORT_VAL:-5432}" DB_USER="${DB_USER_VAL:-postgres}" \
+        PGPASSWORD="$DB_PASS_VAL" \
+        "$RELEASE_DIR/deploy/backup.sh"
+else
+    die "pg_dump not found on PATH: refusing to deploy (migrations run against the live database and require a pre-deploy backup; install postgresql-client, version >= the server)"
+fi
+
+# 5. Schema: forward-only migrations. Never destructive; a failing migration
 #    aborts the deployment before the release goes live.
 ( cd "$RELEASE_DIR" && "$PHP_BIN" artisan migrate --force --no-interaction )
 
-# 5. Runtime directories exist and are owned by the web user (the repo now
+# 6. Runtime directories exist and are owned by the web user (the repo now
 #    tracks them, but ensure ownership/permissions for the FPM user).
 WEB_USER="$(grep -m1 '^user' /etc/php/*/fpm/pool.d/toefl-house.conf 2>/dev/null | awk '{print $3}' || echo www-data)"
 for d in storage/app storage/framework/cache storage/framework/sessions storage/framework/views storage/logs bootstrap/cache; do
@@ -80,10 +105,10 @@ for d in storage/app storage/framework/cache storage/framework/sessions storage/
 done
 chown -R "$WEB_USER":"$WEB_USER" "$RELEASE_DIR/storage" "$RELEASE_DIR/bootstrap/cache"
 
-# 6. Production optimization (Laravel-recommended: cached config/routes/views).
+# 7. Production optimization (Laravel-recommended: cached config/routes/views).
 ( cd "$RELEASE_DIR" && "$PHP_BIN" artisan config:cache && "$PHP_BIN" artisan route:cache && "$PHP_BIN" artisan view:cache )
 
-# 7. Go live: switch the symlink, then verify the release over HTTP.
+# 8. Go live: switch the symlink, then verify the release over HTTP.
 PREV_RELEASE="$(readlink "$CURRENT_LINK" 2>/dev/null || true)"
 ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
 ( systemctl reload php*-fpm 2>/dev/null || service php*-fpm reload 2>/dev/null || true )
@@ -100,7 +125,7 @@ for i in 1 2 3 4 5; do
     sleep 2
 done
 
-# 8. Unhealthy: automatic rollback to the previous release; fail loudly.
+# 9. Unhealthy: automatic rollback to the previous release; fail loudly.
 log "release FAILED health check — rolling back"
 [ -n "$PREV_RELEASE" ] && ln -sfn "$PREV_RELEASE" "$CURRENT_LINK" || rm -f "$CURRENT_LINK"
 nginx -t >/dev/null 2>&1 && systemctl reload nginx 2>/dev/null || true

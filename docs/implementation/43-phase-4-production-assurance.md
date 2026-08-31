@@ -96,3 +96,96 @@ Carried to P4.4: least-privilege DB role and `sslmode` enforcement on the target
 
 **Resource posture.** Synchronous modular monolith (no queue workers, `QUEUE_CONNECTION=sync` by design); session + rate-limit cache on the persistent `cache` table (database driver) — no external infrastructure, no cache invalidation surface; pagination is limit-based on every index view (no unbounded `get()`).
 
+
+## P4.4 — Deployment
+
+**Scope (PHASE_4 contract):** env, config, migrations, health check, readiness,
+deploy script, atomic release, rollback, pre-deploy backup.
+
+### What exists (audited, not invented)
+
+| Piece | Location | Property verified |
+|---|---|---|
+| Atomic release script | `deploy/deploy.sh` | releases/ + `current` symlink; live pointer switches only after env validation, migrations, and caches succeed |
+| Health gate + auto-rollback | `deploy/deploy.sh` steps 8–9 | 5 polls × 2s on `GET /health`; on failure the symlink is restored to the previous release, services reloaded, script exits non-zero, failed release kept on disk |
+| Manual rollback | `deploy/deploy.sh --rollback` | pointer change to the previous release, no rebuild |
+| Release retention | `deploy/deploy.sh` | last 3 releases kept, older pruned after a green deploy |
+| Edge server config | `deploy/nginx/toefl-house.conf` | docroot = `public/` only; dotfiles denied; raw `.php` 403; TLS 1.2/1.3; edge security headers; HTTP→HTTPS redirect; unauthenticated `/health` bypass |
+| FPM pool | `deploy/php-fpm.conf` | dynamic pm (max 20), graceful/zero-downtime reload; no worker/scheduler processes (matches the monolith architecture) |
+| Ops runbook | `docs/operations/production-deployment.md` | 17 sections: env, PG, migrations, caches, workers (none), scheduler (none), HTTPS, health, backup, restore, rollback, deploy, recovery, verification gate |
+
+### Gaps found and fixed (this unit)
+
+1. **No pre-deploy backup.** `deploy.sh` ran forward-only migrations against the
+   live database with no safety net. **Fixed:** step 4 now runs `deploy/backup.sh`
+   (with the persistent `.env`'s DB settings) immediately before `migrate`. If
+   the PostgreSQL client tools are absent, the deploy is **refused** — a
+   migration without a fresh backup is not a deployment this script performs.
+   (Consistent with the P4.2 preflight: the tools are a documented, hard
+   prerequisite of any migration event.)
+2. **Empty `APP_KEY` only failed after go-live.** With an empty key the first
+   request fails session encryption and the health check catches it only after
+   the symlink switched (forcing a rollback of a deploy that should have been
+   refused up front). **Fixed:** the env validation now requires a non-empty
+   `APP_KEY` before anything is cloned or migrated.
+
+### Executed in this sandbox (measured, not claimed)
+
+A real deploy run against a sandboxed `DEPLOY_ROOT` (`/tmp/deploy-test`), a
+fresh empty database (`toefl_house_deploytest`, PostgreSQL 18.4), and the real
+repository as the source:
+
+1. `git clone` of the release ref → **OK** (fresh checkout into
+   `releases/<timestamp>`).
+2. `composer install --no-dev --optimize-autoloader` from the lock file →
+   **OK** (full production vendor tree built in the release).
+3. Env validation → **OK** (`APP_ENV=production`, `APP_DEBUG=false`,
+   non-empty `APP_KEY` enforced).
+4. Pre-deploy backup gate → **proven fail-loud:** with no `pg_dump` on PATH
+   the deploy stops with exit 1 *before* any migration, message:
+   `refusing to deploy (migrations run against the live database and require a
+   pre-deploy backup…)`.
+5. Migrations on the fresh database from the production clone → **118/118 DONE**
+   (the same migration path a first deploy executes).
+6. `config:cache` + `route:cache` + `view:cache` → **OK**.
+7. Atomic switch + health: `current` → release, then through the live front
+   controller `GET /health` → **HTTP 200 in 101ms**
+   `{"status":"ok","environment":"production","checks":{"database":"ok","application_key":"ok"}}`;
+   `GET /login` → **HTTP 200**; `GET /.env` → **HTTP 404** (docroot is
+   `public/` only — the env file is unreachable over HTTP).
+8. `deploy.sh --rollback` with two releases present → **OK** (`current`
+   restored to the previous release).
+9. Refused deploy (step 4 gate) → the **live `current` pointer is untouched**;
+   the failed release remains on disk, unlinked, for forensics.
+
+### Environment constraint (explicit, inherited from P02/P4.2)
+
+The sandbox ships **no PostgreSQL client tools** and the package mirrors here
+cannot provide a PG ≥18 client (Debian bookworm caps at PG 15; the PGDG repo
+and GNU/bison sources are unreachable; the PG 18.4 source build was attempted
+and fails on the absent parser generators). Consequently the one path that
+*requires* `pg_dump` — the file-based backup step inside a full `deploy.sh`
+happy path — is **not executable in this sandbox**. It is proven by its
+fail-loud behavior (items 4 and 9 above) and is carried as a **mandatory
+pre-go-live host drill**:
+
+1. On the target host (with `postgresql-client` ≥ server version): run a full
+   `deploy/deploy.sh <good-ref>` and confirm the pre-deploy backup is produced
+   in `BACKUP_DIR`, migrations run, the release goes live, and `/health` is 200.
+2. Run `deploy/restore.sh <that-backup> --confirm` against a scratch database
+   and verify (the P4.2 TEMPLATE drill already proved 104/104 tables +
+   10/10 checksums at the engine level; this drill closes the file-based loop
+   end to end on the production host).
+3. Induce a failed release (e.g. a bad migration or an unhealthy build) and
+   confirm the automatic rollback leaves the previous release live.
+
+These three drills are the difference between "the script is correct" and
+"the deployment was demonstrated on the production host." They are listed
+here, not waived.
+
+### Verdict
+
+Deployment is ready subject to the host drills above. No speculative
+infrastructure (no orchestrator, no container platform, no message broker) is
+part of or assumed by the deployment; the release-symlink model is the entire
+deployment system.

@@ -23,11 +23,12 @@ scheduler process — see §9/§10.
 
 The live `.env` is created from `.env.example` and stored persistently at
 `$DEPLOY_ROOT/.env` (never in the repository). `deploy/deploy.sh` copies it
-into each release and **aborts** unless both hold:
+into each release and **aborts** unless all hold:
 
 ```
 APP_ENV=production
 APP_DEBUG=false
+APP_KEY=<non-empty>
 ```
 
 Required values (from `.env.example`): `APP_NAME`, `APP_KEY`
@@ -203,12 +204,16 @@ green health check):
 
 1. Fresh checkout of `<git-ref>` into `releases/<timestamp>`.
 2. `composer install --no-dev --optimize-autoloader`.
-3. Copy the persistent `.env`; enforce `APP_ENV=production`, `APP_DEBUG=false`.
-4. `php artisan migrate --force` (forward-only).
-5. Ensure runtime dirs exist and are owned by the web user.
-6. `config:cache` + `route:cache` + `view:cache`.
-7. Switch `current` → new release; reload FPM + nginx.
-8. Poll `GET /health` until 200 (or auto-rollback).
+3. Copy the persistent `.env`; enforce `APP_ENV=production`, `APP_DEBUG=false`,
+   non-empty `APP_KEY`.
+4. **Pre-deploy backup** via `deploy/backup.sh` (fresh dump of the live
+   database, taken moments before it is migrated). Without the PostgreSQL
+   client tools the deploy is refused — migrations never run without a backup.
+5. `php artisan migrate --force` (forward-only).
+6. Ensure runtime dirs exist and are owned by the web user.
+7. `config:cache` + `route:cache` + `view:cache`.
+8. Switch `current` → new release; reload FPM + nginx.
+9. Poll `GET /health` until 200 (or auto-rollback).
 
 Older releases are pruned to the last three.
 
