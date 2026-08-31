@@ -12,6 +12,8 @@
 #
 # Prerequisites (see docs/operations/production-deployment.md):
 #   * php + composer + curl on PATH
+#   * PostgreSQL client tools pg_dump + pg_restore (postgresql-client, version >=
+#     the server) — required by deploy/backup.sh and deploy/restore.sh
 #   * nginx (deploy/nginx) and php-fpm (deploy/php-fpm.conf) installed
 #   * PostgreSQL reachable and the app database created
 #   * a persistent .env at $DEPLOY_ROOT/.env (never committed to the repo)

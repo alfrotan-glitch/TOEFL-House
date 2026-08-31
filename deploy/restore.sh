@@ -21,6 +21,16 @@
 # =============================================================================
 set -euo pipefail
 
+# Preflight: the PostgreSQL client tools must be installed (postgresql-client,
+# version >= the server). A restore without working client tools is a
+# recovery that fails mid-way; refuse before touching anything.
+for tool in pg_restore psql; do
+    command -v "$tool" >/dev/null 2>&1 || {
+        echo "[restore][ERROR] $tool not found on PATH. Install postgresql-client (>= server version)." >&2
+        exit 1
+    }
+done
+
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/toefl-house}"
 DB_NAME="${DB_NAME:-toefl_house}"
 DB_HOST="${DB_HOST:-127.0.0.1}"
