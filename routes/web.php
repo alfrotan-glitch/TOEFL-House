@@ -3,6 +3,7 @@
 use App\Http\Controllers\AcademicController;
 use App\Http\Controllers\AuditController;
 use App\Http\Controllers\AuthenticationController;
+use App\Http\Controllers\DocumentsController;
 use App\Http\Controllers\FinanceController;
 use App\Http\Controllers\HealthController;
 use App\Http\Controllers\HomeController;
@@ -179,6 +180,20 @@ Route::middleware('employee')->group(function (): void {
         Route::post('reports', [ReportingController::class, 'runReport'])->name('run');
         Route::post('dashboards', [ReportingController::class, 'createDashboard'])->name('dashboard.create');
         Route::post('dashboards/{dashboardId}/pin', [ReportingController::class, 'pinDashboard'])->name('dashboard.pin');
+    });
+
+    // Documents & Evidence
+    Route::prefix('documents')->name('documents.')->group(function (): void {
+        Route::get('/', [DocumentsController::class, 'index'])->name('index');
+        Route::post('classifications', [DocumentsController::class, 'defineClassification'])->name('classification.define');
+        Route::post('retention-rules', [DocumentsController::class, 'defineRetentionRule'])->name('retention.rule');
+        Route::post('', [DocumentsController::class, 'registerDocument'])->name('register');
+        Route::post('{documentId}/submit', [DocumentsController::class, 'submitDocument'])->name('submit');
+        Route::post('{documentId}/verify', [DocumentsController::class, 'verifyDocument'])->name('verify');
+        Route::post('{documentId}/activate', [DocumentsController::class, 'activateDocument'])->name('activate');
+        Route::post('{documentId}/expire', [DocumentsController::class, 'expireDocument'])->name('expire');
+        Route::post('{documentId}/archive', [DocumentsController::class, 'archiveDocument'])->name('archive');
+        Route::post('{documentId}/retention', [DocumentsController::class, 'decideRetention'])->name('retention.decide');
     });
 
     // Audit & Governance
