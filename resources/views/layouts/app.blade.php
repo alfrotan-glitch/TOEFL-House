@@ -78,6 +78,7 @@
                 <a href="{{ route('finance.index') }}">Finance</a>
                 <a href="{{ route('documents.index') }}">Documents</a>
                 <a href="{{ route('privacy.index') }}">Privacy</a>
+                <a href="{{ route('communication.index') }}">Communication</a>
                 <a href="{{ route('payroll.index') }}">Payroll</a>
                 <a href="{{ route('reporting.index') }}">Reporting</a>
                 <a href="{{ route('audit.index') }}">Audit</a>

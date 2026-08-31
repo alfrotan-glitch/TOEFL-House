@@ -4,6 +4,7 @@ use App\Http\Controllers\AcademicController;
 use App\Http\Controllers\AccessController;
 use App\Http\Controllers\AuditController;
 use App\Http\Controllers\AuthenticationController;
+use App\Http\Controllers\CommunicationController;
 use App\Http\Controllers\DocumentsController;
 use App\Http\Controllers\FinanceController;
 use App\Http\Controllers\HealthController;
@@ -175,6 +176,14 @@ Route::middleware('employee')->group(function (): void {
         Route::post('reconciliations/{reconciliationId}/approve', [FinanceController::class, 'approveReconciliation'])->name('reconciliation.approve');
         Route::post('funds', [FinanceController::class, 'establishFund'])->name('fund.establish');
         Route::post('funds/{fundId}/allocations', [FinanceController::class, 'allocateFund'])->name('fund.allocate');
+    });
+
+    // Communication
+    Route::prefix('communication')->name('communication.')->group(function (): void {
+        Route::get('/', [CommunicationController::class, 'index'])->name('index');
+        Route::post('messages', [CommunicationController::class, 'queueMessage'])->name('message.queue');
+        Route::post('messages/{messageId}/delivered', [CommunicationController::class, 'markDelivered'])->name('message.delivered');
+        Route::post('messages/{messageId}/failed', [CommunicationController::class, 'markFailed'])->name('message.failed');
     });
 
     // Payroll
