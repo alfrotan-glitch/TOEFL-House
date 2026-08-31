@@ -93,7 +93,7 @@ final class AccessAdversarialTest extends TestCase
         $this->expectExceptionMessage('campus scope does not resolve');
         app(GrantScopePermission::class)->grant(
             $grantor, 'adv-target', 'identity.verify', 'campus', '00000000-0000-4000-8000-00000000dea1',
-            new CarbonImmutable('2026-08-25'), null, false, [], 'adv-grant-1',
+            new CarbonImmutable('2026-08-25'), null, false, 'adv-grant-1',
         );
 
         $this->assertDatabaseMissing('scope_grants', ['person_id' => 'adv-target']);

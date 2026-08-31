@@ -96,14 +96,39 @@
     </div>
 
     <div class="card" style="flex:1 1 320px">
-        <h2>Scales</h2>
+        <h2>Compensation scales</h2>
+        <form method="POST" action="{{ route('hr.scale.register') }}">
+            @csrf
+            <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+            <label>Catalog key</label>
+            <input type="text" name="key" required maxlength="64">
+            <label>Name</label>
+            <input type="text" name="name" required maxlength="255">
+            <label>Rank order</label>
+            <input type="number" name="rank_order" min="1" required>
+            <div class="actions"><button type="submit" class="btn small">Register scale</button></div>
+        </form>
         @if ($scales->isEmpty())
             <p class="empty">No scales recorded.</p>
         @else
-            <table class="grid">
-                <tr><th>Scale</th><th>Key</th></tr>
+            <table class="grid" style="margin-top:12px">
+                <tr><th>Scale</th><th>Key</th><th>Rank</th><th>State</th><th></th></tr>
                 @foreach ($scales as $scale)
-                    <tr><td>{{ $scale->name }}</td><td>{{ $scale->key }}</td></tr>
+                    <tr>
+                        <td>{{ $scale->name }}</td>
+                        <td>{{ $scale->key }}</td>
+                        <td>{{ $scale->rank_order }}</td>
+                        <td><span class="pill {{ $scale->lifecycle_state === 'active' ? 'ok' : '' }}">{{ $scale->lifecycle_state }}</span></td>
+                        <td>
+                            @if ($scale->lifecycle_state === 'active')
+                                <form method="POST" action="{{ route('hr.scale.retire', $scale->id) }}" style="display:inline">
+                                    @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                    <button type="submit" class="btn small secondary">Retire</button>
+                                </form>
+                            @endif
+                        </td>
+                    </tr>
                 @endforeach
             </table>
         @endif

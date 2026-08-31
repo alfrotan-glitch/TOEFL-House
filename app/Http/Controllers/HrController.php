@@ -8,6 +8,7 @@ use App\Modules\Hr\Commands\MaintainContract;
 use App\Modules\Hr\Commands\MaintainContractVersion;
 use App\Modules\Hr\Commands\MaintainEmployment;
 use App\Modules\Hr\Commands\MaintainLeave;
+use App\Modules\Hr\Commands\MaintainScale;
 use App\Modules\Hr\Models\Contract;
 use App\Modules\Hr\Models\ContractVersion;
 use App\Modules\Hr\Models\Employment;
@@ -329,5 +330,35 @@ final class HrController extends Controller
         );
 
         return redirect()->route('hr.index')->with('success', 'Leave request cancelled.');
+    }
+
+    public function registerScale(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'key' => ['required', 'string', 'max:64'],
+            'name' => ['required', 'string', 'max:255'],
+            'rank_order' => ['required', 'integer', 'min:1'],
+        ]);
+
+        app(MaintainScale::class)->register(
+            $this->actor(),
+            $input['key'],
+            $input['name'],
+            (int) $input['rank_order'],
+            $this->idempotencyKey('hr.scale.register'),
+        );
+
+        return redirect()->route('hr.index')->with('success', 'Scale registered.');
+    }
+
+    public function retireScale(Request $request, string $scaleId): RedirectResponse
+    {
+        app(MaintainScale::class)->retire(
+            $this->actor(),
+            Scale::query()->findOrFail($scaleId),
+            $this->idempotencyKey('hr.scale.retire'),
+        );
+
+        return redirect()->route('hr.index')->with('success', 'Scale retired; historical payroll is unaffected.');
     }
 }

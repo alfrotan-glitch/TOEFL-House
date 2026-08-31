@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AcademicController;
+use App\Http\Controllers\AccessController;
 use App\Http\Controllers\AuditController;
 use App\Http\Controllers\AuthenticationController;
 use App\Http\Controllers\DocumentsController;
@@ -132,6 +133,8 @@ Route::middleware('employee')->group(function (): void {
         Route::post('employments/{employmentId}/leave', [HrController::class, 'requestLeave'])->name('leave.request');
         Route::post('leaves/{leaveId}/decide', [HrController::class, 'decideLeave'])->name('leave.decide');
         Route::post('leaves/{leaveId}/cancel', [HrController::class, 'cancelLeave'])->name('leave.cancel');
+        Route::post('scales', [HrController::class, 'registerScale'])->name('scale.register');
+        Route::post('scales/{scaleId}/retire', [HrController::class, 'retireScale'])->name('scale.retire');
     });
 
     // Library & Resources
@@ -206,6 +209,23 @@ Route::middleware('employee')->group(function (): void {
         Route::post('{documentId}/expire', [DocumentsController::class, 'expireDocument'])->name('expire');
         Route::post('{documentId}/archive', [DocumentsController::class, 'archiveDocument'])->name('archive');
         Route::post('{documentId}/retention', [DocumentsController::class, 'decideRetention'])->name('retention.decide');
+    });
+
+    // Access administration
+    Route::prefix('access')->name('access.')->group(function (): void {
+        Route::get('/', [AccessController::class, 'index'])->name('index');
+        Route::post('assignments', [AccessController::class, 'assignPosition'])->name('assignment.assign');
+        Route::post('assignments/{assignmentId}/activate', [AccessController::class, 'activateAssignment'])->name('assignment.activate');
+        Route::post('assignments/{assignmentId}/revoke', [AccessController::class, 'revokeAssignment'])->name('assignment.revoke');
+        Route::post('policies/position-role', [AccessController::class, 'bindPositionRole'])->name('policy.bind');
+        Route::post('policies/role-permission', [AccessController::class, 'grantRolePermission'])->name('policy.permission');
+        Route::post('grants', [AccessController::class, 'grantPermission'])->name('grant.create');
+        Route::post('grants/org-wide', [AccessController::class, 'requestOrgWideGrant'])->name('grant.request_org_wide');
+        Route::post('grants/org-wide/{requestId}/approve', [AccessController::class, 'approveOrgWideGrant'])->name('grant.approve_org_wide');
+        Route::post('grants/org-wide/{requestId}/execute', [AccessController::class, 'executeOrgWideGrant'])->name('grant.execute_org_wide');
+        Route::post('grants/{grantId}/revoke', [AccessController::class, 'revokeGrant'])->name('grant.revoke');
+        Route::post('delegations', [AccessController::class, 'delegate'])->name('delegation.create');
+        Route::post('delegations/{delegationId}/revoke', [AccessController::class, 'revokeDelegation'])->name('delegation.revoke');
     });
 
     // Privacy
