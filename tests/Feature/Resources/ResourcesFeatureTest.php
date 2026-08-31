@@ -9,6 +9,7 @@ use App\Modules\Resources\Commands\DisposeAsset;
 use App\Modules\Resources\Commands\MaintainAsset;
 use App\Modules\Resources\Commands\MaintainWorkOrder;
 use App\Modules\Resources\Models\Asset;
+use App\Modules\Resources\Models\AssetDisposalRequest;
 use App\Modules\Resources\Models\BookCopy;
 use App\Modules\Resources\Models\BookIssuance;
 use App\Modules\Resources\Models\WorkOrder;
@@ -27,7 +28,7 @@ final class ResourcesFeatureTest extends TestCase
     {
         $this->personWithAuthority('res-custodian-1', []);
         $this->personWithAuthority('res-custodian-2', []);
-        $manager = $this->grantedActor('res-manager', ['resources.asset', 'resources.dispose_request']);
+        $manager = $this->grantedActor('res-manager', ['resources.asset', 'resources.dispose_request', 'resources.dispose_approve']);
         $approverOne = $this->grantedActor('res-approver-1', ['resources.dispose_approve']);
         $approverTwo = $this->grantedActor('res-approver-2', ['resources.dispose_approve']);
 
@@ -39,23 +40,59 @@ final class ResourcesFeatureTest extends TestCase
             $this->assertSame('resources.asset_code_exists', $rejection->errorCode());
         }
 
-        app(MaintainAsset::class)->assignCustody($manager, Asset::query()->findOrFail($asset['asset_id']), 'res-custodian-1', '2026-02-01', 'res-c-1');
-        app(MaintainAsset::class)->assignCustody($manager, Asset::query()->findOrFail($asset['asset_id']), 'res-custodian-2', '2026-03-01', 'res-c-2');
+        $assetModel = Asset::query()->findOrFail($asset['asset_id']);
+        app(MaintainAsset::class)->assignCustody($manager, $assetModel, 'res-custodian-1', '2026-02-01', 'res-c-1');
+        app(MaintainAsset::class)->assignCustody($manager, $assetModel, 'res-custodian-2', '2026-03-01', 'res-c-2');
 
         $this->assertSame(2, DB::table('custodies')->where('asset_id', $asset['asset_id'])->count(), 'custody history retained');
         $this->assertSame(1, DB::table('custodies')->where('asset_id', $asset['asset_id'])->whereNull('released_on')->count(), 'one open custody');
         $this->assertDatabaseHas('custodies', ['asset_id' => $asset['asset_id'], 'custodian_person_id' => 'res-custodian-1', 'released_on' => '2026-03-01']);
 
+        // The disposal is staged (000115): the manager session requests,
+        // two distinct approver sessions each sign, the manager executes.
+        $command = app(DisposeAsset::class);
+        $requestResult = $command->request($manager, $assetModel, 'sale', 'replaced by newer model', 'res-d-2');
+        $disposalRequest = AssetDisposalRequest::query()->findOrFail($requestResult['request_id']);
+
         try {
-            app(DisposeAsset::class)->dispose($manager, $approverOne, $approverOne, Asset::query()->findOrFail($asset['asset_id']), 'sale', 'surplus', '2026-04-01', 'res-d-1');
-            $this->fail('a single approver cannot dispose');
+            $command->approve($manager, $disposalRequest, 'res-d-3');
+            $this->fail('the requester may not approve their own request');
         } catch (AuthorizationDenied $denial) {
             $this->assertSame('resources.disposal_not_independent', $denial->errorCode());
         }
 
-        $disposal = app(DisposeAsset::class)->dispose($manager, $approverOne, $approverTwo, Asset::query()->findOrFail($asset['asset_id']), 'sale', 'replaced by newer model', '2026-04-01', 'res-d-2');
+        $this->assertSame('requested', $command->approve($approverOne, $disposalRequest, 'res-d-4')['lifecycle_state']);
+        try {
+            $command->execute($manager, $disposalRequest, '2026-04-01', 'res-d-5');
+            $this->fail('one approver must not suffice');
+        } catch (BusinessRejection $rejection) {
+            $this->assertSame('resources.disposal_request_state', $rejection->errorCode());
+        }
+
+        try {
+            $command->approve($approverOne, $disposalRequest, 'res-d-6');
+            $this->fail('the same approver twice must not suffice');
+        } catch (AuthorizationDenied $denial) {
+            $this->assertSame('resources.disposal_single_actor', $denial->errorCode());
+        }
+
+        $this->assertSame('approved', $command->approve($approverTwo, $disposalRequest, 'res-d-7')['lifecycle_state']);
+
+        $otherManager = $this->grantedActor('res-manager-2', ['resources.dispose_request']);
+        try {
+            $command->execute($otherManager, $disposalRequest, '2026-04-01', 'res-d-8');
+            $this->fail('only the requesting session executes');
+        } catch (AuthorizationDenied $denial) {
+            $this->assertSame('resources.disposal_executor', $denial->errorCode());
+        }
+
+        $disposal = $command->execute($manager, $disposalRequest, '2026-04-01', 'res-d-9');
         $this->assertDatabaseHas('assets', ['id' => $asset['asset_id'], 'lifecycle_state' => 'disposed']);
         $this->assertSame(0, DB::table('custodies')->where('asset_id', $asset['asset_id'])->whereNull('released_on')->count(), 'disposal closes custody');
+        $this->assertDatabaseHas('asset_disposals', [
+            'id' => $disposal['disposal_id'], 'asset_id' => $asset['asset_id'], 'method' => 'sale',
+            'approver_one' => 'res-approver-1', 'approver_two' => 'res-approver-2',
+        ]);
 
         try {
             app(MaintainAsset::class)->assignCustody($manager, Asset::query()->findOrFail($asset['asset_id']), 'res-custodian-1', '2026-05-01', 'res-c-3');

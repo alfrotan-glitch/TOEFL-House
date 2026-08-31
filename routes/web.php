@@ -137,6 +137,17 @@ Route::middleware('employee')->group(function (): void {
     // Library & Resources
     Route::prefix('library')->name('library.')->group(function (): void {
         Route::get('/', [LibraryController::class, 'index'])->name('index');
+        Route::post('assets', [LibraryController::class, 'registerAsset'])->name('asset.register');
+        Route::post('assets/{assetId}/custody', [LibraryController::class, 'assignCustody'])->name('custody.assign');
+        Route::post('assets/{assetId}/custody/release', [LibraryController::class, 'releaseCustody'])->name('custody.release');
+        Route::post('assets/{assetId}/disposal', [LibraryController::class, 'requestDisposal'])->name('disposal.request');
+        Route::post('disposals/{requestId}/approve', [LibraryController::class, 'approveDisposal'])->name('disposal.approve');
+        Route::post('disposals/{requestId}/execute', [LibraryController::class, 'executeDisposal'])->name('disposal.execute');
+        Route::post('work-orders', [LibraryController::class, 'requestWork'])->name('work.request');
+        Route::post('work-orders/{orderId}/approve', [LibraryController::class, 'approveWork'])->name('work.approve');
+        Route::post('work-orders/{orderId}/start', [LibraryController::class, 'startWork'])->name('work.start');
+        Route::post('work-orders/{orderId}/complete', [LibraryController::class, 'completeWork'])->name('work.complete');
+        Route::post('work-orders/{orderId}/cancel', [LibraryController::class, 'cancelWork'])->name('work.cancel');
         Route::post('books/{copyId}/issue', [LibraryController::class, 'issueBook'])->name('issue');
         Route::post('issuances/{issuanceId}/return', [LibraryController::class, 'returnBook'])->name('return');
         Route::post('issuances/{issuanceId}/loss', [LibraryController::class, 'reportLoss'])->name('loss');
