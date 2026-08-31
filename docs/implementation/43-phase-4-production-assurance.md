@@ -69,3 +69,30 @@ Carried to P4.4: least-privilege DB role and `sslmode` enforcement on the target
 
 - Fresh-schema guard inventory (PHASE_3 certification): 116 migrations → **91 functions, 161 triggers**, staged-chain guards on all 000110–000116 request tables, append-only `audit_events`, catalog immutability guards (skills, scales, consent purposes).
 - Direct-SQL attack coverage: `CrossModuleBoundaryAttackTest` (24 tests) + module adversarial suites.
+- Direct-SQL attack coverage: `CrossModuleBoundaryAttackTest` (24 tests) + module adversarial suites.
+
+---
+
+## P4.3 — Performance (this commit)
+
+**Method.** A scratch database (`toefl_house_perf`, dropped afterwards) was seeded to a realistic operational volume — **people 5,000 / user_accounts 500 / consent_purposes 100 / consents 5,000 / scope_grants 5,000 / audit_events 20,000 / messages 2,000** — and every hot console query was measured with `EXPLAIN (ANALYZE)` plus end-to-end page timings through a real HTTP server (`APP_ENV=production`, seeded DB). Host: 2 cores / ~4 GB (the actual class of the deployment target).
+
+**Measured (20k-row audit trail):**
+
+| Console query | Plan before | Time before | After |
+|---|---|---|---|
+| Audit listing `ORDER BY occurred_at DESC LIMIT 300` | seq scan + top-N sort | **4.27 ms** | **0.086 ms (50×)** — backward index scan (000118) |
+| Consent lookup (subject + purpose + active + time window) — `SendMessage` hot path | partial unique index (pre-existing) | 0.03 ms | unchanged (already index-backed) |
+| Scope grants per person | composite index (pre-existing) | 0.03 ms | unchanged |
+| Message listing `ORDER BY id DESC LIMIT 200` | PK (pre-existing) | 0.22 ms | unchanged |
+| Verified people listing | seq + sort (bounded by school population scale) | 1.5 ms | no index (volume-bounded by design — a school has thousands of people, not millions; an index here would be speculative) |
+| Audit filter variants (actor / operation) | seq scan | 2.2–5.3 ms | unchanged at this volume; revisit if the audit trail outgrows tens of thousands of rows (recorded, not pre-empted) |
+
+**Finding fixed.** `audit_events` — the only unbounded, append-only table in the system — had no index on `occurred_at`, and the audit console's default view sorts on exactly that column. The listing degrades **linearly with history** (seq scan + sort). Fixed with migration **000118** (`audit_events_occurred_at_index`); measured 50× at 20k rows and flat as history grows. Pinned by a permanent schema-contract test (`AuditTrailIndexTest` — planner-dependent timings are not asserted in CI; the measurements are the evidence above).
+
+**End-to-end page timings** (real server, seeded DB, 3 runs per page): all 14 console index pages **200 in 99–153 ms wall** (median ≈ 120 ms) — full PHP boot + queries + render, on the deployment-class host.
+
+**N+1 (structural check).** No lazy relation traversal exists in the console: every controller query is a flat, **limit-bounded** collection (100–1,000 rows), and no view accesses a relation on loop variables (machine-checked: zero `->relation->attribute` patterns in `resources/views`). Measured page times at volume corroborate.
+
+**Resource posture.** Synchronous modular monolith (no queue workers, `QUEUE_CONNECTION=sync` by design); session + rate-limit cache on the persistent `cache` table (database driver) — no external infrastructure, no cache invalidation surface; pagination is limit-based on every index view (no unbounded `get()`).
+
