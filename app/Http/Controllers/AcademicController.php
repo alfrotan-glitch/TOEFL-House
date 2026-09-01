@@ -86,6 +86,8 @@ final class AcademicController extends Controller
             'skill_id' => ['nullable', 'string'],
         ]);
 
+        $skillId = $input['skill_id'] ?? null;
+
         app(MaintainClass::class)->scheduleSession(
             $this->actor(),
             ClassModel::query()->findOrFail($input['class_id']),
@@ -93,7 +95,7 @@ final class AcademicController extends Controller
             $input['starts_at'],
             $input['ends_at'],
             $this->idempotencyKey('academic.schedule'),
-            $input['skill_id'] !== null && $input['skill_id'] !== '' ? $input['skill_id'] : null,
+            ($skillId !== null && $skillId !== '') ? $skillId : null,
         );
 
         return redirect()->route('academic.sessions')->with('success', 'Session scheduled.');
@@ -280,6 +282,74 @@ final class AcademicController extends Controller
         );
 
         return redirect()->route('academic.index')->with('success', 'Skill retired.');
+    }
+
+    public function defineClass(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'program_version_id' => ['required', 'string'],
+            'period_id' => ['required', 'string'],
+            'capacity' => ['required', 'integer', 'min:1', 'max:10000'],
+        ]);
+
+        app(MaintainClass::class)->defineClass(
+            $this->actor(),
+            $input['program_version_id'],
+            $input['period_id'],
+            (int) $input['capacity'],
+            $this->idempotencyKey('academic.class.define'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Class defined (planned). Assign a teacher and publish it to open seats.');
+    }
+
+    public function transitionClass(Request $request, string $classId): RedirectResponse
+    {
+        $input = $request->validate([
+            'to_state' => ['required', 'in:published,active,completed,cancelled'],
+        ]);
+
+        app(MaintainClass::class)->transition(
+            $this->actor(),
+            ClassModel::query()->findOrFail($classId),
+            $input['to_state'],
+            $this->idempotencyKey('academic.class.transition'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Class state moved to '.$input['to_state'].'.');
+    }
+
+    public function assignTeacher(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'class_id' => ['required', 'string'],
+            'teacher_person_id' => ['required', 'string'],
+            'effective_from' => ['required', 'date'],
+            'effective_to' => ['nullable', 'date', 'after:effective_from'],
+            'skill_id' => ['nullable', 'string'],
+        ]);
+
+        $effectiveTo = $input['effective_to'] ?? null;
+
+        $result = app(MaintainClass::class)->assignTeacher(
+            $this->actor(),
+            ClassModel::query()->findOrFail($input['class_id']),
+            $input['teacher_person_id'],
+            CarbonImmutable::parse($input['effective_from']),
+            ($effectiveTo !== null && $effectiveTo !== '') ? CarbonImmutable::parse((string) $effectiveTo) : null,
+            $this->idempotencyKey('academic.teacher.assign'),
+        );
+
+        if (! empty($input['skill_id'])) {
+            app(MaintainClass::class)->assignSkill(
+                $this->actor(),
+                TeacherAssignment::query()->findOrFail($result['assignment_id']),
+                $input['skill_id'],
+                $this->idempotencyKey('academic.teacher.assign_skill'),
+            );
+        }
+
+        return redirect()->route('academic.index')->with('success', 'Teacher assigned to the class.');
     }
 
     public function submitAssessmentAttempt(Request $request): RedirectResponse

@@ -159,6 +159,44 @@ final class GrantCommandFeatureTest extends TestCase
         ]);
     }
 
+    public function test_the_org_wide_grant_requestor_may_not_approve_their_own_request(): void
+    {
+        // E2E business-journey finding N1: the staged org-wide grant chain
+        // must keep the requestor off BOTH approval slots, exactly as the
+        // refund/admission/correction chains keep their requester/initiator
+        // off the signing slots. Previously the first approver slot was only
+        // checked against the second approver, so a single session could
+        // request a grant and self-sign the first signature.
+        $grantor = $this->accessAdministrator(); // holds access.approve_org_wide too
+        // A distinct eligible approver created BEFORE the organization so the
+        // structure-authority grant covers the organization below.
+        $approverOne = $this->actorWithStructureCapabilities('org-self-owner-1', ['access.approve_org_wide']);
+        $organization = $this->establishActiveOrganization();
+        $this->personWithAuthority('grantee-self', []);
+        $command = app(GrantScopePermission::class);
+        $from = new CarbonImmutable('2026-08-25');
+
+        $request = $command->request($grantor, 'grantee-self', 'identity.verify', $organization->id, $from, null, false, 'org-self-1');
+        $orgRequest = OrgWideGrantRequest::query()->findOrFail($request['request_id']);
+
+        try {
+            $command->approve($grantor, $orgRequest, 'org-self-a1');
+            $this->fail('the requestor may not fill the first approval slot');
+        } catch (AuthorizationDenied $denial) {
+            $this->assertSame('access.org_wide_single_actor', $denial->errorCode());
+        }
+
+        // The request must remain untouched: no approver recorded, still requested.
+        $this->assertDatabaseHas('org_wide_grant_requests', [
+            'id' => $orgRequest->id,
+            'lifecycle_state' => 'requested',
+            'approver_one_id' => null,
+            'approver_two_id' => null,
+        ]);
+        // A distinct eligible approver CAN still sign slot one.
+        $this->assertSame('requested', $command->approve($approverOne, $orgRequest->fresh(), 'org-self-a2')['lifecycle_state']);
+    }
+
     public function test_emergency_grant_requires_expiry_within_the_limit_and_is_flagged_for_review(): void
     {
         $grantor = $this->accessAdministrator();

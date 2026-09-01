@@ -52,6 +52,7 @@ Route::middleware('employee')->group(function (): void {
 
     Route::prefix('identity')->name('api.identity.')->group(function (): void {
         Route::get('/people', [IdentityApiController::class, 'people'])->name('people');
+        Route::post('/people', [IdentityApiController::class, 'register'])->name('person.register');
         Route::post('/people/{personId}/verify', [IdentityApiController::class, 'verify'])->name('verify');
         Route::post('/accounts', [IdentityApiController::class, 'link'])->name('link');
         Route::post('/accounts/{accountId}/password', [IdentityApiController::class, 'password'])->name('password');

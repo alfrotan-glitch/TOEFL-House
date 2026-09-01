@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Identity\Commands\LinkUserAccount;
+use App\Modules\Identity\Commands\RegisterPerson;
 use App\Modules\Identity\Commands\SetAccountPassword;
 use App\Modules\Identity\Commands\VerifyPerson;
 use App\Modules\Identity\Models\Person;
@@ -21,6 +22,24 @@ final class IdentityApiController extends Controller
         $people = Person::query()->orderBy('legal_name')->limit(300)->get(['id', 'legal_name', 'verification_state']);
 
         return response()->json(['people' => $people]);
+    }
+
+    /** Person intake: opens the unverified person record the other boundaries start from. */
+    public function register(Request $request): JsonResponse
+    {
+        $input = $request->validate([
+            'legal_name' => ['required', 'string', 'max:160'],
+            'date_of_birth' => ['required', 'date', 'before:today'],
+        ]);
+
+        $result = app(RegisterPerson::class)->register(
+            $this->actor(),
+            $input['legal_name'],
+            $input['date_of_birth'],
+            $this->idempotencyKey('identity.person.register'),
+        );
+
+        return response()->json(['status' => 'registered', 'person_id' => $result['person_id']], 201);
     }
 
     public function verify(Request $request, string $personId): JsonResponse

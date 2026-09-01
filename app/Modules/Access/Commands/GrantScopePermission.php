@@ -163,6 +163,16 @@ final class GrantScopePermission
                         throw BusinessRejection::forCode('access.org_wide_grant_state', sprintf('the request is already %s; approvals only count while it is requested', $locked->lifecycle_state));
                     }
 
+                    // Separation of duties: every other staged workflow
+                    // (refunds, admissions, corrections) requires the
+                    // requester/initiator to differ from anyone who signs.
+                    // The requestor who created an org-wide grant request may
+                    // never also approve it — otherwise one session could
+                    // request AND self-sign the first approval slot.
+                    if (trim((string) $locked->requested_by) === $approver->actorId) {
+                        throw AuthorizationDenied::forCode('access.org_wide_single_actor', 'the grant requestor may not also approve the organization-wide grant');
+                    }
+
                     if ($locked->approver_one_id === null) {
                         $locked->forceFill(['approver_one_id' => $approver->actorId]);
                         $state = 'requested';

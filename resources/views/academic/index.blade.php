@@ -106,16 +106,65 @@
 
 <div class="card">
     <h2>Classes</h2>
+    <p class="sub">A class delivers a published program version inside a published period. It opens <strong>planned → published → active</strong>; an active class needs at least one open teacher assignment before it can be activated, and seats can only be taken in active classes.</p>
+    <form method="POST" action="{{ route('academic.class.define') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <select name="program_version_id" required>
+                <option value="">Select a published program version…</option>
+                @foreach ($programVersions as $version)
+                    <option value="{{ $version->id }}">{{ \Illuminate\Support\Str::limit($version->id, 18) }}</option>
+                @endforeach
+            </select>
+            <select name="period_id" required>
+                <option value="">Select a published period…</option>
+                @foreach ($periods as $period)
+                    @if ($period->lifecycle_state === 'published')
+                        <option value="{{ $period->id }}">{{ $period->name }}</option>
+                    @endif
+                @endforeach
+            </select>
+            <input name="capacity" type="number" min="1" max="10000" placeholder="Capacity" required>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Define class</button></div>
+    </form>
     @if ($classes->isEmpty())
         <p class="empty">No classes recorded.</p>
     @else
-        <table class="grid">
-            <tr><th>Class</th><th>Capacity</th><th>State</th></tr>
+        <table class="grid" style="margin-top:8px">
+            <tr><th>Class</th><th>Capacity</th><th>State</th><th>Transition</th></tr>
             @foreach ($classes as $class)
                 <tr>
                     <td>{{ \Illuminate\Support\Str::limit($class->id, 18) }}</td>
                     <td>{{ $class->capacity }}</td>
                     <td><span class="pill {{ $class->lifecycle_state === 'active' ? 'ok' : '' }}">{{ $class->lifecycle_state }}</span></td>
+                    <td>
+                        @if ($class->lifecycle_state === 'planned')
+                            <form method="POST" action="{{ route('academic.class.transition', $class->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <input type="hidden" name="to_state" value="published">
+                                <button type="submit" class="btn small">Publish</button>
+                            </form>
+                        @endif
+                        @if ($class->lifecycle_state === 'published')
+                            <form method="POST" action="{{ route('academic.class.transition', $class->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <input type="hidden" name="to_state" value="active">
+                                <button type="submit" class="btn small">Activate (needs a teacher)</button>
+                            </form>
+                        @endif
+                        @if ($class->lifecycle_state === 'active')
+                            <form method="POST" action="{{ route('academic.class.transition', $class->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <input type="hidden" name="to_state" value="completed">
+                                <button type="submit" class="btn small secondary">Complete</button>
+                            </form>
+                        @endif
+                    </td>
                 </tr>
             @endforeach
         </table>
@@ -124,10 +173,39 @@
 
 <div class="card">
     <h2>Teacher assignments</h2>
+    <p class="sub">A class must carry at least one open (undated end) teacher assignment before it can be activated. Optionally attribute a catalog skill to the assignment.</p>
+    <form method="POST" action="{{ route('academic.teacher.assign') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <select name="class_id" required>
+                <option value="">Select a class…</option>
+                @foreach ($classes as $class)
+                    <option value="{{ $class->id }}">{{ \Illuminate\Support\Str::limit($class->id, 18) }} ({{ $class->lifecycle_state }})</option>
+                @endforeach
+            </select>
+            <select name="teacher_person_id" required>
+                <option value="">Select a verified person…</option>
+                @foreach ($people as $person)
+                    <option value="{{ $person->id }}">{{ $person->legal_name }}</option>
+                @endforeach
+            </select>
+            <input name="effective_from" type="date" required>
+            <select name="skill_id">
+                <option value="">Skill (optional)…</option>
+                @foreach ($skills as $skill)
+                    @if ($skill->lifecycle_state === 'active')
+                        <option value="{{ $skill->id }}">{{ $skill->name }}</option>
+                    @endif
+                @endforeach
+            </select>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Assign teacher</button></div>
+    </form>
     @if ($assignments->isEmpty())
         <p class="empty">No teacher assignments recorded.</p>
     @else
-        <table class="grid">
+        <table class="grid" style="margin-top:8px">
             <tr><th>Class</th><th>Teacher</th><th>Effective</th></tr>
             @foreach ($assignments as $assignment)
                 <tr>

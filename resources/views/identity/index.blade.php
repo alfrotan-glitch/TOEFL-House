@@ -5,7 +5,27 @@
 @section('content')
 <div class="card">
     <h1>Identity &amp; Access</h1>
-    <p class="sub">Verify people, issue employee accounts, and set credentials. Authority for these actions is resolved server-side from your access model.</p>
+    <p class="sub">Intake people, verify them, issue employee accounts, and set credentials. Authority for these actions is resolved server-side from your access model.</p>
+</div>
+
+<div class="card">
+    <h2>Register a new person</h2>
+    <p class="sub">Opens an <strong>unverified</strong> person record — the starting point for an admission applicant, a teacher, or any employee. Verification is a separate, evidenced step below.</p>
+    <form method="POST" action="{{ route('identity.person.register') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="row">
+            <div>
+                <label>Legal name</label>
+                <input name="legal_name" type="text" maxlength="160" required>
+            </div>
+            <div>
+                <label>Date of birth</label>
+                <input name="date_of_birth" type="date" required>
+            </div>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Register person</button></div>
+    </form>
 </div>
 
 <div class="row">

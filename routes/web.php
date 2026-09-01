@@ -53,6 +53,7 @@ Route::middleware('employee')->group(function (): void {
     // Identity & Access
     Route::prefix('identity')->name('identity.')->group(function (): void {
         Route::get('/', [IdentityController::class, 'index'])->name('index');
+        Route::post('people', [IdentityController::class, 'registerPerson'])->name('person.register');
         Route::post('people/{personId}/verify', [IdentityController::class, 'verifyPerson'])->name('verify');
         Route::post('accounts', [IdentityController::class, 'linkAccount'])->name('link');
         Route::post('accounts/{accountId}/password', [IdentityController::class, 'setPassword'])->name('password');
@@ -84,6 +85,9 @@ Route::middleware('employee')->group(function (): void {
         Route::post('periods/{periodId}/transition', [AcademicController::class, 'transitionPeriod'])->name('period.transition');
         Route::post('skills', [AcademicController::class, 'registerSkill'])->name('skill.register');
         Route::post('skills/{skillId}/retire', [AcademicController::class, 'retireSkill'])->name('skill.retire');
+        Route::post('classes', [AcademicController::class, 'defineClass'])->name('class.define');
+        Route::post('classes/{classId}/transition', [AcademicController::class, 'transitionClass'])->name('class.transition');
+        Route::post('teacher-assignments', [AcademicController::class, 'assignTeacher'])->name('teacher.assign');
         Route::get('sessions', [AcademicController::class, 'sessions'])->name('sessions');
         Route::post('sessions', [AcademicController::class, 'scheduleSession'])->name('schedule');
         Route::post('sessions/{sessionId}/attendance', [AcademicController::class, 'recordAttendance'])->name('attendance');
