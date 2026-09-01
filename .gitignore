@@ -19,3 +19,8 @@ composer.phar
 
 # Test runner cache
 /.phpunit.cache
+
+# Windows one-click deployment (see SETUP.md): local runtimes, database
+# cluster and data backups live outside version control by design.
+/.runtime/
+/backup/
