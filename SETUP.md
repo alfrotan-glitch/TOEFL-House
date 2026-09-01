@@ -63,6 +63,31 @@ Re-running `START-TOEFL-HOUSE.bat` at any later time is safe and idempotent:
 it re-verifies everything, starts whatever is stopped, and re-prints the
 addresses.
 
+## Recovery (interruptions, reboots, failures)
+
+* **Reboot / closing the window at any point:** everything (web server,
+  database) starts again the next time you double-click
+  `START-TOEFL-HOUSE.bat`. Tailscale keeps running after a reboot and,
+  for Serve configured with `--bg`, resumes the mapping automatically
+  (documented Tailscale behavior); re-running the launcher is still the
+  normal start and is safe either way.
+* **Interrupted first run (any step):** re-run the launcher. Each step is
+  guarded (already-downloaded runtimes are reused, an existing cluster is
+  started, existing migrations are skipped). If the interruption happened
+  mid-migration, the launcher repairs the partial state automatically on a
+  fresh deployment (see the step list above); it never touches a database
+  that already contains accounts.
+* **Corrupted or missing runtimes:** delete the affected folder under
+  `.runtime\` (the launcher's failure messages name the exact folder) and
+  re-run.
+* **Data disaster:** `RESTORE-TOEFL-HOUSE.bat` with your latest backup —
+  it verifies the dump before changing anything and requires you to type
+  `RESTORE`.
+* **Everything fails:** every failure message names the exact step, the
+  exact cause, and the exact next action. If a message still does not get
+  you moving, the message itself is the thing to report to the TOEFL House
+  maintainer — it contains the diagnostic.
+
 ## Stop
 
 Double-click **`STOP-TOEFL-HOUSE.bat`**. It stops the web server, stops
@@ -106,16 +131,25 @@ when run from a folder window.)
 5. `initdb` a local-only cluster (trust auth, bound to `127.0.0.1`) and
    start PostgreSQL.
 6. Create `toefl_house` and run `php artisan migrate --force` (118
-   migrations, from zero).
+   migrations, from zero). If a previous run was interrupted mid-migration,
+   the launcher detects the partial state and recovers automatically: a
+   fresh deployment with no accounts is rebuilt from scratch (provably safe
+   — `user_accounts` is the root of every record in this system); a
+   deployment that already has accounts is left untouched and pointed at
+   `RESTORE-TOEFL-HOUSE.bat`.
 7. **First run only:** `db:seed --class=FirstRunBootstrapSeeder` — a
    guard-protected bootstrap that runs *only while zero accounts exist*:
    it writes the authoritative organization, the Owner role with the
-   complete 86-capability set, the position/assignment and the owner
+   complete 90-capability set, the position/assignment and the owner
    account. On any live system it is a no-op.
 8. Start `php artisan serve` on `127.0.0.1:8080` in a minimized window.
 9. Poll `/health` until it answers 200.
 10. Install Tailscale if missing, `tailscale serve --bg 8080` (Serve, never
-    Funnel), and print the private `https://…ts.net` address.
+    Funnel), and print the private `https://…ts.net` address. If the
+    background configuration fails once — which on a fresh tailnet means
+    the one-time HTTPS-certificates setup is still pending — the launcher
+    opens a Tailscale window that completes it (follow the link there if
+    one appears), you press any key, and it retries automatically.
 
 ## Security model
 
@@ -166,8 +200,12 @@ the owner capability list equal to every capability defined in the source).
   existence was checked against the official archives, but they have not
   been executed on Windows).
 * **The Tailscale Serve mapping and access from a second authorized
-  device** (no Tailnet exists in the development environment). The command
-  used is the standard `tailscale serve --bg 8080`.
+  device** (no Tailnet exists in the development environment). The
+  command used, `tailscale serve --bg 8080`, and its behavior — tailnet-only
+  exposure, proxying `http://127.0.0.1:8080`, automatic resumption after a
+  reboot, and the one-time HTTPS-certificates setup on a fresh tailnet —
+  were verified against the official Tailscale documentation, but actual
+  access from a second device was not exercised here.
 * **The runtime download URLs over time** (pinned now; if a pinned archive
   is ever removed from the official site, the launcher fails loudly with
   the exact URL and a manual-download fallback).

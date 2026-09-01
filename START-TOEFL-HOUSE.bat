@@ -156,7 +156,7 @@ echo [5/10] Initializing and starting PostgreSQL, local only on 127.0.0.1...
 if not exist "%PGDATA%\PG_VERSION" (
     echo       - first run: initializing the database cluster...
     "%PG_BIN%\initdb.exe" -U postgres -A trust --encoding=UTF8 --no-locale -D "%PGDATA%"
-    if errorlevel 1 call :fail "PostgreSQL cluster initialization failed. Details in .runtime\pg.log. If another program owns port %PG_PORT%, close it and re-run."
+    if errorlevel 1 call :fail "PostgreSQL cluster initialization failed. If a previous run was interrupted, the cluster folder is incomplete: delete the whole folder .runtime\pgdata and re-run this file. Otherwise check .runtime\pg.log, and if another program owns port %PG_PORT%, close it and re-run."
 )
 "%PG_BIN%\pg_ctl.exe" -D "%PGDATA%" status >nul 2>nul
 if errorlevel 1 (
@@ -177,8 +177,32 @@ if not defined DB_EXISTS (
     if errorlevel 1 call :fail "Could not create the toefl_house database. Re-run this file."
 )
 "%PHP%" artisan migrate --force
-if errorlevel 1 call :fail "Migrations failed. The last log lines are in storage\logs\laravel.log. Fix the cause shown there, then re-run this file."
+if errorlevel 1 goto migrate_recovered
+goto migrate_ok
+:migrate_recovered
+REM A migrate that is killed mid-run can leave a partially applied schema:
+REM the database record of the migration is written after its changes
+REM commit, so a re-run can fail with "table already exists". The only
+REM provably safe automatic recovery is a fresh deployment with no data:
+REM user_accounts is the root of every record in this system, so zero
+REM accounts (or a missing table) means nothing of value can exist.
+set "HAS_TABLE=f"
+for /f "tokens=1" %%c in ('"%PG_BIN%\psql.exe" -h 127.0.0.1 -p %PG_PORT% -U postgres -d toefl_house -tAc "SELECT to_regclass('public.user_accounts') IS NOT NULL" 2^>nul') do set "HAS_TABLE=%%c"
+set "ACCTS2=-1"
+if "%HAS_TABLE%"=="t" for /f "tokens=1" %%c in ('"%PG_BIN%\psql.exe" -h 127.0.0.1 -p %PG_PORT% -U postgres -d toefl_house -tAc "SELECT count(*) FROM user_accounts" 2^>nul') do set "ACCTS2=%%c"
+if "%HAS_TABLE%"=="t" if not "%ACCTS2%"=="0" call :fail "Migrations failed and this deployment already has accounts and data. Run RESTORE-TOEFL-HOUSE.bat with your latest backup, then re-run this file. If no backup exists, contact the TOEFL House maintainer - do not delete the database."
+echo       - a previous interrupted run left a partial schema; this is a fresh deployment with no data, rebuilding the database from scratch...
+"%PG_BIN%\dropdb.exe" -h 127.0.0.1 -p %PG_PORT% -U postgres --if-exists toefl_house
+if errorlevel 1 call :fail "Could not drop the partially migrated database. Re-run this file."
+"%PG_BIN%\createdb.exe" -h 127.0.0.1 -p %PG_PORT% -U postgres toefl_house
+if errorlevel 1 call :fail "Could not recreate the database. Re-run this file."
+"%PHP%" artisan migrate --force
+if errorlevel 1 call :fail "Migrations failed twice. The last log lines are in storage\logs\laravel.log."
+echo       - migrations complete after rebuild.
+goto migrate_done
+:migrate_ok
 echo       - migrations complete.
+:migrate_done
 
 REM ---------------------------------------------------------------------------
 REM Step 7 - first-run bootstrap: owner account, only when none exists yet
@@ -288,7 +312,18 @@ if errorlevel 1 (
     exit /b 0
 )
 "%TAILSCALE_BIN%" serve --bg %APP_PORT%
-if errorlevel 1 call :fail "Tailscale Serve configuration failed. The Tailscale client must be signed in - check it, then re-run this file."
+if not errorlevel 1 goto ts_serve_ok
+echo       - Tailscale Serve could not be configured in the background, which
+echo         usually means the one-time HTTPS setup for your tailnet has not
+echo         been done yet. Opening a window that completes it:
+echo         wait for the line "Available within your tailnet" (or follow
+echo         the link shown there if one appears), then close that window
+echo         and press any key here.
+start "Tailscale Setup" cmd /k ""%TAILSCALE_BIN%" serve %APP_PORT%"
+pause
+"%TAILSCALE_BIN%" serve --bg %APP_PORT%
+if errorlevel 1 call :fail "Tailscale Serve still could not be configured. Usually one of: the Tailscale client is not signed in (open the Tailscale tray app and sign in, then re-run this file), or the tailnet needs HTTPS certificates enabled (open https://login.tailscale.com/admin/dns, or ask the tailnet admin). The app itself is fully working at http://127.0.0.1:%APP_PORT% - only the tailnet address needs this fix."
+:ts_serve_ok
 echo.
 echo  =====================================================================
 echo   THE TOEFL HOUSE IS RUNNING

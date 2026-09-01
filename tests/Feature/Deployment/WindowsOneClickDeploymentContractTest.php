@@ -87,6 +87,29 @@ final class WindowsOneClickDeploymentContractTest extends TestCase
         // Fails loudly, never silently.
         $this->assertStringContainsString('exit /b 1', $start);
         $this->assertStringContainsString('pause', $start);
+        // An interrupted first run leaves an incomplete cluster (debris, no
+        // PG_VERSION); initdb then refuses with "directory not empty" - the
+        // failure message must tell the owner the recovery path (AUDIT: this
+        // was a real dead end found in the fresh-run recovery test).
+        $failAt = mb_strpos($start, 'initialization failed');
+        $recoverAt = mb_strpos($start, 'delete the whole folder .runtime\\pgdata');
+        $this->assertNotFalse($failAt, 'the initdb failure message is missing');
+        $this->assertNotFalse($recoverAt, 'the initdb failure message lacks the pgdata recovery path');
+        $this->assertLessThan($recoverAt, $failAt, 'the recovery path must be inside the failure message');
+        // An interrupted migrate can leave a deadlocked schema (the migration
+        // record is logged after the DDL commits). The launcher must auto-heal
+        // only the provably safe case (no user_accounts table, or zero
+        // accounts) and point data-bearing deployments at the restore tool.
+        $this->assertStringContainsString("to_regclass('public.user_accounts')", $start);
+        $this->assertStringContainsString('dropdb', $start);
+        $this->assertStringContainsString('RESTORE-TOEFL-HOUSE.bat', $start);
+        // Tailscale Serve must be configured in the background, with a
+        // one-time interactive fallback for tailnets whose HTTPS certificates
+        // are not enabled yet (the interactive consent flow cannot run in
+        // --bg mode).
+        $this->assertStringContainsString('serve --bg', $start);
+        $this->assertStringContainsString('start "Tailscale Setup" cmd /k', $start);
+        $this->assertStringContainsString('HTTPS certificates', $start);
     }
 
     public function test_no_secret_material_ships_in_the_deployment_artifacts(): void
