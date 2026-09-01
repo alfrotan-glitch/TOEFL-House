@@ -39,16 +39,23 @@ final class AppServiceProvider extends ServiceProvider
         });
 
         // Print documents carry the organization/branch identity in a shared
-        // header. Resolved once per render from the authoritative structure.
+        // header, resolved once per render from the authoritative structure.
+        //
+        // Identity rule (data authority — one source of truth): business
+        // records are institution-level (no record is branch-scoped), so the
+        // header states the institution: the SINGLE active organization,
+        // and — when the institution operates a single active branch — that
+        // branch. With zero or multiple active candidates the document is
+        // institution-branded (config app.name / no branch line) rather than
+        // picking an arbitrary candidate: an official document must never
+        // carry a header the structure does not uniquely determine.
         View::composer('print.*', function ($view): void {
-            /** @var Organization|null $organization */
-            $organization = Organization::query()->where('lifecycle_state', 'active')->orderBy('name')->first();
-            /** @var Branch|null $branch */
-            $branch = Branch::query()->where('lifecycle_state', 'active')->orderBy('name')->first();
+            $organizations = Organization::query()->where('lifecycle_state', 'active')->get();
+            $branches = Branch::query()->where('lifecycle_state', 'active')->get();
 
             $view->with('orgIdentity', [
-                'name' => $organization === null ? config('app.name', 'The TOEFL House') : $organization->name,
-                'branch' => $branch?->name,
+                'name' => $organizations->count() === 1 ? (string) $organizations->first()?->name : config('app.name', 'The TOEFL House'),
+                'branch' => $branches->count() === 1 ? $branches->first()?->name : null,
             ]);
         });
     }

@@ -189,3 +189,24 @@ Deployment is ready subject to the host drills above. No speculative
 infrastructure (no orchestrator, no container platform, no message broker) is
 part of or assumed by the deployment; the release-symlink model is the entire
 deployment system.
+
+## P4.5 — Documents (this commit)
+
+**Scope:** printing, branding, organization/branch identity, data authority.
+
+**Finding fixed — document identity was resolved arbitrarily.** The `print.*` view composer (the single resolution point for document headers) picked `ORDER BY name LIMIT 1` over active organizations and active branches. Proven before fixing: with two active organizations, **every document — including The TOEFL House's own payment receipts — printed under "Alpha Institute" / an unrelated branch**. An official document carried an identity the structure does not determine.
+
+**Fix (data authority, one source of truth).** Business records are institution-level (no record is branch-scoped in this schema), so the header states the institution:
+
+- **organization** = the SINGLE active organization; with zero or multiple active candidates the document is branded with the institution name (`config('app.name')`) instead of picking a candidate — a header is only stated when the structure uniquely determines it;
+- **branch** = the SINGLE active branch; with zero or multiple the branch line is omitted (never guessed).
+
+Pinned by two permanent adversarial tests in `PrintingFeatureTest`: (1) two active orgs + two active branches → the receipt carries the institution brand and **neither** organization nor branch name; (2) one org + two branches → the org is stated, the branch line is omitted. (The zero-organization case is structurally unreachable — the access model always seeds an active bootstrap organization — so it is not tested as a business scenario.)
+
+**Verified sound (no change needed):**
+
+- **Branding/consistency:** all six document types (receipt, invoice, certificate, payroll slip, enrollment record, student ID) extend ONE print layout — A4 `@page` rules, `@media print` (screen chrome stripped), print/save-PDF button, institution header, document type + number, "Issued … by …" footer (the responsible user from the authenticated session), signature blocks. No per-document header forks.
+- **Data authority:** documents render the SAME authoritative domain records the console reads (`Payment`, `Obligation`, `Certificate`, `PayrollResult`, `Enrollment`, `Student`) — printing computes nothing financial or academic itself; `docNo` is deterministic per source record (a reprint reproduces the same document number); the issue date is the print date.
+- **No lazy relations in print views** (machine-checked: zero `->relation->` patterns; documents are single-entity, not looped collections).
+**Second finding fixed (surfaced by this commit's full-suite gate) — a date-dependent test time bomb.** `ScaleContractVersionFeatureTest::test_amendment_supersedes_prior_version_and_backdating_is_rejected` used a fixed calendar date (a contract version effective `2026-09-01`); the domain correctly auto-activates an approved version whose effective date has arrived, so the test passed on 2026-08-31 and failed on 2026-09-01 — the assertion described a past date, not a rule. The **domain rule is correct and unchanged** (`effective_from <= today` → active on approval; future → approved); the test is now date-relative (effective dates computed from the run date) and holds on any date. The rest of the suite was scanned for the same pattern: other fixed-date tests assert on fixed *intervals* or in-window dates (no run-date boundary crossing) — no other time bombs. 
+

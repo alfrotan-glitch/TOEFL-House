@@ -16,6 +16,7 @@ use App\Modules\Hr\Models\Scale;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Tests\Concerns\BuildsActors;
@@ -262,20 +263,30 @@ final class ScaleContractVersionFeatureTest extends TestCase
 
     public function test_amendment_supersedes_prior_version_and_backdating_is_rejected(): void
     {
+        // Date-relative (no fixed calendar dates): approval of a version
+        // whose effective date has already arrived activates it immediately;
+        // a future-dated version stays 'approved'. The test must hold on any
+        // run date.
+        $today = new CarbonImmutable(now()->toDateString());
+        $firstFrom = $today->subDays(60)->toDateString();
+        $secondFrom = $today->addDays(30)->toDateString();
+        $backdatedFrom = $today->subDays(30)->toDateString();
+        $cutoff = (new CarbonImmutable($secondFrom))->subDay()->toDateString();
+
         $commands = app(MaintainContractVersion::class);
-        $first = $this->preparedVersion([['method' => 'fixed_monthly', 'rate' => '20000.00']], null, '2026-08-01', 'p16-l3a');
+        $first = $this->preparedVersion([['method' => 'fixed_monthly', 'rate' => '20000.00']], null, $firstFrom, 'p16-l3a');
         $commands->submit($this->financeManager(), ContractVersion::query()->findOrFail($first['version_id']), 'p16-l3a-sub');
         $commands->approve($this->generalManager(), ContractVersion::query()->findOrFail($first['version_id']), 'p16-l3a-appr');
 
-        $second = $this->preparedVersion([['method' => 'fixed_monthly', 'rate' => '22000.00']], null, '2026-09-01', 'p16-l3b');
+        $second = $this->preparedVersion([['method' => 'fixed_monthly', 'rate' => '22000.00']], null, $secondFrom, 'p16-l3b');
         $commands->submit($this->financeManager(), ContractVersion::query()->findOrFail($second['version_id']), 'p16-l3b-sub');
         $approval = $commands->approve($this->generalManager(), ContractVersion::query()->findOrFail($second['version_id']), 'p16-l3b-appr');
         $this->assertSame('approved', $approval['lifecycle_state']);
 
-        $this->assertDatabaseHas('contract_versions', ['id' => $first['version_id'], 'lifecycle_state' => 'superseded', 'effective_to' => '2026-08-31']);
+        $this->assertDatabaseHas('contract_versions', ['id' => $first['version_id'], 'lifecycle_state' => 'superseded', 'effective_to' => $cutoff]);
         $this->assertSame(2, ContractVersion::query()->findOrFail($second['version_id'])->version_no);
 
-        $backdated = $this->preparedVersion([['method' => 'fixed_monthly', 'rate' => '9000.00']], null, '2026-08-15', 'p16-l3c');
+        $backdated = $this->preparedVersion([['method' => 'fixed_monthly', 'rate' => '9000.00']], null, $backdatedFrom, 'p16-l3c');
         $commands->submit($this->financeManager(), ContractVersion::query()->findOrFail($backdated['version_id']), 'p16-l3c-sub');
         try {
             $commands->approve($this->generalManager(), ContractVersion::query()->findOrFail($backdated['version_id']), 'p16-l3c-appr');
