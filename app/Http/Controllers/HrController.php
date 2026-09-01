@@ -104,7 +104,7 @@ final class HrController extends Controller
     {
         $input = $request->validate([
             'method' => ['required', 'in:fixed_monthly,session_rate,hourly_rate,scale_rate,allowance'],
-            'rate' => ['required', 'numeric', 'gte:0'],
+            'rate' => ['required', 'numeric', 'money', 'gte:0'],
             'skill_id' => ['nullable', 'string'],
             'scale_id' => ['nullable', 'string'],
         ]);

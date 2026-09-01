@@ -304,7 +304,7 @@ final class AcademicController extends Controller
     public function scoreAttempt(Request $request, string $attemptId): RedirectResponse
     {
         $input = $request->validate([
-            'score' => ['required', 'numeric', 'min:0', 'max:9999.99'],
+            'score' => ['required', 'numeric', 'money', 'min:0', 'max:9999.99'],
         ]);
 
         app(ManageAssessmentResult::class)->score(
@@ -353,7 +353,7 @@ final class AcademicController extends Controller
     public function proposeCorrection(Request $request, string $resultId): RedirectResponse
     {
         $input = $request->validate([
-            'score' => ['required', 'numeric', 'min:0', 'max:9999.99'],
+            'score' => ['required', 'numeric', 'money', 'min:0', 'max:9999.99'],
             'reason' => ['required', 'string', 'max:1000'],
         ]);
 

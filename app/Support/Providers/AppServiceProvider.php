@@ -14,6 +14,7 @@ use App\Support\Authorization\AccessDecision;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 
@@ -37,6 +38,17 @@ final class AppServiceProvider extends ServiceProvider
 
             return Limit::perMinute(5)->by($key);
         });
+
+        // Money enters the system through the HTTP boundary as text; the
+        // domain stores it in 2-decimal NUMERIC columns. 'numeric' alone is
+        // not a money format — it admits '1e2', ' 1.5', and third-decimal
+        // values like '0.001' (which the DB then rounds to 0.00 and its
+        // CHECK rejects with a raw SQL error — a 500, not a 422). One
+        // authoritative format rule for every money field: digits, optional
+        // 1–2 decimals, at most 12 integer digits (decimal(14,2) capacity).
+        Validator::extend('money', static function (string $attribute, mixed $value): bool {
+            return preg_match('/^\d{1,12}(\.\d{1,2})?$/', (string) $value) === 1;
+        }, 'The :attribute must be an amount with at most two decimal places (for example 12.50).');
 
         // Print documents carry the organization/branch identity in a shared
         // header, resolved once per render from the authoritative structure.

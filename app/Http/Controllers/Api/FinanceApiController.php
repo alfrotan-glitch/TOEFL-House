@@ -36,7 +36,7 @@ final class FinanceApiController extends Controller
         $input = $request->validate([
             'period_id' => ['required', 'string'],
             'student_id' => ['required', 'string'],
-            'amount' => ['required', 'numeric', 'gt:0'],
+            'amount' => ['required', 'numeric', 'money', 'gt:0'],
             'method' => ['required', 'string', 'max:40'],
             'payer_ref' => ['required', 'string', 'max:120'],
             'received_on' => ['required', 'date'],
@@ -65,7 +65,7 @@ final class FinanceApiController extends Controller
     {
         $input = $request->validate([
             'period_id' => ['required', 'string'],
-            'amount' => ['required', 'numeric', 'gt:0'],
+            'amount' => ['required', 'numeric', 'money', 'gt:0'],
             'reason' => ['required', 'string', 'max:1000'],
         ]);
 

@@ -65,7 +65,7 @@ final class FinanceController extends Controller
         $input = $request->validate([
             'period_id' => ['required', 'string'],
             'student_id' => ['required', 'string'],
-            'amount' => ['required', 'numeric', 'gt:0'],
+            'amount' => ['required', 'numeric', 'money', 'gt:0'],
             'method' => ['required', 'string', 'max:40'],
             'payer_ref' => ['required', 'string', 'max:120'],
             'received_on' => ['required', 'date'],
@@ -95,7 +95,7 @@ final class FinanceController extends Controller
     {
         $input = $request->validate([
             'period_id' => ['required', 'string'],
-            'amount' => ['required', 'numeric', 'gt:0'],
+            'amount' => ['required', 'numeric', 'money', 'gt:0'],
             'reason' => ['required', 'string', 'max:1000'],
         ]);
 
@@ -126,7 +126,7 @@ final class FinanceController extends Controller
     {
         $input = $request->validate([
             'payment_id' => ['required', 'string'],
-            'amount' => ['required', 'numeric', 'gt:0'],
+            'amount' => ['required', 'numeric', 'money', 'gt:0'],
         ]);
 
         app(AllocatePayment::class)->allocate(
@@ -148,7 +148,7 @@ final class FinanceController extends Controller
             'source' => ['required', 'string', 'max:120'],
             'reason' => ['required', 'string', 'max:1000'],
             'category' => ['required', 'string', 'max:120'],
-            'amount' => ['required', 'numeric', 'gt:0'],
+            'amount' => ['required', 'numeric', 'money', 'gt:0'],
             'source_ref' => ['required', 'string', 'max:120'],
         ]);
 
@@ -226,7 +226,7 @@ final class FinanceController extends Controller
             'lines' => ['required', 'array', 'min:1', 'max:4'],
             'lines.*.account_id' => ['nullable', 'string'],
             'lines.*.direction' => ['nullable', 'in:debit,credit'],
-            'lines.*.amount' => ['nullable', 'numeric', 'gt:0'],
+            'lines.*.amount' => ['nullable', 'numeric', 'money', 'gt:0'],
         ]);
 
         $lines = [];
@@ -282,7 +282,7 @@ final class FinanceController extends Controller
         $input = $request->validate([
             'obligation_id' => ['required', 'string'],
             'period_id' => ['required', 'string'],
-            'amount' => ['required', 'numeric', 'gt:0'],
+            'amount' => ['required', 'numeric', 'money', 'gt:0'],
             'eligibility' => ['required', 'string', 'max:500'],
             'effective_from' => ['required', 'date'],
             'effective_to' => ['nullable', 'date', 'after_or_equal:effective_from'],
@@ -320,8 +320,8 @@ final class FinanceController extends Controller
         $input = $request->validate([
             'period_id' => ['required', 'string'],
             'subject' => ['required', 'string', 'max:120'],
-            'expected' => ['required', 'numeric'],
-            'observed' => ['required', 'numeric'],
+            'expected' => ['required', 'numeric', 'money'],
+            'observed' => ['required', 'numeric', 'money'],
             'explanation' => ['nullable', 'string', 'max:1000'],
         ]);
 
@@ -354,7 +354,7 @@ final class FinanceController extends Controller
         $input = $request->validate([
             'name' => ['required', 'string', 'max:120'],
             'agreement_ref' => ['required', 'string', 'max:120'],
-            'committed_amount' => ['required', 'numeric', 'gt:0'],
+            'committed_amount' => ['required', 'numeric', 'money', 'gt:0'],
             'restricted_category' => ['nullable', 'string', 'max:120'],
             'restriction_note' => ['nullable', 'string', 'max:1000'],
         ]);
@@ -376,7 +376,7 @@ final class FinanceController extends Controller
     {
         $input = $request->validate([
             'obligation_line_id' => ['required', 'string'],
-            'amount' => ['required', 'numeric', 'gt:0'],
+            'amount' => ['required', 'numeric', 'money', 'gt:0'],
             'reason' => ['required', 'string', 'max:1000'],
         ]);
 

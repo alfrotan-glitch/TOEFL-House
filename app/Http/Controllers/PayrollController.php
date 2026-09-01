@@ -118,7 +118,7 @@ final class PayrollController extends Controller
     public function proposeSettlement(Request $request, string $employmentId): RedirectResponse
     {
         $input = $request->validate([
-            'amount' => ['required', 'numeric', 'min:0', 'max:99999999999999'],
+            'amount' => ['required', 'numeric', 'money', 'min:0', 'max:99999999999999'],
             'basis' => ['required', 'string', 'max:1000'],
         ]);
 

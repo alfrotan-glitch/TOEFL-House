@@ -4,10 +4,15 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Security;
 
+use App\Modules\Finance\Commands\MaintainFinancialPeriod;
 use App\Modules\Identity\Models\Person;
 use App\Modules\Identity\Models\UserAccount;
+use App\Support\Authorization\Actor;
 use App\Support\Identifiers\RandomIdentifier;
+use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Tests\Concerns\BuildsActors;
 use Tests\TestCase;
 
 /**
@@ -19,6 +24,8 @@ use Tests\TestCase;
  */
 final class SecurityHardeningFeatureTest extends TestCase
 {
+    use BuildsActors;
+
     private function makeEmployee(string $username = 'security.employee', string $password = 'correct-horse-99'): UserAccount
     {
         $personId = RandomIdentifier::new();
@@ -125,5 +132,38 @@ final class SecurityHardeningFeatureTest extends TestCase
         $this->assertStringNotContainsString('DB_PASSWORD', $serialized);
         $this->assertStringNotContainsString('postgres', $serialized);
         $this->assertArrayNotHasKey('version', $body['checks']);
+    }
+
+    /**
+     * FINAL ADVERSARIAL ATTACK — the audit trail is the system's integrity
+     * backbone, so it must be attacked directly at the SQL layer: any UPDATE
+     * or DELETE on audit_events is rejected by the append-only trigger
+     * (000008), not merely by application discipline.
+     */
+    public function test_direct_sql_tampering_with_the_audit_trail_is_rejected_by_the_schema(): void
+    {
+        $this->personWithAuthority('sha-auditor-1', ['finance.period']);
+        $actor = new Actor('sha-auditor-1', 'Auditor');
+
+        app(MaintainFinancialPeriod::class)->open($actor, '2027-01', '2027-01-01', '2027-01-31', 'sha-period-1');
+
+        $row = DB::table('audit_events')->where('operation', 'finance.period.open')->first();
+        $this->assertNotNull($row);
+
+        try {
+            DB::statement('UPDATE audit_events SET after_state = ? WHERE id = ?', ['{"forged":true}', $row->id]);
+            $this->fail('the audit trail must be append-only');
+        } catch (QueryException) {
+            $this->addToAssertionCount(1);
+        }
+
+        try {
+            DB::statement('DELETE FROM audit_events WHERE id = ?', [$row->id]);
+            $this->fail('the audit trail must be append-only');
+        } catch (QueryException) {
+            $this->addToAssertionCount(1);
+        }
+
+        $this->assertDatabaseHas('audit_events', ['id' => $row->id, 'operation' => 'finance.period.open']);
     }
 }
