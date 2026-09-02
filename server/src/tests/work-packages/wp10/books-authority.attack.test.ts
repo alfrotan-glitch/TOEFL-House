@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import supertest from 'supertest';
+import { today } from '../../../utils/ids.js';
 import { db, initSchema } from '../../../db/connection.js';
 import { ensureOrganizationHierarchy } from '../../../db/organizationHierarchy.js';
 import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
@@ -69,8 +70,8 @@ describe('WP-10 ATTACK · Books RBAC, cross-branch and state boundaries', () => 
   it('uses permissions rather than role labels: reception can operate lending but cannot refund; Finance cannot issue', async () => {
     const bookId = await createCatalog();
     await supertest(app).get('/api/books/workspace').set(dataEntry()).expect(403);
-    await supertest(app).post(`/api/books/catalog/${bookId}/loans`).set(receptionist()).set('Idempotency-Key', unique('loan')).send({ studentId: STUDENT_A, dueOn: '2026-09-01' }).expect(201);
-    await supertest(app).post(`/api/books/catalog/${bookId}/loans`).set(finance()).set('Idempotency-Key', unique('finance-loan')).send({ studentId: STUDENT_A, dueOn: '2026-09-01' }).expect(403);
+    await supertest(app).post(`/api/books/catalog/${bookId}/loans`).set(receptionist()).set('Idempotency-Key', unique('loan')).send({ studentId: STUDENT_A, dueOn: today() }).expect(201);
+    await supertest(app).post(`/api/books/catalog/${bookId}/loans`).set(finance()).set('Idempotency-Key', unique('finance-loan')).send({ studentId: STUDENT_A, dueOn: today() }).expect(403);
 
     const sale = await supertest(app).post(`/api/books/catalog/${bookId}/sales`).set(gm()).set('Idempotency-Key', unique('sale')).send({ quantity: 1, purchaserName: 'Walk in' }).expect(201);
     await supertest(app).post(`/api/books/sales/${sale.body.id}/return`).set(receptionist()).set('Idempotency-Key', unique('reception-return')).send({ reason: 'No refund authority' }).expect(403);
@@ -83,7 +84,7 @@ describe('WP-10 ATTACK · Books RBAC, cross-branch and state boundaries', () => 
 
     const localBook = await createCatalog();
     await supertest(app).post(`/api/books/catalog/${localBook}/sales`).set(gm()).set('Idempotency-Key', unique('cross-student-sale')).send({ quantity: 1, studentId: STUDENT_B }).expect(403);
-    await supertest(app).post(`/api/books/catalog/${localBook}/loans`).set(gm()).set('Idempotency-Key', unique('cross-student-loan')).send({ studentId: STUDENT_B, dueOn: '2026-09-01' }).expect(403);
+    await supertest(app).post(`/api/books/catalog/${localBook}/loans`).set(gm()).set('Idempotency-Key', unique('cross-student-loan')).send({ studentId: STUDENT_B, dueOn: today() }).expect(403);
   });
 
   it('rejects unavailable, archived, malformed-date and altered-idempotency attacks without residual facts', async () => {
@@ -94,10 +95,10 @@ describe('WP-10 ATTACK · Books RBAC, cross-branch and state boundaries', () => 
     await supertest(app).post(`/api/books/catalog/${bookId}/sales`).set(gm()).set('Idempotency-Key', saleKey).send({ quantity: 2, purchaserName: 'Different event' }).expect(409);
 
     const loanBook = await createCatalog({ saleEnabled: false, lendingEnabled: true });
-    await supertest(app).post(`/api/books/catalog/${loanBook}/loans`).set(gm()).set('Idempotency-Key', unique('bad-date')).send({ studentId: STUDENT_A, issuedOn: 'not-a-date', dueOn: '2026-09-01' }).expect(400);
+    await supertest(app).post(`/api/books/catalog/${loanBook}/loans`).set(gm()).set('Idempotency-Key', unique('bad-date')).send({ studentId: STUDENT_A, issuedOn: 'not-a-date', dueOn: today() }).expect(400);
     await supertest(app).patch(`/api/books/catalog/${loanBook}`).set(gm()).send({ status: 'archived' }).expect(200);
     await supertest(app).post(`/api/books/catalog/${loanBook}/receipts`).set(gm()).set('Idempotency-Key', unique('archived-receipt')).send({ quantity: 1 }).expect(409);
-    await supertest(app).post(`/api/books/catalog/${loanBook}/loans`).set(gm()).set('Idempotency-Key', unique('archived-loan')).send({ studentId: STUDENT_A, dueOn: '2026-09-01' }).expect(409);
+    await supertest(app).post(`/api/books/catalog/${loanBook}/loans`).set(gm()).set('Idempotency-Key', unique('archived-loan')).send({ studentId: STUDENT_A, dueOn: today() }).expect(409);
     expect(db.prepare('SELECT COUNT(*) AS count FROM book_loans WHERE book_id = ?').get(loanBook)).toEqual({ count: 0 });
   });
 });
@@ -244,8 +245,8 @@ describe('WP-10 ATTACK · database backstops and concurrent request identity', (
     expect(replayReturn.body).toMatchObject({ id: firstReturn.body.id, idempotentReplay: true });
 
     const loanKey = unique('same-loan');
-    const issued = await supertest(app).post(`/api/books/catalog/${bookId}/loans`).set(receptionist()).set('Idempotency-Key', loanKey).send({ studentId: STUDENT_A, dueOn: '2026-09-01' }).expect(201);
-    const replayLoan = await supertest(app).post(`/api/books/catalog/${bookId}/loans`).set(receptionist()).set('Idempotency-Key', loanKey).send({ studentId: STUDENT_A, dueOn: '2026-09-01' }).expect(200);
+    const issued = await supertest(app).post(`/api/books/catalog/${bookId}/loans`).set(receptionist()).set('Idempotency-Key', loanKey).send({ studentId: STUDENT_A, dueOn: today() }).expect(201);
+    const replayLoan = await supertest(app).post(`/api/books/catalog/${bookId}/loans`).set(receptionist()).set('Idempotency-Key', loanKey).send({ studentId: STUDENT_A, dueOn: today() }).expect(200);
     expect(replayLoan.body).toMatchObject({ id: issued.body.id, idempotentReplay: true });
 
     const loanReturnKey = unique('same-loan-return');

@@ -45,7 +45,7 @@ describe('WP-06 session input guards', () => {
   it('normalizes a human time spelling to the canonical HH:MM', async () => {
     const ctx = seedContext();
     const res = await supertest(ctx.app).post('/api/sessions').set(ctx.receptionist).send({
-      classId: ctx.classId, date: '2026-09-01', startTime: '8:05', endTime: '9:30',
+      classId: ctx.classId, date: today(), startTime: '8:05', endTime: '9:30',
     });
     expect(res.status).toBe(201);
     expect(res.body.startTime).toBe('08:05');
@@ -116,7 +116,9 @@ describe('WP-06 session input guards', () => {
 
   it('rejects completing a session before it starts and bogus status values', async () => {
     const ctx = seedContext();
-    const sessionId = await createSession(ctx, { date: '2026-09-01', start: '08:00', end: '09:30' });
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const sessionId = await createSession(ctx, { date: tomorrow.toLocaleDateString('en-CA'), start: '08:00', end: '09:30' });
     const bogus = await supertest(ctx.app).patch(`/api/sessions/${sessionId}/status`).set(ctx.receptionist).send({ status: 'archived' });
     expect(bogus.status).toBe(400);
 

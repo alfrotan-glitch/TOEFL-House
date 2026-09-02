@@ -538,12 +538,15 @@ describe('visitor admission and conversion attacks', () => {
       .send({ notes: 'Call again', outcome: 'callback' });
     expect(missing.status).toBe(400);
 
+    const callbackDate = new Date();
+    callbackDate.setDate(callbackDate.getDate() + 2);
+    const callbackDateIso = callbackDate.toLocaleDateString('en-CA');
     const accepted = await supertest(app)
       .post('/api/visitors/wp03_callback/followups')
       .set(bearerFor('wp03_gm'))
-      .send({ notes: 'Call again', outcome: 'callback', nextContactDate: '2026-09-01' });
+      .send({ notes: 'Call again', outcome: 'callback', nextContactDate: callbackDateIso });
     expect(accepted.status).toBe(201);
-    expect((db.prepare("SELECT next_contact_date FROM visitors WHERE id='wp03_callback'").get() as { next_contact_date: string }).next_contact_date).toBe('2026-09-01');
+    expect((db.prepare("SELECT next_contact_date FROM visitors WHERE id='wp03_callback'").get() as { next_contact_date: string }).next_contact_date).toBe(callbackDateIso);
   });
 
   it('rejects non-text visitor foreign IDs and unauthorized discount transformations', async () => {

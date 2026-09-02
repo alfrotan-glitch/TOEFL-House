@@ -2,7 +2,7 @@
  * Class admission rules — the single domain authority for "may this student
  * occupy a seat in this class?" checks that are not capacity and not placement.
  *
- * Why this module exists (enrollment audit E-1): the gender policy is a domain
+ * Why this module exists: the gender policy is a domain
  * rule, so it lives with the domain rather than in `classes.routes.ts`. Route-level enforcement meant every
  * new write path had to remember to repeat it, and one did not — the
  * transfer-request approval path (`POST /api/enrollments/:id/transfer-requests`)
@@ -46,7 +46,7 @@ export function assertClassGenderAllows(
 }
 
 /**
- * DUPLICATE ENROLLMENT RULE (audit E-2) — the single definition.
+ * DUPLICATE ENROLLMENT RULE — the single definition.
  *
  * THE UNIQUENESS DIMENSION, established from behaviour rather than from the
  * pre-existing index. A student may hold at most ONE seat-consuming enrollment

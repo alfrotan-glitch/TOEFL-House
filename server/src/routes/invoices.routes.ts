@@ -195,7 +195,7 @@ invoicesRouter.post(
 
     if (!studentId) throw new HttpError(400, 'studentId is required.');
     // What the document bills is decided before anything is written, by the one
-    // authority that decides it (owner decision D-118).
+    // authority that decides it.
     const invoicePurpose = assertInvoicePurpose(purpose);
     if (!items || !Array.isArray(items) || items.length === 0) {
       throw new HttpError(400, 'At least one invoice line item is required.');
@@ -255,8 +255,8 @@ invoicesRouter.post(
       // Resolved inside the transaction so a rejected invoice leaves no
       // obligation behind it.
       const { obligationId } = resolveInvoiceObligation(db, { studentId, purpose: invoicePurpose, semesterId });
-      // A term bills one amount and every claim on it competes for that amount
-      // (WP07-F19).
+      // A term bills one amount and every claim on it competes for that
+      // amount.
       if (obligationId) assertTuitionInvoiceFits(db, { obligationId, netAmount });
       stmtInsertInvoice.run(
         invoiceId, studentId, totalAmount, discount, netAmount, status, issueDate, dueDate,
@@ -326,7 +326,7 @@ invoicesRouter.post(
       throw new HttpError(400, 'Invalid payment method.');
     }
     const resolvedMethod = paymentMethod ?? 'cash';
-    // F-5: `Number()` is a coercion, not a parse, so values that are not
+    // `Number()` is a coercion, not a parse, so values that are not
     // amounts became real invoice payments with real cash movement.
     // Reproduced live on a fresh database:
     //     true   -> 201, a 1 AFN payment (cash +0.95 after the savings sweep)
@@ -394,7 +394,7 @@ invoicesRouter.post(
     // WHAT THIS MONEY SETTLES, decided by the invoice rather than assumed.
     // Every invoice payment was booked as `category = 'fee'` with no semester,
     // so a textbooks invoice paid down tuition and a tuition invoice paid down
-    // no term (owner decision D-118, WP07-F17).
+    // no term.
     assertInvoiceHasLines(db, row.id);
     const attribution = invoicePaymentAttribution(db, row);
 
@@ -416,7 +416,7 @@ invoicesRouter.post(
       const paidSoFar = Number((stmtGetInvoicePaymentsSum.get(row.id) as { s: number }).s || 0);
       const remaining = Number(row.net_amount) - paidSoFar;
       if (remaining <= 0) throw new HttpError(409, 'Invoice is already fully paid.');
-      // Whole AFN (D-12/D-22/D-104): exact comparison, no tolerance to hide a
+      // Whole AFN: exact comparison, no tolerance to hide a
       // one-afghani overpayment behind.
       if (payAmount > remaining) {
         throw new HttpError(400, `Amount exceeds remaining balance (${remaining} AFN).`);

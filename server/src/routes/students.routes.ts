@@ -46,7 +46,7 @@ import { assertPlacementEligibleForClass } from '../core/placement/enrollment-ga
 import { assertNotAlreadySeatedInClass } from '../core/academic/class-admission.js';
 import { JourneyEventType } from '../core/journey/event-types.js';
 import { resolveIdempotency, isUniqueViolation } from '../utils/idempotency.js';
-// Single authorities for the Student subsystem (audit STU-C1/C2/H1/H3).
+// Single authorities for the Student subsystem.
 import { normalizeStudentInput, studentPhoneKey } from '../core/students/student-input.js';
 import {
   assertStudentTransition,
@@ -81,7 +81,7 @@ const stmtGetClassDetails = db.prepare('SELECT * FROM classes WHERE id = ?');
 const stmtGetClassFee = db.prepare('SELECT fee FROM classes WHERE id = ?');
 const stmtGetLevelProgramVersion = db.prepare('SELECT program_version_id FROM levels WHERE id = ?');
 /**
- * Phone identity lookup, normalized (audit STU-H3).
+ * Phone identity lookup, normalized.
  *
  * The old statement compared the raw column, so "0700-111-001" and
  * "+93700111001" both slipped past an existing "0700111001". This mirrors
@@ -125,7 +125,7 @@ const stmtInsertEnrollment = db.prepare(
 const stmtGetClassSessions = db.prepare("SELECT id FROM sessions WHERE class_id = ? AND status != 'cancelled'");
 const stmtInsertRoster = db.prepare('INSERT INTO rosters (id, session_id, student_id, attendance_status) VALUES (?, ?, ?, ?)');
 // An extra class creates no `student_semesters` row, so there is no tuition
-// obligation for this document to name and D-118 forbids calling it tuition.
+// obligation for this document to name; it must not be called tuition.
 // It bills its own charge and settles only that.
 const stmtInsertOtherChargeInvoice = db.prepare(
   `INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, notes, invoice_number, issued_by, charge_kind, purpose) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'other', 'other')`
@@ -186,7 +186,7 @@ const stmtInsertSimplePayment = db.prepare(
 /**
  * The refund writer. Separate from the charge writer because a refund carries
  * two facts a charge does not: the payment it reverses, and the semester that
- * payment settled (owner decisions D-113 and D-114). Both are written here, not
+ * payment settled. Both are written here, not
  * chosen by the caller, so the attribution cannot disagree with the money.
  */
 const stmtInsertRefundPayment = db.prepare(
@@ -220,7 +220,7 @@ const stmtUpdateStudentStatus = db.prepare(
     WHERE id = ? AND status = ? AND status <> 'suspended'`,
 );
 /**
- * Graduation releases the seat (audit STU-H4). Only enrollments that still
+ * Graduation releases the seat. Only enrollments that still
  * occupy capacity are touched — `active|confirmed|pending`, exactly the set
  * `countActiveStudentsInClass()` counts — so terminal rows (dropped,
  * transferred, withdrawn) keep their historical status.
@@ -243,7 +243,7 @@ const DEFAULT_PAGE_SIZE = 2000;
 const MAX_PAGE_SIZE = 2000;
 
 // STUDENT_STATUSES was a local copy of the lifecycle vocabulary — one of the
-// four divergent copies audit STU-M2 recorded. It now comes from the single
+// four divergent copies that once existed. It now comes from the single
 // authority in core/students/student-lifecycle.ts.
 
 /** Rejects an unknown status filter instead of quietly returning everything. */
@@ -455,7 +455,7 @@ function checkAcademicHold(req: import('express').Request, studentId: string) {
 }
 
 // ============================================================================
-// §1 — LIST / READ
+// LIST / READ
 // ============================================================================
 paymentsRouter.get('/', requirePermission('Payment.View'), ah(async (req, res) => {
   const { branchId, isAll } = resolveBranchScope(req);
@@ -572,8 +572,8 @@ studentsRouter.get('/search', requirePermission('Student.View'), ah(async (req, 
 }));
 
 /**
- * THE shared filter definition for the student roster, search and export
- * (audit STU-H2). Separate copies of this WHERE clause in the roster and the
+ * THE shared filter definition for the student roster, search and export.
+ * Separate copies of this WHERE clause in the roster and the
  * search endpoint — with the CSV export having no server-side filter at all and
  * reducing whatever page the browser happened to hold — is three answers to one
  * question. One builder means the three surfaces can never disagree about what
@@ -614,7 +614,7 @@ function buildStudentListWhere(
 }
 
 /**
- * Authoritative roster summary (audit STU-H2).
+ * Authoritative roster summary.
  *
  * Mirrors `GET /visitors/summary`, which the Visitors tab already uses. Every
  * figure is computed in SQL over the FULL filtered set — never derived from
@@ -649,7 +649,7 @@ studentsRouter.get('/summary', requirePermission('Student.View'), ah(async (req,
 }));
 
 /**
- * Server-side CSV export over the FULL filtered dataset (audit STU-H2).
+ * Server-side CSV export over the FULL filtered dataset.
  *
  * Built in the UI from `filteredStudents` — the loaded page — an export of a
  * 2,162-student branch silently produces 2,000 rows, financial columns
@@ -730,7 +730,7 @@ studentsRouter.get('/', requirePermission('Student.View'), ah(async (req, res) =
   // q matches name / code / phone / tazkira / whatsapp / email / father.
   const { whereSql, params } = buildStudentListWhere(req, scope);
 
-  // Authoritative totals (audit STU-H2). A bare array capped at MAX_PAGE_SIZE
+  // Authoritative totals. A bare array capped at MAX_PAGE_SIZE
   // with no total leaves a client unable to tell a full result from a
   // truncated one: with 2,162 students the UI renders 2,000 rows and captions
   // them "2000 of 2000". These headers mirror the
@@ -823,7 +823,7 @@ studentsRouter.get('/:id', requirePermission('Student.View'), ah(async (req, res
 }));
 
 // ============================================================================
-// §2 — CREATE (Manual Registration)
+// CREATE (Manual Registration)
 // ============================================================================
 studentsRouter.post('/manual', requirePermission('Student.Create'), ah(async (req, res) => {
   const user = getUserContext(req);
@@ -929,13 +929,13 @@ studentsRouter.post('/manual', requirePermission('Student.Create'), ah(async (re
 }));
 
 // ============================================================================
-// §3 — CONCURRENT CLASS ENROLLMENT (Extra Classes)
+// CONCURRENT CLASS ENROLLMENT (Extra Classes)
 // ============================================================================
 
 studentsRouter.post('/:id/enroll-class', requirePermission('Class.Assign'), ah(async (req, res) => {
   const user = getUserContext(req);
   const student = requireStudent(req, req.params.id);
-  // A graduated or suspended student may not take a new class (audit STU-C2).
+  // A graduated or suspended student may not take a new class.
   assertStudentOperable(student, 'enroll this student in a class');
   const { amountPaidNow = 0 } = req.body || {};
   const classId = requiredText(req.body?.classId, 'Class id', TEXT_LIMITS.short);
@@ -956,7 +956,7 @@ studentsRouter.post('/:id/enroll-class', requirePermission('Class.Assign'), ah(a
     throw new HttpError(400, `Cannot enroll in a class that is ${cls.status}.`);
   }
   
-  // Duplicate rule comes from the single domain authority (audit E-2). This
+  // Duplicate rule comes from the single domain authority. This
   // route must not carry its own narrower version keyed on status='active'
   // alone: that disagrees with the capacity predicate about what occupies a
   // seat. The shared rule covers active|confirmed|pending.
@@ -965,8 +965,8 @@ studentsRouter.post('/:id/enroll-class', requirePermission('Class.Assign'), ah(a
   assertClassGenderAllowsStudent(classId, student.gender);
   // Extra-class enrollment writes the enrollment row directly rather than going
   // through EnrollmentService.enroll(), so it applies the same placement
-  // invariant explicitly — otherwise it remains a bypass of the gate installed
-  // for certification finding C-1. Same shared domain rule, no second
+  // invariant explicitly — otherwise it remains a bypass of that gate. Same
+  // shared domain rule, no second
   // implementation of it.
   assertPlacementEligibleForClass(db, student.id, classId, student.branch_id);
 
@@ -976,7 +976,7 @@ studentsRouter.post('/:id/enroll-class', requirePermission('Class.Assign'), ah(a
   const enrollId = id('enr');
   const date = today();
   const baseFee = cls.fee || 0;
-  // CFG-1: re-resolve authorization at the moment the charge is issued. The
+  // Re-resolve authorization at the moment the charge is issued. The
   // stored `discount_percent` is a cached figure; if the authorization behind
   // it was revoked or expired since, it must not fund a NEW invoice. Proven:
   // a revoked 100% sponsorship still produced a zero-fee enrollment. Already
@@ -1023,7 +1023,7 @@ studentsRouter.post('/:id/enroll-class', requirePermission('Class.Assign'), ah(a
 }));
 
 // ============================================================================
-// §4 — SMART PAYMENTS & REFUNDS
+// SMART PAYMENTS & REFUNDS
 // ============================================================================
 
 studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(async (req, res) => {
@@ -1045,7 +1045,7 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
   // per click. When no key is supplied a fingerprint of the business intent is
   // derived, so retries collapse while a genuinely new later charge (a
   // different time bucket, or an explicit client key) still goes through.
-  // F-5: parse ONCE, before the idempotency fingerprint is derived, so the
+  // Parse ONCE, before the idempotency fingerprint is derived, so the
   // fingerprint, the validation and the stored amount all describe the same
   // value. `Number()` here let non-amounts through as real charges:
   //     true -> 1 AFN, [500] -> 500 AFN, '0x10' -> 16 AFN, [[7]] -> 7 AFN
@@ -1106,7 +1106,7 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
     if (!semesterId) throw new HttpError(400, 'semesterId is required when paying a class fee.');
     const sem = (stmtGetSemestersByStudent.all(student.id) as any[]).find(s => s.id === semesterId);
     if (!sem) throw new HttpError(404, 'Semester not found.');
-    // Keyed on the OBLIGATION, never on the term's name (WP07-F21). A term name
+    // Keyed on the OBLIGATION, never on the term's name. A term name
     // is unique only among ACTIVE terms, so a student repeating "Term One" has
     // two debts under one name; summing by name reported the first term's
     // payments against the second and made the second uncollectable.
@@ -1129,8 +1129,8 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
   else if (category === 'installment') {
     if (!installmentId) throw new HttpError(400, 'installmentId is required.');
     // The instalment belongs to a tuition obligation, so the term it settles is
-    // a fact of the plan rather than something the desk selects (owner
-    // decisions D-117/D-125). While the plan was JSON on the student, an
+    // a fact of the plan rather than something the desk selects. While the
+    // plan was JSON on the student, an
     // instalment payment settled no term and the same tuition could be
     // collected twice.
     const payable = getPayableInstallment(db, student.id, installmentId);
@@ -1186,7 +1186,7 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
     if (category === 'fee') {
       const currentSem = (stmtGetSemestersByStudent.all(student.id) as any[]).find((s) => s.id === semesterId);
       if (!currentSem) throw new HttpError(404, 'Semester not found.');
-      // Re-read under the write lock, keyed on the obligation (WP07-F21).
+      // Re-read under the write lock, keyed on the obligation.
       settledObligationId = ensureTuitionObligation(db, String(currentSem.id)).id;
       const currentDebt = getObligationPosition(db, settledObligationId).outstanding;
       if (currentDebt <= 0) throw new HttpError(409, 'This semester is already fully paid.');
@@ -1263,7 +1263,7 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
  * The payments this student still has money against, with the server's own
  * figure for how much of each is left to refund.
  *
- * The refund dialog needs to name a payment (D-113), and it must not work that
+ * The refund dialog needs to name a payment, and it must not work that
  * figure out for itself: a browser that subtracts refunds from a page of
  * payments is a second financial authority, and it is wrong the moment a
  * payment falls outside the page.
@@ -1294,7 +1294,7 @@ studentsRouter.get('/:id/refundable-payments', requirePermission('Refund.Approve
 /**
  * Issue a refund against ONE named payment.
  *
- * Owner decisions D-113 and D-114: a refund reverses a specific payment, and a
+ * A refund reverses a specific payment, and a
  * tuition refund re-opens the debt of the semester that payment settled. The
  * refund therefore inherits both the target's identity and its semester rather
  * than accepting either from the caller — an unattributed refund cannot be
@@ -1306,7 +1306,7 @@ studentsRouter.get('/:id/refundable-payments', requirePermission('Refund.Approve
  *
  * A plan pays a term, so it is written against that term rather than onto the
  * student. Paying an instalment then settles the term the plan belongs to and
- * the desk never chooses a semester (owner decisions D-117 and D-125).
+ * the desk never chooses a semester.
  */
 studentsRouter.get('/:id/installment-plan', requirePermission('Payment.View'), ah(async (req, res) => {
   const student = requireStudent(req, req.params.id);
@@ -1438,7 +1438,7 @@ studentsRouter.post('/:id/refund', requirePermission('Refund.Approve'), ah(async
 }));
 
 // ============================================================================
-// §5 — SEMESTER ENROLLMENT & LIFECYCLE
+// SEMESTER ENROLLMENT & LIFECYCLE
 // ============================================================================
 
 studentsRouter.post('/:id/enroll-semester', requirePermission('Class.Assign'), ah(async (req, res) => {
@@ -1468,7 +1468,7 @@ studentsRouter.post('/:id/enroll-semester', requirePermission('Class.Assign'), a
   }
   try { resolvedTuition = assertMoney(resolvedTuition ?? 0, 'tuition amount'); }
   catch { throw new HttpError(400, 'Tuition amount must be zero or greater.'); }
-  // CFG-1: same re-resolution as enroll-class — a revoked or expired grant
+  // Same re-resolution as enroll-class — a revoked or expired grant
   // must not price a new semester.
   const effectivePercent = resolveAuthorizedDiscount(db, student.id, Math.max(0, Number(student.discount_percent || 0)), { branchId: student.branch_id }).percent;
   const discountAmount = Math.round(resolvedTuition * effectivePercent / 100);
@@ -1519,7 +1519,7 @@ studentsRouter.post('/:id/enroll-semester', requirePermission('Class.Assign'), a
 studentsRouter.post('/:id/issue-card', requirePermission('Student.Print'), ah(async (req, res) => {
   const user = getUserContext(req);
   const student = requireStudent(req, req.params.id);
-  // Chargeable service: must not bill a graduated student (audit STU-C2).
+  // Chargeable service: must not bill a graduated student.
   assertStudentOperable(student, 'issue an ID card for this student');
   const cardDesign = req.body?.cardDesign;
   const notes = optionalText(req.body?.notes, 'Card notes', TEXT_LIMITS.notes);
@@ -1576,7 +1576,7 @@ studentsRouter.post('/:id/issue-card', requirePermission('Student.Print'), ah(as
 studentsRouter.patch('/:id', requirePermission('Student.Edit'), ah(async (req, res) => {
   const existing = requireStudent(req, req.params.id);
   const body = req.body ?? {};
-  // SAME validation authority as CREATE (audit STU-H1). A handler that
+  // SAME validation authority as CREATE. A handler that
   // validated nothing and merged raw body fields straight into the UPDATE
   // would accept and persist gender "martian", a 5,000-character name, a
   // "9999-99-99" date and `phone: ["x"]` — values the CREATE
@@ -1595,7 +1595,7 @@ studentsRouter.patch('/:id', requirePermission('Student.Edit'), ah(async (req, r
   const nextPhone = String(merge('phone', 'phone') ?? '').trim();
   const nextEmail = String(merge('email', 'email') ?? '').trim();
   const nextTazkira = String(merge('tazkiraNo', 'tazkira_no') ?? '').trim();
-  // Normalized phone identity (audit STU-H3) — a formatting change must not
+  // Normalized phone identity — a formatting change must not
   // let one person occupy two student records.
   const phoneOwner = findStudentByPhoneKey(nextPhone);
   const emailOwner = nextEmail ? stmtFindStudentByEmail.get(nextEmail) as { id: string } | undefined : undefined;
@@ -1619,7 +1619,7 @@ studentsRouter.patch('/:id', requirePermission('Student.Edit'), ah(async (req, r
 
   // The instalment plan is no longer a field of the student profile: it is the
   // schedule of a tuition obligation and is written through
-  // `PUT /api/students/:id/installment-plan` (owner decision D-125).
+  // `PUT /api/students/:id/installment-plan`.
   if (f.installmentPlan !== undefined) {
     throw new HttpError(400, 'An instalment plan is set through PUT /api/students/:id/installment-plan, against the term it pays.');
   }
@@ -1630,7 +1630,7 @@ studentsRouter.patch('/:id', requirePermission('Student.Edit'), ah(async (req, r
     const cap = evaluateRules({ category: 'discount', branchId: existing.branch_id, data: { discountPercent: effDiscount } });
     if (typeof cap.finalOutputs.discountPercent === 'number') effDiscount = cap.finalOutputs.discountPercent;
   }
-  // CFG-1: bound the rule candidate by what this student is actually
+  // Bound the rule candidate by what this student is actually
   // authorized to receive. An authorized exception (ambassador, relative,
   // family, sponsorship) raises the ceiling; absent one, ordinary <= 20%.
   effDiscount = resolveAuthorizedDiscount(db, existing.id, Number(effDiscount), { branchId: existing.branch_id }).percent;
@@ -1659,7 +1659,7 @@ studentsRouter.patch('/:id/status', requirePermission('Student.Edit'), ah(async 
   const existing = requireStudent(req, req.params.id);
   const { status } = req.body ?? {};
   // Vocabulary and transition legality both come from the single Student
-  // lifecycle authority (audit STU-C1/C2). Accepting any of three values from
+  // lifecycle authority. Accepting any of three values from
   // ANY current state would let `graduated → inactive → active` launder a
   // terminal state back into an active one.
   if (!isStudentStatus(status)) {
@@ -1701,7 +1701,7 @@ studentsRouter.post('/:id/transfer', requirePermission('Student.Transfer'), ah(a
     writeAudit(req, `Transferred student ${student.full_name} to class ${targetClass.name}`, { newValue: JSON.stringify({ toClassId, notes: notes || null }) });
     res.json({ ok: true, ...result });
   } catch (err: unknown) {
-    // The service now raises typed HttpErrors (audit E-4): a full class is a
+    // The service raises typed HttpErrors: a full class is a
     // 409, a missing student a 404, a bad request a 400. Re-wrapping everything
     // as 400 flattened that contract and — worse — would have relabelled a
     // genuine server fault as a client error. Pass domain errors through

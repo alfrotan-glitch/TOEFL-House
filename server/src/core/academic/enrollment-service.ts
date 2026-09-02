@@ -141,13 +141,13 @@ export class EnrollmentService {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
     );
     
-    // PURPOSE: `other`, and it is forced rather than chosen (WP07-F18).
+    // PURPOSE: `other`, and it is forced rather than chosen.
     // `buildFeeSnapshot` puts a registration fee and a semester fee on ONE
     // document, so this invoice bills a mixture and can name no single tuition
-    // obligation — which owner decision D-118 requires of a tuition invoice.
+    // obligation — which every tuition invoice requires.
     // The semester row this service writes bills 0, so no tuition of its own
     // goes unsettled by the choice; booking it as `fee`, by contrast, paid down
-    // OTHER terms' debt. Revisit when the owner rules on WP07-F18.
+    // OTHER terms' debt.
     this.stmtInsertInvoice = db.prepare(
       `INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, notes, invoice_number, issued_by, purpose, obligation_id, created_at)
        VALUES (?, ?, ?, ?, ?, 'issued', ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
@@ -176,7 +176,7 @@ export class EnrollmentService {
     `);
     // The term carries the tuition it bills. While it was inserted with a
     // hard-coded 0, the enrolment billed tuition on an invoice and the balance
-    // authority — which reads this row — saw no debt at all (WP07-F18).
+    // authority — which reads this row — saw no debt at all.
     this.stmtInsertNewSemester = db.prepare(`INSERT INTO student_semesters (id, student_id, semester_name, class_id, enroll_date, fee_amount, net_fee_amount, status) VALUES (?, ?, ?, ?, date('now'), ?, ?, 'active')`);
     // `students.current_class_id` is a denormalized convenience column that
     // has never existed in this schema (confirmed: absent from schema.sql
@@ -220,7 +220,7 @@ export class EnrollmentService {
     this.stmtCloseSuspensionBatch = db.prepare(
       `UPDATE student_suspension_batches SET resumed_at = datetime('now') WHERE id = ? AND resumed_at IS NULL`,
     );
-    // Class-scoped variant used when a single enrollment closes (C-1): the
+    // Class-scoped variant used when a single enrollment closes: the
     // student-wide statement above belongs to suspend(), which defers the
     // student's whole load. Dropping one enrollment must only close that
     // enrollment's own semester projection.
@@ -271,7 +271,7 @@ export class EnrollmentService {
       }
       // The class's level is authoritative; the caller-supplied program is only
       // a fallback. Shared with the conversion route so the two can never
-      // disagree about which program governs the seat (audit V-1).
+      // disagree about which program governs the seat.
       effectiveVersionId = resolveGoverningProgramVersionId(
         cls,
         effectiveVersionId,
@@ -334,7 +334,7 @@ export class EnrollmentService {
   }
 
   /**
-   * DUPLICATE ENROLLMENT AUTHORITY (audit E-2).
+   * DUPLICATE ENROLLMENT AUTHORITY.
    *
    * The business rule is: a student may hold at most ONE seat-consuming
    * enrollment in a given class at a time. "Seat-consuming" is deliberately
@@ -436,14 +436,14 @@ export class EnrollmentService {
     // ── DUPLICATE GATE (single enforcement point for every enrollment path) ──
     // Enforced here rather than per route: checked at only one of the routes,
     // `journey/enrollments` — which funnels through this method — could stack
-    // unlimited active enrollments for one student in one class (audit E-2).
+    // unlimited active enrollments for one student in one class.
     this.assertNoDuplicateClassEnrollment(input.studentId, input.classId, input.semesterName ?? null);
 
     // ── PLACEMENT GATE (single enforcement point for every enrollment path) ──
     // Every route that enrolls a student funnels through this method, so the
     // placement invariant lives here rather than being repeated per route.
     // Before this, only visitor→student conversion checked placement and five
-    // other paths did not (certification finding C-1).
+    // other paths did not.
     //
     // UNCONDITIONAL. There is deliberately no opt-out parameter.
     //
@@ -451,7 +451,7 @@ export class EnrollmentService {
     // conversion route. The justification would be that conversion "evaluates
     // the identical placement rule" moments earlier. That claim is false, and
     // the gap it opens is
-    // exploitable (audit V-1): the route read the program off the VISITOR,
+    // exploitable: the route read the program off the VISITOR,
     // while this method resolves it from the CLASS's level. Clearing
     // `visitors.program_version_id` with an ordinary Lead.Edit PATCH therefore
     // made the route's check evaluate nothing at all — it was skipped, not
@@ -476,7 +476,7 @@ export class EnrollmentService {
         const capacity = Number((this.stmtGetClass.get(input.classId) as any)?.capacity ?? 0);
         if (capacity > 0 && current >= capacity) throw new HttpError(409, 'Selected class is full.');
         // Re-checked under the write lock so two concurrent requests cannot
-        // both pass the pre-flight duplicate check (audit E-2).
+        // both pass the pre-flight duplicate check.
         this.assertNoDuplicateClassEnrollment(input.studentId, input.classId, input.semesterName ?? null);
       }
       const snapshot = this.catalog.buildFeeSnapshot({
@@ -494,7 +494,7 @@ export class EnrollmentService {
       // snapshot but not the tuition is refused rather than silently spread
       // onto a registration fee nobody discounted.
       const { tuitionFees, otherFees, tuitionTotal, otherTotal } = partitionFeeSnapshot(snapshot.fees);
-      // PARSED, not coerced (WP07-F20). `Math.max(0, Number(x))` accepted
+      // PARSED, not coerced. `Math.max(0, Number(x))` accepted
       // `true` as a 1 AFN discount, `[1000]` as 1,000 AFN, and turned a
       // negative into a silent 0. The route above this one already parses with
       // `assertMoney`, but every caller converges HERE, so the guard belongs
@@ -546,10 +546,10 @@ export class EnrollmentService {
         });
       }
 
-      // ── BILLING: one document per purpose (owner decision on WP07-F18) ──
+      // ── BILLING: one document per purpose ──
       //
       // Each purpose gets its own document, and the tuition one names the term
-      // it bills — what D-127 requires of every tuition invoice. Registration
+      // it bills — what every tuition invoice requires. Registration
       // and tuition on one document would produce a tuition charge that can
       // settle no term, invisible to the balance authority.
       const issued: Array<{ id: string; number: string | null; purpose: 'tuition' | 'other'; netAmount: number }> = [];
@@ -605,7 +605,7 @@ export class EnrollmentService {
           // No term exists anywhere — an enrolment with no class writes no
           // projection — so no tuition obligation can be named and the whole
           // snapshot is billed as one non-tuition document. Recorded as the
-          // narrow residual of WP07-F18: such an enrolment creates no tuition
+          // narrow residual: such an enrolment creates no tuition
           // receivable in the balance authority, because it creates no term.
           issueInvoice('other', null, snapshot.total, discount, snapshot.fees);
         }
@@ -624,7 +624,7 @@ export class EnrollmentService {
   /**
    * Move a student from their current class into another one.
    *
-   * TRANSFER SEMANTICS (audit E-1). A transfer MOVES an existing seat; it is
+   * TRANSFER SEMANTICS. A transfer MOVES an existing seat; it is
    * not a way to create one. Before remediation this method treated the source
    * enrollment as optional (`if (active)`) while running the destination
    * INSERT unconditionally, which made it an unguarded enrollment-CREATE path:
@@ -952,7 +952,7 @@ export class EnrollmentService {
       // mirroring how suspend() already does this for its own hold state.
       if ((input.to === 'dropped' || input.to === 'withdrawn') && enrollment.class_id) {
         this.stmtDeleteFutureRosters.run(enrollment.student_id, enrollment.class_id);
-        // ── ENROLLMENT → SEMESTER PROJECTION (closure-audit finding C-1) ──
+        // ── ENROLLMENT → SEMESTER PROJECTION ──
         // `student_semesters` is a derived projection of the enrollment, and
         // EnrollmentService is its single writer. Closing an enrollment without
         // closing that projection left the row `status='active'`, which had two
