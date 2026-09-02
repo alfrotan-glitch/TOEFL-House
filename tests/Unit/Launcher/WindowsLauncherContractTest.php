@@ -697,6 +697,26 @@ final class WindowsLauncherContractTest extends TestCase
         $this->assertMatchesRegularExpression('/function portBindable[\s\S]{0,400}?portHasListener\(\$port\)[\s\S]{0,80}?portIsInExcludedRange\(\$port\)/', $helper);
     }
 
+    public function test_built_in_server_runs_with_public_as_working_directory(): void
+    {
+        // The framework router (vendor/.../Foundation/resources/server.php) requires
+        // getcwd()."/index.php". With the process cwd at the repo root it looks for
+        // <root>/index.php (missing) and /health returns HTTP 500
+        // ("require_once(<root>/index.php): Failed to open stream"). `artisan serve`
+        // starts the child with cwd=public; the direct launch must do the same via
+        // `start /D "<public>"`, plus -t for the static document root.
+        $this->assertMatchesRegularExpression(
+            '/start "TOEFL-House-Server" \/D "%ROOT%\\\\public" \/min cmd \/c/',
+            $this->bat,
+            'the server process working directory is set to public via start /D.',
+        );
+        $this->assertMatchesRegularExpression(
+            '/-S 127\.0\.0\.1:%APP_PORT%[\s\S]{0,160}?-t "%ROOT%\\\\public"/',
+            $this->bat,
+            'the built-in server also sets public as its static document root (-t).',
+        );
+    }
+
     public function test_server_runs_direct_php_built_in_server_not_artisan_serve(): void
     {
         // `artisan serve` spawns the PHP built-in server with PHP_CLI_SERVER_WORKERS

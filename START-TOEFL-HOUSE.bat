@@ -255,7 +255,12 @@ REM the child with PHP_CLI_SERVER_WORKERS set (multi-worker mode uses fork(), wh
 REM Windows lacks) and a filtered environment, so the child never binds and reports
 REM "Failed to listen ... (reason: ?)" on every port even though raw PHP binds fine.
 REM -d variables_order=EGPCS makes the desktop DB/SERVER env reach the script.
-start "TOEFL-House-Server" /min cmd /c ""%PHP%" -d variables_order=EGPCS -S 127.0.0.1:%APP_PORT% -t "%ROOT%\public" "%FRAMEWORK_ROUTER%" > "%SERVER_LOG%" 2>&1"
+REM /D sets the child's working directory to public\ (exactly what `artisan serve`
+REM does): the framework router requires getcwd()."/index.php", so the cwd MUST be
+REM public\ for it to resolve the real front controller public\index.php. With the
+REM cwd at the repo root the router requires <root>\index.php (which does not exist)
+REM and /health returns HTTP 500. -t sets the static document root.
+start "TOEFL-House-Server" /D "%ROOT%\public" /min cmd /c ""%PHP%" -d variables_order=EGPCS -S 127.0.0.1:%APP_PORT% -t "%ROOT%\public" "%FRAMEWORK_ROUTER%" > "%SERVER_LOG%" 2>&1"
 echo       - server starting in a minimized window titled TOEFL-House-Server (log: .runtime\server.log)...
 goto check_health
 
