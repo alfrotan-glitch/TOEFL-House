@@ -108,13 +108,22 @@ if not exist "%PHP%" (
         curl.exe -fL --retry 3 -o "%RT%\downloads\php.zip" "%PHP_ARCHIVE_ZIP_URL%"
     )
     if errorlevel 1 call :fail "PHP download failed from both %PHP_ZIP_URL% and %PHP_ARCHIVE_ZIP_URL%. Check the internet connection and re-run. If it keeps failing, save the zip as .runtime\downloads\php.zip manually and re-run."
-    "%TAR%" -xf "%RT%\downloads\php.zip" -C "%RT%\downloads"
-    if errorlevel 1 call :fail "Could not unpack the PHP archive. Re-run this file."
-    REM The official Windows PHP zip unpacks to one top-level folder named after
-    REM the zip (php-X.Y.Z-Win32-vs16-x64) - derive it from PHP_ZIP, never hard-code it.
-    set "PHP_EXTRACT_DIR=%PHP_ZIP:~0,-4%"
-    move /y "%RT%\downloads\%PHP_EXTRACT_DIR%" "%PHP_DIR%" >nul
-    if errorlevel 1 call :fail "Could not place the PHP runtime. Re-run this file."
+    REM The downloaded archive must exist and be non-empty (a real PHP zip is ~30 MB);
+    REM an empty or truncated file means the download was an error page, not PHP.
+    if not exist "%RT%\downloads\php.zip" call :fail "PHP download did not produce the archive: %RT%\downloads\php.zip"
+    for %%F in ("%RT%\downloads\php.zip") do set "PHP_ZIP_BYTES=%%~zF"
+    if !PHP_ZIP_BYTES! LSS 1048576 call :fail "The downloaded PHP archive %RT%\downloads\php.zip is only !PHP_ZIP_BYTES! bytes (a real one is ~30 MB) - the download was truncated or is an error page. Delete .runtime\downloads and re-run."
+    REM The official Windows PHP zip is FLAT: php.exe, php-cgi.exe, ext\ ... sit at the
+    REM archive ROOT with no version-named wrapper folder (unlike the PostgreSQL zip,
+    REM which wraps in pgsql\). So extract straight into the runtime dir with the
+    REM built-in bsdtar. Start from a clean dir so an interrupted run can never leave a
+    REM half-merged runtime; bsdtar (-C) writes into an existing directory.
+    if exist "%PHP_DIR%" rd /q /s "%PHP_DIR%"
+    mkdir "%PHP_DIR%"
+    "%TAR%" -xf "%RT%\downloads\php.zip" -C "%PHP_DIR%"
+    if errorlevel 1 call :fail "Could not unpack the PHP archive with %TAR% (exit code non-zero). Archive: %RT%\downloads\php.zip destination: %PHP_DIR% . Delete .runtime\php and re-run."
+    REM Prove the extraction actually produced the binary before continuing.
+    if not exist "%PHP_DIR%\php.exe" call :fail "The PHP archive %RT%\downloads\php.zip unpacked but %PHP_DIR%\php.exe was not produced. The zip layout may have changed - inspect %PHP_DIR%."
     call :write_php_ini
 )
 "%PHP%" -v >nul 2>nul

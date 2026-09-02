@@ -27,6 +27,13 @@ use PHPUnit\Framework\TestCase;
  * a remote "host:file" - "tar: Cannot connect to C: resolve failed" - and
  * (b) cannot read .zip archives at all. The built-in bsdtar reads .zip and
  * treats drive letters as local paths.
+ *
+ * Finally it pins the PHP placement layout. The official windows.php.net PHP
+ * zip is FLAT: php.exe, php-cgi.exe and ext\ are at the archive ROOT with no
+ * version-named wrapper folder (the EDB PostgreSQL zip, by contrast, wraps in
+ * pgsql\). PHP is therefore extracted directly into the runtime dir; a
+ * staging-then-move of a "php-X.Y.Z-..." folder fails with "The system cannot
+ * find the file specified" because that folder never exists.
  */
 final class WindowsLauncherContractTest extends TestCase
 {
@@ -114,21 +121,85 @@ final class WindowsLauncherContractTest extends TestCase
         $this->assertStringContainsString('archives/', $this->bat);
     }
 
-    public function test_extracted_php_folder_is_derived_not_hard_coded(): void
+    public function test_php_is_extracted_directly_into_the_runtime_dir_for_the_flat_zip_layout(): void
     {
-        // The official Windows PHP zip unpacks to a folder named like the zip.
-        // It must be derived from PHP_ZIP; no hard-coded php-8.2.xx-Win32 literal.
+        // The official windows.php.net PHP zip is FLAT: php.exe, php-cgi.exe and ext\
+        // sit at the archive ROOT with no version-named wrapper folder. So the runtime
+        // must be produced by extracting straight into PHP_DIR - NOT by extracting to a
+        // staging dir and moving a "php-X.Y.Z-Win32-..." wrapper folder that never exists
+        // (that move is what failed with "The system cannot find the file specified").
         $this->assertMatchesRegularExpression(
-            '/set\s+"PHP_EXTRACT_DIR=%PHP_ZIP:~0,-4%"/',
+            '/"%TAR%"\s+-xf\s+"%RT%\\\downloads\\\php\.zip"\s+-C\s+"%PHP_DIR%"/',
             $this->bat,
-            'the extracted runtime folder must be derived by stripping .zip from PHP_ZIP.',
+            'the PHP zip must be extracted directly into %PHP_DIR% (its layout is flat, no wrapper folder).',
         );
+        // No staging-then-move of a PHP wrapper folder may remain.
+        $this->assertStringNotContainsString('%PHP_EXTRACT_DIR%', $this->bat, 'the obsolete wrapper-folder move variable must be gone for PHP.');
         $this->assertDoesNotMatchRegularExpression(
-            '/\\\php-8\.2\.\d+-Win32-vs16-x64\b/',
+            '/move\s+/y\s+"%RT%\\\downloads\\\php[^"]*"\s+"%PHP_DIR%"/i',
             $this->bat,
-            'the extracted folder path must not hard-code the PHP patch version.',
+            'the PHP runtime must not be placed by moving a wrapper folder (the flat zip has none).',
         );
-        $this->assertStringContainsString('move /y "%RT%\downloads\%PHP_EXTRACT_DIR%"', $this->bat);
+    }
+
+    public function test_php_runtime_dir_is_recreated_clean_before_extraction(): void
+    {
+        // A half-extracted runtime from an interrupted run must never be reused; the
+        // launcher wipes and recreates the target dir before extracting into it.
+        $this->assertMatchesRegularExpression(
+            '/if exist "%PHP_DIR%" rd \/q \/s "%PHP_DIR%"\s*\n\s*mkdir "%PHP_DIR%"/',
+            $this->bat,
+            'the launcher must remove and recreate %PHP_DIR% before a clean extraction.',
+        );
+    }
+
+    public function test_downloaded_php_archive_is_verified_existing_and_non_empty(): void
+    {
+        // The archive must exist...
+        $this->assertMatchesRegularExpression(
+            '/if not exist "%RT%\\\downloads\\\php\.zip" call :fail/',
+            $this->bat,
+            'a missing php.zip must fail loudly with the exact path.',
+        );
+        // ...and be non-trivial in size (a real PHP zip is ~30 MB; an error page/truncation is < 1 MB).
+        $this->assertMatchesRegularExpression(
+            '/for\s+%%F in \("%RT%\\\downloads\\\php\.zip"\)\s+do set "PHP_ZIP_BYTES=%%~zF"/',
+            $this->bat,
+            'the launcher must measure the downloaded php.zip size (%%~zF).',
+        );
+        $this->assertMatchesRegularExpression(
+            '/if !PHP_ZIP_BYTES! LSS 1048576 call :fail/',
+            $this->bat,
+            'an empty/truncated php.zip (< 1 MB) must fail before extraction.',
+        );
+    }
+
+    public function test_php_extraction_is_gated_on_php_exe_being_produced(): void
+    {
+        // After extraction the binary itself must exist before the launcher proceeds;
+        // this is the layout-change sentinel (it would have caught the bad wrapper move).
+        $this->assertMatchesRegularExpression(
+            '/if not exist "%PHP_DIR%\\\php\.exe" call :fail/',
+            $this->bat,
+            'the launcher must verify %PHP_DIR%\php.exe exists after extraction, naming the path.',
+        );
+    }
+
+    public function test_postgresql_still_uses_its_wrapper_folder_move(): void
+    {
+        // Unlike PHP, the EDB PostgreSQL binaries zip DOES wrap its contents in a
+        // top-level pgsql\ folder, so it extracts to staging and is moved. Guard that
+        // the PHP flat-layout fix does not flatten PostgreSQL.
+        $this->assertMatchesRegularExpression(
+            '/"%TAR%"\s+-xf\s+"%RT%\\\downloads\\\pgsql\.zip"\s+-C\s+"%RT%\\\downloads"/',
+            $this->bat,
+            'PostgreSQL still extracts into staging (its zip wraps in pgsql\).',
+        );
+        $this->assertMatchesRegularExpression(
+            '/move \/y "%RT%\\\downloads\\\pgsql" "%PG_DIR%"/',
+            $this->bat,
+            'PostgreSQL still moves its pgsql wrapper folder into place.',
+        );
     }
 
     public function test_other_runtimes_use_stable_or_rolling_urls_not_archived_patches(): void
@@ -177,11 +248,11 @@ final class WindowsLauncherContractTest extends TestCase
 
     public function test_php_and_postgresql_archives_use_the_same_built_in_extractor(): void
     {
-        // The PHP zip and the PostgreSQL zip must both go through the built-in tar.
-        $this->assertMatchesRegularExpression('/"%TAR%"\s+-xf\s+"%RT%\\\downloads\\\php\.zip"\s+-C/', $this->bat);
-        $this->assertMatchesRegularExpression('/"%TAR%"\s+-xf\s+"%RT%\\\downloads\\\pgsql\.zip"\s+-C/', $this->bat);
-        // Both extract into the downloads staging dir (relative dest -C is fine for bsdtar;
-        // the drive-letter archive path is the part GNU tar misreads).
+        // Both archives are unpacked with the built-in bsdtar. PHP extracts directly
+        // into the runtime dir (flat zip); PostgreSQL extracts into staging (its zip
+        // wraps in pgsql\) before being moved - see the dedicated layout tests.
+        $this->assertMatchesRegularExpression('/"%TAR%"\s+-xf\s+"%RT%\\\downloads\\\php\.zip"\s+-C\s+"%PHP_DIR%"/', $this->bat);
+        $this->assertMatchesRegularExpression('/"%TAR%"\s+-xf\s+"%RT%\\\downloads\\\pgsql\.zip"\s+-C\s+"%RT%\\\downloads"/', $this->bat);
     }
 
     /**
