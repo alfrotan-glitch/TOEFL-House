@@ -30,20 +30,21 @@ final class PayrollApiController extends Controller
         return response()->json(['calculations' => $calculations]);
     }
 
-    public function calculate(Request $request, string $periodId): JsonResponse
+    public function calculate(Request $request): JsonResponse
     {
         $input = $request->validate([
+            'period_id' => ['required', 'string'],
             'employment_id' => ['required', 'string'],
         ]);
 
-        app(CalculatePayroll::class)->prepare(
+        $result = app(CalculatePayroll::class)->prepare(
             $this->actor(),
-            PayrollPeriod::query()->findOrFail($periodId),
+            PayrollPeriod::query()->findOrFail($input['period_id']),
             Employment::query()->findOrFail($input['employment_id']),
             $this->idempotencyKey('payroll.calculate'),
         );
 
-        return response()->json(['status' => 'prepared'], 201);
+        return response()->json(['status' => 'prepared', 'calculation_id' => $result['calculation_id'], 'lifecycle_state' => $result['lifecycle_state']], 201);
     }
 
     public function approve(Request $request, string $calculationId): JsonResponse

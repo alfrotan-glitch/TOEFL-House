@@ -78,7 +78,7 @@ final class HrController extends Controller
             $this->actor(),
             Employment::query()->findOrFail($input['employment_id']),
             $input['terms_ref'],
-            $input['scale_id'] !== null && $input['scale_id'] !== '' ? $input['scale_id'] : null,
+            ($input['scale_id'] ?? '') !== '' ? $input['scale_id'] : null,
             $input['effective_from'],
             $input['effective_to'] ?? null,
             $this->idempotencyKey('hr.version.prepare'),
@@ -107,6 +107,9 @@ final class HrController extends Controller
             'rate' => ['required', 'numeric', 'money', 'gte:0'],
             'skill_id' => ['nullable', 'string'],
             'scale_id' => ['nullable', 'string'],
+            // An allowance line is meaningless without its label (the domain
+            // rejects an unlabelled allowance); fixed/per-unit lines ignore it.
+            'label' => ['nullable', 'string', 'max:120'],
         ]);
 
         app(MaintainContractVersion::class)->addRule(
@@ -114,9 +117,9 @@ final class HrController extends Controller
             ContractVersion::query()->findOrFail($versionId),
             $input['method'],
             $input['rate'],
-            $input['skill_id'] !== null && $input['skill_id'] !== '' ? $input['skill_id'] : null,
-            $input['scale_id'] !== null && $input['scale_id'] !== '' ? $input['scale_id'] : null,
-            null,
+            ($input['skill_id'] ?? '') !== '' ? $input['skill_id'] : null,
+            ($input['scale_id'] ?? '') !== '' ? $input['scale_id'] : null,
+            ($input['label'] ?? '') !== '' ? $input['label'] : null,
             $this->idempotencyKey('hr.version.rule'),
         );
 

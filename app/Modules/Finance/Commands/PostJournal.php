@@ -55,6 +55,16 @@ final class PostJournal
                         throw BusinessRejection::forCode('finance.period_not_open', 'journals post only to an open financial period');
                     }
 
+                    // A payroll result is paid exactly once: its disbursement is the
+                    // (single) balanced journal sourced from that result. Reversals and
+                    // corrections reference source_type 'journal'/'other' and are unaffected.
+                    // The partial unique index journals_one_disbursement_per_payroll_result
+                    // is the concurrency-safe backstop; this check returns a clean 409.
+                    if ($sourceType === 'payroll_result' && $sourceId !== null
+                        && Journal::query()->where('source_type', 'payroll_result')->where('source_id', $sourceId)->exists()) {
+                        throw BusinessRejection::forCode('finance.payroll_already_paid', 'this payroll result is already disbursed; a payroll is paid exactly once (correct via a reversal)');
+                    }
+
                     $journal = Journal::query()->create([
                         'id' => RandomIdentifier::new(),
                         'period_id' => $lockedPeriod->id,
