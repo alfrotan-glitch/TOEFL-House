@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Tests\Feature\Api;
 
 use App\Modules\Finance\Models\FinancialPeriod;
+use App\Modules\Finance\Models\Payment;
 use App\Modules\Identity\Models\Person;
 use App\Modules\Identity\Models\UserAccount;
 use App\Support\Identifiers\RandomIdentifier;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Tests\Concerns\BuildsStudents;
 use Tests\TestCase;
@@ -129,5 +131,87 @@ final class ApiFeatureTest extends TestCase
         ])->assertForbidden()
             ->assertJsonStructure(['error', 'category', 'message', 'correlation_id', 'retryable'])
             ->assertJsonPath('category', 'authorization');
+    }
+
+    public function test_api_replays_a_payment_idempotently_without_duplicating_rows(): void
+    {
+        $student = $this->makeStudent()['student'];
+        $financier = $this->personWithAuthority('api-idem-1', ['finance.payment']);
+        $this->signInAs($financier->id, 'api.idem');
+
+        $period = FinancialPeriod::query()->create([
+            'id' => RandomIdentifier::new(),
+            'period_key' => '2026-11',
+            'date_from' => '2026-11-01',
+            'date_to' => '2026-11-30',
+            'lifecycle_state' => 'open',
+        ]);
+
+        $payload = [
+            'period_id' => $period->id,
+            'student_id' => $student->id,
+            'amount' => '250.00',
+            'method' => 'cash',
+            'payer_ref' => 'API-IDEM-1',
+            'received_on' => '2026-11-05',
+        ];
+
+        $key = 'api.replay.key.0001';
+        $first = $this->postJson('/api/finance/payments', $payload, ['Idempotency-Key' => $key]);
+        $first->assertCreated();
+
+        // A replay carrying the SAME key and payload must not create a second payment.
+        $this->postJson('/api/finance/payments', $payload, ['Idempotency-Key' => $key])->assertSuccessful();
+        $this->assertSame(1, Payment::query()->where('payer_ref', 'API-IDEM-1')->count());
+        $this->assertSame(1, DB::table('idempotency_keys')
+            ->where('idempotency_key', $key)->where('operation', 'finance.payment.record')->count());
+
+        // The same key reused with a DIFFERENT payload is a conflict, never a double spend.
+        $this->postJson('/api/finance/payments', array_merge($payload, ['amount' => '999.00']), ['Idempotency-Key' => $key])
+            ->assertStatus(409)
+            ->assertJsonPath('error', 'idempotency.conflicting_payload');
+        $this->assertSame(1, Payment::query()->where('payer_ref', 'API-IDEM-1')->count());
+    }
+
+    /**
+     * @dataProvider invalidMoneyAmounts
+     */
+    public function test_api_rejects_non_money_amounts_with_422_not_500(string $invalidAmount): void
+    {
+        $student = $this->makeStudent()['student'];
+        $financier = $this->personWithAuthority('api-money-1', ['finance.payment']);
+        $this->signInAs($financier->id, 'api.money');
+
+        $period = FinancialPeriod::query()->create([
+            'id' => RandomIdentifier::new(),
+            'period_key' => '2026-12',
+            'date_from' => '2026-12-01',
+            'date_to' => '2026-12-31',
+            'lifecycle_state' => 'open',
+        ]);
+
+        $this->postJson('/api/finance/payments', [
+            'period_id' => $period->id,
+            'student_id' => $student->id,
+            'amount' => $invalidAmount,
+            'method' => 'cash',
+            'payer_ref' => 'BAD-'.md5($invalidAmount),
+            'received_on' => '2026-12-05',
+        ])->assertStatus(422); // a structured validation error — never a raw 500/SQL failure
+
+        $this->assertSame(0, Payment::query()->where('payer_ref', 'BAD-'.md5($invalidAmount))->count());
+    }
+
+    /** @return array<string, array{0: string}> */
+    public static function invalidMoneyAmounts(): array
+    {
+        return [
+            'non-numeric' => ['abc'],
+            'negative' => ['-50'],
+            'third decimal' => ['0.001'],
+            'third decimal large' => ['12.999'],
+            'scientific notation' => ['1e2'],
+            'blank' => [''],
+        ];
     }
 }
