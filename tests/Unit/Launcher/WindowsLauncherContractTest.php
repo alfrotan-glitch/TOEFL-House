@@ -426,6 +426,94 @@ final class WindowsLauncherContractTest extends TestCase
         $this->assertSame(1, $decide(true, true, ['mysql']), 'loaded extension without the pgsql driver reported is detected.');
     }
 
+    public function test_postgresql_start_uses_authoritative_status_and_never_double_starts(): void
+    {
+        $prep = $this->subroutineBlock(':prepare_pg', ':ensure_app_db');
+        $this->assertNotSame('', $prep, ':prepare_pg must exist.');
+        // Authoritative status check before any start: pg_ctl status -D "<data dir>".
+        $this->assertMatchesRegularExpression(
+            '/"%PG_BIN%\\\\pg_ctl\.exe" -D "%PGDATA%" status/',
+            $prep,
+            'pg_ctl status must be the authoritative check for an already-running server.',
+        );
+        // start is only attempted in the errorlevel branch AFTER status says not-running.
+        $this->assertMatchesRegularExpression(
+            '/status[^\n]*\n\s*if errorlevel 1 \([\s\S]*?pg_ctl\.exe"[\s\S]*?start/s',
+            $prep,
+            'pg_ctl start must run only when status reports the server is not running.',
+        );
+        $this->assertMatchesRegularExpression(
+            '/else \(\s*\n\s*echo[^\n]*already running[^\n]*\n\s*\)/s',
+            $prep,
+            'when the server is already running it is reused, never started a second time.',
+        );
+    }
+
+    public function test_postgresql_waits_until_it_accepts_connections_after_start(): void
+    {
+        $prep = $this->subroutineBlock(':prepare_pg', ':ensure_app_db');
+        $this->assertMatchesRegularExpression('/pg_isready\.exe" -h 127\.0\.0\.1 -p %PG_PORT%/', $prep, 'after start the launcher waits on pg_isready.');
+        $this->assertMatchesRegularExpression('/goto pg_wait_loop|:pg_wait_loop/', $prep, 'there is a bounded readiness wait loop.');
+        $this->assertMatchesRegularExpression('/if %PG_TRIES% GEQ 30 exit \/b 1/', $prep, 'the readiness wait is bounded and fails fast if the server never accepts connections.');
+    }
+
+    public function test_database_is_created_only_when_absent(): void
+    {
+        $ensure = $this->subroutineBlock(':ensure_app_db', ':fetch_file');
+        $this->assertNotSame('', $ensure, ':ensure_app_db must exist.');
+        // existence is checked authoritatively against pg_database.
+        $this->assertMatchesRegularExpression('/SELECT 1 FROM pg_database WHERE datname=.toefl_house./', $ensure);
+        // createdb only in the "not defined" (absent) branch.
+        $this->assertMatchesRegularExpression(
+            '/if not defined DB_EXISTS \([\s\S]*?createdb\.exe"[^(]*toefl_house[\s\S]*?exit \/b 0\s*\n\s*\)/s',
+            $ensure,
+            'createdb runs only when toefl_house is absent.',
+        );
+    }
+
+    public function test_existing_valid_database_is_reused_and_never_dropped_or_overwritten(): void
+    {
+        $ensure = $this->subroutineBlock(':ensure_app_db', ':fetch_file');
+        $this->assertDoesNotMatchRegularExpression('/dropdb|DROP DATABASE/i', $this->bat, 'the launcher must never drop a database.');
+        $this->assertDoesNotMatchRegularExpression('/createdb[\s\S]{0,200}(already exists)/i', $ensure, 'createdb must not be run blindly against an existing database.');
+        // Validity is proven by authoritative schema/migration checks.
+        $this->assertMatchesRegularExpression("/table_name='user_accounts'/", $ensure, 'validity checks for the application root table.');
+        $this->assertMatchesRegularExpression("/migration='2026_08_25_000007_create_user_accounts_table'/", $ensure, 'validity checks for an application migration record.');
+        $this->assertMatchesRegularExpression(
+            '/if "%DB_KIND%"=="valid" \([\s\S]*?reusing it[\s\S]*?exit \/b 0\s*\n\s*\)/s',
+            $ensure,
+            'a recognized TOEFL House database is reused (no data changed).',
+        );
+    }
+
+    public function test_existing_unrecognized_database_stops_safely_without_destroying_data(): void
+    {
+        $ensure = $this->subroutineBlock(':ensure_app_db', ':fetch_file');
+        $this->assertMatchesRegularExpression(
+            '/call :fail "[^"]*NOT recognized as the TOEFL House database[^"]*"/s',
+            $ensure,
+            'an existing but unrecognizable database stops the launcher with a clear diagnostic.',
+        );
+        $this->assertMatchesRegularExpression('/Nothing has been dropped or overwritten/', $ensure, 'the message must promise no data was destroyed.');
+        $this->assertDoesNotMatchRegularExpression('/dropdb|DROP DATABASE/i', $this->bat, 'no automatic destruction path exists.');
+    }
+
+    public function test_postgres_and_database_stages_are_idempotent_on_repeated_runs(): void
+    {
+        // Re-running must not fail merely because the server/db already exist.
+        $this->assertMatchesRegularExpression('/call :prepare_pg\s*\n\s*if errorlevel 1 call :fail/', $this->bat, 'step 5 calls the idempotent prepare_pg.');
+        $this->assertMatchesRegularExpression('/call :ensure_app_db\s*\n\s*if errorlevel 1 call :fail/', $this->bat, 'step 6 calls the idempotent ensure_app_db.');
+        $this->assertMatchesRegularExpression('/artisan migrate --force\s*\n\s*if errorlevel 1 call :fail/', $this->bat, 'migrations run with Laravel (which skips already-applied migrations).');
+        // createdb exists exactly once, and it lives inside the absent-database guard of :ensure_app_db
+        // (never a blind unconditional call that would error on an already-existing database).
+        $ensure = $this->subroutineBlock(':ensure_app_db', ':fetch_file');
+        $this->assertSame(1, preg_match_all('/createdb\.exe"[^\n]*toefl_house/', $this->bat), 'createdb is invoked exactly once.');
+        $this->assertMatchesRegularExpression('/if not defined DB_EXISTS \([\s\S]*createdb\.exe"[\s\S]*\)/', $ensure, 'createdb is guarded by the database-absent check.');
+        // pg_ctl start appears exactly once, inside the not-running guard.
+        $prep = $this->subroutineBlock(':prepare_pg', ':ensure_app_db');
+        $this->assertSame(1, preg_match_all('/pg_ctl\.exe"[^\n]* start/', $prep), 'pg_ctl start appears exactly once, inside the not-running guard.');
+    }
+
     public function test_composer_uses_the_official_pinned_phar_not_the_bootstrapper(): void
     {
         // Composer is the official PERMANENT versioned PHAR (https://getcomposer.org/download/<v>/composer.phar).
@@ -474,6 +562,23 @@ final class WindowsLauncherContractTest extends TestCase
             'a working composer.phar is reused (idempotent); a broken one is replaced.',
         );
         $this->assertGreaterThan(0, preg_match_all('/"%PHP%" "%COMPOSER_PHAR%"/', $prep), 'always invoked with launcher-local PHP.');
+    }
+
+    private function subroutineBlock(string $startLabel, string $nextLabel): string
+    {
+        // Like subroutineBody but spans the whole subroutine INCLUDING its
+        // internal loop/branch labels (subroutineBody stops at the first label).
+        // Labels must be matched at the start of a line so a "call :label" in the
+        // main flow is not mistaken for the subroutine definition.
+        if (preg_match('/^'.preg_quote($startLabel, '/').'\\s*$/m', $this->bat, $m, PREG_OFFSET_CAPTURE) !== 1) {
+            return '';
+        }
+        $start = $m[0][1];
+        if (preg_match('/^'.preg_quote($nextLabel, '/').'\\s*$/m', $this->bat, $m2, PREG_OFFSET_CAPTURE, $start) === 1) {
+            return substr($this->bat, $start, $m2[0][1] - $start);
+        }
+
+        return substr($this->bat, $start);
     }
 
     private function subroutineBody(string $label): string

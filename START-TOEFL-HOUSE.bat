@@ -170,57 +170,18 @@ REM ---------------------------------------------------------------------------
 REM Step 5 - PostgreSQL initialize + start
 REM ---------------------------------------------------------------------------
 echo [5/10] Initializing and starting PostgreSQL, local only on 127.0.0.1...
-if not exist "%PGDATA%\PG_VERSION" (
-    echo       - first run: initializing the database cluster...
-    "%PG_BIN%\initdb.exe" -U postgres -A trust --encoding=UTF8 --no-locale -D "%PGDATA%"
-    if errorlevel 1 call :fail "PostgreSQL cluster initialization failed. If a previous run was interrupted, the cluster folder is incomplete: delete the whole folder .runtime\pgdata and re-run this file. Otherwise check .runtime\pg.log, and if another program owns port %PG_PORT%, close it and re-run."
-)
-"%PG_BIN%\pg_ctl.exe" -D "%PGDATA%" status >nul 2>nul
-if errorlevel 1 (
-    echo       - starting PostgreSQL...
-    "%PG_BIN%\pg_ctl.exe" -D "%PGDATA%" -o "-p %PG_PORT% -h 127.0.0.1 -c log_timezone=UTC" -l "%PG_LOG%" start
-    if errorlevel 1 call :fail "PostgreSQL could not start. Details in .runtime\pg.log. If another program owns port %PG_PORT%, close it and re-run."
-)
-echo       - PostgreSQL ready.
+call :prepare_pg
+if errorlevel 1 call :fail "PostgreSQL could not be started. Details in .runtime\pg.log. If another program owns port %PG_PORT%, close it and re-run."
 
 REM ---------------------------------------------------------------------------
 REM Step 6 - database + migrations
 REM ---------------------------------------------------------------------------
-echo [6/10] Creating the toefl_house database and running migrations...
-set "DB_EXISTS="
-for /f "tokens=1" %%c in ('"%PG_BIN%\psql.exe" -h 127.0.0.1 -p %PG_PORT% -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='toefl_house'" 2^>nul') do set "DB_EXISTS=%%c"
-if not defined DB_EXISTS (
-    "%PG_BIN%\createdb.exe" -h 127.0.0.1 -p %PG_PORT% -U postgres toefl_house
-    if errorlevel 1 call :fail "Could not create the toefl_house database. Re-run this file."
-)
+echo [6/10] Ensuring the toefl_house database and running migrations...
+call :ensure_app_db
+if errorlevel 1 call :fail "Could not ensure the toefl_house database. Read the message above."
 "%PHP%" artisan migrate --force
-if errorlevel 1 goto migrate_recovered
-goto migrate_ok
-:migrate_recovered
-REM A migrate that is killed mid-run can leave a partially applied schema:
-REM the database record of the migration is written after its changes
-REM commit, so a re-run can fail with "table already exists". The only
-REM provably safe automatic recovery is a fresh deployment with no data:
-REM user_accounts is the root of every record in this system, so zero
-REM accounts (or a missing table) means nothing of value can exist.
-set "HAS_TABLE=f"
-for /f "tokens=1" %%c in ('"%PG_BIN%\psql.exe" -h 127.0.0.1 -p %PG_PORT% -U postgres -d toefl_house -tAc "SELECT to_regclass('public.user_accounts') IS NOT NULL" 2^>nul') do set "HAS_TABLE=%%c"
-set "ACCTS2=-1"
-if "%HAS_TABLE%"=="t" for /f "tokens=1" %%c in ('"%PG_BIN%\psql.exe" -h 127.0.0.1 -p %PG_PORT% -U postgres -d toefl_house -tAc "SELECT count(*) FROM user_accounts" 2^>nul') do set "ACCTS2=%%c"
-if "%HAS_TABLE%"=="t" if not "%ACCTS2%"=="0" call :fail "Migrations failed and this deployment already has accounts and data. Run RESTORE-TOEFL-HOUSE.bat with your latest backup, then re-run this file. If no backup exists, contact the TOEFL House maintainer - do not delete the database."
-echo       - a previous interrupted run left a partial schema; this is a fresh deployment with no data, rebuilding the database from scratch...
-"%PG_BIN%\dropdb.exe" -h 127.0.0.1 -p %PG_PORT% -U postgres --if-exists toefl_house
-if errorlevel 1 call :fail "Could not drop the partially migrated database. Re-run this file."
-"%PG_BIN%\createdb.exe" -h 127.0.0.1 -p %PG_PORT% -U postgres toefl_house
-if errorlevel 1 call :fail "Could not recreate the database. Re-run this file."
-"%PHP%" artisan migrate --force
-if errorlevel 1 call :fail "Migrations failed twice. The last log lines are in storage\logs\laravel.log."
-echo       - migrations complete after rebuild.
-goto migrate_done
-:migrate_ok
+if errorlevel 1 call :fail "Database migrations failed. PostgreSQL wraps migrations in a transaction, so no partial schema is committed; the existing database and all data are untouched. Fix the reported migration error and re-run this file - it resumes from where it stopped. See storage\logs\laravel.log."
 echo       - migrations complete.
-:migrate_done
-
 REM ---------------------------------------------------------------------------
 REM Step 7 - first-run bootstrap: owner account, only when none exists yet
 REM ---------------------------------------------------------------------------
@@ -389,6 +350,60 @@ REM A bare "exit" (no /b) terminates the ENTIRE cmd/launcher process and sets
 REM the error level. "/b" would only return from this subroutine, so the caller
 REM (and a parenthesized block) would keep going and mask the original failure.
 exit 1
+
+:prepare_pg
+REM Idempotent PostgreSQL cluster + server bring-up. Never starts a server that
+REM is already running, and after a start it waits until the server actually
+REM accepts connections (authoritative pg_ctl status, then pg_isready).
+if not exist "%PGDATA%\PG_VERSION" (
+    echo       - first run: initializing the database cluster...
+    "%PG_BIN%\initdb.exe" -U postgres -A trust --encoding=UTF8 --no-locale -D "%PGDATA%"
+    if errorlevel 1 call :fail "PostgreSQL cluster initialization failed. If a previous run was interrupted, the cluster folder is incomplete: delete the whole folder .runtime\pgdata and re-run this file. Otherwise check .runtime\pg.log, and if another program owns port %PG_PORT%, close it and re-run."
+)
+REM pg_ctl status: exit 0 = our cluster's server is already running; 3 = not
+REM running (the normal first-start case); 4 = data directory problem.
+"%PG_BIN%\pg_ctl.exe" -D "%PGDATA%" status >nul 2>nul
+if errorlevel 1 (
+    echo       - starting PostgreSQL...
+    "%PG_BIN%\pg_ctl.exe" -D "%PGDATA%" -o "-p %PG_PORT% -h 127.0.0.1 -c log_timezone=UTC" -l "%PG_LOG%" start
+    if errorlevel 1 exit /b 1
+) else (
+    echo       - PostgreSQL already running; reusing it.
+)
+REM Wait until the server genuinely accepts connections (up to ~30 seconds).
+set /a PG_TRIES=0
+:pg_wait_loop
+set /a PG_TRIES+=1
+"%PG_BIN%\pg_isready.exe" -h 127.0.0.1 -p %PG_PORT% -t 3 >nul 2>nul
+if not errorlevel 1 goto pg_wait_done
+if %PG_TRIES% GEQ 30 exit /b 1
+timeout /t 1 /nobreak >nul
+goto pg_wait_loop
+:pg_wait_done
+echo       - PostgreSQL ready.
+exit /b 0
+
+:ensure_app_db
+REM Idempotent, data-preserving database ensure. Creates toefl_house only when
+REM absent. When present it is NEVER dropped or overwritten: it is classified
+REM by an authoritative catalog check and reused only if it belongs to this
+REM application; an unrecognizable/foreign database stops the launcher.
+set "DB_EXISTS="
+for /f "tokens=1" %%c in ('"%PG_BIN%\psql.exe" -h 127.0.0.1 -p %PG_PORT% -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='toefl_house'" 2^>nul') do set "DB_EXISTS=%%c"
+if not defined DB_EXISTS (
+    echo       - creating the toefl_house database...
+    "%PG_BIN%\createdb.exe" -h 127.0.0.1 -p %PG_PORT% -U postgres toefl_house
+    if errorlevel 1 call :fail "Could not create the toefl_house database. Re-run this file."
+    exit /b 0
+)
+set "DB_KIND="
+for /f "tokens=1" %%c in ('"%PG_BIN%\psql.exe" -h 127.0.0.1 -p %PG_PORT% -U postgres -d toefl_house -tAc "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='user_accounts') OR EXISTS (SELECT 1 FROM migrations WHERE migration='2026_08_25_000007_create_user_accounts_table') OR (to_regclass('public.migrations') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name <> 'migrations')) THEN 'valid' ELSE 'foreign' END" 2^>nul') do set "DB_KIND=%%c"
+if "%DB_KIND%"=="valid" (
+    echo       - toefl_house already exists and is a TOEFL House database; reusing it - no data is changed.
+    exit /b 0
+)
+call :fail "A PostgreSQL database named 'toefl_house' already exists on port %PG_PORT% but is NOT recognized as the TOEFL House database (it has none of this application's tables or migrations). Nothing has been dropped or overwritten. To avoid destroying data, the launcher stops here. If this database belongs to a different program, rename it or remove it yourself; if you expected a TOEFL House database, contact the maintainer. Then re-run this file."
+exit /b 1
 
 :fetch_file
 REM Atomic, validated download. Usage:
