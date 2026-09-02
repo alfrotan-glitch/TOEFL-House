@@ -308,6 +308,136 @@ final class WindowsLauncherContractTest extends TestCase
         $this->assertMatchesRegularExpression('/"%PHP%" "%COMPOSER_PHAR%" --version >nul 2>nul/', $this->bat, 'composer.phar must be verified by running --version.');
     }
 
+    public function test_prepare_php_is_invoked_early_and_self_heals(): void
+    {
+        // The runtime step must route through the self-healing :prepare_php subroutine.
+        $this->assertMatchesRegularExpression('/^call :prepare_php\s*$/m', $this->bat);
+        $prep = $this->subroutineBody(':prepare_php');
+        $this->assertNotSame('', $prep, ':prepare_php subroutine must exist.');
+        // It health-checks an existing runtime and reuses it when healthy (no unnecessary redownload).
+        $this->assertStringContainsString('call :php_health', $prep);
+        $this->assertStringContainsString(':php_ready', $prep);
+        // It can repair from the cached archive and, failing that, re-download.
+        $this->assertStringContainsString('call :php_extract', $prep);
+        $this->assertStringContainsString('call :php_download', $prep);
+        // A runtime that cannot be made healthy fails the launcher (hard stop before later stages).
+        $this->assertMatchesRegularExpression('/call :php_health[\s\S]*?call :fail/', $prep);
+    }
+
+    public function test_php_runtime_stops_the_launcher_when_pdo_pgsql_unavailable(): void
+    {
+        // After preparing PHP the launcher must NOT proceed to Composer/PostgreSQL/app
+        // setup with a broken PHP runtime: :fail terminates the whole process (bare exit).
+        $fail = $this->subroutineBody(':fail');
+        $this->assertMatchesRegularExpression('/^\s*exit\s+1\s*$/m', $fail);
+        // The PHP-prep failure path explicitly names the PDO driver and calls :fail.
+        $prep = $this->subroutineBody(':prepare_php');
+        $this->assertStringContainsString('pdo_pgsql', $prep);
+        $this->assertMatchesRegularExpression('/call :fail "PHP could not be prepared with a working PostgreSQL driver/', $prep);
+    }
+
+    public function test_php_ini_sets_absolute_extension_dir(): void
+    {
+        $ini = $this->subroutineBody(':write_php_ini');
+        // extension_dir must be ABSOLUTE (pointing at the runtime ext dir), not a relative "ext".
+        $this->assertMatchesRegularExpression(
+            '/extension_dir\s*=\s*"%PHP_DIR%\\\\ext"/',
+            $ini,
+            'extension_dir must be the absolute %PHP_DIR%\\ext path.',
+        );
+        $this->assertDoesNotMatchRegularExpression(
+            '/echo extension_dir = "ext"/',
+            $ini,
+            'the relative "ext" extension_dir resolves against CWD and must not be used.',
+        );
+    }
+
+    public function test_pdo_is_loaded_before_pdo_pgsql(): void
+    {
+        $ini = $this->subroutineBody(':write_php_ini');
+        // The PDO shared core is loaded (where php_pdo.dll ships) before the pgsql driver.
+        $this->assertMatchesRegularExpression('/echo extension=pdo\b/', $ini, 'the pdo core extension must be enabled.');
+        $this->assertMatchesRegularExpression('/echo extension=pdo_pgsql/', $ini, 'pdo_pgsql must be enabled.');
+        $this->assertMatchesRegularExpression('/echo extension=pgsql/', $ini, 'pgsql must be enabled.');
+        // The conditional pdo line (guarded by php_pdo.dll existence) precedes pdo_pgsql.
+        $this->assertMatchesRegularExpression(
+            '/php_pdo\.dll"[^\n]*echo extension=pdo\s*\n[\s\S]*?echo extension=pdo_pgsql/',
+            $ini,
+            'pdo must be emitted before pdo_pgsql (guarded by php_pdo.dll presence).',
+        );
+    }
+
+    public function test_runtime_dependency_dlls_are_discoverable_without_global_path(): void
+    {
+        // The PHP folder (which contains the bundled libpq.dll) is prepended to THIS
+        // launcher process PATH only - no System32 copies, no permanent/global PATH change.
+        $prep = $this->subroutineBody(':prepare_php');
+        $this->assertMatchesRegularExpression('/set "PATH=%PHP_DIR%;%PATH%"/', $prep);
+        $this->assertDoesNotMatchRegularExpression('/setx\b/', $this->bat, 'the launcher must not modify the permanent user/system PATH (no setx).');
+        $this->assertDoesNotMatchRegularExpression('/System32\\\\libpq/', $this->bat, 'dependencies must not be copied into System32.');
+    }
+
+    public function test_authoritative_pdo_pgsql_health_check_runs_real_php(): void
+    {
+        $health = $this->subroutineBody(':php_health');
+        // It must actually execute PHP and assert the driver via PDO, not just check files.
+        $this->assertMatchesRegularExpression(
+            "/in_array\\('pgsql',\\s*PDO::getAvailableDrivers\\(\\),\\s*true\\)/",
+            $health,
+            'the health check must call PDO::getAvailableDrivers() and require pgsql.',
+        );
+        $this->assertMatchesRegularExpression("/extension_loaded\\('pdo_pgsql'\\)/", $health);
+        $this->assertMatchesRegularExpression('/set "PHP_HEALTH=%ERRORLEVEL%"/', $health, 'it must capture PHP exit code.');
+    }
+
+    public function test_diagnostic_identifies_php_path_ini_extension_dir_and_dlls(): void
+    {
+        $diag = $this->subroutineBody(':php_diagnose');
+        foreach ([
+            'PHP executable',
+            '--ini',
+            "ini_get('extension_dir')",
+            '%PHP_DIR%\\libpq.dll',
+            '%PHP_DIR%\\ext\\php_pdo_pgsql.dll',
+            '%PHP_DIR%\\ext\\php_pgsql.dll',
+            'PRESENT',
+            'MISSING',
+            '-m 2>&1',
+        ] as $needle) {
+            $this->assertStringContainsString($needle, $diag, "diagnostic must report: $needle");
+        }
+        // :diag_file classifies each required DLL as PRESENT or MISSING.
+        $df = $this->subroutineBody(':diag_file');
+        $this->assertMatchesRegularExpression('/if exist "%~1" \(echo\s+PRESENT[^)]*\) else \(echo\s+MISSING/', $df);
+    }
+
+    public function test_rerunning_repairs_and_reuses_a_valid_runtime(): void
+    {
+        $prep = $this->subroutineBody(':prepare_php');
+        // Healthy existing runtime -> jump straight to ready (reuse, no redownload).
+        $this->assertMatchesRegularExpression('/if exist "%PHP_DIR%\\php\.exe" goto php_have/', $prep);
+        $this->assertMatchesRegularExpression('/if not errorlevel 1 goto php_ready/', $prep);
+        // Broken runtime -> diagnose, re-extract from cache, else re-download; a healthy result is reused.
+        $this->assertMatchesRegularExpression('/re-extracting PHP from the cached/', $prep);
+        // Extraction always writes a fresh php.ini (deterministic) into a clean dir.
+        $ex = $this->subroutineBody(':php_extract');
+        $this->assertMatchesRegularExpression('/rd \/q \/s "%PHP_DIR%"/', $ex);
+        $this->assertMatchesRegularExpression('/call :write_php_ini/', $ex);
+    }
+
+    public function test_runtime_simulation_detects_missing_driver_and_good_runtime(): void
+    {
+        // Deterministic, network-free model of the health probe decision the launcher makes:
+        // healthy iff PDO is present, pdo_pgsql is loaded, and pgsql is a reported driver.
+        $decide = static function (bool $pdo, bool $pdoPgsql, array $drivers): int {
+            return ($pdo && $pdoPgsql && in_array('pgsql', $drivers, true)) ? 0 : 1;
+        };
+        $this->assertSame(0, $decide(true, true, ['sqlite', 'pgsql']), 'a fully working runtime is healthy.');
+        $this->assertSame(1, $decide(true, false, ['sqlite']), 'missing pdo_pgsql is detected (the reported bug).');
+        $this->assertSame(1, $decide(false, false, []), 'missing PDO core is detected.');
+        $this->assertSame(1, $decide(true, true, ['mysql']), 'loaded extension without the pgsql driver reported is detected.');
+    }
+
     private function subroutineBody(string $label): string
     {
         // Return the lines from ":label" up to the next top-level ":otherlabel".

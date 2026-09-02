@@ -104,34 +104,8 @@ echo [2/10] Preparing runtimes into .runtime\ ...
 if not exist "%RT%" mkdir "%RT%"
 if not exist "%RT%\downloads" mkdir "%RT%\downloads"
 
-if not exist "%PHP%" (
-    echo       - PHP %PHP_VERSION% : downloading the official runtime...
-    REM Atomic, validated download to php.zip.part; php.zip is replaced only after the
-    REM download is complete AND large enough (a real PHP zip is ~30 MB). Transient
-    REM resets/timeouts are retried; current-release URL first, then the permanent archive.
-    call :fetch_file "%RT%\downloads\php.zip" "%PHP_ZIP_URL%" "%PHP_ARCHIVE_ZIP_URL%" "10485760"
-    if errorlevel 1 call :fail "PHP download failed or was truncated from both %PHP_ZIP_URL% and %PHP_ARCHIVE_ZIP_URL%. The incomplete file was discarded. Check the internet connection and re-run this file."
-    REM Verify ZIP integrity before extracting: a truncated/corrupt archive must stop here,
-    REM not be extracted (this catches a partial download that passed the size check).
-    "%TAR%" -tf "%RT%\downloads\php.zip" >nul 2>nul
-    if errorlevel 1 call :fail "The downloaded PHP archive %RT%\downloads\php.zip is corrupt or truncated (integrity test failed). Delete it and re-run this file."
-    REM The official Windows PHP zip is FLAT: php.exe, php-cgi.exe, ext\ ... sit at the
-    REM archive ROOT with no version-named wrapper folder (unlike the PostgreSQL zip,
-    REM which wraps in pgsql\). So extract straight into the runtime dir with the
-    REM built-in bsdtar. Start from a clean dir so an interrupted run can never leave a
-    REM half-merged runtime; bsdtar (-C) writes into an existing directory.
-    if exist "%PHP_DIR%" rd /q /s "%PHP_DIR%"
-    mkdir "%PHP_DIR%"
-    "%TAR%" -xf "%RT%\downloads\php.zip" -C "%PHP_DIR%"
-    if errorlevel 1 call :fail "Could not unpack the PHP archive with %TAR% (exit code non-zero). Archive: %RT%\downloads\php.zip destination: %PHP_DIR%. Delete .runtime\php and re-run."
-    REM Prove the extraction actually produced the binary before continuing.
-    if not exist "%PHP_DIR%\php.exe" call :fail "The PHP archive %RT%\downloads\php.zip unpacked but %PHP_DIR%\php.exe was not produced. The zip layout may have changed - inspect %PHP_DIR%."
-    call :write_php_ini
-)
-"%PHP%" -v >nul 2>nul
-if errorlevel 1 call :fail "PHP is present but cannot start. Delete the folder .runtime\php and re-run this file."
-"%PHP%" -m | findstr /i "pdo_pgsql" >nul 2>nul
-if errorlevel 1 call :fail "PHP cannot load the pdo_pgsql extension. Delete the folder .runtime\php and re-run this file."
+call :prepare_php
+
 
 if not exist "%COMPOSER_PHAR%" (
     echo       - Composer : downloading the official installer...
@@ -474,12 +448,122 @@ exit /b 1
 :ft_ok
 exit /b 0
 
+:prepare_php
+REM Self-healing PHP runtime preparation. Ensures a working PHP whose PDO
+REM PostgreSQL driver is actually loaded. A valid runtime is reused as-is; a
+REM missing/broken one is repaired from the cached archive or re-downloaded,
+REM and the run stops (via :fail, which exits the launcher) if PHP cannot be
+REM made healthy. No global PATH is changed; the PHP folder is prepended only
+REM for this launcher process (inherited by the server it starts), so the
+REM bundled libpq.dll etc. are discoverable without admin rights.
+set "PATH=%PHP_DIR%;%PATH%"
+
+if exist "%PHP_DIR%\php.exe" goto php_have
+echo       - PHP %PHP_VERSION% not found yet: preparing the runtime...
+call :php_download
+goto php_configure
+:php_have
+call :php_health
+if not errorlevel 1 goto php_ready
+echo       - the existing PHP runtime cannot load PDO_PGSQL; attempting to repair it...
+call :php_diagnose
+if exist "%RT%\downloads\php.zip" (
+    echo       - re-extracting PHP from the cached, verified archive...
+    call :php_extract
+    if not errorlevel 1 call :php_health
+    if not errorlevel 1 goto php_ready
+)
+echo       - repair from cache failed; re-downloading the PHP runtime...
+call :php_download
+:php_configure
+call :php_health
+if errorlevel 1 (
+    call :php_diagnose
+    call :fail "PHP could not be prepared with a working PostgreSQL driver (pdo_pgsql). See the diagnostic block above for the exact php.ini, extension_dir and DLL state."
+)
+:php_ready
+echo       - PHP runtime ready: PDO pdo_pgsql available.
+exit /b 0
+
+:php_download
+REM Fetch the official PHP zip atomically (current-release URL, then the
+REM permanent archive), verify integrity, and extract into %PHP_DIR%.
+echo       - PHP %PHP_VERSION% : downloading the official runtime...
+call :fetch_file "%RT%\downloads\php.zip" "%PHP_ZIP_URL%" "%PHP_ARCHIVE_ZIP_URL%" "10485760"
+if errorlevel 1 call :fail "PHP download failed or was truncated from both %PHP_ZIP_URL% and %PHP_ARCHIVE_ZIP_URL%. The incomplete file was discarded. Check the internet connection and re-run this file."
+"%TAR%" -tf "%RT%\downloads\php.zip" >nul 2>nul
+if errorlevel 1 call :fail "The downloaded PHP archive %RT%\downloads\php.zip is corrupt or truncated (integrity test failed). Delete it and re-run this file."
+call :php_extract
+if errorlevel 1 call :fail "Could not unpack the PHP archive with %TAR%. Archive: %RT%\downloads\php.zip destination: %PHP_DIR%. Delete .runtime\php and re-run."
+exit /b 0
+
+:php_extract
+REM Extract the flat official PHP zip straight into a clean %PHP_DIR% and write php.ini.
+if exist "%PHP_DIR%" rd /q /s "%PHP_DIR%"
+mkdir "%PHP_DIR%"
+"%TAR%" -xf "%RT%\downloads\php.zip" -C "%PHP_DIR%"
+if errorlevel 1 exit /b 1
+if not exist "%PHP_DIR%\php.exe" exit /b 1
+call :write_php_ini
+exit /b 0
+
+:php_health
+REM Authoritative health check: PHP must run AND the pdo_pgsql driver must be a
+REM reported available PDO driver. Returns errorlevel 0 when healthy, 1 otherwise.
+REM (stderr is shown by the caller's diagnostic if this fails.)
+"%PHP%" -r "exit(extension_loaded('PDO') && extension_loaded('pdo_pgsql') && in_array('pgsql', PDO::getAvailableDrivers(), true) ? 0 : 1);"
+set "PHP_HEALTH=%ERRORLEVEL%"
+exit /b %PHP_HEALTH%
+
+:php_diagnose
+REM Print a precise, secret-free diagnostic when PDO_PGSQL will not load.
+echo.
+echo  -----------------------------------------------------------------------
+echo   PHP RUNTIME DIAGNOSTIC - PDO PostgreSQL driver is unavailable
+echo  -----------------------------------------------------------------------
+echo   PHP executable : %PHP%
+echo   PHP folder     : %PHP_DIR%
+"%PHP%" -v 2>nul
+echo   --- configuration ---
+echo   Loaded php.ini (Configuration File Path ^| Loaded Configuration File):
+"%PHP%" --ini 2>nul
+echo   extension_dir reported by PHP:
+"%PHP%" -r "echo '    extension_dir = ', ini_get('extension_dir'), PHP_EOL;" 2>nul
+echo   --- required files ^(present?^) ---
+call :diag_file "%PHP_DIR%\php.exe"
+call :diag_file "%PHP_DIR%\libpq.dll"
+call :diag_file "%PHP_DIR%\ext\php_pdo.dll"
+call :diag_file "%PHP_DIR%\ext\php_pdo_pgsql.dll"
+call :diag_file "%PHP_DIR%\ext\php_pgsql.dll"
+echo   --- PDO drivers PHP can actually load ---
+"%PHP%" -r "echo '    extension_loaded PDO: ', var_export(extension_loaded('PDO'), true), PHP_EOL, '    extension_loaded pdo_pgsql: ', var_export(extension_loaded('pdo_pgsql'), true), PHP_EOL, '    PDO::getAvailableDrivers: ', implode(',', PDO::getAvailableDrivers()), PHP_EOL;" 2>&1
+echo   --- raw PHP startup output (any 'Unable to load dynamic library' message
+echo       names the missing DLL / wrong extension_dir / architecture mismatch) ---
+"%PHP%" -m 2>&1
+echo   Most common causes: extension_dir is not the absolute "%PHP_DIR%\ext",
+echo   a dependency DLL such as libpq.dll is not on this process PATH, or the
+echo   PHP architecture/thread-safety does not match the extension DLLs.
+echo  -----------------------------------------------------------------------
+echo.
+exit /b 0
+
+:diag_file
+if exist "%~1" (echo     PRESENT : %~1) else (echo     MISSING : %~1)
+exit /b 0
+
 :write_php_ini
 REM A minimal, fully controlled php.ini for the desktop deployment. The stock
-REM php.ini-production ships several required extensions commented out;
-REM writing our own keeps the runtime deterministic.
+REM php.ini-production ships several required extensions commented out; writing
+REM our own keeps the runtime deterministic.
+REM
+REM Two details are essential on Windows:
+REM   1. extension_dir must be ABSOLUTE. A relative "ext" is resolved against the
+REM      process current working directory (the repo root when the launcher runs),
+REM      not the PHP folder, so no extension DLL is found and pdo_pgsql fails.
+REM   2. The PDO shared core (php_pdo.dll, present in older/most Windows builds)
+REM      must be loaded BEFORE pdo_pgsql; load pdo first when that DLL exists.
 > "%PHP_DIR%\php.ini" echo [PHP]
->>"%PHP_DIR%\php.ini" echo extension_dir = "ext"
+>>"%PHP_DIR%\php.ini" echo extension_dir = "%PHP_DIR%\ext"
 >>"%PHP_DIR%\php.ini" echo date.timezone = UTC
 >>"%PHP_DIR%\php.ini" echo display_errors = Off
 >>"%PHP_DIR%\php.ini" echo log_errors = On
@@ -490,6 +574,10 @@ REM writing our own keeps the runtime deterministic.
 >>"%PHP_DIR%\php.ini" echo max_execution_time = 120
 >>"%PHP_DIR%\php.ini" echo extension=openssl
 >>"%PHP_DIR%\php.ini" echo extension=mbstring
+REM Load the PDO shared core before any PDO driver, but only where that DLL is
+REM shipped (modern 8.x builds have PDO built into php8ts.dll; this line is then
+REM skipped harmlessly).
+if exist "%PHP_DIR%\ext\php_pdo.dll" >>"%PHP_DIR%\php.ini" echo extension=pdo
 >>"%PHP_DIR%\php.ini" echo extension=pdo_pgsql
 >>"%PHP_DIR%\php.ini" echo extension=pgsql
 >>"%PHP_DIR%\php.ini" echo extension=fileinfo
