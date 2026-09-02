@@ -48,6 +48,7 @@ set "PG_BIN=%PG_DIR%\bin"
 set "PGDATA=%RT%\pgdata"
 set "PG_LOG=%RT%\pg.log"
 set "SERVER_LOG=%RT%\server.log"
+set "FRAMEWORK_ROUTER=%ROOT%\vendor\laravel\framework\src\Illuminate\Foundation\resources\server.php"
 set "BACKUP_DIR=%ROOT%\backup"
 
 REM Use the Windows BUILT-IN bsdtar by absolute path, not whatever "tar"
@@ -247,7 +248,14 @@ REM (a stale level from earlier checks once caused a false "server start" failur
 REM APP_PORT was already verified bindable by :resolve_app_port; readiness is
 REM decided by the /health loop. The server window writes to SERVER_LOG so a real
 REM bind/crash is diagnosable.
-start "TOEFL-House-Server" /min cmd /c ""%PHP%" artisan serve --host=127.0.0.1 --port=%APP_PORT% > "%SERVER_LOG%" 2>&1"
+if not exist "%FRAMEWORK_ROUTER%" call :fail "The Laravel development-server router is missing at %FRAMEWORK_ROUTER%. Run Composer install and re-run this file."
+REM Run the PHP built-in server DIRECTLY with the same framework router `artisan
+REM serve` uses. We intentionally do NOT use `artisan serve`: on Windows it spawns
+REM the child with PHP_CLI_SERVER_WORKERS set (multi-worker mode uses fork(), which
+REM Windows lacks) and a filtered environment, so the child never binds and reports
+REM "Failed to listen ... (reason: ?)" on every port even though raw PHP binds fine.
+REM -d variables_order=EGPCS makes the desktop DB/SERVER env reach the script.
+start "TOEFL-House-Server" /min cmd /c ""%PHP%" -d variables_order=EGPCS -S 127.0.0.1:%APP_PORT% -t "%ROOT%\public" "%FRAMEWORK_ROUTER%" > "%SERVER_LOG%" 2>&1"
 echo       - server starting in a minimized window titled TOEFL-House-Server (log: .runtime\server.log)...
 goto check_health
 

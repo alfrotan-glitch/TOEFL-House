@@ -650,7 +650,7 @@ final class WindowsLauncherContractTest extends TestCase
         // The server window is launched through cmd /c with its output redirected to a
         // log file, so a real bind/crash failure is diagnosable.
         $this->assertMatchesRegularExpression(
-            '/start "TOEFL-House-Server" \/min cmd \/c "\"%PHP%\" artisan serve --host=127\.0\.0\.1 --port=%APP_PORT% > "%SERVER_LOG%" 2>&1"/',
+            '/start "TOEFL-House-Server" \/min cmd \/c "\"%PHP%\" -d variables_order=EGPCS -S 127\.0\.0\.1:%APP_PORT% -t "%ROOT%\\\\public" "%FRAMEWORK_ROUTER%" > "%SERVER_LOG%" 2>&1"/',
             $this->bat,
             'the server is launched minimized via cmd /c and its output goes to SERVER_LOG.',
         );
@@ -697,6 +697,27 @@ final class WindowsLauncherContractTest extends TestCase
         $this->assertMatchesRegularExpression('/function portBindable[\s\S]{0,400}?portHasListener\(\$port\)[\s\S]{0,80}?portIsInExcludedRange\(\$port\)/', $helper);
     }
 
+    public function test_server_runs_direct_php_built_in_server_not_artisan_serve(): void
+    {
+        // `artisan serve` spawns the PHP built-in server with PHP_CLI_SERVER_WORKERS
+        // set (multi-worker mode) and a filtered environment. That worker mode uses
+        // fork() which Windows lacks, so the child never binds and Laravel reports
+        // "Failed to listen ... (reason: ?)" on EVERY port even though raw PHP binds
+        // fine. The launcher therefore runs the built-in server directly with the
+        // same framework router, no PHP_CLI_SERVER_WORKERS, full environment.
+        $this->assertMatchesRegularExpression('/-S 127\.0\.0\.1:%APP_PORT%/', $this->bat, 'uses the PHP built-in server.');
+        $this->assertMatchesRegularExpression('/-d variables_order=EGPCS/', $this->bat, 'desktop env (DB/SERVER) is passed to the script.');
+        $this->assertMatchesRegularExpression('/FRAMEWORK_ROUTER=.*Foundation\\\\resources\\\\server\.php/', $this->bat, 'uses the same framework router as artisan serve.');
+        $this->assertMatchesRegularExpression('/if not exist "%FRAMEWORK_ROUTER%" call :fail/', $this->bat, 'a missing router (Composer not installed) fails fast.');
+        // artisan serve / the worker variable must only appear in explanatory REM
+        // comments - never on an executable (non-comment) line.
+        $executable = implode("\n", array_filter(explode("\n", $this->bat), function ($line) {
+            return ! preg_match('/^\s*REM/', $line) && ! preg_match('/^\s*:/', $line);
+        }));
+        $this->assertDoesNotMatchRegularExpression('/artisan serve/', $executable, 'artisan serve is not invoked on any executable line (Windows worker-env incompatibility).');
+        $this->assertDoesNotMatchRegularExpression('/PHP_CLI_SERVER_WORKERS/', $executable, 'the launcher never sets the unsupported worker variable.');
+    }
+
     public function test_web_port_is_verified_bindable_before_launch_and_reused_when_healthy(): void
     {
         // Windows excludes dynamic port ranges (Hyper-V/WinNAT) that show NO listener
@@ -720,7 +741,7 @@ final class WindowsLauncherContractTest extends TestCase
         // Step 8 does not launch again when a healthy instance was found.
         $this->assertMatchesRegularExpression('/if "%PORTCAND_HOW%"=="health" \([\s\S]*?goto check_health/', $this->bat);
         // serve, health and tailscale all use the resolved APP_PORT.
-        $this->assertMatchesRegularExpression('/artisan serve --host=127\.0\.0\.1 --port=%APP_PORT%/', $this->bat);
+        $this->assertMatchesRegularExpression('/-S 127\.0\.0\.1:%APP_PORT% -t "%ROOT%\\\\public"/', $this->bat, 'the built-in server serves the public docroot.');
         $this->assertMatchesRegularExpression('/serve --bg %APP_PORT%/', $this->bat);
     }
 
