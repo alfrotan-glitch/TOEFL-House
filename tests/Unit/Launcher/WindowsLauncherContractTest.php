@@ -19,6 +19,14 @@ use PHPUnit\Framework\TestCase;
  * every PHP artifact from one PHP_VERSION constant and downloads with a
  * releases -> releases/archives fallback. These tests fail if that contract
  * is weakened or the version literal is re-hard-coded.
+ *
+ * It also pins the archive-extraction contract. The .zip archives must be
+ * unpacked with the Windows BUILT-IN bsdtar (%SystemRoot%\System32\tar.exe),
+ * invoked by absolute path. A PATH-resolved bare "tar" can be a GNU tar
+ * (Git-for-Windows / MSYS2 / Cygwin), which (a) parses a "C:\..." archive as
+ * a remote "host:file" - "tar: Cannot connect to C: resolve failed" - and
+ * (b) cannot read .zip archives at all. The built-in bsdtar reads .zip and
+ * treats drive letters as local paths.
  */
 final class WindowsLauncherContractTest extends TestCase
 {
@@ -133,6 +141,82 @@ final class WindowsLauncherContractTest extends TestCase
         // there indefinitely; this path does NOT move older patches the way PHP does).
         $this->assertStringStartsWith('https://get.enterprisedb.com/postgresql/', $this->vars['PG_ZIP_URL'] ?? '');
         $this->assertStringContainsString('binaries.zip', $this->vars['PG_ZIP_URL'] ?? '');
+    }
+
+    public function test_archives_are_extracted_with_the_built_in_bsdtar_not_a_path_resolved_tar(): void
+    {
+        // TAR must point at the Windows built-in bsdtar by absolute System32 path.
+        $this->assertArrayHasKey('TAR', $this->vars, 'the launcher must define TAR as the built-in bsdtar path.');
+        $this->assertMatchesRegularExpression(
+            '#%SystemRoot%\\\\System32\\\\tar\.exe$#i',
+            $this->vars['TAR'],
+            'TAR must be the Windows built-in %SystemRoot%\\System32\\tar.exe (bsdtar), not a PATH-resolved tar.',
+        );
+
+        // Every archive extraction must invoke the quoted built-in tar.
+        $this->assertSame(2, preg_match_all('/"%TAR%"\s+-xf/', $this->bat), 'both the PHP and PostgreSQL archives must be extracted with "%TAR%" -xf.');
+
+        // No bare, PATH-resolved "tar" may remain: that is the GNU tar that
+        // fails with "Cannot connect to C: resolve failed" on a drive-letter path.
+        $this->assertDoesNotMatchRegularExpression(
+            '/(^|\s)tar(\.exe)?\s+-xf/m',
+            $this->bat,
+            'no extraction may call a bare PATH-resolved tar; use the built-in "%TAR%".',
+        );
+    }
+
+    public function test_built_in_tar_is_verified_as_a_prerequisite(): void
+    {
+        // Fail loudly up front if the built-in bsdtar is missing, naming why.
+        $this->assertMatchesRegularExpression(
+            '/if not exist "%TAR%" call :fail/',
+            $this->bat,
+            'the launcher must verify the built-in tar exists in the prerequisites step.',
+        );
+    }
+
+    public function test_php_and_postgresql_archives_use_the_same_built_in_extractor(): void
+    {
+        // The PHP zip and the PostgreSQL zip must both go through the built-in tar.
+        $this->assertMatchesRegularExpression('/"%TAR%"\s+-xf\s+"%RT%\\\downloads\\\php\.zip"\s+-C/', $this->bat);
+        $this->assertMatchesRegularExpression('/"%TAR%"\s+-xf\s+"%RT%\\\downloads\\\pgsql\.zip"\s+-C/', $this->bat);
+        // Both extract into the downloads staging dir (relative dest -C is fine for bsdtar;
+        // the drive-letter archive path is the part GNU tar misreads).
+    }
+
+    /**
+     * Behavioural proof of the GNU-tar failure mode, run only where a GNU tar
+     * is actually present on the runner. This documents exactly why the
+     * launcher must not trust a PATH-resolved tar: GNU tar treats "C:..." as a
+     * remote host. Skipped on runners without a GNU tar (e.g. only bsdtar).
+     */
+    public function test_gnu_tar_rejects_a_drive_letter_archive_path_demonstrating_the_bug(): void
+    {
+        $tar = $this->locateGnuTar();
+        if ($tar === null) {
+            $this->markTestSkipped('no GNU tar on this runner to demonstrate the "Cannot connect to C:" failure; skipped.');
+        }
+
+        $cmd = escapeshellarg($tar).' -tf '.escapeshellarg('C:\\nonexistent\\php.zip').' 2>&1';
+        $output = (string) shell_exec($cmd);
+
+        $this->assertMatchesRegularExpression(
+            '/Cannot connect to C:|resolve failed/i',
+            $output,
+            'GNU tar must exhibit the "Cannot connect to C: resolve failed" behaviour that breaks the launcher.',
+        );
+    }
+
+    private function locateGnuTar(): ?string
+    {
+        foreach (['tar', '/usr/bin/tar', '/bin/tar'] as $candidate) {
+            $version = @shell_exec(escapeshellarg($candidate).' --version 2>&1');
+            if (is_string($version) && stripos($version, 'GNU tar') !== false) {
+                return $candidate;
+            }
+        }
+
+        return null;
     }
 
     /**

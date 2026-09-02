@@ -48,6 +48,15 @@ set "PGDATA=%RT%\pgdata"
 set "PG_LOG=%RT%\pg.log"
 set "BACKUP_DIR=%ROOT%\backup"
 
+REM Use the Windows BUILT-IN bsdtar by absolute path, not whatever "tar"
+REM resolves to on PATH. Git-for-Windows / MSYS2 / Cygwin ship a GNU tar that
+REM (a) treats a "C:\..." archive as a remote "host:file" ("Cannot connect to
+REM C: resolve failed") and (b) cannot read .zip archives at all. The built-in
+REM System32\tar.exe is bsdtar (libarchive): it reads .zip and treats drive
+REM letters as local paths. It ships on Windows 10 1803+, the same baseline as
+REM the built-in curl.exe.
+set "TAR=%SystemRoot%\System32\tar.exe"
+
 REM PHP 8.2.x is the pinned runtime (x64, thread-safe, VS16 build). The
 REM archive name, its extracted folder and both download URLs are derived
 REM from PHP_VERSION so the pin lives in exactly one place.
@@ -81,6 +90,7 @@ REM ---------------------------------------------------------------------------
 echo [1/10] Checking prerequisites...
 where curl.exe >nul 2>nul
 if errorlevel 1 call :fail "Built-in curl.exe not found. Windows 10 version 1803 or newer is required - update Windows and re-run this file."
+if not exist "%TAR%" call :fail "Built-in tar.exe (bsdtar) not found at %TAR%. Windows 10 version 1803 or newer is required - update Windows and re-run this file. Do not rely on a Git/MSYS2/Cygwin tar on PATH, which cannot unpack the PHP/PostgreSQL .zip archives."
 
 REM ---------------------------------------------------------------------------
 REM Step 2 - runtimes
@@ -98,7 +108,7 @@ if not exist "%PHP%" (
         curl.exe -fL --retry 3 -o "%RT%\downloads\php.zip" "%PHP_ARCHIVE_ZIP_URL%"
     )
     if errorlevel 1 call :fail "PHP download failed from both %PHP_ZIP_URL% and %PHP_ARCHIVE_ZIP_URL%. Check the internet connection and re-run. If it keeps failing, save the zip as .runtime\downloads\php.zip manually and re-run."
-    tar -xf "%RT%\downloads\php.zip" -C "%RT%\downloads"
+    "%TAR%" -xf "%RT%\downloads\php.zip" -C "%RT%\downloads"
     if errorlevel 1 call :fail "Could not unpack the PHP archive. Re-run this file."
     REM The official Windows PHP zip unpacks to one top-level folder named after
     REM the zip (php-X.Y.Z-Win32-vs16-x64) - derive it from PHP_ZIP, never hard-code it.
@@ -124,7 +134,7 @@ if not exist "%PG_BIN%\initdb.exe" (
     echo       - PostgreSQL %PG_VERSION_TAG : downloading, about 300 MB, one time only...
     curl.exe -fL --retry 3 -o "%RT%\downloads\pgsql.zip" "%PG_ZIP_URL%"
     if errorlevel 1 call :fail "PostgreSQL download failed. URL: %PG_ZIP_URL% - check the internet connection and re-run. If it keeps failing, save the zip as .runtime\downloads\pgsql.zip manually and re-run."
-    tar -xf "%RT%\downloads\pgsql.zip" -C "%RT%\downloads"
+    "%TAR%" -xf "%RT%\downloads\pgsql.zip" -C "%RT%\downloads"
     if errorlevel 1 call :fail "Could not unpack the PostgreSQL archive. Re-run this file."
     move /y "%RT%\downloads\pgsql" "%PG_DIR%" >nul
     if errorlevel 1 call :fail "Could not place the PostgreSQL runtime. Re-run this file."
