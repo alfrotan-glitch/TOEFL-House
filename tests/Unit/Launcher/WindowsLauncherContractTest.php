@@ -635,6 +635,34 @@ final class WindowsLauncherContractTest extends TestCase
         $this->assertMatchesRegularExpression('/set "BOOTSTRAP_OWNER_PASSWORD=!OWN_PW1!"/', $this->bat);
     }
 
+    public function test_server_start_does_not_gate_on_start_errorlevel_and_logs_output(): void
+    {
+        // `start` spawns an independent window and returns without resetting
+        // ERRORLEVEL, so an "if errorlevel 1" right after it reads the stale level
+        // from the port check and falsely reported "Could not start the Laravel
+        // server process". Readiness is decided solely by the /health loop.
+        $this->assertDoesNotMatchRegularExpression(
+            '/artisan serve[\s\S]{0,120}?if errorlevel 1 call :fail "Could not start the Laravel server/',
+            $this->bat,
+            'the server launch must not be gated on `start` errorlevel (it is unreliable after start).',
+        );
+        $this->assertStringNotContainsString('Could not start the Laravel server process', $this->bat);
+        // The server window is launched through cmd /c with its output redirected to a
+        // log file, so a real bind/crash failure is diagnosable.
+        $this->assertMatchesRegularExpression(
+            '/start "TOEFL-House-Server" \/min cmd \/c "\"%PHP%\" artisan serve --host=127\.0\.0\.1 --port=%APP_PORT% > "%SERVER_LOG%" 2>&1"/',
+            $this->bat,
+            'the server is launched minimized via cmd /c and its output goes to SERVER_LOG.',
+        );
+        $this->assertMatchesRegularExpression('/set "SERVER_LOG=%RT%\\\\server\.log"/', $this->bat, 'a server log path is defined.');
+        // The health-loop failure must surface the server log before stopping.
+        $this->assertMatchesRegularExpression(
+            '/type "%SERVER_LOG%"[\s\S]{0,200}?call :fail "The application was not healthy/',
+            $this->bat,
+            'when /health never returns 200, the server log is printed to aid diagnosis.',
+        );
+    }
+
     public function test_composer_uses_the_official_pinned_phar_not_the_bootstrapper(): void
     {
         // Composer is the official PERMANENT versioned PHAR (https://getcomposer.org/download/<v>/composer.phar).

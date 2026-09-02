@@ -47,6 +47,7 @@ set "PG_DIR=%RT%\pgsql"
 set "PG_BIN=%PG_DIR%\bin"
 set "PGDATA=%RT%\pgdata"
 set "PG_LOG=%RT%\pg.log"
+set "SERVER_LOG=%RT%\server.log"
 set "BACKUP_DIR=%ROOT%\backup"
 
 REM Use the Windows BUILT-IN bsdtar by absolute path, not whatever "tar"
@@ -234,9 +235,14 @@ if not errorlevel 1 (
     echo       - port %APP_PORT% already has a listener: the application appears to be running already.
     goto check_health
 )
-start "TOEFL-House-Server" /min "%PHP%" artisan serve --host=127.0.0.1 --port=%APP_PORT%
-if errorlevel 1 call :fail "Could not start the Laravel server process. Re-run this file."
-echo       - server starting in a minimized window titled TOEFL-House-Server...
+REM Launch the server in a separate, minimized window. `start` returns immediately
+REM and does NOT reset ERRORLEVEL when it spawns a process, so we must not gate on
+REM it: the preceding port check leaves errorlevel set, and a stale errorlevel 1
+REM here made the launcher falsely report a server-start failure even though the
+REM window launched fine. Authority for readiness is the /health loop below. The
+REM server window writes its output to SERVER_LOG so a real crash is diagnosable.
+start "TOEFL-House-Server" /min cmd /c ""%PHP%" artisan serve --host=127.0.0.1 --port=%APP_PORT% > "%SERVER_LOG%" 2>&1"
+echo       - server starting in a minimized window titled TOEFL-House-Server (log: .runtime\server.log)...
 goto check_health
 
 :check_health
@@ -254,7 +260,10 @@ if %HEALTH_TRIES% lss 30 (
     timeout /t 2 /nobreak >nul
     goto health_loop
 )
-call :fail "The application was not healthy on %APP_URL_LOCAL% within 60 seconds. Check the minimized window titled TOEFL-House-Server and storage\logs\laravel.log."
+echo.  ---- last server output (.runtime\server.log) ----
+type "%SERVER_LOG%" 2>nul
+echo  ----------------------------------------------------
+call :fail "The application was not healthy on %APP_URL_LOCAL% within 60 seconds. The server output above (.runtime\server.log) shows why; also check the TOEFL-House-Server window and storage\logs\laravel.log."
 :healthy
 echo       - /health OK.
 
