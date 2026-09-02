@@ -672,7 +672,7 @@ if errorlevel 1 call :fail "Could not write APP_URL to the .env file. Re-run thi
 if "%PORTCAND_HOW%"=="health" (
     echo       - application already responding on port %APP_PORT%; reusing it.
 ) else (
-    echo       - using web port %APP_PORT% (verified available).
+    echo       - using web port %APP_PORT%, verified available.
 )
 goto :eof
 

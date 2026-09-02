@@ -663,6 +663,23 @@ final class WindowsLauncherContractTest extends TestCase
         );
     }
 
+    public function test_port_resolution_echo_lines_inside_blocks_have_no_raw_parens(): void
+    {
+        // An unescaped ) in an echo INSIDE an if/else ( ) block closes the block
+        // early and cmd aborts with ". was unexpected at this time." The resolve
+        // block echoes the chosen port inside its if/else, so its echo lines must
+        // contain no unescaped parentheses.
+        $resolve = $this->subroutineBlock(':resolve_app_port', ':probe_port');
+        $this->assertStringContainsString('verified available', $resolve);
+        $this->assertDoesNotMatchRegularExpression(
+            '/^\s*echo[^\n]*\([^\n]*\)/m',
+            $resolve,
+            'echo lines inside the resolve_app_port if/else block must not contain parentheses.',
+        );
+        // The concrete fixed line has no parens at all.
+        $this->assertStringContainsString('using web port %APP_PORT%, verified available.', $resolve);
+    }
+
     public function test_web_port_is_verified_bindable_before_launch_and_reused_when_healthy(): void
     {
         // Windows excludes dynamic port ranges (Hyper-V/WinNAT) that show NO listener
