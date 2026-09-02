@@ -397,7 +397,14 @@ REM outer sacrificial pair that stripping leaves a stray quote and the child
 REM cmd fails with "The filename, directory name, or volume label syntax is
 REM incorrect." Wrap the whole command in "" ... "" exactly like the working
 REM `cmd /c ""%PHP%" ..."` / `cmd /k ""%TAILSCALE_BIN%" ..."` lines.
-for /f "tokens=*" %%a in ('""%TAILSCALE_BIN%" serve status 2^>nul ^| findstr /C:"https://""') do if not defined TAIL_URL set "TAIL_URL=%%a"
+REM Capture tokens=1, NOT the whole line: `serve status` prints
+REM   https://<host>.<tailnet>.ts.net (tailnet only)
+REM and tokens=* would store the "(tailnet only)" label too. The ")" in that
+REM label is read by the `if defined TAIL_URL ( ... )` block below when
+REM `echo %TAIL_URL%` expands, prematurely closing the if-body (the URL was
+REM truncated at the paren and the else branch printed too). The first
+REM whitespace token is always the bare URL, which has no parens.
+for /f "tokens=1" %%a in ('""%TAILSCALE_BIN%" serve status 2^>nul ^| findstr /C:"https://""') do if not defined TAIL_URL set "TAIL_URL=%%a"
 if defined TAIL_URL (
     echo   From other TOEFL House devices on your Tailnet:
     echo        %TAIL_URL%

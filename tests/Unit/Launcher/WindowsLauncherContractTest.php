@@ -898,13 +898,13 @@ final class WindowsLauncherContractTest extends TestCase
         // The for /f that reads `serve status` opens and closes with the doubled
         // outer quote ("" ... "") so the inner quotes survive cmd /c stripping.
         $this->assertMatchesRegularExpression(
-            '#for /f "tokens=\*" %%a in \(\'""%TAILSCALE_BIN%" serve status 2\^>nul \^\| findstr /C:"https://""\'\) do if not defined TAIL_URL set "TAIL_URL=%%a"#',
+            '#for /f "tokens=1" %%a in \(\'""%TAILSCALE_BIN%" serve status 2\^>nul \^\| findstr /C:"https://""\'\) do if not defined TAIL_URL set "TAIL_URL=%%a"#',
             $step10,
             'the `tailscale serve status` for /f must wrap the quoted, spaced executable in a sacrificial "" outer pair.',
         );
         // The broken single-quote form (which cmd /c mangles) must not be present.
         $this->assertDoesNotMatchRegularExpression(
-            "#for /f \"tokens=\\*\" %%a in \\('\"%TAILSCALE_BIN%\" serve status#",
+            "#for /f \"tokens=1\" %%a in \\('\"%TAILSCALE_BIN%\" serve status#",
             $step10,
             'the for /f must not open with a single quote before the spaced TAILSCALE_BIN path (cmd /c strips it).',
         );
@@ -912,6 +912,61 @@ final class WindowsLauncherContractTest extends TestCase
         // commands (regression anchor: these are the known-good forms).
         $this->assertMatchesRegularExpression('#cmd /c ""%PHP%"#', $this->bat, 'the PHP server launch uses the "" wrapper.');
         $this->assertMatchesRegularExpression('#cmd /k ""%TAILSCALE_BIN%" serve#', $this->bat, 'the interactive Tailscale setup uses the "" wrapper.');
+    }
+
+    public function test_tailscale_serve_status_captures_only_the_bare_url_first_token(): void
+    {
+        // `tailscale serve status` prints the address line as
+        //   https://<host>.<tailnet>.ts.net (tailnet only)
+        // With `tokens=*` TAIL_URL captured the whole line, including the
+        // "(tailnet only)" label. That label's closing ")" is read by the
+        // surrounding `if defined TAIL_URL ( ... ) else ( ... )` block when
+        // `echo %TAIL_URL%` expands, which closed the if-body early (the URL was
+        // truncated at the paren and the else branch printed too). The launcher
+        // must take only the FIRST whitespace token - the bare URL, no parens -
+        // so the block is well-formed and only the if-body runs.
+        $step10 = $this->tailscaleStepBlock();
+
+        // The discovery line uses tokens=1 (first whitespace token = bare URL).
+        $this->assertMatchesRegularExpression(
+            '#for /f "tokens=1" %%a in \(\'""%TAILSCALE_BIN%" serve status[^)]*set "TAIL_URL=%%a"#',
+            $step10,
+            'the serve-status for /f must capture tokens=1 (the bare URL), not tokens=* (the whole line).',
+        );
+        // tokens=* must NOT be used for this capture (it would keep the paren label).
+        $this->assertDoesNotMatchRegularExpression(
+            '#for /f "tokens=\*" %%a in \([^)]*serve status#',
+            $step10,
+            'the serve-status for /f must not use tokens=* (it captures the "(tailnet only)" paren).',
+        );
+
+        // Model what for /f tokenisation yields for the real status output: the
+        // first token must be a paren-free bare URL for every line shape.
+        $statusLines = [
+            'https://desktop-jv9arhg.tail3aec10.ts.net (tailnet only)',
+            'https://desktop-jv9arhg.tail3aec10.ts.net (Funnel on)',
+            '   https://desktop-jv9arhg.tail3aec10.ts.net (tailnet only)',
+            'https://desktop-jv9arhg.tail3aec10.ts.net:443/ (tailnet only)',
+        ];
+        foreach ($statusLines as $line) {
+            // for /f default delims are space/tab; %%a with tokens=1 is the first
+            // non-empty token. The |-- proxy lines do not contain "https://" so
+            // findstr filters them out; these lines all contain it.
+            $trimmed = ltrim($line);
+            $first = preg_split('/\s+/', $trimmed, 2)[0];
+            $this->assertMatchesRegularExpression('#^https://\S+$#', $first, "first token must be a bare URL: [$first]");
+            $this->assertStringNotContainsString('(', $first, "the captured URL must contain no parens: [$first]");
+            $this->assertStringNotContainsString('tailnet only', $first, "the captured URL must drop the '(tailnet only)' label: [$first]");
+        }
+
+        // TAIL_URL is echoed inside a parenthesised if-block, so its value must
+        // never contain a block-closing paren; echo the %VAR% (delayed expansion is
+        // unnecessary once the value is a paren-free URL).
+        $this->assertMatchesRegularExpression(
+            '/if defined TAIL_URL \(\s*\n\s*echo[^\n]*\n\s*echo\s+%TAIL_URL%\s*\n\s*\) else \(/',
+            $step10,
+            'the TAIL_URL echo stays inside the if defined TAIL_URL ( ... ) else ( ... ) block.',
+        );
     }
 
     public function test_built_in_server_cwd_public_fix_is_preserved_in_full_launch_line(): void
