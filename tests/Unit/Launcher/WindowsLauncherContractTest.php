@@ -206,11 +206,14 @@ final class WindowsLauncherContractTest extends TestCase
     {
         // Tailscale intentionally uses a rolling "latest" pointer.
         $this->assertSame('https://download.tailscale.com/stable/tailscale-setup-latest.amd64.msi', $this->vars['TAILSCALE_MSI_URL'] ?? '');
-        // Composer is installed via the OFFICIAL installer (https://getcomposer.org/installer),
-        // which fetches the stable phar with signature verification - NOT a pinned direct-PHAR
-        // URL such as the capitalized Composer-stable.phar that 404s.
-        $this->assertSame('https://getcomposer.org/installer', $this->vars['COMPOSER_INSTALLER_URL'] ?? '');
-        $this->assertStringNotContainsString('Composer-stable.phar', $this->bat, 'the capitalized 404 Composer direct-PHAR URL must not be used.');
+        // Composer is the official PERMANENT versioned PHAR (not the crash-prone
+        // composer-setup.php bootstrapper, and not the capitalized Composer-stable.phar URL).
+        $this->assertSame(
+            'https://getcomposer.org/download/%COMPOSER_VERSION%/composer.phar',
+            $this->vars['COMPOSER_PHAR_URL'] ?? '',
+        );
+        $this->assertMatchesRegularExpression('/^\d+\.\d+\.\d+$/', $this->vars['COMPOSER_VERSION'] ?? '');
+        $this->assertStringNotContainsString('Composer-stable.phar', $this->bat);
 
         // PostgreSQL uses EDB's permanent binaries archive (pinned versions are retained
         // there indefinitely; this path does NOT move older patches the way PHP does).
@@ -291,21 +294,6 @@ final class WindowsLauncherContractTest extends TestCase
         }
         // Each of those must be on a `call :fail` line (terminate, not continue).
         $this->assertGreaterThan(0, preg_match_all('/call :fail/', $this->bat));
-    }
-
-    public function test_composer_is_installed_via_the_official_installer_and_verified(): void
-    {
-        // The official installer is fetched (atomic), executed to produce composer.phar, and
-        // the result must exist and run --version.
-        $this->assertMatchesRegularExpression('/call :fetch_file "%COMPOSER_SETUP%" "%COMPOSER_INSTALLER_URL%" "" "\d+"/', $this->bat);
-        $this->assertMatchesRegularExpression(
-            '/"%PHP%" "%COMPOSER_SETUP%" --install-dir="%RT%" --filename=composer\.phar[^
-]*\n\s*if errorlevel 1 call :fail/',
-            $this->bat,
-            'the Composer installer must be run and a failure must stop the launcher.',
-        );
-        $this->assertMatchesRegularExpression('/if not exist "%COMPOSER_PHAR%" call :fail/', $this->bat, 'a missing composer.phar after install must fail.');
-        $this->assertMatchesRegularExpression('/"%PHP%" "%COMPOSER_PHAR%" --version >nul 2>nul/', $this->bat, 'composer.phar must be verified by running --version.');
     }
 
     public function test_prepare_php_is_invoked_early_and_self_heals(): void
@@ -438,96 +426,54 @@ final class WindowsLauncherContractTest extends TestCase
         $this->assertSame(1, $decide(true, true, ['mysql']), 'loaded extension without the pgsql driver reported is detected.');
     }
 
-    public function test_composer_preparation_runs_as_a_self_healing_subroutine_before_database(): void
+    public function test_composer_uses_the_official_pinned_phar_not_the_bootstrapper(): void
     {
-        // Main flow must call :prepare_composer (between PHP prep and PostgreSQL).
-        $this->assertMatchesRegularExpression('/^call :prepare_composer\s*$/m', $this->bat);
-        $prep = $this->subroutineBody(':prepare_composer');
-        $this->assertNotSame('', $prep, ':prepare_composer subroutine must exist.');
-        // It reuses a healthy composer.phar (idempotent) and can replace a broken one.
-        $this->assertMatchesRegularExpression('/if exist "%COMPOSER_PHAR%" \([\s\S]*?--version/', $prep);
-        // It fails the launcher (hard stop) when composer cannot be made ready.
-        $this->assertStringContainsString('call :fail', $prep);
-    }
-
-    public function test_composer_uses_the_official_installer_with_supported_flags_only(): void
-    {
-        $prep = $this->subroutineBody(':prepare_composer');
-        // Downloaded atomically via the helper from the official installer URL.
-        $this->assertMatchesRegularExpression('/call :fetch_file "%COMPOSER_SETUP%" "%COMPOSER_INSTALLER_URL%" "" "1000"/', $prep);
-        // Executed with the LAUNCHER-LOCAL PHP ("%PHP%"), only supported installer options.
+        // Composer is the official PERMANENT versioned PHAR (https://getcomposer.org/download/<v>/composer.phar).
         $this->assertMatchesRegularExpression(
-            '/"%PHP%" "%COMPOSER_SETUP%" --install-dir="%RT%" --filename=composer\.phar/',
-            $prep,
-            'installer must run with launcher PHP, --install-dir=%RT%, --filename=composer.phar.',
+            '/set "COMPOSER_PHAR_URL=https:\/\/getcomposer\.org\/download\/%COMPOSER_VERSION%\/composer\.phar"/',
+            $this->bat,
+            'Composer must come from the official versioned PHAR URL.',
         );
-        // Composer-RUNTIME flags are not installer options and must not be passed.
-        $this->assertDoesNotMatchRegularExpression('/COMPOSER_SETUP%"[^\n]*--no-interaction/', $this->bat, '--no-interaction is not a Composer installer option.');
-        $this->assertDoesNotMatchRegularExpression('/COMPOSER_SETUP%"[^\n]*--no-ansi/', $this->bat, '--no-ansi is a runtime flag; avoid unsupported installer flags.');
+        $this->assertMatchesRegularExpression('/set "COMPOSER_VERSION=\d+\.\d+\.\d+"/', $this->bat, 'a concrete stable Composer version is pinned.');
+        // The composer-setup.php bootstrapper must NOT be downloaded or executed: it crashes this
+        // PHP runtime with STATUS_ACCESS_VIOLATION (0xC0000005 / -1073741819).
+        $this->assertStringNotContainsString('COMPOSER_SETUP', $this->bat, 'the crash-prone composer-setup.php bootstrapper must not be used.');
+        $this->assertStringNotContainsString('COMPOSER_INSTALLER_URL', $this->bat);
+        $this->assertDoesNotMatchRegularExpression('/"%PHP%"[^\n]*composer-setup/i', $this->bat, 'the launcher must never execute composer-setup.php.');
     }
 
-    public function test_composer_installer_exit_code_and_output_are_captured_for_diagnostics(): void
+    public function test_composer_phar_is_downloaded_atomically_and_runs_before_database_stage(): void
     {
         $prep = $this->subroutineBody(':prepare_composer');
-        // stdout+stderr redirected to a log and the exit code captured.
+        $this->assertNotSame('', $prep, ':prepare_composer must exist.');
         $this->assertMatchesRegularExpression(
-            '/--filename=composer\.phar\s*>\s*"%COMPOSER_LOG%"\s*2>&1\s*\n\s*set "COMPOSER_RC=%ERRORLEVEL%"/',
+            '/call :fetch_file "%COMPOSER_PHAR%" "%COMPOSER_PHAR_URL%" "" "1000000"/',
             $prep,
-            'installer output must be logged and its exit code captured.',
+            'composer.phar is fetched atomically into place with a size floor.',
         );
-        // On failure the diagnostic is shown with the captured exit code and the log path.
-        $this->assertStringContainsString('call :composer_diag %COMPOSER_RC%', $prep);
-        $diag = $this->subroutineBody(':composer_diag');
-        $this->assertMatchesRegularExpression('/type "%COMPOSER_LOG%"/', $diag, 'the diagnostic must print the installer log (stdout+stderr).');
-        $this->assertStringContainsString('COMPOSER_RC', $prep, 'failures must report the installer exit code.');
-    }
-
-    public function test_composer_requires_a_present_non_empty_runnable_phar(): void
-    {
-        $prep = $this->subroutineBody(':prepare_composer');
-        // Missing phar -> fail.
-        $this->assertMatchesRegularExpression('/if not exist "%COMPOSER_PHAR%" \([\s\S]*?call :fail/', $prep);
-        // Empty/partial phar (size floor) -> fail.
-        $this->assertMatchesRegularExpression('/for %%S in \("%COMPOSER_PHAR%"\) do set "CP_BYTES=%%~zS"/', $prep);
-        $this->assertMatchesRegularExpression('/if !CP_BYTES! LSS 100000 \([\s\S]*?call :fail/', $prep, 'a too-small composer.phar must be treated as partial/corrupt.');
-        // Authoritative run: composer --version with launcher PHP.
+        $this->assertMatchesRegularExpression('/if !CP_BYTES! LSS 1000000[\s\S]*?call :fail/', $prep, 'a truncated/tiny composer.phar fails.');
         $this->assertMatchesRegularExpression(
-            '/"%PHP%" "%COMPOSER_PHAR%" --version >nul 2>nul\s*\n\s*if errorlevel 1 \([\s\S]*?call :fail/',
+            '/"%PHP%" "%COMPOSER_PHAR%" --version >nul 2>nul\s*\n\s*if errorlevel 1[\s\S]*?call :fail/',
             $prep,
-            'the produced composer.phar must actually run --version; otherwise fail.',
+            'composer.phar must actually run --version with launcher PHP; otherwise fail.',
         );
-    }
-
-    public function test_composer_stops_the_launcher_and_does_not_modify_global_path(): void
-    {
-        // Composer failure is a hard stop before PostgreSQL/application stages.
-        $fail = $this->subroutineBody(':fail');
-        $this->assertMatchesRegularExpression('/^\s*exit\s+1\s*$/m', $fail);
+        $this->assertLessThan(
+            strpos($this->bat, 'if not exist "%PG_BIN%\initdb.exe"'),
+            strpos($this->bat, 'call :prepare_composer'),
+            'Composer is prepared before the PostgreSQL stage.',
+        );
         $this->assertDoesNotMatchRegularExpression('/\bsetx\b/', $this->bat, 'no permanent/global PATH modification.');
-        // prepare_composer is invoked before the PostgreSQL stage in main flow.
-        $cPos = strpos($this->bat, 'call :prepare_composer');
-        $pgPos = strpos($this->bat, 'if not exist "%PG_BIN%\initdb.exe"');
-        $this->assertIsInt($cPos);
-        $this->assertIsInt($pgPos);
-        $this->assertLessThan($pgPos, $cPos, 'Composer is prepared before the PostgreSQL runtime stage.');
     }
 
-    public function test_composer_partial_artifacts_are_cleaned_and_rerun_is_idempotent(): void
+    public function test_composer_prep_is_idempotent_and_uses_launcher_php(): void
     {
         $prep = $this->subroutineBody(':prepare_composer');
-        // Stale installer and the installer's temp phar are removed before a run.
-        $this->assertStringContainsString('if exist "%COMPOSER_SETUP%" del', $prep);
-        $this->assertStringContainsString('composer-temp.phar', $prep, 'the installer composer-temp.phar partial is cleaned.');
-        // A healthy phar short-circuits (reuse), a broken one is deleted and rebuilt.
-        $this->assertMatchesRegularExpression('/existing composer\.phar cannot run; replacing it/', $prep);
-        // Deterministic simulation of the health decision: ok iff the phar exists,
-        // is large enough, and runs --version.
-        $decide = static function (bool $exists, int $bytes, bool $runsVersion): bool {
-            return $exists && $bytes >= 100000 && $runsVersion;
-        };
-        $this->assertTrue($decide(true, 2_500_000, true), 'a valid composer.phar passes and is reused.');
-        $this->assertFalse($decide(false, 0, false), 'missing phar triggers install.');
-        $this->assertFalse($decide(true, 500, false), 'a tiny/partial phar is replaced.');
+        $this->assertMatchesRegularExpression(
+            '/if exist "%COMPOSER_PHAR%" \([\s\S]*?--version[\s\S]*?if not errorlevel 1 exit \/b 0[\s\S]*?del \/q "%COMPOSER_PHAR%"/',
+            $prep,
+            'a working composer.phar is reused (idempotent); a broken one is replaced.',
+        );
+        $this->assertGreaterThan(0, preg_match_all('/"%PHP%" "%COMPOSER_PHAR%"/', $prep), 'always invoked with launcher-local PHP.');
     }
 
     private function subroutineBody(string $label): string
