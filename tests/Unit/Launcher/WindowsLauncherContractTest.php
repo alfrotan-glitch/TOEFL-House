@@ -663,6 +663,33 @@ final class WindowsLauncherContractTest extends TestCase
         );
     }
 
+    public function test_web_port_is_verified_bindable_before_launch_and_reused_when_healthy(): void
+    {
+        // Windows excludes dynamic port ranges (Hyper-V/WinNAT) that show NO listener
+        // in netstat yet fail to bind; a blind launch then crashed with
+        // "Failed to listen on 127.0.0.1:8080". The launcher must verify bindability.
+        $helper = $this->launcherHelper();
+        $this->assertStringContainsString("case 'port-bindable'", $helper);
+        $this->assertStringContainsString('stream_socket_server("tcp://127.0.0.1:{$port}"', $helper);
+        // Port resolution probes /health first (reuse a running instance) then bindability.
+        $resolve = $this->subroutineBlock(':resolve_app_port', ':probe_port');
+        $this->assertNotSame('', $resolve, ':resolve_app_port must exist.');
+        $this->assertMatchesRegularExpression('/call :probe_port %APP_PORT%/', $resolve);
+        $this->assertMatchesRegularExpression('/call :probe_port %%P/', $resolve, 'it falls back to alternate candidate ports.');
+        $this->assertMatchesRegularExpression('/Could not bind any web port/', $resolve, 'failure is explicit if no port is usable.');
+        // The chosen port is written back to .env so serve/health/tailscale agree.
+        $this->assertMatchesRegularExpression('/env-set "%ROOT%\\\.env" "APP_URL=%APP_URL_LOCAL%"/', $resolve);
+
+        $probe = $this->subroutineBlock(':probe_port', ':port_in_use');
+        $this->assertMatchesRegularExpression('/curl\.exe[\s\S]{0,160}?\/health[\s\S]{0,120}?PORTCAND_HOW=health/', $probe, 'a live instance answering /health is reused.');
+        $this->assertMatchesRegularExpression('/port-bindable %~1/', $probe, 'otherwise bindability is tested directly.');
+        // Step 8 does not launch again when a healthy instance was found.
+        $this->assertMatchesRegularExpression('/if "%PORTCAND_HOW%"=="health" \([\s\S]*?goto check_health/', $this->bat);
+        // serve, health and tailscale all use the resolved APP_PORT.
+        $this->assertMatchesRegularExpression('/artisan serve --host=127\.0\.0\.1 --port=%APP_PORT%/', $this->bat);
+        $this->assertMatchesRegularExpression('/serve --bg %APP_PORT%/', $this->bat);
+    }
+
     public function test_composer_uses_the_official_pinned_phar_not_the_bootstrapper(): void
     {
         // Composer is the official PERMANENT versioned PHAR (https://getcomposer.org/download/<v>/composer.phar).

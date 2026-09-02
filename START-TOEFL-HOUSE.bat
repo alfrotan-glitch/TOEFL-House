@@ -166,6 +166,13 @@ if errorlevel 1 (
     if errorlevel 1 call :fail "APP_KEY generation failed. Re-run this file."
 )
 
+REM Resolve the HTTP port BEFORE writing the final .env URL / starting the server.
+REM The preferred port may be taken by a leftover process or reserved by the OS
+REM (Windows excludes dynamic ranges used by Hyper-V/WinNAT; such a port has NO
+REM listener in netstat yet PHP fails to bind it). This picks a verifiably
+REM bindable port and keeps .env / serve / health / Tailscale consistent.
+call :resolve_app_port
+
 REM ---------------------------------------------------------------------------
 REM Step 5 - PostgreSQL initialize + start
 REM ---------------------------------------------------------------------------
@@ -230,17 +237,16 @@ REM ---------------------------------------------------------------------------
 REM Step 8 - start Laravel
 REM ---------------------------------------------------------------------------
 echo [8/10] Starting The TOEFL House on port %APP_PORT%...
-call :port_in_use %APP_PORT%
-if not errorlevel 1 (
-    echo       - port %APP_PORT% already has a listener: the application appears to be running already.
+if "%PORTCAND_HOW%"=="health" (
+    echo       - the application is already running and answering /health on port %APP_PORT%; reusing it.
     goto check_health
 )
 REM Launch the server in a separate, minimized window. `start` returns immediately
-REM and does NOT reset ERRORLEVEL when it spawns a process, so we must not gate on
-REM it: the preceding port check leaves errorlevel set, and a stale errorlevel 1
-REM here made the launcher falsely report a server-start failure even though the
-REM window launched fine. Authority for readiness is the /health loop below. The
-REM server window writes its output to SERVER_LOG so a real crash is diagnosable.
+REM and does NOT reset ERRORLEVEL when it spawns a process, so we do not gate on it
+REM (a stale level from earlier checks once caused a false "server start" failure).
+REM APP_PORT was already verified bindable by :resolve_app_port; readiness is
+REM decided by the /health loop. The server window writes to SERVER_LOG so a real
+REM bind/crash is diagnosable.
 start "TOEFL-House-Server" /min cmd /c ""%PHP%" artisan serve --host=127.0.0.1 --port=%APP_PORT% > "%SERVER_LOG%" 2>&1"
 echo       - server starting in a minimized window titled TOEFL-House-Server (log: .runtime\server.log)...
 goto check_health
@@ -647,6 +653,43 @@ REM specified module could not be found" on every PHP invocation; the built-in
 REM implementations are always present, so they are intentionally not written.
 >>"%PHP_DIR%\php.ini" echo extension=zip
 exit /b 0
+
+:resolve_app_port
+REM Pick the HTTP port. Sets APP_PORT, APP_URL_LOCAL and PORTCAND_HOW:
+REM   PORTCAND_HOW=health  an instance is already answering /health (reuse it)
+REM   PORTCAND_HOW=bind    the port was verified bindable and must be served.
+if not exist "%LAUNCHER_HELPER%" call :fail "The launcher helper is missing at %LAUNCHER_HELPER%. Re-clone the repository."
+call :probe_port %APP_PORT%
+if defined PORTCAND_HOW goto port_resolved
+for %%P in (8081 8082 8090 8181 9090 9091 9000 9001 18080 28080) do (
+    if not defined PORTCAND_HOW call :probe_port %%P
+)
+:port_resolved
+if not defined PORTCAND_HOW call :fail "Could not bind any web port starting from %APP_PORT%. A Windows reserved/excluded port range or another program is blocking them. Close the program holding the port (or restart to release dynamic Hyper-V/WinNAT reservations) and re-run this file."
+set "APP_URL_LOCAL=http://127.0.0.1:%APP_PORT%"
+"%PHP%" "%LAUNCHER_HELPER%" env-set "%ROOT%\.env" "APP_URL=%APP_URL_LOCAL%"
+if errorlevel 1 call :fail "Could not write APP_URL to the .env file. Re-run this file."
+if "%PORTCAND_HOW%"=="health" (
+    echo       - application already responding on port %APP_PORT%; reusing it.
+) else (
+    echo       - using web port %APP_PORT% (verified available).
+)
+goto :eof
+
+:probe_port
+REM Sets PORTCAND_HOW if port %~1 already serves our app ("health") or is
+REM bindable ("bind"). Uses goto :eof so it works when called inside a for loop.
+set "PORTCAND_HOW="
+for /f "tokens=*" %%c in ('curl.exe -s -o nul -w "%%{http_code}" --max-time 3 "http://127.0.0.1:%~1/health" 2^>nul') do if "%%c"=="200" set "PORTCAND_HOW=health"
+if defined PORTCAND_HOW (
+    set "APP_PORT=%~1"
+    goto :eof
+)
+"%PHP%" "%LAUNCHER_HELPER%" port-bindable %~1
+if errorlevel 1 goto :eof
+set "PORTCAND_HOW=bind"
+set "APP_PORT=%~1"
+goto :eof
 
 :port_in_use
 REM Errorlevel 0 when the given TCP port already has a listener.

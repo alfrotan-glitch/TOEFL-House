@@ -38,6 +38,13 @@
  *                  0 when the count is zero (first run, needs the owner), 1 when
  *                  at least one account exists (nothing to bootstrap), 2 when
  *                  the table is missing or the server cannot be reached.
+ *   port-bindable <port>
+ *                  Attempts to bind 127.0.0.1:<port> for a moment and closes it.
+ *                  Exits 0 when the port can be bound (free, not reserved), 3
+ *                  when it cannot be bound (already listening OR inside a
+ *                  Windows reserved/excluded port range, e.g. Hyper-V/WinNAT -
+ *                  such a port shows no LISTENING entry in netstat), 2 on usage
+ *                  error. This distinguishes "netstat says free but bind fails".
  */
 
 declare(strict_types=1);
@@ -60,6 +67,14 @@ try {
                 exit(1);
             }
             exit(envSet($envPath, $pairs));
+
+        case 'port-bindable':
+            $port = (int) array_shift($argv);
+            if ($port <= 0 || $port > 65535) {
+                fwrite(STDERR, "launcher_helper port-bindable: a TCP port 1-65535 is required\n");
+                exit(2);
+            }
+            exit(portBindable($port));
 
         case 'db-exists':
         case 'db-app-valid':
@@ -215,4 +230,22 @@ function dbCommand(string $command, string $dsn, string $user, string $password,
     }
 
     return 2;
+}
+
+/**
+ * Return 0 when 127.0.0.1:<port> can be bound, 3 when it cannot (already in
+ * use or inside an OS reserved/excluded range). Uses the core stream sockets;
+ * no extension is required.
+ */
+function portBindable(int $port): int
+{
+    $errno = 0;
+    $errstr = '';
+    $sock = @stream_socket_server("tcp://127.0.0.1:{$port}", $errno, $errstr, STREAM_SERVER_BIND | STREAM_SERVER_LISTEN);
+    if (is_resource($sock) || $sock instanceof \StreamSocketServer) {
+        fclose($sock);
+        return 0;
+    }
+    // EADDRINUSE / WSAEACCES / WSAEADDRINUSE -> not bindable.
+    return 3;
 }
