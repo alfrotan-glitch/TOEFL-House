@@ -613,6 +613,28 @@ final class WindowsLauncherContractTest extends TestCase
         $this->assertSame(1, preg_match_all('/pg_ctl\.exe"[^\n]* start/', $prep), 'pg_ctl start appears exactly once, inside the not-running guard.');
     }
 
+    public function test_first_run_owner_prompts_use_delayed_expansion_inside_the_block(): void
+    {
+        // The five owner values are captured with `set /p` INSIDE the parenthesized
+        // `if !ACCT_RC! EQU 0 (...)` block. set /p assigns at run time while %VAR% is
+        // expanded at parse time, so reading them as %OWN_NAME% always saw an empty
+        // value and failed with "The owner name is required." They MUST be read with
+        // delayed expansion (!VAR!).
+        $this->assertMatchesRegularExpression('/set \/p "OWN_NAME=[^"]*"/', $this->bat);
+        $this->assertMatchesRegularExpression('/if !ACCT_RC! EQU 0 \(/', $this->bat, 'the bootstrap runs in the zero-accounts block.');
+        $this->assertDoesNotMatchRegularExpression(
+            '/%OWN_(NAME|DOB|USER|PW1|PW2)%/',
+            $this->bat,
+            'owner prompt variables must not be read with parse-time %VAR% (empty inside the block).',
+        );
+        $this->assertMatchesRegularExpression('/if "!OWN_NAME!"=="" call :fail/', $this->bat);
+        $this->assertMatchesRegularExpression('/if not "!OWN_PW1!"=="!OWN_PW2!" call :fail/', $this->bat);
+        $this->assertMatchesRegularExpression('/call :pwlen "!OWN_PW1!"/', $this->bat);
+        // The env vars handed to artisan db:seed must be built from the run-time values.
+        $this->assertMatchesRegularExpression('/set "BOOTSTRAP_OWNER_NAME=!OWN_NAME!"/', $this->bat);
+        $this->assertMatchesRegularExpression('/set "BOOTSTRAP_OWNER_PASSWORD=!OWN_PW1!"/', $this->bat);
+    }
+
     public function test_composer_uses_the_official_pinned_phar_not_the_bootstrapper(): void
     {
         // Composer is the official PERMANENT versioned PHAR (https://getcomposer.org/download/<v>/composer.phar).

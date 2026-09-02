@@ -201,23 +201,26 @@ if !ACCT_RC! EQU 0 (
     set /p "OWN_USER=  Login username: "
     set /p "OWN_PW1=  Choose a password, at least 12 characters: "
     set /p "OWN_PW2=  Repeat the password: "
-    if "%OWN_NAME%"=="" call :fail "The owner name is required. Re-run this file."
-    echo %OWN_DOB% | findstr /R "^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$">nul
+REM Variables filled by `set /p` inside this parenthesized block exist only at
+REM run time, so they MUST be read with delayed expansion (!VAR!); %VAR% is
+REM expanded when the block is parsed and is always empty here.
+    if "!OWN_NAME!"=="" call :fail "The owner name is required. Re-run this file."
+    echo !OWN_DOB!| findstr /R "^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$">nul
     if errorlevel 1 call :fail "The date of birth must be YYYY-MM-DD, for example 1985-04-12. Re-run this file."
-    if "%OWN_USER%"=="" call :fail "The username is required. Re-run this file."
-    if "%OWN_PW1%"=="" call :fail "The password is required. Re-run this file."
-    if not "%OWN_PW1%"=="%OWN_PW2%" call :fail "The two passwords do not match. Re-run this file."
-    call :pwlen "%OWN_PW1%"
+    if "!OWN_USER!"=="" call :fail "The username is required. Re-run this file."
+    if "!OWN_PW1!"=="" call :fail "The password is required. Re-run this file."
+    if not "!OWN_PW1!"=="!OWN_PW2!" call :fail "The two passwords do not match. Re-run this file."
+    call :pwlen "!OWN_PW1!"
     if !PWLEN! lss 12 call :fail "The password must be at least 12 characters. Re-run this file."
-    set "BOOTSTRAP_OWNER_NAME=%OWN_NAME%"
-    set "BOOTSTRAP_OWNER_BIRTHDATE=%OWN_DOB%"
-    set "BOOTSTRAP_OWNER_USERNAME=%OWN_USER%"
-    set "BOOTSTRAP_OWNER_PASSWORD=%OWN_PW1%"
+    set "BOOTSTRAP_OWNER_NAME=!OWN_NAME!"
+    set "BOOTSTRAP_OWNER_BIRTHDATE=!OWN_DOB!"
+    set "BOOTSTRAP_OWNER_USERNAME=!OWN_USER!"
+    set "BOOTSTRAP_OWNER_PASSWORD=!OWN_PW1!"
     "%PHP%" artisan db:seed --class=FirstRunBootstrapSeeder --force
     if errorlevel 1 call :fail "The first-run bootstrap failed. Re-run this file and re-enter the owner details."
     set "BOOTSTRAP_OWNER_PASSWORD="
     echo.
-    echo       - owner account %OWN_USER% created.
+    echo       - owner account !OWN_USER! created.
 ) else (
     echo       - account already exists, nothing to bootstrap.
 )
