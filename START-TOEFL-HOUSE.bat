@@ -13,9 +13,12 @@ REM
 REM What this file does (every step fails loudly and says exactly what is
 REM missing; nothing here fails silently):
 REM   1.  Verifies prerequisites (Windows 10 1803+, built-in curl.exe)
-REM   2.  Prepares runtimes into .runtime\ : PHP 8.2.27, Composer,
-REM       PostgreSQL 18.3 - downloaded once from pinned official URLs and
-REM       reused on every later run
+REM   2.  Prepares runtimes into .runtime\ : PHP 8.2.x (pinned at the version
+REM       in PHP_VERSION, derived artifacts in one place), Composer,
+REM       PostgreSQL 18.3 - downloaded once from official URLs and reused on
+REM       every later run. The PHP download tries /releases/ first and falls
+REM       back to /releases/archives/ (where older patches live permanently),
+REM       so a patch bump upstream never breaks a fresh clone
 REM   3.  Installs Composer dependencies (production, lock file authoritative)
 REM   4.  Creates .env from the production template + generates APP_KEY
 REM   5.  Initializes PostgreSQL (127.0.0.1 only, local trust auth) and
@@ -45,8 +48,18 @@ set "PGDATA=%RT%\pgdata"
 set "PG_LOG=%RT%\pg.log"
 set "BACKUP_DIR=%ROOT%\backup"
 
+REM PHP 8.2.x is the pinned runtime (x64, thread-safe, VS16 build). The
+REM archive name, its extracted folder and both download URLs are derived
+REM from PHP_VERSION so the pin lives in exactly one place.
 set "PHP_VERSION=8.2.27"
-set "PHP_ZIP_URL=https://windows.php.net/downloads/releases/php-8.2.27-Win32-vs16-x64.zip"
+set "PHP_ZIP=php-%PHP_VERSION%-Win32-vs16-x64.zip"
+REM Windows builds only keep the newest patch of each branch under /releases/;
+REM older patches (including a pinned one once a newer 8.2.x ships) are moved
+REM permanently under /releases/archives/. Try the current-release URL first
+REM (fast while the patch is brand new) and transparently fall back to the
+REM archive URL, which never 404s - so this keeps working after patch bumps.
+set "PHP_ZIP_URL=https://windows.php.net/downloads/releases/%PHP_ZIP%"
+set "PHP_ARCHIVE_ZIP_URL=https://windows.php.net/downloads/releases/archives/%PHP_ZIP%"
 set "PG_VERSION_TAG=18.3-1"
 set "PG_ZIP_URL=https://get.enterprisedb.com/postgresql/postgresql-18.3-1-windows-x64-binaries.zip"
 set "COMPOSER_URL=https://getcomposer.org/Composer-stable.phar"
@@ -77,12 +90,20 @@ if not exist "%RT%" mkdir "%RT%"
 if not exist "%RT%\downloads" mkdir "%RT%\downloads"
 
 if not exist "%PHP%" (
-    echo       - PHP %PHP_VERSION% : downloading from the official PHP archive...
-    curl.exe -fL --retry 3 -o "%RT%\downloads\php.zip" "%PHP_ZIP_URL%"
-    if errorlevel 1 call :fail "PHP download failed. URL: %PHP_ZIP_URL% - check the internet connection and re-run. If it keeps failing, save the zip as .runtime\downloads\php.zip manually and re-run."
+    echo       - PHP %PHP_VERSION% : downloading the official runtime...
+    if exist "%RT%\downloads\php.zip" del /q "%RT%\downloads\php.zip"
+    curl.exe -fL --retry 2 -o "%RT%\downloads\php.zip" "%PHP_ZIP_URL%"
+    if errorlevel 1 (
+        echo       - current-release URL unavailable ^(older patches move to the official archive^); trying the permanent archive URL...
+        curl.exe -fL --retry 3 -o "%RT%\downloads\php.zip" "%PHP_ARCHIVE_ZIP_URL%"
+    )
+    if errorlevel 1 call :fail "PHP download failed from both %PHP_ZIP_URL% and %PHP_ARCHIVE_ZIP_URL%. Check the internet connection and re-run. If it keeps failing, save the zip as .runtime\downloads\php.zip manually and re-run."
     tar -xf "%RT%\downloads\php.zip" -C "%RT%\downloads"
     if errorlevel 1 call :fail "Could not unpack the PHP archive. Re-run this file."
-    move /y "%RT%\downloads\php-%PHP_VERSION%-Win32-vs16-x64" "%PHP_DIR%" >nul
+    REM The official Windows PHP zip unpacks to one top-level folder named after
+    REM the zip (php-X.Y.Z-Win32-vs16-x64) - derive it from PHP_ZIP, never hard-code it.
+    set "PHP_EXTRACT_DIR=%PHP_ZIP:~0,-4%"
+    move /y "%RT%\downloads\%PHP_EXTRACT_DIR%" "%PHP_DIR%" >nul
     if errorlevel 1 call :fail "Could not place the PHP runtime. Re-run this file."
     call :write_php_ini
 )
