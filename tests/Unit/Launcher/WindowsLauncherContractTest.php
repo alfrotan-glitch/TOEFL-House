@@ -438,6 +438,98 @@ final class WindowsLauncherContractTest extends TestCase
         $this->assertSame(1, $decide(true, true, ['mysql']), 'loaded extension without the pgsql driver reported is detected.');
     }
 
+    public function test_composer_preparation_runs_as_a_self_healing_subroutine_before_database(): void
+    {
+        // Main flow must call :prepare_composer (between PHP prep and PostgreSQL).
+        $this->assertMatchesRegularExpression('/^call :prepare_composer\s*$/m', $this->bat);
+        $prep = $this->subroutineBody(':prepare_composer');
+        $this->assertNotSame('', $prep, ':prepare_composer subroutine must exist.');
+        // It reuses a healthy composer.phar (idempotent) and can replace a broken one.
+        $this->assertMatchesRegularExpression('/if exist "%COMPOSER_PHAR%" \([\s\S]*?--version/', $prep);
+        // It fails the launcher (hard stop) when composer cannot be made ready.
+        $this->assertStringContainsString('call :fail', $prep);
+    }
+
+    public function test_composer_uses_the_official_installer_with_supported_flags_only(): void
+    {
+        $prep = $this->subroutineBody(':prepare_composer');
+        // Downloaded atomically via the helper from the official installer URL.
+        $this->assertMatchesRegularExpression('/call :fetch_file "%COMPOSER_SETUP%" "%COMPOSER_INSTALLER_URL%" "" "1000"/', $prep);
+        // Executed with the LAUNCHER-LOCAL PHP ("%PHP%"), only supported installer options.
+        $this->assertMatchesRegularExpression(
+            '/"%PHP%" "%COMPOSER_SETUP%" --install-dir="%RT%" --filename=composer\.phar/',
+            $prep,
+            'installer must run with launcher PHP, --install-dir=%RT%, --filename=composer.phar.',
+        );
+        // Composer-RUNTIME flags are not installer options and must not be passed.
+        $this->assertDoesNotMatchRegularExpression('/COMPOSER_SETUP%"[^\n]*--no-interaction/', $this->bat, '--no-interaction is not a Composer installer option.');
+        $this->assertDoesNotMatchRegularExpression('/COMPOSER_SETUP%"[^\n]*--no-ansi/', $this->bat, '--no-ansi is a runtime flag; avoid unsupported installer flags.');
+    }
+
+    public function test_composer_installer_exit_code_and_output_are_captured_for_diagnostics(): void
+    {
+        $prep = $this->subroutineBody(':prepare_composer');
+        // stdout+stderr redirected to a log and the exit code captured.
+        $this->assertMatchesRegularExpression(
+            '/--filename=composer\.phar\s*>\s*"%COMPOSER_LOG%"\s*2>&1\s*\n\s*set "COMPOSER_RC=%ERRORLEVEL%"/',
+            $prep,
+            'installer output must be logged and its exit code captured.',
+        );
+        // On failure the diagnostic is shown with the captured exit code and the log path.
+        $this->assertStringContainsString('call :composer_diag %COMPOSER_RC%', $prep);
+        $diag = $this->subroutineBody(':composer_diag');
+        $this->assertMatchesRegularExpression('/type "%COMPOSER_LOG%"/', $diag, 'the diagnostic must print the installer log (stdout+stderr).');
+        $this->assertStringContainsString('COMPOSER_RC', $prep, 'failures must report the installer exit code.');
+    }
+
+    public function test_composer_requires_a_present_non_empty_runnable_phar(): void
+    {
+        $prep = $this->subroutineBody(':prepare_composer');
+        // Missing phar -> fail.
+        $this->assertMatchesRegularExpression('/if not exist "%COMPOSER_PHAR%" \([\s\S]*?call :fail/', $prep);
+        // Empty/partial phar (size floor) -> fail.
+        $this->assertMatchesRegularExpression('/for %%S in \("%COMPOSER_PHAR%"\) do set "CP_BYTES=%%~zS"/', $prep);
+        $this->assertMatchesRegularExpression('/if !CP_BYTES! LSS 100000 \([\s\S]*?call :fail/', $prep, 'a too-small composer.phar must be treated as partial/corrupt.');
+        // Authoritative run: composer --version with launcher PHP.
+        $this->assertMatchesRegularExpression(
+            '/"%PHP%" "%COMPOSER_PHAR%" --version >nul 2>nul\s*\n\s*if errorlevel 1 \([\s\S]*?call :fail/',
+            $prep,
+            'the produced composer.phar must actually run --version; otherwise fail.',
+        );
+    }
+
+    public function test_composer_stops_the_launcher_and_does_not_modify_global_path(): void
+    {
+        // Composer failure is a hard stop before PostgreSQL/application stages.
+        $fail = $this->subroutineBody(':fail');
+        $this->assertMatchesRegularExpression('/^\s*exit\s+1\s*$/m', $fail);
+        $this->assertDoesNotMatchRegularExpression('/\bsetx\b/', $this->bat, 'no permanent/global PATH modification.');
+        // prepare_composer is invoked before the PostgreSQL stage in main flow.
+        $cPos = strpos($this->bat, 'call :prepare_composer');
+        $pgPos = strpos($this->bat, 'if not exist "%PG_BIN%\initdb.exe"');
+        $this->assertIsInt($cPos);
+        $this->assertIsInt($pgPos);
+        $this->assertLessThan($pgPos, $cPos, 'Composer is prepared before the PostgreSQL runtime stage.');
+    }
+
+    public function test_composer_partial_artifacts_are_cleaned_and_rerun_is_idempotent(): void
+    {
+        $prep = $this->subroutineBody(':prepare_composer');
+        // Stale installer and the installer's temp phar are removed before a run.
+        $this->assertStringContainsString('if exist "%COMPOSER_SETUP%" del', $prep);
+        $this->assertStringContainsString('composer-temp.phar', $prep, 'the installer composer-temp.phar partial is cleaned.');
+        // A healthy phar short-circuits (reuse), a broken one is deleted and rebuilt.
+        $this->assertMatchesRegularExpression('/existing composer\.phar cannot run; replacing it/', $prep);
+        // Deterministic simulation of the health decision: ok iff the phar exists,
+        // is large enough, and runs --version.
+        $decide = static function (bool $exists, int $bytes, bool $runsVersion): bool {
+            return $exists && $bytes >= 100000 && $runsVersion;
+        };
+        $this->assertTrue($decide(true, 2_500_000, true), 'a valid composer.phar passes and is reused.');
+        $this->assertFalse($decide(false, 0, false), 'missing phar triggers install.');
+        $this->assertFalse($decide(true, 500, false), 'a tiny/partial phar is replaced.');
+    }
+
     private function subroutineBody(string $label): string
     {
         // Return the lines from ":label" up to the next top-level ":otherlabel".

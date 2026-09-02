@@ -107,21 +107,8 @@ if not exist "%RT%\downloads" mkdir "%RT%\downloads"
 call :prepare_php
 
 
-if not exist "%COMPOSER_PHAR%" (
-    echo       - Composer : downloading the official installer...
-    REM Fetch the official installer atomically (small PHP script; no fallback source).
-    call :fetch_file "%COMPOSER_SETUP%" "%COMPOSER_INSTALLER_URL%" "" "1000"
-    if errorlevel 1 call :fail "Composer installer download failed from %COMPOSER_INSTALLER_URL% (the incomplete file was discarded). Check the internet connection and re-run."
-    REM Run the official installer: it downloads the STABLE composer.phar through the
-    REM official channel and cryptographically verifies it (signature check), then writes
-    REM it to our runtime. It returns a non-zero code if download/verification fails.
-    "%PHP%" "%COMPOSER_SETUP%" --install-dir="%RT%" --filename=composer.phar --no-ansi --no-interaction
-    if errorlevel 1 call :fail "The official Composer installer could not install or verify composer.phar. Check the internet connection to getcomposer.org and re-run."
-    del /q "%COMPOSER_SETUP%" >nul 2>nul
-)
-if not exist "%COMPOSER_PHAR%" call :fail "Composer installation did not produce %COMPOSER_PHAR%. Re-run this file."
-"%PHP%" "%COMPOSER_PHAR%" --version >nul 2>nul
-if errorlevel 1 call :fail "Composer downloaded but cannot run. Delete .runtime\composer.phar and re-run this file."
+call :prepare_composer
+
 
 if not exist "%PG_BIN%\initdb.exe" (
     echo       - PostgreSQL %PG_VERSION_TAG : downloading, about 300 MB, one time only...
@@ -549,6 +536,88 @@ exit /b 0
 
 :diag_file
 if exist "%~1" (echo     PRESENT : %~1) else (echo     MISSING : %~1)
+exit /b 0
+
+:prepare_composer
+REM Self-healing Composer preparation. An executable composer.phar is reused;
+REM otherwise the official installer is downloaded atomically, run with the
+REM launcher-local PHP (only supported installer flags), and the result is
+REM verified to exist, be non-empty and run --version. The installer's exact
+REM exit code and full stdout/stderr are captured and printed on failure, so
+REM the real error is shown - never just a generic "did not produce" message.
+set "COMPOSER_LOG=%RT%\composer-install.log"
+
+REM Reuse a healthy composer.phar (idempotent; no unnecessary download).
+if exist "%COMPOSER_PHAR%" (
+    "%PHP%" "%COMPOSER_PHAR%" --version >nul 2>nul
+    if not errorlevel 1 exit /b 0
+    echo       - existing composer.phar cannot run; replacing it.
+    del /q "%COMPOSER_PHAR%" >nul 2>nul
+)
+
+echo       - Composer : downloading the official installer...
+REM Clear stale installer / partial artifacts so a failure never leaves a half file.
+if exist "%COMPOSER_SETUP%" del /q "%COMPOSER_SETUP%" >nul 2>nul
+if exist "%RT%\composer-temp.phar" del /q "%RT%\composer-temp.phar" >nul 2>nul
+
+call :fetch_file "%COMPOSER_SETUP%" "%COMPOSER_INSTALLER_URL%" "" "1000"
+if errorlevel 1 call :fail "Composer installer download failed from %COMPOSER_INSTALLER_URL% (the incomplete file was discarded). Check the internet connection and re-run."
+
+REM Validate the installer file itself (must exist and be several KB, not an error page).
+if not exist "%COMPOSER_SETUP%" call :fail "Composer installer was not saved to %COMPOSER_SETUP%."
+for %%S in ("%COMPOSER_SETUP%") do set "CS_BYTES=%%~zS"
+if !CS_BYTES! LSS 1000 call :fail "The Composer installer %COMPOSER_SETUP% is only !CS_BYTES! bytes (expected several KB) - truncated download."
+
+echo       - Composer : running the official installer (writes composer.phar)...
+REM Supported installer options only: --install-dir (target dir) and --filename.
+REM Composer-RUNTIME flags such as --no-ansi/--no-interaction are NOT installer
+REM options and must not be passed. Capture exit code + all output to a log.
+"%PHP%" "%COMPOSER_SETUP%" --install-dir="%RT%" --filename=composer.phar > "%COMPOSER_LOG%" 2>&1
+set "COMPOSER_RC=%ERRORLEVEL%"
+
+REM The small installer is no longer needed; composer.phar is the kept artifact.
+del /q "%COMPOSER_SETUP%" >nul 2>nul
+
+if not exist "%COMPOSER_PHAR%" (
+    call :composer_diag %COMPOSER_RC%
+    call :fail "Composer installation did not produce %COMPOSER_PHAR% (official installer exit code %COMPOSER_RC%). The installer output is printed above and saved to %COMPOSER_LOG%."
+)
+for %%S in ("%COMPOSER_PHAR%") do set "CP_BYTES=%%~zS"
+if !CP_BYTES! LSS 100000 (
+    call :composer_diag %COMPOSER_RC%
+    call :fail "Composer was produced but is only !CP_BYTES! bytes (a valid composer.phar is ~2-3 MB) - it is partial/corrupt. Installer exit code %COMPOSER_RC%; output in %COMPOSER_LOG%."
+)
+"%PHP%" "%COMPOSER_PHAR%" --version >nul 2>nul
+if errorlevel 1 (
+    call :composer_diag %COMPOSER_RC%
+    call :fail "Composer was installed at %COMPOSER_PHAR% but cannot run --version. Installer exit code %COMPOSER_RC%; output in %COMPOSER_LOG%."
+)
+echo       - Composer ready.
+exit /b 0
+
+:composer_diag
+REM %1 = official installer exit code. Prints a secret-free diagnostic with the
+REM captured installer stdout/stderr so the actual failure is visible.
+set "DIAG_RC=%~1"
+echo.
+echo  -----------------------------------------------------------------------
+echo   COMPOSER INSTALLATION DIAGNOSTIC
+echo  -----------------------------------------------------------------------
+echo   PHP executable       : %PHP%
+"%PHP%" -v 2>nul
+echo   Target composer.phar : %COMPOSER_PHAR%
+echo   Install directory    : %RT%
+if exist "%COMPOSER_PHAR%" (echo   composer.phar present: yes) else (echo   composer.phar present: NO - was not produced)
+if exist "%COMPOSER_LOG%" (
+    echo   Installer exit code  : %DIAG_RC%
+    echo   --- official Composer installer output ^(stdout + stderr^) ---
+    type "%COMPOSER_LOG%"
+    echo   ---------------------------------------------------------------
+) else (
+    echo   No installer log was captured at %COMPOSER_LOG%.
+)
+echo  -----------------------------------------------------------------------
+echo.
 exit /b 0
 
 :write_php_ini
