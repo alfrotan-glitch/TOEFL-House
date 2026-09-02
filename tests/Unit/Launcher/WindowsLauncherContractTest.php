@@ -680,6 +680,23 @@ final class WindowsLauncherContractTest extends TestCase
         $this->assertStringContainsString('using web port %APP_PORT%, verified available.', $resolve);
     }
 
+    public function test_port_bindable_check_consults_windows_listeners_and_excluded_ranges(): void
+    {
+        // A raw socket bind is permissive on Windows (SO_REUSEADDR lets a test bind
+        // a held/reserved port that the real PHP server then cannot exclusively
+        // bind - it failed with "Failed to listen on 127.0.0.1:8080"). The helper
+        // must ALSO ask Windows: netstat (LISTENING) and the netsh excluded range
+        // table (Hyper-V/WinNAT reservations), read-only.
+        $helper = $this->launcherHelper();
+        $this->assertStringContainsString('function portHasListener(int $port): bool', $helper);
+        $this->assertStringContainsString('netstat -ano', $helper);
+        $this->assertStringContainsString("stripos($line, 'LISTENING')", $helper);
+        $this->assertStringContainsString('function portIsInExcludedRange(int $port): bool', $helper);
+        $this->assertStringContainsString('netsh interface ipv4 show excludedportrange protocol=tcp', $helper);
+        // port-bindable rejects a port that is either listening or inside an excluded range.
+        $this->assertMatchesRegularExpression('/function portBindable[\s\S]{0,400}?portHasListener\(\$port\)[\s\S]{0,80}?portIsInExcludedRange\(\$port\)/', $helper);
+    }
+
     public function test_web_port_is_verified_bindable_before_launch_and_reused_when_healthy(): void
     {
         // Windows excludes dynamic port ranges (Hyper-V/WinNAT) that show NO listener

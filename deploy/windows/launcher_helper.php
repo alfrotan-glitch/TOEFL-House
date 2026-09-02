@@ -233,19 +233,80 @@ function dbCommand(string $command, string $dsn, string $user, string $password,
 }
 
 /**
- * Return 0 when 127.0.0.1:<port> can be bound, 3 when it cannot (already in
- * use or inside an OS reserved/excluded range). Uses the core stream sockets;
- * no extension is required.
+ * Return 0 when 127.0.0.1:<port> can be used by our server, 3 when it cannot
+ * (already listening, or inside an OS reserved/excluded range). A raw socket
+ * bind alone is NOT reliable on Windows: stream_socket_server uses
+ * SO_REUSEADDR, which lets a test socket bind to a port that is held or inside
+ * a Hyper-V/WinNAT excluded range, while the real PHP server's exclusive bind
+ * then fails with WSAEACCES. So we first ask Windows (netstat for listeners,
+ * netsh for excluded port ranges), and only then try a socket bind. All checks
+ * are read-only; netstat/netsh are standard Windows commands.
  */
 function portBindable(int $port): int
 {
+    if (portHasListener($port)) {
+        return 3;
+    }
+    if (portIsInExcludedRange($port)) {
+        return 3;
+    }
+
     $errno = 0;
     $errstr = '';
     $sock = @stream_socket_server("tcp://127.0.0.1:{$port}", $errno, $errstr, STREAM_SERVER_BIND | STREAM_SERVER_LISTEN);
-    if (is_resource($sock) || $sock instanceof \StreamSocketServer) {
+    if (is_resource($sock)) {
         fclose($sock);
+
         return 0;
     }
-    // EADDRINUSE / WSAEACCES / WSAEADDRINUSE -> not bindable.
+
     return 3;
+}
+
+/**
+ * True when something is LISTENING on the port (any address). Reads netstat.
+ */
+function portHasListener(int $port): bool
+{
+    $out = @shell_exec('netstat -ano 2>nul');
+    if (!is_string($out) || $out === '') {
+        // Cannot determine via netstat; fall through to the socket test.
+        return false;
+    }
+    // Lines look like:  TCP   127.0.0.1:8080   0.0.0.0:0   LISTENING   1234
+    foreach (preg_split('/\r?\n/', $out) as $line) {
+        if (stripos($line, 'LISTENING') === false) {
+            continue;
+        }
+        if (preg_match('/:' . $port . '\s/', $line) === 1 || preg_match('/:' . $port . '$/', trim($line)) === 1) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * True when the port falls in a Windows reserved/excluded TCP range
+ * (Hyper-V / WinNAT / WSL reserve dynamic ranges that nothing can bind).
+ */
+function portIsInExcludedRange(int $port): bool
+{
+    $out = @shell_exec('netsh interface ipv4 show excludedportrange protocol=tcp 2>nul');
+    if (!is_string($out) || $out === '') {
+        return false;
+    }
+    // Data rows have two numeric columns: start port and end port.
+    if (preg_match_all('/^\s*(\d+)\s+(\d+)\s*$/m', $out, $m, PREG_SET_ORDER) === false) {
+        return false;
+    }
+    foreach ($m as $row) {
+        $start = (int) $row[1];
+        $end = (int) $row[2];
+        if ($port >= $start && $port <= $end) {
+            return true;
+        }
+    }
+
+    return false;
 }
