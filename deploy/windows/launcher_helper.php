@@ -25,18 +25,19 @@
  *                  given value and preserving every other line. Exits 0 on
  *                  success, 1 on usage/IO error.
  *   db-exists    <pgsqlDsn> <user> <password> <dbname>
- *                  Prints "yes"/"no". Exits 0 (and prints yes) when the
- *                  database exists, 0 (and prints no) when it does not.
- *                  Exits 2 on a connection/query error.
+ *                  Prints "yes"/"no". Exits 0 when the database exists, 3 when
+ *                  it does not, 2 on a connection/query error.
  *   db-app-valid <pgsqlDsn> <user> <password> <dbname>
  *                  Connects to <dbname> and decides whether it is a TOEFL House
- *                  database by authoritative catalog checks. Prints "valid" or
- *                  "foreign"; exits 0 in both cases. Exits 2 on connect/query
+ *                  database by authoritative catalog checks. Prints "valid" and
+ *                  exits 0 when it is ours; prints "foreign" and exits 3 when
+ *                  it belongs to another application; exits 2 on connect/query
  *                  error.
  *   account-count <pgsqlDsn> <user> <password> <dbname>
- *                  Prints the integer row count of public.user_accounts.
- *                  Exits 0 on success, 1 when the table is absent (a freshly
- *                  created, not-yet-migrated database), 2 on connect error.
+ *                  Prints the integer row count of public.user_accounts. Exits
+ *                  0 when the count is zero (first run, needs the owner), 1 when
+ *                  at least one account exists (nothing to bootstrap), 2 when
+ *                  the table is missing or the server cannot be reached.
  */
 
 declare(strict_types=1);
@@ -161,9 +162,12 @@ function dbCommand(string $command, string $dsn, string $user, string $password,
         case 'db-exists':
             $stmt = $pdo->prepare('SELECT 1 FROM pg_database WHERE datname = ?');
             $stmt->execute([$dbname]);
-            echo $stmt->fetch() !== false ? 'yes' : 'no';
-            echo PHP_EOL;
-            return 0;
+            if ($stmt->fetch() !== false) {
+                echo 'yes', PHP_EOL;
+                return 0; // present
+            }
+            echo 'no', PHP_EOL;
+            return 3; // absent
 
         case 'db-app-valid':
             // Authoritative identity checks against the catalog:
@@ -195,9 +199,8 @@ function dbCommand(string $command, string $dsn, string $user, string $password,
             )->fetchColumn();
 
             $valid = $hasTable === 1 || $hasMigration === 1 || $otherTables === 0;
-            echo $valid ? 'valid' : 'foreign';
-            echo PHP_EOL;
-            return 0;
+            echo $valid ? 'valid' : 'foreign', PHP_EOL;
+            return $valid ? 0 : 3; // 0 = ours, 3 = foreign database
 
         case 'account-count':
             $regclass = $pdo->query("SELECT to_regclass('public.user_accounts')")->fetchColumn();
@@ -207,7 +210,8 @@ function dbCommand(string $command, string $dsn, string $user, string $password,
             }
             $count = (int) $pdo->query('SELECT count(*) FROM public.user_accounts')->fetchColumn();
             echo $count, PHP_EOL;
-            return 0;
+            // 0 accounts = first run (exit 0); existing accounts = skip bootstrap (exit 1).
+            return $count === 0 ? 0 : 1;
     }
 
     return 2;

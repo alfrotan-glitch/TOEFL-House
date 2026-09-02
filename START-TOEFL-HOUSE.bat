@@ -185,10 +185,12 @@ REM ---------------------------------------------------------------------------
 REM Step 7 - first-run bootstrap: owner account, only when none exists yet
 REM ---------------------------------------------------------------------------
 echo [7/10] Checking whether the first owner account needs to be created...
-set "ACCTS=-1"
-for /f "tokens=1" %%c in ('"%PHP%" "%LAUNCHER_HELPER%" account-count "%APP_DSN%" postgres "" toefl_house') do set "ACCTS=%%c"
-if "%ACCTS%"=="-1" call :fail "Could not read the account count from the database. Re-run this file."
-if "%ACCTS%"=="0" (
+REM account-count exit codes: 0 = zero accounts (first run), 1 = accounts exist,
+REM anything else = error. Direct call (no for/f) so cmd never re-quotes it.
+"%PHP%" "%LAUNCHER_HELPER%" account-count "%APP_DSN%" postgres "" toefl_house
+set "ACCT_RC=!ERRORLEVEL!"
+if !ACCT_RC! GEQ 2 call :fail "Could not read the account count from the database. Re-run this file."
+if !ACCT_RC! EQU 0 (
     echo.
     echo   FIRST RUN - create the owner account, the person who signs in first.
     echo   This is the only time you will ever be asked for anything; every
@@ -394,22 +396,27 @@ REM PHP/PDO is the same reliable stack the application already uses.
 if not exist "%LAUNCHER_HELPER%" call :fail "The launcher helper is missing at %LAUNCHER_HELPER%. Re-clone the repository."
 set "MAINT_DSN=pgsql:host=127.0.0.1;port=%PG_PORT%;dbname=postgres;sslmode=disable"
 set "APP_DSN=pgsql:host=127.0.0.1;port=%PG_PORT%;dbname=toefl_house;sslmode=disable"
-set "DB_EXISTS="
-for /f "tokens=1" %%c in ('"%PHP%" "%LAUNCHER_HELPER%" db-exists "%MAINT_DSN%" postgres "" toefl_house') do set "DB_EXISTS=%%c"
-if "%DB_EXISTS%"=="yes" goto db_present
-if "%DB_EXISTS%"=="no" goto db_create
-call :fail "Could not ask PostgreSQL whether toefl_house exists (helper failed or the server is unreachable). Check .runtime\pg.log and re-run this file."
+REM Decide from the helper's EXIT CODE, not its stdout. We intentionally do NOT
+REM wrap this in a `for /f` loop: for /f runs the command via `cmd /c`, whose
+REM quote-handling mangles a line with several quoted paths (it produced
+REM "The filename, directory name, or volume label syntax is incorrect.").
+REM   db-exists: 0 = present, 3 = absent, anything else = error.
+"%PHP%" "%LAUNCHER_HELPER%" db-exists "%MAINT_DSN%" postgres "" toefl_house >nul
+set "DBEX_RC=!ERRORLEVEL!"
+if "!DBEX_RC!"=="3" goto db_create
+if not "!DBEX_RC!"=="0" call :fail "Could not ask PostgreSQL whether toefl_house exists (helper failed or the server is unreachable). Check .runtime\pg.log and re-run this file."
+goto db_present
 :db_create
 echo       - creating the toefl_house database...
 "%PG_BIN%\createdb.exe" -h 127.0.0.1 -p %PG_PORT% -U postgres toefl_house
 if errorlevel 1 call :fail "Could not create the toefl_house database. Re-run this file."
 exit /b 0
 :db_present
-set "DB_KIND="
-for /f "tokens=1" %%c in ('"%PHP%" "%LAUNCHER_HELPER%" db-app-valid "%APP_DSN%" postgres "" toefl_house') do set "DB_KIND=%%c"
-if "%DB_KIND%"=="valid" goto db_valid
-if "%DB_KIND%"=="foreign" goto db_foreign
-call :fail "Could not verify whether toefl_house is a TOEFL House database (helper failed). Check .runtime\pg.log and re-run. Nothing has been dropped or overwritten."
+REM   db-app-valid: 0 = recognized TOEFL House DB, 3 = foreign, else = error.
+"%PHP%" "%LAUNCHER_HELPER%" db-app-valid "%APP_DSN%" postgres "" toefl_house >nul
+set "DBVAL_RC=!ERRORLEVEL!"
+if "!DBVAL_RC!"=="3" goto db_foreign
+if not "!DBVAL_RC!"=="0" call :fail "Could not verify whether toefl_house is a TOEFL House database (helper failed). Check .runtime\pg.log and re-run. Nothing has been dropped or overwritten."
 :db_valid
 echo       - toefl_house already exists and is a TOEFL House database; reusing it - no data is changed.
 exit /b 0
