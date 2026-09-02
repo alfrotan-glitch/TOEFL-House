@@ -29,8 +29,13 @@ REM       the complete capability set, and the owner account - you are asked
 REM       once for name, date of birth, username and password
 REM   8.  Starts Laravel on http://127.0.0.1:8080
 REM   9.  Verifies /health
-REM   10. Installs Tailscale if missing, configures Tailscale SERVE and prints
-REM       the private Tailnet address
+REM   10. OPTIONAL: installs Tailscale if missing and configures Tailscale SERVE
+REM       so the app is reachable from the other devices on your private Tailnet,
+REM       then prints that private address. This is a convenience on top of the
+REM       already-running local server, never a requirement: if the download, the
+REM       install (UAC declined), the Tailscale sign-in or the serve setup cannot
+REM       complete, the launcher still finishes and reports the local address - it
+REM       does NOT fail the deployment the way steps 1-9 do.
 REM
 REM You never need PowerShell, Git, Composer, PHP or PostgreSQL commands.
 REM Double-clicking this file is the entire operation.
@@ -83,7 +88,15 @@ REM fixed download URL, is the standard CI method, and is verified by running
 REM `composer.phar --version`. Pinned to a stable release (min PHP 7.2.5).
 set "COMPOSER_VERSION=2.10.3"
 set "COMPOSER_PHAR_URL=https://getcomposer.org/download/%COMPOSER_VERSION%/composer.phar"
-set "TAILSCALE_MSI_URL=https://download.tailscale.com/stable/tailscale-setup-latest.amd64.msi"
+REM Tailscale Windows packages are MSIs that live ONLY on the official package
+REM host pkgs.tailscale.com and are ALWAYS version-pinned: the file name is
+REM tailscale-setup-<version>-amd64.msi. There is no rolling "latest" MSI (only
+REM the separate .exe bundle has that), and the plain www-style download host
+REM is not a name that resolves on Tailscale's package servers, so an unversioned
+REM MSI URL could never download. We pin a stable version exactly like
+REM PHP/Composer/PostgreSQL; the installed client keeps itself up to date.
+set "TAILSCALE_VERSION=1.102.3"
+set "TAILSCALE_MSI_URL=https://pkgs.tailscale.com/stable/tailscale-setup-%TAILSCALE_VERSION%-amd64.msi"
 
 set "APP_PORT=8080"
 set "PG_PORT=5432"
@@ -289,38 +302,46 @@ echo       - /health OK.
 REM ---------------------------------------------------------------------------
 REM Step 10 - Tailscale Serve, private to the Tailnet, never Funnel
 REM ---------------------------------------------------------------------------
-echo [10/10] Configuring private Tailscale access...
+echo [10/10] Private Tailscale access (optional - never blocks the local app)...
+REM Tailscale is a convenience layer on top of the already-healthy local server:
+REM it makes the app reachable from the other devices on the private Tailnet.
+REM If it cannot be installed, signed in, or have Serve configured, the launcher
+REM does NOT call the fatal :fail path - it finishes and reports the local URL,
+REM then tells how to set Tailscale up manually and re-run.
 set "TAILSCALE_BIN="
 where tailscale.exe >nul 2>nul && set "TAILSCALE_BIN=tailscale.exe"
 if not defined TAILSCALE_BIN (
-    echo       - Tailscale not found: installing the official client. A Windows
-    echo         User Account Control prompt may appear - click Yes.
-    curl.exe -fL --retry 3 -o "%RT%\downloads\tailscale-setup.msi" "%TAILSCALE_MSI_URL%"
-    if errorlevel 1 call :fail "Tailscale download failed. URL: %TAILSCALE_MSI_URL% - you can also install Tailscale from https://tailscale.com/download/windows and re-run this file."
+    echo       - Tailscale not found: downloading the official client.
+    REM Fetch through the same atomic, retry/validated helper used for PHP,
+    REM Composer and PostgreSQL (never a bare curl into the destination).
+    call :fetch_file "%RT%\downloads\tailscale-setup.msi" "%TAILSCALE_MSI_URL%" "" "10485760"
+    if errorlevel 1 (
+        echo       - Tailscale could not be downloaded from %TAILSCALE_MSI_URL%.
+        goto ts_unavailable
+    )
+    echo       - Installing Tailscale silently. A Windows User Account Control
+    echo         prompt may appear - click Yes. Declining it simply skips Tailscale.
     start /wait "" msiexec /i "%RT%\downloads\tailscale-setup.msi" /qn /norestart
-    if errorlevel 1 call :fail "The Tailscale installation failed. Install Tailscale from https://tailscale.com/download/windows and re-run this file."
-    where tailscale.exe >nul 2>nul && set "TAILSCALE_BIN=tailscale.exe"
-    if not defined TAILSCALE_BIN if exist "C:\Program Files (x86)\Tailscale\tailscale.exe" set "TAILSCALE_BIN=C:\Program Files (x86)\Tailscale\tailscale.exe"
-    if not defined TAILSCALE_BIN if exist "%ProgramFiles%\Tailscale\tailscale.exe" set "TAILSCALE_BIN=%ProgramFiles%\Tailscale\tailscale.exe"
-    if not defined TAILSCALE_BIN call :fail "Tailscale was installed but could not be located. Restart the computer, then re-run this file."
+    if errorlevel 1 (
+        echo       - The Tailscale MSI install did not complete - it may have been
+        echo         cancelled at the User Account Control prompt.
+        goto ts_unavailable
+    )
+)
+REM Locate the freshly installed client. The MSI installs into Program Files on
+REM 64-bit Windows; also check PATH and the legacy x86 path. The (x86) path
+REM contains parentheses, so it is kept OUTSIDE the parenthesized block above
+REM (an unquoted ) inside an echo/if block would close cmd's block early).
+where tailscale.exe >nul 2>nul && set "TAILSCALE_BIN=tailscale.exe"
+if not defined TAILSCALE_BIN if exist "%ProgramFiles%\Tailscale\tailscale.exe" set "TAILSCALE_BIN=%ProgramFiles%\Tailscale\tailscale.exe"
+if not defined TAILSCALE_BIN if exist "%ProgramFiles(x86)%\Tailscale\tailscale.exe" set "TAILSCALE_BIN=%ProgramFiles(x86)%\Tailscale\tailscale.exe"
+if not defined TAILSCALE_BIN (
+    echo       - Tailscale was installed but tailscale.exe could not be located yet;
+    echo         a sign-out or reboot may be needed for the install to register.
+    goto ts_unavailable
 )
 "%TAILSCALE_BIN%" status >nul 2>nul
-if errorlevel 1 (
-    echo.
-    echo   ONE MANUAL STEP REMAINS - the only one ever needed:
-    echo.
-    echo     1. Tailscale is installed but not signed in on this machine yet.
-    echo     2. Open https://login.tailscale.com in your browser.
-    echo     3. Sign in with your TOEFL House Tailscale account. This machine
-    echo        will ask for approval on your phone or another signed-in
-    echo        device - approve it.
-    echo     4. Double-click START-TOEFL-HOUSE.bat again. The application is
-    echo        already running locally; that run finishes the Tailscale
-    echo        configuration and prints the private address.
-    echo.
-    pause
-    exit /b 0
-)
+if errorlevel 1 goto ts_signin_required
 "%TAILSCALE_BIN%" serve --bg %APP_PORT%
 if not errorlevel 1 goto ts_serve_ok
 echo       - Tailscale Serve could not be configured in the background, which
@@ -332,7 +353,33 @@ echo         and press any key here.
 start "Tailscale Setup" cmd /k ""%TAILSCALE_BIN%" serve %APP_PORT%"
 pause
 "%TAILSCALE_BIN%" serve --bg %APP_PORT%
-if errorlevel 1 call :fail "Tailscale Serve still could not be configured. Usually one of: the Tailscale client is not signed in (open the Tailscale tray app and sign in, then re-run this file), or the tailnet needs HTTPS certificates enabled (open https://login.tailscale.com/admin/dns, or ask the tailnet admin). The app itself is fully working at http://127.0.0.1:%APP_PORT% - only the tailnet address needs this fix."
+if errorlevel 1 goto ts_serve_failed
+goto ts_serve_ok
+
+:ts_signin_required
+echo.
+echo   ONE MANUAL STEP REMAINS to enable private Tailnet access (optional):
+echo.
+echo     1. Tailscale is installed but not signed in on this machine yet.
+echo     2. Open https://login.tailscale.com in your browser.
+echo     3. Sign in with your TOEFL House Tailscale account. This machine
+echo        will ask for approval on your phone or another signed-in
+echo        device - approve it.
+echo     4. Double-click START-TOEFL-HOUSE.bat again. The application is
+echo        already running locally; that run finishes the Tailscale
+echo        configuration and prints the private address.
+echo.
+goto ts_unavailable
+
+:ts_serve_failed
+echo.
+echo   Tailscale Serve could not be finished. Usually one of: the Tailscale
+echo   client is not signed in (open the Tailscale tray app and sign in), or
+echo   the tailnet needs HTTPS certificates enabled
+echo   (https://login.tailscale.com/admin/dns, or ask the tailnet admin).
+echo.
+goto ts_unavailable
+
 :ts_serve_ok
 echo.
 echo  =====================================================================
@@ -355,6 +402,29 @@ echo.
 echo   Access is PRIVATE to the Tailnet. Tailscale Funnel is NOT used and
 echo   nothing is exposed to the public internet.
 echo.
+goto ts_summary
+
+:ts_unavailable
+echo  =====================================================================
+echo   THE TOEFL HOUSE IS RUNNING - private Tailnet access is not set up.
+echo  =====================================================================
+echo.
+echo   The local server is healthy and fully usable on this computer:
+echo        %APP_URL_LOCAL%
+echo.
+echo   Only the optional private Tailnet link to your other devices could
+echo   not be configured now. To enable it later:
+echo     1. Install Tailscale from https://tailscale.com/download/windows
+echo        (or fix the download/network if it failed).
+echo     2. Open the Tailscale tray app and sign in to your tailnet; approve
+echo        this machine on a device already signed in.
+echo     3. Double-click START-TOEFL-HOUSE.bat again - it finishes the
+echo        Tailscale setup and prints the private address.
+echo.
+echo   Nothing is exposed to the public internet; Tailscale Funnel is unused.
+echo.
+
+:ts_summary
 echo   Other files in this folder:
 echo     STOP-TOEFL-HOUSE.bat    stop the application and the database
 echo     BACKUP-TOEFL-HOUSE.bat  save a database backup into backup\

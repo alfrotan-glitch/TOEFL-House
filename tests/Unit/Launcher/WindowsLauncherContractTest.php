@@ -204,8 +204,9 @@ final class WindowsLauncherContractTest extends TestCase
 
     public function test_other_runtimes_use_stable_or_rolling_urls_not_archived_patches(): void
     {
-        // Tailscale intentionally uses a rolling "latest" pointer.
-        $this->assertSame('https://download.tailscale.com/stable/tailscale-setup-latest.amd64.msi', $this->vars['TAILSCALE_MSI_URL'] ?? '');
+        // Tailscale uses a version-pinned MSI on the official package host; that
+        // contract has its own dedicated tests below (test_tailscale_*).
+        $this->assertArrayHasKey('TAILSCALE_MSI_URL', $this->vars);
         // Composer is the official PERMANENT versioned PHAR (not the crash-prone
         // composer-setup.php bootstrapper, and not the capitalized Composer-stable.phar URL).
         $this->assertSame(
@@ -765,6 +766,132 @@ final class WindowsLauncherContractTest extends TestCase
         $this->assertMatchesRegularExpression('/serve --bg %APP_PORT%/', $this->bat);
     }
 
+    public function test_tailscale_uses_the_official_pkgs_host_and_a_pinned_versioned_msi(): void
+    {
+        // Regression: Step 10 hard-coded https://download.tailscale.com/stable/
+        // tailscale-setup-latest.amd64.msi. That host does not exist in DNS
+        // (curl exit 6 "Could not resolve host") and Tailscale publishes MSIs
+        // ONLY version-pinned as tailscale-setup-<ver>-amd64.msi on the official
+        // package host pkgs.tailscale.com (there is no rolling "latest" MSI).
+        $this->assertArrayHasKey('TAILSCALE_VERSION', $this->vars, 'the launcher must pin a Tailscale version.');
+        $this->assertMatchesRegularExpression(
+            '/^\d+\.\d+\.\d+$/',
+            $this->vars['TAILSCALE_VERSION'],
+            'TAILSCALE_VERSION must be a pinned stable x.y.z release.',
+        );
+        // The URL var derives the file name from the pinned version.
+        $this->assertStringContainsString('%TAILSCALE_VERSION%', $this->vars['TAILSCALE_MSI_URL'], 'the MSI URL must derive from TAILSCALE_VERSION, not a hard-coded file name.');
+        $url = str_replace('%TAILSCALE_VERSION%', $this->vars['TAILSCALE_VERSION'], $this->vars['TAILSCALE_MSI_URL']);
+        // Official host + versioned -amd64.msi pattern.
+        $this->assertSame(
+            "https://pkgs.tailscale.com/stable/tailscale-setup-{$this->vars['TAILSCALE_VERSION']}-amd64.msi",
+            $url,
+            'Tailscale MSI must come from pkgs.tailscale.com as tailscale-setup-<ver>-amd64.msi.',
+        );
+        // The broken host and the nonexistent rolling file name must be gone entirely.
+        $this->assertStringNotContainsString('download.tailscale.com', $this->bat, 'the non-existent download.tailscale.com host must not appear anywhere.');
+        $this->assertStringNotContainsString('tailscale-setup-latest', $this->bat, 'there is no rolling "latest" Tailscale MSI; the file must be version-pinned.');
+    }
+
+    public function test_tailscale_msi_is_downloaded_through_the_atomic_fetch_helper(): void
+    {
+        // The MSI must be fetched via the atomic :fetch_file helper (retries,
+        // .part temporary file, size floor, atomic promotion) - never a bare
+        // curl that writes straight into the destination (curl --retry also
+        // does not retry a DNS failure, exit 6, which is why the old download
+        // never recovered).
+        $step10 = $this->tailscaleStepBlock();
+        $this->assertNotSame('', $step10, 'the Step 10 Tailscale block must exist.');
+        $this->assertStringContainsString(
+            'call :fetch_file "%RT%\downloads\tailscale-setup.msi" "%TAILSCALE_MSI_URL%" "" "10485760"',
+            $step10,
+            'the Tailscale MSI is downloaded through the atomic :fetch_file helper with a size floor.',
+        );
+        // No raw curl writes the MSI directly (the non-atomic pattern).
+        $this->assertDoesNotMatchRegularExpression(
+            '/curl\.exe[^\n]*tailscale-setup\.msi/',
+            $step10,
+            'the MSI must not be written directly by a bare curl (use .part via :fetch_file).',
+        );
+        // The helper itself keeps its atomic contract (part file, retries, promotion).
+        $ff = $this->subroutineBody(':fetch_file');
+        $this->assertMatchesRegularExpression('/FF_DEST%\.part/', $ff, 'the helper downloads to a .part temporary file.');
+        $this->assertMatchesRegularExpression('/move \/y "%FF_DEST%\.part" "%FF_DEST%"/', $ff, 'the helper atomically promotes .part to the destination last.');
+        // msiexec installs the helper-fetched MSI silently (the existing convention).
+        $this->assertStringContainsString('msiexec /i "%RT%\downloads\tailscale-setup.msi" /qn /norestart', $step10, 'the fetched MSI is installed silently with msiexec.');
+    }
+
+    public function test_tailscale_failures_degrade_gracefully_and_never_call_the_fatal_path(): void
+    {
+        // By Step 10 the local app is already healthy (verified by /health). A
+        // Tailscale download failure, install/UAC decline, missing client,
+        // not-signed-in state, or serve-setup failure must NOT invoke the global
+        // fatal :fail path - it must finish and report the local URL, then tell
+        // the operator how to configure Tailscale manually and re-run.
+        $step10 = $this->tailscaleStepBlock();
+        $this->assertNotSame('', $step10, 'the Step 10 Tailscale block must exist.');
+
+        // No fatal :fail anywhere inside the Tailscale step (comments excluded).
+        $executable = implode("\n", array_filter(explode("\n", $step10), function ($line) {
+            return ! preg_match('/^\s*REM/', $line) && ! preg_match('/^\s*:/', $line);
+        }));
+        $this->assertDoesNotMatchRegularExpression(
+            '/call :fail/',
+            $executable,
+            'Tailscale download/install/serve failures must not call the fatal :fail path.',
+        );
+        // Every Tailscale problem converges on the non-fatal :ts_unavailable flow.
+        $this->assertMatchesRegularExpression('/goto ts_unavailable/', $step10, 'a Tailscale failure routes to the graceful :ts_unavailable summary.');
+        $this->assertStringContainsString(':ts_unavailable', $step10, 'the graceful Tailscale-unavailable label exists.');
+        // The graceful banner states the LOCAL server is healthy and gives the local URL.
+        $unavail = $this->subroutineBlock(':ts_unavailable', ':ts_summary');
+        $this->assertMatchesRegularExpression(
+            '/The local server is healthy and fully usable on this computer:[\s\S]{0,80}?%APP_URL_LOCAL%/',
+            $unavail,
+            'on Tailscale failure the launcher reports the local server is healthy and shows the local URL.',
+        );
+        // Manual remediation: where to install and that re-running finishes setup.
+        $this->assertStringContainsString('https://tailscale.com/download/windows', $unavail, 'the message tells how to install Tailscale manually.');
+        $this->assertMatchesRegularExpression('/START-TOEFL-HOUSE\.bat again/s', $unavail, 'the message says to re-run the launcher after configuring Tailscale.');
+        // Not-signed-in keeps its interactive guidance but now continues to the summary (no early exit).
+        $this->assertMatchesRegularExpression('/:ts_signin_required[\s\S]*?goto ts_unavailable/', $step10, 'a not-signed-in client is guided and continues (not a hard exit).');
+        $this->assertMatchesRegularExpression('/:ts_serve_failed[\s\S]*?goto ts_unavailable/', $step10, 'a failed serve setup continues to the graceful summary.');
+        // Serve is still configured when Tailscale IS available.
+        $this->assertMatchesRegularExpression('/serve --bg %APP_PORT%/', $step10, 'tailscale serve --bg is still run when the client is available.');
+        $this->assertStringContainsString(':ts_serve_ok', $step10, 'the successful serve path is preserved.');
+    }
+
+    public function test_graceful_tailscale_does_not_weaken_application_fatal_paths(): void
+    {
+        // Making Tailscale non-fatal must NOT make the application itself
+        // non-fatal. The /health gate and the required runtimes still call the
+        // global :fail; only Step 10 degrades gracefully.
+        // Health gate still hard-stops when the app never answers /health.
+        $this->assertMatchesRegularExpression(
+            '/type "%SERVER_LOG%"[\s\S]{0,200}?call :fail "The application was not healthy/',
+            $this->bat,
+            'an unhealthy application still stops the launcher (the /health gate is not weakened).',
+        );
+        // Required runtimes / DB / migrations still fail fast (representative set).
+        $this->assertMatchesRegularExpression('/call :fail "PostgreSQL could not be started/', $this->bat);
+        $this->assertMatchesRegularExpression('/call :fail "Database migrations failed/', $this->bat);
+        // :fail itself still terminates the whole launcher process.
+        $failBlock = $this->subroutineBody(':fail');
+        $this->assertMatchesRegularExpression('/^\s*exit\s+1\s*$/m', $failBlock, ':fail still ends with a bare "exit 1".');
+    }
+
+    public function test_built_in_server_cwd_public_fix_is_preserved_in_full_launch_line(): void
+    {
+        // Extends the cwd-public regression: the ENTIRE launch line must keep
+        // both the /D "%ROOT%\public" working directory and -t "%ROOT%\public"
+        // document root, with the framework router, around the direct php -S.
+        $this->assertMatchesRegularExpression(
+            '/start "TOEFL-House-Server" \/D "%ROOT%\\\\public" \/min cmd \/c ""%PHP%" -d variables_order=EGPCS -S 127\.0\.0\.1:%APP_PORT% -t "%ROOT%\\\\public" "%FRAMEWORK_ROUTER%" > "%SERVER_LOG%" 2>&1"/',
+            $this->bat,
+            'the direct built-in-server launch keeps /D public cwd, -t public docroot, the framework router and the server log.',
+        );
+    }
+
     public function test_composer_uses_the_official_pinned_phar_not_the_bootstrapper(): void
     {
         // Composer is the official PERMANENT versioned PHAR (https://getcomposer.org/download/<v>/composer.phar).
@@ -813,6 +940,24 @@ final class WindowsLauncherContractTest extends TestCase
             'a working composer.phar is reused (idempotent); a broken one is replaced.',
         );
         $this->assertGreaterThan(0, preg_match_all('/"%PHP%" "%COMPOSER_PHAR%"/', $prep), 'always invoked with launcher-local PHP.');
+    }
+
+    private function tailscaleStepBlock(): string
+    {
+        // The Step 10 Tailscale section, from its section banner up to (but not
+        // including) the "Subroutines" divider that begins :fail et al.
+        $startMarker = 'echo [10/10]';
+        $endMarker = 'REM ===========================================================================';
+        $start = strpos($this->bat, $startMarker);
+        if ($start === false) {
+            return '';
+        }
+        $end = strpos($this->bat, $endMarker, $start);
+        if ($end === false) {
+            return substr($this->bat, $start);
+        }
+
+        return substr($this->bat, $start, $end - $start);
     }
 
     private function subroutineBlock(string $startLabel, string $nextLabel): string
