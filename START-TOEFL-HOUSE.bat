@@ -41,6 +41,7 @@ if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
 set "RT=%ROOT%\.runtime"
 set "PHP_DIR=%RT%\php"
 set "PHP=%PHP_DIR%\php.exe"
+set "LAUNCHER_HELPER=%ROOT%\deploy\windows\launcher_helper.php"
 set "COMPOSER_PHAR=%RT%\composer.phar"
 set "PG_DIR=%RT%\pgsql"
 set "PG_BIN=%PG_DIR%\bin"
@@ -143,22 +144,20 @@ REM ---------------------------------------------------------------------------
 REM Step 4 - .env + APP_KEY
 REM ---------------------------------------------------------------------------
 echo [4/10] Preparing .env from the production template...
-if not exist "%ROOT%\.env" (
-    if not exist "%ROOT%\.env.example" call :fail "The template file .env.example is missing from this clone. Re-clone the repository."
-    copy /y "%ROOT%\.env.example" "%ROOT%\.env" >nul
-    call :set_env DB_USERNAME postgres
-    call :set_env DB_HOST 127.0.0.1
-    call :set_env DB_PORT 5432
-    call :set_env DB_DATABASE toefl_house
-    call :set_env DB_PASSWORD ""
-    call :set_env DB_SSLMODE disable
-    call :set_env APP_URL %APP_URL_LOCAL%
-    REM Localhost access on this PC is plain HTTP; the Tailnet side is HTTPS
-    REM through Tailscale Serve. A secure-only cookie would break the local
-    REM console, so the desktop deployment uses an http-only, same-site cookie.
-    call :set_env SESSION_SECURE_COOKIE false
-    echo       - .env created from .env.example with desktop overrides.
-)
+if not exist "%ROOT%\.env" goto make_env
+goto env_ready
+:make_env
+if not exist "%ROOT%\.env.example" call :fail "The template file .env.example is missing from this clone. Re-clone the repository."
+if not exist "%LAUNCHER_HELPER%" call :fail "The launcher helper is missing at %LAUNCHER_HELPER%. Re-clone the repository."
+copy /y "%ROOT%\.env.example" "%ROOT%\.env" >nul
+REM Apply desktop overrides with a plain-PHP helper. The previous inline
+REM `php -r "...()"` was called from inside a parenthesized block and cmd's
+REM block parser mangled the parentheses (PHP reported "Unclosed '('"), so
+REM the overrides were silently skipped. An external script avoids that.
+"%PHP%" "%LAUNCHER_HELPER%" env-set "%ROOT%\.env" DB_USERNAME=postgres DB_HOST=127.0.0.1 DB_PORT=5432 DB_DATABASE=toefl_house DB_PASSWORD= DB_SSLMODE=disable "APP_URL=%APP_URL_LOCAL%" SESSION_SECURE_COOKIE=false
+if errorlevel 1 call :fail "Could not write the desktop .env overrides via the launcher helper. Re-run this file."
+echo       - .env created from .env.example with desktop overrides.
+:env_ready
 findstr /R /C:"^APP_KEY=base64:" "%ROOT%\.env" >nul 2>nul
 if errorlevel 1 (
     echo       - generating APP_KEY...
@@ -187,7 +186,7 @@ REM Step 7 - first-run bootstrap: owner account, only when none exists yet
 REM ---------------------------------------------------------------------------
 echo [7/10] Checking whether the first owner account needs to be created...
 set "ACCTS=-1"
-for /f "tokens=1" %%c in ('"%PG_BIN%\psql.exe" -h 127.0.0.1 -p %PG_PORT% -U postgres -d toefl_house -tAc "SELECT count(*) FROM user_accounts" 2^>nul') do set "ACCTS=%%c"
+for /f "tokens=1" %%c in ('"%PHP%" "%LAUNCHER_HELPER%" account-count "%APP_DSN%" postgres "" toefl_house') do set "ACCTS=%%c"
 if "%ACCTS%"=="-1" call :fail "Could not read the account count from the database. Re-run this file."
 if "%ACCTS%"=="0" (
     echo.
@@ -388,22 +387,36 @@ REM Idempotent, data-preserving database ensure. Creates toefl_house only when
 REM absent. When present it is NEVER dropped or overwritten: it is classified
 REM by an authoritative catalog check and reused only if it belongs to this
 REM application; an unrecognizable/foreign database stops the launcher.
+REM Existence and identity are decided with PHP/PDO via the launcher helper.
+REM Doing this through `for /f` over psql.exe with quoted paths/SQL was
+REM mis-parsed by cmd (the command never ran and the result came back empty);
+REM PHP/PDO is the same reliable stack the application already uses.
+if not exist "%LAUNCHER_HELPER%" call :fail "The launcher helper is missing at %LAUNCHER_HELPER%. Re-clone the repository."
+set "MAINT_DSN=pgsql:host=127.0.0.1;port=%PG_PORT%;dbname=postgres;sslmode=disable"
+set "APP_DSN=pgsql:host=127.0.0.1;port=%PG_PORT%;dbname=toefl_house;sslmode=disable"
 set "DB_EXISTS="
-for /f "tokens=1" %%c in ('"%PG_BIN%\psql.exe" -h 127.0.0.1 -p %PG_PORT% -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='toefl_house'" 2^>nul') do set "DB_EXISTS=%%c"
-if not defined DB_EXISTS (
-    echo       - creating the toefl_house database...
-    "%PG_BIN%\createdb.exe" -h 127.0.0.1 -p %PG_PORT% -U postgres toefl_house
-    if errorlevel 1 call :fail "Could not create the toefl_house database. Re-run this file."
-    exit /b 0
-)
+for /f "tokens=1" %%c in ('"%PHP%" "%LAUNCHER_HELPER%" db-exists "%MAINT_DSN%" postgres "" toefl_house') do set "DB_EXISTS=%%c"
+if "%DB_EXISTS%"=="yes" goto db_present
+if "%DB_EXISTS%"=="no" goto db_create
+call :fail "Could not ask PostgreSQL whether toefl_house exists (helper failed or the server is unreachable). Check .runtime\pg.log and re-run this file."
+:db_create
+echo       - creating the toefl_house database...
+"%PG_BIN%\createdb.exe" -h 127.0.0.1 -p %PG_PORT% -U postgres toefl_house
+if errorlevel 1 call :fail "Could not create the toefl_house database. Re-run this file."
+exit /b 0
+:db_present
 set "DB_KIND="
-for /f "tokens=1" %%c in ('"%PG_BIN%\psql.exe" -h 127.0.0.1 -p %PG_PORT% -U postgres -d toefl_house -tAc "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='user_accounts') OR EXISTS (SELECT 1 FROM migrations WHERE migration='2026_08_25_000007_create_user_accounts_table') OR (to_regclass('public.migrations') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name <> 'migrations')) THEN 'valid' ELSE 'foreign' END" 2^>nul') do set "DB_KIND=%%c"
-if "%DB_KIND%"=="valid" (
-    echo       - toefl_house already exists and is a TOEFL House database; reusing it - no data is changed.
-    exit /b 0
-)
+for /f "tokens=1" %%c in ('"%PHP%" "%LAUNCHER_HELPER%" db-app-valid "%APP_DSN%" postgres "" toefl_house') do set "DB_KIND=%%c"
+if "%DB_KIND%"=="valid" goto db_valid
+if "%DB_KIND%"=="foreign" goto db_foreign
+call :fail "Could not verify whether toefl_house is a TOEFL House database (helper failed). Check .runtime\pg.log and re-run. Nothing has been dropped or overwritten."
+:db_valid
+echo       - toefl_house already exists and is a TOEFL House database; reusing it - no data is changed.
+exit /b 0
+:db_foreign
 call :fail "A PostgreSQL database named 'toefl_house' already exists on port %PG_PORT% but is NOT recognized as the TOEFL House database (it has none of this application's tables or migrations). Nothing has been dropped or overwritten. To avoid destroying data, the launcher stops here. If this database belongs to a different program, rename it or remove it yourself; if you expected a TOEFL House database, contact the maintainer. Then re-run this file."
 exit /b 1
+
 
 :fetch_file
 REM Atomic, validated download. Usage:
@@ -608,17 +621,12 @@ if exist "%PHP_DIR%\ext\php_pdo.dll" >>"%PHP_DIR%\php.ini" echo extension=pdo
 >>"%PHP_DIR%\php.ini" echo extension=pdo_pgsql
 >>"%PHP_DIR%\php.ini" echo extension=pgsql
 >>"%PHP_DIR%\php.ini" echo extension=fileinfo
->>"%PHP_DIR%\php.ini" echo extension=dom
->>"%PHP_DIR%\php.ini" echo extension=xml
->>"%PHP_DIR%\php.ini" echo extension=simplexml
->>"%PHP_DIR%\php.ini" echo extension=xmlreader
->>"%PHP_DIR%\php.ini" echo extension=xmlwriter
+REM dom, xml, simplexml, xmlreader and xmlwriter are compiled INTO the PHP
+REM core on Windows (there is no php_dom.dll/php_xml.dll in ext). Listing them
+REM as shared extensions produced "Unable to load dynamic library ... The
+REM specified module could not be found" on every PHP invocation; the built-in
+REM implementations are always present, so they are intentionally not written.
 >>"%PHP_DIR%\php.ini" echo extension=zip
-exit /b 0
-
-:set_env
-REM Usage: call :set_env KEY value   (replaces exactly one KEY= line in .env)
-"%PHP%" -r "$k='%1';$v='%2';$f='%ROOT%\.env';$o='';foreach(file($f,FILE_IGNORE_NEW_LINES) as $l){if(preg_match('/^'.preg_quote($k,'/').'=/',$l)){$o.=$k.'='.$v.PHP_EOL;}else{$o.=$l.PHP_EOL;}}file_put_contents($f,$o);"
 exit /b 0
 
 :port_in_use

@@ -457,18 +457,104 @@ final class WindowsLauncherContractTest extends TestCase
         $this->assertMatchesRegularExpression('/if %PG_TRIES% GEQ 30 exit \/b 1/', $prep, 'the readiness wait is bounded and fails fast if the server never accepts connections.');
     }
 
-    public function test_database_is_created_only_when_absent(): void
+    public function test_database_is_created_only_when_absent_via_php_pdo_helper(): void
     {
         $ensure = $this->subroutineBlock(':ensure_app_db', ':fetch_file');
         $this->assertNotSame('', $ensure, ':ensure_app_db must exist.');
-        // existence is checked authoritatively against pg_database.
-        $this->assertMatchesRegularExpression('/SELECT 1 FROM pg_database WHERE datname=.toefl_house./', $ensure);
-        // createdb only in the "not defined" (absent) branch.
+        // Database existence is decided by the committed PHP/PDO launcher helper
+        // (cmd cannot safely parse psql.exe with quoted paths/SQL inside for /f).
+        $this->assertMatchesRegularExpression('/"%LAUNCHER_HELPER%" db-exists "%MAINT_DSN%" postgres "" toefl_house/', $ensure);
+        // createdb is reached only via the "no" (absent) goto branch.
         $this->assertMatchesRegularExpression(
-            '/if not defined DB_EXISTS \([\s\S]*?createdb\.exe"[^(]*toefl_house[\s\S]*?exit \/b 0\s*\n\s*\)/s',
+            '/if "%DB_EXISTS%"=="no" goto db_create[\s\S]*?:db_create[\s\S]*?createdb\.exe"[^\n]*toefl_house[\s\S]*?exit \/b 0/s',
             $ensure,
-            'createdb runs only when toefl_house is absent.',
+            'createdb runs only after the helper reports the database is absent.',
         );
+        $this->assertSame(1, preg_match_all('/createdb\.exe"[^\n]*toefl_house/', $this->bat), 'createdb is invoked exactly once.');
+    }
+
+    public function test_database_inspection_uses_the_php_helper_not_psql_for_f(): void
+    {
+        // No psql invocation may be driven through cmd's for /f (its quote/parenthesis
+        // parser never ran the query, which caused the empty account count). All DB
+        // inspection goes through the committed PHP helper over PDO.
+        $this->assertDoesNotMatchRegularExpression(
+            "/for \/f[^\n]*\([^\n]*psql\.exe/i",
+            $this->bat,
+            'no psql.exe command may be wrapped in a for /f loop; use the PHP/PDO helper.',
+        );
+        $this->assertMatchesRegularExpression('/set "LAUNCHER_HELPER=%ROOT%\\deploy\\windows\\launcher_helper\.php"/', $this->bat);
+        $this->assertStringContainsString('db-app-valid', $this->subroutineBlock(':ensure_app_db', ':fetch_file'));
+        // Step 7 account count also uses the helper over PDO.
+        $this->assertMatchesRegularExpression('/"%LAUNCHER_HELPER%" account-count "%APP_DSN%" postgres "" toefl_house/', $this->bat);
+    }
+
+    public function test_existing_valid_database_is_reused_and_never_dropped_or_overwritten(): void
+    {
+        $this->assertDoesNotMatchRegularExpression('/dropdb|DROP DATABASE/i', $this->bat, 'the launcher must never drop a database.');
+        $this->assertDoesNotMatchRegularExpression('/createdb[\s\S]{0,200}(already exists)/i', $this->bat, 'createdb must not be run blindly against an existing database.');
+        // Validity is established by the helper's authoritative catalog checks.
+        $helper = $this->launcherHelper();
+        $this->assertStringContainsString("table_name = 'user_accounts'", $helper, 'validity checks for the application root table.');
+        $this->assertStringContainsString('2026_08_25_000007_create_user_accounts_table', $helper, 'validity checks for an application migration record.');
+        $ensure = $this->subroutineBlock(':ensure_app_db', ':fetch_file');
+        $this->assertMatchesRegularExpression(
+            '/if "%DB_KIND%"=="valid" goto db_valid[\s\S]*?:db_valid[\s\S]*?reusing it[\s\S]*?exit \/b 0/s',
+            $ensure,
+            'a recognized TOEFL House database is reused (no data changed).',
+        );
+    }
+
+    public function test_existing_unrecognized_database_stops_safely_without_destroying_data(): void
+    {
+        $ensure = $this->subroutineBlock(':ensure_app_db', ':fetch_file');
+        $this->assertMatchesRegularExpression(
+            '/:db_foreign\s*\n\s*call :fail "[^"]*NOT recognized as the TOEFL House database[^"]*"/s',
+            $ensure,
+            'an existing but unrecognizable database stops the launcher with a clear diagnostic.',
+        );
+        $this->assertMatchesRegularExpression('/Nothing has been dropped or overwritten/', $ensure, 'the message must promise no data was destroyed.');
+        $this->assertDoesNotMatchRegularExpression('/dropdb|DROP DATABASE/i', $this->bat, 'no automatic destruction path exists.');
+    }
+
+    public function test_env_overrides_are_written_by_the_php_helper_not_fragile_inline_php(): void
+    {
+        // The desktop .env overrides must be written by the committed helper
+        // (env-set). The previous inline `php -r "...()"` ran inside a
+        // parenthesized if-block; cmd mangled the parentheses and PHP reported
+        // "Unclosed '('", silently skipping the overrides.
+        $this->assertMatchesRegularExpression(
+            '/"%LAUNCHER_HELPER%" env-set "%ROOT%\\\.env"[\s\S]*DB_DATABASE=toefl_house[\s\S]*DB_SSLMODE=disable/',
+            $this->bat,
+            'desktop .env overrides are applied through the helper.',
+        );
+        // The make-env logic must NOT sit inside a parenthesized block (uses goto labels).
+        $this->assertMatchesRegularExpression('/if not exist "%ROOT%\\\.env" goto make_env/', $this->bat);
+        // The old inline .env writer subroutine must be gone.
+        $this->assertStringNotContainsString(':set_env', $this->bat, 'the fragile inline :set_env subroutine is removed.');
+        // The helper must exist and perform an atomic rewrite.
+        $helper = $this->launcherHelper();
+        $this->assertStringContainsString("case 'env-set'", $helper);
+        $this->assertStringContainsString('rename($tmp, $envPath)', $helper, '.env is replaced atomically.');
+    }
+
+    public function test_core_compiled_xml_extensions_are_not_listed_as_shared(): void
+    {
+        // dom/xml/simplexml/xmlreader/xmlwriter are compiled into PHP on Windows
+        // (no php_dom.dll/php_xml.dll in ext). Listing them produced "Unable to load
+        // dynamic library ... The specified module could not be found" on every run.
+        $ini = $this->subroutineBody(':write_php_ini');
+        foreach (['dom', 'xml', 'simplexml', 'xmlreader', 'xmlwriter'] as $ext) {
+            $this->assertDoesNotMatchRegularExpression(
+                '/echo extension=' . preg_quote($ext, '/') . '\s*$/m',
+                $ini,
+                "core-compiled extension '{$ext}' must not be listed as a shared extension.",
+            );
+        }
+        // Genuinely shared extensions are still enabled.
+        $this->assertMatchesRegularExpression('/echo extension=pdo_pgsql/', $ini);
+        $this->assertMatchesRegularExpression('/echo extension=openssl/', $ini);
+        $this->assertMatchesRegularExpression('/echo extension=zip/', $ini);
     }
 
     public function test_existing_valid_database_is_reused_and_never_dropped_or_overwritten(): void
@@ -508,7 +594,7 @@ final class WindowsLauncherContractTest extends TestCase
         // (never a blind unconditional call that would error on an already-existing database).
         $ensure = $this->subroutineBlock(':ensure_app_db', ':fetch_file');
         $this->assertSame(1, preg_match_all('/createdb\.exe"[^\n]*toefl_house/', $this->bat), 'createdb is invoked exactly once.');
-        $this->assertMatchesRegularExpression('/if not defined DB_EXISTS \([\s\S]*createdb\.exe"[\s\S]*\)/', $ensure, 'createdb is guarded by the database-absent check.');
+        $this->assertMatchesRegularExpression('/if "%DB_EXISTS%"=="no" goto db_create/', $ensure, 'createdb is guarded by the helper database-absent result.');
         // pg_ctl start appears exactly once, inside the not-running guard.
         $prep = $this->subroutineBlock(':prepare_pg', ':ensure_app_db');
         $this->assertSame(1, preg_match_all('/pg_ctl\.exe"[^\n]* start/', $prep), 'pg_ctl start appears exactly once, inside the not-running guard.');
@@ -579,6 +665,14 @@ final class WindowsLauncherContractTest extends TestCase
         }
 
         return substr($this->bat, $start);
+    }
+
+    private function launcherHelper(): string
+    {
+        $path = dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . 'deploy' . DIRECTORY_SEPARATOR . 'windows' . DIRECTORY_SEPARATOR . 'launcher_helper.php';
+        $this->assertFileExists($path, 'deploy/windows/launcher_helper.php must be committed.');
+
+        return (string) file_get_contents($path);
     }
 
     private function subroutineBody(string $label): string
