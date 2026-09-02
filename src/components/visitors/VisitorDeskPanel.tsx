@@ -4,11 +4,12 @@
  */
 
 import type {CourseOption} from '../../utils/academicOptions';
-import React, { useState, useEffect } from 'react';
-import {X, Award, Check, Copy, UserCog, PhoneCall, CheckCircle2, Plus, User, UserCheck, UserPlus, ChevronRight} from 'lucide-react';
-import {Visitor, ConversionEligibility} from '../../types';
+import React, { useState } from 'react';
+import {X, Award, Copy, UserCog, PhoneCall, CheckCircle2, Plus, User, UserCheck, ChevronRight, CreditCard, GraduationCap, Ban, ArrowRight} from 'lucide-react';
+import {Visitor, VisitorWorkflowState} from '../../types';
 import { BRAND_NAME } from '../../config/branding';
 import { SOURCE_LABELS } from '../../config/visitorSources';
+import { formatAFN } from '../../utils/format';
 
 interface VisitorDeskPanelProps {
   visitor: Visitor;
@@ -24,52 +25,41 @@ interface VisitorDeskPanelProps {
   updateVisitor: (visitorId: string, updatedFields: Partial<Visitor>) => Promise<void>;
   onOpenPlacementTest: () => void;
   onOpenConvert: () => void;
+  onOpenStudentWorkspace?: (studentId: string) => void;
+  /** Server-derived reception state — the workspace renders it, never derives it. */
+  workflow?: VisitorWorkflowState | null;
   courseOptions?: CourseOption[];
   triggerToast: (message: string, type: 'success' | 'error' | 'info') => void;
-  /** UX-4 — the backend requires Lead.Convert / Lead.Edit for these actions. */
+  /** The backend requires these permissions; the UI mirrors them so no button is a guaranteed 403. */
   canConvertLead?: boolean;
   canEditLead?: boolean;
-  /** UX-3 — read-only pre-flight so Enroll is never a dead end. */
-  checkConversionEligibility?: (visitorId: string, classId?: string) => Promise<ConversionEligibility>;
 }
 
-interface PipelineStep {
-  key: string;
-  label: string;
-  icon: React.ReactNode;
-  isDone: (v: Visitor) => boolean;
-  isCurrent: (v: Visitor) => boolean;
-  hint: string;
-}
-
-const PIPELINE_STEPS: PipelineStep[] = [
-  { key: 'register', label: 'Registered', icon: <UserPlus className="w-3.5 h-3.5" />, isDone: () => true, isCurrent: () => false, hint: 'Visitor registered.' },
-  { key: 'followup', label: 'Follow-up', icon: <PhoneCall className="w-3.5 h-3.5" />, isDone: (v) => (v.followUpHistory?.length ?? 0) > 0, isCurrent: (v) => (v.followUpHistory?.length ?? 0) === 0 && v.status !== 'registered', hint: 'Log contact attempts and gauge interest.' },
-  { key: 'admit', label: 'Admit', icon: <UserCheck className="w-3.5 h-3.5" />, isDone: (v) => v.status === 'registered', isCurrent: (v) => v.status !== 'registered', hint: 'Create the student identity and canonical invoices first.' },
-  { key: 'placement', label: 'Placement', icon: <Award className="w-3.5 h-3.5" />, isDone: (v) => !!v.placementScore, isCurrent: (v) => v.status === 'registered' && !v.placementScore, hint: 'Run placement from the student-linked workspace, then settle invoices before enrollment.' },
+const STAGE_LADDER: Array<{ key: VisitorWorkflowState['stage']; label: string }> = [
+  { key: 'lead', label: 'Lead' },
+  { key: 'follow_up', label: 'Follow-up' },
+  { key: 'admission', label: 'Admission' },
+  { key: 'placement', label: 'Placement' },
+  { key: 'financial_clearance', label: 'Fees' },
+  { key: 'enrollment', label: 'Enroll' },
+  { key: 'enrolled', label: 'Enrolled' },
 ];
 
+const STAGE_TONE: Record<VisitorWorkflowState['stage'], string> = {
+  lead: 'bg-slate-100 text-slate-700 border-slate-200',
+  follow_up: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+  admission: 'bg-sky-50 text-sky-700 border-sky-200',
+  placement: 'bg-violet-50 text-violet-700 border-violet-200',
+  financial_clearance: 'bg-amber-50 text-amber-800 border-amber-200',
+  enrollment: 'bg-teal-50 text-teal-700 border-teal-200',
+  enrolled: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+};
+
 export default function VisitorDeskPanel({
-  visitor, courseOptions = [], onClose, updateVisitorCRM, addVisitorFollowUp, updateVisitor, onOpenPlacementTest, onOpenConvert, triggerToast,
-  canConvertLead = true, canEditLead = true, checkConversionEligibility,
+  visitor, courseOptions = [], onClose, updateVisitorCRM, addVisitorFollowUp, updateVisitor, onOpenPlacementTest, onOpenConvert, onOpenStudentWorkspace,
+  workflow, triggerToast,
+  canConvertLead = true, canEditLead = true,
 }: VisitorDeskPanelProps) {
-  /**
-   * Lead-level conversion eligibility (UX-3), checked with no class selected:
-   * it answers "is this lead convertible at all?" so the Enroll button can
-   * explain itself instead of opening a form that ends in a refusal.
-   */
-  const [eligibility, setEligibility] = useState<ConversionEligibility | null>(null);
-  useEffect(() => {
-    // Fetched for EVERY viewer. Gating this on `canConvertLead` meant a
-    // counselor — who is authorized to run the placement assessment that
-    // unblocks the lead — never learned the lead was blocked.
-    if (!checkConversionEligibility) return;
-    let cancelled = false;
-    checkConversionEligibility(visitor.id)
-      .then((res) => { if (!cancelled) setEligibility(res); })
-      .catch(() => { /* Non-fatal: the modal re-checks and fails closed. */ });
-    return () => { cancelled = true; };
-  }, [visitor.id, visitor.placementStatus, visitor.status, checkConversionEligibility]);
   const [deskTab, setDeskTab] = useState<'details' | 'logs'>('details');
   const [followUpInput, setFollowUpInput] = useState<string>('');
   const [followUpOutcome, setFollowUpOutcome] = useState<string>('');
@@ -94,9 +84,11 @@ export default function VisitorDeskPanel({
   const setProfileField = (field: keyof typeof profileDraft, value: string) =>
     setProfileDraft((current) => ({ ...current, [field]: value }));
 
-  // Sync the editable CRM fields whenever a different visitor is shown, by
-  // adjusting state during render (no setState-in-effect).
-  const [prevVisitorId, setPrevVisitorId] = useState<string>(visitor.id);
+  // The server's local calendar date is the authority; the date pickers honour
+  // it as a courtesy and the API rejects anything older regardless.
+  const todayIso = new Date().toLocaleDateString('en-CA');
+
+  const [prevVisitorId, setPrevVisitorId] = useState(visitor.id);
   if (prevVisitorId !== visitor.id) {
     setPrevVisitorId(visitor.id);
     setDeskTab('details');
@@ -110,8 +102,17 @@ export default function VisitorDeskPanel({
     setFollowUpDate('');
   }
 
+  const assertFutureDate = (value: string): boolean => {
+    if (value && value < todayIso) {
+      triggerToast('Next contact date must be today or a future date.', 'error');
+      return false;
+    }
+    return true;
+  };
+
   const handleSaveCRM = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!assertFutureDate(crmDate)) return;
     try {
       await updateVisitorCRM(visitor.id, crmCourse || courseOptions[0]?.value || '', crmStatus as any, crmDate, crmNotes);
       triggerToast('Visitor CRM info updated successfully.', 'success');
@@ -136,6 +137,7 @@ export default function VisitorDeskPanel({
       triggerToast('Choose a next contact date for a callback.', 'error');
       return;
     }
+    if (!assertFutureDate(followUpDate)) return;
     try {
       await addVisitorFollowUp(visitor.id, followUpInput, followUpOutcome || undefined, followUpDate || undefined);
       setFollowUpInput('');
@@ -163,7 +165,6 @@ export default function VisitorDeskPanel({
     setTimeout(() => setCopiedIndex(null), 2000);
   };
 
-  const currentStep = PIPELINE_STEPS.find((s) => s.isCurrent(visitor));
   const placementTotal = visitor.placementScore?.total
     ?? visitor.placementScore?.totalScore
     ?? visitor.placementScore?.percentage
@@ -171,23 +172,71 @@ export default function VisitorDeskPanel({
   const placementRecommendation = visitor.placementScore?.levelRecommendation
     ?? visitor.placementScore?.recommendation?.text
     ?? visitor.placementScore?.recommendation?.levelId
+    ?? workflow?.placement.recommendedLevelName
     ?? 'Not assigned';
   const placementOverallCefr = visitor.placementScore?.overallCefr ?? null;
   const placementOutcome = visitor.placementScore?.outcome ?? null;
 
+  // ── The one primary action ────────────────────────────────────────────────
+  // Derived from the server's nextAction, gated by the same permissions the
+  // API enforces, and labelled with the business operation — never "Next".
+  const stage = workflow?.stage;
+  const nextAction = workflow?.nextAction;
+  const capabilities = workflow?.capabilities ?? { canFollowUp: canEditLead, canAdmit: canConvertLead, canAssess: canEditLead, canEnroll: false, canSettleInvoices: false };
+  const primary = (() => {
+    switch (nextAction) {
+      case 'log_follow_up':
+        return canEditLead
+          ? { label: workflow?.closed ? 'Reopen lead before working it' : 'Record follow-up', icon: <PhoneCall className="w-4 h-4" />, run: () => setDeskTab('logs'), disabled: workflow?.closed }
+          : null;
+      case 'admit':
+        return canConvertLead
+          ? { label: 'Admit student', icon: <UserCheck className="w-4 h-4" />, run: onOpenConvert, disabled: false }
+          : null;
+      case 'start_placement':
+        return capabilities.canAssess
+          ? { label: placementTotal != null || visitor.placementStatus === 'completed' ? 'Re-run placement' : 'Start placement', icon: <Award className="w-4 h-4" />, run: onOpenPlacementTest, disabled: false }
+          : null;
+      case 'settle_admission_fees':
+        // Invoice settlement is the finance desk's authority. The workspace
+        // states what is owed and who acts — it never offers a 403 button.
+        return null;
+      case 'enroll':
+      case 'view_enrollment': {
+        const studentId = workflow?.admission.studentId;
+        if (!studentId || !onOpenStudentWorkspace) return null;
+        return nextAction === 'enroll' && capabilities.canEnroll
+          ? { label: 'Enroll in class', icon: <GraduationCap className="w-4 h-4" />, run: () => onOpenStudentWorkspace(studentId), disabled: false }
+          : { label: 'Open student profile', icon: <GraduationCap className="w-4 h-4" />, run: () => onOpenStudentWorkspace(studentId), disabled: false };
+      }
+      default:
+        return null;
+    }
+  })();
+
+  const afterEffect: Record<string, string> = {
+    log_follow_up: 'The follow-up history updates and the next action moves forward with the lead.',
+    admit: 'A student record and the admission invoices are created; placement starts immediately after.',
+    start_placement: 'The placement result will determine the recommended level for enrollment.',
+    settle_admission_fees: 'Enrollment unlocks once the admission invoices are settled.',
+    enroll: 'The student takes a seat in the selected class and tuition is billed on its own invoice.',
+    view_enrollment: 'The student profile shows the class, balance and academic history.',
+  };
+
   return (
     <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto animate-in fade-in duration-200" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl w-full max-w-2xl my-auto animate-in zoom-in-95 duration-200 max-h-[92vh] flex flex-col">
-        
-        {/* Header */}
+
+        {/* Header — who this person is */}
         <div className="flex justify-between items-start border-b border-slate-100 px-6 py-4 shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-700 font-black text-base flex items-center justify-center border border-indigo-100">{visitor.fullName.substring(0, 1)}</div>
             <div>
-              <h3 className="font-extrabold text-slate-900 text-sm flex items-center gap-2">
+              <h3 className="font-extrabold text-slate-900 text-sm flex items-center gap-2 flex-wrap">
                 {visitor.fullName}
                 {visitor.serialNo && <span className="text-[10px] text-slate-400 font-mono font-semibold">#{visitor.serialNo}</span>}
-                {visitor.status === 'registered' && <span className="bg-emerald-100 text-emerald-800 text-[9px] px-2 py-0.5 rounded-full font-black">Admitted</span>}
+                {stage && <span className={`text-[9px] px-2 py-0.5 rounded-full font-black border uppercase tracking-wide ${STAGE_TONE[stage]}`}>{STAGE_LADDER.find((s) => s.key === stage)?.label}</span>}
+                {workflow?.admission.admitted && workflow.admission.studentCode && <span className="text-[9px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-black">Student {workflow.admission.studentCode}</span>}
               </h3>
               <p className="text-[11px] text-slate-500 font-mono font-bold mt-0.5">{visitor.phone}{visitor.whatsapp && visitor.whatsapp !== visitor.phone && <span className="text-slate-400"> · WA: {visitor.whatsapp}</span>}</p>
             </div>
@@ -195,67 +244,93 @@ export default function VisitorDeskPanel({
           <button onClick={onClose} className="p-1.5 bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-slate-600 rounded-xl cursor-pointer"><X className="w-4 h-4" /></button>
         </div>
 
-        {/* Stepper */}
-        <div className="bg-gradient-to-r from-indigo-50/60 to-purple-50/40 border-b border-slate-100 px-6 py-3.5 shrink-0">
-          <div className="flex items-center justify-between gap-1">
-            {PIPELINE_STEPS.map((step, i) => {
-              const done = step.isDone(visitor);
-              const isCurrent = step.key === currentStep?.key;
+        {/* Stage ladder + next action — where they are, what to do, what blocks it */}
+        <div className="bg-gradient-to-r from-indigo-50/60 to-purple-50/40 border-b border-slate-100 px-6 py-3.5 shrink-0 space-y-3">
+          <div className="flex items-center gap-1">
+            {STAGE_LADDER.map((step, i) => {
+              const current = stage === step.key;
+              const done = stage != null && STAGE_LADDER.findIndex((s) => s.key === stage) > i;
               return (
                 <React.Fragment key={step.key}>
                   <div className="flex flex-col items-center gap-1 flex-1 min-w-0">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-all ${done ? 'bg-emerald-500 border-emerald-500 text-white' : isCurrent ? 'bg-indigo-600 border-indigo-600 text-white ring-4 ring-indigo-100 animate-pulse' : 'bg-white border-slate-200 text-slate-300'}`}>
-                      {done ? <Check className="w-3.5 h-3.5 stroke-[3]" /> : step.icon}
-                    </div>
-                    <span className={`text-[9px] font-extrabold text-center leading-tight ${isCurrent ? 'text-indigo-700' : done ? 'text-emerald-700' : 'text-slate-400'}`}>{step.label}</span>
+                    <div className={`w-2.5 h-2.5 rounded-full border-2 transition-all ${done ? 'bg-emerald-500 border-emerald-500' : current ? 'bg-indigo-600 border-indigo-600 ring-4 ring-indigo-100' : 'bg-white border-slate-200'}`} />
+                    <span className={`text-[9px] font-extrabold text-center leading-tight ${current ? 'text-indigo-700' : done ? 'text-emerald-700' : 'text-slate-400'}`}>{step.label}</span>
                   </div>
-                  {i < PIPELINE_STEPS.length - 1 && <div className={`h-0.5 flex-1 mx-1 rounded-full ${PIPELINE_STEPS[i].isDone(visitor) ? 'bg-emerald-400' : 'bg-slate-200'}`} style={{ maxWidth: '24px' }} />}
+                  {i < STAGE_LADDER.length - 1 && <div className={`h-0.5 w-4 rounded-full ${done ? 'bg-emerald-400' : 'bg-slate-200'}`} />}
                 </React.Fragment>
               );
             })}
           </div>
-          {currentStep && visitor.status !== 'registered' && (
-            <div className="mt-2.5 flex items-center gap-2 bg-white/80 border border-indigo-100 rounded-xl px-3 py-2">
-              <ChevronRight className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-              <p className="text-[10px] font-bold text-slate-700">Next: <span className="text-indigo-700">{currentStep.label}</span> — {currentStep.hint}</p>
+
+          {workflow && (
+            <div className="rounded-2xl border border-indigo-100 bg-white/90 px-3.5 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[9px] font-black uppercase tracking-[0.14em] text-indigo-500">Next action</p>
+                  <p className="text-xs font-extrabold text-slate-900 mt-0.5 flex items-center gap-1.5">
+                    {primary ? primary.label : nextAction === 'settle_admission_fees' ? 'Settle admission fees' : 'No action available'}
+                    {workflow.closed && <Ban className="w-3.5 h-3.5 text-rose-500" />}
+                  </p>
+                  <p className="text-[10px] text-slate-600 font-semibold mt-0.5 leading-snug">{workflow.nextActionReason}</p>
+                  {nextAction && <p className="text-[10px] text-slate-400 font-medium mt-1 flex items-center gap-1"><ArrowRight className="w-3 h-3 shrink-0" /> {afterEffect[nextAction]}</p>}
+                </div>
+                {primary && (
+                  <button
+                    onClick={primary.run}
+                    disabled={primary.disabled}
+                    className="shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold text-xs px-4 py-2.5 shadow-md transition-colors cursor-pointer"
+                  >
+                    {primary.icon} {primary.label}
+                  </button>
+                )}
+              </div>
+
+              {nextAction === 'settle_admission_fees' && (
+                <div className="mt-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 flex items-start gap-2">
+                  <CreditCard className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                  <div className="text-[10px] font-semibold text-amber-900 leading-snug">
+                    <p className="font-black">
+                      {workflow.financial.totalOutstanding > 0
+                        ? `${formatAFN(workflow.financial.totalOutstanding)} AFN in admission fees must be settled before enrollment`
+                        : 'Admission fees must be settled before enrollment'}
+                      {workflow.financial.registrationOutstanding > 0 && ` · registration ${formatAFN(workflow.financial.registrationOutstanding)}`}
+                      {workflow.financial.placementOutstanding > 0 && ` · placement ${formatAFN(workflow.financial.placementOutstanding)}`}.
+                    </p>
+                    <p className="mt-0.5">
+                      {capabilities.canSettleInvoices
+                        ? 'Open the Finance desk, find this student\u2019s invoices and record the payment.'
+                        : 'Payment requires Finance access — the finance desk settles these invoices.'}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {workflow.blockers.filter((b) => b.code !== 'admission_fees_outstanding').length > 0 && (
+                <div className="mt-2 space-y-1.5">
+                  {workflow.blockers.filter((b) => b.code !== 'admission_fees_outstanding').map((blocker) => (
+                    <p key={blocker.code} className="flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[10px] font-semibold text-amber-900">
+                      <ChevronRight className="mt-0.5 h-3 w-3 shrink-0 text-amber-600" />
+                      <span>{blocker.reason}{blocker.ownerRole ? <span className="text-amber-700 font-black"> ({blocker.ownerRole.replace('_', ' ')})</span> : null}</span>
+                    </p>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
 
-        {/* Action Buttons */}
-        {visitor.status !== 'registered' && (
-          <div className="px-6 py-3 border-b border-slate-100 flex gap-2 shrink-0">
-            {canEditLead && (
-              <button onClick={() => setDeskTab('logs')} className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl font-bold text-xs cursor-pointer transition-colors shadow-sm ${currentStep?.key === 'followup' ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}><PhoneCall className="w-3.5 h-3.5" /> Log Follow-up</button>
-            )}
-            <button onClick={onOpenPlacementTest} className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl font-bold text-xs cursor-pointer transition-colors shadow-sm ${currentStep?.key === 'placement' ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}><Award className="w-3.5 h-3.5" /> {visitor.placementStatus === 'completed' ? 'Re-assess' : 'Assessment Workspace'}</button>
-            {/* UX-4: hidden outright when the caller lacks Lead.Convert — the
-                server 403s, so offering the button only wastes the operator's
-                data entry. UX-3: when placement blocks this lead the button is
-                disabled and says so, rather than opening a payment form. */}
-            {canConvertLead && (
-              <button
-                onClick={onOpenConvert}
-                disabled={Boolean(eligibility && !eligibility.eligible && ['already_converted', 'lead_lost', 'student_exists'].includes(eligibility.code))}
-                title={eligibility && !eligibility.eligible ? eligibility.reason : undefined}
-                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl font-bold text-xs cursor-pointer transition-colors shadow-sm disabled:opacity-40 disabled:cursor-not-allowed ${currentStep?.key === 'admit' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}
-              ><UserCheck className="w-3.5 h-3.5" /> Admit student</button>
-            )}
-          </div>
-        )}
-
-        {/* Why Enroll is unavailable — stated before the operator invests any
-            data entry, with the assessment as the obvious next step. */}
-        {/* Shown regardless of Lead.Convert: a blocker is information, not an
-            action. The Enroll BUTTON above remains gated on Lead.Convert. */}
-        {eligibility && !eligibility.eligible && visitor.status !== 'registered' && (
-          <div className="px-6 pb-3 shrink-0">
-            <p className="flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[10px] font-semibold text-amber-900">
-              <Award className="mt-0.5 h-3 w-3 shrink-0 text-amber-600" />
-              <span>{eligibility.reason}</span>
-            </p>
-          </div>
-        )}
+        {/* Secondary actions — never competing with the primary button */}
+        <div className="px-6 py-2.5 border-b border-slate-100 flex gap-2 shrink-0">
+          {canEditLead && !workflow?.closed && (
+            <button onClick={() => setDeskTab('logs')} className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl font-bold text-xs cursor-pointer transition-colors shadow-sm bg-slate-100 hover:bg-slate-200 text-slate-700"><PhoneCall className="w-3.5 h-3.5" /> Call History</button>
+          )}
+          {capabilities.canAssess && (
+            <button onClick={onOpenPlacementTest} className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl font-bold text-xs cursor-pointer transition-colors shadow-sm bg-slate-100 hover:bg-slate-200 text-slate-700"><Award className="w-3.5 h-3.5" /> {visitor.placementStatus === 'completed' ? 'Re-assess' : 'Assessment Workspace'}</button>
+          )}
+          {canConvertLead && !workflow?.admission.admitted && !workflow?.closed && (
+            <button onClick={onOpenConvert} className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl font-bold text-xs cursor-pointer transition-colors shadow-sm bg-slate-100 hover:bg-slate-200 text-slate-700"><UserCheck className="w-3.5 h-3.5" /> Admit student</button>
+          )}
+        </div>
 
         {/* Inner Tabs */}
         <div className="flex border-b border-slate-150 text-[11px] font-extrabold px-6 shrink-0">
@@ -274,7 +349,9 @@ export default function VisitorDeskPanel({
                     <p className="font-extrabold text-emerald-900 text-[11px]">Placement completed{placementTotal != null ? ` — ${placementTotal}/100` : ''}</p>
                     <p className="text-[10px] text-emerald-700 mt-0.5">Recommended: <span className="font-black">{placementRecommendation}</span>{placementOverallCefr ? <> · CEFR <span className="font-black">{placementOverallCefr}</span></> : null}{placementOutcome ? <> · <span className="font-black uppercase">{placementOutcome}</span></> : null}{visitor.placementScore.examiner ? <> · by {visitor.placementScore.examiner}</> : null}</p>
                   </div>
-                  <button onClick={onOpenPlacementTest} className="px-2.5 py-1.5 bg-white border border-emerald-200 text-emerald-700 rounded-lg text-[10px] font-bold hover:bg-emerald-50 cursor-pointer">Re-test</button>
+                  {capabilities.canAssess && (
+                    <button onClick={onOpenPlacementTest} className="px-2.5 py-1.5 bg-white border border-emerald-200 text-emerald-700 rounded-lg text-[10px] font-bold hover:bg-emerald-50 cursor-pointer">Re-test</button>
+                  )}
                 </div>
               )}
 
@@ -296,7 +373,7 @@ export default function VisitorDeskPanel({
                   </div>
                   <div>
                     <label className="block text-slate-500 font-bold mb-1">Next follow-up date:</label>
-                    <input type="date" value={crmDate} onChange={(e) => setCrmDate(e.target.value)} className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-2 focus:outline-none font-bold text-indigo-600 font-mono text-center" />
+                    <input type="date" min={todayIso} value={crmDate} onChange={(e) => setCrmDate(e.target.value)} className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-2 focus:outline-none font-bold text-indigo-600 font-mono text-center" />
                   </div>
                   <div>
                     <label className="block text-slate-500 font-bold mb-1">Initial source:</label>
@@ -358,7 +435,7 @@ export default function VisitorDeskPanel({
                 {followUpOutcome === 'callback' && (
                   <div>
                     <label className="block text-slate-500 font-bold text-[10px] mb-1">Next contact date:</label>
-                    <input type="date" value={followUpDate} onChange={(e) => setFollowUpDate(e.target.value)} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-indigo-700" required />
+                    <input type="date" min={todayIso} value={followUpDate} onChange={(e) => setFollowUpDate(e.target.value)} className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-indigo-700" required />
                   </div>
                 )}
               </form>}

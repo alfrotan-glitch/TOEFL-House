@@ -225,10 +225,15 @@ export default function ConvertToStudentModal({
           )}
         </div>
 
-        <div className="flex justify-end">
-          <button onClick={onClose} className="rounded-2xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-700">
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50">
             Done
           </button>
+          {onOpenPlacementTest && (
+            <button onClick={onOpenPlacementTest} className="rounded-2xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white hover:bg-indigo-700">
+              Start placement for {convertingVisitor.fullName.split(' ')[0]} now
+            </button>
+          )}
         </div>
       </div>
     );

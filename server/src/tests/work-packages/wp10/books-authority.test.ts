@@ -4,6 +4,7 @@ import { db, initSchema } from '../../../db/connection.js';
 import { ensureOrganizationHierarchy } from '../../../db/organizationHierarchy.js';
 import { bootstrapRbacCatalog } from '../../../core/rbac/rbac-service.js';
 import { bearerFor, seedUser } from '../../support/identity.js';
+import { today } from '../../../utils/ids.js';
 import { createBooksTestApp, ensureBookBranch, ensureBookStudent } from '../../support/books.js';
 
 const BRANCH_A = 'wp10_authority_a';
@@ -161,7 +162,7 @@ describe('WP-10 · canonical Book commerce and inventory authority', () => {
       .post(`/api/books/sales/${sale.body.id}/return`)
       .set(finance())
       .set('Idempotency-Key', key('return'))
-      .send({ reason: 'Customer returned the unopened book.', returnedOn: '2026-08-24' })
+      .send({ reason: 'Customer returned the unopened book.', returnedOn: today() })
       .expect(201);
     expect(returned.body.receiptNumber).toMatch(/^REF-R-/);
     expect(db.prepare(`

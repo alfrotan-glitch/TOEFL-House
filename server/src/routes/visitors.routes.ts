@@ -8,6 +8,7 @@ import { db } from '../db/connection.js';
 import { TEXT_LIMITS, optionalText, requiredText } from '../utils/textInput.js';
 import { parsePagination as parsePaginationShared } from '../utils/pagination.js';
 import { authenticate, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
+import { isGlobalOwner, hasAnyPermission, hasRole } from '../core/rbac/rbac-service.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { assertOptionalIsoDate } from '../utils/isoDate.js';
@@ -15,6 +16,7 @@ import { id, today } from '../utils/ids.js';
 import { resolvePlacementRequirement } from '../core/placement/policy-engine.js';
 import { readRetakePolicy, evaluateBilling } from '../core/placement/placement-policy.js';
 import { buildVisitorSummary, queryVisitorPage, type VisitorFilters } from '../core/visitors/visitor-query.js';
+import { describeVisitorWorkflow, summarizeVisitorWorkflow } from '../core/visitors/visitor-workflow.js';
 import { evaluateConversionEligibilityForVisitor } from '../core/visitors/conversion-eligibility.js';
 import { LEAD_CONVERTED_SQL } from '../core/visitors/lead-lifecycle.js';
 import { findDuplicateCandidates } from '../core/visitors/duplicate-lookup.js';
@@ -90,7 +92,7 @@ const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 100;
 
 // ============================================================================
-// SHARED FIELD AUTHORITY (audit V-2, V-4)
+// SHARED FIELD AUTHORITY
 // ============================================================================
 /**
  * The bounded text fields of a visitor, with their ceilings. CREATE and PATCH
@@ -157,7 +159,7 @@ function assertTazkiraAvailable(tazkira: string | null, excludeVisitorId?: strin
 }
 
 /**
- * Build a compact, non-sensitive audit diff (audit V-8).
+ * Build a compact, non-sensitive audit diff.
  *
  * Records WHICH fields changed and their before/after values, so a change like
  * detaching a placement-governed program is reconstructable. Free-text and
@@ -339,6 +341,19 @@ function parseJsonObject(value: unknown): Record<string, unknown> | undefined {
   }
 }
 
+/**
+ * A next-contact date describes FUTURE work. A date in the past is either a
+ * typo or an attempt to backdate the pipeline, and both are refused here —
+ * the server boundary is the authority; the client's date picker is courtesy.
+ * Applies to every writer that can set the field.
+ */
+function assertContactDateForward(value: string | null): string | null {
+  if (value && value < today()) {
+    throw new HttpError(400, 'Next contact date must be today or a future date.');
+  }
+  return value;
+}
+
 function mapVisitorBase(row: any) {
   return {
     id: row.id, serialNo: row.serial_no, fullName: row.full_name, phone: row.phone, email: row.email, gender: row.gender, source: row.source,
@@ -362,14 +377,15 @@ function mapVisitors(rows: any[]) {
   return rows.map((row) => ({
     ...mapVisitorBase(row),
     followUpHistory: (byVisitor.get(row.id) || []).map((f) => ({ id: f.id, date: f.date, notes: f.notes, operator: f.operator, outcome: f.outcome })),
+    workflow: summarizeVisitorWorkflow(db, row),
   }));
 }
 
 // ============================================================================ 
-// §1 — LIST / READ 
+// LIST / READ 
 // ============================================================================ 
 /**
- * Visitor list — server-side search, filter and pagination (UX-1).
+ * Visitor list — server-side search, filter and pagination.
  *
  * Filtering happens in SQL so that page N is a page of the FILTERED set. When
  * the client filtered a fetched page in JavaScript, a search for lead #101 of
@@ -398,7 +414,7 @@ visitorsRouter.get('/', requirePermission('Lead.View'), ah(async (req, res) => {
 }));
 
 /**
- * Authoritative visitor KPIs (UX-1).
+ * Authoritative visitor KPIs.
  *
  * Same authority model as `/dashboard/summary`: SQL aggregates over the whole
  * scoped population, never a page. The client renders these and derives none
@@ -411,10 +427,10 @@ visitorsRouter.get('/summary', requirePermission('Lead.View'), ah(async (req, re
 }));
 
 // ============================================================================ 
-// §2 — PIPELINE VIEW 
+// PIPELINE VIEW 
 // ============================================================================ 
 /**
- * Conversion eligibility preview (UX-3).
+ * Conversion eligibility preview.
  *
  * Read-only: it calls INTO the same placement authority the write path uses,
  * so it can never green-light a conversion the write path would refuse.
@@ -437,7 +453,7 @@ visitorsRouter.get('/summary', requirePermission('Lead.View'), ah(async (req, re
  * `requireVisitor` enforces the same branch isolation as every other route here.
  */
 /**
- * Possible-duplicate lookup (audit UX-9).
+ * Possible-duplicate lookup.
  *
  * Advisory only: it returns candidates and never refuses anything. The hard
  * identity rule remains the Tazkira unique index (migration 072); phone is
@@ -508,8 +524,56 @@ visitorsRouter.get('/pipeline', requirePermission('Lead.View'), ah(async (req, r
   res.json({ stages, totalLeads, totalRegistrations, overallConversion: totalLeads > 0 ? Math.round((totalRegistrations / totalLeads) * 1000) / 10 : 0 });
 }));
 
+// ============================================================================
+// SINGLE LEAD + RECEPTION WORKFLOW READ MODEL
+// ============================================================================
+/**
+ * One lead, with its derived reception workflow. The workspace that follows a
+ * person from first visit to enrollment loads this — it never re-derives the
+ * stage from scattered fields client-side.
+ */
+visitorsRouter.get('/:id', requirePermission('Lead.View'), ah(async (req, res) => {
+  const visitor = requireVisitor(req, req.params.id);
+  res.json({
+    ...mapVisitors([visitor])[0],
+    workflow: summarizeVisitorWorkflow(db, visitor),
+  });
+}));
+
+/**
+ * The authoritative front-desk state for one person: where they are, what is
+ * blocking them, what happens next, and which of those actions the CURRENT
+ * caller may perform. Read-only — the write authorities are unchanged.
+ */
+visitorsRouter.get('/:id/workflow', requirePermission('Lead.View'), ah(async (req, res) => {
+  const visitor = requireVisitor(req, req.params.id);
+  const rbac = req.rbac;
+  const can = (code: string) => Boolean(rbac && isGlobalOwner(rbac)) || Boolean(rbac && hasAnyPermission(rbac, [code]));
+  const workflow = describeVisitorWorkflow(db, visitor);
+  res.json({
+    visitorId: visitor.id,
+    ...workflow,
+    capabilities: {
+      canFollowUp: can('Lead.Edit'),
+      canAdmit: can('Lead.Convert'),
+      canAssess: Boolean(
+        rbac &&
+          (isGlobalOwner(rbac) ||
+            hasRole(rbac, 'owner') ||
+            hasRole(rbac, 'receptionist') ||
+            hasRole(rbac, 'general_manager') ||
+            hasRole(rbac, 'counselor')),
+      ),
+      canEnroll: can('Class.Assign'),
+      canSettleInvoices: Boolean(
+        rbac && (isGlobalOwner(rbac) || hasRole(rbac, 'finance_manager') || hasRole(rbac, 'general_manager')),
+      ),
+    },
+  });
+}));
+
 // ============================================================================ 
-// §3 — CREATE 
+// CREATE 
 // ============================================================================ 
 visitorsRouter.post('/', requirePermission('Lead.Create'), ah(async (req, res) => {
   const user = getUserContext(req);
@@ -522,13 +586,13 @@ visitorsRouter.post('/', requirePermission('Lead.Create'), ah(async (req, res) =
   // Name the field that is ACTUALLY missing. Throwing
   // "Full name, gender, and source are required." while testing only gender and
   // source tells a request that supplied a full name that the full name is
-  // missing — the exact class of unactionable message UX-2 set out to remove. (`fullName` itself is validated by `requiredText` below, which
+  // missing — the exact class of unactionable message this guard removes. (`fullName` itself is validated by `requiredText` below, which
   // raises its own precise error.)
   if (!gender) throw new HttpError(400, 'Gender is required.');
   if (!source) throw new HttpError(400, 'Lead source is required.');
   assertVisitorGender(gender);
   assertVisitorSource(source);
-  // One normalization/validation authority, shared with PATCH (audit V-4).
+  // One normalization/validation authority, shared with PATCH.
   // Type-checks, trims and bounds every text field; throws 400 on a non-string.
   const text = normalizeVisitorText(body);
   const fullName = requiredText(body.fullName, 'Full name', TEXT_LIMITS.name);
@@ -537,9 +601,9 @@ visitorsRouter.post('/', requirePermission('Lead.Create'), ah(async (req, res) =
           emergencyContactName = null, emergencyContactPhone = null } = text;
   if (phone) assertStudentPhoneSyntax(phone);
   const followUpStatus = body.followUpStatus;
-  const nextContactDate = assertOptionalIsoDate(body.nextContactDate, 'Next contact date');
+  const nextContactDate = assertContactDateForward(assertOptionalIsoDate(body.nextContactDate, 'Next contact date'));
   const dob = assertOptionalIsoDate(body.dob, 'Date of birth');
-  // National ID uniqueness — same policy as students (audit V-2).
+  // National ID uniqueness — same policy as students.
   assertTazkiraAvailable(tazkiraNo);
   const targetBranchId = branchId || user.branchId;
   assertBranchTargetAccess(req, targetBranchId);
@@ -595,7 +659,7 @@ visitorsRouter.post('/', requirePermission('Lead.Create'), ah(async (req, res) =
 }));
 
 // ============================================================================ 
-// §4 — UPDATE 
+// UPDATE 
 // ============================================================================ 
 visitorsRouter.patch('/:id', requirePermission('Lead.Edit'), ah(async (req, res) => {
   const existing = requireVisitor(req, req.params.id);
@@ -627,7 +691,7 @@ visitorsRouter.patch('/:id', requirePermission('Lead.Edit'), ah(async (req, res)
   // date through to storage.
   const text = normalizeVisitorText(f as Record<string, unknown>);
   if (text.phone) assertStudentPhoneSyntax(text.phone);
-  if (f.nextContactDate !== undefined) assertOptionalIsoDate(f.nextContactDate, 'Next contact date');
+  if (f.nextContactDate !== undefined) assertContactDateForward(assertOptionalIsoDate(f.nextContactDate, 'Next contact date'));
   if (f.dob !== undefined) assertOptionalIsoDate(f.dob, 'Date of birth');
   if ('tazkiraNo' in text) assertTazkiraAvailable(text.tazkiraNo, existing.id);
   if (f.programVersionId !== undefined && f.programVersionId !== null) { const pv = stmtGetProgramVersionById.get(f.programVersionId) as any; if (!pv) throw new HttpError(404, 'Selected program version not found.'); if (pv.branch_id !== existing.branch_id) throw new HttpError(400, 'Selected program belongs to another branch.'); if (pv.status !== 'published') throw new HttpError(400, 'Selected program version is not published.'); }
@@ -696,7 +760,7 @@ visitorsRouter.patch('/:id', requirePermission('Lead.Edit'), ah(async (req, res)
 }));
 
 // ============================================================================ 
-// §5 — FOLLOW-UPS 
+// FOLLOW-UPS 
 // ============================================================================ 
 visitorsRouter.post('/:id/followups', requirePermission('Lead.Edit'), ah(async (req, res) => {
   const user = getUserContext(req);
@@ -705,7 +769,7 @@ visitorsRouter.post('/:id/followups', requirePermission('Lead.Edit'), ah(async (
   const notes = requiredText(req.body?.notes, 'Follow-up note text', TEXT_LIMITS.notes);
   if (outcome != null && !FOLLOW_UP_OUTCOMES.has(outcome)) throw new HttpError(400, 'Invalid follow-up outcome.');
   const nextContactDate = req.body?.nextContactDate !== undefined
-    ? assertOptionalIsoDate(req.body.nextContactDate, 'Next contact date')
+    ? assertContactDateForward(assertOptionalIsoDate(req.body.nextContactDate, 'Next contact date'))
     : null;
   if (outcome === 'callback' && !nextContactDate) throw new HttpError(400, 'Callback follow-ups require a next contact date.');
   const tx = db.transaction(() => {
@@ -720,12 +784,12 @@ visitorsRouter.post('/:id/followups', requirePermission('Lead.Edit'), ah(async (
 }));
 
 // ============================================================================
-// §6 — PLACEMENT WORKSPACE
+// PLACEMENT WORKSPACE
 // The unified Placement Assessment Workspace lives under /api/placement.
 // ============================================================================
 
 // ============================================================================ 
-// §7 — CRM UPDATE 
+// CRM UPDATE 
 // ============================================================================ 
 visitorsRouter.patch('/:id/crm', requirePermission('Lead.Edit'), ah(async (req, res) => {
   const visitor = requireVisitor(req, req.params.id);
@@ -735,7 +799,7 @@ visitorsRouter.patch('/:id/crm', requirePermission('Lead.Edit'), ah(async (req, 
   if (stage !== undefined && stage !== visitor.stage) throw new HttpError(400, 'Stage changes must use the stage workflow endpoint.');
   const text = normalizeVisitorText(body);
   const nextContactDate = body.nextContactDate !== undefined
-    ? assertOptionalIsoDate(body.nextContactDate, 'Next contact date')
+    ? assertContactDateForward(assertOptionalIsoDate(body.nextContactDate, 'Next contact date'))
     : visitor.next_contact_date;
   stmtUpdateVisitorCRM.run(
     'interestedCourse' in text ? text.interestedCourse : visitor.interested_course,
@@ -750,7 +814,7 @@ visitorsRouter.patch('/:id/crm', requirePermission('Lead.Edit'), ah(async (req, 
 }));
 
 // ============================================================================ 
-// §8 — CONVERT TO STUDENT 
+// CONVERT TO STUDENT 
 // ============================================================================ 
 visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async (req, res) => {
   const user = getUserContext(req);
@@ -917,7 +981,7 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
 }));
 
 // ============================================================================ 
-// §9 — ADVANCE STAGE 
+// ADVANCE STAGE 
 // ============================================================================ 
 visitorsRouter.post('/:id/advance-stage', requirePermission('Lead.Edit'), ah(async (req, res) => {
   const row = requireVisitor(req, req.params.id);

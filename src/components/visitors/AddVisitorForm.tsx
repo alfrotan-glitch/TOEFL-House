@@ -23,7 +23,7 @@ interface AddVisitorFormProps {
   onCancel: () => void;
   triggerToast: (msg: string, type: 'success' | 'error' | 'info') => void;
   onVisitorCreated?: (visitorId: string) => void;
-  /** Advisory duplicate lookup (UX-9). Never blocks submit. */
+  /** Advisory duplicate lookup. Never blocks submit. */
   checkDuplicateLeads?: (params: { phone?: string; tazkiraNo?: string; fullName?: string }) => Promise<DuplicateCandidate[]>;
   /** Open an existing lead instead of creating a second record. */
   onOpenExistingLead?: (visitorId: string) => void;
@@ -59,7 +59,7 @@ export default function AddVisitorForm({
   const [showAdvanced, setShowAdvanced] = useState(false); // Collapsible state
 
   /**
-   * Possible-duplicate warning (UX-9).
+   * Possible-duplicate warning.
    *
    * Advisory by design. The audit proved a receptionist could silently
    * re-register a returning walk-in — identical name and phone created a second
@@ -115,7 +115,7 @@ export default function AddVisitorForm({
       if (created?.id) onVisitorCreated?.(created.id);
       onCancel();
     } catch (err: any) {
-      // UX-2: `api` is fetch-based and throws ApiError with `.message` — there
+      // `api` is fetch-based and throws ApiError with `.message` — there
       // is no `.response.data` anywhere in this codebase. Reading the Axios
       // shape first meant EVERY actionable server message (duplicate Tazkira,
       // invalid date, name too long) collapsed into one generic sentence on
@@ -248,7 +248,7 @@ export default function AddVisitorForm({
             <div><label className={labelCls}>Email (optional)</label><input type="email" placeholder="name@example.com" maxLength={254} value={email} onChange={(e) => setEmail(e.target.value)} className={`${inputCls} font-mono text-start`} /></div>
             <div><label className={labelCls}>Father's name</label><input type="text" placeholder="e.g. Mohammad Zaman" maxLength={200} value={fatherName} onChange={(e) => setFatherName(e.target.value)} className={inputCls} /></div>
             <div><label className={labelCls}>Tazkira number</label><input type="text" placeholder="e.g. 1234-5678-901" maxLength={60} value={tazkiraNo} onChange={(e) => setTazkiraNo(e.target.value)} className={`${inputCls} font-mono`} /></div>
-            {/* UX-5: the server validates this with assertOptionalIsoDate, so a
+            {/* The server validates this with assertOptionalIsoDate, so a
                 free-text "24" is rejected. A date input makes the only accepted
                 format the only enterable one. */}
             <div><label className={labelCls}>Date of birth</label><input type="date" max={todayIso} value={dob} onChange={(e) => setDob(e.target.value)} className={inputCls} /><p className="mt-1 text-[10px] text-slate-400">Optional — format YYYY-MM-DD.</p></div>

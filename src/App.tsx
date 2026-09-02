@@ -248,10 +248,15 @@ function AuthenticatedApp() {
             activeBranchId={activeBranchId} addVisitor={store.addVisitor} updateVisitorCRM={store.updateVisitorCRM}
             programVersions={store.settings.programVersions}
             addVisitorFollowUp={store.addVisitorFollowUp} updateVisitor={store.updateVisitor} reloadVisitors={store.reloadVisitors}
-            advanceVisitorStage={store.advanceVisitorStage} registerVisitorToStudent={store.registerVisitorToStudent}
+            registerVisitorToStudent={store.registerVisitorToStudent}
             visitorSummary={store.visitorSummary} visitorQuery={store.visitorQuery}
             checkConversionEligibility={store.checkConversionEligibility} checkDuplicateLeads={store.checkDuplicateLeads}
             permissionCodes={user?.permissions ? Array.from(user.permissions) : undefined}
+            getVisitorWorkflow={store.getVisitorWorkflow}
+            onOpenStudentWorkspace={(studentId) => {
+              try { sessionStorage.setItem('erp.openStudentId', studentId); } catch { /* sessionStorage may be unavailable in private/restricted contexts */ }
+              setCurrentTab('students');
+            }}
           />
         );
       case 'students':

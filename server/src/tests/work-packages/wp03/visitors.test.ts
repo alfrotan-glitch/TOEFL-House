@@ -37,6 +37,13 @@ function createApp() {
 // ── Test helpers ────────────────────────────────────────────────────────────
 
 const BRANCH_A = 'branch_test_a';
+
+/** A next-contact date the pipeline accepts: strictly future, local calendar. */
+const futureDate = (days: number): string => {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return d.toLocaleDateString('en-CA');
+};
 const BRANCH_B = 'branch_test_b';
 const CLASS_A = 'class_test_a';
 const CLASS_B_FEMALE = 'class_test_b_female';
@@ -417,7 +424,7 @@ describe('Visitor Module', () => {
           notes: 'Interested in TOEFL',
           interestedCourse: 'IELTS Preparation',
           followUpStatus: 'hot',
-          nextContactDate: '2026-08-01',
+          nextContactDate: futureDate(10),
           fatherName: 'Mohammad Noori',
           addressRegion: 'Kabul',
           tazkiraNo: 'T-12345',
@@ -828,7 +835,7 @@ describe('Visitor Module', () => {
       const res = await supertest(app)
         .post(`/api/visitors/${vid}/followups`)
         .set(authHeader(registrarA))
-        .send({ notes: 'Asked for callback next week', outcome: 'callback', nextContactDate: '2026-08-21' });
+        .send({ notes: 'Asked for callback next week', outcome: 'callback', nextContactDate: futureDate(7) });
 
       expect(res.status).toBe(201);
 
@@ -879,7 +886,7 @@ describe('Visitor Module', () => {
         const res = await supertest(app)
           .post(`/api/visitors/${vid}/followups`)
           .set(authHeader(registrarA))
-          .send({ notes: `Follow-up ${i}`, outcome: 'callback', nextContactDate: `2026-08-${20 + i}` });
+          .send({ notes: `Follow-up ${i}`, outcome: 'callback', nextContactDate: futureDate(i + 1) });
 
         expect(res.status).toBe(201);
       }
@@ -1207,7 +1214,7 @@ describe('Visitor Module', () => {
         .send({
           interestedCourse: 'IELTS',
           followUpStatus: 'hot',
-          nextContactDate: '2026-08-15',
+          nextContactDate: futureDate(14),
           notes: 'Very interested',
         });
 
@@ -1215,7 +1222,7 @@ describe('Visitor Module', () => {
       const visitor = getVisitor(vid);
       expect(visitor.interested_course).toBe('IELTS');
       expect(visitor.follow_up_status).toBe('hot');
-      expect(visitor.next_contact_date).toBe('2026-08-15');
+      expect(visitor.next_contact_date).toBe(futureDate(14));
     });
 
     it('should update stage via the stage workflow endpoint', async () => {

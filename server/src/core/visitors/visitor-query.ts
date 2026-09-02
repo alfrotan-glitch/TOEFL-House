@@ -27,6 +27,7 @@
  */
 import type BetterSqlite3 from 'better-sqlite3';
 import { LEAD_CLOSED_SQL, LEAD_CONVERTED_SQL, LEAD_OPEN_SQL } from './lead-lifecycle.js';
+import { summarizeVisitorWorkflow, RECEPTION_STAGES, type ReceptionStage } from './visitor-workflow.js';
 
 export interface VisitorScope {
   /** Null when the caller legitimately sees the whole organization. */
@@ -85,13 +86,19 @@ export interface VisitorSummary {
    * five columns and printed those lengths as column badges. With 250 leads it
    * showed "New: 21" against a true 223, directly beneath a KPI strip that
    * correctly said 250: two contradictory numbers on one screen. This is the
-   * same defect class as UX-1, and it is fixed the same way — counted in SQL,
+   * fixed the same way — counted in SQL,
    * rendered by the client.
    *
    * Keyed by the raw stage value so the client owns the column grouping;
    * NULL stage is normalised to 'lead', matching the lifecycle predicates.
    */
   byStage: Array<{ stage: string; count: number }>;
+  /**
+   * Lead count per derived reception stage (the operational pipeline:
+   * lead → follow-up → admission → placement → fees → enrollment → enrolled)
+   * over the whole scoped population. Board columns read THIS, never a page.
+   */
+  byWorkflowStage: Array<{ stage: ReceptionStage; count: number }>;
 }
 
 /**
@@ -246,6 +253,21 @@ export function buildVisitorSummary(
       .all(...s.params) as Array<{ stage: string; c: number }>
   ).map((r) => ({ stage: r.stage, count: Number(r.c) }));
 
+  const workflowRows = db.prepare(`SELECT * ${base}`).all(...s.params) as Array<{
+    id: string;
+    status?: string | null;
+    stage?: string | null;
+    program_version_id?: string | null;
+    placement_status?: string | null;
+    branch_id?: string | null;
+  }>;
+  const workflowCounts = new Map<ReceptionStage, number>(RECEPTION_STAGES.map((stage) => [stage, 0]));
+  for (const row of workflowRows) {
+    const stage = summarizeVisitorWorkflow(db, row).stage;
+    workflowCounts.set(stage, (workflowCounts.get(stage) ?? 0) + 1);
+  }
+  const byWorkflowStage = RECEPTION_STAGES.map((stage) => ({ stage, count: workflowCounts.get(stage) ?? 0 }));
+
   const bySource = (
     db
       .prepare(
@@ -260,6 +282,7 @@ export function buildVisitorSummary(
     today: todayStr,
     bySource,
     byStage,
+    byWorkflowStage,
     total,
     pipeline,
     registered,

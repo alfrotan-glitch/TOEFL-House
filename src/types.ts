@@ -155,6 +155,8 @@ export interface Campaign {
 export interface Lead {
   id: string;
   serialNo?: string;
+  /** Server-derived reception state, present on list rows and detail reads. */
+  workflow?: VisitorWorkflowSummary;
   fullName: string;
   phone: string;
   email?: string;
@@ -204,6 +206,77 @@ export interface FollowUp {
 
 /** Backward-compat alias — existing views keep working. */
 export type Visitor = Lead;
+
+/**
+ * Reception workflow state — the server's derived operational position for a
+ * lead. One stage, one next action, and the blockers currently in the way.
+ * The workspace and the pipeline board render this; neither computes it.
+ */
+export type ReceptionStage =
+  | 'lead'
+  | 'follow_up'
+  | 'admission'
+  | 'placement'
+  | 'financial_clearance'
+  | 'enrollment'
+  | 'enrolled';
+
+export type ReceptionAction =
+  | 'log_follow_up'
+  | 'admit'
+  | 'start_placement'
+  | 'settle_admission_fees'
+  | 'enroll'
+  | 'view_enrollment';
+
+export interface VisitorWorkflowBlocker {
+  code: string;
+  reason: string;
+  ownerRole?: string;
+}
+
+export interface VisitorWorkflowState {
+  stage: ReceptionStage;
+  closed: boolean;
+  nextAction: ReceptionAction;
+  nextActionReason: string;
+  blockers: VisitorWorkflowBlocker[];
+  admission: { admitted: boolean; studentId: string | null; studentCode: string | null; studentStatus: string | null };
+  placement: {
+    required: boolean;
+    status: string;
+    satisfied: boolean;
+    attemptStatus: string | null;
+    recommendedLevelId: string | null;
+    recommendedLevelName: string | null;
+    policyDecision: string;
+  };
+  financial: {
+    registrationOutstanding: number;
+    placementOutstanding: number;
+    totalOutstanding: number;
+    cleared: boolean;
+  };
+  enrollment: { activeEnrollmentId: string | null; classId: string | null; className: string | null; levelName: string | null };
+  capabilities?: {
+    canFollowUp: boolean;
+    canAdmit: boolean;
+    canAssess: boolean;
+    canEnroll: boolean;
+    canSettleInvoices: boolean;
+  };
+}
+
+/**
+ * Compact projection the server attaches to list rows and detail reads —
+ * enough to place a person on the board without loading the full state.
+ */
+export interface VisitorWorkflowSummary {
+  stage: ReceptionStage;
+  closed: boolean;
+  nextAction: ReceptionAction;
+  blockers: Array<{ code: string; reason: string }>;
+}
 
 // ============================================================================
 // BC #3: ACADEMIC — Academic Pipeline (academic schema)
@@ -802,7 +875,7 @@ export interface ExpenseReport {
  * (metrics counted from a paginated page rather than the population).
  */
 /**
- * Server-computed visitor KPIs (UX-1). Mirrors GET /visitors/summary.
+ * Server-computed visitor KPIs. Mirrors GET /visitors/summary.
  *
  * These are SQL aggregates over the WHOLE branch-scoped population. The UI
  * renders them and derives none of them — counting a loaded page is exactly the
@@ -831,6 +904,8 @@ export interface VisitorSummary {
    * The kanban renders its column badges from this, never from the loaded page.
    */
   byStage: Array<{ stage: string; count: number }>;
+  /** Stage populations under the derived reception vocabulary. */
+  byWorkflowStage: Array<{ stage: ReceptionStage; count: number }>;
 }
 
 /** The visitor list query the store owns and the server executes. */
@@ -845,7 +920,7 @@ export interface VisitorQuery {
   pageSize?: number;
 }
 
-/** A possible pre-existing lead, from GET /visitors/duplicate-check (UX-9). */
+/** A possible pre-existing lead, from GET /visitors/duplicate-check. */
 export interface DuplicateCandidate {
   id: string;
   serialNo: string | null;
@@ -858,7 +933,7 @@ export interface DuplicateCandidate {
   matchedOn: 'tazkira' | 'phone' | 'name';
 }
 
-/** Mirrors GET /visitors/:id/conversion-eligibility (UX-3). */
+/** Mirrors GET /visitors/:id/conversion-eligibility. */
 export interface ConversionEligibility {
   eligible: boolean;
   code:

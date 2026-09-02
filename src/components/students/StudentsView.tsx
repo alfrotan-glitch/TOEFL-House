@@ -56,7 +56,19 @@ export default function StudentsView({
   const [subTab, setSubTab] = useState<'list' | 'add'>('list');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+  const [pickedStudent, setPickedStudent] = useState<Student | null>(null);
+  // Cross-tab handoff: the reception workspace opens a student's profile by
+  // leaving their id here before switching tabs. Consumed once, on mount.
+  const [handoffStudentId] = useState<string | null>(() => {
+    try {
+      const id = sessionStorage.getItem('erp.openStudentId');
+      sessionStorage.removeItem('erp.openStudentId');
+      return id;
+    } catch { return null; }
+  });
+  const handoffStudent = handoffStudentId ? students.find((s) => s.id === handoffStudentId) ?? null : null;
+  const selectedStudent = pickedStudent ?? handoffStudent;
+  const setSelectedStudent = (student: Student | null) => setPickedStudent(student);
 
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const triggerToast = (message: string, type: 'success' | 'error' | 'info') => setToast({ message, type });

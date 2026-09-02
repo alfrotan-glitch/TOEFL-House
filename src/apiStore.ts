@@ -30,7 +30,8 @@ import {
   Branch, Campus, Organization, TeacherContractType,
   StudentBalanceRow,
   StudentSummary,
-  AttendanceSummaryRow, DashboardSummary, VisitorSummary, VisitorQuery, ConversionEligibility, DuplicateCandidate, InvoicePurpose } from './types';
+  AttendanceSummaryRow, DashboardSummary, VisitorSummary, VisitorQuery, ConversionEligibility, DuplicateCandidate, InvoicePurpose,
+  VisitorWorkflowState } from './types';
 
 /** Real due/paid/remaining figures for one teacher/month, mirroring GET /teachers/:id/salary-status. */
 export interface TeacherSalaryStatus {
@@ -69,7 +70,7 @@ async function safeGet<T>(path: string, query?: Record<string, string | undefine
 
 /**
  * Rows per visitor page. Deliberately far below the server's MAX_PAGE_SIZE:
- * the point of UX-1 is that the UI pages through the full population, not that
+ * the point is that the UI pages through the full population, not that
  * it grabs a bigger slice and keeps counting locally.
  */
 const VISITOR_PAGE_SIZE = 25;
@@ -410,7 +411,7 @@ export function useApiStore() {
   );
   const reloadClasses = useCallback(() => api.get<Class[]>('/classes', bq).then(setClasses), [bq]);
   /**
-   * Visitors are fetched one SERVER-FILTERED page at a time (UX-1).
+   * Visitors are fetched one SERVER-FILTERED page at a time.
    *
    * The previous version pulled a fixed 100 rows and let the view search,
    * filter and count inside that array: with 250 leads the conversion tile read
@@ -453,7 +454,7 @@ export function useApiStore() {
     [bq, canSeeVisitors]
   );
   /**
-   * Advisory possible-duplicate lookup for the registration form (UX-9).
+   * Advisory possible-duplicate lookup for the registration form.
    *
    * Never blocks a submit: it returns candidates and the operator decides.
    * Phone is deliberately not a unique key server-side because household and
@@ -472,7 +473,7 @@ export function useApiStore() {
 
   /**
    * Ask the server whether a conversion would be accepted, before showing the
-   * user a fee/payment form (UX-3). Read-only: the server answers by calling
+   * user a fee/payment form. Read-only: the server answers by calling
    * into the same placement authority the write path enforces, so this can
    * never green-light something Confirm would refuse.
    */
@@ -481,6 +482,18 @@ export function useApiStore() {
       api.get<ConversionEligibility>(`/visitors/${visitorId}/conversion-eligibility`, {
         classId: classId || undefined,
       }),
+    []
+  );
+
+  /** The server's reception state for one person — stage, next action, blockers. */
+  const getVisitorWorkflow = useCallback(
+    (visitorId: string) => api.get<VisitorWorkflowState>(`/visitors/${visitorId}/workflow`),
+    []
+  );
+
+  /** One lead with its workflow state, for views that hold a person id only. */
+  const getVisitorById = useCallback(
+    (visitorId: string) => api.get<Visitor>(`/visitors/${visitorId}`),
     []
   );
 
@@ -929,7 +942,7 @@ export function useApiStore() {
     // Send the stage we believe the visitor is currently in. The server uses it
     // as an optimistic-concurrency token: if another operator (or a double
     // click) already advanced this lead, the request is rejected with 409
-    // instead of chaining a second transition on top (audit V-7).
+    // instead of chaining a second transition on top.
     const current = visitors.find((v) => v.id === visitorId)?.stage;
     await api.post(`/visitors/${visitorId}/advance-stage`, {
       ...(stage ? { stage } : {}),
@@ -1683,6 +1696,7 @@ export function useApiStore() {
     attendanceSummary, reloadAttendanceSummary,
     // Existing business operations
     addVisitor, updateVisitorCRM, addVisitorFollowUp, updateVisitor, advanceVisitorStage, registerVisitorToStudent, checkConversionEligibility, checkDuplicateLeads,
+    getVisitorWorkflow, getVisitorById,
     addStudentManual, updateStudentStatus, updateStudent, enrollStudentSemester, issueStudentCard,
     chargeBudget, createExpenseRequest, recordOperationalPayment, getExpenseReport, updateExpenseAutoApproveThreshold, processExpenseApproval, runSavingEngine, updateSavingSettings, createInvoice, issueInvoice, payInvoice, cancelInvoice, updateFinanceConfig, reloadInvoices,
     processMonthEnd, createBookCatalogItem, updateBookCatalogItem, receiveBookStock, recordBookSale, returnBookSale, issueBookLoan, returnBookLoan, loadBooksHistoryPage,

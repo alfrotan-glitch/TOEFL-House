@@ -314,10 +314,8 @@ export class EnrollmentService {
   }
 
   /**
-   * Enrollment cannot bypass required non-tuition debts that are part of the
-   * admission workflow. Registration and placement invoices must be settled
-   * before a class seat is granted; otherwise the UI could hide the blocker and
-   * still create the enrollment through a direct API call.
+   * THE settlement rule for class seats: registration and placement invoices
+   * must be settled before enrollment is granted — no writer may bypass it.
    */
   private assertFinancialEligibility(studentId: string): void {
     const summary = getStudentNonTuitionSummary(this.db, studentId, ['registration', 'placement']);

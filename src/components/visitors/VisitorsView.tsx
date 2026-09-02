@@ -4,8 +4,8 @@
 
 import { text } from '../../design-system/styles';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import {UserPlus, Search, Sparkles, UserCheck, MessageSquare, Megaphone, Share2, Compass, AlertCircle, CheckCircle2, Clock, Kanban, List, Award} from 'lucide-react';
-import {Visitor, Class, Branch, Teacher, VisitorSummary, VisitorQuery, ConversionEligibility, DuplicateCandidate} from '../../types'; // Added Teacher
+import {UserPlus, Search, Sparkles, UserCheck, MessageSquare, Megaphone, Share2, Compass, AlertCircle, Clock, Kanban, List, Award} from 'lucide-react';
+import {Visitor, Class, Branch, Teacher, VisitorSummary, VisitorQuery, ConversionEligibility, DuplicateCandidate, VisitorWorkflowState} from '../../types'; // Added Teacher
 import {hasPermission} from '../../config/permissions';
 import {VISITOR_SOURCE_OPTIONS, SOURCE_LABELS} from '../../config/visitorSources';
 import {isLeadClosed, isLeadOpen, leadLifecycleBucket, LEAD_BUCKET_LABEL, LEAD_BUCKET_BADGE, PLACEMENT_LABEL, PLACEMENT_BADGE, placementKey} from '../../config/leadLifecycle';
@@ -22,6 +22,30 @@ function placementTotal(visitor: Visitor): number | null {
     ?? visitor.placementScore?.percentage
     ?? null;
 }
+
+/**
+ * Board columns mirror the server's reception stages — the board is a queue
+ * over derived facts, not a second lifecycle model.
+ */
+const WORKFLOW_COLUMNS: Array<{ key: 'lead' | 'follow_up' | 'admission' | 'placement' | 'financial_clearance' | 'enrollment' | 'enrolled' | 'closed'; label: string; tone: string }> = [
+  { key: 'lead', label: 'New', tone: 'border-slate-200' },
+  { key: 'follow_up', label: 'Follow-up', tone: 'border-indigo-200' },
+  { key: 'admission', label: 'Admission', tone: 'border-sky-200' },
+  { key: 'placement', label: 'Placement', tone: 'border-violet-200' },
+  { key: 'financial_clearance', label: 'Fees due', tone: 'border-amber-200' },
+  { key: 'enrollment', label: 'Ready to enroll', tone: 'border-teal-200' },
+  { key: 'enrolled', label: 'Enrolled', tone: 'border-emerald-200' },
+  { key: 'closed', label: 'Closed', tone: 'border-slate-200' },
+];
+
+const NEXT_ACTION_LABELS: Record<string, string> = {
+  log_follow_up: 'Log follow-up',
+  admit: 'Admit student',
+  start_placement: 'Placement test',
+  settle_admission_fees: 'Fees due',
+  enroll: 'Enroll',
+  view_enrollment: 'View class',
+};
 
 interface VisitorsViewProps {
   visitors: Visitor[];
@@ -49,24 +73,29 @@ interface VisitorsViewProps {
   visitorSummary?: VisitorSummary | null;
   /** The query the store last executed, so the view reflects server state. */
   visitorQuery?: VisitorQuery;
-  /** Effective permission codes for the signed-in user (UX-4). */
+  /** Effective permission codes for the signed-in user. */
   permissionCodes?: string[];
-  advanceVisitorStage: (visitorId: string, stage?: Visitor['stage']) => Promise<void>;
+  advanceVisitorStage?: (visitorId: string, stage?: Visitor['stage']) => Promise<void>;
   registerVisitorToStudent: (
     visitorId: string,
     payload: { classId?: string; notes?: string; branchId?: string; programVersionId?: string; levelId?: string }
   ) => Promise<{ studentId: string; studentCode: string; invoices: Array<{ id: string; invoiceNumber: string | null; chargeKind: 'registration' | 'placement'; amount: number; status: string }>; nextStep: string }>;
-  /** Read-only pre-flight for conversion (UX-3). */
+  /** Read-only pre-flight for conversion. */
   checkConversionEligibility: (visitorId: string, classId?: string) => Promise<ConversionEligibility>;
-  /** Advisory duplicate lookup for the registration form (UX-9). */
+  /** Advisory duplicate lookup for the registration form. */
   checkDuplicateLeads?: (params: { phone?: string; tazkiraNo?: string; fullName?: string }) => Promise<DuplicateCandidate[]>;
   programVersions?: Array<{ id: string; name: string; versionLabel: string; status: string }>;
+  /** Authoritative reception state computed by the server for one visitor. */
+  getVisitorWorkflow?: (visitorId: string) => Promise<VisitorWorkflowState>;
+  /** Jumps to the student workspace (used when the next action is enrollment). */
+  onOpenStudentWorkspace?: (studentId: string) => void;
 }
 
 export default function VisitorsView({
   visitors, classes, branches, activeBranchId, addVisitor, updateVisitorCRM, addVisitorFollowUp,
   updateVisitor, reloadVisitors, visitorSummary, visitorQuery, permissionCodes,
-  advanceVisitorStage, registerVisitorToStudent, checkConversionEligibility, checkDuplicateLeads, programVersions = []
+  registerVisitorToStudent, checkConversionEligibility, checkDuplicateLeads, programVersions = [],
+  getVisitorWorkflow, onOpenStudentWorkspace
 }: VisitorsViewProps) {
   const { courseOptions } = useAcademicOptions(classes, activeBranchId);
 
@@ -78,6 +107,19 @@ export default function VisitorsView({
 
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const triggerToast = (message: string, type: 'success' | 'error' | 'info') => setToast({ message, type });
+
+  // Authoritative state for the open workspace. Refetched whenever the list
+  // reloads, so follow-ups and conversions move the desk forward immediately.
+  const [workflow, setWorkflow] = useState<VisitorWorkflowState | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedVisitorId || !getVisitorWorkflow) return;
+    getVisitorWorkflow(selectedVisitorId)
+      .then((state) => { if (!cancelled) setWorkflow(state); })
+      .catch(() => { if (!cancelled) setWorkflow(null); });
+    return () => { cancelled = true; };
+  }, [selectedVisitorId, getVisitorWorkflow, visitors]);
+  const activeWorkflow = selectedVisitorId ? workflow : null;
 
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -94,7 +136,7 @@ export default function VisitorsView({
    */
   const applyFilter = useCallback(<T,>(setter: (v: T) => void) => (value: T) => { setter(value); setPage(0); }, []);
 
-  // ── Permission-aware UI (UX-4) ────────────────────────────────────────────
+  // ── Permission-aware UI ────────────────────────────────────────────────────
   // The backend already refuses these actions; the audit found the UI offering
   // them to everyone, so a counselor filled in a class, fee and payment method
   // before being told "You do not have permission to perform this operation."
@@ -104,7 +146,7 @@ export default function VisitorsView({
   const canConvertLead = hasPermission(permissionCodes, 'Lead.Convert');
 
   /**
-   * Push the current search/filters to the server (UX-1).
+   * Push the current search/filters to the server.
    *
    * Search is debounced so typing does not issue a request per keystroke; the
    * filter selects apply immediately. Every change resets to page 0, because
@@ -150,39 +192,7 @@ export default function VisitorsView({
   const isOverdueContact = useCallback((v: Visitor) => Boolean(v.nextContactDate) && isLeadOpen(v) && (v.nextContactDate as string) < todayIso, [todayIso]);
 
   /**
-   * Advance a lead one stage, with the feedback the bare call never gave.
-   *
-   * `advanceVisitorStage` sends `fromStage` as an optimistic-concurrency token
-   * (audit V-7), so a double-click or a colleague working the same lead is
-   * correctly rejected with 409. A bare
-   * `onClick={() => advanceVisitorStage(v.id)}` — no await, no catch — turns
-   * that rejection into an unhandled promise: the card does not move and
-   * nothing is said. Users read that as a broken button and click again, which
-   * is precisely what produces the next 409.
-   *
-   * `advancing` also disables the button in flight, removing the double-click
-   * that causes the conflict in the first place.
-   */
-  const [advancing, setAdvancing] = useState<string | null>(null);
-  const handleAdvance = useCallback(async (v: Visitor) => {
-    if (advancing) return;
-    setAdvancing(v.id);
-    try {
-      await advanceVisitorStage(v.id);
-      triggerToast(`${v.fullName} moved to the next stage.`, 'success');
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Could not advance this lead.';
-      triggerToast(message, 'error');
-      // A 409 means our view of the stage is stale; resync so the next click
-      // is made against the truth rather than repeating the same conflict.
-      await reloadVisitors().catch(() => undefined);
-    } finally {
-      setAdvancing(null);
-    }
-  }, [advancing, advanceVisitorStage, reloadVisitors]);
-
-  /**
-   * Headline figures come from the server (UX-1).
+   * Headline figures come from the server.
    *
    * Counted from the loaded page instead, with 250 leads the conversion tile
    * reads 27% against a true 11%. Nothing here recomputes a population — the view renders what /visitors/summary returned. `stats` is
@@ -209,6 +219,12 @@ export default function VisitorsView({
   const stageTotals = useMemo(() => {
     if (!visitorSummary?.byStage) return null;
     return Object.fromEntries(visitorSummary.byStage.map((r) => [r.stage, r.count])) as Record<string, number>;
+  }, [visitorSummary]);
+
+  /** Reception-stage population counts — same authority, workflow ladder. */
+  const workflowStageTotals = useMemo(() => {
+    if (!visitorSummary?.byWorkflowStage) return null;
+    return Object.fromEntries(visitorSummary.byWorkflowStage.map((r) => [r.stage, r.count])) as Partial<Record<string, number>>;
   }, [visitorSummary]);
 
   const totalMatching = visitorSummary?.filtered ?? null;
@@ -359,9 +375,9 @@ export default function VisitorsView({
                 <option value="all">All sources</option>
                 {VISITOR_SOURCE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
-              {/* Placement filter. The server has supported ?placement= since the
-                  UX-1 work; it simply had no UI, so "who still needs assessing?"
-                  was unanswerable without opening leads one by one. */}
+              {/* Placement filter: backed by the server's ?placement= query, so
+                  "who still needs assessing?" is answered over the whole
+                  population, not the loaded page. */}
               <select value={placementFilter} onChange={(e) => applyFilter(setPlacementFilter)(e.target.value)} className="sm:col-span-2 bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold cursor-pointer focus:outline-none">
                 <option value="all">All placement states</option>
                 <option value="needs_assessment">Needs assessment</option>
@@ -438,13 +454,15 @@ export default function VisitorsView({
                           <td className={`py-3 px-3 font-mono font-semibold ${isOverdueContact(v) ? 'text-rose-600' : 'text-indigo-600'}`}>{v.nextContactDate ? <span className="flex items-center gap-1 text-[10px]"><Clock className="w-3.5 h-3.5" /> {v.nextContactDate}{isOverdueContact(v) ? <span className="font-black uppercase text-[9px]">overdue</span> : null}</span> : <span className="text-slate-300">-</span>}</td>
                           <td className="py-3 px-3 text-center"><span className={`inline-flex px-2 py-1 rounded-full text-[9px] font-black border ${LEAD_BUCKET_BADGE[leadLifecycleBucket(v)]}`}>{LEAD_BUCKET_LABEL[leadLifecycleBucket(v)]}</span></td>
                           <td className="py-3 px-3 text-start" onClick={(e) => e.stopPropagation()}>
-                            {isClosedLead(v)
+                            {(v.workflow?.closed ?? isClosedLead(v))
                               ? <span className="text-[10px] text-slate-400 font-bold" title="Reopen this lead before it can be enrolled.">Closed</span>
-                              : isPendingLead(v)
+                              : (v.workflow ? v.workflow.nextAction === 'admit' : isPendingLead(v))
                                 ? (canConvertLead
                                     ? <button onClick={() => setConvertingVisitor(v)} className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[10px] px-3 py-1.5 rounded-xl shadow-xs flex items-center gap-1"><UserCheck className="w-3.5 h-3.5" /> Enroll now</button>
                                     : <span className="text-[10px] text-slate-400 font-bold" title="Only the registrar can enroll a lead.">Registrar only</span>)
-                                : <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-0.5 justify-end"><CheckCircle2 className="w-3.5 h-3.5" /> Completed</span>}
+                                : v.workflow && v.workflow.nextAction !== 'log_follow_up'
+                                  ? <span className="text-[10px] text-slate-500 font-bold" title={v.workflow.nextAction.replaceAll('_', ' ')}>{NEXT_ACTION_LABELS[v.workflow.nextAction]}</span>
+                                  : <span className="text-[10px] text-slate-400 font-bold">In follow-up</span>}
                           </td>
                         </tr>
                       );
@@ -454,47 +472,37 @@ export default function VisitorsView({
               </table>
             </div>
           ) : (
-            /* Workflow board */
+            /* Reception queue — every column and card position is the
+               server's derived stage, and the card's action chip is the
+               server's next action. Opening the workspace performs it. */
             <div className="overflow-x-auto pb-2">
-              <div className="grid grid-cols-6 gap-3 min-w-[1320px] items-start">
-                {[
-                  { key: 'new', label: 'New', stages: ['lead', 'inquiry'], tone: 'slate' },
-                  { key: 'nurture', label: 'Nurture', stages: ['follow_up'], tone: 'indigo' },
-                  { key: 'placement', label: 'Placement', stages: ['placement_booking', 'placement_fee', 'placement_completed'], tone: 'violet' },
-                  { key: 'enrollment', label: 'Enrollment', stages: ['class_fee', 'card_issued', 'book_issued', 'registration'], tone: 'amber' },
-                  { key: 'lifecycle', label: 'Enrolled', stages: ['enrollment', 'active', 'graduated', 'alumni'], tone: 'emerald' },
-                  // 'lost' had been folded into Lifecycle alongside enrollment,
-                  // active, graduated and alumni — won and lost outcomes in one
-                  // pile. A closed lead is its own terminal state.
-                  { key: 'lost', label: 'Lost', stages: ['lost'], tone: 'slate' },
-                ].map((col) => {
-                  const colVisitors = filteredVisitors.filter((v) => col.stages.includes(v.stage || 'lead'));
+              <div className="grid grid-cols-8 gap-3 min-w-[1500px] items-start">
+                {WORKFLOW_COLUMNS.map((col) => {
+                  const colVisitors = filteredVisitors.filter((v) => {
+                    const closed = v.workflow?.closed ?? isClosedLead(v);
+                    return col.key === 'closed'
+                      ? closed
+                      : !closed && (v.workflow?.stage ?? 'lead') === col.key;
+                  });
                   // Column badge = SERVER count over the whole population.
-                  // Using colVisitors.length here showed "New: 21" against a
-                  // true 223, because filteredVisitors is one 25-row page.
-                  const colTotal = stageTotals
-                    ? col.stages.reduce((n, st) => n + (stageTotals[st] ?? 0), 0)
-                    : null;
+                  const colTotal = col.key === 'closed'
+                    ? (stageTotals?.lost ?? null)
+                    : (workflowStageTotals?.[col.key] ?? null);
                   return (
-                    <div key={col.key} className="rounded-2xl border border-slate-200 bg-slate-50/70 min-h-[430px] p-3">
+                    <div key={col.key} className={`rounded-2xl border bg-slate-50/70 min-h-[430px] p-3 ${col.tone}`}>
                       <div className="flex items-center justify-between mb-3 px-1">
-                        <div>
-                          <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">{col.label}</p>
-                          <p className="text-[9px] text-slate-400">{col.stages.length} workflow stage{col.stages.length > 1 ? 's' : ''}</p>
-                        </div>
-                        <span className="px-2 py-1 rounded-full bg-white border border-slate-200 text-[10px] font-black text-slate-700" title={colTotal !== null ? `${colTotal} lead(s) in this phase across the whole branch` : undefined}>{colTotal ?? '—'}</span>
+                        <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">{col.label}</p>
+                        <span className="px-2 py-1 rounded-full bg-white border border-slate-200 text-[10px] font-black text-slate-700" title={colTotal !== null ? `${colTotal} person(s) at this stage across the whole branch` : undefined}>{colTotal ?? '—'}</span>
                       </div>
                       <div className="space-y-2 max-h-[560px] overflow-y-auto pe-1">
                         {colVisitors.length === 0 ? (
                           <div className="border border-dashed border-slate-200 rounded-xl bg-white/60 p-6 text-center text-[10px] text-slate-400">
-                            {isFetching ? 'Loading…' : colTotal ? `${colTotal} lead(s) in this phase — not on this page.` : 'No leads in this phase.'}
+                            {isFetching ? 'Loading…' : colTotal ? `${colTotal} person(s) at this stage — not on this page.` : 'Nobody at this stage.'}
                           </div>
                         ) : colVisitors.map((v) => {
-                          const nextStage = (() => {
-                            const order = ['lead','inquiry','follow_up','placement_booking','placement_fee','placement_completed','class_fee','card_issued','book_issued','registration','enrollment','active','graduated','alumni','lost'];
-                            const index = order.indexOf(v.stage || 'lead');
-                            return index >= 0 && index < order.length - 1 ? order[index + 1] : undefined;
-                          })();
+                          const wf = v.workflow;
+                          const actionLabel = wf ? NEXT_ACTION_LABELS[wf.nextAction] : undefined;
+                          const blocker = wf?.blockers.find((b) => b.code !== 'admission_fees_outstanding');
                           return (
                             <div key={v.id} onClick={() => setSelectedVisitorId(v.id)} className="bg-white border border-slate-200 rounded-xl p-3 space-y-2 shadow-sm hover:shadow-md hover:border-indigo-200 transition-all cursor-pointer">
                               <div className="flex items-start justify-between gap-2">
@@ -504,26 +512,20 @@ export default function VisitorsView({
                                 </div>
                                 {v.nextContactDate && <span className={`text-[9px] font-black ${v.nextContactDate < todayIso ? 'text-rose-600' : 'text-slate-400'}`}>{v.nextContactDate < todayIso ? 'OVERDUE' : v.nextContactDate}</span>}
                               </div>
-                              <div className="flex flex-wrap gap-1.5">
-                                <span className="px-1.5 py-0.5 rounded-md bg-indigo-50 border border-indigo-100 text-indigo-700 text-[9px] font-bold">{v.stage?.replaceAll('_', ' ')}</span>
-                                <span className={`px-1.5 py-0.5 rounded-md border text-[9px] font-bold ${INTEREST_BADGES[v.followUpStatus || ''] || 'bg-slate-50 text-slate-500 border-slate-200'}`}>{v.followUpStatus?.replaceAll('_', ' ') || 'medium interest'}</span>
-                              </div>
+                              {wf && (
+                                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[9px] font-black ${col.key === 'closed' ? 'bg-slate-50 text-slate-500 border-slate-200' : 'bg-indigo-50 text-indigo-700 border-indigo-100'}`}>
+                                  {col.key === 'closed' ? 'Closed lead' : (actionLabel ?? wf.stage.replace(/_/g, ' '))}
+                                </span>
+                              )}
+                              {blocker && (
+                                <p className="text-[9px] text-amber-800 bg-amber-50 border border-amber-100 rounded-md px-1.5 py-0.5 leading-snug" title={blocker.reason}>{blocker.reason}</p>
+                              )}
                               <div className="text-[10px] text-slate-500 flex items-center justify-between gap-2">
                                 <span className="truncate">{v.interestedCourse || 'No course interest recorded'}</span>
                                 {placementTotal(v) != null && <span className="text-emerald-700 font-black">{placementTotal(v)}/100</span>}
                               </div>
-                              <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2" onClick={(e) => e.stopPropagation()}>
-                                <button onClick={() => setSelectedVisitorId(v.id)} className="text-[9px] font-bold text-slate-500 hover:text-indigo-600">Open workspace</button>
-                                {nextStage && nextStage !== 'lost' && canEditLead ? (
-                                  <button
-                                    onClick={() => void handleAdvance(v)}
-                                    disabled={advancing === v.id}
-                                    title={`Advance ${v.fullName} to ${nextStage.replace(/_/g, ' ')}`}
-                                    className="text-[9px] font-black text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed px-2.5 py-1.5 rounded-lg"
-                                  >{advancing === v.id ? 'Advancing…' : `Advance → ${nextStage.replace(/_/g, ' ')}`}</button>
-                                ) : v.stage === 'lost' ? (
-                                  <span className="text-[9px] font-black text-slate-400">Closed</span>
-                                ) : null}
+                              <div className="pt-2 border-t border-slate-100" onClick={(e) => e.stopPropagation()}>
+                                <button onClick={() => setSelectedVisitorId(v.id)} className="w-full text-[9px] font-black text-white bg-indigo-600 hover:bg-indigo-700 px-2.5 py-1.5 rounded-lg">Open workspace</button>
                               </div>
                             </div>
                           );
@@ -540,7 +542,7 @@ export default function VisitorsView({
 
       {/* Modals */}
       {activeVisitor && (
-        <VisitorDeskPanel courseOptions={courseOptions} key={activeVisitor.id} visitor={activeVisitor} onClose={() => setSelectedVisitorId(null)} updateVisitorCRM={updateVisitorCRM} addVisitorFollowUp={addVisitorFollowUp} updateVisitor={updateVisitor} onOpenPlacementTest={() => setShowPlacementModal(true)} onOpenConvert={() => setConvertingVisitor(activeVisitor)} triggerToast={triggerToast} canConvertLead={canConvertLead} canEditLead={canEditLead} checkConversionEligibility={checkConversionEligibility} />
+        <VisitorDeskPanel courseOptions={courseOptions} key={activeVisitor.id} visitor={activeVisitor} onClose={() => setSelectedVisitorId(null)} updateVisitorCRM={updateVisitorCRM} addVisitorFollowUp={addVisitorFollowUp} updateVisitor={updateVisitor} onOpenPlacementTest={() => setShowPlacementModal(true)} onOpenConvert={() => setConvertingVisitor(activeVisitor)} onOpenStudentWorkspace={onOpenStudentWorkspace} workflow={activeWorkflow} triggerToast={triggerToast} canConvertLead={canConvertLead} canEditLead={canEditLead} />
       )}
 
       {activeVisitor && showPlacementModal && (
