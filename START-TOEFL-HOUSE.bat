@@ -71,7 +71,12 @@ set "PHP_ZIP_URL=https://windows.php.net/downloads/releases/%PHP_ZIP%"
 set "PHP_ARCHIVE_ZIP_URL=https://windows.php.net/downloads/releases/archives/%PHP_ZIP%"
 set "PG_VERSION_TAG=18.3-1"
 set "PG_ZIP_URL=https://get.enterprisedb.com/postgresql/postgresql-18.3-1-windows-x64-binaries.zip"
-set "COMPOSER_URL=https://getcomposer.org/Composer-stable.phar"
+REM Composer is installed the documented way: download the small official
+REM installer (https://getcomposer.org/installer) and let it fetch the stable
+REM composer.phar through the official channel WITH signature verification.
+REM A capitalized pinned direct-PHAR URL returns 404, so it is not used.
+set "COMPOSER_INSTALLER_URL=https://getcomposer.org/installer"
+set "COMPOSER_SETUP=%RT%\composer-setup.php"
 set "TAILSCALE_MSI_URL=https://download.tailscale.com/stable/tailscale-setup-latest.amd64.msi"
 
 set "APP_PORT=8080"
@@ -101,18 +106,15 @@ if not exist "%RT%\downloads" mkdir "%RT%\downloads"
 
 if not exist "%PHP%" (
     echo       - PHP %PHP_VERSION% : downloading the official runtime...
-    if exist "%RT%\downloads\php.zip" del /q "%RT%\downloads\php.zip"
-    curl.exe -fL --retry 2 -o "%RT%\downloads\php.zip" "%PHP_ZIP_URL%"
-    if errorlevel 1 (
-        echo       - current-release URL unavailable ^(older patches move to the official archive^); trying the permanent archive URL...
-        curl.exe -fL --retry 3 -o "%RT%\downloads\php.zip" "%PHP_ARCHIVE_ZIP_URL%"
-    )
-    if errorlevel 1 call :fail "PHP download failed from both %PHP_ZIP_URL% and %PHP_ARCHIVE_ZIP_URL%. Check the internet connection and re-run. If it keeps failing, save the zip as .runtime\downloads\php.zip manually and re-run."
-    REM The downloaded archive must exist and be non-empty (a real PHP zip is ~30 MB);
-    REM an empty or truncated file means the download was an error page, not PHP.
-    if not exist "%RT%\downloads\php.zip" call :fail "PHP download did not produce the archive: %RT%\downloads\php.zip"
-    for %%F in ("%RT%\downloads\php.zip") do set "PHP_ZIP_BYTES=%%~zF"
-    if !PHP_ZIP_BYTES! LSS 1048576 call :fail "The downloaded PHP archive %RT%\downloads\php.zip is only !PHP_ZIP_BYTES! bytes (a real one is ~30 MB) - the download was truncated or is an error page. Delete .runtime\downloads and re-run."
+    REM Atomic, validated download to php.zip.part; php.zip is replaced only after the
+    REM download is complete AND large enough (a real PHP zip is ~30 MB). Transient
+    REM resets/timeouts are retried; current-release URL first, then the permanent archive.
+    call :fetch_file "%RT%\downloads\php.zip" "%PHP_ZIP_URL%" "%PHP_ARCHIVE_ZIP_URL%" "10485760"
+    if errorlevel 1 call :fail "PHP download failed or was truncated from both %PHP_ZIP_URL% and %PHP_ARCHIVE_ZIP_URL%. The incomplete file was discarded. Check the internet connection and re-run this file."
+    REM Verify ZIP integrity before extracting: a truncated/corrupt archive must stop here,
+    REM not be extracted (this catches a partial download that passed the size check).
+    "%TAR%" -tf "%RT%\downloads\php.zip" >nul 2>nul
+    if errorlevel 1 call :fail "The downloaded PHP archive %RT%\downloads\php.zip is corrupt or truncated (integrity test failed). Delete it and re-run this file."
     REM The official Windows PHP zip is FLAT: php.exe, php-cgi.exe, ext\ ... sit at the
     REM archive ROOT with no version-named wrapper folder (unlike the PostgreSQL zip,
     REM which wraps in pgsql\). So extract straight into the runtime dir with the
@@ -121,7 +123,7 @@ if not exist "%PHP%" (
     if exist "%PHP_DIR%" rd /q /s "%PHP_DIR%"
     mkdir "%PHP_DIR%"
     "%TAR%" -xf "%RT%\downloads\php.zip" -C "%PHP_DIR%"
-    if errorlevel 1 call :fail "Could not unpack the PHP archive with %TAR% (exit code non-zero). Archive: %RT%\downloads\php.zip destination: %PHP_DIR% . Delete .runtime\php and re-run."
+    if errorlevel 1 call :fail "Could not unpack the PHP archive with %TAR% (exit code non-zero). Archive: %RT%\downloads\php.zip destination: %PHP_DIR%. Delete .runtime\php and re-run."
     REM Prove the extraction actually produced the binary before continuing.
     if not exist "%PHP_DIR%\php.exe" call :fail "The PHP archive %RT%\downloads\php.zip unpacked but %PHP_DIR%\php.exe was not produced. The zip layout may have changed - inspect %PHP_DIR%."
     call :write_php_ini
@@ -132,21 +134,32 @@ if errorlevel 1 call :fail "PHP is present but cannot start. Delete the folder .
 if errorlevel 1 call :fail "PHP cannot load the pdo_pgsql extension. Delete the folder .runtime\php and re-run this file."
 
 if not exist "%COMPOSER_PHAR%" (
-    echo       - Composer : downloading...
-    curl.exe -fL --retry 3 -o "%COMPOSER_PHAR%" "%COMPOSER_URL%"
-    if errorlevel 1 call :fail "Composer download failed. URL: %COMPOSER_URL% - check the internet connection and re-run."
+    echo       - Composer : downloading the official installer...
+    REM Fetch the official installer atomically (small PHP script; no fallback source).
+    call :fetch_file "%COMPOSER_SETUP%" "%COMPOSER_INSTALLER_URL%" "" "1000"
+    if errorlevel 1 call :fail "Composer installer download failed from %COMPOSER_INSTALLER_URL% (the incomplete file was discarded). Check the internet connection and re-run."
+    REM Run the official installer: it downloads the STABLE composer.phar through the
+    REM official channel and cryptographically verifies it (signature check), then writes
+    REM it to our runtime. It returns a non-zero code if download/verification fails.
+    "%PHP%" "%COMPOSER_SETUP%" --install-dir="%RT%" --filename=composer.phar --no-ansi --no-interaction
+    if errorlevel 1 call :fail "The official Composer installer could not install or verify composer.phar. Check the internet connection to getcomposer.org and re-run."
+    del /q "%COMPOSER_SETUP%" >nul 2>nul
 )
+if not exist "%COMPOSER_PHAR%" call :fail "Composer installation did not produce %COMPOSER_PHAR%. Re-run this file."
 "%PHP%" "%COMPOSER_PHAR%" --version >nul 2>nul
 if errorlevel 1 call :fail "Composer downloaded but cannot run. Delete .runtime\composer.phar and re-run this file."
 
 if not exist "%PG_BIN%\initdb.exe" (
     echo       - PostgreSQL %PG_VERSION_TAG : downloading, about 300 MB, one time only...
-    curl.exe -fL --retry 3 -o "%RT%\downloads\pgsql.zip" "%PG_ZIP_URL%"
-    if errorlevel 1 call :fail "PostgreSQL download failed. URL: %PG_ZIP_URL% - check the internet connection and re-run. If it keeps failing, save the zip as .runtime\downloads\pgsql.zip manually and re-run."
+    call :fetch_file "%RT%\downloads\pgsql.zip" "%PG_ZIP_URL%" "" "52428800"
+    if errorlevel 1 call :fail "PostgreSQL download failed or was truncated from %PG_ZIP_URL%. The incomplete file was discarded. Check the internet connection and re-run this file."
+    REM Verify archive integrity before extracting.
+    "%TAR%" -tf "%RT%\downloads\pgsql.zip" >nul 2>nul
+    if errorlevel 1 call :fail "The downloaded PostgreSQL archive %RT%\downloads\pgsql.zip is corrupt or truncated (integrity test failed). Delete it and re-run this file."
     "%TAR%" -xf "%RT%\downloads\pgsql.zip" -C "%RT%\downloads"
     if errorlevel 1 call :fail "Could not unpack the PostgreSQL archive. Re-run this file."
     move /y "%RT%\downloads\pgsql" "%PG_DIR%" >nul
-    if errorlevel 1 call :fail "Could not place the PostgreSQL runtime. Re-run this file."
+    if errorlevel 1 call :fail "Could not place the PostgreSQL runtime (expected %RT%\downloads\pgsql after extraction). Re-run this file."
 )
 "%PG_BIN%\initdb.exe" --version >nul 2>nul
 if errorlevel 1 call :fail "PostgreSQL is present but cannot start. Delete the folder .runtime\pgsql and re-run this file."
@@ -403,8 +416,63 @@ echo   STOPPED - the launcher could not continue.
 echo  =====================================================================
 echo   %~1
 echo.
+echo   This window stays open so you can read the exact failure above.
+echo   The launcher exits NOW (non-zero); no later step runs, so the first
+echo   error shown is the real root cause. Close the window or press Ctrl+C.
+echo.
 pause
+REM A bare "exit" (no /b) terminates the ENTIRE cmd/launcher process and sets
+REM the error level. "/b" would only return from this subroutine, so the caller
+REM (and a parenthesized block) would keep going and mask the original failure.
+exit 1
+
+:fetch_file
+REM Atomic, validated download. Usage:
+REM   call :fetch_file <destination> <primary_url> <fallback_url> <min_bytes>
+REM Downloads to <destination>.part with bounded retries, verifies a minimum
+REM size, and only then renames .part over the known-good destination (so a
+REM partial download never clobbers a good file). Sets errorlevel 0 on success,
+REM 1 on failure. The caller MUST :fail on errorlevel 1 (it must not continue).
+setlocal
+set "FF_DEST=%~1"
+set "FF_URL1=%~2"
+set "FF_URL2=%~3"
+set "FF_MIN=%~4"
+if exist "%FF_DEST%.part" del /q "%FF_DEST%.part" >nul 2>nul
+call :fetch_try "%FF_URL1%"
+if errorlevel 1 if not "%FF_URL2%"=="" (
+    echo       - the first source failed; trying the alternate source...
+    call :fetch_try "%FF_URL2%"
+)
+if errorlevel 1 (
+    del /q "%FF_DEST%.part" >nul 2>nul
+    endlocal & exit /b 1
+)
+for %%S in ("%FF_DEST%.part") do set "FF_BYTES=%%~zS"
+if !FF_BYTES! LSS !FF_MIN! (
+    echo       - download produced only !FF_BYTES! bytes, fewer than the !FF_MIN! bytes expected - rejected.
+    del /q "%FF_DEST%.part" >nul 2>nul
+    endlocal & exit /b 1
+)
+move /y "%FF_DEST%.part" "%FF_DEST%" >nul
+endlocal & exit /b 0
+
+:fetch_try
+REM One download source with bounded retries. call :fetch_try <url>
+set "FT_URL=%~1"
+set /a FT_TRY=0
+:ft_loop
+set /a FT_TRY+=1
+curl.exe -fL --connect-timeout 20 --retry 2 --retry-delay 2 -o "%FF_DEST%.part" "%FT_URL%"
+if not errorlevel 1 goto ft_ok
+echo       - download attempt %FT_TRY% of 3 failed: %FT_URL%
+if %FT_TRY% LSS 3 (
+    timeout /t 3 /nobreak >nul
+    goto ft_loop
+)
 exit /b 1
+:ft_ok
+exit /b 0
 
 :write_php_ini
 REM A minimal, fully controlled php.ini for the desktop deployment. The stock

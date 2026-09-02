@@ -204,14 +204,118 @@ final class WindowsLauncherContractTest extends TestCase
 
     public function test_other_runtimes_use_stable_or_rolling_urls_not_archived_patches(): void
     {
-        // Composer and Tailscale intentionally use rolling "latest/stable" pointers.
-        $this->assertSame('https://getcomposer.org/Composer-stable.phar', $this->vars['COMPOSER_URL'] ?? '');
+        // Tailscale intentionally uses a rolling "latest" pointer.
         $this->assertSame('https://download.tailscale.com/stable/tailscale-setup-latest.amd64.msi', $this->vars['TAILSCALE_MSI_URL'] ?? '');
+        // Composer is installed via the OFFICIAL installer (https://getcomposer.org/installer),
+        // which fetches the stable phar with signature verification - NOT a pinned direct-PHAR
+        // URL such as the capitalized Composer-stable.phar that 404s.
+        $this->assertSame('https://getcomposer.org/installer', $this->vars['COMPOSER_INSTALLER_URL'] ?? '');
+        $this->assertStringNotContainsString('Composer-stable.phar', $this->bat, 'the capitalized 404 Composer direct-PHAR URL must not be used.');
 
         // PostgreSQL uses EDB's permanent binaries archive (pinned versions are retained
         // there indefinitely; this path does NOT move older patches the way PHP does).
         $this->assertStringStartsWith('https://get.enterprisedb.com/postgresql/', $this->vars['PG_ZIP_URL'] ?? '');
         $this->assertStringContainsString('binaries.zip', $this->vars['PG_ZIP_URL'] ?? '');
+    }
+
+    public function test_a_required_runtime_failure_terminates_the_whole_launcher(): void
+    {
+        // :fail MUST end the entire cmd process (bare "exit 1"), not "exit /b 1".
+        // With /b, call :fail inside a parenthesized block returns to the block, which then
+        // keeps running (the root cause of PHP failure being masked by later steps).
+        $failBlock = $this->subroutineBody(':fail');
+        $this->assertMatchesRegularExpression('/^\s*exit\s+1\s*$/m', $failBlock, ':fail must end with a bare "exit 1" that terminates the launcher.');
+        $this->assertDoesNotMatchRegularExpression('/exit\s+\/b\s+1/', $failBlock, ':fail must not use "exit /b" (which returns to and resumes the caller).');
+    }
+
+    public function test_php_and_postgresql_downloads_go_through_the_atomic_validated_helper(): void
+    {
+        // Both runtimes must be fetched via the atomic :fetch_file helper (never a bare curl
+        // that writes straight into the destination).
+        $this->assertMatchesRegularExpression('/call :fetch_file "%RT%\\\downloads\\\php\.zip" "%PHP_ZIP_URL%" "%PHP_ARCHIVE_ZIP_URL%" "10485760"/', $this->bat);
+        $this->assertMatchesRegularExpression('/call :fetch_file "%RT%\\\downloads\\\pgsql\.zip" "%PG_ZIP_URL%" "" "52428800"/', $this->bat);
+        // No raw curl writing directly to php.zip / pgsql.zip (the non-atomic pattern).
+        $this->assertDoesNotMatchRegularExpression('/curl\.exe[^
+]*-o "%RT%\\\downloads\\\php\.zip"/', $this->bat, 'php.zip must not be written directly by curl (use .part via the helper).');
+        $this->assertDoesNotMatchRegularExpression('/curl\.exe[^
+]*-o "%RT%\\\downloads\\\pgsql\.zip"/', $this->bat, 'pgsql.zip must not be written directly by curl.');
+    }
+
+    public function test_fetch_helper_downloads_to_part_and_only_promotes_after_checks(): void
+    {
+        $ff = $this->subroutineBody(':fetch_file');
+        // Downloads target <dest>.part ...
+        $this->assertMatchesRegularExpression('/FF_DEST%\.part/', $ff, 'the helper downloads to a .part temporary file.');
+        // ...retries each source ...
+        $ft = $this->subroutineBody(':fetch_try');
+        $this->assertMatchesRegularExpression('/FT_TRY/', $ft, 'the helper retries transient download failures (bounded retry loop).');
+        // ...checks minimum size ...
+        $this->assertMatchesRegularExpression('/FF_BYTES/i', $ff, 'the helper measures the downloaded size.');
+        // ...and only then moves .part over the destination; on failure it deletes .part.
+        $this->assertMatchesRegularExpression('/move \/y "%FF_DEST%\.part" "%FF_DEST%"/', $ff, 'the helper atomically moves .part to the destination last.');
+        $this->assertMatchesRegularExpression('/del \/q "%FF_DEST%\.part"/', $ff, 'a failed/too-small download deletes the .part and never promotes it.');
+    }
+
+    public function test_zip_integrity_is_verified_before_extraction(): void
+    {
+        // Both archives are integrity-tested with bsdtar (-tf lists without extracting)
+        // BEFORE the -xf extraction, so a corrupt/truncated zip fails instead of unpacking
+        // partial files (the "ZIP decompression failed (-5)" defect).
+        $this->assertMatchesRegularExpression('/"%TAR%" -tf "%RT%\\\downloads\\\php\.zip" >nul 2>nul/', $this->bat, 'php.zip must be integrity-tested (-tf) before extraction.');
+        $this->assertMatchesRegularExpression('/"%TAR%" -tf "%RT%\\\downloads\\\pgsql\.zip" >nul 2>nul/', $this->bat, 'pgsql.zip must be integrity-tested (-tf) before extraction.');
+        // The integrity test for PHP must precede the extraction line.
+        $testPos = strpos($this->bat, '"%TAR%" -tf "%RT%\downloads\php.zip"');
+        $extractPos = strpos($this->bat, '"%TAR%" -xf "%RT%\downloads\php.zip"');
+        $this->assertIsInt($testPos);
+        $this->assertIsInt($extractPos);
+        $this->assertLessThan($extractPos, $testPos, 'php.zip integrity test must run before extraction.');
+    }
+
+    public function test_each_runtime_step_fail_fast_on_error(): void
+    {
+        // Every required-runtime failure path must call :fail immediately (no continuation).
+        // PHP download / integrity / extract / binary presence:
+        foreach ([
+            'PHP download failed or was truncated',
+            'integrity test failed',
+            'Could not unpack the PHP archive',
+            '%PHP_DIR%\php.exe was not produced',
+            'Composer installer download failed',
+            'could not install or verify composer.phar',
+            'Composer downloaded but cannot run',
+            'PostgreSQL download failed or was truncated',
+            'Could not unpack the PostgreSQL archive',
+            'Could not place the PostgreSQL runtime',
+        ] as $fragment) {
+            $this->assertStringContainsString($fragment, $this->bat, "missing fail-fast path for: $fragment");
+        }
+        // Each of those must be on a `call :fail` line (terminate, not continue).
+        $this->assertGreaterThan(0, preg_match_all('/call :fail/', $this->bat));
+    }
+
+    public function test_composer_is_installed_via_the_official_installer_and_verified(): void
+    {
+        // The official installer is fetched (atomic), executed to produce composer.phar, and
+        // the result must exist and run --version.
+        $this->assertMatchesRegularExpression('/call :fetch_file "%COMPOSER_SETUP%" "%COMPOSER_INSTALLER_URL%" "" "\d+"/', $this->bat);
+        $this->assertMatchesRegularExpression(
+            '/"%PHP%" "%COMPOSER_SETUP%" --install-dir="%RT%" --filename=composer\.phar[^
+]*\n\s*if errorlevel 1 call :fail/',
+            $this->bat,
+            'the Composer installer must be run and a failure must stop the launcher.',
+        );
+        $this->assertMatchesRegularExpression('/if not exist "%COMPOSER_PHAR%" call :fail/', $this->bat, 'a missing composer.phar after install must fail.');
+        $this->assertMatchesRegularExpression('/"%PHP%" "%COMPOSER_PHAR%" --version >nul 2>nul/', $this->bat, 'composer.phar must be verified by running --version.');
+    }
+
+    private function subroutineBody(string $label): string
+    {
+        // Return the lines from ":label" up to the next top-level ":otherlabel".
+        if (preg_match('/^'.preg_quote($label, '/').'\s*\n([\s\S]*?)(?=^:[A-Za-z_][A-Za-z0-9_]*\s*$|\Z)/m', $this->bat, $m) === 1) {
+            return $m[1];
+        }
+
+        return '';
     }
 
     public function test_archives_are_extracted_with_the_built_in_bsdtar_not_a_path_resolved_tar(): void
