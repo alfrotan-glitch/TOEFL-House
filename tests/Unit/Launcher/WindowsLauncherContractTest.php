@@ -880,6 +880,40 @@ final class WindowsLauncherContractTest extends TestCase
         $this->assertMatchesRegularExpression('/^\s*exit\s+1\s*$/m', $failBlock, ':fail still ends with a bare "exit 1".');
     }
 
+    public function test_tailscale_serve_status_for_f_wraps_the_quoted_path_in_double_quotes(): void
+    {
+        // `for /f ('...')` runs its command via an implicit `cmd /c "..."`, and
+        // cmd /c strips the FIRST and LAST double-quote of a command line that
+        // begins with a quote. TAILSCALE_BIN is a quoted, spaced path
+        // ("C:\Program Files\Tailscale\tailscale.exe"), so the naive
+        //   in ('"%TAILSCALE_BIN%" serve status ... findstr /C:"https://"')
+        // loses its first and last quote to that stripping, leaving a stray
+        // quote and the error "The filename, directory name, or volume label
+        // syntax is incorrect." The fix is the same sacrificial outer pair the
+        // working `cmd /c ""%PHP%" ..."` and `cmd /k ""%TAILSCALE_BIN%" ..."`
+        // lines use: wrap the whole command as ('"" ... ""').
+        $step10 = $this->tailscaleStepBlock();
+        $this->assertNotSame('', $step10, 'the Step 10 Tailscale block must exist.');
+
+        // The for /f that reads `serve status` opens and closes with the doubled
+        // outer quote ("" ... "") so the inner quotes survive cmd /c stripping.
+        $this->assertMatchesRegularExpression(
+            '#for /f "tokens=\*" %%a in \(\'""%TAILSCALE_BIN%" serve status 2\^>nul \^\| findstr /C:"https://""\'\) do if not defined TAIL_URL set "TAIL_URL=%%a"#',
+            $step10,
+            'the `tailscale serve status` for /f must wrap the quoted, spaced executable in a sacrificial "" outer pair.',
+        );
+        // The broken single-quote form (which cmd /c mangles) must not be present.
+        $this->assertDoesNotMatchRegularExpression(
+            "#for /f \"tokens=\\*\" %%a in \\('\"%TAILSCALE_BIN%\" serve status#",
+            $step10,
+            'the for /f must not open with a single quote before the spaced TAILSCALE_BIN path (cmd /c strips it).',
+        );
+        // The same doubled-quote wrapper convention is used by the other spawned
+        // commands (regression anchor: these are the known-good forms).
+        $this->assertMatchesRegularExpression('#cmd /c ""%PHP%"#', $this->bat, 'the PHP server launch uses the "" wrapper.');
+        $this->assertMatchesRegularExpression('#cmd /k ""%TAILSCALE_BIN%" serve#', $this->bat, 'the interactive Tailscale setup uses the "" wrapper.');
+    }
+
     public function test_built_in_server_cwd_public_fix_is_preserved_in_full_launch_line(): void
     {
         // Extends the cwd-public regression: the ENTIRE launch line must keep

@@ -390,7 +390,14 @@ echo   On this computer:
 echo        %APP_URL_LOCAL%
 echo.
 set "TAIL_URL="
-for /f "tokens=*" %%a in ('"%TAILSCALE_BIN%" serve status 2^>nul ^| findstr /C:"https://"') do if not defined TAIL_URL set "TAIL_URL=%%a"
+REM for /f runs this via an implicit `cmd /c "..."`, which strips the FIRST and
+REM LAST double-quote of a quote-leading command. TAILSCALE_BIN is a quoted,
+REM spaced path ("C:\Program Files\Tailscale\tailscale.exe"), so without an
+REM outer sacrificial pair that stripping leaves a stray quote and the child
+REM cmd fails with "The filename, directory name, or volume label syntax is
+REM incorrect." Wrap the whole command in "" ... "" exactly like the working
+REM `cmd /c ""%PHP%" ..."` / `cmd /k ""%TAILSCALE_BIN%" ..."` lines.
+for /f "tokens=*" %%a in ('""%TAILSCALE_BIN%" serve status 2^>nul ^| findstr /C:"https://""') do if not defined TAIL_URL set "TAIL_URL=%%a"
 if defined TAIL_URL (
     echo   From other TOEFL House devices on your Tailnet:
     echo        %TAIL_URL%
