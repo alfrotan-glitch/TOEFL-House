@@ -96,13 +96,25 @@ final class WindowsOneClickDeploymentContractTest extends TestCase
         $this->assertNotFalse($failAt, 'the initdb failure message is missing');
         $this->assertNotFalse($recoverAt, 'the initdb failure message lacks the pgdata recovery path');
         $this->assertLessThan($recoverAt, $failAt, 'the recovery path must be inside the failure message');
-        // An interrupted migrate can leave a deadlocked schema (the migration
-        // record is logged after the DDL commits). The launcher must auto-heal
-        // only the provably safe case (no user_accounts table, or zero
-        // accounts) and point data-bearing deployments at the restore tool.
-        $this->assertStringContainsString("to_regclass('public.user_accounts')", $start);
-        $this->assertStringContainsString('dropdb', $start);
+        // Migrations run transactionally on PostgreSQL (each migration file and
+        // its record commit atomically), so an interrupted run never leaves a
+        // partial schema and re-running resumes from the last applied migration.
+        // The launcher therefore NEVER drops data to self-heal: migrate failure
+        // reports that nothing was altered and that re-running resumes, a foreign
+        // / non-THOEFL database stops here (db_foreign), and data-bearing
+        // recovery is delegated to the committed restore tool.
+        $this->assertStringContainsString('no partial schema is committed', $start);
+        $this->assertStringContainsString('all data are untouched', $start);
         $this->assertStringContainsString('RESTORE-TOEFL-HOUSE.bat', $start);
+        // Data-preserving guarantee: the launcher must never drop an existing
+        // database (no dropdb / DROP DATABASE anywhere).
+        $this->assertDoesNotMatchRegularExpression('/dropdb|DROP DATABASE/i', $start, 'the launcher must never drop a database.');
+        // The interrupted/fresh-run safety classification (is user_accounts
+        // present, or is its migration record logged?) is decided by the
+        // committed PHP helper via to_regclass - not inline in the .bat.
+        $helper = $this->read('deploy/windows/launcher_helper.php');
+        $this->assertStringContainsString("to_regclass('public.user_accounts')", $helper);
+        $this->assertStringContainsString('2026_08_25_000007_create_user_accounts_table', $helper);
         // Tailscale Serve must be configured in the background, with a
         // one-time interactive fallback for tailnets whose HTTPS certificates
         // are not enabled yet (the interactive consent flow cannot run in

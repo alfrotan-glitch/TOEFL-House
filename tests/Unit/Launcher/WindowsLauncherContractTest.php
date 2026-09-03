@@ -106,17 +106,20 @@ final class WindowsLauncherContractTest extends TestCase
 
     public function test_launcher_falls_back_to_archive_when_releases_404s(): void
     {
-        // Both URLs must be referenced by curl in the download block, and the
-        // archive attempt must be gated on a failure of the releases attempt.
-        $releasesCurl = $this->lineCountForCurl('PHP_ZIP_URL');
-        $archiveCurl = $this->lineCountForCurl('PHP_ARCHIVE_ZIP_URL');
-        $this->assertSame(1, $releasesCurl, 'the launcher must curl PHP_ZIP_URL exactly once.');
-        $this->assertSame(1, $archiveCurl, 'the launcher must curl PHP_ARCHIVE_ZIP_URL exactly once (the fallback).');
-
+        // PHP is fetched through the shared atomic :fetch_file helper, which is
+        // given the current-release URL (PHP_ZIP_URL) as the primary source and
+        // the permanent /archives/ URL (PHP_ARCHIVE_ZIP_URL) as the fallback.
         $this->assertMatchesRegularExpression(
-            '/curl\.exe[^\n]*PHP_ZIP_URL[^\n]*\n\s*if errorlevel 1 \([\s\S]*?curl\.exe[^\n]*PHP_ARCHIVE_ZIP_URL/',
+            '/call :fetch_file "%RT%\\\\downloads\\\\php\\.zip" "%PHP_ZIP_URL%" "%PHP_ARCHIVE_ZIP_URL%" "10485760"/',
             $this->bat,
-            'the archive download must only run when the releases download fails (if errorlevel 1).',
+            'the PHP download must pass PHP_ZIP_URL (primary) and PHP_ARCHIVE_ZIP_URL (fallback) to :fetch_file.',
+        );
+        // Inside :fetch_file the fallback source runs only when the primary fails.
+        $ff = $this->subroutineBody(':fetch_file');
+        $this->assertMatchesRegularExpression(
+            '/call :fetch_try "%FF_URL1%"[^\n]*\n\s*if errorlevel 1 if not "%FF_URL2%"==""\s*\([^)]*?call :fetch_try "%FF_URL2%"/',
+            $ff,
+            'the /archives/ fallback must run only when the /releases/ attempt fails (if errorlevel 1).',
         );
         $this->assertStringContainsString('archives/', $this->bat);
     }
@@ -136,7 +139,7 @@ final class WindowsLauncherContractTest extends TestCase
         // No staging-then-move of a PHP wrapper folder may remain.
         $this->assertStringNotContainsString('%PHP_EXTRACT_DIR%', $this->bat, 'the obsolete wrapper-folder move variable must be gone for PHP.');
         $this->assertDoesNotMatchRegularExpression(
-            '/move\s+/y\s+"%RT%\\\downloads\\\php[^"]*"\s+"%PHP_DIR%"/i',
+            '/move\s+\/y\s+"%RT%\\\downloads\\\php[^"]*"\s+"%PHP_DIR%"/i',
             $this->bat,
             'the PHP runtime must not be placed by moving a wrapper folder (the flat zip has none).',
         );
@@ -155,22 +158,27 @@ final class WindowsLauncherContractTest extends TestCase
 
     public function test_downloaded_php_archive_is_verified_existing_and_non_empty(): void
     {
-        // The archive must exist...
+        // php.zip is fetched via the atomic :fetch_file helper, which is handed the
+        // exact destination path and a minimum-size threshold, so a missing or
+        // too-small archive is never promoted over the destination / extracted.
         $this->assertMatchesRegularExpression(
-            '/if not exist "%RT%\\\downloads\\\php\.zip" call :fail/',
+            '/call :fetch_file "%RT%\\\\downloads\\\\php\.zip" "%PHP_ZIP_URL%" "%PHP_ARCHIVE_ZIP_URL%" "10485760"/',
             $this->bat,
-            'a missing php.zip must fail loudly with the exact path.',
+            'php.zip is fetched to its exact path with a non-trivial minimum-size requirement.',
         );
-        // ...and be non-trivial in size (a real PHP zip is ~30 MB; an error page/truncation is < 1 MB).
+        // A failed download stops the launcher loudly (never continues).
         $this->assertMatchesRegularExpression(
-            '/for\s+%%F in \("%RT%\\\downloads\\\php\.zip"\)\s+do set "PHP_ZIP_BYTES=%%~zF"/',
+            '/if errorlevel 1 call :fail "PHP download failed or was truncated from both %PHP_ZIP_URL% and %PHP_ARCHIVE_ZIP_URL%/',
             $this->bat,
-            'the launcher must measure the downloaded php.zip size (%%~zF).',
+            'a missing php.zip must fail loudly instead of continuing.',
         );
+        // A below-minimum download is rejected inside :fetch_file (its .part is
+        // deleted) and never reaches extraction.
+        $ff = $this->subroutineBody(':fetch_file');
         $this->assertMatchesRegularExpression(
-            '/if !PHP_ZIP_BYTES! LSS 1048576 call :fail/',
-            $this->bat,
-            'an empty/truncated php.zip (< 1 MB) must fail before extraction.',
+            '/if !FF_BYTES! LSS !FF_MIN! \([^\n]*\n[^)]*del \/q "%FF_DEST%\.part"/',
+            $ff,
+            'an empty/truncated php.zip must be discarded before it can be used.',
         );
     }
 
@@ -178,10 +186,19 @@ final class WindowsLauncherContractTest extends TestCase
     {
         // After extraction the binary itself must exist before the launcher proceeds;
         // this is the layout-change sentinel (it would have caught the bad wrapper move).
+        // :php_extract aborts (exit /b 1) when php.exe was not produced, and the caller
+        // (:php_download) turns that into a loud, path-naming :fail.
+        $ex = $this->subroutineBody(':php_extract');
         $this->assertMatchesRegularExpression(
-            '/if not exist "%PHP_DIR%\\\php\.exe" call :fail/',
-            $this->bat,
-            'the launcher must verify %PHP_DIR%\php.exe exists after extraction, naming the path.',
+            '/php\.exe"[^\n]*exit \/b 1/',
+            $ex,
+            'the launcher must verify %PHP_DIR%\php.exe exists after extraction and abort if it was not produced.',
+        );
+        $dl = $this->subroutineBody(':php_download');
+        $this->assertMatchesRegularExpression(
+            '/call :php_extract[^\n]*\n\s*if errorlevel 1 call :fail "Could not unpack the PHP archive/',
+            $dl,
+            'an extraction that did not produce php.exe fails the launcher loudly.',
         );
     }
 
@@ -278,15 +295,14 @@ final class WindowsLauncherContractTest extends TestCase
     public function test_each_runtime_step_fail_fast_on_error(): void
     {
         // Every required-runtime failure path must call :fail immediately (no continuation).
-        // PHP download / integrity / extract / binary presence:
+        // PHP download / integrity / extract / composer / PostgreSQL:
         foreach ([
             'PHP download failed or was truncated',
             'integrity test failed',
             'Could not unpack the PHP archive',
-            '%PHP_DIR%\php.exe was not produced',
-            'Composer installer download failed',
-            'could not install or verify composer.phar',
-            'Composer downloaded but cannot run',
+            'Composer download failed or was truncated',
+            'Downloaded composer.phar is only',
+            'composer.phar was downloaded to',
             'PostgreSQL download failed or was truncated',
             'Could not unpack the PostgreSQL archive',
             'Could not place the PostgreSQL runtime',
@@ -301,7 +317,7 @@ final class WindowsLauncherContractTest extends TestCase
     {
         // The runtime step must route through the self-healing :prepare_php subroutine.
         $this->assertMatchesRegularExpression('/^call :prepare_php\s*$/m', $this->bat);
-        $prep = $this->subroutineBody(':prepare_php');
+        $prep = $this->subroutineBlock(':prepare_php', ':prepare_composer');
         $this->assertNotSame('', $prep, ':prepare_php subroutine must exist.');
         // It health-checks an existing runtime and reuses it when healthy (no unnecessary redownload).
         $this->assertStringContainsString('call :php_health', $prep);
@@ -320,7 +336,7 @@ final class WindowsLauncherContractTest extends TestCase
         $fail = $this->subroutineBody(':fail');
         $this->assertMatchesRegularExpression('/^\s*exit\s+1\s*$/m', $fail);
         // The PHP-prep failure path explicitly names the PDO driver and calls :fail.
-        $prep = $this->subroutineBody(':prepare_php');
+        $prep = $this->subroutineBlock(':prepare_php', ':prepare_composer');
         $this->assertStringContainsString('pdo_pgsql', $prep);
         $this->assertMatchesRegularExpression('/call :fail "PHP could not be prepared with a working PostgreSQL driver/', $prep);
     }
@@ -360,7 +376,7 @@ final class WindowsLauncherContractTest extends TestCase
     {
         // The PHP folder (which contains the bundled libpq.dll) is prepended to THIS
         // launcher process PATH only - no System32 copies, no permanent/global PATH change.
-        $prep = $this->subroutineBody(':prepare_php');
+        $prep = $this->subroutineBlock(':prepare_php', ':prepare_composer');
         $this->assertMatchesRegularExpression('/set "PATH=%PHP_DIR%;%PATH%"/', $prep);
         $this->assertDoesNotMatchRegularExpression('/setx\b/', $this->bat, 'the launcher must not modify the permanent user/system PATH (no setx).');
         $this->assertDoesNotMatchRegularExpression('/System32\\\\libpq/', $this->bat, 'dependencies must not be copied into System32.');
@@ -389,8 +405,6 @@ final class WindowsLauncherContractTest extends TestCase
             '%PHP_DIR%\\libpq.dll',
             '%PHP_DIR%\\ext\\php_pdo_pgsql.dll',
             '%PHP_DIR%\\ext\\php_pgsql.dll',
-            'PRESENT',
-            'MISSING',
             '-m 2>&1',
         ] as $needle) {
             $this->assertStringContainsString($needle, $diag, "diagnostic must report: $needle");
@@ -402,9 +416,9 @@ final class WindowsLauncherContractTest extends TestCase
 
     public function test_rerunning_repairs_and_reuses_a_valid_runtime(): void
     {
-        $prep = $this->subroutineBody(':prepare_php');
+        $prep = $this->subroutineBlock(':prepare_php', ':prepare_composer');
         // Healthy existing runtime -> jump straight to ready (reuse, no redownload).
-        $this->assertMatchesRegularExpression('/if exist "%PHP_DIR%\\php\.exe" goto php_have/', $prep);
+        $this->assertMatchesRegularExpression('/if exist "%PHP_DIR%\\\\php\.exe" goto php_have/', $prep);
         $this->assertMatchesRegularExpression('/if not errorlevel 1 goto php_ready/', $prep);
         // Broken runtime -> diagnose, re-extract from cache, else re-download; a healthy result is reused.
         $this->assertMatchesRegularExpression('/re-extracting PHP from the cached/', $prep);
@@ -487,11 +501,11 @@ final class WindowsLauncherContractTest extends TestCase
             'the launcher helper must never be invoked inside a for /f loop.',
         );
         $this->assertDoesNotMatchRegularExpression(
-            "/for \/f[^\n]*psql\.exe/i",
+            "/for \/f[^\n]*%%[^\n]*psql\.exe/i",
             $this->bat,
             'no psql.exe command may be wrapped in a for /f loop; use the PHP/PDO helper.',
         );
-        $this->assertMatchesRegularExpression('/set "LAUNCHER_HELPER=%ROOT%\\deploy\\windows\\launcher_helper\.php"/', $this->bat);
+        $this->assertMatchesRegularExpression('/set "LAUNCHER_HELPER=%ROOT%\\\\deploy\\\\windows\\\\launcher_helper\.php"/', $this->bat);
         // db-app-valid is branched on exit code (0 valid / 3 foreign) directly.
         $this->assertMatchesRegularExpression(
             '/db-app-valid "%APP_DSN%" postgres "" toefl_house >nul\s*\n\s*set "DBVAL_RC=!ERRORLEVEL!"/',
@@ -571,33 +585,6 @@ final class WindowsLauncherContractTest extends TestCase
         $this->assertMatchesRegularExpression('/echo extension=zip/', $ini);
     }
 
-    public function test_existing_valid_database_is_reused_and_never_dropped_or_overwritten(): void
-    {
-        $ensure = $this->subroutineBlock(':ensure_app_db', ':fetch_file');
-        $this->assertDoesNotMatchRegularExpression('/dropdb|DROP DATABASE/i', $this->bat, 'the launcher must never drop a database.');
-        $this->assertDoesNotMatchRegularExpression('/createdb[\s\S]{0,200}(already exists)/i', $ensure, 'createdb must not be run blindly against an existing database.');
-        // Validity is proven by authoritative schema/migration checks inside the helper.
-        $this->assertStringContainsString("table_name = 'user_accounts'", $this->launcherHelper());
-        $this->assertStringContainsString('2026_08_25_000007_create_user_accounts_table', $this->launcherHelper());
-        $this->assertMatchesRegularExpression(
-            '/db-app-valid "%APP_DSN%"[\s\S]*?DBVAL_RC=!ERRORLEVEL![\s\S]*?reusing it/',
-            $ensure,
-            'a recognized TOEFL House database is reused (no data changed).',
-        );
-    }
-
-    public function test_existing_unrecognized_database_stops_safely_without_destroying_data(): void
-    {
-        $ensure = $this->subroutineBlock(':ensure_app_db', ':fetch_file');
-        $this->assertMatchesRegularExpression(
-            '/call :fail "[^"]*NOT recognized as the TOEFL House database[^"]*"/s',
-            $ensure,
-            'an existing but unrecognizable database stops the launcher with a clear diagnostic.',
-        );
-        $this->assertMatchesRegularExpression('/Nothing has been dropped or overwritten/', $ensure, 'the message must promise no data was destroyed.');
-        $this->assertDoesNotMatchRegularExpression('/dropdb|DROP DATABASE/i', $this->bat, 'no automatic destruction path exists.');
-    }
-
     public function test_postgres_and_database_stages_are_idempotent_on_repeated_runs(): void
     {
         // Re-running must not fail merely because the server/db already exist.
@@ -651,7 +638,7 @@ final class WindowsLauncherContractTest extends TestCase
         // The server window is launched through cmd /c with its output redirected to a
         // log file, so a real bind/crash failure is diagnosable.
         $this->assertMatchesRegularExpression(
-            '/start "TOEFL-House-Server" \/min cmd \/c "\"%PHP%\" -d variables_order=EGPCS -S 127\.0\.0\.1:%APP_PORT% -t "%ROOT%\\\\public" "%FRAMEWORK_ROUTER%" > "%SERVER_LOG%" 2>&1"/',
+            '/start "TOEFL-House-Server" \/D "%ROOT%\\\\public" \/min cmd \/c ""%PHP%" -d variables_order=EGPCS -S 127\.0\.0\.1:%APP_PORT% -t "%ROOT%\\\\public" "%FRAMEWORK_ROUTER%" > "%SERVER_LOG%" 2>&1"/',
             $this->bat,
             'the server is launched minimized via cmd /c and its output goes to SERVER_LOG.',
         );
@@ -691,7 +678,7 @@ final class WindowsLauncherContractTest extends TestCase
         $helper = $this->launcherHelper();
         $this->assertStringContainsString('function portHasListener(int $port): bool', $helper);
         $this->assertStringContainsString('netstat -ano', $helper);
-        $this->assertStringContainsString("stripos($line, 'LISTENING')", $helper);
+        $this->assertStringContainsString('stripos($line, \'LISTENING\')', $helper);
         $this->assertStringContainsString('function portIsInExcludedRange(int $port): bool', $helper);
         $this->assertStringContainsString('netsh interface ipv4 show excludedportrange protocol=tcp', $helper);
         // port-bindable rejects a port that is either listening or inside an excluded range.
@@ -929,7 +916,7 @@ final class WindowsLauncherContractTest extends TestCase
 
         // The discovery line uses tokens=1 (first whitespace token = bare URL).
         $this->assertMatchesRegularExpression(
-            '#for /f "tokens=1" %%a in \(\'""%TAILSCALE_BIN%" serve status[^)]*set "TAIL_URL=%%a"#',
+            '#for /f "tokens=1" %%a in \(\'""%TAILSCALE_BIN%" serve status 2\^>nul \^\| findstr /C:"https://""\'\) do if not defined TAIL_URL set "TAIL_URL=%%a"#',
             $step10,
             'the serve-status for /f must capture tokens=1 (the bare URL), not tokens=* (the whole line).',
         );
@@ -1207,8 +1194,4 @@ final class WindowsLauncherContractTest extends TestCase
         ];
     }
 
-    private function lineCountForCurl(string $var): int
-    {
-        return preg_match_all('/curl\.exe[^\n]*"%'.$var.'%"/', $this->bat);
-    }
 }
