@@ -24,7 +24,7 @@ The report does not certify the legacy system or infer that its behavior is appr
 | Calendar | `server/src/core/calendar/periods.ts`, `server/src/utils/jalali.ts` | Existing implementation includes Solar Hijri/Gregorian handling; central authority and business semantics require verification |
 | Operations | `server/src/core/operations/database-backup.ts`, `docs/OPERATIONS.md` | Existing backup/recovery behavior is documented and tested, but is not automatically approved for the new architecture |
 | Test evidence | 216 files under `server/src/tests/` at inspection time | Test count is evidence of exercised behavior, not proof of completeness or certification |
-| Documentation | `docs/MASTER_ENGINEERING_PROTOCOL.md`, `docs/certification/`, `docs/work-packages/`, `docs/registries/` | Existing governance records are historical repository evidence; they must be reconciled with the new directive |
+| Documentation | Legacy-era paths `docs/MASTER_ENGINEERING_PROTOCOL.md`, `docs/certification/`, `docs/work-packages/`, `docs/registries/`. The legacy `MASTER_ENGINEERING_PROTOCOL.md` is **not present** in the current tree; the canonical governing contract is now `docs/MASTER_ENGINEERING_CONTRACT.md` (v3.0). | Existing governance records are historical repository evidence; they must be reconciled with the new directive, and the current governing contract supersedes the legacy protocol path |
 
 ## 3. Valid candidate business knowledge to verify
 

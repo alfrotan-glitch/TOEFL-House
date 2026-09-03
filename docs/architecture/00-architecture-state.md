@@ -1,5 +1,7 @@
 # Architecture State
 
+**Governing contract:** `docs/MASTER_ENGINEERING_CONTRACT.md` (TOEFL HOUSE ERP — WORLD-CLASS MASTER ENGINEERING CONTRACT, v3.0, Canonical Project Engineering Constitution) is the highest-authority project engineering directive; the architecture artifacts below it must remain consistent with it.
+
 **Current gate:** Gate 5 — PASS WITH NON-BLOCKING OPEN ITEMS
 **Current implementation-readiness gate:** Gate 6 — PASS WITH NON-BLOCKING OPEN ITEMS
 **Updated:** 2026-08-25

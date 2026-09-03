@@ -1,5 +1,7 @@
 # TOEFL House Foundation State
 
+**Governing contract:** `docs/MASTER_ENGINEERING_CONTRACT.md` (TOEFL HOUSE ERP — WORLD-CLASS MASTER ENGINEERING CONTRACT, v3.0, Canonical Project Engineering Constitution) is the highest-authority project engineering directive; this record and the foundation artifacts below it must remain consistent with it.
+
 **Phase:** Foundation / discovery
 **Current gate:** Gate 6 — Implementation Readiness and Execution Contract (`PASS WITH NON-BLOCKING OPEN ITEMS`)
 **Certification:** `NOT CLAIMED` — business discovery is complete; Gates 1–16 and Foundation Certification remain pending

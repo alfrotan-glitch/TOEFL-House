@@ -4,8 +4,18 @@
 
 This index maps the directive's required foundation artifacts to their current state. `PLANNED` means the artifact is intentionally queued, not complete.
 
+> **Governing contract.** The highest-authority engineering document is
+> `docs/MASTER_ENGINEERING_CONTRACT.md` — **TOEFL HOUSE ERP — WORLD-CLASS
+> MASTER ENGINEERING CONTRACT, Version 3.0 (Canonical Project Engineering
+> Constitution)**. It is the PRIMARY PROJECT ENGINEERING DIRECTIVE for the
+> entire TOEFL House ERP / EdTech platform and sits above the artifacts indexed
+> here. Every artifact below (and every architecture/implementation/operations
+> record) must be consistent with it unless a later approved revision explicitly
+> supersedes it.
+
 | # | Required artifact | Path / planned path | State |
 |---:|---|---|---|
+| 00 | Master Engineering Contract | `docs/MASTER_ENGINEERING_CONTRACT.md` | MASTER / CANONICAL / CONTINUOUSLY IN FORCE |
 | 01 | Project Charter | `docs/foundation/charter.md` | PLANNED |
 | 02 | System Mission & Scope | `docs/foundation/mission-and-scope.md` | PLANNED |
 | 03 | Organization Model | `docs/foundation/organization-model.md` | BLOCKED by O-01–O-03 |
