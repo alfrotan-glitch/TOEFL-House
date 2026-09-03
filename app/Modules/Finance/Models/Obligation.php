@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $source
  * @property string $original_amount
  * @property string $reason
+ * @property string|null $originating_branch_id
  */
 final class Obligation extends Model
 {
@@ -23,5 +24,5 @@ final class Obligation extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'period_id', 'student_id', 'source', 'original_amount', 'reason', 'posted_by'];
+    protected $fillable = ['id', 'period_id', 'student_id', 'source', 'original_amount', 'reason', 'posted_by', 'originating_branch_id'];
 }

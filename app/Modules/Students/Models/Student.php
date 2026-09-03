@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Modules\Students\Models;
 
 use App\Modules\Identity\Models\Person;
+use App\Modules\Organization\Models\Branch;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -18,6 +19,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string $person_id
  * @property string $admission_decision_id
  * @property string $student_code
+ * @property string|null $originating_branch_id
  */
 final class Student extends Model
 {
@@ -25,7 +27,7 @@ final class Student extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'person_id', 'admission_decision_id', 'student_code'];
+    protected $fillable = ['id', 'person_id', 'admission_decision_id', 'student_code', 'originating_branch_id'];
 
     /** @return HasMany<StudentStatus, $this> */
     public function statuses(): HasMany
@@ -37,5 +39,11 @@ final class Student extends Model
     public function person(): BelongsTo
     {
         return $this->belongsTo(Person::class);
+    }
+
+    /** @return BelongsTo<Branch, $this> */
+    public function originatingBranch(): BelongsTo
+    {
+        return $this->belongsTo(Branch::class, 'originating_branch_id');
     }
 }

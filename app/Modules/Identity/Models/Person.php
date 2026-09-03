@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Modules\Identity\Models;
 
+use App\Modules\Organization\Models\Branch;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
@@ -20,6 +22,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string|null $identity_evidence_ref
  * @property string|null $verified_at
  * @property string|null $verified_by
+ * @property string|null $home_branch_id
  */
 final class Person extends Model
 {
@@ -33,10 +36,16 @@ final class Person extends Model
 
     protected $fillable = [
         'id', 'legal_name', 'date_of_birth', 'verification_state',
-        'identity_key', 'identity_evidence_ref', 'verified_at', 'verified_by',
+        'identity_key', 'identity_evidence_ref', 'verified_at', 'verified_by', 'home_branch_id',
     ];
 
     public $timestamps = false;
+
+    /** @return BelongsTo<Branch, $this> */
+    public function homeBranch(): BelongsTo
+    {
+        return $this->belongsTo(Branch::class, 'home_branch_id');
+    }
 
     public function isVerified(): bool
     {

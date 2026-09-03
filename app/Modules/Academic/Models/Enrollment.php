@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $student_id
  * @property string $class_id
  * @property string $lifecycle_state
+ * @property string|null $originating_branch_id
  */
 final class Enrollment extends Model
 {
@@ -21,5 +22,5 @@ final class Enrollment extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'student_id', 'class_id', 'lifecycle_state'];
+    protected $fillable = ['id', 'student_id', 'class_id', 'lifecycle_state', 'originating_branch_id'];
 }
