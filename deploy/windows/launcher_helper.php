@@ -91,7 +91,7 @@ try {
             exit(1);
     }
 } catch (Throwable $e) {
-    fwrite(STDERR, 'launcher_helper: ' . $e->getMessage() . PHP_EOL);
+    fwrite(STDERR, 'launcher_helper: '.$e->getMessage().PHP_EOL);
     exit(2);
 }
 
@@ -101,8 +101,9 @@ try {
  */
 function envSet(string $envPath, array $pairs): int
 {
-    if (!is_file($envPath)) {
+    if (! is_file($envPath)) {
         fwrite(STDERR, "launcher_helper env-set: .env not found at {$envPath}\n");
+
         return 1;
     }
 
@@ -111,12 +112,14 @@ function envSet(string $envPath, array $pairs): int
         $eq = strpos($pair, '=');
         if ($eq === false) {
             fwrite(STDERR, "launcher_helper env-set: malformed pair (missing '='): {$pair}\n");
+
             return 1;
         }
         $key = substr($pair, 0, $eq);
         $value = substr($pair, $eq + 1);
-        if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $key)) {
+        if (! preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $key)) {
             fwrite(STDERR, "launcher_helper env-set: bad key in pair: {$pair}\n");
+
             return 1;
         }
         $updates[$key] = $value;
@@ -125,6 +128,7 @@ function envSet(string $envPath, array $pairs): int
     $lines = file($envPath, FILE_IGNORE_NEW_LINES);
     if ($lines === false) {
         fwrite(STDERR, "launcher_helper env-set: cannot read {$envPath}\n");
+
         return 1;
     }
 
@@ -133,7 +137,7 @@ function envSet(string $envPath, array $pairs): int
     foreach ($lines as $line) {
         if (preg_match('/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/', $line, $m) === 1 && array_key_exists($m[1], $updates)) {
             $key = $m[1];
-            $out[] = $key . '=' . $updates[$key];
+            $out[] = $key.'='.$updates[$key];
             $applied[$key] = true;
         } else {
             $out[] = $line;
@@ -141,19 +145,21 @@ function envSet(string $envPath, array $pairs): int
     }
     // Any key not present in the template is appended so the override still lands.
     foreach ($updates as $key => $value) {
-        if (!isset($applied[$key])) {
-            $out[] = $key . '=' . $value;
+        if (! isset($applied[$key])) {
+            $out[] = $key.'='.$value;
         }
     }
 
-    $tmp = $envPath . '.tmp';
-    if (file_put_contents($tmp, implode(PHP_EOL, $out) . PHP_EOL, LOCK_EX) === false) {
+    $tmp = $envPath.'.tmp';
+    if (file_put_contents($tmp, implode(PHP_EOL, $out).PHP_EOL, LOCK_EX) === false) {
         fwrite(STDERR, "launcher_helper env-set: cannot write {$tmp}\n");
+
         return 1;
     }
-    if (!@rename($tmp, $envPath)) {
+    if (! @rename($tmp, $envPath)) {
         @unlink($tmp);
         fwrite(STDERR, "launcher_helper env-set: cannot replace {$envPath}\n");
+
         return 1;
     }
 
@@ -179,9 +185,11 @@ function dbCommand(string $command, string $dsn, string $user, string $password,
             $stmt->execute([$dbname]);
             if ($stmt->fetch() !== false) {
                 echo 'yes', PHP_EOL;
+
                 return 0; // present
             }
             echo 'no', PHP_EOL;
+
             return 3; // absent
 
         case 'db-app-valid':
@@ -192,7 +200,7 @@ function dbCommand(string $command, string $dsn, string $user, string $password,
             //    yet - e.g. right after createdb, before the first migrate).
             $hasTable = (int) $pdo->query(
                 'SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.tables '
-                . "WHERE table_schema = 'public' AND table_name = 'user_accounts') THEN 1 ELSE 0 END"
+                ."WHERE table_schema = 'public' AND table_name = 'user_accounts') THEN 1 ELSE 0 END"
             )->fetchColumn();
 
             $migrationsClass = $pdo->query("SELECT to_regclass('public.migrations')")->fetchColumn();
@@ -210,21 +218,24 @@ function dbCommand(string $command, string $dsn, string $user, string $password,
             // of our markers, so it is classified foreign and left untouched.
             $otherTables = (int) $pdo->query(
                 'SELECT count(*) FROM information_schema.tables '
-                . "WHERE table_schema = 'public' AND table_name <> 'migrations'"
+                ."WHERE table_schema = 'public' AND table_name <> 'migrations'"
             )->fetchColumn();
 
             $valid = $hasTable === 1 || $hasMigration === 1 || $otherTables === 0;
             echo $valid ? 'valid' : 'foreign', PHP_EOL;
+
             return $valid ? 0 : 3; // 0 = ours, 3 = foreign database
 
         case 'account-count':
             $regclass = $pdo->query("SELECT to_regclass('public.user_accounts')")->fetchColumn();
             if ($regclass === null || $regclass === false) {
                 fwrite(STDERR, "launcher_helper: user_accounts table is missing after migration\n");
+
                 return 2;
             }
             $count = (int) $pdo->query('SELECT count(*) FROM public.user_accounts')->fetchColumn();
             echo $count, PHP_EOL;
+
             // 0 accounts = first run (exit 0); existing accounts = skip bootstrap (exit 1).
             return $count === 0 ? 0 : 1;
     }
@@ -269,7 +280,7 @@ function portBindable(int $port): int
 function portHasListener(int $port): bool
 {
     $out = @shell_exec('netstat -ano 2>nul');
-    if (!is_string($out) || $out === '') {
+    if (! is_string($out) || $out === '') {
         // Cannot determine via netstat; fall through to the socket test.
         return false;
     }
@@ -278,7 +289,7 @@ function portHasListener(int $port): bool
         if (stripos($line, 'LISTENING') === false) {
             continue;
         }
-        if (preg_match('/:' . $port . '\s/', $line) === 1 || preg_match('/:' . $port . '$/', trim($line)) === 1) {
+        if (preg_match('/:'.$port.'\s/', $line) === 1 || preg_match('/:'.$port.'$/', trim($line)) === 1) {
             return true;
         }
     }
@@ -293,7 +304,7 @@ function portHasListener(int $port): bool
 function portIsInExcludedRange(int $port): bool
 {
     $out = @shell_exec('netsh interface ipv4 show excludedportrange protocol=tcp 2>nul');
-    if (!is_string($out) || $out === '') {
+    if (! is_string($out) || $out === '') {
         return false;
     }
     // Data rows have two numeric columns: start port and end port.

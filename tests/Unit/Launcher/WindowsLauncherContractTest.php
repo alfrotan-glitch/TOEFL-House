@@ -574,7 +574,7 @@ final class WindowsLauncherContractTest extends TestCase
         $ini = $this->subroutineBody(':write_php_ini');
         foreach (['dom', 'xml', 'simplexml', 'xmlreader', 'xmlwriter'] as $ext) {
             $this->assertDoesNotMatchRegularExpression(
-                '/echo extension=' . preg_quote($ext, '/') . '\s*$/m',
+                '/echo extension='.preg_quote($ext, '/').'\s*$/m',
                 $ini,
                 "core-compiled extension '{$ext}' must not be listed as a shared extension.",
             );
@@ -1055,7 +1055,7 @@ final class WindowsLauncherContractTest extends TestCase
 
     private function launcherHelper(): string
     {
-        $path = dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . 'deploy' . DIRECTORY_SEPARATOR . 'windows' . DIRECTORY_SEPARATOR . 'launcher_helper.php';
+        $path = dirname(__DIR__, 3).DIRECTORY_SEPARATOR.'deploy'.DIRECTORY_SEPARATOR.'windows'.DIRECTORY_SEPARATOR.'launcher_helper.php';
         $this->assertFileExists($path, 'deploy/windows/launcher_helper.php must be committed.');
 
         return (string) file_get_contents($path);
@@ -1193,5 +1193,4 @@ final class WindowsLauncherContractTest extends TestCase
             'archives (permanent fallback)' => ['PHP_ARCHIVE_ZIP_URL', true],
         ];
     }
-
 }

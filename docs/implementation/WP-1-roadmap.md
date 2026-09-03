@@ -56,10 +56,10 @@ Key ordering facts:
 
 Dependencies in/out: prerequisite for almost everything; gated by **D0 decisions**.
 
-- **F1 — Multi-branch operational model.** Add immutable branch/campus provenance and a financial-home-branch vs current-branch distinction to operational records (enrollment, obligation/payment/refund, funding/allocation, contract, certificate, academic period/offering) while current operations resolve through the current campus/branch. Satisfies D-F-014 / REQ-ORG-011 (post-transfer historical attribution immutable) and unblocks per-branch finance/reporting.
-- **F2 — Program-version levels & CEFR + authority.** Add a program-version level entity and CEFR banding and a `ProgramVersionLevel` authority so progression/placement/fee packaging are level-aware (G2-D-003).
-- **F3 — Offerings & branch availability.** Add `Offering` (a program-version level a branch runs in a term) and a `BranchAvailability × Term` matrix; re-point registration/enrollment to an offering rather than a bare class.
-- **F4 — Calendar authority.** Decide and implement Shamsi/Hijri business-date semantics with Gregorian/ISO storage, aligned financial/payroll/academic periods, and reporting periods. **Architecture decision required first** (currently Gregorian-only, legacy `jalali.ts` reference-only).
+- **F1 — Multi-branch operational model.** **FOUNDATION DONE** (approved WP2-DEC-01): immutable `originating_branch_id` anchors (students/enrollments/obligations/certificates), `people.home_branch_id` designation, `branch_scope_links` junction, schema guards, focused tests (`000121`). **REMAINING:** domain command paths for provenance/home-branch/scope-link lifecycle; `current_home_branch_id` on operational aggregates (financial vs current branch); provenance on payments/refunds/funding/contracts; cross-branch scope consumption by Access. Satisfies D-F-014 / REQ-ORG-011 and unblocks per-branch finance/reporting.
+- **F2 — Program-version levels & CEFR + authority.** **FOUNDATION DONE** (approved WP2-DEC-02): `ProgramVersionLevel` model, ordered/unique/CEFR levels, cross-version class-level schema guard, `defineLevel` command, focused tests (`000122`). **REMAINING:** level-aware progression/placement/fee-packaging consumers (WP-3 G/J, WP-4).
+- **F3 — Offerings & branch availability.** **FOUNDATION DONE** (approved WP2-DEC-03): `BranchAvailability`/`Offering` + `declareBranchAvailability`/`openOffering` with schema co-dependency, focused tests (`000123`). **REMAINING:** enrollment re-point to an Offering (WP-3 AC3/registration); availability/offering lifecycle (close/cancel/capacity); branch×term query/UI surface.
+- **F4 — Calendar authority.** **IMPLEMENTED and `F4-C VERIFIED`.** Ratified D1/D2/D3/D4 in `WP2-approved-decisions.md`, implemented by `App\Modules\Calendar` (Kabul civil reference AFT UTC+04:30; ratified version-1 series SH 1399–1416; active operational window SH 1399–1415 fully served; supported range SH 1336–1425 fail-closed; Gregorian storage, derived SH semantics), and independently verified in `docs/implementation/WP-2-F4C-calendar-authority-implementation-verification.md`.
 - **S1 — Governance configuration & review.** Materialize the OPEN decided governance detail as configurable, fail-closed approval thresholds and limits (D-F-007/020/022, REQ-ORG-007/013/015, REQ-FIN-001/002) on top of the complete Access engine, plus automated annual sensitive-access review (D-F-083).
 
 Acceptance: fresh-migrate green, schema invariants for provenance FKs, branch-scope HTTP + direct-SQL attack tests, per-branch financial invariants guarded.
@@ -136,7 +136,7 @@ Runs last / continuously: performance under realistic data volumes (the current 
 | 6 | Expenses & budgets absent | M | Branch expense approval & P&L blocked | WP-4 FIN1 |
 | 7 | Invoicing/credits & fiscal-type taxonomy absent | K | No billing statements/credits | WP-4 FIN2 |
 | 8 | Treasury/bank & P&L reporting absent | M/R | No management accounting | WP-4 FIN3 |
-| 9 | Calendar authority (Shamsi) undecided/absent | S | Business-date & period correctness; affects F/J/K/M/R | WP-2 F4 (decision) |
+| 9 | Calendar authority (Shamsi) undecided/absent | S | Business-date & period correctness; affects F/J/K/M/R | **RESOLVED** — WP-2 F4 implemented & `F4-C VERIFIED` |
 | 10 | Legacy data migration externally blocked | V | No data migration/cutover | source DB + decision (WP-7) |
 
 ---
