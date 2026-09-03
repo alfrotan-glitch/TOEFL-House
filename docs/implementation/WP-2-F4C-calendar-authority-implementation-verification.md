@@ -146,3 +146,7 @@ the F4-C touched files are all Pint-clean.
 - **Result: `F4-C VERIFIED`.** No F4-C blocker remains. The 3 unrelated
   repository-wide Pint issues are pre-existing, outside the verified F4-C scope,
   and are noted for the record rather than treated as F4-C blockers.
+- **Post-verification addendum (2026-09-04):** the 3 repository-wide Pint issues
+  were subsequently resolved (repo-wide Pint is now clean, 531 files), and the
+  mission continues on the approved WP-2 F1/F2/F3 foundations. These do not
+  change any F4-C conclusion.
