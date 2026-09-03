@@ -100,18 +100,24 @@ final class GovernedConfigFoundationTest extends TestCase
         $this->assertSame(7_500_000, $this->registry->effective($moneyKey, new CarbonImmutable('2026-12-31'))->typedValue());
 
         // (7) audit metadata: who, operation, target, before/after states.
+        // Correlation is by the known version ids (target_id), never by row order:
+        // audit_events.occurred_at is second-precision and multiple activations
+        // inside one transaction can legitimately share a timestamp.
         $activateEvents = DB::table('audit_events')
             ->where('operation', 'governance.config.activate')
             ->where('actor_id', self::GOVERNOR)
             ->where('target_type', 'governed_config')
-            ->orderBy('occurred_at')
-            ->get();
+            ->get()
+            ->keyBy('target_id');
         $this->assertCount(2, $activateEvents);
-        $this->assertSame($first['version_id'], $activateEvents[0]->target_id);
-        $this->assertNull($activateEvents[0]->before_state);
-        $after1 = json_decode((string) $activateEvents[0]->after_state, true);
+        $this->assertArrayHasKey($first['version_id'], $activateEvents);
+        $this->assertArrayHasKey($second['version_id'], $activateEvents);
+        $event1 = $activateEvents[$first['version_id']];
+        $event2 = $activateEvents[$second['version_id']];
+        $this->assertNull($event1->before_state);
+        $after1 = json_decode((string) $event1->after_state, true);
         $this->assertSame(1, $after1['version_no']);
-        $before2 = json_decode((string) $activateEvents[1]->before_state, true);
+        $before2 = json_decode((string) $event2->before_state, true);
         $this->assertSame(1, $before2['version_no']);
         $this->assertSame('active', $before2['lifecycle_state']);
     }

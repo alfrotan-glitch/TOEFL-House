@@ -85,6 +85,7 @@ final class CalendarAuthorityTest extends TestCase
             '2024-03-19', '2024-03-20', '2025-03-20', '2025-03-21', '2025-12-31',
             '2026-01-01', '2026-09-03', '2028-02-29', '2028-12-31', '2029-03-20',
             '2029-03-21', '2031-06-30', '2033-12-31', '2034-03-21', '2035-03-20',
+            '2035-12-31', '2036-03-19',
         ];
 
         foreach ($dates as $ymd) {
@@ -155,23 +156,52 @@ final class CalendarAuthorityTest extends TestCase
         $this->assertSame([1405, 1, 1], [$b->year, $b->month, $b->day]);
     }
 
+    public function test_active_window_nowruz_starts_1409_1414(): void
+    {
+        // The ratified F4-A.3 §4.2 Kabul series covers Nowruz 1399-1414 and, as
+        // the row closing 1414, ratifies 1 Hamal 1415 = 2036-03-20. This asserts
+        // the rest of the ratified Nowruz chain. 1414 is therefore fully served
+        // (N(1414) and N(1415) both pinned); 1415 itself is NOT served because
+        // its successor N(1416) is not yet ratified (F4-B §2.5).
+        $vectors = [
+            ['2030-03-21', 1409, 1, 1],
+            ['2031-03-21', 1410, 1, 1],
+            ['2032-03-20', 1411, 1, 1],
+            ['2033-03-20', 1412, 1, 1],
+            ['2034-03-21', 1413, 1, 1],
+            ['2035-03-21', 1414, 1, 1],
+        ];
+        foreach ($vectors as [$ymd, $year, $month, $day]) {
+            $sh = $this->authority->forwardFromString($ymd);
+            $this->assertSame([$year, $month, $day], [$sh->year, $sh->month, $sh->day], "forward $ymd");
+            $this->assertSame($ymd, $this->authority->reverseToString(new SolarHijriDate($year, $month, $day)), "reverse $year-$month-$day");
+        }
+
+        // 1414 common (Hut 29): 2036-03-19 = 29 Hut 1414; 2036-03-20 = 1 Hamal
+        // 1415, which is the exclusive end of the served interval (not served).
+        $this->assertFalse($this->authority->isLeapYear(1414));
+        $this->assertSame('2036-03-19', $this->authority->reverseToString(new SolarHijriDate(1414, 12, 29)));
+        $this->assertRejection('calendar.year_not_ratified', fn (): mixed => $this->authority->reverse(new SolarHijriDate(1415, 1, 1)));
+        $this->assertRejection('calendar.year_not_ratified', fn (): mixed => $this->authority->forwardFromString('2036-03-20'));
+    }
+
     // -------- range metadata / fail closed --------
 
     public function test_range_and_served_metadata(): void
     {
         $this->assertSame([1336, 1425], $this->authority->supportedShYearRange());
-        $this->assertSame([1399, 1413], $this->authority->servedShYearRange());
+        $this->assertSame([1399, 1414], $this->authority->servedShYearRange());
         $this->assertTrue($this->authority->isSupportedShYear(1336));
         $this->assertTrue($this->authority->isSupportedShYear(1425));
         $this->assertFalse($this->authority->isSupportedShYear(1335));
         $this->assertFalse($this->authority->isSupportedShYear(1426));
         $this->assertTrue($this->authority->isServedShYear(1399));
-        $this->assertTrue($this->authority->isServedShYear(1413));
+        $this->assertTrue($this->authority->isServedShYear(1414));
         $this->assertFalse($this->authority->isServedShYear(1398));
-        $this->assertFalse($this->authority->isServedShYear(1414));
+        $this->assertFalse($this->authority->isServedShYear(1415));
         $this->assertTrue($this->authority->isGregorianDateServed('2020-03-20'));
-        $this->assertTrue($this->authority->isGregorianDateServed('2035-03-20'));
-        $this->assertFalse($this->authority->isGregorianDateServed('2035-03-21'));
+        $this->assertTrue($this->authority->isGregorianDateServed('2036-03-19'));
+        $this->assertFalse($this->authority->isGregorianDateServed('2036-03-20'));
     }
 
     public function test_out_of_supported_range_fails_closed(): void
@@ -183,8 +213,14 @@ final class CalendarAuthorityTest extends TestCase
 
     public function test_declared_but_unratified_years_do_not_extrapolate(): void
     {
+        // Within the D1-declared supported range SH 1336-1425 but outside the
+        // ratified/serviceable window, the authority must fail closed rather
+        // than extrapolate. 1415 is the ratified boundary Nowruz but its year
+        // is not served until N(1416) is ratified (F4-B §2.5).
         $this->assertRejection('calendar.year_not_ratified', fn (): mixed => $this->authority->reverse(new SolarHijriDate(1398, 1, 1)));
-        $this->assertRejection('calendar.year_not_ratified', fn (): mixed => $this->authority->reverse(new SolarHijriDate(1414, 1, 1)));
+        $this->assertRejection('calendar.year_not_ratified', fn (): mixed => $this->authority->reverse(new SolarHijriDate(1415, 1, 1)));
+        $this->assertRejection('calendar.year_not_ratified', fn (): mixed => $this->authority->reverse(new SolarHijriDate(1416, 1, 1)));
+        $this->assertRejection('calendar.year_not_ratified', fn (): mixed => $this->authority->reverse(new SolarHijriDate(1417, 1, 1)));
         $this->assertRejection('calendar.year_not_ratified', fn (): mixed => $this->authority->reverse(new SolarHijriDate(1425, 1, 1)));
         $this->assertRejection('calendar.year_not_ratified', fn (): mixed => $this->authority->forwardFromString('2036-06-01'));
         $this->assertRejection('calendar.year_not_ratified', fn (): mixed => $this->authority->forwardFromString('2019-06-01'));
@@ -195,10 +231,10 @@ final class CalendarAuthorityTest extends TestCase
         $from = CarbonImmutable::parse('2025-03-21', 'UTC');
         $this->assertSame('2025-03-22', $this->authority->addDays($from, 1)->toDateString());
         $this->assertSame('2025-12-31', $this->authority->addDays($from, 285)->toDateString());
-        // Stepping from just inside the served interval (2035-03-19) by 2 lands on
-        // 2035-03-21 = Nowruz 1414, which is served-year 1414 (no ratified
-        // successor anchor) -> not extrapolated.
-        $this->assertRejection('calendar.year_not_ratified', fn (): mixed => $this->authority->addDays(CarbonImmutable::parse('2035-03-19', 'UTC'), 2));
+        // Stepping from the last served day (2036-03-19) by 1 lands on
+        // 2036-03-20 = 1 Hamal 1415 (the ratified boundary Nowruz), whose year is
+        // not served without a ratified N(1416) -> not extrapolated.
+        $this->assertRejection('calendar.year_not_ratified', fn (): mixed => $this->authority->addDays(CarbonImmutable::parse('2036-03-19', 'UTC'), 1));
         // Stepping far beyond the supported range fails as out-of-range.
         $this->assertRejection('calendar.out_of_supported_range', fn (): mixed => $this->authority->addDays($from, 99999));
     }

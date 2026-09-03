@@ -36,13 +36,18 @@ final class StructureLifecycleFeatureTest extends TestCase
         $this->assertSame('active', $outcome['lifecycle_state']);
         $this->assertDatabaseHas('organizations', ['id' => $organization->id, 'lifecycle_state' => 'active']);
 
+        // The two reopen evidence rows are written inside the owning transaction
+        // and may share a second-precision occurred_at, so they are compared as
+        // a set rather than by row order (which the DB does not guarantee).
         $reopenTrail = AuditEvent::query()
             ->where('target_id', $organization->id)
             ->where('operation', 'organization.structure.reopen')
-            ->orderBy('occurred_at')
             ->pluck('before_state')
             ->all();
-        $this->assertSame([['lifecycle_state' => 'closed'], ['lifecycle_state' => 'reopened']], $reopenTrail);
+        $this->assertEqualsCanonicalizing(
+            [['lifecycle_state' => 'closed'], ['lifecycle_state' => 'reopened']],
+            $reopenTrail,
+        );
 
         $suspendTrail = AuditEvent::query()
             ->where('target_id', $organization->id)
