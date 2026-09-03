@@ -43,6 +43,49 @@ These decisions are formally approved architecture decisions. Their authority, c
 
 ---
 
+## F4-A Calendar Authority ratification (D1–D4) — recorded 2026-09-03
+
+The architecture owner ratified the following decisions that operationalize
+**WP2-DEC-04 (F4 / G2)** by fixing the authoritative Solar Hijri reference
+series and civil-clock rule, and that flip the F4-A verification gate from
+`BLOCKED` to `VERIFIED`. These ratifications **do not alter** WP2-DEC-04 (G2) —
+Shamsi-first business semantics over a single canonical Gregorian stored date
+with authoritative, versioned Shamsi derivation remains the approved decision.
+Recorded here for auditability; the full series data, vectors, and provenance
+live in `docs/implementation/WP-2-F4A.3-solar-hijri-reference-series-ratification.md`
+and the F4-A record (`WP-2-F4A-calendar-authority-verification.md`, §F4-A.4).
+
+- **D1 — Operational range.** Active operational window SH 1399–1415
+  (~2020–2037); full supported deterministic range SH 1336–1425 (1957
+  fixed-structure → ~2047); pre-1336 dates fail closed / require manual
+  handling; no fabrication of historical calendar or branch/date provenance
+  outside verified evidence.
+- **D2 — Reference civil clock.** Kabul local civil time, **AFT = UTC+04:30**,
+  is the TOEFL House Calendar Authority reference clock, with the documented
+  noon-cutoff rule applied against Kabul civil time. **This is a TOEFL House
+  product/architecture decision, not a claim that a currently published Afghan
+  government source mandates this exact computational rule.** The 1408
+  divergence (Nowruz 2029: Kabul noon ⇒ 1 Hamal 1408 = 2029-03-21, where a
+  Tehran-noon rule would give 2029-03-20) is preserved as the documented reason
+  D2 matters.
+- **D3 — Reference-series authority.** The annual equinox/reference series in
+  the F4-A.3 spec is ratified as the **version-1 reference dataset** and is
+  authoritative for supported dates. Any arithmetic algorithm (33-year,
+  2820-year, ICU/Persian, generic Jalali) is only an implementation mechanism
+  that **must** be validated against the ratified reference series — never the
+  sole authority.
+- **D4 — Acceptance vectors.** F4-A.3 vectors **T01–T17** are the initial
+  acceptance/test-vector set with provenance tags (EQUINOX / DERIVED /
+  ATTESTED / REQ-D2); under D2 the REQ-D2 rows resolve to the Kabul branch
+  (T12 = 1 Hamal 1408 = 2029-03-21). Implementation must satisfy the vectors
+  plus the round-trip invariants.
+
+**F4-A status:** `F4-A VERIFIED` (F4 production implementation remains a
+separate, later phase and remains **pending**; this record authorizes no code or
+schema change and does not implement the Calendar Authority).
+
+---
+
 ## Authorization statement
 
 The five decisions above are APPROVED and **authorize WP-2 foundation implementation** (schema, migrations, models, domain invariants, authorization/scope behavior, focused tests, and architecture/implementation documentation) strictly within the WP-2 foundation scope and the WP-2 execution rules. Any implementation detail that would require changing an approved decision must STOP and request a new architecture decision.

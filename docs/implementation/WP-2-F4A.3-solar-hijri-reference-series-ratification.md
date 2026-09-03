@@ -1,13 +1,16 @@
 # WP-2 F4-A.3 — Solar Hijri Reference-Series Ratification (verification/spec record)
 
-**Status:** `F4-A BLOCKED PENDING AUTHORITATIVE CALENDAR VERIFICATION`
-(details in §9). This phase **establishes a fully ratifiable specification** —
-a reproducible equinox-based annual series for the ERP operational range, a
-precise reference-meridian/cutoff analysis, the 1403–1408 boundary
-verification, a candidate-implementation comparison, a reference-vector
-specification, and the future Calendar Authority contract. It does **not** self-ratify:
-the one residual authority gap (the reference meridian/noon-cutoff decree) is
-identified and expressed as an exact owner decision in §9.
+**Status:** `F4-A VERIFIED` (calendar-authority gate flipped from BLOCKED by the
+owner's recorded ratification D1–D4 in F4-A.4 — see
+`WP-2-F4A-calendar-authority-verification.md` §F4-A.4 and §12 below). This phase
+originally **established a fully ratifiable specification** — a reproducible
+equinox-based annual series for the ERP operational range, a precise
+reference-meridian/cutoff analysis, the 1403–1408 boundary verification, a
+candidate-implementation comparison, a reference-vector specification, and the
+future Calendar Authority contract — and the owner has now ratified that
+specification as version 1. The single residual authority gap identified in §9
+(the reference civil clock) is resolved by owner decision **D2 (Kabul AFT
+UTC+04:30)** recorded in F4-A.4.
 **Basis:** F4-A (commit `4d0ab36`) and F4-A.2 (commit `6beb9b0`) findings, which
 are accepted. WP2-DEC-04 (G2 — Shamsi-first business semantics over a single
 canonical Gregorian stored date with authoritative, versioned Shamsi derivation)
@@ -457,7 +460,14 @@ Gregorian date (or the exact canonical [start, end] interval of the period).
 
 ## 9. Owner decision gate — outcome and exact residual asks
 
-### Classification: **BLOCKED** (`F4-A BLOCKED PENDING AUTHORITATIVE CALENDAR VERIFICATION`)
+> **Status note (2026-09-03, F4-A.4):** the classification and residual asks in
+> this §9 reflect the **pre-ratification** state of F4-A.3 (what the spec needed
+> from the owner). The owner has since ratified **D1–D4** (recorded in §12 and in
+> `WP-2-F4A-calendar-authority-verification.md` §F4-A.4 / the approved-decisions
+> record), so the F4-A gate is now **`VERIFIED`**. §9 is preserved verbatim for
+> audit; treat §12 as the current state.
+
+### Classification (at time of F4-A.3, pre-ratification): **BLOCKED** (`F4-A BLOCKED PENDING AUTHORITATIVE CALENDAR VERIFICATION`)
 
 Per the F4-A.3 rule, VERIFIED requires, among others, that the
 **reference meridian/cutoff is established** and the **annual series is
@@ -542,3 +552,57 @@ Nowruz rule) · Afghan Constitution (2004) Art. 18 (solar basis; via U. Minnesot
 HRL and nongnu) · mtempmail Afghan converter (year-span anchors) ·
 F4-A `WP-2-F4A-calendar-authority-verification.md` and F4-A.2 addendum (accepted
 prior findings R1–R7 and the ratification path).
+
+---
+
+## 12. Owner ratification — F4-A.4 (D1–D4 recorded)
+
+**Date:** 2026-09-03 · Documentation only; no code.
+
+The architecture owner formally ratified the four decisions this record framed,
+thereby resolving the §9 residual authority gap and flipping the F4-A gate from
+`BLOCKED` to `VERIFIED`. The ratified decisions are recorded authoritatively in
+`docs/architecture/decisions/WP2-approved-decisions.md` (F4-A appendix) and
+`docs/implementation/WP-2-F4A-calendar-authority-verification.md` (§F4-A.4);
+this section records their effect on this specification.
+
+- **D1 — Operational range (ratified).** Active operational window SH
+  1399–1415 (~2020–2037); full supported deterministic range SH 1336–1425
+  (1957 fixed-structure → ~2047); pre-1336 dates fail closed / require manual
+  handling; no fabrication of historical calendar or branch/date provenance
+  beyond verified evidence.
+- **D2 — Reference civil clock (ratified).** Kabul local civil time,
+  **AFT = UTC+04:30**, is the TOEFL House Calendar Authority reference clock;
+  the documented noon-cutoff rule is applied against Kabul civil time. This is
+  an explicit TOEFL House **product/architecture decision**, **not** a claim
+  that a currently published Afghan government source mandates this exact
+  computational rule. The distinction between the astronomical equinox instant
+  and the resulting civil first day of Hamal is preserved. The **1408
+  divergence** (§5.5) remains explicitly documented as the reason D2 matters.
+- **D3 — Reference-series authority (ratified).** The annual
+  equinox/reference series documented above is ratified as the **version-1
+  reference dataset** and is authoritative for supported dates. Any arithmetic
+  algorithm is only an implementation mechanism and **must** be validated
+  against the ratified reference series. The 33-year, 2820-year, ICU/Persian
+  arithmetic, or another generic Jalali implementation is **not** the sole
+  authority.
+- **D4 — Acceptance vectors (ratified).** Vectors **T01–T17** (§7) are the
+  initial acceptance/test-vector set, with provenance tags preserved
+  (EQUINOX / DERIVED / ATTESTED / REQ-D2). Implementation must satisfy the
+  vectors **plus** the round-trip invariants (§7). Under ratified D2 the
+  reference-dependent rows are fixed to the Kabul (A) branch: T12 = 1 Hamal
+  1408 = **2029-03-21**; the 1407 leap / 1408-common detail (§4.2, §5.5, reference
+  A) is the version-1 series. REQ-D2 vectors are thereby resolved (they remain
+  provenance-tagged DERIVED/EQUINOX for audit but are no longer ambiguous).
+
+**Series/version reproducibility:** the version-1 dataset = the §4.1
+astronomical equinox UTC instants (timeanddate; cross-checked) transformed to
+civil Nowruz by the noon-cutoff rule at Kabul AFT (D2), yielding the §4.2
+Kabul-reference table and the §5.7 month-boundary structure. Future F4
+implementations and historical audits must reproduce against this exact
+dataset + Kabul-clock rule.
+
+**Final F4-A classification (after D1–D4):** `F4-A VERIFIED`. F4 production
+implementation remains **pending** and is a separate, later phase; this record
+authorizes nothing beyond the calendar-authority verification. WP2-DEC-04 / G2
+is unchanged.

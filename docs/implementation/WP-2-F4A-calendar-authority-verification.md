@@ -1,12 +1,16 @@
 # WP-2 F4-A — Calendar Authority & Algorithm Verification (research/spec record)
 
-**Status:** `F4-A BLOCKED PENDING AUTHORITATIVE CALENDAR VERIFICATION` (see §11)
+**Status:** `F4-A VERIFIED` (calendar-authority gate flipped from BLOCKED by the
+owner's recorded ratification D1–D4 in F4-A.4; see §F4-A.4 at the end and
+`WP-2-F4A.3-solar-hijri-reference-series-ratification.md` §12). F4 production
+implementation remains **pending**.
 **F4-A.2 addendum:** 2026-09-03 — narrowed the blocker and set out a concrete
 ratification path (see §F4-A.2 at the end). The definitional identity and the
 near-term Nowruz/leap series are now established on converging evidence; a
 per-day **Afghan primary** civil almanac and the operative reference under the
-2022 lunar-Hijri official reversion remain the residual gaps, so the phase is
-not yet certified.
+2022 lunar-Hijri official reversion were the residual gaps at that time. The
+**F4-A.4 addendum** records the owner ratification (D1–D4) that subsequently
+resolved those gaps as a ratified TOEFL House reference-series decision.
 **WP2-DEC-04 (F4) architecture decision:** UNCHANGED (G2 — Shamsi-first business
 semantics over a single canonical Gregorian stored date with authoritative,
 versioned Shamsi derivation). No calendar conversion code was written.
@@ -418,3 +422,72 @@ edge cases), and (c) the ratified annual leap/Nowruz series for the supported
 range (option D). Until that ratification and a per-year series source are
 recorded, the status remains **F4-A BLOCKED PENDING AUTHORITATIVE CALENDAR
 VERIFICATION** and F4 production implementation remains pending.
+
+---
+
+## F4-A.4 — Owner ratification of the calendar decisions (status → VERIFIED)
+
+**Date:** 2026-09-03 · Documentation only; no code. WP2-DEC-04 (G2) unchanged.
+
+The architecture owner ratified the four decisions that the F4-A.2 ratification
+path and F4-A.3 §9 framed, resolving the residual calendar-authority blocker.
+This closes the F4-A verification gate. The ratified series data and its
+version are kept explicit in
+`WP-2-F4A.3-solar-hijri-reference-series-ratification.md` (§4, §7, §12) so
+future implementations are reproducible and historically auditable.
+
+### Ratified decisions (D1–D4)
+
+**D1 — Operational range.** Active operational window SH 1399–1415
+(~2020–2037); full supported deterministic range SH 1336–1425 (1957
+fixed-structure → ~2047); pre-1336 dates fail closed / require manual handling;
+no fabrication of historical calendar or branch/date provenance outside
+verified evidence.
+
+**D2 — Reference civil clock.** Kabul local civil time, **AFT = UTC+04:30**, is
+the TOEFL House Calendar Authority reference clock; the documented noon-cutoff
+rule is applied against Kabul civil time. This is an explicit TOEFL House
+**product/architecture decision** — **not** a claim that a currently published
+Afghan government source mandates this exact computational rule. The
+astronomical-equinox-instant vs civil-first-day-of-Hamal distinction is
+preserved. The **1408 divergence** (Nowruz 2029: equinox 08:02 UTC →
+12:32 Kabul after noon ⇒ 1 Hamal 1408 = **2029-03-21**; whereas Tehran-noon
+would give 20 Mar 2029) remains explicitly documented as the reason D2 matters.
+
+**D3 — Reference-series authority.** The annual equinox/reference series
+documented in F4-A.3 is ratified as the **version-1 reference dataset** and is
+authoritative for supported dates. Any arithmetic algorithm is only an
+implementation mechanism and **must** be validated against the ratified
+reference series. The 33-year, 2820-year, ICU/Persian arithmetic, or another
+generic Jalali implementation is **not** the sole authority.
+
+**D4 — Acceptance vectors.** F4-A.3 vectors **T01–T17** are the initial
+acceptance/test-vector set, provenance tags preserved (EQUINOX / DERIVED /
+ATTESTED / REQ-D2); under D2 the REQ-D2 rows resolve to the Kabul (A) branch
+(T12 = 1 Hamal 1408 = **2029-03-21**). Implementation must satisfy the vectors
+plus the round-trip invariants.
+
+### Authority framing (important caveat, recorded)
+
+The ratified Kabul/AFT rule is the **TOEFL House product/architecture decision**
+that resolves D2. It is **not** an externally established Afghan legal or
+astronomical authority: no accessible Afghan-government primary source was
+found that decrees this exact noon-cutoff computational rule, and Afghanistan's
+current (2022 lunar-Hijri) official administration publishes no Solar-Hijri
+civil series. This framing is preserved in the version-1 record so future audits
+do not misattribute D2 to an external Afghan mandate.
+
+### Effect on F4-A status
+
+F4-A.2/F4-A.3 required (a) adoption of the Afghan civil Solar Hijri
+(equinox-observed, Dari months), (b) a stated reference civil rule/clock, and
+(c) a ratified annual leap/Nowruz series for the supported range (option D).
+D1–D4 satisfy (a), (b), and (c) and ratify the acceptance vectors and supported
+range. Therefore the F4-A gate flips from `BLOCKED PENDING AUTHORITATIVE
+CALENDAR VERIFICATION` to **`F4-A VERIFIED`**.
+
+**Scope confirmation:** this addendum makes **no** code, schema, migration,
+model, service, or date-logic change; it does not implement the Calendar
+Authority; it does not alter WP2-DEC-04 (G2). F4 production implementation
+remains **pending** and may proceed only in a later phase, validated against
+the ratified version-1 series (D3/D4).
