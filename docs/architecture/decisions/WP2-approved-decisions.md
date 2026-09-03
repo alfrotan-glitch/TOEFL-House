@@ -86,6 +86,18 @@ schema change and does not implement the Calendar Authority).
 
 ---
 
+## F4-C active-window completion ratification (2026-09-04)
+
+The architecture owner ratified **`1 Hamal 1416 = 2037-03-20`** as a version-1
+Calendar Authority anchor (2037 vernal equinox `2037-03-20 06:50 UTC`; 11:20 AFT,
+before Kabul noon under D2). This completes the D1 active operational window
+**SH 1399–1415** without expanding the supported deterministic range
+**SH 1336–1425**. The 1416–1425 and 1336–1398 tails remain **not ratified** and
+must continue to fail closed until separately pinned and ratified under F4-B
+§2.5. No other F4 decision or Calendar Authority boundary is changed.
+
+---
+
 ## Authorization statement
 
 The five decisions above are APPROVED and **authorize WP-2 foundation implementation** (schema, migrations, models, domain invariants, authorization/scope behavior, focused tests, and architecture/implementation documentation) strictly within the WP-2 foundation scope and the WP-2 execution rules. Any implementation detail that would require changing an approved decision must STOP and request a new architecture decision.

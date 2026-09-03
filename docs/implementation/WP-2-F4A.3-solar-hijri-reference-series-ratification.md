@@ -617,3 +617,28 @@ dataset + Kabul-clock rule.
 implementation remains **pending** and is a separate, later phase; this record
 authorizes nothing beyond the calendar-authority verification. WP2-DEC-04 / G2
 is unchanged.
+
+---
+
+## 13. Ratification addendum — active-window completion anchor (2026-09-04)
+
+The architecture owner formally ratified the remaining version-1 anchor needed to
+complete the D1 active operational window SH 1399–1415:
+
+- **Anchor:** `1 Hamal 1416 = 2037-03-20`
+- **Astronomical input:** 2037 vernal equinox = **2037-03-20 06:50 UTC**
+  (authoritative equinox table, time-and-date and equinox-equivalent sources,
+  cross-checked at minute level).
+- **Kabul noon-cutoff transform (D2):** 06:50 UTC = 11:20 AFT, which is **before**
+  Kabul civil noon (12:00 AFT = 07:30 UTC), so `2037-03-20` is the civil first
+  day of Hamal 1416.
+- **Effect on the version-1 series:** `Version1Series` now carries ratified
+  anchors **1399–1416** and therefore fully serves **SH 1399–1415** (the D1
+  active operational window). The **supported deterministic range remains**
+  **SH 1336–1425** unchanged.
+- **Explicit non-extension:** this ratification authorizes the 1416 anchor only.
+  The 1416–1425 tail and the 1336–1398 tail remain **not ratified** and must
+  continue to fail closed (`calendar.year_not_ratified`) until separately
+  pinned and ratified under the F4-B §2.5 rule.
+- **Scope discipline:** no other F4 decision, G2 storage contract, or Calendar
+  Authority boundary is changed.

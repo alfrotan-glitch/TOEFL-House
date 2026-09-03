@@ -11,21 +11,22 @@ namespace App\Modules\Calendar\Domain;
  * table). equinox_utc is the astronomical equinox instant (F4-A.3 §4.1) kept as
  * informational/audit data only — it is never used as the civil-day source.
  *
- * Version-1 anchors Solar Hijri years 1399-1415 (each year's Nowruz is ratified).
+ * Version-1 anchors Solar Hijri years 1399-1416 (each year's Nowruz is ratified).
  * F4-A.3 §§4.1/4.2 tabulate accurate equinox instants and civil Nowruz days for
- * 1399-1414 and ratify 2036-03-20 as the next day after Hut 1414 (1 Hamal 1415);
- * this implementation pins that ratified 1415 anchor and its equinox instant.
- * A year is fully served only when its own and its successor's Nowruz are pinned,
- * so the served range is 1399-1414.
+ * 1399-1414 and ratify 2036-03-20 as the next day after Hut 1414 (1 Hamal 1415).
+ * The architecture owner's ratification of 2026-09-04 formally incorporates
+ * "1 Hamal 1416 = 2037-03-20" (equinox 2037-03-20 06:50 UTC, before Kabul noon
+ * under the ratified D2 rule) as a version-1 anchor, completing the approved
+ * active operational window SH 1399-1415. A year is fully served only when its
+ * own and its successor's Nowruz are pinned, so the served range is 1399-1415.
  *
- * Years 1336-1398 and 1415-1425 are within the D1-declared supported range but
+ * Years 1336-1398 and 1416-1425 are within the D1-declared supported range but
  * are NOT fully covered by ratified version-1 anchors (F4-B §2.5 requires the
- * post-2035 tail to be pinned from an authoritative ephemeris, transformed by
+ * outer-range tails to be pinned from an authoritative ephemeris, transformed by
  * the Kabul rule, extended into the vector set, and ratified as part of
- * version-1 before the authority may serve it); the Calendar Authority must
- * fail closed for those years and never extrapolate. Pinning 1416 (1 Hamal 1416
- * = 2037-03-20 under the Kabul noon-cutoff rule) is the implementation side of
- * that future extension, but it is intentionally NOT ratified here.
+ * version-1 before the authority may serve them); the Calendar Authority must
+ * fail closed for those years and never extrapolate. No expansion beyond the
+ * approved active window is introduced here.
  */
 final class Version1Series
 {
@@ -56,6 +57,7 @@ final class Version1Series
             1413 => ['nowruz' => '2034-03-21', 'equinox_utc' => '2034-03-20 13:17'],
             1414 => ['nowruz' => '2035-03-21', 'equinox_utc' => '2035-03-20 19:02'],
             1415 => ['nowruz' => '2036-03-20', 'equinox_utc' => '2036-03-20 01:02'],
+            1416 => ['nowruz' => '2037-03-20', 'equinox_utc' => '2037-03-20 06:50'],
         ];
     }
 

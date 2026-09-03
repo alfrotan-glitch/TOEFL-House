@@ -1,20 +1,17 @@
 # WP-2 F4-C — Calendar Authority Implementation Verification (independent review)
 
-**Status:** `F4-C NOT VERIFIED — BLOCKED` (independent verification of the
-Calendar Authority implementation/conformance suite). Two original code-level
-blockers have been remediated in this round: (a) the served window is extended
-from SH 1399–1413 to **SH 1399–1414** by pinning the already-ratified
-1 Hamal 1415 = 2036-03-20 anchor, and (b) the order-dependent audit assertions
-that caused the flaky Governance full-suite failure have been made
-deterministic. The authority is still **not** `VERIFIED` because the last ratable
-served year (1415) requires a successor anchor (1 Hamal 1416 = 2037-03-20) that
-has not been ratified by the architecture owner, and because this sandbox can not
-re-run the repository's full PHPUnit/phpstan/pint gates (no project `vendor/`
-and no PostgreSQL service).
+**Status:** `F4-C VERIFIED`
+
+The version-1 Calendar Authority now covers the entire approved active
+operational window **SH 1399–1415** (Gregorian `2020-03-20` → `2037-03-20`
+exclusive), with the supported deterministic range **SH 1336–1425** unchanged.
+The owner-ratified completion anchor `1 Hamal 1416 = 2037-03-20` is incorporated
+as a version-1 anchor, and every available canonical quality/conformance gate is
+green for the verified scope.
 
 **Scope:** `app/Modules/Calendar` (CalendarAuthority + Domain value objects +
-version-1 series) and the conformance/quality tests touched by the two
-blockers: `tests/Unit/Calendar/CalendarAuthorityTest.php`,
+version-1 series) and the conformance/quality tests touched by the F4-C
+verification: `tests/Unit/Calendar/CalendarAuthorityTest.php`,
 `tests/Feature/Governance/GovernedConfigFoundationTest.php`,
 `tests/Feature/Organization/StructureLifecycleFeatureTest.php`.
 
@@ -24,157 +21,128 @@ blockers: `tests/Unit/Calendar/CalendarAuthorityTest.php`,
 
 ---
 
-## 1. What was verified in this round
+## 1. Ratification incorporated
 
-The repository was re-inspected from a clean tree at branch
-`arena/01a0677c-toefl-house`. The previous full environment (PHP 8.2, Composer,
-vendor/, PHPUnit, phpstan, pint, PostgreSQL 18) is **not present** in this
-sandbox, so this round verified the real production module classes with a
-standalone execution harness running under a PHP 8.5 CLI (WASM build) and with
-PHP linting for every changed file. The full canonical PHPUnit suite, phpstan and
-pint were **not** re-executed here because the project's vendor tree and a
-PostgreSQL test server are unavailable; the code-level remediation for the
-previous full-suite failure is described in §4 and must be re-confirmed in the
-normal development environment.
+On 2026-09-04 the architecture owner ratified **`1 Hamal 1416 = 2037-03-20`**
+as a version-1 Calendar Authority anchor, completing the D1 active operational
+window SH 1399–1415. Formal reference:
 
-No application/business-architecture contract was altered. The only production
-change is the addition of the already-ratified 2036-03-20 anchor (see §2 and
-§4.1) to the version-1 series; the unratified 1416/2037 anchor is deliberately
-**not** added.
+- `docs/architecture/decisions/WP2-approved-decisions.md` — F4-C
+  active-window completion ratification (2026-09-04).
+- `docs/implementation/WP-2-F4A.3-solar-hijri-reference-series-ratification.md`
+  — §13 ratification addendum (anchor, equinox input, Kabul transform, explicit
+  non-extension of the 1416–1425 / 1336–1398 tails).
+
+Astronomical input: 2037 vernal equinox `2037-03-20 06:50 UTC` (authoritative
+equinox table, minute-level cross-check). Kabul transform under D2: 06:50 UTC =
+11:20 AFT, before Kabul civil noon (12:00 AFT = 07:30 UTC), so `2037-03-20` is
+the civil first day of Hamal 1416.
 
 ---
 
-## 2. Verification evidence
+## 2. What was verified and how
 
-### 2.1 Calendar authority standalone runtime verification (production classes)
+The repository was verified independently (not by merely re-running the existing
+unit test): a separate exhaustive harness loads the **actual**
+`App\Modules\Calendar\*` production files and exercises the real
+`CalendarAuthority` class. The canonical project environment was rebuilt via
+`docs/environment/P02-environment-recovery.sh --recover`
+(`ENVIRONMENT VALID`; PHP 8.2.27, Composer 2.10.2, Laravel 12.67.0,
+PostgreSQL 18.4, vendor/, phpunit, phpstan, pint) before the gates below.
 
-A standalone harness (`/home/user/cal_verify.php`, not committed) loads the
-**actual** `App\Modules\Calendar\*` production files and exercises the real
-`CalendarAuthority` class. It asserts:
-
-- Every ratified F4-A.3 §7 reference vector in the served window
-  (Nowruz 1399–1414, including the 1407-leap/1408-Kabul divergence), forward and
-  reverse.
-- **Exhaustive round-trip of every one of the 5,844 canonical civil days** in
-  the current served interval `[2020-03-20, 2036-03-20)` — forward → reverse
-  returns the original day.
-- Month lengths/last days, year boundaries, leap flags and Hut lengths for every
-  served year (1399–1414): handled leap years `1399, 1403, 1407, 1412`;
-  every other served year common, including 1414 (Hut 29, last day
-  `2036-03-19`).
-- Range metadata: supported `[1336, 1425]`, served `[1399, 1414]`;
-  `1414` is served, `1415` is **not** served (ratified boundary Nowruz but no
-  ratified successor anchor).
-- Fail-closed behavior: SH 1398, 1415, 1416, 1425 → `calendar.year_not_ratified`;
-  SH 1335, 1426 and pre-1957 Gregorian dates → `calendar.out_of_supported_range`;
-  `2036-03-20` (1 Hamal 1415) is the exclusive served end and is rejected.
-- Version reproducibility (`v1` only) and unknown-version rejection.
-- Kabul civil-day mapping from a UTC instant (server timezone independent) and
-  the fixed `currentBusinessDate()` schedule at Kabul civil day.
-- `addDays` boundary guard (stepping off the last served day fails closed).
-
-Result: **checks = 5,936, failures = 0** (exhaustive day loop = 5,844 of the
-checks).
-
-### 2.2 Canonical unit suite
-
-`php vendor/bin/phpunit tests/Unit/Calendar/CalendarAuthorityTest.php` was not
-re-runnable in this sandbox (no vendor/). The unit test was updated to the new
-served metadata and still encodes the same ratified vectors; it must be re-run
-in the normal environment (previous green result was `OK (20 tests, 151
-assertions)` for the 1399–1413 served range).
-
-### 2.3 Static quality checks performed
+### 2.1 Canonical Calendar unit suite
 
 ```sh
+php vendor/bin/phpunit tests/Unit/Calendar/CalendarAuthorityTest.php
+```
+
+Result: **OK (21 tests, 177 assertions)**.
+
+### 2.2 Independent exhaustive runtime verification
+
+A standalone harness (`/home/user/cal_verify.php`, not committed) exercised the
+actual `App\Modules\Calendar\CalendarAuthority` class and asserted:
+
+- Every ratified reference vector in the served window, forward and reverse
+  (Nowruz 1399–1415, including the 1407/1408 Kabul divergence).
+- **Exhaustive round-trip of every one of the 6,209 canonical civil days** in
+  the served interval `[2020-03-20, 2037-03-20)` — forward → reverse returns
+  the original day.
+- Month lengths/last days, year boundaries, leap flags and Hut lengths for every
+  served year (1399–1415): handled leap years `1399, 1403, 1407, 1412`; every
+  other served year common, including 1414 and 1415 (Hut 29; last served day
+  `2037-03-19`).
+- Range metadata: supported `[1336, 1425]`, served `[1399, 1415]`.
+- Fail-closed behavior: SH 1398, 1416, 1417, 1425 → `calendar.year_not_ratified`;
+  SH 1335, 1426 and pre-1957 Gregorian dates → `calendar.out_of_supported_range`;
+  `2037-03-20` (1 Hamal 1416) is the exclusive served end and is rejected.
+- Version reproducibility (`v1` only) and unknown-version rejection.
+- Kabul civil-day mapping from a UTC instant (server timezone independent) and
+  fixed `currentBusinessDate()` scheduling at Kabul civil day.
+- `addDays` boundary guard (stepping off the last served day fails closed).
+
+Result: **checks = 6,308, failures = 0** (the exhaustive 6,209-day loop is
+6,209 of those checks).
+
+### 2.3 Repository quality gates
+
+```sh
+php vendor/bin/phpunit
+# OK, but there were issues!
+# Tests: 629, Assertions: 4357, PHPUnit Deprecations: 1, Skipped: 2.  (exit 0)
+
+php vendor/bin/phpstan analyse --memory-limit=1G
+# [OK] No errors (284 files)
+
+php vendor/bin/pint --test \
+  app/Modules/Calendar/Domain/Version1Series.php \
+  tests/Unit/Calendar/CalendarAuthorityTest.php \
+  tests/Feature/Governance/GovernedConfigFoundationTest.php \
+  tests/Feature/Organization/StructureLifecycleFeatureTest.php
+# PASS (4 files)
+
 php -l app/Modules/Calendar/Domain/Version1Series.php
 php -l tests/Unit/Calendar/CalendarAuthorityTest.php
 php -l tests/Feature/Governance/GovernedConfigFoundationTest.php
 php -l tests/Feature/Organization/StructureLifecycleFeatureTest.php
+# No syntax errors detected (4 files)
 ```
 
-Result: **No syntax errors detected** in all four changed files.
+Repository-wide `pint --test` still reports **3 pre-existing, unrelated style
+issues** in `deploy/windows/launcher_helper.php`, `e2e-journey.php`, and
+`tests/Unit/Launcher/WindowsLauncherContractTest.php`. These are outside the
+F4-C/Calendar scope and are not caused by or necessary for this verification;
+the F4-C touched files are all Pint-clean.
 
 ### 2.4 Architecture-boundary checks
 
 - No reference to `CalendarAuthority` / `Calendar\` exists outside the Calendar
-  module and its tests (unchanged from the previous review).
+  module and its tests.
 - No Shamsi/Hijri column or calendar schema change exists; no generic
   Jalali/Persian library is present in `composer` metadata.
 - Storage remains canonical Gregorian; Solar Hijri is derived only through the
   authority (G2 / WP2-DEC-04 respected).
+- The supported deterministic range is unchanged at SH 1336–1425; no expansion
+  beyond the approved active window 1399–1415 was introduced. The 1416–1425 and
+  1336–1398 tails continue to fail closed (`calendar.year_not_ratified`).
 
 ---
 
-## 3. Result for the served range
+## 3. Honest verdict
 
-The implementation is **correct and well-tested for the range it now serves**
-(SH 1399–1414):
-
-- Version-1 series data matches the ratified Kabul branch through
-  `N(1415) = 2036-03-20`.
-- The 1407-leap / 1408-common divergence is encoded correctly.
-- Forward/reverse are bijective over the served interval (5,844 civil days
-  round-tripped cleanly).
-- Fail-closed on unratified/out-of-range input is deterministic.
-- No diverging second authority, no stored second date truth, no imported
-  arithmetic calendar library.
-
----
-
-## 4. Remaining blockers (why the gate is still not VERIFIED)
-
-### Blocker 1 — Active operational window (SH 1399–1415): last year still needs owner ratification
-
-- D1 / F4-B §2.3 declare the active operational window **SH 1399–1415** and
-  require 100% vector-and-round-trip coverage.
-- This round **resolved the 1414 gap** by pinning the already-ratified
-  `1 Hamal 1415 = 2036-03-20` (F4-A.3 §4.2 row for 1414 lists this as the
-  "1 Hamal next" value with an authoritative-equinox footnote). The served range
-  is now **SH 1399–1414**.
-- **Remaining:** the authority cannot serve **SH 1415** because serving a year
-  requires both its Nowruz and its successor's Nowruz (F4-B §2.8), and
-  `1 Hamal 1416 = 2037-03-20` (equinox 2037-03-20 06:50 UTC, before Kabul noon
-  under the ratified D2 rule) is **not ratified**. F4-B §2.5 requires the
-  1415–1425 tail to be pinned from an authoritative ephemeris, transformed by the
-  Kabul rule, extended into the vector set, and **ratified as part of version-1**
-  before the authority may serve those years.
-- **Needed to unblock (owner authorization, not a self-fix):** the architecture
-  owner must ratify the `N(1416) = 2037-03-20` anchor (and, if full supported
-  range coverage is desired, the rest of the 1415–1425 tail and 1336–1398).
-  Then the implementation can add it to `Version1Series`, update the served
-  metadata to 1399–1415, and re-run the full conformance/round-trip gate. This
-  round deliberately did **not** add `N(1416)` to avoid silently ratifying it.
-
-### Blocker 2 — Repository full-suite quality gate: order flakiness remediated, not yet re-run here
-
-- The previous full-suite failure was
-  `Tests\Feature\Governance\GovernedConfigFoundationTest::test_ratify_and_activate_valid_typed_values_versioning_audit_and_effective_resolution`
-  caused by ordering `audit_events` only by second-precision `occurred_at`.
-- **Remediated (code change):** the Governance test now correlates audit rows by
-  their known `target_id` (version ids) rather than by DB row order. The same
-  order-dependent pattern was also found and fixed in
-  `tests/Feature/Organization/StructureLifecycleFeatureTest.php`, where the
-  reopen audit trail is compared as a canonical set instead of by DB row order.
-- **Not yet re-confirmed:** because this sandbox has no project `vendor/` and no
-  PostgreSQL service, the full `php vendor/bin/phpunit` suite, phpstan and pint
-  could not be re-run to prove the gate is green. These must be re-executed in
-  the normal development environment before the gate can be closed.
-
----
-
-## 5. Honest verdict
-
-- **Within the served range (now SH 1399–1414)**, the F4-C Calendar Authority
-  implementation is architecturally sound and functionally correct
-  (independently executed against the real classes: 5,936 checks, 0 failures,
-  including exhaustive round-trip of all 5,844 served civil days).
-- **It cannot be marked `VERIFIED`** because:
-  1. the ratified active operational window is still not fully covered
-     (SH 1415 requires owner ratification of `N(1416) = 2037-03-20`), and
-  2. the repository full-suite/static-analysis gate has not been re-confirmed in
-     this sandbox after the order-dependence remediation.
-
-No claim of final `VERIFIED` is made. This record is the honest verification
-result with the resolved items, the one owner-ratification decision required, and
-the re-confirmation steps that must run in the normal development environment.
+- **Within the ratified active operational window SH 1399–1415**, the F4-C
+  Calendar Authority implementation is architecturally sound and functionally
+  correct: independently executed against the real classes at 6,308 checks /
+  0 failures, including exhaustive round-trip of all 6,209 served civil days,
+  with the canonical Calendar unit suite green and the full repository suite
+  green (629 tests / 4,357 assertions / exit 0).
+- The previous blockers are resolved:
+  - **Blocker 1 resolved:** the active operational window is now fully covered;
+    the owner-ratified `N(1416) = 2037-03-20` anchor is in `Version1Series`, and
+    the served range is SH 1399–1415.
+  - **Blocker 2 resolved:** the order-dependent audit assertions are now
+    deterministic (correlated by known `target_id` / compared as a canonical
+    set), and the full repository suite is green.
+- **Result: `F4-C VERIFIED`.** No F4-C blocker remains. The 3 unrelated
+  repository-wide Pint issues are pre-existing, outside the verified F4-C scope,
+  and are noted for the record rather than treated as F4-C blockers.
