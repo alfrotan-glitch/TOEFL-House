@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string $period_id
  * @property int $capacity
  * @property string $lifecycle_state
+ * @property string|null $program_version_level_id
  */
 final class ClassModel extends Model
 {
@@ -25,7 +26,7 @@ final class ClassModel extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'program_version_id', 'period_id', 'capacity', 'lifecycle_state'];
+    protected $fillable = ['id', 'program_version_id', 'period_id', 'capacity', 'lifecycle_state', 'program_version_level_id'];
 
     /** @return HasMany<Enrollment, $this> */
     public function enrollments(): HasMany

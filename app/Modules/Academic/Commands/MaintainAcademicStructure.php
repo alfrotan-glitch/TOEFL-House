@@ -7,6 +7,7 @@ namespace App\Modules\Academic\Commands;
 use App\Modules\Academic\Models\AcademicPeriod;
 use App\Modules\Academic\Models\Program;
 use App\Modules\Academic\Models\ProgramVersion;
+use App\Modules\Academic\Models\ProgramVersionLevel;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Support\Authorization\AccessDecision;
@@ -101,6 +102,61 @@ final class MaintainAcademicStructure
             );
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.program.publish', 'program', $program->id);
+        }
+    }
+
+    /**
+     * @return array{level_id: string, correlation_id: string}
+     */
+    public function defineLevel(Actor $actor, string $programVersionId, string $levelKey, int $ordinal, string $title, ?string $cefrRef, string $idempotencyKey): array
+    {
+        $payload = hash('sha256', implode('|', [
+            'academic.program.level.define', $programVersionId, $levelKey, (string) $ordinal, $title, $cefrRef ?? '', $actor->actorId,
+        ]));
+
+        try {
+            return $this->idempotency->execute('academic.program.level.define', $idempotencyKey, $payload,
+                fn (): array => DB::transaction(function () use ($actor, $programVersionId, $levelKey, $ordinal, $title, $cefrRef): array {
+                    $this->requireCapability($actor);
+
+                    /** @var ProgramVersion $version */
+                    $version = ProgramVersion::query()->whereKey($programVersionId)->lockForUpdate()->firstOrFail();
+                    if ($levelKey === '' || $title === '') {
+                        throw BusinessRejection::forCode('academic.level_required_fields', 'a level requires a key and a title');
+                    }
+                    if ($ordinal < 1) {
+                        throw BusinessRejection::forCode('academic.level_ordinal_positive', 'a level ordinal must be at least 1');
+                    }
+                    if (ProgramVersionLevel::query()->where('program_version_id', $version->id)->where('level_key', $levelKey)->exists()) {
+                        throw BusinessRejection::forCode('academic.level_key_exists', 'a level with this key already exists on the program version');
+                    }
+                    if (ProgramVersionLevel::query()->where('program_version_id', $version->id)->where('ordinal', $ordinal)->exists()) {
+                        throw BusinessRejection::forCode('academic.level_ordinal_exists', 'a level with this ordinal already exists on the program version');
+                    }
+                    /** @var Program $program */
+                    $program = Program::query()->whereKey($version->program_id)->firstOrFail();
+                    if ($program->lifecycle_state === 'archived') {
+                        throw BusinessRejection::forCode('academic.program_archived', 'an archived program cannot gain levels');
+                    }
+
+                    $level = ProgramVersionLevel::query()->create([
+                        'id' => RandomIdentifier::new(),
+                        'program_version_id' => $version->id,
+                        'level_key' => $levelKey,
+                        'ordinal' => $ordinal,
+                        'title' => $title,
+                        'cefr_ref' => $cefrRef,
+                        'lifecycle_state' => 'active',
+                    ]);
+                    $event = $this->audit->record($actor->actorId, 'academic.program.level.define', 'program_version_level', $level->id, null, [
+                        'program_version_id' => $version->id, 'level_key' => $levelKey, 'ordinal' => $ordinal, 'cefr_ref' => $cefrRef,
+                    ]);
+
+                    return ['level_id' => $level->id, 'correlation_id' => $event->correlation_id];
+                }),
+            );
+        } catch (AuthorizationDenied $denial) {
+            $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.program.level.define', 'program_version_level', $programVersionId);
         }
     }
 
