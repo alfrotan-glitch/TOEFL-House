@@ -15,6 +15,8 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $obligation_line_id
  * @property string $amount
  * @property string $reason
+ * @property string|null $originating_branch_id
+ * @property string|null $current_home_branch_id
  */
 final class FundAllocation extends Model
 {
@@ -22,5 +24,5 @@ final class FundAllocation extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'fund_id', 'obligation_line_id', 'amount', 'reason', 'allocated_by'];
+    protected $fillable = ['id', 'fund_id', 'obligation_line_id', 'amount', 'reason', 'allocated_by', 'originating_branch_id', 'current_home_branch_id'];
 }

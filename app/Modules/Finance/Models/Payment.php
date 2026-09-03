@@ -18,6 +18,8 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $method
  * @property string $payer_ref
  * @property string $received_on
+ * @property string|null $originating_branch_id
+ * @property string|null $current_home_branch_id
  */
 final class Payment extends Model
 {
@@ -25,5 +27,5 @@ final class Payment extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'period_id', 'student_id', 'amount', 'method', 'payer_ref', 'received_on', 'recorded_by'];
+    protected $fillable = ['id', 'period_id', 'student_id', 'amount', 'method', 'payer_ref', 'received_on', 'recorded_by', 'originating_branch_id', 'current_home_branch_id'];
 }

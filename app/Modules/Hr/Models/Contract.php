@@ -18,6 +18,8 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $lifecycle_state
  * @property string $effective_from
  * @property string|null $effective_to
+ * @property string|null $originating_branch_id
+ * @property string|null $current_home_branch_id
  */
 final class Contract extends Model
 {
@@ -25,5 +27,5 @@ final class Contract extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'employment_id', 'terms_summary', 'signed_ref', 'lifecycle_state', 'effective_from', 'effective_to', 'signed_by'];
+    protected $fillable = ['id', 'employment_id', 'terms_summary', 'signed_ref', 'lifecycle_state', 'effective_from', 'effective_to', 'signed_by', 'originating_branch_id', 'current_home_branch_id'];
 }

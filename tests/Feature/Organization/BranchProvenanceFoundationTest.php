@@ -9,6 +9,7 @@ use App\Modules\Students\Models\Student;
 use App\Support\Identifiers\RandomIdentifier;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Tests\Concerns\BuildsStudents;
 use Tests\TestCase;
 
@@ -89,6 +90,69 @@ final class BranchProvenanceFoundationTest extends TestCase
         DB::table('branch_scope_links')->insert($this->linkRow($owner->id, $b->id, $actor->id));
 
         $this->assertSame(2, DB::table('branch_scope_links')->count());
+    }
+
+    public function test_all_branch_originating_records_carry_provenance_and_home_branch_columns(): void
+    {
+        foreach ([
+            'students', 'enrollments', 'obligations', 'certificates',
+            'payments', 'refunds', 'fund_allocations', 'contracts',
+        ] as $tableName) {
+            $this->assertTrue(Schema::hasColumn($tableName, 'originating_branch_id'), "$tableName must carry originating_branch_id");
+            $this->assertTrue(Schema::hasColumn($tableName, 'current_home_branch_id'), "$tableName must carry current_home_branch_id");
+        }
+    }
+
+    public function test_every_new_provenance_anchor_has_an_immutability_guard(): void
+    {
+        foreach (['payments', 'refunds', 'fund_allocations', 'contracts'] as $tableName) {
+            $guard = DB::selectOne(
+                'SELECT 1 FROM pg_trigger WHERE tgname = ? AND NOT tgisinternal',
+                [$tableName.'_originating_immutable'],
+            );
+            $this->assertNotNull($guard, "$tableName must have an originating_branch_id immutability trigger");
+        }
+    }
+
+    public function test_scope_link_lifecycle_requires_the_open_window_invariant(): void
+    {
+        $owner = $this->makeBranch('f1-lifecycle-owner');
+        $affected = $this->makeBranch('f1-lifecycle-affected');
+        $actor = $this->makeStudent()['person'];
+
+        // An OPEN/active link must have no effective_to (the one-active rule is
+        // the single current authority) — a non-null end is a closed/historical link.
+        try {
+            $row = $this->linkRow($owner->id, $affected->id, $actor->id);
+            $row['effective_to'] = '2026-09-03';
+            DB::table('branch_scope_links')->insert($row);
+            $this->fail('An active scope link must have a NULL effective_to.');
+        } catch (QueryException $e) {
+            $this->assertStringContainsString('branch_scope_links_open_window_check', $e->getMessage());
+        }
+
+        // A closed link is historical and must have its window end set.
+        try {
+            $row = $this->linkRow($owner->id, $affected->id, $actor->id);
+            $row['lifecycle_state'] = 'closed';
+            DB::table('branch_scope_links')->insert($row);
+            $this->fail('A closed scope link must have a non-NULL effective_to.');
+        } catch (QueryException $e) {
+            $this->assertStringContainsString('branch_scope_links_open_window_check', $e->getMessage());
+        }
+
+        // A closed link must never invert its window.
+        try {
+            $row = $this->linkRow($owner->id, $affected->id, $actor->id);
+            $row['lifecycle_state'] = 'closed';
+            $row['effective_to'] = '2026-09-02';
+            DB::table('branch_scope_links')->insert($row);
+            $this->fail('A scope link window cannot be inverted.');
+        } catch (QueryException $e) {
+            $this->assertStringContainsString('branch_scope_links_window_check', $e->getMessage());
+        }
+
+        $this->assertSame(0, DB::table('branch_scope_links')->count());
     }
 
     private function makeBranch(string $suffix): Branch

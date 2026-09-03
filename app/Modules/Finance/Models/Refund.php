@@ -20,6 +20,8 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $requested_by
  * @property string|null $approved_by
  * @property string $lifecycle_state
+ * @property string|null $originating_branch_id
+ * @property string|null $current_home_branch_id
  */
 final class Refund extends Model
 {
@@ -27,5 +29,5 @@ final class Refund extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'payment_id', 'period_id', 'amount', 'reason', 'requested_by', 'approved_by', 'lifecycle_state'];
+    protected $fillable = ['id', 'payment_id', 'period_id', 'amount', 'reason', 'requested_by', 'approved_by', 'lifecycle_state', 'originating_branch_id', 'current_home_branch_id'];
 }
