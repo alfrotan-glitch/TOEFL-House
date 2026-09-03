@@ -47,9 +47,9 @@ final class CalendarAuthorityTest extends TestCase
     public function test_leap_year_hut_boundaries(): void
     {
         // 1399 is leap (Hut 30); its final day is 2021-03-20 = 30 Hut 1399.
-        // NOTE: F4-A.3 §7 T03's literal text ("29 Hut 1399 = 2021-03-20") is
-        // inconsistent with the ratified leap series (1399 is leap => Hut 30).
-        // The correct value is 30 Hut 1399; surfaced in the F4-C report.
+        // This reconciles F4-A.3 §7 T03, corrected (F4-C) from the
+        // self-inconsistent "29 Hut 1399" to "30 Hut 1399" (a 29-day Hut would
+        // make 1399 common, contradicting the ratified leap series).
         $this->assertTrue($this->authority->isLeapYear(1399));
         $this->assertSame('2021-03-20', $this->authority->reverseToString(new SolarHijriDate(1399, 12, 30)));
         $this->assertSame('2021-03-19', $this->authority->reverseToString(new SolarHijriDate(1399, 12, 29)));

@@ -403,7 +403,7 @@ completed only once the owner chooses A or B.
 |---|---|---|---|---|---|---|
 | T01 | 2020-03-20 | 1 Hamal 1399 | year-start / leap | EQUINOX | §4.1 | ATTESTED |
 | T02 | 2021-03-21 | 1 Hamal 1400 | year-start | EQUINOX | §4.1 | ATTESTED |
-| T03 | 2021-03-20 | 29 Hut 1399 | last day of leap | DERIVED | §5.7 | derived |
+| T03 | 2021-03-20 | 30 Hut 1399 | last day of leap | DERIVED | §4.2 | derived |
 | T04 | 2024-03-20 | 1 Hamal 1403 | year-start / leap | EQUINOX | §4.1 | ATTESTED |
 | T05 | 2024-03-20 → 2025-03-20 | Hut 1403 last = 2025-03-20 | leap Hut boundary | DERIVED | §5.7 | derived |
 | T06 | 2025-03-21 | 1 Hamal 1404 | year-start | EQUINOX | §4.1 | ATTESTED (R3 resolved) |
@@ -427,6 +427,17 @@ match on the authoritative vectors above (a self-consistent wrong table
 round-trips, so vectors, not round-trip alone, certify a candidate). **No
 round-trip run was performed in F4-A.3** because no reference is ratified and no
 code is authorized.
+
+> **Vector correction — T03 (2026-09-03, F4-C reconciliation).** T03's Solar
+> Hijri cell is corrected from "29 Hut 1399" to **"30 Hut 1399"**. The ratified
+> Kabul series (§4.2) fixes SH 1399 as a **leap** year with a **30-day Hut**; its
+> final civil day is 2021-03-20, which is therefore **30 Hut 1399** (the day
+> before 1 Hamal 1400 = 2021-03-21). The earlier "29 Hut" reading was
+> self-inconsistent: a 29-day Hut would make 1399 a *common* year, contradicting
+> the ratified leap series. Consequently 29 Hut 1399 = 2021-03-19 (penultimate
+> day), and the F4-C Calendar Authority + conformance suite assert
+> 30 Hut 1399 = 2021-03-20. The T03 `source` is also corrected from §5.7 to
+> §4.2, because §5.7 tabulates only SH 1403–1408 and does not list SH 1399.
 
 ---
 
