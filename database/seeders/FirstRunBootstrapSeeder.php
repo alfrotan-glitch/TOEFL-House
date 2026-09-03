@@ -61,6 +61,7 @@ final class FirstRunBootstrapSeeder extends Seeder
         'documents.classify', 'documents.register', 'documents.retention', 'documents.verify',
         'facilities.work', 'facilities.work_approve',
         'finance.chart', 'finance.discount', 'finance.discount_approve', 'finance.fund', 'finance.fund_allocate', 'finance.journal', 'finance.obligation', 'finance.opening.approve', 'finance.opening.prepare', 'finance.payment', 'finance.period', 'finance.reconcile', 'finance.reconcile_approve', 'finance.refund', 'finance.refund_approve',
+        'governance.config',
         'hr.contract', 'hr.contract.approve', 'hr.contract.prepare', 'hr.employ', 'hr.leave_approve', 'hr.leave_request', 'hr.scale', 'hr.terminate',
         'identity.admin', 'identity.verify',
         'integrations.dispatch', 'integrations.endpoint', 'integrations.inbound', 'integrations.jobs', 'integrations.process', 'integrations.review',
