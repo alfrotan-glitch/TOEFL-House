@@ -1,6 +1,12 @@
 # WP-2 F4-A — Calendar Authority & Algorithm Verification (research/spec record)
 
 **Status:** `F4-A BLOCKED PENDING AUTHORITATIVE CALENDAR VERIFICATION` (see §11)
+**F4-A.2 addendum:** 2026-09-03 — narrowed the blocker and set out a concrete
+ratification path (see §F4-A.2 at the end). The definitional identity and the
+near-term Nowruz/leap series are now established on converging evidence; a
+per-day **Afghan primary** civil almanac and the operative reference under the
+2022 lunar-Hijri official reversion remain the residual gaps, so the phase is
+not yet certified.
 **WP2-DEC-04 (F4) architecture decision:** UNCHANGED (G2 — Shamsi-first business
 semantics over a single canonical Gregorian stored date with authoritative,
 versioned Shamsi derivation). No calendar conversion code was written.
@@ -276,3 +282,139 @@ pending**.
 [whatdatetoday Nowruz series](https://www.whatdatetoday.com/persian-date-today/) ·
 [emrooz 1404 calendar](https://emrooz.app/en/calendar/1404) ·
 [HandWiki — Solar Hijri history](https://handwiki.org/wiki/History:Solar_Hijri_calendar)
+
+---
+
+## F4-A.2 — Authority resolution attempt (addendum)
+
+**Date:** 2026-09-03 · Documentation only; no code.
+
+### A. Primary / legal evidence found
+
+1. **Afghan Constitution (2004), Article 18** (official translation, University
+   of Minnesota Human Rights Library):
+   > (1) The calendar of the country shall be based on the flight of the
+   > Prophet (PBUH). (2) The basis of work for state offices is the **solar
+   > calendar**. (3) Fridays and the 28 Asad and the 8 Sawr are public holidays.
+   Source: <https://hrlibrary.law.umn.edu/research/afghanistan-constitution.html>
+   This is the legal anchor: epoch = the Hijra; **state offices operate on the
+   solar (Hejrah-e shamsi) calendar**, and the fixed solar holidays 28 Asad /
+   8 Sawr are constitutional.
+
+2. **Adoption/standardisation history** (authoritative encyclopaedic):
+   Afghanistan adopted the Jalali (solar) calendar ~1922 and standardised the
+   fixed month structure in official use ~1957; the Afghan solar calendar is
+   **basically the same as the Persian one**, differing only in month names
+   (Dari uses the Arabic zodiac names Hamal…Hut).
+   Source: <https://www.iranicaonline.org/articles/calendars/>
+   Also: <https://www.justice.gov/sites/default/files/eoir/legacy/2013/06/11/calendar.pdf>
+
+3. **Current official status is contested.** The Islamic Emirate (since its
+   2021 return) has dated official/government documents on the **lunar Hijri**
+   calendar (e.g., decree dates given as 1443 lunar-hijri) and has removed
+   Nowruz from official public holidays, as it did in 1996–2001. Sources:
+   <https://www.afghanistan-analysts.org/en/wp-content/uploads/sites/2/2023/07/Decrees-order-of-Taleban-amir-English.pdf>
+   <https://en.wikipedia.org/wiki/Public_holidays_in_Afghanistan>
+   <https://www.officeholidays.com/holidays/afghanistan/victory-of-the-islamic-emirate>
+   Consequence: **there is no single uncontested "official Afghan civil
+   calendar" in force today.** Solar Hijri remains the calendar of Afghan
+   business, education, and economic/administrative life and is what G2
+   (Shamsi-first ERP) requires; this is recorded as a scope fact, not as an
+   Iranian preference.
+
+### B. Equivalence analysis (Afghan vs Iranian)
+
+- Encyclopaedia Iranica states the Afghan solar calendar is "basically the same
+  as the Persian one," differing only in month names.
+- The calendar year-spans published for the Afghan calendar and for the Iranian
+  solar calendar give **identical** Gregorian spans and Nowruz dates
+  (<https://en.wikipedia.org/wiki/Afghan_calendar>;
+  <https://www.wikiwand.com/en/articles/Iranian_solar_calendar>).
+- Both are equinox-observed; the leap rule is **not** an arithmetic formula
+  (<https://en.wikipedia.org/wiki/Solar_Hijri_calendar>).
+- **Conclusion:** for the standardised (1957+) structure, the Afghan Solar
+  Hijri and the Persian Solar Hijri are the same calendar; their Nowruz dates,
+  leap years, and month day-counts coincide. The two differ only in month-name
+  labels. Therefore reference vectors derived from the equinox-observed Persian
+  calendar are valid for the Afghan civil calendar over this range. This is
+  documented equivalence, **not** "choose Tehran arbitrarily."
+
+### C. Resolved: R3 / R4 (near-noon Nowruz years)
+
+The 33-year-cycle year-spans reference and the noon-rule references converge on
+the **civil** first day of Hamal/Farvardin (the day, not the equinox instant):
+
+| Solar Hijri year | 1 Hamal / 1 Farvardin (civil Nowruz) | Leap? | Basis |
+|---|---|---|---|
+| 1402 | 21 March 2023 | common | year-span; equinox 00:54 Tehran |
+| 1403 | 20 March 2024 | **leap** (366 d) | year-span 2024-03-20 → 2025-03-20; equinox 06:36 Tehran |
+| 1404 | **21 March 2025** | common | year-span 2025-03-21 → 2026-03-20; equinox 12:31 Tehran (after noon → civil day 21st) |
+| 1405 | 21 March 2026 | common | year-span 2026-03-21 → 2027-03-20 |
+| 1406 | 21 March 2027 | common | year-span 2027-03-21 → 2028-03-19 |
+
+Sources: year-spans (<https://en.wikipedia.org/wiki/Afghan_calendar>), noon-rule
+Nowruz times (<https://www.whatdatetoday.com/persian-date-today/>), and the
+Afghan/1404 calendars (<https://emrooz.app/en/calendar/1404>,
+<https://mtempmail.com/afghan-date-converter>). The earlier F4-A.1 "20 March
+2025" citations (e.g., <https://www.vercalendario.info/en/calendars/persian-calendar/compare-1404.html>)
+label the **equinox day**, not the civil day; the civil day under the noon rule
+is 21 March. Residual holiday-listings still show 20 March for "Nowrooz" in
+some sources under the Taliban (Nowruz is no longer an official Afghan public
+holiday), which is a holiday-listing artifact, not a calendar-authority fact.
+
+### D. Required evidence table (operational range)
+
+For each year, the resulting first day of Hamal and leap status below come from
+the Afghan/Persian equinox year-spans reference (secondary, cross-checked).
+Fields the source does **not** establish — the exact equinox clock-time and an
+Afghan-published reference meridian/time-zone — are marked **NS** (not stated)
+rather than inferred; a secondary (Tehran) equinox time is given for reference
+only and does not change the civil day in this range because Kabul (UTC+04:30)
+and Tehran (UTC+03:30) share the same civil Nowruz day in these years.
+
+| SH year | Equinox civil day (Nowruz → 1 Hamal) | Leap (Hut 30) | Reference location/meridian | TZ | Source | Confidence |
+|---|---|---|---|---|---|---|
+| 1399 | 20 March 2020 | yes | NS (Tehran proxy 08:49) | NS | year-spans | secondary |
+| 1400 | 21 March 2021 | no | NS | NS | year-spans | secondary |
+| 1401 | 21 March 2022 | no | NS | NS | year-spans | secondary |
+| 1402 | 21 March 2023 | no | NS | NS | year-spans; equinox 00:54 | secondary |
+| 1403 | 20 March 2024 | yes | NS | NS | year-spans; equinox 06:36 | high (cross-sourced) |
+| 1404 | 21 March 2025 | no | NS | NS | year-spans; equinox 12:31 | high (cross-sourced) |
+| 1405 | 21 March 2026 | no | NS | NS | year-spans | high (cross-sourced) |
+| 1406 | 21 March 2027 | no | NS | NS | year-spans | secondary |
+| 1407 | 20 March 2028 | no | NS | NS | year-spans | secondary |
+| 1408 | 20 March 2029 | yes | NS | NS | year-spans | secondary |
+
+Month lengths are fixed by structure (months 1–6 = 31, 7–11 = 30, Hut = 29/30),
+so Hut length follows from leap status.
+
+### E. Algorithm decision (recommendation)
+
+Evidence supports **option D — versioned hybrid**: an **authoritative annual
+equinox/leap series governs civil dates** (the official rule is equinox-observed
+and has no closed arithmetic formula), and any arithmetic algorithm is used only
+**within a range in which it has been validated against that series**, then
+re-validated on series revision. A pure arithmetic formula (33-year or 2820-year)
+or an unvalidated ICU/Persian/Jalali implementation is **not** authoritative and
+is rejected as the sole source of truth. Versioning guarantees historical
+reports resolve to the same business periods even if the series/algorithm changes.
+
+### F. Status and residual blocker
+
+F4-A.2 **does not certify the calendar** because:
+1. No **Afghan-government-published per-day** Solar Hijri civil almanac is
+   obtainable from the sources available here, and the current authority dates
+   official documents on the lunar Hijri calendar, so no single primary Afghan
+   per-day authority is in force to cite.
+2. The near-term series above is well-converged but rests on secondary/equinox
+   references; it is not a primary Afghan government publication.
+
+**Ratification path to flip to `F4-A VERIFIED`:** the architecture owner ratifies
+(a) that the ERP adopts the Afghan civil Solar Hijri as the equinox-observed
+Persian-equivalent calendar (Dari month names), (b) the equinox civil-Nowruz
+rule and a stated reference (documented equivalence means Tehran/Kabul share the
+civil day over the needed range; a stated meridian is required for near-midnight
+edge cases), and (c) the ratified annual leap/Nowruz series for the supported
+range (option D). Until that ratification and a per-year series source are
+recorded, the status remains **F4-A BLOCKED PENDING AUTHORITATIVE CALENDAR
+VERIFICATION** and F4 production implementation remains pending.
