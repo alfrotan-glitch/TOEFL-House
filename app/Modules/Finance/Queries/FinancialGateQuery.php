@@ -31,8 +31,10 @@ final class FinancialGateQuery
     public function assess(Enrollment $enrollment): array
     {
         $studentId = $enrollment->student_id;
+        $contextOfferingId = $enrollment->offering_id;
         $obligations = Obligation::query()
             ->where('student_id', $studentId)
+            ->when($contextOfferingId !== null, fn ($query) => $query->where(fn ($q) => $q->whereNull('offering_id')->orWhere('offering_id', $contextOfferingId)))
             ->orderBy('created_at')
             ->get();
 
@@ -57,6 +59,7 @@ final class FinancialGateQuery
         $installments = EnrollmentInstallmentPlan::query()
             ->where('student_id', $studentId)
             ->where('lifecycle_state', EnrollmentInstallmentPlan::STATE_APPROVED)
+            ->when($contextOfferingId !== null, fn ($query) => $query->where(fn ($q) => $q->whereNull('offering_id')->orWhere('offering_id', $contextOfferingId)))
             ->get();
         $today = Carbon::today()->toDateString();
         $exceptions = FinancialGateException::query()

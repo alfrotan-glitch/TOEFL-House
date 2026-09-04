@@ -29,6 +29,7 @@ use App\Modules\Finance\Models\FundingSource;
 use App\Modules\Finance\Models\Obligation;
 use App\Modules\Finance\Models\ObligationLine;
 use App\Modules\Finance\Models\Payment;
+use App\Modules\Organization\Models\Branch;
 use App\Support\Errors\DomainError;
 use App\Support\Identifiers\RandomIdentifier;
 use Carbon\CarbonImmutable;
@@ -61,6 +62,14 @@ final class EnrollmentFinancialGateFeatureTest extends TestCase
         $periodId = (string) $structure->definePeriod($officer, 'Gate Term '.$seed, new CarbonImmutable('2026-09-01'), new CarbonImmutable('2026-12-31'), 'gate-period-'.$seed)['period_id'];
         $structure->transitionPeriod($officer, AcademicPeriod::query()->findOrFail($periodId), 'published', 'gate-period-pub-'.$seed);
 
+        $branchId = Branch::query()->create([
+            'id' => RandomIdentifier::new(),
+            'name' => 'Gate Branch '.$seed,
+            'lifecycle_state' => 'active',
+        ])->id;
+        $structure->declareBranchAvailability($officer, $branchId, $levelId, $periodId, 'gate-avail-'.$seed);
+        $offeringId = (string) $structure->openOffering($officer, $branchId, $levelId, $periodId, 5, 'gate-offering-'.$seed)['offering_id'];
+
         $classId = (string) app(MaintainClass::class)->defineClass(
             $officer,
             $programVersionId,
@@ -80,7 +89,7 @@ final class EnrollmentFinancialGateFeatureTest extends TestCase
         ])['student']->id;
 
         $clerk = $this->enrollmentClerk('gate-clerk-'.$seed);
-        $seat = app(MaintainEnrollment::class)->request($clerk, $studentId, $classId, 'gate-enroll-'.$seed);
+        $seat = app(MaintainEnrollment::class)->request($clerk, $studentId, $classId, 'gate-enroll-'.$seed, $offeringId);
 
         return [
             'class_id' => $classId,
@@ -89,6 +98,7 @@ final class EnrollmentFinancialGateFeatureTest extends TestCase
             'period_id' => $periodId,
             'program_version_id' => $programVersionId,
             'level_id' => $levelId,
+            'offering_id' => $offeringId,
         ];
     }
 

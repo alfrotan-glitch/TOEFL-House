@@ -112,7 +112,7 @@ final class LevelProgressionFeatureTest extends TestCase
         $studentId = $this->newStudent('lp-student-prereq');
 
         try {
-            app(MaintainEnrollment::class)->request($this->enrollmentClerk('lp-enroll-prereq'), $studentId, $this->classA2, 'lp-prereq-enroll');
+            app(MaintainEnrollment::class)->request($this->enrollmentClerk('lp-enroll-prereq'), $studentId, $this->classA2, 'lp-prereq-enroll', $this->offeringA2);
             $this->fail('an unsatisfied level prerequisite must fail closed');
         } catch (BusinessRejection $rejection) {
             $this->assertSame('academic.enrollment_prerequisite_unsatisfied', $rejection->errorCode());

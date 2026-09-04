@@ -66,10 +66,8 @@ final class MaintainEnrollment
                     }
                     $this->assertStudentActive($studentId);
                     $this->assertClassActive($classId);
+                    $this->assertOfferingRequiredForLevelClass($offeringId, $classId);
                     $this->assertPrerequisitesForClass($studentId, $classId);
-                    if ($offeringId !== null && $offeringId !== '') {
-                        $this->assertOfferingOpenAndMatchesClass($offeringId, $classId);
-                    }
                     if (Enrollment::query()->where('student_id', $studentId)->where('class_id', $classId)->whereIn('lifecycle_state', ['requested', 'active', 'frozen'])->exists()) {
                         throw BusinessRejection::forCode('academic.enrollment_seat_exists', 'this student already holds a seat in this class');
                     }
@@ -145,12 +143,12 @@ final class MaintainEnrollment
                         throw BusinessRejection::forCode('academic.transfer_same_class', 'a transfer requires a different target class');
                     }
                     $this->assertClassActive($targetClassId);
+                    $this->assertOfferingRequiredForLevelClass($offeringId, $targetClassId);
                     $this->assertPrerequisitesForClass($locked->student_id, $targetClassId);
                     $this->assertStudentActive($locked->student_id);
                     $eligibilitySnapshotId = $this->currentEligibilitySnapshotId($locked->student_id);
                     $this->assertCapacity($targetClassId);
                     if ($offeringId !== null && $offeringId !== '') {
-                        $this->assertOfferingOpenAndMatchesClass($offeringId, $targetClassId);
                         $this->assertOfferingCapacity($offeringId);
                     }
                     if (Enrollment::query()->where('student_id', $locked->student_id)->where('class_id', $targetClassId)->whereIn('lifecycle_state', ['requested', 'active', 'frozen'])->exists()) {
@@ -331,6 +329,23 @@ final class MaintainEnrollment
         if ($class === null || $class->lifecycle_state !== ClassLifecycle::STATE_ACTIVE) {
             throw BusinessRejection::forCode('academic.class_not_active', 'the class is not active');
         }
+    }
+
+    private function assertOfferingRequiredForLevelClass(?string $offeringId, string $classId): void
+    {
+        /** @var ClassModel $class */
+        $class = ClassModel::query()->whereKey($classId)->firstOrFail();
+        if ($class->program_version_level_id === null || $class->program_version_level_id === '') {
+            if ($offeringId !== null && $offeringId !== '') {
+                $this->assertOfferingOpenAndMatchesClass($offeringId, $classId);
+            }
+
+            return;
+        }
+        if ($offeringId === null || $offeringId === '') {
+            throw BusinessRejection::forCode('academic.enrollment_offering_required', 'a level-targeted class requires an academic offering');
+        }
+        $this->assertOfferingOpenAndMatchesClass($offeringId, $classId);
     }
 
     private function assertPrerequisitesForClass(string $studentId, string $classId): void

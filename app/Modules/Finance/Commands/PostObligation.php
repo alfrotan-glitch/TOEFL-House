@@ -109,12 +109,16 @@ final class PostObligation
         if ($offering === null || $offering->lifecycle_state === Offering::STATE_CANCELLED) {
             throw BusinessRejection::forCode('finance.obligation_offering_invalid', 'an obligation offering must be a known non-cancelled academic offering');
         }
+        // A live membership request/active/frozen is the offering packaging
+        // context Finance attributes a charge to. Requested is included so a
+        // tuition obligation can be posted before activation, when the
+        // financial gate is evaluated. Academic never derives the amount.
         if (! Enrollment::query()
             ->where('student_id', $studentId)
             ->where('offering_id', $offeringId)
-            ->where('lifecycle_state', 'active')
+            ->whereIn('lifecycle_state', ['requested', 'active', 'frozen'])
             ->exists()) {
-            throw BusinessRejection::forCode('finance.obligation_offering_enrollment_mismatch', 'the obligation offering must belong to an active enrollment of the student');
+            throw BusinessRejection::forCode('finance.obligation_offering_enrollment_mismatch', 'the obligation offering must belong to a live enrollment of the student');
         }
     }
 
