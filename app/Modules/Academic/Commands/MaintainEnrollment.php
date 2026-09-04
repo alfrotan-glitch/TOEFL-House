@@ -8,6 +8,7 @@ use App\Modules\Academic\Domain\ClassLifecycle;
 use App\Modules\Academic\Domain\EnrollmentLifecycle;
 use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\Enrollment;
+use App\Modules\Academic\Models\Offering;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Students\Models\Student;
@@ -41,19 +42,22 @@ final class MaintainEnrollment
     ) {}
 
     /** @return array{enrollment_id: string, correlation_id: string} */
-    public function request(Actor $requester, string $studentId, string $classId, string $idempotencyKey): array
+    public function request(Actor $requester, string $studentId, string $classId, string $idempotencyKey, ?string $offeringId = null): array
     {
-        $payload = hash('sha256', implode('|', ['academic.enrollment.request', $studentId, $classId, $requester->actorId]));
+        $payload = hash('sha256', implode('|', ['academic.enrollment.request', $studentId, $classId, $offeringId ?? '', $requester->actorId]));
 
         try {
             return $this->idempotency->execute('academic.enrollment.request', $idempotencyKey, $payload,
-                fn (): array => DB::transaction(function () use ($requester, $studentId, $classId): array {
+                fn (): array => DB::transaction(function () use ($requester, $studentId, $classId, $offeringId): array {
                     $outcome = $this->access->decide($requester, self::CAPABILITY_REQUEST, null);
                     if (! $outcome->allowed) {
                         throw AuthorizationDenied::forCode('academic.enrollment_denied', $outcome->reason);
                     }
                     $this->assertStudentActive($studentId);
                     $this->assertClassActive($classId);
+                    if ($offeringId !== null && $offeringId !== '') {
+                        $this->assertOfferingOpenAndMatchesClass($offeringId, $classId);
+                    }
                     if (Enrollment::query()->where('student_id', $studentId)->where('class_id', $classId)->whereIn('lifecycle_state', ['requested', 'active', 'frozen'])->exists()) {
                         throw BusinessRejection::forCode('academic.enrollment_seat_exists', 'this student already holds a seat in this class');
                     }
@@ -62,10 +66,11 @@ final class MaintainEnrollment
                         'id' => RandomIdentifier::new(),
                         'student_id' => $studentId,
                         'class_id' => $classId,
+                        'offering_id' => $offeringId !== null && $offeringId !== '' ? $offeringId : null,
                         'lifecycle_state' => EnrollmentLifecycle::STATE_REQUESTED,
                     ]);
                     $event = $this->audit->record($requester->actorId, 'academic.enrollment.request', 'enrollment', $enrollment->id, null, [
-                        'student_id' => $studentId, 'class_id' => $classId,
+                        'student_id' => $studentId, 'class_id' => $classId, 'offering_id' => $enrollment->offering_id,
                     ]);
 
                     return ['enrollment_id' => $enrollment->id, 'correlation_id' => $event->correlation_id];
@@ -106,13 +111,13 @@ final class MaintainEnrollment
      *
      * @return array{enrollment_id: string, previous_enrollment_id: string, correlation_id: string}
      */
-    public function transfer(Actor $actor, Enrollment $enrollment, string $targetClassId, string $idempotencyKey): array
+    public function transfer(Actor $actor, Enrollment $enrollment, string $targetClassId, string $idempotencyKey, ?string $offeringId = null): array
     {
-        $payload = hash('sha256', implode('|', ['academic.enrollment.transfer', $enrollment->id, $targetClassId, $actor->actorId]));
+        $payload = hash('sha256', implode('|', ['academic.enrollment.transfer', $enrollment->id, $targetClassId, $offeringId ?? '', $actor->actorId]));
 
         try {
             return $this->idempotency->execute('academic.enrollment.transfer', $idempotencyKey, $payload,
-                fn (): array => DB::transaction(function () use ($actor, $enrollment, $targetClassId): array {
+                fn (): array => DB::transaction(function () use ($actor, $enrollment, $targetClassId, $offeringId): array {
                     $outcome = $this->access->decide($actor, self::CAPABILITY_APPROVE, null);
                     if (! $outcome->allowed) {
                         throw AuthorizationDenied::forCode('academic.enrollment_denied', $outcome->reason);
@@ -127,6 +132,10 @@ final class MaintainEnrollment
                     $this->assertClassActive($targetClassId);
                     $this->assertStudentActive($locked->student_id);
                     $this->assertCapacity($targetClassId);
+                    if ($offeringId !== null && $offeringId !== '') {
+                        $this->assertOfferingOpenAndMatchesClass($offeringId, $targetClassId);
+                        $this->assertOfferingCapacity($offeringId);
+                    }
                     if (Enrollment::query()->where('student_id', $locked->student_id)->where('class_id', $targetClassId)->whereIn('lifecycle_state', ['requested', 'active', 'frozen'])->exists()) {
                         throw BusinessRejection::forCode('academic.enrollment_seat_exists', 'this student already holds a seat in the target class');
                     }
@@ -139,6 +148,7 @@ final class MaintainEnrollment
                         'id' => RandomIdentifier::new(),
                         'student_id' => $locked->student_id,
                         'class_id' => $targetClassId,
+                        'offering_id' => $offeringId !== null && $offeringId !== '' ? $offeringId : null,
                         'lifecycle_state' => EnrollmentLifecycle::STATE_REQUESTED,
                     ]);
                     $event = $this->audit->record($actor->actorId, 'academic.enrollment.transfer', 'enrollment', $next->id, $before, [
@@ -146,6 +156,7 @@ final class MaintainEnrollment
                         'student_id' => $locked->student_id,
                         'from_class' => $locked->class_id,
                         'to_class' => $targetClassId,
+                        'offering_id' => $next->offering_id,
                         'lifecycle_state' => EnrollmentLifecycle::STATE_REQUESTED,
                     ]);
 
@@ -176,6 +187,9 @@ final class MaintainEnrollment
                     if ($toState === EnrollmentLifecycle::STATE_ACTIVE) {
                         $this->assertClassActive($locked->class_id);
                         $this->assertCapacity($locked->class_id);
+                        if ($locked->offering_id !== null) {
+                            $this->assertOfferingCapacity($locked->offering_id);
+                        }
                     }
 
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
@@ -211,6 +225,30 @@ final class MaintainEnrollment
         $class = ClassModel::query()->find($classId);
         if ($class === null || $class->lifecycle_state !== ClassLifecycle::STATE_ACTIVE) {
             throw BusinessRejection::forCode('academic.class_not_active', 'the class is not active');
+        }
+    }
+
+    private function assertOfferingOpenAndMatchesClass(string $offeringId, string $classId): void
+    {
+        /** @var Offering|null $offering */
+        $offering = Offering::query()->find($offeringId);
+        if ($offering === null || $offering->lifecycle_state !== Offering::STATE_OPEN) {
+            throw BusinessRejection::forCode('academic.offering_not_open', 'a new enrollment may target only an open offering');
+        }
+        /** @var ClassModel $class */
+        $class = ClassModel::query()->whereKey($classId)->firstOrFail();
+        if ($offering->academic_period_id !== $class->period_id || $offering->program_version_level_id !== $class->program_version_level_id) {
+            throw BusinessRejection::forCode('academic.enrollment_offering_mismatch', 'the enrollment offering must match the class period and level');
+        }
+    }
+
+    private function assertOfferingCapacity(string $offeringId): void
+    {
+        /** @var Offering $offering */
+        $offering = Offering::query()->whereKey($offeringId)->lockForUpdate()->firstOrFail();
+        $activeSeats = Enrollment::query()->where('offering_id', $offeringId)->where('lifecycle_state', 'active')->count();
+        if ($activeSeats >= $offering->capacity) {
+            throw BusinessRejection::forCode('academic.offering_full', sprintf('offering capacity of %d is exhausted', $offering->capacity));
         }
     }
 

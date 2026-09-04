@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Modules\Academic\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
  * Student membership in a class through its lifecycle; transfer closes the
@@ -25,4 +26,16 @@ final class Enrollment extends Model
     protected $keyType = 'string';
 
     protected $fillable = ['id', 'student_id', 'class_id', 'lifecycle_state', 'originating_branch_id', 'current_home_branch_id', 'offering_id'];
+
+    /** @return BelongsTo<Offering, $this> */
+    public function offering(): BelongsTo
+    {
+        return $this->belongsTo(Offering::class);
+    }
+
+    /** @return BelongsTo<ClassModel, $this> */
+    public function class(): BelongsTo
+    {
+        return $this->belongsTo(ClassModel::class, 'class_id');
+    }
 }

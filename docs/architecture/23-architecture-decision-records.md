@@ -15,6 +15,7 @@
 | ADR-011 | Anti-corruption integration adapters, idempotent jobs | vendor coupling and unsafe retries rejected |
 | ADR-012 | RPO/RTO and migration values deferred as explicit operations | invented policy and legacy reuse rejected |
 | ADR-013 | Application technology: PHP with Laravel; persistence: PostgreSQL; remains a modular monolith per ADR-001 | Express/TypeScript + SQLite (legacy stack) rejected as untrusted legacy with trigger-heavy cross-domain schema; Node/TypeScript + PostgreSQL rejected by user decision; distributed services rejected per ADR-001 |
+| ADR-014 | Academic offerings/availability lifecycle, offering-targeted enrollment capacity, and ordered class waitlists stay in Academic (see `decisions/wp-academic-offerings-waitlist.md`) | offering-less soft seats and silent waitlist auto-activation rejected |
 | ADR-013-A | **REJECTED/WITHDRAWN 2026-08-25.** Original amendment text (historical record): "PHP + PostgreSQL remain; the Laravel framework is replaced by a framework-free modular monolith implementing the same approved architecture intent" | Historical alternatives text: "Laravel/Composer/Packagist are unreachable in the build environment (SSL connect failures; see `docs/implementation/22-environment-blocker-report.md`); user decision selected the framework-free variant". **Correction:** no user decision selected the framework-free variant; the environment blocker is not a technology decision. See the ADR-013-A rejection record below. ADR-013 remains authoritative. |
 
 ## ADR-013 record — technology selection

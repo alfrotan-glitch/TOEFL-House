@@ -7,6 +7,7 @@ namespace App\Modules\Academic\Models;
 use App\Modules\Organization\Models\Branch;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * BranchAvailability (WP-2 F3): a branch declares it will run a program-version
@@ -22,6 +23,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 final class BranchAvailability extends Model
 {
     public const STATE_ACTIVE = 'active';
+
+    public const STATE_CLOSED = 'closed';
 
     public $incrementing = false;
 
@@ -41,5 +44,19 @@ final class BranchAvailability extends Model
     public function level(): BelongsTo
     {
         return $this->belongsTo(ProgramVersionLevel::class, 'program_version_level_id');
+    }
+
+    /** @return BelongsTo<AcademicPeriod, $this> */
+    public function period(): BelongsTo
+    {
+        return $this->belongsTo(AcademicPeriod::class, 'academic_period_id');
+    }
+
+    /** @return HasMany<Offering, $this> */
+    public function offerings(): HasMany
+    {
+        return $this->hasMany(Offering::class, 'branch_id', 'branch_id')
+            ->whereColumn('offerings.program_version_level_id', 'branch_availabilities.program_version_level_id')
+            ->whereColumn('offerings.academic_period_id', 'branch_availabilities.academic_period_id');
     }
 }

@@ -9,6 +9,7 @@ use App\Modules\Academic\Models\AcademicPeriod;
 use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\ClassSession;
 use App\Modules\Academic\Models\ProgramVersion;
+use App\Modules\Academic\Models\ProgramVersionLevel;
 use App\Modules\Academic\Models\Skill;
 use App\Modules\Academic\Models\TeacherAssignment;
 use App\Modules\Academic\Models\TeacherAssignmentSkill;
@@ -42,13 +43,13 @@ final class MaintainClass
     ) {}
 
     /** @return array{class_id: string, correlation_id: string} */
-    public function defineClass(Actor $actor, string $programVersionId, string $periodId, int $capacity, string $idempotencyKey): array
+    public function defineClass(Actor $actor, string $programVersionId, string $periodId, int $capacity, string $idempotencyKey, ?string $programVersionLevelId = null): array
     {
-        $payload = hash('sha256', implode('|', ['academic.class.define', $programVersionId, $periodId, $capacity, $actor->actorId]));
+        $payload = hash('sha256', implode('|', ['academic.class.define', $programVersionId, $periodId, $capacity, $programVersionLevelId ?? '', $actor->actorId]));
 
         try {
             return $this->idempotency->execute('academic.class.define', $idempotencyKey, $payload,
-                fn (): array => DB::transaction(function () use ($actor, $programVersionId, $periodId, $capacity): array {
+                fn (): array => DB::transaction(function () use ($actor, $programVersionId, $periodId, $capacity, $programVersionLevelId): array {
                     $this->requireCapability($actor);
                     if (ProgramVersion::query()->whereKey($programVersionId)->doesntExist()) {
                         throw BusinessRejection::forCode('academic.class_version_unknown', 'a class requires a published program version');
@@ -61,16 +62,20 @@ final class MaintainClass
                     if ($capacity <= 0) {
                         throw BusinessRejection::forCode('academic.class_capacity_invalid', 'class capacity must be positive');
                     }
+                    if ($programVersionLevelId !== null && $programVersionLevelId !== '') {
+                        $this->assertLevelBelongsToVersion($programVersionLevelId, $programVersionId);
+                    }
 
                     $class = ClassModel::query()->create([
                         'id' => RandomIdentifier::new(),
                         'program_version_id' => $programVersionId,
                         'period_id' => $periodId,
+                        'program_version_level_id' => $programVersionLevelId !== null && $programVersionLevelId !== '' ? $programVersionLevelId : null,
                         'capacity' => $capacity,
                         'lifecycle_state' => ClassLifecycle::STATE_PLANNED,
                     ]);
                     $event = $this->audit->record($actor->actorId, 'academic.class.define', 'class', $class->id, null, [
-                        'program_version_id' => $programVersionId, 'period_id' => $periodId, 'capacity' => $capacity,
+                        'program_version_id' => $programVersionId, 'period_id' => $periodId, 'program_version_level_id' => $class->program_version_level_id, 'capacity' => $capacity,
                     ]);
 
                     return ['class_id' => $class->id, 'correlation_id' => $event->correlation_id];
@@ -78,6 +83,15 @@ final class MaintainClass
             );
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.class.define', 'class', $programVersionId);
+        }
+    }
+
+    private function assertLevelBelongsToVersion(string $programVersionLevelId, string $programVersionId): void
+    {
+        /** @var ProgramVersionLevel $level */
+        $level = ProgramVersionLevel::query()->whereKey($programVersionLevelId)->firstOrFail();
+        if ($programVersionId !== $level->program_version_id) {
+            throw BusinessRejection::forCode('academic.class_level_version_mismatch', 'a class level must belong to the class program version');
         }
     }
 

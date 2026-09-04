@@ -7,6 +7,7 @@ namespace App\Modules\Academic\Models;
 use App\Modules\Organization\Models\Branch;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * Offering (WP-2 F3): the concrete "branch runs program-version level L in
@@ -22,6 +23,14 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 final class Offering extends Model
 {
+    public const STATE_OPEN = 'open';
+
+    public const STATE_CLOSED = 'closed';
+
+    public const STATE_CANCELLED = 'cancelled';
+
+    public const STATE_COMPLETED = 'completed';
+
     public $incrementing = false;
 
     protected $keyType = 'string';
@@ -40,5 +49,17 @@ final class Offering extends Model
     public function level(): BelongsTo
     {
         return $this->belongsTo(ProgramVersionLevel::class, 'program_version_level_id');
+    }
+
+    /** @return BelongsTo<AcademicPeriod, $this> */
+    public function period(): BelongsTo
+    {
+        return $this->belongsTo(AcademicPeriod::class, 'academic_period_id');
+    }
+
+    /** @return HasMany<ClassWaitlistEntry, $this> */
+    public function waitlistEntries(): HasMany
+    {
+        return $this->hasMany(ClassWaitlistEntry::class, 'offering_id');
     }
 }

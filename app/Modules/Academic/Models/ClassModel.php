@@ -33,4 +33,10 @@ final class ClassModel extends Model
     {
         return $this->hasMany(Enrollment::class, 'class_id');
     }
+
+    /** @return HasMany<ClassWaitlistEntry, $this> */
+    public function waitlistEntries(): HasMany
+    {
+        return $this->hasMany(ClassWaitlistEntry::class, 'class_id');
+    }
 }
