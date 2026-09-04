@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Modules\Admissions\Commands;
 
+use App\Modules\Academic\Placement\Models\PlacementProfile;
 use App\Modules\Admissions\Domain\ApplicantLifecycle;
 use App\Modules\Admissions\Models\Applicant;
 use App\Modules\Audit\AttemptedOperation;
@@ -37,13 +38,13 @@ final class RegisterApplicant
     ) {}
 
     /** @return array{applicant_id: string, correlation_id: string} */
-    public function register(Actor $registrar, string $personId, string $programInterest, string $idempotencyKey): array
+    public function register(Actor $registrar, string $personId, string $programInterest, string $idempotencyKey, ?string $placementProfileId = null): array
     {
-        $payload = hash('sha256', implode('|', ['admissions.register', $personId, $programInterest, $registrar->actorId]));
+        $payload = hash('sha256', implode('|', ['admissions.register', $personId, $programInterest, $placementProfileId ?? '', $registrar->actorId]));
 
         try {
             return $this->idempotency->execute('admissions.register', $idempotencyKey, $payload,
-                fn (): array => DB::transaction(function () use ($registrar, $personId, $programInterest): array {
+                fn (): array => DB::transaction(function () use ($registrar, $personId, $programInterest, $placementProfileId): array {
                     $outcome = $this->access->decide($registrar, self::CAPABILITY, null);
                     if (! $outcome->allowed) {
                         throw AuthorizationDenied::forCode('admissions.register_denied', $outcome->reason);
@@ -58,6 +59,9 @@ final class RegisterApplicant
                     if (Applicant::query()->whereIn('lifecycle_state', ['prospect', 'applicant', 'admitted'])->where('person_id', $personId)->exists()) {
                         throw BusinessRejection::forCode('admissions.open_file_exists', 'this person already has an open admission file');
                     }
+                    if ($placementProfileId !== null && $placementProfileId !== '') {
+                        $this->requireReleasedPlacementFor($placementProfileId, $personId);
+                    }
 
                     $applicant = Applicant::query()->create([
                         'id' => RandomIdentifier::new(),
@@ -65,10 +69,12 @@ final class RegisterApplicant
                         'program_interest' => $programInterest,
                         'lifecycle_state' => ApplicantLifecycle::STATE_APPLICANT,
                         'recorded_by' => $registrar->actorId,
+                        'placement_profile_id' => ($placementProfileId !== null && $placementProfileId !== '') ? $placementProfileId : null,
                     ]);
 
                     $event = $this->audit->record($registrar->actorId, 'admissions.register', 'applicant', $applicant->id, null, [
                         'person_id' => $personId, 'program_interest' => $programInterest, 'lifecycle_state' => ApplicantLifecycle::STATE_APPLICANT,
+                        'placement_profile_id' => $applicant->placement_profile_id,
                     ]);
                     $this->recordVisitorConversion($registrar, $personId, 'applicant', $applicant->id);
 
@@ -77,6 +83,18 @@ final class RegisterApplicant
             );
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $registrar, 'admissions.register', 'applicant', $personId);
+        }
+    }
+
+    private function requireReleasedPlacementFor(string $placementProfileId, string $personId): void
+    {
+        /** @var PlacementProfile|null $profile */
+        $profile = PlacementProfile::query()->find($placementProfileId);
+        if ($profile === null || trim((string) $profile->person_id) !== $personId) {
+            throw BusinessRejection::forCode('admissions.placement_person_mismatch', 'the referenced placement profile belongs to another person');
+        }
+        if ($profile->lifecycle_state !== PlacementProfile::STATE_RELEASED) {
+            throw BusinessRejection::forCode('admissions.placement_not_released', 'admission registration may reference only a released placement profile');
         }
     }
 

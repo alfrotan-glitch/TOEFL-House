@@ -4,29 +4,32 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Placement;
 
-use App\Modules\Academic\Commands\MaintainAcademicStructure;
-use App\Modules\Academic\Models\Program;
 use App\Modules\Academic\Placement\Commands\DecidePlacement;
-use App\Modules\Academic\Placement\Commands\MaintainPlacementCatalog;
 use App\Modules\Academic\Placement\Commands\ManagePlacementProfile;
 use App\Modules\Academic\Placement\Commands\RecommendPlacement;
 use App\Modules\Academic\Placement\Commands\ScorePlacement;
 use App\Modules\Academic\Placement\Models\PlacementAttempt;
 use App\Modules\Academic\Placement\Models\PlacementProfile;
-use App\Modules\Academic\Placement\Models\PlacementQuestion;
 use App\Modules\Academic\Placement\Models\PlacementRecommendation;
 use App\Modules\Academic\Placement\Models\PlacementResponse;
 use App\Modules\Academic\Placement\Models\PlacementRubric;
-use App\Modules\Academic\Placement\Models\PlacementSection;
 use App\Modules\Academic\Placement\Models\PlacementSectionResult;
-use App\Modules\Academic\Placement\Models\PlacementTest;
-use App\Modules\Academic\Placement\Models\PlacementTestVersion;
+use App\Modules\Academic\Placement\Queries\PlacementFinanceLinkQuery;
+use App\Modules\Admissions\Commands\DecideAdmission;
+use App\Modules\Admissions\Commands\EnrollAdmittedApplicant;
+use App\Modules\Admissions\Commands\RegisterApplicant;
+use App\Modules\Admissions\Models\AdmissionDecision;
+use App\Modules\Admissions\Models\Applicant;
 use App\Modules\Crm\Commands\CaptureVisitor;
 use App\Modules\Crm\Commands\LinkVisitorPerson;
 use App\Modules\Crm\Models\Visitor;
+use App\Modules\Finance\Models\FinancialPeriod;
+use App\Modules\Students\Models\Student;
 use App\Support\Errors\BusinessRejection;
+use App\Support\Identifiers\RandomIdentifier;
 use Illuminate\Database\QueryException;
-use Tests\Concerns\BuildsActors;
+use Illuminate\Support\Facades\DB;
+use Tests\Concerns\BuildsPlacementCatalog;
 use Tests\TestCase;
 
 /**
@@ -38,90 +41,7 @@ use Tests\TestCase;
  */
 final class PlacementDecisionFeatureTest extends TestCase
 {
-    use BuildsActors;
-
-    private int $actorSequence = 0;
-
-    private string $programVersionId;
-
-    private string $testVersionId;
-
-    /** @var array<string, string> */
-    private array $questions = [];
-
-    /** @var array<string, array{section: string, comment: string}> */
-    private array $manualSectionResults = [];
-
-    /** @var array<string, string> */
-    private array $sectionIds = [];
-
-    private function setUpPlacementCatalog(): void
-    {
-        $officer = $this->placementOfficer('plc-setup-1');
-        $academic = $this->academicOfficer('plc-acad-1');
-
-        $program = app(MaintainAcademicStructure::class)->defineProgram($academic, 'IELTS Preparation', 'plc-prog');
-        $version = app(MaintainAcademicStructure::class)->publishVersion($academic, Program::query()->findOrFail($program['program_id']), 'placement target', 'plc-ver');
-        $this->programVersionId = $version['version_id'];
-
-        foreach ([['A1', 1, 'A1'], ['A2', 2, 'A2'], ['B1', 3, 'B1'], ['B2', 4, 'B2'], ['C1', 5, 'C1']] as [$key, $ordinal, $cefr]) {
-            app(MaintainAcademicStructure::class)->defineLevel($academic, $this->programVersionId, $key, $ordinal, $key.' level', $cefr, 'plc-level-'.$key);
-        }
-
-        $catalog = app(MaintainPlacementCatalog::class);
-        $test = $catalog->defineTest(
-            $this->placementOfficer('plc-cat-1'),
-            'placement-standard',
-            'Standard Placement',
-            $this->programVersionId,
-            90,
-            ['grammar' => 20, 'reading' => 20, 'listening' => 20, 'writing' => 20, 'speaking' => 20],
-            'plc-test-1',
-        );
-        $catalog->transitionTest($this->placementOfficer('plc-cat-2'), PlacementTest::query()->findOrFail($test['test_id']), 'published', 'plc-test-pub');
-        $version = $catalog->createVersion($this->placementOfficer('plc-cat-3'), PlacementTest::query()->findOrFail($test['test_id']), 'standard v1', 'plc-ver-draft');
-        $this->testVersionId = $version['version_id'];
-
-        // Auto-scored sections.
-        foreach (['grammar', 'reading', 'listening'] as $component) {
-            $section = $catalog->defineSection($this->placementOfficer('plc-cat-4'), PlacementTestVersion::query()->findOrFail($this->testVersionId), $component, ucfirst($component), $component, ['grammar' => 0, 'reading' => 1, 'listening' => 2][$component], 15, 'digital', true, 'plc-'.$component.'-section');
-            $sectionId = $section['section_id'];
-            $this->sectionIds[$component] = $sectionId;
-            $sec = PlacementSection::query()->findOrFail($sectionId);
-            $catalog->transitionSection($this->placementOfficer('plc-cat-5'), $sec, 'published', 'plc-'.$component.'-section-pub');
-
-            foreach (['a', 'b'] as $index) {
-                $q = $catalog->defineQuestion($this->placementOfficer('plc-cat-6'), $sec, $component.'-'.$index, ucfirst($component).' question '.$index, 'mcq', 1, null, 'A', null, 'plc-'.$component.'-q-'.$index);
-                $question = PlacementQuestion::query()->findOrFail($q['question_id']);
-                $catalog->transitionQuestion($this->placementOfficer('plc-cat-7'), $question, 'published', 'plc-'.$component.'-q-'.$index.'-pub');
-                $this->questions[$question->id] = $component;
-            }
-            $this->addRubric($catalog, $component);
-        }
-
-        // Productive sections that require professional marking.
-        foreach (['writing', 'speaking'] as $component) {
-            $section = $catalog->defineSection($this->placementOfficer('plc-cat-8'), PlacementTestVersion::query()->findOrFail($this->testVersionId), $component, ucfirst($component), $component, ['writing' => 3, 'speaking' => 4][$component], 20, 'digital', false, 'plc-'.$component.'-section');
-            $this->sectionIds[$component] = $section['section_id'];
-            $sec = PlacementSection::query()->findOrFail($section['section_id']);
-            $catalog->transitionSection($this->placementOfficer('plc-cat-9'), $sec, 'published', 'plc-'.$component.'-section-pub');
-            $q = $catalog->defineQuestion($this->placementOfficer('plc-cat-10'), $sec, $component.'-task', ucfirst($component).' task', 'essay', 10, null, null, null, 'plc-'.$component.'-q');
-            $question = PlacementQuestion::query()->findOrFail($q['question_id']);
-            $catalog->transitionQuestion($this->placementOfficer('plc-cat-11'), $question, 'published', 'plc-'.$component.'-q-pub');
-            $this->questions[$question->id] = $component;
-            $this->addRubric($catalog, $component);
-        }
-
-        $catalog->publishVersion($this->placementOfficer('plc-cat-12'), PlacementTestVersion::query()->findOrFail($this->testVersionId), 'plc-version-pub');
-    }
-
-    private function addRubric(MaintainPlacementCatalog $catalog, string $component): void
-    {
-        foreach ([['A1', 0, 39.99, 'A1'], ['A2', 40, 54.99, 'A2'], ['B1', 55, 69.99, 'B1'], ['B2', 70, 84.99, 'B2'], ['C1', 85, 100, 'C1']] as [$band, $min, $max, $cefr]) {
-            $rubric = $catalog->defineRubric($this->placementOfficer('plc-cat-20'), PlacementTestVersion::query()->findOrFail($this->testVersionId), $component, $band, $min, $max, $cefr, $component.' '.$band.' band', 'plc-'.$component.'-rubric-'.$band);
-            $catalog->transitionRubric($this->placementOfficer('plc-cat-21'), PlacementRubric::query()->findOrFail($rubric['rubric_id']), 'published', 'plc-'.$component.'-rubric-'.$band.'-pub');
-        }
-    }
+    use BuildsPlacementCatalog;
 
     public function test_full_placement_decision_lifecycle_is_server_authoritative_and_explainable(): void
     {
@@ -279,11 +199,6 @@ final class PlacementDecisionFeatureTest extends TestCase
         ]);
     }
 
-    private function actorId(string $prefix): string
-    {
-        return $prefix.'-'.(++$this->actorSequence).'-'.substr((string) microtime(), -4);
-    }
-
     public function test_recommendation_requires_a_scored_attempt(): void
     {
         $this->setUpPlacementCatalog();
@@ -296,5 +211,157 @@ final class PlacementDecisionFeatureTest extends TestCase
         } catch (BusinessRejection $rejection) {
             $this->assertSame('placement.recommend_requires_scored', $rejection->errorCode());
         }
+    }
+
+    public function test_released_placement_evidence_carries_into_applicant_and_student(): void
+    {
+        $this->setUpPlacementCatalog();
+        $person = $this->personWithAuthority('plc-person-6', []);
+        $profile = $this->completeReleasedPlacement($person->id, 'plc-evidence');
+
+        $registered = app(RegisterApplicant::class)->register(
+            $this->admissionsClerk('plc-evidence-clerk'),
+            $person->id,
+            'IELTS Preparation',
+            'plc-evidence-reg',
+            $profile->id,
+        );
+        $applicant = Applicant::query()->findOrFail($registered['applicant_id']);
+        $this->assertSame($profile->id, (string) $applicant->placement_profile_id);
+
+        $initiated = app(DecideAdmission::class)->initiate(
+            $this->admissionsClerk('plc-evidence-initiate'),
+            $applicant,
+            true,
+            'placement evidence released',
+            'placement/'.$profile->id,
+            'plc-evidence-initiate',
+        );
+        $decision = AdmissionDecision::query()->findOrFail($initiated['decision_id']);
+        app(DecideAdmission::class)->review($this->admissionsReviewer('plc-evidence-review'), $decision, 'plc-evidence-review');
+        app(DecideAdmission::class)->approve($this->admissionsApprover('plc-evidence-approve'), $decision, 'plc-evidence-approve');
+        $converted = app(EnrollAdmittedApplicant::class)->convert(
+            $this->admissionsApprover('plc-evidence-convert'),
+            $applicant,
+            'plc-evidence-convert',
+        );
+        $student = Student::query()->findOrFail($converted['student_id']);
+        $this->assertSame($profile->id, (string) $student->placement_profile_id);
+    }
+
+    public function test_released_placement_reference_rejects_unreleased_or_wrong_person(): void
+    {
+        $this->setUpPlacementCatalog();
+        $person = $this->personWithAuthority('plc-person-7', []);
+        $profile = $this->completeReleasedPlacement($person->id, 'plc-wrong');
+
+        $other = $this->personWithAuthority('plc-person-8', []);
+        try {
+            app(RegisterApplicant::class)->register(
+                $this->admissionsClerk('plc-wrong-clerk'),
+                $other->id,
+                'IELTS Preparation',
+                'plc-wrong-reg',
+                $profile->id,
+            );
+            $this->fail('a placement for another person must not attach to an applicant');
+        } catch (BusinessRejection $rejection) {
+            $this->assertSame('admissions.placement_person_mismatch', $rejection->errorCode());
+        }
+    }
+
+    public function test_placement_finance_link_joins_student_obligations_and_payments(): void
+    {
+        $this->setUpPlacementCatalog();
+        $person = $this->personWithAuthority('plc-person-10', []);
+        $profile = $this->completeReleasedPlacement($person->id, 'plc-finance');
+        $clerk = $this->admissionsClerk('plc-finance-clerk');
+        $reviewer = $this->admissionsReviewer('plc-finance-reviewer');
+        $approver = $this->admissionsApprover('plc-finance-approver');
+
+        $registered = app(RegisterApplicant::class)->register($clerk, $person->id, 'IELTS Preparation', 'plc-finance-reg', $profile->id);
+        $applicant = Applicant::query()->findOrFail($registered['applicant_id']);
+        $initiated = app(DecideAdmission::class)->initiate($clerk, $applicant, true, 'placement evidence released', 'placement/'.$profile->id, 'plc-finance-initiate');
+        $decision = AdmissionDecision::query()->findOrFail($initiated['decision_id']);
+        app(DecideAdmission::class)->review($reviewer, $decision, 'plc-finance-review');
+        app(DecideAdmission::class)->approve($approver, $decision, 'plc-finance-approve');
+        $converted = app(EnrollAdmittedApplicant::class)->convert($approver, $applicant, 'plc-finance-convert');
+        $student = Student::query()->findOrFail($converted['student_id']);
+
+        $period = FinancialPeriod::query()->create([
+            'id' => RandomIdentifier::new(),
+            'period_key' => '2026-11',
+            'date_from' => '2026-11-01',
+            'date_to' => '2026-11-30',
+            'lifecycle_state' => 'open',
+        ]);
+        $obligationId = RandomIdentifier::new();
+        DB::table('obligations')->insert([
+            'id' => $obligationId,
+            'period_id' => $period->id,
+            'student_id' => $student->id,
+            'source' => 'tuition',
+            'original_amount' => '500.00',
+            'reason' => 'Placement program tuition',
+            'posted_by' => RandomIdentifier::new(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $paymentId = RandomIdentifier::new();
+        DB::table('payments')->insert([
+            'id' => $paymentId,
+            'period_id' => $period->id,
+            'student_id' => $student->id,
+            'amount' => '250.00',
+            'method' => 'bank',
+            'payer_ref' => 'PLACEMENT-FIN-1',
+            'received_on' => '2026-11-04',
+            'recorded_by' => RandomIdentifier::new(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $lineage = app(PlacementFinanceLinkQuery::class)->for($profile);
+        $this->assertSame($student->id, (string) $lineage['student_id']);
+        $this->assertCount(1, $lineage['obligations']);
+        $this->assertCount(1, $lineage['payments']);
+        $this->assertSame($obligationId, (string) $lineage['obligations'][0]->id);
+        $this->assertSame($paymentId, (string) $lineage['payments'][0]->id);
+    }
+
+    public function test_physical_answer_sheet_ingestion_is_server_scored_and_traced(): void
+    {
+        $this->setUpPlacementCatalog();
+        $this->setUpPhysicalAutoCatalog();
+        $person = $this->personWithAuthority('plc-person-9', []);
+        $profile = PlacementProfile::query()->findOrFail(app(ManagePlacementProfile::class)->openProfile(
+            $this->placementOfficer('plc-phys-open'),
+            $person->id,
+            $this->programVersionId,
+            'plc-phys-open',
+        )['profile_id']);
+        $attempt = PlacementAttempt::query()->findOrFail(app(ManagePlacementProfile::class)->startAttempt(
+            $this->placementOfficer('plc-phys-start'),
+            $profile,
+            $this->physicalVersionId,
+            'physical',
+            'plc-phys-start',
+        )['attempt_id']);
+        $answers = [];
+        foreach ($this->physicalQuestions as $questionId => $component) {
+            $answers[$questionId] = 'A';
+        }
+        $result = app(ManagePlacementProfile::class)->ingestPhysicalAnswers(
+            $this->placementOfficer('plc-phys-ingest'),
+            $attempt,
+            $answers,
+            'papers/plc-phys/answer-sheet-1',
+            'plc-phys-ingest',
+        );
+        $this->assertFalse($result['tamper_flagged']);
+        $this->assertSame('submitted', $attempt->fresh()->status);
+        $this->assertNotNull($attempt->fresh()->anti_tamper_hmac);
+        $this->assertDatabaseHas('placement_responses', ['attempt_id' => $attempt->id]);
+        $this->assertSame(3, PlacementSectionResult::query()->where('attempt_id', $attempt->id)->whereNotNull('raw_score')->count());
     }
 }

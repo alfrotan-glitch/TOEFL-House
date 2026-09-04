@@ -11,6 +11,7 @@ use App\Modules\Identity\Models\UserAccount;
 use App\Support\Identifiers\RandomIdentifier;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\Concerns\BuildsStudents;
 use Tests\TestCase;
 
@@ -173,9 +174,7 @@ final class ApiFeatureTest extends TestCase
         $this->assertSame(1, Payment::query()->where('payer_ref', 'API-IDEM-1')->count());
     }
 
-    /**
-     * @dataProvider invalidMoneyAmounts
-     */
+    #[DataProvider('invalidMoneyAmounts')]
     public function test_api_rejects_non_money_amounts_with_422_not_500(string $invalidAmount): void
     {
         $student = $this->makeStudent()['student'];

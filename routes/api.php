@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\CrmApiController;
 use App\Http\Controllers\Api\FinanceApiController;
 use App\Http\Controllers\Api\IdentityApiController;
 use App\Http\Controllers\Api\PayrollApiController;
+use App\Http\Controllers\Api\PlacementApiController;
 use App\Http\Controllers\Api\StudentsApiController;
 use App\Support\Authorization\Actor;
 use Illuminate\Http\Request;
@@ -72,6 +73,28 @@ Route::middleware('employee')->group(function (): void {
         Route::get('/calculations', [PayrollApiController::class, 'calculations'])->name('calculations');
         Route::post('/calculations', [PayrollApiController::class, 'calculate'])->name('calculate');
         Route::post('/calculations/{calculationId}/approve', [PayrollApiController::class, 'approve'])->name('approve');
+    });
+
+    Route::prefix('placement')->name('api.placement.')->group(function (): void {
+        Route::get('/tests', [PlacementApiController::class, 'tests'])->name('tests');
+        Route::get('/versions', [PlacementApiController::class, 'versions'])->name('versions');
+        Route::get('/profiles', [PlacementApiController::class, 'profiles'])->name('profiles');
+        Route::get('/profiles/{profileId}', [PlacementApiController::class, 'show'])->name('profiles.show');
+        Route::get('/profiles/{profileId}/finance-link', [PlacementApiController::class, 'financeLink'])->name('profiles.finance-link');
+        Route::post('/profiles', [PlacementApiController::class, 'openProfile'])->name('profiles.open');
+        Route::post('/attempts', [PlacementApiController::class, 'startAttempt'])->name('attempts.start');
+        Route::post('/attempts/{attemptId}/submit', [PlacementApiController::class, 'submitDigital'])->name('attempts.submit');
+        Route::post('/attempts/{attemptId}/submit-physical', [PlacementApiController::class, 'submitPhysical'])->name('attempts.submit-physical');
+        Route::post('/attempts/{attemptId}/ingest-answers', [PlacementApiController::class, 'ingestPhysicalAnswers'])->name('attempts.ingest-answers');
+        Route::post('/sections/score', [PlacementApiController::class, 'scoreSection'])->name('sections.score');
+        Route::post('/section-results/{sectionResultId}/moderate', [PlacementApiController::class, 'moderateSection'])->name('section.moderate');
+        Route::post('/section-results/{sectionResultId}/approve', [PlacementApiController::class, 'approveSection'])->name('section.approve');
+        Route::post('/profiles/{profileId}/mark-scored', [PlacementApiController::class, 'markScored'])->name('profiles.mark-scored');
+        Route::post('/profiles/{profileId}/recommend', [PlacementApiController::class, 'recommend'])->name('recommend');
+        Route::post('/profiles/{profileId}/review', [PlacementApiController::class, 'review'])->name('review');
+        Route::post('/profiles/{profileId}/approve', [PlacementApiController::class, 'approve'])->name('approve');
+        Route::post('/profiles/{profileId}/release', [PlacementApiController::class, 'release'])->name('release');
+        Route::post('/profiles/{profileId}/supersede', [PlacementApiController::class, 'supersede'])->name('supersede');
     });
 
     Route::prefix('crm')->name('api.crm.')->group(function (): void {

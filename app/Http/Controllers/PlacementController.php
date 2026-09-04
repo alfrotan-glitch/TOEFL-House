@@ -19,7 +19,9 @@ use App\Modules\Academic\Placement\Models\PlacementSection;
 use App\Modules\Academic\Placement\Models\PlacementSectionResult;
 use App\Modules\Academic\Placement\Models\PlacementTest;
 use App\Modules\Academic\Placement\Models\PlacementTestVersion;
+use App\Modules\Academic\Placement\Queries\PlacementFinanceLinkQuery;
 use App\Modules\Academic\Placement\Queries\PlacementProfileQuery;
+use App\Modules\Documents\Commands\RegisterDocument;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -73,6 +75,7 @@ final class PlacementController extends Controller
             'levels' => ProgramVersionLevel::query()->orderBy('ordinal')->limit(200)->get(),
             'inProgressAttempt' => $inProgress,
             'questions' => $questions,
+            'financeLink' => app(PlacementFinanceLinkQuery::class)->for($profile),
         ]);
     }
 
@@ -198,6 +201,13 @@ final class PlacementController extends Controller
         return redirect()->route('placement.show', $result->attempt->profile_id)->with('success', 'Section approved.');
     }
 
+    public function markScored(Request $request, string $profileId): RedirectResponse
+    {
+        app(ManagePlacementProfile::class)->markScored($this->actor(), PlacementProfile::query()->findOrFail($profileId), $this->idempotencyKey('placement.profile.mark-scored'));
+
+        return redirect()->route('placement.show', $profileId)->with('success', 'Placement marked scored.');
+    }
+
     public function recommend(Request $request, string $profileId): RedirectResponse
     {
         app(RecommendPlacement::class)->recommend($this->actor(), PlacementProfile::query()->findOrFail($profileId), $this->idempotencyKey('placement.recommend'));
@@ -231,6 +241,29 @@ final class PlacementController extends Controller
         app(DecidePlacement::class)->supersede($this->actor(), PlacementProfile::query()->findOrFail($profileId), $this->idempotencyKey('placement.supersede'));
 
         return redirect()->route('placement.show', $profileId)->with('success', 'Placement profile superseded; a retake may be opened.');
+    }
+
+    public function registerReport(Request $request, string $profileId): RedirectResponse
+    {
+        $input = $request->validate([
+            'classification_id' => ['required', 'string'],
+            'title' => ['required', 'string', 'max:200'],
+            'content_hash' => ['required', 'string', 'size:64'],
+            'storage_ref' => ['required', 'string', 'max:500'],
+        ]);
+
+        $profile = PlacementProfile::query()->findOrFail($profileId);
+        app(RegisterDocument::class)->register(
+            $this->actor(),
+            $profile->person_id,
+            $input['classification_id'],
+            $input['title'],
+            $input['content_hash'],
+            $input['storage_ref'],
+            $this->idempotencyKey('placement.document.register'),
+        );
+
+        return redirect()->route('placement.show', $profileId)->with('success', 'Placement report registered as a Documents version.');
     }
 
     public function defineTest(Request $request): RedirectResponse

@@ -156,6 +156,47 @@
 </div>
 
 <div class="card">
+    <h2>Finance lineage (read-only)</h2>
+    @if (empty($financeLink['student_id']))
+        <p class="sub">No student conversion yet, so no Finance facts are linked.</p>
+    @else
+        <p class="sub">Student {{ $financeLink['student_id'] }} · {{ count($financeLink['obligations']) }} obligation(s) · {{ count($financeLink['payments']) }} payment(s)</p>
+        @if (count($financeLink['obligations']) || count($financeLink['payments']))
+            <table>
+                <thead><tr><th>Type</th><th>Reference</th><th>Amount</th><th>Detail</th><th>Date</th></tr></thead>
+                <tbody>
+                    @foreach ($financeLink['obligations'] as $obligation)
+                        <tr><td>Obligation</td><td>{{ $obligation->id }}</td><td>{{ $obligation->original_amount }}</td><td>{{ $obligation->source }}</td><td>{{ $obligation->created_at }}</td></tr>
+                    @endforeach
+                    @foreach ($financeLink['payments'] as $payment)
+                        <tr><td>Payment</td><td>{{ $payment->id }}</td><td>{{ $payment->amount }}</td><td>{{ $payment->method }}</td><td>{{ $payment->received_on }}</td></tr>
+                    @endforeach
+                </tbody>
+            </table>
+        @else
+            <p class="sub">No obligations or payments for this student yet.</p>
+        @endif
+    @endif
+</div>
+
+<div class="card">
+    <h2>Official placement report (Documents)</h2>
+    <form method="POST" action="{{ route('placement.report.register', $profile->id) }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="row">
+            <input name="classification_id" placeholder="Document classification id" required>
+            <input name="title" placeholder="Report title" required>
+        </div>
+        <div class="row">
+            <input name="content_hash" placeholder="sha256 content hash" required>
+            <input name="storage_ref" placeholder="Storage reference" required>
+        </div>
+        <button type="submit" class="btn small">Register report via Documents</button>
+    </form>
+</div>
+
+<div class="card">
     <h2>Recommendation history</h2>
     @if ($recommendations->isEmpty())
         <p class="sub">None yet.</p>

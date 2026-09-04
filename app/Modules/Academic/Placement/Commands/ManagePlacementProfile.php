@@ -287,6 +287,105 @@ final class ManagePlacementProfile
         }
     }
 
+    /**
+     * Offline/physical answer-sheet ingestion: the proctor records the
+     * candidate's answers server-side so the physical paper evidence is
+     * normalised, checked and auto-scored exactly like digital delivery.
+     *
+     * @param  array<string, string>  $answers  question_id => response_value
+     * @return array{attempt_id: string, tamper_flagged: bool, correlation_id: string}
+     */
+    public function ingestPhysicalAnswers(Actor $actor, PlacementAttempt $attempt, array $answers, string $evidenceRef, string $idempotencyKey): array
+    {
+        $payload = hash('sha256', implode('|', [
+            'placement.attempt.submit.physical.answers', $attempt->id, json_encode($answers), $evidenceRef, $actor->actorId,
+        ]));
+
+        try {
+            return $this->idempotency->execute('placement.attempt.submit.physical.answers', $idempotencyKey, $payload,
+                fn (): array => DB::transaction(function () use ($actor, $attempt, $answers, $evidenceRef): array {
+                    /** @var PlacementAttempt $locked */
+                    $locked = PlacementAttempt::query()->whereKey($attempt->id)->lockForUpdate()->firstOrFail();
+                    $this->requireAttemptBranch($actor, $locked);
+                    if ($locked->delivery_mode !== PlacementDelivery::PHYSICAL || $locked->status !== PlacementAttempt::STATUS_IN_PROGRESS) {
+                        throw BusinessRejection::forCode('placement.attempt_not_physical_progress', 'only an in-progress physical attempt can ingest answers');
+                    }
+                    if ($evidenceRef === '') {
+                        throw BusinessRejection::forCode('placement.attempt_evidence_missing', 'a physical attempt requires an evidence reference');
+                    }
+
+                    $version = PlacementTestVersion::query()->findOrFail($locked->test_version_id);
+                    $questions = $this->publishedQuestions($version->id);
+                    $this->assertAllQuestionsAnswered($questions, $answers);
+
+                    $endedAt = CarbonImmutable::now();
+                    $startedAt = $locked->started_at !== null ? CarbonImmutable::parse($locked->started_at) : $endedAt;
+                    $duration = max(0, (int) $startedAt->diffInSeconds($endedAt));
+                    $test = PlacementTest::query()->whereKey($version->placement_test_id)->firstOrFail();
+                    $tamper = $duration > ($test->total_time_minutes * 60);
+
+                    foreach ($questions as $question) {
+                        PlacementResponse::query()->create([
+                            'id' => RandomIdentifier::new(),
+                            'attempt_id' => $locked->id,
+                            'question_id' => $question->id,
+                            'response_value' => (string) ($answers[$question->id] ?? ''),
+                            'tamper_flagged' => $tamper,
+                            'evidence_sha256' => hash('sha256', (string) ($answers[$question->id] ?? '')),
+                        ]);
+                    }
+                    foreach (PlacementSection::query()->where('test_version_id', $version->id)->where('lifecycle_state', 'published')->get() as $section) {
+                        if ($section->can_auto_score) {
+                            $scored = PlacementScoring::autoScoreSection($section, $answers);
+                            PlacementSectionResult::query()->create([
+                                'id' => RandomIdentifier::new(),
+                                'attempt_id' => $locked->id,
+                                'section_id' => $section->id,
+                                'component' => $section->component,
+                                'raw_score' => $scored['earned'],
+                                'weighted_score' => $scored['percentage'],
+                                'lifecycle_state' => PlacementSectionResult::STATE_SCORED,
+                                'scored_by' => $actor->actorId,
+                                'rationale' => sprintf('offline answer-sheet auto-score for section %s', $section->code),
+                            ]);
+                        } else {
+                            PlacementSectionResult::query()->create([
+                                'id' => RandomIdentifier::new(),
+                                'attempt_id' => $locked->id,
+                                'section_id' => $section->id,
+                                'component' => $section->component,
+                                'lifecycle_state' => PlacementSectionResult::STATE_SCORED,
+                                'scored_by' => $actor->actorId,
+                                'rationale' => 'awaiting professional marking',
+                            ]);
+                        }
+                    }
+
+                    $hmac = PlacementAntiTamper::hmac($locked, $answers, $evidenceRef, $duration);
+                    $locked->forceFill([
+                        'status' => PlacementAttempt::STATUS_SUBMITTED,
+                        'ended_at' => $endedAt,
+                        'duration_seconds' => $duration,
+                        'evidence_ref' => $evidenceRef,
+                        'anti_tamper_hmac' => $hmac,
+                        'tamper_flagged' => $tamper,
+                        'tamper_reason' => $tamper ? 'duration exceeded the allowed test window' : null,
+                    ])->save();
+
+                    $this->markScoredIfComplete($actor, $locked->profile_id);
+                    $event = $this->audit->record($actor->actorId, 'placement.attempt.submit.physical.answers', 'placement_attempt', $locked->id, null, [
+                        'delivery' => 'physical', 'duration' => $duration, 'tamper' => $tamper,
+                    ]);
+                    $this->traceVisitor($actor, $locked->id, $locked->profile_id);
+
+                    return ['attempt_id' => $locked->id, 'tamper_flagged' => $tamper, 'correlation_id' => $event->correlation_id];
+                }),
+            );
+        } catch (AuthorizationDenied $denial) {
+            $this->attemptedOperation->deniedByActor($denial, $actor, 'placement.attempt.submit.physical.answers', 'placement_attempt', $attempt->id);
+        }
+    }
+
     /** @return array{attempt_id: string, lifecycle_state: string, correlation_id: string} */
     public function cancelAttempt(Actor $actor, PlacementAttempt $attempt, string $idempotencyKey): array
     {

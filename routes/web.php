@@ -146,11 +146,13 @@ Route::middleware('employee')->group(function (): void {
         Route::post('sections/score', [PlacementController::class, 'scoreSection'])->name('section.score');
         Route::post('sections/results/{sectionResultId}/moderate', [PlacementController::class, 'moderateSection'])->name('section.moderate');
         Route::post('sections/results/{sectionResultId}/approve', [PlacementController::class, 'approveSection'])->name('section.approve');
+        Route::post('profiles/{profileId}/mark-scored', [PlacementController::class, 'markScored'])->name('mark-scored');
         Route::post('profiles/{profileId}/recommend', [PlacementController::class, 'recommend'])->name('recommend');
         Route::post('profiles/{profileId}/review', [PlacementController::class, 'review'])->name('review');
         Route::post('profiles/{profileId}/approve', [PlacementController::class, 'approveProfile'])->name('approve');
         Route::post('profiles/{profileId}/release', [PlacementController::class, 'releaseProfile'])->name('release');
         Route::post('profiles/{profileId}/supersede', [PlacementController::class, 'supersedeProfile'])->name('supersede');
+        Route::post('profiles/{profileId}/report', [PlacementController::class, 'registerReport'])->name('report.register');
         Route::post('tests', [PlacementController::class, 'defineTest'])->name('test.define');
         Route::post('tests/{testId}/publish', [PlacementController::class, 'publishTest'])->name('test.publish');
         Route::post('versions', [PlacementController::class, 'createVersion'])->name('version.create');

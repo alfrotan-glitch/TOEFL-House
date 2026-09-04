@@ -74,6 +74,7 @@ final class EnrollAdmittedApplicant
                         'person_id' => $locked->person_id,
                         'admission_decision_id' => $decision->id,
                         'student_code' => $studentCode,
+                        'placement_profile_id' => $locked->placement_profile_id,
                     ]);
                     StudentStatus::query()->create([
                         'id' => RandomIdentifier::new(),
@@ -90,6 +91,7 @@ final class EnrollAdmittedApplicant
                         'admission_decision_id' => $decision->id,
                         'student_code' => $studentCode,
                         'initial_status' => StudentStatusRegistry::STATUS_ACTIVE,
+                        'placement_profile_id' => $locked->placement_profile_id,
                     ]);
 
                     return ['student_id' => $student->id, 'student_code' => $studentCode, 'correlation_id' => $event->correlation_id];
