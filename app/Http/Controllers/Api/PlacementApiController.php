@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Academic\Commands\ManageAcademicAppeal;
 use App\Modules\Academic\Placement\Commands\DecidePlacement;
 use App\Modules\Academic\Placement\Commands\ManagePlacementProfile;
 use App\Modules\Academic\Placement\Commands\RecommendPlacement;
@@ -275,5 +276,24 @@ final class PlacementApiController extends Controller
         );
 
         return response()->json(['status' => 'superseded', ...$result]);
+    }
+
+    public function fileAppeal(Request $request, string $profileId): JsonResponse
+    {
+        $input = $request->validate([
+            'reason' => ['required', 'string', 'max:1000'],
+            'student_id' => ['nullable', 'string'],
+        ]);
+
+        $result = app(ManageAcademicAppeal::class)->file(
+            $this->actor(),
+            (string) ($input['student_id'] ?? ''),
+            'placement_profile',
+            PlacementProfile::query()->findOrFail($profileId)->id,
+            $input['reason'],
+            $this->idempotencyKey('placement.appeal.file'),
+        );
+
+        return response()->json(['status' => 'filed', ...$result], 201);
     }
 }

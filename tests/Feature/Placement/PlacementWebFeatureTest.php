@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Placement;
 
+use App\Modules\Academic\Commands\ManageAcademicAppeal;
+use App\Modules\Academic\Models\AcademicAppeal;
 use App\Modules\Documents\Commands\DefineDocumentClassification;
 use App\Modules\Identity\Models\UserAccount;
 use App\Support\Identifiers\RandomIdentifier;
@@ -56,5 +58,33 @@ final class PlacementWebFeatureTest extends TestCase
         $this->assertDatabaseHas('document_versions', [
             'content_hash' => hash('sha256', 'placement-report-content'),
         ]);
+    }
+
+    public function test_placement_appeal_can_be_filed_and_reviewed_before_student_conversion(): void
+    {
+        $appealManager = $this->grantedActor('plc-appeal-manager', ['academic.appeal_manage']);
+        $this->setUpPlacementCatalog();
+        $person = $this->personWithAuthority('plc-appeal-person', []);
+        $profile = $this->completeReleasedPlacement($person->id, 'plc-appeal');
+
+        $this->signInAs($appealManager->actorId, 'placement.appeal');
+        $this->post(route('academic.appeal.file'), [
+            'subject_type' => 'placement_profile',
+            'subject_id' => $profile->id,
+            'reason' => 'The placement recommendation does not reflect my performance.',
+        ])->assertRedirect();
+
+        $appeal = AcademicAppeal::query()->where('subject_type', 'placement_profile')->where('subject_id', $profile->id)->firstOrFail();
+        $this->assertNull($appeal->student_id);
+        $this->assertSame('open', $appeal->lifecycle_state);
+
+        $reviewer = $this->grantedActor('plc-appeal-reviewer', ['academic.appeal_manage']);
+        app(ManageAcademicAppeal::class)->assign($appealManager, $appeal, $reviewer->actorId, 'plc-appeal-assign');
+        app(ManageAcademicAppeal::class)->investigate($reviewer, $appeal->fresh(), 'plc-appeal-investigate');
+        app(ManageAcademicAppeal::class)->resolve($reviewer, $appeal->fresh(), 'adjusted', 'placement/appeal/evidence/'.$appeal->id, 'plc-appeal-resolve');
+        app(ManageAcademicAppeal::class)->close($appealManager, $appeal->fresh(), 'plc-appeal-close');
+
+        $this->assertSame('closed', $appeal->fresh()->lifecycle_state);
+        $this->assertSame('adjusted', $appeal->fresh()->outcome);
     }
 }

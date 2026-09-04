@@ -170,6 +170,19 @@ final class PlacementApiFeatureTest extends TestCase
         $this->postJson('/api/placement/profiles/'.$profileId.'/release', [], ['Idempotency-Key' => 'placement-api-release-2'])->assertOk();
 
         $this->assertSame('released', PlacementProfile::query()->findOrFail($profileId)->lifecycle_state);
+
+        $appealManager = $this->grantedActor('plc-api-appeal-manager', ['academic.appeal_manage']);
+        $this->switchTo($appealManager->actorId, 'placement.api.appeal');
+        $this->postJson('/api/placement/profiles/'.$profileId.'/appeal', [
+            'reason' => 'The placement recommendation does not reflect my performance.',
+        ], ['Idempotency-Key' => 'placement-api-appeal-2'])
+            ->assertCreated()
+            ->assertJsonPath('status', 'filed');
+
+        $this->assertDatabaseHas('academic_appeals', [
+            'subject_type' => 'placement_profile',
+            'subject_id' => $profileId,
+        ]);
     }
 
     public function test_api_physical_answer_sheet_ingest_delegates_to_commands(): void

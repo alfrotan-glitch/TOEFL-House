@@ -197,6 +197,18 @@
 </div>
 
 <div class="card">
+    <h2>Appeal the placement decision</h2>
+    <p class="sub">Filed through the Academic appeal workflow. The assigned reviewer can never be the original placement decision-maker.</p>
+    <form method="POST" action="{{ route('academic.appeal.file') }}">
+        @csrf
+        <input type="hidden" name="subject_type" value="placement_profile">
+        <input type="hidden" name="subject_id" value="{{ $profile->id }}">
+        <textarea name="reason" placeholder="Reason for appeal" required maxlength="1000"></textarea>
+        <div class="actions"><button type="submit" class="btn small">File placement appeal</button></div>
+    </form>
+</div>
+
+<div class="card">
     <h2>Recommendation history</h2>
     @if ($recommendations->isEmpty())
         <p class="sub">None yet.</p>

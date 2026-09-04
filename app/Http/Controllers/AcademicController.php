@@ -517,15 +517,15 @@ final class AcademicController extends Controller
     public function fileAppeal(Request $request): RedirectResponse
     {
         $input = $request->validate([
-            'student_id' => ['required', 'string'],
-            'subject_type' => ['required', 'in:assessment_result,progression_decision'],
+            'student_id' => ['nullable', 'string'],
+            'subject_type' => ['required', 'in:assessment_result,progression_decision,placement_profile'],
             'subject_id' => ['required', 'string'],
             'reason' => ['required', 'string', 'max:1000'],
         ]);
 
         app(ManageAcademicAppeal::class)->file(
             $this->actor(),
-            $input['student_id'],
+            (string) ($input['student_id'] ?? ''),
             $input['subject_type'],
             $input['subject_id'],
             $input['reason'],

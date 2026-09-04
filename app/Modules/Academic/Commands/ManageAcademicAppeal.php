@@ -11,6 +11,7 @@ use App\Modules\Academic\Models\ProgressionDecision;
 use App\Modules\Academic\Placement\Models\PlacementProfile;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
+use App\Modules\Students\Models\Student;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
@@ -52,9 +53,25 @@ final class ManageAcademicAppeal
                         throw BusinessRejection::forCode('academic.appeal_reason', 'an appeal requires a reason');
                     }
 
+                    $resolvedStudentId = trim($studentId);
+                    if ($subjectType === 'placement_profile') {
+                        $profile = PlacementProfile::query()->find($subjectId);
+                        if ($profile === null) {
+                            throw BusinessRejection::forCode('academic.appeal_placement_unknown', 'the placement profile subject does not exist');
+                        }
+                        $resolvedStudentId = (string) (Student::query()->where('person_id', $profile->person_id)->value('id') ?? '');
+                    } else {
+                        if ($resolvedStudentId === '') {
+                            throw BusinessRejection::forCode('academic.appeal_student_required', 'an appeal against a result or progression requires a student');
+                        }
+                        if (Student::query()->whereKey($resolvedStudentId)->doesntExist()) {
+                            throw BusinessRejection::forCode('academic.appeal_student_unknown', 'the student subject does not exist');
+                        }
+                    }
+
                     $appeal = AcademicAppeal::query()->create([
                         'id' => RandomIdentifier::new(),
-                        'student_id' => $studentId,
+                        'student_id' => $resolvedStudentId !== '' ? $resolvedStudentId : null,
                         'subject_type' => $subjectType,
                         'subject_id' => $subjectId,
                         'reason' => $reason,

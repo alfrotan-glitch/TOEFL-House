@@ -95,6 +95,7 @@ Route::middleware('employee')->group(function (): void {
         Route::post('/profiles/{profileId}/approve', [PlacementApiController::class, 'approve'])->name('approve');
         Route::post('/profiles/{profileId}/release', [PlacementApiController::class, 'release'])->name('release');
         Route::post('/profiles/{profileId}/supersede', [PlacementApiController::class, 'supersede'])->name('supersede');
+        Route::post('/profiles/{profileId}/appeal', [PlacementApiController::class, 'fileAppeal'])->name('profiles.appeal');
     });
 
     Route::prefix('crm')->name('api.crm.')->group(function (): void {
