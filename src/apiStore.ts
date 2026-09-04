@@ -26,7 +26,7 @@ import {
   Donor, FundingCampaign, Donation, DonationRestriction, Scholarship, ScholarshipAward, SponsorshipAgreement, FundingSummary,
   ImpactReport, WorkflowInstance, Automation, Session,
   // Rule Engine types
-  BusinessRule, RuleCategory, RuleEngineResult, BusinessRuleVersion, PipelineStage,
+  BusinessRule, RuleCategory, RuleEngineResult, BusinessRuleVersion,
   Branch, Campus, Organization, TeacherContractType,
   StudentBalanceRow,
   StudentSummary,
@@ -938,20 +938,6 @@ export function useApiStore() {
     invalidate('visitors');
   };
 
-  const advanceVisitorStage = async (visitorId: string, stage?: PipelineStage) => {
-    // Send the stage we believe the visitor is currently in. The server uses it
-    // as an optimistic-concurrency token: if another operator (or a double
-    // click) already advanced this lead, the request is rejected with 409
-    // instead of chaining a second transition on top.
-    const current = visitors.find((v) => v.id === visitorId)?.stage;
-    await api.post(`/visitors/${visitorId}/advance-stage`, {
-      ...(stage ? { stage } : {}),
-      ...(current ? { fromStage: current } : {}),
-    });
-    await reloadVisitors();
-    invalidate('visitors');
-  };
-
   const registerVisitorToStudent = async (
     visitorId: string,
     payload: { classId?: string; notes?: string; branchId?: string; programVersionId?: string; levelId?: string }
@@ -1695,7 +1681,7 @@ export function useApiStore() {
     studentsAreLite, ensureFullStudents, studentBalances, reloadStudentBalances, studentSummary,
     attendanceSummary, reloadAttendanceSummary,
     // Existing business operations
-    addVisitor, updateVisitorCRM, addVisitorFollowUp, updateVisitor, advanceVisitorStage, registerVisitorToStudent, checkConversionEligibility, checkDuplicateLeads,
+    addVisitor, updateVisitorCRM, addVisitorFollowUp, updateVisitor, registerVisitorToStudent, checkConversionEligibility, checkDuplicateLeads,
     getVisitorWorkflow, getVisitorById,
     addStudentManual, updateStudentStatus, updateStudent, enrollStudentSemester, issueStudentCard,
     chargeBudget, createExpenseRequest, recordOperationalPayment, getExpenseReport, updateExpenseAutoApproveThreshold, processExpenseApproval, runSavingEngine, updateSavingSettings, createInvoice, issueInvoice, payInvoice, cancelInvoice, updateFinanceConfig, reloadInvoices,

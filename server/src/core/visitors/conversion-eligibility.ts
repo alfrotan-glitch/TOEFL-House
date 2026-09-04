@@ -73,7 +73,8 @@ export function evaluateConversionEligibilityForVisitor(
     branch_id?: string | null;
   },
   classId: string | null,
-  branchId: string | null
+  branchId: string | null,
+  studentAlreadyExists?: boolean
 ): ConversionEligibilityResult {
   const placementStatus = visitor.placement_status ?? 'not_started';
 
@@ -99,7 +100,10 @@ export function evaluateConversionEligibilityForVisitor(
       placementActionable: false,
     };
   }
-  const existingStudent = db.prepare('SELECT id FROM students WHERE lead_id = ?').get(visitor.id);
+  const existingStudent =
+    studentAlreadyExists === undefined
+      ? db.prepare('SELECT id FROM students WHERE lead_id = ?').get(visitor.id)
+      : studentAlreadyExists;
   if (existingStudent) {
     return {
       eligible: false,

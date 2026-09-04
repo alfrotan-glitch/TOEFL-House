@@ -27,7 +27,7 @@
  */
 import type BetterSqlite3 from 'better-sqlite3';
 import { LEAD_CLOSED_SQL, LEAD_CONVERTED_SQL, LEAD_OPEN_SQL } from './lead-lifecycle.js';
-import { summarizeVisitorWorkflow, RECEPTION_STAGES, type ReceptionStage } from './visitor-workflow.js';
+import { describeVisitorWorkflows, RECEPTION_STAGES, type ReceptionStage } from './visitor-workflow.js';
 
 export interface VisitorScope {
   /** Null when the caller legitimately sees the whole organization. */
@@ -262,9 +262,8 @@ export function buildVisitorSummary(
     branch_id?: string | null;
   }>;
   const workflowCounts = new Map<ReceptionStage, number>(RECEPTION_STAGES.map((stage) => [stage, 0]));
-  for (const row of workflowRows) {
-    const stage = summarizeVisitorWorkflow(db, row).stage;
-    workflowCounts.set(stage, (workflowCounts.get(stage) ?? 0) + 1);
+  for (const workflow of describeVisitorWorkflows(db, workflowRows)) {
+    workflowCounts.set(workflow.stage, (workflowCounts.get(workflow.stage) ?? 0) + 1);
   }
   const byWorkflowStage = RECEPTION_STAGES.map((stage) => ({ stage, count: workflowCounts.get(stage) ?? 0 }));
 

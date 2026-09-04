@@ -75,7 +75,6 @@ interface VisitorsViewProps {
   visitorQuery?: VisitorQuery;
   /** Effective permission codes for the signed-in user. */
   permissionCodes?: string[];
-  advanceVisitorStage?: (visitorId: string, stage?: Visitor['stage']) => Promise<void>;
   registerVisitorToStudent: (
     visitorId: string,
     payload: { classId?: string; notes?: string; branchId?: string; programVersionId?: string; levelId?: string }
