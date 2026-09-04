@@ -234,7 +234,7 @@ final class AcademicDeliveryFeatureTest extends TestCase
         /** @var ClassSession $sessionRow */
         $sessionRow = ClassSession::query()->findOrFail($session['session_id']);
 
-        app(MaintainEnrollment::class)->freeze($officer, Enrollment::query()->findOrFail($seat['enrollment_id']), 'enr-key-16');
+        app(MaintainEnrollment::class)->freeze($officer, Enrollment::query()->findOrFail($seat['enrollment_id']), 'student requested a term break', 'enr-key-16');
         try {
             app(RecordAttendance::class)->record($officer, $sessionRow, Enrollment::query()->findOrFail($seat['enrollment_id']), 'present', 'att-key-4');
             $this->fail('a frozen enrollment must not take attendance');

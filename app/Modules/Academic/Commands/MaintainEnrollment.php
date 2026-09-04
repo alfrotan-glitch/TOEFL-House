@@ -4,13 +4,17 @@ declare(strict_types=1);
 
 namespace App\Modules\Academic\Commands;
 
+use App\Modules\Academic\Domain\AssessmentResultLifecycle;
 use App\Modules\Academic\Domain\ClassLifecycle;
 use App\Modules\Academic\Domain\EnrollmentLifecycle;
+use App\Modules\Academic\Domain\ProgressionLifecycle;
 use App\Modules\Academic\Errors\EnrollmentFinancialGateDenied;
+use App\Modules\Academic\Models\AssessmentResult;
 use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Academic\Models\Offering;
 use App\Modules\Academic\Models\ProgramVersionLevel;
+use App\Modules\Academic\Models\ProgressionDecision;
 use App\Modules\Academic\Placement\Models\AcademicEligibilitySnapshot;
 use App\Modules\Academic\Placement\Queries\AcademicEligibilitySnapshotQuery;
 use App\Modules\Academic\Queries\AcademicHistoryQuery;
@@ -31,9 +35,11 @@ use Illuminate\Support\Facades\DB;
 /**
  * Enrollment control: request (student must be currently active, class
  * active, seat free), activation under the enrollment-approval capability
- * with the capacity invariant, freeze/withdraw/complete, and transfer that
- * closes the old enrollment and opens a new one in the target class under
- * the same capacity rule. There is never a duplicate active seat.
+ * with the capacity invariant and the Finance gate, a reasoned completion
+ * lifecycle (freeze with reason, unfreeze with financial re-gate, withdraw
+ * with reason, evidenced completion), and transfer that closes the old
+ * enrollment and opens a new one in the target class under the same capacity
+ * rule. There is never a duplicate active seat.
  */
 final class MaintainEnrollment
 {
@@ -102,22 +108,204 @@ final class MaintainEnrollment
         return $this->transition($approver, $enrollment, EnrollmentLifecycle::STATE_ACTIVE, self::CAPABILITY_APPROVE, $idempotencyKey);
     }
 
-    /** @return array{enrollment_id: string, lifecycle_state: string, correlation_id: string} */
-    public function freeze(Actor $actor, Enrollment $enrollment, string $idempotencyKey): array
+    /**
+     * Freeze parks an active seat under a mandatory human reason. The Finance
+     * standing at freeze time is snapshotted read-only into the audit event;
+     * the activation gate evidence on the row is preserved history. Finance
+     * implications stay Finance-owned: no Finance fact is written here.
+     *
+     * @return array{enrollment_id: string, lifecycle_state: string, correlation_id: string}
+     */
+    public function freeze(Actor $actor, Enrollment $enrollment, string $reason, string $idempotencyKey): array
     {
-        return $this->transition($actor, $enrollment, EnrollmentLifecycle::STATE_FROZEN, self::CAPABILITY_APPROVE, $idempotencyKey);
+        $this->assertReason($reason);
+        $payload = hash('sha256', implode('|', ['academic.enrollment.freeze', $enrollment->id, $reason, $actor->actorId]));
+
+        try {
+            return $this->idempotency->execute('academic.enrollment.transition.'.EnrollmentLifecycle::STATE_FROZEN, $idempotencyKey, $payload,
+                fn (): array => DB::transaction(function () use ($actor, $enrollment, $reason): array {
+                    $outcome = $this->access->decide($actor, self::CAPABILITY_APPROVE, null);
+                    if (! $outcome->allowed) {
+                        throw AuthorizationDenied::forCode('academic.enrollment_denied', $outcome->reason);
+                    }
+
+                    /** @var Enrollment $locked */
+                    $locked = Enrollment::query()->whereKey($enrollment->id)->lockForUpdate()->firstOrFail();
+                    EnrollmentLifecycle::requireTransition($locked->lifecycle_state, EnrollmentLifecycle::STATE_FROZEN);
+                    $exit = $this->exitGateSnapshot($locked);
+
+                    $before = ['lifecycle_state' => $locked->lifecycle_state];
+                    $locked->forceFill([
+                        'lifecycle_state' => EnrollmentLifecycle::STATE_FROZEN,
+                        'state_reason' => $reason,
+                    ]);
+                    $locked->save();
+                    $event = $this->audit->record($actor->actorId, 'academic.enrollment.frozen', 'enrollment', $locked->id, $before, [
+                        'lifecycle_state' => EnrollmentLifecycle::STATE_FROZEN,
+                        'state_reason' => $reason,
+                        'finance_gate_exit' => $exit,
+                    ]);
+
+                    return ['enrollment_id' => $locked->id, 'lifecycle_state' => EnrollmentLifecycle::STATE_FROZEN, 'correlation_id' => $event->correlation_id];
+                }),
+            );
+        } catch (AuthorizationDenied $denial) {
+            $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.enrollment.frozen', 'enrollment', $enrollment->id);
+        }
     }
 
-    /** @return array{enrollment_id: string, lifecycle_state: string, correlation_id: string} */
-    public function withdraw(Actor $actor, Enrollment $enrollment, string $idempotencyKey): array
+    /**
+     * Unfreeze returns a frozen seat to active. A frozen seat holds no
+     * capacity claim, so class/offering capacity is re-checked, and the
+     * Finance gate is re-run exactly like activation: fresh signed evidence
+     * is frozen on the row and an unsatisfied gate refuses the return.
+     *
+     * @return array{enrollment_id: string, lifecycle_state: string, correlation_id: string}
+     */
+    public function unfreeze(Actor $actor, Enrollment $enrollment, string $idempotencyKey): array
     {
-        return $this->transition($actor, $enrollment, EnrollmentLifecycle::STATE_WITHDRAWN, self::CAPABILITY_REQUEST, $idempotencyKey);
+        $payload = hash('sha256', implode('|', ['academic.enrollment.unfreeze', $enrollment->id, $actor->actorId]));
+
+        try {
+            return $this->idempotency->execute('academic.enrollment.transition.'.EnrollmentLifecycle::STATE_ACTIVE, $idempotencyKey, $payload,
+                fn (): array => DB::transaction(function () use ($actor, $enrollment): array {
+                    $outcome = $this->access->decide($actor, self::CAPABILITY_APPROVE, null);
+                    if (! $outcome->allowed) {
+                        throw AuthorizationDenied::forCode('academic.enrollment_denied', $outcome->reason);
+                    }
+
+                    /** @var Enrollment $locked */
+                    $locked = Enrollment::query()->whereKey($enrollment->id)->lockForUpdate()->firstOrFail();
+                    EnrollmentLifecycle::requireTransition($locked->lifecycle_state, EnrollmentLifecycle::STATE_ACTIVE);
+                    $this->assertStudentActive($locked->student_id);
+                    $this->assertClassActive($locked->class_id);
+                    $this->assertCapacity($locked->class_id);
+                    if ($locked->offering_id !== null) {
+                        $this->assertOfferingCapacity($locked->offering_id);
+                    }
+                    $this->freezeFinancialGate($locked, $actor);
+
+                    $before = ['lifecycle_state' => $locked->lifecycle_state];
+                    $locked->forceFill([
+                        'lifecycle_state' => EnrollmentLifecycle::STATE_ACTIVE,
+                        'state_reason' => null,
+                    ]);
+                    $locked->save();
+                    $event = $this->audit->record($actor->actorId, 'academic.enrollment.active', 'enrollment', $locked->id, $before, ['lifecycle_state' => EnrollmentLifecycle::STATE_ACTIVE]);
+
+                    return ['enrollment_id' => $locked->id, 'lifecycle_state' => EnrollmentLifecycle::STATE_ACTIVE, 'correlation_id' => $event->correlation_id];
+                }),
+            );
+        } catch (AuthorizationDenied $denial) {
+            $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.enrollment.active', 'enrollment', $enrollment->id);
+        } catch (EnrollmentFinancialGateDenied $denial) {
+            $this->persistDeniedGate($enrollment, $denial, $actor);
+        }
     }
 
-    /** @return array{enrollment_id: string, lifecycle_state: string, correlation_id: string} */
-    public function complete(Actor $actor, Enrollment $enrollment, string $idempotencyKey): array
+    /**
+     * Withdraw ends a seat terminally under a mandatory human reason. Any
+     * monetary settlement stays exclusively Finance-owned (refunds, credits
+     * and installments are Finance commands); Academic records the Finance
+     * standing at exit read-only in the audit event.
+     *
+     * @return array{enrollment_id: string, lifecycle_state: string, correlation_id: string}
+     */
+    public function withdraw(Actor $actor, Enrollment $enrollment, string $reason, string $idempotencyKey): array
     {
-        return $this->transition($actor, $enrollment, EnrollmentLifecycle::STATE_COMPLETED, self::CAPABILITY_APPROVE, $idempotencyKey);
+        $this->assertReason($reason);
+        $payload = hash('sha256', implode('|', ['academic.enrollment.withdraw', $enrollment->id, $reason, $actor->actorId]));
+
+        try {
+            return $this->idempotency->execute('academic.enrollment.transition.'.EnrollmentLifecycle::STATE_WITHDRAWN, $idempotencyKey, $payload,
+                fn (): array => DB::transaction(function () use ($actor, $enrollment, $reason): array {
+                    $outcome = $this->access->decide($actor, self::CAPABILITY_REQUEST, null);
+                    if (! $outcome->allowed) {
+                        throw AuthorizationDenied::forCode('academic.enrollment_denied', $outcome->reason);
+                    }
+
+                    /** @var Enrollment $locked */
+                    $locked = Enrollment::query()->whereKey($enrollment->id)->lockForUpdate()->firstOrFail();
+                    EnrollmentLifecycle::requireTransition($locked->lifecycle_state, EnrollmentLifecycle::STATE_WITHDRAWN);
+                    $exit = $this->exitGateSnapshot($locked);
+
+                    $before = ['lifecycle_state' => $locked->lifecycle_state];
+                    $locked->forceFill([
+                        'lifecycle_state' => EnrollmentLifecycle::STATE_WITHDRAWN,
+                        'state_reason' => $reason,
+                    ]);
+                    $locked->save();
+                    $event = $this->audit->record($actor->actorId, 'academic.enrollment.withdrawn', 'enrollment', $locked->id, $before, [
+                        'lifecycle_state' => EnrollmentLifecycle::STATE_WITHDRAWN,
+                        'state_reason' => $reason,
+                        'finance_gate_exit' => $exit,
+                    ]);
+
+                    return ['enrollment_id' => $locked->id, 'lifecycle_state' => EnrollmentLifecycle::STATE_WITHDRAWN, 'correlation_id' => $event->correlation_id];
+                }),
+            );
+        } catch (AuthorizationDenied $denial) {
+            $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.enrollment.withdrawn', 'enrollment', $enrollment->id);
+        }
+    }
+
+    /**
+     * Complete terminally marks assessed delivery with a mandatory basis and
+     * verified evidence pinned on the row. A level-aware class requires
+     * evidence (a released result of this seat or an approved progression
+     * decision for this student and class); a legacy class keeps the
+     * certified basis-only path, with optional evidence verified the same
+     * way when supplied. No seat completes automatically.
+     *
+     * @return array{enrollment_id: string, lifecycle_state: string, correlation_id: string}
+     */
+    public function complete(Actor $actor, Enrollment $enrollment, string $basis, ?string $evidenceKind, ?string $evidenceId, string $idempotencyKey): array
+    {
+        if ($basis === '') {
+            throw BusinessRejection::forCode('academic.enrollment_completion_basis_required', 'completing a seat requires its basis');
+        }
+        $payload = hash('sha256', implode('|', ['academic.enrollment.complete', $enrollment->id, $basis, $evidenceKind ?? '', $evidenceId ?? '', $actor->actorId]));
+
+        try {
+            return $this->idempotency->execute('academic.enrollment.transition.'.EnrollmentLifecycle::STATE_COMPLETED, $idempotencyKey, $payload,
+                fn (): array => DB::transaction(function () use ($actor, $enrollment, $basis, $evidenceKind, $evidenceId): array {
+                    $outcome = $this->access->decide($actor, self::CAPABILITY_APPROVE, null);
+                    if (! $outcome->allowed) {
+                        throw AuthorizationDenied::forCode('academic.enrollment_denied', $outcome->reason);
+                    }
+
+                    /** @var Enrollment $locked */
+                    $locked = Enrollment::query()->whereKey($enrollment->id)->lockForUpdate()->firstOrFail();
+                    EnrollmentLifecycle::requireTransition($locked->lifecycle_state, EnrollmentLifecycle::STATE_COMPLETED);
+
+                    /** @var ClassModel $class */
+                    $class = ClassModel::query()->whereKey($locked->class_id)->firstOrFail();
+                    $evidence = $this->assertCompletionEvidence($locked, $class, $evidenceKind, $evidenceId);
+                    $exit = $this->exitGateSnapshot($locked);
+
+                    $before = ['lifecycle_state' => $locked->lifecycle_state];
+                    $locked->forceFill([
+                        'lifecycle_state' => EnrollmentLifecycle::STATE_COMPLETED,
+                        'state_reason' => $basis,
+                        'completion_basis' => $basis,
+                        'completion_evidence_kind' => $evidence['kind'] ?? null,
+                        'completion_evidence_id' => $evidence['id'] ?? null,
+                    ]);
+                    $locked->save();
+                    $event = $this->audit->record($actor->actorId, 'academic.enrollment.completed', 'enrollment', $locked->id, $before, [
+                        'lifecycle_state' => EnrollmentLifecycle::STATE_COMPLETED,
+                        'completion_basis' => $basis,
+                        'completion_evidence_kind' => $evidence['kind'] ?? null,
+                        'completion_evidence_id' => $evidence['id'] ?? null,
+                        'finance_gate_exit' => $exit,
+                    ]);
+
+                    return ['enrollment_id' => $locked->id, 'lifecycle_state' => EnrollmentLifecycle::STATE_COMPLETED, 'correlation_id' => $event->correlation_id];
+                }),
+            );
+        } catch (AuthorizationDenied $denial) {
+            $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.enrollment.completed', 'enrollment', $enrollment->id);
+        }
     }
 
     /**
@@ -280,6 +468,84 @@ final class MaintainEnrollment
             $enrollment->id,
             $denial->assessment(),
         );
+    }
+
+    private function assertReason(string $reason): void
+    {
+        if ($reason === '') {
+            throw BusinessRejection::forCode('academic.enrollment_reason_required', 'this seat change requires a reason');
+        }
+    }
+
+    /**
+     * Finance-read exit snapshot for the freeze/withdraw/complete audit
+     * payloads. Academic never writes Finance facts here; it only records
+     * the Finance-authoritative standing at exit.
+     *
+     * @return array<string, mixed>
+     */
+    private function exitGateSnapshot(Enrollment $enrollment): array
+    {
+        $assessment = $this->financialGates->assess($enrollment);
+
+        return [
+            'satisfied' => $assessment['satisfied'],
+            'remaining' => $assessment['remaining'],
+            'uncovered' => $assessment['uncovered'],
+            'digest' => $assessment['digest'],
+            'signature' => $assessment['signature'],
+            'assessed_at' => $assessment['assessed_at'],
+        ];
+    }
+
+    /**
+     * Verifies the assessed-delivery evidence pinned at completion. A
+     * level-aware class requires evidence; a legacy class accepts a
+     * basis-only completion but verifies supplied evidence the same way.
+     *
+     * @return array{kind: string, id: string}|null
+     */
+    private function assertCompletionEvidence(Enrollment $enrollment, ClassModel $class, ?string $kind, ?string $id): ?array
+    {
+        $kind = $kind !== null && $kind !== '' ? $kind : null;
+        $id = $id !== null && $id !== '' ? $id : null;
+        $levelAware = $class->program_version_level_id !== null && $class->program_version_level_id !== '';
+
+        if ($kind === null || $id === null) {
+            if ($levelAware) {
+                throw BusinessRejection::forCode('academic.enrollment_completion_evidence_required', 'completing a level seat requires its assessed evidence');
+            }
+            if ($kind !== null || $id !== null) {
+                throw BusinessRejection::forCode('academic.enrollment_completion_evidence_unknown', 'completion evidence requires both kind and id');
+            }
+
+            return null;
+        }
+        if (! in_array($kind, ['assessment_result', 'progression_decision'], true)) {
+            throw BusinessRejection::forCode('academic.enrollment_completion_evidence_unknown', sprintf('unknown completion evidence kind %s', $kind));
+        }
+        if ($kind === 'assessment_result') {
+            /** @var AssessmentResult|null $result */
+            $result = AssessmentResult::query()->find($id);
+            if ($result === null || $result->lifecycle_state !== AssessmentResultLifecycle::STATE_RELEASED) {
+                throw BusinessRejection::forCode('academic.enrollment_completion_evidence_mismatch', 'completion requires a released assessment result of this seat');
+            }
+            $attempt = $result->attempt()->firstOrFail();
+            if (trim((string) $attempt->enrollment_id) !== trim($enrollment->id)) {
+                throw BusinessRejection::forCode('academic.enrollment_completion_evidence_mismatch', 'the assessment result does not belong to this seat');
+            }
+        } else {
+            /** @var ProgressionDecision|null $decision */
+            $decision = ProgressionDecision::query()->find($id);
+            if ($decision === null || $decision->lifecycle_state !== ProgressionLifecycle::STATE_APPROVED) {
+                throw BusinessRejection::forCode('academic.enrollment_completion_evidence_mismatch', 'completion requires an approved progression decision for this seat');
+            }
+            if (trim((string) $decision->student_id) !== trim($enrollment->student_id) || trim((string) $decision->class_id) !== trim($enrollment->class_id)) {
+                throw BusinessRejection::forCode('academic.enrollment_completion_evidence_mismatch', 'the progression decision does not belong to this seat');
+            }
+        }
+
+        return ['kind' => $kind, 'id' => $id];
     }
 
     /** @param array<string, mixed> $assessment */

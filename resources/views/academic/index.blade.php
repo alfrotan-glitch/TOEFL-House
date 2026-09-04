@@ -262,6 +262,71 @@
             @endforeach
         </table>
     @endif
+    <h3 style="margin-top:12px">Active and frozen seats</h3>
+    <p class="sub">Freeze parks a seat with a reason; unfreeze returns it under a fresh financial gate; withdraw ends it with a reason; complete pins its basis and assessed evidence.</p>
+    @if ($activeEnrollments->isEmpty() && $frozenEnrollments->isEmpty())
+        <p class="empty">No active or frozen seats.</p>
+    @else
+        <table class="grid">
+            <tr><th>Seat</th><th>State</th><th>Reason</th><th>Freeze</th><th>Unfreeze</th><th>Withdraw</th><th>Complete</th></tr>
+            @foreach ($activeEnrollments->concat($frozenEnrollments) as $seat)
+                <tr>
+                    <td>{{ \Illuminate\Support\Str::limit($seat->student_id, 10) }} / {{ \Illuminate\Support\Str::limit($seat->class_id, 10) }}</td>
+                    <td><span class="pill">{{ $seat->lifecycle_state }}</span></td>
+                    <td>{{ $seat->state_reason !== null ? \Illuminate\Support\Str::limit($seat->state_reason, 24) : '—' }}</td>
+                    <td>
+                        @if ($seat->lifecycle_state === 'active')
+                            <form method="POST" action="{{ route('academic.enrollment.freeze', $seat->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <input name="reason" type="text" placeholder="Reason…" required maxlength="1000" style="width:110px">
+                                <button type="submit" class="btn small">Freeze</button>
+                            </form>
+                        @else
+                            —
+                        @endif
+                    </td>
+                    <td>
+                        @if ($seat->lifecycle_state === 'frozen')
+                            <form method="POST" action="{{ route('academic.enrollment.unfreeze', $seat->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Unfreeze</button>
+                            </form>
+                        @else
+                            —
+                        @endif
+                    </td>
+                    <td>
+                        <form method="POST" action="{{ route('academic.enrollment.withdraw', $seat->id) }}" style="display:inline">
+                            @csrf
+                            <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                            <input name="reason" type="text" placeholder="Reason…" required maxlength="1000" style="width:110px">
+                            <button type="submit" class="btn small secondary">Withdraw</button>
+                        </form>
+                    </td>
+                    <td>
+                        @if ($seat->lifecycle_state === 'active')
+                            <form method="POST" action="{{ route('academic.enrollment.complete', $seat->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <input name="basis" type="text" placeholder="Basis…" required maxlength="1000" style="width:110px">
+                                <select name="evidence_kind" style="width:130px">
+                                    <option value="">No evidence…</option>
+                                    <option value="assessment_result">Released result</option>
+                                    <option value="progression_decision">Progression decision</option>
+                                </select>
+                                <input name="evidence_id" type="text" placeholder="Evidence id…" maxlength="36" style="width:130px">
+                                <button type="submit" class="btn small">Complete</button>
+                            </form>
+                        @else
+                            —
+                        @endif
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
 </div>
 
 <div class="card">

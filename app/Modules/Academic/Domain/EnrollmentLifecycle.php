@@ -7,9 +7,11 @@ namespace App\Modules\Academic\Domain;
 use App\Support\Errors\BusinessRejection;
 
 /**
- * Enrollment/membership registry: requested -> active, then freeze,
- * transfer, withdraw, or complete. Transfer closes the old enrollment and
- * opens a new one; there is never a duplicate active seat.
+ * Enrollment/membership registry: requested -> active, then reasoned freeze
+ * (active -> frozen, reversible through unfreeze with a financial re-gate),
+ * transfer, reasoned withdraw, or evidenced complete. Transfer closes the
+ * old enrollment and opens a new one; there is never a duplicate active
+ * seat.
  */
 final class EnrollmentLifecycle
 {

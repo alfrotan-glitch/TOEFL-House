@@ -115,6 +115,10 @@ Route::middleware('employee')->group(function (): void {
         Route::post('sessions/{sessionId}/attendance', [AcademicController::class, 'recordAttendance'])->name('attendance');
         Route::post('enrollments', [AcademicController::class, 'requestEnrollment'])->name('enrollment.request');
         Route::post('enrollments/{enrollmentId}/activate', [AcademicController::class, 'activateEnrollment'])->name('enrollment.activate');
+        Route::post('enrollments/{enrollmentId}/freeze', [AcademicController::class, 'freezeEnrollment'])->name('enrollment.freeze');
+        Route::post('enrollments/{enrollmentId}/unfreeze', [AcademicController::class, 'unfreezeEnrollment'])->name('enrollment.unfreeze');
+        Route::post('enrollments/{enrollmentId}/withdraw', [AcademicController::class, 'withdrawEnrollment'])->name('enrollment.withdraw');
+        Route::post('enrollments/{enrollmentId}/complete', [AcademicController::class, 'completeEnrollment'])->name('enrollment.complete');
         Route::post('progressions', [AcademicController::class, 'proposeProgression'])->name('progression.propose');
         Route::post('progressions/{decisionId}/review', [AcademicController::class, 'reviewProgression'])->name('progression.review');
         Route::post('progressions/{decisionId}/approve', [AcademicController::class, 'approveProgression'])->name('progression.approve');

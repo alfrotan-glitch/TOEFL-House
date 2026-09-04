@@ -216,7 +216,7 @@ final class AcademicOfferingAndWaitlistFeatureTest extends TestCase
         }
 
         // Freeing the seat lets the offer and promote flow complete.
-        app(MaintainEnrollment::class)->withdraw($clerk, Enrollment::query()->findOrFail($seatA['enrollment_id']), 'wl-withdraw-a');
+        app(MaintainEnrollment::class)->withdraw($clerk, Enrollment::query()->findOrFail($seatA['enrollment_id']), 'student left the branch', 'wl-withdraw-a');
         $waitlist->offer($officer, ClassWaitlistEntry::query()->findOrFail($joined['entry_id']), 'wl-offer-2');
 
         $approver = $this->grantedActor('waitlist-approve-1', ['academic.enroll', 'academic.enroll_approve']);

@@ -217,7 +217,7 @@ final class CrossModuleBoundaryAttackTest extends TestCase
     {
         $classId = $this->activeClass($this->classIdA);
         $seat = app(MaintainEnrollment::class)->request($this->clerk(), $this->newStudent('bd-person-term'), $classId, $this->k('term-req'));
-        app(MaintainEnrollment::class)->withdraw($this->clerk(), Enrollment::query()->findOrFail($seat['enrollment_id']), $this->k('term-wd'));
+        app(MaintainEnrollment::class)->withdraw($this->clerk(), Enrollment::query()->findOrFail($seat['enrollment_id']), 'withdrawn seat under test', $this->k('term-wd'));
 
         $this->expectException(QueryException::class);
         DB::table('enrollments')->where('id', $seat['enrollment_id'])->update(['lifecycle_state' => 'active']);

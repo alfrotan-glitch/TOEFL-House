@@ -58,6 +58,7 @@ final class AcademicController extends Controller
             'programVersions' => ProgramVersion::query()->orderBy('id')->limit(200)->get(),
             'graduations' => GraduationDecision::query()->whereIn('lifecycle_state', ['proposed', 'reviewed', 'approved'])->orderByDesc('id')->limit(200)->get(),
             'requestedEnrollments' => Enrollment::query()->where('lifecycle_state', 'requested')->orderBy('id')->limit(200)->get(),
+            'frozenEnrollments' => Enrollment::query()->where('lifecycle_state', 'frozen')->orderBy('id')->limit(200)->get(),
             'progressions' => ProgressionDecision::query()->whereIn('lifecycle_state', ['proposed', 'reviewed'])->orderBy('id')->limit(200)->get(),
             'appeals' => AcademicAppeal::query()->whereIn('lifecycle_state', ['open', 'assigned', 'investigating', 'escalated', 'resolved', 'rejected'])->orderByDesc('id')->limit(200)->get(),
             'releasedResults' => AssessmentResult::query()->where('lifecycle_state', 'released')->orderByDesc('id')->limit(200)->get(),
@@ -145,6 +146,72 @@ final class AcademicController extends Controller
         );
 
         return redirect()->route('academic.index')->with('success', 'Seat activated.');
+    }
+
+    public function freezeEnrollment(Request $request, string $enrollmentId): RedirectResponse
+    {
+        $input = $request->validate([
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        app(MaintainEnrollment::class)->freeze(
+            $this->actor(),
+            Enrollment::query()->findOrFail($enrollmentId),
+            $input['reason'],
+            $this->idempotencyKey('academic.enrollment.freeze'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Seat frozen with its reason recorded.');
+    }
+
+    public function unfreezeEnrollment(Request $request, string $enrollmentId): RedirectResponse
+    {
+        app(MaintainEnrollment::class)->unfreeze(
+            $this->actor(),
+            Enrollment::query()->findOrFail($enrollmentId),
+            $this->idempotencyKey('academic.enrollment.unfreeze'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Seat returned to active under a fresh financial gate.');
+    }
+
+    public function withdrawEnrollment(Request $request, string $enrollmentId): RedirectResponse
+    {
+        $input = $request->validate([
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        app(MaintainEnrollment::class)->withdraw(
+            $this->actor(),
+            Enrollment::query()->findOrFail($enrollmentId),
+            $input['reason'],
+            $this->idempotencyKey('academic.enrollment.withdraw'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Seat withdrawn with its reason recorded.');
+    }
+
+    public function completeEnrollment(Request $request, string $enrollmentId): RedirectResponse
+    {
+        $input = $request->validate([
+            'basis' => ['required', 'string', 'max:1000'],
+            'evidence_kind' => ['nullable', 'string', 'in:assessment_result,progression_decision'],
+            'evidence_id' => ['nullable', 'string', 'required_with:evidence_kind'],
+        ]);
+
+        $evidenceKind = $input['evidence_kind'] ?? null;
+        $evidenceId = $input['evidence_id'] ?? null;
+
+        app(MaintainEnrollment::class)->complete(
+            $this->actor(),
+            Enrollment::query()->findOrFail($enrollmentId),
+            $input['basis'],
+            ($evidenceKind !== null && $evidenceKind !== '') ? $evidenceKind : null,
+            ($evidenceId !== null && $evidenceId !== '') ? $evidenceId : null,
+            $this->idempotencyKey('academic.enrollment.complete'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Seat completed with its basis and evidence pinned.');
     }
 
     public function proposeProgression(Request $request): RedirectResponse

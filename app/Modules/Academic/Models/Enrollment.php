@@ -20,6 +20,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string|null $current_home_branch_id
  * @property string|null $offering_id
  * @property string|null $academic_eligibility_snapshot_id
+ * @property string|null $state_reason
+ * @property string|null $completion_basis
+ * @property string|null $completion_evidence_kind
+ * @property string|null $completion_evidence_id
  */
 final class Enrollment extends Model
 {
@@ -27,7 +31,7 @@ final class Enrollment extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'student_id', 'class_id', 'lifecycle_state', 'originating_branch_id', 'current_home_branch_id', 'offering_id', 'academic_eligibility_snapshot_id', 'financial_gate_evidence', 'financial_gate_evidence_sha256', 'financial_gate_signature', 'financial_gate_assessed_at', 'financial_gate_satisfied'];
+    protected $fillable = ['id', 'student_id', 'class_id', 'lifecycle_state', 'originating_branch_id', 'current_home_branch_id', 'offering_id', 'academic_eligibility_snapshot_id', 'financial_gate_evidence', 'financial_gate_evidence_sha256', 'financial_gate_signature', 'financial_gate_assessed_at', 'financial_gate_satisfied', 'state_reason', 'completion_basis', 'completion_evidence_kind', 'completion_evidence_id'];
 
     protected $casts = [
         'financial_gate_evidence' => 'array',

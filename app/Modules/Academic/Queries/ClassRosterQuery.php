@@ -30,6 +30,7 @@ final class ClassRosterQuery
             'enrollment_id' => trim((string) $enrollment->id),
             'student_id' => trim((string) $enrollment->student_id),
             'lifecycle_state' => $enrollment->lifecycle_state,
+            'state_reason' => $enrollment->state_reason !== null ? trim((string) $enrollment->state_reason) : null,
         ])->all();
 
         /** @var Collection<int, TeacherAssignment> $teachers */
