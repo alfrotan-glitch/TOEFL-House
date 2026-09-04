@@ -17,6 +17,10 @@ use Illuminate\Support\Collection;
  */
 final class PlacementProfileQuery
 {
+    public function __construct(
+        private readonly AcademicEligibilitySnapshotQuery $eligibilitySnapshots,
+    ) {}
+
     /** @return array<string, mixed> */
     public function for(PlacementProfile $profile): array
     {
@@ -32,6 +36,7 @@ final class PlacementProfileQuery
             'attempts' => $attempts,
             'section_results' => $sectionResults,
             'recommendations' => $recommendations,
+            'eligibility_snapshot' => $this->eligibilitySnapshots->for($profile),
         ];
     }
 

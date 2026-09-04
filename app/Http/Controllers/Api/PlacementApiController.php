@@ -15,6 +15,7 @@ use App\Modules\Academic\Placement\Models\PlacementProfile;
 use App\Modules\Academic\Placement\Models\PlacementSectionResult;
 use App\Modules\Academic\Placement\Models\PlacementTest;
 use App\Modules\Academic\Placement\Models\PlacementTestVersion;
+use App\Modules\Academic\Placement\Queries\AcademicEligibilitySnapshotQuery;
 use App\Modules\Academic\Placement\Queries\PlacementFinanceLinkQuery;
 use App\Modules\Academic\Placement\Queries\PlacementProfileQuery;
 use Illuminate\Http\JsonResponse;
@@ -69,6 +70,17 @@ final class PlacementApiController extends Controller
         $profile = PlacementProfile::query()->findOrFail($profileId);
 
         return response()->json(app(PlacementFinanceLinkQuery::class)->for($profile));
+    }
+
+    public function eligibilitySnapshot(string $profileId): JsonResponse
+    {
+        $profile = PlacementProfile::query()->findOrFail($profileId);
+        $snapshot = app(AcademicEligibilitySnapshotQuery::class)->for($profile);
+        if ($snapshot === null) {
+            abort(404, 'No signed eligibility snapshot exists for this placement profile.');
+        }
+
+        return response()->json(['profile_id' => $profileId] + $snapshot);
     }
 
     public function openProfile(Request $request): JsonResponse

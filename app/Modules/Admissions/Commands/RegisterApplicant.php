@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Modules\Admissions\Commands;
 
 use App\Modules\Academic\Placement\Models\PlacementProfile;
+use App\Modules\Academic\Placement\Queries\AcademicEligibilitySnapshotQuery;
 use App\Modules\Admissions\Domain\ApplicantLifecycle;
 use App\Modules\Admissions\Models\Applicant;
 use App\Modules\Audit\AttemptedOperation;
@@ -35,6 +36,7 @@ final class RegisterApplicant
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
         private readonly VisitorConversionRecorder $visitorConversionRecorder,
+        private readonly AcademicEligibilitySnapshotQuery $eligibilitySnapshots,
     ) {}
 
     /** @return array{applicant_id: string, correlation_id: string} */
@@ -59,8 +61,9 @@ final class RegisterApplicant
                     if (Applicant::query()->whereIn('lifecycle_state', ['prospect', 'applicant', 'admitted'])->where('person_id', $personId)->exists()) {
                         throw BusinessRejection::forCode('admissions.open_file_exists', 'this person already has an open admission file');
                     }
+                    $snapshotId = null;
                     if ($placementProfileId !== null && $placementProfileId !== '') {
-                        $this->requireReleasedPlacementFor($placementProfileId, $personId);
+                        $snapshotId = $this->requireReleasedEligibilitySnapshotFor($placementProfileId, $personId);
                     }
 
                     $applicant = Applicant::query()->create([
@@ -70,11 +73,13 @@ final class RegisterApplicant
                         'lifecycle_state' => ApplicantLifecycle::STATE_APPLICANT,
                         'recorded_by' => $registrar->actorId,
                         'placement_profile_id' => ($placementProfileId !== null && $placementProfileId !== '') ? $placementProfileId : null,
+                        'academic_eligibility_snapshot_id' => $snapshotId,
                     ]);
 
                     $event = $this->audit->record($registrar->actorId, 'admissions.register', 'applicant', $applicant->id, null, [
                         'person_id' => $personId, 'program_interest' => $programInterest, 'lifecycle_state' => ApplicantLifecycle::STATE_APPLICANT,
                         'placement_profile_id' => $applicant->placement_profile_id,
+                        'academic_eligibility_snapshot_id' => $applicant->academic_eligibility_snapshot_id,
                     ]);
                     $this->recordVisitorConversion($registrar, $personId, 'applicant', $applicant->id);
 
@@ -86,7 +91,7 @@ final class RegisterApplicant
         }
     }
 
-    private function requireReleasedPlacementFor(string $placementProfileId, string $personId): void
+    private function requireReleasedEligibilitySnapshotFor(string $placementProfileId, string $personId): string
     {
         /** @var PlacementProfile|null $profile */
         $profile = PlacementProfile::query()->find($placementProfileId);
@@ -96,6 +101,16 @@ final class RegisterApplicant
         if ($profile->lifecycle_state !== PlacementProfile::STATE_RELEASED) {
             throw BusinessRejection::forCode('admissions.placement_not_released', 'admission registration may reference only a released placement profile');
         }
+
+        $snapshot = $this->eligibilitySnapshots->for($profile);
+        if ($snapshot === null) {
+            throw BusinessRejection::forCode('admissions.eligibility_snapshot_missing', 'admission registration requires a signed eligibility snapshot from the released placement profile');
+        }
+        if (! $snapshot['verification']['valid']) {
+            throw BusinessRejection::forCode('admissions.eligibility_snapshot_unverified', 'the placement eligibility snapshot could not be verified: '.$snapshot['verification']['reason']);
+        }
+
+        return (string) $snapshot['snapshot']['id'];
     }
 
     private function recordVisitorConversion(Actor $actor, string $personId, string $conversionType, string $downstreamId): void

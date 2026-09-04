@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace App\Modules\Academic\Placement\Commands;
 
+use App\Modules\Academic\Placement\Domain\AcademicEligibilitySnapshotBuilder;
 use App\Modules\Academic\Placement\Domain\PlacementAccess;
 use App\Modules\Academic\Placement\Domain\PlacementProfileLifecycle;
+use App\Modules\Academic\Placement\Models\AcademicEligibilitySnapshot;
 use App\Modules\Academic\Placement\Models\PlacementAttempt;
 use App\Modules\Academic\Placement\Models\PlacementProfile;
+use App\Modules\Academic\Placement\Models\PlacementRecommendation;
 use App\Modules\Academic\Placement\Models\PlacementSectionResult;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
@@ -15,6 +18,7 @@ use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
+use App\Support\Identifiers\RandomIdentifier;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -98,7 +102,13 @@ final class DecidePlacement
                         $changes['released_by'] = $actor->actorId;
                     }
                     $locked->forceFill($changes)->save();
-                    $event = $this->audit->record($actor->actorId, 'placement.'.$verb, 'placement_profile', $locked->id, $before, ['lifecycle_state' => $toState]);
+
+                    $after = ['lifecycle_state' => $toState];
+                    if ($toState === PlacementProfile::STATE_RELEASED) {
+                        $snapshot = $this->materializeEligibilitySnapshot($locked, $actor);
+                        $after['academic_eligibility_snapshot_id'] = $snapshot->id;
+                    }
+                    $event = $this->audit->record($actor->actorId, 'placement.'.$verb, 'placement_profile', $locked->id, $before, $after);
 
                     return ['profile_id' => $locked->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
                 }),
@@ -106,6 +116,78 @@ final class DecidePlacement
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $actor, 'placement.'.$verb, 'placement_profile', $profile->id);
         }
+    }
+
+    private function materializeEligibilitySnapshot(PlacementProfile $profile, Actor $releaser): AcademicEligibilitySnapshot
+    {
+        if (AcademicEligibilitySnapshot::query()->where('placement_profile_id', $profile->id)->exists()) {
+            throw BusinessRejection::forCode('placement.eligibility_snapshot_exists', 'this placement profile already has a signed eligibility snapshot');
+        }
+
+        /** @var PlacementRecommendation $recommendation */
+        $recommendation = PlacementRecommendation::query()
+            ->where('profile_id', $profile->id)
+            ->latest('created_at')
+            ->firstOrFail();
+
+        $versionNo = (int) AcademicEligibilitySnapshot::query()
+            ->where('placement_profile_id', $profile->id)
+            ->count() + 1;
+
+        /** @var AcademicEligibilitySnapshot|null $previous */
+        $previous = AcademicEligibilitySnapshot::query()
+            ->where('person_id', $profile->person_id)
+            ->latest('signed_at')
+            ->first();
+        $supersedesSnapshotId = $previous?->id;
+
+        $built = (new AcademicEligibilitySnapshotBuilder)->build(
+            $profile,
+            $recommendation,
+            $releaser,
+            $versionNo,
+            $supersedesSnapshotId,
+        );
+
+        $snapshot = AcademicEligibilitySnapshot::query()->create([
+            'id' => RandomIdentifier::new(),
+            'placement_profile_id' => $profile->id,
+            'placement_recommendation_id' => $recommendation->id,
+            'person_id' => $profile->person_id,
+            'visitor_id' => $profile->visitor_id,
+            'snapshot_schema_version' => AcademicEligibilitySnapshotBuilder::SCHEMA_VERSION,
+            'version_no' => $versionNo,
+            'program_version_id' => $built['program_version_id'],
+            'recommended_level_id' => $built['recommended_level_id'],
+            'recommended_class_id' => $built['recommended_class_id'],
+            'recommended_offering_id' => $built['recommended_offering_id'],
+            'academic_period_id' => $built['academic_period_id'],
+            'originating_branch_id' => $profile->originating_branch_id,
+            'current_home_branch_id' => $profile->current_home_branch_id,
+            'payload' => $built['payload'],
+            'payload_canonical_json' => $built['canonical'],
+            'payload_sha256' => $built['digest'],
+            'signature_algorithm' => $built['algorithm'],
+            'signature' => $built['signature'],
+            'signing_key_version' => $built['key_version'],
+            'signed_by' => $releaser->actorId,
+            'signed_at' => $built['payload']['snapshot']['signed_at'],
+            'supersedes_snapshot_id' => $supersedesSnapshotId,
+        ]);
+
+        $profile->forceFill(['academic_eligibility_snapshot_id' => $snapshot->id])->save();
+
+        $this->audit->record($releaser->actorId, 'placement.eligibility.snapshot', 'academic_eligibility_snapshot', $snapshot->id, null, [
+            'placement_profile_id' => $profile->id,
+            'placement_recommendation_id' => $recommendation->id,
+            'snapshot_schema_version' => $snapshot->snapshot_schema_version,
+            'version_no' => $snapshot->version_no,
+            'payload_sha256' => $snapshot->payload_sha256,
+            'signature_algorithm' => $snapshot->signature_algorithm,
+            'signing_key_version' => $snapshot->signing_key_version,
+        ]);
+
+        return $snapshot;
     }
 
     private function allSectionsApproved(string $profileId): bool

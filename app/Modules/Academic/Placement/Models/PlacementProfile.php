@@ -30,6 +30,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string $lifecycle_state
  * @property string|null $originating_branch_id
  * @property string|null $current_home_branch_id
+ * @property string|null $academic_eligibility_snapshot_id
  */
 final class PlacementProfile extends Model
 {
@@ -58,6 +59,7 @@ final class PlacementProfile extends Model
         'recommended_offering_id', 'recommended_class_id', 'overall_cefr_ref',
         'lifecycle_state', 'originating_branch_id', 'current_home_branch_id',
         'reviewed_by', 'approved_by', 'released_by', 'created_by',
+        'academic_eligibility_snapshot_id',
     ];
 
     /** @return BelongsTo<Person, $this> */
@@ -106,6 +108,18 @@ final class PlacementProfile extends Model
     public function recommendations(): HasMany
     {
         return $this->hasMany(PlacementRecommendation::class, 'profile_id');
+    }
+
+    /** @return HasMany<AcademicEligibilitySnapshot, $this> */
+    public function eligibilitySnapshots(): HasMany
+    {
+        return $this->hasMany(AcademicEligibilitySnapshot::class, 'placement_profile_id');
+    }
+
+    /** @return BelongsTo<AcademicEligibilitySnapshot, $this> */
+    public function eligibilitySnapshot(): BelongsTo
+    {
+        return $this->belongsTo(AcademicEligibilitySnapshot::class, 'academic_eligibility_snapshot_id');
     }
 
     public function isLive(): bool

@@ -9,6 +9,8 @@ use App\Modules\Academic\Domain\EnrollmentLifecycle;
 use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Academic\Models\Offering;
+use App\Modules\Academic\Placement\Models\AcademicEligibilitySnapshot;
+use App\Modules\Academic\Placement\Queries\AcademicEligibilitySnapshotQuery;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Students\Models\Student;
@@ -39,6 +41,7 @@ final class MaintainEnrollment
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
+        private readonly AcademicEligibilitySnapshotQuery $eligibilitySnapshots,
     ) {}
 
     /** @return array{enrollment_id: string, correlation_id: string} */
@@ -61,16 +64,19 @@ final class MaintainEnrollment
                     if (Enrollment::query()->where('student_id', $studentId)->where('class_id', $classId)->whereIn('lifecycle_state', ['requested', 'active', 'frozen'])->exists()) {
                         throw BusinessRejection::forCode('academic.enrollment_seat_exists', 'this student already holds a seat in this class');
                     }
+                    $eligibilitySnapshotId = $this->currentEligibilitySnapshotId($studentId);
 
                     $enrollment = Enrollment::query()->create([
                         'id' => RandomIdentifier::new(),
                         'student_id' => $studentId,
                         'class_id' => $classId,
                         'offering_id' => $offeringId !== null && $offeringId !== '' ? $offeringId : null,
+                        'academic_eligibility_snapshot_id' => $eligibilitySnapshotId,
                         'lifecycle_state' => EnrollmentLifecycle::STATE_REQUESTED,
                     ]);
                     $event = $this->audit->record($requester->actorId, 'academic.enrollment.request', 'enrollment', $enrollment->id, null, [
                         'student_id' => $studentId, 'class_id' => $classId, 'offering_id' => $enrollment->offering_id,
+                        'academic_eligibility_snapshot_id' => $enrollment->academic_eligibility_snapshot_id,
                     ]);
 
                     return ['enrollment_id' => $enrollment->id, 'correlation_id' => $event->correlation_id];
@@ -131,6 +137,7 @@ final class MaintainEnrollment
                     }
                     $this->assertClassActive($targetClassId);
                     $this->assertStudentActive($locked->student_id);
+                    $eligibilitySnapshotId = $this->currentEligibilitySnapshotId($locked->student_id);
                     $this->assertCapacity($targetClassId);
                     if ($offeringId !== null && $offeringId !== '') {
                         $this->assertOfferingOpenAndMatchesClass($offeringId, $targetClassId);
@@ -149,6 +156,7 @@ final class MaintainEnrollment
                         'student_id' => $locked->student_id,
                         'class_id' => $targetClassId,
                         'offering_id' => $offeringId !== null && $offeringId !== '' ? $offeringId : null,
+                        'academic_eligibility_snapshot_id' => $eligibilitySnapshotId,
                         'lifecycle_state' => EnrollmentLifecycle::STATE_REQUESTED,
                     ]);
                     $event = $this->audit->record($actor->actorId, 'academic.enrollment.transfer', 'enrollment', $next->id, $before, [
@@ -157,6 +165,7 @@ final class MaintainEnrollment
                         'from_class' => $locked->class_id,
                         'to_class' => $targetClassId,
                         'offering_id' => $next->offering_id,
+                        'academic_eligibility_snapshot_id' => $next->academic_eligibility_snapshot_id,
                         'lifecycle_state' => EnrollmentLifecycle::STATE_REQUESTED,
                     ]);
 
@@ -203,6 +212,22 @@ final class MaintainEnrollment
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.enrollment.'.$toState, 'enrollment', $enrollment->id);
         }
+    }
+
+    private function currentEligibilitySnapshotId(string $studentId): ?string
+    {
+        $snapshotId = Student::query()->whereKey($studentId)->value('academic_eligibility_snapshot_id');
+        if ($snapshotId === null) {
+            return null;
+        }
+        /** @var AcademicEligibilitySnapshot $snapshot */
+        $snapshot = AcademicEligibilitySnapshot::query()->findOrFail($snapshotId);
+        $verification = $this->eligibilitySnapshots->verify($snapshot);
+        if (! $verification['valid']) {
+            throw BusinessRejection::forCode('academic.eligibility_snapshot_unverified', 'the student eligibility snapshot could not be verified: '.$verification['reason']);
+        }
+
+        return $snapshot->id;
     }
 
     private function assertStudentActive(string $studentId): void

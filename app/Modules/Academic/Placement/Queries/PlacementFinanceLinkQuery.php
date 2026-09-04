@@ -15,12 +15,22 @@ use Illuminate\Support\Facades\DB;
  */
 final class PlacementFinanceLinkQuery
 {
+    public function __construct(
+        private readonly AcademicEligibilitySnapshotQuery $eligibilitySnapshots,
+    ) {}
+
     /** @return array<string, mixed> */
     public function for(PlacementProfile $profile): array
     {
         $studentId = DB::table('students')->where('person_id', $profile->person_id)->value('id');
         if ($studentId === null) {
-            return ['person_id' => $profile->person_id, 'student_id' => null, 'obligations' => [], 'payments' => []];
+            return [
+                'person_id' => $profile->person_id,
+                'student_id' => null,
+                'obligations' => [],
+                'payments' => [],
+                'eligibility_snapshot' => $this->eligibilitySnapshots->for($profile),
+            ];
         }
 
         $obligations = DB::table('obligations')
@@ -40,6 +50,7 @@ final class PlacementFinanceLinkQuery
             'student_id' => $studentId,
             'obligations' => $obligations,
             'payments' => $payments,
+            'eligibility_snapshot' => $this->eligibilitySnapshots->for($profile),
         ];
     }
 }

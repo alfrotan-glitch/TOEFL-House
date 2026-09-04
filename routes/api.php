@@ -85,6 +85,7 @@ Route::middleware('employee')->group(function (): void {
         Route::get('/profiles', [PlacementApiController::class, 'profiles'])->name('profiles');
         Route::get('/profiles/{profileId}', [PlacementApiController::class, 'show'])->name('profiles.show');
         Route::get('/profiles/{profileId}/finance-link', [PlacementApiController::class, 'financeLink'])->name('profiles.finance-link');
+        Route::get('/profiles/{profileId}/eligibility-snapshot', [PlacementApiController::class, 'eligibilitySnapshot'])->name('profiles.eligibility-snapshot');
         Route::post('/profiles', [PlacementApiController::class, 'openProfile'])->name('profiles.open');
         Route::post('/attempts', [PlacementApiController::class, 'startAttempt'])->name('attempts.start');
         Route::post('/attempts/{attemptId}/submit', [PlacementApiController::class, 'submitDigital'])->name('attempts.submit');
