@@ -22,6 +22,7 @@ const SUBJECT_A = 'wp01_api_subject_a';
 const TERM_A = 'wp01_api_term_a';
 const OWNER = 'wp01_api_owner';
 const MANAGER_A = 'wp01_api_manager_a';
+const MANAGER_B = 'wp01_api_manager_b';
 const CAMPUS_MANAGER = 'wp01_api_campus_manager';
 
 const PROFILE_FEE_FIELDS = ['placementTestFee', 'registrationFee', 'cardFee', 'diplomaFee'] as const;
@@ -93,6 +94,14 @@ beforeAll(() => {
 
   seedUser({ id: OWNER, role: 'owner', branchId: BRANCH_A });
   seedUser({ id: MANAGER_A, role: 'general_manager', branchId: BRANCH_A });
+  seedUser({ id: MANAGER_B, role: 'general_manager', branchId: BRANCH_B });
+  db.prepare(`
+    INSERT INTO role_permissions (id, role_id, permission_id, default_scope)
+    SELECT 'wp01_gm_fee_edit', r.id, p.id, 'branch'
+      FROM roles r, permissions p
+     WHERE r.code = 'general_manager' AND p.code = 'FeeStructure.Edit'
+    ON CONFLICT(role_id, permission_id) DO UPDATE SET default_scope = 'branch'
+  `).run();
   seedUser({ id: CAMPUS_MANAGER, role: 'general_manager', branchId: BRANCH_A, scopeType: 'campus', scopeId: CAMPUS });
 
   for (const [id, branch] of [
@@ -245,6 +254,43 @@ describe('WP-01 academic configuration contracts', () => {
     expect(second.status).toBe(200);
     expect(second.body).toMatchObject({ default_pass_mark: 70, academic_year_label: '2031', notes: 'kept' });
     expect(second.body.registration_fee).toBeUndefined();
+  });
+
+  it.each([130, -5, 101])('rejects an out-of-range default pass mark: %s', async (value) => {
+    const response = await http.put(`/api/catalog/branch-profile/${BRANCH_A}`).set(as(OWNER))
+      .send({ defaultPassMark: value });
+    expect(response.status).toBe(400);
+    expect(response.body.error).toMatch(/between 0 and 100|finite number/i);
+  });
+
+  it('keeps accepting the boundary pass marks 0 and 100', async () => {
+    for (const value of [0, 100]) {
+      const response = await http.put(`/api/catalog/branch-profile/${BRANCH_A}`).set(as(OWNER))
+        .send({ defaultPassMark: value });
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({ default_pass_mark: value });
+    }
+  });
+
+  it('rejects a fee rule edited from a branch the writer cannot access', async () => {
+    const created = await http.post('/api/catalog/fee-rules').set(as(OWNER)).send({
+      branchId: BRANCH_A, feeType: 'placement', amount: 150,
+    });
+    expect(created.status).toBe(201);
+
+    const response = await http.put(`/api/catalog/fee-rules/${created.body.id}`).set(as(MANAGER_B))
+      .send({ amount: 200 });
+    expect(response.status).toBe(403);
+    const stored = db.prepare('SELECT amount FROM fee_rules WHERE id = ?').get(created.body.id) as { amount: number };
+    expect(stored.amount).toBe(150);
+  });
+
+  it('rejects a branch profile edited from a branch the writer cannot access', async () => {
+    const response = await http.put(`/api/catalog/branch-profile/${BRANCH_A}`).set(as(MANAGER_B))
+      .send({ notes: 'written from the wrong branch' });
+    expect(response.status).toBe(403);
+    const stored = db.prepare('SELECT notes FROM branch_academic_profiles WHERE branch_id = ?').get(BRANCH_A) as { notes: string | null } | undefined;
+    expect(stored?.notes).not.toBe('written from the wrong branch');
   });
 
   it('rejects a default program version from another branch', async () => {

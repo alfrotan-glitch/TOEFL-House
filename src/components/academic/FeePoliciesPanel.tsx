@@ -97,7 +97,8 @@ export default function FeePoliciesPanel({
   }, [branchId]);
 
   useEffect(() => {
-    void load();
+    const tick = setTimeout(() => { void load(); }, 0);
+    return () => clearTimeout(tick);
   }, [load]);
 
   const operationalItems = useMemo(() => items.filter((row) =>

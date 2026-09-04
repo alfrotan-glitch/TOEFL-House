@@ -356,12 +356,17 @@ export default function ProgramVersionsPanel({ branchId }: { branchId?: string }
     }
   }, []);
 
-  useEffect(() => { void loadInitialData(); }, [loadInitialData]);
+  useEffect(() => {
+    const tick = setTimeout(() => { void loadInitialData(); }, 0);
+    return () => clearTimeout(tick);
+  }, [loadInitialData]);
 
   useEffect(() => {
     if (selectedId || versions.length === 0) return;
     const preferred = versions.find((v) => v.status === 'published' && v.is_default) || versions.find((v) => v.status === 'published') || versions[0];
-    if (preferred) void loadTree(preferred.id);
+    if (!preferred) return;
+    const tick = setTimeout(() => { void loadTree(preferred.id); }, 0);
+    return () => clearTimeout(tick);
   }, [versions, selectedId, loadTree]);
 
   const handleApiCall = async (fn: () => Promise<void>, successMsg: string) => {
@@ -420,11 +425,16 @@ export default function ProgramVersionsPanel({ branchId }: { branchId?: string }
     }, 'Rule deleted successfully.');
   };
 
-  const levels = tree?.levels || [];
+  const levels = useMemo(() => tree?.levels ?? [], [tree]);
 
-  useEffect(() => {
+  const [configNormalizedFor, setConfigNormalizedFor] = useState<TreeLevel[] | null>(null);
+  if (configNormalizedFor !== levels) {
+    // Render-phase adjustment (React-sanctioned): the placement form config
+    // is normalized against the level list the moment that list changes,
+    // without an effect cycle.
+    setConfigNormalizedFor(levels);
     setPlacementConfig((current) => normalizeConfig(current, levels));
-  }, [levels]);
+  }
 
   const testsByComponent = useMemo(() => {
     return COMPONENT_ORDER.reduce((acc, key) => {

@@ -96,9 +96,11 @@ export default function DashboardView({
     }
   }, [toast]);
 
-  useEffect(() => {
-    if (!canViewExecutive && mainTab === 'bos') setMainTab('overview');
-  }, [canViewExecutive, mainTab]);
+  if (!canViewExecutive && mainTab === 'bos') {
+    // Render-phase adjustment (React-sanctioned): the guarded tab cannot stay
+    // selected the moment the permission disappears, without an effect cycle.
+    setMainTab('overview');
+  }
 
   const triggerToast = (message: string, type: 'success' | 'error' | 'info') => setToast({ message, type });
 

@@ -92,7 +92,11 @@ export default function AcademicSetupView({ branchId, permissionCodes }: { branc
   // lazily but then STAYS mounted instead of refetching on every revisit.
   const [visited, setVisited] = useState<Record<string, boolean>>({});
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
-  useEffect(() => { setVisited((seen) => (seen[tab] ? seen : { ...seen, [tab]: true })); }, [tab]);
+  if (!visited[tab]) {
+    // Render-phase adjustment (React-sanctioned): opening a tab marks it
+    // visited immediately, without an effect cycle.
+    setVisited({ ...visited, [tab]: true });
+  }
   const [programs, setPrograms] = useState<Program[]>([]);
   const [programVersions, setProgramVersions] = useState<ProgramVersion[]>([]);
   const [levels, setLevels] = useState<Level[]>([]);
@@ -175,18 +179,26 @@ export default function AcademicSetupView({ branchId, permissionCodes }: { branc
     finally { if (isCurrent()) { setLoading(false); setHasLoadedOnce(true); } }
   }, [branchId]);
 
-  // Reload whenever the active branch changes. The selected branch is sent as
-  // a requested scope, and every endpoint independently authorizes it. The UI
-  // chooses a branch; it never grants access to one.
-  useEffect(() => {
-    // Clear branch-scoped data immediately so the previous branch's terms,
+  // Reload whenever the active branch (or catalog version) changes. The
+  // selected branch is sent as a requested scope, and every endpoint
+  // independently authorizes it. The UI chooses a branch; it never grants
+  // access to one.
+  const [scopeKey, setScopeKey] = useState(() => `${branchId ?? 'all'}|${academicVersion}`);
+  const nextScopeKey = `${branchId ?? 'all'}|${academicVersion}`;
+  if (scopeKey !== nextScopeKey) {
+    // Render-phase adjustment (React-sanctioned): branch-scoped data is
+    // cleared the moment the scope changes, so the previous branch's terms,
     // rooms and programs cannot stay on screen during the transition.
+    setScopeKey(nextScopeKey);
     setPrograms([]); setProgramVersions([]); setLevels([]); setSlots([]); setRooms([]); setTerms([]); setFees([]);
     setOfferingCount(0); setVersionCount(0); setFeeDraft({}); setExpanded({}); setLevelVersionAssignment({}); setLvlProgramVersionId('');
     setEditTermId(null); setEditSlotId(null); setEditRoomId(null); setEditProgId(null); setEditLvlId(null); setLevelFormProgramId(null);
     setPanelRefreshKey((k) => k + 1);
-    void (async () => { await reload(); })();
-  }, [reload, branchId, academicVersion]);
+  }
+  useEffect(() => {
+    const tick = setTimeout(() => { void reload(); }, 0);
+    return () => clearTimeout(tick);
+  }, [scopeKey, reload]);
 
   // Every mutation funnels through here so that authoritative state is re-read
   // afterwards. On failure nothing is invalidated and no derived completion

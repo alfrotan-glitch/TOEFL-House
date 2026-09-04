@@ -101,8 +101,8 @@ const MUTANTS = [
     id: 'M8',
     invariant: 'C-6 extra-class payment idempotency key',
     file: F.students,
-    find: "student.branch_id, null, null, `extra-class:${enrollId}`);",
-    replace: "student.branch_id, null, null, `extra-class:${enrollId}:${Math.random()}`);",
+    find: "student.branch_id, null, invId, `extra-class:${enrollId}`);",
+    replace: "student.branch_id, null, invId, `extra-class:${enrollId}:${Math.random()}`);",
   },
   {
     id: 'M9',
