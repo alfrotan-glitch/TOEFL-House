@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AcademicApiController;
+use App\Http\Controllers\Api\CrmApiController;
 use App\Http\Controllers\Api\FinanceApiController;
 use App\Http\Controllers\Api\IdentityApiController;
 use App\Http\Controllers\Api\PayrollApiController;
@@ -71,5 +72,26 @@ Route::middleware('employee')->group(function (): void {
         Route::get('/calculations', [PayrollApiController::class, 'calculations'])->name('calculations');
         Route::post('/calculations', [PayrollApiController::class, 'calculate'])->name('calculate');
         Route::post('/calculations/{calculationId}/approve', [PayrollApiController::class, 'approve'])->name('approve');
+    });
+
+    Route::prefix('crm')->name('api.crm.')->group(function (): void {
+        Route::get('/sources', [CrmApiController::class, 'sources'])->name('sources');
+        Route::post('/sources', [CrmApiController::class, 'defineSource'])->name('source.define');
+        Route::get('/campaigns', [CrmApiController::class, 'campaigns'])->name('campaigns');
+        Route::post('/campaigns', [CrmApiController::class, 'defineCampaign'])->name('campaign.define');
+        Route::get('/visitors', [CrmApiController::class, 'index'])->name('visitors.index');
+        Route::post('/visitors', [CrmApiController::class, 'captures'])->name('visitors.capture');
+        Route::get('/visitors/{visitorId}', [CrmApiController::class, 'show'])->name('visitors.show');
+        Route::get('/visitors/{visitorId}/timeline', [CrmApiController::class, 'timeline'])->name('visitors.timeline');
+        Route::post('/visitors/{visitorId}/link-person', [CrmApiController::class, 'linkPerson'])->name('visitors.link-person');
+        Route::patch('/visitors/{visitorId}', [CrmApiController::class, 'update'])->name('visitors.update');
+        Route::post('/visitors/{visitorId}/transition', [CrmApiController::class, 'transition'])->name('visitors.transition');
+        Route::post('/visitors/{visitorId}/interactions', [CrmApiController::class, 'interactions'])->name('visitors.interactions');
+        Route::post('/visitors/{visitorId}/followups', [CrmApiController::class, 'followups'])->name('visitors.followups');
+        Route::post('/visitors/{visitorId}/conversion', [CrmApiController::class, 'convert'])->name('visitors.convert');
+        Route::post('/followups/{followupId}/complete', [CrmApiController::class, 'completeFollowup'])->name('followups.complete');
+        Route::post('/followups/{followupId}/cancel', [CrmApiController::class, 'cancelFollowup'])->name('followups.cancel');
+        Route::get('/automation-rules', [CrmApiController::class, 'automationRules'])->name('automation.rules');
+        Route::post('/automation-rules', [CrmApiController::class, 'defineAutomationRule'])->name('automation.define');
     });
 });

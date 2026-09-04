@@ -11,12 +11,14 @@ use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Academic\Models\ResultCorrection;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
+use App\Modules\Crm\Domain\CrmInteractionTraceRecorder;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
 use App\Support\Identifiers\RandomIdentifier;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -41,6 +43,7 @@ final class ManageAssessmentResult
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
+        private readonly CrmInteractionTraceRecorder $crmTrace,
     ) {}
 
     /** @return array{attempt_id: string, correlation_id: string} */
@@ -75,6 +78,7 @@ final class ManageAssessmentResult
                     $event = $this->audit->record($assessor->actorId, 'academic.attempt.submit', 'assessment_attempt', $attempt->id, null, [
                         'enrollment_id' => $locked->id, 'kind' => $kind,
                     ]);
+                    $this->traceVisitor($assessor, $locked, $attempt->id, $kind);
 
                     return ['attempt_id' => $attempt->id, 'correlation_id' => $event->correlation_id];
                 }),
@@ -291,6 +295,24 @@ final class ManageAssessmentResult
         if (trim((string) $result->scored_by) === $actor->actorId) {
             throw AuthorizationDenied::forCode('academic.review_not_independent', sprintf('the %s may not be the scorer of the result under review', $role));
         }
+    }
+
+    private function traceVisitor(Actor $actor, Enrollment $enrollment, string $attemptId, string $kind): void
+    {
+        $visitorId = $this->crmTrace->visitorIdForStudent($enrollment->student_id);
+        if ($visitorId === null) {
+            return;
+        }
+        $this->crmTrace->record(
+            $actor,
+            $visitorId,
+            'outbound',
+            'assessment',
+            'other',
+            sprintf('%s attempt submitted for the student linked to this lead.', ucfirst($kind)),
+            CarbonImmutable::now(),
+            assessmentAttemptId: $attemptId,
+        );
     }
 
     private function require(Actor $actor, string $capability, string $errorCode): void

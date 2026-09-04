@@ -5,6 +5,7 @@ use App\Http\Controllers\AccessController;
 use App\Http\Controllers\AuditController;
 use App\Http\Controllers\AuthenticationController;
 use App\Http\Controllers\CommunicationController;
+use App\Http\Controllers\CrmController;
 use App\Http\Controllers\DocumentsController;
 use App\Http\Controllers\FinanceController;
 use App\Http\Controllers\HealthController;
@@ -74,6 +75,22 @@ Route::middleware('employee')->group(function (): void {
         Route::post('students/{studentId}/guardians', [StudentsController::class, 'recordGuardian'])->name('guardian.record');
         Route::post('guardians/{relationshipId}/verify', [StudentsController::class, 'verifyGuardian'])->name('guardian.verify');
         Route::post('guardians/{relationshipId}/revoke', [StudentsController::class, 'revokeGuardian'])->name('guardian.revoke');
+    });
+
+    // Visitor / Lead / CRM
+    Route::prefix('crm')->name('crm.')->group(function (): void {
+        Route::get('/', [CrmController::class, 'index'])->name('index');
+        Route::post('visitors', [CrmController::class, 'capture'])->name('capture');
+        Route::post('visitors/{visitorId}/transition', [CrmController::class, 'transition'])->name('transition');
+        Route::post('visitors/{visitorId}/interactions', [CrmController::class, 'interaction'])->name('interaction');
+        Route::post('visitors/{visitorId}/link-person', [CrmController::class, 'linkPerson'])->name('link-person');
+        Route::post('visitors/{visitorId}/followups', [CrmController::class, 'followup'])->name('followup');
+        Route::post('visitors/{visitorId}/convert', [CrmController::class, 'convert'])->name('convert');
+        Route::post('followups/{followupId}/complete', [CrmController::class, 'completeFollowup'])->name('followup.complete');
+        Route::post('followups/{followupId}/cancel', [CrmController::class, 'cancelFollowup'])->name('followup.cancel');
+        Route::post('sources', [CrmController::class, 'defineSource'])->name('source.define');
+        Route::post('campaigns', [CrmController::class, 'defineCampaign'])->name('campaign.define');
+        Route::post('automation-rules', [CrmController::class, 'defineAutomationRule'])->name('automation.define');
     });
 
     // Academic

@@ -58,6 +58,7 @@ final class FirstRunBootstrapSeeder extends Seeder
         'access.approve_org_wide', 'access.assign_position', 'access.define_policy', 'access.delegate', 'access.grant', 'access.revoke',
         'admissions.approve', 'admissions.initiate', 'admissions.register', 'admissions.review',
         'communication.send',
+        'crm.automation', 'crm.catalog', 'crm.followup', 'crm.visitor', 'crm.visitor.convert',
         'documents.classify', 'documents.register', 'documents.retention', 'documents.verify',
         'facilities.work', 'facilities.work_approve',
         'finance.chart', 'finance.discount', 'finance.discount_approve', 'finance.fund', 'finance.fund_allocate', 'finance.journal', 'finance.obligation', 'finance.opening.approve', 'finance.opening.prepare', 'finance.payment', 'finance.period', 'finance.reconcile', 'finance.reconcile_approve', 'finance.refund', 'finance.refund_approve',

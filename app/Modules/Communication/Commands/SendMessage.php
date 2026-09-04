@@ -8,6 +8,7 @@ use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Communication\Domain\MessageLifecycle;
 use App\Modules\Communication\Models\Message;
+use App\Modules\Crm\Domain\CrmInteractionTraceRecorder;
 use App\Modules\Privacy\Models\Consent;
 use App\Modules\Privacy\Models\ConsentPurpose;
 use App\Support\Authorization\AccessDecision;
@@ -16,6 +17,7 @@ use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
 use App\Support\Identifiers\RandomIdentifier;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -33,6 +35,7 @@ final class SendMessage
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
+        private readonly CrmInteractionTraceRecorder $crmTrace,
     ) {}
 
     /** @return array{message_id: string, correlation_id: string} */
@@ -81,6 +84,7 @@ final class SendMessage
                     $event = $this->audit->record($actor->actorId, 'communication.message.queue', 'message', $message->id, null, [
                         'subject' => $subjectPersonId, 'purpose' => $purpose->id, 'channel' => $channel,
                     ]);
+                    $this->traceVisitor($actor, $subjectPersonId, $message->id, $channel, $purpose->name);
 
                     return ['message_id' => $message->id, 'correlation_id' => $event->correlation_id];
                 }),
@@ -138,5 +142,23 @@ final class SendMessage
         if (! $outcome->allowed) {
             throw AuthorizationDenied::forCode('communication.denied', $outcome->reason);
         }
+    }
+
+    private function traceVisitor(Actor $actor, string $subjectPersonId, string $messageId, string $channel, string $purposeName): void
+    {
+        $visitorId = $this->crmTrace->visitorIdForPerson($subjectPersonId);
+        if ($visitorId === null) {
+            return;
+        }
+        $this->crmTrace->record(
+            $actor,
+            $visitorId,
+            'outbound',
+            in_array($channel, ['call', 'whatsapp', 'email', 'sms'], true) ? $channel : 'other',
+            'connected',
+            sprintf('Message queued through the %s purpose channel (consent-gated).', $purposeName),
+            CarbonImmutable::now(),
+            messageId: $messageId,
+        );
     }
 }

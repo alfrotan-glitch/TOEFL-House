@@ -8,6 +8,8 @@ use App\Modules\Admissions\Domain\ApplicantLifecycle;
 use App\Modules\Admissions\Models\Applicant;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
+use App\Modules\Crm\Domain\VisitorConversionRecorder;
+use App\Modules\Crm\Models\Visitor;
 use App\Modules\Identity\Models\Person;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
@@ -31,6 +33,7 @@ final class RegisterApplicant
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
+        private readonly VisitorConversionRecorder $visitorConversionRecorder,
     ) {}
 
     /** @return array{applicant_id: string, correlation_id: string} */
@@ -67,6 +70,7 @@ final class RegisterApplicant
                     $event = $this->audit->record($registrar->actorId, 'admissions.register', 'applicant', $applicant->id, null, [
                         'person_id' => $personId, 'program_interest' => $programInterest, 'lifecycle_state' => ApplicantLifecycle::STATE_APPLICANT,
                     ]);
+                    $this->recordVisitorConversion($registrar, $personId, 'applicant', $applicant->id);
 
                     return ['applicant_id' => $applicant->id, 'correlation_id' => $event->correlation_id];
                 }),
@@ -74,5 +78,26 @@ final class RegisterApplicant
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $registrar, 'admissions.register', 'applicant', $personId);
         }
+    }
+
+    private function recordVisitorConversion(Actor $actor, string $personId, string $conversionType, string $downstreamId): void
+    {
+        /** @var Visitor|null $visitor */
+        $visitor = Visitor::query()
+            ->where('person_id', $personId)
+            ->whereIn('status', Visitor::openStatuses())
+            ->first();
+        if ($visitor === null) {
+            return;
+        }
+
+        $this->visitorConversionRecorder->record(
+            $actor,
+            $visitor,
+            $conversionType,
+            $conversionType,
+            $downstreamId,
+            'admissions.register.conversion.'.$visitor->id,
+        );
     }
 }

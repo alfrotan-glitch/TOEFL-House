@@ -9,6 +9,9 @@ use App\Modules\Reporting\Queries\AttendanceRateCalculator;
 use App\Modules\Reporting\Queries\FundUtilizationCalculator;
 use App\Modules\Reporting\Queries\OutstandingBalanceCalculator;
 use App\Modules\Reporting\Queries\PayrollTotalCalculator;
+use App\Modules\Reporting\Queries\VisitorCaptureCountCalculator;
+use App\Modules\Reporting\Queries\VisitorConversionCountCalculator;
+use App\Modules\Reporting\Queries\VisitorConversionRateCalculator;
 use App\Support\Errors\BusinessRejection;
 use Illuminate\Support\Facades\DB;
 
@@ -42,6 +45,18 @@ final class MetricCatalog
         'fund_utilization' => [
             'owner' => 'funding', 'authority' => 'financial_period', 'scopes' => ['fund'],
             'calculator' => FundUtilizationCalculator::class,
+        ],
+        'visitor_capture_count' => [
+            'owner' => 'crm', 'authority' => 'academic_period', 'scopes' => ['global', 'branch'],
+            'calculator' => VisitorCaptureCountCalculator::class,
+        ],
+        'visitor_conversion_count' => [
+            'owner' => 'crm', 'authority' => 'academic_period', 'scopes' => ['global', 'branch'],
+            'calculator' => VisitorConversionCountCalculator::class,
+        ],
+        'visitor_conversion_rate' => [
+            'owner' => 'crm', 'authority' => 'academic_period', 'scopes' => ['global', 'branch'],
+            'calculator' => VisitorConversionRateCalculator::class,
         ],
     ];
 

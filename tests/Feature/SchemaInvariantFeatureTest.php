@@ -79,6 +79,12 @@ final class SchemaInvariantFeatureTest extends TestCase
         $this->assertContains('compensation_rules_one_allowance_label_per_version', $this->indexNames('compensation_rules'));
         $this->assertContains('teacher_assignment_skills_one_per_assignment_skill', $this->indexNames('teacher_assignment_skills'));
         $this->assertContains('teaching_delivery_facts_one_per_session', $this->indexNames('teaching_delivery_facts'));
+        $this->assertContains('visitors_one_active_per_person', $this->indexNames('visitors'));
+        $this->assertContains('visitors_one_active_per_contact', $this->indexNames('visitors'));
+        $this->assertContains('visitor_conversions_visitor_id_unique', $this->indexNames('visitor_conversions'));
+        $this->assertContains('visitor_sources_key_unique', $this->indexNames('visitor_sources'));
+        $this->assertContains('visitor_campaigns_key_unique', $this->indexNames('visitor_campaigns'));
+        $this->assertContains('visitor_automation_rules_key_unique', $this->indexNames('visitor_automation_rules'));
     }
 
     /** @return list<string> */
@@ -101,6 +107,9 @@ final class SchemaInvariantFeatureTest extends TestCase
         $this->assertContains('class_sessions_skill_delivery_guard_trigger', $this->triggerNames('class_sessions'));
         $this->assertContains('teacher_assignment_skills_append_only_trigger', $this->triggerNames('teacher_assignment_skills'));
         $this->assertContains('teaching_delivery_facts_claim_trigger', $this->triggerNames('teaching_delivery_facts'));
+        $this->assertContains('visitors_contact_key_guard', $this->triggerNames('visitors'));
+        $this->assertContains('visitors_originating_immutable', $this->triggerNames('visitors'));
+        $this->assertContains('visitor_interactions_append_only', $this->triggerNames('visitor_interactions'));
     }
 
     public function test_retired_legacy_compensation_tables_are_absent_from_the_schema(): void

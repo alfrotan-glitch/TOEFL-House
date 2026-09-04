@@ -6,6 +6,7 @@ namespace App\Modules\Documents\Commands;
 
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
+use App\Modules\Crm\Domain\CrmInteractionTraceRecorder;
 use App\Modules\Documents\Models\Document;
 use App\Modules\Documents\Models\DocumentClassification;
 use App\Modules\Documents\Models\DocumentVersion;
@@ -16,6 +17,7 @@ use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
 use App\Support\Identifiers\RandomIdentifier;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -33,6 +35,7 @@ final class RegisterDocument
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
+        private readonly CrmInteractionTraceRecorder $crmTrace,
     ) {}
 
     /**
@@ -81,6 +84,7 @@ final class RegisterDocument
                         'lifecycle_state' => 'draft',
                         'version_no' => 1,
                     ]);
+                    $this->traceVisitor($registrar, $subjectPersonId, $document->id, $title);
 
                     return ['document_id' => $document->id, 'version_no' => 1, 'correlation_id' => $event->correlation_id];
                 }),
@@ -88,5 +92,23 @@ final class RegisterDocument
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $registrar, 'documents.register', 'document', $subjectPersonId);
         }
+    }
+
+    private function traceVisitor(Actor $actor, string $subjectPersonId, string $documentId, string $title): void
+    {
+        $visitorId = $this->crmTrace->visitorIdForPerson($subjectPersonId);
+        if ($visitorId === null) {
+            return;
+        }
+        $this->crmTrace->record(
+            $actor,
+            $visitorId,
+            'inbound',
+            'document',
+            'other',
+            sprintf('Document "%s" registered for the lead subject.', $title),
+            CarbonImmutable::now(),
+            documentId: $documentId,
+        );
     }
 }

@@ -6,6 +6,7 @@ namespace App\Modules\Finance\Commands;
 
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
+use App\Modules\Crm\Domain\CrmInteractionTraceRecorder;
 use App\Modules\Finance\Domain\FinanceLifecycle;
 use App\Modules\Finance\Models\FinancialPeriod;
 use App\Modules\Finance\Models\Payment;
@@ -15,6 +16,7 @@ use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
 use App\Support\Identifiers\RandomIdentifier;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -31,6 +33,7 @@ final class RecordPayment
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
+        private readonly CrmInteractionTraceRecorder $crmTrace,
     ) {}
 
     /** @return array{payment_id: string, correlation_id: string} */
@@ -71,6 +74,7 @@ final class RecordPayment
                     $event = $this->audit->record($actor->actorId, 'finance.payment.record', 'payment', $payment->id, null, [
                         'student_id' => $studentId, 'amount' => $amount, 'payer_ref' => $payerRef,
                     ]);
+                    $this->traceVisitor($actor, $studentId, $payment->id, $payerRef, $receivedOn);
 
                     return ['payment_id' => $payment->id, 'correlation_id' => $event->correlation_id];
                 }),
@@ -86,5 +90,23 @@ final class RecordPayment
         if (! $outcome->allowed) {
             throw AuthorizationDenied::forCode('finance.payment_denied', $outcome->reason);
         }
+    }
+
+    private function traceVisitor(Actor $actor, string $studentId, string $paymentId, string $payerRef, string $receivedOn): void
+    {
+        $visitorId = $this->crmTrace->visitorIdForStudent($studentId);
+        if ($visitorId === null) {
+            return;
+        }
+        $this->crmTrace->record(
+            $actor,
+            $visitorId,
+            'outbound',
+            'payment',
+            'positive',
+            sprintf('Payment %s received for the student linked to this lead.', $payerRef),
+            CarbonImmutable::parse($receivedOn),
+            paymentId: $paymentId,
+        );
     }
 }
