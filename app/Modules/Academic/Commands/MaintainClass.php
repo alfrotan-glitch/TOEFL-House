@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace App\Modules\Academic\Commands;
 
 use App\Modules\Academic\Domain\ClassLifecycle;
+use App\Modules\Academic\Domain\ClassSectionLifecycle;
 use App\Modules\Academic\Models\AcademicPeriod;
+use App\Modules\Academic\Models\AcademicRoom;
 use App\Modules\Academic\Models\ClassModel;
+use App\Modules\Academic\Models\ClassSection;
 use App\Modules\Academic\Models\ClassSession;
 use App\Modules\Academic\Models\ProgramVersion;
 use App\Modules\Academic\Models\ProgramVersionLevel;
@@ -126,13 +129,13 @@ final class MaintainClass
     }
 
     /** @return array{session_id: string, correlation_id: string} */
-    public function scheduleSession(Actor $actor, ClassModel $class, CarbonImmutable $scheduledOn, string $startsAt, string $endsAt, string $idempotencyKey, ?string $skillId = null): array
+    public function scheduleSession(Actor $actor, ClassModel $class, CarbonImmutable $scheduledOn, string $startsAt, string $endsAt, string $idempotencyKey, ?string $skillId = null, ?string $roomId = null, ?string $sectionId = null): array
     {
-        $payload = hash('sha256', implode('|', ['academic.session.schedule', $class->id, $scheduledOn->toDateString(), $startsAt, $endsAt, $skillId ?? '', $actor->actorId]));
+        $payload = hash('sha256', implode('|', ['academic.session.schedule', $class->id, $scheduledOn->toDateString(), $startsAt, $endsAt, $skillId ?? '', $roomId ?? '', $sectionId ?? '', $actor->actorId]));
 
         try {
             return $this->idempotency->execute('academic.session.schedule', $idempotencyKey, $payload,
-                fn (): array => DB::transaction(function () use ($actor, $class, $scheduledOn, $startsAt, $endsAt, $skillId): array {
+                fn (): array => DB::transaction(function () use ($actor, $class, $scheduledOn, $startsAt, $endsAt, $skillId, $roomId, $sectionId): array {
                     $this->requireCapability($actor);
                     if ($class->lifecycle_state !== ClassLifecycle::STATE_ACTIVE) {
                         throw BusinessRejection::forCode('academic.session_class_not_active', 'sessions are scheduled only on active classes');
@@ -147,17 +150,25 @@ final class MaintainClass
                             throw BusinessRejection::forCode('academic.session_skill_unknown', 'a session may deliver only an active skill');
                         }
                     }
+                    if ($sectionId !== null) {
+                        $this->assertSectionOpen($sectionId, $class->id);
+                    }
+                    if ($roomId !== null) {
+                        $this->assertRoomAvailable($roomId);
+                    }
 
                     $session = ClassSession::query()->create([
                         'id' => RandomIdentifier::new(),
                         'class_id' => $class->id,
                         'skill_id' => $skillId,
+                        'room_id' => $roomId,
+                        'section_id' => $sectionId,
                         'scheduled_on' => $scheduledOn->startOfDay()->toDateString(),
                         'starts_at' => $startsAt,
                         'ends_at' => $endsAt,
                     ]);
                     $event = $this->audit->record($actor->actorId, 'academic.session.schedule', 'class_session', $session->id, null, [
-                        'class_id' => $class->id, 'scheduled_on' => $session->scheduled_on, 'skill_id' => $skillId,
+                        'class_id' => $class->id, 'scheduled_on' => $session->scheduled_on, 'skill_id' => $skillId, 'room_id' => $roomId, 'section_id' => $sectionId,
                     ]);
 
                     return ['session_id' => $session->id, 'correlation_id' => $event->correlation_id];
@@ -165,6 +176,103 @@ final class MaintainClass
             );
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.session.schedule', 'class_session', $class->id);
+        }
+    }
+
+    /** @return array{section_id: string, correlation_id: string} */
+    public function defineSection(Actor $actor, ClassModel $class, string $name, int $capacity, string $idempotencyKey): array
+    {
+        $payload = hash('sha256', implode('|', ['academic.section.define', $class->id, $name, (string) $capacity, $actor->actorId]));
+
+        try {
+            return $this->idempotency->execute('academic.section.define', $idempotencyKey, $payload,
+                fn (): array => DB::transaction(function () use ($actor, $class, $name, $capacity): array {
+                    $this->requireCapability($actor);
+                    if ($name === '') {
+                        throw BusinessRejection::forCode('academic.section_name_required', 'a section requires a name');
+                    }
+                    if ($capacity < 1) {
+                        throw BusinessRejection::forCode('academic.section_capacity_positive', 'a section requires a positive capacity');
+                    }
+                    if (ClassSection::query()->where('class_id', $class->id)->where('name', $name)->exists()) {
+                        throw BusinessRejection::forCode('academic.section_name_exists', 'a section name must be unique within its class');
+                    }
+
+                    $section = ClassSection::query()->create([
+                        'id' => RandomIdentifier::new(),
+                        'class_id' => $class->id,
+                        'name' => $name,
+                        'capacity' => $capacity,
+                        'lifecycle_state' => ClassSectionLifecycle::STATE_PLANNED,
+                    ]);
+                    $event = $this->audit->record($actor->actorId, 'academic.section.define', 'class_section', $section->id, null, [
+                        'class_id' => $class->id, 'name' => $name, 'capacity' => $capacity,
+                    ]);
+
+                    return ['section_id' => $section->id, 'correlation_id' => $event->correlation_id];
+                }),
+            );
+        } catch (AuthorizationDenied $denial) {
+            $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.section.define', 'class_section', $class->id);
+        }
+    }
+
+    /** @return array{section_id: string, lifecycle_state: string, correlation_id: string} */
+    public function transitionSection(Actor $actor, ClassSection $section, string $toState, string $idempotencyKey): array
+    {
+        $payload = hash('sha256', implode('|', ['academic.section.transition', $section->id, $toState, $actor->actorId]));
+
+        try {
+            return $this->idempotency->execute('academic.section.transition.'.$toState, $idempotencyKey, $payload,
+                fn (): array => DB::transaction(function () use ($actor, $section, $toState): array {
+                    $this->requireCapability($actor);
+
+                    /** @var ClassSection $locked */
+                    $locked = ClassSection::query()->whereKey($section->id)->lockForUpdate()->firstOrFail();
+                    $from = $locked->lifecycle_state;
+                    ClassSectionLifecycle::requireTransition($from, $toState);
+                    if ($toState === ClassSectionLifecycle::STATE_OPEN) {
+                        $class = ClassModel::query()->whereKey($locked->class_id)->firstOrFail();
+                        if ($class->lifecycle_state !== ClassLifecycle::STATE_ACTIVE) {
+                            throw BusinessRejection::forCode('academic.section_class_not_active', 'a section opens only on an active class');
+                        }
+                    }
+                    if (in_array($toState, [ClassSectionLifecycle::STATE_CLOSED, ClassSectionLifecycle::STATE_CANCELLED, ClassSectionLifecycle::STATE_ARCHIVED], true)) {
+                        $future = ClassSession::query()->where('section_id', $locked->id)->where('scheduled_on', '>=', CarbonImmutable::today()->toDateString())->count();
+                        if ($future > 0) {
+                            throw BusinessRejection::forCode('academic.section_has_future_sessions', 'a section cannot close or archive while future sessions reference it');
+                        }
+                    }
+
+                    $locked->forceFill(['lifecycle_state' => $toState])->save();
+                    $event = $this->audit->record($actor->actorId, 'academic.section.transition.'.$toState, 'class_section', $locked->id, ['lifecycle_state' => $from], ['lifecycle_state' => $toState]);
+
+                    return ['section_id' => $locked->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
+                }),
+            );
+        } catch (AuthorizationDenied $denial) {
+            $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.section.transition', 'class_section', $section->id);
+        }
+    }
+
+    private function assertSectionOpen(string $sectionId, string $classId): void
+    {
+        /** @var ClassSection $section */
+        $section = ClassSection::query()->whereKey($sectionId)->firstOrFail();
+        if ($classId !== $section->class_id) {
+            throw BusinessRejection::forCode('academic.session_section_class_mismatch', 'a session section must belong to the session class');
+        }
+        if ($section->lifecycle_state !== ClassSectionLifecycle::STATE_OPEN) {
+            throw BusinessRejection::forCode('academic.session_section_not_open', 'a session may be scheduled only in an open section');
+        }
+    }
+
+    private function assertRoomAvailable(string $roomId): void
+    {
+        /** @var AcademicRoom $room */
+        $room = AcademicRoom::query()->whereKey($roomId)->firstOrFail();
+        if ($room->lifecycle_state !== 'available') {
+            throw BusinessRejection::forCode('academic.session_room_not_available', 'a session may be scheduled only in an available room');
         }
     }
 

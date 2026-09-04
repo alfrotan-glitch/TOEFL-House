@@ -39,4 +39,16 @@ final class ClassModel extends Model
     {
         return $this->hasMany(ClassWaitlistEntry::class, 'class_id');
     }
+
+    /** @return HasMany<ClassSection, $this> */
+    public function sections(): HasMany
+    {
+        return $this->hasMany(ClassSection::class, 'class_id');
+    }
+
+    /** @return HasMany<ClassSession, $this> */
+    public function sessions(): HasMany
+    {
+        return $this->hasMany(ClassSession::class, 'class_id');
+    }
 }
