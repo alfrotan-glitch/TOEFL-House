@@ -27,7 +27,12 @@ final class Enrollment extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'student_id', 'class_id', 'lifecycle_state', 'originating_branch_id', 'current_home_branch_id', 'offering_id', 'academic_eligibility_snapshot_id'];
+    protected $fillable = ['id', 'student_id', 'class_id', 'lifecycle_state', 'originating_branch_id', 'current_home_branch_id', 'offering_id', 'academic_eligibility_snapshot_id', 'financial_gate_evidence', 'financial_gate_evidence_sha256', 'financial_gate_signature', 'financial_gate_assessed_at', 'financial_gate_satisfied'];
+
+    protected $casts = [
+        'financial_gate_evidence' => 'array',
+        'financial_gate_satisfied' => 'boolean',
+    ];
 
     /** @return BelongsTo<Offering, $this> */
     public function offering(): BelongsTo

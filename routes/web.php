@@ -230,6 +230,12 @@ Route::middleware('employee')->group(function (): void {
         Route::post('reconciliations/{reconciliationId}/approve', [FinanceController::class, 'approveReconciliation'])->name('reconciliation.approve');
         Route::post('funds', [FinanceController::class, 'establishFund'])->name('fund.establish');
         Route::post('funds/{fundId}/allocations', [FinanceController::class, 'allocateFund'])->name('fund.allocate');
+        Route::post('credits', [FinanceController::class, 'proposeCredit'])->name('credit.propose');
+        Route::post('credits/{creditId}/approve', [FinanceController::class, 'approveCredit'])->name('credit.approve');
+        Route::post('installments', [FinanceController::class, 'proposeInstallment'])->name('installment.propose');
+        Route::post('installments/{planId}/approve', [FinanceController::class, 'approveInstallment'])->name('installment.approve');
+        Route::post('gate-exceptions', [FinanceController::class, 'proposeGateException'])->name('gate_exception.propose');
+        Route::post('gate-exceptions/{exceptionId}/approve', [FinanceController::class, 'approveGateException'])->name('gate_exception.approve');
     });
 
     // Communication

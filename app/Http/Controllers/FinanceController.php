@@ -8,7 +8,10 @@ use App\Modules\Finance\Commands\AllocateFunds;
 use App\Modules\Finance\Commands\AllocatePayment;
 use App\Modules\Finance\Commands\MaintainChartOfAccounts;
 use App\Modules\Finance\Commands\MaintainDiscount;
+use App\Modules\Finance\Commands\MaintainFinancialCredit;
+use App\Modules\Finance\Commands\MaintainFinancialGateException;
 use App\Modules\Finance\Commands\MaintainFinancialPeriod;
+use App\Modules\Finance\Commands\MaintainInstallmentPlan;
 use App\Modules\Finance\Commands\PostJournal;
 use App\Modules\Finance\Commands\PostObligation;
 use App\Modules\Finance\Commands\RecordPayment;
@@ -16,6 +19,9 @@ use App\Modules\Finance\Commands\RecordReconciliation;
 use App\Modules\Finance\Commands\RefundPayment;
 use App\Modules\Finance\Models\Account;
 use App\Modules\Finance\Models\Discount;
+use App\Modules\Finance\Models\EnrollmentInstallmentPlan;
+use App\Modules\Finance\Models\FinancialCredit;
+use App\Modules\Finance\Models\FinancialGateException;
 use App\Modules\Finance\Models\FinancialPeriod;
 use App\Modules\Finance\Models\FundAllocation;
 use App\Modules\Finance\Models\FundingSource;
@@ -48,6 +54,9 @@ final class FinanceController extends Controller
             'refunds' => Refund::query()->where('lifecycle_state', 'recorded')->orderByDesc('id')->limit(200)->get(),
             'proposedRefunds' => Refund::query()->where('lifecycle_state', 'proposed')->orderByDesc('id')->limit(200)->get(),
             'discounts' => Discount::query()->orderByDesc('id')->limit(100)->get(),
+            'credits' => FinancialCredit::query()->orderByDesc('id')->limit(100)->get(),
+            'installmentPlans' => EnrollmentInstallmentPlan::query()->orderByDesc('id')->limit(100)->get(),
+            'gateExceptions' => FinancialGateException::query()->orderByDesc('id')->limit(100)->get(),
             'fundingSources' => FundingSource::query()->orderBy('name')->get(),
             'fundAllocations' => FundAllocation::query()->orderByDesc('id')->limit(200)->get(),
             'periods' => FinancialPeriod::query()->orderBy('period_key')->get(),
@@ -390,5 +399,111 @@ final class FinanceController extends Controller
         );
 
         return redirect()->route('finance.index')->with('success', 'Fund allocated to the obligation line.');
+    }
+
+    public function proposeCredit(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'student_id' => ['required', 'string'],
+            'amount' => ['required', 'numeric', 'money', 'gt:0'],
+            'reason' => ['required', 'string', 'max:1000'],
+            'source_ref' => ['required', 'string', 'max:120'],
+        ]);
+
+        app(MaintainFinancialCredit::class)->propose(
+            $this->actor(),
+            $input['student_id'],
+            $input['amount'],
+            $input['reason'],
+            $input['source_ref'],
+            $this->idempotencyKey('finance.credit.propose'),
+        );
+
+        return redirect()->route('finance.index')->with('success', 'Credit proposed; it authorizes a gate only after a distinct approver approves it.');
+    }
+
+    public function approveCredit(Request $request, string $creditId): RedirectResponse
+    {
+        app(MaintainFinancialCredit::class)->approve(
+            $this->actor(),
+            FinancialCredit::query()->findOrFail($creditId),
+            $this->idempotencyKey('finance.credit.approve'),
+        );
+
+        return redirect()->route('finance.index')->with('success', 'Credit approved and locked.');
+    }
+
+    public function proposeInstallment(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'student_id' => ['required', 'string'],
+            'offering_id' => ['nullable', 'string'],
+            'amount' => ['required', 'numeric', 'money', 'gt:0'],
+            'installments_count' => ['required', 'integer', 'gt:0'],
+            'first_due_on' => ['required', 'date'],
+            'schedule_ref' => ['required', 'string', 'max:120'],
+        ]);
+
+        app(MaintainInstallmentPlan::class)->propose(
+            $this->actor(),
+            $input['student_id'],
+            ($input['offering_id'] ?? '') !== '' ? $input['offering_id'] : null,
+            $input['amount'],
+            (int) $input['installments_count'],
+            $input['first_due_on'],
+            $input['schedule_ref'],
+            $this->idempotencyKey('finance.installment.propose'),
+        );
+
+        return redirect()->route('finance.index')->with('success', 'Installment plan proposed; it authorizes a gate only after a distinct approver approves it.');
+    }
+
+    public function approveInstallment(Request $request, string $planId): RedirectResponse
+    {
+        app(MaintainInstallmentPlan::class)->approve(
+            $this->actor(),
+            EnrollmentInstallmentPlan::query()->findOrFail($planId),
+            $this->idempotencyKey('finance.installment.approve'),
+        );
+
+        return redirect()->route('finance.index')->with('success', 'Installment plan approved and locked.');
+    }
+
+    public function proposeGateException(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'student_id' => ['required', 'string'],
+            'offering_id' => ['nullable', 'string'],
+            'class_id' => ['nullable', 'string'],
+            'amount' => ['required', 'numeric', 'money', 'gt:0'],
+            'reason' => ['required', 'string', 'max:1000'],
+            'effective_from' => ['required', 'date'],
+            'effective_to' => ['nullable', 'date', 'after_or_equal:effective_from'],
+        ]);
+
+        app(MaintainFinancialGateException::class)->propose(
+            $this->actor(),
+            $input['student_id'],
+            ($input['offering_id'] ?? '') !== '' ? $input['offering_id'] : null,
+            ($input['class_id'] ?? '') !== '' ? $input['class_id'] : null,
+            $input['amount'],
+            $input['reason'],
+            $input['effective_from'],
+            ($input['effective_to'] ?? '') !== '' ? $input['effective_to'] : null,
+            $this->idempotencyKey('finance.gate_exception.propose'),
+        );
+
+        return redirect()->route('finance.index')->with('success', 'Gate exception proposed; it takes effect only after a distinct approver approves it.');
+    }
+
+    public function approveGateException(Request $request, string $exceptionId): RedirectResponse
+    {
+        app(MaintainFinancialGateException::class)->approve(
+            $this->actor(),
+            FinancialGateException::query()->findOrFail($exceptionId),
+            $this->idempotencyKey('finance.gate_exception.approve'),
+        );
+
+        return redirect()->route('finance.index')->with('success', 'Gate exception approved and locked.');
     }
 }

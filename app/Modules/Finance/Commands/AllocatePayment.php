@@ -109,6 +109,16 @@ final class AllocatePayment
         return bcsub(bcsub(bcsub((string) $obligation->original_amount, (string) $funded, 2), (string) $allocated, 2), (string) $discounted, 2);
     }
 
+    public function studentUncovered(string $studentId): string
+    {
+        $uncovered = '0.00';
+        foreach (Obligation::query()->where('student_id', $studentId)->get() as $obligation) {
+            $uncovered = bcadd($uncovered, $this->obligationRemaining($obligation), 2);
+        }
+
+        return $uncovered;
+    }
+
     private function require(Actor $actor): void
     {
         $outcome = $this->access->decide($actor, self::CAPABILITY, null);

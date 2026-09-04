@@ -61,7 +61,7 @@ final class FirstRunBootstrapSeeder extends Seeder
         'crm.automation', 'crm.catalog', 'crm.followup', 'crm.visitor', 'crm.visitor.convert',
         'documents.classify', 'documents.register', 'documents.retention', 'documents.verify',
         'facilities.work', 'facilities.work_approve',
-        'finance.chart', 'finance.discount', 'finance.discount_approve', 'finance.fund', 'finance.fund_allocate', 'finance.journal', 'finance.obligation', 'finance.opening.approve', 'finance.opening.prepare', 'finance.payment', 'finance.period', 'finance.reconcile', 'finance.reconcile_approve', 'finance.refund', 'finance.refund_approve',
+        'finance.chart', 'finance.credit', 'finance.credit_approve', 'finance.discount', 'finance.discount_approve', 'finance.fund', 'finance.fund_allocate', 'finance.gate_exception', 'finance.gate_exception_approve', 'finance.installment', 'finance.installment_approve', 'finance.journal', 'finance.obligation', 'finance.opening.approve', 'finance.opening.prepare', 'finance.payment', 'finance.period', 'finance.reconcile', 'finance.reconcile_approve', 'finance.refund', 'finance.refund_approve',
         'governance.config',
         'hr.contract', 'hr.contract.approve', 'hr.contract.prepare', 'hr.employ', 'hr.leave_approve', 'hr.leave_request', 'hr.scale', 'hr.terminate',
         'identity.admin', 'identity.verify',

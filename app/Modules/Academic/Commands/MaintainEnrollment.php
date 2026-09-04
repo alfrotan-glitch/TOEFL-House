@@ -6,6 +6,7 @@ namespace App\Modules\Academic\Commands;
 
 use App\Modules\Academic\Domain\ClassLifecycle;
 use App\Modules\Academic\Domain\EnrollmentLifecycle;
+use App\Modules\Academic\Errors\EnrollmentFinancialGateDenied;
 use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Academic\Models\Offering;
@@ -13,6 +14,8 @@ use App\Modules\Academic\Placement\Models\AcademicEligibilitySnapshot;
 use App\Modules\Academic\Placement\Queries\AcademicEligibilitySnapshotQuery;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
+use App\Modules\Audit\RejectedOperation;
+use App\Modules\Finance\Queries\FinancialGateQuery;
 use App\Modules\Students\Models\Student;
 use App\Modules\Students\Models\StudentStatus;
 use App\Support\Authorization\AccessDecision;
@@ -42,6 +45,8 @@ final class MaintainEnrollment
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
         private readonly AcademicEligibilitySnapshotQuery $eligibilitySnapshots,
+        private readonly FinancialGateQuery $financialGates,
+        private readonly RejectedOperation $rejectedOperation,
     ) {}
 
     /** @return array{enrollment_id: string, correlation_id: string} */
@@ -199,6 +204,7 @@ final class MaintainEnrollment
                         if ($locked->offering_id !== null) {
                             $this->assertOfferingCapacity($locked->offering_id);
                         }
+                        $this->freezeFinancialGate($locked, $actor);
                     }
 
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
@@ -211,7 +217,76 @@ final class MaintainEnrollment
             );
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.enrollment.'.$toState, 'enrollment', $enrollment->id);
+        } catch (EnrollmentFinancialGateDenied $denial) {
+            $this->persistDeniedGate($enrollment, $denial, $actor);
         }
+    }
+
+    /**
+     * Finance-authoritative gate: Academic freezes the assessed, signed
+     * evidence on the enrollment and refuses the transition when the result
+     * is not satisfied. Academic never re-derives the balance.
+     */
+    private function freezeFinancialGate(Enrollment $enrollment, Actor $actor): void
+    {
+        $assessment = $this->financialGates->assess($enrollment);
+        $this->applyGateEvidence($enrollment, $assessment);
+        $enrollment->save();
+
+        $this->audit->record($actor->actorId, 'academic.enrollment.financial_gate.satisfied', 'enrollment', $enrollment->id, null, [
+            'financial_gate_satisfied' => $assessment['satisfied'],
+            'financial_gate_uncovered' => $assessment['uncovered'],
+            'financial_gate_remaining' => $assessment['remaining'],
+            'financial_gate_evidence_sha256' => $assessment['digest'],
+            'financial_gate_signature' => $assessment['signature'],
+        ]);
+
+        if (! $assessment['satisfied']) {
+            throw EnrollmentFinancialGateDenied::withAssessment(
+                'academic.enrollment.financial_gate',
+                'the enrollment financial gate is unsatisfied',
+                $assessment['evidence'],
+                $assessment,
+            );
+        }
+    }
+
+    /**
+     * A failing gate must still leave evidence. The owning transaction rolled
+     * back, so the assessment is frozen in its own committed write and the
+     * denial is audited before the rejection propagates.
+     */
+    private function persistDeniedGate(Enrollment $enrollment, EnrollmentFinancialGateDenied $denial, Actor $actor): never
+    {
+        DB::transaction(function () use ($enrollment, $denial): void {
+            $locked = Enrollment::query()->whereKey($enrollment->id)->lockForUpdate()->first();
+            if ($locked === null) {
+                return;
+            }
+            $this->applyGateEvidence($locked, $denial->assessment());
+            $locked->save();
+        });
+
+        $this->rejectedOperation->reject(
+            $denial,
+            $actor,
+            'academic.enrollment.financial_gate',
+            'enrollment',
+            $enrollment->id,
+            $denial->assessment(),
+        );
+    }
+
+    /** @param array<string, mixed> $assessment */
+    private function applyGateEvidence(Enrollment $enrollment, array $assessment): void
+    {
+        $enrollment->forceFill([
+            'financial_gate_evidence' => $assessment['evidence'],
+            'financial_gate_evidence_sha256' => $assessment['digest'],
+            'financial_gate_signature' => $assessment['signature'],
+            'financial_gate_assessed_at' => $assessment['assessed_at'],
+            'financial_gate_satisfied' => $assessment['satisfied'],
+        ]);
     }
 
     private function currentEligibilitySnapshotId(string $studentId): ?string
