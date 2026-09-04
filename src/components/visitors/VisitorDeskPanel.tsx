@@ -4,8 +4,8 @@
  */
 
 import type {CourseOption} from '../../utils/academicOptions';
-import React, { useState } from 'react';
-import {X, Award, Copy, UserCog, PhoneCall, CheckCircle2, Plus, User, UserCheck, ChevronRight, CreditCard, GraduationCap, Ban, ArrowRight} from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import {X, Award, Copy, UserCog, PhoneCall, CheckCircle2, Plus, User, UserCheck, ChevronRight, CreditCard, GraduationCap, Ban, ArrowRight, Phone, MessageCircle} from 'lucide-react';
 import {Visitor, VisitorWorkflowState} from '../../types';
 import { BRAND_NAME } from '../../config/branding';
 import { SOURCE_LABELS } from '../../config/visitorSources';
@@ -30,6 +30,8 @@ interface VisitorDeskPanelProps {
   workflow?: VisitorWorkflowState | null;
   courseOptions?: CourseOption[];
   triggerToast: (message: string, type: 'success' | 'error' | 'info') => void;
+  /** True when the workflow read failed — the desk still works, minus the live state card. */
+  workflowUnavailable?: boolean;
   /** The backend requires these permissions; the UI mirrors them so no button is a guaranteed 403. */
   canConvertLead?: boolean;
   canEditLead?: boolean;
@@ -57,10 +59,16 @@ const STAGE_TONE: Record<VisitorWorkflowState['stage'], string> = {
 
 export default function VisitorDeskPanel({
   visitor, courseOptions = [], onClose, updateVisitorCRM, addVisitorFollowUp, updateVisitor, onOpenPlacementTest, onOpenConvert, onOpenStudentWorkspace,
-  workflow, triggerToast,
+  workflow, workflowUnavailable = false, triggerToast,
   canConvertLead = true, canEditLead = true,
 }: VisitorDeskPanelProps) {
   const [deskTab, setDeskTab] = useState<'details' | 'logs'>('details');
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   const [followUpInput, setFollowUpInput] = useState<string>('');
   const [followUpOutcome, setFollowUpOutcome] = useState<string>('');
   const [followUpDate, setFollowUpDate] = useState<string>('');
@@ -87,6 +95,14 @@ export default function VisitorDeskPanel({
   // The server's local calendar date is the authority; the date pickers honour
   // it as a courtesy and the API rejects anything older regardless.
   const todayIso = new Date().toLocaleDateString('en-CA');
+  const dialDigits = visitor.phone.replace(/\D/g, '');
+  const whatsappTarget = dialDigits.startsWith('0') ? `93${dialDigits.slice(1)}` : dialDigits;
+  const copyPhone = () => {
+    navigator.clipboard.writeText(visitor.phone);
+    triggerToast('Phone number copied.', 'success');
+  };
+  const followUpOverdue = Boolean(visitor.nextContactDate) && visitor.nextContactDate! < todayIso && workflow?.admission.admitted !== true;
+
 
   const [prevVisitorId, setPrevVisitorId] = useState(visitor.id);
   if (prevVisitorId !== visitor.id) {
@@ -224,7 +240,7 @@ export default function VisitorDeskPanel({
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto animate-in fade-in duration-200" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div role="dialog" aria-modal="true" aria-label={`${visitor.fullName} — reception workspace`} className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto animate-in fade-in duration-200" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl w-full max-w-2xl my-auto animate-in zoom-in-95 duration-200 max-h-[92vh] flex flex-col">
 
         {/* Header — who this person is */}
@@ -238,7 +254,13 @@ export default function VisitorDeskPanel({
                 {stage && <span className={`text-[9px] px-2 py-0.5 rounded-full font-black border uppercase tracking-wide ${STAGE_TONE[stage]}`}>{STAGE_LADDER.find((s) => s.key === stage)?.label}</span>}
                 {workflow?.admission.admitted && workflow.admission.studentCode && <span className="text-[9px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-black">Student {workflow.admission.studentCode}</span>}
               </h3>
-              <p className="text-[11px] text-slate-500 font-mono font-bold mt-0.5">{visitor.phone}{visitor.whatsapp && visitor.whatsapp !== visitor.phone && <span className="text-slate-400"> · WA: {visitor.whatsapp}</span>}</p>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <p className="text-[11px] text-slate-500 font-mono font-bold">{visitor.phone}{visitor.whatsapp && visitor.whatsapp !== visitor.phone && <span className="text-slate-400"> · WA: {visitor.whatsapp}</span>}</p>
+                <button onClick={copyPhone} title="Copy phone number" className="p-1 bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-indigo-600 rounded-lg cursor-pointer"><Copy className="w-3 h-3" /></button>
+                <a href={`tel:${visitor.phone}`} title="Call now" className="p-1 bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-emerald-600 rounded-lg"><Phone className="w-3 h-3" /></a>
+                {whatsappTarget && <a href={`https://wa.me/${whatsappTarget}`} target="_blank" rel="noreferrer" title="Message on WhatsApp" className="p-1 bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-green-600 rounded-lg"><MessageCircle className="w-3 h-3" /></a>}
+                {followUpOverdue && <span className="ms-1 px-1.5 py-0.5 rounded-md bg-rose-50 border border-rose-200 text-rose-700 text-[9px] font-black uppercase tracking-wide" title={`Next contact was due ${visitor.nextContactDate}`}>Follow-up overdue</span>}
+              </div>
             </div>
           </div>
           <button onClick={onClose} className="p-1.5 bg-slate-50 hover:bg-slate-100 text-slate-400 hover:text-slate-600 rounded-xl cursor-pointer"><X className="w-4 h-4" /></button>
@@ -262,6 +284,18 @@ export default function VisitorDeskPanel({
             })}
           </div>
 
+          {!workflow && workflowUnavailable && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50/80 px-3.5 py-2.5 text-[10px] font-semibold text-amber-900">
+              Live reception state is unavailable right now. The profile, follow-up history and contact tools below still work — reopen this workspace to retry.
+            </div>
+          )}
+          {!workflow && !workflowUnavailable && (
+            <div className="rounded-2xl border border-indigo-100 bg-white/90 px-3.5 py-3 space-y-2 animate-pulse" aria-label="Loading reception state">
+              <div className="h-2 w-20 rounded bg-indigo-100" />
+              <div className="h-3 w-40 rounded bg-slate-100" />
+              <div className="h-2 w-64 rounded bg-slate-100" />
+            </div>
+          )}
           {workflow && (
             <div className="rounded-2xl border border-indigo-100 bg-white/90 px-3.5 py-3">
               <div className="flex items-start justify-between gap-3">

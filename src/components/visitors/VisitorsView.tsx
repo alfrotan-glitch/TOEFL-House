@@ -110,18 +110,21 @@ export default function VisitorsView({
   // Authoritative state for the open workspace. Refetched whenever the list
   // reloads, so follow-ups and conversions move the desk forward immediately.
   const [workflow, setWorkflow] = useState<VisitorWorkflowState | null>(null);
+  const [workflowFailedFor, setWorkflowFailedFor] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     if (!selectedVisitorId || !getVisitorWorkflow) return;
     getVisitorWorkflow(selectedVisitorId)
-      .then((state) => { if (!cancelled) setWorkflow(state); })
-      .catch(() => { if (!cancelled) setWorkflow(null); });
+      .then((state) => { if (!cancelled) { setWorkflow(state); setWorkflowFailedFor(null); } })
+      .catch(() => { if (!cancelled) setWorkflowFailedFor(selectedVisitorId); });
     return () => { cancelled = true; };
   }, [selectedVisitorId, getVisitorWorkflow, visitors]);
-  const activeWorkflow = selectedVisitorId ? workflow : null;
+  // Scoped to the person on screen: a previous person's state never bleeds in.
+  const activeWorkflow = workflow && workflow.visitorId === selectedVisitorId ? workflow : null;
 
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [overdueOnly, setOverdueOnly] = useState<boolean>(false);
   const [sourceFilter, setSourceFilter] = useState<string>('all');
   const [interestFilter, setInterestFilter] = useState<string>('all');
   const [placementFilter, setPlacementFilter] = useState<string>('all');
@@ -161,12 +164,13 @@ export default function VisitorsView({
         source: sourceFilter,
         interest: interestFilter,
         placement: placementFilter,
+        overdueOnly: overdueOnly || undefined,
         page,
         pageSize,
       }).finally(() => setIsFetching(false));
     }, searchTerm ? 300 : 0);
     return () => clearTimeout(handle);
-  }, [searchTerm, statusFilter, sourceFilter, interestFilter, placementFilter, page, pageSize, reloadVisitors]);
+  }, [searchTerm, statusFilter, sourceFilter, interestFilter, placementFilter, overdueOnly, page, pageSize, reloadVisitors]);
 
 
   // Local calendar date, matching the server's `today()` (toLocaleDateString
@@ -228,7 +232,7 @@ export default function VisitorsView({
 
   const totalMatching = visitorSummary?.filtered ?? null;
   const totalPages = Math.max(1, Math.ceil((totalMatching ?? 0) / pageSize));
-  const hasActiveFilters = Boolean(searchTerm) || statusFilter !== 'all' || sourceFilter !== 'all' || interestFilter !== 'all' || placementFilter !== 'all';
+  const hasActiveFilters = Boolean(searchTerm) || statusFilter !== 'all' || sourceFilter !== 'all' || interestFilter !== 'all' || placementFilter !== 'all' || overdueOnly;
 
   const activeVisitor = visitors.find(v => v.id === selectedVisitorId) || null;
 
@@ -282,13 +286,18 @@ export default function VisitorsView({
         <div className="rounded-2xl border border-amber-100 bg-amber-50/50 p-3.5 shadow-sm"><p className="text-[10px] font-semibold uppercase tracking-wide text-amber-700/70">In pipeline</p><p className="mt-0.5 font-mono text-lg font-black text-amber-900">{stats ? stats.pipeline : '—'}</p></div>
         <div className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-3.5 shadow-sm"><p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700/70">Enrolled</p><p className="mt-0.5 font-mono text-lg font-black text-emerald-900">{stats ? stats.registered : '—'}</p></div>
         <div className="rounded-2xl border border-indigo-100 bg-indigo-50/40 p-3.5 shadow-sm"><p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-700/70">Conversion</p><p className="mt-0.5 font-mono text-lg font-black text-indigo-900">{stats ? `${stats.conversionRate}%` : '—'}</p></div>
-        <div className={`rounded-2xl border p-3.5 shadow-sm ${stats && stats.overdue > 0 ? 'border-rose-200 bg-rose-50/60' : 'border-slate-200 bg-white'}`}><p className={`text-[10px] font-semibold uppercase tracking-wide ${stats && stats.overdue > 0 ? 'text-rose-700/80' : 'text-slate-400'}`}>Overdue</p><p className={`mt-0.5 font-mono text-lg font-black ${stats && stats.overdue > 0 ? 'text-rose-800' : 'text-slate-900'}`}>{stats ? stats.overdue : '—'}</p></div>
+        <button
+          onClick={() => applyFilter(setOverdueOnly)(!overdueOnly)}
+          title={overdueOnly ? 'Showing only leads past their next-contact date. Click to show everyone.' : 'Show only leads past their next-contact date.'}
+          className={`rounded-2xl border p-3.5 shadow-sm text-start transition-all cursor-pointer hover:-translate-y-0.5 ${stats && stats.overdue > 0 ? 'border-rose-200 bg-rose-50/60' : 'border-slate-200 bg-white'} ${overdueOnly ? 'ring-2 ring-rose-300' : ''}`}
+        ><p className={`text-[10px] font-semibold uppercase tracking-wide flex items-center gap-1 ${stats && stats.overdue > 0 ? 'text-rose-700/80' : 'text-slate-400'}`}>Overdue {overdueOnly ? <span className="px-1.5 py-px rounded bg-rose-600 text-white text-[8px] font-black tracking-wider">FILTER ON</span> : null}</p><p className={`mt-0.5 font-mono text-lg font-black ${stats && stats.overdue > 0 ? 'text-rose-800' : 'text-slate-900'}`}>{stats ? stats.overdue : '—'}</p></button>
       </div>
 
       {stats && stats.overdue > 0 && (
         <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50/80 px-3 py-2.5 text-xs text-rose-950">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
-          <div><p className="font-bold">{stats.overdue} lead(s) past next-contact date</p><p className="text-[10px] text-rose-800/80">Open the desk panel and log a follow-up or update the contact date.</p></div>
+          <div className="flex-1"><p className="font-bold">{stats.overdue} lead(s) past next-contact date</p><p className="text-[10px] text-rose-800/80">Open the desk panel and log a follow-up or update the contact date.</p></div>
+          <button onClick={() => applyFilter(setOverdueOnly)(!overdueOnly)} className={`shrink-0 px-3 py-1.5 rounded-lg text-[10px] font-black cursor-pointer border ${overdueOnly ? 'bg-white text-rose-700 border-rose-300' : 'bg-rose-600 text-white border-rose-600 hover:bg-rose-700'}`}>{overdueOnly ? 'Clear focus' : 'Work this queue'}</button>
         </div>
       )}
 
@@ -405,7 +414,7 @@ export default function VisitorsView({
               <div className="flex items-center gap-1.5">
                 {hasActiveFilters && (
                   <button
-                    onClick={() => { setSearchTerm(''); setStatusFilter('all'); setSourceFilter('all'); setInterestFilter('all'); setPlacementFilter('all'); setPage(0); }}
+                    onClick={() => { setSearchTerm(''); setStatusFilter('all'); setSourceFilter('all'); setInterestFilter('all'); setPlacementFilter('all'); setOverdueOnly(false); setPage(0); }}
                     className="px-2.5 py-1 rounded-lg font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
                   >Clear filters</button>
                 )}
@@ -541,7 +550,7 @@ export default function VisitorsView({
 
       {/* Modals */}
       {activeVisitor && (
-        <VisitorDeskPanel courseOptions={courseOptions} key={activeVisitor.id} visitor={activeVisitor} onClose={() => setSelectedVisitorId(null)} updateVisitorCRM={updateVisitorCRM} addVisitorFollowUp={addVisitorFollowUp} updateVisitor={updateVisitor} onOpenPlacementTest={() => setShowPlacementModal(true)} onOpenConvert={() => setConvertingVisitor(activeVisitor)} onOpenStudentWorkspace={onOpenStudentWorkspace} workflow={activeWorkflow} triggerToast={triggerToast} canConvertLead={canConvertLead} canEditLead={canEditLead} />
+        <VisitorDeskPanel courseOptions={courseOptions} key={activeVisitor.id} visitor={activeVisitor} onClose={() => setSelectedVisitorId(null)} updateVisitorCRM={updateVisitorCRM} addVisitorFollowUp={addVisitorFollowUp} updateVisitor={updateVisitor} onOpenPlacementTest={() => setShowPlacementModal(true)} onOpenConvert={() => setConvertingVisitor(activeVisitor)} onOpenStudentWorkspace={onOpenStudentWorkspace} workflow={activeWorkflow} workflowUnavailable={workflowFailedFor === selectedVisitorId} triggerToast={triggerToast} canConvertLead={canConvertLead} canEditLead={canEditLead} />
       )}
 
       {activeVisitor && showPlacementModal && (

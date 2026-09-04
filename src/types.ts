@@ -236,6 +236,7 @@ export interface VisitorWorkflowBlocker {
 }
 
 export interface VisitorWorkflowState {
+  visitorId: string;
   stage: ReceptionStage;
   closed: boolean;
   nextAction: ReceptionAction;
