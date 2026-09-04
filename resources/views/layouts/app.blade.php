@@ -73,6 +73,7 @@
                 <a href="{{ route('access.index') }}">Access</a>
                 <a href="{{ route('students.index') }}">Students</a>
                 <a href="{{ route('crm.index') }}">CRM</a>
+                <a href="{{ route('placement.index') }}">Placement</a>
                 <a href="{{ route('academic.index') }}">Academic</a>
                 <a href="{{ route('hr.index') }}">Teachers &amp; HR</a>
                 <a href="{{ route('library.index') }}">Library</a>

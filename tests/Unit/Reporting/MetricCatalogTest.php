@@ -23,6 +23,9 @@ final class MetricCatalogTest extends TestCase
             'visitor_capture_count' => ['crm', 'academic_period', ['global', 'branch']],
             'visitor_conversion_count' => ['crm', 'academic_period', ['global', 'branch']],
             'visitor_conversion_rate' => ['crm', 'academic_period', ['global', 'branch']],
+            'placement_profile_count' => ['placement', 'academic_period', ['global', 'branch']],
+            'placement_release_count' => ['placement', 'academic_period', ['global', 'branch']],
+            'placement_recommendation_rate' => ['placement', 'academic_period', ['global', 'branch']],
         ];
 
         $this->assertSame(array_keys($expected), MetricCatalog::keys());

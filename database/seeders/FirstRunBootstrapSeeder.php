@@ -67,6 +67,7 @@ final class FirstRunBootstrapSeeder extends Seeder
         'identity.admin', 'identity.verify',
         'integrations.dispatch', 'integrations.endpoint', 'integrations.inbound', 'integrations.jobs', 'integrations.process', 'integrations.review',
         'payroll.adjust', 'payroll.approve', 'payroll.calculate', 'payroll.clear_finance', 'payroll.clear_hr', 'payroll.period', 'payroll.settle', 'payroll.settle_approve',
+        'placement.approve', 'placement.catalog', 'placement.conduct', 'placement.moderate', 'placement.recommend', 'placement.release', 'placement.score',
         'privacy.approve_bulk_export', 'privacy.consent', 'privacy.define_purpose', 'privacy.disclose', 'privacy.export',
         'reporting.catalog', 'reporting.compute', 'reporting.dashboard', 'reporting.reconcile', 'reporting.run',
         'resources.asset', 'resources.books', 'resources.dispose_approve', 'resources.dispose_request',

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Modules\Crm\Models;
 
 use App\Modules\Academic\Models\AssessmentAttempt;
+use App\Modules\Academic\Placement\Models\PlacementAttempt;
 use App\Modules\Communication\Models\Message;
 use App\Modules\Documents\Models\Document;
 use App\Modules\Finance\Models\Payment;
@@ -36,7 +37,7 @@ final class VisitorInteraction extends Model
 
     protected $fillable = [
         'id', 'visitor_id', 'direction', 'type', 'outcome', 'summary', 'occurred_on',
-        'occurred_at', 'agent_id', 'message_id', 'document_id', 'assessment_attempt_id', 'payment_id', 'correlation_id',
+        'occurred_at', 'agent_id', 'message_id', 'document_id', 'assessment_attempt_id', 'payment_id', 'placement_attempt_id', 'correlation_id',
     ];
 
     /** @return BelongsTo<Visitor, $this> */
@@ -67,5 +68,11 @@ final class VisitorInteraction extends Model
     public function payment(): BelongsTo
     {
         return $this->belongsTo(Payment::class);
+    }
+
+    /** @return BelongsTo<PlacementAttempt, $this> */
+    public function placementAttempt(): BelongsTo
+    {
+        return $this->belongsTo(PlacementAttempt::class);
     }
 }

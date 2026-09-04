@@ -136,6 +136,41 @@ trait BuildsActors
         return new Actor($actorId, 'Academic Officer');
     }
 
+    private function placementOfficer(string $actorId = 'plc-officer-1'): Actor
+    {
+        $this->personWithAuthority($actorId, ['placement.catalog', 'placement.conduct', 'placement.score']);
+
+        return new Actor($actorId, 'Placement Officer');
+    }
+
+    private function placementRecommender(string $actorId = 'plc-recommender-1'): Actor
+    {
+        $this->personWithAuthority($actorId, ['placement.recommend']);
+
+        return new Actor($actorId, 'Placement Recommender');
+    }
+
+    private function placementModerator(string $actorId = 'plc-moderator-1'): Actor
+    {
+        $this->personWithAuthority($actorId, ['placement.moderate']);
+
+        return new Actor($actorId, 'Placement Moderator');
+    }
+
+    private function placementApprover(string $actorId = 'plc-approver-1'): Actor
+    {
+        $this->personWithAuthority($actorId, ['placement.approve']);
+
+        return new Actor($actorId, 'Placement Approver');
+    }
+
+    private function placementReleaser(string $actorId = 'plc-releaser-1'): Actor
+    {
+        $this->personWithAuthority($actorId, ['placement.release']);
+
+        return new Actor($actorId, 'Placement Releaser');
+    }
+
     private function enrollmentClerk(string $actorId = 'acad-clerk-1'): Actor
     {
         $this->personWithAuthority($actorId, ['academic.enroll']);

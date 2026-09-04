@@ -8,6 +8,7 @@ use App\Modules\Academic\Domain\AppealLifecycle;
 use App\Modules\Academic\Models\AcademicAppeal;
 use App\Modules\Academic\Models\AssessmentResult;
 use App\Modules\Academic\Models\ProgressionDecision;
+use App\Modules\Academic\Placement\Models\PlacementProfile;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Support\Authorization\AccessDecision;
@@ -44,7 +45,7 @@ final class ManageAcademicAppeal
             return $this->idempotency->execute('academic.appeal.file', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($filer, $studentId, $subjectType, $subjectId, $reason): array {
                     $this->requireCapability($filer);
-                    if (! in_array($subjectType, ['assessment_result', 'progression_decision'], true)) {
+                    if (! in_array($subjectType, ['assessment_result', 'progression_decision', 'placement_profile'], true)) {
                         throw BusinessRejection::forCode('academic.appeal_subject_unknown', sprintf('unknown appeal subject %s', $subjectType));
                     }
                     if ($reason === '') {
@@ -179,10 +180,20 @@ final class ManageAcademicAppeal
 
             return $result !== null ? trim((string) $result->scored_by) : null;
         }
-        /** @var ProgressionDecision|null $decision */
-        $decision = ProgressionDecision::query()->find($appeal->subject_id);
+        if ($appeal->subject_type === 'progression_decision') {
+            /** @var ProgressionDecision|null $decision */
+            $decision = ProgressionDecision::query()->find($appeal->subject_id);
 
-        return $decision !== null ? trim((string) $decision->approved_by) : null;
+            return $decision !== null ? trim((string) $decision->approved_by) : null;
+        }
+        if ($appeal->subject_type === 'placement_profile') {
+            /** @var PlacementProfile|null $profile */
+            $profile = PlacementProfile::query()->find($appeal->subject_id);
+
+            return $profile !== null ? trim((string) ($profile->approved_by ?? $profile->reviewed_by ?? '')) : null;
+        }
+
+        return null;
     }
 
     private function requireCapability(Actor $actor): void

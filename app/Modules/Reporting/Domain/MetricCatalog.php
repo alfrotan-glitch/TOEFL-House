@@ -9,6 +9,9 @@ use App\Modules\Reporting\Queries\AttendanceRateCalculator;
 use App\Modules\Reporting\Queries\FundUtilizationCalculator;
 use App\Modules\Reporting\Queries\OutstandingBalanceCalculator;
 use App\Modules\Reporting\Queries\PayrollTotalCalculator;
+use App\Modules\Reporting\Queries\PlacementProfileCountCalculator;
+use App\Modules\Reporting\Queries\PlacementRecommendationRateCalculator;
+use App\Modules\Reporting\Queries\PlacementReleaseCountCalculator;
 use App\Modules\Reporting\Queries\VisitorCaptureCountCalculator;
 use App\Modules\Reporting\Queries\VisitorConversionCountCalculator;
 use App\Modules\Reporting\Queries\VisitorConversionRateCalculator;
@@ -57,6 +60,18 @@ final class MetricCatalog
         'visitor_conversion_rate' => [
             'owner' => 'crm', 'authority' => 'academic_period', 'scopes' => ['global', 'branch'],
             'calculator' => VisitorConversionRateCalculator::class,
+        ],
+        'placement_profile_count' => [
+            'owner' => 'placement', 'authority' => 'academic_period', 'scopes' => ['global', 'branch'],
+            'calculator' => PlacementProfileCountCalculator::class,
+        ],
+        'placement_release_count' => [
+            'owner' => 'placement', 'authority' => 'academic_period', 'scopes' => ['global', 'branch'],
+            'calculator' => PlacementReleaseCountCalculator::class,
+        ],
+        'placement_recommendation_rate' => [
+            'owner' => 'placement', 'authority' => 'academic_period', 'scopes' => ['global', 'branch'],
+            'calculator' => PlacementRecommendationRateCalculator::class,
         ],
     ];
 

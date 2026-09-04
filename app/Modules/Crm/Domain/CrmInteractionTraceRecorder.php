@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Modules\Crm\Domain;
 
 use App\Modules\Academic\Models\AssessmentAttempt;
+use App\Modules\Academic\Placement\Models\PlacementAttempt;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Communication\Models\Message;
 use App\Modules\Crm\Models\Visitor;
@@ -72,11 +73,12 @@ final class CrmInteractionTraceRecorder
         ?string $documentId = null,
         ?string $assessmentAttemptId = null,
         ?string $paymentId = null,
+        ?string $placementAttemptId = null,
     ): string {
         if (in_array($direction, ['inbound', 'outbound'], true) === false) {
             throw BusinessRejection::forCode('crm.interaction_direction', 'interaction direction must be inbound or outbound');
         }
-        if (in_array($type, ['call', 'whatsapp', 'email', 'sms', 'visit', 'meeting', 'form_submission', 'document', 'note', 'other', 'payment', 'assessment'], true) === false) {
+        if (in_array($type, ['call', 'whatsapp', 'email', 'sms', 'visit', 'meeting', 'form_submission', 'document', 'note', 'other', 'payment', 'assessment', 'placement'], true) === false) {
             throw BusinessRejection::forCode('crm.interaction_type', 'unknown interaction type');
         }
         if (in_array($outcome, ['no_answer', 'connected', 'positive', 'neutral', 'negative', 'unreachable', 'requested_info', 'scheduled_visit', 'followup_required', 'not_interested', 'qualified', 'converted', 'other'], true) === false) {
@@ -92,7 +94,10 @@ final class CrmInteractionTraceRecorder
             throw BusinessRejection::forCode('crm.document_unknown', 'the referenced document does not exist');
         }
         if ($assessmentAttemptId !== null && $assessmentAttemptId !== '' && AssessmentAttempt::query()->whereKey($assessmentAttemptId)->doesntExist()) {
-            throw BusinessRejection::forCode('crm.assessment_unknown', 'the referenced placement/assessment attempt does not exist');
+            throw BusinessRejection::forCode('crm.assessment_unknown', 'the referenced assessment attempt does not exist');
+        }
+        if ($placementAttemptId !== null && $placementAttemptId !== '' && PlacementAttempt::query()->whereKey($placementAttemptId)->doesntExist()) {
+            throw BusinessRejection::forCode('crm.placement_unknown', 'the referenced placement attempt does not exist');
         }
         if ($paymentId !== null && $paymentId !== '' && Payment::query()->whereKey($paymentId)->doesntExist()) {
             throw BusinessRejection::forCode('crm.payment_unknown', 'the referenced payment does not exist');
@@ -115,6 +120,7 @@ final class CrmInteractionTraceRecorder
             'document_id' => $documentId !== '' ? $documentId : null,
             'assessment_attempt_id' => $assessmentAttemptId !== '' ? $assessmentAttemptId : null,
             'payment_id' => $paymentId !== '' ? $paymentId : null,
+            'placement_attempt_id' => $placementAttemptId !== '' ? $placementAttemptId : null,
             'correlation_id' => RandomIdentifier::new(),
         ]);
         $this->audit->record($actor->actorId, 'crm.interaction.trace', 'visitor_interaction', $interaction->id, null, [

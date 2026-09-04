@@ -15,6 +15,7 @@ use App\Http\Controllers\IdentityController;
 use App\Http\Controllers\LibraryController;
 use App\Http\Controllers\OrganizationController;
 use App\Http\Controllers\PayrollController;
+use App\Http\Controllers\PlacementController;
 use App\Http\Controllers\PrintingController;
 use App\Http\Controllers\PrivacyController;
 use App\Http\Controllers\ReportingController;
@@ -132,6 +133,32 @@ Route::middleware('employee')->group(function (): void {
         Route::post('appeals/{appealId}/reject', [AcademicController::class, 'rejectAppeal'])->name('appeal.reject');
         Route::post('appeals/{appealId}/escalate', [AcademicController::class, 'escalateAppeal'])->name('appeal.escalate');
         Route::post('appeals/{appealId}/close', [AcademicController::class, 'closeAppeal'])->name('appeal.close');
+    });
+
+    // Placement Decision System
+    Route::prefix('placement')->name('placement.')->group(function (): void {
+        Route::get('/', [PlacementController::class, 'index'])->name('index');
+        Route::get('profiles/{profileId}', [PlacementController::class, 'show'])->name('show');
+        Route::post('profiles', [PlacementController::class, 'openProfile'])->name('profile.open');
+        Route::post('attempts', [PlacementController::class, 'startAttempt'])->name('attempt.start');
+        Route::post('attempts/{attemptId}/submit', [PlacementController::class, 'submitDigital'])->name('attempt.submit');
+        Route::post('attempts/{attemptId}/submit-physical', [PlacementController::class, 'submitPhysical'])->name('attempt.submit-physical');
+        Route::post('sections/score', [PlacementController::class, 'scoreSection'])->name('section.score');
+        Route::post('sections/results/{sectionResultId}/moderate', [PlacementController::class, 'moderateSection'])->name('section.moderate');
+        Route::post('sections/results/{sectionResultId}/approve', [PlacementController::class, 'approveSection'])->name('section.approve');
+        Route::post('profiles/{profileId}/recommend', [PlacementController::class, 'recommend'])->name('recommend');
+        Route::post('profiles/{profileId}/review', [PlacementController::class, 'review'])->name('review');
+        Route::post('profiles/{profileId}/approve', [PlacementController::class, 'approveProfile'])->name('approve');
+        Route::post('profiles/{profileId}/release', [PlacementController::class, 'releaseProfile'])->name('release');
+        Route::post('profiles/{profileId}/supersede', [PlacementController::class, 'supersedeProfile'])->name('supersede');
+        Route::post('tests', [PlacementController::class, 'defineTest'])->name('test.define');
+        Route::post('tests/{testId}/publish', [PlacementController::class, 'publishTest'])->name('test.publish');
+        Route::post('versions', [PlacementController::class, 'createVersion'])->name('version.create');
+        Route::post('versions/{versionId}/publish', [PlacementController::class, 'publishVersion'])->name('version.publish');
+        Route::post('sections', [PlacementController::class, 'defineSection'])->name('section.define');
+        Route::post('sections/{sectionId}/transition', [PlacementController::class, 'transitionSection'])->name('section.transition');
+        Route::post('questions', [PlacementController::class, 'defineQuestion'])->name('question.define');
+        Route::post('rubrics', [PlacementController::class, 'defineRubric'])->name('rubric.define');
     });
 
     // Teachers & HR
