@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Modules\Students\Commands;
 
+use App\Modules\Academic\Queries\GraduationCertificationQuery;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Students\Domain\StudentStatusRegistry;
@@ -22,7 +23,10 @@ use Illuminate\Support\Facades\DB;
  * Status transitions append a new status row and close the previous one in
  * the same transaction — status is history, never an overwrite.
  * Suspension and withdrawal need the manage capability; reactivation needs
- * the separate approval capability and is never silent.
+ * the separate approval capability and is never silent. Alumni is gated on
+ * the governed Academic chain: an approved eligible graduation decision and
+ * its issued certificate (Academic owns that truth; Students owns the
+ * transition).
  */
 final class TransitionStudentStatus
 {
@@ -35,6 +39,7 @@ final class TransitionStudentStatus
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
+        private readonly GraduationCertificationQuery $certification,
     ) {}
 
     /** @return array{student_id: string, status: string, correlation_id: string} */
@@ -82,6 +87,9 @@ final class TransitionStudentStatus
                     if ($reason === '') {
                         throw BusinessRejection::forCode('students.status_reason', 'a status transition requires a reason');
                     }
+                    if ($toStatus === StudentStatusRegistry::STATUS_ALUMNI) {
+                        $this->assertGraduationCertified($student->id);
+                    }
 
                     /** @var StudentStatus|null $latest */
                     $latest = StudentStatus::query()->where('student_id', $student->id)->orderByDesc('seq')->lockForUpdate()->first();
@@ -110,6 +118,22 @@ final class TransitionStudentStatus
             );
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $actor, 'students.status', 'student', $student->id);
+        }
+    }
+
+    /**
+     * Alumni is the governed Academic chain made visible on the student
+     * record: an approved eligible graduation decision plus its issued
+     * certificate. A free-text reason alone can never mint a graduate.
+     */
+    private function assertGraduationCertified(string $studentId): void
+    {
+        $certification = $this->certification->certificationForStudent($studentId);
+        if ($certification === null) {
+            throw BusinessRejection::forCode('students.graduation_decision_required', 'alumni status requires an approved eligible graduation decision for the student');
+        }
+        if ($certification['certificate_id'] === null) {
+            throw BusinessRejection::forCode('students.graduation_certificate_required', 'alumni status requires the issued graduation certificate');
         }
     }
 }

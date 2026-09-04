@@ -4,13 +4,17 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Console;
 
+use App\Modules\Academic\Commands\DecideGraduation;
 use App\Modules\Academic\Commands\MaintainAcademicStructure;
+use App\Modules\Academic\Models\GraduationDecision;
 use App\Modules\Academic\Models\Program;
+use App\Modules\Academic\Models\ProgramVersion;
 use App\Modules\Admissions\Commands\DecideAdmission;
 use App\Modules\Admissions\Commands\EnrollAdmittedApplicant;
 use App\Modules\Admissions\Commands\RegisterApplicant;
 use App\Modules\Admissions\Models\AdmissionDecision;
 use App\Modules\Admissions\Models\Applicant;
+use App\Modules\Documents\Commands\DefineDocumentClassification;
 use App\Modules\Hr\Commands\MaintainContractVersion;
 use App\Modules\Hr\Commands\MaintainEmployment;
 use App\Modules\Hr\Models\ContractVersion;
@@ -131,6 +135,35 @@ final class IncrementBWorkflowFeatureTest extends TestCase
         $this->signIn('student-manager');
         $this->post('/students/students/'.$this->studentId.'/status/complete', ['reason' => 'course completed'])
             ->assertRedirect($show);
+
+        // Alumni requires the governed Academic chain: the bare reason is
+        // refused with its code before the chain is travelled.
+        $this->post('/students/students/'.$this->studentId.'/status/graduate', ['reason' => 'graduation board'], ['referer' => $show])
+            ->assertRedirect($show)
+            ->assertSessionHas('error_code', 'students.graduation_decision_required');
+
+        $programId = Program::query()->where('name', 'IELTS Preparation')->value('id');
+        $versionId = (string) ProgramVersion::query()->where('program_id', $programId)->value('id');
+        $proposed = app(DecideGraduation::class)->propose(
+            $this->grantedActor('incb-grad-prop', ['academic.completion']),
+            $this->studentId,
+            $versionId,
+            'eligible',
+            'all requirements met',
+            'incb-grad-1',
+        );
+        $graduation = GraduationDecision::query()->findOrFail($proposed['decision_id']);
+        app(DecideGraduation::class)->review($this->grantedActor('incb-grad-rev', ['academic.completion']), $graduation, 'incb-grad-2');
+        app(DecideGraduation::class)->approve($this->grantedActor('incb-grad-appr', ['academic.completion_approve']), $graduation, 'incb-grad-3');
+        app(DefineDocumentClassification::class)->defineClassification(
+            $this->grantedActor('incb-grad-class', ['documents.classify']),
+            'academic.certificate',
+            'academic',
+            'restricted',
+            'incb-grad-class-1',
+        );
+        app(DecideGraduation::class)->issueCertificate($this->grantedActor('incb-grad-cert', ['academic.certify', 'documents.register']), $graduation, 'incb-grad-4');
+
         $this->post('/students/students/'.$this->studentId.'/status/graduate', ['reason' => 'graduation board'])
             ->assertRedirect($show);
         $this->assertDatabaseHas(DB::connection()->getTablePrefix().'student_statuses', [

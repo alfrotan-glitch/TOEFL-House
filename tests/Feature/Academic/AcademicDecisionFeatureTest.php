@@ -24,6 +24,7 @@ use App\Modules\Academic\Models\ResultCorrection;
 use App\Modules\Admissions\Commands\EnrollAdmittedApplicant;
 use App\Modules\Admissions\Commands\RegisterApplicant;
 use App\Modules\Admissions\Models\Applicant;
+use App\Modules\Documents\Commands\DefineDocumentClassification;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use Carbon\CarbonImmutable;
@@ -210,7 +211,7 @@ final class AcademicDecisionFeatureTest extends TestCase
     public function test_graduation_requires_independent_approval_and_certificate_is_immutable(): void
     {
         $proposer = $this->grantedActor('dec-completion-x', ['academic.completion']);
-        $approver = $this->grantedActor('dec-completion-appr', ['academic.completion_approve', 'academic.certify']);
+        $approver = $this->grantedActor('dec-completion-appr', ['academic.completion_approve', 'academic.certify', 'documents.register']);
         $versionId = (string) DB::table('classes')->where('id', $this->classId)->value('program_version_id');
 
         $decision = app(DecideGraduation::class)->propose($proposer, $this->studentId, $versionId, 'eligible', 'all program requirements met', 'dec-grad-1');
@@ -224,6 +225,16 @@ final class AcademicDecisionFeatureTest extends TestCase
 
         $reviewer = $this->grantedActor('dec-grad-reviewer', ['academic.completion']);
         app(DecideGraduation::class)->review($reviewer, GraduationDecision::query()->findOrFail($decision['decision_id']), 'dec-grad-3');
+
+        // Eligible approval requires closed seats: terminalize the fixture seat first.
+        app(MaintainEnrollment::class)->withdraw($this->enrollmentClerk('dec-enroll'), Enrollment::query()->findOrFail($this->enrollmentId), 'seat closed for graduation', 'dec-enr-wd');
+        app(DefineDocumentClassification::class)->defineClassification(
+            $this->grantedActor('dec-classifier', ['documents.classify']),
+            'academic.certificate',
+            'academic',
+            'restricted',
+            'dec-classification-1',
+        );
         app(DecideGraduation::class)->approve($approver, GraduationDecision::query()->findOrFail($decision['decision_id']), 'dec-grad-4');
 
         $certificate = app(DecideGraduation::class)->issueCertificate($approver, GraduationDecision::query()->findOrFail($decision['decision_id']), 'dec-cert-1');

@@ -123,7 +123,9 @@ final class GraduationWorkflowFeatureTest extends TestCase
         $this->makeEmployee('gwf-dual-1', ['academic.completion', 'academic.completion_approve'], 'proposer');
         $this->makeEmployee('gwf-reviewer-1', ['academic.completion'], 'graduation-reviewer');
         $this->makeEmployee('gwf-approver-1', ['academic.completion_approve'], 'graduation-approver');
-        $this->makeEmployee('gwf-cert-1', ['academic.certify'], 'certifier');
+        $this->makeEmployee('gwf-cert-1', ['academic.certify', 'documents.register'], 'certifier');
+        $this->makeEmployee('gwf-clerk-9', ['academic.enroll'], 'clerk');
+        $this->makeEmployee('gwf-registrar-1', ['documents.classify'], 'registrar');
 
         // Propose — the proposer's own session.
         $this->signIn('proposer');
@@ -156,11 +158,27 @@ final class GraduationWorkflowFeatureTest extends TestCase
             ->assertRedirect('/academic')
             ->assertSessionHas('error_code', 'academic.approval_not_independent');
 
-        // Approval by a third employee; certificate by a fourth.
+        // Eligible approval requires closed seats: the fixture seat is
+        // withdrawn over the console before the approval is taken.
+        $this->signOut();
+        $this->signIn('clerk');
+        $enrollmentId = DB::table(DB::connection()->getTablePrefix().'enrollments')->where('student_id', $this->studentId)->where('class_id', $this->classId)->value('id');
+        $this->post('/academic/enrollments/'.$enrollmentId.'/withdraw', ['reason' => 'seat closed for graduation'])->assertRedirect('/academic');
+
+        // Approval by a third employee; the registrar defines the
+        // certificate classification; certificate by a fourth.
         $this->signOut();
         $this->signIn('graduation-approver');
         $this->post('/academic/graduations/'.$decisionId.'/approve')->assertRedirect('/academic');
         $this->assertDatabaseHas(DB::connection()->getTablePrefix().'graduation_decisions', ['id' => $decisionId, 'lifecycle_state' => 'approved']);
+
+        $this->signOut();
+        $this->signIn('registrar');
+        $this->post('/documents/classifications', [
+            'category' => 'academic.certificate',
+            'owner_module' => 'academic',
+            'access_class' => 'restricted',
+        ])->assertRedirect('/documents');
 
         $this->signOut();
         $this->signIn('certifier');
@@ -168,6 +186,9 @@ final class GraduationWorkflowFeatureTest extends TestCase
         $serial = DB::table(DB::connection()->getTablePrefix().'certificates')->where('graduation_decision_id', $decisionId)->value('serial');
         $this->assertNotNull($serial);
         $this->assertSame(1, DB::table(DB::connection()->getTablePrefix().'certificates')->count());
+        $documentId = DB::table(DB::connection()->getTablePrefix().'certificates')->where('graduation_decision_id', $decisionId)->value('document_id');
+        $this->assertNotNull($documentId);
+        $this->assertSame('submitted', DB::table(DB::connection()->getTablePrefix().'documents')->where('id', $documentId)->value('lifecycle_state'));
 
         // Issuance is one-shot.
         $this->post('/academic/graduations/'.$decisionId.'/certificate', [], ['referer' => 'http://localhost/academic'])

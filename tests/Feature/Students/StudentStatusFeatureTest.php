@@ -81,14 +81,17 @@ final class StudentStatusFeatureTest extends TestCase
         app(TransitionStudentStatus::class)->withdraw($manager, $this->student, 'family relocation', 'stu-key-5');
         app(TransitionStudentStatus::class)->reactivate($reactivator, $this->student, 'returned', 'stu-key-6');
         app(TransitionStudentStatus::class)->complete($manager, $this->student, 'program finished', 'stu-key-7');
-        app(TransitionStudentStatus::class)->graduate($manager, $this->student, 'certified', 'stu-key-8');
 
-        $record = (new StudentRecordQuery)->studentRecord($this->student->id);
-        $this->assertSame('alumni', $record['status']);
-
-        $this->expectException(BusinessRejection::class);
-        $this->expectExceptionMessage('transition alumni -> active is not allowed');
-        app(TransitionStudentStatus::class)->reactivate($reactivator, $this->student, 'no return from alumni', 'stu-key-9');
+        // Alumni is gated on the governed Academic chain: a bare reason can
+        // never mint a graduate (the full chain to alumni is exercised in
+        // GraduationIntegrityFeatureTest).
+        try {
+            app(TransitionStudentStatus::class)->graduate($manager, $this->student, 'certified', 'stu-key-8');
+            $this->fail('alumni without a graduation decision must be refused');
+        } catch (BusinessRejection $rejection) {
+            $this->assertSame('students.graduation_decision_required', $rejection->errorCode());
+        }
+        $this->assertSame('completed', (new StudentRecordQuery)->studentRecord($this->student->id)['status']);
     }
 
     public function test_status_history_is_append_only_even_against_raw_sql(): void
