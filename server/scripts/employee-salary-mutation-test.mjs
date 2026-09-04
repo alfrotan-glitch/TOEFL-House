@@ -169,6 +169,7 @@ const survived = results.filter((r) => r.status === 'SURVIVED' && !EQUIVALENT.ha
 const equivalent = results.filter((r) => r.status === 'SURVIVED' && EQUIVALENT.has(r.id));
 const invalid = results.filter((r) => r.status === 'INVALID');
 console.log(`KILLED: ${killed}/${results.length - equivalent.length}   PROVEN EQUIVALENT: ${equivalent.length}   SURVIVED: ${survived.length}   INVALID: ${invalid.length}`);
+if (equivalent.length) console.log(`\n${equivalent.length} proven-equivalent mutant(s): ${equivalent.map((r) => r.id).join(', ')} (see the note at the top of this file)`);
 if (survived.length) {
   console.log('\nSURVIVING MUTANTS (missing test coverage):');
   for (const s of survived) console.log(`  ${s.id} — ${s.invariant} (${s.file})`);

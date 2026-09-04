@@ -29,7 +29,7 @@ import {
   validateAutomationActions,
   validateAutomationConditions,
 } from '../core/events/automation-engine.js';
-import { isDomainEventType } from '../core/events/event-registry.js';
+import { isDomainEventType, isEmittedEventType } from '../core/events/event-registry.js';
 const log = createLogger('automations');
 
 export const automationsRouter = Router();
@@ -166,6 +166,12 @@ automationsRouter.post(
     }
     if (!isDomainEventType(rawTrigger)) {
       throw new HttpError(400, `Unknown automation trigger '${rawTrigger}'.`);
+    }
+    if (!isEmittedEventType(rawTrigger)) {
+      throw new HttpError(
+        400,
+        `'${rawTrigger}' is reserved vocabulary: no writer in the system emits it, so this automation would never fire. Pick a trigger from the emitted types (GET /api/events/types shows which are emitted).`,
+      );
     }
 
     let normalizedConditions;

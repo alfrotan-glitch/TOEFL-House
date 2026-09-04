@@ -23,7 +23,7 @@ import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id } from '../utils/ids.js';
 import { eventBus } from '../core/events/event-bus.js';
-import { DOMAIN_EVENT_CATALOG, isDomainEventType, type DomainEventType } from '../core/events/event-registry.js';
+import { DOMAIN_EVENT_CATALOG, isDomainEventType, isEmittedEventType, type DomainEventType } from '../core/events/event-registry.js';
 
 export const eventsRouter = Router();
 eventsRouter.use(authenticate);
@@ -347,7 +347,12 @@ eventsRouter.get(
   '/types',
   requirePermission('Event.View'),
   ah(async (_req, res) => {
-    res.json({ count: DOMAIN_EVENT_CATALOG.length, types: DOMAIN_EVENT_CATALOG });
+    // `emitted` separates real events from reserved vocabulary, so trigger
+    // pickers built on this endpoint cannot offer a type that never fires.
+    res.json({
+      count: DOMAIN_EVENT_CATALOG.length,
+      types: DOMAIN_EVENT_CATALOG.map((entry) => ({ ...entry, emitted: isEmittedEventType(entry.type) })),
+    });
   })
 );
 

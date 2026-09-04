@@ -127,3 +127,56 @@ the end with their evidence. The final verdict is written only when the audit cl
 **Conditional trust:** scheduled (24h GFS) backup cadence — the startup pair was verified end-to-end, but the recurring schedule was not observed over time in this audit; single-instance concurrency assumptions hold only while deployment stays single-process (F-M4).
 
 Nothing else audited rose to distrust. The system's bones — schema, authority separation, gates, recovery — are genuinely sound; the two findings are both of the same species: a boundary where a value or promise crosses from the client/marketing layer into the authoritative layer unverified.
+
+---
+
+## REMEDIATION RECORD — 2026-09-04 (same day, owner-directed production hardening)
+
+**F-A1 — FIXED at the route/architecture layer.** `enroll-semester` now refuses `tuitionAmount` outright (400, mirroring `/manual`), REQUIRES a `classId` (a term without a class has no price authority), and prices the term exclusively from the class row's pinned fee with the server-resolved authorized discount. The receipt number is allocated inside the transaction and only when a receipt is written — the previously burned numbers (observed as the missing R-00000006) are pinned by a new gap-free-series test. The invoice-pay route, the payment desk, the refund route, and both Book commerce writers had the same pre-transaction allocation — every one now allocates inside the transaction that writes its receipt, so no rejection, race, or replay can burn a number. Frontend: the "Total Fee" is a read-only display of the class fee, the semester name is a structured choice (branch academic terms, deterministic seasonal fallback — never free text), and the class list only offers seats the server would accept (free seats, gender policy, placement ceiling via the new `placementCeiling` on `GET /students/:id`). Tests: two PRICE INTEGRITY attack cases added (client price → 400 + catalog-priced term under the receptionist role; no receipt burn on rejected/cash-free enrollment); every suite that previously *pinned the client price* was rebased onto the catalog contract. New registry rows: canonical-authority ("Tuition price of an enrolled term") and three invariants (price authority, receipt allocation, automation liveness).
+
+**F-A2 — FIXED by wiring the real emitters and deleting the dead layer.** `student.registered` (manual registration + visitor conversion), `payment.received` (payment desk, invoice pay, enrollment cash leg — carrying `remainingBalance` computed inside the transaction), `exam.result_recorded` (score recording, carrying `score`), `book.sold` (book sales core, carrying `remainingStock` from `book_inventory_positions`), `expense.requested` (expense requests → the Budget Expense Approval workflow now auto-starts), `scholarship.awarded`, and `attendanceRate` added to both `attendance.marked` emitters (the Low Attendance condition previously compared `undefined < 85` — never true, so even the one "wired" automation was dead). All events are emitted inside the business transaction (outbox atomicity) and dispatched after commit. The write-only `pipeline_metrics` materialization (second authority for a fact `/api/events/stats` derives from `domain_events`) was removed from schema and code. The invoice-pay direct notification was folded into the event handler (one notification per payment, one channel). The event-bus header no longer claims to be "the central nervous system… every state transition"; it now names the wired domains and points at the registry. New `automation-liveness.test.ts` pins the FULL chain (route → event → handler/automation effect) for the seeded triggers so a removed emitter fails CI.
+
+**F-M1 — FIXED.** money.ts seat-count comment now states the actual rule (whole-AFN unbounded vs small whole counts).
+
+**F-M2 — FIXED** with F-A1's frontend work (structured term names, read-only price, filtered class list, placement-ceiling hint).
+
+**F-M3 — FIXED.** `jalaliToIso` now refuses impossible Jalali dates (RangeError) instead of folding them onto the next day; `isValidJalaliDate` exported; FE/server mirrors regenerated identically. All existing callers construct valid dates, so behavior is unchanged for legitimate input.
+
+**F-M4 — FIXED.** `busy_timeout = 5000` on the canonical connection.
+
+**Also:** the mutation-gate summary line no longer reports documented equivalents as surviving mutants ("10 surviving reported" → "0 surviving reported" + an explicit proven-equivalent count); the three harnesses that named their equivalents without the canonical marker were normalized.
+
+**Verification:** server suite 2861/2861 (209 files, +3 liveness tests); FE lint/typecheck/build green; server lint/typecheck green; mutation gate 18/18 PASSED with 0 surviving, 0 invalid, 10 obsolete (documented); schema preflight passes (119 tables — pipeline_metrics removed); live drills below.
+
+---
+
+## OWNERSHIP-MANDATE CONTINUATION FINDINGS
+
+Findings surfaced by the continuing ownership pass, recorded under the same
+10-point discipline.
+
+## FINDING F-A3 — Trigger-configuration surfaces accept reserved event vocabulary: an owner can create an automation or workflow on an event nobody emits, and the system confirms it "is now active"
+
+**Severity: CONFIRMED DEFECT — API honesty / business-logic (user-configurable controls that silently cannot run). Medium.**
+
+1. **Location.** `server/src/core/events/event-registry.ts` (`DOMAIN_EVENT_CATALOG`, 58 types, header claiming "configuration cannot drift from emitted events"); `server/src/routes/automations.routes.ts` POST `/:trigger` validated with `isDomainEventType` only; `server/src/routes/workflows.routes.ts` `normalizeWorkflowTrigger` (`isWorkflowTrigger` = `manual` || any catalog type); `server/src/routes/events.routes.ts` `GET /api/events/types` served the raw catalog with no emission truth.
+
+2. **Actual vs expected.** Actual: 20 of the 58 catalog types have runtime emitters; the other 38 are reserved vocabulary with no writer. Both creation APIs accepted all 58 (+ manual for workflows) — `POST /api/automations {trigger:'invoice.paid'}` returned 201 with the notification "…is now active and listening for 'invoice.paid' events", a promise the system cannot keep (no emitter exists, so the rule can never fire). Expected: a triggerable surface offers and accepts only event types that are actually emitted.
+
+3. **Why wrong.** The registry conflated vocabulary with reality and nothing enforced its own header's claim. This is the user-configurable half of F-A2: F-A2's seeded automations were born dead; this let any owner manufacture new dead rules with a success confirmation. Same species — a promise crossing from the configuration layer into the authoritative layer unverified.
+
+4. **Reproduction.** Pre-fix: `POST /api/automations` with `trigger:'invoice.paid'` → 201 + "now active and listening" notification; `grep` proves no `.emit(` call site names `invoice.paid`; the rule fires never, errors never. Workflow definitions: same via `POST /api/workflows/definitions` with any reserved type.
+
+5. **Impact.** An owner who wires, say, an "invoice.paid → notify finance" automation believes a control exists that does not. Silent forever — no error, no log, no execution. Erodes trust in every automation that *is* configured, since nothing distinguishes live rules from dead ones.
+
+6. **Test coverage.** wp12 covered unknown-type rejection (`payment.never_happened` → 400) and emitted-type creation — the reserved-vocabulary middle ground was unpinned. New `event-registry-honesty.test.ts` (9 tests) now pins it: creation APIs reject reserved triggers with explicit "would never fire / would never start" messages; the emitted list is mechanically proven against the source tree.
+
+7. **Data-corruption potential.** None directly. Indirect: business decisions premised on alerts/approvals that silently never run.
+
+8. **Recurrence.** Every automation/workflow-definition created on reserved vocabulary. The seeds themselves were already live (all 5 automation triggers and the one event-triggered workflow definition are emitted types — now asserted by test).
+
+9. **Severity classification.** Confirmed defect — API honesty + business logic; not security (owner-only permission gates held). Medium: requires an owner to configure, but then lies to them.
+
+10. **Remediation layer — FIXED at the architectural level.** Emission truth is now governed where the vocabulary lives: `EMITTED_EVENT_TYPES` + `DYNAMIC_EMIT_SITES` in `event-registry.ts`, with `isEmittedEventType()` exported. Automation creation and workflow-definition creation reject reserved triggers with honest 400s naming the problem and pointing at `GET /api/events/types`; that endpoint now serves each catalog entry with an `emitted` flag so any future picker is honest by construction. `event-registry-honesty.test.ts` scans the real source tree and fails on drift in **both** directions (a type claimed emitted must have a literal `.emit(` call site, or be registered as dynamic with its owning file verified; every literal emit type must be claimed; reserved types must appear nowhere else in non-test source — no hidden emitters, no dead consumers) and asserts every seeded automation/workflow trigger is triggerable. Registry rows updated (canonical-authority: which events actually fire; invariants: trigger-surface honesty).
+
+**Verification (full):** server suite 2870 tests / 210 files — 2868 passed, 2 skipped (pre-existing), 0 failed; server lint/typecheck green; mutation gate 18/18, 0 surviving; schema preflight 118 tables; cleanliness PASS; live drills in the session record.

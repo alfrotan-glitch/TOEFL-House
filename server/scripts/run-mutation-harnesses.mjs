@@ -65,13 +65,22 @@ function summarise(output) {
   const voidRuns = [...output.matchAll(/^\s*(\S+)\s+.*MEASUREMENT VOID/gm)].map((m) => m[1]);
   // TR-4 Bucket-1: retired mutants with written evidence, reported distinctly.
   const obsolete = [...output.matchAll(/^\s*(\S+)\s+OBSOLETE/gm)].map((m) => m[1]);
+  // Harnesses classify their own proven-equivalent survivors and print a
+  // summary line naming them. Those ids SURVIVED by execution but carry a
+  // written proof of equivalence — counting them in the survivor line
+  // overstates the unresolved finding count (audit F-M note: the gate line
+  // used to say "10 surviving reported" with 0 actual findings).
+  const provenEquivalent = [
+    ...output.matchAll(/proven-equivalent mutant\(s\):\s*([A-Za-z0-9_,\s]+?)(?:\s*\(see|$)/gm),
+  ].flatMap((m) => m[1].split(',').map((s) => s.trim()).filter(Boolean));
   const tallyLine = output.match(/^.*killed.*$/m) ?? output.match(/^KILLED:.*$/m);
   const tally = tallyLine ? String(tallyLine[0]).trim() : '';
   return {
-    survivors: [...new Set([...survivors, ...alt])],
+    survivors: [...new Set([...survivors, ...alt])].filter((id) => !provenEquivalent.includes(id)),
     invalid: [...new Set(invalid)],
     voidRuns: [...new Set(voidRuns)],
     obsolete: [...new Set(obsolete)],
+    equivalent: [...new Set(provenEquivalent)],
     tally,
   };
 }
@@ -116,10 +125,11 @@ if (jsonOut) {
 
 console.log(`\n──────────────────────────────────────────────────────────`);
 console.log(`  ${results.length - failed.length} passed · ${failed.length} failed · ${survivorCount} surviving mutant(s) reported`);
+const equivalentCount = results.reduce((n, r) => n + (r.equivalent?.length ?? 0), 0);
+if (equivalentCount > 0) console.log(`  ${equivalentCount} proven-equivalent mutant(s) — survived by execution, equivalence proven and documented in the harness`);
 if (invalidCount > 0) console.log(`  ${invalidCount} INVALID anchor(s) — intended measurement(s) that could not be applied`);
 if (voidCount > 0) console.log(`  ${voidCount} VOID run(s) — target suite executed no tests\n`);
 if (obsoleteCount > 0) console.log(`  ${obsoleteCount} obsolete mutant(s) — retired with recorded evidence in the harness`);
-if (invalidCount === 0 && voidCount === 0 && obsoleteCount === 0) console.log('');
 
 if (failed.length > 0) {
   console.error('  MUTATION GATE FAILED');

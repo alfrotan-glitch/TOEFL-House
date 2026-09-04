@@ -23,11 +23,6 @@ const stmtInsertWorkflowHistory = db.prepare(
   `INSERT INTO workflow_history (id, instance_id, step_order, actor, action, notes, timestamp)
    VALUES (?, ?, 0, 'system', 'start', 'Workflow auto-started by event', ?)`
 );
-const stmtUpsertPipelineMetric = db.prepare(
-  `INSERT INTO pipeline_metrics (pipeline, stage, count, conversion_rate, average_time_in_stage, branch_id, computed_at)
-   VALUES ('event_stream', ?, 1, 0, 0, ?, datetime('now'))
-   ON CONFLICT(pipeline, stage, branch_id) DO UPDATE SET count = count + 1, computed_at = datetime('now')`
-);
 
 // Helper interfaces for type safety (replaces `any`)
 interface BaseEventPayload {
@@ -236,22 +231,11 @@ export function registerEventHandlers(): void {
     true,
   );
 
-  // ── Analytics / Pipeline Metrics Handler ──────────────────────────────
-
-  eventBus.on(
-    '*',
-    async (event: DomainEvent) => {
-      try {
-        stmtUpsertPipelineMetric.run(event.type, event.branchId);
-      } catch (err) {
-        // Non-critical — analytics should never break event processing
-        log.error('[EventBus] Analytics logging failed:', err);
-      }
-    },
-    'analytics-event-logger',
-    200,
-    true
-  );
+  // NOTE (audit F-A2): the former "analytics-event-logger" handler upserted a
+  // per-type count into `pipeline_metrics` — a second, write-only authority
+  // for a fact `GET /api/events/stats` already derives from the `domain_events`
+  // outbox (LAW 1: one authority per fact). Table and handler are removed
+  // together; event statistics remain queryable from the outbox.
 
   log.info(`[EventBus] Registered ${eventBus.listHandlers().length} event handlers.`);
 }

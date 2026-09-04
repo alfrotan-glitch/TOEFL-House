@@ -169,7 +169,7 @@ describe('SSL-1 — the financial consequence is closed', () => {
     const blocked = await supertest(app)
       .post(`/api/students/${studentId}/enroll-semester`)
       .set(authHeader(hod))
-      .send({ semesterName: 'Term 2', classId: 'prl_c_next', tuitionAmount: 20000 });
+      .send({ semesterName: 'Term 2', classId: 'prl_c_next' });
     expect(blocked.status).toBe(403);
     expect(String(blocked.body.error)).toContain('Academic Hold');
 
@@ -186,7 +186,7 @@ describe('SSL-1 — the financial consequence is closed', () => {
     const stillBlocked = await supertest(app)
       .post(`/api/students/${studentId}/enroll-semester`)
       .set(authHeader(hod))
-      .send({ semesterName: 'Term 2', classId: 'prl_c_next', tuitionAmount: 20000 });
+      .send({ semesterName: 'Term 2', classId: 'prl_c_next' });
     expect(stillBlocked.status).toBe(403);
   });
 });

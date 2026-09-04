@@ -158,8 +158,9 @@ export function assertComputedMoney(value: number, field = 'amount', opts: { all
  * admitting 3. `1e15` was equally accepted, making the capacity gate
  * meaningless.
  *
- * Deliberately separate from assertMoney: money allows two decimal places,
- * a seat does not. Zero remains legal and keeps its established meaning
+ * Deliberately a separate rule from assertMoney: money is whole-AFN only but
+ * unbounded, a seat is a small whole count. Zero remains legal and keeps its
+ * established meaning
  * throughout this codebase — "no configured limit" (every capacity gate is
  * written `capacity > 0 && ...`), which is why zero is not rejected here.
  */

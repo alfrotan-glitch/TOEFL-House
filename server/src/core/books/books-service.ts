@@ -10,6 +10,7 @@ import { isUniqueViolation } from '../../utils/idempotency.js';
 import type { Pagination } from '../../utils/pagination.js';
 import { getJourneyEngine } from '../journey/journey-engine.js';
 import { JourneyEventType } from '../journey/event-types.js';
+import { eventBus } from '../events/event-bus.js';
 
 export type BookItemKind = 'book' | 'chapter';
 export type BookPaymentMethod = 'cash' | 'card' | 'bank_transfer';
@@ -548,9 +549,13 @@ export function postBookSale(db: Database, bookId: string, branchId: string, com
 
   const saleId = id('book_sale');
   const paymentId = id('pay');
-  const receiptNumber = nextReceiptNumber();
+  // Allocated inside the transaction that writes the receipt: a rejected or
+  // raced sale must not burn a number from the gap-free series.
+  let receiptNumber: string | null = null;
+  let saleEvent: ReturnType<typeof eventBus.emit> | undefined;
   try {
     db.transaction(() => {
+      receiptNumber = nextReceiptNumber();
       db.prepare(`
         INSERT INTO book_sales
           (id, book_id, quantity, unit_price, gross_amount, discount_amount, net_amount, payment_id,
@@ -569,6 +574,23 @@ export function postBookSale(db: Database, bookId: string, branchId: string, com
         referenceId: saleId, paymentId, operatorName: command.actor.fullName,
         operatorRole: command.actor.role, branchId,
       });
+      // Outbox row committed with the sale it describes (audit F-A2: the
+      // seeded "Critical Stock Alert" automation conditions on the stock left
+      // after a sale; no emitter existed). Availability is read from the one
+      // inventory authority, inside the transaction, so it already reflects
+      // this sale.
+      const position = db.prepare(
+        'SELECT available_quantity FROM book_inventory_positions WHERE book_id = ?'
+      ).get(bookId) as { available_quantity: number } | undefined;
+      saleEvent = eventBus.emit(
+        'book.sold', 'book', saleId,
+        {
+          bookId, title: book.title, quantity,
+          remainingStock: Number(position?.available_quantity ?? 0),
+          netAmount, receiptNumber: receiptNumber ?? null, purchaserName, branchId,
+        },
+        { operatorId: command.actor.userId, branchId },
+      );
     })();
   } catch (error) {
     if (isUniqueViolation(error)) {
@@ -592,7 +614,8 @@ export function postBookSale(db: Database, bookId: string, branchId: string, com
     }
     rejectBookStorageFailure(error, 'Book availability changed or the sale conflicts with an existing command.');
   }
-  return { id: saleId, receiptNumber, idempotentReplay: false };
+  if (saleEvent) void eventBus.dispatch(saleEvent);
+  return { id: saleId, receiptNumber: receiptNumber ?? '', idempotentReplay: false };
 }
 
 export function returnBookSale(db: Database, saleId: string, branchId: string, command: BookSaleReturnCommand): { id: string; receiptNumber: string; idempotentReplay: boolean } {
@@ -622,11 +645,14 @@ export function returnBookSale(db: Database, saleId: string, branchId: string, c
 
   const refundId = id('book_sale_refund');
   const paymentId = id('pay');
-  const receiptNumber = `REF-${nextReceiptNumber()}`;
+  // Allocated inside the transaction that writes the refund receipt, so a
+  // raced or rejected return burns no number.
+  let receiptNumber: string | null = null;
   try {
     db.transaction(() => {
       const fresh = db.prepare('SELECT id FROM book_sale_refunds WHERE sale_id = ?').get(saleId);
       if (fresh) throw new HttpError(409, 'This Book sale has already been returned and refunded.');
+      receiptNumber = `REF-${nextReceiptNumber()}`;
       db.prepare(`
         INSERT INTO book_sale_refunds
           (id, sale_id, refund_payment_id, returned_on, reason, returned_by_user_id, returned_by_name, branch_id, idempotency_key)
@@ -660,7 +686,7 @@ export function returnBookSale(db: Database, saleId: string, branchId: string, c
     }
     rejectBookStorageFailure(error, 'This Book sale has already been returned or the return conflicts with an existing command.');
   }
-  return { id: refundId, receiptNumber, idempotentReplay: false };
+  return { id: refundId, receiptNumber: receiptNumber ?? '', idempotentReplay: false };
 }
 
 export function issueBookLoan(db: Database, bookId: string, branchId: string, command: BookLoanCommand): { id: string; idempotentReplay: boolean } {

@@ -313,18 +313,6 @@ CREATE TABLE IF NOT EXISTS visitor_followups (
   outcome    TEXT CHECK (outcome IN ('interested','not_interested','callback','registered')) 
 );
 
-CREATE TABLE IF NOT EXISTS pipeline_metrics ( 
-  pipeline              TEXT NOT NULL, 
-  stage                 TEXT NOT NULL, 
-  count                 INTEGER NOT NULL DEFAULT 0, 
-  conversion_rate       REAL NOT NULL DEFAULT 0, 
-  average_time_in_stage REAL NOT NULL DEFAULT 0, 
-  branch_id             TEXT NOT NULL REFERENCES branches(id) ON DELETE CASCADE, 
-  computed_at           TEXT NOT NULL DEFAULT (datetime('now')), 
-  PRIMARY KEY (pipeline, stage, branch_id) 
-);
-CREATE INDEX IF NOT EXISTS idx_pipeline_metrics_br   ON pipeline_metrics(branch_id);
-
 CREATE TABLE IF NOT EXISTS households (
   id         TEXT PRIMARY KEY,
   name       TEXT NOT NULL,

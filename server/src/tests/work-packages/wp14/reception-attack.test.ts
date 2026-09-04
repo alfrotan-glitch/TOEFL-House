@@ -145,7 +145,7 @@ async function settleRegistration(admission: Awaited<ReturnType<typeof admit>>) 
 
 async function enroll(studentId: string, classId: string, semesterName: string, auth = asReception) {
   return supertest(app).post(`/api/students/${studentId}/enroll-semester`).set(auth)
-    .send({ semesterName, classId, tuitionAmount: 20000, amountPaidNow: 0 });
+    .send({ semesterName, classId, amountPaidNow: 0 });
 }
 
 /** The board row, the profile and the workspace must tell one story. */

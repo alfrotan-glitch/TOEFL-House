@@ -10,6 +10,7 @@ import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
 import { addNotification } from '../utils/notifications.js';
+import { getStudentBalance } from '../utils/studentBalance.js';
 import { getNumberSetting, setSetting } from '../utils/settings.js';
 import { getFinanceAccount } from '../utils/financeAccounts.js';
 import { recordIncome } from '../utils/income.js';
@@ -19,6 +20,7 @@ import { SYSTEM_DEFAULTS } from '../core/configuration/policy-catalog.js';
 import { assertMoney, assertComputedMoney } from '../utils/money.js';
 import { FINANCE_SETTING_LIST } from '../core/configuration/finance-settings.js';
 import { resolveIdempotency, isUniqueViolation } from '../utils/idempotency.js';
+import { eventBus } from '../core/events/event-bus.js';
 import {
   assertInvoicePurpose, resolveInvoiceObligation, assertInvoiceHasLines, invoicePaymentAttribution,
   assertTuitionInvoiceFits,
@@ -399,9 +401,12 @@ invoicesRouter.post(
     const attribution = invoicePaymentAttribution(db, row);
 
     const payId = id('pay');
-    // Allocated only after the replay check so retries do not burn receipt numbers.
-    const rc = nextReceiptNumber();
     const student = stmtGetStudentById.get(row.student_id) as any;
+    // The receipt number is allocated inside the transaction, after the replay
+    // check, so neither a retry nor a rejected payment burns a number from the
+    // gap-free series (same rule as every other receipt writer).
+    let receiptNumber: string | null = null;
+    let paymentEvent: ReturnType<typeof eventBus.emit> | undefined;
 
     let replayOf: { id: string; receipt_number: string | null } | undefined;
     const tx = db.transaction(() => {
@@ -421,6 +426,9 @@ invoicesRouter.post(
       if (payAmount > remaining) {
         throw new HttpError(400, `Amount exceeds remaining balance (${remaining} AFN).`);
       }
+
+      const rc = nextReceiptNumber();
+      receiptNumber = rc;
 
       stmtInsertPayment.run(
         payId, row.student_id, row.id, payAmount, date, resolvedMethod,
@@ -446,6 +454,21 @@ invoicesRouter.post(
       const newPaid = paidSoFar + payAmount;
       const newStatus = newPaid >= Number(row.net_amount) ? 'paid' : 'partial';
       stmtUpdateInvoiceStatus.run(newStatus, row.id);
+
+      // Outbox row committed with the money it describes (audit F-A2). This
+      // replaces the former direct-only notification: a payment now announces
+      // itself through the one channel every payment uses.
+      paymentEvent = eventBus.emit(
+        'payment.received', 'payment', payId,
+        {
+          amount: payAmount,
+          studentName: student?.full_name ?? null,
+          remainingBalance: getStudentBalance(db, row.student_id, 'active').outstanding,
+          invoiceNumber: row.invoice_number ?? null,
+          category: attribution.category, receiptNumber: rc, branchId: row.branch_id,
+        },
+        { operatorId: user.userId, branchId: row.branch_id },
+      );
     });
     try {
       tx();
@@ -463,12 +486,12 @@ invoicesRouter.post(
       }
       throw err;
     }
+    if (paymentEvent) void eventBus.dispatch(paymentEvent);
 
     writeAudit(req, `Payment ${payAmount} AFN on invoice ${row.invoice_number || row.id}`);
-    addNotification('Invoice payment recorded', `${payAmount} AFN received for invoice ${row.invoice_number || row.id}.`, 'success', row.branch_id);
 
     const updated = stmtGetInvoiceById.get(row.id) as any;
-    res.status(201).json({ invoice: mapInvoice(updated, loadItems(row.id)), paymentId: payId, receiptNumber: rc });
+    res.status(201).json({ invoice: mapInvoice(updated, loadItems(row.id)), paymentId: payId, receiptNumber });
   })
 );
 

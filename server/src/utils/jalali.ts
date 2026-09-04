@@ -128,6 +128,18 @@ export function jalaliMonthLength(jy: number, jm: number): number {
   return isJalaliLeapYear(jy) ? 30 : 29;
 }
 
+/**
+ * True when the Jalali parts name a real calendar date. The conversion
+ * algorithm itself happily folds an impossible date (Hut 30 of a non-leap
+ * year) onto the NEXT day's Gregorian value; a caller that round-trips
+ * without this check would silently store a date the user never chose.
+ */
+export function isValidJalaliDate(jy: number, jm: number, jd: number): boolean {
+  if (!Number.isInteger(jy) || !Number.isInteger(jm) || !Number.isInteger(jd)) return false;
+  if (jm < 1 || jm > 12) return false;
+  return jd >= 1 && jd <= jalaliMonthLength(jy, jm);
+}
+
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})/;
 
 /** Parses a stored Gregorian 'YYYY-MM-DD' (optionally with a time part). */
@@ -148,8 +160,16 @@ export function isoToJalali(iso: string): JalaliDate | null {
   return gregorianToJalali(g.gy, g.gm, g.gd);
 }
 
-/** Converts Jalali parts to the Gregorian 'YYYY-MM-DD' the database stores. */
+/**
+ * Converts Jalali parts to the Gregorian 'YYYY-MM-DD' the database stores.
+ * Impossible dates are REFUSED, not folded: the algorithm would otherwise
+ * return the next day's Gregorian value for e.g. Hut 30 of a non-leap year,
+ * and the wrong date would be stored as if the user had chosen it.
+ */
 export function jalaliToIso(jy: number, jm: number, jd: number): string {
+  if (!isValidJalaliDate(jy, jm, jd)) {
+    throw new RangeError(`Not a real Jalali date: ${jy}/${jm}/${jd}`);
+  }
   const { gy, gm, gd } = jalaliToGregorian(jy, jm, jd);
   return `${String(gy).padStart(4, '0')}-${String(gm).padStart(2, '0')}-${String(gd).padStart(2, '0')}`;
 }

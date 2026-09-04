@@ -11,6 +11,7 @@ import {
   isOperatingIncome,
 } from '../core/finance/ledger-classification.js';
 import { db } from '../db/connection.js';
+import { eventBus } from '../core/events/event-bus.js';
 import { CATEGORY_NAME, SUBCATEGORY_PARENT, classificationOf, isSubcategoryId } from '../core/finance/category-taxonomy.js';
 import { assertTextLengths, TEXT_LIMITS } from '../utils/textInput.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource, requestHasRole } from '../middleware/auth.js';
@@ -820,11 +821,24 @@ financeRouter.post(
     const requestBranchId = budgetLine.branch_id || user.branchId;
     const { expenseKind, paymentMethod, billPeriod, notes } = normalizeExpenseMeta(req.body);
     const newId = id('req');
-    stmtInsertExpenseRequest.run(
-      newId, title, resolvedAmount, budgetLineId, user.fullName, 'pending', today(), requestBranchId,
-      expenseKind, billPeriod, paymentMethod, notes, 0, user.userId, null
-    );
-    
+    // The row and its event commit together (audit F-A2): the "Budget Expense
+    // Approval" workflow auto-starts on `expense.requested`, so the request and
+    // the workflow instance it opens must be one atomic fact.
+    const { expenseEvent } = db.transaction(() => {
+      stmtInsertExpenseRequest.run(
+        newId, title, resolvedAmount, budgetLineId, user.fullName, 'pending', today(), requestBranchId,
+        expenseKind, billPeriod, paymentMethod, notes, 0, user.userId, null
+      );
+      return {
+        expenseEvent: eventBus.emit(
+          'expense.requested', 'expense', newId,
+          { title, amount: resolvedAmount, budgetLineId, budgetLineName: budgetLine.name, requestId: newId, branchId: requestBranchId },
+          { operatorId: user.userId, branchId: requestBranchId },
+        ),
+      };
+    })();
+    if (expenseEvent) void eventBus.dispatch(expenseEvent);
+
     // Report the PARSED amount and notify the branch that will actually pay,
     // so the notification, the audit line and the stored row all agree.
     addNotification('New expense request', `Expense request "${title}" for ${resolvedAmount} AFN against budget ${budgetLine.name} is pending approval.`, 'info', requestBranchId);

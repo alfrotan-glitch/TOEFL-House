@@ -38,7 +38,7 @@ interface StudentsViewProps {
     fromStatus?: Student['status'],
   ) => void;
   updateStudent: (studentId: string, updatedFields: Partial<Student>) => void;
-  enrollStudentSemester: (studentId: string, semesterName: string, classId: string, tuitionAmount: number, amountPaidNow?: number, notes?: string) => void;
+  enrollStudentSemester: (studentId: string, semesterName: string, classId: string, amountPaidNow?: number, notes?: string) => void;
   issueStudentCard: (studentId: string, cardDesign: { primaryColor: string; bgStyle: string }, notes?: string) => Promise<{ feeCharged: number }>;
   /** Authoritative roster totals from the server (audit STU-H2). */
   studentSummary?: StudentSummary | null;
@@ -92,8 +92,15 @@ export default function StudentsView({
   const [showEnrollModal, setShowEnrollModal] = useState(false);
   const [enrollSemesterName, setEnrollSemesterName] = useState('');
   const [enrollClassId, setEnrollClassId] = useState('');
-  const [enrollTuitionAmount, setEnrollTuitionAmount] = useState(0);
   const [enrollAmountPaidNow, setEnrollAmountPaidNow] = useState(0);
+  // Structured enrollment options, loaded from the server when the modal
+  // opens. The desk must not type a price or a term name free-hand (audit
+  // F-A1/F-M2): the price comes from the class, the term name from the
+  // branch's academic terms, and the class list must only offer seats the
+  // server would accept.
+  const [enrollTerms, setEnrollTerms] = useState<Array<{ id: string; name: string; year: number }>>([]);
+  const [enrollLevelOrders, setEnrollLevelOrders] = useState<Record<string, number>>({});
+  const [enrollCeiling, setEnrollCeiling] = useState<{ levelId: string; levelName: string } | null>(null);
 
   // Refund Modal State
   const [refundStudent, setRefundStudent] = useState<Student | null>(null);
@@ -127,6 +134,34 @@ export default function StudentsView({
   const SEARCH_PAGE = 50;
 
   const activeStudentInfo = selectedStudent ? students.find(s => s.id === selectedStudent.id) || selectedStudent : null;
+
+  // Enrollment options load when the modal opens (audit F-A1/F-M2): the
+  // student's placement ceiling (which classes the server will accept), the
+  // level catalog (for ordering classes against that ceiling), and the
+  // branch's academic terms (structured semester names).
+  useEffect(() => {
+    if (!showEnrollModal || !activeStudentInfo) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [detail, levels, terms] = await Promise.all([
+          api.get<{ placementCeiling?: { levelId: string; levelName: string } | null }>(`/students/${activeStudentInfo.id}`),
+          api.get<Array<{ id: string; order?: number }>>('/academic/levels').catch(() => []),
+          api.get<Array<{ id: string; name: string; year: number; isActive?: boolean }>>('/academic/terms', { branchId: activeStudentInfo.branchId }).catch(() => []),
+        ]);
+        if (cancelled) return;
+        setEnrollCeiling(detail.placementCeiling ?? null);
+        setEnrollLevelOrders(Object.fromEntries((levels as Array<{ id: string; order?: number }>).map((l) => [l.id, Number(l.order ?? 0)])));
+        setEnrollTerms((terms as Array<{ id: string; name: string; year: number; isActive?: boolean }>)
+          .filter((t) => t.isActive !== false)
+          .map((t) => ({ id: t.id, name: t.name, year: t.year })));
+      } catch {
+        if (!cancelled) { setEnrollCeiling(null); setEnrollLevelOrders({}); setEnrollTerms([]); }
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the fetch keys on the modal being open for THIS student; re-running on any student-object identity change would refetch an unchanged answer.
+  }, [showEnrollModal, activeStudentInfo?.id]);
 
   // Finance map from SERVER-aggregated balances.
   //
@@ -321,11 +356,42 @@ export default function StudentsView({
     }
   };
 
+  // Which classes the modal may offer (audit F-M2): same branch, active, a
+  // free seat, gender-compatible, and not above the student's placement
+  // ceiling. The server re-checks every one of these — this filter exists so
+  // the desk is never OFFERED a choice the server would refuse.
+  const enrollableClasses = useMemo(() => {
+    if (!activeStudentInfo) return [] as Array<Class & { blockedReason?: string }>;
+    const ceilingOrder = enrollCeiling ? enrollLevelOrders[enrollCeiling.levelId] : undefined;
+    return classes
+      .filter((c) => c.status === 'active' && c.branchId === activeStudentInfo.branchId)
+      .map((c) => {
+        const freeSeats = Math.max(0, (c.capacity || 0) - (c.enrolled ?? 0));
+        if (c.capacity > 0 && freeSeats <= 0) return { ...c, blockedReason: 'full' };
+        if (c.genderPolicy && c.genderPolicy !== 'mixed' && activeStudentInfo.gender && c.genderPolicy !== activeStudentInfo.gender) return { ...c, blockedReason: 'gender policy' };
+        if (ceilingOrder !== undefined && c.levelId && (enrollLevelOrders[c.levelId] ?? 0) > ceilingOrder) return { ...c, blockedReason: 'above placement' };
+        return { ...c, blockedReason: undefined };
+      });
+  }, [classes, activeStudentInfo, enrollCeiling, enrollLevelOrders]);
+
+  const selectedEnrollClass = enrollableClasses.find((c) => c.id === enrollClassId) || null;
+
+  // Structured semester names only (audit F-M2): the branch's active academic
+  // terms, with one deterministic seasonal fallback so a branch that has not
+  // configured terms is still enrollable — never a free-text field.
+  const enrollTermOptions = useMemo(() => {
+    if (enrollTerms.length > 0) return enrollTerms.map((t) => t.name);
+    const now = new Date();
+    const season = now.getMonth() >= 8 ? 'Fall' : now.getMonth() >= 5 ? 'Summer' : 'Spring';
+    return [`${season} ${now.getFullYear()}`];
+  }, [enrollTerms]);
+
   const handleSemesterEnroll = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeStudentInfo || !enrollSemesterName || !enrollClassId) return triggerToast('Missing fields.', 'error');
+    if (selectedEnrollClass?.blockedReason) return triggerToast(`That class cannot be selected (${selectedEnrollClass.blockedReason}).`, 'error');
     try {
-      await enrollStudentSemester(activeStudentInfo.id, enrollSemesterName, enrollClassId, enrollTuitionAmount, enrollAmountPaidNow);
+      await enrollStudentSemester(activeStudentInfo.id, enrollSemesterName, enrollClassId, enrollAmountPaidNow);
       setShowEnrollModal(false);
       triggerToast('New semester enrollment successful.', 'success');
     } catch (err: any) {
@@ -486,7 +552,7 @@ export default function StudentsView({
                 canSuspendStudent={canSuspendStudent} canResumeStudent={canResumeStudent} canPrintStudent={canPrintStudent}
                 updateStudent={updateStudent} updateStudentStatus={updateStudentStatus}
                 issueStudentCard={issueStudentCard} triggerToast={triggerToast} onClose={() => setSelectedStudent(null)}
-                onOpenEnroll={() => { setEnrollSemesterName(''); setEnrollClassId(''); setEnrollTuitionAmount(0); setEnrollAmountPaidNow(0); setShowEnrollModal(true); }}
+                onOpenEnroll={() => { setEnrollSemesterName(''); setEnrollClassId(''); setEnrollAmountPaidNow(0); setEnrollTerms([]); setEnrollCeiling(null); setEnrollLevelOrders({}); setShowEnrollModal(true); }}
                 onOpenExtraClass={() => setShowExtraClassModal(true)}
                 onOpenRefund={() => { setRefundStudent(activeStudentInfo); setRefundAmount(0); setRefundReason(''); void openRefund(activeStudentInfo); }}
                 onPayInstallment={(instId, amount) => { setPaymentStudent(activeStudentInfo); setPayCategory('installment'); setPayInstallmentId(instId); setPayAmount(amount); }}
@@ -645,14 +711,35 @@ export default function StudentsView({
           <div className="bg-white border rounded-2xl p-5 shadow-xl w-full max-w-md text-xs space-y-4">
             <h3 className="font-extrabold text-slate-900 text-sm border-b pb-2">New Semester Enrollment</h3>
             <form onSubmit={handleSemesterEnroll} className="space-y-3">
-              <input type="text" placeholder="Semester Name (e.g. Fall 2026)" value={enrollSemesterName} onChange={(e) => setEnrollSemesterName(e.target.value)} className={inputCls} required />
-              <select value={enrollClassId} onChange={(e) => { setEnrollClassId(e.target.value); const c = classes.find(c => c.id === e.target.value); if (c) { setEnrollTuitionAmount(c.fee); setEnrollAmountPaidNow(c.fee); } }} className={inputCls} required>
-                <option value="">-- Select Class --</option>
-                {classes.filter(c => c.status === 'active' && c.branchId === activeStudentInfo?.branchId).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
+              <div>
+                <label className="block text-slate-600 mb-1 font-medium">Academic term</label>
+                <select value={enrollSemesterName} onChange={(e) => setEnrollSemesterName(e.target.value)} className={inputCls} required>
+                  <option value="">-- Select Term --</option>
+                  {enrollTermOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+                </select>
+                {enrollTerms.length === 0 && <p className="text-slate-400 mt-1">No academic term is configured for this branch — add terms in Academic Setup for a proper term list.</p>}
+              </div>
+              <div>
+                <label className="block text-slate-600 mb-1 font-medium">Class</label>
+                <select value={enrollClassId} onChange={(e) => { setEnrollClassId(e.target.value); setEnrollAmountPaidNow(0); }} className={inputCls} required>
+                  <option value="">-- Select Class --</option>
+                  {enrollableClasses.map((c) => (
+                    <option key={c.id} value={c.id} disabled={!!c.blockedReason}>
+                      {c.name}{c.blockedReason ? ` — ${c.blockedReason}` : ''} ({c.level}, {formatAFN(c.fee)})
+                    </option>
+                  ))}
+                </select>
+                {enrollCeiling && <p className="text-slate-400 mt-1">Placement authorizes up to {enrollCeiling.levelName}.</p>}
+              </div>
               <div className="grid grid-cols-2 gap-3">
-                <input type="number" placeholder="Total Fee" value={enrollTuitionAmount} onChange={(e) => setEnrollTuitionAmount(Number(e.target.value))} className={`${inputCls} font-mono`} required />
-                <input type="number" placeholder="Paid Today" value={enrollAmountPaidNow} onChange={(e) => setEnrollAmountPaidNow(Number(e.target.value))} className={`${inputCls} font-mono`} required />
+                <div>
+                  <label className="block text-slate-600 mb-1 font-medium">Tuition (from class fee)</label>
+                  <input type="text" readOnly tabIndex={-1} value={selectedEnrollClass ? formatAFN(selectedEnrollClass.fee) : '—'} className={`${inputCls} font-mono bg-slate-50 text-slate-500`} />
+                </div>
+                <div>
+                  <label className="block text-slate-600 mb-1 font-medium">Paid today</label>
+                  <input type="number" min={0} max={selectedEnrollClass?.fee ?? undefined} placeholder="Paid Today" value={enrollAmountPaidNow} onChange={(e) => setEnrollAmountPaidNow(Number(e.target.value))} className={`${inputCls} font-mono`} required />
+                </div>
               </div>
               <div className="flex gap-2 justify-end pt-3 border-t">
                 <button type="button" onClick={() => setShowEnrollModal(false)} className={btnSecondary}>Cancel</button>

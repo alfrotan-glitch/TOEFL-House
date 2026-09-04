@@ -20,6 +20,7 @@ import { describeVisitorWorkflow, summarizeVisitorWorkflow } from '../core/visit
 import { evaluateConversionEligibilityForVisitor } from '../core/visitors/conversion-eligibility.js';
 import { LEAD_CONVERTED_SQL } from '../core/visitors/lead-lifecycle.js';
 import { findDuplicateCandidates } from '../core/visitors/duplicate-lookup.js';
+import { eventBus } from '../core/events/event-bus.js';
 import { addNotification } from '../utils/notifications.js';
 import { getNumberSetting, incrementNumberSetting } from '../utils/settings.js';
 import { resolveFeeRule } from '../core/configuration/policy-resolver.js';
@@ -971,8 +972,20 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
     }
 
     journey.appendEvent({ studentId: newStudentId, eventType: JourneyEventType.STUDENT_REGISTERED, occurredAt: date, branchId: studentBranchId, actorUserId: user.userId, actorName: user.fullName, payload: { studentCode, fromVisitorId: visitor.id, source: visitor.source, targetClassId: classItem?.id ?? null, workflow: 'admission_before_placement' } });
+
+    // Outbox row committed atomically with the conversion (audit F-A2: this
+    // is a student registration and must feed the same `student.registered`
+    // automations as the manual path).
+    return {
+      registrationEvent: eventBus.emit(
+        'student.registered', 'student', newStudentId,
+        { fullName: visitor.full_name, studentCode, branchId: studentBranchId },
+        { operatorId: user.userId, branchId: studentBranchId },
+      ),
+    };
   });
-  tx();
+  const { registrationEvent } = tx();
+  if (registrationEvent) void eventBus.dispatch(registrationEvent);
 
   addNotification('Student Admission Created', `Student ${visitor.full_name} admitted. Complete placement, settle invoices, then enroll from the student workspace.`, 'success', studentBranchId);
   writeAudit(req, `Converted visitor ${visitor.full_name} to student ${studentCode}`, { newValue: JSON.stringify({ studentId: newStudentId, stage: admissionStage, targetClassId: classItem?.id ?? null, invoices: issuedInvoices, workflow: 'admission_before_placement' }) });

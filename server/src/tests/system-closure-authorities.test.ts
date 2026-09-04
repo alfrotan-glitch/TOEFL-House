@@ -112,14 +112,14 @@ describe('CLOSURE-2 — head_of_department is academic-only and cannot waive deb
     const blocked = await supertest(app)
       .post('/api/students/clo_s_hold/enroll-semester')
       .set(authHeader(hod))
-      .send({ semesterName: 'Term 2 HOD', classId: 'clo_c_next', tuitionAmount: 20000 });
+      .send({ semesterName: 'Term 2 HOD', classId: 'clo_c_next' });
     expect(blocked.status).toBe(403);
     expect(String(blocked.body.error)).toContain('Academic Hold');
 
     const allowed = await supertest(app)
       .post('/api/students/clo_s_hold/enroll-semester')
       .set(authHeader(owner))
-      .send({ semesterName: 'Term 2 Owner', classId: 'clo_c_next', tuitionAmount: 20000 });
+      .send({ semesterName: 'Term 2 Owner', classId: 'clo_c_next' });
     expect(allowed.status).toBe(201);
   });
 });

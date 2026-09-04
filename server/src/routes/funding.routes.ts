@@ -419,10 +419,23 @@ fundingRouter.post('/scholarships/award', requirePermission('Funding.Edit'), ah(
   if (amount > fund.available) throw new HttpError(409, `Only ${fund.available} AFN is available in this scholarship fund.`);
   const awardId = id('scha');
   const awardDate = assertOptionalIsoDate(body.awardDate, 'awardDate') ?? today();
-  db.prepare(
-    `INSERT INTO scholarship_awards (id, scholarship_id, student_id, amount, award_date, notes, branch_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(awardId, scholarshipId, studentId, amount, awardDate, typeof body.notes === 'string' ? body.notes.trim() || null : null, branchId);
+  const studentName = (db.prepare('SELECT full_name FROM students WHERE id = ?').get(studentId) as { full_name: string } | undefined)?.full_name ?? null;
+  // Row and event commit together (audit F-A2: the scholarship.awarded
+  // notification handler existed with no emitter).
+  const { awardEvent } = db.transaction(() => {
+    db.prepare(
+      `INSERT INTO scholarship_awards (id, scholarship_id, student_id, amount, award_date, notes, branch_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(awardId, scholarshipId, studentId, amount, awardDate, typeof body.notes === 'string' ? body.notes.trim() || null : null, branchId);
+    return {
+      awardEvent: eventBus.emit(
+        'scholarship.awarded', 'scholarship', awardId,
+        { studentName, studentId, scholarshipId, amount, branchId },
+        { operatorId: req.user?.userId ?? null, branchId },
+      ),
+    };
+  })();
+  if (awardEvent) void eventBus.dispatch(awardEvent);
   writeAudit(req, `Created scholarship award ${awardId}`, { branchId, newValue: JSON.stringify({ scholarshipId, studentId, amount }) });
   res.status(201).json({ id: awardId, fund: getFundPosition(db, scholarshipId) });
 }));

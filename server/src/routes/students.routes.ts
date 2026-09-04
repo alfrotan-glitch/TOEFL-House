@@ -46,6 +46,7 @@ import { assertPlacementEligibleForClass } from '../core/placement/enrollment-ga
 import { assertNotAlreadySeatedInClass } from '../core/academic/class-admission.js';
 import { JourneyEventType } from '../core/journey/event-types.js';
 import { resolveIdempotency, isUniqueViolation } from '../utils/idempotency.js';
+import { eventBus } from '../core/events/event-bus.js';
 // Single authorities for the Student subsystem.
 import { normalizeStudentInput, studentPhoneKey } from '../core/students/student-input.js';
 import {
@@ -78,7 +79,21 @@ const stmtGetPaymentsAll = db.prepare<[number, number], PaymentRow>('SELECT * FR
 const stmtGetPaymentsByBranch = db.prepare<[string, number, number], PaymentRow>('SELECT * FROM payments WHERE branch_id = ? ORDER BY date DESC LIMIT ? OFFSET ?');
 
 const stmtGetClassDetails = db.prepare('SELECT * FROM classes WHERE id = ?');
-const stmtGetClassFee = db.prepare('SELECT fee FROM classes WHERE id = ?');
+/**
+ * The highest level a student may be enrolled in, derived exactly as the
+ * enrollment gate derives it (`core/placement/enrollment-gate.ts`): the latest
+ * COMPLETED placement attempt, examiner override first. Exposed on the student
+ * detail so enrollment UIs can offer only classes the gate would accept — the
+ * server remains the authority; this is the same answer it would give.
+ */
+const stmtGetPlacementCeiling = db.prepare(`
+  SELECT l.id AS level_id, l.name AS level_name
+    FROM placement_assessment_attempts a
+    JOIN students s ON s.lead_id = a.visitor_id
+    JOIN levels l ON l.id = COALESCE(a.override_level_id, a.recommended_level_id)
+   WHERE s.id = ? AND a.status = 'completed'
+   ORDER BY a.completed_at DESC, a.attempt_number DESC
+   LIMIT 1`);
 const stmtGetLevelProgramVersion = db.prepare('SELECT program_version_id FROM levels WHERE id = ?');
 /**
  * Phone identity lookup, normalized.
@@ -813,6 +828,13 @@ studentsRouter.get('/:id', requirePermission('Student.View'), ah(async (req, res
   // on the roster and on the profile.
   res.json({
     ...mapStudents([student], { includeFinance: mayViewFinance })[0],
+    // The placement ceiling is academic guidance, not financial data, so it is
+    // not gated on Payment.View — every operator offered an enrollment choice
+    // needs to know which classes the gate will accept.
+    placementCeiling: (() => {
+      const row = stmtGetPlacementCeiling.get(student.id) as { level_id: string; level_name: string } | undefined;
+      return row ? { levelId: row.level_id, levelName: row.level_name } : null;
+    })(),
     ...(mayViewFinance ? {
       balance: {
         lifetime: getStudentBalance(db, student.id, 'all'),
@@ -913,8 +935,19 @@ studentsRouter.post('/manual', requirePermission('Student.Create'), ah(async (re
       stmtInsertInvoiceItem.run(id('ii'), registrationInvoiceId, registrationRule.name, registrationFeeAmount, registrationFeeAmount);
       issuedInvoices.push({ id: registrationInvoiceId, invoiceNumber: registrationInvoiceNumber, chargeKind: 'registration', amount: registrationFeeAmount, status: 'issued' });
     }
+    // Outbox row committed atomically with the registration (audit F-A2: the
+    // automation layer was seeded on `student.registered` while no emitter
+    // existed — the "New Student Welcome" automation could never fire).
+    return {
+      registrationEvent: eventBus.emit(
+        'student.registered', 'student', newId,
+        { fullName, studentCode, branchId: studentBranchId },
+        { operatorId: user.userId, branchId: studentBranchId },
+      ),
+    };
   });
-  tx();
+  const { registrationEvent } = tx();
+  if (registrationEvent) void eventBus.dispatch(registrationEvent);
 
   try {
     const journey = getJourneyEngine(db);
@@ -1095,10 +1128,12 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
       if (existing) return res.status(200).json({ receiptNumber: existing.receipt_number, amountCharged: existing.amount, idempotentReplay: true });
     }
   }
-  const rc = nextReceiptNumber();
   const payId = id('pay');
   let resolvedAmount = 0;
   let semName: string | null = null;
+  // Allocated inside the transaction that writes the receipt: a rejected or
+  // raced payment must not burn a number from the gap-free series.
+  let receiptNumber: string | null = null;
   const requestedAmount = parsedAmount;
   if (requestedAmount !== null && requestedAmount <= 0) throw new HttpError(400, 'Amount must be greater than 0.');
 
@@ -1214,6 +1249,8 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
     // above are read-then-write and every concurrent request passes them
     // simultaneously. Writing NULL here for guarded categories would disable
     // the unique index, because SQLite considers each NULL distinct.
+    const rc = nextReceiptNumber();
+    receiptNumber = rc;
     stmtInsertPayment.run(payId, student.id, resolvedAmount, date, resolvedMethod, category, notes || 'Smart Payment', rc, student.branch_id, semName, null, idempotencyKey);
     if (settledObligationId) {
       allocatePaymentToObligation(db, {
@@ -1232,9 +1269,25 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
       ? `${category === 'other' ? 'Ad-hoc charge' : `${category} charge`} for ${student.full_name}: ${String(notes).trim()}`
       : `Received ${category} payment from ${student.full_name}`;
     recordIncome({ category, amount: resolvedAmount, date, description: ledgerDescription, referenceId: student.id, paymentId: payId, operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null, branchId: student.branch_id });
+    // Outbox row committed with the money it describes (audit F-A2). The
+    // remaining balance is read INSIDE the transaction — after this payment —
+    // because the Outstanding Balance Reminder automation conditions on it.
+    return {
+      paymentEvent: eventBus.emit(
+        'payment.received', 'payment', payId,
+        {
+          amount: resolvedAmount,
+          studentName: student.full_name,
+          remainingBalance: getStudentBalance(db, student.id, 'active').outstanding,
+          category, receiptNumber, branchId: student.branch_id,
+        },
+        { operatorId: user.userId, branchId: student.branch_id },
+      ),
+    };
   });
+  let paymentEvent: ReturnType<typeof eventBus.emit> | undefined;
   try {
-    tx();
+    ({ paymentEvent } = tx());
   } catch (err) {
     // Atomic backstop. The pre-check above is a fast path; under true
     // concurrency several requests can pass it simultaneously. Only one can
@@ -1252,11 +1305,12 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
   }
 
   try {
-    getJourneyEngine(db).appendEvent({ studentId: student.id, eventType: JourneyEventType.PAYMENT_RECORDED, occurredAt: date, branchId: student.branch_id, actorUserId: user.userId, actorName: user.fullName, payload: { amount: resolvedAmount, category, receiptNumber: rc } });
+    getJourneyEngine(db).appendEvent({ studentId: student.id, eventType: JourneyEventType.PAYMENT_RECORDED, occurredAt: date, branchId: student.branch_id, actorUserId: user.userId, actorName: user.fullName, payload: { amount: resolvedAmount, category, receiptNumber } });
   } catch (err) { log.warn('[journey] failed', err); }
+  if (paymentEvent) void eventBus.dispatch(paymentEvent);
 
-  writeAudit(req, `Recorded ${category} payment ${resolvedAmount} AFN from ${student.full_name}`, { branchId: student.branch_id, newValue: JSON.stringify({ receipt: rc, amount: resolvedAmount, category, paymentId: payId, semester: semName }) });
-  res.status(201).json({ receiptNumber: rc, amountCharged: resolvedAmount });
+  writeAudit(req, `Recorded ${category} payment ${resolvedAmount} AFN from ${student.full_name}`, { branchId: student.branch_id, newValue: JSON.stringify({ receipt: receiptNumber, amount: resolvedAmount, category, paymentId: payId, semester: semName }) });
+  res.status(201).json({ receiptNumber, amountCharged: resolvedAmount });
 }));
 
 /**
@@ -1387,8 +1441,10 @@ studentsRouter.post('/:id/refund', requirePermission('Refund.Approve'), ah(async
     const existing = stmtGetPaymentByIdempotency.get(candidate, student.id) as any;
     if (existing) return res.status(200).json({ receiptNumber: existing.receipt_number, idempotentReplay: true });
   }
-  const rc = `REF-${nextReceiptNumber()}`;
   const payId = id('pay');
+  // Allocated inside the transaction that writes the refund receipt: a
+  // rejected or raced refund must not burn a number from the gap-free series.
+  let receiptNumber: string | null = null;
 
   const tx = db.transaction(() => {
     // Re-read inside the transaction: two refunds racing on one payment must
@@ -1398,6 +1454,8 @@ studentsRouter.post('/:id/refund', requirePermission('Refund.Approve'), ah(async
     if (refundAmount > stillRefundable) {
       throw new HttpError(409, `Only ${stillRefundable} AFN remains refundable on that payment.`);
     }
+    const rc = `REF-${nextReceiptNumber()}`;
+    receiptNumber = rc;
     stmtInsertRefundPayment.run(
       payId, student.id, -refundAmount, date, String(reason).trim(), rc, student.branch_id,
       idempotencyKey, target.id, target.semester ?? null,
@@ -1430,11 +1488,11 @@ studentsRouter.post('/:id/refund', requirePermission('Refund.Approve'), ah(async
   }
 
   try {
-    getJourneyEngine(db).appendEvent({ studentId: student.id, eventType: JourneyEventType.PAYMENT_RECORDED, occurredAt: date, branchId: student.branch_id, actorUserId: user.userId, actorName: user.fullName, payload: { amount: -refundAmount, category: 'refund', receiptNumber: rc, refundsPaymentId: target.id } });
+    getJourneyEngine(db).appendEvent({ studentId: student.id, eventType: JourneyEventType.PAYMENT_RECORDED, occurredAt: date, branchId: student.branch_id, actorUserId: user.userId, actorName: user.fullName, payload: { amount: -refundAmount, category: 'refund', receiptNumber, refundsPaymentId: target.id } });
   } catch (err) { log.warn('[journey] failed', err); }
 
-  writeAudit(req, `Refunded ${refundAmount} AFN to ${student.full_name}`, { branchId: student.branch_id, oldValue: JSON.stringify({ reason: String(reason), refundsPaymentId: target.id, refundsCategory: target.category }), newValue: JSON.stringify({ receipt: rc, amount: refundAmount, paymentId: payId }) });
-  res.status(201).json({ receiptNumber: rc, refundsPaymentId: target.id, refundsCategory: target.category, semester: target.semester ?? null });
+  writeAudit(req, `Refunded ${refundAmount} AFN to ${student.full_name}`, { branchId: student.branch_id, oldValue: JSON.stringify({ reason: String(reason), refundsPaymentId: target.id, refundsCategory: target.category }), newValue: JSON.stringify({ receipt: receiptNumber, amount: refundAmount, paymentId: payId }) });
+  res.status(201).json({ receiptNumber, refundsPaymentId: target.id, refundsCategory: target.category, semester: target.semester ?? null });
 }));
 
 // ============================================================================
@@ -1446,28 +1504,33 @@ studentsRouter.post('/:id/enroll-semester', requirePermission('Class.Assign'), a
   const student = requireStudent(req, req.params.id);
   assertStudentOperable(student, 'enroll this student in a semester');
   const { tuitionAmount, amountPaidNow } = req.body ?? {};
-  const classId = optionalText(req.body?.classId, 'Class id', TEXT_LIMITS.short);
+  const classId = requiredText(req.body?.classId, 'Class id', TEXT_LIMITS.short);
   const semesterName = requiredText(req.body?.semesterName, 'Semester name', TEXT_LIMITS.name);
   const notes = optionalText(req.body?.notes, 'Enrollment notes', TEXT_LIMITS.notes);
   if (student.status !== 'active') throw new HttpError(409, 'Only active students can be enrolled.');
-  if (classId) {
-    const cls = stmtGetClassDetails.get(classId) as any;
-    if (!cls) throw new HttpError(404, 'Class not found.');
-    if (cls.branch_id !== student.branch_id) throw new HttpError(400, 'Class belongs to another branch.');
-    if (cls.status !== 'active') throw new HttpError(400, 'Selected class is not active.');
-    assertClassGenderAllowsStudent(classId, student.gender);
+  // PRICE AUTHORITY (audit F-A1). `student_semesters` is the registered
+  // authority for what a term costs, and `classes.fee` — pinned to the level
+  // fee rule at class creation, uneditable while pinned — is the only source
+  // this endpoint may write from. A client-supplied figure priced the term at
+  // whatever the desk typed (proven live: a 6,500 AFN class sold for 50 AFN
+  // with a receipt and a clean balance), so the field is refused outright,
+  // exactly as POST /students/manual refuses it. `amountPaidNow` stays: how
+  // much cash walks in is the desk's fact; the price is not.
+  if (tuitionAmount != null) {
+    throw new HttpError(400, 'Tuition is derived from the class fee and cannot be supplied.');
   }
+  const cls = stmtGetClassDetails.get(classId) as any;
+  if (!cls) throw new HttpError(404, 'Class not found.');
+  if (cls.branch_id !== student.branch_id) throw new HttpError(400, 'Class belongs to another branch.');
+  if (cls.status !== 'active') throw new HttpError(400, 'Selected class is not active.');
+  assertClassGenderAllowsStudent(classId, student.gender);
 
   // Check Academic Hold before starting a new semester
   checkAcademicHold(req, student.id);
 
-  let resolvedTuition = tuitionAmount;
-  if (resolvedTuition == null && classId) {
-    const cls = stmtGetClassFee.get(classId) as any;
-    resolvedTuition = cls ? cls.fee : 0;
-  }
-  try { resolvedTuition = assertMoney(resolvedTuition ?? 0, 'tuition amount'); }
-  catch { throw new HttpError(400, 'Tuition amount must be zero or greater.'); }
+  let resolvedTuition: number;
+  try { resolvedTuition = assertMoney(cls.fee ?? 0, 'class fee'); }
+  catch { throw new HttpError(409, 'The class fee on record is not a valid amount. Correct the class configuration before enrolling.'); }
   // Same re-resolution as enroll-class — a revoked or expired grant
   // must not price a new semester.
   const effectivePercent = resolveAuthorizedDiscount(db, student.id, Math.max(0, Number(student.discount_percent || 0)), { branchId: student.branch_id }).percent;
@@ -1479,8 +1542,9 @@ studentsRouter.post('/:id/enroll-semester', requirePermission('Class.Assign'), a
   if (paidNow > netTuition) throw new HttpError(400, 'Amount received cannot exceed the payable fee.');
 
   const date = today();
-  const rc = nextReceiptNumber();
   const newSemId = id('sem');
+  let receiptNumber: string | null = null;
+  let paymentEvent: ReturnType<typeof eventBus.emit> | undefined;
 
   const tx = db.transaction(() => {
     // Idempotency guard (also enforced by uq_student_semester_active): a
@@ -1491,8 +1555,15 @@ studentsRouter.post('/:id/enroll-semester', requirePermission('Class.Assign'), a
       `SELECT 1 FROM student_semesters WHERE student_id = ? AND semester_name = ? AND status = 'active' LIMIT 1`
     ).get(student.id, semesterName);
     if (existingActiveSem) throw new HttpError(409, `Student is already enrolled in ${semesterName}.`);
-    stmtInsertSemester.run(newSemId, student.id, semesterName, classId || null, date, resolvedTuition, netTuition);
+    stmtInsertSemester.run(newSemId, student.id, semesterName, classId, date, resolvedTuition, netTuition);
     if (paidNow > 0) {
+      // Allocated HERE, inside the transaction, and only when a receipt will
+      // actually be written: the sequence is gap-free by contract
+      // (`documentNumbers`), and allocating before the transaction burned a
+      // number on every rolled-back or cash-free enrollment (observed live as
+      // a hole in the receipt series).
+      const rc = nextReceiptNumber();
+      receiptNumber = rc;
       const semPayId = id('pay');
       // Keyed on the semester enrolment itself: uq_student_semester_active
       // already forbids a second active semester of the same name, so this
@@ -1504,16 +1575,28 @@ studentsRouter.post('/:id/enroll-semester', requirePermission('Class.Assign'), a
         operatorName: user.fullName, date,
       });
       recordIncome({ category: 'fee', amount: paidNow, date, description: `Received ${semesterName} fee from ${student.full_name}`, referenceId: student.id, paymentId: semPayId, operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null, branchId: student.branch_id });
+      // Outbox row committed with the money it describes (audit F-A2).
+      paymentEvent = eventBus.emit(
+        'payment.received', 'payment', semPayId,
+        {
+          amount: paidNow,
+          studentName: student.full_name,
+          remainingBalance: getStudentBalance(db, student.id, 'active').outstanding,
+          category: 'fee', receiptNumber: rc, semesterName, branchId: student.branch_id,
+        },
+        { operatorId: user.userId, branchId: student.branch_id },
+      );
     }
     // Enrollment happens in the same transaction (see manual-add above).
     // writeSemester:false because the explicit semester row above carries the
     // real fee amounts.
-    getEnrollmentService(db).enroll({ studentId: student.id, branchId: student.branch_id, semesterName, classId: classId || null, enrollmentType: 'new', notes: notes || null, actorUserId: user.userId, actorName: user.fullName, startedAt: date, autoInvoice: resolvedTuition <= 0 && paidNow <= 0, writeSemester: false });
+    getEnrollmentService(db).enroll({ studentId: student.id, branchId: student.branch_id, semesterName, classId, enrollmentType: 'new', notes: notes || null, actorUserId: user.userId, actorName: user.fullName, startedAt: date, autoInvoice: resolvedTuition <= 0 && paidNow <= 0, writeSemester: false });
   });
   tx();
+  if (paymentEvent) void eventBus.dispatch(paymentEvent);
 
-  writeAudit(req, `Enrolled ${student.full_name} in semester ${semesterName}`, { newValue: JSON.stringify({ semesterId: newSemId, classId: classId || null, netTuition, paidNow, receipt: paidNow > 0 ? rc : null }) });
-  res.status(201).json({ ok: true, semesterId: newSemId, receiptNumber: paidNow > 0 ? rc : null });
+  writeAudit(req, `Enrolled ${student.full_name} in semester ${semesterName}`, { newValue: JSON.stringify({ semesterId: newSemId, classId, classFee: resolvedTuition, netTuition, paidNow, receipt: receiptNumber }) });
+  res.status(201).json({ ok: true, semesterId: newSemId, receiptNumber });
 }));
 
 studentsRouter.post('/:id/issue-card', requirePermission('Student.Print'), ah(async (req, res) => {

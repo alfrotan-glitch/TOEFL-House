@@ -88,6 +88,67 @@ export function isDomainEventType(value: string): value is DomainEventType {
   return DOMAIN_EVENT_TYPE_SET.has(value);
 }
 
+/**
+ * Event types that actually have a runtime emitter.
+ * ======================================================================
+ * The catalog above is the complete VOCABULARY; this list is the subset
+ * that the system actually emits today. Anything else in the catalog is
+ * reserved vocabulary: no route or core writer publishes it, so an
+ * automation or workflow listening for it would NEVER fire. Triggerable
+ * surfaces (automation creation, workflow-definition creation) must
+ * reject reserved types instead of accepting a rule that cannot run.
+ *
+ * This list is not trusted on faith: src/tests/event-registry-honesty.test.ts
+ * scans the source tree and fails when the list and the real `.emit(` call
+ * sites drift apart — in either direction.
+ */
+export const EMITTED_EVENT_TYPES = [
+  // academic
+  'attendance.marked',
+  'class.activated',
+  'class.lifecycle_changed',
+  'session.scheduled',
+  // assessment
+  'exam.result_recorded',
+  // finance
+  'payment.received',
+  'expense.requested',
+  // funding / impact
+  'campaign.created',
+  'donation.received',
+  'donor.created',
+  'impact.report_generated',
+  'scholarship.awarded',
+  // inventory
+  'book.sold',
+  // student / crm
+  'student.registered',
+  // workflow engine
+  'workflow.completed',
+  'workflow.rejected',
+  'workflow.started',
+  'workflow.step_completed',
+] as const satisfies readonly DomainEventType[];
+
+// Emitted through a computed first argument rather than a literal, so the
+// honesty scan cannot see them at the call site. Each entry names the file
+// that owns the emit; the test verifies the literals really occur there
+// next to an `.emit(` call.
+export const DYNAMIC_EMIT_SITES: Readonly<Record<string, string>> = {
+  'session.completed': 'src/routes/sessions.routes.ts',
+  'session.cancelled': 'src/routes/sessions.routes.ts',
+};
+
+const EMITTED_SET = new Set<string>([...EMITTED_EVENT_TYPES, ...Object.keys(DYNAMIC_EMIT_SITES)]);
+
+/** True when some runtime writer publishes this event type. */
+export function isEmittedEventType(value: string): boolean {
+  return EMITTED_SET.has(value);
+}
+
+/** The honest picker surface: every type a trigger can actually listen for. */
+export const TRIGGERABLE_EVENT_TYPES: readonly DomainEventType[] = [...EMITTED_SET].sort() as DomainEventType[];
+
 export type WorkflowTrigger = DomainEventType | 'manual';
 export const WORKFLOW_TRIGGER_MANUAL = 'manual' as const;
 

@@ -61,8 +61,10 @@ async function newStudent(name: string): Promise<string> {
 
 /** Enrols the student and returns the semester id. */
 async function enrol(studentId: string, tuition: number): Promise<string> {
+  // Priced by the class fee (audit F-A1); the fixture moves the fee first.
+  db.prepare('UPDATE classes SET fee = ? WHERE id = ?').run(tuition, CLASS_ID);
   const res = await supertest(app).post(`/api/students/${studentId}/enroll-semester`).set(auth())
-    .send({ semesterName: 'Term', classId: CLASS_ID, tuitionAmount: tuition, amountPaidNow: 0 });
+    .send({ semesterName: 'Term', classId: CLASS_ID, amountPaidNow: 0 });
   expect(res.status).toBe(201);
   return res.body.semesterId as string;
 }

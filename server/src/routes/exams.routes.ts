@@ -3,6 +3,7 @@ import { isLeadClosed } from '../core/visitors/lead-lifecycle.js';
 import { Router } from 'express';
 import { db } from '../db/connection.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
+import { eventBus } from '../core/events/event-bus.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id, today } from '../utils/ids.js';
@@ -338,6 +339,7 @@ examsRouter.patch(
       }
     }
 
+    let resultEvent: ReturnType<typeof eventBus.emit> | undefined;
     const scoreTx = db.transaction(() => {
       stmtUpdateExamResult.run(score, status, certIssued ? 1 : 0, certNo, result.id);
       if (certIssued && result.student_id) {
@@ -354,8 +356,17 @@ examsRouter.patch(
           branchId: exam.branch_id,
         });
       }
+      // Outbox row committed with the score it describes (audit F-A2: the
+      // seeded "High Exam Result Review" automation conditions on `score`,
+      // and no emitter existed).
+      resultEvent = eventBus.emit(
+        'exam.result_recorded', 'exam', result.id,
+        { score, status, examId: exam.id, examTitle: exam.title, candidateName: result.candidate_name, certificateIssued: !!certIssued, branchId: exam.branch_id },
+        { operatorId: user.userId, branchId: exam.branch_id },
+      );
     });
     scoreTx();
+    if (resultEvent) void eventBus.dispatch(resultEvent);
 
     writeAudit(req, `Recorded score ${score} for ${result.candidate_name} in ${req.params.id}. Certificate: ${certIssued ? 'Yes' : 'No'}`);
     res.json({ id: result.id, status, certificateNo: certNo, diplomaFee: certIssued ? diplomaFee : 0 });

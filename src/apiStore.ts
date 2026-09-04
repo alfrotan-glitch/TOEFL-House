@@ -989,8 +989,11 @@ export function useApiStore() {
   };
 
   const enrollStudentSemester = async (studentId: string, semesterName: string, classId: string,
-    tuitionAmount: number, amountPaidNow?: number, notes?: string) => {
-    await api.post(`/students/${studentId}/enroll-semester`, { semesterName, classId, tuitionAmount, amountPaidNow, notes });
+    amountPaidNow?: number, notes?: string) => {
+    // Tuition is NOT sent: the server prices the term from the class's pinned
+    // fee (audit F-A1). A client figure here used to become the tuition of
+    // record.
+    await api.post(`/students/${studentId}/enroll-semester`, { semesterName, classId, amountPaidNow, notes });
     await Promise.all([reloadStudents(), reloadPayments(), reloadTransactions(), reloadFinanceOverview(), reloadNotifications()]);
     invalidate('finance', 'payments', 'students');
   };

@@ -73,6 +73,6 @@ try {
 const survivors = results.filter((result) => result[2].includes('SURVIVED') && !EQUIVALENT.has(result[0]));
 const equivalent = results.filter((result) => result[2].includes('SURVIVED') && EQUIVALENT.has(result[0]));
 const invalid = results.filter((result) => result[2] === 'INVALID');
-if (equivalent.length) console.log(`\n${equivalent.length} execution-proven equivalent mutant(s): ${equivalent.map((result) => result[0]).join(', ')}`);
+if (equivalent.length) console.log(`\n${equivalent.length} proven-equivalent mutant(s): ${equivalent.map((result) => result[0]).join(', ')}`);
 console.log(`\n${results.filter((result) => result[2] === 'KILLED').length}/${results.length} killed, ${survivors.length} non-equivalent survivors, ${invalid.length} invalid`);
 process.exit(survivors.length || invalid.length ? 1 : 0);

@@ -14,7 +14,7 @@ import { ah, HttpError } from '../middleware/errorHandler.js';
 import { id } from '../utils/ids.js';
 import { addNotification } from '../utils/notifications.js';
 import { eventBus } from '../core/events/event-bus.js';
-import { isWorkflowTrigger, WORKFLOW_TRIGGER_MANUAL } from '../core/events/event-registry.js';
+import { isWorkflowTrigger, WORKFLOW_TRIGGER_MANUAL, isEmittedEventType } from '../core/events/event-registry.js';
 
 export const workflowsRouter = Router();
 workflowsRouter.use(authenticate);
@@ -92,6 +92,15 @@ function normalizeWorkflowTrigger(raw: unknown): string {
   const trigger = typeof raw === 'string' ? raw.trim() : '';
   if (!trigger) throw new HttpError(400, 'Workflow trigger is required.');
   if (!isWorkflowTrigger(trigger)) throw new HttpError(400, `Unknown workflow trigger '${trigger}'.`);
+  // Manual is always valid. An event trigger is only valid when a writer
+  // actually emits that type — a workflow bound to reserved vocabulary would
+  // sit waiting forever while reporting itself active.
+  if (trigger !== WORKFLOW_TRIGGER_MANUAL && !isEmittedEventType(trigger)) {
+    throw new HttpError(
+      400,
+      `'${trigger}' is reserved vocabulary: no writer in the system emits it, so this workflow would never start. Pick an emitted event type or 'manual'.`,
+    );
+  }
   return trigger;
 }
 

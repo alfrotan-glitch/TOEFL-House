@@ -253,9 +253,11 @@ describe('fixed fees are charged once per student across all writers', () => {
 
   it('concurrent semester enrolment creates one semester and one tuition charge', async () => {
     const sid = await newStudent('Semester Racer');
+    // Priced by the class fee (audit F-A1).
+    db.prepare(`INSERT OR REPLACE INTO classes (id,name,level,branch_id,status,lifecycle_stage,schedule_time,fee) VALUES ('race_cls','Race Class','A1',?,'active','in_progress','08:00',5000)`).run(BRANCH);
     await Promise.all(
       Array.from({ length: 6 }, () =>
-        supertest(app).post(`/api/students/${sid}/enroll-semester`).set(auth()).send({ semesterName: 'Race-Term', tuitionAmount: 5000, amountPaidNow: 5000 }),
+        supertest(app).post(`/api/students/${sid}/enroll-semester`).set(auth()).send({ semesterName: 'Race-Term', classId: 'race_cls', amountPaidNow: 5000 }),
       ),
     );
     const sem = db.prepare(`SELECT COUNT(*) AS c FROM student_semesters WHERE student_id = ?`).get(sid) as { c: number };

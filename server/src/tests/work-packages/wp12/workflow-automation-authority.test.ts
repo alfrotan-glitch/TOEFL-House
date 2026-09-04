@@ -18,7 +18,7 @@ import { errorHandler } from '../../../middleware/errorHandler.js';
 import { eventBus } from '../../../core/events/event-bus.js';
 import { registerEventHandlers } from '../../../core/events/handlers.js';
 import { seedUser, bearerFor } from '../../support/identity.js';
-import { DOMAIN_EVENT_CATALOG } from '../../../core/events/event-registry.js';
+import { DOMAIN_EVENT_CATALOG, isEmittedEventType } from '../../../core/events/event-registry.js';
 
 const BRANCH = 'wp12_branch';
 const OWNER = 'u_wp12_owner';
@@ -159,7 +159,12 @@ describe('WP-12 package-local authority', () => {
       .set(bearerFor(GM));
     expect(gmRes.status).toBe(200);
     expect(gmRes.body.count).toBe(DOMAIN_EVENT_CATALOG.length);
-    expect(gmRes.body.types).toEqual(DOMAIN_EVENT_CATALOG);
+    // Each entry is the catalog row plus the honest `emitted` flag, so any
+    // picker built on this endpoint can separate real events from reserved
+    // vocabulary (see event-registry-honesty.test.ts).
+    expect(gmRes.body.types).toEqual(
+      DOMAIN_EVENT_CATALOG.map((entry) => ({ ...entry, emitted: isEmittedEventType(entry.type) })),
+    );
 
     const financeRes = await supertest(app)
       .get('/api/events/types')

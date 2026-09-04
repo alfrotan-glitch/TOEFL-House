@@ -81,6 +81,7 @@ beforeAll(() => {
 
   seedUser({ id: 'wp03_gm', role: 'general_manager', branchId: BRANCH_A });
   seedUser({ id: 'wp03_data', role: 'data_entry', branchId: BRANCH_A });
+  seedUser({ id: 'wp03_recep', role: 'receptionist', branchId: BRANCH_A });
   seedUser({ id: 'wp03_finance', role: 'finance_manager', branchId: BRANCH_A });
   seedUser({ id: 'wp03_split_finance', role: 'head_of_department', branchId: BRANCH_A });
   assignRole('wp03_split_finance', 'finance_manager', BRANCH_B, { isPrimary: false });
@@ -95,40 +96,109 @@ beforeAll(() => {
 });
 
 describe('student admission and lifecycle attacks', () => {
-  it('rejects non-money coercions and overpayment against a zero-fee semester', async () => {
+  it('rejects non-money coercions and overpayment against a zero-fee class', async () => {
     insertStudent('wp03_money', '0700003101');
+    insertClass('wp03_zero_class', BRANCH_A, 0);
     const coerced = await supertest(app)
       .post('/api/students/wp03_money/enroll-semester')
       .set(bearerFor('wp03_gm'))
-      .send({ semesterName: 'Coercion', tuitionAmount: true, amountPaidNow: true });
+      .send({ semesterName: 'Coercion', classId: 'wp03_zero_class', amountPaidNow: true });
     expect(coerced.status).toBe(400);
 
     const zeroOverpay = await supertest(app)
       .post('/api/students/wp03_money/enroll-semester')
       .set(bearerFor('wp03_gm'))
-      .send({ semesterName: 'Zero Fee', tuitionAmount: 0, amountPaidNow: 500 });
+      .send({ semesterName: 'Zero Fee', classId: 'wp03_zero_class', amountPaidNow: 500 });
     expect(zeroOverpay.status).toBe(400);
 
     const nonTextClass = await supertest(app)
       .post('/api/students/wp03_money/enroll-semester')
       .set(bearerFor('wp03_gm'))
-      .send({ semesterName: 'Bad class', classId: { nested: true }, tuitionAmount: 0 });
+      .send({ semesterName: 'Bad class', classId: { nested: true } });
     expect(nonTextClass.status).toBe(400);
+  });
+
+  it('PRICE INTEGRITY (audit F-A1): refuses a client-supplied tuition and prices the term from the class fee', async () => {
+    insertStudent('wp03_price', '0700003130');
+    insertClass('wp03_price_class', BRANCH_A, 6500);
+
+    // Any client figure — even the "correct" one — is refused: the price is
+    // not the caller's fact to state.
+    const spoof = await supertest(app)
+      .post('/api/students/wp03_price/enroll-semester')
+      .set(bearerFor('wp03_recep'))
+      .send({ semesterName: 'Spoofed Term', classId: 'wp03_price_class', tuitionAmount: 50, amountPaidNow: 50 });
+    expect(spoof.status).toBe(400);
+    expect(spoof.body.error).toMatch(/derived from the class fee/i);
+
+    // The receptionist — the desk role holding Class.Assign — cannot buy a
+    // discount: the term is priced at the class fee, nothing else.
+    const fair = await supertest(app)
+      .post('/api/students/wp03_price/enroll-semester')
+      .set(bearerFor('wp03_recep'))
+      .send({ semesterName: 'Fair Term', classId: 'wp03_price_class', amountPaidNow: 6500 });
+    expect(fair.status).toBe(201);
+    const term = db
+      .prepare(`SELECT fee_amount, net_fee_amount FROM student_semesters WHERE student_id = 'wp03_price' AND semester_name = 'Fair Term'`)
+      .get() as { fee_amount: number; net_fee_amount: number };
+    expect(term.fee_amount).toBe(6500);
+    expect(term.net_fee_amount).toBe(6500);
+
+    // A class is mandatory: a term without a class has no price authority.
+    const classless = await supertest(app)
+      .post('/api/students/wp03_price/enroll-semester')
+      .set(bearerFor('wp03_gm'))
+      .send({ semesterName: 'Classless Term', amountPaidNow: 0 });
+    expect(classless.status).toBe(400);
+  });
+
+  it('PRICE INTEGRITY: a failed or cash-free enrollment burns no receipt number', async () => {
+    insertStudent('wp03_gap', '0700003131');
+    insertClass('wp03_gap_class', BRANCH_A, 5000);
+    const counter = () =>
+      (db.prepare(`SELECT value FROM system_settings WHERE key = 'receipt_counter'`).get() as { value: string } | undefined)?.value ?? '0';
+    db.prepare(`INSERT OR REPLACE INTO system_settings (key, value) VALUES ('receipt_counter', '900')`).run();
+
+    const rejected = await supertest(app)
+      .post('/api/students/wp03_gap/enroll-semester')
+      .set(bearerFor('wp03_gm'))
+      .send({ semesterName: 'Gap Term', classId: 'wp03_gap_class', amountPaidNow: 99999 });
+    expect(rejected.status).toBe(400);
+    expect(Number(counter())).toBe(900);
+
+    const cashFree = await supertest(app)
+      .post('/api/students/wp03_gap/enroll-semester')
+      .set(bearerFor('wp03_gm'))
+      .send({ semesterName: 'Gap Term', classId: 'wp03_gap_class', amountPaidNow: 0 });
+    expect(cashFree.status).toBe(201);
+    expect(Number(counter())).toBe(900); // no receipt written, no number consumed
+
+    const withCash = await supertest(app)
+      .post('/api/students/wp03_gap/enroll-semester')
+      .set(bearerFor('wp03_gm'))
+      .send({ semesterName: 'Gap Term 2', classId: 'wp03_gap_class', amountPaidNow: 1000 });
+    expect(withCash.status).toBe(201);
+    expect(Number(counter())).toBe(901); // exactly one allocation for the one receipt
+    expect(withCash.body.receiptNumber).toBe('R-00000901');
   });
 
   it('allows a legitimate paid repeat after the prior semester is completed', async () => {
     insertStudent('wp03_repeat', '0700003102');
+    insertClass('wp03_repeat_class', BRANCH_A, 1000);
     const first = await supertest(app)
       .post('/api/students/wp03_repeat/enroll-semester')
       .set(bearerFor('wp03_gm'))
-      .send({ semesterName: 'Repeatable', tuitionAmount: 1000, amountPaidNow: 1000 });
+      .send({ semesterName: 'Repeatable', classId: 'wp03_repeat_class', amountPaidNow: 1000 });
     expect(first.status).toBe(201);
+    // Completing the term closes BOTH rows that carry it: the tuition term
+    // and the class seat (the duplicate rule keys on active seats).
     db.prepare("UPDATE student_semesters SET status='completed' WHERE id=?").run(first.body.semesterId);
+    db.prepare("UPDATE enrollments SET status='completed' WHERE student_id='wp03_repeat' AND semester_name='Repeatable'").run();
 
     const second = await supertest(app)
       .post('/api/students/wp03_repeat/enroll-semester')
       .set(bearerFor('wp03_gm'))
-      .send({ semesterName: 'Repeatable', tuitionAmount: 1000, amountPaidNow: 1000 });
+      .send({ semesterName: 'Repeatable', classId: 'wp03_repeat_class', amountPaidNow: 1000 });
     expect(second.status).toBe(201);
   });
 
@@ -257,10 +327,11 @@ describe('student admission and lifecycle attacks', () => {
          (id, student_id, semester_name, enroll_date, fee_amount, net_fee_amount, status)
        VALUES (?, 'wp03_split_finance_student', 'Debt term', ?, 1000, 1000, 'active')`,
     ).run(id('sem'), today());
+    insertClass('wp03_hold_class', BRANCH_A, 1000);
     const heldEnrollment = await supertest(app)
       .post('/api/students/wp03_split_finance_student/enroll-semester')
       .set(bearerFor('wp03_split_finance'))
-      .send({ semesterName: 'Cross-branch override attempt', tuitionAmount: 0, amountPaidNow: 0 });
+      .send({ semesterName: 'Cross-branch override attempt', classId: 'wp03_hold_class', amountPaidNow: 0 });
     expect(heldEnrollment.status).toBe(403);
   });
 

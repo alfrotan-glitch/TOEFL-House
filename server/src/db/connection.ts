@@ -35,6 +35,11 @@ if (dbDir && dbDir !== '.' && !fs.existsSync(dbDir)) {
 export const db: BetterSqlite3.Database = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
+// A second process sharing the database file (an operator running a script
+// against the live DB) would otherwise surface immediate SQLITE_BUSY 500s
+// instead of waiting for the writer. Harmless in the designed
+// single-instance deployment; cheap insurance everywhere else.
+db.pragma('busy_timeout = 5000');
 
 /**
  * Verifies the database matches the canonical schema and is internally sound.

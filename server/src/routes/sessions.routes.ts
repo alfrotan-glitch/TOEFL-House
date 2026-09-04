@@ -915,7 +915,12 @@ sessionsRouter.post(
       }
       // Auto-drop mutations and the attendance event are one transaction so a
       // crash cannot leave the attendance state without its durable event.
-      return eventBus.emit('attendance.marked', 'session', req.params.id, { classId: session.class_id, date: session.date, recordCount: records.length }, { operatorId: user.userId, branchId: session.branch_id });
+      // `attendanceRate` (percent present of THIS marking) is what the seeded
+      // "Low Attendance Alert" automation conditions on — without it the
+      // condition compares against undefined and can never fire (audit F-A2).
+      const present = records.filter((r) => r.status === 'present' || r.status === 'late').length;
+      const attendanceRate = Math.round((present / records.length) * 100);
+      return eventBus.emit('attendance.marked', 'session', req.params.id, { classId: session.class_id, date: session.date, recordCount: records.length, attendanceRate }, { operatorId: user.userId, branchId: session.branch_id });
     });
     const event = tx();
 
@@ -963,7 +968,10 @@ sessionsRouter.patch(
       if (status === 'absent') {
         autoDrop = checkAndApplyAutoDrop(roster.student_id, session.class_id, policy, user.userId);
       }
-      return eventBus.emit('attendance.marked', 'session', req.params.id, { classId: session.class_id, date: session.date, recordCount: 1 }, { operatorId: user.userId, branchId: session.branch_id });
+      // Same payload contract as the bulk path: the automation layer
+      // conditions on `attendanceRate` (audit F-A2).
+      const attendanceRate = (status === 'present' || status === 'late') ? 100 : 0;
+      return eventBus.emit('attendance.marked', 'session', req.params.id, { classId: session.class_id, date: session.date, recordCount: 1, attendanceRate }, { operatorId: user.userId, branchId: session.branch_id });
     });
     const event = tx();
     void eventBus.dispatch(event);

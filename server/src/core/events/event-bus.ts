@@ -1,10 +1,21 @@
 /**
 TOEFL House ERP — Domain Event Bus
 ============================================================
-The central nervous system of the entire architecture. Every state
-transition in any Bounded Context publishes a Domain Event here.
-Subscribers (workflows, automations, notifications, analytics) react
-asynchronously without the publisher knowing or caring who listens.
+The asynchronous coordination layer for the domains that publish here:
+academics (sessions, attendance, exam results), admissions (student
+registration), finance (payments, expenses), commerce (books), funding
+(donations, scholarships) and impact reporting. Publishers emit inside
+their business transaction (persistent outbox) and dispatch after commit.
+Subscribers (workflows, automations, notifications) react asynchronously
+without the publisher knowing or caring who listens.
+
+NOT a claim that every table write publishes: the student journey
+(`core/journey`) is a separate, synchronous event stream, and purely
+administrative CRUD (catalog edits, user management) publishes nothing.
+The event catalog (`event-registry.ts`) lists every type an emitter
+actually produces; an automation or workflow trigger outside that set
+cannot fire — `docs/registries/canonical-authority.md` records which
+transitions are wired.
 
 Design Principles:
 - Fire-and-Forget Publishing: Publishers never block on subscribers.

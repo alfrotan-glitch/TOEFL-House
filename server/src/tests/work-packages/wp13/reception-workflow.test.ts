@@ -267,7 +267,7 @@ describe('the reception lifecycle', () => {
     expect(awaitingFees.capabilities.canSettleInvoices).toBe(false);
 
     const blockedEnrollment = await supertest(app).post(`/api/students/${admission.studentId}/enroll-semester`).set(asReception)
-      .send({ semesterName: 'Blocked Term', classId: CLASS_B1, tuitionAmount: 20000, amountPaidNow: 0 });
+      .send({ semesterName: 'Blocked Term', classId: CLASS_B1, amountPaidNow: 0 });
     expect([403, 409]).toContain(blockedEnrollment.status);
     expect(blockedEnrollment.body.error).toMatch(/settled|hold|outstanding/i);
 
@@ -281,7 +281,7 @@ describe('the reception lifecycle', () => {
     expect(readyToEnroll.financial.cleared).toBe(true);
 
     const enrollment = await supertest(app).post(`/api/students/${admission.studentId}/enroll-semester`).set(asReception)
-      .send({ semesterName: 'Live Term', classId: CLASS_B1, tuitionAmount: 20000, amountPaidNow: 0 });
+      .send({ semesterName: 'Live Term', classId: CLASS_B1, amountPaidNow: 0 });
     expect(enrollment.status).toBe(201);
     expect(enrollment.body).toMatchObject({ ok: true });
 
@@ -331,7 +331,7 @@ describe('the reception lifecycle', () => {
     await supertest(app).post(`/api/invoices/${invoiceId}/pay`).set(asFinance).send({ amount: 500, paymentMethod: 'cash' });
 
     const above = await supertest(app).post(`/api/students/${admission.studentId}/enroll-semester`).set(asReception)
-      .send({ semesterName: 'Too High', classId: CLASS_C1, tuitionAmount: 20000, amountPaidNow: 0 });
+      .send({ semesterName: 'Too High', classId: CLASS_C1, amountPaidNow: 0 });
     expect(above.status).toBe(409);
     expect(above.body.error).toMatch(/above the authorized level|recommendation/i);
   });

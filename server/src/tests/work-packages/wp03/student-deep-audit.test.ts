@@ -81,6 +81,12 @@ describe('Student subsystem deep audit', () => {
     db.prepare(`INSERT OR IGNORE INTO student_semesters (id, student_id, semester_name, enroll_date, fee_amount, net_fee_amount, status)
       VALUES (?, ?, ?, ?, ?, ?, 'active')`).run(id('sem'), sid, semName, today(), fee, fee);
   }
+  // Terms are priced by the enrolled class (audit F-A1), so the enroll-semester
+  // cases need a class carrying a fee.
+  function seedClass(cid: string, branch: string, fee: number) {
+    db.prepare(`INSERT OR IGNORE INTO classes (id, name, level, branch_id, status, lifecycle_stage, schedule_time, fee)
+      VALUES (?, ?, 'A1', ?, 'active', 'in_progress', '08:00', ?)`).run(cid, `Class ${cid}`, branch, fee);
+  }
 
   // ── CONTROL TESTS (must PASS — the protections work) ─────────────────────
   it('control: duplicate identity (phone/email/tazkira) rejected', async () => {
@@ -107,8 +113,9 @@ describe('Student subsystem deep audit', () => {
   // ── DEFECT 1: enroll-semester double-submit ──────────────────────────────
   it('FIXED: enroll-semester duplicate submission creates exactly one semester + one income', async () => {
     seedStudent('stu_d1', 'D1 Student', BRANCH_A, '0700000010');
+    seedClass('stu_d1_class', BRANCH_A, 5000);
     const results = await Promise.all(Array.from({ length: 4 }, () =>
-      supertest(app).post('/api/students/stu_d1/enroll-semester').set(authHeader(registrar)).send({ semesterName: 'Level A1', tuitionAmount: 5000, amountPaidNow: 5000 })));
+      supertest(app).post('/api/students/stu_d1/enroll-semester').set(authHeader(registrar)).send({ semesterName: 'Level A1', classId: 'stu_d1_class', amountPaidNow: 5000 })));
     const ok = results.filter((r) => r.status === 201).length;
     const semRows = (db.prepare(`SELECT COUNT(*) c FROM student_semesters WHERE student_id='stu_d1' AND semester_name='Level A1'`).get() as { c: number }).c;
     const incRows = (db.prepare(`SELECT COUNT(*) c FROM financial_transactions WHERE reference_id='stu_d1' AND category='fee' AND description LIKE '%Level A1%'`).get() as { c: number }).c;
@@ -118,7 +125,9 @@ describe('Student subsystem deep audit', () => {
     expect(incRows).toBe(1);
     // A legitimate repeat after the semester is completed is still allowed.
     db.prepare(`UPDATE student_semesters SET status='completed' WHERE student_id='stu_d1' AND semester_name='Level A1'`).run();
-    const repeat = await supertest(app).post('/api/students/stu_d1/enroll-semester').set(authHeader(registrar)).send({ semesterName: 'Level A1', tuitionAmount: 5000, amountPaidNow: 0 });
+    // Completing the term also closes the class seat the duplicate rule keys on.
+    db.prepare(`UPDATE enrollments SET status='completed' WHERE student_id='stu_d1' AND semester_name='Level A1'`).run();
+    const repeat = await supertest(app).post('/api/students/stu_d1/enroll-semester').set(authHeader(registrar)).send({ semesterName: 'Level A1', classId: 'stu_d1_class', amountPaidNow: 0 });
     expect(repeat.status).toBe(201);
     const activeCount = (db.prepare(`SELECT COUNT(*) c FROM student_semesters WHERE student_id='stu_d1' AND semester_name='Level A1' AND status='active'`).get() as { c: number }).c;
     expect(activeCount).toBe(1);

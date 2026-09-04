@@ -33,6 +33,7 @@ import { invoicesRouter } from '../routes/invoices.routes.js';
 import { errorHandler } from '../middleware/errorHandler.js';
 
 const BRANCH = 'overpay_branch';
+const CLASS_ID = 'overpay_class';
 let app: express.Express;
 let seq = 0;
 
@@ -56,10 +57,17 @@ async function newStudent(): Promise<string> {
 /** Creates a student carrying a single tuition obligation of `fee`. */
 async function studentOwing(fee: number): Promise<{ studentId: string; semesterId: string }> {
   const studentId = await newStudent();
+  // Priced by the class fee (audit F-A1): the fixture sets the fee, the
+  // endpoint reads it. A class is now required — a term without a class has
+  // no price authority.
+  db.prepare(
+    `INSERT OR REPLACE INTO classes (id,name,level,branch_id,status,lifecycle_stage,schedule_time,fee)
+     VALUES (?,?,'A1',?,'active','in_progress','08:00',?)`,
+  ).run(CLASS_ID, 'Overpay Class', BRANCH, fee);
   const res = await supertest(app)
     .post(`/api/students/${studentId}/enroll-semester`)
     .set(auth())
-    .send({ semesterName: 'Semester 1', tuitionAmount: fee });
+    .send({ semesterName: 'Semester 1', classId: CLASS_ID });
   expect(res.status).toBe(201);
   return { studentId, semesterId: res.body.semesterId };
 }
