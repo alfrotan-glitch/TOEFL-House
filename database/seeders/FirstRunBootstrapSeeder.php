@@ -71,7 +71,7 @@ final class FirstRunBootstrapSeeder extends Seeder
         'privacy.approve_bulk_export', 'privacy.consent', 'privacy.define_purpose', 'privacy.disclose', 'privacy.export',
         'reporting.catalog', 'reporting.compute', 'reporting.dashboard', 'reporting.reconcile', 'reporting.run',
         'resources.asset', 'resources.books', 'resources.dispose_approve', 'resources.dispose_request',
-        'students.guardian', 'students.manage', 'students.reactivate',
+        'students.communication', 'students.guardian', 'students.hold', 'students.manage', 'students.reactivate', 'students.transfer',
     ];
 
     public function run(): void

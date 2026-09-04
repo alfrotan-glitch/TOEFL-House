@@ -11,11 +11,16 @@ use App\Modules\Admissions\Commands\RegisterApplicant;
 use App\Modules\Admissions\Models\AdmissionDecision;
 use App\Modules\Admissions\Models\Applicant;
 use App\Modules\Identity\Models\Person;
+use App\Modules\Organization\Models\Branch;
 use App\Modules\Students\Commands\MaintainGuardianRelationship;
+use App\Modules\Students\Commands\MaintainStudentCommunicationPreference;
+use App\Modules\Students\Commands\ManageStudentHold;
+use App\Modules\Students\Commands\TransferStudentHomeBranch;
 use App\Modules\Students\Commands\TransitionStudentStatus;
 use App\Modules\Students\Models\GuardianRelationship;
 use App\Modules\Students\Models\Student;
 use App\Modules\Students\Models\StudentStatus;
+use App\Modules\Students\Queries\StudentLifecycleQuery;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -152,6 +157,7 @@ final class StudentsController extends Controller
 
         return view('students.show', [
             'student' => $student,
+            'lifecycle' => (new StudentLifecycleQuery)->for($student),
             'statuses' => $statuses,
             'guardians' => GuardianRelationship::query()
                 ->where('student_id', $student->id)
@@ -160,7 +166,76 @@ final class StudentsController extends Controller
             'enrollments' => Enrollment::query()
                 ->where('student_id', $student->id)
                 ->orderByDesc('created_at')->limit(50)->get(),
+            'branches' => Branch::query()->where('lifecycle_state', 'active')->orderBy('name')->get(),
         ]);
+    }
+
+    public function transferBranch(Request $request, string $studentId): RedirectResponse
+    {
+        $input = $request->validate([
+            'branch_id' => ['required', 'string'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        app(TransferStudentHomeBranch::class)->transfer(
+            $this->actor(),
+            Student::query()->findOrFail($studentId),
+            $input['branch_id'],
+            $input['reason'],
+            $this->idempotencyKey('students.transfer'),
+        );
+
+        return redirect()->route('students.show', $studentId)->with('success', 'Student home branch transferred.');
+    }
+
+    public function freezeStudent(Request $request, string $studentId): RedirectResponse
+    {
+        $input = $request->validate([
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        app(ManageStudentHold::class)->freeze(
+            $this->actor(),
+            Student::query()->findOrFail($studentId),
+            $input['reason'],
+            $this->idempotencyKey('students.hold.freeze'),
+        );
+
+        return redirect()->route('students.show', $studentId)->with('success', 'Student hold opened (freeze).');
+    }
+
+    public function resumeStudent(Request $request, string $studentId): RedirectResponse
+    {
+        $input = $request->validate([
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        app(ManageStudentHold::class)->resume(
+            $this->actor(),
+            Student::query()->findOrFail($studentId),
+            $input['reason'],
+            $this->idempotencyKey('students.hold.resume'),
+        );
+
+        return redirect()->route('students.show', $studentId)->with('success', 'Student hold closed (resume).');
+    }
+
+    public function setCommunicationPreference(Request $request, string $studentId): RedirectResponse
+    {
+        $input = $request->validate([
+            'channel' => ['required', 'string', 'in:email,sms,whatsapp,push'],
+            'enabled' => ['sometimes', 'boolean'],
+        ]);
+
+        app(MaintainStudentCommunicationPreference::class)->setPreference(
+            $this->actor(),
+            Student::query()->findOrFail($studentId),
+            $input['channel'],
+            $request->boolean('enabled'),
+            $this->idempotencyKey('students.communication'),
+        );
+
+        return redirect()->route('students.show', $studentId)->with('success', 'Student communication preference saved.');
     }
 
     public function transitionStatus(Request $request, string $studentId, string $action): RedirectResponse

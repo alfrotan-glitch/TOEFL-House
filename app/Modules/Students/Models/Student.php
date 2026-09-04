@@ -61,4 +61,22 @@ final class Student extends Model
     {
         return $this->belongsTo(PlacementProfile::class);
     }
+
+    /** @return HasMany<StudentBranchTransfer, $this> */
+    public function branchTransfers(): HasMany
+    {
+        return $this->hasMany(StudentBranchTransfer::class)->orderBy('seq');
+    }
+
+    /** @return HasMany<StudentHoldEvent, $this> */
+    public function holdEvents(): HasMany
+    {
+        return $this->hasMany(StudentHoldEvent::class)->orderBy('seq');
+    }
+
+    /** @return HasMany<StudentCommunicationPreference, $this> */
+    public function communicationPreferences(): HasMany
+    {
+        return $this->hasMany(StudentCommunicationPreference::class);
+    }
 }

@@ -10,7 +10,11 @@ use App\Modules\Admissions\Commands\EnrollAdmittedApplicant;
 use App\Modules\Admissions\Commands\RegisterApplicant;
 use App\Modules\Admissions\Models\AdmissionDecision;
 use App\Modules\Admissions\Models\Applicant;
+use App\Modules\Students\Commands\MaintainStudentCommunicationPreference;
+use App\Modules\Students\Commands\ManageStudentHold;
+use App\Modules\Students\Commands\TransferStudentHomeBranch;
 use App\Modules\Students\Models\Student;
+use App\Modules\Students\Queries\StudentLifecycleQuery;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -108,5 +112,64 @@ final class StudentsApiController extends Controller
         );
 
         return response()->json(['status' => 'enrolled']);
+    }
+
+    public function show(string $studentId): JsonResponse
+    {
+        $student = Student::query()->findOrFail($studentId);
+
+        return response()->json((new StudentLifecycleQuery)->for($student));
+    }
+
+    public function transfer(Request $request, string $studentId): JsonResponse
+    {
+        $input = $request->validate([
+            'branch_id' => ['required', 'string'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        $result = app(TransferStudentHomeBranch::class)->transfer(
+            $this->actor(),
+            Student::query()->findOrFail($studentId),
+            $input['branch_id'],
+            $input['reason'],
+            $this->idempotencyKey('students.transfer'),
+        );
+
+        return response()->json(['status' => 'transferred', ...$result]);
+    }
+
+    public function hold(Request $request, string $studentId): JsonResponse
+    {
+        $input = $request->validate([
+            'action' => ['required', 'string', 'in:freeze,resume'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        $student = Student::query()->findOrFail($studentId);
+        $command = app(ManageStudentHold::class);
+        $result = $input['action'] === 'freeze'
+            ? $command->freeze($this->actor(), $student, $input['reason'], $this->idempotencyKey('students.hold.freeze'))
+            : $command->resume($this->actor(), $student, $input['reason'], $this->idempotencyKey('students.hold.resume'));
+
+        return response()->json(['status' => $input['action'], ...$result]);
+    }
+
+    public function communicationPreference(Request $request, string $studentId): JsonResponse
+    {
+        $input = $request->validate([
+            'channel' => ['required', 'string', 'in:email,sms,whatsapp,push'],
+            'enabled' => ['required', 'boolean'],
+        ]);
+
+        $result = app(MaintainStudentCommunicationPreference::class)->setPreference(
+            $this->actor(),
+            Student::query()->findOrFail($studentId),
+            $input['channel'],
+            (bool) $input['enabled'],
+            $this->idempotencyKey('students.communication'),
+        );
+
+        return response()->json(['status' => 'saved', ...$result]);
     }
 }

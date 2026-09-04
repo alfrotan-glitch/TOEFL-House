@@ -76,6 +76,10 @@ Route::middleware('employee')->group(function (): void {
         Route::post('students/{studentId}/guardians', [StudentsController::class, 'recordGuardian'])->name('guardian.record');
         Route::post('guardians/{relationshipId}/verify', [StudentsController::class, 'verifyGuardian'])->name('guardian.verify');
         Route::post('guardians/{relationshipId}/revoke', [StudentsController::class, 'revokeGuardian'])->name('guardian.revoke');
+        Route::post('students/{studentId}/transfer', [StudentsController::class, 'transferBranch'])->name('transfer');
+        Route::post('students/{studentId}/hold/freeze', [StudentsController::class, 'freezeStudent'])->name('hold.freeze');
+        Route::post('students/{studentId}/hold/resume', [StudentsController::class, 'resumeStudent'])->name('hold.resume');
+        Route::post('students/{studentId}/communication', [StudentsController::class, 'setCommunicationPreference'])->name('communication');
     });
 
     // Visitor / Lead / CRM

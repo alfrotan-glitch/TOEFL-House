@@ -39,11 +39,15 @@ Route::middleware('employee')->group(function (): void {
 
     Route::prefix('students')->name('api.students.')->group(function (): void {
         Route::get('/', [StudentsApiController::class, 'index'])->name('index');
+        Route::get('/{studentId}', [StudentsApiController::class, 'show'])->name('show');
         Route::post('/applicants', [StudentsApiController::class, 'registerApplicant'])->name('register');
         Route::post('/applicants/{applicantId}/initiate', [StudentsApiController::class, 'initiate'])->name('initiate');
         Route::post('/decisions/{decisionId}/review', [StudentsApiController::class, 'review'])->name('decision.review');
         Route::post('/decisions/{decisionId}/approve', [StudentsApiController::class, 'approve'])->name('decision.approve');
         Route::post('/applicants/{applicantId}/enroll', [StudentsApiController::class, 'enroll'])->name('enroll');
+        Route::post('/{studentId}/transfer', [StudentsApiController::class, 'transfer'])->name('transfer');
+        Route::post('/{studentId}/hold', [StudentsApiController::class, 'hold'])->name('hold');
+        Route::post('/{studentId}/communication-preference', [StudentsApiController::class, 'communicationPreference'])->name('communication');
     });
 
     Route::prefix('academic')->name('api.academic.')->group(function (): void {
