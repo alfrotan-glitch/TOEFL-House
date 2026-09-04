@@ -6,6 +6,7 @@ namespace App\Http\Controllers;
 
 use App\Modules\Academic\Models\Certificate;
 use App\Modules\Academic\Models\Enrollment;
+use App\Modules\Academic\Queries\TranscriptQuery;
 use App\Modules\Finance\Models\Obligation;
 use App\Modules\Finance\Models\Payment;
 use App\Modules\Payroll\Models\PayrollPeriod;
@@ -56,6 +57,20 @@ final class PrintingController extends Controller
             'certificate' => $certificate,
             'student' => Student::query()->whereKey($certificate->student_id)->first(),
             'issuedOn' => now()->toDateString(),
+        ]);
+    }
+
+    public function transcript(string $transcriptId): View
+    {
+        $issued = app(TranscriptQuery::class)->issued($transcriptId);
+        abort_if($issued === null, 404);
+
+        return view('print.transcript', [
+            'documentNo' => $this->docNo('TRX', $issued['transcript']->id),
+            'transcript' => $issued['transcript'],
+            'payload' => $issued['payload'],
+            'verified' => app(TranscriptQuery::class)->verify($issued['transcript']),
+            'issuedOn' => $issued['transcript']->issued_at->toDateString(),
         ]);
     }
 

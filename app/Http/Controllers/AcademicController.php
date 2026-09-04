@@ -6,6 +6,7 @@ namespace App\Http\Controllers;
 
 use App\Modules\Academic\Commands\DecideGraduation;
 use App\Modules\Academic\Commands\DecideProgression;
+use App\Modules\Academic\Commands\IssueTranscript;
 use App\Modules\Academic\Commands\MaintainAcademicStructure;
 use App\Modules\Academic\Commands\MaintainClass;
 use App\Modules\Academic\Commands\MaintainEnrollment;
@@ -27,6 +28,7 @@ use App\Modules\Academic\Models\ProgressionDecision;
 use App\Modules\Academic\Models\ResultCorrection;
 use App\Modules\Academic\Models\Skill;
 use App\Modules\Academic\Models\TeacherAssignment;
+use App\Modules\Academic\Models\Transcript;
 use App\Modules\Identity\Models\Person;
 use App\Modules\Students\Models\Student;
 use Carbon\CarbonImmutable;
@@ -64,6 +66,7 @@ final class AcademicController extends Controller
             'releasedResults' => AssessmentResult::query()->where('lifecycle_state', 'released')->orderByDesc('id')->limit(200)->get(),
             'approvedProgressions' => ProgressionDecision::query()->where('lifecycle_state', 'approved')->orderBy('id')->limit(200)->get(),
             'people' => Person::query()->where('verification_state', 'verified')->orderBy('legal_name')->limit(300)->get(),
+            'transcripts' => Transcript::query()->orderByDesc('issued_at')->limit(100)->get(),
         ]);
     }
 
@@ -579,6 +582,23 @@ final class AcademicController extends Controller
         );
 
         return redirect()->route('academic.index')->with('success', 'Certificate issued with its unique serial.');
+    }
+
+    public function issueTranscript(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'student_id' => ['required', 'string'],
+            'program_version_id' => ['required', 'string'],
+        ]);
+
+        app(IssueTranscript::class)->issue(
+            $this->actor(),
+            $input['student_id'],
+            $input['program_version_id'],
+            $this->idempotencyKey('academic.transcript.issue'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Official transcript issued and frozen with its content hash.');
     }
 
     public function fileAppeal(Request $request): RedirectResponse

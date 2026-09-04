@@ -134,6 +134,7 @@ Route::middleware('employee')->group(function (): void {
         Route::post('graduations/{decisionId}/approve', [AcademicController::class, 'approveGraduation'])->name('graduation.approve');
         Route::post('graduations/{decisionId}/reject', [AcademicController::class, 'rejectGraduation'])->name('graduation.reject');
         Route::post('graduations/{decisionId}/certificate', [AcademicController::class, 'issueCertificate'])->name('graduation.certificate');
+        Route::post('transcripts', [AcademicController::class, 'issueTranscript'])->name('transcript.issue');
         Route::post('appeals', [AcademicController::class, 'fileAppeal'])->name('appeal.file');
         Route::post('appeals/{appealId}/assign', [AcademicController::class, 'assignAppeal'])->name('appeal.assign');
         Route::post('appeals/{appealId}/investigate', [AcademicController::class, 'investigateAppeal'])->name('appeal.investigate');
@@ -328,6 +329,7 @@ Route::middleware('employee')->group(function (): void {
         Route::get('receipt/{paymentId}', [PrintingController::class, 'paymentReceipt'])->name('receipt');
         Route::get('invoice/{obligationId}', [PrintingController::class, 'invoice'])->name('invoice');
         Route::get('certificate/{certificateId}', [PrintingController::class, 'certificate'])->name('certificate');
+        Route::get('transcript/{transcriptId}', [PrintingController::class, 'transcript'])->name('transcript');
         Route::get('payroll/{resultId}', [PrintingController::class, 'payrollSlip'])->name('payroll');
         Route::get('enrollment/{enrollmentId}', [PrintingController::class, 'enrollment'])->name('enrollment');
         Route::get('id-card/{studentId}', [PrintingController::class, 'idCard'])->name('idcard');

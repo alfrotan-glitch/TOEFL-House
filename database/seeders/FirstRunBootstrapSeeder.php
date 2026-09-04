@@ -54,7 +54,7 @@ final class FirstRunBootstrapSeeder extends Seeder
      * @var list<string>
      */
     public const OWNER_CAPABILITIES = [
-        'academic.appeal_manage', 'academic.approve_result', 'academic.assess', 'academic.attendance', 'academic.certify', 'academic.completion', 'academic.completion_approve', 'academic.enroll', 'academic.enroll_approve', 'academic.moderate', 'academic.progression_approve', 'academic.progression_propose', 'academic.progression_review', 'academic.release', 'academic.schedule', 'academic.skill', 'academic.structure',
+        'academic.appeal_manage', 'academic.approve_result', 'academic.assess', 'academic.attendance', 'academic.certify', 'academic.completion', 'academic.completion_approve', 'academic.enroll', 'academic.enroll_approve', 'academic.moderate', 'academic.progression_approve', 'academic.progression_propose', 'academic.progression_review', 'academic.release', 'academic.schedule', 'academic.skill', 'academic.structure', 'academic.transcript_issue',
         'access.approve_org_wide', 'access.assign_position', 'access.define_policy', 'access.delegate', 'access.grant', 'access.revoke',
         'admissions.approve', 'admissions.initiate', 'admissions.register', 'admissions.review',
         'communication.send',

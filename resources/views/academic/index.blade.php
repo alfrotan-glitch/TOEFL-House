@@ -577,6 +577,44 @@
 </div>
 
 <div class="card">
+    <h2>Official transcripts</h2>
+    <p class="sub">Issue a frozen, hashed official transcript per student and program version. Prints render the stored payload, so later achievements never leak into earlier records; every issuance is registered as a managed transcript document.</p>
+    <form method="POST" action="{{ route('academic.transcript.issue') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <select name="student_id" required>
+                <option value="">Select a student…</option>
+                @foreach ($students as $student)
+                    <option value="{{ $student->id }}">{{ $student->student_code }}</option>
+                @endforeach
+            </select>
+            <select name="program_version_id" required>
+                <option value="">Select a program version…</option>
+                @foreach ($programVersions as $version)
+                    <option value="{{ $version->id }}">{{ \Illuminate\Support\Str::limit($version->id, 14) }}</option>
+                @endforeach
+            </select>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Issue transcript</button></div>
+    </form>
+    @if ($transcripts->isEmpty())
+        <p class="empty">No transcripts issued.</p>
+    @else
+        <table class="grid" style="margin-top:8px">
+            <tr><th>Issued</th><th>Hash</th><th>Actions</th></tr>
+            @foreach ($transcripts as $transcript)
+                <tr>
+                    <td>{{ $transcript->issued_at }}</td>
+                    <td><code>{{ \Illuminate\Support\Str::limit($transcript->content_hash, 16) }}</code></td>
+                    <td><a class="btn small" href="{{ route('print.transcript', $transcript->id) }}">Print</a></td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
+
+<div class="card">
     <h2>Appeals</h2>
     <p class="sub">Independent review of a released result or an approved progression decision: open → assigned → investigating → resolved / rejected / escalated → closed. The original decision-maker can never review their own decision; only the assigned reviewer can decide; a decided appeal is closed only with outcome and evidence.</p>
     <form method="POST" action="{{ route('academic.appeal.file') }}">
