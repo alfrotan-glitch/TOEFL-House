@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Modules\Finance\Commands;
 
+use App\Modules\Academic\Models\Enrollment;
+use App\Modules\Academic\Models\Offering;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Finance\Domain\FinanceLifecycle;
@@ -39,13 +41,13 @@ final class PostObligation
      * @param  list<array{category: string, amount: string, source_ref: string}>  $lines
      * @return array{obligation_id: string, correlation_id: string}
      */
-    public function post(Actor $actor, FinancialPeriod $period, string $studentId, string $source, string $reason, array $lines, string $idempotencyKey): array
+    public function post(Actor $actor, FinancialPeriod $period, string $studentId, string $source, string $reason, array $lines, string $idempotencyKey, ?string $offeringId = null): array
     {
-        $payload = hash('sha256', implode('|', ['finance.obligation.post', $period->id, $studentId, $source, $reason, json_encode($lines), $actor->actorId]));
+        $payload = hash('sha256', implode('|', ['finance.obligation.post', $period->id, $studentId, $source, $reason, json_encode($lines), $offeringId ?? '', $actor->actorId]));
 
         try {
             return $this->idempotency->execute('finance.obligation.post', $idempotencyKey, $payload,
-                fn (): array => DB::transaction(function () use ($actor, $period, $studentId, $source, $reason, $lines): array {
+                fn (): array => DB::transaction(function () use ($actor, $period, $studentId, $source, $reason, $lines, $offeringId): array {
                     $this->require($actor);
                     if ($lines === [] || $reason === '') {
                         throw BusinessRejection::forCode('finance.obligation_lines', 'an obligation requires lines and a reason');
@@ -65,6 +67,10 @@ final class PostObligation
                         $total = bcadd($total, (string) $line['amount'], 2);
                     }
 
+                    if ($offeringId !== null && $offeringId !== '') {
+                        $this->assertOfferingLinkedToActiveEnrollment($offeringId, $studentId);
+                    }
+
                     $obligation = Obligation::query()->create([
                         'id' => RandomIdentifier::new(),
                         'period_id' => $lockedPeriod->id,
@@ -73,6 +79,7 @@ final class PostObligation
                         'original_amount' => $total,
                         'reason' => $reason,
                         'posted_by' => $actor->actorId,
+                        'offering_id' => $offeringId !== null && $offeringId !== '' ? $offeringId : null,
                     ]);
                     foreach ($lines as $line) {
                         ObligationLine::query()->create([
@@ -84,7 +91,7 @@ final class PostObligation
                         ]);
                     }
                     $event = $this->audit->record($actor->actorId, 'finance.obligation.post', 'obligation', $obligation->id, null, [
-                        'student_id' => $studentId, 'original_amount' => $total, 'lines' => count($lines),
+                        'student_id' => $studentId, 'original_amount' => $total, 'lines' => count($lines), 'offering_id' => $obligation->offering_id,
                     ]);
 
                     return ['obligation_id' => $obligation->id, 'correlation_id' => $event->correlation_id];
@@ -92,6 +99,22 @@ final class PostObligation
             );
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $actor, 'finance.obligation.post', 'obligation', $studentId);
+        }
+    }
+
+    private function assertOfferingLinkedToActiveEnrollment(string $offeringId, string $studentId): void
+    {
+        /** @var Offering|null $offering */
+        $offering = Offering::query()->find($offeringId);
+        if ($offering === null || $offering->lifecycle_state === Offering::STATE_CANCELLED) {
+            throw BusinessRejection::forCode('finance.obligation_offering_invalid', 'an obligation offering must be a known non-cancelled academic offering');
+        }
+        if (! Enrollment::query()
+            ->where('student_id', $studentId)
+            ->where('offering_id', $offeringId)
+            ->where('lifecycle_state', 'active')
+            ->exists()) {
+            throw BusinessRejection::forCode('finance.obligation_offering_enrollment_mismatch', 'the obligation offering must belong to an active enrollment of the student');
         }
     }
 

@@ -6,6 +6,8 @@ namespace App\Modules\Academic\Commands;
 
 use App\Modules\Academic\Models\AcademicPeriod;
 use App\Modules\Academic\Models\BranchAvailability;
+use App\Modules\Academic\Models\LevelPrerequisite;
+use App\Modules\Academic\Models\LevelProgressionRule;
 use App\Modules\Academic\Models\Offering;
 use App\Modules\Academic\Models\Program;
 use App\Modules\Academic\Models\ProgramVersion;
@@ -257,6 +259,189 @@ final class MaintainAcademicStructure
             );
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.offering.open', 'offering', $branchId);
+        }
+    }
+
+    /** @return array{prerequisite_id: string, correlation_id: string} */
+    public function definePrerequisite(Actor $actor, string $targetLevelId, string $requiredLevelId, string $idempotencyKey): array
+    {
+        $payload = hash('sha256', implode('|', [
+            'academic.prerequisite.define', $targetLevelId, $requiredLevelId, $actor->actorId,
+        ]));
+
+        try {
+            return $this->idempotency->execute('academic.prerequisite.define', $idempotencyKey, $payload,
+                fn (): array => DB::transaction(function () use ($actor, $targetLevelId, $requiredLevelId): array {
+                    $this->requireCapability($actor);
+                    $this->requireSameProgramVersion($targetLevelId, $requiredLevelId);
+                    if ($targetLevelId === $requiredLevelId) {
+                        throw BusinessRejection::forCode('academic.prerequisite_self', 'a level cannot require itself');
+                    }
+                    if (LevelPrerequisite::query()
+                        ->where('target_level_id', $targetLevelId)
+                        ->where('required_level_id', $requiredLevelId)
+                        ->where('lifecycle_state', LevelPrerequisite::STATE_ACTIVE)
+                        ->exists()) {
+                        throw BusinessRejection::forCode('academic.prerequisite_exists', 'this active prerequisite already exists');
+                    }
+                    $this->assertNoActivePrerequisiteCycle($targetLevelId, $requiredLevelId);
+
+                    $prerequisite = LevelPrerequisite::query()->create([
+                        'id' => RandomIdentifier::new(),
+                        'target_level_id' => $targetLevelId,
+                        'required_level_id' => $requiredLevelId,
+                        'lifecycle_state' => LevelPrerequisite::STATE_ACTIVE,
+                        'defined_by' => $actor->actorId,
+                    ]);
+                    $event = $this->audit->record($actor->actorId, 'academic.prerequisite.define', 'level_prerequisite', $prerequisite->id, null, [
+                        'target_level_id' => $targetLevelId, 'required_level_id' => $requiredLevelId,
+                    ]);
+
+                    return ['prerequisite_id' => $prerequisite->id, 'correlation_id' => $event->correlation_id];
+                }),
+            );
+        } catch (AuthorizationDenied $denial) {
+            $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.prerequisite.define', 'level_prerequisite', $requiredLevelId);
+        }
+    }
+
+    /** @return array{prerequisite_id: string, lifecycle_state: string, correlation_id: string} */
+    public function retirePrerequisite(Actor $actor, LevelPrerequisite $prerequisite, string $idempotencyKey): array
+    {
+        $payload = hash('sha256', implode('|', [
+            'academic.prerequisite.retire', $prerequisite->id, $actor->actorId,
+        ]));
+
+        try {
+            return $this->idempotency->execute('academic.prerequisite.retire', $idempotencyKey, $payload,
+                fn (): array => DB::transaction(function () use ($actor, $prerequisite): array {
+                    $this->requireCapability($actor);
+
+                    /** @var LevelPrerequisite $locked */
+                    $locked = LevelPrerequisite::query()->whereKey($prerequisite->id)->lockForUpdate()->firstOrFail();
+                    if ($locked->lifecycle_state !== LevelPrerequisite::STATE_ACTIVE) {
+                        throw BusinessRejection::forCode('academic.prerequisite_not_active', 'only an active prerequisite can be retired');
+                    }
+                    $before = ['lifecycle_state' => $locked->lifecycle_state];
+                    $locked->forceFill(['lifecycle_state' => LevelPrerequisite::STATE_RETIRED]);
+                    $locked->save();
+                    $event = $this->audit->record($actor->actorId, 'academic.prerequisite.retire', 'level_prerequisite', $locked->id, $before, ['lifecycle_state' => LevelPrerequisite::STATE_RETIRED]);
+
+                    return ['prerequisite_id' => $locked->id, 'lifecycle_state' => LevelPrerequisite::STATE_RETIRED, 'correlation_id' => $event->correlation_id];
+                }),
+            );
+        } catch (AuthorizationDenied $denial) {
+            $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.prerequisite.retire', 'level_prerequisite', $prerequisite->id);
+        }
+    }
+
+    /** @return array{rule_id: string, correlation_id: string} */
+    public function defineProgressionRule(Actor $actor, string $levelId, ?string $minimumPassingScore, ?int $maxRepeats, string $idempotencyKey): array
+    {
+        $payload = hash('sha256', implode('|', [
+            'academic.progression_rule.define', $levelId, $minimumPassingScore ?? '', (string) ($maxRepeats ?? ''), $actor->actorId,
+        ]));
+
+        try {
+            return $this->idempotency->execute('academic.progression_rule.define', $idempotencyKey, $payload,
+                fn (): array => DB::transaction(function () use ($actor, $levelId, $minimumPassingScore, $maxRepeats): array {
+                    $this->requireCapability($actor);
+                    $this->requireActiveLevel($levelId);
+                    if ($minimumPassingScore !== null && $minimumPassingScore !== '' && (! is_numeric($minimumPassingScore) || (float) $minimumPassingScore < 0 || (float) $minimumPassingScore > 100)) {
+                        throw BusinessRejection::forCode('academic.progression_rule_score', 'a minimum passing score must be between 0 and 100');
+                    }
+                    if ($maxRepeats !== null && $maxRepeats < 1) {
+                        throw BusinessRejection::forCode('academic.progression_rule_repeats', 'maximum repeats must be at least 1');
+                    }
+                    if (LevelProgressionRule::query()
+                        ->where('program_version_level_id', $levelId)
+                        ->where('lifecycle_state', LevelProgressionRule::STATE_ACTIVE)
+                        ->exists()) {
+                        throw BusinessRejection::forCode('academic.progression_rule_exists', 'this level already has an active progression rule');
+                    }
+
+                    $rule = LevelProgressionRule::query()->create([
+                        'id' => RandomIdentifier::new(),
+                        'program_version_level_id' => $levelId,
+                        'minimum_passing_score' => $minimumPassingScore !== '' ? $minimumPassingScore : null,
+                        'max_repeats' => $maxRepeats,
+                        'lifecycle_state' => LevelProgressionRule::STATE_ACTIVE,
+                        'defined_by' => $actor->actorId,
+                    ]);
+                    $event = $this->audit->record($actor->actorId, 'academic.progression_rule.define', 'level_progression_rule', $rule->id, null, [
+                        'program_version_level_id' => $levelId,
+                        'minimum_passing_score' => $rule->minimum_passing_score,
+                        'max_repeats' => $rule->max_repeats,
+                    ]);
+
+                    return ['rule_id' => $rule->id, 'correlation_id' => $event->correlation_id];
+                }),
+            );
+        } catch (AuthorizationDenied $denial) {
+            $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.progression_rule.define', 'level_progression_rule', $levelId);
+        }
+    }
+
+    /** @return array{rule_id: string, lifecycle_state: string, correlation_id: string} */
+    public function retireProgressionRule(Actor $actor, LevelProgressionRule $rule, string $idempotencyKey): array
+    {
+        $payload = hash('sha256', implode('|', [
+            'academic.progression_rule.retire', $rule->id, $actor->actorId,
+        ]));
+
+        try {
+            return $this->idempotency->execute('academic.progression_rule.retire', $idempotencyKey, $payload,
+                fn (): array => DB::transaction(function () use ($actor, $rule): array {
+                    $this->requireCapability($actor);
+
+                    /** @var LevelProgressionRule $locked */
+                    $locked = LevelProgressionRule::query()->whereKey($rule->id)->lockForUpdate()->firstOrFail();
+                    if ($locked->lifecycle_state !== LevelProgressionRule::STATE_ACTIVE) {
+                        throw BusinessRejection::forCode('academic.progression_rule_not_active', 'only an active rule can be retired');
+                    }
+                    $before = ['lifecycle_state' => $locked->lifecycle_state];
+                    $locked->forceFill(['lifecycle_state' => LevelProgressionRule::STATE_RETIRED]);
+                    $locked->save();
+                    $event = $this->audit->record($actor->actorId, 'academic.progression_rule.retire', 'level_progression_rule', $locked->id, $before, ['lifecycle_state' => LevelProgressionRule::STATE_RETIRED]);
+
+                    return ['rule_id' => $locked->id, 'lifecycle_state' => LevelProgressionRule::STATE_RETIRED, 'correlation_id' => $event->correlation_id];
+                }),
+            );
+        } catch (AuthorizationDenied $denial) {
+            $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.progression_rule.retire', 'level_progression_rule', $rule->id);
+        }
+    }
+
+    private function requireSameProgramVersion(string $targetLevelId, string $requiredLevelId): void
+    {
+        /** @var ProgramVersionLevel $target */
+        $target = ProgramVersionLevel::query()->whereKey($targetLevelId)->firstOrFail();
+        /** @var ProgramVersionLevel $required */
+        $required = ProgramVersionLevel::query()->whereKey($requiredLevelId)->firstOrFail();
+        if (trim((string) $target->program_version_id) !== trim((string) $required->program_version_id)) {
+            throw BusinessRejection::forCode('academic.prerequisite_cross_version', 'a prerequisite must belong to the same program version');
+        }
+    }
+
+    private function assertNoActivePrerequisiteCycle(string $targetLevelId, string $requiredLevelId): void
+    {
+        $cycle = DB::select(<<<'SQL'
+            WITH RECURSIVE chain AS (
+                SELECT required_level_id AS node
+                  FROM level_prerequisites
+                 WHERE target_level_id = ?
+                   AND lifecycle_state = 'active'
+                UNION
+                SELECT lp.required_level_id AS node
+                  FROM level_prerequisites lp
+                  JOIN chain ON lp.target_level_id = chain.node
+                 WHERE lp.lifecycle_state = 'active'
+            )
+            SELECT 1 AS found FROM chain WHERE node = ? LIMIT 1
+            SQL, [$requiredLevelId, $targetLevelId]);
+
+        if ($cycle !== []) {
+            throw BusinessRejection::forCode('academic.prerequisite_cycle', 'level prerequisite cycles are not allowed');
         }
     }
 

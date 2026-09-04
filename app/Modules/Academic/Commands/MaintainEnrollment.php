@@ -10,8 +10,10 @@ use App\Modules\Academic\Errors\EnrollmentFinancialGateDenied;
 use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Academic\Models\Offering;
+use App\Modules\Academic\Models\ProgramVersionLevel;
 use App\Modules\Academic\Placement\Models\AcademicEligibilitySnapshot;
 use App\Modules\Academic\Placement\Queries\AcademicEligibilitySnapshotQuery;
+use App\Modules\Academic\Queries\AcademicHistoryQuery;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Audit\RejectedOperation;
@@ -47,6 +49,7 @@ final class MaintainEnrollment
         private readonly AcademicEligibilitySnapshotQuery $eligibilitySnapshots,
         private readonly FinancialGateQuery $financialGates,
         private readonly RejectedOperation $rejectedOperation,
+        private readonly AcademicHistoryQuery $history,
     ) {}
 
     /** @return array{enrollment_id: string, correlation_id: string} */
@@ -63,6 +66,7 @@ final class MaintainEnrollment
                     }
                     $this->assertStudentActive($studentId);
                     $this->assertClassActive($classId);
+                    $this->assertPrerequisitesForClass($studentId, $classId);
                     if ($offeringId !== null && $offeringId !== '') {
                         $this->assertOfferingOpenAndMatchesClass($offeringId, $classId);
                     }
@@ -141,6 +145,7 @@ final class MaintainEnrollment
                         throw BusinessRejection::forCode('academic.transfer_same_class', 'a transfer requires a different target class');
                     }
                     $this->assertClassActive($targetClassId);
+                    $this->assertPrerequisitesForClass($locked->student_id, $targetClassId);
                     $this->assertStudentActive($locked->student_id);
                     $eligibilitySnapshotId = $this->currentEligibilitySnapshotId($locked->student_id);
                     $this->assertCapacity($targetClassId);
@@ -325,6 +330,22 @@ final class MaintainEnrollment
         $class = ClassModel::query()->find($classId);
         if ($class === null || $class->lifecycle_state !== ClassLifecycle::STATE_ACTIVE) {
             throw BusinessRejection::forCode('academic.class_not_active', 'the class is not active');
+        }
+    }
+
+    private function assertPrerequisitesForClass(string $studentId, string $classId): void
+    {
+        /** @var ClassModel $class */
+        $class = ClassModel::query()->whereKey($classId)->firstOrFail();
+        if ($class->program_version_level_id === null || $class->program_version_level_id === '') {
+            return;
+        }
+        /** @var ProgramVersionLevel $target */
+        $target = ProgramVersionLevel::query()->whereKey($class->program_version_level_id)->firstOrFail();
+        $violations = $this->history->prerequisiteViolations($studentId, $target);
+        if ($violations !== []) {
+            $keys = implode(', ', array_column($violations, 'level_key'));
+            throw BusinessRejection::forCode('academic.enrollment_prerequisite_unsatisfied', 'level prerequisites are unsatisfied: '.$keys);
         }
     }
 
