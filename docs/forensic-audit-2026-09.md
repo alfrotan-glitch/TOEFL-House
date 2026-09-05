@@ -693,3 +693,52 @@ cash effect → trace → reversal → reporting) is delivered as
   self-consistency check, which is why W6-1/W7-1 are boundary requirements.
 - Suite 215 files / 2,900 passed / 2 skipped; live invariants I1–I16 + 0/0
   reconciliation after the adjustment drill.
+
+---
+
+## Wave 8 — economic reality coverage (full matrix in docs/forensic-audit-wave8-coverage-matrix.md)
+
+Wave 8 stepped OUTSIDE the ERP: one real accounting period of a Kabul ESL
+institute was reconstructed from the outside (hawala sponsors, publisher
+credit, Eid bonuses, prepaid rent, capex, an owner's friend lending money),
+then every event was tested against the software with absence-of-surface
+claims proven from source. Deliverable:
+`docs/forensic-audit-wave8-coverage-matrix.md` — ~60 independently
+discovered events classified A–G, semantic collisions, the cash-basis
+legitimacy line, historical impact, and the ten-point judgment.
+
+Headlines:
+
+- **Material capability gaps (F, forward-looking — zero rows damaged
+  today, verified):** supplier payables (the `separate` declaration is an
+  unreconciled promise — inventory without liability); the write-off family
+  (uncollectible student debt, uncollectible staff advances on termination,
+  permanent employee deductions); restricted-fund segregation (restrictions
+  are tracking-only — no expense path consults them, cash pools freely);
+  external debt representable only as equity (loan via capital_injection:
+  solvency invisible).
+- **Taxonomy finding (C, core-level):** the income side is a residual rule
+  — bank interest, asset-disposal proceeds and supplier rebates all become
+  OPERATING revenue through `other`. The expense side already has explicit
+  classes; the income side needs the same redesign. This is the one
+  structural fix that needs no owner policy decision.
+- **Workaround findings (D):** employee bonus (due-cap = base only; detached
+  Staff-Benefits expense severs the compensation record); overpayment credit
+  and mid-term earned waivers (only via fabrication); supplier rebates
+  (forced fake revenue).
+- **Verified-clean surprises:** teacher performance bonuses ARE computed
+  into dues by the rule engine; inter-branch value transfer works through
+  the treasury hub BY DESIGN (return + charge, both proven primitives) —
+  not a workaround; hawala fees and prepaid rent are representable within
+  the declared basis.
+- **Honest bypass conclusion:** unrecorded physical cash is beyond any
+  software; the ERP makes it detectable (sequential receipts, conservation
+  over everything recorded) but lacks a cash-count surface to anchor the
+  daily procedure (recorded F-lite).
+- Cash-basis legitimacy line drawn precisely (§11 of the matrix): timing
+  simplifications legitimate; lost obligations are not.
+
+No code was changed this wave by design: every remaining gap requires an
+owner policy decision (supplier terms, write-off authority, loan terms,
+fund segregation) or the income-taxonomy redesign, which is specified but
+deliberately not smuggled into an audit commit.
