@@ -788,3 +788,40 @@ missing memos. Deliverables:
 Wave 9 closes with the model independently coherent, policy boundaries
 explicit, and implementation authorized only where no financial meaning
 would be invented during coding.
+
+---
+
+## Wave 10 — economic-state architecture verdict (full: docs/forensic-audit-wave10-state-architecture-verdict.md)
+
+Read-only falsification wave on the memo layer itself. **Verdict: CONDITIONAL
+PASS.** The entity + immutable amount + append-only settlement + derived
+position + guarded event-style reversal pattern is sound and consistently
+implemented for tuition receivables, funding commitments, payroll facts and
+inventory; it is not a hidden second ledger. Conditions before Wave-9
+capabilities may be built on it:
+
+- **W10-1 (defect, code-proven):** `student_installments` flag flip is
+  one-way — a refunded installment payment leaves the installment 'paid'
+  while the obligation re-opens, and re-payment via the installment path
+  409s. Zero live rows today; fix = event-style reversal symmetric with
+  allocations.
+- **W10-2 (temporal defect):** class merge rewrites `student_semesters.
+  class_id` with no enrollment events and no effective dating — attribution
+  history survives only in audit text. Also: the table has no `created_at`;
+  PIT reconstruction works at date granularity only (live probe verified:
+  receivable-as-of = 25,000 = current).
+- **W10-3 (reconciliation asymmetry):** cash has runtime invariants; the
+  memo layer has none — obligation↔allocation↔payment and
+  installment↔allocation coherence exist only in tests. Add runtime memo
+  invariants + composite unique (obligation_id, payment_id) on allocations.
+- **W10-4 / P16 (policy):** staff-advance recovery is period-locked and
+  unattributed — an independent outstanding-advances figure is underivable;
+  cross-period recovery is unrepresentable. Owner decision required.
+
+Confirmed sound: obligation identity DB-unique per term; refund reversal
+chain guarded/idempotent/reason-preserving; resurrection impossible;
+scholarship/sponsorship closures exemplary; PIT receivable derivable at
+date granularity; no orphan/duplicate/contradictory state reachable in the
+request lifecycle. Historical production impact: none (0 installments,
+0 refunds, 0 merges live). Wave-11 gate: fix W10-1/2/3, decide P16, then
+the three Wave-9 authorized items, then policy-gated items.
