@@ -175,7 +175,7 @@ const CHECKS: Check[] = [
   },
   {
     invariant: 'I7',
-    detail: 'Posted salary for a period never exceeds the period\u2019s base',
+    detail: "Posted salary for a period never exceeds the period's composed due (W12: ledger due_amount = base + earned bonus; current base is the legacy backstop)",
     // W12: the payroll cap is the COMPOSED due (base + rule-earned bonus),
     // stamped on each ledger row at payment time inside the write lock. The
     // invariant follows that same authority — posted non-advance pay for a
