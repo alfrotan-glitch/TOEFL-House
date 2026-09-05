@@ -943,6 +943,7 @@ changes.
 | Date | Section | Change | Authorized by |
 |---|---|---|---|
 | 2026-09-05 | (companion charter) | Registered the owner-enacted **Master Engineering Authority charter** (`docs/MASTER_ENGINEERING_AUTHORITY.md`) as binding pre-execution governance for all engineering work from registration forward. Enactment directive as received: «این را بععوان سند محکم و قبل اجرا ثبت کن». The charter is registered verbatim; its relationship to this Protocol is recorded in its Registrar's Note (operationally consistent; any future precedence conflict is an owner-level decision per §105). The sealed normative body §0–§108 is untouched and the seal is unchanged. | Owner |
+| 2026-09-05 | (companion mandate) | Registered the owner-enacted **Technical Authority Mandate** (`docs/TECHNICAL_AUTHORITY_MANDATE.md`) — ROLE / TECHNICAL VETO POWER / INDEPENDENT JUDGMENT / ENGINEERING STANDARD / IMPLEMENTATION AUTHORITY / VERIFICATION AUTHORITY / COMMITMENT TO TRUTH / FINAL DECISION PRINCIPLE — as a binding companion to the charter. Enactment directive as received: «این را هم ثبت کن». Registered verbatim; consistent in substance with both this Protocol and the charter (Registrar's Note records the harmonization: the veto stops unsafe instructions, it never creates business policy). Sealed normative body untouched; seal unchanged. | Owner |
 
 ## §E — DERIVED EVIDENCE (subordinate, non-normative)
 
@@ -990,6 +991,7 @@ package is nominally under audit, because every other package consumes them.
 |---|---|---|
 | This protocol | `docs/MASTER_ENGINEERING_PROTOCOL.md` | `npm run audit:protocol` (checksum) |
 | Master Engineering Authority charter (owner-enacted 2026-09-05) | `docs/MASTER_ENGINEERING_AUTHORITY.md` | owner enactment recorded in §R; verbatim-fidelity registration (not checksummed) |
+| Technical Authority Mandate (owner-enacted 2026-09-05) | `docs/TECHNICAL_AUTHORITY_MANDATE.md` | owner enactment recorded in §R; verbatim-fidelity registration (not checksummed) |
 | Canonical Authority Registry (§16) | `docs/registries/canonical-authority.md` | `npm run audit:registries` |
 | Invariant Registry (§17) | `docs/registries/invariants.md` | `npm run audit:registries` |
 | Metric Registry (§18) | `docs/registries/metrics.md` | `npm run audit:registries` |
