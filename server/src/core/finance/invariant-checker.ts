@@ -87,6 +87,11 @@
  *      its gross wage fact (W21).
  *  I27 ADVANCE WRITE-OFF EVIDENCE — every advance write-off pins exactly one
  *      whole salary_advance fact and writes no money (W21).
+ *  I28 ASSET LIFECYCLE EVIDENCE — depreciation is bounded, non-cash and stops
+ *      at loss/disposal; every disposal carries exact carrying value, matching
+ *      cash evidence and a truthful gain/loss (W22).
+ *  I29 INTEREST EVIDENCE — every interest payment links an equal
+ *      signed-negative loan_interest cash row and vice versa (W22).
  */
 import type BetterSqlite3 from 'better-sqlite3';
 import {
@@ -293,7 +298,9 @@ const CHECKS: Check[] = [
               + COALESCE((SELECT SUM(amount) FROM financial_transactions WHERE type IN ('loan_proceeds','loan_repayment','supplier_refund')), 0)
               -- W21: withheld wages handed to the authority (the wage was
               -- expensed at gross; the remittance moves only the store).
-              + COALESCE((SELECT SUM(amount) FROM financial_transactions WHERE type = 'withholding_remittance'), 0) AS explained,
+              + COALESCE((SELECT SUM(amount) FROM financial_transactions WHERE type = 'withholding_remittance'), 0)
+              -- W22: disposal proceeds move branch cash; interest moves treasury cash.
+              + COALESCE((SELECT SUM(amount) FROM financial_transactions WHERE type IN ('disposal_proceeds','loan_interest')), 0) AS explained,
               COALESCE((SELECT SUM(main_balance + saving_balance) FROM finance_accounts), 0)
               + COALESCE((SELECT SUM(current_amount) FROM budget_lines), 0) AS held
           )
@@ -510,6 +517,55 @@ const CHECKS: Check[] = [
            WHERE EXISTS (SELECT 1 FROM financial_transactions ft WHERE ft.reference_id = w.id)`,
     sample: (r) => `${r.kind} ${r.k}: expected ${r.expected}, found ${r.actual} — an advance write-off pins one existing fact and moves no money`,
   },
+  {
+    invariant: 'I28',
+    detail: 'Asset lifecycle economics agree: depreciation is bounded, non-cash and consistent with custody; disposals carry exact carrying value, evidence and gain/loss (W22)',
+    sql: `SELECT 'depreciation_exceeds_cost' AS kind, d.asset_id AS k, (SELECT cost FROM fixed_assets WHERE id = d.asset_id) AS expected, 0 AS actual
+            FROM asset_depreciations d
+           GROUP BY d.asset_id
+          HAVING SUM(d.amount) > MAX((SELECT cost FROM fixed_assets WHERE id = d.asset_id))
+          UNION ALL
+          SELECT 'depreciated_lost_asset', d.id, 0, 1
+            FROM asset_depreciations d
+            JOIN fixed_assets a ON a.id = d.asset_id
+           WHERE a.custody_status = 'lost'
+             AND d.created_at > (SELECT MAX(l.created_at) FROM fixed_asset_losses l WHERE l.asset_id = a.id)
+          UNION ALL
+          SELECT 'depreciation_after_disposal', d.id, 0, 1
+            FROM asset_depreciations d
+            JOIN asset_disposals x ON x.asset_id = d.asset_id
+           WHERE d.period_key > substr(x.disposal_on, 1, 7)
+          UNION ALL
+          SELECT 'disposal_status_mismatch', x.id, 1, 0
+            FROM asset_disposals x
+           WHERE (SELECT custody_status FROM fixed_assets WHERE id = x.asset_id) IS NOT 'disposed'
+          UNION ALL
+          SELECT 'disposal_gain_loss_mismatch', x.id, x.proceeds - x.carrying_value, x.gain_loss
+            FROM asset_disposals x
+           WHERE x.gain_loss IS NOT (x.proceeds - x.carrying_value)
+          UNION ALL
+          SELECT 'disposal_proceeds_without_evidence', x.id, x.proceeds, 0
+            FROM asset_disposals x
+           WHERE x.proceeds > 0
+             AND NOT EXISTS (SELECT 1 FROM financial_transactions ft
+                              WHERE ft.id = x.proceeds_transaction_id AND ft.type = 'disposal_proceeds'
+                                AND ft.amount = x.proceeds AND ft.branch_id = x.branch_id)`,
+    sample: (r) => `${r.kind} ${r.k}: expected ${r.expected}, found ${r.actual} — asset lifecycle facts and cash disagree`,
+  },
+  {
+    invariant: 'I29',
+    detail: 'Every interest payment links a signed-negative loan_interest cash row of exactly its amount (W22)',
+    sql: `SELECT 'interest_without_cash' AS kind, p.id AS k, p.amount AS expected, 0 AS actual
+            FROM loan_interest_payments p
+           WHERE NOT EXISTS (SELECT 1 FROM financial_transactions ft
+                              WHERE ft.id = p.transaction_id AND ft.type = 'loan_interest' AND ft.amount = -p.amount)
+          UNION ALL
+          SELECT 'cash_without_interest_payment', ft.id, 0, ft.amount
+            FROM financial_transactions ft
+           WHERE ft.type = 'loan_interest'
+             AND NOT EXISTS (SELECT 1 FROM loan_interest_payments p WHERE p.transaction_id = ft.id)`,
+    sample: (r) => `${r.kind} ${r.k}: expected ${r.expected}, ledger says ${r.actual} — interest cash and declarations disagree`,
+  },
 ];
 
 /**
@@ -541,7 +597,9 @@ const IDENTITY_CHECKS: IdentityCheck[] = [
             + COALESCE((SELECT SUM(amount) FROM financial_transactions ft
                          WHERE ft.branch_id = fa.scope_id AND ft.type = 'supplier_refund'), 0)
             + COALESCE((SELECT SUM(amount) FROM financial_transactions ft
-                         WHERE ft.branch_id = fa.scope_id AND ft.type = 'withholding_remittance'), 0) AS ledger_main,
+                         WHERE ft.branch_id = fa.scope_id AND ft.type = 'withholding_remittance'), 0)
+            + COALESCE((SELECT SUM(amount) FROM financial_transactions ft
+                         WHERE ft.branch_id = fa.scope_id AND ft.type = 'disposal_proceeds'), 0) AS ledger_main,
             fa.saving_balance AS account_saving,
             COALESCE((SELECT SUM(amount) FROM financial_transactions ft
                        WHERE ft.branch_id = fa.scope_id AND ft.type = 'saving_transfer'), 0) AS ledger_saving
@@ -576,7 +634,10 @@ const IDENTITY_CHECKS: IdentityCheck[] = [
             -- W20: loan proceeds credit the treasury and principal repayments
             -- debit it, both P&L-neutrally (signed rows).
             + COALESCE((SELECT SUM(amount) FROM financial_transactions ft
-                         WHERE ft.type IN ('loan_proceeds','loan_repayment')), 0) AS ledger_main,
+                         WHERE ft.type IN ('loan_proceeds','loan_repayment')), 0)
+            -- W22: interest paid is treasury cash out (a finance cost), never principal.
+            + COALESCE((SELECT SUM(amount) FROM financial_transactions ft
+                         WHERE ft.type = 'loan_interest'), 0) AS ledger_main,
             fa.saving_balance AS account_saving,
             0 AS ledger_saving
           FROM finance_accounts fa

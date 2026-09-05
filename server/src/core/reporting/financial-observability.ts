@@ -263,6 +263,8 @@ export interface DailyCashActivityStatement {
     supplierRefunds: number;
     /** W21: withheld wages remitted this day (P&L-neutral cash out). */
     withholdingRemitted: number;
+    /** W22: disposal proceeds received this day (P&L-neutral cash in). */
+    disposalProceeds: number;
   };
   closing: { main: number; saving: number };
   /** Equity injections stamped with this branch on this date. They credit the
@@ -310,13 +312,18 @@ export function getDailyCashActivity(db: Database.Database, opts: { branchId: st
     `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type='withholding_remittance' AND branch_id = ?`,
     date,
   );
+  // W22: disposal proceeds are P&L-neutral cash INTO branch main.
+  const disposalProceedsSince = sumSince(
+    `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type='disposal_proceeds' AND branch_id = ?`,
+    date,
+  );
 
   const acct = db.prepare(`SELECT main_balance, saving_balance FROM finance_accounts WHERE scope_type='branch' AND scope_id=?`)
     .get(branchId) as { main_balance: number; saving_balance: number } | undefined;
   const mainNow = Number(acct?.main_balance ?? 0);
   const savingNow = Number(acct?.saving_balance ?? 0);
 
-  const openingMain = mainNow - (cashIncomeSince - savingSince - drawingsSince + reclaimsSince + supplierRefundsSince + withholdingRemittedSince);
+  const openingMain = mainNow - (cashIncomeSince - savingSince - drawingsSince + reclaimsSince + supplierRefundsSince + withholdingRemittedSince + disposalProceedsSince);
   const openingSaving = savingNow - savingSince;
 
   const incomeRows = db.prepare(
@@ -340,6 +347,10 @@ export function getDailyCashActivity(db: Database.Database, opts: { branchId: st
   const withholdingRemitted = Number((db.prepare(
     `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type='withholding_remittance' AND branch_id = ? AND date = ?`,
   ).get(branchId, date) as { v: number }).v) || 0;
+  // W22: disposal proceeds are P&L-neutral cash INTO branch main.
+  const disposalProceeds = Number((db.prepare(
+    `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type='disposal_proceeds' AND branch_id = ? AND date = ?`,
+  ).get(branchId, date) as { v: number }).v) || 0;
 
   const incomeTotal = incomeRows.reduce((s, r) => s + Number(r.total), 0);
   const refundsTotal = incomeRows.reduce((s, r) => s + Math.min(0, Number(r.total)), 0);
@@ -348,7 +359,7 @@ export function getDailyCashActivity(db: Database.Database, opts: { branchId: st
       WHERE type='income' AND category='${CAPITAL_INJECTION_CATEGORY}' AND branch_id = ? AND date = ?`,
   ).all(branchId, date) as Array<{ transactionId: string; amount: number; description: string }>;
 
-  const dayMainDelta = incomeTotal - savingMovement - drawings + reclaims + supplierRefunds + withholdingRemitted;
+  const dayMainDelta = incomeTotal - savingMovement - drawings + reclaims + supplierRefunds + withholdingRemitted + disposalProceeds;
   return {
     basis: 'digital-expected',
     note: 'Digital expected cash per the ledger (I16/I17 identities). This is NOT a physical count; physical-cash control awaits the Wave-14 D-CC owner decisions.',
@@ -356,7 +367,7 @@ export function getDailyCashActivity(db: Database.Database, opts: { branchId: st
     opening: { main: openingMain, saving: openingSaving },
     movements: {
       incomeByCategory: incomeRows.map((r) => ({ category: r.category, amount: Number(r.total) })),
-      incomeTotal, refundsTotal, savingMovement, ownerDrawings: drawings, restrictedReclaims: reclaims, supplierRefunds, withholdingRemitted,
+      incomeTotal, refundsTotal, savingMovement, ownerDrawings: drawings, restrictedReclaims: reclaims, supplierRefunds, withholdingRemitted, disposalProceeds,
     },
     closing: { main: openingMain + dayMainDelta, saving: openingSaving + savingMovement },
     memoEquityInjectionsThisBranch: equityMemo,

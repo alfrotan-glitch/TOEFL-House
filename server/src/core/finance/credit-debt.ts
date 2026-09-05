@@ -172,16 +172,24 @@ export interface LoanPosition {
   principal: number;
   repaid: number;
   outstanding: number;
+  /** W22: interest paid to date — a finance cost, never principal. */
+  interestPaid: number;
+  interestRateBps: number | null;
+  maturityOn: string | null;
+  scheduleNote: string | null;
   status: 'open' | 'repaid';
 }
 
 export function getLoanPosition(database: Db, loanId: string): LoanPosition {
-  const loan = database.prepare('SELECT id, lender_name, principal, status FROM loans WHERE id = ?').get(loanId) as
-    | { id: string; lender_name: string; principal: number; status: 'open' | 'repaid' }
+  const loan = database.prepare('SELECT id, lender_name, principal, status, interest_rate_bps, maturity_on, schedule_note FROM loans WHERE id = ?').get(loanId) as
+    | { id: string; lender_name: string; principal: number; status: 'open' | 'repaid'; interest_rate_bps: number | null; maturity_on: string | null; schedule_note: string | null }
     | undefined;
   if (!loan) throw new HttpError(404, 'Loan not found.');
   const repaid = Number((database.prepare(
     'SELECT COALESCE(SUM(amount), 0) AS t FROM loan_repayments WHERE loan_id = ?',
+  ).get(loanId) as { t: number }).t) || 0;
+  const interestPaid = Number((database.prepare(
+    'SELECT COALESCE(SUM(amount), 0) AS t FROM loan_interest_payments WHERE loan_id = ?',
   ).get(loanId) as { t: number }).t) || 0;
   return {
     loanId: loan.id,
@@ -189,6 +197,10 @@ export function getLoanPosition(database: Db, loanId: string): LoanPosition {
     principal: Number(loan.principal),
     repaid,
     outstanding: Math.max(0, Number(loan.principal) - repaid),
+    interestPaid,
+    interestRateBps: loan.interest_rate_bps ?? null,
+    maturityOn: loan.maturity_on ?? null,
+    scheduleNote: loan.schedule_note ?? null,
     status: loan.status,
   };
 }
@@ -196,12 +208,18 @@ export function getLoanPosition(database: Db, loanId: string): LoanPosition {
 /** Loan proceeds: cash into the organization treasury, P&L-neutral — never income, never capital. */
 export function recordLoan(database: Db, command: {
   lenderName: string; principal: number; purpose?: string | null; receivedOn?: string; operatorBranchId: string; operatorName: string;
+  interestRateBps?: number | null; maturityOn?: string | null; scheduleNote?: string | null;
 }): { loanId: string; transactionId: string } {
   if (!database.inTransaction) throw new Error('recordLoan() must run inside a transaction.');
   const principal = assertMoney(command.principal, 'loan principal');
   if (principal <= 0) throw new HttpError(400, 'A loan principal must be greater than zero.');
   const lender = String(command.lenderName ?? '').trim();
   if (lender.length < 3) throw new HttpError(400, 'A lender name of at least 3 characters is required.');
+  // W22 (D-197/D-199): contractual facts, stated as such. The rate is annual
+  // basis points — an integer fact, never an invented classification.
+  const rateBps = command.interestRateBps == null ? null : Math.round(Number(command.interestRateBps));
+  if (rateBps != null && (!Number.isFinite(rateBps) || rateBps < 0)) throw new HttpError(400, 'interestRateBps must be a non-negative integer (annual basis points).');
+  if (command.maturityOn && !/^\d{4}-\d{2}-\d{2}$/.test(command.maturityOn)) throw new HttpError(400, 'maturityOn must be an ISO date (YYYY-MM-DD).');
 
   incrementMainBalance('organization', 'global', principal);
   const transactionId = id('tx');
@@ -213,10 +231,47 @@ export function recordLoan(database: Db, command: {
 
   const loanId = id('loan');
   database.prepare(
-    `INSERT INTO loans (id, lender_name, principal, purpose, received_on, proceeds_transaction_id, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(loanId, lender, principal, command.purpose?.trim() || null, command.receivedOn ?? today(), transactionId, command.operatorName);
+    `INSERT INTO loans (id, lender_name, principal, purpose, received_on, interest_rate_bps, maturity_on, schedule_note, proceeds_transaction_id, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(loanId, lender, principal, command.purpose?.trim() || null, command.receivedOn ?? today(),
+        rateBps, command.maturityOn ?? null, command.scheduleNote?.trim() || null, transactionId, command.operatorName);
   return { loanId, transactionId };
+}
+
+/**
+ * W22 (D-197/D-199): interest paid — a FINANCE COST. Real cash out of the
+ * organization treasury through a signed-negative 'loan_interest' row; it
+ * reduces NO principal liability and is never income. The amount is an
+ * operator-stated fact from the lender's statement (the same authority every
+ * declared amount in this system uses).
+ */
+export function recordLoanInterest(database: Db, command: {
+  loanId: string; amount: number; paidBy: string; paidOn?: string;
+}): { interestPaymentId: string; transactionId: string } {
+  if (!database.inTransaction) throw new Error('recordLoanInterest() must run inside a transaction.');
+  const amount = assertMoney(command.amount, 'interest amount');
+  if (amount <= 0) throw new HttpError(400, 'An interest payment must be greater than zero.');
+  const loan = database.prepare('SELECT id FROM loans WHERE id = ?').get(command.loanId) as { id: string } | undefined;
+  if (!loan) throw new HttpError(404, 'Loan not found.');
+  const proceeds = database.prepare(
+    'SELECT branch_id FROM financial_transactions WHERE id = (SELECT proceeds_transaction_id FROM loans WHERE id = ?)',
+  ).get(command.loanId) as { branch_id: string };
+  const debited = decrementMainBalanceIfSufficient('organization', 'global', amount);
+  if (!debited) throw new HttpError(409, `Insufficient organization treasury balance to pay ${amount} AFN of interest.`);
+
+  const transactionId = id('tx');
+  database.prepare(
+    `INSERT INTO financial_transactions (id, type, category, amount, date, description, reference_id, operator_name, branch_id)
+     VALUES (?, 'loan_interest', 'loan_interest', ?, ?, ?, ?, ?, ?)`,
+  ).run(transactionId, -amount, command.paidOn ?? today(),
+    `Loan interest paid on loan ${command.loanId}`, command.loanId, command.paidBy, proceeds.branch_id);
+
+  const interestPaymentId = id('lip');
+  database.prepare(
+    `INSERT INTO loan_interest_payments (id, loan_id, amount, transaction_id, paid_on, paid_by)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(interestPaymentId, command.loanId, amount, transactionId, command.paidOn ?? today(), command.paidBy);
+  return { interestPaymentId, transactionId };
 }
 
 /** Principal repayment: cash out of the treasury, P&L-neutral; never interest (a rate is owner policy). */

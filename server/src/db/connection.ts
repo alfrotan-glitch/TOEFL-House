@@ -428,6 +428,104 @@ function ensureWriteOffWithholdingShape(schema: string): void {
   }
 }
 
+/**
+ * W22 (D-197..D-199): converge the asset-lifecycle economics shape onto
+ * pre-W22 databases — `financial_transactions` gains the P&L-neutral
+ * 'disposal_proceeds' type and the finance-cost 'loan_interest' type;
+ * `fixed_assets` gains 'disposed' custody plus the useful-life/in-service
+ * fact columns. Copy-swap with canonical DDL, dependent triggers dropped
+ * and recreated by the schema re-run, foreign keys asserted clean.
+ */
+function ensureAssetLifecycleShape(schema: string): void {
+  const swaps: Array<{ table: string; evidence: string; columns: string[] }> = [
+    {
+      table: 'financial_transactions',
+      evidence: "'disposal_proceeds'",
+      columns: ['id', 'type', 'category', 'finance_category_id', 'amount', 'date', 'description', 'reference_id', 'payment_id', 'donation_id', 'operator_name', 'operator_role', 'branch_id'],
+    },
+    {
+      table: 'fixed_assets',
+      evidence: "'disposed'",
+      columns: ['id', 'name', 'branch_id', 'category_id', 'acquired_on', 'cost', 'source_transaction_id', 'custody_status', 'notes', 'created_by', 'created_at'],
+    },
+  ];
+  const pending: string[] = [];
+  const staleW22Triggers = db.prepare(
+    `SELECT name FROM sqlite_master WHERE type = 'trigger' AND (tbl_name IN ('asset_depreciations', 'asset_disposals', 'loan_interest_payments') OR name = 'trg_fixed_assets_disposal_guard')`,
+  ).all() as Array<{ name: string }>;
+  for (const { table, evidence, columns } of swaps) {
+    const current = db.prepare(
+      `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`,
+    ).get(table) as { sql: string } | undefined;
+    if (!current?.sql || current.sql.includes(evidence)) continue;
+
+    const start = schema.indexOf(`CREATE TABLE IF NOT EXISTS ${table} (`);
+    const end = schema.indexOf('\n);', start);
+    const ddl = start >= 0 && end > start ? schema.slice(start, end + 3) : null;
+    if (!ddl) throw new Error(`Cannot converge ${table}: canonical DDL not found in schema.sql.`);
+
+    log.warn(`Rebuilding ${table} with the W22 asset-lifecycle shape (copy-swap, foreign keys suspended).`);
+    // The main schema exec above has already CREATED the W22 triggers against
+    // the not-yet-widened tables (SQLite does not resolve NEW./column refs at
+    // CREATE TRIGGER time). They would explode the first ALTER … RENAME, which
+    // re-validates the whole trigger corpus, so drop them here; the schema
+    // re-exec after all swaps recreates them against the final shape.
+    for (const trig of staleW22Triggers) db.exec(`DROP TRIGGER IF EXISTS ${JSON.stringify(trig.name)}`);
+    const present = new Set((db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((c) => c.name));
+    const cols = columns.filter((name) => present.has(name)).join(', ');
+    const swap = db.transaction(() => {
+      db.exec(ddl.replace(`CREATE TABLE IF NOT EXISTS ${table} (`, `CREATE TABLE ${table}_w22_swap (`));
+      db.exec(`INSERT INTO ${table}_w22_swap (${cols}) SELECT ${cols} FROM ${table}`);
+      const dependents = (db.prepare(
+        `SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name != ? AND sql LIKE ?`,
+      ).all(table, `%${table}%`) as Array<{ name: string }>).map((r) => r.name);
+      for (const name of dependents) db.exec(`DROP TRIGGER ${JSON.stringify(name)}`);
+      db.exec(`DROP TABLE ${table}`);
+      db.exec(`ALTER TABLE ${table}_w22_swap RENAME TO ${table}`);
+    });
+    swap();
+    pending.push(table);
+  }
+  // The canonical schema's W22 triggers reference the widened columns across
+  // BOTH tables (e.g. trg_asset_depreciations_bound reads
+  // fixed_assets.useful_life_months). Re-executing the schema is therefore
+  // deferred until every swap has landed, never between them.
+  if (pending.length > 0) {
+    db.exec(schema);
+    for (const table of pending) {
+      const violations = (db.prepare('PRAGMA foreign_key_check').all() as Array<unknown>).filter(
+        (v) => JSON.stringify(v).includes(table),
+      );
+      if (violations.length > 0) {
+        throw new Error(`${table} rebuild introduced foreign-key violations: ${JSON.stringify(violations).slice(0, 400)}`);
+      }
+    }
+  }
+}
+
+/**
+ * W22: additive contractual-fact columns on pre-existing tables — supplier
+ * payment terms/due date and loan rate/maturity/schedule. ALTER TABLE ADD
+ * COLUMN keeps every historical row; new columns start NULL, which reports
+ * as "no terms stated" rather than an invented default.
+ */
+function ensureContractualFactColumns(): void {
+  const adds: Array<{ table: string; column: string; ddl: string }> = [
+    { table: 'supplier_invoices', column: 'terms', ddl: `ALTER TABLE supplier_invoices ADD COLUMN terms TEXT` },
+    { table: 'supplier_invoices', column: 'due_on', ddl: `ALTER TABLE supplier_invoices ADD COLUMN due_on TEXT` },
+    { table: 'loans', column: 'interest_rate_bps', ddl: `ALTER TABLE loans ADD COLUMN interest_rate_bps INTEGER` },
+    { table: 'loans', column: 'maturity_on', ddl: `ALTER TABLE loans ADD COLUMN maturity_on TEXT` },
+    { table: 'loans', column: 'schedule_note', ddl: `ALTER TABLE loans ADD COLUMN schedule_note TEXT` },
+    { table: 'fixed_assets', column: 'useful_life_months', ddl: `ALTER TABLE fixed_assets ADD COLUMN useful_life_months INTEGER` },
+    { table: 'fixed_assets', column: 'in_service_on', ddl: `ALTER TABLE fixed_assets ADD COLUMN in_service_on TEXT` },
+  ];
+  for (const { table, column, ddl } of adds) {
+    const present = (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).some((c) => c.name === column);
+    if (present) continue;
+    db.exec(ddl);
+  }
+}
+
 function ensureFinancialTransactionsReclaimType(schema: string): void {
   const current = db.prepare(
     `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'financial_transactions'`,
@@ -560,6 +658,8 @@ export function initSchema(): void {
     ensureRegistrationsFinancialColumnsDropped();
     ensureFinancialTransactionsCreditDebtTypes(schema);
     ensureWriteOffWithholdingShape(schema);
+    ensureAssetLifecycleShape(schema);
+    ensureContractualFactColumns();
     ensureSingleCurrencyChecks(schema);
     ensureDonationClawbackAttributionColumns();
     ensureFixedAssetsCustodyLossShape(schema);

@@ -2757,7 +2757,7 @@ CREATE TABLE IF NOT EXISTS financial_transactions (
   -- 'loan_proceeds' (+, treasury), 'loan_repayment' (−, treasury) and
   -- 'supplier_refund' (+, branch main) — liabilities and refund recoveries,
   -- never income and never expense (W16 owner directive; D-190).
-  type          TEXT NOT NULL CHECK (type IN ('income','expense','saving_transfer','budget_charge','restricted_reclaim','loan_proceeds','loan_repayment','supplier_refund','withholding_remittance')), 
+  type          TEXT NOT NULL CHECK (type IN ('income','expense','saving_transfer','budget_charge','restricted_reclaim','loan_proceeds','loan_repayment','supplier_refund','withholding_remittance','disposal_proceeds','loan_interest')), 
   -- Human-readable label. For INCOME rows this is the billing vocabulary
   -- (fee/book/exam/placement/donation/…), which the expense taxonomy does not
   -- model. It is NEVER the accounting authority — see `finance_category_id`.
@@ -3904,13 +3904,18 @@ CREATE TABLE IF NOT EXISTS fixed_assets (
   acquired_on           TEXT NOT NULL,
   cost                  INTEGER NOT NULL CHECK (cost > 0),
   source_transaction_id TEXT REFERENCES financial_transactions(id) ON DELETE RESTRICT,
-  -- W18: 'lost' records the custody FACT that an asset is no longer held
-  -- (lost/stolen/destroyed) — the fixed-asset mirror of the certified books
-  -- adjustment semantics: financially invisible in the cash model (the cost
-  -- left at purchase; a physical loss moves no money today), so no P&L class
-  -- is implied. Proceeds-bearing disposal and depreciation remain POLICY
-  -- REQUIRED (D-182/D-188) and are unrepresentable.
-  custody_status        TEXT NOT NULL DEFAULT 'in_service' CHECK (custody_status IN ('in_service','lost')),
+  -- Custody facts: 'lost' (W18/D-188) is financially invisible in the cash
+  -- model — the cost left at purchase, a physical loss moves no money today.
+  -- 'disposed' (W22/D-198) is the economic removal: carrying amount leaves
+  -- the register through an asset_disposals event whose proceeds (if any)
+  -- are cash evidence and whose gain/loss is recorded on the event.
+  custody_status        TEXT NOT NULL DEFAULT 'in_service' CHECK (custody_status IN ('in_service','lost','disposed')),
+  -- W22 lifecycle facts (owner-decided depreciation, D-197/D-198): the useful
+  -- life in whole months and the in-service point from which straight-line
+  -- depreciation runs. Nullable contractual facts — an asset without a life
+  -- simply has no depreciation surface yet.
+  useful_life_months    INTEGER CHECK (useful_life_months IS NULL OR useful_life_months > 0),
+  in_service_on         TEXT,
   notes                 TEXT,
   created_by            TEXT,
   created_at            TEXT NOT NULL DEFAULT (datetime('now'))
@@ -4102,6 +4107,12 @@ CREATE TABLE IF NOT EXISTS supplier_invoices (
   amount        INTEGER NOT NULL CHECK (amount > 0),
   description   TEXT NOT NULL CHECK (length(trim(description)) >= 4),
   received_on   TEXT NOT NULL,
+  -- W22 (D-197/D-199): payment terms as stated facts ('net 30', 'cash on
+  -- delivery'…) plus the due date they imply — the truth behind due-status
+  -- and aging reporting. Nullable: a payable may be recorded before terms
+  -- are confirmed, and reporting says 'no terms' rather than inventing them.
+  terms         TEXT,
+  due_on        TEXT CHECK (due_on IS NULL OR due_on GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
   status        TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','settled')),
   declared_by   TEXT,
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
@@ -4170,6 +4181,12 @@ CREATE TABLE IF NOT EXISTS loans (
   principal    INTEGER NOT NULL CHECK (principal > 0),
   purpose      TEXT,
   received_on  TEXT NOT NULL,
+  -- W22 (D-197/D-199): contractual facts, stated as such — never invented
+  -- accounting classifications. interest_rate_bps is annual, basis points;
+  -- maturity_on and schedule_note describe the agreed repayment calendar.
+  interest_rate_bps INTEGER CHECK (interest_rate_bps IS NULL OR interest_rate_bps >= 0),
+  maturity_on  TEXT,
+  schedule_note TEXT,
   proceeds_transaction_id TEXT NOT NULL UNIQUE REFERENCES financial_transactions(id) ON DELETE RESTRICT,
   status       TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','repaid')),
   repaid_on    TEXT,
@@ -4364,4 +4381,135 @@ WHEN NEW.status = 'remitted'
      AND ft.amount = -NEW.amount AND ft.branch_id = NEW.branch_id
 )
 BEGIN SELECT RAISE(ABORT, 'a withholding remittance requires its signed-negative cash evidence'); END;
+
+-- ═════════════════════════════════════════════════════════════════════════════
+-- WAVE 22 · Asset lifecycle economics and loan interest (owner-decided policy,
+-- 2026-09-05 execution mandate — registered D-197)
+-- ═════════════════════════════════════════════════════════════════════════════
+
+-- ── Depreciation: systematic, straight-line, NON-CASH ───────────────────────
+-- Each row is one month of recognized depreciation: a pure function of the
+-- asset's cost, useful life and in-service point, reproducible and auditable.
+-- NO financial_transactions row exists for depreciation — it never moves cash
+-- and never fabricates income; the P&L surfaces derive the expense from these
+-- facts. Whole-AFN straight line with the rounding remainder absorbed by the
+-- final period, so cumulative depreciation ends at exactly the cost.
+CREATE TABLE IF NOT EXISTS asset_depreciations (
+  id             TEXT PRIMARY KEY,
+  asset_id       TEXT NOT NULL REFERENCES fixed_assets(id) ON DELETE RESTRICT,
+  branch_id      TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  period_key     TEXT NOT NULL CHECK (period_key GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  amount         INTEGER NOT NULL CHECK (amount > 0),
+  recognized_on  TEXT NOT NULL,
+  recognized_by  TEXT NOT NULL,
+  created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (asset_id, period_key)
+);
+CREATE INDEX IF NOT EXISTS idx_asset_depreciations_branch_date ON asset_depreciations(branch_id, recognized_on);
+CREATE INDEX IF NOT EXISTS idx_asset_depreciations_asset ON asset_depreciations(asset_id);
+
+CREATE TRIGGER IF NOT EXISTS trg_asset_depreciations_bound
+BEFORE INSERT ON asset_depreciations
+WHEN (SELECT useful_life_months FROM fixed_assets WHERE id = NEW.asset_id) IS NULL
+  -- Month index from the in-service point: 0-based, must lie inside the life.
+  OR (CAST(substr(NEW.period_key, 1, 4) AS INTEGER) * 12 + CAST(substr(NEW.period_key, 6, 2) AS INTEGER))
+     - (CAST(substr(COALESCE((SELECT in_service_on FROM fixed_assets WHERE id = NEW.asset_id),
+                              (SELECT acquired_on FROM fixed_assets WHERE id = NEW.asset_id)), 1, 4) AS INTEGER) * 12
+        + CAST(substr(COALESCE((SELECT in_service_on FROM fixed_assets WHERE id = NEW.asset_id),
+                                (SELECT acquired_on FROM fixed_assets WHERE id = NEW.asset_id)), 6, 2) AS INTEGER))
+     NOT BETWEEN 0 AND (SELECT useful_life_months - 1 FROM fixed_assets WHERE id = NEW.asset_id)
+  -- A lost asset stopped depreciating at its loss; a disposed one at disposal.
+  OR (SELECT custody_status FROM fixed_assets WHERE id = NEW.asset_id) = 'lost'
+  OR ((SELECT custody_status FROM fixed_assets WHERE id = NEW.asset_id) = 'disposed'
+      AND NEW.period_key > substr((SELECT disposal_on FROM asset_disposals WHERE asset_id = NEW.asset_id), 1, 7))
+  OR (SELECT COALESCE(SUM(amount), 0) FROM asset_depreciations WHERE asset_id = NEW.asset_id) + NEW.amount
+     > (SELECT cost FROM fixed_assets WHERE id = NEW.asset_id)
+BEGIN SELECT RAISE(ABORT, 'Depreciation must lie within the asset''s in-service life and never exceed its cost'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_asset_depreciations_immutable
+BEFORE UPDATE ON asset_depreciations
+WHEN NEW.id IS NOT OLD.id
+BEGIN SELECT RAISE(ABORT, 'recognized depreciation is immutable'); END;
+CREATE TRIGGER IF NOT EXISTS trg_asset_depreciations_nodelete
+BEFORE DELETE ON asset_depreciations
+BEGIN SELECT RAISE(ABORT, 'recognized depreciation is append-only'); END;
+
+-- ── Disposal: a separate economic event from custody loss ──────────────────
+-- Removes the asset's CARRYING amount (cost − recognized depreciation) from
+-- the register, records actual proceeds as CASH (branch main, P&L-neutral
+-- type 'disposal_proceeds' — never operating income) and the resulting
+-- gain/loss (= proceeds − carrying) on the event itself. Proceeds 0 is a
+-- pure retirement. Lost assets keep the custody-loss semantics (D-188) and
+-- cannot be disposed.
+CREATE TABLE IF NOT EXISTS asset_disposals (
+  id                      TEXT PRIMARY KEY,
+  asset_id                TEXT NOT NULL UNIQUE REFERENCES fixed_assets(id) ON DELETE RESTRICT,
+  branch_id               TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  disposal_on             TEXT NOT NULL CHECK (disposal_on GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+  proceeds                INTEGER NOT NULL CHECK (proceeds >= 0),
+  carrying_value          INTEGER NOT NULL CHECK (carrying_value >= 0),
+  gain_loss               INTEGER NOT NULL,
+  proceeds_transaction_id TEXT UNIQUE REFERENCES financial_transactions(id) ON DELETE RESTRICT,
+  buyer                   TEXT,
+  reason                  TEXT NOT NULL CHECK (length(trim(reason)) >= 8),
+  disposed_by             TEXT NOT NULL,
+  created_at              TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK ((proceeds > 0 AND proceeds_transaction_id IS NOT NULL) OR (proceeds = 0 AND proceeds_transaction_id IS NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_asset_disposals_branch ON asset_disposals(branch_id, disposal_on);
+
+CREATE TRIGGER IF NOT EXISTS trg_asset_disposals_immutable
+BEFORE UPDATE ON asset_disposals
+WHEN NEW.id IS NOT OLD.id
+BEGIN SELECT RAISE(ABORT, 'asset disposal events are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS trg_asset_disposals_nodelete
+BEFORE DELETE ON asset_disposals
+BEGIN SELECT RAISE(ABORT, 'asset disposal events are append-only'); END;
+
+-- A disposal names an in-service asset of the same branch and its cash
+-- evidence is one positive disposal_proceeds row of exactly the proceeds.
+CREATE TRIGGER IF NOT EXISTS trg_asset_disposals_bound
+BEFORE INSERT ON asset_disposals
+WHEN (SELECT custody_status FROM fixed_assets WHERE id = NEW.asset_id) IS NOT 'in_service'
+  OR (SELECT branch_id FROM fixed_assets WHERE id = NEW.asset_id) IS NOT NEW.branch_id
+  OR (SELECT cost FROM fixed_assets WHERE id = NEW.asset_id)
+     - (SELECT COALESCE(SUM(amount), 0) FROM asset_depreciations WHERE asset_id = NEW.asset_id) IS NOT NEW.carrying_value
+  OR NEW.gain_loss IS NOT (NEW.proceeds - NEW.carrying_value)
+  OR (NEW.proceeds > 0 AND NOT EXISTS (
+      SELECT 1 FROM financial_transactions ft
+       WHERE ft.id = NEW.proceeds_transaction_id AND ft.type = 'disposal_proceeds'
+         AND ft.amount = NEW.proceeds AND ft.branch_id = NEW.branch_id))
+BEGIN SELECT RAISE(ABORT, 'A disposal must name an in-service asset, its exact carrying value, and matching cash evidence'); END;
+
+-- The custody flip is final and bound to its disposal event.
+CREATE TRIGGER IF NOT EXISTS trg_fixed_assets_disposal_guard
+BEFORE UPDATE OF custody_status ON fixed_assets
+WHEN (NEW.custody_status = 'disposed' AND OLD.custody_status <> 'disposed'
+      AND NOT EXISTS (SELECT 1 FROM asset_disposals d WHERE d.asset_id = NEW.id))
+  OR (OLD.custody_status = 'disposed' AND NEW.custody_status IS NOT OLD.custody_status)
+BEGIN SELECT RAISE(ABORT, 'asset disposal is bound to its disposal event and is final'); END;
+
+-- ── Loan interest: a finance cost, never principal ─────────────────────────
+-- Interest paid is real cash OUT of the organization treasury and a finance
+-- expense; it reduces NO principal liability. Evidence is one signed-negative
+-- 'loan_interest' ledger row of exactly the paid amount.
+CREATE TABLE IF NOT EXISTS loan_interest_payments (
+  id             TEXT PRIMARY KEY,
+  loan_id        TEXT NOT NULL REFERENCES loans(id) ON DELETE RESTRICT,
+  amount         INTEGER NOT NULL CHECK (amount > 0),
+  transaction_id TEXT NOT NULL UNIQUE REFERENCES financial_transactions(id) ON DELETE RESTRICT,
+  paid_on        TEXT NOT NULL,
+  paid_by        TEXT,
+  created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_loan_interest_payments_loan ON loan_interest_payments(loan_id);
+
+CREATE TRIGGER IF NOT EXISTS trg_loan_interest_evidence
+BEFORE INSERT ON loan_interest_payments
+WHEN NOT EXISTS (
+  SELECT 1 FROM financial_transactions ft JOIN loans l ON l.id = NEW.loan_id
+   WHERE ft.id = NEW.transaction_id AND ft.type = 'loan_interest' AND ft.amount = -NEW.amount
+     AND ft.branch_id = (SELECT branch_id FROM financial_transactions WHERE id = l.proceeds_transaction_id)
+)
+BEGIN SELECT RAISE(ABORT, 'an interest payment requires its signed-negative loan_interest cash evidence at the loan''s branch'); END;
 

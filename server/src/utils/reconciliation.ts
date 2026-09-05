@@ -148,10 +148,13 @@ export function computeReconciliation(opts: { branchId: string | null; isAll: bo
   // W21: withholding remittances are P&L-neutral cash OUT of branch main.
   const withholdingRemittedSql = `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type='withholding_remittance'`;
   const withholdingRemitted = scalarValue(withholdingRemittedSql, 'AND branch_id = ?', boundBranchId);
+  // W22: disposal proceeds are P&L-neutral cash INTO branch main.
+  const disposalProceedsSql = `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type='disposal_proceeds'`;
+  const disposalProceeds = scalarValue(disposalProceedsSql, 'AND branch_id = ?', boundBranchId);
   // Whole AFN throughout (D-12/D-22): every money column is an INTEGER, so a
   // variance is either zero or a real discrepancy. A two-decimal tolerance here
   // would only hide a genuine one-afghani break.
-  const expectedMain = cashIncome - expectedSaving - ownerDrawings + reclaims + supplierRefunds + withholdingRemitted;
+  const expectedMain = cashIncome - expectedSaving - ownerDrawings + reclaims + supplierRefunds + withholdingRemitted + disposalProceeds;
 
   const acctSql = `SELECT COALESCE(SUM(main_balance),0) AS main, COALESCE(SUM(saving_balance),0) AS saving FROM finance_accounts WHERE scope_type = 'branch'`;
   const acctRow = (boundBranchId === null

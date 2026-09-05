@@ -106,6 +106,17 @@ const stmtPeriodDistributed = db.prepare(
   `SELECT COALESCE(SUM(amount),0) as distributed FROM financial_transactions
     WHERE finance_category_id='sub_owner_drawings' AND date BETWEEN ? AND ? AND branch_id=?`
 );
+// W22 (D-197/D-198/D-199): two real costs the cash ledger cannot carry as
+// 'expense' rows — systematic depreciation (non-cash; the register's fact rows
+// are the authority) and loan interest (a finance cost that leaves the
+// treasury as its own P&L-neutral type). Both reduce real profit, so the
+// distribution authority counts them; both are labeled explicitly below.
+const stmtPeriodDepreciation = db.prepare(
+  `SELECT COALESCE(SUM(amount),0) as dep FROM asset_depreciations WHERE branch_id=? AND recognized_on BETWEEN ? AND ?`
+);
+const stmtPeriodFinanceCost = db.prepare(
+  `SELECT COALESCE(SUM(-amount),0) as fin FROM financial_transactions WHERE type='loan_interest' AND branch_id=? AND date BETWEEN ? AND ?`
+);
 
 /**
  * Loads every input to the current-month withdrawal authority as one unit.
@@ -115,7 +126,12 @@ const stmtPeriodDistributed = db.prepare(
 function currentProfitDistributionPosition(branchId: string) {
   const { from, to, period } = getTimeBounds(undefined, 'month');
   const revenue = Number((stmtMonthlyRevenue.get(from, to, branchId) as any).revenue || 0);
-  const expense = Number((stmtMonthlyExpense.get(from, to, branchId) as any).expense || 0);
+  const cashExpense = Number((stmtMonthlyExpense.get(from, to, branchId) as any).expense || 0);
+  const depreciation = Number((stmtPeriodDepreciation.get(branchId, from, to) as any).dep || 0);
+  const financeCost = Number((stmtPeriodFinanceCost.get(branchId, from, to) as any).fin || 0);
+  // The expense that sets the distribution tier is the COMPLETE period cost:
+  // cash operating expense + non-cash depreciation + finance cost.
+  const expense = cashExpense + depreciation + financeCost;
   const fixedTotal = Number((stmtFixedTotal.get(branchId) as any).fixedTotal || 0);
   const distributed = assertMoney(
     Number((stmtPeriodDistributed.get(from, to, branchId) as any).distributed || 0),
@@ -130,7 +146,7 @@ function currentProfitDistributionPosition(branchId: string) {
     mainBalance: account.mainBalance,
     savingBalance: account.savingBalance,
   });
-  return { from, to, period, revenue, expense, fixedTotal, position };
+  return { from, to, period, revenue, expense, cashExpense, depreciation, financeCost, fixedTotal, position };
 }
 
 const stmtVariableTotal = db.prepare(`SELECT COALESCE(SUM(allocated_amount),0) as variableTotal FROM budget_lines WHERE branch_id=? AND cost_type='variable'`);
@@ -278,7 +294,11 @@ bosRouter.get(
 
     const todayRevenue = (stmtTodayRevenue.get(todayStr, branchId) as any).revenue;
     const monthlyRevenue = (stmtMonthlyRevenue.get(from, to, branchId) as any).revenue;
-    const monthlyExpense = (stmtMonthlyExpense.get(from, to, branchId) as any).expense;
+    const monthlyCashExpense = (stmtMonthlyExpense.get(from, to, branchId) as any).expense;
+    // W22: complete period cost — cash expense + non-cash depreciation + finance cost.
+    const monthlyDepreciation = Number((stmtPeriodDepreciation.get(branchId, from, to) as any).dep || 0);
+    const monthlyFinanceCost = Number((stmtPeriodFinanceCost.get(branchId, from, to) as any).fin || 0);
+    const monthlyExpense = monthlyCashExpense + monthlyDepreciation + monthlyFinanceCost;
     const breakEven = (stmtFixedTotal.get(branchId) as any).fixedTotal;
     const variableTotal = (stmtVariableTotal.get(branchId) as any).variableTotal;
     const teacherCost = (stmtTeacherCost.get(from, to, branchId) as any).teacherCost;
@@ -316,6 +336,9 @@ bosRouter.get(
       variableCosts: variableTotal,
       profit,
       profitMargin: Math.round(profitMargin * 10) / 10,
+      monthlyCashExpense,
+      monthlyDepreciation,
+      monthlyFinanceCost,
       cashAvailable: mainAccountBalance,
       cashBalance: reserveFundBalance,
       reserveFundBalance,
@@ -478,7 +501,7 @@ bosRouter.get(
     // A profit withdrawal is a current-month action, not an analytics view.
     // Publishing a today/year ceiling while enforcing a month ceiling would
     // show an amount that the mutation does not honour.
-    const { from, to, period, revenue, expense, position } =
+    const { from, to, period, revenue, expense, cashExpense, depreciation, financeCost, position } =
       currentProfitDistributionPosition(branchId);
 
     res.json({
@@ -489,6 +512,11 @@ bosRouter.get(
       periodTo: to,
       revenue,
       expense,
+      // Complete period cost composition (W22): the withdrawal ceiling is
+      // computed on cashExpense + depreciation (non-cash) + financeCost.
+      cashExpense,
+      depreciation,
+      financeCost,
       profit: position.profit,
       profitMargin: Math.round(position.marginPercent * 10) / 10,
       tierPercent: position.tierPercent,

@@ -24,8 +24,9 @@ import { addNotification } from '../utils/notifications.js';
 import { getNumberSetting, setSetting } from '../utils/settings.js';
 import { decrementMainBalanceIfSufficient, incrementMainBalance, getFinanceAccount } from '../utils/financeAccounts.js';
 import { computeReconciliation } from '../utils/reconciliation.js';
-import { getPayablePosition, recordSupplierInvoicePayment, recordSupplierReturn, receiveSupplierRefund, getLoanPosition, recordLoan, recordLoanRepayment } from '../core/finance/credit-debt.js';
+import { getPayablePosition, recordSupplierInvoicePayment, recordSupplierReturn, receiveSupplierRefund, getLoanPosition, recordLoan, recordLoanRepayment, recordLoanInterest } from '../core/finance/credit-debt.js';
 import { dischargeTuitionObligation, listTuitionWriteOffs, writeOffEmployeeAdvance, listAdvanceWriteOffs, declarePayrollWithholding, remitPayrollWithholding, getWithholdingRegister } from '../core/finance/write-offs.js';
+import { getAssetLifecyclePosition, runDepreciation, disposeAsset, listAssetDisposals, getAssetPortfolioSummary, getDepreciationExpense, depreciationSchedule } from '../core/finance/asset-lifecycle.js';
 import { BUDGET_MOVEMENT_CATEGORY, BUDGET_MOVEMENT_TYPE, postBudgetMovement } from '../core/finance/budget-movements.js';
 import { assertMoney } from '../utils/money.js';
 import { SYSTEM_DEFAULTS } from '../core/configuration/policy-catalog.js';
@@ -1667,13 +1668,29 @@ financeRouter.post(
     if (!description || description.length < 4) throw new HttpError(400, 'A payable description of at least 4 characters is required.');
     const receivedOn = optionalText(req.body?.receivedOn, 'Received on', TEXT_LIMITS.short) ?? today();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(receivedOn)) throw new HttpError(400, 'receivedOn must be an ISO date (YYYY-MM-DD).');
+    // W22 (D-197/D-199): payment terms as stated facts — a label ('net 30'),
+    // an explicit due date, or termsDays computed from receipt. All optional;
+    // absent terms report as 'no terms stated', never an invented default.
+    const terms = optionalText(req.body?.terms, 'Terms', TEXT_LIMITS.line);
+    const explicitDueOn = optionalText(req.body?.dueOn, 'Due on', TEXT_LIMITS.short);
+    if (explicitDueOn && !/^\d{4}-\d{2}-\d{2}$/.test(explicitDueOn)) throw new HttpError(400, 'dueOn must be an ISO date (YYYY-MM-DD).');
+    const termsDays = req.body?.termsDays == null ? null : Math.round(Number(req.body.termsDays));
+    if (termsDays != null && (!Number.isFinite(termsDays) || termsDays < 0)) throw new HttpError(400, 'termsDays must be a non-negative whole number of days.');
+    const computedDueOn = explicitDueOn ?? (termsDays != null
+      ? new Date(`${receivedOn}T00:00:00Z`).toISOString().slice(0, 10) : null);
+    let dueOn = computedDueOn;
+    if (!explicitDueOn && termsDays != null) {
+      const d = new Date(`${receivedOn}T00:00:00Z`);
+      d.setUTCDate(d.getUTCDate() + termsDays);
+      dueOn = d.toISOString().slice(0, 10);
+    }
 
     const invoiceId = id('sinv');
     db.transaction(() => {
       db.prepare(
-        `INSERT INTO supplier_invoices (id, supplier_id, branch_id, amount, description, received_on, declared_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ).run(invoiceId, supplierId, branchId, amount, description, receivedOn, user.fullName);
+        `INSERT INTO supplier_invoices (id, supplier_id, branch_id, amount, description, received_on, terms, due_on, declared_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(invoiceId, supplierId, branchId, amount, description, receivedOn, terms, dueOn, user.fullName);
     })();
     writeAudit(req, `Declared supplier payable ${invoiceId} (${amount} AFN)`, { branchId, newValue: JSON.stringify({ supplierId, amount }) });
     res.status(201).json({ id: invoiceId });
@@ -1773,7 +1790,7 @@ financeRouter.get(
     const params = isAll ? [] : [branchId];
     const rows = db.prepare(
       `SELECT i.id, i.supplier_id, s.name AS supplier_name, i.branch_id, i.amount, i.description,
-              i.received_on, i.status, i.declared_by,
+              i.received_on, i.status, i.declared_by, i.terms, i.due_on,
               COALESCE((SELECT SUM(p.amount) FROM supplier_invoice_payments p WHERE p.supplier_invoice_id = i.id), 0) AS settled,
               COALESCE((SELECT SUM(r.amount) FROM supplier_returns r WHERE r.supplier_invoice_id = i.id AND r.kind = 'payable_reduction'), 0) AS payable_reduced,
               COALESCE((SELECT SUM(r.amount) FROM supplier_returns r WHERE r.supplier_invoice_id = i.id AND r.kind = 'refund_due' AND r.status = 'effectuated'), 0) AS refund_due
@@ -1783,6 +1800,30 @@ financeRouter.get(
         ORDER BY datetime(i.created_at) DESC, i.id DESC`,
     ).all(...params) as Array<Record<string, unknown>>;
     const open = rows.filter((r) => Number(r.amount) - Number(r.settled) - Number(r.payable_reduced) > 0);
+    const todayStr = today();
+    const daysOverdue = (dueOn: unknown) => (typeof dueOn === 'string' && dueOn
+      ? Math.floor((Date.parse(`${todayStr}T00:00:00Z`) - Date.parse(`${dueOn}T00:00:00Z`)) / 86_400_000)
+      : null);
+    const dueStatusOf = (outstanding: number, dueOn: unknown) => {
+      if (outstanding <= 0) return 'settled';
+      const od = daysOverdue(dueOn);
+      if (od == null) return 'no_terms';
+      if (od > 0) return 'overdue';
+      if (od >= -7) return 'due_soon';
+      return 'not_due';
+    };
+    const aging = { current: 0, d1_30: 0, d31_60: 0, d60plus: 0 };
+    for (const r of open) {
+      const outstanding = Number(r.amount) - Number(r.settled) - Number(r.payable_reduced);
+      const od = daysOverdue(r.due_on);
+      // Undated open payable: no stated fact makes it overdue, so it is
+      // current exposure (still a real, unsettled liability).
+      if (od == null) { aging.current += outstanding; continue; }
+      if (od <= 0) aging.current += outstanding;
+      else if (od <= 30) aging.d1_30 += outstanding;
+      else if (od <= 60) aging.d31_60 += outstanding;
+      else aging.d60plus += outstanding;
+    }
     res.json({
       scope: isAll ? 'organization' : 'branch',
       branchId: branchId ?? null,
@@ -1790,14 +1831,22 @@ financeRouter.get(
         openPayables: open.reduce((s, r) => s + (Number(r.amount) - Number(r.settled) - Number(r.payable_reduced)), 0),
         refundDue: rows.reduce((s, r) => s + Number(r.refund_due), 0),
         counts: { invoices: rows.length, open: open.length },
+        overdue: aging.d1_30 + aging.d31_60 + aging.d60plus,
       },
-      invoices: rows.map((r) => ({
-        id: r.id, supplierId: r.supplier_id, supplierName: r.supplier_name, branchId: r.branch_id,
-        amount: r.amount, description: r.description, receivedOn: r.received_on, status: r.status,
-        settled: r.settled, payableReduced: r.payable_reduced, refundDue: r.refund_due,
-        outstanding: Math.max(0, Number(r.amount) - Number(r.settled) - Number(r.payable_reduced)),
-      })),
-      note: 'Credit purchases are liabilities at receipt; settlement pays through the budget authority. Terms/due dates are owner policy (POLICY REQUIRED).',
+      aging,
+      invoices: rows.map((r) => {
+        const outstanding = Math.max(0, Number(r.amount) - Number(r.settled) - Number(r.payable_reduced));
+        return {
+          id: r.id, supplierId: r.supplier_id, supplierName: r.supplier_name, branchId: r.branch_id,
+          amount: r.amount, description: r.description, receivedOn: r.received_on, status: r.status,
+          terms: r.terms ?? null, dueOn: r.due_on ?? null,
+          daysOverdue: outstanding > 0 ? daysOverdue(r.due_on) : null,
+          dueStatus: dueStatusOf(outstanding, r.due_on),
+          settled: r.settled, payableReduced: r.payable_reduced, refundDue: r.refund_due,
+          outstanding,
+        };
+      }),
+      note: 'Credit purchases are liabilities at receipt; settlement pays through the budget authority. Terms and due dates are stated facts; absent terms report as no_terms.',
     });
   }),
 );
@@ -1810,6 +1859,13 @@ financeRouter.post(
     let principal: number;
     try { principal = assertMoney(req.body?.principal, 'loan principal'); } catch { throw new HttpError(400, 'Loan principal must be a whole-AFN positive value.'); }
     const purpose = optionalText(req.body?.purpose, 'Loan purpose', TEXT_LIMITS.line);
+    const interestRateBps = req.body?.interestRateBps == null ? null : Math.round(Number(req.body.interestRateBps));
+    if (interestRateBps != null && (!Number.isFinite(interestRateBps) || interestRateBps < 0)) {
+      throw new HttpError(400, 'interestRateBps must be a non-negative integer (annual basis points).');
+    }
+    const maturityOn = optionalText(req.body?.maturityOn, 'Maturity', TEXT_LIMITS.short);
+    if (maturityOn && !/^\d{4}-\d{2}-\d{2}$/.test(maturityOn)) throw new HttpError(400, 'maturityOn must be an ISO date (YYYY-MM-DD).');
+    const scheduleNote = optionalText(req.body?.scheduleNote, 'Schedule note', TEXT_LIMITS.line);
     let loanId = '';
     let transactionId = '';
     db.transaction(() => {
@@ -1817,6 +1873,7 @@ financeRouter.post(
         lenderName: String(req.body?.lenderName ?? ''), principal, purpose,
         receivedOn: optionalText(req.body?.receivedOn, 'Received on', TEXT_LIMITS.short) ?? today(),
         operatorBranchId: user.branchId, operatorName: user.fullName,
+        interestRateBps, maturityOn: maturityOn ?? null, scheduleNote,
       });
       loanId = result.loanId;
       transactionId = result.transactionId;
@@ -1832,20 +1889,25 @@ financeRouter.get(
   ah(async (_req, res) => {
     const rows = db.prepare(
       `SELECT l.id, l.lender_name, l.principal, l.purpose, l.received_on, l.status, l.repaid_on,
-              COALESCE((SELECT SUM(r.amount) FROM loan_repayments r WHERE r.loan_id = l.id), 0) AS repaid
+              l.interest_rate_bps, l.maturity_on, l.schedule_note,
+              COALESCE((SELECT SUM(r.amount) FROM loan_repayments r WHERE r.loan_id = l.id), 0) AS repaid,
+              COALESCE((SELECT SUM(i.amount) FROM loan_interest_payments i WHERE i.loan_id = l.id), 0) AS interest_paid
          FROM loans l ORDER BY datetime(l.created_at) DESC, l.id DESC`,
     ).all() as Array<Record<string, unknown>>;
     res.json({
       totals: {
         outstanding: rows.reduce((s, r) => s + (Number(r.principal) - Number(r.repaid)), 0),
+        interestPaid: rows.reduce((s, r) => s + Number(r.interest_paid), 0),
         counts: { loans: rows.length, open: rows.filter((r) => r.status === 'open').length },
       },
       loans: rows.map((r) => ({
         id: r.id, lenderName: r.lender_name, principal: r.principal, purpose: r.purpose,
         receivedOn: r.received_on, status: r.status, repaidOn: r.repaid_on, repaid: r.repaid,
+        interestRateBps: r.interest_rate_bps ?? null, maturityOn: r.maturity_on ?? null,
+        scheduleNote: r.schedule_note ?? null, interestPaid: r.interest_paid,
         outstanding: Math.max(0, Number(r.principal) - Number(r.repaid)),
       })),
-      note: 'Loans are principal-only liabilities at the organization treasury; interest is owner policy and has no surface (POLICY REQUIRED).',
+      note: 'Loans are principal-only liabilities at the organization treasury; interest paid is a finance cost that reduces no principal. Rates and schedules are stated contractual facts.',
     });
   }),
 );
@@ -2006,6 +2068,189 @@ financeRouter.post(
     })();
     writeAudit(req, `Remitted payroll withholding ${req.params.id}`, { branchId: row.branch_id, newValue: JSON.stringify({ transactionId }) });
     res.json({ ok: true, transactionId });
+  }),
+);
+
+// ═════════════════════════════════════════════════════════════════════════════
+// WAVE 22 · Asset lifecycle economics, loan interest, supplier terms
+// (owner-decided policy, 2026-09-05 execution mandate — D-197)
+// ═════════════════════════════════════════════════════════════════════════════
+// Depreciation is systematic straight-line recognition over the stated useful
+// life from the in-service point — NON-CASH: no ledger row exists for it; the
+// P&L surfaces derive the expense from the fact rows. Disposal is a separate
+// economic event from custody loss: carrying value leaves the register,
+// actual proceeds enter branch main as P&L-neutral cash, gain/loss is
+// recorded on the event and is never operating income. Loan interest is a
+// finance cost out of the treasury that reduces no principal. Supplier terms
+// and due dates are stated facts behind due-status and aging reporting.
+
+financeRouter.post(
+  '/assets/:id/lifecycle',
+  requirePermission('Expense.Approve'),
+  ah(async (req, res) => {
+    const asset = db.prepare('SELECT branch_id, custody_status FROM fixed_assets WHERE id = ?').get(req.params.id) as
+      | { branch_id: string; custody_status: string }
+      | undefined;
+    if (!asset) throw new HttpError(404, 'Fixed asset not found.');
+    if (!canAccessBranchResource(req, asset.branch_id)) throw new HttpError(403, 'Asset belongs to another branch.');
+    if (asset.custody_status !== 'in_service') throw new HttpError(409, 'Only an in-service asset accepts lifecycle facts.');
+    const usefulLifeMonths = req.body?.usefulLifeMonths == null ? null : Math.round(Number(req.body.usefulLifeMonths));
+    if (usefulLifeMonths != null && (!Number.isFinite(usefulLifeMonths) || usefulLifeMonths <= 0)) {
+      throw new HttpError(400, 'usefulLifeMonths must be a positive whole number of months.');
+    }
+    const inServiceOn = optionalText(req.body?.inServiceOn, 'In-service date', TEXT_LIMITS.short);
+    if (inServiceOn && !/^\d{4}-\d{2}-\d{2}$/.test(inServiceOn)) throw new HttpError(400, 'inServiceOn must be an ISO date (YYYY-MM-DD).');
+
+    db.prepare(`UPDATE fixed_assets SET useful_life_months = COALESCE(?, useful_life_months), in_service_on = COALESCE(?, in_service_on) WHERE id = ?`)
+      .run(usefulLifeMonths, inServiceOn ?? null, req.params.id);
+    writeAudit(req, `Stated lifecycle facts for asset ${req.params.id}`, {
+      branchId: asset.branch_id,
+      newValue: JSON.stringify({ usefulLifeMonths, inServiceOn }),
+    });
+    res.json(getAssetLifecyclePosition(db, req.params.id));
+  }),
+);
+
+financeRouter.post(
+  '/assets/:id/depreciate',
+  requirePermission('Expense.Approve'),
+  ah(async (req, res) => {
+    const user = getUserContext(req);
+    const asset = db.prepare('SELECT branch_id FROM fixed_assets WHERE id = ?').get(req.params.id) as { branch_id: string } | undefined;
+    if (!asset) throw new HttpError(404, 'Fixed asset not found.');
+    if (!canAccessBranchResource(req, asset.branch_id)) throw new HttpError(403, 'Asset belongs to another branch.');
+    const throughPeriod = optionalText(req.body?.throughPeriod, 'Through period', TEXT_LIMITS.short);
+
+    let result: ReturnType<typeof runDepreciation> | undefined;
+    db.transaction(() => {
+      result = runDepreciation(db, { assetId: req.params.id, throughPeriod: throughPeriod || undefined, recognizedBy: user.fullName });
+    })();
+    writeAudit(req, `Recognized depreciation for asset ${req.params.id} (${result?.inserted.reduce((s, r) => s + r.amount, 0) || 0} AFN, ${result?.inserted.length ?? 0} periods)`, {
+      branchId: asset.branch_id,
+      newValue: JSON.stringify(result?.inserted ?? []),
+    });
+    res.json({
+      insertedPeriods: result?.inserted ?? [],
+      position: result?.position,
+      note: 'Depreciation is non-cash: no ledger row exists for it; P&L surfaces derive the expense from these facts.',
+    });
+  }),
+);
+
+financeRouter.get(
+  '/assets/:id/depreciation',
+  requirePermission('Budget.View', 'Ledger.View', 'Finance.Report'),
+  ah(async (req, res) => {
+    const asset = db.prepare('SELECT branch_id, cost, acquired_on, in_service_on, useful_life_months, custody_status FROM fixed_assets WHERE id = ?').get(req.params.id) as
+      | { branch_id: string; cost: number; acquired_on: string; in_service_on: string | null; useful_life_months: number | null; custody_status: string }
+      | undefined;
+    if (!asset) throw new HttpError(404, 'Fixed asset not found.');
+    if (!canAccessBranchResource(req, asset.branch_id)) throw new HttpError(403, 'Asset belongs to another branch.');
+    const position = getAssetLifecyclePosition(db, req.params.id);
+    const recognized = new Map(
+      (db.prepare(`SELECT period_key, amount, recognized_on, recognized_by FROM asset_depreciations WHERE asset_id = ?`).all(req.params.id) as Array<{ period_key: string; amount: number; recognized_on: string; recognized_by: string }>)
+        .map((r) => [r.period_key, r]),
+    );
+    const schedule = asset.useful_life_months
+      ? depreciationSchedule(Number(asset.cost), asset.useful_life_months, position.inServiceOn).map((row) => ({
+          ...row,
+          ...(recognized.get(row.periodKey) ?? { recognizedOn: null, recognizedBy: null }),
+        }))
+      : [];
+    res.json({ position, schedule, recognizedTotal: position.recognized });
+  }),
+);
+
+financeRouter.post(
+  '/assets/:id/dispose',
+  requirePermission('Expense.Approve'),
+  ah(async (req, res) => {
+    const user = getUserContext(req);
+    const asset = db.prepare('SELECT branch_id FROM fixed_assets WHERE id = ?').get(req.params.id) as { branch_id: string } | undefined;
+    if (!asset) throw new HttpError(404, 'Fixed asset not found.');
+    if (!canAccessBranchResource(req, asset.branch_id)) throw new HttpError(403, 'Asset belongs to another branch.');
+    const proceeds = Number(req.body?.proceeds ?? 0);
+    if (!Number.isFinite(proceeds)) throw new HttpError(400, 'Proceeds must be a whole-AFN non-negative value.');
+    const buyer = optionalText(req.body?.buyer, 'Buyer', TEXT_LIMITS.name);
+    const reason = optionalText(req.body?.reason, 'Disposal reason', TEXT_LIMITS.line);
+
+    let result: ReturnType<typeof disposeAsset> | undefined;
+    db.transaction(() => {
+      result = disposeAsset(db, {
+        assetId: req.params.id, proceeds, disposalOn: optionalText(req.body?.disposalOn, 'Disposal date', TEXT_LIMITS.short) ?? undefined,
+        buyer, reason: reason ?? '', disposedBy: user.fullName,
+      });
+    })();
+    writeAudit(req, `Disposed of asset ${req.params.id} (proceeds ${result?.proceeds} AFN, gain/loss ${result?.gainLoss})`, {
+      branchId: asset.branch_id,
+      newValue: JSON.stringify({ disposalId: result?.disposalId, proceeds: result?.proceeds, gainLoss: result?.gainLoss, transactionId: result?.transactionId }),
+    });
+    res.status(201).json({ ...result, note: 'Proceeds are P&L-neutral cash-in, never operating income; the gain/loss is recorded on the event.' });
+  }),
+);
+
+financeRouter.get(
+  '/asset-disposals',
+  requirePermission('Budget.View', 'Ledger.View', 'Finance.Report'),
+  ah(async (req, res) => {
+    const { branchId } = resolveBranchScope(req);
+    const rows = listAssetDisposals(db, branchId ?? null);
+    res.json({
+      totals: {
+        proceeds: rows.reduce((s, r) => s + Number(r.proceeds), 0),
+        gainLoss: rows.reduce((s, r) => s + Number(r.gainLoss), 0),
+        count: rows.length,
+      },
+      disposals: rows,
+    });
+  }),
+);
+
+financeRouter.get(
+  '/asset-lifecycle/summary',
+  requirePermission('Budget.View', 'Ledger.View', 'Finance.Report'),
+  ah(async (req, res) => {
+    const { branchId } = resolveBranchScope(req);
+    const from = optionalText(req.query.from as string, 'From', TEXT_LIMITS.short) ?? today().slice(0, 8) + '01';
+    const to = optionalText(req.query.to as string, 'To', TEXT_LIMITS.short) ?? today();
+    const portfolio = getAssetPortfolioSummary(db, branchId ?? null);
+    const depreciation = getDepreciationExpense(db, { branchId: branchId ?? null, from, to });
+    const gains = (db.prepare(
+      `SELECT COALESCE(SUM(gain_loss), 0) AS v FROM asset_disposals WHERE branch_id ${branchId ? '= ?' : 'IS NOT NULL'} AND disposal_on >= ? AND disposal_on <= ?`,
+    ).get(...(branchId ? [branchId, from, to] : [from, to])) as { v: number }).v;
+    const financeCost = Number((db.prepare(
+      `SELECT COALESCE(SUM(-amount), 0) AS v FROM financial_transactions WHERE type = 'loan_interest' ${branchId ? 'AND branch_id = ?' : ''} AND date >= ? AND date <= ?`,
+    ).get(...(branchId ? [branchId, from, to] : [from, to])) as { v: number }).v) || 0;
+    res.json({
+      scope: branchId ? 'branch' : 'organization',
+      period: { from, to },
+      portfolio,
+      periodExpense: {
+        depreciationNonCash: depreciation.total,
+        disposalGainLoss: Number(gains) || 0,
+        loanInterestFinanceCost: financeCost,
+      },
+      note: 'Depreciation is derived from append-only fact rows and moves no cash; disposal proceeds are cash, their gain/loss is not operating income.',
+    });
+  }),
+);
+
+financeRouter.post(
+  '/loans/:id/pay-interest',
+  requirePermission('Expense.Approve'),
+  ah(async (req, res) => {
+    const user = getUserContext(req);
+    const amount = Number(req.body?.amount);
+    if (!Number.isFinite(amount)) throw new HttpError(400, 'The interest amount is required.');
+
+    let result: { interestPaymentId: string; transactionId: string } | undefined;
+    db.transaction(() => {
+      result = recordLoanInterest(db, { loanId: req.params.id, amount, paidBy: user.fullName });
+    })();
+    writeAudit(req, `Paid loan interest on ${req.params.id} (${amount} AFN)`, {
+      newValue: JSON.stringify({ interestPaymentId: result?.interestPaymentId, transactionId: result?.transactionId }),
+    });
+    res.status(201).json({ ...result, position: getLoanPosition(db, req.params.id) });
   }),
 );
 
