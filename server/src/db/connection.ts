@@ -159,6 +159,103 @@ function ensureBookReceiptAcquisitionColumns(): void {
  * re-run afterwards recreates the indexes and triggers that died with the
  * old table. Greenfield databases already carry the new CHECK and skip this.
  */
+/**
+ * W18 (D-187): converge a pre-W18 `donation_clawbacks` table onto the
+ * attribution shape. Pre-W18 declaration only ever succeeded when the donation
+ * had NO onward instrument movement, so every legacy clawback's attribution is
+ * derivable: the donation's single root instrument. NULL survives only where
+ * no unique root exists (not producible through the service; defensive).
+ */
+function ensureDonationClawbackAttributionColumns(): void {
+  const columns = db.prepare(`PRAGMA table_info(donation_clawbacks)`).all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === 'attributed_id')) {
+    db.exec(`ALTER TABLE donation_clawbacks ADD COLUMN attributed_kind TEXT`);
+    db.exec(`ALTER TABLE donation_clawbacks ADD COLUMN attributed_id TEXT`);
+  }
+  // Backfill: one root instrument ⇒ attribute to it. The W16 immutability
+  // trigger correctly refuses ANY update to an open/repaid clawback, so it is
+  // dropped for this one-time convergence and recreated by the schema re-run
+  // in initSchema; a crash in between simply re-runs the (idempotent) backfill
+  // on the next boot.
+  db.exec('DROP TRIGGER IF EXISTS trg_donation_clawbacks_immutable_update');
+  db.exec(`
+    UPDATE donation_clawbacks SET
+      attributed_kind = 'scholarship_funding',
+      attributed_id = (SELECT sf.id FROM scholarship_fundings sf WHERE sf.donation_id = donation_clawbacks.donation_id)
+    WHERE attributed_id IS NULL
+      AND (SELECT COUNT(*) FROM scholarship_fundings sf WHERE sf.donation_id = donation_clawbacks.donation_id) = 1
+      AND (SELECT COUNT(*) FROM sponsorship_receipts sr WHERE sr.donation_id = donation_clawbacks.donation_id) = 0
+      AND (SELECT COUNT(*) FROM campaign_funding_entries e
+            WHERE e.source_donation_id = donation_clawbacks.donation_id AND e.origin_kind = 'restricted_donation') = 0
+  `);
+  db.exec(`
+    UPDATE donation_clawbacks SET
+      attributed_kind = 'sponsorship_receipt',
+      attributed_id = (SELECT sr.id FROM sponsorship_receipts sr WHERE sr.donation_id = donation_clawbacks.donation_id)
+    WHERE attributed_id IS NULL
+      AND (SELECT COUNT(*) FROM scholarship_fundings sf WHERE sf.donation_id = donation_clawbacks.donation_id) = 0
+      AND (SELECT COUNT(*) FROM sponsorship_receipts sr WHERE sr.donation_id = donation_clawbacks.donation_id) = 1
+      AND (SELECT COUNT(*) FROM campaign_funding_entries e
+            WHERE e.source_donation_id = donation_clawbacks.donation_id AND e.origin_kind = 'restricted_donation') = 0
+  `);
+  db.exec(`
+    UPDATE donation_clawbacks SET
+      attributed_kind = 'campaign_funding_entry',
+      attributed_id = (SELECT e.id FROM campaign_funding_entries e
+                        WHERE e.source_donation_id = donation_clawbacks.donation_id AND e.origin_kind = 'restricted_donation')
+    WHERE attributed_id IS NULL
+      AND (SELECT COUNT(*) FROM scholarship_fundings sf WHERE sf.donation_id = donation_clawbacks.donation_id) = 0
+      AND (SELECT COUNT(*) FROM sponsorship_receipts sr WHERE sr.donation_id = donation_clawbacks.donation_id) = 0
+      AND (SELECT COUNT(*) FROM campaign_funding_entries e
+            WHERE e.source_donation_id = donation_clawbacks.donation_id AND e.origin_kind = 'restricted_donation') = 1
+  `);
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS trg_donation_clawbacks_immutable_update
+    BEFORE UPDATE ON donation_clawbacks
+    WHEN NEW.donation_id IS NOT OLD.donation_id OR NEW.amount IS NOT OLD.amount
+         OR NEW.status = 'open' OR OLD.status = 'repaid'
+    BEGIN SELECT RAISE(ABORT, 'A clawback''s declaration is immutable; it may only transition open → repaid'); END
+  `);
+}
+
+/**
+ * W18: widen `fixed_assets.custody_status` with the custody-loss state.
+ * SQLite cannot ALTER a CHECK constraint, so an existing (pre-W18) table is
+ * rebuilt with the standard copy-swap while `foreign_keys` is OFF. Dependent
+ * triggers (including the edited custody-transfer guard) are dropped first and
+ * recreated by the idempotent schema re-run. Greenfield databases carry the
+ * new CHECK already and skip this.
+ */
+function ensureFixedAssetsCustodyLossShape(schema: string): void {
+  const current = db.prepare(
+    `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'fixed_assets'`,
+  ).get() as { sql: string } | undefined;
+  if (!current?.sql || current.sql.includes("'lost'")) return;
+
+  const canonical = schema.match(/[\s\S]*CREATE TABLE IF NOT EXISTS fixed_assets \([\s\S]*?\n\);/);
+  const ddl = canonical ? canonical[0].slice(canonical[0].indexOf('CREATE TABLE IF NOT EXISTS fixed_assets (')) : null;
+  if (!ddl) throw new Error('Cannot converge fixed_assets: canonical DDL not found in schema.sql.');
+
+  log.warn('Rebuilding fixed_assets with the W18 custody-loss state (copy-swap, foreign keys suspended).');
+  const swap = db.transaction(() => {
+    db.exec(ddl.replace('CREATE TABLE IF NOT EXISTS fixed_assets (', 'CREATE TABLE fixed_assets_w18_swap ('));
+    db.exec(`INSERT INTO fixed_assets_w18_swap (id, name, branch_id, category_id, acquired_on, cost, source_transaction_id, custody_status, notes, created_by, created_at)
+             SELECT id, name, branch_id, category_id, acquired_on, cost, source_transaction_id, custody_status, notes, created_by, created_at FROM fixed_assets`);
+    const dependents = (db.prepare(
+      `SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name != 'fixed_assets' AND sql LIKE '%fixed_assets%'`,
+    ).all() as Array<{ name: string }>).map((r) => r.name);
+    for (const name of dependents) db.exec(`DROP TRIGGER ${JSON.stringify(name)}`);
+    db.exec('DROP TABLE fixed_assets');
+    db.exec('ALTER TABLE fixed_assets_w18_swap RENAME TO fixed_assets');
+  });
+  swap();
+  db.exec(schema);
+  const violations = db.prepare('PRAGMA foreign_key_check').all();
+  if (violations.length > 0) {
+    throw new Error(`fixed_assets rebuild introduced foreign-key violations: ${JSON.stringify(violations).slice(0, 400)}`);
+  }
+}
+
 function ensureFinancialTransactionsReclaimType(schema: string): void {
   const current = db.prepare(
     `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'financial_transactions'`,
@@ -288,6 +385,8 @@ export function initSchema(): void {
     ensureBookReceiptAcquisitionColumns();
     ensureEmployeeLedgerDueColumn();
     ensureRegistrationsFinancialColumnsDropped();
+    ensureDonationClawbackAttributionColumns();
+    ensureFixedAssetsCustodyLossShape(schema);
     ensureFinancialTransactionsReclaimType(schema);
     reconcileCanonicalFeeAuthority();
   } catch (error) {

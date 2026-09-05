@@ -308,13 +308,17 @@ export function getScholarshipFundingPosition(db: Database, fundingId: string): 
       WHERE scholarship_funding_id = ? AND status = 'active'`,
   ).get(fundingId) as { t: number }).t) || 0;
   const amount = Number(row.amount) || 0;
-  // W16: clawbacks attributed to the donation behind this funding source.
+  // W16/W18: clawbacks attributed to THIS funding source reduce its capacity.
+  // Declaration fixes attribution (D-187); pre-W18 rows carry NULL attribution
+  // and keep the original chain-wide behaviour.
   const clawedBack = Number((db.prepare(
     `SELECT COALESCE(SUM(c.amount), 0) AS t FROM donation_clawbacks c
-      WHERE c.donation_id = (SELECT donation_id FROM scholarship_fundings WHERE id = :f)
-         OR c.donation_id IN (SELECT e.source_donation_id FROM scholarship_fundings sf
-                              JOIN campaign_funding_entries e ON e.id = sf.campaign_funding_entry_id
-                              WHERE sf.id = :f AND e.source_donation_id IS NOT NULL)`,
+      WHERE (c.attributed_kind = 'scholarship_funding' AND c.attributed_id = :f)
+         OR (c.attributed_id IS NULL AND (
+               c.donation_id = (SELECT donation_id FROM scholarship_fundings WHERE id = :f)
+            OR c.donation_id IN (SELECT e.source_donation_id FROM scholarship_fundings sf
+                                 JOIN campaign_funding_entries e ON e.id = sf.campaign_funding_entry_id
+                                 WHERE sf.id = :f AND e.source_donation_id IS NOT NULL)))`,
   ).get({ f: fundingId }) as { t: number }).t) || 0;
   return { id: fundingId, amount, applied, returned: 0, clawedBack, available: Math.max(0, amount - applied - clawedBack) };
 }
@@ -331,13 +335,16 @@ export function getSponsorshipReceiptPosition(db: Database, receiptId: string): 
       WHERE source_sponsorship_receipt_id = ?`,
   ).get(receiptId) as { t: number }).t) || 0;
   const amount = Number(row.amount) || 0;
-  // W16: clawbacks attributed to the donation behind this receipt.
+  // W16/W18: clawbacks attributed to THIS receipt reduce its capacity
+  // (D-187 fixed-at-declaration attribution; NULL rows keep chain behaviour).
   const clawedBack = Number((db.prepare(
     `SELECT COALESCE(SUM(c.amount), 0) AS t FROM donation_clawbacks c
-      WHERE c.donation_id = (SELECT donation_id FROM sponsorship_receipts WHERE id = :r)
-         OR c.donation_id IN (SELECT e.source_donation_id FROM sponsorship_receipts sr
-                              JOIN campaign_funding_entries e ON e.id = sr.campaign_funding_entry_id
-                              WHERE sr.id = :r AND e.source_donation_id IS NOT NULL)`,
+      WHERE (c.attributed_kind = 'sponsorship_receipt' AND c.attributed_id = :r)
+         OR (c.attributed_id IS NULL AND (
+               c.donation_id = (SELECT donation_id FROM sponsorship_receipts WHERE id = :r)
+            OR c.donation_id IN (SELECT e.source_donation_id FROM sponsorship_receipts sr
+                                 JOIN campaign_funding_entries e ON e.id = sr.campaign_funding_entry_id
+                                 WHERE sr.id = :r AND e.source_donation_id IS NOT NULL)))`,
   ).get({ r: receiptId }) as { t: number }).t) || 0;
   return { id: receiptId, amount, applied, returned, clawedBack, available: Math.max(0, amount - applied - returned - clawedBack) };
 }
@@ -350,11 +357,15 @@ export function getCampaignFundingEntryPosition(db: Database, entryId: string): 
           + COALESCE((SELECT SUM(amount) FROM sponsorship_receipts WHERE campaign_funding_entry_id = ?), 0) AS t`,
   ).get(entryId, entryId) as { t: number }).t) || 0;
   const amount = Number(row.amount) || 0;
-  // W16: clawbacks on the donation that created this entry reduce its capacity.
+  // W16/W18: clawbacks attributed to THIS entry reduce its capacity — W18
+  // extends this to sponsorship_return entries that uniquely hold unconsumed
+  // money (D-187). Pre-W18 NULL rows keep the direct-entry-only behaviour.
   const clawedBack = Number((db.prepare(
     `SELECT COALESCE(SUM(c.amount), 0) AS t FROM donation_clawbacks c
-       JOIN campaign_funding_entries e ON e.source_donation_id = c.donation_id
-      WHERE e.id = :e AND e.origin_kind = 'restricted_donation'`,
+       JOIN campaign_funding_entries e ON e.id = :e
+      WHERE (c.attributed_kind = 'campaign_funding_entry' AND c.attributed_id = :e)
+         OR (c.attributed_id IS NULL AND c.donation_id = e.source_donation_id
+             AND e.origin_kind = 'restricted_donation')`,
   ).get({ e: entryId }) as { t: number }).t) || 0;
   return { id: entryId, amount, applied, returned: 0, clawedBack, available: Math.max(0, amount - applied - clawedBack) };
 }

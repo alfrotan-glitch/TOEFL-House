@@ -3891,7 +3891,13 @@ CREATE TABLE IF NOT EXISTS fixed_assets (
   acquired_on           TEXT NOT NULL,
   cost                  INTEGER NOT NULL CHECK (cost > 0),
   source_transaction_id TEXT REFERENCES financial_transactions(id) ON DELETE RESTRICT,
-  custody_status        TEXT NOT NULL DEFAULT 'in_service' CHECK (custody_status IN ('in_service')),
+  -- W18: 'lost' records the custody FACT that an asset is no longer held
+  -- (lost/stolen/destroyed) — the fixed-asset mirror of the certified books
+  -- adjustment semantics: financially invisible in the cash model (the cost
+  -- left at purchase; a physical loss moves no money today), so no P&L class
+  -- is implied. Proceeds-bearing disposal and depreciation remain POLICY
+  -- REQUIRED (D-182/D-188) and are unrepresentable.
+  custody_status        TEXT NOT NULL DEFAULT 'in_service' CHECK (custody_status IN ('in_service','lost')),
   notes                 TEXT,
   created_by            TEXT,
   created_at            TEXT NOT NULL DEFAULT (datetime('now'))
@@ -3933,7 +3939,28 @@ CREATE INDEX IF NOT EXISTS idx_fixed_asset_transfers_asset ON fixed_asset_transf
 CREATE TRIGGER IF NOT EXISTS trg_fixed_asset_transfers_current_branch
 BEFORE INSERT ON fixed_asset_transfers
 WHEN (SELECT branch_id FROM fixed_assets WHERE id = NEW.asset_id) IS NOT NEW.from_branch_id
-BEGIN SELECT RAISE(ABORT, 'A custody transfer must start from the asset''s current branch'); END;
+  OR (SELECT custody_status FROM fixed_assets WHERE id = NEW.asset_id) IS NOT 'in_service'
+BEGIN SELECT RAISE(ABORT, 'A custody transfer must start from the asset''s current branch and an in-service asset'); END;
+
+-- W18: a custody loss is an append-only event; the asset's status flips in the
+-- same transaction (UNIQUE asset_id = one loss per asset). Reason ≥ 8 chars is
+-- enforced at the route boundary like every irreversible financial-adjacent
+-- event; evidence_ref carries the out-of-band report reference (optional).
+CREATE TABLE IF NOT EXISTS fixed_asset_losses (
+  id           TEXT PRIMARY KEY,
+  asset_id     TEXT NOT NULL UNIQUE REFERENCES fixed_assets(id) ON DELETE RESTRICT,
+  reason       TEXT NOT NULL,
+  evidence_ref TEXT,
+  declared_on  TEXT NOT NULL,
+  declared_by  TEXT,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_fixed_asset_losses_asset ON fixed_asset_losses(asset_id);
+
+CREATE TRIGGER IF NOT EXISTS trg_fixed_asset_losses_in_service
+BEFORE INSERT ON fixed_asset_losses
+WHEN (SELECT custody_status FROM fixed_assets WHERE id = NEW.asset_id) IS NOT 'in_service'
+BEGIN SELECT RAISE(ABORT, 'Only an in-service asset can be declared lost'); END;
 
 -- ── 2. Bank statement matching (control layer only) ────────────────────────
 -- Statement lines are EXTERNAL evidence. Matching links a line to an existing
@@ -3996,6 +4023,17 @@ CREATE TABLE IF NOT EXISTS donation_clawbacks (
   donation_id           TEXT NOT NULL REFERENCES donations(id) ON DELETE RESTRICT,
   amount                INTEGER NOT NULL CHECK (amount > 0),
   reason                TEXT NOT NULL,
+  -- W18 (D-187): the funding instrument whose capacity this clawback reduces,
+  -- fixed at declaration from the provenance chain. Required whenever
+  -- declaration succeeds: attribution is either unique by construction (the
+  -- donation's single root instrument) or unique because exactly ONE
+  -- instrument in the chain still holds unconsumed capacity. When two or more
+  -- instruments hold unconsumed money the ordering is owner policy (D-DC-3)
+  -- and declaration refuses — so a stored row is never ambiguous. Pre-W18
+  -- rows are backfilled to their single root instrument by the schema
+  -- convergence; NULL survives only if a backfill is impossible.
+  attributed_kind       TEXT CHECK (attributed_kind IN ('scholarship_funding','sponsorship_receipt','campaign_funding_entry')),
+  attributed_id         TEXT,
   status                TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','repaid')),
   declared_on           TEXT NOT NULL,
   repaid_on             TEXT,

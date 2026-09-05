@@ -29,14 +29,19 @@ import { db as defaultDb } from '../../db/connection.js';
 import { assertMoney } from '../../utils/money.js';
 import { today } from '../../utils/ids.js';
 import { decrementMainBalanceIfSufficient } from '../../utils/financeAccounts.js';
+import {
+  getScholarshipFundingPosition,
+  getSponsorshipReceiptPosition,
+  getCampaignFundingEntryPosition,
+} from '../finance/obligations.js';
 import { id } from '../../utils/ids.js';
 import { HttpError } from '../../middleware/errorHandler.js';
 
 type Db = Database.Database;
 
 const stmtInsertClawback = (database: Db) => database.prepare(
-  `INSERT INTO donation_clawbacks (id, donation_id, amount, reason, status, declared_on, declared_by)
-   VALUES (?, ?, ?, ?, 'open', ?, ?)`,
+  `INSERT INTO donation_clawbacks (id, donation_id, amount, reason, attributed_kind, attributed_id, status, declared_on, declared_by)
+   VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?)`,
 );
 
 const stmtGetClawback = (database: Db) => database.prepare('SELECT * FROM donation_clawbacks WHERE id = ?');
@@ -72,27 +77,49 @@ export function declareDonationClawback(database: Db = defaultDb, command: Clawb
     throw new HttpError(409, 'Only a restricted donation can be clawed back: an unrestricted gift has no purpose condition to revoke.');
   }
 
-  // ── V1 attribution-uniqueness guard (owner-authorized standard semantics;
-  //    D-DC-3 partial-ordering policy deliberately NOT invented) ────────────
-  // A restricted donation delivers its whole amount to exactly ONE instrument
-  // at registration, so clawback attribution is unique UNLESS the money has
-  // moved onward (a sponsorship return re-routing it into a campaign). With
-  // onward movement, which instrument loses capacity first is policy → refuse.
-  const onward = database.prepare(
-    `SELECT COUNT(*) AS n FROM campaign_funding_entries e
-      WHERE e.origin_kind = 'sponsorship_return'
-        AND EXISTS (
-          SELECT 1 FROM sponsorship_receipts sr
-           WHERE sr.id = e.source_sponsorship_receipt_id
-             AND (sr.donation_id = :d
-                  OR sr.campaign_funding_entry_id IN (
-                    SELECT id FROM campaign_funding_entries WHERE source_donation_id = :d)))
-        AND EXISTS (
-          SELECT 1 FROM campaign_funding_entries root WHERE root.source_donation_id = :d)`,
-  ).get({ d: command.donationId }) as { n: number };
-  if (Number(onward.n) > 0) {
-    throw new HttpError(409, 'This donation\'s money has moved between funding instruments; which instrument loses capacity first is an owner decision (D-DC-3) that has not been made. POLICY REQUIRED.');
+  // ── W18 attribution resolution (D-187): D-DC-3 is narrowed to genuine
+  //    ambiguity. A restricted donation delivers its whole amount to ONE
+  //    instrument at registration; money may move onward through sponsorship
+  //    returns, but attribution is only AMBIGUOUS when TWO OR MORE instruments
+  //    in the provenance chain still hold unconsumed capacity — only then is
+  //    "which loses first" an ordering choice (owner policy). When exactly ONE
+  //    instrument holds unconsumed money, the facts force the attribution and
+  //    no policy is needed. The attribution is FIXED AT DECLARATION on the
+  //    clawback row, so later consumption cannot re-write history.
+  type InstrumentKind = 'scholarship_funding' | 'sponsorship_receipt' | 'campaign_funding_entry';
+  const instruments = database.prepare(
+    `SELECT 'scholarship_funding' AS kind, id FROM scholarship_fundings WHERE donation_id = :d
+      UNION ALL
+     SELECT 'sponsorship_receipt', id FROM sponsorship_receipts WHERE donation_id = :d
+      UNION ALL
+     SELECT 'campaign_funding_entry', e.id FROM campaign_funding_entries e WHERE e.source_donation_id = :d
+      UNION ALL
+     SELECT 'scholarship_funding', sf.id FROM scholarship_fundings sf
+      WHERE sf.campaign_funding_entry_id IN (SELECT id FROM campaign_funding_entries WHERE source_donation_id = :d)
+      UNION ALL
+     SELECT 'sponsorship_receipt', sr.id FROM sponsorship_receipts sr
+      WHERE sr.campaign_funding_entry_id IN (SELECT id FROM campaign_funding_entries WHERE source_donation_id = :d)`,
+  ).all({ d: command.donationId }) as Array<{ kind: InstrumentKind; id: string }>;
+
+  const availableOf = (kind: InstrumentKind, instrumentId: string): number => {
+    if (kind === 'scholarship_funding') return getScholarshipFundingPosition(database, instrumentId).available;
+    if (kind === 'sponsorship_receipt') return getSponsorshipReceiptPosition(database, instrumentId).available;
+    return getCampaignFundingEntryPosition(database, instrumentId).available;
+  };
+  const holders = instruments
+    .map((i) => ({ ...i, available: availableOf(i.kind, i.id) }))
+    .filter((i) => i.available > 0);
+  let attributed: { kind: InstrumentKind; id: string } | null = null;
+  if (holders.length > 1) {
+    const names = holders.map((h) => `${h.kind} ${h.id} (${h.available} AFN)`).join('; ');
+    throw new HttpError(
+      409,
+      `Unconsumed money of this donation now sits in ${holders.length} funding instruments (${names}). Which instrument loses capacity first is an owner decision (D-DC-3) that has not been made. POLICY REQUIRED.`,
+    );
   }
+  if (holders.length === 1) attributed = { kind: holders[0].kind, id: holders[0].id };
+  // holders.length === 0 ⇒ reclaimable is exhausted; the bound check below
+  // refuses with the exact remaining figure.
 
   // Consumption: ACTIVE aid allocations reachable from this donation\'s root
   // instruments (its own fundings/receipts/entry, and instruments funded from
@@ -129,6 +156,7 @@ export function declareDonationClawback(database: Db = defaultDb, command: Clawb
   try {
     stmtInsertClawback(database).run(
       clawbackId, command.donationId, amount, reason,
+      attributed?.kind ?? null, attributed?.id ?? null,
       command.declaredOn ?? today(), command.operator.name,
     );
   } catch (error) {

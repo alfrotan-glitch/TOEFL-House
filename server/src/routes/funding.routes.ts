@@ -788,6 +788,7 @@ fundingRouter.get('/donation-clawbacks', requirePermission('Funding.View'), ah(a
   const rows = db.prepare(
     `SELECT c.id, c.amount, c.reason, c.status, c.declared_on, c.repaid_on,
             c.repaid_transaction_id, c.declared_by, c.created_at,
+            c.attributed_kind, c.attributed_id,
             c.donation_id, d.amount AS donation_amount, d.donor_id,
             dn.full_name AS donor_name, d.branch_id
        FROM donation_clawbacks c
@@ -805,6 +806,7 @@ fundingRouter.get('/donation-clawbacks', requirePermission('Funding.View'), ah(a
     totals: { open: openTotal, repaid: repaidTotal },
     clawbacks: rows.map((r) => ({
       id: r.id, donationId: r.donation_id, donationAmount: r.donation_amount,
+      attributedKind: r.attributed_kind ?? null, attributedId: r.attributed_id ?? null,
       donorId: r.donor_id ?? null, donorName: r.donor_name ?? null,
       amount: r.amount, reason: r.reason, status: r.status,
       declaredOn: r.declared_on, declaredBy: r.declared_by ?? null,

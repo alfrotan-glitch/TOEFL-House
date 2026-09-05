@@ -1385,6 +1385,9 @@ financeRouter.get(
       acquiredOn: r.acquired_on, cost: r.cost, sourceTransactionId: r.source_transaction_id,
       custodyStatus: r.custody_status, notes: r.notes,
       transfers: (db.prepare('SELECT from_branch_id, to_branch_id, transferred_on, reason FROM fixed_asset_transfers WHERE asset_id = ? ORDER BY created_at').all(r.id) as Array<Record<string, unknown>>),
+      loss: (db.prepare('SELECT reason, evidence_ref, declared_on, declared_by FROM fixed_asset_losses WHERE asset_id = ?').get(r.id) as Record<string, unknown> | undefined
+        ? (() => { const l = db.prepare('SELECT reason, evidence_ref, declared_on, declared_by FROM fixed_asset_losses WHERE asset_id = ?').get(r.id) as Record<string, unknown>; return { reason: l.reason, evidenceRef: l.evidence_ref ?? null, declaredOn: l.declared_on, declaredBy: l.declared_by ?? null }; })()
+        : null),
     })));
   }),
 );
@@ -1394,9 +1397,12 @@ financeRouter.post(
   requirePermission('Expense.Approve'),
   ah(async (req, res) => {
     const user = getUserContext(req);
-    const asset = db.prepare('SELECT * FROM fixed_assets WHERE id = ?').get(req.params.id) as { id: string; branch_id: string } | undefined;
+    const asset = db.prepare('SELECT * FROM fixed_assets WHERE id = ?').get(req.params.id) as { id: string; branch_id: string; custody_status: string } | undefined;
     if (!asset) throw new HttpError(404, 'Fixed asset not found.');
     if (!canAccessBranchResource(req, asset.branch_id)) throw new HttpError(403, 'Asset belongs to another branch.');
+    if (asset.custody_status !== 'in_service') {
+      throw new HttpError(409, 'This asset is no longer in service; it has no custody to transfer.');
+    }
     const body = (req.body ?? {}) as Record<string, unknown>;
     const toBranchId = typeof body.toBranchId === 'string' ? body.toBranchId : '';
     const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
@@ -1415,6 +1421,54 @@ financeRouter.post(
     })();
     writeAudit(req, `Transferred fixed asset ${asset.id} to branch ${toBranchId}`, { oldValue: asset.branch_id, newValue: toBranchId });
     res.json({ ok: true, id: transferId });
+  }),
+);
+
+// ── W18: custody-loss declaration ──
+// A lost/stolen/destroyed asset is a CUSTODY fact, not a financial event: in
+// the cash model the cost left at purchase, so a physical loss moves no money
+// and implies no P&L class (the certified books-adjustment precedent). The
+// register records the fact append-only and flips custody to 'lost' in the
+// same transaction. Disposal with proceeds and depreciation remain POLICY
+// REQUIRED (D-182/D-188) and stay unrepresentable.
+financeRouter.post(
+  '/assets/:id/declare-loss',
+  requirePermission('Expense.Approve'),
+  ah(async (req, res) => {
+    const user = getUserContext(req);
+    const asset = db.prepare('SELECT * FROM fixed_assets WHERE id = ?').get(req.params.id) as
+      | { id: string; branch_id: string; custody_status: string; name: string }
+      | undefined;
+    if (!asset) throw new HttpError(404, 'Fixed asset not found.');
+    if (!canAccessBranchResource(req, asset.branch_id)) throw new HttpError(403, 'Asset belongs to another branch.');
+    if (asset.custody_status !== 'in_service') {
+      throw new HttpError(409, 'This asset is already out of service; it cannot be declared lost again.');
+    }
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
+    if (reason.length < 8) throw new HttpError(400, 'A loss reason of at least 8 characters is required.');
+    assertTextLengths([[reason, 'Loss reason', TEXT_LIMITS.notes]]);
+    const evidenceRef = typeof body.evidenceRef === 'string' && body.evidenceRef.trim()
+      ? (assertTextLengths([[body.evidenceRef.trim(), 'Evidence reference', TEXT_LIMITS.line]]), body.evidenceRef.trim())
+      : null;
+
+    const lossId = id('fal');
+    db.transaction(() => {
+      db.prepare(
+        `INSERT INTO fixed_asset_losses (id, asset_id, reason, evidence_ref, declared_on, declared_by)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run(lossId, asset.id, reason, evidenceRef, today(), user.fullName);
+      const flipped = db.prepare(
+        `UPDATE fixed_assets SET custody_status = 'lost' WHERE id = ? AND custody_status = 'in_service'`,
+      ).run(asset.id);
+      if (flipped.changes !== 1) throw new HttpError(409, 'This asset is already out of service; it cannot be declared lost again.');
+    })();
+    writeAudit(req, `Declared fixed asset ${asset.id} (${asset.name}) lost`, {
+      branchId: asset.branch_id,
+      oldValue: 'in_service',
+      newValue: JSON.stringify({ custodyStatus: 'lost', reason, evidenceRef }),
+    });
+    res.status(201).json({ id: lossId, assetId: asset.id, custodyStatus: 'lost' });
   }),
 );
 
