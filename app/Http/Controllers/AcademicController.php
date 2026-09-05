@@ -22,6 +22,7 @@ use App\Modules\Academic\Models\AcademicPeriod;
 use App\Modules\Academic\Models\AcademicRoom;
 use App\Modules\Academic\Models\AssessmentAttempt;
 use App\Modules\Academic\Models\AssessmentResult;
+use App\Modules\Academic\Models\AttendanceFact;
 use App\Modules\Academic\Models\BranchAvailability;
 use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\ClassSection;
@@ -116,6 +117,7 @@ final class AcademicController extends Controller
             'sections' => ClassSection::query()->orderBy('class_id')->orderBy('name')->limit(300)->get(),
             'branches' => Branch::query()->orderBy('name')->limit(100)->get(),
             'timetable' => $timetable,
+            'attendanceFacts' => AttendanceFact::query()->orderByDesc('created_at')->limit(200)->get(),
         ]);
     }
 
@@ -173,6 +175,24 @@ final class AcademicController extends Controller
         );
 
         return redirect()->route('academic.sessions')->with('success', 'Attendance fact recorded.');
+    }
+
+    public function correctAttendance(Request $request, string $factId): RedirectResponse
+    {
+        $input = $request->validate([
+            'status' => ['required', 'in:present,late,absent,excused'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        $result = app(RecordAttendance::class)->correct(
+            $this->actor(),
+            AttendanceFact::query()->findOrFail($factId),
+            $input['status'],
+            $input['reason'],
+            $this->idempotencyKey('academic.attendance.correct'),
+        );
+
+        return redirect()->route('academic.sessions')->with('success', "Attendance corrected by a new fact {$result['fact_id']}; the original stays as history.");
     }
 
     public function defineRoom(Request $request): RedirectResponse
@@ -362,6 +382,26 @@ final class AcademicController extends Controller
         return redirect()->route('academic.index')->with('success', 'Seat completed with its basis and evidence pinned.');
     }
 
+    public function transferEnrollment(Request $request, string $enrollmentId): RedirectResponse
+    {
+        $input = $request->validate([
+            'target_class_id' => ['required', 'string'],
+            'offering_id' => ['nullable', 'string'],
+        ]);
+
+        $offeringId = ($input['offering_id'] ?? '') !== '' ? (string) $input['offering_id'] : null;
+
+        $result = app(MaintainEnrollment::class)->transfer(
+            $this->actor(),
+            Enrollment::query()->findOrFail($enrollmentId),
+            $input['target_class_id'],
+            $this->idempotencyKey('academic.enrollment.transfer'),
+            $offeringId,
+        );
+
+        return redirect()->route('academic.index')->with('success', "Seat transferred; the new seat {$result['enrollment_id']} awaits activation under a fresh financial gate.");
+    }
+
     public function proposeProgression(Request $request): RedirectResponse
     {
         $input = $request->validate([
@@ -485,6 +525,31 @@ final class AcademicController extends Controller
         );
 
         return redirect()->route('academic.index')->with('success', 'Program version published (immutable).');
+    }
+
+    public function defineLevel(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'program_version_id' => ['required', 'string'],
+            'level_key' => ['required', 'string', 'max:120'],
+            'ordinal' => ['required', 'integer', 'min:1', 'max:1000'],
+            'title' => ['required', 'string', 'max:200'],
+            'cefr_ref' => ['nullable', 'string', 'max:20'],
+        ]);
+
+        $cefr = ($input['cefr_ref'] ?? '') !== '' ? (string) $input['cefr_ref'] : null;
+
+        $result = app(MaintainAcademicStructure::class)->defineLevel(
+            $this->actor(),
+            $input['program_version_id'],
+            $input['level_key'],
+            (int) $input['ordinal'],
+            $input['title'],
+            $cefr,
+            $this->idempotencyKey('academic.level.define'),
+        );
+
+        return redirect()->route('academic.index')->with('success', "Level defined ({$result['level_id']}). Levels are append-only history.");
     }
 
     public function definePeriod(Request $request): RedirectResponse
@@ -617,7 +682,10 @@ final class AcademicController extends Controller
             'program_version_id' => ['required', 'string'],
             'period_id' => ['required', 'string'],
             'capacity' => ['required', 'integer', 'min:1', 'max:10000'],
+            'program_version_level_id' => ['nullable', 'string'],
         ]);
+
+        $levelId = ($input['program_version_level_id'] ?? '') !== '' ? (string) $input['program_version_level_id'] : null;
 
         app(MaintainClass::class)->defineClass(
             $this->actor(),
@@ -625,6 +693,7 @@ final class AcademicController extends Controller
             $input['period_id'],
             (int) $input['capacity'],
             $this->idempotencyKey('academic.class.define'),
+            $levelId,
         );
 
         return redirect()->route('academic.index')->with('success', 'Class defined (planned). Assign a teacher and publish it to open seats.');

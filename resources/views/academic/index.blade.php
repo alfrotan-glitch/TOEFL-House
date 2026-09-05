@@ -13,7 +13,7 @@
 
 <div class="card">
     <h2>Structure</h2>
-    <p class="sub">Programs publish immutable versions; periods move draft → published → closed; skills drive delivery and payroll evidence.</p>
+    <p class="sub">Programs publish immutable versions; versions carry append-only ordered levels (key + ordinal unique per version, optional CEFR); periods move draft → published → closed; skills drive delivery and payroll evidence.</p>
     <form method="POST" action="{{ route('academic.program.define') }}">
         @csrf
         <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
@@ -21,6 +21,23 @@
             <input name="name" type="text" placeholder="Program name" required>
         </div>
         <div class="actions"><button type="submit" class="btn">Define program</button></div>
+    </form>
+    <form method="POST" action="{{ route('academic.level.define') }}" style="margin-top:8px">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <select name="program_version_id" required>
+                <option value="">Select a program version…</option>
+                @foreach ($programVersions as $version)
+                    <option value="{{ $version->id }}">{{ \Illuminate\Support\Str::limit($version->id, 18) }}</option>
+                @endforeach
+            </select>
+            <input name="level_key" type="text" placeholder="Level key (e.g. starter)" required maxlength="120">
+            <input name="ordinal" type="number" min="1" max="1000" placeholder="Order" required style="width:90px">
+            <input name="title" type="text" placeholder="Level title" required maxlength="200">
+            <input name="cefr_ref" type="text" placeholder="CEFR (optional)" maxlength="20" style="width:130px">
+        </div>
+        <div class="actions"><button type="submit" class="btn">Define level</button></div>
     </form>
     @if ($programs->isEmpty())
         <p class="empty">No programs recorded.</p>
@@ -106,7 +123,7 @@
 
 <div class="card">
     <h2>Classes</h2>
-    <p class="sub">A class delivers a published program version inside a published period. It opens <strong>planned → published → active</strong>; an active class needs at least one open teacher assignment before it can be activated, and seats can only be taken in active classes.</p>
+    <p class="sub">A class delivers a published program version inside a published period, optionally targeting one of the version's levels for level-aware progression. It opens <strong>planned → published → active</strong>; an active class needs at least one open teacher assignment before it can be activated, and seats can only be taken in active classes.</p>
     <form method="POST" action="{{ route('academic.class.define') }}">
         @csrf
         <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
@@ -123,6 +140,12 @@
                     @if ($period->lifecycle_state === 'published')
                         <option value="{{ $period->id }}">{{ $period->name }}</option>
                     @endif
+                @endforeach
+            </select>
+            <select name="program_version_level_id">
+                <option value="">No level (legacy class)…</option>
+                @foreach ($levels as $level)
+                    <option value="{{ $level->id }}">{{ $level->title }} ({{ $level->cefr_ref ?? 'no CEFR' }})</option>
                 @endforeach
             </select>
             <input name="capacity" type="number" min="1" max="10000" placeholder="Capacity" required>
@@ -271,12 +294,12 @@
         </table>
     @endif
     <h3 style="margin-top:12px">Active and frozen seats</h3>
-    <p class="sub">Freeze parks a seat with a reason; unfreeze returns it under a fresh financial gate; withdraw ends it with a reason; complete pins its basis and assessed evidence.</p>
+    <p class="sub">Freeze parks a seat with a reason; unfreeze returns it under a fresh financial gate; withdraw ends it with a reason; complete pins its basis and assessed evidence. Transfer closes an active seat as transferred and opens a requested seat in another active class, which reactivates under a fresh financial gate; history is never mutated.</p>
     @if ($activeEnrollments->isEmpty() && $frozenEnrollments->isEmpty())
         <p class="empty">No active or frozen seats.</p>
     @else
         <table class="grid">
-            <tr><th>Seat</th><th>State</th><th>Reason</th><th>Freeze</th><th>Unfreeze</th><th>Withdraw</th><th>Complete</th></tr>
+            <tr><th>Seat</th><th>State</th><th>Reason</th><th>Freeze</th><th>Unfreeze</th><th>Withdraw</th><th>Complete</th><th>Transfer</th></tr>
             @foreach ($activeEnrollments->concat($frozenEnrollments) as $seat)
                 <tr>
                     <td>{{ \Illuminate\Support\Str::limit($seat->student_id, 10) }} / {{ \Illuminate\Support\Str::limit($seat->class_id, 10) }}</td>
@@ -326,6 +349,33 @@
                                 </select>
                                 <input name="evidence_id" type="text" placeholder="Evidence id…" maxlength="36" style="width:130px">
                                 <button type="submit" class="btn small">Complete</button>
+                            </form>
+                        @else
+                            —
+                        @endif
+                    </td>
+                    <td>
+                        @if ($seat->lifecycle_state === 'active')
+                            <form method="POST" action="{{ route('academic.enrollment.transfer', $seat->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <select name="target_class_id" required style="width:130px">
+                                    <option value="">Target class…</option>
+                                    @foreach ($classes as $class)
+                                        @if ($class->lifecycle_state === 'active' && $class->id !== $seat->class_id)
+                                            <option value="{{ $class->id }}">{{ \Illuminate\Support\Str::limit($class->id, 14) }}</option>
+                                        @endif
+                                    @endforeach
+                                </select>
+                                <select name="offering_id" style="width:120px">
+                                    <option value="">No offering…</option>
+                                    @foreach ($offerings as $offering)
+                                        @if ($offering->lifecycle_state === 'open')
+                                            <option value="{{ $offering->id }}">{{ \Illuminate\Support\Str::limit($offering->id, 14) }}</option>
+                                        @endif
+                                    @endforeach
+                                </select>
+                                <button type="submit" class="btn small secondary">Transfer</button>
                             </form>
                         @else
                             —

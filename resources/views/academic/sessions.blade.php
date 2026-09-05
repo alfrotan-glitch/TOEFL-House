@@ -5,7 +5,7 @@
 @section('content')
 <div class="card">
     <h1>Session Calendar &amp; Attendance</h1>
-    <p class="sub">Schedule sessions for active classes (optionally tagged with a skill, a room, and a class section) and record append-only attendance facts for enrolled students. The day timetable shows who teaches where.</p>
+    <p class="sub">Schedule sessions for active classes (optionally tagged with a skill, a room, and a class section) and record append-only attendance facts for enrolled students. A fact is never edited: correcting one appends a new fact linked to the original with a mandatory reason. The day timetable shows who teaches where.</p>
 </div>
 
 <div class="card">
@@ -332,6 +332,41 @@
                                 </form>
                             </details>
                         @endif
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
+
+<div class="card">
+    <h2>Correct an attendance fact</h2>
+    <p class="sub">Corrections append a new fact and keep the original as history; a reason is mandatory and a correction must target a fact of the same enrollment.</p>
+    @if ($attendanceFacts->isEmpty())
+        <p class="empty">No attendance facts recorded yet.</p>
+    @else
+        <table class="grid" style="margin-top:8px">
+            <tr><th>Fact</th><th>Session</th><th>Enrollment</th><th>Status</th><th>Corrects</th><th>Correction</th></tr>
+            @foreach ($attendanceFacts as $fact)
+                <tr>
+                    <td>{{ \Illuminate\Support\Str::limit($fact->id, 14) }}</td>
+                    <td>{{ \Illuminate\Support\Str::limit($fact->session_id, 14) }}</td>
+                    <td>{{ \Illuminate\Support\Str::limit($fact->enrollment_id, 14) }}</td>
+                    <td><span class="pill">{{ $fact->status }}</span></td>
+                    <td>{{ $fact->corrects_id !== null ? \Illuminate\Support\Str::limit($fact->corrects_id, 14) : '—' }}</td>
+                    <td>
+                        <form method="POST" action="{{ route('academic.attendance.correct', $fact->id) }}" style="display:inline">
+                            @csrf
+                            <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                            <select name="status" required style="width:100px">
+                                <option value="present">Present</option>
+                                <option value="late">Late</option>
+                                <option value="absent">Absent</option>
+                                <option value="excused">Excused</option>
+                            </select>
+                            <input name="reason" type="text" placeholder="Correction reason…" required maxlength="1000" style="width:150px">
+                            <button type="submit" class="btn small secondary">Correct</button>
+                        </form>
                     </td>
                 </tr>
             @endforeach

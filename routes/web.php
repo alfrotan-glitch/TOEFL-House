@@ -105,6 +105,7 @@ Route::middleware('employee')->group(function (): void {
         Route::post('programs/{programId}/versions', [AcademicController::class, 'publishProgramVersion'])->name('version.publish');
         Route::post('periods', [AcademicController::class, 'definePeriod'])->name('period.define');
         Route::post('periods/{periodId}/transition', [AcademicController::class, 'transitionPeriod'])->name('period.transition');
+        Route::post('levels', [AcademicController::class, 'defineLevel'])->name('level.define');
         Route::post('levels/prerequisites', [AcademicController::class, 'definePrerequisite'])->name('level.prerequisite.define');
         Route::post('levels/prerequisites/{prerequisiteId}/retire', [AcademicController::class, 'retirePrerequisite'])->name('level.prerequisite.retire');
         Route::post('levels/rules', [AcademicController::class, 'defineProgressionRule'])->name('level.rule.define');
@@ -117,6 +118,7 @@ Route::middleware('employee')->group(function (): void {
         Route::get('sessions', [AcademicController::class, 'sessions'])->name('sessions');
         Route::post('sessions', [AcademicController::class, 'scheduleSession'])->name('schedule');
         Route::post('sessions/{sessionId}/attendance', [AcademicController::class, 'recordAttendance'])->name('attendance');
+        Route::post('sessions/facts/{factId}/correct', [AcademicController::class, 'correctAttendance'])->name('attendance.correct');
         Route::post('rooms', [AcademicController::class, 'defineRoom'])->name('room.define');
         Route::post('rooms/{roomId}/transition', [AcademicController::class, 'transitionRoom'])->name('room.transition');
         Route::post('rooms/{roomId}/resize', [AcademicController::class, 'resizeRoom'])->name('room.resize');
@@ -128,6 +130,7 @@ Route::middleware('employee')->group(function (): void {
         Route::post('enrollments/{enrollmentId}/unfreeze', [AcademicController::class, 'unfreezeEnrollment'])->name('enrollment.unfreeze');
         Route::post('enrollments/{enrollmentId}/withdraw', [AcademicController::class, 'withdrawEnrollment'])->name('enrollment.withdraw');
         Route::post('enrollments/{enrollmentId}/complete', [AcademicController::class, 'completeEnrollment'])->name('enrollment.complete');
+        Route::post('enrollments/{enrollmentId}/transfer', [AcademicController::class, 'transferEnrollment'])->name('enrollment.transfer');
         Route::post('progressions', [AcademicController::class, 'proposeProgression'])->name('progression.propose');
         Route::post('progressions/{decisionId}/review', [AcademicController::class, 'reviewProgression'])->name('progression.review');
         Route::post('progressions/{decisionId}/approve', [AcademicController::class, 'approveProgression'])->name('progression.approve');
