@@ -4,7 +4,7 @@ import {
   HandCoins, LibraryBig, PackagePlus, Pencil, Plus, Printer,
   ReceiptText, RefreshCcw, RotateCcw, Search, Undo2,
 } from 'lucide-react';
-import type { BookCatalogItem, BookLoan, BookSale, BooksWorkspace, Student } from '../../types';
+import type { BookCatalogItem, BookLoan, BookSale, BooksWorkspace, BudgetLine, Student } from '../../types';
 import type { DocumentIssuer } from '../../config/documentIssuer';
 import { formatAFN } from '../../utils/format';
 import { hasPermission } from '../../config/permissions';
@@ -27,7 +27,9 @@ interface BooksViewProps {
     receivedOn?: string;
     unitCost?: number | null;
     note?: string;
+    purchase?: { paidFromBudgetLineId?: string; declaration?: 'separate' | 'not-applicable' };
   }) => Promise<void>;
+  budgetLines: BudgetLine[];
   updateBookCatalogItem: (bookId: string, input: {
     title?: string;
     saleEnabled?: boolean;
@@ -36,7 +38,7 @@ interface BooksViewProps {
     defaultUnitCost?: number | null;
     status?: 'active' | 'archived';
   }) => Promise<void>;
-  receiveBookStock: (bookId: string, input: { quantity: number; receivedOn?: string; unitCost?: number | null; note?: string }) => Promise<void>;
+  receiveBookStock: (bookId: string, input: { quantity: number; receivedOn?: string; unitCost?: number | null; note?: string; purchase?: { paidFromBudgetLineId?: string; declaration?: 'separate' | 'not-applicable' } }) => Promise<void>;
   recordBookSale: (bookId: string, input: {
     quantity: number;
     purchaserName?: string;
@@ -108,6 +110,7 @@ export default function BooksView({
   issueBookLoan,
   returnBookLoan,
   loadBooksHistoryPage,
+  budgetLines,
 }: BooksViewProps) {
   const [tab, setTab] = useState<BooksTab>('catalog');
   const [search, setSearch] = useState('');
@@ -135,6 +138,15 @@ export default function BooksView({
   const [receiptUnitCost, setReceiptUnitCost] = useState('');
   const [receiptDate, setReceiptDate] = useState('');
   const [receiptNote, setReceiptNote] = useState('');
+  // Acquisition accounting (W6-1): costly stock must declare how it is paid.
+  const [catalogPurchaseMode, setCatalogPurchaseMode] = useState('');
+  const [catalogPurchaseLine, setCatalogPurchaseLine] = useState('');
+  const [receiptPurchaseMode, setReceiptPurchaseMode] = useState('');
+  const [receiptPurchaseLine, setReceiptPurchaseLine] = useState('');
+  const purchasePayload = (mode: string, lineId: string) =>
+    mode === 'paid-here' ? (lineId ? { paidFromBudgetLineId: lineId } : undefined)
+      : mode === 'separate' || mode === 'not-applicable' ? { declaration: mode as 'separate' | 'not-applicable' }
+        : undefined;
 
   const [saleQuantity, setSaleQuantity] = useState('1');
   const [saleStudentId, setSaleStudentId] = useState('');
@@ -417,11 +429,26 @@ export default function BooksView({
               <button type="button" className={button.ghost} onClick={() => setDialog(null)} disabled={busy}>Close</button>
             </div>
 
-            {dialog.kind === 'catalog' && <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void submit(() => createBookCatalogItem({ title: catalogTitle, itemKind: catalogKind, saleEnabled: catalogSaleEnabled, salePrice: catalogSaleEnabled ? Number(catalogSalePrice) : null, lendingEnabled: catalogLendingEnabled, initialQuantity: Number(catalogQuantity), receivedOn: catalogReceivedOn || undefined, unitCost: catalogUnitCost === '' ? null : Number(catalogUnitCost) }), 'Catalog item and initial stock receipt created.'); }}>
+            {dialog.kind === 'catalog' && <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void submit(() => createBookCatalogItem({ title: catalogTitle, itemKind: catalogKind, saleEnabled: catalogSaleEnabled, salePrice: catalogSaleEnabled ? Number(catalogSalePrice) : null, lendingEnabled: catalogLendingEnabled, initialQuantity: Number(catalogQuantity), receivedOn: catalogReceivedOn || undefined, unitCost: catalogUnitCost === '' ? null : Number(catalogUnitCost), purchase: purchasePayload(catalogPurchaseMode, catalogPurchaseLine) }), 'Catalog item and initial stock receipt created.'); }}>
               <Field label="Title"><input required value={catalogTitle} onChange={(event) => setCatalogTitle(event.target.value)} className={control.input} /></Field>
-              <Field label="Item kind"><select value={catalogKind} onChange={(event) => setCatalogKind(event.target.value as 'book' | 'chapter')} className={control.select}><option value="book">Book</option><option value="chapter">Skill chapter</option></select></Field>
-              <CapabilityControls saleEnabled={catalogSaleEnabled} onSaleEnabled={setCatalogSaleEnabled} salePrice={catalogSalePrice} onSalePrice={setCatalogSalePrice} lendingEnabled={catalogLendingEnabled} onLendingEnabled={setCatalogLendingEnabled} />
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field label="Initial quantity"><input required min="1" step="1" type="number" value={catalogQuantity} onChange={(event) => setCatalogQuantity(event.target.value)} className={control.input} /></Field><Field label="Unit cost (optional AFN)"><input min="0" step="1" type="number" value={catalogUnitCost} onChange={(event) => setCatalogUnitCost(event.target.value)} className={control.input} /></Field></div>
+              <div className="grid grid-cols-1 gap-2 rounded-md border border-amber-300/60 bg-amber-50/60 p-3 text-xs">
+                <span className={text.hint}>How is this purchase paid? (required when a unit cost is given)</span>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <select value={catalogPurchaseMode} onChange={(event) => setCatalogPurchaseMode(event.target.value)} className={control.select} required={catalogUnitCost !== '' && Number(catalogUnitCost) > 0}>
+                    <option value="">Choose…</option>
+                    <option value="paid-here">Pay now from a budget line</option>
+                    <option value="separate">Recorded separately (expense workflow)</option>
+                    <option value="not-applicable">No payment — donation / internal transfer</option>
+                  </select>
+                  {catalogPurchaseMode === 'paid-here' && (
+                    <select value={catalogPurchaseLine} onChange={(event) => setCatalogPurchaseLine(event.target.value)} className={control.select} required>
+                      <option value="">Budget line…</option>
+                      {budgetLines.filter((line) => line.isActive).map((line) => <option key={line.id} value={line.id}>{line.name} — {formatAFN(line.currentAmount)}</option>)}
+                    </select>
+                  )}
+                </div>
+              </div>
               <ShamsiDateInput label="Received on (optional)" value={catalogReceivedOn} onChange={setCatalogReceivedOn} />
               <SubmitButton busy={busy} label="Create catalog item" />
             </form>}
@@ -434,9 +461,26 @@ export default function BooksView({
               <SubmitButton busy={busy} label="Save catalog item" />
             </form>}
 
-            {dialog.kind === 'receipt' && <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void submit(() => receiveBookStock(dialog.book.id, { quantity: Number(receiptQuantity), receivedOn: receiptDate || undefined, unitCost: receiptUnitCost === '' ? null : Number(receiptUnitCost), note: receiptNote || undefined }), 'Immutable stock receipt recorded.'); }}>
+            {dialog.kind === 'receipt' && <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void submit(() => receiveBookStock(dialog.book.id, { quantity: Number(receiptQuantity), receivedOn: receiptDate || undefined, unitCost: receiptUnitCost === '' ? null : Number(receiptUnitCost), note: receiptNote || undefined, purchase: purchasePayload(receiptPurchaseMode, receiptPurchaseLine) }), 'Immutable stock receipt recorded.'); }}>
               <p className={text.hint}>Current available quantity: {dialog.book.availableQuantity}</p>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field label="Quantity"><input required min="1" step="1" type="number" value={receiptQuantity} onChange={(event) => setReceiptQuantity(event.target.value)} className={control.input} /></Field><Field label="Unit cost (optional AFN)"><input min="0" step="1" type="number" value={receiptUnitCost} onChange={(event) => setReceiptUnitCost(event.target.value)} className={control.input} /></Field></div>
+              <div className="grid grid-cols-1 gap-2 rounded-md border border-amber-300/60 bg-amber-50/60 p-3 text-xs">
+                <span className={text.hint}>How is this purchase paid? (required when a unit cost is given)</span>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <select value={receiptPurchaseMode} onChange={(event) => setReceiptPurchaseMode(event.target.value)} className={control.select} required={receiptUnitCost !== '' && Number(receiptUnitCost) > 0}>
+                    <option value="">Choose…</option>
+                    <option value="paid-here">Pay now from a budget line</option>
+                    <option value="separate">Recorded separately (expense workflow)</option>
+                    <option value="not-applicable">No payment — donation / internal transfer</option>
+                  </select>
+                  {receiptPurchaseMode === 'paid-here' && (
+                    <select value={receiptPurchaseLine} onChange={(event) => setReceiptPurchaseLine(event.target.value)} className={control.select} required>
+                      <option value="">Budget line…</option>
+                      {budgetLines.filter((line) => line.isActive).map((line) => <option key={line.id} value={line.id}>{line.name} — {formatAFN(line.currentAmount)}</option>)}
+                    </select>
+                  )}
+                </div>
+              </div>
               <ShamsiDateInput label="Received on (optional)" value={receiptDate} onChange={setReceiptDate} />
               <Field label="Note (optional)"><textarea value={receiptNote} onChange={(event) => setReceiptNote(event.target.value)} className={control.input} rows={3} /></Field>
               <SubmitButton busy={busy} label="Record stock receipt" />

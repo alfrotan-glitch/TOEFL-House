@@ -358,6 +358,7 @@ function AuthenticatedApp() {
           issuer={resolveDocumentIssuer(store.settings.branches.find((branch) => branch.id === activeBranchId))}
           workspace={store.booksWorkspace}
           students={store.students}
+          budgetLines={store.budgetLines}
           permissionCodes={user?.permissions ? Array.from(user.permissions) : undefined}
           createBookCatalogItem={store.createBookCatalogItem}
           updateBookCatalogItem={store.updateBookCatalogItem}

@@ -1928,6 +1928,13 @@ CREATE TABLE IF NOT EXISTS book_stock_receipts (
   received_by_name      TEXT NOT NULL,
   branch_id             TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
   idempotency_key       TEXT NOT NULL,
+  -- Acquisition accounting (wave 6 / W6-1): how the purchase of this stock was
+  -- accounted for. NULL when the receipt carries no cost, when it was paid
+  -- atomically from a budget line (see purchase_transaction_id), or on legacy
+  -- rows written before the declaration existed.
+  purchase_declaration  TEXT,
+  -- The expense row that paid for this stock atomically with the receipt.
+  purchase_transaction_id TEXT REFERENCES financial_transactions(id) ON DELETE RESTRICT,
   created_at            TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_book_stock_receipts_book_date

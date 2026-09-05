@@ -105,6 +105,8 @@ booksRouter.post(
       salePrice: intentValue(req.body?.salePrice),
       lendingEnabled: intentValue(req.body?.lendingEnabled),
       initialQuantity: intentValue(req.body?.initialQuantity),
+      unitCost: intentValue(req.body?.unitCost),
+      purchase: intentValue(req.body?.purchase),
       actorUserId: req.user?.userId ?? null,
     });
     const result = createBookCatalogItem(db, {
@@ -145,6 +147,7 @@ booksRouter.post(
       receivedOn: intentValue(req.body?.receivedOn),
       unitCost: intentValue(req.body?.unitCost),
       note: intentValue(req.body?.note),
+      purchase: intentValue(req.body?.purchase),
       actorUserId: req.user?.userId ?? null,
     });
     const result = receiveBookStock(db, req.params.bookId, branchId, {

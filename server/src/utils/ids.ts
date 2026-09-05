@@ -22,8 +22,13 @@ export function addDaysISO(dateStr: string, days: number): string {
 
 /** Returns today's date in YYYY-MM-DD format based on LOCAL server time. */
 export function today(): string {
-  // 'en-CA' locale reliably outputs ISO 8601 (YYYY-MM-DD) based on local time.
-  return new Date().toLocaleDateString('en-CA');
+  // 'en-CA' locale reliably outputs ISO 8601 (YYYY-MM-DD). The TIMEZONE is
+  // pinned to the business calendar (Asia/Kabul, UTC+4:30, no DST) rather
+  // than left to the server's local setting: under a UTC server, every
+  // Kabul date between 00:00 and 04:29 was booked to the PREVIOUS business
+  // day — crossing month boundaries at month start (a fee paid 00:15 Kabul
+  // on Sep 1 landed in August's P&L). Forensic wave 6 finding W6-2.
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kabul' });
 }
 
 /** Returns current time in Persian (Farsi) format. */

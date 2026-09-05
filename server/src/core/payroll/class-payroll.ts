@@ -250,7 +250,10 @@ export function teacherBranchAsOf(
  *  this system are calendar days, not instants, so the local calendar is the
  *  correct basis. */
 export function gregorianToday(): string {
-  return new Date().toLocaleDateString('en-CA');
+  // Pinned to the business calendar (Asia/Kabul) — same basis as `today()` in
+  // utils/ids.ts (W6-2). A server-local date under a UTC host disagrees with
+  // the business day between Kabul midnight and 04:29.
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kabul' });
 }
 
 /** Checks if a class is operational for payroll purposes */

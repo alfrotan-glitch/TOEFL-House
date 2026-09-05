@@ -476,3 +476,128 @@ held or produced a fix in an earlier wave. No open material weakness.
 The rebuilt live world remains running (`server/` on :4000, owner
 account `owner` — password rotated during the live drills, see
 `docs/forensic-audit-2026-09.md` wave-5 section).
+
+---
+
+## Wave 6 — 2026-09-05: the classification itself, conservation from first principles, books inventory economics, business timezone
+
+Standing directive unchanged: distrust everything, including wave 5. Wave 6
+attacked the weakest point of my own prior work — **the I11–I15 identities
+reuse `OPERATING_INCOME_SQL`/`OPERATING_EXPENSE_SQL`, the same classification
+the reports use. A misclassified category would satisfy every invariant while
+every report lies.** A reconciliation that compares the ledger to itself reads
+0/0 forever.
+
+### Category-semantics audit (income rule is residual)
+
+`OPERATING_INCOME = type='income' AND category <> 'capital_injection'` — a
+*residual* definition: any new cash-in surface becomes revenue unless its
+category string is exactly `capital_injection`. Full writer inventory drawn
+from source AND from the live ledger:
+
+| category | writers | verdict |
+|---|---|---|
+| fee, book, exam, placement, diploma, card | students/invoices/exams/books | genuine revenue |
+| other | extra class fee, registration invoice pay | genuine revenue (coarse label) |
+| donation | funding-service (with donation_id pair) | revenue for the school; acceptable |
+| refund | **negative** income (contra-revenue) | correct treatment; savings reclaim verified |
+| capital_injection | treasury deposit only | excluded from revenue ✓ |
+| salary / salary_advance | payroll + voids | advance lands on `sub_salary_advances` = non-expense (receivable) ✓ verified live |
+| book_purchase | NEW (wave 6) | `sub_books_educational` operating expense |
+| owner_drawing | BOS withdraw | `sub_owner_drawings`, equity, excluded from P&L ✓ |
+
+No non-revenue cash-in category leaks into operating income. The payroll
+advance (receivable) vs salary (cost) split is written correctly by every
+writer, confirmed in the live ledger rows.
+
+### W6-1 (MATERIAL, fixed): book inventory acquisition was financially invisible
+
+`receiveBookStock` — and, found by self-attack, `createBookCatalogItem`'s
+initial receipt too — recorded quantity + `unit_cost` with **no financial leg
+at all**: no expense row, no cash movement, nothing. The sale booked
+full-price income. `unit_cost` was write-only data (no COGS, no inventory
+valuation, no consumer anywhere; no supplier-payment surface in the Books
+module; no reconciliation tying receipts to book-purchase expenses).
+
+Economic consequence: **the P&L permanently reported a 100% book margin.**
+Cash paid to suppliers vanished from the books only if nobody manually
+recorded an operational payment; nothing enforced or reconciled it. No
+invariant could see the gap — conservation compares the ledger to itself, and
+the purchase was never in the ledger. This is precisely the "balanced ledger,
+wrong economic reality" class the audit exists to find.
+
+**Fix (the boundary, not a heuristic):** a receipt that carries acquisition
+value must now DECLARE how it is paid —
+`purchase.paidFromBudgetLineId` (paid NOW, atomically with the receipt:
+guarded envelope debit + `book_purchase` expense row on
+`sub_books_educational`, all one transaction) or
+`purchase.declaration: 'separate'` (expense workflow) or `'not-applicable'`
+(donation/transfer). Silence is a 400. Both entry paths (restock + catalog
+create) share one implementation so the semantics cannot drift. Schema:
+`book_stock_receipts.purchase_declaration`, `.purchase_transaction_id`
+(+ startup migration for existing databases; legacy rows keep NULL and are
+pre-declaration history, not rewritten). Idempotency intent includes the
+purchase block. Client: both dialogs gained a mandatory "How is this purchase
+paid?" selector with live budget-line balances.
+
+Live-verified on the rebuilt server: silent costly receipt → 400 with zero
+trace; paid receipt → envelope 5000+4000→**−3000 atomic**; classified
+`book_purchase` row written; sale → income; conservation exact
+(118,200 = 118,200) through the whole chain.
+
+*Honest limit:* under the system's cash basis, cost lands at purchase and
+revenue at sale (period mismatch for unsold stock is inherent to cash basis —
+same treatment as salary and supplies). Follow-up recorded: surface
+inventory-at-cost as a visible metric in the Books workspace.
+
+### W6-2 (fixed): business dates were server-timezone dates
+
+`today()` returned the **server-local** date; no timezone is configured
+anywhere, and the server runs UTC while the business is Kabul (UTC+4:30, no
+DST). Every Kabul date from 00:00–04:29 was booked to the previous business
+day — at a month boundary, to the previous month (a fee paid 00:15 Kabul on
+Sep 1 landed in August's P&L). Same defect in payroll's private
+`gregorianToday()`. **Fix:** both pinned to `timeZone: 'Asia/Kabul'`
+explicitly — deployment-independent. The calendar authority
+(`core/calendar/periods.ts`) already routes through `today()` and is covered.
+
+### W6-3: new invariant I16 — conservation of money, no shared SQL
+
+I16 re-derives total money from RAW external flows only (Σ income − Σ
+expense, signed by type, zero category knowledge) and compares with every
+store (account mains + savings + envelope currents; budget/saving movements
+are internal by construction). It catches store/ledger divergence **even
+along paths whose categories every report agrees about** — including direct
+balance tampering: +500 to a branch account with perfectly classified books
+is detected and named. Pinned in `books-acquisition-accounting.test.ts`,
+including the proof that I16 flags a direct-balance INSERT as unexplained
+money (it caught the audit's own first test fixture doing exactly that).
+
+Scope honesty: I16 sees internal divergence; it cannot see an economic event
+that was never recorded — that is why W6-1 is a **boundary requirement** on
+the receipt API, not an invariant.
+
+### Also verified this wave
+
+- Payroll void paths: `BEGIN IMMEDIATE` + fresh re-read + `status='posted'`
+  recheck inside the transaction → double-void serializes to 409; the
+  unguarded-looking `stmtUpdateBudgetAmount` is only reachable with negative
+  (credit) values from the void reversals — no overdraft path exists.
+- Books refund: negative income (contra-revenue) + savings reclaim + stock
+  restored via the `book_inventory_positions` view.
+- Bootstrap FK gate caught and forced repair of 3 orphan rows the audit's
+  own debug cleanup had left (budget_lines ×2, user_roles ×1) — the gate
+  works, and the incident is recorded rather than hidden.
+- Suite: **214 files, 2,894 passed, 2 skipped** (new: acquisition accounting
+  5/5; everything green under the Kabul-pinned clock).
+- Live: invariants I1–I16 pass, reconciliation 0/0 after the full books
+  economics chain on the running server.
+
+### Wave-6 verdict
+
+Two real defects found and fixed (W6-1 books acquisition economics — a
+genuine accounting-model hole; W6-2 business-calendar timezone). One new
+first-principles invariant (I16) that does not share SQL with the reports.
+The income-classification residual rule was audited and currently holds.
+Next surfaces to attack: receivables independent derivation vs reports,
+SoD (self-approval above threshold), donation restriction economics.

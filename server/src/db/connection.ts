@@ -116,6 +116,22 @@ function ensureInvoiceChargeKindColumn(): void {
   }
 }
 
+/**
+ * Converge a pre-W6.1 database onto the acquisition-accounting shape of
+ * `book_stock_receipts`: the purchase declaration and the paying transaction
+ * are new columns. Existing (legacy) rows keep NULL — they are pre-declaration
+ * history, reported as such by the books reconciliation rather than rewritten.
+ */
+function ensureBookReceiptAcquisitionColumns(): void {
+  const columns = db.prepare(`PRAGMA table_info(book_stock_receipts)`).all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === 'purchase_declaration')) {
+    db.exec(`ALTER TABLE book_stock_receipts ADD COLUMN purchase_declaration TEXT`);
+  }
+  if (!columns.some((column) => column.name === 'purchase_transaction_id')) {
+    db.exec(`ALTER TABLE book_stock_receipts ADD COLUMN purchase_transaction_id TEXT REFERENCES financial_transactions(id) ON DELETE RESTRICT`);
+  }
+}
+
 function reconcileCanonicalFeeAuthority(): void {
   const rows = db.prepare(`
     SELECT branch_id, placement_test_fee, registration_fee, card_fee, diploma_fee
@@ -189,6 +205,7 @@ export function initSchema(): void {
     reconcileCanonicalPlacementState();
     db.exec(schema);
     ensureInvoiceChargeKindColumn();
+    ensureBookReceiptAcquisitionColumns();
     ensureRegistrationsFinancialColumnsDropped();
     reconcileCanonicalFeeAuthority();
   } catch (error) {

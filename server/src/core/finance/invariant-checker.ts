@@ -46,6 +46,11 @@
  *  I15 INVOICE DOCUMENT INTEGRITY — a live invoice's items sum to its stated
  *      total, so a drifted or hand-edited document cannot misreport what it
  *      charges.
+ *  I16 CONSERVATION OF MONEY — total AFN held across every store (account
+ *      mains, savings, budget envelopes) equals raw income minus raw expense
+ *      flows. Derived WITHOUT the classification SQL on purpose: it sees any
+ *      store/row divergence even along paths whose categories every report
+ *      agrees about, so a shared misclassification cannot hide it.
  */
 import type BetterSqlite3 from 'better-sqlite3';
 import {
@@ -204,6 +209,30 @@ const CHECKS: Check[] = [
           WHERE i.status NOT IN ('draft', 'cancelled')
             AND ABS(i.total_amount - COALESCE((SELECT SUM(ii.amount) FROM invoice_items ii WHERE ii.invoice_id = i.id), 0)) > 0.001`,
     sample: (r) => `invoice ${r.k} states ${r.total} but its items sum to ${r.items}`,
+  },
+  {
+    // I16 deliberately shares NOTHING with the reporting classification: it
+    // re-derives total book money from the raw external flows (income rows in,
+    // expense rows out — both signed by type, no category knowledge) and
+    // compares it with every store that can hold money. Budget and savings
+    // movements are internal by construction (they only ever move money
+    // BETWEEN these stores), so any divergence is money created from nothing
+    // or vanished into nothing — including paths whose categories every
+    // report and every other invariant happen to agree about.
+    invariant: 'I16',
+    detail: 'Conservation of money: every AFN held in accounts and envelopes is explained by raw income minus expense flows',
+    sql: `WITH flows AS (
+            SELECT
+              COALESCE((SELECT SUM(amount) FROM financial_transactions WHERE type = 'income'), 0)
+              - COALESCE((SELECT SUM(amount) FROM financial_transactions WHERE type = 'expense'), 0) AS explained,
+              COALESCE((SELECT SUM(main_balance + saving_balance) FROM finance_accounts), 0)
+              + COALESCE((SELECT SUM(current_amount) FROM budget_lines), 0) AS held
+          )
+          SELECT 'global' AS k, explained, held,
+                 held - explained AS delta
+          FROM flows
+          WHERE ABS(held - explained) > 0.001`,
+    sample: (r) => `stores hold ${r.held} AFN but raw external flows explain ${r.explained} (delta ${r.delta}) — money appeared or vanished outside the ledger`,
   },
 ];
 

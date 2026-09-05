@@ -31,6 +31,11 @@ export interface BookCatalogCommand {
   receivedOn?: unknown;
   unitCost?: unknown;
   note?: unknown;
+  /** See BookReceiptCommand.purchase — the initial receipt obeys the same acquisition accounting. */
+  purchase?: {
+    paidFromBudgetLineId?: unknown;
+    declaration?: unknown;
+  };
   branchId: string;
   idempotencyKey: string;
   idempotencyCandidates?: string[];
@@ -51,6 +56,22 @@ export interface BookReceiptCommand {
   receivedOn?: unknown;
   unitCost?: unknown;
   note?: unknown;
+  /**
+   * How the acquisition is paid for, when the receipt carries a cost.
+   *
+   * `paidFromBudgetLineId` — the purchase is paid NOW, from that budget line,
+   * atomically with the receipt (guarded debit + expense row categorized
+   * `sub_books_educational`). `declaration` — `'separate'` (the payment is or
+   * will be recorded through the expense workflow) or `'not-applicable'`
+   * (donation / internal transfer / no money moved). A costly receipt with NO
+   * purchase block is rejected: stock could otherwise arrive with zero
+   * financial trace while its sale books full-price income, so the P&L would
+   * permanently report a 100% book margin no invariant can see.
+   */
+  purchase?: {
+    paidFromBudgetLineId?: unknown;
+    declaration?: unknown;
+  };
   idempotencyKey: string;
   idempotencyCandidates?: string[];
   actor: BooksActor;
@@ -399,12 +420,19 @@ export function createBookCatalogItem(db: Database, command: BookCatalogCommand)
   const duplicateTitle = db.prepare(`
     SELECT id FROM books WHERE branch_id = ? AND item_kind = ? AND title = ? COLLATE NOCASE
   `).get(command.branchId, itemKind, title) as { id: string } | undefined;
-  if (duplicateTitle) throw new HttpError(409, 'A Book catalog item with this title and kind already exists in the branch.');
+  if (duplicateTitle) throw new HttpError(409, 'A Book catalog item with this title and kind already exists in this branch.');
+
+  // The initial receipt obeys the same acquisition accounting (W6-1): a
+  // costly initial stock cannot appear silently either.
+  const acquisition = resolveAcquisitionBooking(db, {
+    branchId: command.branchId, quantity, unitCost, purchase: command.purchase, title, operatorName: command.actor.fullName,
+  });
 
   const bookId = id('book');
   const receiptId = id('book_receipt');
   try {
     db.transaction(() => {
+      acquisition.writePayment(db, receiptId, receivedOn);
       db.prepare(`
         INSERT INTO books
           (id, title, item_kind, sale_enabled, sale_price, lending_enabled, default_unit_cost, status, branch_id)
@@ -412,9 +440,10 @@ export function createBookCatalogItem(db: Database, command: BookCatalogCommand)
       `).run(bookId, title, itemKind, saleEnabled ? 1 : 0, saleEnabled ? salePrice : null, lendingEnabled ? 1 : 0, unitCost, command.branchId);
       db.prepare(`
         INSERT INTO book_stock_receipts
-          (id, book_id, quantity, received_on, unit_cost, note, received_by_user_id, received_by_name, branch_id, idempotency_key)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(receiptId, bookId, quantity, receivedOn, unitCost, note, command.actor.userId, command.actor.fullName, command.branchId, idempotencyKey);
+          (id, book_id, quantity, received_on, unit_cost, note, received_by_user_id, received_by_name, branch_id, idempotency_key, purchase_declaration, purchase_transaction_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(receiptId, bookId, quantity, receivedOn, unitCost, note, command.actor.userId, command.actor.fullName, command.branchId, idempotencyKey, acquisition.declaration, acquisition.transactionId);
+      acquisition.debit(db);
     })();
   } catch (error) {
     if (isUniqueViolation(error)) {
@@ -466,6 +495,84 @@ export function patchBookCatalogItem(db: Database, bookId: string, branchId: str
   }
 }
 
+interface AcquisitionPurchase {
+  paidFromBudgetLineId?: unknown;
+  declaration?: unknown;
+}
+
+/**
+ * Validate and prepare the acquisition accounting leg for a stock receipt
+ * (W6-1). Validation happens BEFORE any write; `apply` must be called inside
+ * the caller's transaction, after the receipt row exists, so receipt, guarded
+ * debit and expense row commit as ONE fact.
+ */
+function resolveAcquisitionBooking(
+  db: Database,
+  input: { branchId: string; quantity: number; unitCost: number | null; purchase: AcquisitionPurchase | undefined; title: string; operatorName: string },
+): { declaration: string | null; transactionId: string | null; writePayment: (db: Database, receiptId: string, receivedOn: string) => void; debit: (db: Database) => void } {
+  const acquisitionCost = input.unitCost !== null && input.unitCost > 0 ? input.unitCost * input.quantity : 0;
+  const purchase = input.purchase ?? {};
+  const purchaseDeclaration = typeof purchase.declaration === 'string' ? purchase.declaration : undefined;
+  const paidFromBudgetLineId = typeof purchase.paidFromBudgetLineId === 'string' && purchase.paidFromBudgetLineId ? purchase.paidFromBudgetLineId : undefined;
+
+  if (acquisitionCost > 0 && !paidFromBudgetLineId && purchaseDeclaration !== 'separate' && purchaseDeclaration !== 'not-applicable') {
+    throw new HttpError(
+      400,
+      `This receipt carries an acquisition cost of ${acquisitionCost} AFN and must declare how the purchase is paid: pass purchase.paidFromBudgetLineId to pay from a budget line now (recorded atomically with the receipt), or purchase.declaration 'separate' if the payment is recorded through the expense workflow, or 'not-applicable' for donations and internal transfers.`,
+    );
+  }
+  if (paidFromBudgetLineId && purchaseDeclaration) {
+    throw new HttpError(400, 'Pass either purchase.paidFromBudgetLineId or purchase.declaration, not both.');
+  }
+  if (paidFromBudgetLineId && acquisitionCost <= 0) {
+    throw new HttpError(400, 'purchase.paidFromBudgetLineId requires a receipt that carries a unit cost.');
+  }
+
+  const transactionId = paidFromBudgetLineId ? id('tx') : null;
+  if (paidFromBudgetLineId) {
+    const line = db.prepare('SELECT id, name, branch_id, is_active, current_amount FROM budget_lines WHERE id = ?').get(paidFromBudgetLineId) as
+      | { id: string; name: string; branch_id: string; is_active: number; current_amount: number }
+      | undefined;
+    if (!line) throw new HttpError(404, 'Purchase budget line not found.');
+    if (!line.is_active) throw new HttpError(409, 'Purchase budget line is retired.');
+    if (line.branch_id !== input.branchId) throw new HttpError(400, 'Purchase budget line belongs to another branch.');
+    if (Number(line.current_amount) < acquisitionCost) {
+      throw new HttpError(409, `Insufficient balance on budget line "${line.name}" (remaining: ${Number(line.current_amount)} AFN) for this purchase.`);
+    }
+  }
+
+  return {
+    declaration: paidFromBudgetLineId ? null : (purchaseDeclaration ?? null),
+    transactionId,
+    /**
+     * Write the payment's expense row. Runs FIRST inside the caller's
+     * transaction: `book_stock_receipts.purchase_transaction_id` carries a
+     * FK to it, so the transaction row must exist before the receipt that
+     * names it (`reference_id` on the transaction is a soft reference and
+     * may name the receipt before it exists).
+     */
+    writePayment: (db, receiptId, receivedOn) => {
+      if (!paidFromBudgetLineId || transactionId === null || acquisitionCost <= 0) return;
+      db.prepare(`
+        INSERT INTO financial_transactions
+          (id, type, category, finance_category_id, amount, date, description, reference_id, operator_name, branch_id)
+        VALUES (?, 'expense', 'book_purchase', 'sub_books_educational', ?, ?, ?, ?, ?, ?)
+      `).run(
+        transactionId, acquisitionCost, receivedOn,
+        `Book stock purchase: ${input.quantity} × ${input.title}${input.unitCost !== null ? ` @ ${input.unitCost} AFN` : ''}`,
+        receiptId, input.operatorName, input.branchId,
+      );
+    },
+    /** Guarded envelope debit. Runs LAST, inside the same transaction. */
+    debit: (db) => {
+      if (!paidFromBudgetLineId || acquisitionCost <= 0) return;
+      const debited = db.prepare('UPDATE budget_lines SET current_amount = current_amount - ? WHERE id = ? AND current_amount >= ?')
+        .run(acquisitionCost, paidFromBudgetLineId, acquisitionCost);
+      if (debited.changes !== 1) throw new HttpError(409, 'Purchase budget line balance changed during this receipt. Please retry.');
+    },
+  };
+}
+
 export function receiveBookStock(db: Database, bookId: string, branchId: string, command: BookReceiptCommand): { id: string; idempotentReplay: boolean } {
   const book = requireBook(db, bookId);
   assertBookBranch(book, branchId);
@@ -484,19 +591,36 @@ export function receiveBookStock(db: Database, bookId: string, branchId: string,
     return { id: prior.id, idempotentReplay: true };
   }
 
+  // ---------- Acquisition accounting (forensic wave 6, finding W6-1) ----------
+  // A receipt that carries acquisition value MUST declare how it is paid.
+  // Without this, stock arrived financially invisible: its sale booked
+  // full-price income while no surface ever recorded the cash-out, so every
+  // book was reported at a 100% margin and no invariant could see the gap
+  // (conservation compares the ledger to itself; the purchase was never in it).
+  const acquisition = resolveAcquisitionBooking(db, {
+    branchId, quantity, unitCost, purchase: command.purchase, title: book.title, operatorName: command.actor.fullName,
+  });
+
   const receiptId = id('book_receipt');
-  try {
-    db.prepare(`
+  const stmtInsertReceipt = db.prepare(`
       INSERT INTO book_stock_receipts
-        (id, book_id, quantity, received_on, unit_cost, note, received_by_user_id, received_by_name, branch_id, idempotency_key)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(receiptId, bookId, quantity, receivedOn, unitCost, note, command.actor.userId, command.actor.fullName, branchId, idempotencyKey);
+        (id, book_id, quantity, received_on, unit_cost, note, received_by_user_id, received_by_name, branch_id, idempotency_key, purchase_declaration, purchase_transaction_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+  const bookPurchase = db.transaction(() => {
+    acquisition.writePayment(db, receiptId, receivedOn);
+    stmtInsertReceipt.run(
+      receiptId, bookId, quantity, receivedOn, unitCost, note,
+      command.actor.userId, command.actor.fullName, branchId, idempotencyKey,
+      acquisition.declaration, acquisition.transactionId,
+    );
+    acquisition.debit(db);
+  });
+  try {
+    bookPurchase();
   } catch (error) {
     if (isUniqueViolation(error)) {
-      const winner = db.prepare(`
-        SELECT id, book_id, quantity, branch_id FROM book_stock_receipts
-         WHERE idempotency_key IN (${candidatePlaceholders(candidates)})
-      `).get(...candidates) as { id: string; book_id: string; quantity: number; branch_id: string } | undefined;
+      const winner = db.prepare(`SELECT id, book_id, quantity, branch_id FROM book_stock_receipts WHERE idempotency_key IN (${candidatePlaceholders(candidates)})`).get(...candidates) as { id: string; book_id: string; quantity: number; branch_id: string } | undefined;
       if (winner) {
         if (winner.book_id !== bookId || winner.quantity !== quantity || winner.branch_id !== branchId) {
           throw new HttpError(409, 'This idempotency key has already been used for a different Book receipt.');

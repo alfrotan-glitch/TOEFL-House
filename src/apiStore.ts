@@ -1085,6 +1085,7 @@ export function useApiStore() {
     receivedOn?: string;
     unitCost?: number | null;
     note?: string;
+    purchase?: { paidFromBudgetLineId?: string; declaration?: 'separate' | 'not-applicable' };
   }) => {
     await api.post('/books/catalog', { ...input, branchId: currentBranchId }, undefined, { 'Idempotency-Key': crypto.randomUUID() });
     await reloadBooksWorkspace();
@@ -1104,7 +1105,7 @@ export function useApiStore() {
     invalidate('books');
   };
 
-  const receiveBookStock = async (bookId: string, input: { quantity: number; receivedOn?: string; unitCost?: number | null; note?: string }) => {
+  const receiveBookStock = async (bookId: string, input: { quantity: number; receivedOn?: string; unitCost?: number | null; note?: string; purchase?: { paidFromBudgetLineId?: string; declaration?: 'separate' | 'not-applicable' } }) => {
     await api.post(`/books/catalog/${bookId}/receipts`, input, undefined, { 'Idempotency-Key': crypto.randomUUID() });
     await reloadBooksWorkspace();
     invalidate('books');
