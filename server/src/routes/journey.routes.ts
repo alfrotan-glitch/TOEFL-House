@@ -263,32 +263,67 @@ journeyRouter.post(
     // reject an over-large discount instead of capping it. students.routes
     // clamps a *percent it derived itself* from the rule engine, which is a
     // different act — there the caller never named an amount.
-    const requestedDiscount = discountAmount != null ? assertMoney(discountAmount, 'discount amount') : 0;
-    if (requestedDiscount > 0) {
-      const resolvedLevelId = effectiveLevelId;
-      const level = resolvedLevelId
-        ? (db.prepare('SELECT program_version_id FROM levels WHERE id = ?').get(resolvedLevelId) as { program_version_id?: string } | undefined)
-        : undefined;
-      const snapshot = getCatalogService(db).buildFeeSnapshot({
-        programVersionId: programVersionId || level?.program_version_id || null,
-        levelId: resolvedLevelId,
-        branchId: student.branch_id,
-        enrollmentType: enrollmentType || 'new',
-      });
-      // The ceiling is a percentage of the TUITION, not of the whole snapshot.
-      // A discount attaches to tuition only (owner decision on WP07-F18), so
-      // basing the ceiling on a total that includes the registration fee would
-      // authorise more discount than there is tuition to discount.
-      const { tuitionTotal } = partitionFeeSnapshot(snapshot.fees);
-      const authorized = resolveAuthorizedDiscount(db, studentId, 100, { branchId: student.branch_id });
-      const maxDiscount = Math.round((tuitionTotal * authorized.percent) / 100);
-      if (requestedDiscount > maxDiscount) {
-        throw new HttpError(
-          400,
-          `Discount of ${requestedDiscount} AFN exceeds the authorized maximum of ${maxDiscount} AFN (${authorized.percent}% of ${tuitionTotal} AFN tuition) for this student.`,
-        );
-      }
+    // THE DISCOUNT THE ENROLMENT ACTUALLY CARRIES. Two defects converged here:
+    //
+    // 1. A STANDING authorization was ignored: with no explicit discountAmount
+    //    the route forwarded 0, so a student with an approved sponsorship or
+    //    family grant paid full price on this surface while the desk surfaces
+    //    (enroll-semester, manual create) applied the same grant — two prices
+    //    for the same student, decided by which screen enrolled them.
+    // 2. The explicit-amount ceiling was derived from the CATALOG snapshot,
+    //    but the charge is priced from the CLASS fee when a class is named —
+    //    the ceiling and the invoice could disagree.
+    //
+    // The basis is therefore the tuition this enrolment will actually charge
+    // (class fee replacing the semester component, exactly as the service
+    // prices it), the percent is resolved through the same CFG-1 authority the
+    // desk uses, and an explicit AFN figure — when the caller insists on one —
+    // must still fit inside that authority's ceiling.
+    const resolvedLevelId = effectiveLevelId;
+    const level = resolvedLevelId
+      ? (db.prepare('SELECT program_version_id FROM levels WHERE id = ?').get(resolvedLevelId) as { program_version_id?: string } | undefined)
+      : undefined;
+    const snapshot = getCatalogService(db).buildFeeSnapshot({
+      programVersionId: programVersionId || level?.program_version_id || null,
+      levelId: resolvedLevelId,
+      branchId: student.branch_id,
+      enrollmentType: enrollmentType || 'new',
+    });
+    // The ceiling is a percentage of the TUITION, not of the whole snapshot.
+    // A discount attaches to tuition only (owner decision on WP07-F18), so
+    // basing the ceiling on a total that includes the registration fee would
+    // authorise more discount than there is tuition to discount.
+    const partitioned = partitionFeeSnapshot(snapshot.fees);
+    const semesterComponent = partitioned.tuitionFees
+      .filter((fee) => fee.feeType === 'semester')
+      .reduce((total, fee) => total + (Number(fee.amount) || 0), 0);
+    let tuitionBasis = partitioned.tuitionTotal;
+    if (classId) {
+      const classRow = db.prepare('SELECT fee FROM classes WHERE id = ?').get(classId) as { fee: number | null } | undefined;
+      const classFee = Number(classRow?.fee ?? 0) || 0;
+      tuitionBasis = classFee + (partitioned.tuitionTotal - semesterComponent);
     }
+    const requestedDiscount = discountAmount != null ? assertMoney(discountAmount, 'discount amount') : 0;
+    // THE CEILING probe asks "what is the most this student could ever be
+    // granted" — for an unexceptional student that is the ORDINARY policy cap
+    // (20%), which is a bound for on-request discounts, not an automatic grant.
+    const ceiling = resolveAuthorizedDiscount(db, studentId, 100, { branchId: student.branch_id });
+    const maxDiscount = Math.round((tuitionBasis * ceiling.percent) / 100);
+    if (requestedDiscount > maxDiscount) {
+      throw new HttpError(
+        400,
+        `Discount of ${requestedDiscount} AFN exceeds the authorized maximum of ${maxDiscount} AFN (${ceiling.percent}% of ${tuitionBasis} AFN tuition) for this student.`,
+      );
+    }
+    // THE STANDING discount asks "what does this student already carry" — an
+    // approved authorization row, or the stored policy percent the desk
+    // surfaces resolve the same way. For a student with neither, this is 0 and
+    // the enrolment prices at full fee unless the caller explicitly asks.
+    const standing = resolveAuthorizedDiscount(db, studentId, Math.max(0, Number(student.discount_percent || 0)), { branchId: student.branch_id });
+    const standingDiscount = Math.round((tuitionBasis * standing.percent) / 100);
+    // No explicit figure: the standing authorization prices the enrolment, in
+    // parity with the desk surfaces. Explicit figure: honoured as asked.
+    const effectiveDiscount = requestedDiscount > 0 ? requestedDiscount : standingDiscount;
     
     const result = getEnrollmentService(db).enroll({
       studentId,
@@ -306,7 +341,7 @@ journeyRouter.post(
       actorUserId: user.userId,
       actorName: user.fullName,
       autoInvoice: autoInvoice !== false,
-      discountAmount: requestedDiscount,
+      discountAmount: effectiveDiscount,
       includeRegistrationFee: false,
     });
 

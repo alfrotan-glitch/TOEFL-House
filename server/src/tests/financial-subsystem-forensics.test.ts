@@ -383,3 +383,91 @@ describe('FS-8 — the academic hold is lifetime-scoped and covers every enrollm
     expect(rows[0].status).toBe('active');
   });
 });
+
+describe('FS-9 — a refund reverses a SPLIT payment across its obligations, LIFO', () => {
+  it('one payment settling two terms refunds from the latest settlement first', async () => {
+    const sid = await newStudent('FS9 Split Refund');
+    await settleRegistration(sid);
+    const e1 = await supertest(app).post(`/api/students/${sid}/journey/enrollments`).set(auth())
+      .send({ classId: CLASS_A, semesterName: 'FS9 T1', enrollmentType: 'new' });
+    expect(e1.status).toBe(201);
+    const e2 = await supertest(app).post(`/api/students/${sid}/journey/enrollments`).set(auth())
+      .send({ classId: CLASS_B, semesterName: 'FS9 T2', enrollmentType: 'new' });
+    expect(e2.status).toBe(201);
+
+    const sem1 = db.prepare(`SELECT id FROM student_semesters WHERE student_id = ? AND semester_name = 'FS9 T1'`).get(sid) as { id: string };
+    const sem2 = db.prepare(`SELECT id FROM student_semesters WHERE student_id = ? AND semester_name = 'FS9 T2'`).get(sid) as { id: string };
+    const obl1 = db.prepare(`SELECT id FROM student_obligations WHERE semester_id = ?`).get(sem1.id) as { id: string };
+    const obl2 = db.prepare(`SELECT id FROM student_obligations WHERE semester_id = ?`).get(sem2.id) as { id: string };
+
+    // One 6,000 payment the engine legally splits: 4,000 settles T1, 2,000 T2.
+    const payId = 'fsx_pay_split';
+    db.prepare(
+      `INSERT INTO payments (id, student_id, amount, date, payment_method, status, category, branch_id, idempotency_key)
+       VALUES (?, ?, 6000, '2026-09-05', 'cash', 'completed', 'fee', ?, 'fsx-split-pay')`,
+    ).run(payId, sid, BRANCH);
+    db.transaction(() => {
+      allocatePaymentToObligation(db, { paymentId: payId, obligationId: obl1.id, amount: 4000, operatorName: 'FS9' });
+      allocatePaymentToObligation(db, { paymentId: payId, obligationId: obl2.id, amount: 2000, operatorName: 'FS9' });
+    })();
+
+    // Refund 2,500: LIFO takes T2's whole 2,000 plus 500 of T1's 4,000. The
+    // pre-fix engine would have reversed ONE arbitrary row and refused amounts
+    // beyond it.
+    const refund = await supertest(app).post(`/api/students/${sid}/refund`).set(auth())
+      .send({ paymentId: payId, amount: 2500, reason: 'FS9 split refund' });
+    expect(refund.status).toBe(201);
+
+    const activeSum = (obligationId: string) => Number((db.prepare(
+      `SELECT COALESCE(SUM(amount),0) AS s FROM obligation_allocations WHERE obligation_id = ? AND status = 'active'`,
+    ).get(obligationId) as { s: number }).s);
+    expect(activeSum(obl1.id)).toBe(3500);
+    expect(activeSum(obl2.id)).toBe(0);
+
+    // A further 1,000 comes off T1 only.
+    const refund2 = await supertest(app).post(`/api/students/${sid}/refund`).set(auth())
+      .send({ paymentId: payId, amount: 1000, reason: 'FS9 split refund 2' });
+    expect(refund2.status).toBe(201);
+    expect(activeSum(obl1.id)).toBe(2500);
+    expect(activeSum(obl2.id)).toBe(0);
+
+    // The remaining settlement is exactly what was paid minus what returned.
+    expect(activeSum(obl1.id) + activeSum(obl2.id)).toBe(6000 - 3500);
+  });
+});
+
+describe('FS-10 — a REAL authorized discount flows through class-fee pricing intact', () => {
+  it('grant → term net → invoice discount → collection cap all agree', async () => {
+    const sid = await newStudent('FS10 Sponsored');
+    await settleRegistration(sid);
+    db.prepare(
+      `INSERT INTO student_discount_authorizations (id, student_id, category, approved_percent, status, branch_id, source)
+       VALUES ('fsx_auth_10', ?, 'SPONSORSHIP', 20, 'active', ?, 'manual')`,
+    ).run(sid, BRANCH);
+
+    const enroll = await supertest(app).post(`/api/students/${sid}/journey/enrollments`).set(auth())
+      .send({ classId: CLASS_A, semesterName: 'FS10 Term', enrollmentType: 'new' });
+    expect(enroll.status).toBe(201);
+
+    // The term keeps the GROSS class fee and the discounted net separately.
+    const term = db.prepare(`SELECT fee_amount, net_fee_amount FROM student_semesters WHERE student_id = ? AND semester_name = 'FS10 Term'`).get(sid) as { fee_amount: number; net_fee_amount: number };
+    expect(Number(term.fee_amount)).toBe(6500);
+    expect(Number(term.net_fee_amount)).toBe(5200);
+
+    // The document carries the discount explicitly (the discounts report sums it).
+    const inv = db.prepare(`SELECT total_amount, discount_amount, net_amount FROM invoices WHERE student_id = ? AND purpose = 'tuition'`).get(sid) as { total_amount: number; discount_amount: number; net_amount: number };
+    expect(Number(inv.total_amount)).toBe(6500);
+    expect(Number(inv.discount_amount)).toBe(1300);
+    expect(Number(inv.net_amount)).toBe(5200);
+
+    // The collection cap is the DISCOUNTED figure: the student can never owe
+    // or pay the waived 1,300 back.
+    const semId = db.prepare(`SELECT id FROM student_semesters WHERE student_id = ? AND semester_name = 'FS10 Term'`).get(sid) as { id: string };
+    const full = await supertest(app).post(`/api/students/${sid}/payments`).set(auth())
+      .send({ amount: 5200, category: 'fee', semesterId: semId.id, method: 'cash' });
+    expect([200, 201]).toContain(full.status);
+    const over = await supertest(app).post(`/api/students/${sid}/payments`).set(auth())
+      .send({ amount: 1, category: 'fee', semesterId: semId.id, method: 'cash' });
+    expect([400, 409]).toContain(over.status);
+  });
+});

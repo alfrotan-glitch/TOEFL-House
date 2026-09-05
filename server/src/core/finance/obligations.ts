@@ -952,11 +952,13 @@ export function allocatePaymentToObligation(
 /**
  * Reduces a payment's settlement when it is refunded (owner decision on E1b).
  *
- * The refund reverses the allocation it targets through the mechanism every
- * other instrument uses, and — when only part of the payment is returned —
- * writes a fresh allocation for the amount the student keeps owing settled.
- * There is therefore exactly ONE way to undo an allocation, and
- * `CHECK (amount > 0)` keeps protecting the table.
+ * The refund reverses the payment's active allocations through the mechanism
+ * every other instrument uses — LIFO across ALL of them when the payment was
+ * split across obligations — and, when only part of the settlement is
+ * returned, writes a fresh allocation for the amount the student keeps
+ * settled, against the same obligation it came from. There is therefore
+ * exactly ONE way to undo an allocation, and `CHECK (amount > 0)` keeps
+ * protecting the table.
  *
  * A payment that settled no obligation (a book, exam or card charge) has
  * nothing to reverse, and this is a no-op for it.
@@ -968,33 +970,55 @@ export function refundPaymentAllocation(
   if (!db.inTransaction) throw new Error('refundPaymentAllocation() called outside a transaction.');
   const refundAmount = assertMoney(params.refundAmount, 'Refund amount');
 
-  const active = db
+  // A payment may hold SEVERAL active allocations — the allocation cap exists
+  // precisely because a split across obligations is legal. Reversal walks them
+  // LIFO (latest settlement first, the natural accounting direction for a
+  // refund) until the refunded amount is consumed, re-allocating whatever the
+  // student keeps settled on the SAME obligation it came from. The old
+  // implementation read ONE arbitrary allocation row, so a split payment could
+  // be refunded against the wrong term — and the amount guard compared against
+  // that single row instead of the payment's whole remaining settlement.
+  const activeRows = db
     .prepare(
       `SELECT a.id, a.obligation_id, a.amount FROM obligation_allocations a
-        WHERE a.payment_id = ? AND ${CASH_ALLOCATION_SQL}`,
+        WHERE a.payment_id = ? AND ${CASH_ALLOCATION_SQL}
+        ORDER BY a.date DESC, a.rowid DESC`,
     )
-    .get(params.targetPaymentId) as { id: string; obligation_id: string; amount: number } | undefined;
-  if (!active) return { reversedAllocationId: null, retainedAllocationId: null };
+    .all(params.targetPaymentId) as Array<{ id: string; obligation_id: string; amount: number }>;
+  if (activeRows.length === 0) return { reversedAllocationId: null, retainedAllocationId: null };
 
-  if (refundAmount > Number(active.amount)) {
-    throw new HttpError(409, `Only ${active.amount} AFN of that payment is still settling a term.`);
+  const totalActive = activeRows.reduce((sum, row) => sum + Number(row.amount), 0);
+  if (refundAmount > totalActive) {
+    throw new HttpError(409, `Only ${totalActive} AFN of that payment is still settling a term.`);
   }
 
-  db.prepare(
+  const reverse = db.prepare(
     `UPDATE obligation_allocations
         SET status = 'reversed', reversed_at = datetime('now'), reversed_by = ?, reversal_reason = ?
       WHERE id = ? AND status = 'active'`,
-  ).run(params.operatorName, String(params.reason ?? '').trim() || 'refund', active.id);
-
-  const retained = Number(active.amount) - refundAmount;
-  if (retained <= 0) return { reversedAllocationId: active.id, retainedAllocationId: null };
-
-  const { allocationId } = allocatePaymentToObligation(db, {
-    paymentId: params.targetPaymentId,
-    obligationId: active.obligation_id,
-    amount: retained,
-    operatorName: params.operatorName,
-    date: params.date,
-  });
-  return { reversedAllocationId: active.id, retainedAllocationId: allocationId };
+  );
+  let firstReversed: string | null = null;
+  let lastRetained: string | null = null;
+  let remaining = refundAmount;
+  for (const row of activeRows) {
+    const rowAmount = Number(row.amount);
+    if (remaining <= 0) break;
+    reverse.run(params.operatorName, String(params.reason ?? '').trim() || 'refund', row.id);
+    if (!firstReversed) firstReversed = row.id;
+    remaining -= rowAmount;
+    if (remaining < 0) {
+      // This row settled more than the refund returns: the student keeps the
+      // difference settled against the SAME obligation it was paying.
+      const { allocationId } = allocatePaymentToObligation(db, {
+        paymentId: params.targetPaymentId,
+        obligationId: row.obligation_id,
+        amount: -remaining,
+        operatorName: params.operatorName,
+        date: params.date,
+      });
+      lastRetained = allocationId;
+      remaining = 0;
+    }
+  }
+  return { reversedAllocationId: firstReversed, retainedAllocationId: lastRetained };
 }
