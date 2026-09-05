@@ -223,9 +223,9 @@ journeyRouter.post(
     }
     if (classId) assertClassGenderAllowsStudent(classId, student.gender);
 
-    // ACADEMIC HOLD — the same debt gate the class and semester desks apply.
-    // This surface previously had no hold check at all, so a student blocked
-    // at either desk could enroll through the journey. Lifetime-scoped, with
+    // ACADEMIC HOLD — the same debt gate the class and semester desks apply,
+    // enforced on this surface too so a student blocked at either desk cannot
+    // enroll through the journey instead. Lifetime-scoped, with
     // the resume exception for re-opening a term the student already holds
     // (see core/academic/academic-hold.ts).
     assertEnrollmentNotOnHold(req, {

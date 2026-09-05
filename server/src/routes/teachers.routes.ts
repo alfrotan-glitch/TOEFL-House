@@ -960,12 +960,12 @@ employeesRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(as
           // A second FULL payment against a settled month is classified as the
           // full-payment conflict deterministically here, not only when the
           // unique index happens to catch the insert below (the index stays as
-          // the concurrency backstop). Mutation testing previously proved the
-          // route's own classification was load-bearing; it still is.
+          // the concurrency backstop). This classification is load-bearing for
+          // the route's own guarantees.
           const fullAlreadyPosted = type === 'full' && !!db
             .prepare(`SELECT 1 FROM employee_salary_ledger WHERE employee_id = ? AND period_key = ? AND payment_type = 'full' AND status = 'posted' LIMIT 1`)
             .get(employee.id, periodKey);
-          if (fullAlreadyPosted) throw new HttpError(409, `A full salary payment for \"${monthName}\" already exists.`);
+          if (fullAlreadyPosted) throw new HttpError(409, `A full salary payment for "${monthName}" already exists.`);
         if (remainingDue <= 0) throw new HttpError(409, `Nothing remains payable for "${monthName}" (due ${composedDue} AFN = base ${dueInfo.base}${dueInfo.bonus ? ` + bonus ${dueInfo.bonus}` : ''}, ${paidThisPeriod} AFN already posted).`);
         if (resolvedAmount > remainingDue) {
           throw new HttpError(400, `Payment cannot exceed the remaining salary of ${remainingDue} AFN for "${monthName}".`);

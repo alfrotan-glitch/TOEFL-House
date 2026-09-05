@@ -118,8 +118,9 @@ function ensureInvoiceChargeKindColumn(): void {
 
 /**
  * W17 (F9): converge a pre-W17 `payments` table onto the payer-attribution
- * shape. Attribution is optional detail; every legacy row keeps NULL, which is
- * exactly its pre-W17 meaning ("no third-party attribution recorded").
+ * shape. Attribution is optional detail; rows recorded before attribution
+ * existed keep NULL, which is exactly their meaning ("no third-party
+ * attribution recorded").
  */
 function ensurePaymentsPayerColumns(): void {
   const columns = db.prepare(`PRAGMA table_info(payments)`).all() as Array<{ name: string }>;
@@ -134,8 +135,9 @@ function ensurePaymentsPayerColumns(): void {
 /**
  * Converge a pre-W6.1 database onto the acquisition-accounting shape of
  * `book_stock_receipts`: the purchase declaration and the paying transaction
- * are new columns. Existing (legacy) rows keep NULL — they are pre-declaration
- * history, reported as such by the books reconciliation rather than rewritten.
+ * are new columns. Rows recorded before declaration accounting keep NULL —
+ * pre-declaration history, reported as such by the books reconciliation
+ * rather than rewritten.
  */
 function ensureBookReceiptAcquisitionColumns(): void {
   const columns = db.prepare(`PRAGMA table_info(book_stock_receipts)`).all() as Array<{ name: string }>;
@@ -161,9 +163,10 @@ function ensureBookReceiptAcquisitionColumns(): void {
  */
 /**
  * W18 (D-187): converge a pre-W18 `donation_clawbacks` table onto the
- * attribution shape. Pre-W18 declaration only ever succeeded when the donation
- * had NO onward instrument movement, so every legacy clawback's attribution is
- * derivable: the donation's single root instrument. NULL survives only where
+ * attribution shape. A declaration from before attribution existed only ever
+ * succeeded when the donation had NO onward instrument movement, so its
+ * attribution is derivable: the donation's single root instrument. NULL
+ * survives only where
  * no unique root exists (not producible through the service; defensive).
  */
 function ensureDonationClawbackAttributionColumns(): void {
@@ -313,6 +316,51 @@ function ensureSingleCurrencyChecks(schema: string): void {
   }
 }
 
+/**
+ * W20 (D-190): widen `financial_transactions.type` with the credit/debt
+ * subsystem's P&L-neutral evidence types — 'loan_proceeds', 'loan_repayment',
+ * 'supplier_refund'. Same copy-swap convergence as the W16 reclaim type:
+ * canonical DDL from schema.sql, dependent triggers dropped and recreated by
+ * the schema re-run, foreign keys asserted clean afterwards.
+ */
+function ensureFinancialTransactionsCreditDebtTypes(schema: string): void {
+  const current = db.prepare(
+    `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'financial_transactions'`,
+  ).get() as { sql: string } | undefined;
+  if (!current?.sql || current.sql.includes("'loan_proceeds'")) return;
+
+  const canonical = schema.match(/[\s\S]*CREATE TABLE IF NOT EXISTS financial_transactions \([\s\S]*?\n\);/);
+  const ddl = canonical ? canonical[0].slice(canonical[0].indexOf('CREATE TABLE IF NOT EXISTS financial_transactions (')) : null;
+  if (!ddl) throw new Error('Cannot converge financial_transactions: canonical DDL not found in schema.sql.');
+
+  log.warn('Rebuilding financial_transactions with the W20 credit/debt evidence types (copy-swap, foreign keys suspended).');
+  const swap = db.transaction(() => {
+    db.exec(ddl.replace('CREATE TABLE IF NOT EXISTS financial_transactions (', 'CREATE TABLE financial_transactions_w20_swap ('));
+    // Copy only columns the old table actually has; everything else takes the
+    // canonical default.
+    const canonicalCols = ['id', 'type', 'category', 'finance_category_id', 'amount', 'date', 'description', 'reference_id', 'payment_id', 'donation_id', 'operator_name', 'operator_role', 'branch_id'];
+    const present = new Set((db.prepare('PRAGMA table_info(financial_transactions)').all() as Array<{ name: string }>).map((c) => c.name));
+    const cols = canonicalCols.filter((name) => present.has(name)).join(', ');
+    db.exec(`INSERT INTO financial_transactions_w20_swap (${cols}) SELECT ${cols} FROM financial_transactions`);
+    // DROP TABLE aborts if triggers on OTHER tables still reference this one,
+    // so they are dropped first and recreated by the schema re-run below.
+    const dependents = (db.prepare(
+      `SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name != 'financial_transactions' AND sql LIKE '%financial_transactions%'`,
+    ).all() as Array<{ name: string }>).map((r) => r.name);
+    for (const name of dependents) db.exec(`DROP TRIGGER ${JSON.stringify(name)}`);
+    db.exec('DROP TABLE financial_transactions');
+    db.exec('ALTER TABLE financial_transactions_w20_swap RENAME TO financial_transactions');
+  });
+  swap();
+  // Re-create the indexes and triggers that were dropped with the old table.
+  // The full schema is idempotent and everything else already exists.
+  db.exec(schema);
+  const violations = db.prepare('PRAGMA foreign_key_check').all();
+  if (violations.length > 0) {
+    throw new Error(`financial_transactions rebuild introduced foreign-key violations: ${JSON.stringify(violations).slice(0, 400)}`);
+  }
+}
+
 function ensureFinancialTransactionsReclaimType(schema: string): void {
   const current = db.prepare(
     `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'financial_transactions'`,
@@ -406,9 +454,10 @@ function reconcileCanonicalFeeAuthority(): void {
  * Converge a pre-W12 database onto the employee due-composition shape of
  * `employee_salary_ledger`: the `due_amount` column records the composed due
  * (base + earned bonus) a payment settled against, and the fact triggers
- * enforce paid ≤ due (advance exempt) and full ⇒ paid = due. Legacy rows keep
- * the column DEFAULT 0 — the due that bounded them was the then-current base
- * salary, which is not recoverable and is therefore NOT fabricated.
+ * enforce paid ≤ due (advance exempt) and full ⇒ paid = due. Rows recorded
+ * before due-composition keep the column DEFAULT 0 — the due that bounded
+ * them was the then-current base salary, which is not recoverable and is
+ * therefore NOT fabricated.
  */
 function ensureEmployeeLedgerDueColumn(): void {
   const columns = db.prepare(`PRAGMA table_info(employee_salary_ledger)`).all() as Array<{ name: string }>;
@@ -442,6 +491,7 @@ export function initSchema(): void {
     ensureBookReceiptAcquisitionColumns();
     ensureEmployeeLedgerDueColumn();
     ensureRegistrationsFinancialColumnsDropped();
+    ensureFinancialTransactionsCreditDebtTypes(schema);
     ensureSingleCurrencyChecks(schema);
     ensureDonationClawbackAttributionColumns();
     ensureFixedAssetsCustodyLossShape(schema);

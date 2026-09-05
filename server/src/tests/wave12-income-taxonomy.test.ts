@@ -28,7 +28,6 @@ import { runFinancialInvariantChecks } from '../core/finance/invariant-checker.j
 import {
   OPERATING_INCOME_SQL,
   classifyIncomeRow,
-  isOperatingIncome,
 } from '../core/finance/ledger-classification.js';
 import {
   CANONICAL_INCOME_CATEGORIES,

@@ -2753,7 +2753,11 @@ CREATE TABLE IF NOT EXISTS financial_transactions (
   -- never an expense; checkers (I16/I22), reconciliation and the daily
   -- statement derive it from this type. Pre-W16 databases are converged by
   -- ensureFinancialTransactionsReclaimType() in connection.ts.
-  type          TEXT NOT NULL CHECK (type IN ('income','expense','saving_transfer','budget_charge','restricted_reclaim')), 
+  -- W20 adds the credit/debt subsystem's P&L-neutral cash evidence types:
+  -- 'loan_proceeds' (+, treasury), 'loan_repayment' (−, treasury) and
+  -- 'supplier_refund' (+, branch main) — liabilities and refund recoveries,
+  -- never income and never expense (W16 owner directive; D-190).
+  type          TEXT NOT NULL CHECK (type IN ('income','expense','saving_transfer','budget_charge','restricted_reclaim','loan_proceeds','loan_repayment','supplier_refund')), 
   -- Human-readable label. For INCOME rows this is the billing vocabulary
   -- (fee/book/exam/placement/donation/…), which the expense taxonomy does not
   -- model. It is NEVER the accounting authority — see `finance_category_id`.
@@ -4063,3 +4067,127 @@ BEFORE UPDATE ON donation_clawbacks
 WHEN NEW.donation_id IS NOT OLD.donation_id OR NEW.amount IS NOT OLD.amount
      OR NEW.status = 'open' OR OLD.status = 'repaid'
 BEGIN SELECT RAISE(ABORT, 'A clawback''s declaration is immutable; it may only transition open → repaid'); END;
+
+-- ═════════════════════════════════════════════════════════════════════════════
+-- WAVE 20 · Credit/debt subsystem V1 (W16 owner-directed standard semantics)
+-- ═════════════════════════════════════════════════════════════════════════════
+-- Payables: a credit purchase creates a LIABILITY at receipt (never income,
+-- never an expense until settled in cash). Settlement pays through the normal
+-- budget/expense authority and links back. A return reverses the payable (or
+-- creates a refund receivable when already settled) — never income. Terms/due
+-- dates are owner policy and deliberately absent (POLICY REQUIRED).
+-- Loans: principal-only. Proceeds credit the organization treasury through a
+-- P&L-neutral type (never income, never capital); principal repayment debits
+-- it; interest has NO surface (a rate is owner policy). Lender identity is a
+-- recorded fact, not policy.
+
+CREATE TABLE IF NOT EXISTS suppliers (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL CHECK (length(trim(name)) > 0),
+  phone       TEXT,
+  notes       TEXT,
+  created_by  TEXT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS supplier_invoices (
+  id            TEXT PRIMARY KEY,
+  supplier_id   TEXT NOT NULL REFERENCES suppliers(id) ON DELETE RESTRICT,
+  branch_id     TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  amount        INTEGER NOT NULL CHECK (amount > 0),
+  description   TEXT NOT NULL CHECK (length(trim(description)) >= 4),
+  received_on   TEXT NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','settled')),
+  declared_by   TEXT,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_supplier_invoices_branch ON supplier_invoices(branch_id);
+CREATE INDEX IF NOT EXISTS idx_supplier_invoices_supplier ON supplier_invoices(supplier_id);
+
+-- Settlement legs: each links the payable to the expense row that paid it.
+-- The amount must equal the linked row's amount (I23); the payable's settled
+-- total can never exceed its amount (trigger below).
+CREATE TABLE IF NOT EXISTS supplier_invoice_payments (
+  id               TEXT PRIMARY KEY,
+  supplier_invoice_id TEXT NOT NULL REFERENCES supplier_invoices(id) ON DELETE RESTRICT,
+  amount           INTEGER NOT NULL CHECK (amount > 0),
+  transaction_id   TEXT NOT NULL UNIQUE REFERENCES financial_transactions(id) ON DELETE RESTRICT,
+  paid_on          TEXT NOT NULL,
+  paid_by          TEXT,
+  created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_supplier_invoice_payments_invoice ON supplier_invoice_payments(supplier_invoice_id);
+
+CREATE TABLE IF NOT EXISTS supplier_returns (
+  id                   TEXT PRIMARY KEY,
+  supplier_invoice_id  TEXT NOT NULL REFERENCES supplier_invoices(id) ON DELETE RESTRICT,
+  amount               INTEGER NOT NULL CHECK (amount > 0),
+  reason               TEXT NOT NULL CHECK (length(trim(reason)) >= 8),
+  -- 'payable_reduction': the payable was still open — the debt shrinks.
+  -- 'refund_due':        already settled in cash — a refund receivable arises,
+  --                      settled by 'supplier_refund' cash-in (never income).
+  kind                 TEXT NOT NULL CHECK (kind IN ('payable_reduction','refund_due')),
+  status               TEXT NOT NULL DEFAULT ('effectuated') CHECK (status IN ('effectuated','refunded')),
+  refund_transaction_id TEXT REFERENCES financial_transactions(id) ON DELETE RESTRICT,
+  declared_on          TEXT NOT NULL,
+  declared_by          TEXT,
+  created_at           TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK ((kind = 'payable_reduction' AND status = 'effectuated' AND refund_transaction_id IS NULL)
+      OR (kind = 'refund_due' AND status IN ('effectuated','refunded')))
+);
+CREATE INDEX IF NOT EXISTS idx_supplier_returns_invoice ON supplier_returns(supplier_invoice_id);
+
+-- trg: settlements + payable-reducing returns can never exceed the invoice.
+CREATE TRIGGER IF NOT EXISTS trg_supplier_invoices_bound
+AFTER INSERT ON supplier_invoice_payments
+WHEN (
+  (SELECT COALESCE(SUM(amount), 0) FROM supplier_invoice_payments WHERE supplier_invoice_id = NEW.supplier_invoice_id)
+  + (SELECT COALESCE(SUM(amount), 0) FROM supplier_returns
+      WHERE supplier_invoice_id = NEW.supplier_invoice_id AND kind = 'payable_reduction')
+  > (SELECT amount FROM supplier_invoices WHERE id = NEW.supplier_invoice_id)
+)
+BEGIN SELECT RAISE(ABORT, 'Supplier invoice settlements and reductions cannot exceed the invoiced amount'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_supplier_returns_bound
+AFTER INSERT ON supplier_returns
+WHEN NEW.kind = 'payable_reduction' AND (
+  (SELECT COALESCE(SUM(amount), 0) FROM supplier_invoice_payments WHERE supplier_invoice_id = NEW.supplier_invoice_id)
+  + (SELECT COALESCE(SUM(amount), 0) FROM supplier_returns
+      WHERE supplier_invoice_id = NEW.supplier_invoice_id AND kind = 'payable_reduction')
+  > (SELECT amount FROM supplier_invoices WHERE id = NEW.supplier_invoice_id)
+)
+BEGIN SELECT RAISE(ABORT, 'Supplier invoice settlements and reductions cannot exceed the invoiced amount'); END;
+
+-- Loans (principal-only; org-scope — proceeds credit the organization treasury).
+CREATE TABLE IF NOT EXISTS loans (
+  id           TEXT PRIMARY KEY,
+  lender_name  TEXT NOT NULL CHECK (length(trim(lender_name)) >= 3),
+  principal    INTEGER NOT NULL CHECK (principal > 0),
+  purpose      TEXT,
+  received_on  TEXT NOT NULL,
+  proceeds_transaction_id TEXT NOT NULL UNIQUE REFERENCES financial_transactions(id) ON DELETE RESTRICT,
+  status       TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','repaid')),
+  repaid_on    TEXT,
+  created_by   TEXT,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS loan_repayments (
+  id             TEXT PRIMARY KEY,
+  loan_id        TEXT NOT NULL REFERENCES loans(id) ON DELETE RESTRICT,
+  amount         INTEGER NOT NULL CHECK (amount > 0),
+  transaction_id TEXT NOT NULL UNIQUE REFERENCES financial_transactions(id) ON DELETE RESTRICT,
+  paid_on        TEXT NOT NULL,
+  paid_by        TEXT,
+  created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_loan_repayments_loan ON loan_repayments(loan_id);
+
+CREATE TRIGGER IF NOT EXISTS trg_loan_repayments_bound
+AFTER INSERT ON loan_repayments
+WHEN (
+  (SELECT COALESCE(SUM(amount), 0) FROM loan_repayments WHERE loan_id = NEW.loan_id)
+  > (SELECT principal FROM loans WHERE id = NEW.loan_id)
+)
+BEGIN SELECT RAISE(ABORT, 'Loan repayments cannot exceed the principal'); END;
+

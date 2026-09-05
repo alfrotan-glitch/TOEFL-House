@@ -126,7 +126,7 @@ function fixtureInvoice(purpose: string, chargeKind: string, net: number, issueD
 let S1: string;
 let S2: string;
 let semToday: string;
-let agedIds: Array<{ semId: string; fee: number; age: number }> = [];
+const agedIds: Array<{ semId: string; fee: number; age: number }> = [];
 
 beforeAll(async () => {
   initSchema();
@@ -393,7 +393,7 @@ describe('W15 · receivables aging', () => {
     expect(otherBody.rows.every((r) => r.branchId === OTHER)).toBe(true);
     expect(otherBody.crossFoot.unattributedTuitionPayments).toBe(1234); // the semester-NULL fixture, disclosed
     // And it was NOT allocated into any term row.
-    expect((otherBody.rows as Array<{ settled: number }>).every((r) => r.settled !== 1234)).toBe(true);
+    expect((otherBody.rows as unknown as Array<{ settled: number }>).every((r) => r.settled !== 1234)).toBe(true);
   });
 
   it('validates asOf: garbage 400, future 400, past OK', async () => {

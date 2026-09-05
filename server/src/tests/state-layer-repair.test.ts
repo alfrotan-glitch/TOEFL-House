@@ -16,7 +16,7 @@ import invoicesRouter from '../routes/invoices.routes.js';
 import { runFinancialInvariantChecks } from '../core/finance/invariant-checker.js';
 import { bearerFor, seedUser } from './support/identity.js';
 import { db, initSchema } from '../db/connection.js';
-import { ensureOrganizationHierarchy, DEFAULT_BRANCH_ID } from '../db/organizationHierarchy.js';
+import { ensureOrganizationHierarchy } from '../db/organizationHierarchy.js';
 
 const OWNER = 'user_owner';
 const BRANCH = 'branch_w11';

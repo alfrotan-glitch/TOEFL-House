@@ -317,7 +317,10 @@ describe('FS-6 — aid settlement re-prices the invoices billing the term', () =
     expect(reissued.status).toBe('issued');
 
     // Paying the residual through the invoice works; the term settles exactly.
-    const pay = await supertest(app).post(`/api/invoices/${db.prepare(`SELECT id FROM invoices WHERE student_id = ? AND purpose = 'tuition' AND status <> 'cancelled'`).get(sid)!.id}/pay`).set(auth())
+    const openInvoiceId = (db.prepare(
+      `SELECT id FROM invoices WHERE student_id = ? AND purpose = 'tuition' AND status <> 'cancelled'`,
+    ).get(sid) as { id: string } | undefined)?.id;
+    const pay = await supertest(app).post(`/api/invoices/${openInvoiceId}/pay`).set(auth())
       .send({ amount: 2000, paymentMethod: 'cash' });
     expect([200, 201]).toContain(pay.status);
     const position = getObligationPosition(db, obligation.id);
@@ -378,7 +381,7 @@ describe('FS-8 — the academic hold is lifetime-scoped and covers every enrollm
     const resumed = await supertest(app).post(`/api/students/${sid}/journey/enrollments`).set(regAuth())
       .send({ classId: CLASS_A, semesterName: 'FS8R Term', enrollmentType: 'new' });
     expect(resumed.status).toBe(201);
-    const rows = db.prepare(`SELECT status FROM student_semesters WHERE student_id = ? AND semester_name = 'FS8R Term'`).all(sid);
+    const rows = db.prepare(`SELECT status FROM student_semesters WHERE student_id = ? AND semester_name = 'FS8R Term'`).all(sid) as Array<{ status: string }>;
     expect(rows).toHaveLength(1);
     expect(rows[0].status).toBe('active');
   });

@@ -176,11 +176,9 @@ describe('W12-2 · restricted-exposure world (production surfaces only)', () => 
   let donor: string;
   let campaign: string;
   let scholarship: string;
-  let donationA: string; // restricted → campaign
   let donationB: string; // restricted → scholarship (direct)
   let fundingB: string;
   let award: string;
-  let studentA: string;
   let obligationA: string;
 
   it('restricted donation → campaign: received, nothing settled', async () => {
@@ -195,7 +193,6 @@ describe('W12-2 · restricted-exposure world (production surfaces only)', () => 
     const don = await request(app).post('/api/funding/donations').set(owner())
       .send({ donorId: donor, amount: 60000, branchId: BRANCH, restriction: { kind: 'campaign', targetId: campaign } });
     assertOk('donation A', don, 201);
-    donationA = don.body.id;
 
     const after = report();
     expect(after.restrictedReceived).toBe(before.restrictedReceived + 60000);
@@ -228,7 +225,6 @@ describe('W12-2 · restricted-exposure world (production surfaces only)', () => 
     fundingB = (db.prepare('SELECT id FROM scholarship_fundings WHERE donation_id = ?').get(donationB) as { id: string }).id;
 
     const { student, obligationId } = await makeObligation('W12FX A', 40000);
-    studentA = student;
     obligationA = obligationId;
 
     const aw = await request(app).post('/api/funding/scholarships/award').set(owner())
@@ -398,6 +394,7 @@ describe('W12-2 · restricted-exposure world (production surfaces only)', () => 
       `SELECT d.id, d.branch_id, d.amount FROM donations d JOIN donation_restrictions r ON r.donation_id = d.id LIMIT 1`,
     ).get() as { id: string; branch_id: string; amount: number } | undefined;
     expect(restricted).toBeTruthy();
+    if (!restricted) throw new Error('fixture donation restriction missing');
     // Fabricate leakage: erase the restriction so this donation's money leaves
     // the restricted pool while its allocations keep consuming it. The state
     // layer blocks honest mutations here — prove the checker still catches the

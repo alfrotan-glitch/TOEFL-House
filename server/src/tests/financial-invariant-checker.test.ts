@@ -36,7 +36,7 @@ beforeAll(async () => {
 describe('the financial invariant checker', () => {
   it('answers pass with no findings on a world with no violations', () => {
     const findings = runFinancialInvariantChecks(db);
-    const unexpected = findings.filter((f) => f.rows !== 0);
+    // any non-zero finding would fail the assertions below
     // A shared test database may hold rows from other suites; the contract
     // under test is the DETECTION below. On a truly clean DB this is [].
     if (findings.length === 0) expect(findings).toEqual([]);

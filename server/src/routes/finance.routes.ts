@@ -14,7 +14,7 @@ import {
 import { db } from '../db/connection.js';
 import { eventBus } from '../core/events/event-bus.js';
 import { CATEGORY_NAME, SUBCATEGORY_PARENT, classificationOf, isSubcategoryId } from '../core/finance/category-taxonomy.js';
-import { assertTextLengths, TEXT_LIMITS } from '../utils/textInput.js';
+import { assertTextLengths, optionalText, TEXT_LIMITS } from '../utils/textInput.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource, requestHasRole } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
@@ -24,6 +24,7 @@ import { addNotification } from '../utils/notifications.js';
 import { getNumberSetting, setSetting } from '../utils/settings.js';
 import { decrementMainBalanceIfSufficient, incrementMainBalance, getFinanceAccount } from '../utils/financeAccounts.js';
 import { computeReconciliation } from '../utils/reconciliation.js';
+import { getPayablePosition, recordSupplierInvoicePayment, recordSupplierReturn, receiveSupplierRefund, getLoanPosition, recordLoan, recordLoanRepayment } from '../core/finance/credit-debt.js';
 import { BUDGET_MOVEMENT_CATEGORY, BUDGET_MOVEMENT_TYPE, postBudgetMovement } from '../core/finance/budget-movements.js';
 import { assertMoney } from '../utils/money.js';
 import { SYSTEM_DEFAULTS } from '../core/configuration/policy-catalog.js';
@@ -1607,6 +1608,265 @@ financeRouter.get(
       unmatchedLines,
       note: 'Control layer only: statement evidence vs ledger rows. Matching never writes financial truth.',
     });
+  }),
+);
+
+// ═════════════════════════════════════════════════════════════════════════════
+// WAVE 20 · Credit/debt subsystem (W16 owner-directed standard semantics)
+// ═════════════════════════════════════════════════════════════════════════════
+// Payables: a credit purchase is a LIABILITY at receipt (never income, never
+// an expense until settled in cash through the normal budget authority). A
+// return reverses the payable, or raises a refund receivable when the invoice
+// was already settled; the refund lands as P&L-neutral cash-in. Loans are
+// principal-only liabilities at the organization treasury (never income,
+// never capital); interest has NO surface (a rate is owner policy, D-182).
+// Control writes sit behind Expense.Approve — the W16 convention; reads
+// behind the finance-view set.
+
+financeRouter.post(
+  '/suppliers',
+  requirePermission('Expense.Approve'),
+  ah(async (req, res) => {
+    const user = getUserContext(req);
+    const name = String(req.body?.name ?? '').trim();
+    if (!name) throw new HttpError(400, 'Supplier name is required.');
+    assertTextLengths([[name, 'Supplier name', TEXT_LIMITS.name]]);
+    const phone = optionalText(req.body?.phone, 'Supplier phone', TEXT_LIMITS.short);
+    const notes = optionalText(req.body?.notes, 'Supplier notes', TEXT_LIMITS.notes);
+    const supplierId = id('sup');
+    db.prepare('INSERT INTO suppliers (id, name, phone, notes, created_by) VALUES (?, ?, ?, ?, ?)')
+      .run(supplierId, name, phone, notes, user.fullName);
+    writeAudit(req, `Registered supplier ${supplierId} (${name})`);
+    res.status(201).json({ id: supplierId });
+  }),
+);
+
+financeRouter.get(
+  '/suppliers',
+  requirePermission('Budget.View', 'Ledger.View', 'Finance.Report'),
+  ah(async (_req, res) => {
+    const rows = db.prepare('SELECT id, name, phone, notes, created_at FROM suppliers ORDER BY name').all();
+    res.json(rows);
+  }),
+);
+
+financeRouter.post(
+  '/supplier-invoices',
+  requirePermission('Expense.Approve'),
+  ah(async (req, res) => {
+    const user = getUserContext(req);
+    const supplierId = optionalText(req.body?.supplierId, 'Supplier id', TEXT_LIMITS.short);
+    if (!supplierId) throw new HttpError(400, 'A supplier is required.');
+    const branchId = optionalText(req.body?.branchId, 'Branch id', TEXT_LIMITS.short) ?? user.branchId;
+    if (!canAccessBranchResource(req, branchId)) throw new HttpError(403, 'Payable belongs to another branch.');
+    let amount: number;
+    try { amount = assertMoney(req.body?.amount, 'payable amount'); } catch { throw new HttpError(400, 'Payable amount must be a whole-AFN positive value.'); }
+    if (amount <= 0) throw new HttpError(400, 'Payable amount must be greater than zero.');
+    const description = optionalText(req.body?.description, 'Payable description', TEXT_LIMITS.line);
+    if (!description || description.length < 4) throw new HttpError(400, 'A payable description of at least 4 characters is required.');
+    const receivedOn = optionalText(req.body?.receivedOn, 'Received on', TEXT_LIMITS.short) ?? today();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(receivedOn)) throw new HttpError(400, 'receivedOn must be an ISO date (YYYY-MM-DD).');
+
+    const invoiceId = id('sinv');
+    db.transaction(() => {
+      db.prepare(
+        `INSERT INTO supplier_invoices (id, supplier_id, branch_id, amount, description, received_on, declared_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(invoiceId, supplierId, branchId, amount, description, receivedOn, user.fullName);
+    })();
+    writeAudit(req, `Declared supplier payable ${invoiceId} (${amount} AFN)`, { branchId, newValue: JSON.stringify({ supplierId, amount }) });
+    res.status(201).json({ id: invoiceId });
+  }),
+);
+
+financeRouter.post(
+  '/supplier-invoices/:id/settle',
+  requirePermission('Expense.Approve'),
+  ah(async (req, res) => {
+    const user = getUserContext(req);
+    const invoice = db.prepare('SELECT * FROM supplier_invoices WHERE id = ?').get(req.params.id) as
+      | { id: string; branch_id: string; status: string }
+      | undefined;
+    if (!invoice) throw new HttpError(404, 'Supplier invoice not found.');
+    if (!canAccessBranchResource(req, invoice.branch_id)) throw new HttpError(403, 'Payable belongs to another branch.');
+    let amount: number;
+    try { amount = assertMoney(req.body?.amount, 'settlement amount'); } catch { throw new HttpError(400, 'Settlement amount must be a whole-AFN positive value.'); }
+    const budgetLineId = optionalText(req.body?.budgetLineId, 'Budget line id', TEXT_LIMITS.short);
+    if (!budgetLineId) throw new HttpError(400, 'A budget line is required — a settlement pays through the normal budget authority.');
+    const budgetLine = stmtGetBudgetLineById.get(budgetLineId) as { id: string; branch_id: string; name: string; current_amount: number; category_id: string } | undefined;
+    if (!budgetLine) throw new HttpError(404, 'Budget line not found.');
+    if (budgetLine.branch_id !== invoice.branch_id) throw new HttpError(409, 'The budget line belongs to a different branch than the payable.');
+    const paymentMethod = typeof req.body?.paymentMethod === 'string' && ['cash', 'card', 'bank_transfer'].includes(req.body.paymentMethod) ? req.body.paymentMethod : 'cash';
+
+    let paymentId = '';
+    let transactionId = '';
+    db.transaction(() => {
+      // Pay through the ONE budget/expense authority, then link the evidence.
+      const tx = payFromBudgetLine({
+        budgetLine, amount, title: `Supplier payable settlement ${invoice.id}`, date: today(),
+        operatorName: user.fullName, branchId: invoice.branch_id, requestId: invoice.id, paymentMethod,
+      });
+      void tx;
+      transactionId = String((db.prepare(
+        `SELECT id FROM financial_transactions WHERE reference_id = ? AND type = 'expense' ORDER BY rowid DESC LIMIT 1`,
+      ).get(invoice.id) as { id: string }).id);
+      const result = recordSupplierInvoicePayment(db, { invoiceId: invoice.id, amount, transactionId, paidBy: user.fullName });
+      paymentId = result.paymentId;
+    })();
+    writeAudit(req, `Settled supplier payable ${invoice.id} (${amount} AFN)`, { branchId: invoice.branch_id, newValue: JSON.stringify({ paymentId, transactionId }) });
+    res.json({ ok: true, paymentId, transactionId, position: getPayablePosition(db, invoice.id) });
+  }),
+);
+
+financeRouter.post(
+  '/supplier-invoices/:id/return',
+  requirePermission('Expense.Approve'),
+  ah(async (req, res) => {
+    const user = getUserContext(req);
+    const invoice = db.prepare('SELECT * FROM supplier_invoices WHERE id = ?').get(req.params.id) as
+      | { id: string; branch_id: string }
+      | undefined;
+    if (!invoice) throw new HttpError(404, 'Supplier invoice not found.');
+    if (!canAccessBranchResource(req, invoice.branch_id)) throw new HttpError(403, 'Payable belongs to another branch.');
+    let amount: number;
+    try { amount = assertMoney(req.body?.amount, 'return amount'); } catch { throw new HttpError(400, 'Return amount must be a whole-AFN positive value.'); }
+    const reason = String(req.body?.reason ?? '').trim();
+
+    let returnId = '';
+    let kind = '';
+    db.transaction(() => {
+      const result = recordSupplierReturn(db, { invoiceId: invoice.id, amount, reason, declaredBy: user.fullName });
+      returnId = result.returnId;
+      kind = result.kind;
+    })();
+    writeAudit(req, `Returned goods against supplier payable ${invoice.id} (${amount} AFN, ${kind})`, { branchId: invoice.branch_id, newValue: JSON.stringify({ returnId, kind }) });
+    res.status(201).json({ id: returnId, kind, position: getPayablePosition(db, invoice.id) });
+  }),
+);
+
+financeRouter.post(
+  '/supplier-returns/:id/receive-refund',
+  requirePermission('Expense.Approve'),
+  ah(async (req, res) => {
+    const user = getUserContext(req);
+    const ret = db.prepare(
+      `SELECT r.id, i.branch_id FROM supplier_returns r JOIN supplier_invoices i ON i.id = r.supplier_invoice_id WHERE r.id = ?`,
+    ).get(req.params.id) as { id: string; branch_id: string } | undefined;
+    if (!ret) throw new HttpError(404, 'Supplier return not found.');
+    if (!canAccessBranchResource(req, ret.branch_id)) throw new HttpError(403, 'Return belongs to another branch.');
+    let transactionId = '';
+    db.transaction(() => {
+      transactionId = receiveSupplierRefund(db, { returnId: ret.id, receivedBy: user.fullName }).transactionId;
+    })();
+    writeAudit(req, `Received supplier refund for return ${ret.id}`, { branchId: ret.branch_id, newValue: JSON.stringify({ transactionId }) });
+    res.json({ ok: true, transactionId });
+  }),
+);
+
+financeRouter.get(
+  '/payables',
+  requirePermission('Budget.View', 'Ledger.View', 'Finance.Report'),
+  ah(async (req, res) => {
+    const { branchId, isAll } = resolveBranchScope(req);
+    const scope = isAll ? '' : 'AND i.branch_id = ?';
+    const params = isAll ? [] : [branchId];
+    const rows = db.prepare(
+      `SELECT i.id, i.supplier_id, s.name AS supplier_name, i.branch_id, i.amount, i.description,
+              i.received_on, i.status, i.declared_by,
+              COALESCE((SELECT SUM(p.amount) FROM supplier_invoice_payments p WHERE p.supplier_invoice_id = i.id), 0) AS settled,
+              COALESCE((SELECT SUM(r.amount) FROM supplier_returns r WHERE r.supplier_invoice_id = i.id AND r.kind = 'payable_reduction'), 0) AS payable_reduced,
+              COALESCE((SELECT SUM(r.amount) FROM supplier_returns r WHERE r.supplier_invoice_id = i.id AND r.kind = 'refund_due' AND r.status = 'effectuated'), 0) AS refund_due
+         FROM supplier_invoices i
+         JOIN suppliers s ON s.id = i.supplier_id
+        WHERE 1=1 ${scope}
+        ORDER BY datetime(i.created_at) DESC, i.id DESC`,
+    ).all(...params) as Array<Record<string, unknown>>;
+    const open = rows.filter((r) => Number(r.amount) - Number(r.settled) - Number(r.payable_reduced) > 0);
+    res.json({
+      scope: isAll ? 'organization' : 'branch',
+      branchId: branchId ?? null,
+      totals: {
+        openPayables: open.reduce((s, r) => s + (Number(r.amount) - Number(r.settled) - Number(r.payable_reduced)), 0),
+        refundDue: rows.reduce((s, r) => s + Number(r.refund_due), 0),
+        counts: { invoices: rows.length, open: open.length },
+      },
+      invoices: rows.map((r) => ({
+        id: r.id, supplierId: r.supplier_id, supplierName: r.supplier_name, branchId: r.branch_id,
+        amount: r.amount, description: r.description, receivedOn: r.received_on, status: r.status,
+        settled: r.settled, payableReduced: r.payable_reduced, refundDue: r.refund_due,
+        outstanding: Math.max(0, Number(r.amount) - Number(r.settled) - Number(r.payable_reduced)),
+      })),
+      note: 'Credit purchases are liabilities at receipt; settlement pays through the budget authority. Terms/due dates are owner policy (POLICY REQUIRED).',
+    });
+  }),
+);
+
+financeRouter.post(
+  '/loans',
+  requirePermission('Expense.Approve'),
+  ah(async (req, res) => {
+    const user = getUserContext(req);
+    let principal: number;
+    try { principal = assertMoney(req.body?.principal, 'loan principal'); } catch { throw new HttpError(400, 'Loan principal must be a whole-AFN positive value.'); }
+    const purpose = optionalText(req.body?.purpose, 'Loan purpose', TEXT_LIMITS.line);
+    let loanId = '';
+    let transactionId = '';
+    db.transaction(() => {
+      const result = recordLoan(db, {
+        lenderName: String(req.body?.lenderName ?? ''), principal, purpose,
+        receivedOn: optionalText(req.body?.receivedOn, 'Received on', TEXT_LIMITS.short) ?? today(),
+        operatorBranchId: user.branchId, operatorName: user.fullName,
+      });
+      loanId = result.loanId;
+      transactionId = result.transactionId;
+    })();
+    writeAudit(req, `Recorded loan ${loanId} (${principal} AFN)`, { newValue: JSON.stringify({ loanId, transactionId, principal }) });
+    res.status(201).json({ id: loanId, transactionId, position: getLoanPosition(db, loanId) });
+  }),
+);
+
+financeRouter.get(
+  '/loans',
+  requirePermission('Budget.View', 'Ledger.View', 'Finance.Report'),
+  ah(async (_req, res) => {
+    const rows = db.prepare(
+      `SELECT l.id, l.lender_name, l.principal, l.purpose, l.received_on, l.status, l.repaid_on,
+              COALESCE((SELECT SUM(r.amount) FROM loan_repayments r WHERE r.loan_id = l.id), 0) AS repaid
+         FROM loans l ORDER BY datetime(l.created_at) DESC, l.id DESC`,
+    ).all() as Array<Record<string, unknown>>;
+    res.json({
+      totals: {
+        outstanding: rows.reduce((s, r) => s + (Number(r.principal) - Number(r.repaid)), 0),
+        counts: { loans: rows.length, open: rows.filter((r) => r.status === 'open').length },
+      },
+      loans: rows.map((r) => ({
+        id: r.id, lenderName: r.lender_name, principal: r.principal, purpose: r.purpose,
+        receivedOn: r.received_on, status: r.status, repaidOn: r.repaid_on, repaid: r.repaid,
+        outstanding: Math.max(0, Number(r.principal) - Number(r.repaid)),
+      })),
+      note: 'Loans are principal-only liabilities at the organization treasury; interest is owner policy and has no surface (POLICY REQUIRED).',
+    });
+  }),
+);
+
+financeRouter.post(
+  '/loans/:id/repay',
+  requirePermission('Expense.Approve'),
+  ah(async (req, res) => {
+    const user = getUserContext(req);
+    let amount: number;
+    try { amount = assertMoney(req.body?.amount, 'repayment amount'); } catch { throw new HttpError(400, 'Repayment amount must be a whole-AFN positive value.'); }
+    let repaymentId = '';
+    let transactionId = '';
+    let position: ReturnType<typeof getLoanPosition> | undefined;
+    db.transaction(() => {
+      const result = recordLoanRepayment(db, { loanId: req.params.id, amount, paidBy: user.fullName });
+      repaymentId = result.repaymentId;
+      transactionId = result.transactionId;
+      position = result.position;
+    })();
+    writeAudit(req, `Repaid loan ${req.params.id} (${amount} AFN principal)`, { newValue: JSON.stringify({ repaymentId, transactionId }) });
+    res.json({ ok: true, repaymentId, transactionId, position });
   }),
 );
 

@@ -74,11 +74,15 @@
  *      applied to tuition settlements (allocation subledger), never created
  *      or leaked: active aid allocations may never exceed restricted
  *      receipts (per branch and overall).
+ *  I23 PAYABLE EVIDENCE — every payable settlement links an equal expense
+ *      row; every received supplier refund links an equal 'supplier_refund'
+ *      cash-in (W20).
+ *  I24 LOAN EVIDENCE — every loan's proceeds row equals its principal; every
+ *      repayment links an equal signed-negative loan_repayment row (W20).
  */
 import type BetterSqlite3 from 'better-sqlite3';
 import {
   OPERATING_INCOME_SQL,
-  OPERATING_EXPENSE_SQL,
   OWNER_DRAWING_SQL,
   unclassifiedIncomeSql,
 } from './ledger-classification.js';
@@ -264,7 +268,11 @@ const CHECKS: Check[] = [
               -- W16: restricted_reclaim rows are signed cash-out movements of
               -- stores (clawback repayments); held drops with them, so the
               -- explained side must drop too.
-              + COALESCE((SELECT SUM(amount) FROM financial_transactions WHERE type = 'restricted_reclaim'), 0) AS explained,
+              + COALESCE((SELECT SUM(amount) FROM financial_transactions WHERE type = 'restricted_reclaim'), 0)
+              -- W20: the credit/debt evidence types move stores P&L-neutrally
+              -- (loan proceeds/repayment at the treasury; supplier refunds at
+              -- branch main) — the explained side must move with them.
+              + COALESCE((SELECT SUM(amount) FROM financial_transactions WHERE type IN ('loan_proceeds','loan_repayment','supplier_refund')), 0) AS explained,
               COALESCE((SELECT SUM(main_balance + saving_balance) FROM finance_accounts), 0)
               + COALESCE((SELECT SUM(current_amount) FROM budget_lines), 0) AS held
           )
@@ -382,6 +390,39 @@ const CHECKS: Check[] = [
          AND NOT EXISTS (SELECT 1 FROM donation_clawbacks c WHERE c.repaid_transaction_id = ft.id)`,
     sample: (r) => `${r.kind} ${r.k}: expected ${r.expected}, ledger says ${r.actual} — clawback cash and declarations disagree`,
   },
+  {
+    invariant: 'I23',
+    detail: 'Payable settlements and supplier refunds agree with their ledger evidence (W20)',
+    sql: `SELECT 'settlement_without_expense' AS kind, sip.id AS k, sip.amount AS expected, 0 AS actual
+            FROM supplier_invoice_payments sip
+           WHERE NOT EXISTS (SELECT 1 FROM financial_transactions ft
+                              WHERE ft.id = sip.transaction_id AND ft.type = 'expense' AND ft.amount = sip.amount)
+          UNION ALL
+          SELECT 'refund_without_cash', r.id, r.amount,
+                 (SELECT COALESCE(ft.amount, 0) FROM financial_transactions ft WHERE ft.id = r.refund_transaction_id)
+            FROM supplier_returns r
+           WHERE r.kind = 'refund_due' AND r.status = 'refunded'
+             AND (r.refund_transaction_id IS NULL
+                  OR NOT EXISTS (SELECT 1 FROM financial_transactions ft
+                                  WHERE ft.id = r.refund_transaction_id AND ft.type = 'supplier_refund' AND ft.amount = r.amount))`,
+    sample: (r) => `${r.kind} ${r.k}: expected ${r.expected}, ledger says ${r.actual} — payable cash and declarations disagree`,
+  },
+  {
+    invariant: 'I24',
+    detail: 'Loan proceeds and repayments agree with their ledger evidence (W20)',
+    sql: `SELECT 'proceeds_mismatch' AS kind, l.id AS k, l.principal AS expected,
+                 (SELECT COALESCE(ft.amount, -999999999) FROM financial_transactions ft WHERE ft.id = l.proceeds_transaction_id) AS actual
+            FROM loans l
+           WHERE NOT EXISTS (SELECT 1 FROM financial_transactions ft
+                              WHERE ft.id = l.proceeds_transaction_id AND ft.type = 'loan_proceeds' AND ft.amount = l.principal)
+          UNION ALL
+          SELECT 'repayment_mismatch', lr.id, lr.amount,
+                 (SELECT COALESCE(ft.amount, 999999999) FROM financial_transactions ft WHERE ft.id = lr.transaction_id)
+            FROM loan_repayments lr
+           WHERE NOT EXISTS (SELECT 1 FROM financial_transactions ft
+                              WHERE ft.id = lr.transaction_id AND ft.type = 'loan_repayment' AND ft.amount = -lr.amount)`,
+    sample: (r) => `${r.kind} ${r.k}: expected ${r.expected}, ledger says ${r.actual} — loan cash and declarations disagree`,
+  },
 ];
 
 /**
@@ -409,7 +450,9 @@ const IDENTITY_CHECKS: IdentityCheck[] = [
             - COALESCE((SELECT SUM(amount) FROM financial_transactions ft
                          WHERE ft.branch_id = fa.scope_id AND ${OWNER_DRAWING_SQL}), 0)
             + COALESCE((SELECT SUM(amount) FROM financial_transactions ft
-                         WHERE ft.branch_id = fa.scope_id AND ft.type = 'restricted_reclaim'), 0) AS ledger_main,
+                         WHERE ft.branch_id = fa.scope_id AND ft.type = 'restricted_reclaim'), 0)
+            + COALESCE((SELECT SUM(amount) FROM financial_transactions ft
+                         WHERE ft.branch_id = fa.scope_id AND ft.type = 'supplier_refund'), 0) AS ledger_main,
             fa.saving_balance AS account_saving,
             COALESCE((SELECT SUM(amount) FROM financial_transactions ft
                        WHERE ft.branch_id = fa.scope_id AND ft.type = 'saving_transfer'), 0) AS ledger_saving
@@ -440,7 +483,11 @@ const IDENTITY_CHECKS: IdentityCheck[] = [
             COALESCE((SELECT SUM(amount) FROM financial_transactions ft
                        WHERE ft.category = 'capital_injection'), 0)
             - COALESCE((SELECT SUM(amount) FROM financial_transactions ft
-                         WHERE ft.type = '${BUDGET_MOVEMENT_TYPE}'), 0) AS ledger_main,
+                         WHERE ft.type = '${BUDGET_MOVEMENT_TYPE}'), 0)
+            -- W20: loan proceeds credit the treasury and principal repayments
+            -- debit it, both P&L-neutrally (signed rows).
+            + COALESCE((SELECT SUM(amount) FROM financial_transactions ft
+                         WHERE ft.type IN ('loan_proceeds','loan_repayment')), 0) AS ledger_main,
             fa.saving_balance AS account_saving,
             0 AS ledger_saving
           FROM finance_accounts fa

@@ -49,7 +49,6 @@ app.use(errorHandler);
 const owner = () => bearerFor(OWNER);
 let seq = 0;
 const unique = (s: string) => `${s} ${++seq}`;
-const phone = () => `0793${String(100000 + (seq % 900000)).slice(-6)}`;
 const assertOk = (label: string, res: { status: number; body: unknown }, ...ok: number[]) => {
   if (!ok.includes(res.status)) throw new Error(`${label} ${res.status}: ${JSON.stringify(res.body).slice(0, 260)}`);
 };

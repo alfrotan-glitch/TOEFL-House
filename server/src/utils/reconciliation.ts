@@ -142,10 +142,13 @@ export function computeReconciliation(opts: { branchId: string | null; isAll: bo
   // permanent phantom-cash variance.
   const reclaimSql = `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type='restricted_reclaim'`;
   const reclaims = scalarValue(reclaimSql, 'AND branch_id = ?', boundBranchId);
+  // W20: supplier refunds are P&L-neutral cash INTO branch main.
+  const supplierRefundSql = `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type='supplier_refund'`;
+  const supplierRefunds = scalarValue(supplierRefundSql, 'AND branch_id = ?', boundBranchId);
   // Whole AFN throughout (D-12/D-22): every money column is an INTEGER, so a
   // variance is either zero or a real discrepancy. A two-decimal tolerance here
   // would only hide a genuine one-afghani break.
-  const expectedMain = cashIncome - expectedSaving - ownerDrawings + reclaims;
+  const expectedMain = cashIncome - expectedSaving - ownerDrawings + reclaims + supplierRefunds;
 
   const acctSql = `SELECT COALESCE(SUM(main_balance),0) AS main, COALESCE(SUM(saving_balance),0) AS saving FROM finance_accounts WHERE scope_type = 'branch'`;
   const acctRow = (boundBranchId === null

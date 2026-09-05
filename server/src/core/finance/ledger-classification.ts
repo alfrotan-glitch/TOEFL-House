@@ -36,9 +36,10 @@
  * -------------------------------------------------------------------
  * Income rows carry the billing vocabulary (`fee`, `book`, `exam`,
  * `placement`, `donation`, `card`, …) in `category` and leave
- * `finance_category_id` NULL. The operating boundary used to be RESIDUAL
- * (`category <> 'capital_injection'`), so any undeclared inflow silently
- * became trading revenue. It is now GENERATED from CANONICAL_INCOME_CATEGORIES
+ * `finance_category_id` NULL. The operating boundary is GENERATED from
+ * CANONICAL_INCOME_CATEGORIES (never residual: `category <>
+ * 'capital_injection'` would let an undeclared inflow silently become trading
+ * revenue).
  * — a category counts as operating income because its DECLARED class says so,
  * and an unknown category counts as NOTHING (conservative) while invariant I20
  * flags it. The write boundary (`assertCanonicalIncomeCategory`) rejects

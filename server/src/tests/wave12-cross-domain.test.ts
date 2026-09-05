@@ -128,7 +128,6 @@ beforeAll(async () => {
 
 describe('W12-XD · cross-domain seams', () => {
   let donor: string;
-  let campaign: string;
   let scholarship: string;
   let funding: string;
   let student: string;

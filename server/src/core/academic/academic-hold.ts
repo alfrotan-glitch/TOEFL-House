@@ -5,14 +5,12 @@
  * outstanding debt from previous terms may not open a NEW term until it is
  * settled; owner / general manager / finance_manager may override.
  *
- * Two defects this module corrects:
+ * Two properties this module guarantees:
  *
- * 1. The hold used to sum only ACTIVE-scope balances. Every path that moves a
- *    term out of 'active' (drop → deferred, completion, graduation) then
- *    erased that term's debt from the gate, so a student could drop an unpaid
- *    term and immediately start a fresh one — consuming seat after seat while
- *    the debt piled up in lifetime receivable. The hold now reads the FULL
- *    lifetime balance, which is what "debt from previous semesters" means.
+ * 1. The hold sums the FULL lifetime balance. Every path that moves a term
+ *    out of 'active' (drop → deferred, completion, graduation) must still
+ *    count that term's debt at the gate, because "debt from previous
+ *    semesters" means lifetime receivable, not active-scope receivable.
  *
  * 2. Only two of the three enrollment surfaces applied the gate. The journey
  *    enrollment route never called it, so any student blocked at the class or
@@ -26,7 +24,6 @@
  * money in the term they are trying to complete, so such requests pass; every
  * enrollment that would create a NEW term while in debt is refused.
  */
-import type Database from 'better-sqlite3';
 import type { Request } from 'express';
 import { db } from '../../db/connection.js';
 import { getStudentBalance } from '../../utils/studentBalance.js';

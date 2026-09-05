@@ -214,7 +214,7 @@ export const CANONICAL_CATEGORIES: readonly CanonicalCategory[] = [
 // The conservative-default principle (both residual directions conservative):
 //   · an UNCATEGORISED expense still hits costs (unchanged, above);
 //   · an UNKNOWN income category is REJECTED at the write boundary and, if one
-//     ever reaches the ledger (drift/legacy), is EXCLUDED from operating income
+//     ever reaches the ledger through drift, is EXCLUDED from operating income
 //     and flagged by invariant I20. Unexpected cash can never become revenue
 //     by accident.
 
