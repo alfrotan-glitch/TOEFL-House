@@ -29,8 +29,31 @@
  *      and gap-free by contract); instead: every completed payment with a
  *      receipt_number has a UNIQUE (receipt_number) — the series cannot fork.
  *  I10 Budget envelopes never go negative.
+ *  I11 BRANCH CASH IDENTITY — per branch, finance_accounts must equal what the
+ *      ledger says moved: main = operating income − savings sweeps − owner
+ *      drawings; saving = sweeps. (A direct UPDATE to finance_accounts, or a
+ *      cash path with no ledger row, breaks this immediately.)
+ *  I12 BUDGET ENVELOPE IDENTITY — per branch, Σ(current_amount) and
+ *      Σ(allocated_amount) equal Σ(signed budget movements) − Σ(spent), so a
+ *      ledger row without its envelope move (or the reverse) is visible.
+ *  I13 ORGANIZATION TREASURY IDENTITY — the global treasury equals capital
+ *      injections minus signed budget movements, and its SAVING account is
+ *      never used (no path may write it).
+ *  I14 PAYMENT↔LEDGER COMPLETENESS — every completed payment has a ledger row
+ *      carrying its payment_id, and no ledger row names a payment that does
+ *      not exist. Income without a payment document (or a payment the books
+ *      never saw) is exactly how cash goes missing silently.
+ *  I15 INVOICE DOCUMENT INTEGRITY — a live invoice's items sum to its stated
+ *      total, so a drifted or hand-edited document cannot misreport what it
+ *      charges.
  */
 import type BetterSqlite3 from 'better-sqlite3';
+import {
+  OPERATING_INCOME_SQL,
+  OPERATING_EXPENSE_SQL,
+  OWNER_DRAWING_SQL,
+} from './ledger-classification.js';
+import { BUDGET_MOVEMENT_TYPE } from './budget-movements.js';
 
 export interface InvariantFinding {
   invariant: string;
@@ -158,11 +181,134 @@ const CHECKS: Check[] = [
           WHERE current_amount < -0.001`,
     sample: (r) => `budget line ${r.k} (${r.name}) at ${r.current_amount}`,
   },
+  {
+    invariant: 'I14',
+    detail: 'Every completed payment is represented in the ledger, and every ledger payment reference is real',
+    sql: `SELECT p.id AS k
+          FROM payments p
+          WHERE p.status = 'completed'
+            AND NOT EXISTS (SELECT 1 FROM financial_transactions ft WHERE ft.payment_id = p.id)
+          UNION ALL
+          SELECT ft.id AS k
+          FROM financial_transactions ft
+          WHERE ft.payment_id IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.id = ft.payment_id)`,
+    sample: (r) => `row ${r.k}: a payment the ledger never saw, or a ledger row naming a payment that does not exist`,
+  },
+  {
+    invariant: 'I15',
+    detail: 'A live invoice\'s items sum to its stated total',
+    sql: `SELECT i.id AS k, i.total_amount AS total,
+               COALESCE((SELECT SUM(ii.amount) FROM invoice_items ii WHERE ii.invoice_id = i.id), 0) AS items
+          FROM invoices i
+          WHERE i.status NOT IN ('draft', 'cancelled')
+            AND ABS(i.total_amount - COALESCE((SELECT SUM(ii.amount) FROM invoice_items ii WHERE ii.invoice_id = i.id), 0)) > 0.001`,
+    sample: (r) => `invoice ${r.k} states ${r.total} but its items sum to ${r.items}`,
+  },
+];
+
+/**
+ * Ledger-level identities (I11–I13) compare TWO stores, so they are computed
+ * in code: one query per side, compared per scope. A mismatch is a finding
+ * with the two figures named.
+ */
+interface IdentityCheck {
+  invariant: string;
+  detail: string;
+  /** One row per scope with the account figure and the ledger-derived figure. */
+  sql: string;
+}
+
+const IDENTITY_CHECKS: IdentityCheck[] = [
+  {
+    invariant: 'I11',
+    detail: 'Branch cash equals ledger movement (main and saving)',
+    sql: `SELECT fa.scope_id AS k,
+            fa.main_balance AS account_main,
+            COALESCE((SELECT SUM(amount) FROM financial_transactions ft
+                       WHERE ft.branch_id = fa.scope_id AND ${OPERATING_INCOME_SQL}) ,0)
+            - COALESCE((SELECT SUM(amount) FROM financial_transactions ft
+                         WHERE ft.branch_id = fa.scope_id AND ft.type = 'saving_transfer'), 0)
+            - COALESCE((SELECT SUM(amount) FROM financial_transactions ft
+                         WHERE ft.branch_id = fa.scope_id AND ${OWNER_DRAWING_SQL}), 0) AS ledger_main,
+            fa.saving_balance AS account_saving,
+            COALESCE((SELECT SUM(amount) FROM financial_transactions ft
+                       WHERE ft.branch_id = fa.scope_id AND ft.type = 'saving_transfer'), 0) AS ledger_saving
+          FROM finance_accounts fa
+          WHERE fa.scope_type = 'branch'`,
+  },
+  {
+    invariant: 'I12',
+    detail: 'Budget envelopes equal their funding minus their spend',
+    sql: `SELECT bl.branch_id AS k,
+            SUM(bl.current_amount) AS account_current,
+            SUM(bl.allocated_amount) AS account_allocated,
+            COALESCE((SELECT SUM(amount) FROM financial_transactions ft
+                       WHERE ft.branch_id = bl.branch_id AND ft.type = '${BUDGET_MOVEMENT_TYPE}'), 0) AS ledger_allocated,
+            COALESCE((SELECT SUM(amount) FROM financial_transactions ft
+                       WHERE ft.branch_id = bl.branch_id AND ft.type = '${BUDGET_MOVEMENT_TYPE}'), 0)
+            - COALESCE((SELECT SUM(amount) FROM financial_transactions ft
+                         WHERE ft.branch_id = bl.branch_id AND ft.type = 'expense'
+                         AND NOT ${OWNER_DRAWING_SQL}), 0) AS ledger_current
+          FROM budget_lines bl
+          GROUP BY bl.branch_id`,
+  },
+  {
+    invariant: 'I13',
+    detail: 'Organization treasury equals capital injections minus budget funding',
+    sql: `SELECT 'global' AS k,
+            fa.main_balance AS account_main,
+            COALESCE((SELECT SUM(amount) FROM financial_transactions ft
+                       WHERE ft.category = 'capital_injection'), 0)
+            - COALESCE((SELECT SUM(amount) FROM financial_transactions ft
+                         WHERE ft.type = '${BUDGET_MOVEMENT_TYPE}'), 0) AS ledger_main,
+            fa.saving_balance AS account_saving,
+            0 AS ledger_saving
+          FROM finance_accounts fa
+          WHERE fa.scope_type = 'organization' AND fa.scope_id = 'global'`,
+  },
 ];
 
 /** Runs every invariant check. Returns findings; an empty list is a PASS. */
 export function runFinancialInvariantChecks(db: BetterSqlite3.Database): InvariantFinding[] {
   const findings: InvariantFinding[] = [];
+  for (const identity of IDENTITY_CHECKS) {
+    try {
+      const rows = db.prepare(identity.sql).all() as Array<Record<string, number | string>>;
+      for (const row of rows) {
+        const mismatches: string[] = [];
+        if (Math.abs(Number(row.account_main) - Number(row.ledger_main)) > 0.001) {
+          mismatches.push(`main: account ${row.account_main} vs ledger ${row.ledger_main}`);
+        }
+        if (Math.abs(Number(row.account_saving) - Number(row.ledger_saving)) > 0.001) {
+          mismatches.push(`saving: account ${row.account_saving} vs ledger ${row.ledger_saving}`);
+        }
+        if ('account_current' in row) {
+          if (Math.abs(Number(row.account_current) - Number(row.ledger_current)) > 0.001) {
+            mismatches.push(`current: envelopes ${row.account_current} vs ledger ${row.ledger_current}`);
+          }
+          if (Math.abs(Number(row.account_allocated) - Number(row.ledger_allocated)) > 0.001) {
+            mismatches.push(`allocated: envelopes ${row.account_allocated} vs ledger ${row.ledger_allocated}`);
+          }
+        }
+        if (mismatches.length > 0) {
+          findings.push({
+            invariant: identity.invariant,
+            detail: identity.detail,
+            rows: 1,
+            sample: `scope ${row.k}: ${mismatches.join('; ')}`,
+          });
+        }
+      }
+    } catch (error) {
+      findings.push({
+        invariant: identity.invariant,
+        detail: identity.detail,
+        rows: -1,
+        sample: `IDENTITY CHECK FAILED TO RUN: ${(error as Error).message}`,
+      });
+    }
+  }
   for (const check of CHECKS) {
     try {
       const rows = db.prepare(check.sql).all() as Array<Record<string, unknown>>;

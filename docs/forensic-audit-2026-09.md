@@ -311,13 +311,25 @@ documents the schema-level UNIQUE index as the first layer).
   append-only and immutable-except-reversal by trigger; `payments.receipt_number`
   is UNIQUE (a fork cannot be written).
 
-### Design note (recorded, not a weakness finding)
+### Design note — CORRECTED 2026-09-05 (wave 5)
 
-No production API funds a budget envelope from zero — envelopes are only
-movable between each other (month-end return/transfer). A greenfield branch's
-payroll envelopes start at 0/0, so a branch cannot run payroll until someone
-either inserts funds directly or receives a transfer. Operationally worth a
-deliberate funding surface; no money can be created or lost through the gap.
+The wave-4 note below ("no production API funds a budget envelope from
+zero") was **wrong** and is superseded. The funding surface exists and is
+guarded:
+
+- `POST /api/finance/treasury/deposit` funds the organization treasury
+  (capital injection), and `POST /api/finance/budget-lines/:id/charge`
+  moves funds from treasury into any envelope (guarded decrement:
+  `current_amount >= ?`). Both were exercised live in wave 5
+  (`docs/forensic-audit-2026-09.md`, "Wave 5" section below): deposit →
+  charge → payroll → month-end return preserved every identity
+  (cashVariance 0 / budgetVariance 0, invariants PASS).
+
+*(Historical, incorrect — kept for the record:)* No production API funds a
+budget envelope from zero — envelopes are only movable between each other
+(month-end return/transfer). A greenfield branch's payroll envelopes start
+at 0/0, so a branch cannot run payroll until someone either inserts funds
+directly or receives a transfer.
 
 ### Verification
 
@@ -328,3 +340,94 @@ deliberate funding surface; no money can be created or lost through the gap.
   reactivation with single invoice, retake composition, payroll partial
   cap/advance freedom, BOS ceiling drain.
 - Invariant checker on the live database: **PASS**.
+
+---
+
+## Wave 5 — 2026-09-05: ledger-identity engine, live rebuild, reconciliation hypothesis refuted
+
+Standing directive: distrust all prior results, including earlier waves of
+this same document. Everything below was re-derived from source and re-proven
+on a running server.
+
+### Hypothesis 154 (budget reconciliation blind spot) — REFUTED
+
+Claim under test: payroll written as `type='salary_advance'` etc. would
+escape `OPERATING_EXPENSE_SQL` and break budget-spent reconciliation.
+
+Source truth: ALL payroll spend — salary, partial, advance, and their voids
+(`teachers.routes.ts:103`, `stmtInsertFinTx`) — and ALL `payFromBudgetLine`
+spend (`finance.routes.ts:229`) is written `type='expense'` with category
+label + `finance_category_id` taken together from the budget line. Empirical
+probe through the real routes (treasury deposit → charge → advance) showed
+`cashVariance 0 / budgetVariance 0` BEFORE and AFTER. The hypothesis is
+refuted; reconciliation sees every envelope spend.
+
+Reporting coherence re-verified: every totals endpoint
+(`finance.routes.ts:72–75, 101, 132–135`) uses `OPERATING_INCOME_SQL` /
+`OPERATING_EXPENSE_SQL` / `OWNER_DRAWING_SQL`; no raw `type='expense'` sums
+remain anywhere in the server.
+
+### New invariant engine — I11–I15
+
+`src/core/finance/invariant-checker.ts` extended from I1–I10 to I15:
+
+- **I11** branch cash identity: branch main balance ≡ operating income −
+  saving transfers − owner drawings; branch saving ≡ Σ saving transfers.
+- **I12** envelope identity: per budget line Σ allocated ≡ Σ budget
+  movements; Σ current ≡ movements − expense (non-owner-drawing).
+- **I13** organizational treasury identity: org main ≡ Σ capital
+  injections − Σ budget movements; org saving must be 0.
+- **I14** payment↔ledger completeness, both directions (UNION ALL):
+  every payment row has its ledger rows and vice versa.
+- **I15** invoice-items sum: `invoice.total` ≡ Σ invoice items for every
+  invoice not in (draft, cancelled).
+
+Pinned by `src/tests/ledger-identity-invariants.test.ts` (6/6): a world
+built **only through production surfaces** (treasury deposit → charge →
+student fee → salary partial + advance → BOS withdraw correctly refused at
+the 6-month liquidity floor → month-end return) passes; each identity,
+corrupted the way a tamper would write it, is detected; restoring the data
+returns the checker to clean.
+
+### Books refund path — verified sound
+
+`books-service.ts` refund (~:630–700): idempotency candidates + unique
+`sale_id`, single transaction, negative payment + `recordIncome` refund.
+Stock is the `book_inventory_positions` VIEW (`schema.sql:2136–2143`):
+`sold_quantity` excludes refunded sales via `NOT EXISTS`, so stock restores
+automatically on refund. Invoice-create totals re-verified (`assertMoney`
+on computed total; discount ≤ total at 400; net computed). All student
+payment writers pair payments with `recordIncome`.
+
+### Operational finding — backup bootstrap requires external dir
+
+Server bootstrap hard-fails until `BACKUP_EXTERNAL_DIR` is set to a
+non-empty, non-placeholder path whose `pathKey` differs from the local
+`./data/backups` (`database-backup.ts:244,262`). Not a defect (it forces an
+off-host copy at startup) but it blocks any zero-config start; deployment
+docs should state it. The startup backup ran and verified (sha256 recorded)
+once configured.
+
+### Live rebuild + drills (fresh seeded world, running server :4000)
+
+- Fresh seed (owner only, no demo data); owner bootstrapped; server live.
+- **Three-store battery 9/9**: invariants + reconciliation healthy before;
+  treasury deposit 60,000 → envelope charge 20,000 → salary partial 1,500 +
+  advance 700 → month-end return; invariants + reconciliation healthy
+  after (cashVar 0 / budgetVar 0).
+- **Live drill FS3 14/14** on the same world: class-fee pricing on both
+  enrolment surfaces; over-collect caps (desk 400; cross-surface
+  invoice-pay attack 400); drop+re-enrol reactivates the ONE term at the
+  class fee with a single live tuition invoice; retake = 6,500 + 2,000;
+  payroll partials capped (900 + 1,100 then third refused 409 — the 409
+  initially observed was the *correctly emptied* envelope, recharging it
+  confirmed the cap logic); invariants + reconciliation PASS after the
+  drill.
+- Suite: **213 files, 2,889 passed, 2 skipped** with the new identity tests.
+
+### Wave-5 verdict
+
+No new material weakness found. Wave-4's "no funding API" design note was
+factually wrong and is corrected above. Remaining surfaces still to
+re-attack: treasury deposit/withdraw concurrency, month-end races,
+migration/historical data.
