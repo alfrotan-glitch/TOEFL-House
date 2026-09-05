@@ -742,3 +742,49 @@ No code was changed this wave by design: every remaining gap requires an
 owner policy decision (supplier terms, write-off authority, loan terms,
 fund segregation) or the income-taxonomy redesign, which is specified but
 deliberately not smuggled into an audit commit.
+
+---
+
+## Wave 9 — financial operating model (full document: docs/forensic-audit-wave9-financial-operating-model.md)
+
+Design wave; no code changed. The declared basis was deduced from writer
+behavior and named precisely: **cash-recognition accounting with
+economic-state memos**, whose coherence law is "every memo must be
+lifecycle-complete." Wave 8's gaps are exactly the lifecycle-incomplete or
+missing memos. Deliverables:
+
+- **Per-area policy question tables** (supplier payables P1–P4, write-offs
+  P5–P10, restricted funds P11, loans P12–P15) — each with the economic
+  stake, dependents, and the consequence of remaining undefined. Nothing
+  answered without source; all open questions marked UNKNOWN per LAW 10.
+- **Semantics derived, not invented:** student-debt write-off = memo
+  discharge with NO P&L effect (unpaid tuition was never revenue under cash
+  recognition — a bad-debt expense would be incoherent); staff-advance
+  write-off = expense recognition at renunciation (the advance WAS cash
+  out); credit purchase = payable memo at goods receipt + single expense at
+  the settlement cash event (double-count impossible by construction);
+  restricted-fund exposure derivable from the existing subledger without
+  new stores.
+- **Equity distortion of capital_injection-as-debt proven** mechanically;
+  production attestation flagged (loan-vs-equity is unknowable from data).
+- **Income taxonomy redesigned as semantics** (§5): explicit classes,
+  funding income separated, `loan_proceeds`, contra-refund, and
+  `non_operating_other` as the CONSERVATIVE DEFAULT replacing the residual —
+  unknown inflows can no longer become operating revenue by accident
+  (mirroring how uncategorized expenses never vanish). Interest/finance
+  income excluded pending P13 (Islamic-finance observation recorded, not
+  decided).
+- **Ledger role resolved:** typed economic-event journal; balances are
+  derived views; lifecycle belongs to memo entities, classification to
+  categories — no more string-category lifecycles.
+- **Authorized now (no policy dependency):** income taxonomy implementation,
+  restricted-fund exposure report, employee bonus via payroll
+  due-composition (symmetric completion of the existing teacher design).
+- **Blocked at policy:** supplier payables, write-offs, loans, fund
+  enforcement — each with the named decision list.
+- **Falsification log** (10 constructed attacks on the proposed model) and
+  the final A–F verdict table.
+
+Wave 9 closes with the model independently coherent, policy boundaries
+explicit, and implementation authorized only where no financial meaning
+would be invented during coding.
