@@ -944,7 +944,10 @@ CREATE TABLE IF NOT EXISTS level_branch_fees (
   level_id    TEXT NOT NULL REFERENCES levels(id) ON DELETE CASCADE, 
   branch_id   TEXT NOT NULL REFERENCES branches(id) ON DELETE CASCADE, 
   fee         INTEGER NOT NULL, 
-  currency    TEXT NOT NULL DEFAULT 'AFN', 
+  -- D-11 (owner, Q1): AFN is the sole currency. The label is constrained at
+  -- the storage boundary so no writer — present or future — can record a
+  -- second currency (W19 conformance repair; there is no FX logic anywhere).
+  currency    TEXT NOT NULL DEFAULT 'AFN' CHECK (currency = 'AFN'), 
   effective_from TEXT, 
   effective_to   TEXT, 
   created_at  TEXT NOT NULL DEFAULT (datetime('now')), 
@@ -2420,7 +2423,8 @@ CREATE TABLE IF NOT EXISTS fee_rules (
   fee_type            TEXT NOT NULL CHECK (fee_type IN ('registration','placement','semester','retake','diploma','card')), 
   name                TEXT NOT NULL, 
   amount              INTEGER NOT NULL DEFAULT 0, 
-  currency            TEXT NOT NULL DEFAULT 'AFN', 
+  -- D-11 (owner, Q1): AFN is the sole currency (see level_branch_fees).
+  currency            TEXT NOT NULL DEFAULT 'AFN' CHECK (currency = 'AFN'), 
   is_optional         INTEGER NOT NULL DEFAULT 0, 
   effective_from      TEXT, 
   effective_to        TEXT, 

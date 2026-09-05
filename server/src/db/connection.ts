@@ -256,6 +256,63 @@ function ensureFixedAssetsCustodyLossShape(schema: string): void {
   }
 }
 
+/**
+ * W19 (D-11 conformance): the owner decided AFN is the sole currency (Q1:
+ * "no secondary currency, no FX rate, no multi-currency columns or conversion
+ * logic anywhere"). Every writer already pins 'AFN' and no conversion logic
+ * exists; the remaining gap was storage-level: the two currency label columns
+ * accepted any string. Both now carry CHECK (currency = 'AFN'); existing
+ * (pre-W19) databases are converged with the standard copy-swap. The check
+ * enforces the owner's decision — it invents nothing.
+ */
+function ensureSingleCurrencyChecks(schema: string): void {
+  const tables: Array<{ table: string; evidence: string; columns: string[] }> = [
+    {
+      table: 'level_branch_fees',
+      evidence: "CHECK (currency = 'AFN')",
+      columns: ['id', 'level_id', 'branch_id', 'fee', 'currency', 'effective_from', 'effective_to', 'created_at'],
+    },
+    {
+      table: 'fee_rules',
+      evidence: "CHECK (currency = 'AFN')",
+      columns: ['id', 'program_version_id', 'level_id', 'branch_id', 'fee_type', 'name', 'amount', 'currency', 'is_optional', 'effective_from', 'effective_to', 'version', 'is_active', 'created_at'],
+    },
+  ];
+  for (const { table, evidence, columns } of tables) {
+    const current = db.prepare(
+      `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`,
+    ).get(table) as { sql: string } | undefined;
+    if (!current?.sql || current.sql.includes(evidence)) continue;
+
+    const start = schema.indexOf(`CREATE TABLE IF NOT EXISTS ${table} (`);
+    const end = schema.indexOf('\n);', start);
+    const ddl = start >= 0 && end > start ? schema.slice(start, end + 3) : null;
+    if (!ddl) throw new Error(`Cannot converge ${table}: canonical DDL not found in schema.sql.`);
+
+    log.warn(`Rebuilding ${table} with the D-11 single-currency CHECK (copy-swap, foreign keys suspended).`);
+    const present = new Set((db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((c) => c.name));
+    const cols = columns.filter((name) => present.has(name)).join(', ');
+    const swap = db.transaction(() => {
+      db.exec(ddl.replace(`CREATE TABLE IF NOT EXISTS ${table} (`, `CREATE TABLE ${table}_w19_swap (`));
+      db.exec(`INSERT INTO ${table}_w19_swap (${cols}) SELECT ${cols} FROM ${table}`);
+      const dependents = (db.prepare(
+        `SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name != ? AND sql LIKE ?`,
+      ).all(table, `%${table}%`) as Array<{ name: string }>).map((r) => r.name);
+      for (const name of dependents) db.exec(`DROP TRIGGER ${JSON.stringify(name)}`);
+      db.exec(`DROP TABLE ${table}`);
+      db.exec(`ALTER TABLE ${table}_w19_swap RENAME TO ${table}`);
+    });
+    swap();
+    db.exec(schema);
+    const violations = (db.prepare('PRAGMA foreign_key_check').all() as Array<unknown>).filter(
+      (v) => JSON.stringify(v).includes(table),
+    );
+    if (violations.length > 0) {
+      throw new Error(`${table} rebuild introduced foreign-key violations: ${JSON.stringify(violations).slice(0, 400)}`);
+    }
+  }
+}
+
 function ensureFinancialTransactionsReclaimType(schema: string): void {
   const current = db.prepare(
     `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'financial_transactions'`,
@@ -385,6 +442,7 @@ export function initSchema(): void {
     ensureBookReceiptAcquisitionColumns();
     ensureEmployeeLedgerDueColumn();
     ensureRegistrationsFinancialColumnsDropped();
+    ensureSingleCurrencyChecks(schema);
     ensureDonationClawbackAttributionColumns();
     ensureFixedAssetsCustodyLossShape(schema);
     ensureFinancialTransactionsReclaimType(schema);
