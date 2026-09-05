@@ -249,6 +249,8 @@ export interface DailyCashActivityStatement {
     /** Sweep to saving (positive) or reclaim from saving (negative). */
     savingMovement: number;
     ownerDrawings: number;
+    /** Clawback repayments to funders (signed cash-out, P&L-neutral). */
+    restrictedReclaims: number;
   };
   closing: { main: number; saving: number };
   /** Equity injections stamped with this branch on this date. They credit the
@@ -281,13 +283,17 @@ export function getDailyCashActivity(db: Database.Database, opts: { branchId: st
     `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE ${OWNER_DRAWING_SQL} AND branch_id = ?`,
     date,
   );
+  const reclaimsSince = sumSince(
+    `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type='restricted_reclaim' AND branch_id = ?`,
+    date,
+  );
 
   const acct = db.prepare(`SELECT main_balance, saving_balance FROM finance_accounts WHERE scope_type='branch' AND scope_id=?`)
     .get(branchId) as { main_balance: number; saving_balance: number } | undefined;
   const mainNow = Number(acct?.main_balance ?? 0);
   const savingNow = Number(acct?.saving_balance ?? 0);
 
-  const openingMain = mainNow - (cashIncomeSince - savingSince - drawingsSince);
+  const openingMain = mainNow - (cashIncomeSince - savingSince - drawingsSince + reclaimsSince);
   const openingSaving = savingNow - savingSince;
 
   const incomeRows = db.prepare(
@@ -300,6 +306,9 @@ export function getDailyCashActivity(db: Database.Database, opts: { branchId: st
   const drawings = Number((db.prepare(
     `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE ${OWNER_DRAWING_SQL} AND branch_id = ? AND date = ?`,
   ).get(branchId, date) as { v: number }).v) || 0;
+  const reclaims = Number((db.prepare(
+    `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type='restricted_reclaim' AND branch_id = ? AND date = ?`,
+  ).get(branchId, date) as { v: number }).v) || 0;
 
   const incomeTotal = incomeRows.reduce((s, r) => s + Number(r.total), 0);
   const refundsTotal = incomeRows.reduce((s, r) => s + Math.min(0, Number(r.total)), 0);
@@ -308,7 +317,7 @@ export function getDailyCashActivity(db: Database.Database, opts: { branchId: st
       WHERE type='income' AND category='${CAPITAL_INJECTION_CATEGORY}' AND branch_id = ? AND date = ?`,
   ).all(branchId, date) as Array<{ transactionId: string; amount: number; description: string }>;
 
-  const dayMainDelta = incomeTotal - savingMovement - drawings;
+  const dayMainDelta = incomeTotal - savingMovement - drawings + reclaims;
   return {
     basis: 'digital-expected',
     note: 'Digital expected cash per the ledger (I16/I17 identities). This is NOT a physical count; physical-cash control awaits the Wave-14 D-CC owner decisions.',
@@ -316,7 +325,7 @@ export function getDailyCashActivity(db: Database.Database, opts: { branchId: st
     opening: { main: openingMain, saving: openingSaving },
     movements: {
       incomeByCategory: incomeRows.map((r) => ({ category: r.category, amount: Number(r.total) })),
-      incomeTotal, refundsTotal, savingMovement, ownerDrawings: drawings,
+      incomeTotal, refundsTotal, savingMovement, ownerDrawings: drawings, restrictedReclaims: reclaims,
     },
     closing: { main: openingMain + dayMainDelta, saving: openingSaving + savingMovement },
     memoEquityInjectionsThisBranch: equityMemo,

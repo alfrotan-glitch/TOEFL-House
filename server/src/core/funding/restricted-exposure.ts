@@ -65,6 +65,10 @@ export interface RestrictedExposureReport {
   scope: 'all' | 'branch';
   branchId: string | null;
   restrictedReceived: number;
+  /** Σ clawbacks (open + repaid): restricted money returned to funders (W16). */
+  restrictedReclaimed: number;
+  /** Σ OPEN clawbacks: repayment obligations still outstanding (a liability). */
+  openClawbackLiability: number;
   restrictedSettled: number;
   sponsorshipReturnedToCampaign: number;
   restrictedRemaining: number;
@@ -137,8 +141,18 @@ export function getRestrictedExposure(db: Database.Database, branchId: string | 
 
   const restrictedReceived = num(scopedDonation.get(...(branchId ? [branchId] : [])));
   const restrictedSettled = num(scopedSettled.get(...(branchId ? [branchId, branchId] : [])));
+  const scopedReclaimed = db.prepare(
+    `SELECT COALESCE(SUM(c.amount), 0) AS v FROM donation_clawbacks c ${branchId ? 'JOIN donations d ON d.id = c.donation_id WHERE d.branch_id = ?' : ''}`,
+  );
+  const scopedOpenLiability = db.prepare(
+    `SELECT COALESCE(SUM(c.amount), 0) AS v FROM donation_clawbacks c ${branchId ? "JOIN donations d ON d.id = c.donation_id WHERE d.branch_id = ? AND c.status = 'open'" : "WHERE c.status = 'open'"}`,
+  );
+  const restrictedReclaimed = num(scopedReclaimed.get(...(branchId ? [branchId] : [])));
+  const openClawbackLiability = num(scopedOpenLiability.get(...(branchId ? [branchId] : [])));
   const sponsorshipReturnedToCampaign = num(scopedReturned.get(...(branchId ? [branchId] : [])));
-  const restrictedRemaining = Math.max(0, restrictedReceived - restrictedSettled);
+  // W16: reclaimed money (declared or repaid) is no longer part of the
+  // restricted pool — the funder is taking it back.
+  const restrictedRemaining = Math.max(0, restrictedReceived - restrictedSettled - restrictedReclaimed);
 
   const activeAwardCommitments = num(scopedAwardCommitments.get(...(branchId ? [branchId] : [])));
   const sponsorshipPromisedMonthly = num(scopedPromisedMonthly.get(...(branchId ? [branchId] : [])));
@@ -179,6 +193,8 @@ export function getRestrictedExposure(db: Database.Database, branchId: string | 
     scope: branchId ? 'branch' : 'all',
     branchId,
     restrictedReceived,
+    restrictedReclaimed,
+    openClawbackLiability,
     restrictedSettled,
     sponsorshipReturnedToCampaign,
     restrictedRemaining,

@@ -1321,4 +1321,211 @@ financeRouter.get(
   })
 );
 
+
+// ═════════════════════════════════════════════════════════════════════════════
+// WAVE 16 · Fixed-asset custody register + bank statement matching (control)
+// ═════════════════════════════════════════════════════════════════════════════
+// Standard semantics (owner-authorized). The PURCHASE cash flow already exists
+// (capex classification); the register is the ASSET side: custody, branch and
+// an append-only transfer trail. Depreciation and disposal are future policy —
+// custody_status only knows 'in_service', so neither can be recorded until
+// policy defines it. Permissions follow existing finance conventions:
+// control writes sit behind Expense.Approve; reads behind the finance-view set.
+
+financeRouter.post(
+  '/assets',
+  requirePermission('Expense.Approve'),
+  ah(async (req, res) => {
+    const user = getUserContext(req);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const name = typeof body.name === 'string' ? body.name.trim() : '';
+    if (!name) throw new HttpError(400, 'Asset name is required.');
+    const branchId = typeof body.branchId === 'string' ? body.branchId : user.branchId;
+    if (!canAccessBranchResource(req, branchId)) throw new HttpError(403, 'Asset belongs to another branch.');
+    const categoryId = typeof body.categoryId === 'string' ? body.categoryId : '';
+    if (!categoryId) throw new HttpError(400, 'A capital-expenditure subcategory is required.');
+    const sourceTransactionId = typeof body.sourceTransactionId === 'string' && body.sourceTransactionId ? body.sourceTransactionId : null;
+    let cost: number;
+    try { cost = assertMoney(body.cost, 'asset cost'); } catch { throw new HttpError(400, 'Asset cost must be a whole-AFN positive amount.'); }
+    if (cost <= 0) throw new HttpError(400, 'Asset cost must be greater than zero.');
+    const acquiredOn = typeof body.acquiredOn === 'string' && body.acquiredOn ? body.acquiredOn : today();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(acquiredOn)) throw new HttpError(400, 'acquiredOn must be an ISO date (YYYY-MM-DD).');
+
+    const assetId = id('fa');
+    try {
+      db.prepare(
+        `INSERT INTO fixed_assets (id, name, branch_id, category_id, acquired_on, cost, source_transaction_id, notes, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(assetId, name, branchId, categoryId, acquiredOn, cost, sourceTransactionId,
+            typeof body.notes === 'string' ? body.notes.trim() || null : null, user.fullName);
+    } catch (error) {
+      const message = String((error as { message?: string })?.message ?? '');
+      // Order matters: BOTH trigger messages contain "capital-expenditure", so
+      // the source-tx violation must be matched first or it is mislabeled as a
+      // classification 400 instead of the dishonest-source 409.
+      if (message.includes('source must be')) throw new HttpError(409, 'The source transaction must be a capital-expenditure row of the same branch covering the asset cost.');
+      if (message.includes('capital-expenditure')) throw new HttpError(400, 'The asset must be classified under a capital-expenditure subcategory.');
+      throw error;
+    }
+    writeAudit(req, `Registered fixed asset ${assetId} (${name}, ${cost} AFN)`, { branchId, newValue: JSON.stringify({ name, cost, categoryId }) });
+    res.status(201).json({ id: assetId });
+  }),
+);
+
+financeRouter.get(
+  '/assets',
+  requirePermission('Budget.View', 'Ledger.View', 'Finance.Report'),
+  ah(async (req, res) => {
+    const { branchId, isAll } = resolveBranchScope(req);
+    const rows = (isAll
+      ? db.prepare(`SELECT a.*, fc.name AS category_name FROM fixed_assets a LEFT JOIN finance_categories fc ON fc.id = a.category_id`).all()
+      : db.prepare(`SELECT a.*, fc.name AS category_name FROM fixed_assets a LEFT JOIN finance_categories fc ON fc.id = a.category_id WHERE a.branch_id = ?`).all(branchId)) as Array<Record<string, unknown>>;
+    res.json(rows.map((r) => ({
+      id: r.id, name: r.name, branchId: r.branch_id, categoryId: r.category_id, categoryName: r.category_name,
+      acquiredOn: r.acquired_on, cost: r.cost, sourceTransactionId: r.source_transaction_id,
+      custodyStatus: r.custody_status, notes: r.notes,
+      transfers: (db.prepare('SELECT from_branch_id, to_branch_id, transferred_on, reason FROM fixed_asset_transfers WHERE asset_id = ? ORDER BY created_at').all(r.id) as Array<Record<string, unknown>>),
+    })));
+  }),
+);
+
+financeRouter.post(
+  '/assets/:id/transfer',
+  requirePermission('Expense.Approve'),
+  ah(async (req, res) => {
+    const user = getUserContext(req);
+    const asset = db.prepare('SELECT * FROM fixed_assets WHERE id = ?').get(req.params.id) as { id: string; branch_id: string } | undefined;
+    if (!asset) throw new HttpError(404, 'Fixed asset not found.');
+    if (!canAccessBranchResource(req, asset.branch_id)) throw new HttpError(403, 'Asset belongs to another branch.');
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const toBranchId = typeof body.toBranchId === 'string' ? body.toBranchId : '';
+    const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
+    if (!toBranchId) throw new HttpError(400, 'Destination branch is required.');
+    if (reason.length < 8) throw new HttpError(400, 'A transfer reason of at least 8 characters is required.');
+    if (!canAccessBranchResource(req, toBranchId)) throw new HttpError(403, 'You cannot move assets into that branch.');
+    const transferredOn = typeof body.transferredOn === 'string' && body.transferredOn ? body.transferredOn : today();
+
+    const transferId = id('fat');
+    db.transaction(() => {
+      db.prepare(
+        `INSERT INTO fixed_asset_transfers (id, asset_id, from_branch_id, to_branch_id, transferred_on, reason, operator_name)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(transferId, asset.id, asset.branch_id, toBranchId, transferredOn, reason, user.fullName);
+      db.prepare('UPDATE fixed_assets SET branch_id = ? WHERE id = ?').run(toBranchId, asset.id);
+    })();
+    writeAudit(req, `Transferred fixed asset ${asset.id} to branch ${toBranchId}`, { oldValue: asset.branch_id, newValue: toBranchId });
+    res.json({ ok: true, id: transferId });
+  }),
+);
+
+// ── Bank statement matching: a CONTROL layer, never a financial authority ──
+// Lines are external evidence; matching links a line to an existing ledger row
+// and can never create, edit or void financial truth. The variance report
+// simply names what is unmatched on each side.
+
+financeRouter.post(
+  '/bank-statement-lines',
+  requirePermission('Expense.Approve'),
+  ah(async (req, res) => {
+    const user = getUserContext(req);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const branchId = typeof body.branchId === 'string' ? body.branchId : user.branchId;
+    if (!canAccessBranchResource(req, branchId)) throw new HttpError(403, 'Statement line belongs to another branch.');
+    let amount: number;
+    try { amount = assertMoney(body.amount, 'statement amount'); } catch { throw new HttpError(400, 'Statement amount must be a whole-AFN non-zero value.'); }
+    if (amount === 0) throw new HttpError(400, 'Statement amount cannot be zero.');
+    const description = typeof body.description === 'string' ? body.description.trim() : '';
+    if (!description) throw new HttpError(400, 'Statement description is required.');
+    const lineDate = typeof body.lineDate === 'string' ? body.lineDate : '';
+    const statementDate = typeof body.statementDate === 'string' ? body.statementDate : lineDate;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(lineDate)) throw new HttpError(400, 'lineDate must be an ISO date (YYYY-MM-DD).');
+
+    // Duplicate-import guard: the identical line already recorded.
+    const dup = db.prepare(
+      `SELECT id FROM bank_statement_lines
+        WHERE branch_id = ? AND line_date = ? AND amount = ? AND description = ?
+          AND COALESCE(external_ref,'') = COALESCE(?, '')`,
+    ).get(branchId, lineDate, amount, description, typeof body.externalRef === 'string' ? body.externalRef : null) as { id: string } | undefined;
+    if (dup) throw new HttpError(409, 'This statement line has already been imported.');
+
+    const lineId = id('bsl');
+    db.prepare(
+      `INSERT INTO bank_statement_lines (id, branch_id, statement_date, line_date, description, amount, external_ref, imported_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(lineId, branchId, statementDate, lineDate, description, amount,
+          typeof body.externalRef === 'string' ? body.externalRef : null, user.fullName);
+    writeAudit(req, `Imported bank statement line ${lineId}`, { branchId, newValue: JSON.stringify({ lineDate, amount }) });
+    res.status(201).json({ id: lineId });
+  }),
+);
+
+financeRouter.post(
+  '/bank-statement-matches',
+  requirePermission('Expense.Approve'),
+  ah(async (req, res) => {
+    const user = getUserContext(req);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const lineId = typeof body.lineId === 'string' ? body.lineId : '';
+    const transactionId = typeof body.transactionId === 'string' ? body.transactionId : '';
+    if (!lineId || !transactionId) throw new HttpError(400, 'lineId and transactionId are required.');
+    const line = db.prepare('SELECT branch_id FROM bank_statement_lines WHERE id = ?').get(lineId) as { branch_id: string } | undefined;
+    if (!line) throw new HttpError(404, 'Statement line not found.');
+    if (!canAccessBranchResource(req, line.branch_id)) throw new HttpError(403, 'Statement line belongs to another branch.');
+    const tx = db.prepare('SELECT branch_id FROM financial_transactions WHERE id = ?').get(transactionId) as { branch_id: string } | undefined;
+    if (!tx) throw new HttpError(404, 'Ledger row not found.');
+    const matchId = id('bsm');
+    try {
+      db.prepare(`INSERT INTO bank_statement_matches (id, line_id, transaction_id, matched_by) VALUES (?, ?, ?, ?)`)
+        .run(matchId, lineId, transactionId, user.fullName);
+    } catch (error) {
+      const message = String((error as { message?: string })?.message ?? '');
+      if (message.includes('same branch')) throw new HttpError(409, 'The line and the ledger row belong to different branches.');
+      if (message.includes('UNIQUE')) throw new HttpError(409, 'That line or that ledger row is already matched.');
+      throw error;
+    }
+    writeAudit(req, `Matched bank statement line ${lineId} to ledger row ${transactionId}`, { branchId: line.branch_id });
+    res.status(201).json({ id: matchId });
+  }),
+);
+
+financeRouter.delete(
+  '/bank-statement-matches/:id',
+  requirePermission('Expense.Approve'),
+  ah(async (req, res) => {
+    const match = db.prepare(
+      `SELECT m.id, l.branch_id FROM bank_statement_matches m JOIN bank_statement_lines l ON l.id = m.line_id WHERE m.id = ?`,
+    ).get(req.params.id) as { id: string; branch_id: string } | undefined;
+    if (!match) throw new HttpError(404, 'Match not found.');
+    if (!canAccessBranchResource(req, match.branch_id)) throw new HttpError(403, 'Match belongs to another branch.');
+    db.prepare('DELETE FROM bank_statement_matches WHERE id = ?').run(req.params.id);
+    writeAudit(req, `Unmatched bank statement match ${req.params.id}`, { branchId: match.branch_id });
+    res.json({ ok: true });
+  }),
+);
+
+financeRouter.get(
+  '/bank-reconciliation',
+  requirePermission('Ledger.View', 'Finance.Report'),
+  ah(async (req, res) => {
+    const { branchId, isAll } = resolveBranchScope(req);
+    const scope = isAll ? '' : 'AND l.branch_id = ?';
+    const params = isAll ? [] : [branchId];
+    const unmatchedLines = db.prepare(
+      `SELECT l.id, l.branch_id, l.line_date, l.description, l.amount
+         FROM bank_statement_lines l
+        WHERE NOT EXISTS (SELECT 1 FROM bank_statement_matches m WHERE m.line_id = l.id) ${scope}`,
+    ).all(...params) as Array<Record<string, unknown>>;
+    const matchedCount = Number((db.prepare(
+      `SELECT COUNT(*) AS v FROM bank_statement_matches m JOIN bank_statement_lines l ON l.id = m.line_id WHERE 1=1 ${scope}`,
+    ).get(...params) as { v: number }).v);
+    res.json({
+      scope: isAll ? 'organization' : 'branch',
+      branchId: branchId ?? null,
+      matchedCount,
+      unmatchedLines,
+      note: 'Control layer only: statement evidence vs ledger rows. Matching never writes financial truth.',
+    });
+  }),
+);
+
 export default financeRouter;

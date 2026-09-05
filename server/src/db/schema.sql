@@ -2736,7 +2736,12 @@ BEGIN SELECT RAISE(ABORT, 'Book commerce payments are immutable'); END;
 
 CREATE TABLE IF NOT EXISTS financial_transactions ( 
   id            TEXT PRIMARY KEY, 
-  type          TEXT NOT NULL CHECK (type IN ('income','expense','saving_transfer','budget_charge')), 
+  -- W16: 'restricted_reclaim' is the P&L-neutral cash evidence of a donation
+  -- clawback repayment — money returning to a funder. It is never income and
+  -- never an expense; checkers (I16/I22), reconciliation and the daily
+  -- statement derive it from this type. Pre-W16 databases are converged by
+  -- ensureFinancialTransactionsReclaimType() in connection.ts.
+  type          TEXT NOT NULL CHECK (type IN ('income','expense','saving_transfer','budget_charge','restricted_reclaim')), 
   -- Human-readable label. For INCOME rows this is the billing vocabulary
   -- (fee/book/exam/placement/donation/…), which the expense taxonomy does not
   -- model. It is NEVER the accounting authority — see `finance_category_id`.
@@ -3857,3 +3862,154 @@ CREATE TABLE IF NOT EXISTS audit_failures (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_failures_branch ON audit_failures(branch_id, occurred_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_failures_time ON audit_failures(occurred_at DESC);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- WAVE 16 · Standard accounting semantics for previously ungated capabilities
+-- (owner-authorized 2026-09-05; numeric policy — thresholds, approvals, rates,
+-- depreciation, write-off authority — deliberately ABSENT: POLICY REQUIRED).
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── 1. Fixed-asset custody register ────────────────────────────────────────
+-- The purchase cash flow already exists (capex classification, W-verified).
+-- This table is the ASSET side: what was acquired, where it lives, and an
+-- append-only custody trail. Depreciation and disposal are future policy and
+-- deliberately have no representation here beyond a custody status that only
+-- knows 'in_service' — retirement cannot be recorded until policy defines it.
+CREATE TABLE IF NOT EXISTS fixed_assets (
+  id                    TEXT PRIMARY KEY,
+  name                  TEXT NOT NULL,
+  branch_id             TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  category_id           TEXT NOT NULL REFERENCES finance_categories(id) ON DELETE RESTRICT,
+  acquired_on           TEXT NOT NULL,
+  cost                  INTEGER NOT NULL CHECK (cost > 0),
+  source_transaction_id TEXT REFERENCES financial_transactions(id) ON DELETE RESTRICT,
+  custody_status        TEXT NOT NULL DEFAULT 'in_service' CHECK (custody_status IN ('in_service')),
+  notes                 TEXT,
+  created_by            TEXT,
+  created_at            TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_fixed_assets_branch ON fixed_assets(branch_id);
+
+CREATE TRIGGER IF NOT EXISTS trg_fixed_assets_capex_node_insert
+BEFORE INSERT ON fixed_assets
+WHEN (SELECT classification FROM finance_categories WHERE id = NEW.category_id) <> 'capital_expenditure'
+BEGIN SELECT RAISE(ABORT, 'A fixed asset must be classified under a capital-expenditure node'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_fixed_assets_source_tx_insert
+BEFORE INSERT ON fixed_assets
+WHEN NEW.source_transaction_id IS NOT NULL AND (
+  (SELECT type FROM financial_transactions WHERE id = NEW.source_transaction_id) IS NOT 'expense'
+  OR (SELECT fc.classification FROM financial_transactions ft
+       LEFT JOIN finance_categories fc ON fc.id = ft.finance_category_id
+      WHERE ft.id = NEW.source_transaction_id) IS NOT 'capital_expenditure'
+  OR (SELECT branch_id FROM financial_transactions WHERE id = NEW.source_transaction_id) IS NOT NEW.branch_id
+  OR (SELECT amount FROM financial_transactions WHERE id = NEW.source_transaction_id) < NEW.cost
+)
+BEGIN SELECT RAISE(ABORT, 'A fixed asset''s source must be a capital-expenditure row of the same branch covering its cost'); END;
+
+-- Custody moves are events, not edits: the trail row and the asset update
+-- commit together in the route's transaction.
+CREATE TABLE IF NOT EXISTS fixed_asset_transfers (
+  id              TEXT PRIMARY KEY,
+  asset_id        TEXT NOT NULL REFERENCES fixed_assets(id) ON DELETE RESTRICT,
+  from_branch_id  TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  to_branch_id    TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  transferred_on  TEXT NOT NULL,
+  reason          TEXT NOT NULL,
+  operator_name   TEXT,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK (from_branch_id <> to_branch_id)
+);
+CREATE INDEX IF NOT EXISTS idx_fixed_asset_transfers_asset ON fixed_asset_transfers(asset_id);
+
+CREATE TRIGGER IF NOT EXISTS trg_fixed_asset_transfers_current_branch
+BEFORE INSERT ON fixed_asset_transfers
+WHEN (SELECT branch_id FROM fixed_assets WHERE id = NEW.asset_id) IS NOT NEW.from_branch_id
+BEGIN SELECT RAISE(ABORT, 'A custody transfer must start from the asset''s current branch'); END;
+
+-- ── 2. Bank statement matching (control layer only) ────────────────────────
+-- Statement lines are EXTERNAL evidence. Matching links a line to an existing
+-- ledger row; it never creates, edits or voids financial truth. Unmatched
+-- lines and unmatched bank-movement rows are the reconciliation variance.
+CREATE TABLE IF NOT EXISTS bank_statement_lines (
+  id             TEXT PRIMARY KEY,
+  branch_id      TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  statement_date TEXT NOT NULL,
+  line_date      TEXT NOT NULL,
+  description    TEXT NOT NULL,
+  amount         INTEGER NOT NULL CHECK (amount <> 0),
+  external_ref   TEXT,
+  imported_by    TEXT,
+  created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_bank_lines_branch_date ON bank_statement_lines(branch_id, line_date);
+
+CREATE TABLE IF NOT EXISTS bank_statement_matches (
+  id             TEXT PRIMARY KEY,
+  line_id        TEXT NOT NULL UNIQUE REFERENCES bank_statement_lines(id) ON DELETE RESTRICT,
+  transaction_id TEXT NOT NULL UNIQUE REFERENCES financial_transactions(id) ON DELETE RESTRICT,
+  matched_by     TEXT,
+  matched_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TRIGGER IF NOT EXISTS trg_bank_matches_branch_scope
+BEFORE INSERT ON bank_statement_matches
+WHEN (SELECT branch_id FROM bank_statement_lines WHERE id = NEW.line_id)
+     IS NOT (SELECT branch_id FROM financial_transactions WHERE id = NEW.transaction_id)
+BEGIN SELECT RAISE(ABORT, 'A bank match must join a statement line and a ledger row of the same branch'); END;
+
+-- ── 3. Student branch transfers (explicit relocation event) ────────────────
+-- The event preserves the student's open financial state (obligations and
+-- invoices follow the student in the same transaction, guarded by the
+-- student-branch triggers); historical rows — payments, ledger, receipts —
+-- keep the branch where the money actually moved.
+CREATE TABLE IF NOT EXISTS student_branch_transfers (
+  id               TEXT PRIMARY KEY,
+  student_id       TEXT NOT NULL REFERENCES students(id) ON DELETE RESTRICT,
+  from_branch_id   TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  to_branch_id     TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  reason           TEXT NOT NULL,
+  operator_user_id TEXT,
+  operator_name    TEXT,
+  created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK (from_branch_id <> to_branch_id)
+);
+CREATE INDEX IF NOT EXISTS idx_student_branch_transfers_student ON student_branch_transfers(student_id);
+
+-- ── 4. Donation clawbacks (restricted money returned to the funder) ────────
+-- A clawback is a REPAYMENT OBLIGATION against a restricted donation — never
+-- negative operating revenue. Declaration opens the liability; repayment moves
+-- cash out through a dedicated P&L-neutral ledger type ('restricted_reclaim'),
+-- mirroring how saving transfers and budget movements move stores without
+-- touching the trading result. Conservative guard (D-DC-3 policy pending):
+-- only the donation's UNCOMMITTED restricted remainder may be reclaimed.
+CREATE TABLE IF NOT EXISTS donation_clawbacks (
+  id                    TEXT PRIMARY KEY,
+  donation_id           TEXT NOT NULL REFERENCES donations(id) ON DELETE RESTRICT,
+  amount                INTEGER NOT NULL CHECK (amount > 0),
+  reason                TEXT NOT NULL,
+  status                TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','repaid')),
+  declared_on           TEXT NOT NULL,
+  repaid_on             TEXT,
+  repaid_transaction_id TEXT REFERENCES financial_transactions(id) ON DELETE RESTRICT,
+  declared_by           TEXT,
+  created_at            TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_donation_clawbacks_donation ON donation_clawbacks(donation_id);
+
+CREATE TRIGGER IF NOT EXISTS trg_donation_clawbacks_bound
+BEFORE INSERT ON donation_clawbacks
+WHEN (
+  -- Blunt absolute bound; the precise consumption-and-attribution guard runs
+  -- in the service inside the same transaction (recursive provenance is not
+  -- expressible here), and I22 re-verifies the result.
+  COALESCE((SELECT SUM(amount) FROM donation_clawbacks WHERE donation_id = NEW.donation_id), 0) + NEW.amount
+  > (SELECT amount FROM donations WHERE id = NEW.donation_id)
+)
+BEGIN SELECT RAISE(ABORT, 'Cumulative clawbacks cannot exceed the donation amount'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_donation_clawbacks_immutable_update
+BEFORE UPDATE ON donation_clawbacks
+WHEN NEW.donation_id IS NOT OLD.donation_id OR NEW.amount IS NOT OLD.amount
+     OR NEW.status = 'open' OR OLD.status = 'repaid'
+BEGIN SELECT RAISE(ABORT, 'A clawback''s declaration is immutable; it may only transition open → repaid'); END;

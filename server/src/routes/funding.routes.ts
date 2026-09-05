@@ -10,6 +10,7 @@ import { isUniqueViolation, resolveIdempotency } from '../utils/idempotency.js';
 import { eventBus } from '../core/events/event-bus.js';
 import { repriceTuitionInvoicesAfterAid } from '../core/finance/invoicing.js';
 import { getRestrictedExposure } from '../core/funding/restricted-exposure.js';
+import { declareDonationClawback, repayDonationClawback } from '../core/funding/clawbacks.js';
 import {
   allocateScholarshipToObligation,
   allocateSponsorshipToObligation,
@@ -751,6 +752,38 @@ fundingRouter.get('/summary', requirePermission('Funding.View'), ah(async (req, 
 fundingRouter.get('/restricted-exposure', requirePermission('Funding.View'), ah(async (req, res) => {
   const { branchId, isAll } = resolveBranchScope(req);
   res.json(getRestrictedExposure(db, isAll ? null : branchId));
+}));
+
+// ── WAVE 16 · Donation clawbacks (restricted money returned to the funder) ──
+// Standard semantics (owner-authorized): a clawback is a repayment obligation,
+// never negative operating revenue. Declaration opens the liability; repayment
+// moves branch cash out through the P&L-neutral 'restricted_reclaim' ledger
+// type. Only a donation's UNCOMMITTED restricted remainder is reclaimable
+// (D-DC-3 partial-clawback ordering remains POLICY REQUIRED).
+fundingRouter.post('/donations/:id/clawback', requirePermission('Funding.Edit'), ah(async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const user = userContext(req);
+  let clawbackId = '';
+  db.transaction(() => {
+    clawbackId = declareDonationClawback(db, {
+      donationId: req.params.id,
+      amount: assertMoney(body.amount, 'clawback amount'),
+      reason: String(body.reason ?? ''),
+      operator: { name: user.fullName, role: req.rbac?.primaryRole ?? null },
+    }).clawbackId;
+  })();
+  writeAudit(req, `Declared donation clawback ${clawbackId} on donation ${req.params.id}`, { newValue: JSON.stringify({ amount: body.amount }) });
+  res.status(201).json({ id: clawbackId, status: 'open' });
+}));
+
+fundingRouter.post('/donation-clawbacks/:id/repay', requirePermission('Funding.Edit'), ah(async (req, res) => {
+  const user = userContext(req);
+  let transactionId = '';
+  db.transaction(() => {
+    transactionId = repayDonationClawback(db, req.params.id, { name: user.fullName, role: req.rbac?.primaryRole ?? null }).transactionId;
+  })();
+  writeAudit(req, `Repaid donation clawback ${req.params.id}`, { newValue: JSON.stringify({ transactionId }) });
+  res.json({ ok: true, id: req.params.id, status: 'repaid', transactionId });
 }));
 
 export default fundingRouter;

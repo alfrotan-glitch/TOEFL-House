@@ -132,6 +132,55 @@ function ensureBookReceiptAcquisitionColumns(): void {
   }
 }
 
+
+/**
+ * W16 evolution: widen `financial_transactions.type` with the P&L-neutral
+ * 'restricted_reclaim' evidence type for donation-clawback repayments.
+ *
+ * SQLite cannot ALTER a CHECK constraint, so an existing (pre-W16) table is
+ * rebuilt with the standard copy-swap procedure while `foreign_keys` is OFF
+ * (initSchema guarantees that). The canonical DDL is extracted from
+ * schema.sql itself — never duplicated here — and the idempotent schema
+ * re-run afterwards recreates the indexes and triggers that died with the
+ * old table. Greenfield databases already carry the new CHECK and skip this.
+ */
+function ensureFinancialTransactionsReclaimType(schema: string): void {
+  const current = db.prepare(
+    `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'financial_transactions'`,
+  ).get() as { sql: string } | undefined;
+  if (!current?.sql || current.sql.includes("'restricted_reclaim'")) return;
+
+  const canonical = schema.match(/CREATE TABLE IF NOT EXISTS financial_transactions \([\s\S]*?\n\);/);
+  if (!canonical) throw new Error('Cannot converge financial_transactions: canonical DDL not found in schema.sql.');
+
+  log.warn('Rebuilding financial_transactions with the W16 restricted_reclaim type (copy-swap, foreign keys suspended).');
+  const swap = db.transaction(() => {
+    db.exec(canonical[0].replace('CREATE TABLE IF NOT EXISTS financial_transactions (', 'CREATE TABLE financial_transactions_w16_swap ('));
+    // Copy only columns the old table actually has (very old databases may
+    // predate `donation_id`); everything else takes the canonical default.
+    const canonicalCols = ['id', 'type', 'category', 'finance_category_id', 'amount', 'date', 'description', 'reference_id', 'payment_id', 'donation_id', 'operator_name', 'operator_role', 'branch_id'];
+    const present = new Set((db.prepare('PRAGMA table_info(financial_transactions)').all() as Array<{ name: string }>).map((c) => c.name));
+    const cols = canonicalCols.filter((name) => present.has(name)).join(', ');
+    db.exec(`INSERT INTO financial_transactions_w16_swap (${cols}) SELECT ${cols} FROM financial_transactions`);
+    // DROP TABLE aborts if triggers on OTHER tables still reference this one,
+    // so they are dropped first and recreated by the schema re-run below.
+    const dependents = (db.prepare(
+      `SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name != 'financial_transactions' AND sql LIKE '%financial_transactions%'`,
+    ).all() as Array<{ name: string }>).map((r) => r.name);
+    for (const name of dependents) db.exec(`DROP TRIGGER ${JSON.stringify(name)}`);
+    db.exec('DROP TABLE financial_transactions');
+    db.exec('ALTER TABLE financial_transactions_w16_swap RENAME TO financial_transactions');
+  });
+  swap();
+  // Re-create the indexes and triggers that were dropped with the old table.
+  // The full schema is idempotent and everything else already exists.
+  db.exec(schema);
+  const violations = db.prepare('PRAGMA foreign_key_check').all();
+  if (violations.length > 0) {
+    throw new Error(`financial_transactions rebuild introduced foreign-key violations: ${JSON.stringify(violations).slice(0, 400)}`);
+  }
+}
+
 function reconcileCanonicalFeeAuthority(): void {
   const rows = db.prepare(`
     SELECT branch_id, placement_test_fee, registration_fee, card_fee, diploma_fee
@@ -223,6 +272,7 @@ export function initSchema(): void {
     ensureBookReceiptAcquisitionColumns();
     ensureEmployeeLedgerDueColumn();
     ensureRegistrationsFinancialColumnsDropped();
+    ensureFinancialTransactionsReclaimType(schema);
     reconcileCanonicalFeeAuthority();
   } catch (error) {
     log.error('Failed to apply the canonical schema.');

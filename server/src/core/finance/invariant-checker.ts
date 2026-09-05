@@ -31,7 +31,8 @@
  *  I10 Budget envelopes never go negative.
  *  I11 BRANCH CASH IDENTITY — per branch, finance_accounts must equal what the
  *      ledger says moved: main = operating income − savings sweeps − owner
- *      drawings; saving = sweeps. (A direct UPDATE to finance_accounts, or a
+ *      drawings + restricted reclaims (W16: clawback repayments are signed
+ *      negative, so they reduce main); saving = sweeps. (A direct UPDATE to finance_accounts, or a
  *      cash path with no ledger row, breaks this immediately.)
  *  I12 BUDGET ENVELOPE IDENTITY — per branch, Σ(current_amount) and
  *      Σ(allocated_amount) equal Σ(signed budget movements) − Σ(spent), so a
@@ -259,7 +260,11 @@ const CHECKS: Check[] = [
     sql: `WITH flows AS (
             SELECT
               COALESCE((SELECT SUM(amount) FROM financial_transactions WHERE type = 'income'), 0)
-              - COALESCE((SELECT SUM(amount) FROM financial_transactions WHERE type = 'expense'), 0) AS explained,
+              - COALESCE((SELECT SUM(amount) FROM financial_transactions WHERE type = 'expense'), 0)
+              -- W16: restricted_reclaim rows are signed cash-out movements of
+              -- stores (clawback repayments); held drops with them, so the
+              -- explained side must drop too.
+              + COALESCE((SELECT SUM(amount) FROM financial_transactions WHERE type = 'restricted_reclaim'), 0) AS explained,
               COALESCE((SELECT SUM(main_balance + saving_balance) FROM finance_accounts), 0)
               + COALESCE((SELECT SUM(current_amount) FROM budget_lines), 0) AS held
           )
@@ -336,6 +341,11 @@ const CHECKS: Check[] = [
           FROM donations d
           JOIN donation_restrictions r ON r.donation_id = d.id
          GROUP BY d.branch_id
+      ), reclaimed AS (
+        -- W16: clawed-back money leaves the restricted pool (open or repaid).
+        SELECT d.branch_id AS b, SUM(c.amount) AS v
+          FROM donation_clawbacks c JOIN donations d ON d.id = c.donation_id
+         GROUP BY d.branch_id
       ), aid_applied AS (
         SELECT sf.branch_id AS b, SUM(a.amount) AS v
           FROM obligation_allocations a
@@ -349,11 +359,28 @@ const CHECKS: Check[] = [
          WHERE a.status = 'active' AND a.source_kind = 'sponsorship'
          GROUP BY sr.branch_id
       )
-      SELECT rr.b AS k, rr.v AS received, COALESCE(aa.v, 0) AS applied
+      SELECT rr.b AS k, rr.v AS received, COALESCE(aa.v, 0) AS applied, COALESCE(rc.v, 0) AS reclaimed
         FROM restricted_received rr
         LEFT JOIN aid_applied aa ON aa.b = rr.b
-       WHERE COALESCE(aa.v, 0) > rr.v`,
-    sample: (r) => `branch ${r.k}: ${r.applied} AFN of restricted money is actively applied against ${r.received} AFN received — restricted funds leaked`,
+        LEFT JOIN reclaimed rc ON rc.b = rr.b
+       WHERE COALESCE(aa.v, 0) > rr.v - COALESCE(rc.v, 0)`,
+    sample: (r) => `branch ${r.k}: ${r.applied} AFN of restricted money is actively applied against ${r.received} AFN received less ${r.reclaimed} AFN reclaimed — restricted funds leaked`,
+  },
+  {
+    invariant: 'I22',
+    detail: 'Clawback repayments and their cash evidence agree exactly (W16: one repayment, one restricted_reclaim row, matched amounts and branches)',
+    sql: `
+      SELECT 'repaid_without_cash' AS kind, c.id AS k, c.amount AS expected, COALESCE(ft.amount, 0) AS actual
+        FROM donation_clawbacks c
+        LEFT JOIN financial_transactions ft ON ft.id = c.repaid_transaction_id
+       WHERE c.status = 'repaid'
+         AND (ft.id IS NULL OR ft.type <> 'restricted_reclaim' OR ft.amount <> -c.amount)
+      UNION ALL
+      SELECT 'cash_without_clawback', ft.id, 0, ft.amount
+        FROM financial_transactions ft
+       WHERE ft.type = 'restricted_reclaim'
+         AND NOT EXISTS (SELECT 1 FROM donation_clawbacks c WHERE c.repaid_transaction_id = ft.id)`,
+    sample: (r) => `${r.kind} ${r.k}: expected ${r.expected}, ledger says ${r.actual} — clawback cash and declarations disagree`,
   },
 ];
 
@@ -380,7 +407,9 @@ const IDENTITY_CHECKS: IdentityCheck[] = [
             - COALESCE((SELECT SUM(amount) FROM financial_transactions ft
                          WHERE ft.branch_id = fa.scope_id AND ft.type = 'saving_transfer'), 0)
             - COALESCE((SELECT SUM(amount) FROM financial_transactions ft
-                         WHERE ft.branch_id = fa.scope_id AND ${OWNER_DRAWING_SQL}), 0) AS ledger_main,
+                         WHERE ft.branch_id = fa.scope_id AND ${OWNER_DRAWING_SQL}), 0)
+            + COALESCE((SELECT SUM(amount) FROM financial_transactions ft
+                         WHERE ft.branch_id = fa.scope_id AND ft.type = 'restricted_reclaim'), 0) AS ledger_main,
             fa.saving_balance AS account_saving,
             COALESCE((SELECT SUM(amount) FROM financial_transactions ft
                        WHERE ft.branch_id = fa.scope_id AND ft.type = 'saving_transfer'), 0) AS ledger_saving

@@ -194,6 +194,8 @@ export interface FundPosition {
   committed: number;
   /** Still awardable. */
   available: number;
+  /** W16: money returned to funders via clawbacks attributed to this fund. */
+  clawedBack: number;
 }
 
 export function getFundPosition(db: Database, scholarshipId: string): FundPosition {
@@ -219,7 +221,19 @@ export function getFundPosition(db: Database, scholarshipId: string): FundPositi
     ).get(scholarshipId) as { t: number }).t,
   ) || 0;
   const committed = activeAwardCommitments + closedAwardApplications;
-  return { scholarshipId, received, committed, available: Math.max(0, received - committed) };
+  // W16: clawed-back money (returned to the funder) no longer funds this
+  // scholarship's capacity. Attribution is unique per donation (enforced at
+  // declaration), so the subtraction is exact, never an allocation choice.
+  const clawedBack = Number((db.prepare(
+    `SELECT COALESCE(SUM(c.amount), 0) AS t FROM donation_clawbacks c
+      WHERE c.donation_id IN (
+        SELECT sf.donation_id FROM scholarship_fundings sf WHERE sf.scholarship_id = :s AND sf.donation_id IS NOT NULL
+        UNION
+        SELECT e.source_donation_id FROM scholarship_fundings sf
+          JOIN campaign_funding_entries e ON e.id = sf.campaign_funding_entry_id
+         WHERE sf.scholarship_id = :s AND e.source_donation_id IS NOT NULL)`,
+  ).get({ s: scholarshipId }) as { t: number }).t) || 0;
+  return { scholarshipId, received, committed, clawedBack, available: Math.max(0, received - committed - clawedBack) };
 }
 
 export interface AwardPosition {
@@ -280,6 +294,8 @@ export interface FundingSourcePosition {
   id: string;
   amount: number;
   applied: number;
+  /** W16: money returned to funders via clawbacks attributed to this source. */
+  clawedBack: number;
   returned: number;
   available: number;
 }
@@ -292,7 +308,15 @@ export function getScholarshipFundingPosition(db: Database, fundingId: string): 
       WHERE scholarship_funding_id = ? AND status = 'active'`,
   ).get(fundingId) as { t: number }).t) || 0;
   const amount = Number(row.amount) || 0;
-  return { id: fundingId, amount, applied, returned: 0, available: Math.max(0, amount - applied) };
+  // W16: clawbacks attributed to the donation behind this funding source.
+  const clawedBack = Number((db.prepare(
+    `SELECT COALESCE(SUM(c.amount), 0) AS t FROM donation_clawbacks c
+      WHERE c.donation_id = (SELECT donation_id FROM scholarship_fundings WHERE id = :f)
+         OR c.donation_id IN (SELECT e.source_donation_id FROM scholarship_fundings sf
+                              JOIN campaign_funding_entries e ON e.id = sf.campaign_funding_entry_id
+                              WHERE sf.id = :f AND e.source_donation_id IS NOT NULL)`,
+  ).get({ f: fundingId }) as { t: number }).t) || 0;
+  return { id: fundingId, amount, applied, returned: 0, clawedBack, available: Math.max(0, amount - applied - clawedBack) };
 }
 
 export function getSponsorshipReceiptPosition(db: Database, receiptId: string): FundingSourcePosition {
@@ -307,7 +331,15 @@ export function getSponsorshipReceiptPosition(db: Database, receiptId: string): 
       WHERE source_sponsorship_receipt_id = ?`,
   ).get(receiptId) as { t: number }).t) || 0;
   const amount = Number(row.amount) || 0;
-  return { id: receiptId, amount, applied, returned, available: Math.max(0, amount - applied - returned) };
+  // W16: clawbacks attributed to the donation behind this receipt.
+  const clawedBack = Number((db.prepare(
+    `SELECT COALESCE(SUM(c.amount), 0) AS t FROM donation_clawbacks c
+      WHERE c.donation_id = (SELECT donation_id FROM sponsorship_receipts WHERE id = :r)
+         OR c.donation_id IN (SELECT e.source_donation_id FROM sponsorship_receipts sr
+                              JOIN campaign_funding_entries e ON e.id = sr.campaign_funding_entry_id
+                              WHERE sr.id = :r AND e.source_donation_id IS NOT NULL)`,
+  ).get({ r: receiptId }) as { t: number }).t) || 0;
+  return { id: receiptId, amount, applied, returned, clawedBack, available: Math.max(0, amount - applied - returned - clawedBack) };
 }
 
 export function getCampaignFundingEntryPosition(db: Database, entryId: string): FundingSourcePosition {
@@ -318,7 +350,13 @@ export function getCampaignFundingEntryPosition(db: Database, entryId: string): 
           + COALESCE((SELECT SUM(amount) FROM sponsorship_receipts WHERE campaign_funding_entry_id = ?), 0) AS t`,
   ).get(entryId, entryId) as { t: number }).t) || 0;
   const amount = Number(row.amount) || 0;
-  return { id: entryId, amount, applied, returned: 0, available: Math.max(0, amount - applied) };
+  // W16: clawbacks on the donation that created this entry reduce its capacity.
+  const clawedBack = Number((db.prepare(
+    `SELECT COALESCE(SUM(c.amount), 0) AS t FROM donation_clawbacks c
+       JOIN campaign_funding_entries e ON e.source_donation_id = c.donation_id
+      WHERE e.id = :e AND e.origin_kind = 'restricted_donation'`,
+  ).get({ e: entryId }) as { t: number }).t) || 0;
+  return { id: entryId, amount, applied, returned: 0, clawedBack, available: Math.max(0, amount - applied - clawedBack) };
 }
 
 // ── Commands ───────────────────────────────────────────────────────────────
@@ -675,6 +713,8 @@ export interface SponsorshipPosition {
   /** Still applicable while the agreement is active. */
   available: number;
   status: 'active' | 'completed' | 'terminated';
+  /** W16: money returned to funders via clawbacks attributed to this agreement. */
+  clawedBack: number;
 }
 
 export function getSponsorshipPosition(db: Database, agreementId: string): SponsorshipPosition {
@@ -702,6 +742,16 @@ export function getSponsorshipPosition(db: Database, agreementId: string): Spons
     ).get(agreementId) as { t: number }).t,
   ) || 0;
 
+  // W16: clawbacks on donations that funded this agreement reduce capacity.
+  const clawedBack = Number((db.prepare(
+    `SELECT COALESCE(SUM(c.amount), 0) AS t FROM donation_clawbacks c
+      WHERE c.donation_id IN (
+        SELECT sr.donation_id FROM sponsorship_receipts sr WHERE sr.agreement_id = :a AND sr.donation_id IS NOT NULL
+        UNION
+        SELECT e.source_donation_id FROM sponsorship_receipts sr
+          JOIN campaign_funding_entries e ON e.id = sr.campaign_funding_entry_id
+         WHERE sr.agreement_id = :a AND e.source_donation_id IS NOT NULL)`,
+  ).get({ a: agreementId }) as { t: number }).t) || 0;
   return {
     agreementId,
     donorId: agreement.donor_id,
@@ -711,7 +761,8 @@ export function getSponsorshipPosition(db: Database, agreementId: string): Spons
     received,
     applied,
     returned,
-    available: Math.max(0, received - applied - returned),
+    clawedBack,
+    available: Math.max(0, received - applied - returned - clawedBack),
     status: agreement.status,
   };
 }

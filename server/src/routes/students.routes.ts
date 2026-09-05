@@ -1813,6 +1813,47 @@ studentsRouter.patch('/:id/status', requirePermission('Student.Edit'), ah(async 
   res.json({ ok: true });
 }));
 
+// ── WAVE 16 · Branch transfer (explicit relocation event) ────────────────────
+// Standard semantics (owner-authorized): the student's OPEN financial state
+// follows the student — obligations and invoices move in the same transaction,
+// guarded by the student-branch triggers — while HISTORICAL rows (payments,
+// ledger, receipts) keep the branch where the money actually moved. The
+// transfer itself is an append-only event row; nothing is rewritten.
+studentsRouter.post('/:id/transfer-branch', requirePermission('Student.Transfer'), ah(async (req, res) => {
+  const user = getUserContext(req);
+  const toBranchId = requiredText(req.body?.toBranchId, 'Destination branch id', TEXT_LIMITS.short);
+  const reason = requiredText(req.body?.reason, 'Transfer reason', TEXT_LIMITS.notes);
+  const student = requireStudent(req, req.params.id);
+  assertStudentOperable(student, 'transfer this student');
+  const fromBranchId = student.branch_id as string;
+  if (toBranchId === fromBranchId) throw new HttpError(400, 'The student already belongs to that branch.');
+  if (!canAccessBranchResource(req, fromBranchId)) throw new HttpError(403, 'You cannot transfer students out of this branch.');
+  if (!canAccessBranchResource(req, toBranchId)) throw new HttpError(403, 'You cannot transfer students into that branch.');
+  if (!db.prepare('SELECT 1 FROM branches WHERE id = ? AND is_active = 1').get(toBranchId)) {
+    throw new HttpError(404, 'Destination branch not found or inactive.');
+  }
+
+  const transferId = id('sbt');
+  db.transaction(() => {
+    // The event row first (its CHECK guards from ≠ to at the database layer).
+    db.prepare(
+      `INSERT INTO student_branch_transfers (id, student_id, from_branch_id, to_branch_id, reason, operator_user_id, operator_name)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(transferId, student.id, fromBranchId, toBranchId, reason, user.userId, user.fullName);
+    // Then the relocation, student first: the obligation/invoice branch
+    // triggers compare against the student's NEW branch, so the open state
+    // follows atomically and no row can be left behind.
+    db.prepare('UPDATE students SET branch_id = ? WHERE id = ?').run(toBranchId, student.id);
+    db.prepare(`UPDATE student_obligations SET branch_id = ? WHERE student_id = ? AND status = 'open'`).run(toBranchId, student.id);
+    db.prepare(`UPDATE invoices SET branch_id = ? WHERE student_id = ? AND status IN ('issued','partial','overdue')`).run(toBranchId, student.id);
+  })();
+
+  writeAudit(req, `Transferred student ${student.id} from branch ${fromBranchId} to ${toBranchId}`, {
+    oldValue: fromBranchId, newValue: toBranchId,
+  });
+  res.json({ ok: true, id: transferId, fromBranchId, toBranchId });
+}));
+
 studentsRouter.post('/:id/transfer', requirePermission('Student.Transfer'), ah(async (req, res) => {
   const user = getUserContext(req);
   const toClassId = requiredText(req.body?.toClassId, 'Destination class id', TEXT_LIMITS.short);

@@ -137,10 +137,15 @@ export function computeReconciliation(opts: { branchId: string | null; isAll: bo
   const cashIncome = scalarValue(cashIncomeSql, 'AND branch_id = ?', boundBranchId);
   const expectedSaving = scalarValue(savingSql, 'AND branch_id = ?', boundBranchId);
   const ownerDrawings = scalarValue(ownerDrawingSql, 'AND branch_id = ?', boundBranchId);
+  // W16: clawback repayments move branch cash out through a P&L-neutral type;
+  // expected main must fall with them or every post-reclaim branch shows a
+  // permanent phantom-cash variance.
+  const reclaimSql = `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type='restricted_reclaim'`;
+  const reclaims = scalarValue(reclaimSql, 'AND branch_id = ?', boundBranchId);
   // Whole AFN throughout (D-12/D-22): every money column is an INTEGER, so a
   // variance is either zero or a real discrepancy. A two-decimal tolerance here
   // would only hide a genuine one-afghani break.
-  const expectedMain = cashIncome - expectedSaving - ownerDrawings;
+  const expectedMain = cashIncome - expectedSaving - ownerDrawings + reclaims;
 
   const acctSql = `SELECT COALESCE(SUM(main_balance),0) AS main, COALESCE(SUM(saving_balance),0) AS saving FROM finance_accounts WHERE scope_type = 'branch'`;
   const acctRow = (boundBranchId === null
