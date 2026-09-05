@@ -421,6 +421,25 @@
 </div>
 
 <div class="card">
+    <h2>Class gradesheets</h2>
+    <p class="sub">A gradesheet compiles one class: roster × attempts × live result × correction lineage. Only an assigned teacher of the class or academic oversight may open it; released results are the official lines.</p>
+    @if ($gradeableClasses->isEmpty())
+        <p class="empty">No classes are open to you for grading review.</p>
+    @else
+        <table class="grid">
+            <tr><th>Class</th><th>State</th><th></th></tr>
+            @foreach ($gradeableClasses as $gradeableClass)
+                <tr>
+                    <td>{{ \Illuminate\Support\Str::limit($gradeableClass->id, 18) }}</td>
+                    <td><span class="pill {{ $gradeableClass->lifecycle_state === 'active' ? 'ok' : '' }}">{{ $gradeableClass->lifecycle_state }}</span></td>
+                    <td><a class="btn small" href="{{ route('academic.gradesheet', $gradeableClass->id) }}">Open gradesheet</a></td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
+
+<div class="card">
     <h2>Attempts awaiting a score</h2>
     @if ($attempts->isEmpty())
         <p class="empty">No submitted attempts awaiting a score.</p>

@@ -129,6 +129,7 @@ Route::middleware('employee')->group(function (): void {
         Route::post('results/{resultId}/release', [AcademicController::class, 'releaseResult'])->name('result.release');
         Route::post('results/{resultId}/corrections', [AcademicController::class, 'proposeCorrection'])->name('result.correction');
         Route::post('corrections/{correctionId}/approve', [AcademicController::class, 'approveCorrection'])->name('correction.approve');
+        Route::get('gradesheets/{classId}', [AcademicController::class, 'gradesheet'])->name('gradesheet');
         Route::post('graduations', [AcademicController::class, 'proposeGraduation'])->name('graduation.propose');
         Route::post('graduations/{decisionId}/review', [AcademicController::class, 'reviewGraduation'])->name('graduation.review');
         Route::post('graduations/{decisionId}/approve', [AcademicController::class, 'approveGraduation'])->name('graduation.approve');

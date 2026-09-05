@@ -33,6 +33,7 @@ use App\Modules\Academic\Models\ResultCorrection;
 use App\Modules\Academic\Models\Skill;
 use App\Modules\Academic\Models\TeacherAssignment;
 use App\Modules\Academic\Models\Transcript;
+use App\Modules\Academic\Queries\GradesheetQuery;
 use App\Modules\Identity\Models\Person;
 use App\Modules\Organization\Models\Branch;
 use App\Modules\Students\Models\Student;
@@ -76,6 +77,7 @@ final class AcademicController extends Controller
             'levels' => ProgramVersionLevel::query()->orderBy('program_version_id')->orderBy('ordinal')->limit(300)->get(),
             'availabilities' => BranchAvailability::query()->orderBy('id')->limit(200)->get(),
             'offerings' => Offering::query()->orderBy('id')->limit(200)->get(),
+            'gradeableClasses' => app(GradesheetQuery::class)->accessibleClasses($this->actor()),
         ]);
     }
 
@@ -86,6 +88,15 @@ final class AcademicController extends Controller
             'classes' => ClassModel::query()->where('lifecycle_state', 'active')->orderBy('id')->get(),
             'skills' => Skill::query()->where('lifecycle_state', 'active')->orderBy('key')->get(),
             'enrollments' => Enrollment::query()->where('lifecycle_state', 'active')->orderBy('class_id')->limit(1000)->get(),
+        ]);
+    }
+
+    public function gradesheet(string $classId): View
+    {
+        $class = ClassModel::query()->findOrFail($classId);
+
+        return view('academic.gradesheet', [
+            'gradesheet' => app(GradesheetQuery::class)->forClass($this->actor(), $class),
         ]);
     }
 
