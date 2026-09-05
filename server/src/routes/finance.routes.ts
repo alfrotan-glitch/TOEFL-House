@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { runFinancialInvariantChecks } from '../core/finance/invariant-checker.js';
 import {
   CAPITAL_INJECTION_CATEGORY,
   OPERATING_EXPENSE_SQL,
@@ -1129,6 +1130,24 @@ financeRouter.put(
     writeAudit(req, `Changed daily savings percentage to ${percent}%`);
     res.json({ ok: true, percent });
   })
+);
+
+// ---------- Invariant Checker ----------
+// An independent auditor over the raw tables: it re-derives every financial
+// invariant without reusing the report/balance code it audits, so it cannot
+// inherit a bug from them. Empty findings = PASS. Owner/finance only: the
+// output names concrete rows and is an operational audit surface.
+financeRouter.get(
+  '/invariants',
+  requirePermission('Ledger.View', 'Finance.Report'),
+  ah(async (_req, res) => {
+    const findings = runFinancialInvariantChecks(db);
+    res.json({
+      status: findings.length === 0 ? 'pass' : 'fail',
+      checkedAt: new Date().toISOString(),
+      findings,
+    });
+  }),
 );
 
 // ---------- Reconciliation ----------

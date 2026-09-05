@@ -180,3 +180,151 @@ Findings surfaced by the continuing ownership pass, recorded under the same
 10. **Remediation layer — FIXED at the architectural level.** Emission truth is now governed where the vocabulary lives: `EMITTED_EVENT_TYPES` + `DYNAMIC_EMIT_SITES` in `event-registry.ts`, with `isEmittedEventType()` exported. Automation creation and workflow-definition creation reject reserved triggers with honest 400s naming the problem and pointing at `GET /api/events/types`; that endpoint now serves each catalog entry with an `emitted` flag so any future picker is honest by construction. `event-registry-honesty.test.ts` scans the real source tree and fails on drift in **both** directions (a type claimed emitted must have a literal `.emit(` call site, or be registered as dynamic with its owning file verified; every literal emit type must be claimed; reserved types must appear nowhere else in non-test source — no hidden emitters, no dead consumers) and asserts every seeded automation/workflow trigger is triggerable. Registry rows updated (canonical-authority: which events actually fire; invariants: trigger-surface honesty).
 
 **Verification (full):** server suite 2870 tests / 210 files — 2868 passed, 2 skipped (pre-existing), 0 failed; server lint/typecheck green; mutation gate 18/18, 0 surviving; schema preflight 118 tables; cleanliness PASS; live drills in the session record.
+
+---
+
+## FINANCIAL-SUBSYSTEM FORENSIC CONTINUATION — 2026-09-05
+
+An adversarial pass over the entire financial subsystem (obligations, invoices,
+payments, refunds, payroll, profit distribution, budget envelopes, discounts,
+holds, diploma/exam cash) under the standing rule: nothing is trusted — not
+tests, not prior audits, not green suites — until it earns evidence.
+
+### Defects found and fixed (each with a pinning test)
+
+**F-B1 · Drop + re-enrol duplicated the term's charge.** A drop defers the
+term; re-enrolment in that same term INSERTED a fresh `student_semesters` row
+priced 0 (pre-F4) or full price (post-F4) beside the deferred one — either
+hiding the live term's debt from every status='active' balance or doubling the
+receivable. Re-enrolment now REACTIVATES the deferred/completed term (one row,
+same fee, same payments, no second invoice). Unmasked by wp05 C-1 once the
+zero-priced insert was removed; pinned there and by FS-8's resume exception.
+
+**F-B2 · Retake pricing lost the retake charge.** The class-fee authority fix
+replaced the WHOLE tuition component, so a retake term (class fee + retake fee
+rule) was invoiced at the class fee alone. The override now replaces only the
+seat component; tuition-type fees alongside it survive (wp07, live drill:
+retake term = class 6,500 + retake 2,000 = 8,500).
+
+**F-B3 · BOS withdrawal ceiling replenished geometrically.**
+`computeProfitDistribution` added `distributed` back to profit while the
+taxonomy (post-F6) already excluded owner drawings from operating expense —
+every withdrawal grew the tier basis and refunded 15% of itself to the
+allowance (proven live: a 24,000 ceiling paid 28,234 and was still open;
+Σ geometric with r=0.15 → ceiling/0.85). The add-back is removed; the
+allowance still subtracts distributions. All five wp11 withdrawal tests plus a
+live drain drill (Σ 5,549 ≤ 5,550) hold.
+
+**F-B4 · Employee payroll: full-payment conflict classification and the
+decided partial cap.** A second full payment against a settled month escaped
+with the generic unique-violation message; the route now classifies it
+deterministically (the index remains the concurrency backstop). The previously
+open question — whether repeated partials are capped — is DECIDED: salary
+payments (partials included) are bounded by the period's remaining due, base
+minus everything posted, advances included; advances remain uncapped (they are
+receivables against future pay, not wage cost). Test rebased to the decided
+contract.
+
+**F-B5 · The academic hold was scope-blind and surface-blind.** The hold
+summed only ACTIVE-scope debt, so dropping/completing an unpaid term erased it
+from the gate (its own doc comment says "previous semesters"); and the journey
+enrolment surface never called the hold at all — a blocked student enrolled
+through the journey. The gate now lives in `core/academic/academic-hold.ts`,
+reads the FULL lifetime balance, is applied by all three enrolment surfaces,
+carries a resume exception (re-entering a term the student already holds adds
+no new seat/receivable), and keeps the owner/GM/finance override. FS-8 pins
+all four properties.
+
+**F-B6 · registrations carried financial lookalikes.** `amount_paid`,
+`receipt_number`, `discount_applied` were written 0/NULL/0 by every producer
+while the dashboard summed `discount_applied` as "registration discounts
+granted" — a permanently understated figure next to the real one. Columns
+dropped from the canonical schema and converged on existing databases;
+discounts granted are read from the single document authority (invoices).
+
+**F-B7 · Split payments refunded against an arbitrary obligation.**
+`refundPaymentAllocation` read ONE allocation row (`.get()`, no ORDER BY) for a
+payment the allocation engine explicitly permits to split across obligations,
+and bounded the refund against that single row. Reversal now walks ALL active
+allocations LIFO, re-allocating retained settlement against the same
+obligation it came from (FS-9: 4,000+2,000 split, refund 2,500 → 2,000 off the
+later term + 500 off the earlier).
+
+**F-B8 · Journey enrolments ignored standing discount authorizations.** With
+no explicit `discountAmount`, a student with an approved sponsorship/family
+grant paid full price on the journey surface while the desk surfaces applied
+the same grant — two prices for one student decided by which screen enrolled
+them. The explicit-amount ceiling was also derived from catalog tuition while
+the charge is the class fee. The route now resolves a ceiling probe AND the
+standing discount through the CFG-1 authority against the basis the service
+will actually charge (FS-10: grant 20% → term 6,500/5,200, invoice
+6,500/1,300/5,200, cap 5,200).
+
+**F-B9 · Diploma cash had no payment, no receipt, no refund path.**
+Certificate issuance booked diploma income with no `payments` row — invisible
+to payment history, outside the gap-free receipt series, impossible to refund
+(the refund route works by paymentId). Now a payment row with receipt, keyed
+`diploma-fee:{certNo}`, income linked via `payment_id` (erp-forensic rebased;
+the once-per-student and desk-first ordering guarantees still hold).
+
+**F-B10 · Two clocks and offset-dependent date math.** Writers dated money
+with `today()` (server-local) while three reader defaults used UTC
+`toISOString()` — authorization windows and policy as-of dates could flip a
+day early/late depending on the surface. Date+N arithmetic mixed a UTC parse
+with a local add and a UTC render, making due dates, freeze windows and report
+comparison windows depend on the server's timezone offset. Clock defaults now
+use the one business clock; all date arithmetic is UTC-pure (`addDaysISO`).
+
+**F-B11 · wp06 fixture flake (not a product defect).** A session fixture
+starting 00:45 made the single-mark test fail whenever the suite ran in the
+first 45 minutes of the day (marking is gated on session start). Fixture now
+starts 00:00.
+
+### The invariant checker (independent verification instrument)
+
+`core/finance/invariant-checker.ts` re-derives ten financial invariants
+(I1 allocation ≤ payment, I2 settlement ≤ due, I3 obligation↔term pricing
+integrity, I4 invoice↔term net parity, I5 invoice status vs. collected cash,
+I6 no settlement of cancelled obligations, I7 payroll ≤ base per period,
+I8 ledger↔payment sign agreement, I9 receipt series never forks,
+I10 envelopes never negative) directly from the raw tables WITHOUT reusing
+the report/balance code it audits, and exposes them at
+`GET /api/finance/invariants`. A check that cannot RUN is a finding, not a pass.
+
+First run against the LIVE database found I2 violated exactly once — the
+pre-remediation over-collection artifact from the original drill (8,000
+settled on a 6,000 term, written by the pre-fix server). Repaired through the
+system's own refund instrument (LIFO reversal returned the term to 6,000/6,000
+and the cash to the student). Re-run: **PASS — no violations.** The checker's
+own test proves detection (seeded I1 violation caught; the receipt-fork probe
+documents the schema-level UNIQUE index as the first layer).
+
+### Verified sound (adversarially probed, no defect)
+
+- **Invoice-cancel semantics** (live-probed): paid → 400; unpaid → 200; fully
+  refunded (net 0) → 200; partially refunded (net > 0) → 400. The guard sums
+  completed payments NET of refunds.
+- **Savings-sweep reversal** — negative income takes main first and reclaims
+  the remainder from savings with a contra ledger row; refunds never sweep
+  (pinned by `refund-reclaims-savings.test.ts`).
+- **DB-ledger defenses observed while testing**: allocation facts are
+  append-only and immutable-except-reversal by trigger; `payments.receipt_number`
+  is UNIQUE (a fork cannot be written).
+
+### Design note (recorded, not a weakness finding)
+
+No production API funds a budget envelope from zero — envelopes are only
+movable between each other (month-end return/transfer). A greenfield branch's
+payroll envelopes start at 0/0, so a branch cannot run payroll until someone
+either inserts funds directly or receives a transfer. Operationally worth a
+deliberate funding surface; no money can be created or lost through the gap.
+
+### Verification
+
+- Server suite **2,885 / 2,885** (212 files), typecheck/lint green.
+- Forensic suite FS-1..FS-10 **10/10**.
+- Live drill (running server, fresh world): 15/15 — class-fee pricing on both
+  enrolment surfaces, over-collect caps (desk + cross-surface), drop+re-enrol
+  reactivation with single invoice, retake composition, payroll partial
+  cap/advance freedom, BOS ceiling drain.
+- Invariant checker on the live database: **PASS**.
