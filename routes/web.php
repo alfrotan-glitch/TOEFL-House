@@ -113,6 +113,11 @@ Route::middleware('employee')->group(function (): void {
         Route::get('sessions', [AcademicController::class, 'sessions'])->name('sessions');
         Route::post('sessions', [AcademicController::class, 'scheduleSession'])->name('schedule');
         Route::post('sessions/{sessionId}/attendance', [AcademicController::class, 'recordAttendance'])->name('attendance');
+        Route::post('rooms', [AcademicController::class, 'defineRoom'])->name('room.define');
+        Route::post('rooms/{roomId}/transition', [AcademicController::class, 'transitionRoom'])->name('room.transition');
+        Route::post('rooms/{roomId}/resize', [AcademicController::class, 'resizeRoom'])->name('room.resize');
+        Route::post('sections', [AcademicController::class, 'defineSection'])->name('section.define');
+        Route::post('sections/{sectionId}/transition', [AcademicController::class, 'transitionSection'])->name('section.transition');
         Route::post('enrollments', [AcademicController::class, 'requestEnrollment'])->name('enrollment.request');
         Route::post('enrollments/{enrollmentId}/activate', [AcademicController::class, 'activateEnrollment'])->name('enrollment.activate');
         Route::post('enrollments/{enrollmentId}/freeze', [AcademicController::class, 'freezeEnrollment'])->name('enrollment.freeze');

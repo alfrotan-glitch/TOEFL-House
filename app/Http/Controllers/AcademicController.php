@@ -10,6 +10,7 @@ use App\Modules\Academic\Commands\IssueTranscript;
 use App\Modules\Academic\Commands\MaintainAcademicStructure;
 use App\Modules\Academic\Commands\MaintainClass;
 use App\Modules\Academic\Commands\MaintainEnrollment;
+use App\Modules\Academic\Commands\MaintainRoom;
 use App\Modules\Academic\Commands\MaintainSkill;
 use App\Modules\Academic\Commands\ManageAcademicAppeal;
 use App\Modules\Academic\Commands\ManageAcademicOffering;
@@ -17,10 +18,12 @@ use App\Modules\Academic\Commands\ManageAssessmentResult;
 use App\Modules\Academic\Commands\RecordAttendance;
 use App\Modules\Academic\Models\AcademicAppeal;
 use App\Modules\Academic\Models\AcademicPeriod;
+use App\Modules\Academic\Models\AcademicRoom;
 use App\Modules\Academic\Models\AssessmentAttempt;
 use App\Modules\Academic\Models\AssessmentResult;
 use App\Modules\Academic\Models\BranchAvailability;
 use App\Modules\Academic\Models\ClassModel;
+use App\Modules\Academic\Models\ClassSection;
 use App\Modules\Academic\Models\ClassSession;
 use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Academic\Models\GraduationDecision;
@@ -34,6 +37,7 @@ use App\Modules\Academic\Models\Skill;
 use App\Modules\Academic\Models\TeacherAssignment;
 use App\Modules\Academic\Models\Transcript;
 use App\Modules\Academic\Queries\GradesheetQuery;
+use App\Modules\Academic\Queries\TimetableQuery;
 use App\Modules\Identity\Models\Person;
 use App\Modules\Organization\Models\Branch;
 use App\Modules\Students\Models\Student;
@@ -81,13 +85,29 @@ final class AcademicController extends Controller
         ]);
     }
 
-    public function sessions(): View
+    public function sessions(Request $request): View
     {
+        $filter = $request->validate([
+            'timetable_branch_id' => ['nullable', 'string'],
+            'timetable_day' => ['nullable', 'date'],
+        ]);
+
+        $timetable = null;
+        if (! empty($filter['timetable_branch_id'])) {
+            $day = ! empty($filter['timetable_day']) ? CarbonImmutable::parse($filter['timetable_day']) : null;
+            $timetable = app(TimetableQuery::class)->forBranch($filter['timetable_branch_id'], $day);
+        }
+
         return view('academic.sessions', [
-            'sessions' => ClassSession::query()->orderByDesc('scheduled_on')->limit(200)->get(),
+            'sessions' => ClassSession::query()->with(['room', 'section'])->orderByDesc('scheduled_on')->limit(200)->get(),
             'classes' => ClassModel::query()->where('lifecycle_state', 'active')->orderBy('id')->get(),
+            'sectionClasses' => ClassModel::query()->orderBy('id')->limit(200)->get(),
             'skills' => Skill::query()->where('lifecycle_state', 'active')->orderBy('key')->get(),
             'enrollments' => Enrollment::query()->where('lifecycle_state', 'active')->orderBy('class_id')->limit(1000)->get(),
+            'rooms' => AcademicRoom::query()->orderBy('branch_id')->orderBy('code')->limit(200)->get(),
+            'sections' => ClassSection::query()->orderBy('class_id')->orderBy('name')->limit(300)->get(),
+            'branches' => Branch::query()->orderBy('name')->limit(100)->get(),
+            'timetable' => $timetable,
         ]);
     }
 
@@ -108,9 +128,11 @@ final class AcademicController extends Controller
             'starts_at' => ['required', 'string', 'regex:/^\d{2}:\d{2}$/'],
             'ends_at' => ['required', 'string', 'regex:/^\d{2}:\d{2}$/'],
             'skill_id' => ['nullable', 'string'],
+            'room_id' => ['nullable', 'string'],
+            'section_id' => ['nullable', 'string'],
         ]);
 
-        $skillId = $input['skill_id'] ?? null;
+        $optional = fn (?string $value): ?string => ($value !== null && $value !== '') ? $value : null;
 
         app(MaintainClass::class)->scheduleSession(
             $this->actor(),
@@ -119,7 +141,9 @@ final class AcademicController extends Controller
             $input['starts_at'],
             $input['ends_at'],
             $this->idempotencyKey('academic.schedule'),
-            ($skillId !== null && $skillId !== '') ? $skillId : null,
+            $optional($input['skill_id'] ?? null),
+            $optional($input['room_id'] ?? null),
+            $optional($input['section_id'] ?? null),
         );
 
         return redirect()->route('academic.sessions')->with('success', 'Session scheduled.');
@@ -141,6 +165,96 @@ final class AcademicController extends Controller
         );
 
         return redirect()->route('academic.sessions')->with('success', 'Attendance fact recorded.');
+    }
+
+    public function defineRoom(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'branch_id' => ['required', 'string'],
+            'name' => ['required', 'string', 'max:255'],
+            'code' => ['required', 'string', 'max:255'],
+            'capacity' => ['required', 'integer', 'min:1', 'max:10000'],
+            'room_type' => ['required', 'in:classroom,lab,computer,hall,other'],
+        ]);
+
+        app(MaintainRoom::class)->defineRoom(
+            $this->actor(),
+            $input['branch_id'],
+            $input['name'],
+            $input['code'],
+            (int) $input['capacity'],
+            $input['room_type'],
+            $this->idempotencyKey('academic.room.define'),
+        );
+
+        return redirect()->route('academic.sessions')->with('success', 'Room defined (available).');
+    }
+
+    public function transitionRoom(Request $request, string $roomId): RedirectResponse
+    {
+        $input = $request->validate([
+            'to_state' => ['required', 'in:available,maintenance,retired'],
+        ]);
+
+        app(MaintainRoom::class)->transition(
+            $this->actor(),
+            AcademicRoom::query()->findOrFail($roomId),
+            $input['to_state'],
+            $this->idempotencyKey('academic.room.transition'),
+        );
+
+        return redirect()->route('academic.sessions')->with('success', 'Room state moved to '.$input['to_state'].'.');
+    }
+
+    public function resizeRoom(Request $request, string $roomId): RedirectResponse
+    {
+        $input = $request->validate([
+            'capacity' => ['required', 'integer', 'min:1', 'max:10000'],
+        ]);
+
+        app(MaintainRoom::class)->resize(
+            $this->actor(),
+            AcademicRoom::query()->findOrFail($roomId),
+            (int) $input['capacity'],
+            $this->idempotencyKey('academic.room.resize'),
+        );
+
+        return redirect()->route('academic.sessions')->with('success', 'Room capacity resized.');
+    }
+
+    public function defineSection(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'class_id' => ['required', 'string'],
+            'name' => ['required', 'string', 'max:255'],
+            'capacity' => ['required', 'integer', 'min:1', 'max:10000'],
+        ]);
+
+        app(MaintainClass::class)->defineSection(
+            $this->actor(),
+            ClassModel::query()->findOrFail($input['class_id']),
+            $input['name'],
+            (int) $input['capacity'],
+            $this->idempotencyKey('academic.section.define'),
+        );
+
+        return redirect()->route('academic.sessions')->with('success', 'Section defined (planned). Open it to schedule sessions in it.');
+    }
+
+    public function transitionSection(Request $request, string $sectionId): RedirectResponse
+    {
+        $input = $request->validate([
+            'to_state' => ['required', 'in:open,cancelled,closed,archived'],
+        ]);
+
+        app(MaintainClass::class)->transitionSection(
+            $this->actor(),
+            ClassSection::query()->findOrFail($sectionId),
+            $input['to_state'],
+            $this->idempotencyKey('academic.section.transition'),
+        );
+
+        return redirect()->route('academic.sessions')->with('success', 'Section state moved to '.$input['to_state'].'.');
     }
 
     public function requestEnrollment(Request $request): RedirectResponse
