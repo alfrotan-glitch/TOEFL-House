@@ -601,3 +601,54 @@ first-principles invariant (I16) that does not share SQL with the reports.
 The income-classification residual rule was audited and currently holds.
 Next surfaces to attack: receivables independent derivation vs reports,
 SoD (self-approval above threshold), donation restriction economics.
+
+### Wave-6 continued — receivables four-way reconciliation, SoD, donation restrictions
+
+**Receivables (report vs independent derivation).** Re-derived branch
+arrears from raw events (active terms − completed payments − active aid
+allocations, per-student floored) and compared with every representation:
+
+- `GET /reports/overview` `financial.outstanding.tuition` = **25,000** —
+  matches the independent tuition-only derivation **exactly** (Desk
+  6,500−2,500=4,000 ×2; Journey 15,000−6,500=8,500 ×2). The report and the
+  BOS arrears share the terms−payments authority (`getBranchOutstanding`),
+  which F18b made aid-aware; the invoice-basis figure is NOT used for
+  arrears. (An initial 21,000-vs-25,000 "mismatch" was the audit probe's own
+  category-scope error — registration payments subtracted from tuition due.
+  Decomposition before declaration, always.)
+- The invoice-based derivation (22,000) disagrees per-student in BOTH
+  directions for structural reasons: desk-path semester payments carry no
+  `invoice_id`, and desk-path terms have no invoice at all. It is used only
+  for `nonTuition`, which is explicitly document-borne and per-invoice
+  floored, with its basis stated in the response.
+- **Control note (recorded, not a defect):** a desk payment with category
+  `other` never settles a non-tuition invoice; staff bypassing invoice-pay
+  leave documented debt overstated. Non-tuition collections should route
+  through invoice-pay; a reconciliation line for unlinked `other` payments
+  is a candidate follow-up.
+
+**Segregation of duties.** `/expense-requests/:id/decide` refuses
+requester==approver (403) unless the approver is the owner (the capital
+authority; deliberate). Threshold auto-pay on `/operational-payments` is
+the documented design (threshold-gated, notified, audited).
+
+**Donation restriction economics.** Restrictions are a real subledger, not
+metadata: donations flow into scholarship funds / sponsorship receipts /
+restricted campaign entries (`getDonationUnallocated` caps one destination);
+allocations are triple-guarded (fund available, award remaining, obligation
+outstanding), transactional; reversal returns money to the AWARD (donor
+money stays committed) with release-to-fund as a separate explicit act. No
+double income: the allocation moves no cash; the donation was the income.
+
+**Payroll void re-check.** `BEGIN IMMEDIATE` + fresh re-read +
+`status='posted'` recheck inside the transaction: a double void serializes
+to 409 and cannot double-credit the envelope. The unguarded
+`stmtUpdateBudgetAmount` is reachable only with negative (credit) values.
+
+**Wave 6 closed.** Two material findings fixed (W6-1 books acquisition
+accounting, W6-2 business timezone), one new first-principles invariant
+(I16), receivables reconciled independently and exactly, SoD and donation
+restrictions verified sound, three control notes recorded. Remaining
+follow-ups: inventory-at-cost visibility in the Books workspace, unlinked
+`other`-payment reconciliation line, legacy pre-declaration receipts
+surfacing.
