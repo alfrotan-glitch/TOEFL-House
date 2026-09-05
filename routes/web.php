@@ -105,6 +105,10 @@ Route::middleware('employee')->group(function (): void {
         Route::post('programs/{programId}/versions', [AcademicController::class, 'publishProgramVersion'])->name('version.publish');
         Route::post('periods', [AcademicController::class, 'definePeriod'])->name('period.define');
         Route::post('periods/{periodId}/transition', [AcademicController::class, 'transitionPeriod'])->name('period.transition');
+        Route::post('levels/prerequisites', [AcademicController::class, 'definePrerequisite'])->name('level.prerequisite.define');
+        Route::post('levels/prerequisites/{prerequisiteId}/retire', [AcademicController::class, 'retirePrerequisite'])->name('level.prerequisite.retire');
+        Route::post('levels/rules', [AcademicController::class, 'defineProgressionRule'])->name('level.rule.define');
+        Route::post('levels/rules/{ruleId}/retire', [AcademicController::class, 'retireProgressionRule'])->name('level.rule.retire');
         Route::post('skills', [AcademicController::class, 'registerSkill'])->name('skill.register');
         Route::post('skills/{skillId}/retire', [AcademicController::class, 'retireSkill'])->name('skill.retire');
         Route::post('classes', [AcademicController::class, 'defineClass'])->name('class.define');

@@ -421,6 +421,96 @@
 </div>
 
 <div class="card">
+    <h2>Level progression rules &amp; prerequisites</h2>
+    <p class="sub">Governance for level-aware progression: a rule sets the pass mark and repeat cap of one level (a level holds at most one active rule); a prerequisite declares that a level requires completing another level of the same program version, and cycles are refused. Retired rows stay as history.</p>
+    <form method="POST" action="{{ route('academic.level.rule.define') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <select name="program_version_level_id" required>
+                <option value="">Select a level…</option>
+                @foreach ($levels as $level)
+                    <option value="{{ $level->id }}">{{ $level->title }} ({{ $level->cefr_ref }})</option>
+                @endforeach
+            </select>
+            <input name="minimum_passing_score" type="text" inputmode="decimal" placeholder="Pass mark 0–100 (optional)" style="width:190px">
+            <input name="max_repeats" type="number" min="1" max="100" placeholder="Max repeats (optional)" style="width:180px">
+        </div>
+        <div class="actions"><button type="submit" class="btn">Define rule</button></div>
+    </form>
+    @if ($levelRules->isEmpty())
+        <p class="empty">No progression rules defined.</p>
+    @else
+        <table class="grid" style="margin-top:8px">
+            <tr><th>Level</th><th>Pass mark</th><th>Max repeats</th><th>State</th><th></th></tr>
+            @foreach ($levelRules as $rule)
+                <tr>
+                    <td>{{ $levels->firstWhere('id', $rule->program_version_level_id)?->title ?? \Illuminate\Support\Str::limit($rule->program_version_level_id, 14) }}</td>
+                    <td>{{ $rule->minimum_passing_score ?? '—' }}</td>
+                    <td>{{ $rule->max_repeats ?? '—' }}</td>
+                    <td><span class="pill {{ $rule->lifecycle_state === 'active' ? 'ok' : '' }}">{{ $rule->lifecycle_state }}</span></td>
+                    <td>
+                        @if ($rule->lifecycle_state === 'active')
+                            <form method="POST" action="{{ route('academic.level.rule.retire', $rule->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small secondary">Retire</button>
+                            </form>
+                        @else
+                            —
+                        @endif
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+    <form method="POST" action="{{ route('academic.level.prerequisite.define') }}" style="margin-top:12px">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <select name="target_level_id" required>
+                <option value="">Target level…</option>
+                @foreach ($levels as $level)
+                    <option value="{{ $level->id }}">{{ $level->title }} ({{ $level->cefr_ref }})</option>
+                @endforeach
+            </select>
+            <select name="required_level_id" required>
+                <option value="">Requires level…</option>
+                @foreach ($levels as $level)
+                    <option value="{{ $level->id }}">{{ $level->title }} ({{ $level->cefr_ref }})</option>
+                @endforeach
+            </select>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Define prerequisite</button></div>
+    </form>
+    @if ($levelPrerequisites->isEmpty())
+        <p class="empty">No prerequisites defined.</p>
+    @else
+        <table class="grid" style="margin-top:8px">
+            <tr><th>Level</th><th>Requires</th><th>State</th><th></th></tr>
+            @foreach ($levelPrerequisites as $prerequisite)
+                <tr>
+                    <td>{{ $levels->firstWhere('id', $prerequisite->target_level_id)?->title ?? \Illuminate\Support\Str::limit($prerequisite->target_level_id, 14) }}</td>
+                    <td>{{ $levels->firstWhere('id', $prerequisite->required_level_id)?->title ?? \Illuminate\Support\Str::limit($prerequisite->required_level_id, 14) }}</td>
+                    <td><span class="pill {{ $prerequisite->lifecycle_state === 'active' ? 'ok' : '' }}">{{ $prerequisite->lifecycle_state }}</span></td>
+                    <td>
+                        @if ($prerequisite->lifecycle_state === 'active')
+                            <form method="POST" action="{{ route('academic.level.prerequisite.retire', $prerequisite->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small secondary">Retire</button>
+                            </form>
+                        @else
+                            —
+                        @endif
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
+
+<div class="card">
     <h2>Progression decisions</h2>
     <p class="sub">Propose, review and approve are signed by three distinct employees in their own sessions.</p>
     <form method="POST" action="{{ route('academic.progression.propose') }}">

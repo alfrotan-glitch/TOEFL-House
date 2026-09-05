@@ -29,6 +29,8 @@ use App\Modules\Academic\Models\ClassSession;
 use App\Modules\Academic\Models\ClassWaitlistEntry;
 use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Academic\Models\GraduationDecision;
+use App\Modules\Academic\Models\LevelPrerequisite;
+use App\Modules\Academic\Models\LevelProgressionRule;
 use App\Modules\Academic\Models\Offering;
 use App\Modules\Academic\Models\Program;
 use App\Modules\Academic\Models\ProgramVersion;
@@ -81,6 +83,8 @@ final class AcademicController extends Controller
             'transcripts' => Transcript::query()->orderByDesc('issued_at')->limit(100)->get(),
             'branches' => Branch::query()->orderBy('name')->limit(100)->get(),
             'levels' => ProgramVersionLevel::query()->orderBy('program_version_id')->orderBy('ordinal')->limit(300)->get(),
+            'levelRules' => LevelProgressionRule::query()->orderBy('program_version_level_id')->limit(300)->get(),
+            'levelPrerequisites' => LevelPrerequisite::query()->orderBy('target_level_id')->limit(300)->get(),
             'availabilities' => BranchAvailability::query()->orderBy('id')->limit(200)->get(),
             'offerings' => Offering::query()->orderBy('id')->limit(200)->get(),
             'waitlistEntries' => ClassWaitlistEntry::query()->whereIn('lifecycle_state', ['waiting', 'offered'])->orderBy('class_id')->orderBy('position')->limit(300)->get(),
@@ -464,6 +468,67 @@ final class AcademicController extends Controller
         );
 
         return redirect()->route('academic.index')->with('success', 'Academic period transitioned.');
+    }
+
+    public function definePrerequisite(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'target_level_id' => ['required', 'string'],
+            'required_level_id' => ['required', 'string'],
+        ]);
+
+        app(MaintainAcademicStructure::class)->definePrerequisite(
+            $this->actor(),
+            $input['target_level_id'],
+            $input['required_level_id'],
+            $this->idempotencyKey('academic.prerequisite.define'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Level prerequisite defined (active).');
+    }
+
+    public function retirePrerequisite(Request $request, string $prerequisiteId): RedirectResponse
+    {
+        app(MaintainAcademicStructure::class)->retirePrerequisite(
+            $this->actor(),
+            LevelPrerequisite::query()->findOrFail($prerequisiteId),
+            $this->idempotencyKey('academic.prerequisite.retire'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Level prerequisite retired.');
+    }
+
+    public function defineProgressionRule(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'program_version_level_id' => ['required', 'string'],
+            'minimum_passing_score' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'max_repeats' => ['nullable', 'integer', 'min:1', 'max:100'],
+        ]);
+
+        $score = ($input['minimum_passing_score'] ?? '') !== '' ? (string) $input['minimum_passing_score'] : null;
+        $repeats = ($input['max_repeats'] ?? '') !== '' ? (int) $input['max_repeats'] : null;
+
+        app(MaintainAcademicStructure::class)->defineProgressionRule(
+            $this->actor(),
+            $input['program_version_level_id'],
+            $score,
+            $repeats,
+            $this->idempotencyKey('academic.progression_rule.define'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Level progression rule defined (active).');
+    }
+
+    public function retireProgressionRule(Request $request, string $ruleId): RedirectResponse
+    {
+        app(MaintainAcademicStructure::class)->retireProgressionRule(
+            $this->actor(),
+            LevelProgressionRule::query()->findOrFail($ruleId),
+            $this->idempotencyKey('academic.progression_rule.retire'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Level progression rule retired.');
     }
 
     public function registerSkill(Request $request): RedirectResponse
