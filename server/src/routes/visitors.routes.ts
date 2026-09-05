@@ -76,7 +76,7 @@ const stmtUpdateVisitorConverted = db.prepare("UPDATE visitors SET status = 'reg
 const stmtInsertConvertedStudent = db.prepare(
   `INSERT INTO students (id, student_code, full_name, phone, email, qr_code, status, registration_date, branch_id, discount_percent, gender, placement_score, notes, father_name, address_region, tazkira_no, whatsapp, dob, school_or_university, emergency_contact_name, emergency_contact_phone, lead_id) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
-const stmtInsertConvertedRegistration = db.prepare(`INSERT INTO registrations (id, student_id, class_id, date, amount_paid, receipt_number, discount_applied, branch_id, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+const stmtInsertConvertedRegistration = db.prepare(`INSERT INTO registrations (id, student_id, class_id, date, branch_id, source) VALUES (?, ?, ?, ?, ?, ?)`);
 const stmtInsertRegistrationFeeInvoice = db.prepare(`INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, notes, invoice_number, issued_by, student_name, student_code, charge_kind, purpose, obligation_id) VALUES (?, ?, ?, 0, ?, 'issued', ?, ?, ?, ?, ?, ?, ?, ?, 'registration', 'other', NULL)`);
 const stmtInsertPlacementFeeInvoice = db.prepare(`INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, notes, invoice_number, issued_by, student_name, student_code, charge_kind, purpose, obligation_id) VALUES (?, ?, ?, 0, ?, 'issued', ?, ?, ?, ?, ?, ?, ?, ?, 'placement', 'other', NULL)`);
 const stmtInsertInvoiceItem = db.prepare(`INSERT INTO invoice_items (id, invoice_id, description, quantity, unit_price, amount) VALUES (?, ?, ?, 1, ?, ?)`);
@@ -927,7 +927,7 @@ visitorsRouter.post('/:id/convert', requirePermission('Lead.Convert'), ah(async 
     // target class, record it here as the intended class on the registration
     // document so the UI/API contract stays truthful without creating an
     // enrollment prematurely.
-    stmtInsertConvertedRegistration.run(id('reg'), newStudentId, classItem?.id ?? null, date, 0, null, 0, studentBranchId, visitor.source);
+    stmtInsertConvertedRegistration.run(id('reg'), newStudentId, classItem?.id ?? null, date, studentBranchId, visitor.source);
 
     if (registrationFeeAmount > 0 && registrationInvoiceId && registrationInvoiceNumber) {
       stmtInsertRegistrationFeeInvoice.run(

@@ -102,9 +102,9 @@ describe('§1 Transaction Integrity', () => {
       ).run(id('sem'), studentId, date);
 
       db.prepare(
-        `INSERT INTO registrations (id, student_id, class_id, date, amount_paid, receipt_number, discount_applied, branch_id)
-         VALUES (?, ?, 'cls_audit_1', ?, 4500, ?, 10, ?)`
-      ).run(id('reg'), studentId, date, rc, BRANCH_ID);
+        `INSERT INTO registrations (id, student_id, class_id, date, branch_id)
+         VALUES (?, ?, 'cls_audit_1', ?, ?)`
+      ).run(id('reg'), studentId, date, BRANCH_ID);
 
       db.prepare(
         `INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, invoice_number, purpose)

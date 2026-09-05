@@ -8,6 +8,7 @@ import { db } from '../db/connection.js';
 import { optionalText, requiredText, TEXT_LIMITS } from '../utils/textInput.js';
 import { parsePagination as parsePaginationShared } from '../utils/pagination.js';
 import { getStudentBalance, getStudentBalancesByIds, getStudentBalancesPage } from '../utils/studentBalance.js';
+import { assertEnrollmentNotOnHold } from '../core/academic/academic-hold.js';
 import {
   allocatePaymentToObligation,
   ensureTuitionObligation,
@@ -124,7 +125,7 @@ const stmtFindVisitorByTazkira = db.prepare(
   "SELECT id, full_name FROM visitors WHERE tazkira_no = ? AND id <> COALESCE(?, '') LIMIT 1",
 );
 const stmtInsertRegistration = db.prepare(
-  `INSERT INTO registrations (id, student_id, class_id, date, amount_paid, receipt_number, discount_applied, branch_id, source, semester) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  `INSERT INTO registrations (id, student_id, class_id, date, branch_id, source, semester) VALUES (?, ?, ?, ?, ?, ?, ?)`
 );
 const stmtGetTransferSourceEnrollment = db.prepare(`
   SELECT id FROM enrollments
@@ -441,32 +442,14 @@ function mapStudents(
 }
 
 /**
- * Enterprise Feature: Academic Hold
- * Checks if the student has any outstanding debt from previous semesters.
- * If they do, enrollment is blocked unless overridden by finance/owner.
+ * Enterprise Feature: Academic Hold — now the shared, lifetime-scoped gate in
+ * core/academic/academic-hold.ts (all three enrollment surfaces call it; see
+ * that module for the rule and the resume exception).
  */
-function checkAcademicHold(req: import('express').Request, studentId: string) {
+function checkAcademicHold(req: import('express').Request, studentId: string, target: { classId?: string | null; semesterName?: string | null } = {}) {
   const student = stmtGetStudentById.get(studentId) as { branch_id: string } | undefined;
-  const canOverride = !!req.rbac && !!student && canAccessBranchForRequirement(
-    db,
-    req.rbac,
-    student.branch_id,
-    { roleCodes: ['owner', 'general_manager', 'finance_manager'] },
-  );
-  if (canOverride) return;
-
-  // Uses the shared authoritative balance so the hold threshold agrees with the
-  // debt shown on the profile, the roster, the portal and the dashboard.
-  // Enrollment-gating must honor the FULL outstanding balance, not only tuition:
-  // unpaid registration/placement invoices are required payment conditions too.
-  // Looking only at `outstanding` (tuition) let a student bypass blocker #3 by
-  // enrolling in an extra class while required non-tuition invoices remained
-  // issued and unpaid.
-  const totalDebt = getStudentBalance(db, studentId, 'active').totalOutstanding;
-
-  if (totalDebt > 0) {
-    throw new HttpError(403, `Academic Hold: Student has an outstanding debt of ${totalDebt} AFN. Please clear the balance before new enrollment.`);
-  }
+  if (!student) throw new HttpError(404, 'Student not found.');
+  assertEnrollmentNotOnHold(req, { studentId, branchId: student.branch_id, classId: target.classId ?? null, semesterName: target.semesterName ?? null });
 }
 
 // ============================================================================
@@ -916,7 +899,7 @@ studentsRouter.post('/manual', requirePermission('Student.Create'), ah(async (re
 
   const tx = db.transaction(() => {
     stmtInsertStudent.run(newId, studentCode, fullName, phone || null, email || null, `${studentCode}-${String(fullName).toUpperCase().replace(/\s+/g, '-')}`, regDate, studentBranchId, effDiscount, gender, fatherName || null, addressRegion || null, tazkiraNo || null, whatsapp || null, dob || null, schoolOrUniversity || null, emergencyContactName || null, emergencyContactPhone || null, notes || (selectedClass ? `Admitted for ${selectedClass.name}. Enrollment occurs after placement and payment.` : 'Admitted. Enrollment occurs after placement and payment.'));
-    stmtInsertRegistration.run(id('reg'), newId, null, regDate, 0, null, 0, studentBranchId, 'manual', null);
+    stmtInsertRegistration.run(id('reg'), newId, null, regDate, studentBranchId, 'manual', null);
     if (registrationFeeAmount > 0 && registrationInvoiceId && registrationInvoiceNumber) {
       stmtInsertRegistrationInvoice.run(
         registrationInvoiceId,
@@ -1004,7 +987,7 @@ studentsRouter.post('/:id/enroll-class', requirePermission('Class.Assign'), ah(a
   assertPlacementEligibleForClass(db, student.id, classId, student.branch_id);
 
   // Check Academic Hold
-  checkAcademicHold(req, student.id);
+  checkAcademicHold(req, student.id, { classId, semesterName: null });
 
   const enrollId = id('enr');
   const date = today();
@@ -1557,8 +1540,9 @@ studentsRouter.post('/:id/enroll-semester', requirePermission('Class.Assign'), a
   if (cls.status !== 'active') throw new HttpError(400, 'Selected class is not active.');
   assertClassGenderAllowsStudent(classId, student.gender);
 
-  // Check Academic Hold before starting a new semester
-  checkAcademicHold(req, student.id);
+  // Check Academic Hold before starting a new semester. Names the class and
+  // term so the gate can recognize a re-opened term (the resume exception).
+  checkAcademicHold(req, student.id, { classId, semesterName });
 
   let resolvedTuition: number;
   try { resolvedTuition = assertMoney(cls.fee ?? 0, 'class fee'); }

@@ -93,6 +93,22 @@ function reconcileCanonicalPlacementState(): void {
  * the canonical registry. Any non-canonical stored amount is left unresolved so
  * the live fee resolver blocks the charge instead of guessing one.
  */
+/**
+ * Converge a pre-canonical database onto the registrations shape: the
+ * amount_paid / receipt_number / discount_applied columns were financial
+ * LOOKALIKES — every production writer stored 0/NULL/0, so any reader (the
+ * dashboard's registration-discount leg, direct SQL) was reading fiction.
+ * They are dropped; the authorities (payments, invoices) keep the facts.
+ */
+function ensureRegistrationsFinancialColumnsDropped(): void {
+  const columns = db.prepare(`PRAGMA table_info(registrations)`).all() as Array<{ name: string }>;
+  for (const dead of ['amount_paid', 'receipt_number', 'discount_applied']) {
+    if (columns.some((column) => column.name === dead)) {
+      db.exec(`ALTER TABLE registrations DROP COLUMN ${dead}`);
+    }
+  }
+}
+
 function ensureInvoiceChargeKindColumn(): void {
   const columns = db.prepare(`PRAGMA table_info(invoices)`).all() as Array<{ name: string }>;
   if (!columns.some((column) => column.name === 'charge_kind')) {
@@ -173,6 +189,7 @@ export function initSchema(): void {
     reconcileCanonicalPlacementState();
     db.exec(schema);
     ensureInvoiceChargeKindColumn();
+    ensureRegistrationsFinancialColumnsDropped();
     reconcileCanonicalFeeAuthority();
   } catch (error) {
     log.error('Failed to apply the canonical schema.');

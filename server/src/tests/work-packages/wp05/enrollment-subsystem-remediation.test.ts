@@ -150,6 +150,27 @@ beforeAll(async () => {
 // ===========================================================================
 // E-1 — transfer is not an enrollment-creation path
 // ===========================================================================
+/** Settles every active term through the payment desk so a subsequent
+ * enrolment exercises SEAT logic, not the (correct) lifetime academic hold. */
+async function settleActiveTerms(sid: string) {
+  const terms = db.prepare(
+    "SELECT id, COALESCE(net_fee_amount, fee_amount, 0) AS fee FROM student_semesters WHERE student_id = ? AND status = 'active'",
+  ).all(sid) as Array<{ id: string; fee: number }>;
+  for (const term of terms) {
+    const paid = (db.prepare(
+      `SELECT COALESCE(SUM(oa.amount),0) AS s FROM obligation_allocations oa
+        JOIN student_obligations o ON o.id = oa.obligation_id
+        WHERE o.semester_id = ? AND o.status = 'open'`,
+    ).get(term.id) as { s: number }).s || 0;
+    const remaining = Math.max(0, Number(term.fee) - Number(paid));
+    if (remaining > 0) {
+      const res = await supertest(app).post(`/api/students/${sid}/payments`)
+        .set(authHeader(reg)).send({ amount: remaining, category: 'fee', semesterId: term.id, paymentMethod: 'cash' });
+      expect(res.status).toBeLessThan(400);
+    }
+  }
+}
+
 describe('E-1 — transfer requires a valid active source enrollment', () => {
   it('refuses to transfer a student whose only enrollment is terminal (graduated)', async () => {
     makeClass('e1_src', 10); makeClass('e1_dst', 10);
@@ -347,6 +368,9 @@ describe('E-1 — transfer requires a valid active source enrollment', () => {
     makeClass('e1_dup_src', 10);
     makeClass('e1_dup_dst', 10);
     const sid = await createStudent({ classId: 'e1_dup_src' });
+    // The parallel seat is a NEW term: settle the source term first so this
+    // test exercises the destination duplicate guard, not the debt hold.
+    await settleActiveTerms(sid);
     const extra = await supertest(app).post(`/api/students/${sid}/journey/enrollments`)
       .set(authHeader(reg)).send({ classId: 'e1_dup_dst', semesterName: 'Parallel Term', enrollmentType: 'new' });
     expect(extra.status).toBe(201);
@@ -438,13 +462,22 @@ describe('E-2 — duplicate enrollment is refused on every write path', () => {
     expect(seatRows(sid, 'e2_extra')).toBe(1);
   });
 
-  it('a legitimate following term in the same class is still allowed (no over-blocking)', async () => {
+  it('a following term is hold-gated on debt, then allowed once the current term is settled', async () => {
     makeClass('e2_terms', 10);
     const sid = await createStudent({ classId: 'e2_terms' });
 
+    // While the current term is unpaid, a NEW term is exactly what the
+    // lifetime academic hold exists to block (previously it passed because the
+    // hold summed only active-scope debt).
+    const held = await supertest(app).post(`/api/students/${sid}/journey/enrollments`)
+      .set(authHeader(reg)).send({ classId: 'e2_terms', semesterName: 'Following Term', enrollmentType: 'new' });
+    expect(held.status).toBe(403);
+    expect(held.body.error).toMatch(/Academic Hold/i);
+
+    // Settled, the following term is allowed — no over-blocking of seat logic.
+    await settleActiveTerms(sid);
     const res = await supertest(app).post(`/api/students/${sid}/journey/enrollments`)
       .set(authHeader(reg)).send({ classId: 'e2_terms', semesterName: 'Following Term', enrollmentType: 'new' });
-
     expect(res.status).toBe(201);
     // Two terms, but still a single occupied seat.
     expect(seatsUsed('e2_terms')).toBe(1);
@@ -759,15 +792,25 @@ describe('C-1 — dropped/withdrawn enrollments close their semester projection'
     expect(seatsUsed('c1_re')).toBe(1);
   });
 
-  it('a different semester still enrols normally after a drop (3)', async () => {
+  it('a different term after a drop is held against the unpaid term — override roles may still enroll (3)', async () => {
     makeClass('c1_diff', 10);
     const sid = await createStudent({ classId: 'c1_diff' });
     const enr = await activeEnrollmentId(sid);
     await supertest(app).post(`/api/enrollments/${enr}/drop`).set(authHeader(reg)).send({ reason: 'x' });
 
-    const next = await supertest(app).post(`/api/students/${sid}/journey/enrollments`)
+    // The dropped term's 5,000 AFN debt now follows the student: opening a
+    // DIFFERENT term while it is unpaid is exactly what the hold exists to
+    // stop (it used to pass because the hold summed only active-scope debt,
+    // which the drop itself erased).
+    const blocked = await supertest(app).post(`/api/students/${sid}/journey/enrollments`)
       .set(authHeader(reg)).send({ classId: 'c1_diff', semesterName: 'A Later Term', enrollmentType: 'new' });
-    expect(next.status).toBe(201);
+    expect(blocked.status).toBe(403);
+    expect(blocked.body.error).toMatch(/Academic Hold/i);
+
+    // The override roles keep the desk able to exercise judgement.
+    const overridden = await supertest(app).post(`/api/students/${sid}/journey/enrollments`)
+      .set(authHeader(owner)).send({ classId: 'c1_diff', semesterName: 'A Later Term', enrollmentType: 'new' });
+    expect(overridden.status).toBe(201);
   });
 
   it('drop + re-enrol does not duplicate the fee obligation and preserves payments (4, 5)', async () => {
@@ -888,6 +931,9 @@ describe('C-1 — dropped/withdrawn enrollments close their semester projection'
     makeClass('c1_scopeA', 10);
     makeClass('c1_scopeB', 10);
     const sid = await createStudent({ classId: 'c1_scopeA' });
+    // The concurrent seat is a NEW term: settle the first so the test
+    // exercises the drop-scoping projection, not the debt hold.
+    await settleActiveTerms(sid);
     const second = await supertest(app).post(`/api/students/${sid}/journey/enrollments`)
       .set(authHeader(reg)).send({ classId: 'c1_scopeB', semesterName: 'Parallel Term', enrollmentType: 'new' });
     expect(second.status).toBe(201);

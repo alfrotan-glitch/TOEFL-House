@@ -458,14 +458,19 @@ CREATE TABLE IF NOT EXISTS student_suspension_semesters (
   PRIMARY KEY (batch_id, semester_id)
 );
 
+-- A registration is an EVENT document: who registered, where, when, through
+-- which surface. It deliberately carries NO money columns: cash collected is a
+-- fact of `payments` + `obligation_allocations`, discounts granted are a fact
+-- of `invoices.discount_amount`, and a second copy of either on this table
+-- would be a free-to-drift duplicate of an authority (the removed
+-- amount_paid/receipt_number/discount_applied columns were written as 0/NULL/0
+-- by every production writer while the dashboard summed discount_applied as
+-- "registration discounts granted" — a permanently understated figure).
 CREATE TABLE IF NOT EXISTS registrations ( 
   id               TEXT PRIMARY KEY, 
   student_id       TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE, 
   class_id         TEXT REFERENCES classes(id) ON DELETE SET NULL, 
   date             TEXT NOT NULL, 
-  amount_paid      INTEGER NOT NULL DEFAULT 0, 
-  receipt_number   TEXT, 
-  discount_applied INTEGER NOT NULL DEFAULT 0, 
   branch_id        TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT, 
   source           TEXT, 
   semester         TEXT 

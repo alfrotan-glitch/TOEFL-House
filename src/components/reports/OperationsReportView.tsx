@@ -207,8 +207,8 @@ export default function OperationsReportView() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
               <div className="text-[10px] uppercase font-bold text-slate-400">Discounts granted</div>
-              <div className="text-xl font-extrabold font-mono text-slate-900 mt-1">{formatAFN(report.financial.discounts.invoiceDiscounts + report.financial.discounts.registrationDiscounts)}</div>
-              <div className="text-[10px] text-slate-400 mt-0.5">Invoices {formatAFN(report.financial.discounts.invoiceDiscounts)} · Registrations {formatAFN(report.financial.discounts.registrationDiscounts)}</div>
+              <div className="text-xl font-extrabold font-mono text-slate-900 mt-1">{formatAFN(report.financial.discounts.invoiceDiscounts)}</div>
+              <div className="text-[10px] text-slate-400 mt-0.5">From issued invoices — the single discount authority</div>
             </div>
             <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
               <div className="text-[10px] uppercase font-bold text-slate-400">Receivable (as at today)</div>

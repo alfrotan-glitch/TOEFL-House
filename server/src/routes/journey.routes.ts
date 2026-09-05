@@ -9,6 +9,7 @@ import { getCatalogService } from '../core/academic/catalog-service.js';
 import { resolveAuthorizedDiscount } from '../core/configuration/discount-authority.js';
 import { partitionFeeSnapshot } from '../core/finance/invoicing.js';
 import { assertClassGenderAllowsStudent } from './classes.routes.js';
+import { assertEnrollmentNotOnHold } from '../core/academic/academic-hold.js';
 import { JourneyEventType } from '../core/journey/event-types.js';
 import { assertStudentAccess } from '../core/rbac/abac.js';
 import { hasPermissionForBranchWithActionScopes, isGlobalOwner } from '../core/rbac/rbac-service.js';
@@ -221,6 +222,15 @@ journeyRouter.post(
         requiredText(skill, `Skill ${index + 1}`, TEXT_LIMITS.short));
     }
     if (classId) assertClassGenderAllowsStudent(classId, student.gender);
+
+    // ACADEMIC HOLD — the same debt gate the class and semester desks apply.
+    // This surface previously had no hold check at all, so a student blocked
+    // at either desk could enroll through the journey. Lifetime-scoped, with
+    // the resume exception for re-opening a term the student already holds
+    // (see core/academic/academic-hold.ts).
+    assertEnrollmentNotOnHold(req, {
+      studentId, branchId: student.branch_id, classId, semesterName,
+    });
     const classLevel = classId
       ? db.prepare('SELECT level_id FROM classes WHERE id = ?').get(classId) as { level_id: string | null } | undefined
       : undefined;

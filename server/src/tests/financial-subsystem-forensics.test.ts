@@ -63,6 +63,9 @@ function createApp() {
 
 const gm = (): TokenPayload => ({ userId: USER, username: 'fsx', branchId: BRANCH, fullName: 'Fsx GM' });
 const auth = () => ({ Authorization: `Bearer ${signToken(gm())}` });
+const REG_USER = 'u_fsx_reg';
+const reg = (): TokenPayload => ({ userId: REG_USER, username: 'fsx_reg', branchId: BRANCH, fullName: 'Fsx Reg' });
+const regAuth = () => ({ Authorization: `Bearer ${signToken(reg())}` });
 
 let app: express.Express;
 let seq = 0;
@@ -98,6 +101,12 @@ beforeAll(async () => {
   // general_manager passes the role-label gates (invoice pay, exam enroll) and,
   // through the RBAC catalog, the permission gates (refund, funding, class).
   assignRole(USER, 'general_manager', BRANCH);
+  db.prepare(
+    `INSERT OR IGNORE INTO users (id, username, full_name, branch_id, password_hash, is_active, must_change_password)
+     VALUES (?, ?, ?, ?, ?, 1, 0)`,
+  ).run(REG_USER, 'fsx_reg', 'Fsx Reg', BRANCH, await hashPassword('x'));
+  // A registrar CANNOT override the academic hold — that is the point of FS-8.
+  assignRole(REG_USER, 'registrar', BRANCH);
   db.prepare(
     `INSERT OR IGNORE INTO classes (id, name, level, branch_id, status, lifecycle_stage, schedule_time, fee)
      VALUES (?, 'FSX A', 'A1', ?, 'active', 'in_progress', '08:00', 6500)`,
@@ -328,5 +337,49 @@ describe('FS-7 — employee payroll has a due authority', () => {
       .send({ monthName: '1405-06', amountPaid: 50000, paymentType: 'full' });
     expect(res.status).toBe(400);
     expect(String(res.body.error)).toMatch(/remaining salary of 8000/);
+  });
+});
+
+describe('FS-8 — the academic hold is lifetime-scoped and covers every enrollment surface', () => {
+  it('debt on a NON-active term still blocks a new term for a registrar; override roles may proceed', async () => {
+    const sid = await newStudent('FS8 Debtor');
+    await settleRegistration(sid);
+    const enroll = await supertest(app).post(`/api/students/${sid}/journey/enrollments`).set(regAuth())
+      .send({ classId: CLASS_A, semesterName: 'FS8 Term', enrollmentType: 'new' });
+    expect(enroll.status).toBe(201);
+
+    // Move the term out of 'active' the way a drop does. An active-scoped hold
+    // would see zero debt after this — the exact bypass the lifetime scope
+    // exists to close.
+    db.prepare(`UPDATE student_semesters SET status = 'deferred' WHERE student_id = ? AND semester_name = 'FS8 Term'`).run(sid);
+
+    const blocked = await supertest(app).post(`/api/students/${sid}/journey/enrollments`).set(regAuth())
+      .send({ classId: CLASS_B, semesterName: 'FS8 Fresh Term', enrollmentType: 'new' });
+    expect(blocked.status).toBe(403);
+    expect(String(blocked.body.error)).toMatch(/Academic Hold/i);
+
+    // Override roles keep their judgement call.
+    const overridden = await supertest(app).post(`/api/students/${sid}/journey/enrollments`).set(auth())
+      .send({ classId: CLASS_B, semesterName: 'FS8 Fresh Term', enrollmentType: 'new' });
+    expect(overridden.status).toBe(201);
+  });
+
+  it('re-entering a term the student already holds is never held (the resume exception)', async () => {
+    const sid = await newStudent('FS8 Resume');
+    await settleRegistration(sid);
+    await supertest(app).post(`/api/students/${sid}/journey/enrollments`).set(regAuth())
+      .send({ classId: CLASS_A, semesterName: 'FS8R Term', enrollmentType: 'new' }).expect(201);
+    // Mimic a drop: the enrollment closes and its term projection defers.
+    db.prepare(`UPDATE enrollments SET status = 'dropped' WHERE student_id = ? AND class_id = ?`).run(sid, CLASS_A);
+    db.prepare(`UPDATE student_semesters SET status = 'deferred' WHERE student_id = ? AND semester_name = 'FS8R Term'`).run(sid);
+
+    // Same class + same term name: this RE-OPENS the held term rather than
+    // consuming a new seat, so the unpaid debt on it must not block resumption.
+    const resumed = await supertest(app).post(`/api/students/${sid}/journey/enrollments`).set(regAuth())
+      .send({ classId: CLASS_A, semesterName: 'FS8R Term', enrollmentType: 'new' });
+    expect(resumed.status).toBe(201);
+    const rows = db.prepare(`SELECT status FROM student_semesters WHERE student_id = ? AND semester_name = 'FS8R Term'`).all(sid);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe('active');
   });
 });

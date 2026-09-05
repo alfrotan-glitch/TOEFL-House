@@ -91,8 +91,8 @@ describe('§A Failure Recovery', () => {
     try {
       db.transaction(() => {
         db.prepare(
-          `INSERT INTO registrations (id, student_id, class_id, date, amount_paid, receipt_number, discount_applied, branch_id)
-           VALUES (?, ?, 'cls_ext_1', ?, 4500, ?, 10, ?)`
+          `INSERT INTO registrations (id, student_id, class_id, date, branch_id)
+           VALUES (?, ?, 'cls_ext_1', ?, ?)`
         ).run(regId, studentId, today(), rc, BRANCH_ID);
 
         db.prepare(
@@ -132,8 +132,8 @@ describe('§A Failure Recovery', () => {
     try {
       db.transaction(() => {
         db.prepare(
-          `INSERT INTO registrations (id, student_id, class_id, date, amount_paid, receipt_number, discount_applied, branch_id)
-           VALUES (?, ?, 'cls_ext_1', ?, 4500, ?, 10, ?)`
+          `INSERT INTO registrations (id, student_id, class_id, date, branch_id)
+           VALUES (?, ?, 'cls_ext_1', ?, ?)`
         ).run(regId, studentId, today(), rc, BRANCH_ID);
 
         db.prepare(

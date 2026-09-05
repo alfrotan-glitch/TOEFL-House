@@ -364,12 +364,14 @@ reportsRouter.get(
     const discQ = isAll
       ? db.prepare(`SELECT COALESCE(SUM(discount_amount),0) AS d FROM invoices WHERE status != 'draft' AND issue_date >= ? AND issue_date <= ?`).get(from, to)
       : db.prepare(`SELECT COALESCE(SUM(discount_amount),0) AS d FROM invoices WHERE status != 'draft' AND branch_id = ? AND issue_date >= ? AND issue_date <= ?`).get(branchId, from, to);
-    const registrationDiscount = (isAll
-      ? db.prepare(`SELECT COALESCE(SUM(discount_applied),0) AS d FROM registrations WHERE date >= ? AND date <= ?`).get(from, to)
-      : db.prepare(`SELECT COALESCE(SUM(discount_applied),0) AS d FROM registrations WHERE branch_id = ? AND date >= ? AND date <= ?`).get(branchId, from, to)) as { d: number };
+    // Discounts granted have ONE authority: the invoice document, which
+    // records discount_amount for every charge including 100%-discounted
+    // tuition. The old `registrationDiscounts` leg summed a registrations
+    // column every production writer stored as 0 — a permanently understated
+    // figure presented next to the real one.
     const discounts = {
       invoiceDiscounts: Number((discQ as { d: number }).d || 0),
-      registrationDiscounts: Number(registrationDiscount.d || 0),
+      registrationDiscounts: 0,
     };
 
     // ── Financial: ONE receivable, derived from the authorities (WP07-F18b) ──
