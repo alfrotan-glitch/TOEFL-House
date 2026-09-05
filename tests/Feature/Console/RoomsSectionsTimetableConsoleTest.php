@@ -50,6 +50,7 @@ final class RoomsSectionsTimetableConsoleTest extends TestCase
             'name' => 'Timetable Branch '.substr(md5(RandomIdentifier::new()), 0, 8),
             'lifecycle_state' => 'active',
         ])->id;
+        $this->attachBranchToBootstrapOrganization($this->branchId);
 
         $program = $structure->defineProgram($officer, 'Console Intensive', 'rst-prog');
         $version = $structure->publishVersion($officer, Program::query()->findOrFail($program['program_id']), 'Console v1', 'rst-ver');

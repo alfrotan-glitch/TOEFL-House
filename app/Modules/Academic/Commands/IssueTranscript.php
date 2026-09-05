@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Modules\Academic\Commands;
 
+use App\Modules\Academic\Domain\AcademicAccess;
+use App\Modules\Academic\Domain\RecordBranch;
 use App\Modules\Academic\Domain\TranscriptComposer;
 use App\Modules\Academic\Models\ProgramVersion;
 use App\Modules\Academic\Models\Transcript;
@@ -14,7 +16,6 @@ use App\Modules\Documents\Commands\TransitionDocument;
 use App\Modules\Documents\Models\Document;
 use App\Modules\Documents\Models\DocumentClassification;
 use App\Modules\Students\Models\Student;
-use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
@@ -41,7 +42,7 @@ final class IssueTranscript
     public const SCHEMA_VERSION = 'transcript/v1';
 
     public function __construct(
-        private readonly AccessDecision $access,
+        private readonly AcademicAccess $access,
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
@@ -58,10 +59,7 @@ final class IssueTranscript
         try {
             return $this->idempotency->execute('academic.transcript.issue', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($issuer, $studentId, $programVersionId, $idempotencyKey): array {
-                    $outcome = $this->access->decide($issuer, self::CAPABILITY_ISSUE, null);
-                    if (! $outcome->allowed) {
-                        throw AuthorizationDenied::forCode('academic.transcript_denied', $outcome->reason);
-                    }
+                    $this->access->require($issuer, self::CAPABILITY_ISSUE, RecordBranch::studentBranchForId($studentId), 'academic.transcript_denied');
 
                     /** @var Student $student */
                     $student = Student::query()->findOrFail($studentId);

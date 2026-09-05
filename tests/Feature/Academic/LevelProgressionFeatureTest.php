@@ -95,6 +95,7 @@ final class LevelProgressionFeatureTest extends TestCase
             'name' => 'LP Branch '.substr(md5(RandomIdentifier::new()), 0, 8),
             'lifecycle_state' => 'active',
         ])->id;
+        $this->attachBranchToBootstrapOrganization($this->branchId);
 
         $this->offeringA1 = $this->openOffering($structure, $officer, $this->levelA1, 'lp-off-a1');
         $this->offeringA2 = $this->openOffering($structure, $officer, $this->levelA2, 'lp-off-a2');

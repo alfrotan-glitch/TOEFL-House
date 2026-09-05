@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Academic\Commands\ManageAcademicAppeal;
+use App\Modules\Academic\Domain\RecordBranch;
 use App\Modules\Academic\Placement\Commands\DecidePlacement;
 use App\Modules\Academic\Placement\Commands\ManagePlacementProfile;
 use App\Modules\Academic\Placement\Commands\RecommendPlacement;
@@ -18,6 +19,7 @@ use App\Modules\Academic\Placement\Models\PlacementTestVersion;
 use App\Modules\Academic\Placement\Queries\AcademicEligibilitySnapshotQuery;
 use App\Modules\Academic\Placement\Queries\PlacementFinanceLinkQuery;
 use App\Modules\Academic\Placement\Queries\PlacementProfileQuery;
+use App\Support\Authorization\ActorBranches;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -30,12 +32,21 @@ final class PlacementApiController extends Controller
 {
     public function tests(): JsonResponse
     {
-        return response()->json([
-            'tests' => PlacementTest::query()->orderBy('name')->get([
-                'id', 'key', 'name', 'program_version_id', 'total_time_minutes',
-                'component_weights', 'lifecycle_state', 'originating_branch_id',
-            ]),
-        ]);
+        $tests = [];
+        if ($this->hasReadAuthority()) {
+            $visible = $this->visibleBranches();
+            $tests = PlacementTest::query()
+                ->where(function ($query) use ($visible): void {
+                    $query->whereIn('originating_branch_id', $visible)
+                        ->orWhereNull('originating_branch_id');
+                })
+                ->orderBy('name')->get([
+                    'id', 'key', 'name', 'program_version_id', 'total_time_minutes',
+                    'component_weights', 'lifecycle_state', 'originating_branch_id',
+                ]);
+        }
+
+        return response()->json(['tests' => $tests]);
     }
 
     public function versions(): JsonResponse
@@ -49,11 +60,16 @@ final class PlacementApiController extends Controller
 
     public function profiles(Request $request): JsonResponse
     {
-        $profiles = app(PlacementProfileQuery::class)->search(
-            (string) $request->query('term', ''),
-            (string) $request->query('lifecycle_state', ''),
-            (string) $request->query('program_version_id', ''),
-        );
+        $profiles = [];
+        if ($this->hasReadAuthority()) {
+            $branches = app(ActorBranches::class);
+            $actor = $this->actor();
+            $profiles = app(PlacementProfileQuery::class)->search(
+                (string) $request->query('term', ''),
+                (string) $request->query('lifecycle_state', ''),
+                (string) $request->query('program_version_id', ''),
+            )->filter(fn ($profile): bool => $branches->allows($actor, RecordBranch::placementProfileBranch($profile)))->values();
+        }
 
         return response()->json(['profiles' => $profiles]);
     }
@@ -61,6 +77,7 @@ final class PlacementApiController extends Controller
     public function show(string $profileId): JsonResponse
     {
         $profile = PlacementProfile::query()->findOrFail($profileId);
+        $this->requireBranchVisible(RecordBranch::placementProfileBranch($profile), 'api.placement.show', 'placement_profile', $profile->id);
 
         return response()->json(app(PlacementProfileQuery::class)->for($profile));
     }
@@ -68,6 +85,7 @@ final class PlacementApiController extends Controller
     public function financeLink(string $profileId): JsonResponse
     {
         $profile = PlacementProfile::query()->findOrFail($profileId);
+        $this->requireBranchVisible(RecordBranch::placementProfileBranch($profile), 'api.placement.finance_link', 'placement_profile', $profile->id);
 
         return response()->json(app(PlacementFinanceLinkQuery::class)->for($profile));
     }
@@ -75,6 +93,7 @@ final class PlacementApiController extends Controller
     public function eligibilitySnapshot(string $profileId): JsonResponse
     {
         $profile = PlacementProfile::query()->findOrFail($profileId);
+        $this->requireBranchVisible(RecordBranch::placementProfileBranch($profile), 'api.placement.eligibility', 'placement_profile', $profile->id);
         $snapshot = app(AcademicEligibilitySnapshotQuery::class)->for($profile);
         if ($snapshot === null) {
             abort(404, 'No signed eligibility snapshot exists for this placement profile.');

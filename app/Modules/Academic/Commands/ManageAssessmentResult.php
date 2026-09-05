@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Modules\Academic\Commands;
 
+use App\Modules\Academic\Domain\AcademicAccess;
 use App\Modules\Academic\Domain\AssessmentResultLifecycle;
+use App\Modules\Academic\Domain\RecordBranch;
 use App\Modules\Academic\Models\AssessmentAttempt;
 use App\Modules\Academic\Models\AssessmentResult;
 use App\Modules\Academic\Models\Enrollment;
@@ -12,7 +14,6 @@ use App\Modules\Academic\Models\ResultCorrection;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Crm\Domain\CrmInteractionTraceRecorder;
-use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
@@ -39,7 +40,7 @@ final class ManageAssessmentResult
     public const CAPABILITY_RELEASE = 'academic.release';
 
     public function __construct(
-        private readonly AccessDecision $access,
+        private readonly AcademicAccess $access,
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
@@ -54,15 +55,15 @@ final class ManageAssessmentResult
         try {
             return $this->idempotency->execute('academic.attempt.submit', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($assessor, $enrollment, $kind, $evidenceRef): array {
-                    $this->require($assessor, self::CAPABILITY_ASSESS, 'academic.assess_denied');
+                    /** @var Enrollment $locked */
+                    $locked = Enrollment::query()->whereKey($enrollment->id)->lockForUpdate()->firstOrFail();
+                    $this->require($assessor, self::CAPABILITY_ASSESS, RecordBranch::enrollmentBranch($locked), 'academic.assess_denied');
                     if (! in_array($kind, ['placement', 'assessment'], true)) {
                         throw BusinessRejection::forCode('academic.attempt_kind_unknown', sprintf('unknown attempt kind %s', $kind));
                     }
                     if ($evidenceRef === '') {
                         throw BusinessRejection::forCode('academic.attempt_evidence_missing', 'an attempt requires an evidence reference');
                     }
-                    /** @var Enrollment $locked */
-                    $locked = Enrollment::query()->whereKey($enrollment->id)->lockForUpdate()->firstOrFail();
                     if ($locked->lifecycle_state !== 'active') {
                         throw BusinessRejection::forCode('academic.attempt_enrollment_not_active', 'attempts attach only to an active enrollment');
                     }
@@ -96,9 +97,9 @@ final class ManageAssessmentResult
         try {
             return $this->idempotency->execute('academic.result.score', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($scorer, $attempt, $score): array {
-                    $this->require($scorer, self::CAPABILITY_ASSESS, 'academic.assess_denied');
                     /** @var AssessmentAttempt $locked */
                     $locked = AssessmentAttempt::query()->whereKey($attempt->id)->lockForUpdate()->firstOrFail();
+                    $this->require($scorer, self::CAPABILITY_ASSESS, RecordBranch::attemptBranch($locked), 'academic.assess_denied');
                     if ($locked->lifecycle_state !== 'submitted') {
                         throw BusinessRejection::forCode('academic.attempt_not_submitted', 'only a submitted attempt can be scored');
                     }
@@ -152,6 +153,21 @@ final class ManageAssessmentResult
     }
 
     /**
+     * Mark-appealed is the conscious, attributable act that orders
+     * remediation of a released result (WP-ACAD-APPEAL-RESOLVE) — the sole
+     * writer of the appealed state. It performs no score change itself; the
+     * correction still flows through propose + approve with their own
+     * capabilities and independence rules. Moderate-gating (not assess)
+     * keeps scorers from parking their own results out of completion reach.
+     *
+     * @return array{result_id: string, lifecycle_state: string, correlation_id: string}
+     */
+    public function markAppealed(Actor $moderator, AssessmentResult $result, string $idempotencyKey): array
+    {
+        return $this->transition($moderator, $result, AssessmentResultLifecycle::STATE_APPEALED, self::CAPABILITY_MODERATE, 'mark_appealed', $idempotencyKey, null);
+    }
+
+    /**
      * Correction appends a new result row referencing the original and
      * closes the original as corrected; the original score stays visible
      * in history.
@@ -166,7 +182,9 @@ final class ManageAssessmentResult
         try {
             return $this->idempotency->execute('academic.result.correction.propose', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($moderator, $original, $score, $reason): array {
-                    $this->require($moderator, self::CAPABILITY_MODERATE, 'academic.moderate_denied');
+                    /** @var AssessmentResult $locked */
+                    $locked = AssessmentResult::query()->whereKey($original->id)->lockForUpdate()->firstOrFail();
+                    $this->require($moderator, self::CAPABILITY_MODERATE, RecordBranch::resultBranch($locked), 'academic.moderate_denied');
                     if ($reason === '') {
                         throw BusinessRejection::forCode('academic.correction_reason', 'a correction requires a reason');
                     }
@@ -174,8 +192,6 @@ final class ManageAssessmentResult
                         throw BusinessRejection::forCode('academic.result_score_invalid', 'a score must be a non-negative number');
                     }
 
-                    /** @var AssessmentResult $locked */
-                    $locked = AssessmentResult::query()->whereKey($original->id)->lockForUpdate()->firstOrFail();
                     AssessmentResultLifecycle::requireTransition($locked->lifecycle_state, AssessmentResultLifecycle::STATE_CORRECTED);
                     if (ResultCorrection::query()->where('result_id', $locked->id)->where('lifecycle_state', ResultCorrection::STATE_PROPOSED)->exists()) {
                         throw BusinessRejection::forCode('academic.correction_exists', 'this result already has an open correction');
@@ -209,10 +225,12 @@ final class ManageAssessmentResult
         try {
             return $this->idempotency->execute('academic.result.correction.approve', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($approver, $correction): array {
-                    $this->require($approver, self::CAPABILITY_APPROVE, 'academic.approve_result_denied');
-
                     /** @var ResultCorrection $lockedCorrection */
                     $lockedCorrection = ResultCorrection::query()->whereKey($correction->id)->lockForUpdate()->firstOrFail();
+                    /** @var AssessmentResult $locked */
+                    $locked = AssessmentResult::query()->whereKey($lockedCorrection->result_id)->lockForUpdate()->firstOrFail();
+                    $this->require($approver, self::CAPABILITY_APPROVE, RecordBranch::resultBranch($locked), 'academic.approve_result_denied');
+
                     if ($lockedCorrection->lifecycle_state !== ResultCorrection::STATE_PROPOSED) {
                         throw BusinessRejection::forCode('academic.correction_state', sprintf('only a proposed correction can be approved, state is %s', $lockedCorrection->lifecycle_state));
                     }
@@ -220,8 +238,6 @@ final class ManageAssessmentResult
                         throw AuthorizationDenied::forCode('academic.correction_single_actor', 'a correction needs a moderator and an approver as distinct actors');
                     }
 
-                    /** @var AssessmentResult $locked */
-                    $locked = AssessmentResult::query()->whereKey($lockedCorrection->result_id)->lockForUpdate()->firstOrFail();
                     AssessmentResultLifecycle::requireTransition($locked->lifecycle_state, AssessmentResultLifecycle::STATE_CORRECTED);
 
                     $locked->forceFill(['lifecycle_state' => AssessmentResultLifecycle::STATE_CORRECTED]);
@@ -262,10 +278,9 @@ final class ManageAssessmentResult
         try {
             return $this->idempotency->execute('academic.result.'.$verb, $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $result, $toState, $capability, $verb, $guard): array {
-                    $this->require($actor, $capability, 'academic.result_denied');
-
                     /** @var AssessmentResult $locked */
                     $locked = AssessmentResult::query()->whereKey($result->id)->lockForUpdate()->firstOrFail();
+                    $this->require($actor, $capability, RecordBranch::resultBranch($locked), 'academic.result_denied');
                     AssessmentResultLifecycle::requireTransition($locked->lifecycle_state, $toState);
                     if ($guard !== null) {
                         $guard($locked, $actor);
@@ -315,11 +330,8 @@ final class ManageAssessmentResult
         );
     }
 
-    private function require(Actor $actor, string $capability, string $errorCode): void
+    private function require(Actor $actor, string $capability, ?string $branchId, string $errorCode): void
     {
-        $outcome = $this->access->decide($actor, $capability, null);
-        if (! $outcome->allowed) {
-            throw AuthorizationDenied::forCode($errorCode, $outcome->reason);
-        }
+        $this->access->require($actor, $capability, $branchId, $errorCode);
     }
 }

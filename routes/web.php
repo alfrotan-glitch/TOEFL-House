@@ -145,6 +145,7 @@ Route::middleware('employee')->group(function (): void {
         Route::post('results/{resultId}/moderate', [AcademicController::class, 'moderateResult'])->name('result.moderate');
         Route::post('results/{resultId}/approve', [AcademicController::class, 'approveResult'])->name('result.approve');
         Route::post('results/{resultId}/release', [AcademicController::class, 'releaseResult'])->name('result.release');
+        Route::post('results/{resultId}/mark-appealed', [AcademicController::class, 'markResultAppealed'])->name('result.mark-appealed');
         Route::post('results/{resultId}/corrections', [AcademicController::class, 'proposeCorrection'])->name('result.correction');
         Route::post('corrections/{correctionId}/approve', [AcademicController::class, 'approveCorrection'])->name('correction.approve');
         Route::post('waitlist', [AcademicController::class, 'joinWaitlist'])->name('waitlist.join');

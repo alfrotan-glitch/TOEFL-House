@@ -42,6 +42,7 @@ final class OfferingAvailabilityFoundationTest extends TestCase
             'name' => 'F3 Branch '.substr(md5(RandomIdentifier::new()), 0, 8),
             'lifecycle_state' => 'active',
         ])->id;
+        $this->attachBranchToBootstrapOrganization($this->branchId);
 
         $program = $structure->defineProgram($officer, 'F3 Intensive', 'f3-prog');
         $versionId = $structure->publishVersion($officer, Program::query()->findOrFail($program['program_id']), 'F3 v1', 'f3-ver')['version_id'];

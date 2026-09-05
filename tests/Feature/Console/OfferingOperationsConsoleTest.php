@@ -58,6 +58,7 @@ final class OfferingOperationsConsoleTest extends TestCase
             'name' => 'Console Branch '.substr(md5(RandomIdentifier::new()), 0, 8),
             'lifecycle_state' => 'active',
         ])->id;
+        $this->attachBranchToBootstrapOrganization($this->branchId);
 
         $program = $structure->defineProgram($officer, 'Console Intensive', 'con-prog');
         $version = $structure->publishVersion($officer, Program::query()->findOrFail($program['program_id']), 'Console v1', 'con-ver');

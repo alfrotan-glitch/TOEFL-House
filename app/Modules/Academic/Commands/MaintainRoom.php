@@ -4,13 +4,13 @@ declare(strict_types=1);
 
 namespace App\Modules\Academic\Commands;
 
+use App\Modules\Academic\Domain\AcademicAccess;
 use App\Modules\Academic\Domain\RoomLifecycle;
 use App\Modules\Academic\Models\AcademicRoom;
 use App\Modules\Academic\Models\ClassSession;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Organization\Models\Branch;
-use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
@@ -33,7 +33,7 @@ final class MaintainRoom
     private const ROOM_TYPES = ['classroom', 'lab', 'computer', 'hall', 'other'];
 
     public function __construct(
-        private readonly AccessDecision $access,
+        private readonly AcademicAccess $access,
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
@@ -47,7 +47,7 @@ final class MaintainRoom
         try {
             return $this->idempotency->execute('academic.room.define', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $branchId, $name, $code, $capacity, $roomType): array {
-                    $this->requireCapability($actor);
+                    $this->requireCapability($actor, $branchId);
                     $this->assertRoomDefinition($branchId, $name, $code, $capacity, $roomType);
 
                     $room = AcademicRoom::query()->create([
@@ -79,10 +79,9 @@ final class MaintainRoom
         try {
             return $this->idempotency->execute('academic.room.transition.'.$toState, $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $room, $toState): array {
-                    $this->requireCapability($actor);
-
                     /** @var AcademicRoom $locked */
                     $locked = AcademicRoom::query()->whereKey($room->id)->lockForUpdate()->firstOrFail();
+                    $this->requireCapability($actor, (string) $locked->branch_id);
                     $from = $locked->lifecycle_state;
                     RoomLifecycle::requireTransition($from, $toState);
                     if (in_array($toState, [RoomLifecycle::STATE_MAINTENANCE, RoomLifecycle::STATE_RETIRED], true)) {
@@ -111,13 +110,13 @@ final class MaintainRoom
         try {
             return $this->idempotency->execute('academic.room.resize', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $room, $capacity): array {
-                    $this->requireCapability($actor);
+                    /** @var AcademicRoom $locked */
+                    $locked = AcademicRoom::query()->whereKey($room->id)->lockForUpdate()->firstOrFail();
+                    $this->requireCapability($actor, (string) $locked->branch_id);
                     if ($capacity < 1) {
                         throw BusinessRejection::forCode('academic.room_capacity_positive', 'a room requires a positive capacity');
                     }
 
-                    /** @var AcademicRoom $locked */
-                    $locked = AcademicRoom::query()->whereKey($room->id)->lockForUpdate()->firstOrFail();
                     if ($locked->capacity === $capacity) {
                         throw BusinessRejection::forCode('academic.room_capacity_unchanged', 'room capacity is already set to this value');
                     }
@@ -153,11 +152,8 @@ final class MaintainRoom
         }
     }
 
-    private function requireCapability(Actor $actor): void
+    private function requireCapability(Actor $actor, ?string $branchId): void
     {
-        $outcome = $this->access->decide($actor, self::CAPABILITY, null);
-        if (! $outcome->allowed) {
-            throw AuthorizationDenied::forCode('academic.structure_denied', $outcome->reason);
-        }
+        $this->access->require($actor, self::CAPABILITY, $branchId, 'academic.structure_denied');
     }
 }

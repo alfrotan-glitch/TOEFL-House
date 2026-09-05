@@ -4,13 +4,14 @@ declare(strict_types=1);
 
 namespace App\Modules\Academic\Commands;
 
+use App\Modules\Academic\Domain\AcademicAccess;
+use App\Modules\Academic\Domain\RecordBranch;
 use App\Modules\Academic\Models\AttendanceFact;
 use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\ClassSession;
 use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
-use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
@@ -28,7 +29,7 @@ final class RecordAttendance
     public const CAPABILITY = 'academic.attendance';
 
     public function __construct(
-        private readonly AccessDecision $access,
+        private readonly AcademicAccess $access,
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
@@ -59,10 +60,11 @@ final class RecordAttendance
         try {
             return $this->idempotency->execute($operation, $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($recorder, $session, $enrollment, $status, $correctsId, $reason, $operation): array {
-                    $outcome = $this->access->decide($recorder, self::CAPABILITY, null);
-                    if (! $outcome->allowed) {
-                        throw AuthorizationDenied::forCode('academic.attendance_denied', $outcome->reason);
-                    }
+                    /** @var Enrollment $lockedEnrollment */
+                    $lockedEnrollment = Enrollment::query()->whereKey($enrollment->id)->lockForUpdate()->firstOrFail();
+                    // Seat-level grain: each seat is checked in its own
+                    // branch, so mixed-branch classes stay correct.
+                    $this->access->require($recorder, self::CAPABILITY, RecordBranch::enrollmentBranch($lockedEnrollment), 'academic.attendance_denied');
                     if (! in_array($status, ['present', 'absent', 'late', 'excused'], true)) {
                         throw BusinessRejection::forCode('academic.attendance_status_unknown', sprintf('unknown attendance status %s', $status));
                     }
@@ -71,8 +73,6 @@ final class RecordAttendance
                     if ($class === null || $class->lifecycle_state !== 'active') {
                         throw BusinessRejection::forCode('academic.attendance_class_not_active', 'attendance is taken only on sessions of an active class');
                     }
-                    /** @var Enrollment $lockedEnrollment */
-                    $lockedEnrollment = Enrollment::query()->whereKey($enrollment->id)->lockForUpdate()->firstOrFail();
                     if ($lockedEnrollment->class_id !== $session->class_id) {
                         throw BusinessRejection::forCode('academic.attendance_wrong_class', 'the enrollment does not belong to the session class');
                     }

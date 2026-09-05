@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Modules\Academic\Commands;
 
+use App\Modules\Academic\Domain\AcademicAccess;
 use App\Modules\Academic\Domain\EnrollmentLifecycle;
 use App\Modules\Academic\Domain\ProgressionLifecycle;
+use App\Modules\Academic\Domain\RecordBranch;
 use App\Modules\Academic\Models\AssessmentResult;
 use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\Enrollment;
@@ -16,7 +18,6 @@ use App\Modules\Academic\Models\ProgressionDecision;
 use App\Modules\Academic\Queries\AcademicHistoryQuery;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
-use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
@@ -40,7 +41,7 @@ final class DecideProgression
     public const CAPABILITY_APPROVE = 'academic.progression_approve';
 
     public function __construct(
-        private readonly AccessDecision $access,
+        private readonly AcademicAccess $access,
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
@@ -57,7 +58,7 @@ final class DecideProgression
         try {
             return $this->idempotency->execute('academic.progression.propose', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($proposer, $studentId, $classId, $outcome, $reason, $assessmentResultId, $basis, $repeatCount): array {
-                    $this->require($proposer, self::CAPABILITY_PROPOSE, 'academic.progression_denied');
+                    $this->require($proposer, self::CAPABILITY_PROPOSE, RecordBranch::studentBranchForId($studentId), 'academic.progression_denied');
                     if (! in_array($outcome, ['advance', 'repeat'], true)) {
                         throw BusinessRejection::forCode('academic.progression_outcome_unknown', sprintf('unknown progression outcome %s', $outcome));
                     }
@@ -137,8 +138,9 @@ final class DecideProgression
         try {
             return $this->idempotency->execute('academic.progression.supersede', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($reviewer, $approver, $original, $outcome, $reason, $assessmentResultId, $basis, $repeatCount): array {
-                    $this->require($reviewer, self::CAPABILITY_REVIEW, 'academic.progression_denied');
-                    $this->require($approver, self::CAPABILITY_APPROVE, 'academic.progression_denied');
+                    $subjectBranch = RecordBranch::studentBranchForId((string) $original->student_id);
+                    $this->require($reviewer, self::CAPABILITY_REVIEW, $subjectBranch, 'academic.progression_denied');
+                    $this->require($approver, self::CAPABILITY_APPROVE, $subjectBranch, 'academic.progression_denied');
                     if (trim((string) $original->proposed_by) === $reviewer->actorId || trim((string) $original->proposed_by) === $approver->actorId) {
                         throw AuthorizationDenied::forCode('academic.appeal_not_independent', 'the original decision-maker may not review or approve the appeal outcome');
                     }
@@ -196,10 +198,9 @@ final class DecideProgression
         try {
             return $this->idempotency->execute('academic.progression.'.$verb, $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $decision, $toState, $capability, $verb): array {
-                    $this->require($actor, $capability, 'academic.progression_denied');
-
                     /** @var ProgressionDecision $locked */
                     $locked = ProgressionDecision::query()->whereKey($decision->id)->lockForUpdate()->firstOrFail();
+                    $this->require($actor, $capability, RecordBranch::progressionBranch($locked), 'academic.progression_denied');
                     ProgressionLifecycle::requireTransition($locked->lifecycle_state, $toState);
                     if (in_array($toState, [ProgressionLifecycle::STATE_REVIEWED], true) && trim((string) $locked->proposed_by) === $actor->actorId) {
                         throw AuthorizationDenied::forCode('academic.review_not_independent', 'the reviewer may not be the proposer of the decision under review');
@@ -439,11 +440,8 @@ final class DecideProgression
             ->count() + 1;
     }
 
-    private function require(Actor $actor, string $capability, string $errorCode): void
+    private function require(Actor $actor, string $capability, ?string $branchId, string $errorCode): void
     {
-        $outcome = $this->access->decide($actor, $capability, null);
-        if (! $outcome->allowed) {
-            throw AuthorizationDenied::forCode($errorCode, $outcome->reason);
-        }
+        $this->access->require($actor, $capability, $branchId, $errorCode);
     }
 }

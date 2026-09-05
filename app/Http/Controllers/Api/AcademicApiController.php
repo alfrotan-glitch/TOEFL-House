@@ -19,7 +19,22 @@ final class AcademicApiController extends Controller
 {
     public function sessions(): JsonResponse
     {
-        $sessions = ClassSession::query()->orderByDesc('scheduled_on')->limit(200)->get();
+        // Room-less sessions are scheduling metadata; roomed sessions disclose
+        // branch resources and are confined to visible branches.
+        $sessions = [];
+        if ($this->hasReadAuthority()) {
+            $visible = $this->visibleBranches();
+            $sessions = ClassSession::query()
+                ->select('class_sessions.*')
+                ->leftJoin('academic_rooms as room', 'room.id', '=', 'class_sessions.room_id')
+                ->where(function ($query) use ($visible): void {
+                    $query->whereNull('class_sessions.room_id')
+                        ->orWhereIn('room.branch_id', $visible);
+                })
+                ->orderByDesc('class_sessions.scheduled_on')
+                ->limit(200)
+                ->get();
+        }
 
         return response()->json(['sessions' => $sessions]);
     }

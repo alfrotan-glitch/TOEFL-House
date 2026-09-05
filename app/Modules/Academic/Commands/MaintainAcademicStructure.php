@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Modules\Academic\Commands;
 
+use App\Modules\Academic\Domain\AcademicAccess;
 use App\Modules\Academic\Models\AcademicPeriod;
 use App\Modules\Academic\Models\BranchAvailability;
 use App\Modules\Academic\Models\LevelPrerequisite;
@@ -15,7 +16,6 @@ use App\Modules\Academic\Models\ProgramVersionLevel;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Organization\Models\Branch;
-use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
@@ -28,13 +28,19 @@ use Illuminate\Support\Facades\DB;
  * Academic structure control: programs publish immutable versions, periods
  * publish and close. Published history is never silently rewritten — a
  * change is a new version.
+ *
+ * Scope boundary (WP-ACAD-SCOPE): curriculum governance (programs, levels,
+ * periods, rules) is organization-global by design — its records carry no
+ * branch — so those verbs check the capability globally (explicit null).
+ * Branch-bound verbs (availability, offerings) check it in the target
+ * branch's scope.
  */
 final class MaintainAcademicStructure
 {
     public const CAPABILITY = 'academic.structure';
 
     public function __construct(
-        private readonly AccessDecision $access,
+        private readonly AcademicAccess $access,
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
@@ -48,7 +54,7 @@ final class MaintainAcademicStructure
         try {
             return $this->idempotency->execute('academic.program.define', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $name): array {
-                    $this->requireCapability($actor);
+                    $this->requireCapability($actor, null);
                     if ($name === '') {
                         throw BusinessRejection::forCode('academic.program_name_missing', 'a program requires a name');
                     }
@@ -74,7 +80,7 @@ final class MaintainAcademicStructure
         try {
             return $this->idempotency->execute('academic.program.publish', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $program, $summary): array {
-                    $this->requireCapability($actor);
+                    $this->requireCapability($actor, null);
 
                     /** @var Program $locked */
                     $locked = Program::query()->whereKey($program->id)->lockForUpdate()->firstOrFail();
@@ -122,7 +128,7 @@ final class MaintainAcademicStructure
         try {
             return $this->idempotency->execute('academic.program.level.define', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $programVersionId, $levelKey, $ordinal, $title, $cefrRef): array {
-                    $this->requireCapability($actor);
+                    $this->requireCapability($actor, null);
 
                     /** @var ProgramVersion $version */
                     $version = ProgramVersion::query()->whereKey($programVersionId)->lockForUpdate()->firstOrFail();
@@ -175,7 +181,7 @@ final class MaintainAcademicStructure
         try {
             return $this->idempotency->execute('academic.branch_availability.declare', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $branchId, $programVersionLevelId, $academicPeriodId): array {
-                    $this->requireCapability($actor);
+                    $this->requireCapability($actor, $branchId);
                     $this->requireOpenTerm($academicPeriodId);
                     $this->requireActiveLevel($programVersionLevelId);
                     /** @var Branch $branch */
@@ -220,7 +226,7 @@ final class MaintainAcademicStructure
         try {
             return $this->idempotency->execute('academic.offering.open', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $branchId, $programVersionLevelId, $academicPeriodId, $capacity): array {
-                    $this->requireCapability($actor);
+                    $this->requireCapability($actor, $branchId);
                     if ($capacity < 1) {
                         throw BusinessRejection::forCode('academic.offering_capacity_positive', 'an offering requires a positive capacity');
                     }
@@ -272,7 +278,7 @@ final class MaintainAcademicStructure
         try {
             return $this->idempotency->execute('academic.prerequisite.define', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $targetLevelId, $requiredLevelId): array {
-                    $this->requireCapability($actor);
+                    $this->requireCapability($actor, null);
                     $this->requireSameProgramVersion($targetLevelId, $requiredLevelId);
                     if ($targetLevelId === $requiredLevelId) {
                         throw BusinessRejection::forCode('academic.prerequisite_self', 'a level cannot require itself');
@@ -315,7 +321,7 @@ final class MaintainAcademicStructure
         try {
             return $this->idempotency->execute('academic.prerequisite.retire', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $prerequisite): array {
-                    $this->requireCapability($actor);
+                    $this->requireCapability($actor, null);
 
                     /** @var LevelPrerequisite $locked */
                     $locked = LevelPrerequisite::query()->whereKey($prerequisite->id)->lockForUpdate()->firstOrFail();
@@ -345,7 +351,7 @@ final class MaintainAcademicStructure
         try {
             return $this->idempotency->execute('academic.progression_rule.define', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $levelId, $minimumPassingScore, $maxRepeats): array {
-                    $this->requireCapability($actor);
+                    $this->requireCapability($actor, null);
                     $this->requireActiveLevel($levelId);
                     if ($minimumPassingScore !== null && $minimumPassingScore !== '' && (! is_numeric($minimumPassingScore) || (float) $minimumPassingScore < 0 || (float) $minimumPassingScore > 100)) {
                         throw BusinessRejection::forCode('academic.progression_rule_score', 'a minimum passing score must be between 0 and 100');
@@ -392,7 +398,7 @@ final class MaintainAcademicStructure
         try {
             return $this->idempotency->execute('academic.progression_rule.retire', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $rule): array {
-                    $this->requireCapability($actor);
+                    $this->requireCapability($actor, null);
 
                     /** @var LevelProgressionRule $locked */
                     $locked = LevelProgressionRule::query()->whereKey($rule->id)->lockForUpdate()->firstOrFail();
@@ -471,7 +477,7 @@ final class MaintainAcademicStructure
         try {
             return $this->idempotency->execute('academic.period.define', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $name, $startsOn, $endsOn): array {
-                    $this->requireCapability($actor);
+                    $this->requireCapability($actor, null);
                     if ($endsOn->startOfDay()->lessThanOrEqualTo($startsOn->startOfDay())) {
                         throw BusinessRejection::forCode('academic.period_window', 'a period must end after it starts');
                     }
@@ -501,7 +507,7 @@ final class MaintainAcademicStructure
         try {
             return $this->idempotency->execute('academic.period.transition', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $period, $toState): array {
-                    $this->requireCapability($actor);
+                    $this->requireCapability($actor, null);
 
                     $from = $period->lifecycle_state;
                     $allowed = ['draft' => ['published'], 'published' => ['closed'], 'closed' => []][$from] ?? null;
@@ -521,11 +527,13 @@ final class MaintainAcademicStructure
         }
     }
 
-    private function requireCapability(Actor $actor): void
+    /**
+     * Branch-bound verbs pass the target branch; governance verbs pass an
+     * explicit null (global check, WP-ACAD-SCOPE). No default: every call
+     * site must state its scope choice.
+     */
+    private function requireCapability(Actor $actor, ?string $branchId): void
     {
-        $outcome = $this->access->decide($actor, self::CAPABILITY, null);
-        if (! $outcome->allowed) {
-            throw AuthorizationDenied::forCode('academic.structure_denied', $outcome->reason);
-        }
+        $this->access->require($actor, self::CAPABILITY, $branchId, 'academic.structure_denied');
     }
 }

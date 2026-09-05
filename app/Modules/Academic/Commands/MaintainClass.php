@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Modules\Academic\Commands;
 
+use App\Modules\Academic\Domain\AcademicAccess;
 use App\Modules\Academic\Domain\ClassLifecycle;
 use App\Modules\Academic\Domain\ClassSectionLifecycle;
 use App\Modules\Academic\Models\AcademicPeriod;
@@ -19,7 +20,6 @@ use App\Modules\Academic\Models\TeacherAssignmentSkill;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Identity\Models\Person;
-use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
@@ -39,7 +39,7 @@ final class MaintainClass
     public const CAPABILITY = 'academic.schedule';
 
     public function __construct(
-        private readonly AccessDecision $access,
+        private readonly AcademicAccess $access,
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
@@ -53,7 +53,7 @@ final class MaintainClass
         try {
             return $this->idempotency->execute('academic.class.define', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $programVersionId, $periodId, $capacity, $programVersionLevelId): array {
-                    $this->requireCapability($actor);
+                    $this->requireCapability($actor, null);
                     if (ProgramVersion::query()->whereKey($programVersionId)->doesntExist()) {
                         throw BusinessRejection::forCode('academic.class_version_unknown', 'a class requires a published program version');
                     }
@@ -106,7 +106,7 @@ final class MaintainClass
         try {
             return $this->idempotency->execute('academic.class.transition', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $class, $toState): array {
-                    $this->requireCapability($actor);
+                    $this->requireCapability($actor, null);
 
                     /** @var ClassModel $locked */
                     $locked = ClassModel::query()->whereKey($class->id)->lockForUpdate()->firstOrFail();
@@ -136,7 +136,7 @@ final class MaintainClass
         try {
             return $this->idempotency->execute('academic.session.schedule', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $class, $scheduledOn, $startsAt, $endsAt, $skillId, $roomId, $sectionId): array {
-                    $this->requireCapability($actor);
+                    $this->requireCapability($actor, $this->roomBranch($roomId));
                     if ($class->lifecycle_state !== ClassLifecycle::STATE_ACTIVE) {
                         throw BusinessRejection::forCode('academic.session_class_not_active', 'sessions are scheduled only on active classes');
                     }
@@ -187,7 +187,7 @@ final class MaintainClass
         try {
             return $this->idempotency->execute('academic.section.define', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $class, $name, $capacity): array {
-                    $this->requireCapability($actor);
+                    $this->requireCapability($actor, null);
                     if ($name === '') {
                         throw BusinessRejection::forCode('academic.section_name_required', 'a section requires a name');
                     }
@@ -225,7 +225,7 @@ final class MaintainClass
         try {
             return $this->idempotency->execute('academic.section.transition.'.$toState, $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $section, $toState): array {
-                    $this->requireCapability($actor);
+                    $this->requireCapability($actor, null);
 
                     /** @var ClassSection $locked */
                     $locked = ClassSection::query()->whereKey($section->id)->lockForUpdate()->firstOrFail();
@@ -290,7 +290,7 @@ final class MaintainClass
         try {
             return $this->idempotency->execute('academic.teacher.assign_skill', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $assignment, $skillId): array {
-                    $this->requireCapability($actor);
+                    $this->requireCapability($actor, null);
 
                     /** @var TeacherAssignment $locked */
                     $locked = TeacherAssignment::query()->where('id', $assignment->id)->lockForUpdate()->firstOrFail();
@@ -328,7 +328,7 @@ final class MaintainClass
         try {
             return $this->idempotency->execute('academic.teacher.assign', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $class, $teacherPersonId, $effectiveFrom, $effectiveTo): array {
-                    $this->requireCapability($actor);
+                    $this->requireCapability($actor, null);
                     if (! Person::query()->whereKey($teacherPersonId)->exists()) {
                         throw BusinessRejection::forCode('academic.teacher_unknown', 'a teacher assignment requires a known person');
                     }
@@ -358,12 +358,23 @@ final class MaintainClass
         }
     }
 
-    private function requireCapability(Actor $actor): void
+    private function requireCapability(Actor $actor, ?string $branchId): void
     {
-        $outcome = $this->access->decide($actor, self::CAPABILITY, null);
-        if (! $outcome->allowed) {
-            throw AuthorizationDenied::forCode('academic.schedule_denied', $outcome->reason);
+        $this->access->require($actor, self::CAPABILITY, $branchId, 'academic.schedule_denied');
+    }
+
+    /**
+     * Booking a room consumes a branch-owned resource, so a roomed session
+     * is checked in the room's branch scope. Room-less scheduling stays a
+     * governance act (explicit null).
+     */
+    private function roomBranch(?string $roomId): ?string
+    {
+        if ($roomId === null || trim($roomId) === '') {
+            return null;
         }
+
+        return trim((string) (AcademicRoom::query()->whereKey($roomId)->value('branch_id') ?? ''));
     }
 
     /**
@@ -382,7 +393,7 @@ final class MaintainClass
         try {
             return $this->idempotency->execute('academic.teacher.end', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $assignment, $effectiveTo, $reason): array {
-                    $this->requireCapability($actor);
+                    $this->requireCapability($actor, null);
                     if ($reason === '') {
                         throw BusinessRejection::forCode('academic.assignment_reason', 'ending an assignment requires a reason');
                     }
@@ -424,7 +435,7 @@ final class MaintainClass
         try {
             return $this->idempotency->execute('academic.teacher.extend', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $assignment, $newEffectiveTo, $reason): array {
-                    $this->requireCapability($actor);
+                    $this->requireCapability($actor, null);
                     if ($reason === '') {
                         throw BusinessRejection::forCode('academic.assignment_reason', 'extending an assignment requires a reason');
                     }
@@ -468,7 +479,7 @@ final class MaintainClass
         try {
             return $this->idempotency->execute('academic.teacher.handover', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $assignment, $successorTeacherPersonId, $handoverOn, $reason): array {
-                    $this->requireCapability($actor);
+                    $this->requireCapability($actor, null);
                     if ($reason === '') {
                         throw BusinessRejection::forCode('academic.assignment_reason', 'handing over an assignment requires a reason');
                     }

@@ -168,11 +168,22 @@ final class AcademicDecisionFeatureTest extends TestCase
             $this->assertSame('academic.appeal_outcome_required', $rejection->errorCode());
         }
 
+        // Resolved MEANS upheld and redressed: resolving the untouched result
+        // is refused until remediation is recorded on it.
+        try {
+            app(ManageAcademicAppeal::class)->resolve($appealManager, AcademicAppeal::query()->findOrFail($appeal['appeal_id']), 'upheld', 'answer-sheet/review-9', 'dec-app-6x');
+            $this->fail('an untouched subject cannot resolve');
+        } catch (BusinessRejection $rejection) {
+            $this->assertSame('academic.appeal_subject_untouched', $rejection->errorCode());
+        }
+
+        $moderator = $this->grantedActor('dec-moderator-appeal', ['academic.moderate']);
+        app(ManageAssessmentResult::class)->markAppealed($moderator, AssessmentResult::query()->findOrFail($ids['result_id']), 'dec-app-mark');
         app(ManageAcademicAppeal::class)->resolve($appealManager, AcademicAppeal::query()->findOrFail($appeal['appeal_id']), 'upheld', 'answer-sheet/review-9', 'dec-app-6');
         app(ManageAcademicAppeal::class)->close($appealManager, AcademicAppeal::query()->findOrFail($appeal['appeal_id']), 'dec-app-7');
 
         $this->assertDatabaseHas('academic_appeals', ['id' => $appeal['appeal_id'], 'lifecycle_state' => 'closed', 'outcome' => 'upheld']);
-        $this->assertDatabaseHas('assessment_results', ['id' => $ids['result_id'], 'lifecycle_state' => 'released']);
+        $this->assertDatabaseHas('assessment_results', ['id' => $ids['result_id'], 'lifecycle_state' => 'appealed']);
     }
 
     public function test_progression_is_explicit_three_role_and_supersedes_on_appeal(): void

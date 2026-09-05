@@ -60,6 +60,7 @@ final class AcademicOfferingAndWaitlistFeatureTest extends TestCase
             'name' => 'Offering Branch '.substr(md5(RandomIdentifier::new()), 0, 8),
             'lifecycle_state' => 'active',
         ])->id;
+        $this->attachBranchToBootstrapOrganization($this->branchId);
 
         $program = $structure->defineProgram($officer, 'Offering Intensive', 'off-prog');
         $version = $structure->publishVersion($officer, Program::query()->findOrFail($program['program_id']), 'Offering v1', 'off-ver');

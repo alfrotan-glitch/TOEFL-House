@@ -70,6 +70,13 @@
                             <button type="submit" class="btn small">Release</button>
                         </form>
                     @endif
+                    @if ($attempt['live']['lifecycle_state'] === 'released')
+                        <form method="POST" action="{{ route('academic.result.mark-appealed', $attempt['live']['result_id']) }}" style="display:inline">
+                            @csrf
+                            <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                            <button type="submit" class="btn small secondary">Mark appealed</button>
+                        </form>
+                    @endif
                     @if (in_array($attempt['live']['lifecycle_state'], ['released', 'appealed'], true))
                         <form method="POST" action="{{ route('academic.result.correction', $attempt['live']['result_id']) }}" style="display:inline">
                             @csrf

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Modules\Academic\Commands;
 
+use App\Modules\Academic\Domain\AcademicAccess;
+use App\Modules\Academic\Domain\RecordBranch;
 use App\Modules\Academic\Domain\WaitlistLifecycle;
 use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\ClassWaitlistEntry;
@@ -13,7 +15,6 @@ use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Students\Models\Student;
 use App\Modules\Students\Models\StudentStatus;
-use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
@@ -34,7 +35,7 @@ final class ManageClassWaitlist
     public const CAPABILITY_APPROVE = 'academic.enroll_approve';
 
     public function __construct(
-        private readonly AccessDecision $access,
+        private readonly AcademicAccess $access,
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
@@ -48,10 +49,6 @@ final class ManageClassWaitlist
         try {
             return $this->idempotency->execute('academic.waitlist.join', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($requester, $studentId, $classId, $offeringId): array {
-                    $outcome = $this->access->decide($requester, self::CAPABILITY_REQUEST, null);
-                    if (! $outcome->allowed) {
-                        throw AuthorizationDenied::forCode('academic.waitlist_denied', $outcome->reason);
-                    }
                     $this->assertStudentActive($studentId);
 
                     /** @var ClassModel $class */
@@ -69,6 +66,7 @@ final class ManageClassWaitlist
                     if ($offeringId !== null && $offeringId !== '') {
                         $this->assertOfferingMatchesClass($offeringId, $classId);
                     }
+                    $this->access->require($requester, self::CAPABILITY_REQUEST, $this->queueBranch($offeringId, $studentId), 'academic.waitlist_denied');
                     $classFull = $this->classFull($class);
                     $offeringFull = $offeringId !== null && $offeringId !== '' && $this->offeringFull($offeringId);
                     if (! $classFull && ! $offeringFull) {
@@ -111,13 +109,9 @@ final class ManageClassWaitlist
         try {
             return $this->idempotency->execute('academic.waitlist.promote', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $entry, $idempotencyKey): array {
-                    $outcome = $this->access->decide($actor, self::CAPABILITY_APPROVE, null);
-                    if (! $outcome->allowed) {
-                        throw AuthorizationDenied::forCode('academic.waitlist_denied', $outcome->reason);
-                    }
-
                     /** @var ClassWaitlistEntry $locked */
                     $locked = ClassWaitlistEntry::query()->whereKey($entry->id)->lockForUpdate()->firstOrFail();
+                    $this->access->require($actor, self::CAPABILITY_APPROVE, RecordBranch::waitlistBranch($locked), 'academic.waitlist_denied');
                     WaitlistLifecycle::requireTransition($locked->lifecycle_state, WaitlistLifecycle::STATE_ENROLLED);
                     $this->assertCapacityAvailable($locked);
 
@@ -168,13 +162,9 @@ final class ManageClassWaitlist
         try {
             return $this->idempotency->execute('academic.waitlist.transition.'.$toState, $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $entry, $toState, $capability): array {
-                    $outcome = $this->access->decide($actor, $capability, null);
-                    if (! $outcome->allowed) {
-                        throw AuthorizationDenied::forCode('academic.waitlist_denied', $outcome->reason);
-                    }
-
                     /** @var ClassWaitlistEntry $locked */
                     $locked = ClassWaitlistEntry::query()->whereKey($entry->id)->lockForUpdate()->firstOrFail();
+                    $this->access->require($actor, $capability, RecordBranch::waitlistBranch($locked), 'academic.waitlist_denied');
                     WaitlistLifecycle::requireTransition($locked->lifecycle_state, $toState);
                     if ($toState === WaitlistLifecycle::STATE_OFFERED) {
                         $this->assertCapacityAvailable($locked);
@@ -190,6 +180,24 @@ final class ManageClassWaitlist
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.waitlist.transition', 'class_waitlist_entry', $entry->id);
         }
+    }
+
+    /**
+     * Branch of a waitlist queueing: the named offering's branch, else the
+     * student's home branch (WP-ACAD-SCOPE).
+     */
+    private function queueBranch(?string $offeringId, string $studentId): ?string
+    {
+        $offeringId = trim((string) ($offeringId ?? ''));
+        if ($offeringId !== '') {
+            /** @var Offering|null $offering */
+            $offering = Offering::query()->find($offeringId);
+            if ($offering !== null && trim((string) $offering->branch_id) !== '') {
+                return trim((string) $offering->branch_id);
+            }
+        }
+
+        return RecordBranch::studentBranchForId($studentId);
     }
 
     private function assertStudentActive(string $studentId): void

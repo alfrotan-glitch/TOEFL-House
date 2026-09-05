@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Modules\Academic\Commands;
 
+use App\Modules\Academic\Domain\AcademicAccess;
 use App\Modules\Academic\Domain\AssessmentResultLifecycle;
 use App\Modules\Academic\Domain\ClassLifecycle;
 use App\Modules\Academic\Domain\EnrollmentLifecycle;
 use App\Modules\Academic\Domain\ProgressionLifecycle;
+use App\Modules\Academic\Domain\RecordBranch;
 use App\Modules\Academic\Errors\EnrollmentFinancialGateDenied;
 use App\Modules\Academic\Models\AssessmentResult;
 use App\Modules\Academic\Models\ClassModel;
@@ -24,7 +26,6 @@ use App\Modules\Audit\RejectedOperation;
 use App\Modules\Finance\Queries\FinancialGateQuery;
 use App\Modules\Students\Models\Student;
 use App\Modules\Students\Models\StudentStatus;
-use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
@@ -48,7 +49,7 @@ final class MaintainEnrollment
     public const CAPABILITY_APPROVE = 'academic.enroll_approve';
 
     public function __construct(
-        private readonly AccessDecision $access,
+        private readonly AcademicAccess $access,
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
@@ -66,16 +67,18 @@ final class MaintainEnrollment
         try {
             return $this->idempotency->execute('academic.enrollment.request', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($requester, $studentId, $classId, $offeringId): array {
-                    $outcome = $this->access->decide($requester, self::CAPABILITY_REQUEST, null);
-                    if (! $outcome->allowed) {
-                        throw AuthorizationDenied::forCode('academic.enrollment_denied', $outcome->reason);
-                    }
                     $this->assertStudentActive($studentId);
                     $this->assertClassActive($classId);
                     $this->assertPrerequisitesForClass($studentId, $classId);
                     if ($offeringId !== null && $offeringId !== '') {
                         $this->assertOfferingOpenAndMatchesClass($offeringId, $classId);
                     }
+                    // Scope follows the seat: offering branch, else the
+                    // student's home branch (WP-ACAD-SCOPE). The derived
+                    // branch is stamped as originating provenance — captured
+                    // from linked rows, never fabricated.
+                    $branchId = $this->seatBranch($offeringId, $studentId);
+                    $this->access->require($requester, self::CAPABILITY_REQUEST, $branchId, 'academic.enrollment_denied');
                     if (Enrollment::query()->where('student_id', $studentId)->where('class_id', $classId)->whereIn('lifecycle_state', ['requested', 'active', 'frozen'])->exists()) {
                         throw BusinessRejection::forCode('academic.enrollment_seat_exists', 'this student already holds a seat in this class');
                     }
@@ -86,11 +89,13 @@ final class MaintainEnrollment
                         'student_id' => $studentId,
                         'class_id' => $classId,
                         'offering_id' => $offeringId !== null && $offeringId !== '' ? $offeringId : null,
+                        'originating_branch_id' => $branchId,
                         'academic_eligibility_snapshot_id' => $eligibilitySnapshotId,
                         'lifecycle_state' => EnrollmentLifecycle::STATE_REQUESTED,
                     ]);
                     $event = $this->audit->record($requester->actorId, 'academic.enrollment.request', 'enrollment', $enrollment->id, null, [
                         'student_id' => $studentId, 'class_id' => $classId, 'offering_id' => $enrollment->offering_id,
+                        'originating_branch_id' => $enrollment->originating_branch_id,
                         'academic_eligibility_snapshot_id' => $enrollment->academic_eligibility_snapshot_id,
                     ]);
 
@@ -124,13 +129,9 @@ final class MaintainEnrollment
         try {
             return $this->idempotency->execute('academic.enrollment.transition.'.EnrollmentLifecycle::STATE_FROZEN, $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $enrollment, $reason): array {
-                    $outcome = $this->access->decide($actor, self::CAPABILITY_APPROVE, null);
-                    if (! $outcome->allowed) {
-                        throw AuthorizationDenied::forCode('academic.enrollment_denied', $outcome->reason);
-                    }
-
                     /** @var Enrollment $locked */
                     $locked = Enrollment::query()->whereKey($enrollment->id)->lockForUpdate()->firstOrFail();
+                    $this->access->require($actor, self::CAPABILITY_APPROVE, RecordBranch::enrollmentBranch($locked), 'academic.enrollment_denied');
                     EnrollmentLifecycle::requireTransition($locked->lifecycle_state, EnrollmentLifecycle::STATE_FROZEN);
                     $exit = $this->exitGateSnapshot($locked);
 
@@ -169,13 +170,9 @@ final class MaintainEnrollment
         try {
             return $this->idempotency->execute('academic.enrollment.transition.'.EnrollmentLifecycle::STATE_ACTIVE, $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $enrollment): array {
-                    $outcome = $this->access->decide($actor, self::CAPABILITY_APPROVE, null);
-                    if (! $outcome->allowed) {
-                        throw AuthorizationDenied::forCode('academic.enrollment_denied', $outcome->reason);
-                    }
-
                     /** @var Enrollment $locked */
                     $locked = Enrollment::query()->whereKey($enrollment->id)->lockForUpdate()->firstOrFail();
+                    $this->access->require($actor, self::CAPABILITY_APPROVE, RecordBranch::enrollmentBranch($locked), 'academic.enrollment_denied');
                     EnrollmentLifecycle::requireTransition($locked->lifecycle_state, EnrollmentLifecycle::STATE_ACTIVE);
                     $this->assertStudentActive($locked->student_id);
                     $this->assertClassActive($locked->class_id);
@@ -219,13 +216,9 @@ final class MaintainEnrollment
         try {
             return $this->idempotency->execute('academic.enrollment.transition.'.EnrollmentLifecycle::STATE_WITHDRAWN, $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $enrollment, $reason): array {
-                    $outcome = $this->access->decide($actor, self::CAPABILITY_REQUEST, null);
-                    if (! $outcome->allowed) {
-                        throw AuthorizationDenied::forCode('academic.enrollment_denied', $outcome->reason);
-                    }
-
                     /** @var Enrollment $locked */
                     $locked = Enrollment::query()->whereKey($enrollment->id)->lockForUpdate()->firstOrFail();
+                    $this->access->require($actor, self::CAPABILITY_REQUEST, RecordBranch::enrollmentBranch($locked), 'academic.enrollment_denied');
                     EnrollmentLifecycle::requireTransition($locked->lifecycle_state, EnrollmentLifecycle::STATE_WITHDRAWN);
                     $exit = $this->exitGateSnapshot($locked);
 
@@ -269,13 +262,9 @@ final class MaintainEnrollment
         try {
             return $this->idempotency->execute('academic.enrollment.transition.'.EnrollmentLifecycle::STATE_COMPLETED, $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $enrollment, $basis, $evidenceKind, $evidenceId): array {
-                    $outcome = $this->access->decide($actor, self::CAPABILITY_APPROVE, null);
-                    if (! $outcome->allowed) {
-                        throw AuthorizationDenied::forCode('academic.enrollment_denied', $outcome->reason);
-                    }
-
                     /** @var Enrollment $locked */
                     $locked = Enrollment::query()->whereKey($enrollment->id)->lockForUpdate()->firstOrFail();
+                    $this->access->require($actor, self::CAPABILITY_APPROVE, RecordBranch::enrollmentBranch($locked), 'academic.enrollment_denied');
                     EnrollmentLifecycle::requireTransition($locked->lifecycle_state, EnrollmentLifecycle::STATE_COMPLETED);
 
                     /** @var ClassModel $class */
@@ -321,13 +310,15 @@ final class MaintainEnrollment
         try {
             return $this->idempotency->execute('academic.enrollment.transfer', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $enrollment, $targetClassId, $offeringId): array {
-                    $outcome = $this->access->decide($actor, self::CAPABILITY_APPROVE, null);
-                    if (! $outcome->allowed) {
-                        throw AuthorizationDenied::forCode('academic.enrollment_denied', $outcome->reason);
-                    }
-
                     /** @var Enrollment $locked */
                     $locked = Enrollment::query()->whereKey($enrollment->id)->lockForUpdate()->firstOrFail();
+                    $this->access->require($actor, self::CAPABILITY_APPROVE, RecordBranch::enrollmentBranch($locked), 'academic.enrollment_denied');
+                    // A cross-branch transfer writes a seat into the
+                    // receiving branch: the actor must hold the capability
+                    // there too, not just on the source seat.
+                    if ($offeringId !== null && $offeringId !== '') {
+                        $this->access->require($actor, self::CAPABILITY_APPROVE, $this->offeringBranch($offeringId), 'academic.enrollment_denied');
+                    }
                     EnrollmentLifecycle::requireTransition($locked->lifecycle_state, EnrollmentLifecycle::STATE_TRANSFERRED);
                     if ($targetClassId === $locked->class_id) {
                         throw BusinessRejection::forCode('academic.transfer_same_class', 'a transfer requires a different target class');
@@ -354,6 +345,7 @@ final class MaintainEnrollment
                         'student_id' => $locked->student_id,
                         'class_id' => $targetClassId,
                         'offering_id' => $offeringId !== null && $offeringId !== '' ? $offeringId : null,
+                        'originating_branch_id' => $this->seatBranch($offeringId, (string) $locked->student_id),
                         'academic_eligibility_snapshot_id' => $eligibilitySnapshotId,
                         'lifecycle_state' => EnrollmentLifecycle::STATE_REQUESTED,
                     ]);
@@ -383,13 +375,9 @@ final class MaintainEnrollment
         try {
             return $this->idempotency->execute('academic.enrollment.transition.'.$toState, $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $enrollment, $toState, $capability): array {
-                    $outcome = $this->access->decide($actor, $capability, null);
-                    if (! $outcome->allowed) {
-                        throw AuthorizationDenied::forCode('academic.enrollment_denied', $outcome->reason);
-                    }
-
                     /** @var Enrollment $locked */
                     $locked = Enrollment::query()->whereKey($enrollment->id)->lockForUpdate()->firstOrFail();
+                    $this->access->require($actor, $capability, RecordBranch::enrollmentBranch($locked), 'academic.enrollment_denied');
                     EnrollmentLifecycle::requireTransition($locked->lifecycle_state, $toState);
                     if ($toState === EnrollmentLifecycle::STATE_ACTIVE) {
                         $this->assertClassActive($locked->class_id);
@@ -468,6 +456,27 @@ final class MaintainEnrollment
             $enrollment->id,
             $denial->assessment(),
         );
+    }
+
+    /**
+     * Branch of a seat being requested: the offering's branch when an
+     * offering is named, else the student's home branch (WP-ACAD-SCOPE).
+     */
+    private function seatBranch(?string $offeringId, string $studentId): ?string
+    {
+        return $this->offeringBranch($offeringId) ?? RecordBranch::studentBranchForId($studentId);
+    }
+
+    private function offeringBranch(?string $offeringId): ?string
+    {
+        $offeringId = trim((string) ($offeringId ?? ''));
+        if ($offeringId === '') {
+            return null;
+        }
+        /** @var Offering|null $offering */
+        $offering = Offering::query()->find($offeringId);
+
+        return $offering === null ? null : trim((string) $offering->branch_id);
     }
 
     private function assertReason(string $reason): void

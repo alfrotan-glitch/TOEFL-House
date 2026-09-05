@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Academic\Domain\RecordBranch;
 use App\Modules\Admissions\Commands\DecideAdmission;
 use App\Modules\Admissions\Commands\EnrollAdmittedApplicant;
 use App\Modules\Admissions\Commands\RegisterApplicant;
@@ -23,18 +24,54 @@ final class StudentsApiController extends Controller
 {
     public function index(): JsonResponse
     {
-        $students = Student::query()
-            ->select('students.*')
-            ->leftJoin('student_statuses as csr', function ($join): void {
-                $join->on('csr.student_id', '=', 'students.id')
-                    ->whereRaw('csr.id = (select ss.id from student_statuses ss where ss.student_id = students.id order by ss.effective_from desc, ss.id desc limit 1)');
-            })
-            ->selectRaw('csr.status as current_status')
-            ->orderBy('students.student_code')
-            ->limit(200)
-            ->get();
+        // Branch-visibility (WP-ACAD-SCOPE): only students/applicants of the
+        // actor's branches. Null-provenance rows stay visible to authorized
+        // actors while provenance is being populated.
+        $visible = $this->visibleBranches();
+        $students = [];
+        $applicants = [];
+        if ($this->hasReadAuthority()) {
+            $students = Student::query()
+                ->select('students.*')
+                ->leftJoin('student_statuses as csr', function ($join): void {
+                    $join->on('csr.student_id', '=', 'students.id')
+                        ->whereRaw('csr.id = (select ss.id from student_statuses ss where ss.student_id = students.id order by ss.effective_from desc, ss.id desc limit 1)');
+                })
+                ->selectRaw('csr.status as current_status')
+                ->where(function ($query) use ($visible): void {
+                    $query->whereIn('students.current_home_branch_id', $visible)
+                        ->orWhere(function ($query) use ($visible): void {
+                            $query->whereNull('students.current_home_branch_id')
+                                ->whereIn('students.originating_branch_id', $visible);
+                        })
+                        ->orWhere(function ($query): void {
+                            $query->whereNull('students.current_home_branch_id')
+                                ->whereNull('students.originating_branch_id');
+                        });
+                })
+                ->orderBy('students.student_code')
+                ->limit(200)
+                ->get();
 
-        $applicants = Applicant::query()->orderByDesc('created_at')->limit(200)->get();
+            $applicants = Applicant::query()
+                ->select('applicants.*')
+                ->leftJoin('placement_profiles as profile', 'profile.id', '=', 'applicants.placement_profile_id')
+                ->where(function ($query) use ($visible): void {
+                    $query->whereNull('applicants.placement_profile_id')
+                        ->orWhereIn('profile.current_home_branch_id', $visible)
+                        ->orWhere(function ($query) use ($visible): void {
+                            $query->whereNull('profile.current_home_branch_id')
+                                ->whereIn('profile.originating_branch_id', $visible);
+                        })
+                        ->orWhere(function ($query): void {
+                            $query->whereNull('profile.current_home_branch_id')
+                                ->whereNull('profile.originating_branch_id');
+                        });
+                })
+                ->orderByDesc('applicants.created_at')
+                ->limit(200)
+                ->get();
+        }
 
         return response()->json(['students' => $students, 'applicants' => $applicants]);
     }
@@ -117,6 +154,12 @@ final class StudentsApiController extends Controller
     public function show(string $studentId): JsonResponse
     {
         $student = Student::query()->findOrFail($studentId);
+        $this->requireBranchVisible(
+            RecordBranch::studentBranchForId($student->id),
+            'api.students.show',
+            'student',
+            $student->id,
+        );
 
         return response()->json((new StudentLifecycleQuery)->for($student));
     }

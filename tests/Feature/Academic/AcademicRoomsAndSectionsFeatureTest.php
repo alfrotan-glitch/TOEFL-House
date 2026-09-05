@@ -44,6 +44,7 @@ final class AcademicRoomsAndSectionsFeatureTest extends TestCase
             'name' => 'Scheduling Branch '.substr(md5(RandomIdentifier::new()), 0, 8),
             'lifecycle_state' => 'active',
         ])->id;
+        $this->attachBranchToBootstrapOrganization($this->branchId);
 
         $program = $structure->defineProgram($officer, 'Scheduling Program', 'sched-prog');
         $version = $structure->publishVersion($officer, Program::query()->findOrFail($program['program_id']), 'Scheduling v1', 'sched-ver');

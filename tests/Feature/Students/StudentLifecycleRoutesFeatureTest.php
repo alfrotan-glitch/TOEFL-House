@@ -37,6 +37,9 @@ final class StudentLifecycleRoutesFeatureTest extends TestCase
             'name' => 'Lifecycle Route Branch '.$suffix,
             'lifecycle_state' => 'active',
         ]);
+        // Branched students are only visible to org authority through the
+        // campus-assignment topology, so the fixture branch joins it.
+        $this->attachBranchToBootstrapOrganization($branch->id);
 
         return $branch;
     }

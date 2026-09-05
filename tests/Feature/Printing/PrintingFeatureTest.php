@@ -42,7 +42,11 @@ final class PrintingFeatureTest extends TestCase
 
     private function signIn(): void
     {
-        $person = $this->personWithAuthority('print-emp-1', []);
+        // The print operator holds a position under the bootstrap
+        // organization: authorized staff (read-authority), without any
+        // branch grant — null-provenance documents render, branched ones do
+        // not (see the authorization tests).
+        $person = $this->personWithAuthority('print-emp-1', ['academic.enroll']);
         UserAccount::query()->create([
             'id' => RandomIdentifier::new(),
             'person_id' => $person->id,

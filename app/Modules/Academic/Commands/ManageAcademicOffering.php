@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Modules\Academic\Commands;
 
+use App\Modules\Academic\Domain\AcademicAccess;
 use App\Modules\Academic\Domain\BranchAvailabilityLifecycle;
 use App\Modules\Academic\Domain\OfferingLifecycle;
 use App\Modules\Academic\Models\AcademicPeriod;
@@ -13,7 +14,6 @@ use App\Modules\Academic\Models\Offering;
 use App\Modules\Academic\Models\ProgramVersionLevel;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
-use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
@@ -31,7 +31,7 @@ final class ManageAcademicOffering
     public const CAPABILITY = 'academic.structure';
 
     public function __construct(
-        private readonly AccessDecision $access,
+        private readonly AcademicAccess $access,
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
@@ -57,10 +57,9 @@ final class ManageAcademicOffering
         try {
             return $this->idempotency->execute('academic.availability.transition.'.$toState, $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $availability, $toState): array {
-                    $this->requireCapability($actor);
-
                     /** @var BranchAvailability $locked */
                     $locked = BranchAvailability::query()->whereKey($availability->id)->lockForUpdate()->firstOrFail();
+                    $this->requireCapability($actor, (string) $locked->branch_id);
                     $from = $locked->lifecycle_state;
                     BranchAvailabilityLifecycle::requireTransition($from, $toState);
 
@@ -122,10 +121,9 @@ final class ManageAcademicOffering
         try {
             return $this->idempotency->execute('academic.offering.transition.'.$toState, $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $offering, $toState): array {
-                    $this->requireCapability($actor);
-
                     /** @var Offering $locked */
                     $locked = Offering::query()->whereKey($offering->id)->lockForUpdate()->firstOrFail();
+                    $this->requireCapability($actor, (string) $locked->branch_id);
                     $from = $locked->lifecycle_state;
                     OfferingLifecycle::requireTransition($from, $toState);
 
@@ -160,13 +158,13 @@ final class ManageAcademicOffering
         try {
             return $this->idempotency->execute('academic.offering.resize', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $offering, $capacity): array {
-                    $this->requireCapability($actor);
+                    /** @var Offering $locked */
+                    $locked = Offering::query()->whereKey($offering->id)->lockForUpdate()->firstOrFail();
+                    $this->requireCapability($actor, (string) $locked->branch_id);
                     if ($capacity < 1) {
                         throw BusinessRejection::forCode('academic.offering_capacity_positive', 'an offering requires a positive capacity');
                     }
 
-                    /** @var Offering $locked */
-                    $locked = Offering::query()->whereKey($offering->id)->lockForUpdate()->firstOrFail();
                     $activeSeats = Enrollment::query()->where('offering_id', $locked->id)->where('lifecycle_state', 'active')->count();
                     if ($capacity < $activeSeats) {
                         throw BusinessRejection::forCode('academic.offering_capacity_below_active', "offering capacity cannot fall below its {$activeSeats} active seat(s)");
@@ -221,11 +219,8 @@ final class ManageAcademicOffering
         }
     }
 
-    private function requireCapability(Actor $actor): void
+    private function requireCapability(Actor $actor, ?string $branchId): void
     {
-        $outcome = $this->access->decide($actor, self::CAPABILITY, null);
-        if (! $outcome->allowed) {
-            throw AuthorizationDenied::forCode('academic.structure_denied', $outcome->reason);
-        }
+        $this->access->require($actor, self::CAPABILITY, $branchId, 'academic.structure_denied');
     }
 }

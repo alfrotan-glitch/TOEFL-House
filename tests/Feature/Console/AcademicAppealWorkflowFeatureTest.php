@@ -155,6 +155,7 @@ final class AcademicAppealWorkflowFeatureTest extends TestCase
     {
         $this->makeEmployee('afw-filer-1', ['academic.appeal_manage'], 'filer');
         $this->makeEmployee('afw-reviewer-1', ['academic.appeal_manage'], 'appeal-reviewer');
+        $this->makeEmployee('afw-moderator-1', ['academic.moderate'], 'moderator');
         $this->makeEmployee('afw-stranger-1', ['academic.appeal_manage'], 'stranger');
         $this->makeEmployee('afw-closer-1', ['academic.appeal_manage'], 'closer');
         $this->makeEmployee('afw-plain-1', [], 'plain');
@@ -233,8 +234,25 @@ final class AcademicAppealWorkflowFeatureTest extends TestCase
             ->assertRedirect('/academic')
             ->assertSessionHas('error_code', 'academic.appeal_wrong_reviewer');
 
-        // The assigned reviewer decides with outcome and evidence; a distinct
-        // employee then closes the record.
+        // Resolving before remediation is recorded is refused: resolved
+        // means upheld AND redressed, never a bare verdict.
+        $this->signOut();
+        $this->signIn('appeal-reviewer');
+        $this->post('/academic/appeals/'.$appealId.'/resolve', [
+            'outcome' => 'appeal upheld',
+            'outcome_evidence' => 'answer-sheet/afw-stu-1',
+        ], ['referer' => 'http://localhost/academic'])
+            ->assertRedirect('/academic')
+            ->assertSessionHas('error_code', 'academic.appeal_subject_untouched');
+
+        // Remediation is ordered through the owning result workflow, by its
+        // own authority — then the reviewer resolves and a distinct employee
+        // closes the record.
+        $this->signOut();
+        $this->signIn('moderator');
+        $this->post('/academic/results/'.$this->resultId.'/mark-appealed')->assertRedirect('/academic');
+        $this->assertDatabaseHas('assessment_results', ['id' => $this->resultId, 'lifecycle_state' => 'appealed']);
+
         $this->signOut();
         $this->signIn('appeal-reviewer');
         $this->post('/academic/appeals/'.$appealId.'/resolve', [

@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace App\Modules\Academic\Commands;
 
+use App\Modules\Academic\Domain\AcademicAccess;
 use App\Modules\Academic\Models\Skill;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
-use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
@@ -25,7 +25,7 @@ final class MaintainSkill
     public const CAPABILITY = 'academic.skill';
 
     public function __construct(
-        private readonly AccessDecision $access,
+        private readonly AcademicAccess $access,
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
@@ -92,11 +92,13 @@ final class MaintainSkill
         }
     }
 
+    /**
+     * Skills are organization-global curriculum records (WP-ACAD-SCOPE), so
+     * the capability is checked globally. No default: call sites stay
+     * explicit.
+     */
     private function require(Actor $actor): void
     {
-        $outcome = $this->access->decide($actor, self::CAPABILITY, null);
-        if (! $outcome->allowed) {
-            throw AuthorizationDenied::forCode('academic.skill_denied', $outcome->reason);
-        }
+        $this->access->require($actor, self::CAPABILITY, null, 'academic.skill_denied');
     }
 }

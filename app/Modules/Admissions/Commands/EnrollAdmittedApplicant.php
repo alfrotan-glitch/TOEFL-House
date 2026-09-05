@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Modules\Admissions\Commands;
 
+use App\Modules\Academic\Placement\Models\PlacementProfile;
 use App\Modules\Admissions\Models\AdmissionDecision;
 use App\Modules\Admissions\Models\Applicant;
 use App\Modules\Audit\AttemptedOperation;
@@ -69,11 +70,24 @@ final class EnrollAdmittedApplicant
                     }
 
                     $studentCode = 'STU-'.strtoupper(substr(bin2hex(random_bytes(5)), 0, 9));
+                    // Originating provenance (WP-ACAD-SCOPE): where the
+                    // student entered — the branch that placed them. Stays
+                    // null when unknown; never fabricated.
+                    $originatingBranchId = null;
+                    if ($locked->placement_profile_id !== null && trim((string) $locked->placement_profile_id) !== '') {
+                        /** @var PlacementProfile|null $profile */
+                        $profile = PlacementProfile::query()->find($locked->placement_profile_id);
+                        $originatingBranchId = $profile === null ? null : trim((string) ($profile->current_home_branch_id ?? $profile->originating_branch_id ?? ''));
+                        if ($originatingBranchId === '') {
+                            $originatingBranchId = null;
+                        }
+                    }
                     $student = Student::query()->create([
                         'id' => RandomIdentifier::new(),
                         'person_id' => $locked->person_id,
                         'admission_decision_id' => $decision->id,
                         'student_code' => $studentCode,
+                        'originating_branch_id' => $originatingBranchId,
                         'placement_profile_id' => $locked->placement_profile_id,
                         'academic_eligibility_snapshot_id' => $locked->academic_eligibility_snapshot_id,
                     ]);

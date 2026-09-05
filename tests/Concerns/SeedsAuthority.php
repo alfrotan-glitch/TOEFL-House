@@ -11,6 +11,8 @@ use App\Modules\Access\Models\PositionAssignment;
 use App\Modules\Access\Models\Role;
 use App\Modules\Access\Models\ScopeGrant;
 use App\Modules\Identity\Models\Person;
+use App\Modules\Organization\Models\Campus;
+use App\Modules\Organization\Models\CampusAssignment;
 use App\Modules\Organization\Models\Organization;
 use App\Support\Identifiers\RandomIdentifier;
 
@@ -176,6 +178,38 @@ trait SeedsAuthority
                 'granted_by' => '00000000-0000-4000-8000-00000000b005',
             ]);
         }
+    }
+
+    /**
+     * Attributes a fixture branch to a campus of the bootstrap organization,
+     * giving it a production-shaped organization path (WP-ACAD-SCOPE).
+     * Bare branches were an artifact of the null-scope era: without an open
+     * campus assignment a branch resolves to no organization, and
+     * organization-rooted authority correctly does not cover it.
+     */
+    private function attachBranchToBootstrapOrganization(string $branchId): void
+    {
+        $this->ensureBootstrapAuthority();
+        $campusId = Campus::query()->where('organization_id', $this->bootstrapOrganizationId)->value('id');
+        if ($campusId === null) {
+            $campusId = Campus::query()->create([
+                'id' => RandomIdentifier::new(),
+                'organization_id' => $this->bootstrapOrganizationId,
+                'name' => 'Authority Bootstrap Campus',
+                'lifecycle_state' => 'active',
+            ])->id;
+        }
+        if (CampusAssignment::query()->where('branch_id', $branchId)->whereNull('effective_to')->exists()) {
+            return;
+        }
+        CampusAssignment::query()->create([
+            'id' => RandomIdentifier::new(),
+            'branch_id' => $branchId,
+            'campus_id' => $campusId,
+            'effective_from' => '2026-01-01',
+            'effective_to' => null,
+            'transfer_correlation_id' => 'fixture-bootstrap',
+        ]);
     }
 
     /**

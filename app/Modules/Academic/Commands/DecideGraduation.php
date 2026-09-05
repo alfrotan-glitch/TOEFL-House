@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Modules\Academic\Commands;
 
+use App\Modules\Academic\Domain\AcademicAccess;
 use App\Modules\Academic\Domain\ProgressionLifecycle;
+use App\Modules\Academic\Domain\RecordBranch;
 use App\Modules\Academic\Models\Certificate;
 use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\Enrollment;
@@ -17,7 +19,6 @@ use App\Modules\Documents\Models\Document;
 use App\Modules\Documents\Models\DocumentClassification;
 use App\Modules\Finance\Queries\FinancialGateQuery;
 use App\Modules\Students\Models\Student;
-use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
@@ -52,7 +53,7 @@ final class DecideGraduation
     public const DOCUMENT_CATEGORY = 'academic.certificate';
 
     public function __construct(
-        private readonly AccessDecision $access,
+        private readonly AcademicAccess $access,
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
@@ -69,7 +70,7 @@ final class DecideGraduation
         try {
             return $this->idempotency->execute('academic.graduation.propose', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($proposer, $studentId, $programVersionId, $outcome, $basis): array {
-                    $this->require($proposer, self::CAPABILITY_PROPOSE, 'academic.graduation_denied');
+                    $this->require($proposer, self::CAPABILITY_PROPOSE, RecordBranch::studentBranchForId($studentId), 'academic.graduation_denied');
                     if (! in_array($outcome, ['eligible', 'not_eligible'], true)) {
                         throw BusinessRejection::forCode('academic.graduation_outcome_unknown', sprintf('unknown graduation outcome %s', $outcome));
                     }
@@ -127,10 +128,9 @@ final class DecideGraduation
         try {
             return $this->idempotency->execute('academic.certificate.issue', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($issuer, $decision, $idempotencyKey): array {
-                    $this->require($issuer, self::CAPABILITY_CERTIFY, 'academic.certify_denied');
-
                     /** @var GraduationDecision $locked */
                     $locked = GraduationDecision::query()->whereKey($decision->id)->lockForUpdate()->firstOrFail();
+                    $this->require($issuer, self::CAPABILITY_CERTIFY, RecordBranch::graduationBranch($locked), 'academic.certify_denied');
                     if ($locked->lifecycle_state !== 'approved' || $locked->outcome !== 'eligible') {
                         throw BusinessRejection::forCode('academic.certificate_requires_approval', 'a certificate requires an approved eligible graduation decision');
                     }
@@ -184,6 +184,7 @@ final class DecideGraduation
                         'student_id' => $locked->student_id,
                         'serial' => $serial,
                         'document_id' => $registered['document_id'],
+                        'originating_branch_id' => RecordBranch::studentBranchForId((string) $locked->student_id),
                     ]);
                     $event = $this->audit->record($issuer->actorId, 'academic.certificate.issue', 'certificate', $certificate->id, null, [
                         'graduation_decision_id' => $locked->id,
@@ -235,10 +236,9 @@ final class DecideGraduation
         try {
             return $this->idempotency->execute('academic.graduation.'.$verb, $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $decision, $toState, $capability, $verb): array {
-                    $this->require($actor, $capability, 'academic.graduation_denied');
-
                     /** @var GraduationDecision $locked */
                     $locked = GraduationDecision::query()->whereKey($decision->id)->lockForUpdate()->firstOrFail();
+                    $this->require($actor, $capability, RecordBranch::graduationBranch($locked), 'academic.graduation_denied');
                     ProgressionLifecycle::requireTransition($locked->lifecycle_state, $toState);
                     if ($toState === ProgressionLifecycle::STATE_REVIEWED && trim((string) $locked->proposed_by) === $actor->actorId) {
                         throw AuthorizationDenied::forCode('academic.review_not_independent', 'the reviewer may not be the proposer');
@@ -269,11 +269,8 @@ final class DecideGraduation
         }
     }
 
-    private function require(Actor $actor, string $capability, string $errorCode): void
+    private function require(Actor $actor, string $capability, ?string $branchId, string $errorCode): void
     {
-        $outcome = $this->access->decide($actor, $capability, null);
-        if (! $outcome->allowed) {
-            throw AuthorizationDenied::forCode($errorCode, $outcome->reason);
-        }
+        $this->access->require($actor, $capability, $branchId, $errorCode);
     }
 }

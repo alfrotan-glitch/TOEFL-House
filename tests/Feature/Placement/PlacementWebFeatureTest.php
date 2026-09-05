@@ -6,8 +6,11 @@ namespace Tests\Feature\Placement;
 
 use App\Modules\Academic\Commands\ManageAcademicAppeal;
 use App\Modules\Academic\Models\AcademicAppeal;
+use App\Modules\Academic\Placement\Commands\DecidePlacement;
+use App\Modules\Academic\Placement\Models\PlacementProfile;
 use App\Modules\Documents\Commands\DefineDocumentClassification;
 use App\Modules\Identity\Models\UserAccount;
+use App\Support\Errors\BusinessRejection;
 use App\Support\Identifiers\RandomIdentifier;
 use Illuminate\Support\Facades\Hash;
 use Tests\Concerns\BuildsPlacementCatalog;
@@ -81,10 +84,22 @@ final class PlacementWebFeatureTest extends TestCase
         $reviewer = $this->grantedActor('plc-appeal-reviewer', ['academic.appeal_manage']);
         app(ManageAcademicAppeal::class)->assign($appealManager, $appeal, $reviewer->actorId, 'plc-appeal-assign');
         app(ManageAcademicAppeal::class)->investigate($reviewer, $appeal->fresh(), 'plc-appeal-investigate');
+
+        // Resolved means upheld AND redressed: the owning placement workflow
+        // records the remediation (retake path supersedes the profile) before
+        // the reviewer may resolve; the resolve itself mutates nothing.
+        try {
+            app(ManageAcademicAppeal::class)->resolve($reviewer, $appeal->fresh(), 'adjusted', 'placement/appeal/evidence/'.$appeal->id, 'plc-appeal-resolve-early');
+            $this->fail('a still-open profile must not resolve');
+        } catch (BusinessRejection $rejection) {
+            $this->assertSame('academic.appeal_subject_untouched', $rejection->errorCode());
+        }
+        app(DecidePlacement::class)->supersede($this->placementReleaser('plc-appeal-releaser'), PlacementProfile::query()->findOrFail($profile->id), 'plc-appeal-supersede');
         app(ManageAcademicAppeal::class)->resolve($reviewer, $appeal->fresh(), 'adjusted', 'placement/appeal/evidence/'.$appeal->id, 'plc-appeal-resolve');
         app(ManageAcademicAppeal::class)->close($appealManager, $appeal->fresh(), 'plc-appeal-close');
 
         $this->assertSame('closed', $appeal->fresh()->lifecycle_state);
         $this->assertSame('adjusted', $appeal->fresh()->outcome);
+        $this->assertSame('superseded', $profile->fresh()->lifecycle_state);
     }
 }

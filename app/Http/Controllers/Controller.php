@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Modules\Audit\AttemptedOperation;
 use App\Support\Authorization\Actor;
+use App\Support\Authorization\ActorBranches;
+use App\Support\Errors\AuthorizationDenied;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Foundation\Validation\ValidatesRequests;
 use Illuminate\Routing\Controller as BaseController;
@@ -26,6 +29,37 @@ abstract class Controller extends BaseController
         $actor = request()->attributes->get('actor');
 
         return $actor;
+    }
+
+    /**
+     * Read-side branch gate (WP-ACAD-SCOPE) for document production and
+     * bulk-read endpoints: the target's owning branch must be visible to
+     * the actor. Denials are denial-audited and surface as 403. Mutations
+     * are never authorized here — commands own those decisions.
+     */
+    protected function requireBranchVisible(?string $branchId, string $operation, string $targetType, string $targetId, string $errorCode = 'api.read_denied'): void
+    {
+        if (app(ActorBranches::class)->allows($this->actor(), $branchId)) {
+            return;
+        }
+        app(AttemptedOperation::class)->deniedByActor(
+            AuthorizationDenied::forCode($errorCode, 'this record is outside your authorized branches'),
+            $this->actor(),
+            $operation,
+            $targetType,
+            $targetId,
+        );
+    }
+
+    /** @return list<string> */
+    protected function visibleBranches(): array
+    {
+        return app(ActorBranches::class)->visibleBranchIds($this->actor());
+    }
+
+    protected function hasReadAuthority(): bool
+    {
+        return app(ActorBranches::class)->hasAnyAuthority($this->actor());
     }
 
     protected function idempotencyKey(string $operation): string

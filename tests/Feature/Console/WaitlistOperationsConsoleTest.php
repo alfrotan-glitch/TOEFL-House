@@ -68,6 +68,7 @@ final class WaitlistOperationsConsoleTest extends TestCase
             'name' => 'Waitlist Branch '.substr(md5(RandomIdentifier::new()), 0, 8),
             'lifecycle_state' => 'active',
         ])->id;
+        $this->attachBranchToBootstrapOrganization($this->branchId);
 
         $program = $structure->defineProgram($officer, 'Waitlist Intensive', 'wl-prog');
         $version = $structure->publishVersion($officer, Program::query()->findOrFail($program['program_id']), 'Waitlist v1', 'wl-ver');

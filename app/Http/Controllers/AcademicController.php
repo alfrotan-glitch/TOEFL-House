@@ -872,6 +872,17 @@ final class AcademicController extends Controller
         return redirect()->route('academic.index')->with('success', 'Result released; only released results exist for the student.');
     }
 
+    public function markResultAppealed(Request $request, string $resultId): RedirectResponse
+    {
+        app(ManageAssessmentResult::class)->markAppealed(
+            $this->actor(),
+            AssessmentResult::query()->findOrFail($resultId),
+            $this->idempotencyKey('academic.result.mark-appealed'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Result marked appealed; remediation is ordered and an upheld appeal may now resolve.');
+    }
+
     public function proposeCorrection(Request $request, string $resultId): RedirectResponse
     {
         $input = $request->validate([
