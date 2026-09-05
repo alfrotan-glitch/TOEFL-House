@@ -74,7 +74,7 @@ const stmtGetLinkedStudentTeacher = db.prepare(
 const stmtGetSemestersBatch = db.prepare(`SELECT * FROM student_semesters WHERE student_id IN (SELECT value FROM json_each(?)) ORDER BY enroll_date`);
 const stmtGetSemestersByStudent = db.prepare('SELECT * FROM student_semesters WHERE student_id = ? ORDER BY enroll_date DESC');
 const stmtGetPrimaryEnrollmentsBatch = db.prepare(`SELECT e.* FROM enrollments e WHERE e.status IN ('active','confirmed','pending') AND e.enrollment_type != 'extra' AND e.student_id IN (SELECT value FROM json_each(?)) AND NOT EXISTS (SELECT 1 FROM enrollments e2 WHERE e2.student_id = e.student_id AND e2.status IN ('active','confirmed','pending') AND e2.enrollment_type != 'extra' AND e2.started_at > e.started_at)`);
-interface PaymentRow { id: string; student_id: string; amount: number; date: string; category: string; receipt_number: string | null; semester: string | null; status: string; payment_method: string | null; notes: string | null; branch_id: string; invoice_id: string | null; }
+interface PaymentRow { id: string; student_id: string; amount: number; date: string; category: string; receipt_number: string | null; semester: string | null; status: string; payment_method: string | null; notes: string | null; branch_id: string; invoice_id: string | null; payer_name: string | null; payer_relation: string | null; }
 
 const stmtGetPaymentsAll = db.prepare<[number, number], PaymentRow>('SELECT * FROM payments ORDER BY date DESC LIMIT ? OFFSET ?');
 const stmtGetPaymentsByBranch = db.prepare<[string, number, number], PaymentRow>('SELECT * FROM payments WHERE branch_id = ? ORDER BY date DESC LIMIT ? OFFSET ?');
@@ -163,7 +163,7 @@ const stmtInsertSemester = db.prepare(
   `INSERT INTO student_semesters (id, student_id, semester_name, class_id, enroll_date, fee_amount, net_fee_amount, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'active')`
 );
 const stmtInsertPayment = db.prepare(
-  `INSERT INTO payments (id, student_id, amount, date, payment_method, status, category, notes, receipt_number, branch_id, semester, invoice_id, idempotency_key) VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?)`
+  `INSERT INTO payments (id, student_id, amount, date, payment_method, status, category, notes, receipt_number, branch_id, semester, invoice_id, idempotency_key, payer_name, payer_relation) VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
 /**
  * Idempotency replay lookup, SCOPED TO THE STUDENT.
@@ -466,6 +466,7 @@ paymentsRouter.get('/', requirePermission('Payment.View'), ah(async (req, res) =
     category: r.category, receiptNumber: r.receipt_number,
     status: r.status, notes: r.notes, semester: r.semester ?? null,
     paymentMethod: r.payment_method ?? null,
+    payerName: r.payer_name ?? null, payerRelation: r.payer_relation ?? null,
   })));
 }));
 
@@ -1023,7 +1024,7 @@ studentsRouter.post('/:id/enroll-class', requirePermission('Class.Assign'), ah(a
 
     if (paidNow > 0) {
       const pid = id('pay');
-      stmtInsertPayment.run(pid, student.id, paidNow, date, 'cash', 'other', `Extra class fee: ${cls.name}`, nextReceiptNumber(), student.branch_id, null, invId, `extra-class:${enrollId}`);
+      stmtInsertPayment.run(pid, student.id, paidNow, date, 'cash', 'other', `Extra class fee: ${cls.name}`, nextReceiptNumber(), student.branch_id, null, invId, `extra-class:${enrollId}`, null, null);
       recordIncome({ category: 'other', amount: paidNow, date, description: `Extra class fee from ${student.full_name}`, referenceId: invId, paymentId: pid, operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null, branchId: student.branch_id });
     }
   });
@@ -1045,6 +1046,10 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
   const user = getUserContext(req);
   const student = requireStudent(req, req.params.id);
   const { category, paymentMethod, amount } = req.body ?? {};
+  // W17 (F9): optional third-party payer attribution — DETAIL only, economic
+  // ownership of the payment stays with the student.
+  const payerNameText = optionalText(req.body?.payerName, 'Payer name', TEXT_LIMITS.name);
+  const payerRelationText = optionalText(req.body?.payerRelation, 'Payer relation', TEXT_LIMITS.short);
   const notes = optionalText(req.body?.notes, 'Payment notes', TEXT_LIMITS.notes);
   const semesterId = optionalText(req.body?.semesterId, 'Semester id', TEXT_LIMITS.short);
   const installmentId = optionalText(req.body?.installmentId, 'Installment id', TEXT_LIMITS.short);
@@ -1265,7 +1270,7 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
     // the unique index, because SQLite considers each NULL distinct.
     const rc = nextReceiptNumber();
     receiptNumber = rc;
-    stmtInsertPayment.run(payId, student.id, resolvedAmount, date, resolvedMethod, category, notes || 'Smart Payment', rc, student.branch_id, semName, null, idempotencyKey);
+    stmtInsertPayment.run(payId, student.id, resolvedAmount, date, resolvedMethod, category, notes || 'Smart Payment', rc, student.branch_id, semName, null, idempotencyKey, payerNameText, payerRelationText);
     if (settledObligationId) {
       allocatePaymentToObligation(db, {
         paymentId: payId, obligationId: settledObligationId, amount: resolvedAmount,
@@ -1616,7 +1621,7 @@ studentsRouter.post('/:id/enroll-semester', requirePermission('Class.Assign'), a
       // already forbids a second active semester of the same name, so this
       // payment cannot legitimately repeat. A NULL here would disable
       // uq_payments_idempotency for the row.
-      stmtInsertPayment.run(semPayId, student.id, paidNow, date, 'cash', 'fee', `Semester fee for ${semesterName}`, rc, student.branch_id, semesterName, null, `enroll-semester:${newSemId}`);
+      stmtInsertPayment.run(semPayId, student.id, paidNow, date, 'cash', 'fee', `Semester fee for ${semesterName}`, rc, student.branch_id, semesterName, null, `enroll-semester:${newSemId}`, null, null);
       allocatePaymentToObligation(db, {
         paymentId: semPayId, obligationId: ensureTuitionObligation(db, newSemId).id, amount: paidNow,
         operatorName: user.fullName, date,
@@ -1819,7 +1824,40 @@ studentsRouter.patch('/:id/status', requirePermission('Student.Edit'), ah(async 
 // guarded by the student-branch triggers — while HISTORICAL rows (payments,
 // ledger, receipts) keep the branch where the money actually moved. The
 // transfer itself is an append-only event row; nothing is rewritten.
+/**
+ * GET /api/students/:id/transfer-history — the append-only branch-custody trail
+ * (W17). The W16 event row was write-only; this read surface states the facts
+ * without any policy: who moved which student, where, why, when. It is pure
+ * observability over an existing authority — no update/delete counterpart
+ * exists by design (events are immutable).
+ */
+studentsRouter.get('/:id/transfer-history', requirePermission('Student.View'), ah(async (req, res) => {
+  const student = requireStudent(req, req.params.id);
+  if (!canAccessBranchResource(req, student.branch_id as string)) {
+    throw new HttpError(403, 'This student belongs to another branch.');
+  }
+  const rows = db.prepare(
+    `SELECT id, from_branch_id, to_branch_id, reason, operator_user_id, operator_name, created_at
+       FROM student_branch_transfers WHERE student_id = ? ORDER BY datetime(created_at) DESC, id DESC`,
+  ).all(student.id) as Array<Record<string, unknown>>;
+  writeAudit(req, `Viewed branch-transfer history for student ${student.id}`);
+  res.json({
+    studentId: student.id,
+    currentBranchId: student.branch_id,
+    transfers: rows.map((r) => ({
+      id: r.id,
+      fromBranchId: r.from_branch_id,
+      toBranchId: r.to_branch_id,
+      reason: r.reason,
+      operatorUserId: r.operator_user_id ?? null,
+      operatorName: r.operator_name ?? null,
+      recordedAt: r.created_at,
+    })),
+  });
+}));
+
 studentsRouter.post('/:id/transfer-branch', requirePermission('Student.Transfer'), ah(async (req, res) => {
+
   const user = getUserContext(req);
   const toBranchId = requiredText(req.body?.toBranchId, 'Destination branch id', TEXT_LIMITS.short);
   const reason = requiredText(req.body?.reason, 'Transfer reason', TEXT_LIMITS.notes);

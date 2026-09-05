@@ -15,6 +15,7 @@ import { getNumberSetting, setSetting } from '../utils/settings.js';
 import { getFinanceAccount } from '../utils/financeAccounts.js';
 import { recordIncome } from '../utils/income.js';
 import { nextReceiptNumber } from '../utils/receipt.js';
+import { optionalText, TEXT_LIMITS } from '../utils/textInput.js';
 import { nextInvoiceNumber } from '../utils/invoice.js';
 import { SYSTEM_DEFAULTS } from '../core/configuration/policy-catalog.js';
 import { assertMoney, assertComputedMoney } from '../utils/money.js';
@@ -58,7 +59,7 @@ const stmtGetInvoicePaymentsSum = db.prepare(
   `SELECT COALESCE(SUM(amount), 0) as s FROM payments WHERE invoice_id = ? AND status = 'completed'`
 );
 const stmtInsertPayment = db.prepare(
-  `INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, semester, notes, receipt_number, branch_id, idempotency_key) VALUES (?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?)`
+  `INSERT INTO payments (id, student_id, invoice_id, amount, date, payment_method, status, category, semester, notes, receipt_number, branch_id, idempotency_key, payer_name, payer_relation) VALUES (?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?)`
 );
 const stmtUpdateInvoiceStatus = db.prepare('UPDATE invoices SET status = ? WHERE id = ?');
 const stmtCancelInvoice = db.prepare(`UPDATE invoices SET status = 'cancelled' WHERE id = ?`);
@@ -316,7 +317,14 @@ invoicesRouter.post(
     const row = stmtGetPlainInvoiceById.get(req.params.id) as any;
     if (!row) throw new HttpError(404, 'Invoice not found.');
     requireInvoiceBranch(req, row);
-    const { amount, paymentMethod, notes } = req.body as { amount?: number; paymentMethod?: string; notes?: string };
+    const { amount, paymentMethod, notes, payerName, payerRelation } = req.body as {
+      amount?: number; paymentMethod?: string; notes?: string; payerName?: unknown; payerRelation?: unknown;
+    };
+    // W17 (F9): third-party payer attribution — optional DETAIL of the payment
+    // fact. Economic ownership stays with the student; this records who handed
+    // over the money. NULL (absent) is the historical default.
+    const payerNameText = optionalText(payerName, 'Payer name', TEXT_LIMITS.name);
+    const payerRelationText = optionalText(payerRelation, 'Payer relation', TEXT_LIMITS.short);
     const VALID_METHODS = ['cash', 'card', 'bank_transfer'] as const;
     // An unrecognised method is REFUSED, not replaced. Recording a cheque or a
     // mistyped `bank_transfr` as CASH states that money is in the drawer when
@@ -431,7 +439,8 @@ invoicesRouter.post(
       stmtInsertPayment.run(
         payId, row.student_id, row.id, payAmount, date, resolvedMethod,
         attribution.category, attribution.semesterName,
-        notes || `Payment for invoice ${row.invoice_number || row.id}`, rc, row.branch_id, idempotencyKey || null
+        notes || `Payment for invoice ${row.invoice_number || row.id}`, rc, row.branch_id, idempotencyKey || null,
+        payerNameText, payerRelationText
       );
 
       // Cash settles the term by NAMING it, through the one settlement

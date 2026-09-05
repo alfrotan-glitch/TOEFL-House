@@ -1518,10 +1518,38 @@ financeRouter.get(
     const matchedCount = Number((db.prepare(
       `SELECT COUNT(*) AS v FROM bank_statement_matches m JOIN bank_statement_lines l ON l.id = m.line_id WHERE 1=1 ${scope}`,
     ).get(...params) as { v: number }).v);
+    // W17: the matched PAIRS, not just their count — a control surface must
+    // show WHICH statement line was tied to WHICH ledger row, by whom and
+    // when, or verifying a match means SQL archaeology. Still read-only.
+    const matchRows = db.prepare(
+      `SELECT m.id AS match_id, m.matched_by, m.matched_at,
+              l.id AS line_id, l.line_date, l.description AS line_description, l.amount AS line_amount, l.external_ref,
+              ft.id AS transaction_id, ft.date AS transaction_date, ft.type AS transaction_type,
+              ft.category AS transaction_category, ft.amount AS transaction_amount, ft.reference_id AS transaction_reference
+         FROM bank_statement_matches m
+         JOIN bank_statement_lines l ON l.id = m.line_id
+         LEFT JOIN financial_transactions ft ON ft.id = m.transaction_id
+        WHERE 1=1 ${scope}
+        ORDER BY datetime(m.matched_at) DESC, m.id DESC`,
+    ).all(...params) as Array<Record<string, unknown>>;
+    const matches = matchRows.map((r) => ({
+      id: r.match_id,
+      matchedBy: r.matched_by ?? null,
+      matchedAt: r.matched_at,
+      line: {
+        id: r.line_id, date: r.line_date, description: r.line_description,
+        amount: r.line_amount, externalRef: r.external_ref ?? null,
+      },
+      transaction: r.transaction_id ? {
+        id: r.transaction_id, date: r.transaction_date, type: r.transaction_type,
+        category: r.transaction_category, amount: r.transaction_amount, referenceId: r.transaction_reference ?? null,
+      } : null,
+    }));
     res.json({
       scope: isAll ? 'organization' : 'branch',
       branchId: branchId ?? null,
       matchedCount,
+      matches,
       unmatchedLines,
       note: 'Control layer only: statement evidence vs ledger rows. Matching never writes financial truth.',
     });

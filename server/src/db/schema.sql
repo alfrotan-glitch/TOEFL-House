@@ -2587,6 +2587,14 @@ CREATE TABLE IF NOT EXISTS payments (
   -- position and re-opens only the semester the refunded tuition settled.
   refunds_payment_id TEXT REFERENCES payments(id) ON DELETE RESTRICT,
   idempotency_key TEXT,
+  -- W17 (F9, W14 register): third-party payer ATTRIBUTION DETAIL. Economic
+  -- ownership of a payment is and remains the student; who physically handed
+  -- over the money (a guardian, a sponsor, an employer) is detail, not a second
+  -- party to the fact. Optional on the collection paths; NULL = no attribution
+  -- recorded, which is the whole pre-W17 history. Never validated against any
+  -- person registry and never a ledger dimension.
+  payer_name     TEXT,
+  payer_relation TEXT,
   created_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_payments_branch       ON payments(branch_id);

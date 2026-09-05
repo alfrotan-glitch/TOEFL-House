@@ -776,7 +776,46 @@ fundingRouter.post('/donations/:id/clawback', requirePermission('Funding.Edit'),
   res.status(201).json({ id: clawbackId, status: 'open' });
 }));
 
-fundingRouter.post('/donation-clawbacks/:id/repay', requirePermission('Funding.Edit'), ah(async (req, res) => {
+// ── WAVE 17 · Clawback register (read) ──
+// The exposure view aggregates; this lists the individual repayment
+// obligations with their status and cash evidence. Pure observability over
+// the W16 authority: no mutation surface is added, and every figure traces to
+// donation_clawbacks/donations/donors rows.
+fundingRouter.get('/donation-clawbacks', requirePermission('Funding.View'), ah(async (req, res) => {
+  const { branchId, isAll } = resolveBranchScope(req);
+  const scope = isAll ? '' : 'AND d.branch_id = ?';
+  const params = isAll ? [] : [branchId];
+  const rows = db.prepare(
+    `SELECT c.id, c.amount, c.reason, c.status, c.declared_on, c.repaid_on,
+            c.repaid_transaction_id, c.declared_by, c.created_at,
+            c.donation_id, d.amount AS donation_amount, d.donor_id,
+            dn.full_name AS donor_name, d.branch_id
+       FROM donation_clawbacks c
+       JOIN donations d ON d.id = c.donation_id
+       LEFT JOIN donors dn ON dn.id = d.donor_id
+      WHERE 1=1 ${scope}
+      ORDER BY datetime(c.created_at) DESC, c.id DESC`,
+  ).all(...params) as Array<Record<string, unknown>>;
+  const openTotal = rows.filter((r) => r.status === 'open').reduce((s, r) => s + Number(r.amount), 0);
+  const repaidTotal = rows.filter((r) => r.status === 'repaid').reduce((s, r) => s + Number(r.amount), 0);
+  res.json({
+    scope: isAll ? 'organization' : 'branch',
+    branchId: branchId ?? null,
+    counts: { open: rows.filter((r) => r.status === 'open').length, repaid: rows.filter((r) => r.status === 'repaid').length },
+    totals: { open: openTotal, repaid: repaidTotal },
+    clawbacks: rows.map((r) => ({
+      id: r.id, donationId: r.donation_id, donationAmount: r.donation_amount,
+      donorId: r.donor_id ?? null, donorName: r.donor_name ?? null,
+      amount: r.amount, reason: r.reason, status: r.status,
+      declaredOn: r.declared_on, declaredBy: r.declared_by ?? null,
+      repaidOn: r.repaid_on ?? null, repaidTransactionId: r.repaid_transaction_id ?? null,
+      recordedAt: r.created_at,
+    })),
+  });
+}));
+
+fundingRouter.post('/donation-clawbacks/:id/repay'
+, requirePermission('Funding.Edit'), ah(async (req, res) => {
   const user = userContext(req);
   let transactionId = '';
   db.transaction(() => {

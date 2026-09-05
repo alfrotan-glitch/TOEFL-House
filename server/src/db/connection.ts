@@ -117,6 +117,21 @@ function ensureInvoiceChargeKindColumn(): void {
 }
 
 /**
+ * W17 (F9): converge a pre-W17 `payments` table onto the payer-attribution
+ * shape. Attribution is optional detail; every legacy row keeps NULL, which is
+ * exactly its pre-W17 meaning ("no third-party attribution recorded").
+ */
+function ensurePaymentsPayerColumns(): void {
+  const columns = db.prepare(`PRAGMA table_info(payments)`).all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === 'payer_name')) {
+    db.exec(`ALTER TABLE payments ADD COLUMN payer_name TEXT`);
+  }
+  if (!columns.some((column) => column.name === 'payer_relation')) {
+    db.exec(`ALTER TABLE payments ADD COLUMN payer_relation TEXT`);
+  }
+}
+
+/**
  * Converge a pre-W6.1 database onto the acquisition-accounting shape of
  * `book_stock_receipts`: the purchase declaration and the paying transaction
  * are new columns. Existing (legacy) rows keep NULL — they are pre-declaration
@@ -269,6 +284,7 @@ export function initSchema(): void {
     reconcileCanonicalPlacementState();
     db.exec(schema);
     ensureInvoiceChargeKindColumn();
+    ensurePaymentsPayerColumns();
     ensureBookReceiptAcquisitionColumns();
     ensureEmployeeLedgerDueColumn();
     ensureRegistrationsFinancialColumnsDropped();
