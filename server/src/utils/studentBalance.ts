@@ -125,7 +125,9 @@ const TUITION_CHARGE_SQL = `'fee','installment'`;
  * one. `refunds_payment_id` is the attribution: it is NOT NULL on every refund
  * (enforced by `trg_payments_refund_attribution_*`) and NULL on every charge.
  */
-const TUITION_PAYMENT_SQL = `(
+// Exported (W15) so the receivables-aging view reuses the exact attribution
+// rule instead of restating it — one rule, two readers (LAW 1).
+export const TUITION_PAYMENT_SQL = `(
   category IN (${TUITION_CHARGE_SQL})
   OR (category = 'refund' AND (
         SELECT t.category FROM payments t WHERE t.id = payments.refunds_payment_id

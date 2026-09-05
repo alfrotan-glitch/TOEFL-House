@@ -28,6 +28,9 @@ import { CATEGORY_NAME } from '../core/finance/category-taxonomy.js';
 import { BUDGET_MOVEMENT_CATEGORY, BUDGET_MOVEMENT_TYPE } from '../core/finance/budget-movements.js';
 import { db } from '../db/connection.js';
 import { getBranchOutstanding } from '../utils/studentBalance.js';
+import { getReceivablesAging, getDailyCashActivity } from '../core/reporting/financial-observability.js';
+import { assertOptionalIsoDate } from '../utils/isoDate.js';
+import { today } from '../utils/ids.js';
 import { authenticate, requirePermission, resolveBranchScope } from '../middleware/auth.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { REPORT_CATALOG, REPORT_CATEGORIES, reportById, type ReportDefinition } from '../core/reporting/report-catalog.js';
@@ -635,5 +638,62 @@ reportsRouter.get(
     res.setHeader('X-Report-Period-Key', result.boundaries.periodKey);
     res.setHeader('Content-Disposition', `attachment; filename="${reportExportFilename(result)}"`);
     res.send(csv);
+  }),
+);
+
+// ── WAVE 15 · Financial observability (read-only derived views) ────────────
+// Both surfaces are projections of existing authorities (see
+// core/reporting/financial-observability.ts); neither writes, neither creates
+// a second source of financial truth, and the daily statement is DIGITAL
+// expected cash only — never a physical drawer count (Wave-14 D-CC boundary).
+
+/**
+ * GET /api/reports/receivables-aging — open tuition terms and non-tuition
+ * invoices, floored per debt item, bucketed by Jalali age from origination
+ * (enroll_date / issue_date). Reporting only: no status changes, no write-off
+ * semantics (P16 remains an owner decision).
+ */
+reportsRouter.get(
+  '/receivables-aging',
+  authenticate,
+  requirePermission('Report.View', 'Finance.Report', 'Ledger.View'),
+  ah(async (req, res) => {
+    const { branchId, isAll } = resolveBranchScope(req);
+    let asOf: string;
+    try {
+      asOf = assertOptionalIsoDate((req.query as Record<string, unknown>).asOf, 'asOf') ?? today();
+    } catch (err) {
+      throw new HttpError(400, err instanceof Error ? err.message : 'asOf must be an ISO date (YYYY-MM-DD).');
+    }
+    if (asOf > today()) throw new HttpError(400, 'asOf cannot be in the future: aging is a statement about the present or past.');
+    res.json(getReceivablesAging(db, { branchId: isAll ? null : branchId, asOf }));
+  }),
+);
+
+/**
+ * GET /api/reports/cash-activity/daily — one branch's digital expected cash
+ * roll-forward for one date (opening → income by class, refunds, savings
+ * sweep, drawings → closing), reconstructed from the I16/I17 identities and
+ * reconciling to the live store balance for today.
+ */
+reportsRouter.get(
+  '/cash-activity/daily',
+  authenticate,
+  requirePermission('Report.View', 'Finance.Report', 'Ledger.View'),
+  ah(async (req, res) => {
+    const { branchId, isAll } = resolveBranchScope(req);
+    let date: string;
+    try {
+      date = assertOptionalIsoDate((req.query as Record<string, unknown>).date, 'date') ?? today();
+    } catch (err) {
+      throw new HttpError(400, err instanceof Error ? err.message : 'date must be an ISO date (YYYY-MM-DD).');
+    }
+    if (date > today()) throw new HttpError(400, 'A statement of a future date is not a fact; date cannot be in the future.');
+    if (isAll) {
+      const branches = db.prepare('SELECT id FROM branches WHERE is_active = 1 ORDER BY id').all() as Array<{ id: string }>;
+      res.json({ scope: 'organization', date, branches: branches.map((b) => getDailyCashActivity(db, { branchId: b.id, date })) });
+    } else {
+      res.json(getDailyCashActivity(db, { branchId: branchId as string, date }));
+    }
   }),
 );
