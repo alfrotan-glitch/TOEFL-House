@@ -9,6 +9,7 @@ import { assertDateRange, assertOptionalIsoDate } from '../utils/isoDate.js';
 import { isUniqueViolation, resolveIdempotency } from '../utils/idempotency.js';
 import { eventBus } from '../core/events/event-bus.js';
 import { repriceTuitionInvoicesAfterAid } from '../core/finance/invoicing.js';
+import { getRestrictedExposure } from '../core/funding/restricted-exposure.js';
 import {
   allocateScholarshipToObligation,
   allocateSponsorshipToObligation,
@@ -739,6 +740,17 @@ fundingRouter.patch('/sponsorships/:id', requirePermission('Funding.Edit'), ah(a
 fundingRouter.get('/summary', requirePermission('Funding.View'), ah(async (req, res) => {
   const { branchId, isAll } = resolveBranchScope(req);
   res.json(getFundingSummary(db, isAll ? null : branchId));
+}));
+
+// ── RESTRICTED-FUND EXPOSURE (W12 / W9 §3 model 2 — authorized, view-only) ──
+// A DERIVED VIEW of the authoritative funding subledger + store conservation
+// figure: who restricted what, what it settled, what remains, and how much of
+// the cash in stores is economically the donors'. No enforcement (P11); no
+// second ledger — every number traces to donations/allocation facts or the
+// same held-total invariant I16 reconciles.
+fundingRouter.get('/restricted-exposure', requirePermission('Funding.View'), ah(async (req, res) => {
+  const { branchId, isAll } = resolveBranchScope(req);
+  res.json(getRestrictedExposure(db, isAll ? null : branchId));
 }));
 
 export default fundingRouter;

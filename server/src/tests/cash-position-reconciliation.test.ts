@@ -94,6 +94,9 @@ describe('cash-position reconciliation', () => {
 
     // Exactly what F-10 did: a contra-revenue row straight into the ledger,
     // bypassing recordIncome() and therefore never touching finance_accounts.
+    // The category is deliberately NON-canonical: a rogue row must stay
+    // cash-visible even though the operating boundary excludes it (the write
+    // boundary would have rejected it; I20 flags it as drift).
     db.prepare(
       `INSERT INTO financial_transactions (id, type, category, amount, date, description, operator_name, branch_id)
        VALUES (?, 'income', 'book_refund', -500, '2026-06-02', 'hand-rolled contra row', 'Test', ?)`,
@@ -177,7 +180,7 @@ describe('cash-position reconciliation', () => {
 
   it('a real refund through recordIncome keeps the position healthy', () => {
     income(500, 'book');
-    income(-500, 'book_refund');
+    income(-500, 'refund'); // canonical contra-revenue via recordIncome
     const acct = getFinanceAccount('branch', BRANCH);
     expect(acct).toEqual({ mainBalance: 0, savingBalance: 0 });
 

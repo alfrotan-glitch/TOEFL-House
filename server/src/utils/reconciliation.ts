@@ -9,7 +9,7 @@
  * better-sqlite3, which would break the owner (branchId=all) path.
  */
 import { db } from '../db/connection.js';
-import { OPERATING_INCOME_SQL, OWNER_DRAWING_SQL } from '../core/finance/ledger-classification.js';
+import { BRANCH_CASH_INCOME_SQL, OWNER_DRAWING_SQL } from '../core/finance/ledger-classification.js';
 import { BUDGET_MOVEMENT_TYPE } from '../core/finance/budget-movements.js';
 
 export interface ReconciliationResult {
@@ -107,8 +107,10 @@ export function computeReconciliation(opts: { branchId: string | null; isAll: bo
   // that every reconciliation still reported as healthy.
   //
   // The formula must mirror how money ACTUALLY moves in this system:
-  //   * operating income credits branch cash, and the savings sweep moves a
-  //     slice of it into the branch saving account;
+  //   * every non-equity income row credits branch cash (the CASH predicate,
+  //     not the trading-result predicate — a rogue row the taxonomy excludes
+  //     still moved, or failed to move, real money), and the savings sweep
+  //     moves a slice of it into the branch saving account;
   //   * `capital_injection` credits the ORGANIZATION treasury, not branch cash,
   //     even though the row is stamped with the operator's branch;
   //   * `budget_charge` debits the ORGANIZATION treasury into a budget line;
@@ -125,20 +127,20 @@ export function computeReconciliation(opts: { branchId: string | null; isAll: bo
   //   * an OWNER DRAWING (written by `bos.routes.ts`) is the one expense path
   //     that debits BRANCH CASH directly instead of a budget line, so it has to
   //     come off expected main.
-  const operatingIncomeSql = `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE ${OPERATING_INCOME_SQL}`;
+  const cashIncomeSql = `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE ${BRANCH_CASH_INCOME_SQL}`;
   const savingSql = `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type='saving_transfer'`;
   // Owner drawings are a NON-EXPENSE CASH MOVEMENT paid straight out of branch
   // cash. Omitting them here would open a permanent cashVariance equal to every
   // withdrawal ever made and report a perfectly healthy branch as broken.
   const ownerDrawingSql =
     `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE ${OWNER_DRAWING_SQL}`;
-  const operatingIncome = scalarValue(operatingIncomeSql, 'AND branch_id = ?', boundBranchId);
+  const cashIncome = scalarValue(cashIncomeSql, 'AND branch_id = ?', boundBranchId);
   const expectedSaving = scalarValue(savingSql, 'AND branch_id = ?', boundBranchId);
   const ownerDrawings = scalarValue(ownerDrawingSql, 'AND branch_id = ?', boundBranchId);
   // Whole AFN throughout (D-12/D-22): every money column is an INTEGER, so a
   // variance is either zero or a real discrepancy. A two-decimal tolerance here
   // would only hide a genuine one-afghani break.
-  const expectedMain = operatingIncome - expectedSaving - ownerDrawings;
+  const expectedMain = cashIncome - expectedSaving - ownerDrawings;
 
   const acctSql = `SELECT COALESCE(SUM(main_balance),0) AS main, COALESCE(SUM(saving_balance),0) AS saving FROM finance_accounts WHERE scope_type = 'branch'`;
   const acctRow = (boundBranchId === null

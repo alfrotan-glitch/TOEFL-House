@@ -95,13 +95,16 @@ function insertEmployeeLedgerFixture(input: {
     );
     db.prepare(
       `INSERT INTO employee_salary_ledger
-         (id, employee_id, period_key, period_label, paid_amount, payment_type, transaction_id, branch_id, idempotency_key, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, employee_id, period_key, period_label, due_amount, paid_amount, payment_type, transaction_id, branch_id, idempotency_key, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       input.id,
       input.employeeId,
       input.periodKey,
       input.periodLabel,
+      // W12: the insert fact-trigger bounds a wage payment by its due and
+      // requires full == due; the harness pays honestly, so due == paid.
+      input.amount,
       input.amount,
       input.paymentType,
       transactionId,

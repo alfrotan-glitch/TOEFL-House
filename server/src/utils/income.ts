@@ -8,6 +8,7 @@ import {
   decrementMainBalanceIfSufficient, decrementSavingBalanceIfSufficient,
   getFinanceAccount, incrementMainBalance, incrementSavingBalance,
 } from './financeAccounts.js';
+import { assertCanonicalIncomeCategory } from '../core/finance/category-taxonomy.js';
 
 // ── Performance: Module-level Prepared Statements ──────────────────────────
 const stmtInsertIncomeTx = db.prepare(
@@ -57,6 +58,12 @@ export function recordIncome(params: RecordIncomeParams): { savingAmount: number
   if (normalizedAmount === 0) {
     throw new Error('Income amount cannot be zero.');
   }
+  // THE INCOME WRITE BOUNDARY (W12 / W9 §5): the classification of an inflow
+  // decides what it does to the trading result, so an undeclared category is a
+  // programming/config defect, not data. Failing here aborts the caller's whole
+  // transaction — an unexpected inflow can never reach the ledger to silently
+  // become operating revenue.
+  assertCanonicalIncomeCategory(params.category);
 
   const date = params.date || today();
   const transactionId = params.transactionId ?? id('tx');

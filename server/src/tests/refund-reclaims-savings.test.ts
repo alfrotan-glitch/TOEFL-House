@@ -166,13 +166,13 @@ describe('F-9: a full refund of a fully-paid amount', () => {
  */
 describe('F-10: every money path debits cash through recordIncome', () => {
   it('a book-sale refund returns cash and savings to their pre-sale state', () => {
-    income(500, 'book sale');
+    income(500, 'book'); // canonical product-revenue class
     expect(getFinanceAccount('branch', BRANCH)).toEqual({ mainBalance: 475, savingBalance: 25 });
 
     // What the refund route now does.
     db.transaction(() =>
       recordIncome({
-        category: 'book_refund', amount: -500, date: '2026-05-01',
+        category: 'refund', amount: -500, date: '2026-05-01', // the production refund writer's canonical contra-revenue class
         description: 'Contra-revenue refund for book sale',
         operatorName: 'Test', operatorRole: 'owner', branchId: BRANCH,
       }),

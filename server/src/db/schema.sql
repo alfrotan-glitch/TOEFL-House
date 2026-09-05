@@ -2946,6 +2946,10 @@ CREATE TABLE IF NOT EXISTS employee_salary_ledger (
   employee_id     TEXT NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
   period_key      TEXT NOT NULL,
   period_label    TEXT NOT NULL,
+  -- Composed due AT PAYMENT TIME (base + earned bonus, W12). Pre-composition
+  -- history keeps 0: the due that bounded those payments was the then-current
+  -- base salary, which is not recoverable, so it is NOT fabricated.
+  due_amount      INTEGER NOT NULL DEFAULT 0,
   paid_amount     INTEGER NOT NULL DEFAULT 0,
   payment_type    TEXT NOT NULL CHECK (payment_type IN ('full','partial','advance')),
   transaction_id  TEXT,
@@ -2974,9 +2978,17 @@ CREATE TRIGGER trg_employee_salary_fact_insert
 BEFORE INSERT ON employee_salary_ledger
 WHEN typeof(NEW.paid_amount) IS NOT 'integer'
   OR NEW.paid_amount <= 0
+  OR typeof(NEW.due_amount) IS NOT 'integer'
+  OR NEW.due_amount < 0
   OR NEW.status IS NOT 'posted'
   OR NEW.period_key NOT GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'
   OR CAST(substr(NEW.period_key, 6, 2) AS INTEGER) NOT BETWEEN 1 AND 12
+  -- W12 due-composition invariants: a wage payment is bounded by the period's
+  -- composed due, and 'full' settles it exactly. An ADVANCE is exempt — it is
+  -- a receivable against future pay, deliberately uncapped (same design as the
+  -- route's due authority).
+  OR (NEW.payment_type <> 'advance' AND NEW.paid_amount > NEW.due_amount)
+  OR (NEW.payment_type = 'full' AND NEW.paid_amount IS NOT NEW.due_amount)
   OR NEW.transaction_id IS NULL
   OR NOT EXISTS (
     SELECT 1 FROM financial_transactions ft
@@ -3013,6 +3025,7 @@ WHEN OLD.status IS NOT 'posted'
   OR NEW.employee_id IS NOT OLD.employee_id
   OR NEW.period_key IS NOT OLD.period_key
   OR NEW.period_label IS NOT OLD.period_label
+  OR NEW.due_amount IS NOT OLD.due_amount
   OR NEW.paid_amount IS NOT OLD.paid_amount
   OR NEW.payment_type IS NOT OLD.payment_type
   OR NEW.transaction_id IS NOT OLD.transaction_id

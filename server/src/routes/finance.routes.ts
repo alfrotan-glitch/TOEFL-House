@@ -28,6 +28,7 @@ import { BUDGET_MOVEMENT_CATEGORY, BUDGET_MOVEMENT_TYPE, postBudgetMovement } fr
 import { assertMoney } from '../utils/money.js';
 import { SYSTEM_DEFAULTS } from '../core/configuration/policy-catalog.js';
 import { FINANCE_SETTINGS } from '../core/configuration/finance-settings.js';
+import { assertCanonicalIncomeCategory } from '../core/finance/category-taxonomy.js';
 
 export const financeRouter = Router();
 financeRouter.use(authenticate);
@@ -757,8 +758,11 @@ financeRouter.post(
 
     const tx = db.transaction(() => {
       incrementMainBalance('organization', 'global', amount);
+      // The one income writer that bypasses recordIncome(): assert the same
+      // canonical-class boundary so no direct-insert path can dodge it.
+      assertCanonicalIncomeCategory(CAPITAL_INJECTION_CATEGORY);
       stmtInsertFinTx.run(
-        id('tx'), 'income', 'capital_injection', null, amount, date,
+        id('tx'), 'income', CAPITAL_INJECTION_CATEGORY, null, amount, date,
         notes ? `Capital injection into central treasury — ${notes}` : 'Capital injection into central treasury',
         null, user.fullName, user.branchId
       );

@@ -120,10 +120,15 @@ describe('classification rule', () => {
    * The predicates encode the TYPE as well as the category, so they cannot be
    * misapplied. A capital_injection row is only equity when it is income; an
    * expense row that happened to carry that category is still operating cost.
+   * W12: an income row carrying a category that is NOT a declared income class
+   * (profit_distribution is an expense-side concept) matches NOTHING on the
+   * income side — an unrecognized inflow can never become revenue by accident
+   * (I20 flags it as drift).
    */
   it('does not misclassify a category applied to the wrong type', () => {
     expect(isOperatingExpense({ type: 'expense', category: 'capital_injection' })).toBe(true);
-    expect(isOperatingIncome({ type: 'income', category: 'profit_distribution' })).toBe(true);
+    expect(isOperatingIncome({ type: 'income', category: 'profit_distribution' })).toBe(false);
+    expect(isEquityTransfer({ type: 'expense', category: 'capital_injection' })).toBe(false);
   });
 
   it('the JS helpers and the SQL predicates agree', () => {
@@ -218,7 +223,7 @@ describe('dashboard cash flow excludes owner equity movements', () => {
   it('still counts ordinary income and expense in full', () => {
     db.prepare(`DELETE FROM financial_transactions WHERE id LIKE 'lc_tx_%'`).run();
     tx('income', 'fee', 1000);
-    tx('income', 'book_sale', 500);
+    tx('income', 'book', 500); // canonical product-revenue class
     tx('expense', 'salary', 300);
     tx('expense', 'utilities', 200);
     const s = buildDashboardSummary(db, { branchId: BRANCH, isAll: false }, { days: 1 });

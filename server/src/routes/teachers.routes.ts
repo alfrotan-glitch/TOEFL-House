@@ -23,6 +23,7 @@ import {
 } from '../core/payroll/class-payroll.js';
 import { jalaliPeriodLabel } from '../utils/jalali.js';
 import { payrollLedgerCategoryId } from '../core/finance/category-taxonomy.js';
+import { computeEmployeeDueAmount } from '../core/payroll/employee-payroll.js';
 import { resolveIdempotency, isUniqueViolation } from '../utils/idempotency.js';
 
 export const teachersRouter = Router();
@@ -131,8 +132,8 @@ const stmtGetEmployeeSalaryByIdempotencyCandidates = db.prepare(
 const stmtGetEmployeeSalaryLedger = db.prepare('SELECT * FROM employee_salary_ledger WHERE id = ? AND employee_id = ?');
 const stmtVoidEmployeeSalaryLedger = db.prepare("UPDATE employee_salary_ledger SET status = 'voided', voided_at = datetime('now'), voided_by = ?, void_reason = ? WHERE id = ? AND status = 'posted'");
 const stmtInsertEmployeeSalaryLedger = db.prepare(
-  `INSERT INTO employee_salary_ledger (id, employee_id, period_key, period_label, paid_amount, payment_type, transaction_id, notes, branch_id, operator_name, idempotency_key, status)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'posted')`
+  `INSERT INTO employee_salary_ledger (id, employee_id, period_key, period_label, due_amount, paid_amount, payment_type, transaction_id, notes, branch_id, operator_name, idempotency_key, status)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'posted')`
 );
 
 function findTeacherSalaryReplay(candidates: readonly string[]) {
@@ -808,6 +809,62 @@ employeesRouter.delete('/:id', requirePermission('Employee.Edit'), ah(async (req
   res.json({ ok: true, mode: 'soft_delete', status: 'inactive' });
 }));
 
+// ── EMPLOYEE SALARY STATUS (W12: symmetric to the teacher preview) ─────────
+// Exposes the due COMPOSITION (base + earned bonus) so the desk sees exactly
+// what the pay-salary cap will enforce — the two surfaces share one authority
+// (computeEmployeeDueAmount), so they can never disagree.
+function computeEmployeePayroll(employee: { id: string; branch_id: string; base_salary: number; role: string }) {
+  // Same contract as the teacher path: a broken payroll rule configuration is
+  // an operator-correctable conflict (409), never an unhandled 500.
+  try {
+    return computeEmployeeDueAmount(db, employee);
+  } catch (error) {
+    if (error instanceof PayrollRuleConfigurationError) {
+      throw new HttpError(409, 'Payroll configuration is invalid. Correct the active payroll rules before calculating or paying salary.');
+    }
+    throw error;
+  }
+}
+
+employeesRouter.get('/:id/salary-status', requirePermission('Payroll.Edit', 'Payroll.View', 'Employee.View'), ah(async (req, res) => {
+  const employee = requireEmployee(req, req.params.id);
+  const query = req.query as Record<string, unknown>;
+  const suppliedMonth = query.month ?? query.monthName;
+  if (query.month !== undefined && query.monthName !== undefined && query.month !== query.monthName) {
+    throw new HttpError(400, 'month and monthName must identify the same payroll period.');
+  }
+  const periodKey = suppliedMonth === undefined ? currentJalaliPeriodKey() : requirePayrollPeriod(suppliedMonth);
+  const dueInfo = computeEmployeePayroll({
+    id: employee.id,
+    branch_id: employee.branch_id,
+    base_salary: Number(employee.base_salary) || 0,
+    role: String(employee.role ?? ''),
+  });
+  if (!Number.isFinite(dueInfo.due) || dueInfo.due < 0) throw new HttpError(500, 'Payroll calculation returned an invalid amount.');
+  const paidRow = db
+    .prepare(`SELECT COALESCE(SUM(paid_amount),0) AS s FROM employee_salary_ledger WHERE employee_id = ? AND period_key = ? AND status = 'posted'`)
+    .get(employee.id, periodKey) as { s: number };
+  const paid = Number(paidRow.s) || 0;
+  const fullPaid = !!db
+    .prepare(`SELECT 1 FROM employee_salary_ledger WHERE employee_id = ? AND period_key = ? AND payment_type = 'full' AND status = 'posted' LIMIT 1`)
+    .get(employee.id, periodKey);
+  res.json({
+    employeeId: employee.id,
+    periodKey,
+    periodLabel: jalaliPeriodLabel(periodKey),
+    due: dueInfo.due,
+    base: dueInfo.base,
+    bonus: dueInfo.bonus,
+    paid,
+    remaining: Math.max(0, dueInfo.due - paid),
+    fullPaid,
+    canPayFull: !fullPaid && dueInfo.due - paid > 0,
+    warnings: dueInfo.warnings,
+    isBlocked: dueInfo.isBlocked,
+    blockReason: dueInfo.blockReason ?? null,
+  });
+}));
+
 employeesRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(async (req, res) => {
   const user = getUserContext(req);
   const employee = requireEmployee(req, req.params.id);
@@ -872,23 +929,33 @@ employeesRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(as
           throw new HttpError(409, 'Idempotency key was already used for a different payroll operation.');
         }
         db.exec('COMMIT');
-        return { amountPaid: Number(replay.paid_amount), ledgerId: replay.id, replayed: true, remainingBudget: null as number | null };
+        return { amountPaid: Number(replay.paid_amount), ledgerId: replay.id, replayed: true, remainingBudget: null as number | null, dueInfo: null };
       }
 
-      // DUE AUTHORITY (mirrors the teacher path). A salary payment is bounded
-      // by what the period still owes: base salary for the period minus
-      // everything already posted for it — advances included, so an advance is
-      // recovered against later salary rather than being free extra money on
-      // top of a full month. An advance itself stays uncapped by design: it is
-      // a receivable against future pay, exactly as the taxonomy records it.
-      // Before this, `full` was whatever the caller said it was, so a single
-      // request could pay any multiple of the employee's salary out of the
-      // budget envelope with nothing to compare against.
-      const baseSalary = Number((db.prepare('SELECT base_salary FROM employees WHERE id = ?').get(employee.id) as { base_salary: number } | undefined)?.base_salary) || 0;
+      // DUE AUTHORITY (mirrors the teacher path; W12 due-composition). A
+      // salary payment is bounded by what the period still owes — advances
+      // included in what is already posted, so an advance is recovered against
+      // later salary rather than being free extra money on top of a full
+      // month. An advance itself stays uncapped by design: it is a receivable
+      // against future pay, exactly as the taxonomy records it.
+      // W12: the cap is the COMPOSED due — base salary plus any bonus an
+      // active payroll rule legitimately earned (W9 §10.7: the bonus was
+      // computable but unpayable, forcing a falsified base-salary raise).
+      // Computed INSIDE the write lock so a concurrent rule change cannot make
+      // the cap and the ledger row disagree.
+      const employeeRow = db.prepare('SELECT base_salary, role FROM employees WHERE id = ?').get(employee.id) as { base_salary: number; role: string } | undefined;
+      const dueInfo = computeEmployeePayroll({
+        id: employee.id,
+        branch_id: employee.branch_id,
+        base_salary: Number(employeeRow?.base_salary) || 0,
+        role: String(employeeRow?.role ?? ''),
+      });
+      if (dueInfo.isBlocked) throw new HttpError(409, dueInfo.blockReason || 'Payroll is blocked by policy.');
+      const composedDue = dueInfo.due;
       const paidThisPeriod = Number((db
         .prepare(`SELECT COALESCE(SUM(paid_amount),0) AS s FROM employee_salary_ledger WHERE employee_id = ? AND period_key = ? AND status = 'posted'`)
         .get(employee.id, periodKey) as { s: number }).s) || 0;
-      const remainingDue = Math.max(0, baseSalary - paidThisPeriod);
+      const remainingDue = Math.max(0, composedDue - paidThisPeriod);
       if (type !== 'advance') {
           // A second FULL payment against a settled month is classified as the
           // full-payment conflict deterministically here, not only when the
@@ -899,7 +966,7 @@ employeesRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(as
             .prepare(`SELECT 1 FROM employee_salary_ledger WHERE employee_id = ? AND period_key = ? AND payment_type = 'full' AND status = 'posted' LIMIT 1`)
             .get(employee.id, periodKey);
           if (fullAlreadyPosted) throw new HttpError(409, `A full salary payment for \"${monthName}\" already exists.`);
-        if (remainingDue <= 0) throw new HttpError(409, `Nothing remains payable for "${monthName}" (base ${baseSalary} AFN, ${paidThisPeriod} AFN already posted).`);
+        if (remainingDue <= 0) throw new HttpError(409, `Nothing remains payable for "${monthName}" (due ${composedDue} AFN = base ${dueInfo.base}${dueInfo.bonus ? ` + bonus ${dueInfo.bonus}` : ''}, ${paidThisPeriod} AFN already posted).`);
         if (resolvedAmount > remainingDue) {
           throw new HttpError(400, `Payment cannot exceed the remaining salary of ${remainingDue} AFN for "${monthName}".`);
         }
@@ -935,10 +1002,10 @@ employeesRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(as
       );
       // The canonical financial trail this endpoint never had. `uq_employee_salary_full_period`
       // replaces the old description-LIKE guard for full payments.
-      stmtInsertEmployeeSalaryLedger.run(ledgerId, employee.id, periodKey, periodLabel, resolvedAmount, type, txId, null, employee.branch_id, user.fullName, idempotencyKey);
+      stmtInsertEmployeeSalaryLedger.run(ledgerId, employee.id, periodKey, periodLabel, composedDue, resolvedAmount, type, txId, dueInfo.bonus > 0 ? `Includes earned bonus of ${dueInfo.bonus} AFN (payroll rule).` : null, employee.branch_id, user.fullName, idempotencyKey);
 
       db.exec('COMMIT');
-      return { amountPaid: resolvedAmount, ledgerId, replayed: false, remainingBudget: Number(budgetLine.current_amount) - resolvedAmount };
+      return { amountPaid: resolvedAmount, ledgerId, replayed: false, remainingBudget: Number(budgetLine.current_amount) - resolvedAmount, dueInfo };
     } catch (err) {
       try { db.exec('ROLLBACK'); } catch { /* rollback may already be complete */ }
       // Atomic backstop: under true concurrency several requests pass the
@@ -958,13 +1025,20 @@ employeesRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(as
   })();
 
   if (!result.replayed) {
-    addNotification('Employee Salary Paid', `Salary of ${result.amountPaid} AFN paid to employee ${employee.full_name}.`, 'success', employee.branch_id);
+    if (result.dueInfo && result.dueInfo.bonus > 0) {
+      addNotification('Employee Salary Paid', `Salary of ${result.amountPaid} AFN (due ${result.dueInfo.due} = base ${result.dueInfo.base} + bonus ${result.dueInfo.bonus}) paid to employee ${employee.full_name}.`, 'success', employee.branch_id);
+    } else {
+      addNotification('Employee Salary Paid', `Salary of ${result.amountPaid} AFN paid to employee ${employee.full_name}.`, 'success', employee.branch_id);
+    }
     writeAudit(req, `Paid salary to employee ${employee.full_name} — ${result.amountPaid} AFN for ${monthName}`);
   }
   res.status(201).json({
     ok: true, amountPaid: result.amountPaid, monthName, paymentType: type,
     ledgerId: result.ledgerId, replayed: result.replayed,
     remainingBudget: result.remainingBudget,
+    due: result.dueInfo ? result.dueInfo.due : undefined,
+    base: result.dueInfo ? result.dueInfo.base : undefined,
+    bonus: result.dueInfo ? result.dueInfo.bonus : undefined,
   });
 }));
 

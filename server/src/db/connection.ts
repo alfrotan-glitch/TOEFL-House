@@ -185,6 +185,21 @@ function reconcileCanonicalFeeAuthority(): void {
 }
 
 /**
+ * Converge a pre-W12 database onto the employee due-composition shape of
+ * `employee_salary_ledger`: the `due_amount` column records the composed due
+ * (base + earned bonus) a payment settled against, and the fact triggers
+ * enforce paid ≤ due (advance exempt) and full ⇒ paid = due. Legacy rows keep
+ * the column DEFAULT 0 — the due that bounded them was the then-current base
+ * salary, which is not recoverable and is therefore NOT fabricated.
+ */
+function ensureEmployeeLedgerDueColumn(): void {
+  const columns = db.prepare(`PRAGMA table_info(employee_salary_ledger)`).all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === 'due_amount')) {
+    db.exec(`ALTER TABLE employee_salary_ledger ADD COLUMN due_amount INTEGER NOT NULL DEFAULT 0`);
+  }
+}
+
+/**
  * Applies the canonical schema, then the organization hierarchy defaults.
  * Safe on every process start (fresh or existing database).
  */
@@ -206,6 +221,7 @@ export function initSchema(): void {
     db.exec(schema);
     ensureInvoiceChargeKindColumn();
     ensureBookReceiptAcquisitionColumns();
+    ensureEmployeeLedgerDueColumn();
     ensureRegistrationsFinancialColumnsDropped();
     reconcileCanonicalFeeAuthority();
   } catch (error) {

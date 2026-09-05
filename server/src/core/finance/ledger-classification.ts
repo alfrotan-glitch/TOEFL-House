@@ -32,12 +32,17 @@
  * That is the conservative default: an uncategorised cost must never vanish
  * from the cost side of the P&L.
  *
- * INCOME IS NOT IN THE TAXONOMY
- * -----------------------------
- * The canonical taxonomy models the EXPENSE side. Income rows carry the billing
- * vocabulary (`fee`, `book`, `exam`, `placement`, `donation`, `card`, …) in
- * `category` and leave `finance_category_id` NULL. The single income rule that
- * matters — owner capital is not revenue — stays a named constant.
+ * INCOME IS CLASSIFIED BY THE CANONICAL INCOME TAXONOMY (W12 / W9 §5)
+ * -------------------------------------------------------------------
+ * Income rows carry the billing vocabulary (`fee`, `book`, `exam`,
+ * `placement`, `donation`, `card`, …) in `category` and leave
+ * `finance_category_id` NULL. The operating boundary used to be RESIDUAL
+ * (`category <> 'capital_injection'`), so any undeclared inflow silently
+ * became trading revenue. It is now GENERATED from CANONICAL_INCOME_CATEGORIES
+ * — a category counts as operating income because its DECLARED class says so,
+ * and an unknown category counts as NOTHING (conservative) while invariant I20
+ * flags it. The write boundary (`assertCanonicalIncomeCategory`) rejects
+ * undeclared codes before they can reach the ledger at all.
  *
  * WHAT THIS MODULE DELIBERATELY DOES NOT DO
  * -----------------------------------------
@@ -48,8 +53,12 @@
  */
 import {
   CANONICAL_CATEGORIES,
+  CANONICAL_INCOME_CATEGORIES,
+  INCOME_IN_OPERATING_RESULT,
   classificationOf,
+  incomeClassificationOf,
   type FinanceCategoryClassification,
+  type IncomeClassification,
 } from './category-taxonomy.js';
 
 /** Income rows in this category are owner capital, not revenue. */
@@ -92,9 +101,32 @@ export function expenseClassificationSql(
     : `(${type} = 'expense' AND ${lookup} = '${classification}')`;
 }
 
-/** SQL predicate: the row is OPERATING income. */
+/**
+ * The declared operating income classes, as a SQL literal list. GENERATED from
+ * the canonical income taxonomy — never hand-maintained here.
+ */
+export const OPERATING_INCOME_CATEGORY_LIST_SQL: string = `(${CANONICAL_INCOME_CATEGORIES
+  .filter((c) => c.inOperatingResult)
+  .map((c) => `'${c.id}'`)
+  .join(', ')})`;
+
+/**
+ * SQL predicate: the row is OPERATING income — its DECLARED class participates
+ * in the trading result (service/product revenue, funding income, contra).
+ * Unknown categories match NOTHING: unexpected inflows can never become revenue
+ * by accident (I20 flags them; the write boundary rejects them).
+ */
 export function operatingIncomeSql(alias?: string): string {
-  return `(${col('type', alias)} = 'income' AND ${col('category', alias)} <> '${CAPITAL_INJECTION_CATEGORY}')`;
+  return `(${col('type', alias)} = 'income' AND ${col('category', alias)} IN ${OPERATING_INCOME_CATEGORY_LIST_SQL})`;
+}
+
+/**
+ * SQL predicate: an income row whose category is NOT in the canonical income
+ * taxonomy — classification drift, surfaced by invariant I20.
+ */
+export function unclassifiedIncomeSql(alias?: string): string {
+  const codes = CANONICAL_INCOME_CATEGORIES.map((c) => `'${c.id}'`).join(', ');
+  return `(${col('type', alias)} = 'income' AND (${col('category', alias)} IS NULL OR ${col('category', alias)} NOT IN (${codes})))`;
 }
 
 /** SQL predicate: the row is OPERATING expense. */
@@ -139,6 +171,26 @@ export function ownerDrawingSql(alias?: string): string {
 
 // Unaliased forms, for the many statements that query the table directly.
 export const OPERATING_INCOME_SQL = operatingIncomeSql();
+
+/**
+ * SQL predicate: the row credits BRANCH CASH — every income class except
+ * equity contributions (which credit the organization treasury). This is the
+ * CASH movement question, NOT the trading-result question: the reconciliation
+ * must keep seeing rows the operating boundary excludes (e.g. a rogue
+ * non-canonical contra row), or phantom cash becomes undetectable (F-10).
+ * Unknown categories match IN: an unrecognized inflow still moved (or failed
+ * to move) real money — I20 flags the classification problem separately.
+ */
+export const EQUITY_INCOME_CATEGORY_LIST_SQL: string = `(${CANONICAL_INCOME_CATEGORIES
+  .filter((c) => c.classification === 'equity_contribution')
+  .map((c) => `'${c.id}'`)
+  .join(', ')})`;
+
+export function branchCashIncomeSql(alias?: string): string {
+  return `(${col('type', alias)} = 'income' AND COALESCE(${col('category', alias)}, '') NOT IN ${EQUITY_INCOME_CATEGORY_LIST_SQL})`;
+}
+
+export const BRANCH_CASH_INCOME_SQL = branchCashIncomeSql();
 export const OPERATING_EXPENSE_SQL = operatingExpenseSql();
 export const CAPITAL_EXPENDITURE_SQL = capitalExpenditureSql();
 export const NON_EXPENSE_CASH_MOVEMENT_SQL = nonExpenseCashMovementSql();
@@ -166,7 +218,7 @@ export function classifyExpenseRow(row: ClassifiableRow): FinanceCategoryClassif
 
 /** In-memory counterpart, for callers that already hold a row. */
 export function isOperatingIncome(row: ClassifiableRow): boolean {
-  return row.type === 'income' && row.category !== CAPITAL_INJECTION_CATEGORY;
+  return row.type === 'income' && INCOME_IN_OPERATING_RESULT.has(String(row.category ?? ''));
 }
 
 /** In-memory counterpart, for callers that already hold a row. */
@@ -184,10 +236,18 @@ export function isNonExpenseCashMovement(row: ClassifiableRow): boolean {
   return row.type === 'expense' && classifyExpenseRow(row) === 'non_expense_cash_movement';
 }
 
+/** In-memory income classification (null when the category is not canonical). */
+export function classifyIncomeRow(row: ClassifiableRow): IncomeClassification | null {
+  return incomeClassificationOf(row.category ?? null);
+}
+
 /** True when the row moves owner equity rather than trading value. */
 export function isEquityTransfer(row: ClassifiableRow): boolean {
   return (
-    (row.type === 'income' && row.category === CAPITAL_INJECTION_CATEGORY) ||
+    // The category test alone is NOT enough: an EXPENSE row that happened to
+    // carry an equity income category is still an operating cost (the
+    // classification must respect the row's type, exactly like the SQL).
+    (row.type === 'income' && classifyIncomeRow(row) === 'equity_contribution') ||
     (row.type === 'expense' && nodeOf(row) === OWNER_DRAWINGS_CATEGORY_ID)
   );
 }

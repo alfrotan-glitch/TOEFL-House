@@ -194,6 +194,121 @@ export const CANONICAL_CATEGORIES: readonly CanonicalCategory[] = [
   },
 ] as const;
 
+// ═══════════════════════════════════════════════════════════════════════════
+// INCOME TAXONOMY (Wave 12 / W9 §5)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The canonical taxonomy above models the EXPENSE side. Income rows carry the
+// billing vocabulary in `financial_transactions.category` — and until now the
+// operating-result boundary was RESIDUAL on that string: anything that was not
+// exactly `capital_injection` counted as trading revenue. Four economically
+// different inflows collapsed into one residual, and a future writer passing a
+// typo or a new code would have silently inflated the P&L.
+//
+// This block is the single authority for income classification, exactly as
+// CANONICAL_CATEGORIES is for expenses. Every income class is DECLARED with its
+// economic meaning and its treatment; the operating-income predicate and the
+// write boundary are GENERATED from this table, so a new income class cannot
+// exist without also declaring what it does to the trading result.
+//
+// The conservative-default principle (both residual directions conservative):
+//   · an UNCATEGORISED expense still hits costs (unchanged, above);
+//   · an UNKNOWN income category is REJECTED at the write boundary and, if one
+//     ever reaches the ledger (drift/legacy), is EXCLUDED from operating income
+//     and flagged by invariant I20. Unexpected cash can never become revenue
+//     by accident.
+
+/** How an income class affects the books. */
+export type IncomeClassification =
+  | 'operating_revenue'   // service/product revenue from trading (education)
+  | 'funding_income'      // donor/sponsor cash: in the operating result, but displayed as its own funding line
+  | 'contra_revenue'      // returned revenue: negative, reduces the operating result
+  | 'equity_contribution' // owner capital in: balance-sheet, never revenue
+  | 'non_operating_inflow'; // neither trading nor equity (disposals, rebates-without-expense); never trading revenue
+
+export interface CanonicalIncomeCategory {
+  /** Stable billing-vocabulary code as written to `financial_transactions.category`. */
+  id: string;
+  name: string;
+  classification: IncomeClassification;
+  /** True when the class belongs in the OPERATING result (P&L, dashboards). */
+  inOperatingResult: boolean;
+  note: string;
+}
+
+/**
+ * The canonical income classes — every writer's vocabulary, with the economic
+ * semantics authorized by W9 §5. Derived from the actual writers; no class was
+ * invented for completeness.
+ *
+ *  · fee / installment — tuition service revenue (a plan settles the same
+ *    education debt a direct fee does; one economic class family).
+ *  · chapter / exam / diploma / card / placement / other — auxiliary service
+ *    revenue; `other` is the desk's REASON-REQUIRED ad-hoc educational charge,
+ *    true operating misc revenue per W9, never a silent fallback (the write
+ *    boundary rejects anything undeclared).
+ *  · book — product revenue (book sales).
+ *  · donation — donor cash (restricted or not is a FACT in
+ *    donation_restrictions, joined by donation_id; the restricted/unrestricted
+ *    split is derived, not re-encoded in the string).
+ *  · refund — contra-revenue: cash returned against settled revenue.
+ *  · capital_injection — owner equity into the treasury.
+ *  · non_operating_other — the conservative NON-revenue side of the boundary.
+ *    No writer exists today (interest/finance income is excluded until P13);
+ *    the class is declared so the taxonomy is total and the residual direction
+ *    stays conservative when a legitimate writer is authorized later.
+ */
+export const CANONICAL_INCOME_CATEGORIES: readonly CanonicalIncomeCategory[] = [
+  { id: 'fee',                 name: 'Tuition (direct)',        classification: 'operating_revenue',   inOperatingResult: true,  note: 'Education service revenue.' },
+  { id: 'installment',         name: 'Tuition (plan)',          classification: 'operating_revenue',   inOperatingResult: true,  note: 'Same education debt, settled via an installment plan.' },
+  { id: 'chapter',             name: 'Chapter charge',          classification: 'operating_revenue',   inOperatingResult: true,  note: 'Ad-hoc educational charge (reason required at the desk).' },
+  { id: 'exam',                name: 'Examination fee',         classification: 'operating_revenue',   inOperatingResult: true,  note: 'Auxiliary service revenue.' },
+  { id: 'diploma',             name: 'Diploma fee',             classification: 'operating_revenue',   inOperatingResult: true,  note: 'Auxiliary service revenue.' },
+  { id: 'card',                name: 'ID card fee',             classification: 'operating_revenue',   inOperatingResult: true,  note: 'Administrative service revenue.' },
+  { id: 'placement',           name: 'Placement assessment',    classification: 'operating_revenue',   inOperatingResult: true,  note: 'Auxiliary service revenue.' },
+  { id: 'other',               name: 'Operating misc revenue',  classification: 'operating_revenue',   inOperatingResult: true,  note: 'Desk ad-hoc charge with a MANDATORY reason — a declared class, never a fallback.' },
+  { id: 'book',                name: 'Book sales',              classification: 'operating_revenue',   inOperatingResult: true,  note: 'Product revenue.' },
+  { id: 'donation',            name: 'Donations & funding',     classification: 'funding_income',      inOperatingResult: true,  note: 'In the operating result, reported on its own funding line; restricted-ness is a fact of the funding subledger.' },
+  { id: 'refund',              name: 'Refunds (contra-revenue)', classification: 'contra_revenue',    inOperatingResult: true,  note: 'Negative income: cash returned against settled revenue.' },
+  { id: 'capital_injection',   name: 'Owner capital',           classification: 'equity_contribution', inOperatingResult: false, note: 'Equity into the treasury — never trading revenue.' },
+  { id: 'non_operating_other', name: 'Non-operating inflow',    classification: 'non_operating_inflow', inOperatingResult: false, note: 'Neither trading nor equity nor liability. No writer is authorized today (P13 holds finance income).' },
+] as const;
+
+/** Every canonical income code. */
+export const CANONICAL_INCOME_CATEGORY_IDS: ReadonlySet<string> = new Set(
+  CANONICAL_INCOME_CATEGORIES.map((c) => c.id),
+);
+
+/** Income code → classification (single authority for the operating boundary). */
+export const INCOME_CLASSIFICATION: ReadonlyMap<string, IncomeClassification> = new Map(
+  CANONICAL_INCOME_CATEGORIES.map((c) => [c.id, c.classification] as const),
+);
+
+/** Income code → operating-result membership. */
+export const INCOME_IN_OPERATING_RESULT: ReadonlySet<string> = new Set(
+  CANONICAL_INCOME_CATEGORIES.filter((c) => c.inOperatingResult).map((c) => c.id),
+);
+
+export function incomeClassificationOf(code: string | null | undefined): IncomeClassification | null {
+  if (code == null) return null;
+  return INCOME_CLASSIFICATION.get(code) ?? null;
+}
+
+/**
+ * The write boundary. An income row may only be recorded under a DECLARED
+ * class — this is the income-side twin of "an uncategorised cost must never
+ * vanish": an undeclared inflow must never become revenue. Callers wrap this
+ * in their transaction so a rejection aborts the whole economic event.
+ */
+export function assertCanonicalIncomeCategory(code: string | null | undefined): string {
+  if (typeof code !== 'string' || !CANONICAL_INCOME_CATEGORY_IDS.has(code)) {
+    throw new Error(
+      `Unknown income category ${JSON.stringify(code)}. Income must use a canonical class from core/finance/category-taxonomy (W9 §5); add the class there with its accounting treatment before writing it.`,
+    );
+  }
+  return code;
+}
+
 /**
  * Channels / vendors.
  *

@@ -64,12 +64,22 @@
  *      and employee) has its financial_transactions row with the same
  *      amount. Payroll facts are memos over ledger events; a missing or
  *      mismatched row means payroll history and the books disagree.
+ *  I20 INCOME CLASSIFICATION KNOWN — every income row carries a canonical
+ *      income class (W12 / W9 §5). The write boundary rejects undeclared
+ *      categories, so a row here means drift: a writer bypassed the boundary
+ *      or the taxonomy lost a class that history still uses. Such a row is
+ *      EXCLUDED from operating income (conservative) until classified.
+ *  I21 RESTRICTED-FUND CONSERVATION — donor-restricted money can only be
+ *      applied to tuition settlements (allocation subledger), never created
+ *      or leaked: active aid allocations may never exceed restricted
+ *      receipts (per branch and overall).
  */
 import type BetterSqlite3 from 'better-sqlite3';
 import {
   OPERATING_INCOME_SQL,
   OPERATING_EXPENSE_SQL,
   OWNER_DRAWING_SQL,
+  unclassifiedIncomeSql,
 } from './ledger-classification.js';
 import { BUDGET_MOVEMENT_TYPE } from './budget-movements.js';
 
@@ -166,14 +176,22 @@ const CHECKS: Check[] = [
   {
     invariant: 'I7',
     detail: 'Posted salary for a period never exceeds the period\u2019s base',
-    sql: `SELECT l.employee_id AS k, l.period_key AS period, e.base_salary AS base,
+    // W12: the payroll cap is the COMPOSED due (base + rule-earned bonus),
+    // stamped on each ledger row at payment time inside the write lock. The
+    // invariant follows that same authority — posted non-advance pay for a
+    // period may never exceed the highest due the period ever recorded
+    // (mid-period rule changes can only be reflected honestly by a new,
+    // separately-bounded payment). Pre-composition history (due_amount 0)
+    // keeps its original meaning: the then-current base bounded the payment,
+    // and today's base remains the best available backstop for it.
+    sql: `SELECT l.employee_id AS k, l.period_key AS period, MAX(l.due_amount) AS due,
                SUM(l.paid_amount) AS posted
           FROM employee_salary_ledger l
           JOIN employees e ON e.id = l.employee_id
           WHERE l.status = 'posted' AND l.payment_type <> 'advance'
-          GROUP BY l.employee_id, l.period_key, e.base_salary
-          HAVING SUM(l.paid_amount) > e.base_salary + 0.001`,
-    sample: (r) => `employee ${r.k} period ${r.period}: base ${r.base}, posted ${r.posted}`,
+          GROUP BY l.employee_id, l.period_key
+          HAVING SUM(l.paid_amount) > MAX(MAX(l.due_amount), e.base_salary) + 0.001`,
+    sample: (r) => `employee ${r.k} period ${r.period}: due ${r.due}, posted ${r.posted}`,
   },
   {
     invariant: 'I8',
@@ -299,6 +317,43 @@ const CHECKS: Check[] = [
        WHERE l.status = 'posted'
          AND NOT EXISTS (SELECT 1 FROM financial_transactions t WHERE t.id = l.transaction_id AND t.amount = l.paid_amount)`,
     sample: (r) => `${r.kind} payroll row ${r.k} (${r.amount} AFN) has no matching ledger transaction`,
+  },
+  {
+    invariant: 'I20',
+    detail: 'Every income row carries a canonical income class (W12 income taxonomy)',
+    sql: `
+      SELECT id AS k, category AS code
+        FROM financial_transactions
+       WHERE ${unclassifiedIncomeSql()}`,
+    sample: (r) => `income row ${r.k} has non-canonical category ${JSON.stringify(r.code)} — it is excluded from operating income until classified`,
+  },
+  {
+    invariant: 'I21',
+    detail: 'Restricted-fund conservation: active aid allocations never exceed restricted receipts (W12 exposure report premise)',
+    sql: `
+      WITH restricted_received AS (
+        SELECT d.branch_id AS b, SUM(d.amount) AS v
+          FROM donations d
+          JOIN donation_restrictions r ON r.donation_id = d.id
+         GROUP BY d.branch_id
+      ), aid_applied AS (
+        SELECT sf.branch_id AS b, SUM(a.amount) AS v
+          FROM obligation_allocations a
+          JOIN scholarship_fundings sf ON sf.id = a.scholarship_funding_id
+         WHERE a.status = 'active' AND a.source_kind = 'scholarship'
+         GROUP BY sf.branch_id
+        UNION ALL
+        SELECT sr.branch_id AS b, SUM(a.amount) AS v
+          FROM obligation_allocations a
+          JOIN sponsorship_receipts sr ON sr.id = a.sponsorship_receipt_id
+         WHERE a.status = 'active' AND a.source_kind = 'sponsorship'
+         GROUP BY sr.branch_id
+      )
+      SELECT rr.b AS k, rr.v AS received, COALESCE(aa.v, 0) AS applied
+        FROM restricted_received rr
+        LEFT JOIN aid_applied aa ON aa.b = rr.b
+       WHERE COALESCE(aa.v, 0) > rr.v`,
+    sample: (r) => `branch ${r.k}: ${r.applied} AFN of restricted money is actively applied against ${r.received} AFN received — restricted funds leaked`,
   },
 ];
 
