@@ -184,8 +184,15 @@ const stmtUpdateEnrollmentsMerge = db.prepare(
 );
 const stmtDeleteFutureSourceRosters = db.prepare(`DELETE FROM rosters WHERE student_id IN (SELECT student_id FROM enrollments WHERE class_id = ?) AND session_id IN (SELECT id FROM sessions WHERE class_id = ? AND date >= date('now') AND status != 'cancelled')`);
 const stmtGetFutureTargetSessions = db.prepare(`SELECT id FROM sessions WHERE class_id = ? AND date >= date('now') AND status != 'cancelled'`);
-const stmtGetSourceActiveStudents = db.prepare(`SELECT DISTINCT student_id FROM enrollments WHERE class_id = ? AND status IN (${MERGE_MOVABLE_STATUS_SQL})`);
+const stmtGetSourceActiveStudents = db.prepare(`SELECT DISTINCT id AS enrollment_id, student_id FROM enrollments WHERE class_id = ? AND status IN (${MERGE_MOVABLE_STATUS_SQL})`);
 const stmtInsertMergeRoster = db.prepare(`INSERT OR IGNORE INTO rosters (id, session_id, student_id, attendance_status) VALUES (?, ?, ?, 'not_marked')`);
+// W10-2 (forensic wave 11): a merge rewrites enrollment/semester class_id in
+// place; without event rows the from→to attribution survives only in audit
+// text and history is not reconstructible from memos. 'transferred' is the
+// existing vocabulary value for a class-membership change — a merge IS one,
+// administered en masse. created_at defaults to now: the event records when
+// the merge happened, which is the truth; no historical date is fabricated.
+const stmtInsertMergeEvent = db.prepare(`INSERT INTO enrollment_events (id, enrollment_id, student_id, event_type, from_class_id, to_class_id, notes, actor_user_id) VALUES (?, ?, ?, 'transferred', ?, ?, ?, ?)`);
 // Cancellation itself (lifecycle_stage/status/cancellation_reason) goes
 // through classLifecycle.cancel() so it's validated and audited the same
 // way as every other transition; this statement only records the merge
@@ -768,7 +775,7 @@ classesRouter.post(
     const mergeTx = db.transaction(() => {
       // Snapshot the population BEFORE the UPDATE — afterwards these rows point
       // at the target class and the query would return nothing.
-      const sourceStudents = stmtGetSourceActiveStudents.all(source.id) as { student_id: string }[];
+      const sourceStudents = stmtGetSourceActiveStudents.all(source.id) as { enrollment_id: string; student_id: string }[];
 
       stmtUpdateSemestersMerge.run(targetClassId, sourceId);
       stmtDeleteFutureSourceRosters.run(source.id, source.id);
@@ -781,6 +788,12 @@ classesRouter.post(
       const targetSessions = stmtGetFutureTargetSessions.all(target.id) as { id: string }[];
       for (const student of sourceStudents) {
         for (const session of targetSessions) stmtInsertMergeRoster.run(id('ros'), session.id, student.student_id);
+        stmtInsertMergeEvent.run(
+          id('eev'), student.enrollment_id, student.student_id,
+          sourceId, targetClassId,
+          `Class merged: ${source.name} into ${target.name}`,
+          req.user?.userId ?? null,
+        );
       }
       classLifecycle.cancel(sourceId, {
         reason: `Merged into ${target.name} (${targetClassId})`,

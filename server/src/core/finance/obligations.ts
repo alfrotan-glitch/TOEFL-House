@@ -608,8 +608,7 @@ export function setInstallmentPlan(
     );
   }
 
-  db.prepare(`DELETE FROM student_installments WHERE obligation_id = ?`).run(params.obligationId);
-  const insert = db.prepare(
+  db.prepare(`DELETE FROM student_installments WHERE obligation_id = ?`).run(params.obligationId);  const insert = db.prepare(
     `INSERT INTO student_installments (id, obligation_id, sequence, amount, due_date, status)
      VALUES (?, ?, ?, ?, ?, 'pending')`,
   );
@@ -1020,5 +1019,29 @@ export function refundPaymentAllocation(
       remaining = 0;
     }
   }
+
+  // W10-1 (forensic wave 11): an instalment's 'paid' flag is a CACHE of "this
+  // payment is actively settling my obligation" — the settlement truth itself
+  // lives in the (append-only) allocations. When a refund leaves the payment
+  // with NO remaining active allocation, every instalment it marked paid must
+  // re-open, or the instalment memo contradicts the obligation ("term owed,
+  // instalment paid forever") and the instalment payment path 409s on a
+  // legitimate re-payment. A PARTIAL refund re-allocates the retained amount
+  // above, so the payment still settles and the flag correctly stays 'paid'.
+  // Guarded on the payment's remaining ACTIVE allocations — never on amounts —
+  // so this can only ever mirror allocation truth, never invent state.
+  if (firstReversed) {
+    db.prepare(`
+      UPDATE student_installments
+         SET status = 'pending', paid_payment_id = NULL
+       WHERE paid_payment_id = ?
+         AND status = 'paid'
+         AND NOT EXISTS (
+           SELECT 1 FROM obligation_allocations a
+            WHERE a.payment_id = ? AND a.status = 'active'
+         )
+    `).run(params.targetPaymentId, params.targetPaymentId);
+  }
+
   return { reversedAllocationId: firstReversed, retainedAllocationId: lastRetained };
 }

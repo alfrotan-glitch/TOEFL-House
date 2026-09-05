@@ -3388,6 +3388,13 @@ CREATE TABLE IF NOT EXISTS obligation_allocations (
   CHECK ((status = 'active' AND reversed_at IS NULL) OR (status = 'reversed' AND reversed_at IS NOT NULL))
 );
 CREATE INDEX IF NOT EXISTS idx_allocations_obligation ON obligation_allocations(obligation_id, status);
+-- W10-3 (forensic wave 11): one ACTIVE settlement per (obligation, payment).
+-- A payment may split across obligations and an obligation may take many
+-- payments, but the SAME pair may not hold two active allocations — that is
+-- a duplicate settlement of the same debt by the same cash. Reversed rows are
+-- exempt, so a refunded pair can legitimately re-settle later.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_allocations_active_payment_obligation
+  ON obligation_allocations(obligation_id, payment_id) WHERE status = 'active';
 CREATE INDEX IF NOT EXISTS idx_allocations_award ON obligation_allocations(scholarship_award_id, status);
 CREATE INDEX IF NOT EXISTS idx_allocations_scholarship_funding ON obligation_allocations(scholarship_funding_id, status);
 CREATE INDEX IF NOT EXISTS idx_allocations_payment ON obligation_allocations(payment_id, status);

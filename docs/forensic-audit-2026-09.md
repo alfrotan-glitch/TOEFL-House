@@ -825,3 +825,37 @@ date granularity; no orphan/duplicate/contradictory state reachable in the
 request lifecycle. Historical production impact: none (0 installments,
 0 refunds, 0 merges live). Wave-11 gate: fix W10-1/2/3, decide P16, then
 the three Wave-9 authorized items, then policy-gated items.
+
+### Wave 11 — State-layer repair & adversarial verification (2026-09-05) — PASS
+
+Deliverable: `docs/forensic-audit-wave11-state-layer-repair-verdict.md`.
+
+All three W10 defects independently reproduced against current source, then repaired
+at the strongest appropriate layer and re-attacked through production surfaces
+(`src/tests/state-layer-repair.test.ts`, 13/13): W10-1 installment re-open when its
+payment no longer actively settles anything (partial refunds keep it paid via
+re-allocation); W10-2 per-enrollment `transferred` events on class merge (merge-time
+truth, no fabricated dates); W10-3 partial unique index on ACTIVE
+(obligation, payment) allocations + runtime invariants I17 (settlement arithmetic),
+I18 (paid installment ⇔ payment still actively settles), I19 (payroll⇔ledger amount),
+with findings now naming the offending entity (`entityId`).
+
+The verification itself surfaced a fourth defect (W11-A): a fully refunded payment's
+derived idempotency key swallowed its honest re-payment as a "replay" — desk success,
+no money recorded — reachable the moment W10-1 unblocked repay-after-refund. Repaired
+by key-generation advance (`.r2`, …) for derived keys whose holder is fully refunded;
+true retries and client keys unchanged; proven category-generic (fee and installment).
+
+Historical impact: CLEAN — live DB has 0 refunds, 0 paid installments, 0 merges, 0
+duplicate active pairs (index convergence), 0 orphans, and the full I1–I19 checker
+returns zero findings on a read-only copy. No historical repair performed or required.
+
+P16 (staff-advance recovery window): **POLICY REQUIRED** — no authoritative source in
+OPERATIONS.md, protocol, work-package, certification or payroll docs; today's code
+recovers advances within the same period implicitly (due-cap arithmetic), and cannot
+represent cross-period recovery or explicit advance→recovery attribution. Boundary
+documented; nothing implemented.
+
+Full suite: 2913 passed / 2 skipped / 0 failed; tsc clean. Wave-12 gate: the three
+Wave-9 authorized items (income taxonomy, restricted exposure report, employee-bonus
+payroll composition), no schema migration without a named invariant.

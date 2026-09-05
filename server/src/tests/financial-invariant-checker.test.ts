@@ -52,9 +52,17 @@ describe('the financial invariant checker', () => {
       VALUES ('inv_sem1', 'inv_s1', 'Inv Term', NULL, '2026-01-01', 1000, 'active')`).run();
     db.prepare(`INSERT INTO student_obligations (id, student_id, branch_id, kind, semester_id)
       VALUES ('inv_ob1', 'inv_s1', ?, 'tuition', 'inv_sem1')`).run(BRANCH);
+    // W10-3/Wave-11: a duplicate ACTIVE (obligation, payment) pair is now
+    // refused by the partial unique index uq_allocations_active_payment_obligation,
+    // so this probe over-allocates the payment the still-representable way —
+    // one allocation against EACH of two obligations, totalling 120 of 100.
+    db.prepare(`INSERT INTO student_semesters (id, student_id, semester_name, class_id, enroll_date, fee_amount, status)
+      VALUES ('inv_sem2', 'inv_s1', 'Inv Term Two', NULL, '2026-01-01', 1000, 'active')`).run();
+    db.prepare(`INSERT INTO student_obligations (id, student_id, branch_id, kind, semester_id)
+      VALUES ('inv_ob2', 'inv_s1', ?, 'tuition', 'inv_sem2')`).run(BRANCH);
     db.prepare(`INSERT INTO obligation_allocations (id, obligation_id, amount, source_kind, payment_id, status, date)
       VALUES ('inv_a1', 'inv_ob1', 60, 'payment', 'inv_p1', 'active', '2026-01-01'),
-             ('inv_a2', 'inv_ob1', 60, 'payment', 'inv_p1', 'active', '2026-01-01')`).run();
+             ('inv_a2', 'inv_ob2', 60, 'payment', 'inv_p1', 'active', '2026-01-01')`).run();
     const hit = runFinancialInvariantChecks(db).find((f) => f.invariant === 'I1');
     expect(hit).toBeDefined();
     expect(hit!.rows).toBeGreaterThan(0);

@@ -1074,7 +1074,7 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
     try { parsedAmount = assertMoney(amount, 'Amount'); }
     catch { throw new HttpError(400, 'Amount must be greater than 0.'); }
   }
-  const { key: idempotencyKey, candidates: idempotencyCandidates, clientSupplied: clientSuppliedKey } = resolveIdempotency(req, {
+  const { key: baseIdempotencyKey, candidates: idempotencyCandidates, clientSupplied: clientSuppliedKey } = resolveIdempotency(req, {
     route: 'student-payment',
     studentId: student.id,
     category,
@@ -1084,6 +1084,34 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
     method: resolvedMethod,
     actorUserId: user.userId,
   });
+  // A DERIVED key may collide with a payment whose settlement was later fully
+  // refunded. That old payment no longer represents this intent's effects —
+  // its allocations were reversed and (for tuition) the debt re-opened — so
+  // replaying its receipt would hand the desk a "success" while swallowing
+  // the new money: no payment, no allocation, no cash movement. The intent
+  // "settle this installment/fee" is repeatable once its previous fulfillment
+  // was reversed, so the key advances to the next generation instead. True
+  // retries of a still-settling payment keep the same key and replay as
+  // before; concurrent re-payments derive the same generation key and the
+  // unique index arbitrates them exactly like any other race.
+  const holderFullyRefunded = (key: string): boolean => {
+    const holder = stmtGetPaymentByIdempotency.get(key, student.id) as { id: string } | undefined;
+    if (!holder) return false;
+    const refunded = db.prepare(
+      `SELECT COALESCE(SUM(-r.amount), 0) v FROM payments r
+        WHERE r.refunds_payment_id = ? AND r.status = 'completed' AND r.category = 'refund'`,
+    ).get(holder.id) as { v: number };
+    const original = db.prepare('SELECT amount FROM payments WHERE id = ?').get(holder.id) as { amount: number };
+    return Number(refunded.v) >= Number(original.amount);
+  };
+  let idempotencyKey = baseIdempotencyKey;
+  if (!clientSuppliedKey) {
+    let generation = 1;
+    while (holderFullyRefunded(idempotencyKey)) {
+      generation += 1;
+      idempotencyKey = `${baseIdempotencyKey}.r${generation}`;
+    }
+  }
   // An EXPLICIT client key always replays immediately — the caller has stated
   // that this is one intent.
   //
@@ -1107,7 +1135,11 @@ studentsRouter.post('/:id/payments', requirePermission('Payment.Create'), ah(asy
   if (replayEligible) {
     for (const candidate of idempotencyCandidates) {
       const existing = stmtGetPaymentByIdempotency.get(candidate, student.id) as any;
-      if (existing) return res.status(200).json({ receiptNumber: existing.receipt_number, amountCharged: existing.amount, idempotentReplay: true });
+      // A fully refunded payment is not a live answer to this intent — skip
+      // it and let the insert below record the re-payment.
+      if (existing && !holderFullyRefunded(candidate)) {
+        return res.status(200).json({ receiptNumber: existing.receipt_number, amountCharged: existing.amount, idempotentReplay: true });
+      }
     }
   }
   const payId = id('pay');

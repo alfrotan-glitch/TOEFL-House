@@ -51,6 +51,19 @@
  *      flows. Derived WITHOUT the classification SQL on purpose: it sees any
  *      store/row divergence even along paths whose categories every report
  *      agrees about, so a shared misclassification cannot hide it.
+ *  I17 SETTLEMENT ARITHMETIC (state layer) — no obligation is over-settled
+ *      (Σ active allocations ≤ the term's billed amount) and no payment
+ *      over-allocates itself (Σ active allocations of a payment ≤ its
+ *      amount). These hold regardless of application code; a drift means
+ *      money was credited against debts that do not exist.
+ *  I18 INSTALMENT↔SETTLEMENT COHERENCE — every 'paid' instalment names a
+ *      completed payment that still actively settles its obligation. The
+ *      instalment flag is a cache of allocation truth (W10-1); this checks
+ *      the cache against the truth at runtime.
+ *  I19 PAYROLL↔LEDGER COHERENCE — every posted salary-ledger row (teacher
+ *      and employee) has its financial_transactions row with the same
+ *      amount. Payroll facts are memos over ledger events; a missing or
+ *      mismatched row means payroll history and the books disagree.
  */
 import type BetterSqlite3 from 'better-sqlite3';
 import {
@@ -65,6 +78,10 @@ export interface InvariantFinding {
   detail: string;
   rows: number;
   sample?: string;
+  /** Identifies the offending entity when the check names one (W11: probes
+   *  and the audit tool need to know WHICH obligation/payment/installment,
+   *  not merely that some row somewhere violates the invariant). */
+  entityId?: string;
 }
 
 interface Check {
@@ -234,6 +251,55 @@ const CHECKS: Check[] = [
           WHERE ABS(held - explained) > 0.001`,
     sample: (r) => `stores hold ${r.held} AFN but raw external flows explain ${r.explained} (delta ${r.delta}) — money appeared or vanished outside the ledger`,
   },
+  {
+    invariant: 'I17',
+    detail: 'No obligation is settled beyond its billed amount and no payment allocates beyond itself',
+    sql: `
+      SELECT 'over_settled_obligation' AS kind, o.id AS k, SUM(a.amount) AS total, COALESCE(ss.net_fee_amount, ss.fee_amount) AS bound
+        FROM obligation_allocations a
+        JOIN student_obligations o ON o.id = a.obligation_id
+        LEFT JOIN student_semesters ss ON ss.id = o.semester_id
+       WHERE a.status = 'active'
+       GROUP BY o.id
+      HAVING SUM(a.amount) > COALESCE(COALESCE(ss.net_fee_amount, ss.fee_amount), 0) + 0.001
+      UNION ALL
+      SELECT 'over_allocated_payment', p.id, SUM(a.amount), p.amount
+        FROM obligation_allocations a
+        JOIN payments p ON p.id = a.payment_id
+       WHERE a.status = 'active' AND a.payment_id IS NOT NULL
+       GROUP BY p.id
+      HAVING SUM(a.amount) > p.amount + 0.001`,
+    sample: (r) => `${r.kind} ${r.k}: settlements total ${r.total} against a bound of ${r.bound}`,
+  },
+  {
+    invariant: 'I18',
+    detail: "A 'paid' instalment names a completed payment that still actively settles",
+    sql: `
+      SELECT i.id AS k, i.paid_payment_id AS payment
+        FROM student_installments i
+       WHERE i.status = 'paid'
+         AND (
+           i.paid_payment_id IS NULL
+           OR NOT EXISTS (SELECT 1 FROM payments p WHERE p.id = i.paid_payment_id AND p.status = 'completed')
+           OR NOT EXISTS (SELECT 1 FROM obligation_allocations a WHERE a.payment_id = i.paid_payment_id AND a.status = 'active')
+         )`,
+    sample: (r) => `instalment ${r.k} is 'paid' by payment ${r.payment} which no longer actively settles anything`,
+  },
+  {
+    invariant: 'I19',
+    detail: 'Every posted salary-ledger row has its ledger transaction with the same amount',
+    sql: `
+      SELECT 'teacher' AS kind, l.id AS k, l.paid_amount AS amount
+        FROM teacher_salary_ledger l
+       WHERE l.status = 'posted'
+         AND NOT EXISTS (SELECT 1 FROM financial_transactions t WHERE t.id = l.transaction_id AND t.amount = l.paid_amount)
+      UNION ALL
+      SELECT 'employee', l.id, l.paid_amount
+        FROM employee_salary_ledger l
+       WHERE l.status = 'posted'
+         AND NOT EXISTS (SELECT 1 FROM financial_transactions t WHERE t.id = l.transaction_id AND t.amount = l.paid_amount)`,
+    sample: (r) => `${r.kind} payroll row ${r.k} (${r.amount} AFN) has no matching ledger transaction`,
+  },
 ];
 
 /**
@@ -326,6 +392,7 @@ export function runFinancialInvariantChecks(db: BetterSqlite3.Database): Invaria
             detail: identity.detail,
             rows: 1,
             sample: `scope ${row.k}: ${mismatches.join('; ')}`,
+            entityId: typeof row.k === 'string' ? (row.k as string) : undefined,
           });
         }
       }
@@ -347,6 +414,7 @@ export function runFinancialInvariantChecks(db: BetterSqlite3.Database): Invaria
           detail: check.detail,
           rows: rows.length,
           sample: check.sample ? check.sample(rows[0]) : JSON.stringify(rows[0]).slice(0, 200),
+          entityId: typeof rows[0].k === 'string' ? (rows[0].k as string) : undefined,
         });
       }
     } catch (error) {
