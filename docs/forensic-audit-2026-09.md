@@ -431,3 +431,48 @@ No new material weakness found. Wave-4's "no funding API" design note was
 factually wrong and is corrected above. Remaining surfaces still to
 re-attack: treasury deposit/withdraw concurrency, month-end races,
 migration/historical data.
+
+### Wave-5 addendum — concurrency races, boundary fuzz, migration/history
+
+All on the running rebuilt server (fresh seeded world, live HTTP):
+
+- **Treasury charge race (6/6)**: org treasury drained to exactly 0, funded
+  with exactly 500, then 8 concurrent `POST /budget-lines/:id/charge` of
+  500. Exactly **1 won (201), 7 refused (409)**; treasury ended at 0 and
+  was never negative; invariants + reconciliation clean. The guarded
+  `decrementMainBalanceIfSufficient` holds under genuine concurrency.
+- **Month-end race (8 concurrent `decision:'return'` on the same funded
+  envelope)**: exactly 1 moved money, 7 got 400 (envelope already zero) —
+  `stmtDebit` is guarded (`current_amount >= ? AND allocated_amount >= ?`,
+  budget-movements.ts:94–96), so two concurrent returns cannot both
+  succeed.
+- **Structural note (why the races are safe at all)**: better-sqlite3 is
+  fully synchronous and every money handler keeps the
+  read-validate-write stretch inside one synchronous block (no `await`
+  between balance read and `db.transaction`), so the event loop cannot
+  interleave them; the guarded UPDATEs are the second line of defense for
+  a hypothetical multi-process deployment.
+- **Money-in boundary fuzz (28/28 refused)**: `0, -5, '0x10', true,
+  [500], null, undefined, 1e15, 0.001, '50a', {}, 'NaN', Infinity, -0.5`
+  against both `/treasury/deposit` and `/budget-lines/:id/charge` — no
+  acceptance, org treasury delta 0, invariants pass, reconciliation
+  healthy. (`assertMoney` at the boundary.)
+- **Migration / historical data reviewed** (`src/db/connection.ts`):
+  (1) `registrations` financial lookalike columns (`amount_paid`,
+  `receipt_number`, `discount_applied`) dropped — they were always
+  0/NULL/0 fiction; payments/invoices remain the authorities. (2) legacy
+  invoices get `charge_kind = NULL` via `ALTER TABLE`;
+  `normalizeInvoiceChargeKind` (invoicing.ts:252) falls back to
+  `purpose` and finally `'other'`, and over-collect caps are
+  kind-independent (paid vs total), so historical invoices pay and cap
+  correctly. (3) `reconcileCanonicalFeeAuthority` skips non-canonical
+  legacy fee amounts so a live charge blocks rather than guessing a fee.
+  No migration path can write history that violates I1–I15.
+
+**Wave 5 closed.** Every planned surface (reconciliation semantics,
+refund/reversal fidelity, ledger identities, concurrency, month-end
+races, migration/history, boundary fuzz) has been attacked and either
+held or produced a fix in an earlier wave. No open material weakness.
+The rebuilt live world remains running (`server/` on :4000, owner
+account `owner` — password rotated during the live drills, see
+`docs/forensic-audit-2026-09.md` wave-5 section).
