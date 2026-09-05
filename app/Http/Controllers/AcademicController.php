@@ -15,6 +15,7 @@ use App\Modules\Academic\Commands\MaintainSkill;
 use App\Modules\Academic\Commands\ManageAcademicAppeal;
 use App\Modules\Academic\Commands\ManageAcademicOffering;
 use App\Modules\Academic\Commands\ManageAssessmentResult;
+use App\Modules\Academic\Commands\ManageClassWaitlist;
 use App\Modules\Academic\Commands\RecordAttendance;
 use App\Modules\Academic\Models\AcademicAppeal;
 use App\Modules\Academic\Models\AcademicPeriod;
@@ -25,6 +26,7 @@ use App\Modules\Academic\Models\BranchAvailability;
 use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\ClassSection;
 use App\Modules\Academic\Models\ClassSession;
+use App\Modules\Academic\Models\ClassWaitlistEntry;
 use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Academic\Models\GraduationDecision;
 use App\Modules\Academic\Models\Offering;
@@ -81,6 +83,7 @@ final class AcademicController extends Controller
             'levels' => ProgramVersionLevel::query()->orderBy('program_version_id')->orderBy('ordinal')->limit(300)->get(),
             'availabilities' => BranchAvailability::query()->orderBy('id')->limit(200)->get(),
             'offerings' => Offering::query()->orderBy('id')->limit(200)->get(),
+            'waitlistEntries' => ClassWaitlistEntry::query()->whereIn('lifecycle_state', ['waiting', 'offered'])->orderBy('class_id')->orderBy('position')->limit(300)->get(),
             'gradeableClasses' => app(GradesheetQuery::class)->accessibleClasses($this->actor()),
         ]);
     }
@@ -654,6 +657,70 @@ final class AcademicController extends Controller
         );
 
         return redirect()->route('academic.index')->with('success', 'Correction approved; the original result is closed as corrected.');
+    }
+
+    public function joinWaitlist(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'student_id' => ['required', 'string'],
+            'class_id' => ['required', 'string'],
+            'offering_id' => ['nullable', 'string'],
+        ]);
+
+        $offeringId = ($input['offering_id'] ?? '') !== '' ? (string) $input['offering_id'] : null;
+        $joined = app(ManageClassWaitlist::class)->join(
+            $this->actor(),
+            $input['student_id'],
+            $input['class_id'],
+            $offeringId,
+            $this->idempotencyKey('academic.waitlist.join'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Student queued on the class waitlist at position '.$joined['position'].'.');
+    }
+
+    public function offerWaitlistEntry(Request $request, string $entryId): RedirectResponse
+    {
+        app(ManageClassWaitlist::class)->offer(
+            $this->actor(),
+            ClassWaitlistEntry::query()->findOrFail($entryId),
+            $this->idempotencyKey('academic.waitlist.offer'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Freed seat offered to the waitlisted student.');
+    }
+
+    public function promoteWaitlistEntry(Request $request, string $entryId): RedirectResponse
+    {
+        app(ManageClassWaitlist::class)->promote(
+            $this->actor(),
+            ClassWaitlistEntry::query()->findOrFail($entryId),
+            $this->idempotencyKey('academic.waitlist.promote'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Offer accepted; a normal seat request was created for approval.');
+    }
+
+    public function withdrawWaitlistEntry(Request $request, string $entryId): RedirectResponse
+    {
+        app(ManageClassWaitlist::class)->withdraw(
+            $this->actor(),
+            ClassWaitlistEntry::query()->findOrFail($entryId),
+            $this->idempotencyKey('academic.waitlist.withdraw'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Waitlist entry withdrawn.');
+    }
+
+    public function expireWaitlistEntry(Request $request, string $entryId): RedirectResponse
+    {
+        app(ManageClassWaitlist::class)->expire(
+            $this->actor(),
+            ClassWaitlistEntry::query()->findOrFail($entryId),
+            $this->idempotencyKey('academic.waitlist.expire'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Waitlist entry expired.');
     }
 
     public function proposeGraduation(Request $request): RedirectResponse

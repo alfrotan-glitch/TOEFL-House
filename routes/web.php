@@ -134,6 +134,11 @@ Route::middleware('employee')->group(function (): void {
         Route::post('results/{resultId}/release', [AcademicController::class, 'releaseResult'])->name('result.release');
         Route::post('results/{resultId}/corrections', [AcademicController::class, 'proposeCorrection'])->name('result.correction');
         Route::post('corrections/{correctionId}/approve', [AcademicController::class, 'approveCorrection'])->name('correction.approve');
+        Route::post('waitlist', [AcademicController::class, 'joinWaitlist'])->name('waitlist.join');
+        Route::post('waitlist/{entryId}/offer', [AcademicController::class, 'offerWaitlistEntry'])->name('waitlist.offer');
+        Route::post('waitlist/{entryId}/promote', [AcademicController::class, 'promoteWaitlistEntry'])->name('waitlist.promote');
+        Route::post('waitlist/{entryId}/withdraw', [AcademicController::class, 'withdrawWaitlistEntry'])->name('waitlist.withdraw');
+        Route::post('waitlist/{entryId}/expire', [AcademicController::class, 'expireWaitlistEntry'])->name('waitlist.expire');
         Route::get('gradesheets/{classId}', [AcademicController::class, 'gradesheet'])->name('gradesheet');
         Route::post('graduations', [AcademicController::class, 'proposeGraduation'])->name('graduation.propose');
         Route::post('graduations/{decisionId}/review', [AcademicController::class, 'reviewGraduation'])->name('graduation.review');

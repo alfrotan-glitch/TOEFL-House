@@ -338,6 +338,89 @@
 </div>
 
 <div class="card">
+    <h2>Class waitlist</h2>
+    <p class="sub">Students queue only when a class or offering is full, in position order. A freed seat is offered to an entry; accepting creates a normal seat request for approval, declining withdraws or expires the entry.</p>
+    <form method="POST" action="{{ route('academic.waitlist.join') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <select name="student_id" required>
+                <option value="">Select a student…</option>
+                @foreach ($students as $student)
+                    <option value="{{ $student->id }}">{{ $student->student_code }}</option>
+                @endforeach
+            </select>
+            <select name="class_id" required>
+                <option value="">Select an active class…</option>
+                @foreach ($classes as $class)
+                    @if ($class->lifecycle_state === 'active')
+                        <option value="{{ $class->id }}">{{ \Illuminate\Support\Str::limit($class->id, 14) }} (cap {{ $class->capacity }})</option>
+                    @endif
+                @endforeach
+            </select>
+            <select name="offering_id">
+                <option value="">No offering…</option>
+                @foreach ($offerings as $offering)
+                    @if ($offering->lifecycle_state === 'open')
+                        <option value="{{ $offering->id }}">{{ \Illuminate\Support\Str::limit($offering->id, 14) }} (cap {{ $offering->capacity }})</option>
+                    @endif
+                @endforeach
+            </select>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Join waitlist</button></div>
+    </form>
+    @if ($waitlistEntries->isEmpty())
+        <p class="empty">No students waiting for a seat.</p>
+    @else
+        <table class="grid" style="margin-top:8px">
+            <tr><th>Student</th><th>Class</th><th>Offering</th><th>Pos</th><th>State</th><th>Actions</th></tr>
+            @foreach ($waitlistEntries as $entry)
+                <tr>
+                    <td>{{ $students->firstWhere('id', $entry->student_id)?->student_code ?? \Illuminate\Support\Str::limit($entry->student_id, 14) }}</td>
+                    <td>{{ \Illuminate\Support\Str::limit($entry->class_id, 14) }}</td>
+                    <td>{{ $entry->offering_id !== null ? \Illuminate\Support\Str::limit($entry->offering_id, 14) : '—' }}</td>
+                    <td>{{ $entry->position }}</td>
+                    <td><span class="pill {{ $entry->lifecycle_state === 'offered' ? 'ok' : '' }}">{{ $entry->lifecycle_state }}</span></td>
+                    <td>
+                        @if ($entry->lifecycle_state === 'waiting')
+                            <form method="POST" action="{{ route('academic.waitlist.offer', $entry->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Offer</button>
+                            </form>
+                            <form method="POST" action="{{ route('academic.waitlist.promote', $entry->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Accept</button>
+                            </form>
+                            <form method="POST" action="{{ route('academic.waitlist.withdraw', $entry->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small secondary">Withdraw</button>
+                            </form>
+                        @endif
+                        @if (in_array($entry->lifecycle_state, ['waiting', 'offered'], true))
+                            <form method="POST" action="{{ route('academic.waitlist.expire', $entry->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small secondary">Expire</button>
+                            </form>
+                        @endif
+                        @if ($entry->lifecycle_state === 'offered')
+                            <form method="POST" action="{{ route('academic.waitlist.promote', $entry->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Accept</button>
+                            </form>
+                        @endif
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
+
+<div class="card">
     <h2>Progression decisions</h2>
     <p class="sub">Propose, review and approve are signed by three distinct employees in their own sessions.</p>
     <form method="POST" action="{{ route('academic.progression.propose') }}">
