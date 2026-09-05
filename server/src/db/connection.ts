@@ -361,6 +361,73 @@ function ensureFinancialTransactionsCreditDebtTypes(schema: string): void {
   }
 }
 
+/**
+ * W21 (D-193..D-195): converge the write-off/withholding shape onto pre-W21
+ * databases — the `financial_transactions` type CHECK gains the P&L-neutral
+ * 'withholding_remittance'; `student_obligations` gains 'discharged';
+ * `obligation_allocations` gains source_kind 'write_off'; `invoices` gains
+ * 'written_off'. Same copy-swap convergence as every prior wave: canonical
+ * DDL from schema.sql, dependent triggers dropped and recreated by the
+ * schema re-run, foreign keys asserted clean afterwards.
+ */
+function ensureWriteOffWithholdingShape(schema: string): void {
+  const tables: Array<{ table: string; evidence: string; columns: string[] }> = [
+    {
+      table: 'financial_transactions',
+      evidence: "'withholding_remittance'",
+      columns: ['id', 'type', 'category', 'finance_category_id', 'amount', 'date', 'description', 'reference_id', 'payment_id', 'donation_id', 'operator_name', 'operator_role', 'branch_id'],
+    },
+    {
+      table: 'student_obligations',
+      evidence: "'discharged'",
+      columns: ['id', 'student_id', 'branch_id', 'kind', 'semester_id', 'status', 'created_at'],
+    },
+    {
+      table: 'obligation_allocations',
+      evidence: "'write_off'",
+      columns: ['id', 'obligation_id', 'amount', 'source_kind', 'payment_id', 'scholarship_award_id', 'scholarship_funding_id', 'sponsorship_agreement_id', 'sponsorship_receipt_id', 'status', 'reversed_at', 'reversed_by', 'reversal_reason', 'operator_name', 'date', 'created_at'],
+    },
+    {
+      table: 'invoices',
+      evidence: "'written_off'",
+      columns: ['id', 'student_id', 'total_amount', 'discount_amount', 'net_amount', 'status', 'issue_date', 'due_date', 'branch_id', 'created_at', 'notes', 'invoice_number', 'issued_by', 'student_name', 'student_code', 'charge_kind', 'purpose', 'obligation_id'],
+    },
+  ];
+  for (const { table, evidence, columns } of tables) {
+    const current = db.prepare(
+      `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`,
+    ).get(table) as { sql: string } | undefined;
+    if (!current?.sql || current.sql.includes(evidence)) continue;
+
+    const start = schema.indexOf(`CREATE TABLE IF NOT EXISTS ${table} (`);
+    const end = schema.indexOf('\n);', start);
+    const ddl = start >= 0 && end > start ? schema.slice(start, end + 3) : null;
+    if (!ddl) throw new Error(`Cannot converge ${table}: canonical DDL not found in schema.sql.`);
+
+    log.warn(`Rebuilding ${table} with the W21 write-off/withholding shape (copy-swap, foreign keys suspended).`);
+    const present = new Set((db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((c) => c.name));
+    const cols = columns.filter((name) => present.has(name)).join(', ');
+    const swap = db.transaction(() => {
+      db.exec(ddl.replace(`CREATE TABLE IF NOT EXISTS ${table} (`, `CREATE TABLE ${table}_w21_swap (`));
+      db.exec(`INSERT INTO ${table}_w21_swap (${cols}) SELECT ${cols} FROM ${table}`);
+      const dependents = (db.prepare(
+        `SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name != ? AND sql LIKE ?`,
+      ).all(table, `%${table}%`) as Array<{ name: string }>).map((r) => r.name);
+      for (const name of dependents) db.exec(`DROP TRIGGER ${JSON.stringify(name)}`);
+      db.exec(`DROP TABLE ${table}`);
+      db.exec(`ALTER TABLE ${table}_w21_swap RENAME TO ${table}`);
+    });
+    swap();
+    db.exec(schema);
+    const violations = (db.prepare('PRAGMA foreign_key_check').all() as Array<unknown>).filter(
+      (v) => JSON.stringify(v).includes(table),
+    );
+    if (violations.length > 0) {
+      throw new Error(`${table} rebuild introduced foreign-key violations: ${JSON.stringify(violations).slice(0, 400)}`);
+    }
+  }
+}
+
 function ensureFinancialTransactionsReclaimType(schema: string): void {
   const current = db.prepare(
     `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'financial_transactions'`,
@@ -492,6 +559,7 @@ export function initSchema(): void {
     ensureEmployeeLedgerDueColumn();
     ensureRegistrationsFinancialColumnsDropped();
     ensureFinancialTransactionsCreditDebtTypes(schema);
+    ensureWriteOffWithholdingShape(schema);
     ensureSingleCurrencyChecks(schema);
     ensureDonationClawbackAttributionColumns();
     ensureFixedAssetsCustodyLossShape(schema);

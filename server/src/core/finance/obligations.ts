@@ -49,7 +49,7 @@ export interface TuitionObligation {
   semesterId: string;
   semesterName: string;
   netAmount: number;
-  status: 'open' | 'cancelled';
+  status: 'open' | 'cancelled' | 'discharged';
 }
 
 /**
@@ -125,6 +125,8 @@ export interface ObligationPosition {
    * a donor's sponsorship as scholarship money.
    */
   settledAid: number;
+  /** Tuition discharged by memo write-off — settled nothing, retired the remainder (W21). */
+  discharged: number;
   settled: number;
   outstanding: number;
 }
@@ -146,7 +148,7 @@ export function getObligationPosition(db: Database, obligationId: string): Oblig
         WHERE o.id = ?`,
     )
     .get(obligationId) as
-    | { id: string; student_id: string; branch_id: string; semester_id: string; status: 'open' | 'cancelled'; semester_name: string; net_amount: number }
+    | { id: string; student_id: string; branch_id: string; semester_id: string; status: 'open' | 'cancelled' | 'discharged'; semester_name: string; net_amount: number }
     | undefined;
   if (!row) throw new HttpError(404, 'Obligation not found.');
 
@@ -163,14 +165,30 @@ export function getObligationPosition(db: Database, obligationId: string): Oblig
   // unique over time and this is the figure the payment desk trusts.
   const settledCash = getObligationCashSettled(db, obligationId);
   const settledAid = getObligationAidSettled(db, obligationId);
+  // W21: memo discharges (write_off allocations) settle nothing that was
+  // paid — they declare the remainder uncollectible — but they retire the
+  // obligation's outstanding figure exactly like a settlement.
+  const discharged = getObligationDischarged(db, obligationId);
   const settled = settledCash + settledAid;
   return {
     obligation,
     settledCash,
     settledAid,
+    discharged,
     settled,
-    outstanding: Math.max(0, obligation.netAmount - settled),
+    outstanding: Math.max(0, obligation.netAmount - settled - discharged),
   };
+}
+
+/** Tuition discharged from this obligation by memo write-off (W21). */
+export function getObligationDischarged(db: Database, obligationId: string): number {
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(amount), 0) AS total FROM obligation_allocations
+        WHERE obligation_id = ? AND source_kind = 'write_off' AND status = 'active'`,
+    )
+    .get(obligationId) as { total: number };
+  return Number(row.total) || 0;
 }
 
 /** Aid money currently applied to one obligation, whatever the instrument. */

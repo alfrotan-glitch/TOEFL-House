@@ -30,6 +30,8 @@ export interface StudentNonTuitionBalanceRow {
 export interface StudentBalance {
   /** Total tuition charged, post-discount, for the semesters in scope. */
   tuitionDue: number;
+  /** Tuition discharged by memo write-off (W21): never paid, never owed again. */
+  tuitionDischarged: number;
   /** Net tuition paid: fee + installment + refund (refunds are negative). */
   tuitionPaid: number;
   /** Tuition outstanding only. Preserved as the tuition authority. */
@@ -61,14 +63,21 @@ export interface StudentNonTuitionSummary {
   nonTuitionBreakdown: StudentNonTuitionBalanceRow[];
 }
 
-/** Derive the TUITION position from already-computed totals. Pure — unit safe. */
-function deriveTuitionPosition(tuitionDue: number, tuitionPaid: number) {
+/**
+ * Derive the TUITION position from already-computed totals. Pure — unit safe.
+ * A memo discharge (W21) retires the remainder without being a payment, so it
+ * is counted SEPARATELY from tuitionPaid — reporting a discharged term as
+ * "paid" would be a misstatement.
+ */
+function deriveTuitionPosition(tuitionDue: number, tuitionPaid: number, tuitionDischarged = 0) {
   const due = Number(tuitionDue) || 0;
   const paid = Number(tuitionPaid) || 0;
+  const discharged = Number(tuitionDischarged) || 0;
   return {
     tuitionDue: due,
     tuitionPaid: paid,
-    outstanding: Math.max(0, due - paid),
+    tuitionDischarged: discharged,
+    outstanding: Math.max(0, due - paid - discharged),
     creditBalance: Math.max(0, paid - due),
     paidPercentage: due > 0 ? Math.min(100, Math.max(0, Math.round((paid / due) * 100))) : 100,
   };
@@ -89,8 +98,9 @@ function composeStudentBalance(
   tuitionDue: number,
   tuitionPaid: number,
   nonTuition: StudentNonTuitionSummary,
+  tuitionDischarged = 0,
 ): StudentBalance {
-  const tuition = deriveTuitionPosition(tuitionDue, tuitionPaid);
+  const tuition = deriveTuitionPosition(tuitionDue, tuitionPaid, tuitionDischarged);
   const nonTuitionDue = Number(nonTuition.nonTuitionDue) || 0;
   const nonTuitionPaid = Number(nonTuition.nonTuitionPaid) || 0;
   const nonTuitionOutstanding = Number(nonTuition.nonTuitionOutstanding) || 0;
@@ -138,6 +148,14 @@ export const TUITION_PAYMENT_SQL = `(
  * SQL fragment: the instruments that settle tuition without moving cash.
  */
 export const AID_SOURCE_KINDS_SQL = `('scholarship','sponsorship')`;
+
+/**
+ * W21: active MEMO discharges — write_off allocations. Kept deliberately OUT
+ * of AID_SOURCE_KINDS_SQL: aid is donor money with capacity semantics; a
+ * discharge settles nothing and touches no fund. Every tuition-outstanding
+ * derivation subtracts this term alongside payments and aid.
+ */
+export const WRITE_OFF_ALLOCATION_SQL = `a.source_kind = 'write_off' AND a.status = 'active'`;
 
 /**
  * An ACTIVE cash allocation: the source-kind/status pairing every "settled in
@@ -315,7 +333,15 @@ export function getStudentBalance(db: Database, studentId: string, scope: Balanc
     .get(studentId) as { total: number };
 
   const tuitionPaid = Number(paid.total) + studentScholarshipSettled(db, studentId);
-  return composeStudentBalance(due.total, tuitionPaid, getStudentNonTuitionSummary(db, studentId));
+  const discharged = db
+    .prepare(
+      `SELECT COALESCE(SUM(a.amount), 0) AS total
+         FROM obligation_allocations a
+         JOIN student_obligations o ON o.id = a.obligation_id
+        WHERE o.student_id = ? AND ${WRITE_OFF_ALLOCATION_SQL}`,
+    )
+    .get(studentId) as { total: number };
+  return composeStudentBalance(due.total, tuitionPaid, getStudentNonTuitionSummary(db, studentId), Number(discharged.total) || 0);
 }
 
 /** One roster row: a student id plus their authoritative balance. */
@@ -359,16 +385,23 @@ export function getStudentBalancesPage(
            WHERE o.kind = 'tuition' AND a.source_kind IN ${AID_SOURCE_KINDS_SQL} AND a.status = 'active'
            GROUP BY o.student_id
          ) aid ON aid.student_id = st.id
+         LEFT JOIN (
+           SELECT o.student_id AS student_id, SUM(a.amount) AS total
+           FROM obligation_allocations a
+           JOIN student_obligations o ON o.id = a.obligation_id
+           WHERE ${WRITE_OFF_ALLOCATION_SQL}
+           GROUP BY o.student_id
+         ) written_off ON written_off.student_id = st.id
          ${branchFilter}
          ORDER BY st.registration_date DESC
          LIMIT ? OFFSET ?`,
     )
-    .all(...params, limit, offset) as Array<{ student_id: string; tuition_due: number; tuition_paid: number }>;
+    .all(...params, limit, offset) as Array<{ student_id: string; tuition_due: number; tuition_paid: number; written_off_total: number | null }>;
 
   const nonTuitionByStudent = getStudentNonTuitionSummariesByIds(db, rows.map((row) => row.student_id));
   return rows.map((row) => ({
     studentId: row.student_id,
-    ...composeStudentBalance(row.tuition_due, row.tuition_paid, nonTuitionByStudent.get(row.student_id) ?? emptyNonTuitionSummary()),
+    ...composeStudentBalance(row.tuition_due, row.tuition_paid, nonTuitionByStudent.get(row.student_id) ?? emptyNonTuitionSummary(), Number(row.written_off_total) || 0),
   }));
 }
 
@@ -403,12 +436,19 @@ export function getStudentBalancesByIds(
          WHERE o.kind = 'tuition' AND a.source_kind IN ${AID_SOURCE_KINDS_SQL} AND a.status = 'active'
          GROUP BY o.student_id
        ) aid ON aid.student_id = st.id
+       LEFT JOIN (
+         SELECT o.student_id AS student_id, SUM(a.amount) AS total
+         FROM obligation_allocations a
+         JOIN student_obligations o ON o.id = a.obligation_id
+         WHERE ${WRITE_OFF_ALLOCATION_SQL}
+         GROUP BY o.student_id
+       ) written_off ON written_off.student_id = st.id
       WHERE st.id IN (SELECT value FROM json_each(?))`,
-  ).all(JSON.stringify(ids)) as Array<{ student_id: string; tuition_due: number; tuition_paid: number }>;
+  ).all(JSON.stringify(ids)) as Array<{ student_id: string; tuition_due: number; tuition_paid: number; written_off_total: number | null }>;
   const nonTuitionByStudent = getStudentNonTuitionSummariesByIds(db, ids);
   return rows.map((row) => ({
     studentId: row.student_id,
-    ...composeStudentBalance(row.tuition_due, row.tuition_paid, nonTuitionByStudent.get(row.student_id) ?? emptyNonTuitionSummary()),
+    ...composeStudentBalance(row.tuition_due, row.tuition_paid, nonTuitionByStudent.get(row.student_id) ?? emptyNonTuitionSummary(), Number(row.written_off_total) || 0),
   }));
 }
 
@@ -420,7 +460,7 @@ export function getBranchOutstanding(db: Database, branchId: string | null): num
   const params = branchId ? [branchId] : [];
   const row = db
     .prepare(
-      `SELECT COALESCE(SUM(MAX(0, sem.total - COALESCE(paid.total, 0) - COALESCE(aid.total, 0))), 0) AS outstanding
+      `SELECT COALESCE(SUM(MAX(0, sem.total - COALESCE(paid.total, 0) - COALESCE(aid.total, 0) - COALESCE(written_off.total, 0))), 0) AS outstanding
        FROM (
          SELECT student_id, SUM(${TUITION_NET_SQL}) AS total
          FROM student_semesters GROUP BY student_id
@@ -438,7 +478,14 @@ export function getBranchOutstanding(db: Database, branchId: string | null): num
          JOIN student_obligations o ON o.id = a.obligation_id
          WHERE a.status = 'active' AND a.source_kind IN ${AID_SOURCE_KINDS_SQL}
          GROUP BY o.student_id
-       ) aid ON aid.student_id = sem.student_id`,
+       ) aid ON aid.student_id = sem.student_id
+       LEFT JOIN (
+         SELECT o.student_id, SUM(a.amount) AS total
+         FROM obligation_allocations a
+         JOIN student_obligations o ON o.id = a.obligation_id
+         WHERE ${WRITE_OFF_ALLOCATION_SQL}
+         GROUP BY o.student_id
+       ) written_off ON written_off.student_id = sem.student_id`,
     )
     .get(...params) as { outstanding: number };
   return Number(row.outstanding) || 0;

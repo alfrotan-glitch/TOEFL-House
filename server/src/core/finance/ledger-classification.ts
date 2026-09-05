@@ -95,11 +95,18 @@ export function expenseClassificationSql(
 ): string {
   const type = col('type', alias);
   const fk = col('finance_category_id', alias);
+  // The correlation must be explicit: a bare \`id\` inside the EXISTS would
+  // bind to advance_write_offs' own id column and silently no-op.
+  const rowId = alias ? col('id', alias) : 'financial_transactions.id';
   const lookup = `(SELECT fc.classification FROM finance_categories fc WHERE fc.id = ${fk})`;
+  // W21: a declared-uncollectible salary advance is a STAFF COST. The cash
+  // left at advance time; the write-off changes the row's meaning, not the
+  // ledger — so the overlay is pinned to the row id, never a new fact.
+  const writtenOffAdvance = `EXISTS (SELECT 1 FROM advance_write_offs w WHERE w.transaction_id = ${rowId})`;
   return classification === 'operating_expense'
     // NULL → operating expense: an uncategorised cost must never disappear.
-    ? `(${type} = 'expense' AND COALESCE(${lookup}, 'operating_expense') = 'operating_expense')`
-    : `(${type} = 'expense' AND ${lookup} = '${classification}')`;
+    ? `(${type} = 'expense' AND (COALESCE(${lookup}, 'operating_expense') = 'operating_expense' OR ${writtenOffAdvance}))`
+    : `(${type} = 'expense' AND ${lookup} = '${classification}' AND NOT ${writtenOffAdvance})`;
 }
 
 /**

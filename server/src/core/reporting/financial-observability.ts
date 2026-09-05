@@ -26,6 +26,7 @@
 import type Database from 'better-sqlite3';
 import {
   TUITION_NET_SQL,
+  WRITE_OFF_ALLOCATION_SQL,
   TUITION_PAYMENT_SQL,
   AID_SOURCE_KINDS_SQL,
   getBranchOutstanding,
@@ -114,6 +115,7 @@ const TUITION_NET_QUALIFIED_SQL = TUITION_NET_SQL
 interface TuitionAgingFact {
   sem_id: string; student_id: string; student_name: string; branch_id: string;
   semester_name: string; enroll_date: string; billed: number; paid: number; aid: number;
+  discharged: number;
 }
 
 interface InvoiceAgingFact {
@@ -146,7 +148,13 @@ export function getReceivablesAging(db: Database.Database, opts: { branchId: str
                JOIN student_obligations o ON o.id = a.obligation_id
               WHERE o.semester_id = sem.id
                 AND a.source_kind IN ${AID_SOURCE_KINDS_SQL} AND a.status = 'active'
-            ), 0) AS aid
+            ), 0) AS aid,
+            COALESCE((
+              SELECT SUM(a.amount) FROM obligation_allocations a
+               JOIN student_obligations o ON o.id = a.obligation_id
+              WHERE o.semester_id = sem.id
+                AND ${WRITE_OFF_ALLOCATION_SQL}
+            ), 0) AS discharged
        FROM student_semesters sem
        JOIN students st ON st.id = sem.student_id
       WHERE 1=1 ${branchScope}`,
@@ -169,7 +177,7 @@ export function getReceivablesAging(db: Database.Database, opts: { branchId: str
 
   const rows: AgingRow[] = [];
   for (const f of tuitionFacts) {
-    const outstanding = Math.max(0, Number(f.billed) - Number(f.paid) - Number(f.aid));
+    const outstanding = Math.max(0, Number(f.billed) - Number(f.paid) - Number(f.aid) - Number(f.discharged));
     if (outstanding <= 0) continue;
     const ageMonths = Math.max(0, jalaliMonthsElapsed(f.enroll_date.slice(0, 10), opts.asOf));
     rows.push({
@@ -253,6 +261,8 @@ export interface DailyCashActivityStatement {
     restrictedReclaims: number;
     /** W20: supplier refunds received this day (P&L-neutral cash in). */
     supplierRefunds: number;
+    /** W21: withheld wages remitted this day (P&L-neutral cash out). */
+    withholdingRemitted: number;
   };
   closing: { main: number; saving: number };
   /** Equity injections stamped with this branch on this date. They credit the
@@ -294,13 +304,19 @@ export function getDailyCashActivity(db: Database.Database, opts: { branchId: st
     `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type='supplier_refund' AND branch_id = ?`,
     date,
   );
+  // W21: withheld wages remitted to the authority are P&L-neutral cash OUT of
+  // branch main (the wage was expensed at gross when it was paid).
+  const withholdingRemittedSince = sumSince(
+    `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type='withholding_remittance' AND branch_id = ?`,
+    date,
+  );
 
   const acct = db.prepare(`SELECT main_balance, saving_balance FROM finance_accounts WHERE scope_type='branch' AND scope_id=?`)
     .get(branchId) as { main_balance: number; saving_balance: number } | undefined;
   const mainNow = Number(acct?.main_balance ?? 0);
   const savingNow = Number(acct?.saving_balance ?? 0);
 
-  const openingMain = mainNow - (cashIncomeSince - savingSince - drawingsSince + reclaimsSince + supplierRefundsSince);
+  const openingMain = mainNow - (cashIncomeSince - savingSince - drawingsSince + reclaimsSince + supplierRefundsSince + withholdingRemittedSince);
   const openingSaving = savingNow - savingSince;
 
   const incomeRows = db.prepare(
@@ -320,6 +336,10 @@ export function getDailyCashActivity(db: Database.Database, opts: { branchId: st
   const supplierRefunds = Number((db.prepare(
     `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type='supplier_refund' AND branch_id = ? AND date = ?`,
   ).get(branchId, date) as { v: number }).v) || 0;
+  // W21: withholding remittances are P&L-neutral cash OUT of branch main.
+  const withholdingRemitted = Number((db.prepare(
+    `SELECT COALESCE(SUM(amount),0) AS v FROM financial_transactions WHERE type='withholding_remittance' AND branch_id = ? AND date = ?`,
+  ).get(branchId, date) as { v: number }).v) || 0;
 
   const incomeTotal = incomeRows.reduce((s, r) => s + Number(r.total), 0);
   const refundsTotal = incomeRows.reduce((s, r) => s + Math.min(0, Number(r.total)), 0);
@@ -328,7 +348,7 @@ export function getDailyCashActivity(db: Database.Database, opts: { branchId: st
       WHERE type='income' AND category='${CAPITAL_INJECTION_CATEGORY}' AND branch_id = ? AND date = ?`,
   ).all(branchId, date) as Array<{ transactionId: string; amount: number; description: string }>;
 
-  const dayMainDelta = incomeTotal - savingMovement - drawings + reclaims + supplierRefunds;
+  const dayMainDelta = incomeTotal - savingMovement - drawings + reclaims + supplierRefunds + withholdingRemitted;
   return {
     basis: 'digital-expected',
     note: 'Digital expected cash per the ledger (I16/I17 identities). This is NOT a physical count; physical-cash control awaits the Wave-14 D-CC owner decisions.',
@@ -336,7 +356,7 @@ export function getDailyCashActivity(db: Database.Database, opts: { branchId: st
     opening: { main: openingMain, saving: openingSaving },
     movements: {
       incomeByCategory: incomeRows.map((r) => ({ category: r.category, amount: Number(r.total) })),
-      incomeTotal, refundsTotal, savingMovement, ownerDrawings: drawings, restrictedReclaims: reclaims, supplierRefunds,
+      incomeTotal, refundsTotal, savingMovement, ownerDrawings: drawings, restrictedReclaims: reclaims, supplierRefunds, withholdingRemitted,
     },
     closing: { main: openingMain + dayMainDelta, saving: openingSaving + savingMovement },
     memoEquityInjectionsThisBranch: equityMemo,

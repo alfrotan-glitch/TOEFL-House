@@ -2477,7 +2477,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   total_amount   INTEGER NOT NULL DEFAULT 0, 
   discount_amount INTEGER NOT NULL DEFAULT 0, 
   net_amount     INTEGER NOT NULL DEFAULT 0, 
-  status         TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','issued','paid','partial','overdue','cancelled')), 
+  status         TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','issued','paid','partial','overdue','cancelled','written_off')), 
   issue_date     TEXT NOT NULL, 
   due_date       TEXT, 
   branch_id      TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT, 
@@ -2757,7 +2757,7 @@ CREATE TABLE IF NOT EXISTS financial_transactions (
   -- 'loan_proceeds' (+, treasury), 'loan_repayment' (−, treasury) and
   -- 'supplier_refund' (+, branch main) — liabilities and refund recoveries,
   -- never income and never expense (W16 owner directive; D-190).
-  type          TEXT NOT NULL CHECK (type IN ('income','expense','saving_transfer','budget_charge','restricted_reclaim','loan_proceeds','loan_repayment','supplier_refund')), 
+  type          TEXT NOT NULL CHECK (type IN ('income','expense','saving_transfer','budget_charge','restricted_reclaim','loan_proceeds','loan_repayment','supplier_refund','withholding_remittance')), 
   -- Human-readable label. For INCOME rows this is the billing vocabulary
   -- (fee/book/exam/placement/donation/…), which the expense taxonomy does not
   -- model. It is NEVER the accounting authority — see `finance_category_id`.
@@ -3354,7 +3354,9 @@ CREATE TABLE IF NOT EXISTS student_obligations (
   branch_id   TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
   kind        TEXT NOT NULL CHECK (kind IN ('tuition')),
   semester_id TEXT REFERENCES student_semesters(id) ON DELETE RESTRICT,
-  status      TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','cancelled')),
+  -- W21: 'discharged' is the memo write-off state (owner-directed semantic:
+  -- unpaid tuition was never revenue, so discharging it moves no money).
+  status      TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','cancelled','discharged')),
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   CHECK (kind <> 'tuition' OR semester_id IS NOT NULL)
 );
@@ -3401,7 +3403,7 @@ CREATE TABLE IF NOT EXISTS obligation_allocations (
   id                         TEXT PRIMARY KEY,
   obligation_id              TEXT NOT NULL REFERENCES student_obligations(id) ON DELETE RESTRICT,
   amount                     INTEGER NOT NULL CHECK (amount > 0),
-  source_kind                TEXT NOT NULL CHECK (source_kind IN ('payment','scholarship','sponsorship')),
+  source_kind                TEXT NOT NULL CHECK (source_kind IN ('payment','scholarship','sponsorship','write_off')),
   payment_id                 TEXT REFERENCES payments(id) ON DELETE RESTRICT,
   scholarship_award_id       TEXT REFERENCES scholarship_awards(id) ON DELETE RESTRICT,
   scholarship_funding_id     TEXT REFERENCES scholarship_fundings(id) ON DELETE RESTRICT,
@@ -3418,6 +3420,9 @@ CREATE TABLE IF NOT EXISTS obligation_allocations (
        (source_kind = 'payment' AND payment_id IS NOT NULL AND scholarship_award_id IS NULL AND scholarship_funding_id IS NULL AND sponsorship_agreement_id IS NULL AND sponsorship_receipt_id IS NULL)
     OR (source_kind = 'scholarship' AND scholarship_award_id IS NOT NULL AND scholarship_funding_id IS NOT NULL AND payment_id IS NULL AND sponsorship_agreement_id IS NULL AND sponsorship_receipt_id IS NULL)
     OR (source_kind = 'sponsorship' AND sponsorship_agreement_id IS NOT NULL AND sponsorship_receipt_id IS NOT NULL AND payment_id IS NULL AND scholarship_award_id IS NULL AND scholarship_funding_id IS NULL)
+    -- W21: a memo discharge names NO source instrument — it settles nothing
+    -- that was paid and moves no cash; the tuition was never revenue.
+    OR (source_kind = 'write_off' AND payment_id IS NULL AND scholarship_award_id IS NULL AND scholarship_funding_id IS NULL AND sponsorship_agreement_id IS NULL AND sponsorship_receipt_id IS NULL)
   ),
   CHECK ((status = 'active' AND reversed_at IS NULL) OR (status = 'reversed' AND reversed_at IS NOT NULL))
 );
@@ -4190,4 +4195,173 @@ WHEN (
   > (SELECT principal FROM loans WHERE id = NEW.loan_id)
 )
 BEGIN SELECT RAISE(ABORT, 'Loan repayments cannot exceed the principal'); END;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- WAVE 21 · Write-offs and payroll withholding (owner-directed semantics,
+-- 2026-09-05; numeric policy — rates, thresholds, materiality — stays with the
+-- Owner and is deliberately NOT represented)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── Tuition write-off: a MEMO discharge ─────────────────────────────────────
+-- Unpaid tuition was never revenue, so discharging it writes no ledger row and
+-- moves no money. The discharge is one append-only event plus one
+-- source_kind='write_off' allocation (the memo settlement every balance
+-- derivation already knows how to read), and the obligation leaves 'open'
+-- forever: no later payment, scholarship or sponsorship may settle a
+-- discharged term (re-instatement is an owner act, not a route).
+CREATE TABLE IF NOT EXISTS tuition_write_offs (
+  id             TEXT PRIMARY KEY,
+  obligation_id  TEXT NOT NULL UNIQUE REFERENCES student_obligations(id) ON DELETE RESTRICT,
+  allocation_id  TEXT NOT NULL UNIQUE REFERENCES obligation_allocations(id) ON DELETE RESTRICT,
+  amount         INTEGER NOT NULL CHECK (amount > 0),
+  reason         TEXT NOT NULL CHECK (length(trim(reason)) >= 8),
+  declared_by    TEXT NOT NULL,
+  created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_tuition_write_offs_obligation ON tuition_write_offs(obligation_id);
+
+-- The event is append-only history.
+CREATE TRIGGER IF NOT EXISTS trg_tuition_write_offs_immutable
+BEFORE UPDATE ON tuition_write_offs
+WHEN NEW.id IS NOT OLD.id
+BEGIN SELECT RAISE(ABORT, 'tuition write-off events are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS trg_tuition_write_offs_nodelete
+BEFORE DELETE ON tuition_write_offs
+BEGIN SELECT RAISE(ABORT, 'tuition write-off events are append-only'); END;
+
+-- An obligation may only ENTER 'discharged' together with its write-off event,
+-- and may never leave it.
+CREATE TRIGGER IF NOT EXISTS trg_obligations_discharge_guard
+BEFORE UPDATE OF status ON student_obligations
+WHEN (NEW.status = 'discharged' AND OLD.status <> 'discharged'
+      AND NOT EXISTS (SELECT 1 FROM tuition_write_offs w WHERE w.obligation_id = NEW.id))
+  OR (OLD.status = 'discharged' AND NEW.status IS NOT OLD.status)
+BEGIN SELECT RAISE(ABORT, 'obligation discharge is bound to its write-off event and is final'); END;
+
+-- No settlement of any kind lands on a discharged (or cancelled) obligation.
+CREATE TRIGGER IF NOT EXISTS trg_allocations_obligation_live
+BEFORE INSERT ON obligation_allocations
+WHEN NEW.source_kind <> 'write_off'
+     AND (SELECT status FROM student_obligations WHERE id = NEW.obligation_id) IS NOT 'open'
+BEGIN SELECT RAISE(ABORT, 'only an open obligation accepts settlements'); END;
+
+-- ── Employee-advance write-off: a classification truth, not a cash event ────
+-- The cash left at advance time (envelope-backed 'salary_advance' expense
+-- row). Writing the advance off does not move money again — it declares the
+-- receivable uncollectible, so the SAME ledger row now counts as a staff cost
+-- in the operating-expense lens instead of a non-expense cash movement. The
+-- immutable fact is untouched; only its classification changes.
+CREATE TABLE IF NOT EXISTS advance_write_offs (
+  id             TEXT PRIMARY KEY,
+  transaction_id TEXT NOT NULL UNIQUE REFERENCES financial_transactions(id) ON DELETE RESTRICT,
+  branch_id      TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  employee_id    TEXT NOT NULL,
+  amount         INTEGER NOT NULL CHECK (amount > 0),
+  reason         TEXT NOT NULL CHECK (length(trim(reason)) >= 8),
+  declared_by    TEXT NOT NULL,
+  created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_advance_write_offs_branch ON advance_write_offs(branch_id);
+
+CREATE TRIGGER IF NOT EXISTS trg_advance_write_offs_immutable
+BEFORE UPDATE ON advance_write_offs
+WHEN NEW.id IS NOT OLD.id
+BEGIN SELECT RAISE(ABORT, 'advance write-off events are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS trg_advance_write_offs_nodelete
+BEFORE DELETE ON advance_write_offs
+BEGIN SELECT RAISE(ABORT, 'advance write-off events are append-only'); END;
+
+-- A write-off names exactly one whole salary_advance fact of the same branch.
+CREATE TRIGGER IF NOT EXISTS trg_advance_write_offs_bound
+BEFORE INSERT ON advance_write_offs
+WHEN NOT EXISTS (
+  SELECT 1 FROM financial_transactions ft
+   WHERE ft.id = NEW.transaction_id AND ft.type = 'expense'
+     AND ft.category = 'salary_advance' AND ft.amount = NEW.amount AND ft.branch_id = NEW.branch_id
+)
+BEGIN SELECT RAISE(ABORT, 'an advance write-off must name exactly one salary_advance expense fact'); END;
+
+-- ── Payroll withholding: a liability from deduction until remittance ───────
+-- Wage payments book GROSS (the envelope and the expense row say gross). A
+-- withholding declaration states what was withheld at source from that wage:
+-- the cash stays in the branch drawer, owed to the authority — a liability,
+-- never institute income and never a second expense. Remittance hands the
+-- cash over through the P&L-neutral 'withholding_remittance' type (signed
+-- negative at branch main), exactly like the clawback-repayment pattern.
+CREATE TABLE IF NOT EXISTS payroll_withholdings (
+  id                     TEXT PRIMARY KEY,
+  branch_id              TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  employee_kind          TEXT NOT NULL CHECK (employee_kind IN ('teacher','employee')),
+  employee_id            TEXT NOT NULL,
+  employee_name          TEXT NOT NULL,
+  period_key             TEXT NOT NULL CHECK (period_key GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'),
+  transaction_id         TEXT NOT NULL UNIQUE REFERENCES financial_transactions(id) ON DELETE RESTRICT,
+  amount                 INTEGER NOT NULL CHECK (amount > 0),
+  status                 TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','remitted')),
+  note                   TEXT,
+  declared_by            TEXT NOT NULL,
+  remitted_transaction_id TEXT UNIQUE REFERENCES financial_transactions(id) ON DELETE RESTRICT,
+  remitted_at            TEXT,
+  remitted_by            TEXT,
+  created_at             TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK ((status = 'open' AND remitted_transaction_id IS NULL AND remitted_at IS NULL AND remitted_by IS NULL)
+      OR (status = 'remitted' AND remitted_transaction_id IS NOT NULL AND remitted_at IS NOT NULL AND remitted_by IS NOT NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_payroll_withholdings_branch ON payroll_withholdings(branch_id, status);
+
+-- Declarations are append-only facts; only the guarded open→remitted flip
+-- (performed by the remittance service in the same transaction as its cash
+-- evidence) may touch a row.
+CREATE TRIGGER IF NOT EXISTS trg_payroll_withholdings_immutable
+BEFORE UPDATE ON payroll_withholdings
+WHEN NEW.id IS NOT OLD.id
+  OR NEW.branch_id IS NOT OLD.branch_id
+  OR NEW.employee_kind IS NOT OLD.employee_kind
+  OR NEW.employee_id IS NOT OLD.employee_id
+  OR NEW.period_key IS NOT OLD.period_key
+  OR NEW.transaction_id IS NOT OLD.transaction_id
+  OR NEW.amount IS NOT OLD.amount
+  OR NEW.note IS NOT OLD.note
+  OR NEW.declared_by IS NOT OLD.declared_by
+  OR OLD.status IS NOT 'open'
+  OR NEW.status IS NOT 'remitted'
+  OR NEW.remitted_transaction_id IS NULL
+  OR NEW.remitted_at IS NULL
+  OR NEW.remitted_by IS NULL
+BEGIN SELECT RAISE(ABORT, 'payroll withholding declarations are immutable; only the guarded remittance flip is allowed'); END;
+CREATE TRIGGER IF NOT EXISTS trg_payroll_withholdings_nodelete
+BEFORE DELETE ON payroll_withholdings
+BEGIN SELECT RAISE(ABORT, 'payroll withholding declarations are append-only'); END;
+
+-- A declaration is bounded by the GROSS wage fact it names (never an advance).
+CREATE TRIGGER IF NOT EXISTS trg_payroll_withholdings_bound
+BEFORE INSERT ON payroll_withholdings
+WHEN NOT EXISTS (
+  SELECT 1 FROM financial_transactions ft
+   WHERE ft.id = NEW.transaction_id AND ft.type = 'expense'
+     AND ft.category = 'salary' AND ft.branch_id = NEW.branch_id AND ft.amount >= NEW.amount
+)
+  OR NOT (
+       EXISTS (SELECT 1 FROM teacher_salary_ledger l
+                WHERE l.transaction_id = NEW.transaction_id AND l.period_key = NEW.period_key
+                  AND l.teacher_id = NEW.employee_id AND l.status = 'posted'
+                  AND (NEW.employee_kind = 'teacher'))
+       OR EXISTS (SELECT 1 FROM employee_salary_ledger l
+                WHERE l.transaction_id = NEW.transaction_id AND l.period_key = NEW.period_key
+                  AND l.employee_id = NEW.employee_id AND l.status = 'posted'
+                  AND (NEW.employee_kind = 'employee'))
+  )
+BEGIN SELECT RAISE(ABORT, 'a withholding declaration must name a posted gross salary fact of the same employee, branch, period and amount bound'); END;
+
+-- A remittance's cash evidence is one signed-negative withholding_remittance
+-- row of exactly the declared amount.
+CREATE TRIGGER IF NOT EXISTS trg_payroll_withholdings_remit_evidence
+BEFORE UPDATE OF status ON payroll_withholdings
+WHEN NEW.status = 'remitted'
+     AND NOT EXISTS (
+  SELECT 1 FROM financial_transactions ft
+   WHERE ft.id = NEW.remitted_transaction_id AND ft.type = 'withholding_remittance'
+     AND ft.amount = -NEW.amount AND ft.branch_id = NEW.branch_id
+)
+BEGIN SELECT RAISE(ABORT, 'a withholding remittance requires its signed-negative cash evidence'); END;
 

@@ -79,6 +79,14 @@
  *      cash-in (W20).
  *  I24 LOAN EVIDENCE — every loan's proceeds row equals its principal; every
  *      repayment links an equal signed-negative loan_repayment row (W20).
+ *  I25 TUITION DISCHARGE EVIDENCE — every discharged obligation carries exactly
+ *      one write-off event and one matching write_off allocation, no ledger
+ *      row, and no open invoice still demands the debt (W21).
+ *  I26 WITHHOLDING EVIDENCE — every remitted declaration links an equal
+ *      signed-negative withholding_remittance row and no declaration exceeds
+ *      its gross wage fact (W21).
+ *  I27 ADVANCE WRITE-OFF EVIDENCE — every advance write-off pins exactly one
+ *      whole salary_advance fact and writes no money (W21).
  */
 import type BetterSqlite3 from 'better-sqlite3';
 import {
@@ -151,7 +159,7 @@ const CHECKS: Check[] = [
           FROM invoices i
           JOIN student_obligations o ON o.id = i.obligation_id
           JOIN student_semesters s ON s.id = o.semester_id
-          WHERE i.purpose = 'tuition' AND i.status NOT IN ('cancelled')
+          WHERE i.purpose = 'tuition' AND i.status NOT IN ('cancelled','written_off')
             AND ABS(i.net_amount - COALESCE(s.net_fee_amount, s.fee_amount, 0)) > 0.001`,
     sample: (r) => `invoice ${r.k} net ${r.net} vs term ${r.sem} net ${r.term_net}`,
   },
@@ -162,7 +170,7 @@ const CHECKS: Check[] = [
                COALESCE((SELECT SUM(p.amount) FROM payments p
                           WHERE p.invoice_id = i.id AND p.status = 'completed'), 0) AS paid
           FROM invoices i
-          WHERE i.status NOT IN ('cancelled', 'draft')
+          WHERE i.status NOT IN ('cancelled', 'draft', 'written_off')
             AND (
               (i.status = 'paid' AND ABS(i.net_amount - paid) > 0.001)
               OR (i.status IN ('issued', 'partial', 'overdue') AND paid >= i.net_amount - 0.001 AND paid > 0)
@@ -171,12 +179,22 @@ const CHECKS: Check[] = [
   },
   {
     invariant: 'I6',
-    detail: 'No active allocation settles a cancelled obligation',
+    detail: 'No active allocation settles a cancelled or discharged obligation (W21: a discharge is final)',
     sql: `SELECT a.id AS k, a.obligation_id AS ob
           FROM obligation_allocations a
           JOIN student_obligations o ON o.id = a.obligation_id
-          WHERE a.status = 'active' AND o.status = 'cancelled'`,
-    sample: (r) => `allocation ${r.k} still settles cancelled obligation ${r.ob}`,
+          WHERE a.status = 'active' AND o.status = 'cancelled'
+          UNION ALL
+          -- W21: settlements that predate the discharge are legitimate
+          -- history (the term really was partly paid); only money that
+          -- landed AFTER the final discharge is corruption.
+          SELECT a.id, a.obligation_id
+          FROM obligation_allocations a
+          JOIN student_obligations o ON o.id = a.obligation_id
+          WHERE a.status = 'active' AND o.status = 'discharged'
+            AND a.source_kind <> 'write_off'
+            AND a.created_at > (SELECT w.created_at FROM tuition_write_offs w WHERE w.obligation_id = o.id)`,
+    sample: (r) => `allocation ${r.k} still settles a closed obligation ${r.ob}`,
   },
   {
     invariant: 'I7',
@@ -272,7 +290,10 @@ const CHECKS: Check[] = [
               -- W20: the credit/debt evidence types move stores P&L-neutrally
               -- (loan proceeds/repayment at the treasury; supplier refunds at
               -- branch main) — the explained side must move with them.
-              + COALESCE((SELECT SUM(amount) FROM financial_transactions WHERE type IN ('loan_proceeds','loan_repayment','supplier_refund')), 0) AS explained,
+              + COALESCE((SELECT SUM(amount) FROM financial_transactions WHERE type IN ('loan_proceeds','loan_repayment','supplier_refund')), 0)
+              -- W21: withheld wages handed to the authority (the wage was
+              -- expensed at gross; the remittance moves only the store).
+              + COALESCE((SELECT SUM(amount) FROM financial_transactions WHERE type = 'withholding_remittance'), 0) AS explained,
               COALESCE((SELECT SUM(main_balance + saving_balance) FROM finance_accounts), 0)
               + COALESCE((SELECT SUM(current_amount) FROM budget_lines), 0) AS held
           )
@@ -423,6 +444,72 @@ const CHECKS: Check[] = [
                               WHERE ft.id = lr.transaction_id AND ft.type = 'loan_repayment' AND ft.amount = -lr.amount)`,
     sample: (r) => `${r.kind} ${r.k}: expected ${r.expected}, ledger says ${r.actual} — loan cash and declarations disagree`,
   },
+  {
+    invariant: 'I25',
+    detail: 'Tuition discharges agree with their memo evidence and move no money (W21)',
+    sql: `SELECT 'discharged_without_event' AS kind, o.id AS k, 0 AS expected, 0 AS actual
+            FROM student_obligations o
+           WHERE o.status = 'discharged'
+             AND NOT EXISTS (SELECT 1 FROM tuition_write_offs w WHERE w.obligation_id = o.id)
+          UNION ALL
+          SELECT 'event_without_discharge', w.id, 1,
+                 (SELECT CASE WHEN o.status = 'discharged' THEN 1 ELSE 0 END FROM student_obligations o WHERE o.id = w.obligation_id)
+            FROM tuition_write_offs w
+           WHERE NOT EXISTS (SELECT 1 FROM student_obligations o WHERE o.id = w.obligation_id AND o.status = 'discharged')
+          UNION ALL
+          SELECT 'allocation_mismatch', w.id, w.amount,
+                 (SELECT COALESCE(a.amount, 0) FROM obligation_allocations a WHERE a.id = w.allocation_id)
+            FROM tuition_write_offs w
+           WHERE NOT EXISTS (SELECT 1 FROM obligation_allocations a
+                              WHERE a.id = w.allocation_id AND a.source_kind = 'write_off'
+                                AND a.status = 'active' AND a.amount = w.amount AND a.obligation_id = w.obligation_id)
+          UNION ALL
+          SELECT 'discharge_wrote_cash', w.id, 0, 1
+            FROM tuition_write_offs w
+           WHERE EXISTS (SELECT 1 FROM financial_transactions ft WHERE ft.reference_id = w.id)
+          UNION ALL
+          SELECT 'open_invoice_on_discharged', i.id, 0, 1
+            FROM invoices i
+            JOIN student_obligations o ON o.id = i.obligation_id
+           WHERE o.status = 'discharged' AND i.status IN ('issued','partial','overdue')`,
+    sample: (r) => `${r.kind} ${r.k}: expected ${r.expected}, found ${r.actual} — a memo discharge must be one event, one matching allocation, zero cash`,
+  },
+  {
+    invariant: 'I26',
+    detail: 'Withholding remittances agree with their declarations (W21)',
+    sql: `SELECT 'remitted_without_cash' AS kind, w.id AS k, w.amount AS expected, 0 AS actual
+            FROM payroll_withholdings w
+           WHERE w.status = 'remitted'
+             AND NOT EXISTS (SELECT 1 FROM financial_transactions ft
+                              WHERE ft.id = w.remitted_transaction_id AND ft.type = 'withholding_remittance'
+                                AND ft.amount = -w.amount AND ft.branch_id = w.branch_id)
+          UNION ALL
+          SELECT 'cash_without_declaration', ft.id, 0, ft.amount
+            FROM financial_transactions ft
+           WHERE ft.type = 'withholding_remittance'
+             AND NOT EXISTS (SELECT 1 FROM payroll_withholdings w WHERE w.remitted_transaction_id = ft.id)
+          UNION ALL
+          SELECT 'declaration_exceeds_gross', w.id, w.amount,
+                 (SELECT COALESCE(ft.amount, 0) FROM financial_transactions ft WHERE ft.id = w.transaction_id)
+            FROM payroll_withholdings w
+           WHERE (SELECT COALESCE(ft.amount, 0) FROM financial_transactions ft WHERE ft.id = w.transaction_id) < w.amount`,
+    sample: (r) => `${r.kind} ${r.k}: expected ${r.expected}, ledger says ${r.actual} — withheld cash and declarations disagree`,
+  },
+  {
+    invariant: 'I27',
+    detail: 'Advance write-offs name exactly one whole salary-advance fact (W21)',
+    sql: `SELECT 'orphan_or_partial' AS kind, w.id AS k, w.amount AS expected,
+                 (SELECT COALESCE(ft.amount, 0) FROM financial_transactions ft WHERE ft.id = w.transaction_id) AS actual
+            FROM advance_write_offs w
+           WHERE NOT EXISTS (SELECT 1 FROM financial_transactions ft
+                              WHERE ft.id = w.transaction_id AND ft.type = 'expense'
+                                AND ft.category = 'salary_advance' AND ft.amount = w.amount AND ft.branch_id = w.branch_id)
+          UNION ALL
+          SELECT 'event_wrote_cash', w.id, 0, 1
+            FROM advance_write_offs w
+           WHERE EXISTS (SELECT 1 FROM financial_transactions ft WHERE ft.reference_id = w.id)`,
+    sample: (r) => `${r.kind} ${r.k}: expected ${r.expected}, found ${r.actual} — an advance write-off pins one existing fact and moves no money`,
+  },
 ];
 
 /**
@@ -452,7 +539,9 @@ const IDENTITY_CHECKS: IdentityCheck[] = [
             + COALESCE((SELECT SUM(amount) FROM financial_transactions ft
                          WHERE ft.branch_id = fa.scope_id AND ft.type = 'restricted_reclaim'), 0)
             + COALESCE((SELECT SUM(amount) FROM financial_transactions ft
-                         WHERE ft.branch_id = fa.scope_id AND ft.type = 'supplier_refund'), 0) AS ledger_main,
+                         WHERE ft.branch_id = fa.scope_id AND ft.type = 'supplier_refund'), 0)
+            + COALESCE((SELECT SUM(amount) FROM financial_transactions ft
+                         WHERE ft.branch_id = fa.scope_id AND ft.type = 'withholding_remittance'), 0) AS ledger_main,
             fa.saving_balance AS account_saving,
             COALESCE((SELECT SUM(amount) FROM financial_transactions ft
                        WHERE ft.branch_id = fa.scope_id AND ft.type = 'saving_transfer'), 0) AS ledger_saving

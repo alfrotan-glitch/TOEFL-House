@@ -198,7 +198,7 @@ export function repriceTuitionInvoicesAfterAid(
 ): { cancelled: string[]; reissuedInvoiceId: string | null; reissuedAmount: number } {
   if (!db.inTransaction) throw new Error('repriceTuitionInvoicesAfterAid() called outside a transaction.');
   const invoices = db
-    .prepare(`SELECT id, invoice_number, branch_id FROM invoices WHERE obligation_id = ? AND purpose = 'tuition' AND status NOT IN ('cancelled')`)
+    .prepare(`SELECT id, invoice_number, branch_id FROM invoices WHERE obligation_id = ? AND purpose = 'tuition' AND status NOT IN ('cancelled','written_off')`)
     .all(params.obligationId) as Array<{ id: string; invoice_number: string | null; branch_id: string }>;
   if (invoices.length === 0) return { cancelled: [], reissuedInvoiceId: null, reissuedAmount: 0 };
 
@@ -208,7 +208,7 @@ export function repriceTuitionInvoicesAfterAid(
 
   const position = getObligationPosition(db, params.obligationId);
   for (const inv of collectable) {
-    db.prepare(`UPDATE invoices SET status = 'cancelled' WHERE id = ? AND status NOT IN ('cancelled')`).run(inv.id);
+    db.prepare(`UPDATE invoices SET status = 'cancelled' WHERE id = ? AND status NOT IN ('cancelled','written_off')`).run(inv.id);
   }
   // The residual the term still owes, after this aid settlement and after any
   // invoices that keep their payments.

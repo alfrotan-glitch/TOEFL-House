@@ -25,6 +25,7 @@ import { getNumberSetting, setSetting } from '../utils/settings.js';
 import { decrementMainBalanceIfSufficient, incrementMainBalance, getFinanceAccount } from '../utils/financeAccounts.js';
 import { computeReconciliation } from '../utils/reconciliation.js';
 import { getPayablePosition, recordSupplierInvoicePayment, recordSupplierReturn, receiveSupplierRefund, getLoanPosition, recordLoan, recordLoanRepayment } from '../core/finance/credit-debt.js';
+import { dischargeTuitionObligation, listTuitionWriteOffs, writeOffEmployeeAdvance, listAdvanceWriteOffs, declarePayrollWithholding, remitPayrollWithholding, getWithholdingRegister } from '../core/finance/write-offs.js';
 import { BUDGET_MOVEMENT_CATEGORY, BUDGET_MOVEMENT_TYPE, postBudgetMovement } from '../core/finance/budget-movements.js';
 import { assertMoney } from '../utils/money.js';
 import { SYSTEM_DEFAULTS } from '../core/configuration/policy-catalog.js';
@@ -1867,6 +1868,144 @@ financeRouter.post(
     })();
     writeAudit(req, `Repaid loan ${req.params.id} (${amount} AFN principal)`, { newValue: JSON.stringify({ repaymentId, transactionId }) });
     res.json({ ok: true, repaymentId, transactionId, position });
+  }),
+);
+
+// ═════════════════════════════════════════════════════════════════════════════
+// WAVE 21 · Write-offs and payroll withholding (owner-directed semantics)
+// ═════════════════════════════════════════════════════════════════════════════
+// Tuition write-off is a MEMO discharge (unpaid tuition was never revenue):
+// no ledger row, no cash — the obligation is final, its open invoices are
+// marked written_off. An advance write-off reclassifies an existing
+// salary-advance fact as a staff cost without moving money. Withholding is a
+// LIABILITY from deduction until remittance (never income, never a second
+// expense; wage facts book gross). The NUMERIC layer — rates, thresholds,
+// materiality windows, who beyond these mapped authorities — is owner policy
+// (POLICY REQUIRED) and deliberately has no surface.
+
+financeRouter.post(
+  '/obligations/:id/write-off',
+  requirePermission('Discount.Approve'),
+  ah(async (req, res) => {
+    const user = getUserContext(req);
+    const obligation = db.prepare('SELECT branch_id, student_id FROM student_obligations WHERE id = ?').get(req.params.id) as
+      | { branch_id: string; student_id: string }
+      | undefined;
+    if (!obligation) throw new HttpError(404, 'Obligation not found.');
+    if (!canAccessBranchResource(req, obligation.branch_id)) throw new HttpError(403, 'Obligation belongs to another branch.');
+    const reason = optionalText(req.body?.reason, 'Discharge reason', TEXT_LIMITS.line);
+    if (!reason || reason.trim().length < 8) throw new HttpError(400, 'A discharge reason of at least 8 characters is required.');
+
+    let result: ReturnType<typeof dischargeTuitionObligation> | undefined;
+    db.transaction(() => {
+      result = dischargeTuitionObligation(db, { obligationId: req.params.id, reason: reason.trim(), declaredBy: user.fullName });
+    })();
+    writeAudit(req, `Discharged tuition obligation ${req.params.id} (${result?.amount} AFN memo)`, {
+      branchId: obligation.branch_id,
+      newValue: JSON.stringify({ writeOffId: result?.writeOffId, amount: result?.amount, writtenOffInvoices: result?.writtenOffInvoices }),
+    });
+    res.status(201).json({ ...result, note: 'Memo discharge: unpaid tuition was never revenue — no ledger row, no cash moved. Re-instatement is an owner act.' });
+  }),
+);
+
+financeRouter.get(
+  '/tuition-write-offs',
+  requirePermission('Budget.View', 'Ledger.View', 'Finance.Report'),
+  ah(async (req, res) => {
+    const { branchId } = resolveBranchScope(req);
+    const rows = listTuitionWriteOffs(db, branchId ?? null);
+    res.json({
+      totals: { discharged: rows.reduce((s, r) => s + Number(r.amount), 0), count: rows.length },
+      writeOffs: rows,
+      note: 'Each discharge is one memo event + one write_off allocation; no ledger row exists for any of them.',
+    });
+  }),
+);
+
+financeRouter.post(
+  '/payroll/advance-write-offs',
+  requirePermission('Payroll.Approve'),
+  ah(async (req, res) => {
+    const user = getUserContext(req);
+    const transactionId = optionalText(req.body?.transactionId, 'Transaction id', TEXT_LIMITS.short);
+    if (!transactionId) throw new HttpError(400, 'The salary-advance transaction id is required.');
+    const ft = db.prepare(`SELECT branch_id FROM financial_transactions WHERE id = ?`).get(transactionId) as { branch_id: string } | undefined;
+    if (!ft) throw new HttpError(404, 'Transaction not found.');
+    if (!canAccessBranchResource(req, ft.branch_id)) throw new HttpError(403, 'Advance belongs to another branch.');
+    const reason = optionalText(req.body?.reason, 'Write-off reason', TEXT_LIMITS.line);
+    if (!reason || reason.trim().length < 8) throw new HttpError(400, 'A write-off reason of at least 8 characters is required.');
+
+    let result: { writeOffId: string } | undefined;
+    db.transaction(() => {
+      result = writeOffEmployeeAdvance(db, { transactionId, reason: reason.trim(), declaredBy: user.fullName });
+    })();
+    writeAudit(req, `Wrote off salary advance ${transactionId}`, { branchId: ft.branch_id, newValue: JSON.stringify(result) });
+    res.status(201).json({ ...result, note: 'The advance fact is now counted as a staff cost; no money moved at write-off.' });
+  }),
+);
+
+financeRouter.get(
+  '/payroll/advance-write-offs',
+  requirePermission('Payroll.View', 'Ledger.View', 'Finance.Report'),
+  ah(async (req, res) => {
+    const { branchId } = resolveBranchScope(req);
+    const rows = listAdvanceWriteOffs(db, branchId ?? null);
+    res.json({
+      totals: { writtenOff: rows.reduce((s, r) => s + Number(r.amount), 0), count: rows.length },
+      writeOffs: rows,
+    });
+  }),
+);
+
+financeRouter.post(
+  '/payroll/withholdings',
+  requirePermission('Payroll.Edit'),
+  ah(async (req, res) => {
+    const user = getUserContext(req);
+    const transactionId = optionalText(req.body?.transactionId, 'Transaction id', TEXT_LIMITS.short);
+    if (!transactionId) throw new HttpError(400, 'The gross salary transaction id is required.');
+    const amount = Number(req.body?.amount);
+    if (!Number.isFinite(amount)) throw new HttpError(400, 'The withheld amount is required.');
+    const note = optionalText(req.body?.note, 'Withholding note', TEXT_LIMITS.line);
+    const ft = db.prepare(`SELECT branch_id FROM financial_transactions WHERE id = ?`).get(transactionId) as { branch_id: string } | undefined;
+    if (ft && !canAccessBranchResource(req, ft.branch_id)) throw new HttpError(403, 'Wage payment belongs to another branch.');
+
+    let result: { withholdingId: string } | undefined;
+    db.transaction(() => {
+      result = declarePayrollWithholding(db, { transactionId, amount, note, declaredBy: user.fullName });
+    })();
+    writeAudit(req, `Declared payroll withholding on wage ${transactionId} (${amount} AFN)`, {
+      branchId: ft?.branch_id,
+      newValue: JSON.stringify(result),
+    });
+    res.status(201).json({ ...result, note: 'Withheld wages are a liability until remitted — never income, never a second expense.' });
+  }),
+);
+
+financeRouter.get(
+  '/payroll/withholdings',
+  requirePermission('Payroll.View', 'Ledger.View', 'Finance.Report'),
+  ah(async (req, res) => {
+    const { branchId } = resolveBranchScope(req);
+    res.json(getWithholdingRegister(db, branchId ?? null));
+  }),
+);
+
+financeRouter.post(
+  '/payroll/withholdings/:id/remit',
+  requirePermission('Payroll.Edit'),
+  ah(async (req, res) => {
+    const user = getUserContext(req);
+    const row = db.prepare('SELECT branch_id FROM payroll_withholdings WHERE id = ?').get(req.params.id) as { branch_id: string } | undefined;
+    if (!row) throw new HttpError(404, 'Withholding declaration not found.');
+    if (!canAccessBranchResource(req, row.branch_id)) throw new HttpError(403, 'Withholding belongs to another branch.');
+
+    let transactionId = '';
+    db.transaction(() => {
+      transactionId = remitPayrollWithholding(db, { withholdingId: req.params.id, remittedBy: user.fullName }).transactionId;
+    })();
+    writeAudit(req, `Remitted payroll withholding ${req.params.id}`, { branchId: row.branch_id, newValue: JSON.stringify({ transactionId }) });
+    res.json({ ok: true, transactionId });
   }),
 );
 
