@@ -138,12 +138,7 @@ export const stmtLatestCompletedAttempt: Stmt = db.prepare(`
   WHERE visitor_id = ? AND status = 'completed'
   ORDER BY completed_at DESC, attempt_number DESC LIMIT 1
 `);
-export const stmtInsertPlacementFeePayment: Stmt = db.prepare(`
-  INSERT INTO payments
-    (id, student_id, amount, date, payment_method, status, category, notes,
-     receipt_number, branch_id, idempotency_key)
-  VALUES (?, NULL, ?, ?, 'cash', 'completed', 'placement', ?, ?, ?, ?)
-`);
+
 export const stmtUpdateVisitorPlacement: Stmt = db.prepare(`
   UPDATE visitors
   SET placement_score=?, placement_method=?, placement_status='completed',

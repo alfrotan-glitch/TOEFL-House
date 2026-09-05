@@ -25,7 +25,7 @@ import {
   assertInvoicePurpose, resolveInvoiceObligation, assertInvoiceHasLines, invoicePaymentAttribution,
   assertTuitionInvoiceFits,
 } from '../core/finance/invoicing.js';
-import { allocatePaymentToObligation } from '../core/finance/obligations.js';
+import { allocatePaymentToObligation, getObligationPosition } from '../core/finance/obligations.js';
 
 export const invoicesRouter = Router();
 invoicesRouter.use(authenticate, authorize('owner', 'finance_manager', 'general_manager', 'receptionist'));
@@ -437,8 +437,23 @@ invoicesRouter.post(
       );
 
       // Cash settles the term by NAMING it, through the one settlement
-      // authority every instrument uses.
+      // authority every instrument uses. The invoice's own remaining balance is
+      // NOT the ceiling for a tuition invoice: aid (scholarship, sponsorship)
+      // and the payment desk both settle the same obligation, so the term may
+      // have less outstanding than this document bills. Collecting the full
+      // invoice regardless would over-settle the term, hand the student a
+      // phantom credit and take cash for debt that was already covered — the
+      // desk refuses exactly this, and the two collection paths must agree.
       if (attribution.obligationId) {
+        const position = getObligationPosition(db, attribution.obligationId);
+        if (payAmount > position.outstanding) {
+          throw new HttpError(
+            400,
+            position.outstanding <= 0
+              ? 'This term is already fully settled — the invoice can no longer collect cash for it.'
+              : `Payment exceeds what this term still owes. Invoice remaining: ${remaining} AFN, term outstanding: ${position.outstanding} AFN.`,
+          );
+        }
         allocatePaymentToObligation(db, {
           paymentId: payId, obligationId: attribution.obligationId, amount: payAmount,
           operatorName: user.fullName, date,

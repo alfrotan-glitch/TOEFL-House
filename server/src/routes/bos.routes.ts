@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { LEAD_CONVERTED_SQL } from '../core/visitors/lead-lifecycle.js';
 import { db } from '../db/connection.js';
+import { OPERATING_INCOME_SQL, OPERATING_EXPENSE_SQL } from '../core/finance/ledger-classification.js';
 import { getBranchOutstanding, CASH_ALLOCATION_SQL } from '../utils/studentBalance.js';
 import { authenticate, requirePermission, requireGlobalOwner, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
@@ -78,9 +79,15 @@ function getTimeBounds(period?: string, timeframe?: string) {
 }
 
 // ── Performance Optimization: Prepared Statements ──────────────────────────
-const stmtTodayRevenue = db.prepare(`SELECT COALESCE(SUM(amount),0) as revenue FROM financial_transactions WHERE type='income' AND date=? AND branch_id=?`);
-const stmtMonthlyRevenue = db.prepare(`SELECT COALESCE(SUM(amount),0) as revenue FROM financial_transactions WHERE type='income' AND date BETWEEN ? AND ? AND branch_id=?`);
-const stmtMonthlyExpense = db.prepare(`SELECT COALESCE(SUM(amount),0) as expense FROM financial_transactions WHERE type='expense' AND date BETWEEN ? AND ? AND branch_id=?`);
+// Margin inputs are OPERATING figures, classified by the one ledger authority
+// (core/finance/ledger-classification). The raw `type='income'` sum counted an
+// owner's capital injection as branch revenue and the raw `type='expense'` sum
+// counted owner drawings and salary advances (receivables, not costs) as
+// expenses — every one of them distorting the profit margin that sets the
+// distribution tier and the withdrawable allowance.
+const stmtTodayRevenue = db.prepare(`SELECT COALESCE(SUM(amount),0) as revenue FROM financial_transactions WHERE ${OPERATING_INCOME_SQL} AND date=? AND branch_id=?`);
+const stmtMonthlyRevenue = db.prepare(`SELECT COALESCE(SUM(amount),0) as revenue FROM financial_transactions WHERE ${OPERATING_INCOME_SQL} AND date BETWEEN ? AND ? AND branch_id=?`);
+const stmtMonthlyExpense = db.prepare(`SELECT COALESCE(SUM(amount),0) as expense FROM financial_transactions WHERE ${OPERATING_EXPENSE_SQL} AND date BETWEEN ? AND ? AND branch_id=?`);
 const stmtFixedTotal = db.prepare(`SELECT COALESCE(SUM(allocated_amount),0) as fixedTotal FROM budget_lines WHERE branch_id=? AND cost_type='fixed'`);
 // BOS-1: profit distributions ALREADY taken in the period.
 //

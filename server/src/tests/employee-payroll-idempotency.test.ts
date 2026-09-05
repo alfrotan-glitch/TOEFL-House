@@ -243,14 +243,22 @@ describe('T-1 · legitimate distinct payments still succeed', () => {
     expect(before - budgetNow()).toBe(5500);
   });
 
-  it('preserves partial/advance behaviour: repeated partials are NOT capped at base salary', async () => {
-    // Deliberate: no cap semantics are asserted, only that distinct legitimate
-    // partials keep working. Whether a cumulative cap SHOULD exist is an open
-    // business decision recorded in the audit, not something invented here.
+  it('partial payments are capped at what the period still owes (the decided cap)', async () => {
+    // The audit's decision on the previously open question: salary payments —
+    // partials included — are bounded by the period's remaining due (base
+    // minus everything posted, advances included). Distinct legitimate
+    // partials still work; a partial past the salary is refused instead of
+    // draining budget as unearned "salary". Advances remain uncapped: they are
+    // a receivable against future pay, not a wage cost.
     const e = mkEmployee('epi_nocap', 2000);
-    for (const amt of [900, 1100, 1300]) {
-      expect((await pay(e, { monthName: 'Jawza 1405', amountPaid: amt, paymentType: 'partial' })).status).toBe(201);
-    }
+    expect((await pay(e, { monthName: 'Jawza 1405', amountPaid: 900, paymentType: 'partial' })).status).toBe(201);
+    expect((await pay(e, { monthName: 'Jawza 1405', amountPaid: 1100, paymentType: 'partial' })).status).toBe(201);
+    // 900 + 1100 = base. The next partial has nothing left to settle.
+    const over = await pay(e, { monthName: 'Jawza 1405', amountPaid: 1300, paymentType: 'partial' });
+    expect(over.status).toBe(409);
+    expect(over.body.error).toMatch(/Nothing remains payable/i);
+    // An advance is not a wage cost and is not capped by the salary figure.
+    expect((await pay(e, { monthName: 'Saratan 1405', amountPaid: 1300, paymentType: 'advance' })).status).toBe(201);
     expect(paidTotal(e)).toBe(3300);
     expect(ledgerRows(e)).toHaveLength(3);
   });

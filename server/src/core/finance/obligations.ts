@@ -912,6 +912,34 @@ export function allocatePaymentToObligation(
   const amount = assertMoney(params.amount, 'Allocation amount');
   if (amount <= 0) throw new HttpError(400, 'An allocation must be greater than zero.');
 
+  // ENGINE-LEVEL CAP, not caller discipline. The allocation is the settlement
+  // truth for the obligation engine and for the payment desk's outstanding
+  // figure; if one payment could be allocated beyond what it actually paid —
+  // across several obligations or in one oversized row — the books would show
+  // tuition settled by money that never arrived. Every caller today writes
+  // exactly one allocation equal to the payment, but "every caller is careful"
+  // is not an invariant, it is a hope. The payment row is the cash authority;
+  // its unallocated remainder is the ceiling.
+  const payment = db
+    .prepare(`SELECT amount FROM payments WHERE id = ?`)
+    .get(params.paymentId) as { amount: number } | undefined;
+  if (!payment) throw new HttpError(404, 'The payment being allocated was not found.');
+  const alreadyAllocated = Number(
+    (db
+      .prepare(
+        `SELECT COALESCE(SUM(a.amount), 0) AS t FROM obligation_allocations a
+          WHERE a.payment_id = ? AND ${CASH_ALLOCATION_SQL}`,
+      )
+      .get(params.paymentId) as { t: number }).t,
+  ) || 0;
+  const unallocated = Number(payment.amount) - alreadyAllocated;
+  if (amount > unallocated) {
+    throw new HttpError(
+      409,
+      `Only ${unallocated} AFN of payment ${params.paymentId} is still unallocated (${Number(payment.amount)} paid, ${alreadyAllocated} already settling a term).`,
+    );
+  }
+
   const allocationId = id('alloc');
   db.prepare(
     `INSERT INTO obligation_allocations

@@ -1,4 +1,5 @@
 import { nextScopedDocumentNumber } from '../utils/documentNumbers.js';
+import { nextReceiptNumber } from '../utils/receipt.js';
 import { isLeadClosed } from '../core/visitors/lead-lifecycle.js';
 import { Router } from 'express';
 import { db } from '../db/connection.js';
@@ -235,15 +236,32 @@ examsRouter.post(
     const newId = id('er');
     const date = today();
 
+    let examFeeReceipt: string | null = null;
     const enrollTx = db.transaction(() => {
       stmtInsertExamResult.run(newId, exam.id, studentId || null, visitorId || null, candidateName, feePaid ? 1 : 0, exam.branch_id);
       if (feePaid && exam.fee > 0) {
+        // Cash taken at the desk is a PAYMENT with a receipt from the gap-free
+        // series, whoever the payer is. Booking only the ledger income left
+        // this money invisible to every payment-derived report and to the
+        // receipt series the drawer is reconciled against — income without a
+        // document. The payment row is the cash authority; the ledger row
+        // points at it through payment_id like every other collection path.
+        const paymentId = id('pay');
+        const receipt = nextReceiptNumber();
+        examFeeReceipt = receipt;
+        // Keyed on the enrolment identity: one exam seat, one fee payment —
+        // a retried submit collapses onto the same key instead of charging twice.
+        db.prepare(
+          `INSERT INTO payments (id, student_id, amount, date, payment_method, status, category, notes, receipt_number, branch_id, idempotency_key)
+           VALUES (?, ?, ?, ?, 'cash', 'completed', 'exam', ?, ?, ?, ?)`
+        ).run(paymentId, studentId || null, exam.fee, date, `Exam fee: ${exam.title} — ${candidateName}`, receipt, exam.branch_id, `exam-fee:${newId}`);
         recordIncome({
           category: 'exam',
           amount: exam.fee,
           date,
           description: `Exam fee for ${exam.title} from ${candidateName}`,
           referenceId: exam.id,
+          paymentId,
           operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null,
           branchId: exam.branch_id,
         });
@@ -263,7 +281,7 @@ examsRouter.post(
     }
 
     writeAudit(req, `Enrolled ${candidateName} in exam ${exam.title}`);
-    res.status(201).json({ id: newId, candidateName });
+    res.status(201).json({ id: newId, candidateName, receiptNumber: examFeeReceipt });
   })
 );
 

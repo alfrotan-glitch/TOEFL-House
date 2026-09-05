@@ -75,7 +75,10 @@ describe('WP-06 attendance single-authority boundary', () => {
 
   it('the single-mark PATCH surface shows the same fact the bulk surface shows', async () => {
     const ctx = seedContext();
-    const sessionId = await markableSession(ctx, today(), '00:45', '01:15');
+    // Start at 00:00, not later: marking is gated on the session having
+    // STARTED, and a fixture start of 00:45 leaves the suite red whenever it
+    // runs in the first 45 minutes of the day.
+    const sessionId = await markableSession(ctx, today(), '00:00', '00:30');
 
     const res = await markOne(ctx, sessionId, rosterId(sessionId, ctx.studentB), { status: 'absent' });
     expect(res.status).toBe(200);

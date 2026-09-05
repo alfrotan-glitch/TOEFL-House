@@ -797,8 +797,15 @@ describe('C-1 — dropped/withdrawn enrollments close their semester projection'
     expect((db.prepare(
       "SELECT COALESCE(SUM(amount), 0) t FROM payments WHERE student_id = ? AND status = 'completed'"
     ).get(sid) as { t: number }).t).toBe(paidBefore);
-    // Nothing was deleted — the dropped term survives as history.
-    expect(semestersOf(sid).some((r) => r.status === 'deferred' && r.fee === lifetimeBefore)).toBe(true);
+    // Nothing was duplicated and nothing was deleted: re-enrolment RE-OPENED
+    // the dropped term (one row, same fee, same payments) instead of inserting
+    // a second, silently zero-priced term beside it — which is what used to
+    // pass this test while hiding the active term's debt from every
+    // status='active' balance.
+    const terms = semestersOf(sid);
+    expect(terms).toHaveLength(1);
+    expect(terms[0].status).toBe('active');
+    expect(terms[0].fee).toBe(lifetimeBefore);
   });
 
   it('a dropped term leaves the ACTIVE balance scope but stays in lifetime debt', async () => {

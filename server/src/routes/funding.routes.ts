@@ -8,6 +8,7 @@ import { assertMoney } from '../utils/money.js';
 import { assertDateRange, assertOptionalIsoDate } from '../utils/isoDate.js';
 import { isUniqueViolation, resolveIdempotency } from '../utils/idempotency.js';
 import { eventBus } from '../core/events/event-bus.js';
+import { repriceTuitionInvoicesAfterAid } from '../core/finance/invoicing.js';
 import {
   allocateScholarshipToObligation,
   allocateSponsorshipToObligation,
@@ -526,10 +527,15 @@ fundingRouter.post('/scholarship-awards/:id/allocations', requirePermission('Fun
   const amount = assertMoney(body.amount, 'allocation amount');
   const user = userContext(req);
   let allocationId = '';
+  let repriced: ReturnType<typeof repriceTuitionInvoicesAfterAid> | undefined;
   db.transaction(() => {
     allocationId = allocateScholarshipToObligation(db, { awardId: req.params.id, scholarshipFundingId, obligationId, amount, operatorName: user.fullName }).allocationId;
+    // Aid settles the TERM; the tuition invoices billing it must not keep
+    // promising what is no longer collectable. Unpaid ones are cancelled and
+    // one replacement is issued for the residual, in this same transaction.
+    repriced = repriceTuitionInvoicesAfterAid(db, { obligationId, operatorName: user.fullName, note: `scholarship allocation ${allocationId} (${amount} AFN)` });
   })();
-  writeAudit(req, `Applied scholarship award ${req.params.id}`, { branchId: award.branch_id, newValue: JSON.stringify({ allocationId, obligationId, scholarshipFundingId, amount }) });
+  writeAudit(req, `Applied scholarship award ${req.params.id}`, { branchId: award.branch_id, newValue: JSON.stringify({ allocationId, obligationId, scholarshipFundingId, amount, cancelledInvoices: repriced?.cancelled ?? [], reissuedInvoiceId: repriced?.reissuedInvoiceId ?? null }) });
   res.status(201).json({ id: allocationId, award: getAwardPosition(db, req.params.id), obligation: getObligationPosition(db, obligationId) });
 }));
 
@@ -541,7 +547,13 @@ fundingRouter.post('/scholarship-awards/:id/allocations/:allocationId/reverse', 
   if (!allocation) throw new HttpError(404, 'Allocation not found.');
   if (allocation.scholarship_award_id !== req.params.id) throw new HttpError(400, 'Allocation belongs to another award.');
   const reason = typeof (req.body as any)?.reason === 'string' ? (req.body as any).reason : '';
-  db.transaction(() => reverseScholarshipAllocation(db, { allocationId: req.params.allocationId, reason, operatorName: userContext(req).fullName }))();
+  db.transaction(() => {
+    reverseScholarshipAllocation(db, { allocationId: req.params.allocationId, reason, operatorName: userContext(req).fullName });
+    // The obligation re-opens by the reversed amount, so its collection
+    // documents are re-priced to the new collectable figure — the mirror of
+    // the re-pricing the allocation performed.
+    repriceTuitionInvoicesAfterAid(db, { obligationId: allocation.obligation_id, operatorName: userContext(req).fullName, note: `scholarship allocation ${req.params.allocationId} reversed` });
+  })();
   writeAudit(req, `Reversed scholarship allocation ${req.params.allocationId}`, { branchId: award.branch_id });
   res.json({ ok: true, award: getAwardPosition(db, req.params.id), obligation: getObligationPosition(db, allocation.obligation_id) });
 }));
@@ -671,10 +683,12 @@ fundingRouter.post('/sponsorships/:id/allocations', requirePermission('Funding.E
   const sponsorshipReceiptId = trimmedId(body.sponsorshipReceiptId ?? body.sourceId, 'sponsorshipReceiptId');
   const amount = assertMoney(body.amount, 'allocation amount');
   let allocationId = '';
+  let repriced: ReturnType<typeof repriceTuitionInvoicesAfterAid> | undefined;
   db.transaction(() => {
     allocationId = allocateSponsorshipToObligation(db, { agreementId: req.params.id, sponsorshipReceiptId, obligationId, amount, operatorName: userContext(req).fullName }).allocationId;
+    repriced = repriceTuitionInvoicesAfterAid(db, { obligationId, operatorName: userContext(req).fullName, note: `sponsorship allocation ${allocationId} (${amount} AFN)` });
   })();
-  writeAudit(req, `Applied sponsorship ${req.params.id}`, { branchId: agreement.branch_id, newValue: JSON.stringify({ allocationId, obligationId, sponsorshipReceiptId, amount }) });
+  writeAudit(req, `Applied sponsorship ${req.params.id}`, { branchId: agreement.branch_id, newValue: JSON.stringify({ allocationId, obligationId, sponsorshipReceiptId, amount, cancelledInvoices: repriced?.cancelled ?? [], reissuedInvoiceId: repriced?.reissuedInvoiceId ?? null }) });
   res.status(201).json({ id: allocationId, sponsorship: getSponsorshipPosition(db, req.params.id), obligation: getObligationPosition(db, obligationId) });
 }));
 
@@ -687,7 +701,10 @@ fundingRouter.post('/sponsorship-allocations/:id/reverse', requirePermission('Fu
   if (!allocation) throw new HttpError(404, 'Sponsorship allocation not found.');
   requireBranchResource(req, allocation.branch_id);
   const reason = typeof (req.body as any)?.reason === 'string' ? (req.body as any).reason : '';
-  db.transaction(() => reverseSponsorshipAllocation(db, { allocationId: req.params.id, reason, operatorName: userContext(req).fullName }))();
+  db.transaction(() => {
+    reverseSponsorshipAllocation(db, { allocationId: req.params.id, reason, operatorName: userContext(req).fullName });
+    repriceTuitionInvoicesAfterAid(db, { obligationId: allocation.obligation_id, operatorName: userContext(req).fullName, note: `sponsorship allocation ${req.params.id} reversed` });
+  })();
   writeAudit(req, `Reversed sponsorship allocation ${req.params.id}`, { branchId: allocation.branch_id });
   res.json({ ok: true, sponsorship: getSponsorshipPosition(db, allocation.sponsorship_agreement_id), obligation: getObligationPosition(db, allocation.obligation_id) });
 }));

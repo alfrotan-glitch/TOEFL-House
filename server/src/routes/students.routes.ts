@@ -205,13 +205,13 @@ const stmtInsertSimplePayment = db.prepare(
  * chosen by the caller, so the attribution cannot disagree with the money.
  */
 const stmtInsertRefundPayment = db.prepare(
-  `INSERT INTO payments (id, student_id, amount, date, payment_method, status, category, notes, receipt_number, branch_id, idempotency_key, refunds_payment_id, semester)
-   VALUES (?, ?, ?, ?, 'cash', 'completed', 'refund', ?, ?, ?, ?, ?, ?)`
+  `INSERT INTO payments (id, student_id, amount, date, payment_method, status, category, notes, receipt_number, branch_id, idempotency_key, refunds_payment_id, semester, invoice_id)
+   VALUES (?, ?, ?, ?, 'cash', 'completed', 'refund', ?, ?, ?, ?, ?, ?, ?)`
 );
 /** The payment a refund may reverse, with what is left of it. */
 const stmtIsBookSalePayment = db.prepare('SELECT 1 FROM book_sales WHERE payment_id = ?');
 const stmtGetRefundTarget = db.prepare(
-  `SELECT p.id, p.student_id, p.branch_id, p.amount, p.category, p.semester, p.status, p.date, p.receipt_number,
+  `SELECT p.id, p.student_id, p.branch_id, p.amount, p.category, p.semester, p.status, p.date, p.receipt_number, p.invoice_id,
           COALESCE((SELECT SUM(ABS(r.amount)) FROM payments r
                      WHERE r.refunds_payment_id = p.id AND r.status = 'completed'), 0) AS refunded
      FROM payments p WHERE p.id = ?`
@@ -1395,6 +1395,32 @@ studentsRouter.put('/:id/installment-plan', requirePermission('Payment.Create'),
   res.json(plan);
 }));
 
+/**
+ * Recomputes an invoice's status from its completed payments after a refund.
+ *
+ * Must run inside the refund transaction. The invoice-backed balance and the
+ * enrollment gate both derive "paid" from payments carrying the invoice's id —
+ * the refund row now carries it too — but the invoice's own status column must
+ * not keep claiming 'paid' after its money went back, or the desk reads a
+ * settled document for a receivable that has re-opened.
+ */
+function reopenRefundedInvoice(invoiceId: string): void {
+  const invoice = db.prepare('SELECT id, net_amount, status FROM invoices WHERE id = ?').get(invoiceId) as
+    | { id: string; net_amount: number; status: string }
+    | undefined;
+  if (!invoice || invoice.status === 'cancelled' || invoice.status === 'draft') return;
+  const paid = Number((db
+    .prepare(`SELECT COALESCE(SUM(amount), 0) AS s FROM payments WHERE invoice_id = ? AND status = 'completed'`)
+    .get(invoiceId) as { s: number }).s) || 0;
+  const net = Number(invoice.net_amount) || 0;
+  // 'overdue' is derived at read time from due_date; the stored rest state is
+  // issued/partial. A fully returned payment re-opens the document at 'issued'.
+  const reopened = paid <= 0 ? 'issued' : paid >= net ? 'paid' : 'partial';
+  if (reopened !== invoice.status) {
+    db.prepare('UPDATE invoices SET status = ? WHERE id = ?').run(reopened, invoiceId);
+  }
+}
+
 studentsRouter.post('/:id/refund', requirePermission('Refund.Approve'), ah(async (req, res) => {
   const user = getUserContext(req);
   const student = requireStudent(req, req.params.id);
@@ -1410,7 +1436,7 @@ studentsRouter.post('/:id/refund', requirePermission('Refund.Approve'), ah(async
   const targetId = typeof paymentId === 'string' ? paymentId.trim() : '';
   if (!targetId) throw new HttpError(400, 'A refund must name the payment it reverses (paymentId).');
   const target = stmtGetRefundTarget.get(targetId) as
-    | { id: string; student_id: string; branch_id: string; amount: number; category: string; semester: string | null; status: string; refunded: number }
+    | { id: string; student_id: string; branch_id: string; amount: number; category: string; semester: string | null; status: string; refunded: number; invoice_id: string | null }
     | undefined;
   if (!target) throw new HttpError(404, 'The payment being refunded was not found.');
   if (target.student_id !== student.id) throw new HttpError(403, 'That payment belongs to another student.');
@@ -1456,10 +1482,16 @@ studentsRouter.post('/:id/refund', requirePermission('Refund.Approve'), ah(async
     }
     const rc = `REF-${nextReceiptNumber()}`;
     receiptNumber = rc;
+    // The refund row carries the target's invoice linkage. Without it the
+    // invoice-backed balance keeps counting the refunded money as paid: the
+    // registration invoice stays 'paid', the student's non-tuition receivable
+    // reads settled, and the enrollment gate — which blocks on exactly that
+    // figure — stays open after the cash has left the drawer.
     stmtInsertRefundPayment.run(
       payId, student.id, -refundAmount, date, String(reason).trim(), rc, student.branch_id,
-      idempotencyKey, target.id, target.semester ?? null,
+      idempotencyKey, target.id, target.semester ?? null, target.invoice_id,
     );
+    if (target.invoice_id) reopenRefundedInvoice(target.invoice_id);
     // The refund reverses the allocation its target made and re-allocates
     // whatever the student keeps settled, so a term re-opens by exactly the
     // amount returned (owner decision on E1b).

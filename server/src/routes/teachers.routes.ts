@@ -875,6 +875,39 @@ employeesRouter.post('/:id/pay-salary', requirePermission('Payroll.Edit'), ah(as
         return { amountPaid: Number(replay.paid_amount), ledgerId: replay.id, replayed: true, remainingBudget: null as number | null };
       }
 
+      // DUE AUTHORITY (mirrors the teacher path). A salary payment is bounded
+      // by what the period still owes: base salary for the period minus
+      // everything already posted for it — advances included, so an advance is
+      // recovered against later salary rather than being free extra money on
+      // top of a full month. An advance itself stays uncapped by design: it is
+      // a receivable against future pay, exactly as the taxonomy records it.
+      // Before this, `full` was whatever the caller said it was, so a single
+      // request could pay any multiple of the employee's salary out of the
+      // budget envelope with nothing to compare against.
+      const baseSalary = Number((db.prepare('SELECT base_salary FROM employees WHERE id = ?').get(employee.id) as { base_salary: number } | undefined)?.base_salary) || 0;
+      const paidThisPeriod = Number((db
+        .prepare(`SELECT COALESCE(SUM(paid_amount),0) AS s FROM employee_salary_ledger WHERE employee_id = ? AND period_key = ? AND status = 'posted'`)
+        .get(employee.id, periodKey) as { s: number }).s) || 0;
+      const remainingDue = Math.max(0, baseSalary - paidThisPeriod);
+      if (type !== 'advance') {
+          // A second FULL payment against a settled month is classified as the
+          // full-payment conflict deterministically here, not only when the
+          // unique index happens to catch the insert below (the index stays as
+          // the concurrency backstop). Mutation testing previously proved the
+          // route's own classification was load-bearing; it still is.
+          const fullAlreadyPosted = type === 'full' && !!db
+            .prepare(`SELECT 1 FROM employee_salary_ledger WHERE employee_id = ? AND period_key = ? AND payment_type = 'full' AND status = 'posted' LIMIT 1`)
+            .get(employee.id, periodKey);
+          if (fullAlreadyPosted) throw new HttpError(409, `A full salary payment for \"${monthName}\" already exists.`);
+        if (remainingDue <= 0) throw new HttpError(409, `Nothing remains payable for "${monthName}" (base ${baseSalary} AFN, ${paidThisPeriod} AFN already posted).`);
+        if (resolvedAmount > remainingDue) {
+          throw new HttpError(400, `Payment cannot exceed the remaining salary of ${remainingDue} AFN for "${monthName}".`);
+        }
+        if (type === 'full' && resolvedAmount !== remainingDue) {
+          throw new HttpError(400, `Full payment must settle the entire remaining salary of ${remainingDue} AFN for "${monthName}".`);
+        }
+      }
+
       const budgetLine = stmtGetPayrollBudgetLine.get('employee', employee.branch_id) as BudgetRow | undefined;
       if (!budgetLine) throw new HttpError(500, 'Employee payroll budget line is not configured for this branch.');
       // Conditional debit: the balance is re-checked by the database in the

@@ -493,7 +493,34 @@ export class EnrollmentService {
       // manual registration already apply — so a discount that fits the whole
       // snapshot but not the tuition is refused rather than silently spread
       // onto a registration fee nobody discounted.
-      const { tuitionFees, otherFees, tuitionTotal, otherTotal } = partitionFeeSnapshot(snapshot.fees);
+      const partitioned = partitionFeeSnapshot(snapshot.fees);
+      let { tuitionFees, tuitionTotal } = partitioned;
+      const { otherFees, otherTotal } = partitioned;
+      // THE CLASS IS THE PRICE OF ITS SEAT. `student_semesters` is the canonical
+      // authority for what a term costs, and `classes.fee` is the authority that
+      // table's tuition comes from (registry: Tuition price of an enrolled
+      // term) — the fee-rule snapshot describes the catalog, not this class, and
+      // the two are allowed to disagree. Pricing the term from the snapshot let
+      // the same class be sold at two different prices depending on which
+      // endpoint enrolled the student (proven live: class 6500, fee rule 6000,
+      // term written 6000). When this enrolment names a class, the SEMESTER
+      // component of tuition is the class fee; tuition-type fees alongside it
+      // (a retake charge, WP07-F18) are catalog rules and stay.
+      if (input.classId) {
+        const classRow = this.stmtGetClass.get(input.classId) as { fee: number } | undefined;
+        const classFee = Number(classRow?.fee ?? 0) || 0;
+        if (classRow) {
+          const nonSeatTuitions = tuitionFees.filter((fee) => fee.feeType !== 'semester');
+          const replaced = classFee !== tuitionFees.filter((fee) => fee.feeType === 'semester').reduce((s, fee) => s + fee.amount, 0);
+          if (replaced || nonSeatTuitions.length > 0) {
+            tuitionFees = [
+              { feeType: 'semester', name: 'Tuition — class fee', amount: classFee },
+              ...nonSeatTuitions,
+            ];
+            tuitionTotal = classFee + nonSeatTuitions.reduce((s, fee) => s + fee.amount, 0);
+          }
+        }
+      }
       // PARSED, not coerced. `Math.max(0, Number(x))` accepted
       // `true` as a 1 AFN discount, `[1000]` as 1,000 AFN, and turned a
       // negative into a silent 0. The route above this one already parses with
@@ -523,9 +550,34 @@ export class EnrollmentService {
       // their own figures and pass `writeSemester: false`, which is why this is
       // conditional rather than unconditional.
       let termId: string | null = null;
+      let termWasCreated = false;
       if (input.classId && initialStatus === 'active' && input.writeSemester !== false) {
-        termId = makeId('ss');
-        this.stmtInsertNewSemester.run(termId, input.studentId, semesterName, input.classId, tuitionTotal, netTuition);
+        // RE-ENROLMENT IN A TERM THE STUDENT ALREADY HELD re-opens that term
+        // rather than billing a second one. A dropped or completed enrolment
+        // leaves its term projection behind (deferred / completed) carrying the
+        // fee that was actually charged and the payments that actually settled
+        // it; inserting a fresh term here would either duplicate the charge or,
+        // when the replacement was silently priced 0, hide the active term's
+        // debt from every balance that scopes on status='active'.
+        const priorTerm = this.db
+          .prepare(
+            `SELECT id FROM student_semesters
+              WHERE student_id = ? AND class_id = ? AND semester_name = ?
+                AND status IN ('deferred', 'completed')
+              ORDER BY CASE status WHEN 'deferred' THEN 0 ELSE 1 END, rowid DESC LIMIT 1`,
+          )
+          .get(input.studentId, input.classId, semesterName) as { id: string } | undefined;
+        if (priorTerm) {
+          termId = priorTerm.id;
+          const reopened = this.db
+            .prepare(`UPDATE student_semesters SET status = 'active' WHERE id = ? AND status IN ('deferred', 'completed')`)
+            .run(priorTerm.id);
+          if (reopened.changes !== 1) throw new HttpError(409, 'The term being re-opened changed state. Retry.');
+        } else {
+          termId = makeId('ss');
+          termWasCreated = true;
+          this.stmtInsertNewSemester.run(termId, input.studentId, semesterName, input.classId, tuitionTotal, netTuition);
+        }
       }
 
       const eventType = enrollmentType === 'repeat' || enrollmentType === 'partial_repeat'
@@ -585,12 +637,15 @@ export class EnrollmentService {
       };
 
       if (input.autoInvoice !== false) {
-        if (termId) {
+        if (termId && termWasCreated) {
           // This call created the term, so tuition has an obligation to name.
           // Issued whenever tuition was CHARGED, even when a 100% authorized
           // discount takes it all: the document is the record that the fee
           // existed and was discounted, and the discounts-granted report sums
-          // `invoices.discount_amount` from exactly these rows.
+          // `invoices.discount_amount` from exactly these rows. A RE-OPENED
+          // term is billed here never: it was billed when first enrolled, its
+          // obligation already exists, and a second document would double the
+          // receivable for the same seat.
           if (tuitionTotal > 0) {
             const obligation = ensureTuitionObligation(this.db, termId);
             issueInvoice('tuition', obligation.id, tuitionTotal, discount, tuitionFees);

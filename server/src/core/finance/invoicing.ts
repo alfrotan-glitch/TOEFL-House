@@ -34,6 +34,8 @@
 import type { Database } from 'better-sqlite3';
 import { HttpError } from '../../middleware/errorHandler.js';
 import { ensureTuitionObligation, getObligationPosition } from './obligations.js';
+import { nextInvoiceNumber } from '../../utils/invoice.js';
+import { id as makeId, today } from '../../utils/ids.js';
 
 export const INVOICE_PURPOSES = ['tuition', 'books', 'exam', 'other'] as const;
 export type InvoicePurpose = (typeof INVOICE_PURPOSES)[number];
@@ -171,6 +173,60 @@ export function assertTuitionInvoiceFits(
         : `That term has only ${capacity} AFN left to bill.`,
     );
   }
+}
+
+/**
+ * Re-prices the tuition invoices of an obligation after AID settles part of it.
+ *
+ * Aid (scholarship, sponsorship) settles the TERM through the obligation
+ * authority, but the collection documents billing that term still promise the
+ * old figure. Left alone they either strand (an invoice that can never collect
+ * what aid already settled) or invite over-collection. The payment path refuses
+ * anything beyond the term's outstanding; this keeps the DOCUMENTS truthful
+ * too: unpaid tuition invoices on the obligation are cancelled and one
+ * replacement is issued for whatever is still collectable.
+ *
+ * Invoices that already hold payments are left untouched — their collected
+ * cash stands, the pay-path cap bounds any further collection, and cancelling
+ * a document with real receipts against it would hide history.
+ *
+ * Must run inside the caller's transaction, AFTER the aid allocation is written.
+ */
+export function repriceTuitionInvoicesAfterAid(
+  db: Database,
+  params: { obligationId: string; operatorName: string; note: string },
+): { cancelled: string[]; reissuedInvoiceId: string | null; reissuedAmount: number } {
+  if (!db.inTransaction) throw new Error('repriceTuitionInvoicesAfterAid() called outside a transaction.');
+  const invoices = db
+    .prepare(`SELECT id, invoice_number, branch_id FROM invoices WHERE obligation_id = ? AND purpose = 'tuition' AND status NOT IN ('cancelled')`)
+    .all(params.obligationId) as Array<{ id: string; invoice_number: string | null; branch_id: string }>;
+  if (invoices.length === 0) return { cancelled: [], reissuedInvoiceId: null, reissuedAmount: 0 };
+
+  const hasPayments = db.prepare(`SELECT 1 FROM payments WHERE invoice_id = ? AND status = 'completed' LIMIT 1`);
+  const collectable = invoices.filter((inv) => !hasPayments.get(inv.id));
+  if (collectable.length === 0) return { cancelled: [], reissuedInvoiceId: null, reissuedAmount: 0 };
+
+  const position = getObligationPosition(db, params.obligationId);
+  for (const inv of collectable) {
+    db.prepare(`UPDATE invoices SET status = 'cancelled' WHERE id = ? AND status NOT IN ('cancelled')`).run(inv.id);
+  }
+  // The residual the term still owes, after this aid settlement and after any
+  // invoices that keep their payments.
+  const residual = position.outstanding;
+  if (residual <= 0) return { cancelled: collectable.map((i) => i.invoice_number ?? i.id), reissuedInvoiceId: null, reissuedAmount: 0 };
+
+  const branchId = collectable[0].branch_id;
+  const newId = makeId('inv');
+  const number = nextInvoiceNumber(branchId);
+  const due = new Date(); due.setDate(due.getDate() + 14);
+  db.prepare(
+    `INSERT INTO invoices (id, student_id, total_amount, discount_amount, net_amount, status, issue_date, due_date, branch_id, notes, invoice_number, issued_by, purpose, obligation_id)
+     VALUES (?, ?, ?, 0, ?, 'issued', ?, ?, ?, ?, ?, ?, 'tuition', ?)`,
+  ).run(newId, position.obligation.studentId, residual, residual, today(), due.toISOString().slice(0, 10), branchId,
+    `Re-issued after aid settlement: ${params.note}`, number, params.operatorName, params.obligationId);
+  db.prepare(`INSERT INTO invoice_items (id, invoice_id, description, quantity, unit_price, amount) VALUES (?, ?, ?, 1, ?, ?)`)
+    .run(makeId('ii'), newId, 'Tuition — remaining after aid settlement', residual, residual);
+  return { cancelled: collectable.map((i) => i.invoice_number ?? i.id), reissuedInvoiceId: newId, reissuedAmount: residual };
 }
 
 export type InvoiceChargeKind = 'registration' | 'placement' | 'books' | 'exam' | 'other';

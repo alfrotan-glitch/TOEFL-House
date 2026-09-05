@@ -11,7 +11,10 @@ import { assertComputedMoney, assertMoney } from '../../utils/money.js';
 export interface ProfitDistributionInput {
   /** Operating income for the period. */
   revenue: number;
-  /** Operating expense for the period, including owner drawings already taken. */
+  /** Operating expense for the period. Owner drawings are NOT operating cost —
+   *  the taxonomy classifies them non_expense_cash_movement, so OPERATING
+   *  expense never contains them and prior distributions must not be added
+   *  back here. The period's allowance still subtracts them below. */
   expense: number;
   /** Owner drawings already taken in this period. */
   distributed: number;
@@ -77,9 +80,13 @@ export function computeProfitDistribution(input: ProfitDistributionInput): Profi
   const mainBalance = assertMoney(input.mainBalance, 'main account balance');
   const savingBalance = assertMoney(input.savingBalance, 'saving account balance');
 
-  // Owner drawings are added back because they are equity transfers, not an
-  // operating cost. Prior drawings are subtracted from the allowance below.
-  const profit = assertComputedMoney(revenue - expense + distributed, 'calculated profit', {
+  // Owner drawings are an equity transfer, not an operating cost: the
+  // classification authority already excludes them from `expense`, so the
+  // pre-distribution profit is simply revenue − expense. Adding `distributed`
+  // back here as well double-counted every withdrawal: each one grew profit,
+  // lifted the tier basis, and replenished 15% of itself — a geometric drain
+  // proven live (ceiling 24,000 AFN paid out 28,234 AFN and still counting).
+  const profit = assertComputedMoney(revenue - expense, 'calculated profit', {
     allowNegative: true,
   });
   const marginPercent = revenue > 0 ? (profit / revenue) * 100 : 0;
