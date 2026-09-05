@@ -135,6 +135,15 @@ Route::middleware('employee')->group(function (): void {
         Route::post('graduations/{decisionId}/reject', [AcademicController::class, 'rejectGraduation'])->name('graduation.reject');
         Route::post('graduations/{decisionId}/certificate', [AcademicController::class, 'issueCertificate'])->name('graduation.certificate');
         Route::post('transcripts', [AcademicController::class, 'issueTranscript'])->name('transcript.issue');
+        Route::post('availabilities', [AcademicController::class, 'declareAvailability'])->name('availability.declare');
+        Route::post('availabilities/{availabilityId}/close', [AcademicController::class, 'closeAvailability'])->name('availability.close');
+        Route::post('availabilities/{availabilityId}/reopen', [AcademicController::class, 'reopenAvailability'])->name('availability.reopen');
+        Route::post('offerings', [AcademicController::class, 'openOffering'])->name('offering.open');
+        Route::post('offerings/{offeringId}/close', [AcademicController::class, 'closeOffering'])->name('offering.close');
+        Route::post('offerings/{offeringId}/reopen', [AcademicController::class, 'reopenOffering'])->name('offering.reopen');
+        Route::post('offerings/{offeringId}/cancel', [AcademicController::class, 'cancelOffering'])->name('offering.cancel');
+        Route::post('offerings/{offeringId}/complete', [AcademicController::class, 'completeOffering'])->name('offering.complete');
+        Route::post('offerings/{offeringId}/resize', [AcademicController::class, 'resizeOffering'])->name('offering.resize');
         Route::post('appeals', [AcademicController::class, 'fileAppeal'])->name('appeal.file');
         Route::post('appeals/{appealId}/assign', [AcademicController::class, 'assignAppeal'])->name('appeal.assign');
         Route::post('appeals/{appealId}/investigate', [AcademicController::class, 'investigateAppeal'])->name('appeal.investigate');

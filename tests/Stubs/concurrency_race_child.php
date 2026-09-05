@@ -1,6 +1,7 @@
 <?php
 
 declare(strict_types=1);
+use Tests\Support\PgWire\PgWirePdo;
 
 /**
  * Concurrency race child (plain CLI — no framework). Invoked by
@@ -14,12 +15,27 @@ declare(strict_types=1);
     , $db, $host, $port, $user, $password, $rowId, $approver, $readyFile, $resultFile,
 ] = $argv;
 
-$pdo = new PDO(
-    sprintf('pgsql:host=%s;port=%s;dbname=%s', $host, $port, $db),
-    $user,
-    $password,
-    [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION],
-);
+$dsn = sprintf('pgsql:host=%s;port=%s;dbname=%s', $host, $port, $db);
+if (extension_loaded('pdo_pgsql')) {
+    $pdo = new PDO(
+        $dsn,
+        $user,
+        $password,
+        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION],
+    );
+} else {
+    // Sandbox static PHP cannot load pdo_pgsql; same wire semantics via the
+    // test-only driver (no-op wherever the native driver is available).
+    require __DIR__.'/../Support/PgWire/PgWireException.php';
+    require __DIR__.'/../Support/PgWire/PgWirePdo.php';
+    require __DIR__.'/../Support/PgWire/PgWireStatement.php';
+    $pdo = new PgWirePdo(
+        $dsn,
+        $user,
+        $password,
+        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION],
+    );
+}
 
 $pdo->exec('BEGIN');
 touch($readyFile);

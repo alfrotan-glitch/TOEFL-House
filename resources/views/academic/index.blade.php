@@ -239,6 +239,14 @@
                     @endif
                 @endforeach
             </select>
+            <select name="offering_id">
+                <option value="">No offering…</option>
+                @foreach ($offerings as $offering)
+                    @if ($offering->lifecycle_state === 'open')
+                        <option value="{{ $offering->id }}">{{ \Illuminate\Support\Str::limit($offering->id, 14) }} (cap {{ $offering->capacity }})</option>
+                    @endif
+                @endforeach
+            </select>
         </div>
         <div class="actions"><button type="submit" class="btn">Request seat</button></div>
     </form>
@@ -573,6 +581,141 @@
                 </tr>
             @endforeach
         </table>
+    @endif
+</div>
+
+<div class="card">
+    <h2>Branch availability &amp; offerings</h2>
+    <p class="sub">Declare which branch × level × term combinations run, then open offerings against them. Seats and Finance packaging consume open offerings; closing, cancelling, and resizing are guarded by open seats.</p>
+    <form method="POST" action="{{ route('academic.availability.declare') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <select name="branch_id" required>
+                <option value="">Select a branch…</option>
+                @foreach ($branches as $branch)
+                    <option value="{{ $branch->id }}">{{ $branch->name }}</option>
+                @endforeach
+            </select>
+            <select name="program_version_level_id" required>
+                <option value="">Select a level…</option>
+                @foreach ($levels as $level)
+                    <option value="{{ $level->id }}">{{ $level->title }} ({{ $level->cefr_ref }})</option>
+                @endforeach
+            </select>
+            <select name="academic_period_id" required>
+                <option value="">Select a term…</option>
+                @foreach ($periods as $period)
+                    <option value="{{ $period->id }}">{{ $period->name }}</option>
+                @endforeach
+            </select>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Declare availability</button></div>
+    </form>
+    <form method="POST" action="{{ route('academic.offering.open') }}" style="margin-top:8px">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <select name="branch_id" required>
+                <option value="">Select a branch…</option>
+                @foreach ($branches as $branch)
+                    <option value="{{ $branch->id }}">{{ $branch->name }}</option>
+                @endforeach
+            </select>
+            <select name="program_version_level_id" required>
+                <option value="">Select a level…</option>
+                @foreach ($levels as $level)
+                    <option value="{{ $level->id }}">{{ $level->title }} ({{ $level->cefr_ref }})</option>
+                @endforeach
+            </select>
+            <select name="academic_period_id" required>
+                <option value="">Select a term…</option>
+                @foreach ($periods as $period)
+                    <option value="{{ $period->id }}">{{ $period->name }}</option>
+                @endforeach
+            </select>
+            <input name="capacity" type="number" min="1" max="10000" placeholder="Capacity" required style="width:110px">
+        </div>
+        <div class="actions"><button type="submit" class="btn">Open offering</button></div>
+    </form>
+    @if ($availabilities->isEmpty() && $offerings->isEmpty())
+        <p class="empty">No availability declared and no offerings opened.</p>
+    @else
+        @if (!$availabilities->isEmpty())
+            <table class="grid" style="margin-top:8px">
+                <tr><th>Availability</th><th>State</th><th>Actions</th></tr>
+                @foreach ($availabilities as $availability)
+                    <tr>
+                        <td>{{ \Illuminate\Support\Str::limit($availability->id, 14) }}</td>
+                        <td><span class="pill">{{ $availability->lifecycle_state }}</span></td>
+                        <td>
+                            @if ($availability->lifecycle_state === 'active')
+                                <form method="POST" action="{{ route('academic.availability.close', $availability->id) }}" style="display:inline">
+                                    @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                    <button type="submit" class="btn small secondary">Close</button>
+                                </form>
+                            @endif
+                            @if ($availability->lifecycle_state === 'closed')
+                                <form method="POST" action="{{ route('academic.availability.reopen', $availability->id) }}" style="display:inline">
+                                    @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                    <button type="submit" class="btn small">Reopen</button>
+                                </form>
+                            @endif
+                        </td>
+                    </tr>
+                @endforeach
+            </table>
+        @endif
+        @if (!$offerings->isEmpty())
+            <table class="grid" style="margin-top:8px">
+                <tr><th>Offering</th><th>State</th><th>Capacity</th><th>Actions</th></tr>
+                @foreach ($offerings as $offering)
+                    <tr>
+                        <td>{{ \Illuminate\Support\Str::limit($offering->id, 14) }}</td>
+                        <td><span class="pill">{{ $offering->lifecycle_state }}</span></td>
+                        <td>{{ $offering->capacity }}</td>
+                        <td>
+                            @if ($offering->lifecycle_state === 'open')
+                                <form method="POST" action="{{ route('academic.offering.close', $offering->id) }}" style="display:inline">
+                                    @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                    <button type="submit" class="btn small secondary">Close</button>
+                                </form>
+                            @endif
+                            @if (in_array($offering->lifecycle_state, ['open', 'closed'], true))
+                                <form method="POST" action="{{ route('academic.offering.cancel', $offering->id) }}" style="display:inline">
+                                    @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                    <button type="submit" class="btn small secondary">Cancel</button>
+                                </form>
+                                <form method="POST" action="{{ route('academic.offering.complete', $offering->id) }}" style="display:inline">
+                                    @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                    <button type="submit" class="btn small secondary">Complete</button>
+                                </form>
+                            @endif
+                            @if ($offering->lifecycle_state === 'closed')
+                                <form method="POST" action="{{ route('academic.offering.reopen', $offering->id) }}" style="display:inline">
+                                    @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                    <button type="submit" class="btn small">Reopen</button>
+                                </form>
+                            @endif
+                            @if (in_array($offering->lifecycle_state, ['open', 'closed'], true))
+                                <form method="POST" action="{{ route('academic.offering.resize', $offering->id) }}" style="display:inline">
+                                    @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                    <input name="capacity" type="number" min="1" max="10000" placeholder="New cap…" required style="width:90px">
+                                    <button type="submit" class="btn small">Resize</button>
+                                </form>
+                            @endif
+                        </td>
+                    </tr>
+                @endforeach
+            </table>
+        @endif
     @endif
 </div>
 

@@ -12,24 +12,29 @@ use App\Modules\Academic\Commands\MaintainClass;
 use App\Modules\Academic\Commands\MaintainEnrollment;
 use App\Modules\Academic\Commands\MaintainSkill;
 use App\Modules\Academic\Commands\ManageAcademicAppeal;
+use App\Modules\Academic\Commands\ManageAcademicOffering;
 use App\Modules\Academic\Commands\ManageAssessmentResult;
 use App\Modules\Academic\Commands\RecordAttendance;
 use App\Modules\Academic\Models\AcademicAppeal;
 use App\Modules\Academic\Models\AcademicPeriod;
 use App\Modules\Academic\Models\AssessmentAttempt;
 use App\Modules\Academic\Models\AssessmentResult;
+use App\Modules\Academic\Models\BranchAvailability;
 use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\ClassSession;
 use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Academic\Models\GraduationDecision;
+use App\Modules\Academic\Models\Offering;
 use App\Modules\Academic\Models\Program;
 use App\Modules\Academic\Models\ProgramVersion;
+use App\Modules\Academic\Models\ProgramVersionLevel;
 use App\Modules\Academic\Models\ProgressionDecision;
 use App\Modules\Academic\Models\ResultCorrection;
 use App\Modules\Academic\Models\Skill;
 use App\Modules\Academic\Models\TeacherAssignment;
 use App\Modules\Academic\Models\Transcript;
 use App\Modules\Identity\Models\Person;
+use App\Modules\Organization\Models\Branch;
 use App\Modules\Students\Models\Student;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
@@ -67,6 +72,10 @@ final class AcademicController extends Controller
             'approvedProgressions' => ProgressionDecision::query()->where('lifecycle_state', 'approved')->orderBy('id')->limit(200)->get(),
             'people' => Person::query()->where('verification_state', 'verified')->orderBy('legal_name')->limit(300)->get(),
             'transcripts' => Transcript::query()->orderByDesc('issued_at')->limit(100)->get(),
+            'branches' => Branch::query()->orderBy('name')->limit(100)->get(),
+            'levels' => ProgramVersionLevel::query()->orderBy('program_version_id')->orderBy('ordinal')->limit(300)->get(),
+            'availabilities' => BranchAvailability::query()->orderBy('id')->limit(200)->get(),
+            'offerings' => Offering::query()->orderBy('id')->limit(200)->get(),
         ]);
     }
 
@@ -128,13 +137,16 @@ final class AcademicController extends Controller
         $input = $request->validate([
             'student_id' => ['required', 'string'],
             'class_id' => ['required', 'string'],
+            'offering_id' => ['nullable', 'string'],
         ]);
 
+        $offeringId = ($input['offering_id'] ?? '') !== '' ? (string) $input['offering_id'] : null;
         app(MaintainEnrollment::class)->request(
             $this->actor(),
             $input['student_id'],
             $input['class_id'],
             $this->idempotencyKey('academic.enrollment.request'),
+            $offeringId,
         );
 
         return redirect()->route('academic.index')->with('success', 'Seat requested; it takes effect once an approver activates it.');
@@ -599,6 +611,128 @@ final class AcademicController extends Controller
         );
 
         return redirect()->route('academic.index')->with('success', 'Official transcript issued and frozen with its content hash.');
+    }
+
+    public function declareAvailability(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'branch_id' => ['required', 'string'],
+            'program_version_level_id' => ['required', 'string'],
+            'academic_period_id' => ['required', 'string'],
+        ]);
+
+        app(MaintainAcademicStructure::class)->declareBranchAvailability(
+            $this->actor(),
+            $input['branch_id'],
+            $input['program_version_level_id'],
+            $input['academic_period_id'],
+            $this->idempotencyKey('academic.availability.declare'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Branch availability declared.');
+    }
+
+    public function openOffering(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'branch_id' => ['required', 'string'],
+            'program_version_level_id' => ['required', 'string'],
+            'academic_period_id' => ['required', 'string'],
+            'capacity' => ['required', 'integer', 'min:1', 'max:10000'],
+        ]);
+
+        app(MaintainAcademicStructure::class)->openOffering(
+            $this->actor(),
+            $input['branch_id'],
+            $input['program_version_level_id'],
+            $input['academic_period_id'],
+            (int) $input['capacity'],
+            $this->idempotencyKey('academic.offering.open'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Offering opened.');
+    }
+
+    public function closeAvailability(Request $request, string $availabilityId): RedirectResponse
+    {
+        app(ManageAcademicOffering::class)->closeAvailability(
+            $this->actor(),
+            BranchAvailability::query()->findOrFail($availabilityId),
+            $this->idempotencyKey('academic.availability.close'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Availability closed.');
+    }
+
+    public function reopenAvailability(Request $request, string $availabilityId): RedirectResponse
+    {
+        app(ManageAcademicOffering::class)->reopenAvailability(
+            $this->actor(),
+            BranchAvailability::query()->findOrFail($availabilityId),
+            $this->idempotencyKey('academic.availability.reopen'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Availability reopened.');
+    }
+
+    public function closeOffering(Request $request, string $offeringId): RedirectResponse
+    {
+        app(ManageAcademicOffering::class)->closeOffering(
+            $this->actor(),
+            Offering::query()->findOrFail($offeringId),
+            $this->idempotencyKey('academic.offering.close'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Offering closed.');
+    }
+
+    public function reopenOffering(Request $request, string $offeringId): RedirectResponse
+    {
+        app(ManageAcademicOffering::class)->reopenOffering(
+            $this->actor(),
+            Offering::query()->findOrFail($offeringId),
+            $this->idempotencyKey('academic.offering.reopen'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Offering reopened.');
+    }
+
+    public function cancelOffering(Request $request, string $offeringId): RedirectResponse
+    {
+        app(ManageAcademicOffering::class)->cancelOffering(
+            $this->actor(),
+            Offering::query()->findOrFail($offeringId),
+            $this->idempotencyKey('academic.offering.cancel'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Offering cancelled.');
+    }
+
+    public function completeOffering(Request $request, string $offeringId): RedirectResponse
+    {
+        app(ManageAcademicOffering::class)->completeOffering(
+            $this->actor(),
+            Offering::query()->findOrFail($offeringId),
+            $this->idempotencyKey('academic.offering.complete'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Offering completed.');
+    }
+
+    public function resizeOffering(Request $request, string $offeringId): RedirectResponse
+    {
+        $input = $request->validate([
+            'capacity' => ['required', 'integer', 'min:1', 'max:10000'],
+        ]);
+
+        app(ManageAcademicOffering::class)->resizeCapacity(
+            $this->actor(),
+            Offering::query()->findOrFail($offeringId),
+            (int) $input['capacity'],
+            $this->idempotencyKey('academic.offering.resize'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Offering capacity resized.');
     }
 
     public function fileAppeal(Request $request): RedirectResponse
