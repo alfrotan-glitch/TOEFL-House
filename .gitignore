@@ -24,3 +24,4 @@ composer.phar
 # cluster and data backups live outside version control by design.
 /.runtime/
 /backup/
+.sandbox/
