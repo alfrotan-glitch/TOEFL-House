@@ -34,8 +34,10 @@ function daysBetween(a: string, b: string): number {
   return Math.floor((new Date(a).getTime() - new Date(b).getTime()) / 86400000);
 }
 function addDays(dateStr: string, days: number): string {
-  const d = new Date(dateStr);
-  d.setDate(d.getDate() + days);
+  // UTC-pure: parse UTC, add UTC, render UTC (mixed clocks made the answer
+  // depend on the server's timezone offset).
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 }
 

@@ -5,6 +5,21 @@ export function id(prefix: string): string {
   return `${prefix}_${randomUUID()}`;
 }
 
+/** Adds days to a YYYY-MM-DD date, purely in UTC.
+ *
+ * `new Date(str)` + `setDate` + `toISOString` mixes clocks: the parse is UTC,
+ * the arithmetic is LOCAL, the render is UTC again, so the answer depends on
+ * the server's offset (a negative offset can move the result back a day).
+ * Business date math must be deterministic everywhere: parse UTC, add UTC,
+ * render UTC.
+ */
+export function addDaysISO(dateStr: string, days: number): string {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) throw new Error(`addDaysISO: invalid date "${dateStr}".`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 /** Returns today's date in YYYY-MM-DD format based on LOCAL server time. */
 export function today(): string {
   // 'en-CA' locale reliably outputs ISO 8601 (YYYY-MM-DD) based on local time.

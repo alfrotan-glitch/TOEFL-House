@@ -1,4 +1,5 @@
 import type BetterSqlite3 from 'better-sqlite3';
+import { today as todayLocal } from '../../utils/ids.js';
 import { assertMoney } from '../../utils/money.js';
 
 export type FeeKey = 'placementTestFee' | 'registrationFee' | 'cardIssuanceFee' | 'diplomaFee';
@@ -57,7 +58,8 @@ const lookupStatement = (db: BetterSqlite3.Database) => db.prepare(LOOKUP_SQL);
 
 function normalizeAsOfDate(value: string | null | undefined): string {
   const trimmed = typeof value === 'string' ? value.trim() : '';
-  return trimmed || new Date().toISOString().slice(0, 10);
+  // Same clock the writers use (`today()`, local) — see discount-authority.
+  return trimmed || todayLocal();
 }
 
 function normalizeAmount(row: { amount: unknown; fee_type: string }): number {

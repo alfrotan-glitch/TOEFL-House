@@ -1,4 +1,5 @@
 import type BetterSqlite3 from 'better-sqlite3';
+import { today as todayLocal } from '../../utils/ids.js';
 
 /**
  * THE DISCOUNT AUTHORIZATION BOUNDARY
@@ -156,7 +157,10 @@ export function resolveAuthorizedDiscount(
   opts: { branchId?: string | null; today?: string } = {},
 ): AuthorizedDiscount {
   const requested = Number.isFinite(Number(candidate)) ? Math.max(0, Number(candidate)) : 0;
-  const today = opts.today ?? new Date().toISOString().slice(0, 10);
+  // The business clock, not the UTC clock: authorization windows are read
+  // against dates written by `today()` (local). Mixing clocks made a grant
+  // flip active/expired at 19:30 Kabul time instead of midnight.
+  const today = opts.today ?? todayLocal();
 
   let best: { row: AuthRow; max: number } | null = null;
 

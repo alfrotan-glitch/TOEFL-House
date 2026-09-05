@@ -358,18 +358,37 @@ examsRouter.patch(
     }
 
     let resultEvent: ReturnType<typeof eventBus.emit> | undefined;
+    let diplomaReceipt: string | null = null;
     const scoreTx = db.transaction(() => {
       stmtUpdateExamResult.run(score, status, certIssued ? 1 : 0, certNo, result.id);
       if (certIssued && result.student_id) {
         stmtInsertCertificate.run(id('cert'), result.student_id, date, certNo, status, exam.branch_id);
       }
       if (certIssued && diplomaFee > 0) {
+        // Cash taken at issuance is a PAYMENT with a receipt from the gap-free
+        // series — the same authority every collection path uses. Booking only
+        // the ledger income left the diploma fee outside the payment history,
+        // outside the receipt series the drawer reconciles, and outside the
+        // refund route (which reverses by paymentId); the once-per-student
+        // probe above had to read raw financial_transactions to even see it.
+        const diplomaPaymentId = id('pay');
+        diplomaReceipt = nextReceiptNumber();
+        db.prepare(
+          `INSERT INTO payments (id, student_id, amount, date, payment_method, status, category, notes, receipt_number, branch_id, idempotency_key)
+           VALUES (?, ?, ?, ?, 'cash', 'completed', 'diploma', ?, ?, ?, ?)`,
+        ).run(
+          diplomaPaymentId, result.student_id || null, diplomaFee, date,
+          `Diploma fee: ${certNo}`, diplomaReceipt, exam.branch_id,
+          // Keyed on the certificate identity: one certificate, one charge.
+          `diploma-fee:${certNo}`,
+        );
         recordIncome({
           category: 'diploma',
           amount: diplomaFee,
           date,
           description: `Diploma fee for ${result.candidate_name} (${certNo})`,
           referenceId: result.student_id || result.visitor_id,
+          paymentId: diplomaPaymentId,
           operatorName: user.fullName, operatorRole: req.rbac?.primaryRole ?? null,
           branchId: exam.branch_id,
         });
@@ -387,7 +406,7 @@ examsRouter.patch(
     if (resultEvent) void eventBus.dispatch(resultEvent);
 
     writeAudit(req, `Recorded score ${score} for ${result.candidate_name} in ${req.params.id}. Certificate: ${certIssued ? 'Yes' : 'No'}`);
-    res.json({ id: result.id, status, certificateNo: certNo, diplomaFee: certIssued ? diplomaFee : 0 });
+    res.json({ id: result.id, status, certificateNo: certNo, diplomaFee: certIssued ? diplomaFee : 0, diplomaReceipt });
   })
 );
 

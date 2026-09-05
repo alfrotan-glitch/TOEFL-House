@@ -104,15 +104,20 @@ describe('ERP cross-system forensic audit', () => {
     const resultId = id('res');
     db.prepare(`INSERT INTO exam_results (id, exam_id, student_id, candidate_name, score, status, branch_id) VALUES (?, 'xf_exam', 'xf_stu', 'XF Student', 0, 'pending', ?)`).run(resultId, BRANCH_A);
 
-    // Score the exam with certificate issuance → charges diploma 500 (no payment row).
+    // Score the exam with certificate issuance → charges diploma 500 AS A
+    // PAYMENT (remediated: it used to book income only, with no payment row,
+    // no receipt, no refund path).
     const score = await supertest(app).patch(`/api/exams/xf_exam/results/${resultId}`).set(authHeader(owner)).send({ score: 85, certIssued: true });
     expect(score.status).toBe(200);
     expect(score.body.diplomaFee).toBe(500);
+    expect(typeof score.body.diplomaReceipt).toBe('string');
     const certIncome = (db.prepare(`SELECT COUNT(*) c FROM financial_transactions WHERE category='diploma' AND reference_id='xf_stu'`).get() as { c: number }).c;
     const certPayment = (db.prepare(`SELECT COUNT(*) c FROM payments WHERE student_id='xf_stu' AND category='diploma'`).get() as { c: number }).c;
-    console.log(`[EVIDENCE] certificate: diploma income=${certIncome}, payments rows=${certPayment}`);
+    const linked = (db.prepare(`SELECT COUNT(*) c FROM financial_transactions ft JOIN payments p ON p.id = ft.payment_id WHERE ft.category='diploma' AND ft.reference_id='xf_stu'`).get() as { c: number }).c;
+    console.log(`[EVIDENCE] certificate: diploma income=${certIncome}, payments rows=${certPayment}, income linked to payment=${linked}`);
     expect(certIncome).toBe(1);
-    expect(certPayment).toBe(0); // no payment row — traceability gap
+    expect(certPayment).toBe(1); // the cash is a payment with a receipt now
+    expect(linked).toBe(1);      // and the ledger points at it
 
     // Manual diploma payment: must now be rejected (409) — the certificate
     // already booked the fee (ledger-backed guard).

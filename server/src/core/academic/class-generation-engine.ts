@@ -3,6 +3,7 @@
  * Auto-generates classes based on levels, time slots, rooms, and gender policies.
  */
 import type Database from 'better-sqlite3';
+import { today as todayLocal } from '../../utils/ids.js';
 import { id as makeId } from '../../utils/ids.js';
 import { deriveCoarseClassStatus } from './lifecycle-engine.js';
 import { ACADEMIC_DEFAULTS } from '../configuration/policy-catalog.js';
@@ -284,7 +285,7 @@ export class ClassGenerationEngine {
     }
     
     // Resolve start and end dates from Academic Term if available
-    let startDate = new Date().toISOString().slice(0, 10);
+    let startDate = todayLocal();
     let endDate = new Date();
     endDate.setMonth(endDate.getMonth() + 3); // Default 3 months
     if (run.academic_term_id) {

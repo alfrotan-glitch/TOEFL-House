@@ -12,7 +12,7 @@ import { isGlobalOwner, hasAnyPermission, hasRole } from '../core/rbac/rbac-serv
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { assertOptionalIsoDate } from '../utils/isoDate.js';
-import { id, today } from '../utils/ids.js';
+import { id, today, addDaysISO } from '../utils/ids.js';
 import { resolvePlacementRequirement } from '../core/placement/policy-engine.js';
 import { readRetakePolicy, evaluateBilling } from '../core/placement/placement-policy.js';
 import { buildVisitorSummary, queryVisitorPage, type VisitorFilters } from '../core/visitors/visitor-query.js';
@@ -235,9 +235,8 @@ function resolveAdmissionRegistrationRule(branchId: string, scope: { programVers
 
 function invoiceDueDate(issueDate: string): string {
   const dueDays = getNumberSetting('invoice_due_days', SYSTEM_DEFAULTS.invoiceDueDays);
-  const due = new Date(issueDate);
-  due.setDate(due.getDate() + dueDays);
-  return due.toISOString().slice(0, 10);
+  // UTC-pure due-date arithmetic (see addDaysISO in utils/ids).
+  return addDaysISO(issueDate, dueDays);
 }
 
 function latestCompletedPlacementAttempt(visitorId: string): { id: string; snapshot_json: string | null } | null {

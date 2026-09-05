@@ -31,7 +31,7 @@ import { writeAudit } from '../middleware/audit.js';
 import { assertMoney } from '../utils/money.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
 import { toCsv } from '../utils/csv.js';
-import { id, today } from '../utils/ids.js';
+import { id, today , addDaysISO } from '../utils/ids.js';
 import { recordIncome } from '../utils/income.js';
 import { getNumberSetting } from '../utils/settings.js';
 import { evaluateRules } from '../core/configuration/rule-engine.js';
@@ -285,9 +285,8 @@ function resolveAdmissionRegistrationRule(branchId: string, scope: { programVers
 
 function invoiceDueDate(issueDate: string): string {
   const dueDays = getNumberSetting('invoice_due_days', SYSTEM_DEFAULTS.invoiceDueDays);
-  const due = new Date(issueDate);
-  due.setDate(due.getDate() + dueDays);
-  return due.toISOString().slice(0, 10);
+  // UTC-pure due-date arithmetic (see addDaysISO in utils/ids).
+  return addDaysISO(issueDate, dueDays);
 }
 
 /**

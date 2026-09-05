@@ -8,7 +8,7 @@ import { db } from '../db/connection.js';
 import { authenticate, authorize, requirePermission, resolveBranchScope, canAccessBranchResource } from '../middleware/auth.js';
 import { writeAudit } from '../middleware/audit.js';
 import { ah, HttpError } from '../middleware/errorHandler.js';
-import { id, today } from '../utils/ids.js';
+import { id, today , addDaysISO } from '../utils/ids.js';
 import { addNotification } from '../utils/notifications.js';
 import { getStudentBalance } from '../utils/studentBalance.js';
 import { getNumberSetting, setSetting } from '../utils/settings.js';
@@ -243,9 +243,8 @@ invoicesRouter.post(
 
     const dueDays = getNumberSetting('invoice_due_days', SYSTEM_DEFAULTS.invoiceDueDays);
     const issueDate = today();
-    const due = new Date(issueDate);
-    due.setDate(due.getDate() + dueDays);
-    const dueDate = due.toISOString().slice(0, 10);
+    // UTC-pure due-date arithmetic (see addDaysISO in utils/ids).
+    const dueDate = addDaysISO(issueDate, dueDays);
 
     const invoiceId = id('inv');
     const branchId = student.branch_id;
@@ -295,9 +294,8 @@ invoicesRouter.post(
     const invoiceNumber = nextInvoiceNumber(row.branch_id);
     const dueDays = getNumberSetting('invoice_due_days', SYSTEM_DEFAULTS.invoiceDueDays);
     const issueDate = today();
-    const due = new Date(issueDate);
-    due.setDate(due.getDate() + dueDays);
-    const dueDate = due.toISOString().slice(0, 10);
+    // UTC-pure due-date arithmetic (see addDaysISO in utils/ids).
+    const dueDate = addDaysISO(issueDate, dueDays);
 
     stmtUpdateInvoiceIssue.run(invoiceNumber, issueDate, dueDate, user.fullName, row.id);
 
