@@ -512,7 +512,7 @@
 
 <div class="card">
     <h2>Progression decisions</h2>
-    <p class="sub">Propose, review and approve are signed by three distinct employees in their own sessions.</p>
+    <p class="sub">Propose, review and approve are signed by three distinct employees in their own sessions; the approver may reject a reviewed decision instead. An approved or rejected decision can be marked appealed (contest is recorded on the record by an employee with the review capability who was not the proposer) or corrected by supersession, which writes an approved successor decision, links the original to it, and keeps the original row as immutable history — the superseding employee signs both roles and must differ from the original proposer. A completed seat accepts an approved progression decision as assessed evidence. Optional evidence travels on the proposal; the successor correction always carries its own outcome and reason.</p>
     <form method="POST" action="{{ route('academic.progression.propose') }}">
         @csrf
         <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
@@ -534,6 +534,9 @@
                 <option value="repeat">Repeat</option>
             </select>
             <input name="reason" type="text" placeholder="Reason" required>
+            <input name="assessment_result_id" type="text" placeholder="Result id (optional)" maxlength="36">
+            <input name="basis" type="text" placeholder="Decision basis (optional)" maxlength="1000">
+            <input name="repeat_count" type="number" min="1" placeholder="Repeat count (optional)">
         </div>
         <div class="actions"><button type="submit" class="btn">Propose progression</button></div>
     </form>
@@ -561,6 +564,60 @@
                                 @csrf
                                 <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
                                 <button type="submit" class="btn">Approve</button>
+                            </form>
+                            <form method="POST" action="{{ route('academic.progression.reject', $decision->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small secondary">Reject</button>
+                            </form>
+                        @endif
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+    <h3 style="margin-top:12px">Decided progressions</h3>
+    <p class="sub">Decided rows are read-only history: appealed marks contest on the record, supersession links the original to its successor decision.</p>
+    @if ($decidedProgressions->isEmpty())
+        <p class="empty">No decided progression history.</p>
+    @else
+        <table class="grid">
+            <tr><th>Student</th><th>Class</th><th>Outcome</th><th>State</th><th>Successor</th><th>Appeal / correct</th></tr>
+            @foreach ($decidedProgressions as $decision)
+                <tr>
+                    <td>{{ \Illuminate\Support\Str::limit($decision->student_id, 18) }}</td>
+                    <td>{{ \Illuminate\Support\Str::limit($decision->class_id, 18) }}</td>
+                    <td>{{ $decision->outcome }}</td>
+                    <td><span class="pill">{{ $decision->lifecycle_state }}</span></td>
+                    <td>{{ $decision->superseded_by_id !== null ? \Illuminate\Support\Str::limit($decision->superseded_by_id, 14) : '—' }}</td>
+                    <td>
+                        @if (in_array($decision->lifecycle_state, ['approved', 'rejected'], true))
+                            <form method="POST" action="{{ route('academic.progression.mark-appealed', $decision->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Mark appealed</button>
+                            </form>
+                            <form method="POST" action="{{ route('academic.progression.supersede', $decision->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <select name="outcome" required style="width:95px">
+                                    <option value="advance">Advance</option>
+                                    <option value="repeat">Repeat</option>
+                                </select>
+                                <input name="reason" type="text" placeholder="Correction reason…" required maxlength="1000" style="width:130px">
+                                <button type="submit" class="btn small">Supersede</button>
+                            </form>
+                        @endif
+                        @if ($decision->lifecycle_state === 'appealed')
+                            <form method="POST" action="{{ route('academic.progression.supersede', $decision->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <select name="outcome" required style="width:95px">
+                                    <option value="advance">Advance</option>
+                                    <option value="repeat">Repeat</option>
+                                </select>
+                                <input name="reason" type="text" placeholder="Correction reason…" required maxlength="1000" style="width:130px">
+                                <button type="submit" class="btn small">Supersede</button>
                             </form>
                         @endif
                     </td>

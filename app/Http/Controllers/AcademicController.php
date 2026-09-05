@@ -76,6 +76,7 @@ final class AcademicController extends Controller
             'requestedEnrollments' => Enrollment::query()->where('lifecycle_state', 'requested')->orderBy('id')->limit(200)->get(),
             'frozenEnrollments' => Enrollment::query()->where('lifecycle_state', 'frozen')->orderBy('id')->limit(200)->get(),
             'progressions' => ProgressionDecision::query()->whereIn('lifecycle_state', ['proposed', 'reviewed'])->orderBy('id')->limit(200)->get(),
+            'decidedProgressions' => ProgressionDecision::query()->whereIn('lifecycle_state', ['approved', 'rejected', 'appealed', 'superseded'])->orderByDesc('id')->limit(200)->get(),
             'appeals' => AcademicAppeal::query()->whereIn('lifecycle_state', ['open', 'assigned', 'investigating', 'escalated', 'resolved', 'rejected'])->orderByDesc('id')->limit(200)->get(),
             'releasedResults' => AssessmentResult::query()->where('lifecycle_state', 'released')->orderByDesc('id')->limit(200)->get(),
             'approvedProgressions' => ProgressionDecision::query()->where('lifecycle_state', 'approved')->orderBy('id')->limit(200)->get(),
@@ -368,7 +369,13 @@ final class AcademicController extends Controller
             'class_id' => ['required', 'string'],
             'outcome' => ['required', 'in:advance,repeat'],
             'reason' => ['required', 'string', 'max:1000'],
+            'assessment_result_id' => ['nullable', 'string'],
+            'basis' => ['nullable', 'string', 'max:1000'],
+            'repeat_count' => ['nullable', 'integer', 'min:1'],
         ]);
+
+        $evidence = fn (string $key): ?string => (($input[$key] ?? '') !== '' && $input[$key] !== null) ? (string) $input[$key] : null;
+        $repeatCount = ($input['repeat_count'] ?? '') !== '' && $input['repeat_count'] !== null ? (int) $input['repeat_count'] : null;
 
         app(DecideProgression::class)->propose(
             $this->actor(),
@@ -377,6 +384,9 @@ final class AcademicController extends Controller
             $input['outcome'],
             $input['reason'],
             $this->idempotencyKey('academic.progression.propose'),
+            $evidence('assessment_result_id'),
+            $evidence('basis'),
+            $repeatCount,
         );
 
         return redirect()->route('academic.index')->with('success', 'Progression proposed; it takes effect once reviewed and approved by distinct signers.');
@@ -402,6 +412,48 @@ final class AcademicController extends Controller
         );
 
         return redirect()->route('academic.index')->with('success', 'Progression approved.');
+    }
+
+    public function rejectProgression(Request $request, string $decisionId): RedirectResponse
+    {
+        app(DecideProgression::class)->reject(
+            $this->actor(),
+            ProgressionDecision::query()->findOrFail($decisionId),
+            $this->idempotencyKey('academic.progression.reject'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Progression rejected.');
+    }
+
+    public function markProgressionAppealed(Request $request, string $decisionId): RedirectResponse
+    {
+        app(DecideProgression::class)->markAppealed(
+            $this->actor(),
+            ProgressionDecision::query()->findOrFail($decisionId),
+            $this->idempotencyKey('academic.progression.mark-appealed'),
+        );
+
+        return redirect()->route('academic.index')->with('success', 'Progression marked as appealed.');
+    }
+
+    public function supersedeProgression(Request $request, string $decisionId): RedirectResponse
+    {
+        $input = $request->validate([
+            'outcome' => ['required', 'in:advance,repeat'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        $actor = $this->actor();
+        $result = app(DecideProgression::class)->supersede(
+            $actor,
+            $actor,
+            ProgressionDecision::query()->findOrFail($decisionId),
+            $input['outcome'],
+            $input['reason'],
+            $this->idempotencyKey('academic.progression.supersede'),
+        );
+
+        return redirect()->route('academic.index')->with('success', "Progression superseded by decision {$result['decision_id']}.");
     }
 
     public function defineProgram(Request $request): RedirectResponse

@@ -131,6 +131,9 @@ Route::middleware('employee')->group(function (): void {
         Route::post('progressions', [AcademicController::class, 'proposeProgression'])->name('progression.propose');
         Route::post('progressions/{decisionId}/review', [AcademicController::class, 'reviewProgression'])->name('progression.review');
         Route::post('progressions/{decisionId}/approve', [AcademicController::class, 'approveProgression'])->name('progression.approve');
+        Route::post('progressions/{decisionId}/reject', [AcademicController::class, 'rejectProgression'])->name('progression.reject');
+        Route::post('progressions/{decisionId}/mark-appealed', [AcademicController::class, 'markProgressionAppealed'])->name('progression.mark-appealed');
+        Route::post('progressions/{decisionId}/supersede', [AcademicController::class, 'supersedeProgression'])->name('progression.supersede');
         Route::post('attempts', [AcademicController::class, 'submitAssessmentAttempt'])->name('attempt.submit');
         Route::post('attempts/{attemptId}/score', [AcademicController::class, 'scoreAttempt'])->name('attempt.score');
         Route::post('results/{resultId}/moderate', [AcademicController::class, 'moderateResult'])->name('result.moderate');
