@@ -115,6 +115,9 @@ Route::middleware('employee')->group(function (): void {
         Route::post('classes', [AcademicController::class, 'defineClass'])->name('class.define');
         Route::post('classes/{classId}/transition', [AcademicController::class, 'transitionClass'])->name('class.transition');
         Route::post('teacher-assignments', [AcademicController::class, 'assignTeacher'])->name('teacher.assign');
+        Route::post('teacher-assignments/{assignmentId}/end', [AcademicController::class, 'endAssignment'])->name('teacher.end');
+        Route::post('teacher-assignments/{assignmentId}/extend', [AcademicController::class, 'extendAssignment'])->name('teacher.extend');
+        Route::post('teacher-assignments/{assignmentId}/handover', [AcademicController::class, 'handoverAssignment'])->name('teacher.handover');
         Route::get('sessions', [AcademicController::class, 'sessions'])->name('sessions');
         Route::post('sessions', [AcademicController::class, 'scheduleSession'])->name('schedule');
         Route::post('sessions/{sessionId}/attendance', [AcademicController::class, 'recordAttendance'])->name('attendance');

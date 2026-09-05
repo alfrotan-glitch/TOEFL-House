@@ -748,6 +748,62 @@ final class AcademicController extends Controller
         return redirect()->route('academic.index')->with('success', 'Teacher assigned to the class.');
     }
 
+    public function endAssignment(Request $request, string $assignmentId): RedirectResponse
+    {
+        $input = $request->validate([
+            'effective_to' => ['required', 'date'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        $result = app(MaintainClass::class)->endAssignment(
+            $this->actor(),
+            TeacherAssignment::query()->findOrFail($assignmentId),
+            CarbonImmutable::parse($input['effective_to']),
+            $input['reason'],
+            $this->idempotencyKey('academic.teacher.end'),
+        );
+
+        return redirect()->route('academic.index')->with('success', "Assignment ended {$result['effective_to']}; the row stays as history and the teacher keeps read access until term end.");
+    }
+
+    public function extendAssignment(Request $request, string $assignmentId): RedirectResponse
+    {
+        $input = $request->validate([
+            'effective_to' => ['required', 'date'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        $result = app(MaintainClass::class)->extendAssignment(
+            $this->actor(),
+            TeacherAssignment::query()->findOrFail($assignmentId),
+            CarbonImmutable::parse($input['effective_to']),
+            $input['reason'],
+            $this->idempotencyKey('academic.teacher.extend'),
+        );
+
+        return redirect()->route('academic.index')->with('success', "Assignment extended to {$result['effective_to']}.");
+    }
+
+    public function handoverAssignment(Request $request, string $assignmentId): RedirectResponse
+    {
+        $input = $request->validate([
+            'successor_teacher_person_id' => ['required', 'string'],
+            'handover_on' => ['required', 'date'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        $result = app(MaintainClass::class)->handoverAssignment(
+            $this->actor(),
+            TeacherAssignment::query()->findOrFail($assignmentId),
+            $input['successor_teacher_person_id'],
+            CarbonImmutable::parse($input['handover_on']),
+            $input['reason'],
+            $this->idempotencyKey('academic.teacher.handover'),
+        );
+
+        return redirect()->route('academic.index')->with('success', "Assignment handed over; successor assignment {$result['incoming_assignment_id']} is open.");
+    }
+
     public function submitAssessmentAttempt(Request $request): RedirectResponse
     {
         $input = $request->validate([

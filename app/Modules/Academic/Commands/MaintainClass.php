@@ -365,4 +365,152 @@ final class MaintainClass
             throw AuthorizationDenied::forCode('academic.schedule_denied', $outcome->reason);
         }
     }
+
+    /**
+     * End an open assignment on an explicit date with a mandatory
+     * reason. History is retained: the row is dated, never deleted.
+     * Ending the last open assignment of an active class is allowed;
+     * continuance is an Academic Management decision (D-F-062), not an
+     * automatic transition.
+     *
+     * @return array{assignment_id: string, effective_to: string, correlation_id: string}
+     */
+    public function endAssignment(Actor $actor, TeacherAssignment $assignment, CarbonImmutable $effectiveTo, string $reason, string $idempotencyKey): array
+    {
+        $payload = hash('sha256', implode('|', ['academic.teacher.end', $assignment->id, $effectiveTo->toDateString(), $reason, $actor->actorId]));
+
+        try {
+            return $this->idempotency->execute('academic.teacher.end', $idempotencyKey, $payload,
+                fn (): array => DB::transaction(function () use ($actor, $assignment, $effectiveTo, $reason): array {
+                    $this->requireCapability($actor);
+                    if ($reason === '') {
+                        throw BusinessRejection::forCode('academic.assignment_reason', 'ending an assignment requires a reason');
+                    }
+
+                    /** @var TeacherAssignment $locked */
+                    $locked = TeacherAssignment::query()->whereKey($assignment->id)->lockForUpdate()->firstOrFail();
+                    if ($locked->effective_to !== null) {
+                        throw BusinessRejection::forCode('academic.assignment_not_open', 'only an open assignment can be ended');
+                    }
+                    if ($effectiveTo->startOfDay()->lessThanOrEqualTo(CarbonImmutable::parse($locked->effective_from)->startOfDay())) {
+                        throw BusinessRejection::forCode('academic.assignment_period', 'an assignment must end after it starts');
+                    }
+
+                    $locked->forceFill(['effective_to' => $effectiveTo->startOfDay()->toDateString()]);
+                    $locked->save();
+                    $event = $this->audit->record($actor->actorId, 'academic.teacher.end', 'teacher_assignment', $locked->id, ['effective_to' => null], [
+                        'effective_to' => $locked->effective_to, 'reason' => $reason,
+                    ]);
+
+                    return ['assignment_id' => $locked->id, 'effective_to' => (string) $locked->effective_to, 'correlation_id' => $event->correlation_id];
+                }),
+            );
+        } catch (AuthorizationDenied $denial) {
+            $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.teacher.end', 'teacher_assignment', $assignment->id);
+        }
+    }
+
+    /**
+     * Move the end date of a dated assignment later, with a mandatory
+     * reason (D-F-065). Open-ended assignments are not extended; they
+     * have no end date to move.
+     *
+     * @return array{assignment_id: string, effective_to: string, correlation_id: string}
+     */
+    public function extendAssignment(Actor $actor, TeacherAssignment $assignment, CarbonImmutable $newEffectiveTo, string $reason, string $idempotencyKey): array
+    {
+        $payload = hash('sha256', implode('|', ['academic.teacher.extend', $assignment->id, $newEffectiveTo->toDateString(), $reason, $actor->actorId]));
+
+        try {
+            return $this->idempotency->execute('academic.teacher.extend', $idempotencyKey, $payload,
+                fn (): array => DB::transaction(function () use ($actor, $assignment, $newEffectiveTo, $reason): array {
+                    $this->requireCapability($actor);
+                    if ($reason === '') {
+                        throw BusinessRejection::forCode('academic.assignment_reason', 'extending an assignment requires a reason');
+                    }
+
+                    /** @var TeacherAssignment $locked */
+                    $locked = TeacherAssignment::query()->whereKey($assignment->id)->lockForUpdate()->firstOrFail();
+                    if ($locked->effective_to === null) {
+                        throw BusinessRejection::forCode('academic.assignment_not_dated', 'only a dated assignment can be extended');
+                    }
+                    if ($newEffectiveTo->startOfDay()->lessThanOrEqualTo(CarbonImmutable::parse($locked->effective_to)->startOfDay())) {
+                        throw BusinessRejection::forCode('academic.assignment_period', 'an extension must move the end date later');
+                    }
+
+                    $before = ['effective_to' => $locked->effective_to];
+                    $locked->forceFill(['effective_to' => $newEffectiveTo->startOfDay()->toDateString()]);
+                    $locked->save();
+                    $event = $this->audit->record($actor->actorId, 'academic.teacher.extend', 'teacher_assignment', $locked->id, $before, [
+                        'effective_to' => $locked->effective_to, 'reason' => $reason,
+                    ]);
+
+                    return ['assignment_id' => $locked->id, 'effective_to' => (string) $locked->effective_to, 'correlation_id' => $event->correlation_id];
+                }),
+            );
+        } catch (AuthorizationDenied $denial) {
+            $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.teacher.extend', 'teacher_assignment', $assignment->id);
+        }
+    }
+
+    /**
+     * Hand over one open assignment to a successor in a single
+     * transaction (D-F-061): the outgoing row ends on the handover
+     * date and the successor row opens from that date. Substitution
+     * stays a separate assignment row; the audit links both.
+     *
+     * @return array{outgoing_assignment_id: string, incoming_assignment_id: string, correlation_id: string}
+     */
+    public function handoverAssignment(Actor $actor, TeacherAssignment $assignment, string $successorTeacherPersonId, CarbonImmutable $handoverOn, string $reason, string $idempotencyKey): array
+    {
+        $payload = hash('sha256', implode('|', ['academic.teacher.handover', $assignment->id, $successorTeacherPersonId, $handoverOn->toDateString(), $reason, $actor->actorId]));
+
+        try {
+            return $this->idempotency->execute('academic.teacher.handover', $idempotencyKey, $payload,
+                fn (): array => DB::transaction(function () use ($actor, $assignment, $successorTeacherPersonId, $handoverOn, $reason): array {
+                    $this->requireCapability($actor);
+                    if ($reason === '') {
+                        throw BusinessRejection::forCode('academic.assignment_reason', 'handing over an assignment requires a reason');
+                    }
+                    if (! Person::query()->whereKey($successorTeacherPersonId)->exists()) {
+                        throw BusinessRejection::forCode('academic.teacher_unknown', 'a handover requires a known successor person');
+                    }
+
+                    /** @var TeacherAssignment $locked */
+                    $locked = TeacherAssignment::query()->whereKey($assignment->id)->lockForUpdate()->firstOrFail();
+                    if ($locked->effective_to !== null) {
+                        throw BusinessRejection::forCode('academic.assignment_not_open', 'only an open assignment can be handed over');
+                    }
+                    if ($handoverOn->startOfDay()->lessThanOrEqualTo(CarbonImmutable::parse($locked->effective_from)->startOfDay())) {
+                        throw BusinessRejection::forCode('academic.assignment_period', 'a handover must take effect after the assignment starts');
+                    }
+                    if (TeacherAssignment::query()->where('class_id', $locked->class_id)->where('teacher_person_id', $successorTeacherPersonId)->whereNull('effective_to')->exists()) {
+                        throw BusinessRejection::forCode('academic.teacher_duplicate', 'the successor already has an open assignment on the class');
+                    }
+
+                    $day = $handoverOn->startOfDay()->toDateString();
+                    $locked->forceFill(['effective_to' => $day]);
+                    $locked->save();
+
+                    $incoming = TeacherAssignment::query()->create([
+                        'id' => RandomIdentifier::new(),
+                        'class_id' => $locked->class_id,
+                        'teacher_person_id' => $successorTeacherPersonId,
+                        'effective_from' => $day,
+                        'effective_to' => null,
+                    ]);
+                    $event = $this->audit->record($actor->actorId, 'academic.teacher.handover', 'teacher_assignment', $incoming->id, ['outgoing_assignment_id' => $locked->id], [
+                        'outgoing_assignment_id' => $locked->id,
+                        'successor_teacher_person_id' => $successorTeacherPersonId,
+                        'handover_on' => $day,
+                        'reason' => $reason,
+                    ]);
+
+                    return ['outgoing_assignment_id' => $locked->id, 'incoming_assignment_id' => $incoming->id, 'correlation_id' => $event->correlation_id];
+                }),
+            );
+        } catch (AuthorizationDenied $denial) {
+            $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.teacher.handover', 'teacher_assignment', $assignment->id);
+        }
+    }
 }

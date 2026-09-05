@@ -11,7 +11,7 @@
             <em>none assigned</em>
         @else
             @foreach ($gradesheet['teachers'] as $teacher)
-                <span class="pill">{{ \Illuminate\Support\Str::limit($teacher['teacher_person_id'], 18) }}</span>
+                <span class="pill" title="{{ $teacher['effective_from'] }} → {{ $teacher['effective_to'] ?? 'open' }}">{{ \Illuminate\Support\Str::limit($teacher['teacher_person_id'], 18) }}{{ $teacher['effective_to'] !== null ? ' (ended)' : '' }}</span>
             @endforeach
         @endif
     </p>

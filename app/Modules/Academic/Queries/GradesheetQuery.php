@@ -6,6 +6,7 @@ namespace App\Modules\Academic\Queries;
 
 use App\Modules\Academic\Commands\ManageAssessmentResult;
 use App\Modules\Academic\Domain\AssessmentResultLifecycle;
+use App\Modules\Academic\Models\AcademicPeriod;
 use App\Modules\Academic\Models\AssessmentAttempt;
 use App\Modules\Academic\Models\AssessmentResult;
 use App\Modules\Academic\Models\ClassModel;
@@ -17,6 +18,7 @@ use App\Modules\Students\Models\Student;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 
 /**
@@ -25,8 +27,10 @@ use Illuminate\Support\Collection;
  * This query never writes: every mutation stays on ManageAssessmentResult
  * (submit/score/moderate/approve/release, staged corrections). It compiles
  * one class's roster × attempts × live result × correction lineage, and it
- * enforces the only new authorization in this slice — the viewer rule: an
- * open-assigned teacher of the class (identity match), or academic
+ * enforces the viewer rule: an open-assigned teacher of the class
+ * (identity match), a teacher whose assignment ended while the class
+ * period has not ended (D-F-058/D-F-066 read-only tier — the page itself
+ * is read-only and the rule never grants mutation authority), or academic
  * oversight (a chain or structure capability). Denials are audited exactly
  * like command denials.
  */
@@ -54,7 +58,8 @@ final class GradesheetQuery
 
     /**
      * Classes the viewer may open, for scoping the gradesheet selector.
-     * Assigned classes for teachers; recent classes for oversight.
+     * Open-assigned classes plus ended-assignment classes whose period
+     * has not ended, for teachers; recent classes for oversight.
      *
      * @return Collection<int, ClassModel>
      */
@@ -69,7 +74,6 @@ final class GradesheetQuery
 
         $classIds = TeacherAssignment::query()
             ->where('teacher_person_id', $actor->actorId)
-            ->whereNull('effective_to')
             ->distinct()
             ->pluck('class_id')
             ->all();
@@ -81,7 +85,7 @@ final class GradesheetQuery
         /** @var Collection<int, ClassModel> $classes */
         $classes = ClassModel::query()->whereIn('id', $classIds)->orderByDesc('created_at')->get();
 
-        return $classes;
+        return $classes->filter(fn (ClassModel $class): bool => $this->mayView($actor, $class))->values();
     }
 
     /**
@@ -95,12 +99,13 @@ final class GradesheetQuery
 
         $teachers = TeacherAssignment::query()
             ->where('class_id', $class->id)
-            ->whereNull('effective_to')
             ->orderBy('effective_from')
             ->get()
             ->map(fn (TeacherAssignment $assignment): array => [
                 'assignment_id' => (string) $assignment->id,
                 'teacher_person_id' => (string) $assignment->teacher_person_id,
+                'effective_from' => (string) $assignment->effective_from,
+                'effective_to' => $assignment->effective_to !== null ? (string) $assignment->effective_to : null,
             ])
             ->all();
 
@@ -175,13 +180,7 @@ final class GradesheetQuery
 
     private function requireViewer(Actor $actor, ClassModel $class): void
     {
-        $assigned = TeacherAssignment::query()
-            ->where('class_id', $class->id)
-            ->where('teacher_person_id', $actor->actorId)
-            ->whereNull('effective_to')
-            ->exists();
-
-        if ($assigned || $this->isOversight($actor)) {
+        if ($this->mayView($actor, $class) || $this->isOversight($actor)) {
             return;
         }
 
@@ -193,6 +192,43 @@ final class GradesheetQuery
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.gradesheet.view', 'class', (string) $class->id);
         }
+    }
+
+    /**
+     * Open assignments always view; ended assignments view while the
+     * class period has not ended (D-F-058/D-F-066). Teachers without
+     * any assignment on the class never view by identity.
+     */
+    private function mayView(Actor $actor, ClassModel $class): bool
+    {
+        $open = TeacherAssignment::query()
+            ->where('class_id', $class->id)
+            ->where('teacher_person_id', $actor->actorId)
+            ->whereNull('effective_to')
+            ->exists();
+        if ($open) {
+            return true;
+        }
+
+        $everAssigned = TeacherAssignment::query()
+            ->where('class_id', $class->id)
+            ->where('teacher_person_id', $actor->actorId)
+            ->exists();
+        if (! $everAssigned) {
+            return false;
+        }
+
+        return ! $this->termEnded($class);
+    }
+
+    private function termEnded(ClassModel $class): bool
+    {
+        $endsOn = AcademicPeriod::query()->whereKey($class->period_id)->value('ends_on');
+        if (! is_string($endsOn) || $endsOn === '') {
+            return false;
+        }
+
+        return $endsOn < CarbonImmutable::today()->toDateString();
     }
 
     private function isOversight(Actor $actor): bool

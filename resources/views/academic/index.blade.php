@@ -196,7 +196,7 @@
 
 <div class="card">
     <h2>Teacher assignments</h2>
-    <p class="sub">A class must carry at least one open (undated end) teacher assignment before it can be activated. Optionally attribute a catalog skill to the assignment.</p>
+    <p class="sub">A class must carry at least one open (undated end) teacher assignment before it can be activated. Optionally attribute a catalog skill to the assignment. Assignments end on an explicit date with a reason and stay as history; dated assignments can be extended, and an open assignment can be handed to a successor in one audited step. Ended teachers keep gradesheet read access until the class term ends.</p>
     <form method="POST" action="{{ route('academic.teacher.assign') }}">
         @csrf
         <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
@@ -229,12 +229,60 @@
         <p class="empty">No teacher assignments recorded.</p>
     @else
         <table class="grid" style="margin-top:8px">
-            <tr><th>Class</th><th>Teacher</th><th>Effective</th></tr>
+            <tr><th>Class</th><th>Teacher</th><th>From</th><th>To</th><th>End</th><th>Extend</th><th>Handover</th></tr>
             @foreach ($assignments as $assignment)
                 <tr>
                     <td>{{ \Illuminate\Support\Str::limit($assignment->class_id, 18) }}</td>
                     <td>{{ \Illuminate\Support\Str::limit($assignment->teacher_person_id, 18) }}</td>
                     <td>{{ $assignment->effective_from }}</td>
+                    <td>{{ $assignment->effective_to ?? 'open' }}</td>
+                    <td>
+                        @if ($assignment->effective_to === null)
+                            <form method="POST" action="{{ route('academic.teacher.end', $assignment->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <input name="effective_to" type="date" required style="width:130px">
+                                <input name="reason" type="text" placeholder="Reason…" required maxlength="1000" style="width:110px">
+                                <button type="submit" class="btn small secondary">End</button>
+                            </form>
+                        @else
+                            —
+                        @endif
+                    </td>
+                    <td>
+                        @if ($assignment->effective_to !== null)
+                            <form method="POST" action="{{ route('academic.teacher.extend', $assignment->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <input name="effective_to" type="date" required style="width:130px">
+                                <input name="reason" type="text" placeholder="Reason…" required maxlength="1000" style="width:110px">
+                                <button type="submit" class="btn small">Extend</button>
+                            </form>
+                        @else
+                            —
+                        @endif
+                    </td>
+                    <td>
+                        @if ($assignment->effective_to === null)
+                            <form method="POST" action="{{ route('academic.teacher.handover', $assignment->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <select name="successor_teacher_person_id" required style="width:130px">
+                                    <option value="">Successor…</option>
+                                    @foreach ($people as $person)
+                                        @if ($person->id !== $assignment->teacher_person_id)
+                                            <option value="{{ $person->id }}">{{ $person->legal_name }}</option>
+                                        @endif
+                                    @endforeach
+                                </select>
+                                <input name="handover_on" type="date" required style="width:130px">
+                                <input name="reason" type="text" placeholder="Reason…" required maxlength="1000" style="width:110px">
+                                <button type="submit" class="btn small">Hand over</button>
+                            </form>
+                        @else
+                            —
+                        @endif
+                    </td>
                 </tr>
             @endforeach
         </table>
