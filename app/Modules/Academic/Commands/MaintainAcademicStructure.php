@@ -5,8 +5,12 @@ declare(strict_types=1);
 namespace App\Modules\Academic\Commands;
 
 use App\Modules\Academic\Domain\AcademicAccess;
+use App\Modules\Academic\Domain\ClassLifecycle;
+use App\Modules\Academic\Domain\EnrollmentLifecycle;
 use App\Modules\Academic\Models\AcademicPeriod;
 use App\Modules\Academic\Models\BranchAvailability;
+use App\Modules\Academic\Models\ClassModel;
+use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Academic\Models\LevelPrerequisite;
 use App\Modules\Academic\Models\LevelProgressionRule;
 use App\Modules\Academic\Models\Offering;
@@ -509,21 +513,58 @@ final class MaintainAcademicStructure
                 fn (): array => DB::transaction(function () use ($actor, $period, $toState): array {
                     $this->requireCapability($actor, null);
 
-                    $from = $period->lifecycle_state;
+                    /** @var AcademicPeriod $locked */
+                    $locked = AcademicPeriod::query()->whereKey($period->id)->lockForUpdate()->firstOrFail();
+                    $from = $locked->lifecycle_state;
                     $allowed = ['draft' => ['published'], 'published' => ['closed'], 'closed' => []][$from] ?? null;
                     if ($allowed === null || ! in_array($toState, $allowed, true)) {
                         throw BusinessRejection::forCode('academic.period_transition_forbidden', sprintf('transition %s -> %s is not allowed', $from, $toState));
                     }
+                    if ($toState === 'closed') {
+                        $this->assertPeriodCarriesNoLiveDelivery($locked->id);
+                    }
 
-                    $period->forceFill(['lifecycle_state' => $toState]);
-                    $period->save();
-                    $event = $this->audit->record($actor->actorId, 'academic.period.transition', 'academic_period', $period->id, ['lifecycle_state' => $from], ['lifecycle_state' => $toState]);
+                    $locked->forceFill(['lifecycle_state' => $toState]);
+                    $locked->save();
+                    $event = $this->audit->record($actor->actorId, 'academic.period.transition', 'academic_period', $locked->id, ['lifecycle_state' => $from], ['lifecycle_state' => $toState]);
 
-                    return ['period_id' => $period->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
+                    return ['period_id' => $locked->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
                 }),
             );
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.period.transition', 'academic_period', $period->id);
+        }
+    }
+
+    /**
+     * Closing a period is fail-closed: a closed term carries no live
+     * delivery. Every class in the period must already be terminal
+     * (cancelled, completed, archived) and no seat on the period's
+     * classes may still be requested, active, or frozen. Class
+     * terminality is monotonic — terminal states have no outgoing
+     * transitions except cancelled/completed -> archived, which stays
+     * terminal — so the class read needs no lock: a stale read can only
+     * refuse conservatively, never wrongly permit. The live seat rows
+     * are locked so a concurrent seat mutation serializes against the
+     * guard. Mirrors the class guard (academic.class_open_seats) and the
+     * offering guard (academic.offering_open_seats).
+     */
+    private function assertPeriodCarriesNoLiveDelivery(string $periodId): void
+    {
+        $openClasses = ClassModel::query()->where('period_id', $periodId)
+            ->whereNotIn('lifecycle_state', [ClassLifecycle::STATE_CANCELLED, ClassLifecycle::STATE_COMPLETED, ClassLifecycle::STATE_ARCHIVED])
+            ->count();
+        if ($openClasses > 0) {
+            throw BusinessRejection::forCode('academic.period_open_classes', sprintf('period cannot close while %d non-terminal class(es) reference it', $openClasses));
+        }
+
+        $openSeats = Enrollment::query()
+            ->whereIn('class_id', ClassModel::query()->where('period_id', $periodId)->select('id'))
+            ->whereIn('lifecycle_state', [EnrollmentLifecycle::STATE_REQUESTED, EnrollmentLifecycle::STATE_ACTIVE, EnrollmentLifecycle::STATE_FROZEN])
+            ->lockForUpdate()
+            ->pluck('id');
+        if ($openSeats->isNotEmpty()) {
+            throw BusinessRejection::forCode('academic.period_open_seats', sprintf('period cannot close while %d open enrollment seat(s) reference it', $openSeats->count()));
         }
     }
 

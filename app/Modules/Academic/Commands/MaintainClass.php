@@ -7,11 +7,13 @@ namespace App\Modules\Academic\Commands;
 use App\Modules\Academic\Domain\AcademicAccess;
 use App\Modules\Academic\Domain\ClassLifecycle;
 use App\Modules\Academic\Domain\ClassSectionLifecycle;
+use App\Modules\Academic\Domain\EnrollmentLifecycle;
 use App\Modules\Academic\Models\AcademicPeriod;
 use App\Modules\Academic\Models\AcademicRoom;
 use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\ClassSection;
 use App\Modules\Academic\Models\ClassSession;
+use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Academic\Models\ProgramVersion;
 use App\Modules\Academic\Models\ProgramVersionLevel;
 use App\Modules\Academic\Models\Skill;
@@ -89,6 +91,28 @@ final class MaintainClass
         }
     }
 
+    /**
+     * Terminal class transitions are fail-closed: a class moves to
+     * cancelled or completed only once every seat it carries has reached
+     * its own terminal state (withdrawn, transferred, completed).
+     * Requested, active, and frozen seats are live delivery obligations —
+     * the same live set the duplicate-seat, transfer, and waitlist guards
+     * use — and stranding them on a dead class would orphan attendance,
+     * assessment, and progression evidence. The live rows are locked so a
+     * concurrent seat mutation serializes against the guard. Mirrors the
+     * offering guard (academic.offering_open_seats).
+     */
+    private function assertNoOpenSeats(string $classId, string $toState): void
+    {
+        $openSeats = Enrollment::query()->where('class_id', $classId)
+            ->whereIn('lifecycle_state', [EnrollmentLifecycle::STATE_REQUESTED, EnrollmentLifecycle::STATE_ACTIVE, EnrollmentLifecycle::STATE_FROZEN])
+            ->lockForUpdate()
+            ->pluck('id');
+        if ($openSeats->isNotEmpty()) {
+            throw BusinessRejection::forCode('academic.class_open_seats', sprintf('class cannot move to %s while %d open enrollment seat(s) reference it', $toState, $openSeats->count()));
+        }
+    }
+
     private function assertLevelBelongsToVersion(string $programVersionLevelId, string $programVersionId): void
     {
         /** @var ProgramVersionLevel $level */
@@ -114,6 +138,9 @@ final class MaintainClass
                     ClassLifecycle::requireTransition($from, $toState);
                     if ($toState === ClassLifecycle::STATE_ACTIVE && TeacherAssignment::query()->where('class_id', $locked->id)->whereNull('effective_to')->doesntExist()) {
                         throw BusinessRejection::forCode('academic.class_needs_teacher', 'a class needs at least one open teacher assignment to activate');
+                    }
+                    if (in_array($toState, [ClassLifecycle::STATE_CANCELLED, ClassLifecycle::STATE_COMPLETED], true)) {
+                        $this->assertNoOpenSeats($locked->id, $toState);
                     }
 
                     $locked->forceFill(['lifecycle_state' => $toState]);

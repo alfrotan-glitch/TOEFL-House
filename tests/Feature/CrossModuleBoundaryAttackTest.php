@@ -240,6 +240,10 @@ final class CrossModuleBoundaryAttackTest extends TestCase
         $classId = $this->activeClass($this->classIdA);
         $studentId = $this->newStudent('bd-person-completed');
         $seat = app(MaintainEnrollment::class)->request($this->clerk(), $studentId, $classId, $this->k('comp-req'));
+        // Terminal-guard doctrine (WP-ACAD-TERMINAL-GUARD): a class
+        // completes only once its seats are terminal, so the requested seat
+        // is withdrawn through the governed path before completion.
+        app(MaintainEnrollment::class)->withdraw($this->clerk(), Enrollment::query()->findOrFail($seat['enrollment_id']), 'seat withdrawn before class completion', $this->k('comp-wd'));
         app(MaintainClass::class)->transition($this->officer(), ClassModel::query()->findOrFail($classId), 'completed', $this->k('comp-cls'));
 
         $this->expectException(QueryException::class);

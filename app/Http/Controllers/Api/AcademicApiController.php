@@ -49,14 +49,16 @@ final class AcademicApiController extends Controller
             'skill_id' => ['nullable', 'string'],
         ]);
 
+        $optional = fn (?string $value): ?string => ($value !== null && $value !== '') ? $value : null;
+
         app(MaintainClass::class)->scheduleSession(
             $this->actor(),
             ClassModel::query()->findOrFail($input['class_id']),
             CarbonImmutable::parse($input['scheduled_on']),
             $input['starts_at'],
             $input['ends_at'],
-            $input['skill_id'] !== null && $input['skill_id'] !== '' ? $input['skill_id'] : null,
             $this->idempotencyKey('academic.schedule'),
+            $optional($input['skill_id'] ?? null),
         );
 
         return response()->json(['status' => 'scheduled'], 201);
