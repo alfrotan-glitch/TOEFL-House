@@ -1941,6 +1941,55 @@ CREATE INDEX IF NOT EXISTS idx_book_stock_receipts_book_date
   ON book_stock_receipts(book_id, received_on, created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_book_stock_receipts_idempotency
   ON book_stock_receipts(idempotency_key);
+
+-- W7-1: audited quantity-only stock adjustments (loss / found / correction).
+-- Under the system's cash basis the acquisition cost was expensed at purchase,
+-- so a physical loss has NO financial leg — this table exists so the loss is
+-- representable at all, instead of forcing staff to fabricate a sale (which
+-- would invent revenue) to correct a quantity.
+CREATE TABLE IF NOT EXISTS book_stock_adjustments (
+  id                    TEXT PRIMARY KEY,
+  book_id               TEXT NOT NULL REFERENCES books(id) ON DELETE RESTRICT,
+  delta                 INTEGER NOT NULL CHECK (delta <> 0),
+  kind                  TEXT NOT NULL CHECK (kind IN ('loss','found','correction')),
+  adjusted_on           TEXT NOT NULL,
+  reason                TEXT NOT NULL CHECK (length(TRIM(reason)) >= 8),
+  adjusted_by_user_id   TEXT NOT NULL,
+  adjusted_by_name      TEXT NOT NULL,
+  branch_id             TEXT NOT NULL REFERENCES branches(id) ON DELETE RESTRICT,
+  idempotency_key       TEXT NOT NULL,
+  created_at            TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_book_stock_adjustments_branch_date
+  ON book_stock_adjustments(branch_id, adjusted_on, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_book_stock_adjustments_idempotency
+  ON book_stock_adjustments(idempotency_key);
+CREATE TRIGGER IF NOT EXISTS trg_book_stock_adjustments_integrity_insert
+BEFORE INSERT ON book_stock_adjustments
+WHEN typeof(NEW.delta) IS NOT 'integer'
+  OR strftime('%Y-%m-%d', NEW.adjusted_on) IS NOT NEW.adjusted_on
+  OR (SELECT branch_id FROM books WHERE id = NEW.book_id) IS NOT NEW.branch_id
+  OR (SELECT status FROM books WHERE id = NEW.book_id) IS NOT 'active'
+  OR NEW.idempotency_key IS NULL OR TRIM(NEW.idempotency_key) = ''
+  OR (
+    COALESCE((SELECT SUM(r.quantity) FROM book_stock_receipts r WHERE r.book_id = NEW.book_id), 0)
+    - COALESCE((SELECT SUM(s.quantity) FROM book_sales s
+                WHERE s.book_id = NEW.book_id
+                  AND NOT EXISTS (SELECT 1 FROM book_sale_refunds sr WHERE sr.sale_id = s.id)), 0)
+    - COALESCE((SELECT COUNT(*) FROM book_loans l
+                WHERE l.book_id = NEW.book_id
+                  AND NOT EXISTS (SELECT 1 FROM book_loan_returns lr WHERE lr.loan_id = l.id)), 0)
+    + COALESCE((SELECT SUM(a.delta) FROM book_stock_adjustments a WHERE a.book_id = NEW.book_id), 0)
+      + NEW.delta < 0
+  )
+BEGIN SELECT RAISE(ABORT, 'Book stock adjustment is invalid, cross-branch, archived, unkeyed, or underflows availability'); END;
+CREATE TRIGGER IF NOT EXISTS trg_book_stock_adjustments_immutable_update
+BEFORE UPDATE ON book_stock_adjustments
+BEGIN SELECT RAISE(ABORT, 'Book stock adjustments are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS trg_book_stock_adjustments_immutable_delete
+BEFORE DELETE ON book_stock_adjustments
+BEGIN SELECT RAISE(ABORT, 'Book stock adjustments are immutable'); END;
+
 CREATE TRIGGER IF NOT EXISTS trg_book_stock_receipts_integrity_insert
 BEFORE INSERT ON book_stock_receipts
 WHEN typeof(NEW.quantity) IS NOT 'integer'
@@ -1982,6 +2031,7 @@ CREATE INDEX IF NOT EXISTS idx_book_sales_book_date ON book_sales(book_id, sold_
 CREATE INDEX IF NOT EXISTS idx_book_sales_branch_date ON book_sales(branch_id, sold_on, created_at);
 CREATE INDEX IF NOT EXISTS idx_book_sales_student ON book_sales(student_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_book_sales_idempotency ON book_sales(idempotency_key);
+DROP TRIGGER IF EXISTS trg_book_sales_integrity_insert;
 CREATE TRIGGER IF NOT EXISTS trg_book_sales_integrity_insert
 BEFORE INSERT ON book_sales
 WHEN typeof(NEW.quantity) IS NOT 'integer'
@@ -2018,6 +2068,7 @@ WHEN typeof(NEW.quantity) IS NOT 'integer'
     - COALESCE((SELECT COUNT(*) FROM book_loans l
                 WHERE l.book_id = NEW.book_id
                   AND NOT EXISTS (SELECT 1 FROM book_loan_returns lr WHERE lr.loan_id = l.id)), 0)
+    + COALESCE((SELECT SUM(a.delta) FROM book_stock_adjustments a WHERE a.book_id = NEW.book_id), 0)
     < NEW.quantity
   )
 BEGIN SELECT RAISE(ABORT, 'Book sale is invalid, unavailable, cross-branch, archived, or unkeyed'); END;
@@ -2084,6 +2135,7 @@ CREATE INDEX IF NOT EXISTS idx_book_loans_branch_due ON book_loans(branch_id, du
 CREATE INDEX IF NOT EXISTS idx_book_loans_student ON book_loans(student_id, due_on);
 CREATE INDEX IF NOT EXISTS idx_book_loans_book ON book_loans(book_id, issued_on);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_book_loans_idempotency ON book_loans(idempotency_key);
+DROP TRIGGER IF EXISTS trg_book_loans_integrity_insert;
 CREATE TRIGGER IF NOT EXISTS trg_book_loans_integrity_insert
 BEFORE INSERT ON book_loans
 WHEN NEW.due_on < NEW.issued_on
@@ -2102,6 +2154,7 @@ WHEN NEW.due_on < NEW.issued_on
     - COALESCE((SELECT COUNT(*) FROM book_loans l
                 WHERE l.book_id = NEW.book_id
                   AND NOT EXISTS (SELECT 1 FROM book_loan_returns lr WHERE lr.loan_id = l.id)), 0)
+    + COALESCE((SELECT SUM(a.delta) FROM book_stock_adjustments a WHERE a.book_id = NEW.book_id), 0)
     < 1
   )
 BEGIN SELECT RAISE(ABORT, 'Book loan is invalid, unavailable, cross-branch, archived, disabled, or unkeyed'); END;
@@ -2157,7 +2210,8 @@ SELECT
                   AND NOT EXISTS (SELECT 1 FROM book_sale_refunds sr WHERE sr.sale_id = s.id)), 0)
     - COALESCE((SELECT COUNT(*) FROM book_loans l
                 WHERE l.book_id = b.id
-                  AND NOT EXISTS (SELECT 1 FROM book_loan_returns lr WHERE lr.loan_id = l.id)), 0) AS available_quantity
+                  AND NOT EXISTS (SELECT 1 FROM book_loan_returns lr WHERE lr.loan_id = l.id)), 0)
+    + COALESCE((SELECT SUM(a.delta) FROM book_stock_adjustments a WHERE a.book_id = b.id), 0) AS available_quantity
 FROM books b;
 
 

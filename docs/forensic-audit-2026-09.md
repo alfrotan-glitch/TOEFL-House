@@ -652,3 +652,44 @@ restrictions verified sound, three control notes recorded. Remaining
 follow-ups: inventory-at-cost visibility in the Books workspace, unlinked
 `other`-payment reconciliation line, legacy pre-declaration receipts
 surfacing.
+
+---
+
+## Wave 7 — economic completeness (full matrix in docs/forensic-audit-wave7-economic-matrix.md)
+
+Wave 7 began from real-world economic events, not the ledger. The complete
+event matrix (31 event classes → operational record → financial consequence →
+cash effect → trace → reversal → reporting) is delivered as
+`docs/forensic-audit-wave7-economic-matrix.md`. Headlines:
+
+- **W7-1 (fixed): stock loss/found was economically unrepresentable.** The
+  only quantity-decreasing event was a sale, which books revenue — so a
+  physical loss could only be recorded by fabricating income. New
+  `book_stock_adjustments` surface: quantity-only (no financial leg — cost
+  was expensed at purchase under cash basis), kind loss/found/correction,
+  reason ≥8 chars, idempotent, immutable by trigger, availability floor in
+  the trigger, sale/loan guards + inventory view include adjustments, schema
+  convergence handled (DROP+CREATE for changed triggers). 6/6 tests, 7/7 live.
+- **W7-2 (gap recorded): no debt write-off surface.** Dropped students'
+  debt is owed forever; only payment settles. Forgiveness is policy — needs
+  an explicit owner decision (§61), not an invented feature.
+- **W7-3/W7-4 (notes):** future payroll periods accepted (cash-basis
+  defensible); books dates back/future-dateable by authorized users (reports
+  consistent with stored dates; control consideration).
+- **Re-verified this wave:** transfer preserves the obligation (0-fee
+  destination term, no double bill) with the receivable authority
+  lifecycle-INCLUSIVE (no status filter — debt cannot vanish in a status
+  change); fee/net_fee immutable after creation (no writer updates them);
+  employee advances recovered through the due-cap that counts advances;
+  sponsorship returns are internal re-routes; drop keeps debt payable
+  (settlement keys on obligation, not term status).
+- **Independent report battery 9/9** (my SQL, not the app's): revenue,
+  payroll, cash, envelopes, receivables, settlement completeness, donations,
+  inventory, advances — all exact.
+- **I16's external-flow definition formally defended** (§2 of the matrix):
+  exactly-once pairing proven by complete writer inventory + DB CHECK
+  vocabulary; no internal/external ambiguity; honest limit stated — cash
+  stores only, and unrecorded events are invisible to every
+  self-consistency check, which is why W6-1/W7-1 are boundary requirements.
+- Suite 215 files / 2,900 passed / 2 skipped; live invariants I1–I16 + 0/0
+  reconciliation after the adjustment drill.

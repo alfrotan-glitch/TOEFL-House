@@ -573,6 +573,84 @@ function resolveAcquisitionBooking(
   };
 }
 
+export interface BookStockAdjustmentCommand {
+  delta: unknown;
+  kind: unknown;
+  adjustedOn?: unknown;
+  reason: unknown;
+  idempotencyKey: string;
+  idempotencyCandidates?: string[];
+  actor: BooksActor;
+}
+
+/**
+ * W7-1 — record a physical stock correction (loss / found / correction).
+ *
+ * Before this existed, the ONLY quantity-decreasing event was a sale, which
+ * books revenue: a real loss was economically unrepresentable unless staff
+ * fabricated a sale (inventing income). Under the system's cash basis the
+ * acquisition cost was already expensed at purchase, so a loss carries NO
+ * financial leg — this is a quantity fact with an audit trail, nothing more.
+ * The database trigger enforces the availability floor (never below zero) and
+ * immutability; the sale/loan guards include adjustments in availability.
+ */
+export function adjustBookStock(db: Database, bookId: string, branchId: string, command: BookStockAdjustmentCommand): { id: string; idempotentReplay: boolean } {
+  const book = requireBook(db, bookId);
+  assertBookBranch(book, branchId);
+  if (book.status !== 'active') throw new HttpError(409, 'Archived Book items cannot adjust stock.');
+  if (typeof command.delta !== 'number' || !Number.isInteger(command.delta) || command.delta === 0) {
+    throw new HttpError(400, 'An adjustment delta must be a non-zero whole number of copies (negative for a loss, positive for a find).');
+  }
+  const kind = command.kind;
+  if (kind !== 'loss' && kind !== 'found' && kind !== 'correction') {
+    throw new HttpError(400, "kind must be 'loss', 'found', or 'correction'.");
+  }
+  if (kind === 'loss' && command.delta > 0) throw new HttpError(400, "A 'loss' adjustment must be negative.");
+  if (kind === 'found' && command.delta < 0) throw new HttpError(400, "A 'found' adjustment must be positive.");
+  const reason = requiredText(command.reason, 'Reason', TEXT_LIMITS.line);
+  if (reason.trim().length < 8) throw new HttpError(400, 'An adjustment reason of at least 8 characters is required.');
+  const adjustedOn = assertOptionalIsoDate(command.adjustedOn, 'adjustedOn') ?? today();
+  const idempotencyKey = assertKey(command.idempotencyKey);
+  const candidates = idempotencyCandidates(idempotencyKey, command.idempotencyCandidates);
+
+  const prior = db.prepare(`SELECT id, book_id, delta, branch_id FROM book_stock_adjustments WHERE idempotency_key IN (${candidatePlaceholders(candidates)})`)
+    .get(...candidates) as { id: string; book_id: string; delta: number; branch_id: string } | undefined;
+  if (prior) {
+    if (prior.book_id !== bookId || prior.delta !== command.delta || prior.branch_id !== branchId) {
+      throw new HttpError(409, 'This idempotency key has already been used for a different stock adjustment.');
+    }
+    return { id: prior.id, idempotentReplay: true };
+  }
+
+  const adjustmentId = id('book_adj');
+  try {
+    db.prepare(`
+      INSERT INTO book_stock_adjustments
+        (id, book_id, delta, kind, adjusted_on, reason, adjusted_by_user_id, adjusted_by_name, branch_id, idempotency_key)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(adjustmentId, bookId, command.delta, kind, adjustedOn, reason.trim(), command.actor.userId, command.actor.fullName, branchId, idempotencyKey);
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      const winner = db.prepare(`SELECT id, book_id, delta, branch_id FROM book_stock_adjustments WHERE idempotency_key IN (${candidatePlaceholders(candidates)})`)
+        .get(...candidates) as { id: string; book_id: string; delta: number; branch_id: string } | undefined;
+      if (winner) {
+        if (winner.book_id !== bookId || winner.delta !== command.delta || winner.branch_id !== branchId) {
+          throw new HttpError(409, 'This idempotency key has already been used for a different stock adjustment.');
+        }
+        return { id: winner.id, idempotentReplay: true };
+      }
+    }
+    // The availability floor and shape checks live in the DB trigger; surface
+    // its message rather than a raw 500.
+    const message = String((error as { message?: string })?.message ?? '');
+    if (message.includes('underflows availability')) {
+      throw new HttpError(409, 'This adjustment would take available stock below zero.');
+    }
+    rejectBookStorageFailure(error, 'Book stock adjustment conflicts with an existing command.');
+  }
+  return { id: adjustmentId, idempotentReplay: false };
+}
+
 export function receiveBookStock(db: Database, bookId: string, branchId: string, command: BookReceiptCommand): { id: string; idempotentReplay: boolean } {
   const book = requireBook(db, bookId);
   assertBookBranch(book, branchId);

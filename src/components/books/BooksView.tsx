@@ -39,6 +39,7 @@ interface BooksViewProps {
     status?: 'active' | 'archived';
   }) => Promise<void>;
   receiveBookStock: (bookId: string, input: { quantity: number; receivedOn?: string; unitCost?: number | null; note?: string; purchase?: { paidFromBudgetLineId?: string; declaration?: 'separate' | 'not-applicable' } }) => Promise<void>;
+  adjustBookStock: (bookId: string, input: { delta: number; kind: 'loss' | 'found' | 'correction'; reason: string; adjustedOn?: string }) => Promise<void>;
   recordBookSale: (bookId: string, input: {
     quantity: number;
     purchaserName?: string;
@@ -58,6 +59,7 @@ type Dialog =
   | { kind: 'catalog' }
   | { kind: 'edit'; book: BookCatalogItem }
   | { kind: 'receipt'; book: BookCatalogItem }
+  | { kind: 'adjust'; book: BookCatalogItem }
   | { kind: 'sale'; book: BookCatalogItem }
   | { kind: 'saleReturn'; sale: BookSale }
   | { kind: 'loan'; book: BookCatalogItem }
@@ -90,6 +92,7 @@ function dialogTitle(dialog: Exclude<Dialog, null>): string {
     case 'catalog': return 'Create catalog item';
     case 'edit': return `Edit ${dialog.book.title}`;
     case 'receipt': return `Receive stock · ${dialog.book.title}`;
+    case 'adjust': return `Adjust stock · ${dialog.book.title}`;
     case 'sale': return `Record sale · ${dialog.book.title}`;
     case 'saleReturn': return `Return sale ${dialog.sale.receiptNumber}`;
     case 'loan': return `Issue loan · ${dialog.book.title}`;
@@ -111,6 +114,7 @@ export default function BooksView({
   returnBookLoan,
   loadBooksHistoryPage,
   budgetLines,
+  adjustBookStock,
 }: BooksViewProps) {
   const [tab, setTab] = useState<BooksTab>('catalog');
   const [search, setSearch] = useState('');
@@ -143,6 +147,9 @@ export default function BooksView({
   const [catalogPurchaseLine, setCatalogPurchaseLine] = useState('');
   const [receiptPurchaseMode, setReceiptPurchaseMode] = useState('');
   const [receiptPurchaseLine, setReceiptPurchaseLine] = useState('');
+  const [adjustDelta, setAdjustDelta] = useState('-1');
+  const [adjustKind, setAdjustKind] = useState<'loss' | 'found' | 'correction'>('loss');
+  const [adjustReason, setAdjustReason] = useState('');
   const purchasePayload = (mode: string, lineId: string) =>
     mode === 'paid-here' ? (lineId ? { paidFromBudgetLineId: lineId } : undefined)
       : mode === 'separate' || mode === 'not-applicable' ? { declaration: mode as 'separate' | 'not-applicable' }
@@ -223,6 +230,13 @@ export default function BooksView({
     setReceiptDate('');
     setReceiptNote('');
     setDialog({ kind: 'receipt', book });
+  };
+
+  const openAdjust = (book: BookCatalogItem) => {
+    setAdjustDelta('-1');
+    setAdjustKind('loss');
+    setAdjustReason('');
+    setDialog({ kind: 'adjust', book });
   };
 
   const openSale = (book: BookCatalogItem) => {
@@ -355,6 +369,7 @@ export default function BooksView({
                       {canRestock && book.status === 'active' && <button type="button" className={button.ghost} onClick={() => openReceipt(book)}><PackagePlus className="h-4 w-4" />Stock</button>}
                       {canSell && book.status === 'active' && book.saleEnabled && <button type="button" className={button.ghost} onClick={() => openSale(book)} disabled={book.availableQuantity <= 0}><HandCoins className="h-4 w-4" />Sell</button>}
                       {canIssue && book.status === 'active' && book.lendingEnabled && <button type="button" className={button.ghost} onClick={() => openLoan(book)} disabled={book.availableQuantity <= 0}><BookOpenCheck className="h-4 w-4" />Issue</button>}
+                      {canEdit && book.status === 'active' && <button type="button" className={button.ghost} onClick={() => openAdjust(book)}><ClipboardCheck className="h-4 w-4" />Adjust</button>}
                       {canEdit && <button type="button" className={button.ghost} onClick={() => openEdit(book)}><Pencil className="h-4 w-4" />Edit</button>}
                     </div>
                   </td>
@@ -484,6 +499,16 @@ export default function BooksView({
               <ShamsiDateInput label="Received on (optional)" value={receiptDate} onChange={setReceiptDate} />
               <Field label="Note (optional)"><textarea value={receiptNote} onChange={(event) => setReceiptNote(event.target.value)} className={control.input} rows={3} /></Field>
               <SubmitButton busy={busy} label="Record stock receipt" />
+            </form>}
+
+            {dialog.kind === 'adjust' && <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void submit(() => adjustBookStock(dialog.book.id, { delta: Number(adjustDelta), kind: adjustKind, reason: adjustReason }), 'Stock adjustment recorded.'); }}>
+              <p className={text.hint}>Current available quantity: {dialog.book.availableQuantity}. An adjustment is a physical correction (loss, found, count fix) — it moves no money and writes an immutable audit row.</p>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <Field label="Kind"><select value={adjustKind} onChange={(event) => setAdjustKind(event.target.value as 'loss' | 'found' | 'correction')} className={control.select}><option value="loss">Loss (negative)</option><option value="found">Found (positive)</option><option value="correction">Count correction</option></select></Field>
+                <Field label="Delta (copies, signed)"><input required type="number" step="1" value={adjustDelta} onChange={(event) => setAdjustDelta(event.target.value)} className={control.input} /></Field>
+              </div>
+              <Field label="Reason (required, min 8 characters)"><input required minLength={8} value={adjustReason} onChange={(event) => setAdjustReason(event.target.value)} className={control.input} /></Field>
+              <SubmitButton busy={busy} label="Record adjustment" danger={adjustKind === 'loss'} />
             </form>}
 
             {dialog.kind === 'sale' && <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void submit(() => recordBookSale(dialog.book.id, { quantity: Number(saleQuantity), studentId: saleStudentId || undefined, purchaserName: saleStudentId ? undefined : salePurchaserName, discountAmount: Number(saleDiscount || 0), paymentMethod: salePaymentMethod, soldOn: saleDate || undefined }), 'Book sale and linked receipt recorded.'); }}>

@@ -363,6 +363,7 @@ function AuthenticatedApp() {
           createBookCatalogItem={store.createBookCatalogItem}
           updateBookCatalogItem={store.updateBookCatalogItem}
           receiveBookStock={store.receiveBookStock}
+          adjustBookStock={store.adjustBookStock}
           recordBookSale={store.recordBookSale}
           returnBookSale={store.returnBookSale}
           issueBookLoan={store.issueBookLoan}

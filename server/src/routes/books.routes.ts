@@ -7,6 +7,7 @@ import { resolveIdempotency } from '../utils/idempotency.js';
 import { parsePagination } from '../utils/pagination.js';
 import { addNotification } from '../utils/notifications.js';
 import {
+  adjustBookStock,
   createBookCatalogItem,
   getBookBranch,
   getBookLoanBranch,
@@ -119,6 +120,36 @@ booksRouter.post(
     if (!result.idempotentReplay) {
       writeAudit(req, `Created Book catalog item ${result.id}`, { branchId });
       addNotification('Book catalog item created', 'A Book catalog item and its initial stock receipt were recorded.', 'success', branchId);
+    }
+    res.status(result.idempotentReplay ? 200 : 201).json(result);
+  }),
+);
+
+booksRouter.post(
+  '/catalog/:bookId/adjustments',
+  requirePermission('Book.Edit'),
+  ah(async (req, res) => {
+    const branchId = accessibleBookBranch(req, req.params.bookId);
+    const idem = resolveIdempotency(req, {
+      route: 'book-stock-adjustment',
+      bookId: req.params.bookId,
+      delta: intentValue(req.body?.delta),
+      kind: intentValue(req.body?.kind),
+      reason: intentValue(req.body?.reason),
+      actorUserId: req.user?.userId ?? null,
+    });
+    const result = adjustBookStock(db, req.params.bookId, branchId, {
+      delta: req.body?.delta,
+      kind: req.body?.kind,
+      adjustedOn: req.body?.adjustedOn,
+      reason: req.body?.reason,
+      idempotencyKey: idem.key,
+      idempotencyCandidates: idem.candidates,
+      actor: actor(req),
+    });
+    if (!result.idempotentReplay) {
+      writeAudit(req, `Recorded Book stock adjustment ${result.id} (${req.body?.kind} ${req.body?.delta})`, { branchId });
+      addNotification('Book stock adjusted', `A ${req.body?.kind} stock adjustment (${req.body?.delta}) was recorded.`, 'warning', branchId);
     }
     res.status(result.idempotentReplay ? 200 : 201).json(result);
   }),

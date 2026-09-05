@@ -1111,6 +1111,12 @@ export function useApiStore() {
     invalidate('books');
   };
 
+  const adjustBookStock = async (bookId: string, input: { delta: number; kind: 'loss' | 'found' | 'correction'; reason: string; adjustedOn?: string }) => {
+    await api.post(`/books/catalog/${bookId}/adjustments`, input, undefined, { 'Idempotency-Key': crypto.randomUUID() });
+    await reloadBooksWorkspace();
+    invalidate('books');
+  };
+
   const recordBookSale = async (bookId: string, input: {
     quantity: number;
     purchaserName?: string;
@@ -1689,7 +1695,7 @@ export function useApiStore() {
     getVisitorWorkflow, getVisitorById,
     addStudentManual, updateStudentStatus, updateStudent, enrollStudentSemester, issueStudentCard,
     chargeBudget, createExpenseRequest, recordOperationalPayment, getExpenseReport, updateExpenseAutoApproveThreshold, processExpenseApproval, runSavingEngine, updateSavingSettings, createInvoice, issueInvoice, payInvoice, cancelInvoice, updateFinanceConfig, reloadInvoices,
-    processMonthEnd, createBookCatalogItem, updateBookCatalogItem, receiveBookStock, recordBookSale, returnBookSale, issueBookLoan, returnBookLoan, loadBooksHistoryPage,
+    processMonthEnd, createBookCatalogItem, updateBookCatalogItem, receiveBookStock, adjustBookStock, recordBookSale, returnBookSale, issueBookLoan, returnBookLoan, loadBooksHistoryPage,
     // Exams (Two-Phase Workflow)
     registerExam, editExam, deleteExam, enrollExamCandidate, addExamResult, correctExamScore,
     // HR & Payroll
