@@ -105,7 +105,7 @@ final class MaintainFinancialGateException
                         throw AuthorizationDenied::forCode('finance.gate_exception_not_independent', 'the approver must differ from the proposer');
                     }
                     $uncovered = $this->allocations->studentUncovered($locked->student_id);
-                    if (bccomp((string) $locked->amount, $uncovered, 2) === 1) {
+                    if (bccomp($locked->amount, $uncovered, 2) === 1) {
                         throw BusinessRejection::forCode('finance.gate_exception_exceeds_uncovered', sprintf('the gate exception exceeds the current uncovered obligation remainder %s', $uncovered));
                     }
 
@@ -186,7 +186,11 @@ final class MaintainFinancialGateException
         return $branchId === null ? null : Branch::query()->whereKey($branchId)->first();
     }
 
-    /** @param list<Branch> $branches @return array{branch_id: string|null, organization_id: string|null} */
+    /**
+     * @param list<Branch> $branches
+     *
+     * @return array{branch_id: string|null, organization_id: string|null}
+     */
     private function provenanceForBranches(array $branches): array
     {
         $branchIds = [];

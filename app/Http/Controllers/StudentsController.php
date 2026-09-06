@@ -47,6 +47,7 @@ final class StudentsController extends Controller
     }
 
     /** Count of students whose latest status row is active. */
+    /** @param list<string> $visible */
     private function activeStudentCount(array $visible): int
     {
 
@@ -352,7 +353,10 @@ final class StudentsController extends Controller
         return redirect()->back()->with('success', 'Guardian relationship revoked.');
     }
 
-    /** @return Builder<Student> */
+    /**
+     * @param list<string> $visible
+     * @return Builder<Student>
+     */
     private function studentsWithStatus(array $visible): Builder
     {
 

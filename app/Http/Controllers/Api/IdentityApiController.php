@@ -73,7 +73,7 @@ final class IdentityApiController extends Controller
 
         app(LinkUserAccount::class)->link(
             $this->actor(),
-            Person::query()->findOrFail($input['person_id']),
+            Person::query()->findOrFail((string) $input['person_id']),
             $input['username'],
             $this->idempotencyKey('identity.link'),
         );

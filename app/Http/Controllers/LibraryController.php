@@ -325,7 +325,10 @@ final class LibraryController extends Controller
         return redirect()->route('library.index')->with('success', 'Work order cancelled.');
     }
 
-    /** @param list<string> $branchIds */
+    /**
+     * @param \Illuminate\Database\Eloquent\Builder<*> $query
+     * @param list<string> $branchIds
+     */
     private function applyRootScope($query, string $table, array $branchIds): void
     {
         $today = CarbonImmutable::today()->toDateString();

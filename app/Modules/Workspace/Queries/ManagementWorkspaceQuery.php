@@ -26,7 +26,10 @@ use Illuminate\Support\Facades\DB;
  */
 final class ManagementWorkspaceQuery
 {
-    /** @param list<string> $visibleBranches */
+    /**
+     * @param  list<string>  $visibleBranches
+     * @return array<string, mixed>
+     */
     public function snapshot(Actor $actor, bool $organizationScope, array $visibleBranches): array
     {
         $scope = $organizationScope ? 'organization' : 'branch';
@@ -42,15 +45,18 @@ final class ManagementWorkspaceQuery
             ];
         }, MetricCatalog::keys());
 
+        /** @var list<string> $organizationIds */
         $organizationIds = $organizationScope ? $this->authorizedOrganizations($actor) : [];
         // Organization authority must include every active branch in the
         // authorized organization, not only branches returned by the
         // branch-visibility resolver. This preserves organization-wide
         // reporting when a valid organization grant has no branch grant.
+        /** @var list<string> $scopedBranches */
         $scopedBranches = $organizationScope
             ? $this->branchesForOrganizations($organizationIds)
             : $visibleBranches;
         sort($scopedBranches);
+        /** @var array<string, string> $branchOrganizations */
         $branchOrganizations = $this->branchOrganizations($scopedBranches);
         $counts = $organizationScope
             ? $this->organizationCounts($scopedBranches, $organizationIds, $branchOrganizations)
@@ -112,7 +118,12 @@ final class ManagementWorkspaceQuery
         ];
     }
 
-    /** @param list<string> $branchIds @param list<string> $organizationIds @param array<string, string> $branchOrganizations @return array<string, int> */
+    /**
+     * @param  list<string>  $branchIds
+     * @param  list<string>  $organizationIds
+     * @param  array<string, string>  $branchOrganizations
+     * @return array<string, int>
+     */
     private function organizationCounts(array $branchIds, array $organizationIds, array $branchOrganizations): array
     {
         if ($branchIds === [] && $organizationIds === []) {
@@ -159,7 +170,10 @@ final class ManagementWorkspaceQuery
         ];
     }
 
-    /** @param list<string> $organizationIds @return list<string> */
+    /**
+     * @param  list<string>  $organizationIds
+     * @return list<string>
+     */
     private function branchesForOrganizations(array $organizationIds): array
     {
         if ($organizationIds === []) {
@@ -189,7 +203,10 @@ final class ManagementWorkspaceQuery
         return $branches;
     }
 
-    /** @param list<string> $branchIds @return array<string, string> */
+    /**
+     * @param  list<string>  $branchIds
+     * @return array<string, string>
+     */
     private function branchOrganizations(array $branchIds): array
     {
         if ($branchIds === []) {
@@ -212,7 +229,10 @@ final class ManagementWorkspaceQuery
         return $organizations;
     }
 
-    /** @param list<string> $organizationIds @param array<string, string> $branchOrganizations */
+    /**
+     * @param  list<string>  $organizationIds
+     * @param  array<string, string>  $branchOrganizations
+     */
     private function countWorkItems(array $organizationIds, array $branchOrganizations): int
     {
         return (int) DB::table('work_items')
@@ -267,8 +287,10 @@ final class ManagementWorkspaceQuery
         ];
     }
 
-    /** @param list<string> $branchIds @param array<string, string> $branchOrganizations
-     *  @return array<string, int>
+    /**
+     * @param  list<string>  $branchIds
+     * @param  array<string, string>  $branchOrganizations
+     * @return array<string, int>
      */
     private function scopedCounts(array $branchIds, array $branchOrganizations): array
     {

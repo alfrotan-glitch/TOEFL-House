@@ -30,6 +30,8 @@ use Illuminate\Support\Facades\DB;
  */
 final class MaintainTeacherAssignment
 {
+    public const CAPABILITY = 'academic.schedule';
+
     public function __construct(
         private readonly AcademicAccess $access,
         private readonly IdempotentExecution $idempotency,
@@ -155,7 +157,7 @@ final class MaintainTeacherAssignment
     private function classProvenance(string $classId): array
     {
         $class = ClassModel::query()->whereKey($classId)->first();
-        $branchId = trim((string) ($class?->branch_id ?? ''));
+        $branchId = $class !== null ? trim((string) ($class->branch_id ?? '')) : '';
         $branch = $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
         if ($branch === null || $branch->lifecycle_state !== 'active') {
             throw BusinessRejection::forCode('academic.class_provenance_required', 'a class-linked event requires active branch provenance');

@@ -13,6 +13,7 @@ use App\Modules\Finance\Models\Discount;
 use App\Modules\Finance\Models\FinancialCorrection;
 use App\Modules\Finance\Models\FundAllocation;
 use App\Modules\Finance\Models\FundingSource;
+use App\Support\MoneyAmount;
 
 /**
  * Finance's single derived-balance authority.
@@ -24,7 +25,7 @@ use App\Modules\Finance\Models\FundingSource;
  */
 final class FinancialBalanceQuery
 {
-    /** @return array{remaining: string, allocated: string, reversed: string, funded: string, discounted: string, decreased: string, increased: string, original: string} */
+    /** @return array{remaining: numeric-string, allocated: numeric-string, reversed: numeric-string, funded: numeric-string, discounted: numeric-string, decreased: numeric-string, increased: numeric-string, original: numeric-string} */
     public function obligationBreakdown(Obligation $obligation): array
     {
         $lineIds = ObligationLine::query()
@@ -33,45 +34,45 @@ final class FinancialBalanceQuery
         $fundAllocationIds = FundAllocation::query()
             ->whereIn('obligation_line_id', $lineIds)
             ->pluck('id');
-        $funded = (string) FundAllocation::query()
+        $funded = MoneyAmount::decimal(FundAllocation::query()
             ->whereIn('id', $fundAllocationIds)
-            ->sum('amount');
-        $fundReversed = (string) FinancialCorrection::query()
+            ->sum('amount'));
+        $fundReversed = MoneyAmount::decimal(FinancialCorrection::query()
             ->whereIn('fund_allocation_id', $fundAllocationIds)
             ->where('correction_type', FinancialCorrection::TYPE_FUND_ALLOCATION_REVERSAL)
             ->where('lifecycle_state', FinancialCorrection::STATE_RECORDED)
-            ->sum('amount');
+            ->sum('amount'));
         $funded = bcsub($funded, $fundReversed, 2);
         $allocationIds = PaymentAllocation::query()
             ->where('obligation_id', $obligation->id)
             ->pluck('id');
-        $allocated = (string) PaymentAllocation::query()
+        $allocated = MoneyAmount::decimal(PaymentAllocation::query()
             ->where('obligation_id', $obligation->id)
-            ->sum('amount');
-        $reversed = (string) FinancialCorrection::query()
+            ->sum('amount'));
+        $reversed = MoneyAmount::decimal(FinancialCorrection::query()
             ->whereIn('payment_allocation_id', $allocationIds)
             ->where('correction_type', FinancialCorrection::TYPE_ALLOCATION_REVERSAL)
             ->where('lifecycle_state', FinancialCorrection::STATE_RECORDED)
-            ->sum('amount');
-        $discounted = (string) Discount::query()
+            ->sum('amount'));
+        $discounted = MoneyAmount::decimal(Discount::query()
             ->where('obligation_id', $obligation->id)
             ->where('lifecycle_state', 'approved')
-            ->sum('amount');
-        $decreased = (string) FinancialCorrection::query()
+            ->sum('amount'));
+        $decreased = MoneyAmount::decimal(FinancialCorrection::query()
             ->where('obligation_id', $obligation->id)
             ->where('correction_type', FinancialCorrection::TYPE_OBLIGATION_ADJUSTMENT)
             ->where('direction', FinancialCorrection::DIRECTION_DECREASE)
             ->where('lifecycle_state', FinancialCorrection::STATE_RECORDED)
-            ->sum('amount');
-        $increased = (string) FinancialCorrection::query()
+            ->sum('amount'));
+        $increased = MoneyAmount::decimal(FinancialCorrection::query()
             ->where('obligation_id', $obligation->id)
             ->where('correction_type', FinancialCorrection::TYPE_OBLIGATION_ADJUSTMENT)
             ->where('direction', FinancialCorrection::DIRECTION_INCREASE)
             ->where('lifecycle_state', FinancialCorrection::STATE_RECORDED)
-            ->sum('amount');
+            ->sum('amount'));
 
         $netAllocated = bcsub($allocated, $reversed, 2);
-        $remaining = bcsub((string) $obligation->original_amount, (string) $funded, 2);
+        $remaining = bcsub((string) $obligation->original_amount, $funded, 2);
         $remaining = bcsub($remaining, $netAllocated, 2);
         $remaining = bcsub($remaining, $discounted, 2);
         $remaining = bcsub($remaining, $decreased, 2);
@@ -88,33 +89,36 @@ final class FinancialBalanceQuery
         ];
     }
 
+    /** @return numeric-string */
     public function obligationRemaining(Obligation $obligation): string
     {
         return $this->obligationBreakdown($obligation)['remaining'];
     }
 
+    /** @return numeric-string */
     public function paymentRemaining(Payment $payment): string
     {
         $allocationIds = PaymentAllocation::query()
             ->where('payment_id', $payment->id)
             ->pluck('id');
-        $allocated = (string) PaymentAllocation::query()
+        $allocated = MoneyAmount::decimal(PaymentAllocation::query()
             ->where('payment_id', $payment->id)
-            ->sum('amount');
-        $reversed = (string) FinancialCorrection::query()
+            ->sum('amount'));
+        $reversed = MoneyAmount::decimal(FinancialCorrection::query()
             ->whereIn('payment_allocation_id', $allocationIds)
             ->where('correction_type', FinancialCorrection::TYPE_ALLOCATION_REVERSAL)
             ->where('lifecycle_state', FinancialCorrection::STATE_RECORDED)
-            ->sum('amount');
+            ->sum('amount'));
         $netAllocated = bcsub($allocated, $reversed, 2);
-        $refunded = (string) Refund::query()
+        $refunded = MoneyAmount::decimal(Refund::query()
             ->where('payment_id', $payment->id)
             ->where('lifecycle_state', 'recorded')
-            ->sum('amount');
+            ->sum('amount'));
 
         return bcsub(bcsub((string) $payment->amount, $netAllocated, 2), $refunded, 2);
     }
 
+    /** @return numeric-string */
     public function studentUncovered(string $studentId): string
     {
         $uncovered = '0.00';
@@ -132,15 +136,15 @@ final class FinancialBalanceQuery
             ->where('fund_id', $fund->id)
             ->whereDate('created_at', '<=', $periodEnd)
             ->pluck('id');
-        $allocated = (string) FundAllocation::query()
+        $allocated = MoneyAmount::decimal(FundAllocation::query()
             ->whereIn('id', $allocationIds)
-            ->sum('amount');
-        $reversed = (string) FinancialCorrection::query()
+            ->sum('amount'));
+        $reversed = MoneyAmount::decimal(FinancialCorrection::query()
             ->whereIn('fund_allocation_id', $allocationIds)
             ->where('correction_type', FinancialCorrection::TYPE_FUND_ALLOCATION_REVERSAL)
             ->where('lifecycle_state', FinancialCorrection::STATE_RECORDED)
             ->whereDate('created_at', '<=', $periodEnd)
-            ->sum('amount');
+            ->sum('amount'));
         $net = bcsub($allocated, $reversed, 2);
 
         $committed = (string) $fund->committed_amount;

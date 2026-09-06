@@ -28,7 +28,7 @@ final class DeliveryProcessor
     /** @return array{delivery_id: string, outcome: string, attempts: int} */
     public function processId(string $deliveryId, Actor $operator): array
     {
-        $claim = DB::transaction(function () use ($deliveryId, $operator): ?array {
+        $claim = DB::transaction(function () use ($deliveryId, $operator): array {
             /** @var IntegrationDelivery|null $delivery */
             $delivery = IntegrationDelivery::query()->whereKey($deliveryId)->lockForUpdate()->first();
             if ($delivery === null) {
@@ -84,9 +84,8 @@ final class DeliveryProcessor
             ];
         });
 
-        if ($claim === null || isset($claim['outcome'])) {
-            /** @var array{delivery_id: string, outcome: string, attempts: int} $claim */
-            return $claim ?? ['delivery_id' => $deliveryId, 'outcome' => 'skipped_missing', 'attempts' => 0];
+        if (isset($claim['outcome'])) {
+            return $claim;
         }
 
         try {

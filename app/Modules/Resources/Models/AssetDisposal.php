@@ -7,7 +7,16 @@ namespace App\Modules\Resources\Models;
 use Illuminate\Database\Eloquent\Model;
 
 /**
- * Approved asset disposal — immutable history; requires two distinct approvers. @property string $id @property string $asset_id @property string $method
+ * Approved asset disposal — immutable history; requires two distinct approvers.
+ * @property string $id
+ * @property string $asset_id
+ * @property string $method
+ * @property string $asset_id
+ * @property string $method
+ * @property string $reason
+ * @property string $requested_by
+ * @property string $approved_by
+ * @property string $approved_at
  */
 final class AssetDisposal extends Model
 {

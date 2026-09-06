@@ -31,10 +31,15 @@ final class EffectiveStructureQuery
     public function effectiveStructure(CarbonImmutable $asOf, ?StructureScope $filter = null): array
     {
         $day = $asOf->startOfDay()->toDateString();
+        // Unwrap the optional scope once so closures never re-check a union
+        // and the query stays a pure filtered read.
+        $organizationId = $filter?->organizationId;
+        $campusId = $filter?->campusId;
+        $branchId = $filter?->branchId;
 
         $organizations = Organization::query()
             ->where('lifecycle_state', 'active')
-            ->when($filter !== null, fn ($query) => $query->where('id', $filter->organizationId))
+            ->when($organizationId !== null, fn ($query) => $query->where('id', $organizationId))
             ->orderBy('name')
             ->get(['id', 'name'])
             ->map(fn (Organization $organization): array => ['id' => $organization->id, 'name' => $organization->name])
@@ -42,7 +47,7 @@ final class EffectiveStructureQuery
 
         $campuses = Campus::query()
             ->where('lifecycle_state', 'active')
-            ->when($filter !== null, fn ($query) => $query->where('organization_id', $filter->organizationId))
+            ->when($organizationId !== null, fn ($query) => $query->where('organization_id', $organizationId))
             ->orderBy('name')
             ->get(['id', 'organization_id', 'name'])
             ->map(fn (Campus $campus): array => [
@@ -59,8 +64,8 @@ final class EffectiveStructureQuery
 
         $branches = Branch::query()
             ->where('lifecycle_state', 'active')
-            ->when($filter?->branchId !== null, fn ($query) => $query->where('id', $filter->branchId))
-            ->when($filter?->campusId !== null, fn ($query) => $query->whereIn('id', $assignments->where('campus_id', $filter->campusId)->pluck('branch_id')))
+            ->when($branchId !== null, fn ($query) => $query->where('id', $branchId))
+            ->when($campusId !== null, fn ($query) => $query->whereIn('id', $assignments->where('campus_id', $campusId)->pluck('branch_id')))
             ->orderBy('name')
             ->get(['id', 'name'])
             ->map(fn (Branch $branch): array => [
@@ -72,18 +77,18 @@ final class EffectiveStructureQuery
 
         $departments = Department::query()
             ->where('lifecycle_state', 'active')
-            ->when($filter !== null, fn ($query) => $query->where(function ($query) use ($filter): void {
-                $query->where(function ($query) use ($filter): void {
-                    $query->where('scope_type', 'organization')->where('scope_id', $filter->organizationId);
+            ->when($filter !== null, fn ($query) => $query->where(function ($query) use ($organizationId, $campusId, $branchId): void {
+                $query->where(function ($query) use ($organizationId): void {
+                    $query->where('scope_type', 'organization')->where('scope_id', $organizationId);
                 });
-                if ($filter->campusId !== null) {
-                    $query->orWhere(function ($query) use ($filter): void {
-                        $query->where('scope_type', 'campus')->where('scope_id', $filter->campusId);
+                if ($campusId !== null) {
+                    $query->orWhere(function ($query) use ($campusId): void {
+                        $query->where('scope_type', 'campus')->where('scope_id', $campusId);
                     });
                 }
-                if ($filter->branchId !== null) {
-                    $query->orWhere(function ($query) use ($filter): void {
-                        $query->where('scope_type', 'branch')->where('scope_id', $filter->branchId);
+                if ($branchId !== null) {
+                    $query->orWhere(function ($query) use ($branchId): void {
+                        $query->where('scope_type', 'branch')->where('scope_id', $branchId);
                     });
                 }
             }))

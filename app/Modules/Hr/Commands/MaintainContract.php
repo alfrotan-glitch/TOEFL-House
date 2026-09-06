@@ -53,7 +53,7 @@ final class MaintainContract
 
                     /** @var Employment $locked */
                     $locked = Employment::query()->whereKey($employment->id)->lockForUpdate()->firstOrFail();
-                    $branch = $this->employmentBranch($locked);
+                    $branch = $this->employmentBranch($locked->id);
                     $scope = $branch->structureScope();
                     $this->require($actor, self::CAPABILITY, $scope);
                     if ($locked->lifecycle_state === EmploymentLifecycle::STATE_TERMINATED) {
@@ -149,7 +149,7 @@ final class MaintainContract
     {
         $employment = Employment::query()->whereKey($employmentId)->first();
         $person = $employment === null ? null : Person::query()->whereKey($employment->person_id)->first();
-        $branchId = trim((string) ($person?->home_branch_id ?? ''));
+        $branchId = $person !== null ? trim((string) ($person->home_branch_id ?? '')) : '';
         $branch = $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
         if ($employment === null || $person === null || $branch === null || $branch->lifecycle_state !== 'active' || $branch->structureScope()->organizationId === '') {
             throw BusinessRejection::forCode('hr.employee_provenance_required', 'contract operations require active employee branch and organization provenance');

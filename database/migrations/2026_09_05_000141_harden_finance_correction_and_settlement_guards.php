@@ -567,12 +567,12 @@ return new class extends Migration
                 SELECT fs.committed_amount, trim(fs.restricted_category) INTO fund_committed, fund_restriction
                   FROM funding_sources fs WHERE fs.id = NEW.fund_id FOR UPDATE;
                 IF fund_committed IS NULL THEN
-                    RAISE EXCEPTION 'fund allocation references missing funding source %' USING ERRCODE = 'foreign_key_violation';
+                    RAISE EXCEPTION 'fund allocation references missing funding source %', NEW.fund_id USING ERRCODE = 'foreign_key_violation';
                 END IF;
                 SELECT ol.amount, ol.obligation_id INTO line_amount, target_obligation
                   FROM obligation_lines ol WHERE ol.id = NEW.obligation_line_id FOR UPDATE;
                 IF line_amount IS NULL THEN
-                    RAISE EXCEPTION 'fund allocation references missing obligation line %' USING ERRCODE = 'foreign_key_violation';
+                    RAISE EXCEPTION 'fund allocation references missing obligation line %', NEW.obligation_line_id USING ERRCODE = 'foreign_key_violation';
                 END IF;
                 IF fund_restriction <> '' AND fund_restriction <> trim((SELECT category FROM obligation_lines WHERE id = NEW.obligation_line_id)) THEN
                     RAISE EXCEPTION 'fund restriction does not match obligation line' USING ERRCODE = 'check_violation';

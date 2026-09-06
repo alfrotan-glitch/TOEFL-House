@@ -316,7 +316,7 @@ final class DecideProgression
             $to = $from;
         }
 
-        $effectiveBasis = $basis !== null ? $basis : ($fallback !== null ? $fallback->basis : '');
+        $effectiveBasis = $basis !== null ? $basis : ($fallback !== null ? ($fallback->basis ?? '') : '');
         if (trim($effectiveBasis) === '') {
             throw BusinessRejection::forCode('academic.progression_basis_required', 'a level-aware progression requires its basis');
         }

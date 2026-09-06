@@ -75,7 +75,10 @@ final class OpeningStateFeatureTest extends TestCase
         return $this->grantedActor('op-gm', ['finance.opening.approve']);
     }
 
-    /** @return array{state: OpeningState, entries: array<string, string>} */
+    /**
+     * @param list<array{category: string, amount: string, studentId?: string|null, personId?: string|null, asset?: string|null, equity?: string|null, source: string, description?: string}> $entries
+     * @return array{state: OpeningState, entries: array<string, string>}
+     */
     private function preparedState(array $entries = []): array
     {
         $fm = $this->financeManager();
@@ -311,6 +314,10 @@ final class OpeningStateFeatureTest extends TestCase
         $openingPeriodId = FinancialPeriod::query()->where('period_key', $this->openingPeriodKey)->value('id');
         $obligations = Obligation::query()->where('period_id', $openingPeriodId)->where('student_id', $this->studentId)->get();
         $this->assertSame(2, $obligations->count());
+        $baseObligation = $obligations->firstWhere('original_amount', '3000.00');
+        if ($baseObligation === null) {
+            $this->fail('expected opening obligation of 3000.00 is missing');
+        }
 
         $analyst = $this->grantedActor('op-analyst', ['reporting.catalog', 'reporting.compute']);
         app(DefineMetric::class)->define($analyst, 'student_outstanding_balance', 'Outstanding balance', 'spec', '2026-01-01', 'op-def-1');
@@ -320,7 +327,7 @@ final class OpeningStateFeatureTest extends TestCase
         // subsequent activity: a real payment of 1000 allocated through the normal certified mechanism
         $september = app(MaintainFinancialPeriod::class)->open($this->financeManager(), '2026-09', '2026-09-01', '2026-09-30', 'op-per-9');
         $payment = app(RecordPayment::class)->record($this->financeManager(), FinancialPeriod::query()->findOrFail($september['period_id']), $this->studentId, '1000.00', 'cash', 'RCPT-OP-1', '2026-09-05', 'op-pay-1');
-        app(AllocatePayment::class)->allocate($this->financeManager(), Payment::query()->findOrFail($payment['payment_id']), $obligations->firstWhere('original_amount', '3000.00'), '1000.00', 'op-alloc-1');
+        app(AllocatePayment::class)->allocate($this->financeManager(), Payment::query()->findOrFail($payment['payment_id']), $baseObligation, '1000.00', 'op-alloc-1');
 
         // current position: opening period now nets 3500 - 1000 = 2500
         $current = app(ComputeProjection::class)->compute($analyst, 'student_outstanding_balance', $this->openingPeriodKey, 'student', $this->studentId, 'op-proj-2');
@@ -330,14 +337,14 @@ final class OpeningStateFeatureTest extends TestCase
         $this->assertSame('0.00', $septemberView['value']);
 
         // correction after approval: approved discount of 500 adjusts WITHOUT touching opening evidence
-        $discount = app(MaintainDiscount::class)->propose($this->financeManager(), $obligations->firstWhere('original_amount', '3000.00'), FinancialPeriod::query()->findOrFail($september['period_id']), '500.00', 'policy/correction', '2026-09-10', null, 'post-approval correction', 'op-dis-1');
+        $discount = app(MaintainDiscount::class)->propose($this->financeManager(), $baseObligation, FinancialPeriod::query()->findOrFail($september['period_id']), '500.00', 'policy/correction', '2026-09-10', null, 'post-approval correction', 'op-dis-1');
         app(MaintainDiscount::class)->approve($this->grantedActor('op-dis-appr', ['finance.discount_approve']), Discount::query()->findOrFail($discount['discount_id']), 'op-dis-2');
         $afterCorrection = app(ComputeProjection::class)->compute($analyst, 'student_outstanding_balance', $this->openingPeriodKey, 'student', $this->studentId, 'op-proj-4');
         $this->assertSame('2000.00', $afterCorrection['value']);
 
         // opening evidence remains intact and reproducible
         $this->assertDatabaseHas('opening_entries', ['id' => $prepared['entries']['paper/ledger-2'], 'amount' => '3000.00']);
-        $this->assertDatabaseHas('obligations', ['id' => $obligations->firstWhere('original_amount', '3000.00')->id, 'original_amount' => '3000.00']);
+        $this->assertDatabaseHas('obligations', ['id' => $baseObligation->id, 'original_amount' => '3000.00']);
         $approved = OpeningState::query()->findOrFail($state->id);
         $this->assertSame(OpeningEntryContract::digestFor($approved), $approved->approval_digest);
     }

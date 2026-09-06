@@ -282,7 +282,9 @@ final class ReportingFeatureTest extends TestCase
         $enrollmentIds = Enrollment::query()->where('class_id', $this->classId)->where('lifecycle_state', 'active')->pluck('id');
         $statuses = ['present', 'absent'];
         foreach ($enrollmentIds as $i => $enrollmentId) {
-            app(RecordAttendance::class)->record($officer, ClassSession::query()->findOrFail($session['session_id']), Enrollment::query()->findOrFail($enrollmentId), $statuses[$i], 'rep-att-'.$i);
+            /** @var Enrollment $enrollment */
+            $enrollment = Enrollment::query()->findOrFail($enrollmentId);
+            app(RecordAttendance::class)->record($officer, ClassSession::query()->findOrFail($session['session_id']), $enrollment, $statuses[$i], 'rep-att-'.$i);
         }
     }
 }

@@ -13,7 +13,7 @@ use Illuminate\Database\Eloquent\Model;
  *
  * @property string $id
  * @property string $employment_id
- * @property string $amount
+ * @property numeric-string $amount
  * @property string $basis
  * @property string $lifecycle_state
  * @property string $prepared_by

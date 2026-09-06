@@ -10,6 +10,7 @@ use App\Modules\Finance\Models\EnrollmentInstallmentPlan;
 use App\Modules\Finance\Models\FinancialCredit;
 use App\Modules\Finance\Models\FinancialGateException;
 use App\Modules\Finance\Models\Obligation;
+use App\Support\MoneyAmount;
 use Illuminate\Support\Carbon;
 
 /**
@@ -38,15 +39,17 @@ final class FinancialGateQuery
             ->get();
 
         $obligationEvidence = [];
+        /** @var numeric-string $originalTotal */
         $originalTotal = '0.00';
+        /** @var numeric-string $uncovered */
         $uncovered = '0.00';
         foreach ($obligations as $obligation) {
             $remaining = $this->balances->obligationRemaining($obligation);
-            $originalTotal = bcadd($originalTotal, (string) $obligation->original_amount, 2);
+            $originalTotal = bcadd($originalTotal, $obligation->original_amount, 2);
             $uncovered = bcadd($uncovered, $remaining, 2);
             $obligationEvidence[] = [
                 'obligation_id' => $obligation->id,
-                'obligation_amount' => (string) $obligation->original_amount,
+                'obligation_amount' => $obligation->original_amount,
                 'obligation_remaining' => $remaining,
             ];
         }
@@ -78,9 +81,9 @@ final class FinancialGateQuery
             })
             ->get();
 
-        $creditAmount = $this->sum($credits->pluck('amount')->all());
-        $installmentAmount = $this->sum($installments->pluck('amount')->all());
-        $exceptionAmount = $this->sum($exceptions->pluck('amount')->all());
+        $creditAmount = $this->sum(array_map(static fn (mixed $amount): string => MoneyAmount::decimal($amount), array_values($credits->pluck('amount')->all())));
+        $installmentAmount = $this->sum(array_map(static fn (mixed $amount): string => MoneyAmount::decimal($amount), array_values($installments->pluck('amount')->all())));
+        $exceptionAmount = $this->sum(array_map(static fn (mixed $amount): string => MoneyAmount::decimal($amount), array_values($exceptions->pluck('amount')->all())));
 
         $coveredByExisting = bcsub($originalTotal, $uncovered, 2);
         $coveredByCredit = $this->minOf($creditAmount, $uncovered);
@@ -146,15 +149,17 @@ final class FinancialGateQuery
             ->get();
 
         $obligationEvidence = [];
+        /** @var numeric-string $originalTotal */
         $originalTotal = '0.00';
+        /** @var numeric-string $uncovered */
         $uncovered = '0.00';
         foreach ($obligations as $obligation) {
             $remaining = $this->balances->obligationRemaining($obligation);
-            $originalTotal = bcadd($originalTotal, (string) $obligation->original_amount, 2);
+            $originalTotal = bcadd($originalTotal, $obligation->original_amount, 2);
             $uncovered = bcadd($uncovered, $remaining, 2);
             $obligationEvidence[] = [
                 'obligation_id' => $obligation->id,
-                'obligation_amount' => (string) $obligation->original_amount,
+                'obligation_amount' => $obligation->original_amount,
                 'obligation_remaining' => $remaining,
             ];
         }
@@ -179,9 +184,9 @@ final class FinancialGateQuery
             })
             ->get();
 
-        $creditAmount = $this->sum($credits->pluck('amount')->all());
-        $installmentAmount = $this->sum($installments->pluck('amount')->all());
-        $exceptionAmount = $this->sum($exceptions->pluck('amount')->all());
+        $creditAmount = $this->sum(array_map(static fn (mixed $amount): string => MoneyAmount::decimal($amount), array_values($credits->pluck('amount')->all())));
+        $installmentAmount = $this->sum(array_map(static fn (mixed $amount): string => MoneyAmount::decimal($amount), array_values($installments->pluck('amount')->all())));
+        $exceptionAmount = $this->sum(array_map(static fn (mixed $amount): string => MoneyAmount::decimal($amount), array_values($exceptions->pluck('amount')->all())));
 
         $coveredByExisting = bcsub($originalTotal, $uncovered, 2);
         $coveredByCredit = $this->minOf($creditAmount, $uncovered);
@@ -228,7 +233,11 @@ final class FinancialGateQuery
         ];
     }
 
-    /** @param list<string> $amounts */
+    /**
+     * @param list<numeric-string> $amounts
+     *
+     * @return numeric-string
+     */
     private function sum(array $amounts): string
     {
         $total = '0.00';
@@ -239,6 +248,12 @@ final class FinancialGateQuery
         return $total;
     }
 
+    /**
+     * @param numeric-string $potential
+     * @param numeric-string $limit
+     *
+     * @return numeric-string
+     */
     private function minOf(string $potential, string $limit): string
     {
         return bccomp($potential, $limit, 2) === 1 ? $limit : $potential;

@@ -59,7 +59,7 @@ final class RecordBranch
 
     public static function enrollmentBranch(Enrollment $enrollment): ?string
     {
-        $authoritative = Enrollment::query()->find($enrollment->getKey());
+        $authoritative = Enrollment::query()->find((string) $enrollment->getKey());
         if ($authoritative === null) {
             return null;
         }
@@ -94,14 +94,14 @@ final class RecordBranch
 
     public static function classBranch(ClassModel $class): ?string
     {
-        $authoritative = ClassModel::query()->find($class->getKey());
+        $authoritative = ClassModel::query()->find((string) $class->getKey());
 
         return $authoritative === null ? null : self::present($authoritative->branch_id);
     }
 
     public static function progressionBranch(ProgressionDecision $decision): ?string
     {
-        $authoritative = ProgressionDecision::query()->find($decision->getKey());
+        $authoritative = ProgressionDecision::query()->find((string) $decision->getKey());
         if ($authoritative === null) {
             return null;
         }
@@ -122,7 +122,7 @@ final class RecordBranch
 
     public static function certificateBranch(Certificate $certificate): ?string
     {
-        $authoritative = Certificate::query()->find($certificate->getKey());
+        $authoritative = Certificate::query()->find((string) $certificate->getKey());
         if ($authoritative === null) {
             return null;
         }
@@ -137,7 +137,7 @@ final class RecordBranch
         if ($profile === null) {
             return null;
         }
-        $authoritative = PlacementProfile::query()->find($profile->getKey());
+        $authoritative = PlacementProfile::query()->find((string) $profile->getKey());
         if ($authoritative === null) {
             return null;
         }

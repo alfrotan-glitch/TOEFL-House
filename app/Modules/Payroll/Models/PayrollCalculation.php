@@ -15,7 +15,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $id
  * @property string $period_id
  * @property string $employment_id
- * @property string $base_amount
+ * @property numeric-string $base_amount
  * @property array<string, mixed> $snapshot
  * @property string $lifecycle_state
  * @property string|null $resolution_ref

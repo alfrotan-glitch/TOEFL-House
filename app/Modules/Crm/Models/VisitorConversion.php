@@ -28,7 +28,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * @property string|null $student_id
  * @property string $converted_by
  * @property string $authority_audit_event_id
- * @property string $converted_at
+ * @property \Carbon\CarbonImmutable $converted_at
  * @property string $correlation_id
  */
 final class VisitorConversion extends Model

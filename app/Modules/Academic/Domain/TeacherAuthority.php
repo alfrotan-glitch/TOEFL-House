@@ -275,7 +275,7 @@ final class TeacherAuthority
             throw BusinessRejection::forCode('academic.teacher_employment_inactive', 'teacher employment is not active for this academic action');
         }
         $status = EmploymentStatus::query()->where('employment_id', $employment->id)->where('effective_from', '<=', $on->toDateString())->orderByDesc('effective_from')->orderByDesc('created_at')->orderByDesc('id')->first();
-        $effectiveEmploymentState = $status?->status ?? $employment->lifecycle_state;
+        $effectiveEmploymentState = $status !== null ? $status->status : $employment->lifecycle_state;
         if ($effectiveEmploymentState !== 'active') {
             throw BusinessRejection::forCode('academic.teacher_status_inactive', 'teacher employment status is not active on the academic date');
         }
@@ -357,7 +357,7 @@ final class TeacherAuthority
         }
     }
 
-    private function branchScope(string $branchId): ?\App\Support\Authorization\StructureScope
+    private function branchScope(string $branchId): \App\Support\Authorization\StructureScope
     {
         $branch = trim($branchId) === '' ? null : Branch::query()->whereKey($branchId)->first();
         $scope = $branch?->structureScope();

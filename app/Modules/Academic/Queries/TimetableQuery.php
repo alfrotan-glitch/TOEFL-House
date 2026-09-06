@@ -30,14 +30,14 @@ final class TimetableQuery
             return ['room' => null, 'sessions' => []];
         }
 
-        $sessions = ClassSession::query()
+        $sessions = array_values(ClassSession::query()
             ->where('room_id', $roomId)
             ->where('scheduled_on', $day->toDateString())
             ->with(['class', 'section'])
             ->orderBy('starts_at')
             ->get()
             ->map(fn (ClassSession $session): array => $this->sessionRow($session))
-            ->all();
+            ->values()->all());
 
         return ['room' => $room->toArray(), 'sessions' => $sessions];
     }
@@ -54,20 +54,20 @@ final class TimetableQuery
             return ['class' => null, 'sections' => [], 'sessions' => []];
         }
 
-        $sections = ClassSection::query()
+        $sections = array_values(ClassSection::query()
             ->where('class_id', $classId)
             ->orderBy('name')
             ->get()
             ->map(fn (ClassSection $section): array => $section->toArray())
-            ->all();
-        $sessions = ClassSession::query()
+            ->values()->all());
+        $sessions = array_values(ClassSession::query()
             ->where('class_id', $classId)
             ->where('scheduled_on', $day->toDateString())
             ->with(['section', 'room'])
             ->orderBy('starts_at')
             ->get()
             ->map(fn (ClassSession $session): array => $this->sessionRow($session))
-            ->all();
+            ->values()->all());
 
         return ['class' => $class->toArray(), 'sections' => $sections, 'sessions' => $sessions];
     }
@@ -78,14 +78,14 @@ final class TimetableQuery
     public function forBranch(string $branchId, ?CarbonImmutable $day = null): array
     {
         $day = $this->day($day);
-        $sessions = ClassSession::query()
+        $sessions = array_values(ClassSession::query()
             ->whereHas('class', fn ($query) => $query->where('branch_id', $branchId))
             ->where('scheduled_on', $day->toDateString())
             ->with(['room', 'class', 'section'])
             ->orderBy('starts_at')
             ->get()
             ->map(fn (ClassSession $session): array => $this->sessionRow($session))
-            ->all();
+            ->values()->all());
 
         return ['branch_id' => $branchId, 'day' => $day->toDateString(), 'sessions' => $sessions];
     }

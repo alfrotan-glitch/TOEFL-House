@@ -22,7 +22,9 @@ final class NotificationQuery
     {
         $now = CarbonImmutable::now();
         $candidateBranches = app(ActorBranches::class)->visibleBranchIds($actor);
+        /** @var list<string> $branches */
         $branches = $this->authorizedBranches($actor, $candidateBranches);
+        /** @var array<string, string> $branchOrganizations */
         $branchOrganizations = $this->branchOrganizations($branches);
         // Resolve organization scope directly through AccessResolution rather
         // than inferring it from visible branches. An organization grant is a
@@ -52,7 +54,7 @@ final class NotificationQuery
                 }
             });
         };
-        $items = Notification::query()
+        $items = array_values(Notification::query()
             ->where('recipient_actor_id', $actor->actorId)
             ->where($scope)
             ->whereIn('lifecycle_state', ['unread', 'read'])
@@ -74,7 +76,7 @@ final class NotificationQuery
                 'status' => (string) $notification->lifecycle_state,
                 'read_at' => $notification->read_at?->toIso8601String(),
                 'created_at' => $notification->created_at?->toIso8601String(),
-            ])->all();
+            ])->values()->all());
 
         return [
             'status' => 'ready',
@@ -88,7 +90,10 @@ final class NotificationQuery
         ];
     }
 
-    /** @param list<string> $branchIds @return array<string, string> */
+    /**
+     * @param  list<string>  $branchIds
+     * @return array<string, string>
+     */
     private function branchOrganizations(array $branchIds): array
     {
         if ($branchIds === []) {
@@ -126,7 +131,10 @@ final class NotificationQuery
         return $authorized;
     }
 
-    /** @param list<string> $candidateBranchIds @return list<string> */
+    /**
+     * @param  list<string>  $candidateBranchIds
+     * @return list<string>
+     */
     private function authorizedBranches(Actor $actor, array $candidateBranchIds): array
     {
         $decision = app(AccessDecision::class);

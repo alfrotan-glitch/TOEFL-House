@@ -86,7 +86,7 @@ final class IdentityController extends Controller
             'person_id' => ['required', 'string'],
             'username' => ['required', 'string', 'max:120'],
         ]);
-        $person = Person::query()->findOrFail($input['person_id']);
+        $person = Person::query()->findOrFail((string) $input['person_id']);
 
         app(LinkUserAccount::class)->link(
             $this->actor(),

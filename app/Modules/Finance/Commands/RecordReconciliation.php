@@ -58,7 +58,7 @@ final class RecordReconciliation
                         throw BusinessRejection::forCode('finance.reconciliation_exists', 'this period and subject already has a recorded observation');
                     }
 
-                    $variance = bcsub((string) $observed, (string) $expected, 2);
+                    $variance = bcsub(MoneyAmount::decimal($observed), MoneyAmount::decimal($expected), 2);
                     $reconciliation = Reconciliation::query()->create([
                         'id' => RandomIdentifier::new(),
                         'period_id' => $lockedPeriod->id,

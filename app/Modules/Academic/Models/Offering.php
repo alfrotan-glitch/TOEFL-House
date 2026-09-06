@@ -20,6 +20,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string $academic_period_id
  * @property int $capacity
  * @property string $lifecycle_state
+ * @property-read int $open_waitlist_entries
  *
  * Classes may deliver an offering, but the offering remains the packaging and
  * capacity authority; class delivery never rewrites its identity.

@@ -160,7 +160,7 @@ final class FinanceController extends Controller
 
         app(RecordPayment::class)->record(
             $this->actor(),
-            FinancialPeriod::query()->findOrFail($input['period_id']),
+            FinancialPeriod::query()->findOrFail((string) $input['period_id']),
             $input['student_id'],
             $input['amount'],
             $input['method'],
@@ -189,7 +189,7 @@ final class FinanceController extends Controller
         app(RefundPayment::class)->propose(
             $this->actor(),
             Payment::query()->findOrFail($paymentId),
-            FinancialPeriod::query()->findOrFail($input['period_id']),
+            FinancialPeriod::query()->findOrFail((string) $input['period_id']),
             $input['amount'],
             $input['reason'],
             $this->idempotencyKey('finance.refund.propose'),
@@ -218,7 +218,7 @@ final class FinanceController extends Controller
 
         app(AllocatePayment::class)->allocate(
             $this->actor(),
-            Payment::query()->findOrFail($input['payment_id']),
+            Payment::query()->findOrFail((string) $input['payment_id']),
             Obligation::query()->findOrFail($obligationId),
             $input['amount'],
             $this->idempotencyKey('finance.allocate'),
@@ -241,7 +241,7 @@ final class FinanceController extends Controller
 
         app(PostObligation::class)->post(
             $this->actor(),
-            FinancialPeriod::query()->findOrFail($input['period_id']),
+            FinancialPeriod::query()->findOrFail((string) $input['period_id']),
             $input['student_id'],
             $input['source'],
             $input['reason'],
@@ -337,7 +337,7 @@ final class FinanceController extends Controller
 
         app(PostJournal::class)->post(
             $this->actor(),
-            FinancialPeriod::query()->findOrFail($input['period_id']),
+            FinancialPeriod::query()->findOrFail((string) $input['period_id']),
             $input['source_type'],
             (($input['source_id'] ?? '') !== '') ? $input['source_id'] : null,
             $input['reason'],
@@ -434,8 +434,8 @@ final class FinanceController extends Controller
 
         app(MaintainDiscount::class)->propose(
             $this->actor(),
-            Obligation::query()->findOrFail($input['obligation_id']),
-            FinancialPeriod::query()->findOrFail($input['period_id']),
+            Obligation::query()->findOrFail((string) $input['obligation_id']),
+            FinancialPeriod::query()->findOrFail((string) $input['period_id']),
             $input['amount'],
             $input['eligibility'],
             $input['effective_from'],
@@ -470,7 +470,7 @@ final class FinanceController extends Controller
 
         app(RecordReconciliation::class)->observe(
             $this->actor(),
-            FinancialPeriod::query()->findOrFail($input['period_id']),
+            FinancialPeriod::query()->findOrFail((string) $input['period_id']),
             $input['subject'],
             $input['expected'],
             $input['observed'],
@@ -526,7 +526,7 @@ final class FinanceController extends Controller
         app(AllocateFunds::class)->allocate(
             $this->actor(),
             FundingSource::query()->findOrFail($fundId),
-            ObligationLine::query()->findOrFail($input['obligation_line_id']),
+            ObligationLine::query()->findOrFail((string) $input['obligation_line_id']),
             $input['amount'],
             $input['reason'],
             $this->idempotencyKey('finance.fund.allocate'),

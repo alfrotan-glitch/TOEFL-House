@@ -107,7 +107,7 @@ final class DelegateAuthority
                         'delegator_person_id' => $delegatorPersonId,
                         'delegate_person_id' => $delegatePersonId,
                         'permission' => $permission,
-                        'scope' => $scopeType !== null ? $scopeType.':'.($scopeId ?? '') : null,
+                        'scope' => $scopeType.':'.$scopeId,
                         'effective_from' => $delegation->effective_from,
                         'effective_to' => $delegation->effective_to,
                         'reason' => $reason,

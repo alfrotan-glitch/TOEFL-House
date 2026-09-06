@@ -53,7 +53,7 @@ final class ProcessJobRun
     /** @return array{run_id: string, status: string, outcome: array<string, mixed>|null} */
     private function executeClaimed(Actor $actor, string $runId): array
     {
-        $claim = DB::transaction(function () use ($actor, $runId): ?array {
+        $claim = DB::transaction(function () use ($actor, $runId): array {
             $this->require($actor);
 
             /** @var JobRun|null $locked */
@@ -96,9 +96,8 @@ final class ProcessJobRun
             ];
         });
 
-        if ($claim === null || isset($claim['status'])) {
-            /** @var array{run_id: string, status: string, outcome: array<string, mixed>|null} $claim */
-            return $claim ?? ['run_id' => $runId, 'status' => 'missing', 'outcome' => null];
+        if (isset($claim['status'])) {
+            return $claim;
         }
 
         try {
@@ -117,8 +116,10 @@ final class ProcessJobRun
         }
     }
 
-    /** @param array<string, mixed> $claim @param array<string, mixed> $outcome
-     *  @return array{run_id: string, status: string, outcome: array<string, mixed>|null}
+    /**
+     * @param array<string, mixed> $claim
+     * @param array<string, mixed> $outcome
+     * @return array{run_id: string, status: string, outcome: array<string, mixed>|null}
      */
     private function finalizeSuccess(Actor $actor, array $claim, array $outcome): array
     {

@@ -14,7 +14,7 @@ use stdClass;
  * Parameter typing mirrors pdo_pgsql (server-side inference from unknown-type
  * text params); result typing mirrors pdo_pgsql by column OID.
  */
-class PgWireStatement extends PDOStatement
+final class PgWireStatement extends PDOStatement
 {
     private PgWirePdo $pdo;
 
@@ -52,6 +52,7 @@ class PgWireStatement extends PDOStatement
 
     private ?string $errCode = '00000';
 
+    /** @var array{0: string, 1: string, 2: string} */
     private array $errInfo = ['00000', '', ''];
 
     protected function __construct()
@@ -59,6 +60,7 @@ class PgWireStatement extends PDOStatement
         // Instantiated via create()/fromResult().
     }
 
+    /** @param array<int, mixed> $options */
     public static function create(PgWirePdo $pdo, string $originalSql, string $rewrittenSql, array $options = []): static
     {
         $stmt = new static;
@@ -140,11 +142,13 @@ class PgWireStatement extends PDOStatement
         return $this->errCode;
     }
 
+    /** @return array{0: string, 1: string, 2: string} */
     public function errorInfo(): array
     {
         return $this->errInfo;
     }
 
+    /** @param array<int|string, mixed>|null $params */
     public function execute(?array $params = null): bool
     {
         $this->closed = false;
@@ -203,6 +207,7 @@ class PgWireStatement extends PDOStatement
         return $row;
     }
 
+    /** @return array<int, mixed> */
     public function fetchAll(int $mode = 0, mixed ...$args): array
     {
         $mode = $mode === 0 ? $this->fetchMode : $mode;
@@ -344,10 +349,10 @@ class PgWireStatement extends PDOStatement
         return true;
     }
 
-    public function setFetchMode(int $mode, mixed ...$args): bool
+    public function setFetchMode(int $mode, mixed ...$args): true
     {
         $this->fetchMode = $mode;
-        $this->fetchModeArgs = $args;
+        $this->fetchModeArgs = array_values($args);
 
         return true;
     }
@@ -383,6 +388,7 @@ class PgWireStatement extends PDOStatement
         $this->closed = false;
     }
 
+    /** @param array<string, mixed> $assoc */
     private function projectRow(array $assoc, int $mode): mixed
     {
         $base = $mode & 0xFFFF;
@@ -400,6 +406,10 @@ class PgWireStatement extends PDOStatement
         };
     }
 
+    /**
+     * @param array<string, mixed> $assoc
+     * @return array<string|int, mixed>
+     */
     private function bothRow(array $assoc): array
     {
         $row = [];
@@ -413,6 +423,11 @@ class PgWireStatement extends PDOStatement
         return $row;
     }
 
+    /**
+     * @param string $class
+     * @param array<int, mixed> $ctorArgs
+     * @param array<string, mixed> $assoc
+     */
     private function intoNew(string $class, array $ctorArgs, array $assoc): object
     {
         $object = new $class(...$ctorArgs);
@@ -423,6 +438,7 @@ class PgWireStatement extends PDOStatement
         return $object;
     }
 
+    /** @param array<string, mixed> $assoc */
     private function intoExisting(mixed $object, array $assoc): object
     {
         $target = is_object($object) ? $object : new stdClass;

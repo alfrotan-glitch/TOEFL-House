@@ -150,22 +150,20 @@ final class CrmInteractionTraceRecorder
         }
         $authorityEvent = AuditEvent::query()->whereKey($authorityAuditEventId)->lockForUpdate()->first();
         $referenceKind = (string) array_key_first($references);
-        $expectedOperations = match ($referenceKind) {
-            'message' => ['communication.message.queue'],
-            'document' => ['documents.register'],
-            'assessment' => ['academic.attempt.submit'],
-            'payment' => ['finance.payment.record'],
-            'placement' => ['placement.attempt.submit', 'placement.attempt.submit.physical.answers'],
-            default => [],
-        };
-        $expectedTargetType = match ($referenceKind) {
-            'message' => 'message',
-            'document' => 'document',
-            'assessment' => 'assessment_attempt',
-            'payment' => 'payment',
-            'placement' => 'placement_attempt',
-            default => '',
-        };
+        /** @var array<string, array{operations: list<string>, target_type: string}> $expectedByKind */
+        $expectedByKind = [
+            'message' => ['operations' => ['communication.message.queue'], 'target_type' => 'message'],
+            'document' => ['operations' => ['documents.register'], 'target_type' => 'document'],
+            'assessment' => ['operations' => ['academic.attempt.submit'], 'target_type' => 'assessment_attempt'],
+            'payment' => ['operations' => ['finance.payment.record'], 'target_type' => 'payment'],
+            'placement' => ['operations' => ['placement.attempt.submit', 'placement.attempt.submit.physical.answers'], 'target_type' => 'placement_attempt'],
+        ];
+        $expected = $expectedByKind[$referenceKind] ?? null;
+        if ($expected === null) {
+            throw BusinessRejection::forCode('crm.interaction_reference_kind_unknown', 'the interaction reference kind is not governed');
+        }
+        $expectedOperations = $expected['operations'];
+        $expectedTargetType = $expected['target_type'];
         $expectedTargetId = (string) ($references[$referenceKind] ?? '');
         if ($authorityEvent === null
             || $authorityEvent->actor_id !== $actor->actorId

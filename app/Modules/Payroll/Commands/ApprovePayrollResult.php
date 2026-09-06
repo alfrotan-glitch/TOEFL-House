@@ -65,7 +65,7 @@ final class ApprovePayrollResult
                     }
                     /** @var Person|null $person */
                     $person = Person::query()->whereKey($employment->person_id)->first();
-                    $originatingBranchId = trim((string) ($person?->home_branch_id ?? ''));
+                    $originatingBranchId = $person !== null ? trim((string) ($person->home_branch_id ?? '')) : '';
                     $branch = $originatingBranchId === '' ? null : Branch::query()->whereKey($originatingBranchId)->first();
                     if ($branch === null || $branch->lifecycle_state !== 'active' || $branch->structureScope()->organizationId === '') {
                         throw BusinessRejection::forCode('payroll.branch_provenance_missing', 'an approved Payroll result requires an active employee home branch snapshot with organization provenance');

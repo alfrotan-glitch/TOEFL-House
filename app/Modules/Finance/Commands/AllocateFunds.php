@@ -113,12 +113,12 @@ final class AllocateFunds
                     }
 
                     $fundAllocationIds = FundAllocation::query()->where('fund_id', $lockedFund->id)->pluck('id');
-                    $utilized = (string) FundAllocation::query()->whereIn('id', $fundAllocationIds)->sum('amount');
-                    $reversed = (string) FinancialCorrection::query()
+                    $utilized = MoneyAmount::decimal(FundAllocation::query()->whereIn('id', $fundAllocationIds)->sum('amount'));
+                    $reversed = MoneyAmount::decimal(FinancialCorrection::query()
                         ->whereIn('fund_allocation_id', $fundAllocationIds)
                         ->where('correction_type', FinancialCorrection::TYPE_FUND_ALLOCATION_REVERSAL)
                         ->where('lifecycle_state', FinancialCorrection::STATE_RECORDED)
-                        ->sum('amount');
+                        ->sum('amount'));
                     $available = bcsub((string) $lockedFund->committed_amount, bcsub($utilized, $reversed, 2), 2);
                     if (bccomp($amount, $available, 2) === 1) {
                         throw BusinessRejection::forCode('finance.fund_exhausted', sprintf('the allocation exceeds the unutilized pool remainder %s', $available));
@@ -136,12 +136,12 @@ final class AllocateFunds
                     }
                     $this->require($actor, self::CAPABILITY_ALLOCATE, $branch->structureScope());
                     $lineAllocationIds = FundAllocation::query()->where('obligation_line_id', $lockedLine->id)->pluck('id');
-                    $lineFunded = (string) FundAllocation::query()->whereIn('id', $lineAllocationIds)->sum('amount');
-                    $lineReversed = (string) FinancialCorrection::query()
+                    $lineFunded = MoneyAmount::decimal(FundAllocation::query()->whereIn('id', $lineAllocationIds)->sum('amount'));
+                    $lineReversed = MoneyAmount::decimal(FinancialCorrection::query()
                         ->whereIn('fund_allocation_id', $lineAllocationIds)
                         ->where('correction_type', FinancialCorrection::TYPE_FUND_ALLOCATION_REVERSAL)
                         ->where('lifecycle_state', FinancialCorrection::STATE_RECORDED)
-                        ->sum('amount');
+                        ->sum('amount'));
                     $lineRemaining = bcsub((string) $lockedLine->amount, bcsub($lineFunded, $lineReversed, 2), 2);
                     if (bccomp($amount, $lineRemaining, 2) === 1) {
                         throw BusinessRejection::forCode('finance.fund_exceeds_line', sprintf('the allocation exceeds the uncovered line remainder %s', $lineRemaining));

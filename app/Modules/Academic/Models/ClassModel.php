@@ -22,6 +22,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property int $capacity
  * @property string $lifecycle_state
  * @property string|null $program_version_level_id
+ * @property-read int $requested_seats
+ * @property-read int $active_seats
+ * @property-read int $frozen_seats
+ * @property-read int $claimed_seats
+ * @property-read int $open_waitlist_entries
  */
 final class ClassModel extends Model
 {

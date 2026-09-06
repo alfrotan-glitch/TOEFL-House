@@ -428,10 +428,12 @@ final class AcademicApiController extends Controller
                 })
                 ->with(['person:id,legal_name', 'branchAuthorizations'])
                 ->orderBy('id')->limit(500)->get()->flatMap(function (TeacherProfile $profile) use ($branchScopes): array {
+                    /** @var \App\Modules\Identity\Models\Person|null $profilePerson */
+                    $profilePerson = $profile->person;
                     return $profile->branchAuthorizations->filter(static fn ($authorization): bool => $authorization->lifecycle_state === 'active' && in_array((string) $authorization->branch_id, $branchScopes['schedule'], true) && (string) $authorization->effective_from <= now()->toDateString() && ($authorization->effective_to === null || (string) $authorization->effective_to > now()->toDateString()))->map(static fn ($authorization): array => [
                         'id' => (string) $profile->person_id,
                         'teacher_profile_id' => (string) $profile->id,
-                        'name' => (string) ($profile->person?->legal_name ?? $profile->person_id),
+                        'name' => $profilePerson !== null ? (string) $profilePerson->legal_name : (string) $profile->person_id,
                         'branch_id' => (string) $authorization->branch_id,
                     ])->all();
                 })->values()->all();
@@ -571,7 +573,7 @@ final class AcademicApiController extends Controller
 
         $result = app(MaintainClass::class)->scheduleSession(
             $this->actor(),
-            ClassModel::query()->findOrFail($input['class_id']),
+            ClassModel::query()->findOrFail((string) $input['class_id']),
             CarbonImmutable::parse($input['scheduled_on']),
             $input['starts_at'],
             $input['ends_at'],
@@ -614,7 +616,7 @@ final class AcademicApiController extends Controller
     public function defineSection(Request $request): JsonResponse
     {
         $input = $request->validate(['class_id' => ['required', 'string'], 'name' => ['required', 'string', 'max:255'], 'capacity' => ['required', 'integer', 'min:1', 'max:10000']]);
-        $result = app(MaintainClass::class)->defineSection($this->actor(), ClassModel::query()->findOrFail($input['class_id']), $input['name'], (int) $input['capacity'], $this->idempotencyKey('academic.section.define'));
+        $result = app(MaintainClass::class)->defineSection($this->actor(), ClassModel::query()->findOrFail((string) $input['class_id']), $input['name'], (int) $input['capacity'], $this->idempotencyKey('academic.section.define'));
 
         return response()->json(['status' => 'defined', ...$result], 201);
     }
@@ -622,7 +624,7 @@ final class AcademicApiController extends Controller
     public function transitionSection(Request $request, string $sectionId): JsonResponse
     {
         $input = $request->validate(['to_state' => ['required', 'in:open,closed,cancelled,archived']]);
-        $result = app(MaintainClass::class)->transitionSection($this->actor(), ClassSection::query()->findOrFail($sectionId), $input['to_state'], $this->idempotencyKey('academic.section.transition'));
+        $result = app(MaintainClass::class)->transitionSection($this->actor(), ClassSection::query()->findOrFail((string) $sectionId), $input['to_state'], $this->idempotencyKey('academic.section.transition'));
 
         return response()->json(['status' => 'transitioned', ...$result]);
     }
@@ -630,7 +632,7 @@ final class AcademicApiController extends Controller
     public function assignTeacher(Request $request): JsonResponse
     {
         $input = $request->validate(['class_id' => ['required', 'string'], 'teacher_person_id' => ['required', 'string'], 'effective_from' => ['required', 'date'], 'effective_to' => ['nullable', 'date', 'after:effective_from']]);
-        $result = app(MaintainTeacherAssignment::class)->assignTeacher($this->actor(), ClassModel::query()->findOrFail($input['class_id']), $input['teacher_person_id'], CarbonImmutable::parse($input['effective_from']), isset($input['effective_to']) && $input['effective_to'] !== '' ? CarbonImmutable::parse($input['effective_to']) : null, $this->idempotencyKey('academic.teacher.assign'));
+        $result = app(MaintainTeacherAssignment::class)->assignTeacher($this->actor(), ClassModel::query()->findOrFail((string) $input['class_id']), $input['teacher_person_id'], CarbonImmutable::parse($input['effective_from']), isset($input['effective_to']) && $input['effective_to'] !== '' ? CarbonImmutable::parse($input['effective_to']) : null, $this->idempotencyKey('academic.teacher.assign'));
 
         return response()->json(['status' => 'assigned', ...$result], 201);
     }
@@ -638,7 +640,7 @@ final class AcademicApiController extends Controller
     public function attendance(Request $request, string $sessionId): JsonResponse
     {
         $input = $request->validate(['enrollment_id' => ['required', 'string'], 'status' => ['required', 'in:present,late,absent,excused']]);
-        $result = app(RecordAttendance::class)->record($this->actor(), ClassSession::query()->findOrFail($sessionId), Enrollment::query()->findOrFail($input['enrollment_id']), $input['status'], $this->idempotencyKey('academic.attendance'));
+        $result = app(RecordAttendance::class)->record($this->actor(), ClassSession::query()->findOrFail((string) $sessionId), Enrollment::query()->findOrFail((string) $input['enrollment_id']), $input['status'], $this->idempotencyKey('academic.attendance'));
 
         return response()->json(['status' => 'recorded', ...$result], 201);
     }
@@ -729,7 +731,7 @@ final class AcademicApiController extends Controller
         ]);
         $result = app(ManageAssessmentResult::class)->submitAttempt(
             $this->actor(),
-            Enrollment::query()->findOrFail($input['enrollment_id']),
+            Enrollment::query()->findOrFail((string) $input['enrollment_id']),
             $input['kind'],
             $input['evidence_ref'],
             $this->idempotencyKey('academic.attempt.submit'),
@@ -906,6 +908,7 @@ final class AcademicApiController extends Controller
         return response()->json(['status' => 'retired', ...$result]);
     }
 
+    /** @return array{decision_id: string, superseded_id: string, correlation_id: string} */
     private function supersedeProgression(Request $request, DecideProgression $command, ProgressionDecision $decision, string $key): array
     {
         $input = $request->validate([
@@ -1077,6 +1080,7 @@ final class AcademicApiController extends Controller
         return response()->json(['status' => 'transitioned', ...$result]);
     }
 
+    /** @return array{enrollment_id: string, lifecycle_state: string, correlation_id: string} */
     private function completeEnrollmentCommand(Request $request, MaintainEnrollment $command, Enrollment $enrollment, string $key): array
     {
         $input = $request->validate(['basis' => ['required', 'string', 'max:1000'], 'evidence_kind' => ['nullable', 'in:assessment_result,progression_decision'], 'evidence_id' => ['nullable', 'string', 'required_with:evidence_kind']]);
@@ -1084,6 +1088,7 @@ final class AcademicApiController extends Controller
         return $command->complete($this->actor(), $enrollment, $input['basis'], $this->optional($input['evidence_kind'] ?? null), $this->optional($input['evidence_id'] ?? null), $key);
     }
 
+    /** @return array{enrollment_id: string, previous_enrollment_id: string, correlation_id: string} */
     private function transferEnrollmentCommand(Request $request, MaintainEnrollment $command, Enrollment $enrollment, string $key): array
     {
         $input = $request->validate(['target_class_id' => ['required', 'string'], 'offering_id' => ['nullable', 'string']]);

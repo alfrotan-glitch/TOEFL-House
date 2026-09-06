@@ -22,11 +22,12 @@ final class EnsureEmployeeSession
 {
     public function handle(Request $request, Closure $next): Response
     {
-        if (! Auth::check() || ! $request->user()->isActive()) {
+        $user = $request->user();
+        if (! $user instanceof UserAccount || ! $user->isActive()) {
             if ($request->expectsJson() || str_starts_with($request->path(), 'api/')) {
                 return response()->json(['error' => 'authentication_required', 'message' => 'Sign in as an employee to continue.'], 401);
             }
-            if ($request->user() !== null && ! $request->user()->isActive()) {
+            if ($user !== null && ! $user->isActive()) {
                 Auth::logout();
             }
 

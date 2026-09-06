@@ -61,7 +61,10 @@ final class SettlementWorkflowFeatureTest extends TestCase
         app(MaintainEmployment::class)->terminate($manager, Employment::query()->findOrFail($this->employmentId), '2026-10-01', 'contract ended', 'swf-emp-3');
     }
 
-    /** @return array{0: Person, 1: UserAccount} */
+    /**
+     * @param list<string> $capabilities
+     * @return array{0: Person, 1: UserAccount}
+     */
     private function makeEmployee(string $personId, array $capabilities, string $username): array
     {
         $person = $this->personWithAuthority($personId, $capabilities);

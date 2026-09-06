@@ -45,7 +45,7 @@ final class StudentRecordQuery
             ->orderByDesc('seq')
             ->first();
 
-        $guardians = GuardianRelationship::query()
+        $guardians = array_values(GuardianRelationship::query()
             ->where('student_id', $studentId)
             ->where('lifecycle_state', 'active')
             ->where('verification_state', 'verified')
@@ -56,11 +56,11 @@ final class StudentRecordQuery
                 'relationship_id' => trim((string) $relationship->id),
                 'guardian_person_id' => trim((string) $relationship->guardian_person_id),
                 'relationship' => $relationship->relationship,
-                'permissions' => $relationship->permissions ?? [],
+                'permissions' => $relationship->permissions,
             ])
-            ->all();
+            ->all());
 
-        $transfers = $student->branchTransfers()
+        $transfers = array_values($student->branchTransfers()
             ->where('effective_from', '<=', $day)
             ->get()
             ->map(static fn ($transfer): array => [
@@ -71,7 +71,7 @@ final class StudentRecordQuery
                 'reason' => $transfer->reason,
                 'transferred_by' => trim((string) $transfer->transferred_by),
             ])
-            ->all() ?? [];
+            ->all());
 
         /** @var StudentHoldEvent|null $latestHold */
         $latestHold = StudentHoldEvent::query()
@@ -79,7 +79,7 @@ final class StudentRecordQuery
             ->where('effective_from', '<=', $day)
             ->orderByDesc('seq')
             ->first();
-        $holdHistory = StudentHoldEvent::query()
+        $holdHistory = array_values(StudentHoldEvent::query()
             ->where('student_id', $studentId)
             ->where('effective_from', '<=', $day)
             ->orderBy('seq')
@@ -91,7 +91,7 @@ final class StudentRecordQuery
                 'reason' => $event->reason,
                 'actor_id' => trim((string) $event->actor_id),
             ])
-            ->all();
+            ->all());
 
         return [
             'student_id' => trim($studentId),
@@ -105,13 +105,13 @@ final class StudentRecordQuery
                 'open' => $latestHold?->action === 'freeze',
                 'history' => $holdHistory,
             ],
-            'communication_preferences' => $student->communicationPreferences()
+            'communication_preferences' => array_values($student->communicationPreferences()
                 ->get(['channel', 'enabled'])
                 ->map(static fn ($preference): array => [
                     'channel' => $preference->channel,
                     'enabled' => (bool) $preference->enabled,
                 ])
-                ->all(),
+                ->all()),
             'guardians' => $guardians,
         ];
     }

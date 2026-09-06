@@ -166,7 +166,7 @@ final class RefundPayment
     private function assertWithinRefundableRemainder(Payment $payment, string $amount): void
     {
         $refundable = $this->balances->paymentRemaining($payment);
-        if (bccomp($amount, $refundable, 2) === 1) {
+        if (bccomp(MoneyAmount::decimal($amount), $refundable, 2) === 1) {
             throw BusinessRejection::forCode('finance.refund_exceeds_source', sprintf('the refund exceeds the refundable remainder %s', $refundable));
         }
     }

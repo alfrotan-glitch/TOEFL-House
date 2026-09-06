@@ -65,6 +65,7 @@ final class MoneyInputAdversarialTest extends TestCase
         return $period['period_id'];
     }
 
+    /** @return TestResponse<\Illuminate\Http\Response> */
     private function postPayment(string $amount): TestResponse
     {
         $this->post('/login', ['username' => 'mia-teller', 'password' => 'mia-password-1'])->assertRedirect('/');

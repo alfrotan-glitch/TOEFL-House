@@ -152,7 +152,7 @@ final class SettleEmployment
     private function employmentBranch(Employment $employment): Branch
     {
         $person = Person::query()->whereKey($employment->person_id)->first();
-        $branchId = trim((string) ($person?->home_branch_id ?? ''));
+        $branchId = $person !== null ? trim((string) ($person->home_branch_id ?? '')) : '';
         $branch = $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
         if ($branch === null || $branch->lifecycle_state !== 'active' || $branch->structureScope()->organizationId === '') {
             throw BusinessRejection::forCode('payroll.employee_provenance_required', 'employment settlement requires active employee branch and organization provenance');

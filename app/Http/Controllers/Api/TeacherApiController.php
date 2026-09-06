@@ -63,13 +63,17 @@ final class TeacherApiController extends Controller
                 ],
                 'profiles' => $profiles->map(function (TeacherProfile $profile) use ($assignments): array {
                     $rows = $assignments->get($profile->id, collect());
-                    $employmentState = (string) ($profile->employment?->lifecycle_state ?? 'unknown');
+                    /** @var Employment|null $employment */
+                    $employment = $profile->employment;
+                    $employmentState = $employment !== null ? (string) $employment->lifecycle_state : 'unknown';
                     $onLeave = Leave::query()->where('employment_id', $profile->employment_id)->where('lifecycle_state', 'approved')->where('date_from', '<=', now()->toDateString())->where('date_to', '>=', now()->toDateString())->exists();
                     $effectiveState = $profile->lifecycle_state !== TeacherProfile::STATE_ACTIVE ? 'profile_'.$profile->lifecycle_state : ($employmentState !== 'active' ? 'employment_'.$employmentState : ($onLeave ? 'on_leave' : 'operational'));
+                    /** @var \App\Modules\Identity\Models\Person|null $profilePerson */
+                    $profilePerson = $profile->person;
                     return [
                         'id' => (string) $profile->id,
                         'person_id' => (string) $profile->person_id,
-                        'legal_name' => (string) ($profile->person?->legal_name ?? ''),
+                        'legal_name' => $profilePerson !== null ? (string) $profilePerson->legal_name : '',
                         'employment_id' => (string) $profile->employment_id,
                         'employment_state' => $employmentState,
                         'effective_state' => $effectiveState,
@@ -157,7 +161,7 @@ final class TeacherApiController extends Controller
     public function register(Request $request): JsonResponse
     {
         $input = $request->validate(['employment_id' => ['required', 'string'], 'professional_title' => ['required', 'string', 'max:160'], 'profile_summary' => ['nullable', 'string', 'max:4000']]);
-        $result = app(MaintainTeacherProfile::class)->register($this->actor(), Employment::query()->findOrFail($input['employment_id']), $input['professional_title'], $input['profile_summary'] ?? null, $this->idempotencyKey('academic.teacher.register'));
+        $result = app(MaintainTeacherProfile::class)->register($this->actor(), Employment::query()->findOrFail((string) $input['employment_id']), $input['professional_title'], $input['profile_summary'] ?? null, $this->idempotencyKey('academic.teacher.register'));
         return response()->json(['status' => 'registered', ...$result], 201);
     }
 
@@ -219,7 +223,7 @@ final class TeacherApiController extends Controller
     public function assign(Request $request): JsonResponse
     {
         $input = $request->validate(['class_id' => ['required', 'string'], 'teacher_person_id' => ['required', 'string'], 'effective_from' => ['required', 'date'], 'effective_to' => ['nullable', 'date', 'after:effective_from']]);
-        $result = app(MaintainTeacherAssignment::class)->assignTeacher($this->actor(), ClassModel::query()->findOrFail($input['class_id']), $input['teacher_person_id'], CarbonImmutable::parse($input['effective_from']), ($input['effective_to'] ?? '') !== '' ? CarbonImmutable::parse($input['effective_to']) : null, $this->idempotencyKey('academic.teacher.assign'));
+        $result = app(MaintainTeacherAssignment::class)->assignTeacher($this->actor(), ClassModel::query()->findOrFail((string) $input['class_id']), $input['teacher_person_id'], CarbonImmutable::parse($input['effective_from']), ($input['effective_to'] ?? '') !== '' ? CarbonImmutable::parse($input['effective_to']) : null, $this->idempotencyKey('academic.teacher.assign'));
         return response()->json(['status' => 'assigned', ...$result], 201);
     }
 

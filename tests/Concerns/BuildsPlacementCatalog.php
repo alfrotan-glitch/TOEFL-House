@@ -190,14 +190,22 @@ trait BuildsPlacementCatalog
         app(ManagePlacementProfile::class)->markScored($this->placementOfficer($this->actorId($prefix.'-scored')), $profile, $prefix.'-scored');
         foreach (PlacementSectionResult::query()->where('attempt_id', $attempt->id)->get() as $sectionResult) {
             app(ScorePlacement::class)->moderateSection($this->placementModerator($this->actorId($prefix.'-mod')), $sectionResult, $prefix.'-mod-'.$sectionResult->id);
-            app(ScorePlacement::class)->approveSection($this->placementApprover($this->actorId($prefix.'-appr')), $sectionResult->fresh(), $prefix.'-appr-'.$sectionResult->id);
+            $approved = $sectionResult->fresh();
+            if ($approved === null) {
+                $this->fail('placement section result disappeared before approval');
+            }
+            app(ScorePlacement::class)->approveSection($this->placementApprover($this->actorId($prefix.'-appr')), $approved, $prefix.'-appr-'.$sectionResult->id);
         }
         app(RecommendPlacement::class)->recommend($this->placementRecommender($this->actorId($prefix.'-rec')), $profile, $prefix.'-rec');
         app(DecidePlacement::class)->review($this->placementModerator($this->actorId($prefix.'-review')), $profile, $prefix.'-review');
         app(DecidePlacement::class)->approve($this->placementApprover($this->actorId($prefix.'-approve')), $profile, $prefix.'-approve');
         app(DecidePlacement::class)->release($this->placementReleaser($this->actorId($prefix.'-release')), $profile, $prefix.'-release');
-        $this->assertSame('released', $profile->fresh()->lifecycle_state);
+        $released = $profile->fresh();
+        if ($released === null) {
+            $this->fail('placement profile disappeared after release');
+        }
+        $this->assertSame('released', $released->lifecycle_state);
 
-        return $profile->fresh();
+        return $released;
     }
 }

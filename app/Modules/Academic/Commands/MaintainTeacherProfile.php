@@ -351,7 +351,7 @@ final class MaintainTeacherProfile
                     })->exists()) {
                         throw BusinessRejection::forCode('academic.teacher_availability_branch_invalid', 'availability requires effective teacher branch authorization for its full window');
                     }
-                    if (TeacherAvailability::query()->where('teacher_profile_id', $locked->id)->where('branch_id', $branch->id)->where('weekday', $weekday)->where('lifecycle_state', 'active')->where('starts_at', '<', $endsAt)->where('ends_at', '>', $startsAt)->where('effective_from', '<=', $effectiveFrom)->where(function ($query) use ($effectiveTo): void {
+                    if (TeacherAvailability::query()->where('teacher_profile_id', $locked->id)->where('branch_id', $branch->id)->where('weekday', $weekday)->where('lifecycle_state', 'active')->where('starts_at', '<', $endsAt)->where('ends_at', '>', $startsAt)->where('effective_from', '<=', $effectiveFrom)->where(function ($query) use ($effectiveTo, $effectiveFrom): void {
                         $query->whereNull('effective_to')->orWhere('effective_to', '>', $effectiveTo ?? $effectiveFrom);
                     })->exists()) {
                         throw BusinessRejection::forCode('academic.teacher_availability_overlap', 'teacher availability windows may not overlap');

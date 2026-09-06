@@ -303,6 +303,7 @@ final class VisitorCrmFeatureTest extends TestCase
         $capture = app(CaptureVisitor::class)->capture($crmStaff, null, 'Convert Lead', null, 'convert@example.com', 'email', 'online', null, null, null, null, null, 'capture-convert');
         $visitor = Visitor::query()->findOrFail($capture['visitor_id']);
 
+        $denialCode = null;
         try {
             app(RecordVisitorConversion::class)->record(
                 $this->actorWithoutAnyCapability('crm-nobody-1'),
@@ -312,19 +313,20 @@ final class VisitorCrmFeatureTest extends TestCase
                 'student-denied',
                 'convert-denied',
             );
-            $this->fail('conversion without CRM capability must be denied');
         } catch (AuthorizationDenied $denial) {
-            $this->assertSame('crm.conversion_denied', $denial->errorCode());
+            $denialCode = $denial->errorCode();
         }
+        $this->assertSame('crm.conversion_denied', $denialCode, 'conversion without CRM capability must be denied');
 
         $converter = $this->actorWithStructureCapabilities('crm-converter-1', ['crm.visitor']);
+        $rejectionCode = null;
         try {
             app(RecordVisitorConversion::class)->record($converter, $visitor, 'student', 'student', 'student-id', 'convert-1');
-            $this->fail('CRM must not assert a downstream conversion');
         } catch (BusinessRejection $rejection) {
-            $this->assertSame('crm.conversion_authority_required', $rejection->errorCode());
+            $rejectionCode = $rejection->errorCode();
         }
-        $this->assertSame(Visitor::STATUS_NEW, $visitor->fresh()->status);
+        $this->assertSame('crm.conversion_authority_required', $rejectionCode, 'CRM must not assert a downstream conversion');
+        $this->assertSame(Visitor::STATUS_NEW, $visitor->fresh()?->status);
         $this->assertDatabaseMissing('visitor_conversions', ['visitor_id' => $visitor->id]);
     }
 
@@ -391,7 +393,7 @@ final class VisitorCrmFeatureTest extends TestCase
         $this->assertSame($branch->id, $visitor->origin_branch_id);
 
         app(MaintainVisitor::class)->update($branchActor, $visitor, null, null, null, null, 'hot', 'IELTS', null, null, 'branch-update-1');
-        $this->assertSame('hot', $visitor->fresh()->rating);
+        $this->assertSame('hot', $visitor->fresh()?->rating);
 
         // Branch provenance is immutable once assigned.
         try {
@@ -519,11 +521,13 @@ final class VisitorCrmFeatureTest extends TestCase
 
         $visitor = Visitor::query()->findOrFail($capture['visitor_id']);
         app(LinkVisitorPerson::class)->link($reception, $visitor, $person->id, 'link-person-1');
-        $this->assertSame($person->id, trim((string) $visitor->fresh()->person_id));
+        $refreshedVisitor = $visitor->fresh();
+        $this->assertNotNull($refreshedVisitor);
+        $this->assertSame($person->id, trim((string) $refreshedVisitor->person_id));
 
         $registrar = $this->admissionsClerk('crm-link-clerk-1');
         app(RegisterApplicant::class)->register($registrar, $person->id, 'IELTS Preparation', 'reg-crm-link');
-        $this->assertSame(Visitor::STATUS_CONVERTED, $visitor->fresh()->status);
+        $this->assertSame(Visitor::STATUS_CONVERTED, $visitor->fresh()?->status);
         $this->assertDatabaseHas('visitor_conversions', ['visitor_id' => $visitor->id, 'conversion_type' => 'applicant']);
     }
 }

@@ -13,7 +13,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $id
  * @property string $student_id
  * @property string|null $offering_id
- * @property string $amount
+ * @property numeric-string $amount
  * @property int $installments_count
  * @property string $first_due_on
  * @property string $schedule_ref

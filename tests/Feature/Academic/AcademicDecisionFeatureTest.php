@@ -71,6 +71,7 @@ final class AcademicDecisionFeatureTest extends TestCase
         $this->enrollmentId = $seat['enrollment_id'];
     }
 
+    /** @return array{attempt_id: string, result_id: string} */
     private function releasedResult(): array
     {
         $scorer = $this->grantedActor('dec-scorer', ['academic.assess']);
@@ -111,7 +112,7 @@ final class AcademicDecisionFeatureTest extends TestCase
             app(ManageAssessmentResult::class)->release($this->grantedActor('dec-approver-a2', ['academic.approve_result']), $row, 'dec-res-9');
             $this->fail('releasing needs the release capability');
         } catch (AuthorizationDenied) {
-            $this->assertTrue(true);
+            $this->addToAssertionCount(1);
         }
         app(ManageAssessmentResult::class)->release($this->grantedActor('dec-releaser-a', ['academic.release']), $row, 'dec-res-10');
 

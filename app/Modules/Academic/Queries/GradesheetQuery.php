@@ -142,6 +142,7 @@ final class GradesheetQuery
 
         $attemptIds = $attemptsBySeat->flatten()->map(fn (AssessmentAttempt $attempt): string => (string) $attempt->id)->all();
 
+        /** @var Collection<string, \Illuminate\Database\Eloquent\Collection<int, AssessmentResult>> $resultsByAttempt */
         $resultsByAttempt = $attemptIds === []
             ? new Collection
             : AssessmentResult::query()
@@ -153,6 +154,7 @@ final class GradesheetQuery
 
         $resultIds = $resultsByAttempt->flatten()->map(fn (AssessmentResult $result): string => (string) $result->id)->all();
 
+        /** @var Collection<string, ResultCorrection> $openCorrections */
         $openCorrections = $resultIds === []
             ? new Collection
             : ResultCorrection::query()
@@ -266,13 +268,13 @@ final class GradesheetQuery
     }
 
     /**
-     * @param  Collection<string, Collection<int, AssessmentResult>>  $resultsByAttempt
+     * @param  Collection<string, \Illuminate\Database\Eloquent\Collection<int, AssessmentResult>>  $resultsByAttempt
      * @param  Collection<string, ResultCorrection>  $openCorrections
      * @return array<string, mixed>
      */
     private function attemptRow(AssessmentAttempt $attempt, Collection $resultsByAttempt, Collection $openCorrections): array
     {
-        /** @var Collection<int, AssessmentResult> $results */
+        /** @var Collection<int, AssessmentResult>|\Illuminate\Database\Eloquent\Collection<int, AssessmentResult> $results */
         $results = $resultsByAttempt->get((string) $attempt->id, new Collection);
 
         // Live-result resolution mirrors TranscriptComposer exactly: the

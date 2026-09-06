@@ -18,6 +18,7 @@ use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
+use App\Support\MoneyAmount;
 use App\Support\Identifiers\RandomIdentifier;
 use Illuminate\Support\Facades\DB;
 
@@ -91,7 +92,7 @@ final class ReconcileMetric
                         throw BusinessRejection::forCode('reporting.projection_scope_conflict', 'the reported projection has stale organization provenance for its current scope');
                     }
 
-                    $variance = bcsub((string) $reported->value, $authoritative['value'], 4);
+                    $variance = bcsub(MoneyAmount::decimal($reported->value), MoneyAmount::decimal($authoritative['value']), 4);
                     $status = bccomp($variance, '0.0000', 4) === 0 ? 'matched' : 'diverged';
                     $reconciliation = MetricReconciliation::query()->create([
                         'id' => RandomIdentifier::new(),

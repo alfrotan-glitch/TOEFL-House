@@ -20,7 +20,11 @@ final class IntegrationRetrySweepJob implements JobHandler
 {
     public function __construct(private readonly DeliveryProcessor $processor) {}
 
-    /** @param  array<string, mixed>  $context @return array<string, int> */
+    /**
+     * @param  array<string, mixed>  $context
+     *
+     * @return array<string, int>
+     */
     public function handle(array $context): array
     {
         $runBy = trim((string) ($context['run_by'] ?? ''));

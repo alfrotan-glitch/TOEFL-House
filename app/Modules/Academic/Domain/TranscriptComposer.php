@@ -44,9 +44,8 @@ final class TranscriptComposer
         /** @var Program|null $program */
         $program = Program::query()->find($version->program_id);
 
-        $classIds = ClassModel::query()->where('program_version_id', $programVersionId)->pluck('id')->all();
         /** @var list<string> $classIds */
-        $classIds = array_map(strval(...), $classIds);
+        $classIds = array_map(strval(...), ClassModel::query()->where('program_version_id', $programVersionId)->pluck('id')->values()->all());
 
         $enrollments = Enrollment::query()->where('student_id', $studentId)->whereIn('class_id', $classIds)->orderBy('created_at')->get();
 
@@ -63,9 +62,9 @@ final class TranscriptComposer
             ],
             'entry' => $this->entry((string) $student->person_id, $programVersionId),
             'levels' => $this->levels($studentId, $programVersionId),
-            'results' => $this->results($enrollments->all()),
-            'seats' => $this->seats($enrollments->all()),
-            'attendance' => $this->attendance($enrollments->all()),
+            'results' => $this->results(array_values($enrollments->all())),
+            'seats' => $this->seats(array_values($enrollments->all())),
+            'attendance' => $this->attendance(array_values($enrollments->all())),
             'graduation' => $this->graduation($studentId),
         ];
     }
@@ -94,7 +93,7 @@ final class TranscriptComposer
     /** @return list<array<string, mixed>> */
     private function levels(string $studentId, string $programVersionId): array
     {
-        return LevelProgressFact::query()
+        return array_values(LevelProgressFact::query()
             ->where('student_id', $studentId)
             ->where('program_version_id', $programVersionId)
             ->orderBy('achieved_at')
@@ -116,7 +115,8 @@ final class TranscriptComposer
                     'achieved_at' => $fact->achieved_at?->toIso8601String(),
                 ];
             })
-            ->all();
+            ->values()
+            ->all());
     }
 
     /**

@@ -19,7 +19,10 @@ use App\Modules\Audit\Models\AuditEvent;
  */
 final class DomainEventContext
 {
-    /** @param array<string, mixed> $payload @return array<string, string|null> */
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, string|null>
+     */
     public static function from(AuditEvent $auditEvent, array $payload): array
     {
         $baseFields = [];
@@ -70,7 +73,10 @@ final class DomainEventContext
         ];
     }
 
-    /** @param array<string, mixed> $fields @param list<string> $keys */
+    /**
+     * @param array<string, mixed> $fields
+     * @param list<string> $keys
+     */
     private static function first(array $fields, array $keys): ?string
     {
         foreach ($keys as $key) {
@@ -83,7 +89,10 @@ final class DomainEventContext
         return null;
     }
 
-    /** @param array<string, mixed> $fields @param list<string> $keys */
+    /**
+     * @param array<string, mixed> $fields
+     * @param list<string> $keys
+     */
     private static function hasAny(array $fields, array $keys): bool
     {
         foreach ($keys as $key) {

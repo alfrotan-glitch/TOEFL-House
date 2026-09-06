@@ -79,6 +79,7 @@ final class ScaleContractVersionFeatureTest extends TestCase
     }
 
     /**
+     * @param list<array<string, mixed>> $rules
      * @return array{version_id: string, contract_id: string}
      */
     private function preparedVersion(array $rules, ?string $scaleId, string $effectiveFrom, string $keyPrefix): array

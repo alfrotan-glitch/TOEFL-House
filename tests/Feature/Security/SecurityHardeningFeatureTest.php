@@ -94,7 +94,7 @@ final class SecurityHardeningFeatureTest extends TestCase
         $withRemember->assertRedirect('/');
         $this->assertTrue(
             collect($withRemember->headers->all('set-cookie'))
-                ->contains(fn (string $header): bool => preg_match('/^remember_web_[a-f0-9]+=[^;]+/', $header) === 1),
+                ->contains(fn (?string $header): bool => is_string($header) && preg_match('/^remember_web_[a-f0-9]+=[^;]+/', $header) === 1),
             'the remember-enabled sign-in must issue the recaller cookie',
         );
     }
@@ -108,7 +108,7 @@ final class SecurityHardeningFeatureTest extends TestCase
         $withoutRemember->assertRedirect('/');
         $this->assertFalse(
             collect($withoutRemember->headers->all('set-cookie'))
-                ->contains(fn (string $header): bool => preg_match('/^remember_web_[a-f0-9]+=[^;]+/', $header) === 1),
+                ->contains(fn (?string $header): bool => is_string($header) && preg_match('/^remember_web_[a-f0-9]+=[^;]+/', $header) === 1),
             'a session-only sign-in must not issue a recaller cookie',
         );
     }
@@ -128,7 +128,7 @@ final class SecurityHardeningFeatureTest extends TestCase
     {
         $body = $this->getJson('/health')->assertOk()->json();
 
-        $serialized = json_encode($body);
+        $serialized = json_encode($body, JSON_THROW_ON_ERROR);
         $this->assertStringNotContainsString('DB_PASSWORD', $serialized);
         $this->assertStringNotContainsString('postgres', $serialized);
         $this->assertArrayNotHasKey('version', $body['checks']);

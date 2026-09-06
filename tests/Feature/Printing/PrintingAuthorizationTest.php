@@ -100,6 +100,7 @@ final class PrintingAuthorizationTest extends TestCase
         ])->id;
     }
 
+    /** @param list<string> $capabilities */
     private function makeLogin(string $username, string $personId, array $capabilities, ?string $branchId): void
     {
         if ($branchId === null) {

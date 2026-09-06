@@ -124,7 +124,7 @@ final class FinanceApiController extends Controller
 
         app(RecordPayment::class)->record(
             $this->actor(),
-            FinancialPeriod::query()->findOrFail($input['period_id']),
+            FinancialPeriod::query()->findOrFail((string) $input['period_id']),
             $input['student_id'],
             $input['amount'],
             $input['method'],
@@ -145,7 +145,7 @@ final class FinanceApiController extends Controller
             'source_ref' => ['required', 'string', 'max:120'], 'offering_id' => ['nullable', 'string'],
         ]);
         $result = app(PostObligation::class)->post(
-            $this->actor(), FinancialPeriod::query()->findOrFail($input['period_id']), $input['student_id'],
+            $this->actor(), FinancialPeriod::query()->findOrFail((string) $input['period_id']), $input['student_id'],
             $input['source'], $input['reason'], [[
                 'category' => $input['category'], 'amount' => $input['amount'], 'source_ref' => $input['source_ref'],
             ]], $this->idempotencyKey('finance.obligation.post'), $input['offering_id'] ?? null,
@@ -160,7 +160,7 @@ final class FinanceApiController extends Controller
             'payment_id' => ['required', 'string'], 'amount' => ['required', 'numeric', 'money', 'gt:0'],
         ]);
         $result = app(AllocatePayment::class)->allocate(
-            $this->actor(), Payment::query()->findOrFail($input['payment_id']),
+            $this->actor(), Payment::query()->findOrFail((string) $input['payment_id']),
             Obligation::query()->findOrFail($obligationId), $input['amount'],
             $this->idempotencyKey('finance.allocate'),
         );
@@ -214,11 +214,12 @@ final class FinanceApiController extends Controller
             'lines' => ['required', 'array', 'min:1'], 'lines.*.account_id' => ['required', 'string'],
             'lines.*.direction' => ['required', 'in:debit,credit'], 'lines.*.amount' => ['required', 'numeric', 'money', 'gt:0'],
         ]);
+        $lines = array_values(array_map(static fn (array $line): array => [
+            'account_id' => $line['account_id'], 'direction' => $line['direction'], 'amount' => (string) $line['amount'],
+        ], $input['lines']));
         $result = app(PostJournal::class)->post(
-            $this->actor(), FinancialPeriod::query()->findOrFail($input['period_id']), $input['source_type'],
-            $input['source_id'] ?? null, $input['reason'], array_map(static fn (array $line): array => [
-                'account_id' => $line['account_id'], 'direction' => $line['direction'], 'amount' => (string) $line['amount'],
-            ], $input['lines']), $this->idempotencyKey('finance.journal.post'),
+            $this->actor(), FinancialPeriod::query()->findOrFail((string) $input['period_id']), $input['source_type'],
+            $input['source_id'] ?? null, $input['reason'], $lines, $this->idempotencyKey('finance.journal.post'),
         );
 
         return response()->json(['status' => 'posted', ...$result], 201);
@@ -244,8 +245,8 @@ final class FinanceApiController extends Controller
             'reason' => ['required', 'string', 'max:1000'],
         ]);
         $result = app(MaintainDiscount::class)->propose(
-            $this->actor(), Obligation::query()->findOrFail($input['obligation_id']),
-            FinancialPeriod::query()->findOrFail($input['period_id']), $input['amount'], $input['eligibility'],
+            $this->actor(), Obligation::query()->findOrFail((string) $input['obligation_id']),
+            FinancialPeriod::query()->findOrFail((string) $input['period_id']), $input['amount'], $input['eligibility'],
             $input['effective_from'], $input['effective_to'] ?? null, $input['reason'],
             $this->idempotencyKey('finance.discount.propose'),
         );
@@ -279,7 +280,7 @@ final class FinanceApiController extends Controller
         $result = app(RefundPayment::class)->propose(
             $this->actor(),
             Payment::query()->findOrFail($paymentId),
-            FinancialPeriod::query()->findOrFail($input['period_id']),
+            FinancialPeriod::query()->findOrFail((string) $input['period_id']),
             $input['amount'],
             $input['reason'],
             $this->idempotencyKey('finance.refund.propose'),
@@ -349,7 +350,7 @@ final class FinanceApiController extends Controller
             'explanation' => ['nullable', 'string', 'max:1000'],
         ]);
         $result = app(RecordReconciliation::class)->observe(
-            $this->actor(), FinancialPeriod::query()->findOrFail($input['period_id']), $input['subject'],
+            $this->actor(), FinancialPeriod::query()->findOrFail((string) $input['period_id']), $input['subject'],
             $input['expected'], $input['observed'], $input['explanation'] ?? null,
             $this->idempotencyKey('finance.reconciliation.observe'),
         );
@@ -391,7 +392,7 @@ final class FinanceApiController extends Controller
         ]);
         $result = app(AllocateFunds::class)->allocate(
             $this->actor(), FundingSource::query()->findOrFail($fundId),
-            \App\Modules\Finance\Models\ObligationLine::query()->findOrFail($input['obligation_line_id']),
+            \App\Modules\Finance\Models\ObligationLine::query()->findOrFail((string) $input['obligation_line_id']),
             $input['amount'], $input['reason'], $this->idempotencyKey('finance.fund.allocate'),
         );
 

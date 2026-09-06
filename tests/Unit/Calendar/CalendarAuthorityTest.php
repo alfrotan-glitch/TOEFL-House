@@ -118,7 +118,7 @@ final class CalendarAuthorityTest extends TestCase
             $this->assertSame($len, $mi->length, "1404 month $month length");
             $this->assertSame($mi->firstDayGregorian->addDays($len - 1)->toDateString(), $mi->lastDayGregorian()->toDateString());
         }
-        $this->assertRejection('calendar.invalid_day', fn (): mixed => $this->authority->reverse(new SolarHijriDate(1404, 12, 30)));
+        $this->assertRejection('calendar.invalid_day', function (): void { $this->authority->reverse(new SolarHijriDate(1404, 12, 30)); });
     }
 
     public function test_year_boundaries(): void
@@ -263,10 +263,10 @@ final class CalendarAuthorityTest extends TestCase
     public function test_day_exceeding_real_month_length_rejected(): void
     {
         // 1404 common: Hut has 29 days; 30 Hut invalid.
-        $this->assertRejection('calendar.invalid_day', fn (): mixed => $this->authority->validateSolarHijri(new SolarHijriDate(1404, 12, 30)));
+        $this->assertRejection('calendar.invalid_day', function (): void { $this->authority->validateSolarHijri(new SolarHijriDate(1404, 12, 30)); });
         $this->assertRejection('calendar.invalid_day', fn (): mixed => $this->authority->reverse(new SolarHijriDate(1404, 12, 30)));
         // Month 7 (Mizan) has 30 days; day 31 invalid.
-        $this->assertRejection('calendar.invalid_day', fn (): mixed => $this->authority->validateSolarHijri(new SolarHijriDate(1404, 7, 31)));
+        $this->assertRejection('calendar.invalid_day', function (): void { $this->authority->validateSolarHijri(new SolarHijriDate(1404, 7, 31)); });
     }
 
     // -------- Kabul civil clock / current business date / timezone --------

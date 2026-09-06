@@ -176,7 +176,7 @@ final class AcademicController extends Controller
 
         app(MaintainClass::class)->scheduleSession(
             $this->actor(),
-            ClassModel::query()->findOrFail($input['class_id']),
+            ClassModel::query()->findOrFail((string) $input['class_id']),
             CarbonImmutable::parse($input['scheduled_on']),
             $input['starts_at'],
             $input['ends_at'],
@@ -199,7 +199,7 @@ final class AcademicController extends Controller
         app(RecordAttendance::class)->record(
             $this->actor(),
             ClassSession::query()->findOrFail($sessionId),
-            Enrollment::query()->findOrFail($input['enrollment_id']),
+            Enrollment::query()->findOrFail((string) $input['enrollment_id']),
             $input['status'],
             $this->idempotencyKey('academic.attendance'),
         );
@@ -290,7 +290,7 @@ final class AcademicController extends Controller
 
         app(MaintainClass::class)->defineSection(
             $this->actor(),
-            ClassModel::query()->findOrFail($input['class_id']),
+            ClassModel::query()->findOrFail((string) $input['class_id']),
             $input['name'],
             (int) $input['capacity'],
             $this->idempotencyKey('academic.section.define'),
@@ -762,7 +762,7 @@ final class AcademicController extends Controller
 
         $result = app(MaintainTeacherAssignment::class)->assignTeacher(
             $this->actor(),
-            ClassModel::query()->findOrFail($input['class_id']),
+            ClassModel::query()->findOrFail((string) $input['class_id']),
             $input['teacher_person_id'],
             CarbonImmutable::parse($input['effective_from']),
             ($effectiveTo !== null && $effectiveTo !== '') ? CarbonImmutable::parse((string) $effectiveTo) : null,
@@ -847,7 +847,7 @@ final class AcademicController extends Controller
 
         app(ManageAssessmentResult::class)->submitAttempt(
             $this->actor(),
-            Enrollment::query()->findOrFail($input['enrollment_id']),
+            Enrollment::query()->findOrFail((string) $input['enrollment_id']),
             $input['kind'],
             $input['evidence_ref'],
             $this->idempotencyKey('academic.attempt.submit'),

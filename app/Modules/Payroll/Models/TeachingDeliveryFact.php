@@ -18,7 +18,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $session_id
  * @property string $skill_id
  * @property string $scheduled_on
- * @property string $hours
+ * @property numeric-string $hours
  */
 final class TeachingDeliveryFact extends Model
 {

@@ -21,9 +21,6 @@ use Illuminate\Support\Facades\DB;
  */
 final class CrmInteractionLineage
 {
-    /**
-     * @param  array<string, string|null>  $references
-     */
     public function assert(
         Visitor $visitor,
         string $type,
@@ -63,7 +60,10 @@ final class CrmInteractionLineage
             throw BusinessRejection::forCode('crm.interaction_person_unverified', 'a linked authoritative record requires a verified visitor identity');
         }
 
-        $referenceId = (string) $references[$referenceKind];
+        $referenceId = (string) ($references[$referenceKind] ?? '');
+        if ($referenceId === '') {
+            throw BusinessRejection::forCode('crm.interaction_reference_required', 'the linked reference must carry its authoritative record id');
+        }
         $subjectRecord = match ($referenceKind) {
             'message' => Message::query()->whereKey($referenceId)->first(['subject_person_id']),
             'document' => Document::query()->whereKey($referenceId)->first(['subject_person_id']),
@@ -82,8 +82,16 @@ final class CrmInteractionLineage
                 ->first(['placement_profiles.person_id', 'placement_attempts.originating_branch_id']),
             default => null,
         };
-        $subjectPersonId = $subjectRecord?->person_id;
-        $subjectBranchId = $subjectRecord?->originating_branch_id;
+        // Message/Document carry subject_person_id (not person_id); the
+        // DB::table projections carry person_id. Normalize per reference kind.
+        $subjectPersonId = match (true) {
+            $subjectRecord instanceof Message => $subjectRecord->subject_person_id,
+            $subjectRecord instanceof Document => $subjectRecord->subject_person_id,
+            default => $subjectRecord?->person_id,
+        };
+        $subjectBranchId = $subjectRecord instanceof Message || $subjectRecord instanceof Document
+            ? null
+            : $subjectRecord?->originating_branch_id;
         $branchProvenanceRequired = in_array($referenceKind, ['assessment', 'payment', 'placement'], true);
 
         if ($subjectPersonId === null || trim((string) $subjectPersonId) === '') {

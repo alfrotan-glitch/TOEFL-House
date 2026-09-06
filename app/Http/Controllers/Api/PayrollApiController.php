@@ -52,8 +52,8 @@ final class PayrollApiController extends Controller
 
         $result = app(CalculatePayroll::class)->prepare(
             $this->actor(),
-            PayrollPeriod::query()->findOrFail($input['period_id']),
-            Employment::query()->findOrFail($input['employment_id']),
+            PayrollPeriod::query()->findOrFail((string) $input['period_id']),
+            Employment::query()->findOrFail((string) $input['employment_id']),
             $this->idempotencyKey('payroll.calculate'),
         );
 
@@ -81,7 +81,7 @@ final class PayrollApiController extends Controller
         $result = app(ResolveHeldPayrollCalculation::class)->resolve(
             $this->actor(),
             PayrollCalculation::query()->findOrFail($calculationId),
-            PayrollCalculation::query()->findOrFail($input['replacement_calculation_id']),
+            PayrollCalculation::query()->findOrFail((string) $input['replacement_calculation_id']),
             $input['resolution_ref'],
             $this->idempotencyKey('payroll.resolve-held'),
         );

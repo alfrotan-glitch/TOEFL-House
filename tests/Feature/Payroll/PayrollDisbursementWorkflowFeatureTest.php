@@ -82,6 +82,7 @@ final class PayrollDisbursementWorkflowFeatureTest extends TestCase
         $this->expenseAccountId = $exp['account_id'];
     }
 
+    /** @param list<string> $capabilities */
     private function makeLogin(string $personId, array $capabilities, string $username): void
     {
         $person = $this->personWithAuthority($personId, $capabilities);

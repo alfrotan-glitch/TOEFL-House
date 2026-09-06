@@ -55,7 +55,7 @@ final class MaintainEmploymentSettlement
                     $proposal = DB::table('settlement_proposals')->where('id', $proposalId)->lockForUpdate()->first();
                     if ($proposal === null || $proposal->lifecycle_state !== 'proposed'
                         || (string) $proposal->employment_id !== (string) $employment->id
-                        || bccomp((string) $proposal->amount, $amount, 2) !== 0
+                        || bccomp(MoneyAmount::decimal($proposal->amount), MoneyAmount::decimal($amount), 2) !== 0
                         || (string) $proposal->basis !== $basis
                         || (string) $proposal->prepared_by !== $preparedBy) {
                         throw BusinessRejection::forCode('finance.employment_settlement_proposal_invalid', 'Finance may record only the matching proposed Payroll settlement');
@@ -70,7 +70,7 @@ final class MaintainEmploymentSettlement
                         throw BusinessRejection::forCode('finance.employment_settlement_exists', 'this employment already has a Finance settlement');
                     }
                     $person = Person::query()->whereKey($locked->person_id)->first();
-                    $branchId = trim((string) ($person?->home_branch_id ?? ''));
+                    $branchId = $person !== null ? trim((string) ($person->home_branch_id ?? '')) : '';
                     $branch = $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
                     if ($branch === null || $branch->lifecycle_state !== 'active' || $branch->structureScope()->organizationId === '') {
                         throw BusinessRejection::forCode('finance.employment_settlement_provenance_required', 'a settlement requires active employee home branch and organization provenance');

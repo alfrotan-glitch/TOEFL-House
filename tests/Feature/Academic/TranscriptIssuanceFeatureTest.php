@@ -63,7 +63,6 @@ final class TranscriptIssuanceFeatureTest extends TestCase
 
     private string $levelA1Id;
 
-    private string $levelA2Id;
 
     private string $classId;
 
@@ -75,7 +74,6 @@ final class TranscriptIssuanceFeatureTest extends TestCase
         $programId = (string) Program::query()->where('name', 'IELTS Preparation')->value('id');
         $this->programVersionId = (string) ProgramVersion::query()->where('program_id', $programId)->value('id');
         $this->levelA1Id = (string) ProgramVersionLevel::query()->where('program_version_id', $this->programVersionId)->where('level_key', 'A1')->value('id');
-        $this->levelA2Id = (string) ProgramVersionLevel::query()->where('program_version_id', $this->programVersionId)->where('level_key', 'A2')->value('id');
 
         $officer = $this->academicOfficer('trx-officer');
         $this->periodId = (string) app(MaintainAcademicStructure::class)->definePeriod($officer, 'Transcript Term', new CarbonImmutable('2026-09-01'), new CarbonImmutable('2026-12-31'), 'trx-period')['period_id'];
@@ -150,7 +148,7 @@ final class TranscriptIssuanceFeatureTest extends TestCase
             ->where('operation', 'academic.transcript.issue')
             ->where('target_id', $issued['transcript_id'])
             ->firstOrFail();
-        $this->assertSame($issued['content_hash'], $event->after_state['content_hash']);
+        $this->assertSame($issued['content_hash'], $event->after_state['content_hash'] ?? null);
     }
 
     public function test_corrected_result_supersedes_the_original_score(): void

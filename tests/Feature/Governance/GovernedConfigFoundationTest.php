@@ -90,7 +90,7 @@ final class GovernedConfigFoundationTest extends TestCase
         $v1 = GovernedConfig::query()->findOrFail($first['version_id']);
         $v2 = GovernedConfig::query()->findOrFail($second['version_id']);
         $this->assertSame(GovernedConfig::STATE_ENDED, $v1->lifecycle_state);
-        $this->assertSame('2026-06-01', $v1->effective_to->toDateString());
+        $this->assertSame('2026-06-01', $v1->effective_to?->toDateString());
         $this->assertSame(GovernedConfig::STATE_ACTIVE, $v2->lifecycle_state);
         $this->assertTrue($v2->isOpen());
 
@@ -114,6 +114,9 @@ final class GovernedConfigFoundationTest extends TestCase
         $this->assertArrayHasKey($second['version_id'], $activateEvents);
         $event1 = $activateEvents[$first['version_id']];
         $event2 = $activateEvents[$second['version_id']];
+        if ($event1 === null || $event2 === null) {
+            $this->fail('activation audit events are missing');
+        }
         $this->assertNull($event1->before_state);
         $after1 = json_decode((string) $event1->after_state, true);
         $this->assertSame(1, $after1['version_no']);
@@ -258,7 +261,10 @@ final class GovernedConfigFoundationTest extends TestCase
         $this->assertSame(1, GovernedConfig::query()->count());
     }
 
-    /** @param array{v?: int|string, ...} $envelope */
+    /**
+     * @param array<string, mixed> $envelope
+     * @return array<string, mixed>
+     */
     private function rawRow(string $key, int $versionNo, array $envelope, string $from, ?string $to, string $lifecycle): array
     {
         return [
@@ -288,6 +294,7 @@ final class GovernedConfigFoundationTest extends TestCase
         }
     }
 
+    /** @param class-string $class */
     private function assertRejected(string $class, string $code, callable $action): void
     {
         try {

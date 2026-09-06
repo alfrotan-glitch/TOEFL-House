@@ -120,13 +120,13 @@ final class PostJournal
             if (Journal::query()->where('reversal_of_id', $lockedOriginal->id)->exists()) {
                 throw BusinessRejection::forCode('finance.journal_already_reversed', 'this journal already has a compensating reversal');
             }
-            $lines = JournalLine::query()->where('journal_id', $lockedOriginal->id)
+            $lines = array_values(JournalLine::query()->where('journal_id', $lockedOriginal->id)
                 ->get()
                 ->map(static fn (JournalLine $line): array => [
                     'account_id' => $line->account_id,
                     'direction' => $line->direction === 'debit' ? 'credit' : 'debit',
                     'amount' => (string) $line->amount,
-                ])->all();
+                ])->values()->all());
 
             return $this->post(
                 $actor,
@@ -165,16 +165,17 @@ final class PostJournal
             if (! in_array($line['direction'], ['debit', 'credit'], true)) {
                 throw BusinessRejection::forCode('finance.journal_direction', 'journal lines are debit or credit');
             }
-            if (! MoneyAmount::positive((string) $line['amount'])) {
+            $lineAmount = MoneyAmount::decimal($line['amount']);
+            if (! MoneyAmount::positive($lineAmount)) {
                 throw BusinessRejection::forCode('finance.journal_amount', 'journal line amounts must be positive');
             }
             if (! Account::query()->whereKey($line['account_id'])->exists()) {
                 throw BusinessRejection::forCode('finance.journal_account_unknown', 'a journal line references an unknown account');
             }
             if ($line['direction'] === 'debit') {
-                $debit = bcadd($debit, (string) $line['amount'], 2);
+                $debit = bcadd($debit, $lineAmount, 2);
             } else {
-                $credit = bcadd($credit, (string) $line['amount'], 2);
+                $credit = bcadd($credit, $lineAmount, 2);
             }
         }
         if (bccomp($debit, $credit, 2) !== 0) {

@@ -102,7 +102,7 @@ final class MaintainFinancialCredit
                         throw AuthorizationDenied::forCode('finance.credit_not_independent', 'the approver must differ from the proposer');
                     }
                     $uncovered = $this->allocations->studentUncovered($locked->student_id);
-                    if (bccomp((string) $locked->amount, $uncovered, 2) === 1) {
+                    if (bccomp($locked->amount, $uncovered, 2) === 1) {
                         throw BusinessRejection::forCode('finance.credit_exceeds_uncovered', sprintf('the credit exceeds the current uncovered obligation remainder %s', $uncovered));
                     }
 

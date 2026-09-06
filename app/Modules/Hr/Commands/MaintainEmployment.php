@@ -206,7 +206,7 @@ final class MaintainEmployment
     private function validateEffectiveFrom(string $effectiveFrom): void
     {
         $parsed = CarbonImmutable::createFromFormat('Y-m-d', $effectiveFrom);
-        if ($parsed === false || $parsed->format('Y-m-d') !== $effectiveFrom) {
+        if (! $parsed instanceof CarbonImmutable || $parsed->format('Y-m-d') !== $effectiveFrom) {
             throw BusinessRejection::forCode('hr.effective_from_invalid', 'employment transitions require an ISO calendar date');
         }
     }
@@ -215,7 +215,7 @@ final class MaintainEmployment
     {
         $personId = $person instanceof Person ? $person->id : $person;
         $authoritative = Person::query()->whereKey($personId)->first();
-        $branchId = trim((string) ($authoritative?->home_branch_id ?? ''));
+        $branchId = $authoritative !== null ? trim((string) ($authoritative->home_branch_id ?? '')) : '';
         $branch = $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
         if ($authoritative === null || $branch === null || $branch->lifecycle_state !== 'active' || $branch->structureScope()->organizationId === '') {
             throw BusinessRejection::forCode('hr.employee_provenance_required', 'HR employment operations require active employee branch and organization provenance');

@@ -10,7 +10,6 @@ use Illuminate\Database\Eloquent\Model;
  * Staged asset disposal request (000115): born 'requested', signed by two
  * distinct approver sessions in their own sessions, and executed by the
  * requesting session once approved. Immutable history — see the 000115 guard.
- *
  * @property string $id
  * @property string $asset_id
  * @property string $method

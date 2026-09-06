@@ -70,7 +70,10 @@ final class GraduationWorkflowFeatureTest extends TestCase
         app(MaintainEnrollment::class)->activate($this->academicOfficer('gwf-off-2'), Enrollment::query()->findOrFail($enrollment['enrollment_id']), 'gwf-enr-2');
     }
 
-    /** @return array{0: Person, 1: UserAccount} */
+    /**
+     * @param list<string> $capabilities
+     * @return array{0: Person, 1: UserAccount}
+     */
     private function makeEmployee(string $personId, array $capabilities, string $username): array
     {
         $person = $this->personWithAuthority($personId, $capabilities);

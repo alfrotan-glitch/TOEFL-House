@@ -116,6 +116,7 @@ final class WaitlistOperationsConsoleTest extends TestCase
         return app(EnrollAdmittedApplicant::class)->convert($this->admissionsApprover('wl-approve-'.$personId), $applicant, 'wl-conv-'.$personId)['student_id'];
     }
 
+    /** @param list<string> $capabilities */
     private function makeEmployee(string $personId, array $capabilities, string $username): void
     {
         $person = $this->personWithAuthority($personId, $capabilities);

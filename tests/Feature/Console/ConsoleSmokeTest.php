@@ -42,7 +42,7 @@ final class ConsoleSmokeTest extends TestCase
         $this->assertAuthenticated();
 
         $skipped = ['api.me', 'health', 'login'];
-        foreach (Route::getRoutes() as $route) {
+        foreach (Route::getRoutes()->getRoutes() as $route) {
             $name = (string) ($route->getName() ?? '');
             $uri = '/'.ltrim((string) $route->uri(), '/');
             if (! in_array('GET', (array) $route->methods(), true)) {
@@ -77,6 +77,7 @@ final class ConsoleSmokeTest extends TestCase
      *
      * @return string[]
      */
+    /** @return list<string> */
     private static function allCapabilities(): array
     {
         static $capabilities = null;
@@ -85,7 +86,7 @@ final class ConsoleSmokeTest extends TestCase
         }
 
         $capabilities = [];
-        $files = glob(app_path('Modules/*/Commands/*.php'));
+        $files = glob(app_path('Modules/*/Commands/*.php')) ?: [];
         foreach ($files as $file) {
             $source = (string) file_get_contents($file);
             if (preg_match_all("/\bCAPABILITY[A-Z_]*\s*=\s*'([a-z][a-z0-9_.]*)'/", $source, $matches)) {

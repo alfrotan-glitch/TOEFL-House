@@ -148,7 +148,7 @@ final class AccessResolution implements AccessDecision
             return [];
         }
 
-        return ScopeGrant::query()
+        return array_values(ScopeGrant::query()
             ->where('person_id', $personId)
             ->where('permission', $capability)
             ->where('lifecycle_state', 'active')
@@ -156,7 +156,8 @@ final class AccessResolution implements AccessDecision
             ->where(fn ($query) => $query->whereNull('effective_to')->orWhere('effective_to', '>', $today))
             ->get()
             ->map(static fn (ScopeGrant $grant): string => $grant->scope_type.':'.$grant->scope_id)
-            ->all();
+            ->values()
+            ->all());
     }
 
     /** @return list<string> */
@@ -355,7 +356,7 @@ final class AccessResolution implements AccessDecision
     /** @return list<string> */
     private function activePolicyGrants(string $bindingType, string $bindingId, string $grantsType, string $today): array
     {
-        return AccessPolicy::query()
+        return array_values(AccessPolicy::query()
             ->where('binding_type', $bindingType)
             ->where('binding_id', $bindingId)
             ->where('grants_type', $grantsType)
@@ -363,7 +364,8 @@ final class AccessResolution implements AccessDecision
             ->where(fn ($query) => $query->whereNull('effective_to')->orWhere('effective_to', '>', $today))
             ->pluck($grantsType === AccessPolicy::GRANTS_ROLE ? 'grants_id' : 'permission')
             ->map(static fn ($value): string => (string) $value)
-            ->all();
+            ->values()
+            ->all());
     }
 
     private function positionOrganization(string $positionId): ?string

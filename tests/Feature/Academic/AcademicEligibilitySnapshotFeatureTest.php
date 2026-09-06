@@ -73,6 +73,7 @@ final class AcademicEligibilitySnapshotFeatureTest extends TestCase
         $this->assertSame($snapshot['snapshot']['id'], $financeLineage['eligibility_snapshot']['snapshot']['id']);
         $this->assertTrue($financeLineage['eligibility_snapshot']['verification']['valid']);
 
+        /** @var AcademicEligibilitySnapshot $snapshotRow */
         $snapshotRow = AcademicEligibilitySnapshot::query()->findOrFail($snapshot['snapshot']['id']);
         $this->expectException(QueryException::class);
         $snapshotRow->forceFill(['version_no' => 99])->save();
@@ -119,7 +120,7 @@ final class AcademicEligibilitySnapshotFeatureTest extends TestCase
         $period = app(MaintainAcademicStructure::class)->definePeriod($officer, 'Eligibility Term', new CarbonImmutable('2026-09-01'), new CarbonImmutable('2026-12-31'), 'elig2-period');
         app(MaintainAcademicStructure::class)->transitionPeriod($officer, AcademicPeriod::query()->findOrFail($period['period_id']), 'published', 'elig2-period-pub');
         $this->personWithAuthority('elig2-teacher-1', []);
-        $class = app(MaintainClass::class)->defineClass($officer, $profile->program_version_id, $period['period_id'], 10, 'elig2-class');
+        $class = app(MaintainClass::class)->defineClass($officer, (string) $profile->program_version_id, $period['period_id'], 10, 'elig2-class');
         app(MaintainClass::class)->assignTeacher($officer, ClassModel::query()->findOrFail($class['class_id']), 'elig2-teacher-1', new CarbonImmutable('2026-09-01'), null, 'elig2-class-teacher');
         app(MaintainClass::class)->transition($officer, ClassModel::query()->findOrFail($class['class_id']), 'published', 'elig2-class-pub');
         app(MaintainClass::class)->transition($officer, ClassModel::query()->findOrFail($class['class_id']), 'active', 'elig2-class-active');
@@ -143,6 +144,7 @@ final class AcademicEligibilitySnapshotFeatureTest extends TestCase
         $person = $this->personWithAuthority('elig-retake-person', []);
         $first = $this->completeReleasedPlacement($person->id, 'elig3a');
         $firstSnapshot = app(AcademicEligibilitySnapshotQuery::class)->for($first);
+        $this->assertNotNull($firstSnapshot);
 
         app(DecidePlacement::class)->supersede(
             $this->placementReleaser('elig3-supersede'),
@@ -154,7 +156,9 @@ final class AcademicEligibilitySnapshotFeatureTest extends TestCase
         $history = app(AcademicEligibilitySnapshotQuery::class)->historyForPerson($person->id);
         $this->assertCount(2, $history);
 
+        /** @var AcademicEligibilitySnapshot $firstRow */
         $firstRow = AcademicEligibilitySnapshot::query()->findOrFail($firstSnapshot['snapshot']['id']);
+        /** @var AcademicEligibilitySnapshot $secondRow */
         $secondRow = AcademicEligibilitySnapshot::query()
             ->where('placement_profile_id', $second->id)
             ->firstOrFail();
@@ -169,6 +173,7 @@ final class AcademicEligibilitySnapshotFeatureTest extends TestCase
         $person = $this->personWithAuthority('elig-tamper-person', []);
         $profile = $this->completeReleasedPlacement($person->id, 'elig4');
         $snapshot = app(AcademicEligibilitySnapshotQuery::class)->for($profile);
+        $this->assertNotNull($snapshot);
 
         $payload = $snapshot['payload'];
         $payload['recommendation']['rationale'] = 'tampered rationale';

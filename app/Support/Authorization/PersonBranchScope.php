@@ -20,7 +20,7 @@ final class PersonBranchScope
     public static function resolve(string $personId): StructureScope
     {
         $person = Person::query()->whereKey(trim($personId))->first();
-        $branchId = trim((string) ($person?->home_branch_id ?? ''));
+        $branchId = $person !== null ? trim((string) ($person->home_branch_id ?? '')) : '';
         $branch = $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
         if ($person === null || $branch === null || $branch->lifecycle_state !== 'active') {
             throw BusinessRejection::forCode('identity.person_provenance_required', 'person-linked operations require an active home branch');

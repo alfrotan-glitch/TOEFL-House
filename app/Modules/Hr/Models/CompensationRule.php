@@ -19,7 +19,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property string|null $skill_id
  * @property string|null $scale_id
  * @property string|null $label
- * @property string $rate
+ * @property numeric-string $rate
  */
 final class CompensationRule extends Model
 {

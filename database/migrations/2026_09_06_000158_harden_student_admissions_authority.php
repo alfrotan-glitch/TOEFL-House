@@ -30,6 +30,9 @@ return new class extends Migration
     public function up(): void
     {
         DB::statement("CREATE UNIQUE INDEX applicants_one_open_per_person ON applicants (person_id) WHERE lifecycle_state IN ('prospect', 'applicant', 'admitted')");
+        // This index is an invariant consolidated from 2026_08_26_000107; it is
+        // already created there, so refresh it rather than fail a fresh install.
+        DB::statement('DROP INDEX IF EXISTS students_one_per_admission_decision');
         DB::statement('CREATE UNIQUE INDEX students_one_per_admission_decision ON students (admission_decision_id)');
 
         DB::statement(<<<'SQL'

@@ -13,9 +13,9 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $id
  * @property string $period_id
  * @property string $subject
- * @property string $expected
- * @property string $observed
- * @property string $variance
+ * @property numeric-string $expected
+ * @property numeric-string $observed
+ * @property numeric-string $variance
  * @property string $lifecycle_state
  */
 final class Reconciliation extends Model

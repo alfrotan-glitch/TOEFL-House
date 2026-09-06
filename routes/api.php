@@ -36,6 +36,9 @@ Route::prefix('v1')->middleware('employee')->group(function (): void {
         /** @var Actor $actor */
         $actor = $request->attributes->get('actor');
         $user = $request->user();
+        if ($user === null) {
+            abort(401, 'authentication_required');
+        }
 
         return response()->json([
             'data' => [

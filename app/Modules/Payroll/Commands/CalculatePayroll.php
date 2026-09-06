@@ -231,6 +231,7 @@ final class CalculatePayroll
             ];
         }
 
+        /** @var numeric-string $amount */
         $amount = '0.00';
         $perSkillRows = [];
         $heldReason = null;
@@ -250,12 +251,12 @@ final class CalculatePayroll
                 $skillHours = bcadd($skillHours, $skillSession->hours, 2);
             }
             $lineAmount = $rule->method === CompensationRule::METHOD_SESSION
-                ? bcmul((string) $rule->rate, $sessionsCount, 2)
-                : bcmul((string) $rule->rate, $skillHours, 2);
+                ? bcmul($rule->rate, $sessionsCount, 2)
+                : bcmul($rule->rate, $skillHours, 2);
             $amount = bcadd($amount, $lineAmount, 2);
             $perSkillRows[] = [
                 'skill_id' => (string) $skillId, 'sessions' => $sessionsCount, 'hours' => $skillHours,
-                'rule_id' => $rule->id, 'method' => $rule->method, 'rate' => (string) $rule->rate, 'amount' => $lineAmount,
+                'rule_id' => $rule->id, 'method' => $rule->method, 'rate' => $rule->rate, 'amount' => $lineAmount,
             ];
         }
         if ($heldReason !== null) {
@@ -265,11 +266,11 @@ final class CalculatePayroll
         $additiveRows = [];
         foreach ($rules as $rule) {
             if ($rule->method === CompensationRule::METHOD_FIXED || $rule->method === CompensationRule::METHOD_ALLOWANCE) {
-                $prorated = $this->proratedLineAmount((string) $rule->rate, $version, $period);
+                $prorated = $this->proratedLineAmount($rule->rate, $version, $period);
                 $amount = bcadd($amount, $prorated['payable'], 2);
                 $additiveRows[] = [
                     'rule_id' => $rule->id, 'method' => $rule->method, 'label' => $rule->label,
-                    'contract_amount' => (string) $rule->rate,
+                    'contract_amount' => $rule->rate,
                     'active_days' => $prorated['active_days'], 'period_days' => $prorated['period_days'],
                     'amount' => $prorated['payable'],
                 ];
@@ -313,7 +314,8 @@ final class CalculatePayroll
      * coverage pays the full amount. Exact cent arithmetic with round
      * half up, so monetary precision never depends on float order.
      *
-     * @return array{payable: string, active_days: int, period_days: int}
+     * @param  numeric-string  $contractAmount
+     * @return array{payable: numeric-string, active_days: int, period_days: int}
      */
     private function proratedLineAmount(string $contractAmount, ContractVersion $version, PayrollPeriod $period): array
     {
@@ -346,7 +348,7 @@ final class CalculatePayroll
             'scale_id' => $version->scale_id,
             'rules' => array_map(static fn (CompensationRule $rule): array => [
                 'id' => $rule->id, 'method' => $rule->method, 'skill_id' => $rule->skill_id,
-                'scale_id' => $rule->scale_id, 'label' => $rule->label, 'rate' => (string) $rule->rate,
+                'scale_id' => $rule->scale_id, 'label' => $rule->label, 'rate' => $rule->rate,
             ], $rules),
             'proration' => [
                 'period_from' => $period->date_from,
@@ -372,7 +374,7 @@ final class CalculatePayroll
      */
     private function deliveredSkillSessions(PayrollPeriod $period, Employment $employment): array
     {
-        return DB::table('class_sessions')
+        return array_values(DB::table('class_sessions')
             ->join('classes as delivery_class', 'delivery_class.id', '=', 'class_sessions.class_id')
             ->join('teacher_assignments as ta', function (JoinClause $join) use ($employment): void {
                 $join->on('ta.class_id', '=', 'class_sessions.class_id')
@@ -453,7 +455,7 @@ final class CalculatePayroll
 
                 return $row;
             })
-            ->all();
+            ->all());
     }
 
     /**
@@ -559,7 +561,7 @@ final class CalculatePayroll
     private function employeeBranch(Employment $employment): Branch
     {
         $person = Person::query()->whereKey($employment->person_id)->first();
-        $branchId = trim((string) ($person?->home_branch_id ?? ''));
+        $branchId = $person !== null ? trim((string) ($person->home_branch_id ?? '')) : '';
         $branch = $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
         if ($branch === null || $branch->lifecycle_state !== 'active' || $branch->structureScope()->organizationId === '') {
             throw BusinessRejection::forCode('payroll.employee_provenance_required', 'Payroll calculation requires active employee branch and organization provenance');

@@ -70,7 +70,7 @@ final class IdempotentExecution
         }
     }
 
-    private function returnRecorded(object $recorded, string $payloadHash): mixed
+    private function returnRecorded(\stdClass $recorded, string $payloadHash): mixed
     {
         if ((string) $recorded->payload_hash !== $payloadHash) {
             throw BusinessRejection::forCode('idempotency.conflicting_payload', 'idempotency key reused with a different payload');

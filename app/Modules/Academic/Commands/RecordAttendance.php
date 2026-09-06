@@ -44,7 +44,9 @@ final class RecordAttendance
     /** @return array{fact_id: string, correlation_id: string} */
     public function record(Actor $recorder, ClassSession $session, Enrollment $enrollment, string $status, string $idempotencyKey): array
     {
-        return $this->append($recorder, $session, $enrollment, $status, null, null, 'academic.attendance.record', $idempotencyKey);
+        $result = $this->append($recorder, $session, $enrollment, $status, null, null, 'academic.attendance.record', $idempotencyKey);
+
+        return ['fact_id' => $result['fact_id'], 'correlation_id' => $result['correlation_id']];
     }
 
     /** @return array{fact_id: string, corrects_id: string, correlation_id: string} */
@@ -55,10 +57,16 @@ final class RecordAttendance
         /** @var Enrollment $enrollment */
         $enrollment = Enrollment::query()->findOrFail($original->enrollment_id);
 
-        return $this->append($recorder, $session, $enrollment, $status, $original->id, $reason, 'academic.attendance.correct', $idempotencyKey);
+        $result = $this->append($recorder, $session, $enrollment, $status, $original->id, $reason, 'academic.attendance.correct', $idempotencyKey);
+
+        return [
+            'fact_id' => $result['fact_id'],
+            'corrects_id' => $result['corrects_id'] ?? $original->id,
+            'correlation_id' => $result['correlation_id'],
+        ];
     }
 
-    /** @return array{fact_id: string, correlation_id: string}|array{fact_id: string, corrects_id: string, correlation_id: string} */
+    /** @return array{fact_id: string, corrects_id: string|null, correlation_id: string} */
     private function append(Actor $recorder, ClassSession $session, Enrollment $enrollment, string $status, ?string $correctsId, ?string $reason, string $operation, string $idempotencyKey): array
     {
         $payload = hash('sha256', implode('|', [$operation, $session->id, $enrollment->id, $status, $correctsId ?? '', $reason ?? '', $recorder->actorId]));
@@ -129,9 +137,11 @@ final class RecordAttendance
                         ...$provenance,
                     ]);
 
-                    return $correctsId !== null
-                        ? ['fact_id' => $fact->id, 'corrects_id' => $correctsId, 'correlation_id' => $event->correlation_id]
-                        : ['fact_id' => $fact->id, 'correlation_id' => $event->correlation_id];
+                    return [
+                        'fact_id' => $fact->id,
+                        'corrects_id' => $correctsId,
+                        'correlation_id' => $event->correlation_id,
+                    ];
                 }),
             );
         } catch (AuthorizationDenied $denial) {

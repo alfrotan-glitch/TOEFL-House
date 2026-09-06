@@ -33,13 +33,13 @@ final class ClassWaitlistQuery
             'class_id' => trim($classId),
             'capacity' => (int) $class->capacity,
             'claimed_seats' => $claimedSeats,
-            'waitlist' => $entries->map(static fn (ClassWaitlistEntry $entry): array => [
+            'waitlist' => array_values($entries->map(static fn (ClassWaitlistEntry $entry): array => [
                 'entry_id' => trim((string) $entry->id),
                 'student_id' => trim((string) $entry->student_id),
                 'offering_id' => trim((string) ($entry->offering_id ?? '')),
                 'position' => (int) $entry->position,
                 'lifecycle_state' => $entry->lifecycle_state,
-            ])->all(),
+            ])->all()),
         ];
     }
 }

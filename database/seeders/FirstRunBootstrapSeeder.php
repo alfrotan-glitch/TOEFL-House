@@ -85,10 +85,10 @@ final class FirstRunBootstrapSeeder extends Seeder
             return;
         }
 
-        $name = trim((string) env('BOOTSTRAP_OWNER_NAME'));
-        $birthdate = trim((string) env('BOOTSTRAP_OWNER_BIRTHDATE'));
-        $username = trim((string) env('BOOTSTRAP_OWNER_USERNAME'));
-        $password = (string) env('BOOTSTRAP_OWNER_PASSWORD');
+        $name = trim(self::launcherEnv('BOOTSTRAP_OWNER_NAME'));
+        $birthdate = trim(self::launcherEnv('BOOTSTRAP_OWNER_BIRTHDATE'));
+        $username = trim(self::launcherEnv('BOOTSTRAP_OWNER_USERNAME'));
+        $password = self::launcherEnv('BOOTSTRAP_OWNER_PASSWORD');
 
         if ($name === '' || $birthdate === '' || $username === '' || $password === '') {
             $this->command?->error('BOOTSTRAP_OWNER_NAME, BOOTSTRAP_OWNER_BIRTHDATE, BOOTSTRAP_OWNER_USERNAME and BOOTSTRAP_OWNER_PASSWORD must all be set (the launcher prompts for them on first run).');
@@ -97,6 +97,7 @@ final class FirstRunBootstrapSeeder extends Seeder
         }
 
         $today = CarbonImmutable::now()->toDateString();
+
 
         DB::transaction(function () use ($name, $birthdate, $username, $password, $today): void {
             $ownerPerson = Person::query()->create([
@@ -199,4 +200,21 @@ final class FirstRunBootstrapSeeder extends Seeder
         $this->command?->info('First-run bootstrap complete: organization "The TOEFL House", Owner role ('.count(self::OWNER_CAPABILITIES).' capabilities) and account "'.$username.'" created.');
         $this->command?->info('Sign in with that account to begin. From now on every further account is created through the console access workflow.');
     }
+
+    /**
+     * Read a launcher-supplied bootstrap value from the process environment.
+     *
+     * env() is deliberately not used here: this seeder legitimately runs inside
+     * an already booted process (deployment contract tests set these values via
+     * putenv), while env() outside config/ is a configuration-cache hazard and
+     * is consequently rejected by the static analysis policy. The launcher sets
+     * the same values as real process environment variables.
+     */
+    private static function launcherEnv(string $key): string
+    {
+        $value = getenv($key);
+
+        return $value === false ? '' : $value;
+    }
 }
+

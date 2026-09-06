@@ -87,7 +87,7 @@ final class GraduationIntegrityFeatureTest extends TestCase
 
     public function test_eligible_approval_succeeds_once_seats_are_terminal(): void
     {
-        [$studentId, $seatId] = $this->activeSeatWithId('terminal', $this->classId, 'grad-terminal');
+        [$studentId, $seatId] = $this->activeSeatWithId('terminal');
         app(MaintainEnrollment::class)->withdraw($this->enrollmentClerk('grad-clerk-terminal'), Enrollment::query()->findOrFail($seatId), 'family relocation verified', 'grad-terminal-wd');
 
         $decisionId = $this->reviewedDecision('terminal', $studentId, 'eligible');
@@ -151,9 +151,10 @@ final class GraduationIntegrityFeatureTest extends TestCase
             ->where('operation', 'academic.certificate.issue')
             ->where('target_id', $issued['certificate_id'])
             ->firstOrFail();
-        $this->assertSame($issued['document_id'], $event->after_state['document_id']);
-        $this->assertTrue((bool) $event->after_state['finance_clearance']['satisfied']);
-        $this->assertSame('0.00', $event->after_state['finance_clearance']['remaining']);
+        $after = $event->after_state ?? [];
+        $this->assertSame($issued['document_id'], $after['document_id'] ?? null);
+        $this->assertTrue((bool) ($after['finance_clearance']['satisfied'] ?? false));
+        $this->assertSame('0.00', $after['finance_clearance']['remaining'] ?? null);
     }
 
     public function test_clearance_snapshot_reflects_debt_without_refusing_issuance(): void
@@ -177,9 +178,10 @@ final class GraduationIntegrityFeatureTest extends TestCase
             ->where('operation', 'academic.certificate.issue')
             ->where('target_id', $issued['certificate_id'])
             ->firstOrFail();
-        $this->assertFalse((bool) $event->after_state['finance_clearance']['satisfied']);
-        $this->assertSame('1000.00', $event->after_state['finance_clearance']['remaining']);
-        $this->assertArrayHasKey('signature', $event->after_state['finance_clearance']);
+        $after = $event->after_state ?? [];
+        $this->assertFalse((bool) ($after['finance_clearance']['satisfied'] ?? false));
+        $this->assertSame('1000.00', $after['finance_clearance']['remaining'] ?? null);
+        $this->assertArrayHasKey('signature', $after['finance_clearance'] ?? []);
     }
 
     public function test_issuer_without_documents_capability_is_denied_and_issues_nothing(): void

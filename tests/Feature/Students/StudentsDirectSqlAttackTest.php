@@ -59,6 +59,7 @@ final class StudentsDirectSqlAttackTest extends TestCase
         app(EnrollAdmittedApplicant::class)->convert($this->admissionsApprover(), Applicant::query()->findOrFail($this->applicantA['applicant_id']), 'statk-conv-1');
     }
 
+    /** @return array{applicant_id: string, decision_id: string} */
     private function admittedApplicant(Person $person, string $prefix): array
     {
         $registered = app(RegisterApplicant::class)->register($this->admissionsClerk(), $person->id, 'TOEFL Intensive', $prefix.'-reg', null, $this->admissionBranchId);

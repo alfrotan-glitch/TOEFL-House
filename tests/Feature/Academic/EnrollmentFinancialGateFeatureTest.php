@@ -135,7 +135,7 @@ final class EnrollmentFinancialGateFeatureTest extends TestCase
         $this->assertFalse((bool) $enrollment->financial_gate_satisfied);
         $this->assertNotNull($enrollment->financial_gate_evidence_sha256);
         $this->assertNotNull($enrollment->financial_gate_signature);
-        $this->assertSame('1000.00', $enrollment->financial_gate_evidence['uncovered']);
+        $this->assertSame('1000.00', $enrollment->financial_gate_evidence['uncovered'] ?? null);
         $this->assertSame('0.00', $enrollment->financial_gate_evidence['coverage']['payment_discount_funding']);
         $this->assertSame('1000.00', $enrollment->financial_gate_evidence['remaining']);
 
@@ -165,7 +165,7 @@ final class EnrollmentFinancialGateFeatureTest extends TestCase
 
         $enrollment = Enrollment::query()->findOrFail($setup['enrollment_id']);
         $this->assertTrue((bool) $enrollment->financial_gate_satisfied);
-        $this->assertSame('0.00', $enrollment->financial_gate_evidence['remaining']);
+        $this->assertSame('0.00', $enrollment->financial_gate_evidence['remaining'] ?? null);
         $this->assertSame('1000.00', $enrollment->financial_gate_evidence['coverage']['payment_discount_funding']);
     }
 
@@ -186,7 +186,7 @@ final class EnrollmentFinancialGateFeatureTest extends TestCase
             'gate-activate-waiver',
         );
         $this->assertSame('active', $activation['lifecycle_state']);
-        $this->assertSame('0.00', Enrollment::query()->findOrFail($setup['enrollment_id'])->financial_gate_evidence['remaining']);
+        $this->assertSame('0.00', Enrollment::query()->findOrFail($setup['enrollment_id'])->financial_gate_evidence['remaining'] ?? null);
     }
 
     public function test_funding_allocation_satisfies_gate(): void
@@ -206,7 +206,7 @@ final class EnrollmentFinancialGateFeatureTest extends TestCase
             'gate-activate-sponsor',
         );
         $this->assertSame('active', $activation['lifecycle_state']);
-        $this->assertSame('0.00', Enrollment::query()->findOrFail($setup['enrollment_id'])->financial_gate_evidence['remaining']);
+        $this->assertSame('0.00', Enrollment::query()->findOrFail($setup['enrollment_id'])->financial_gate_evidence['remaining'] ?? null);
     }
 
     public function test_approved_credit_satisfies_gate(): void
@@ -227,7 +227,7 @@ final class EnrollmentFinancialGateFeatureTest extends TestCase
         );
         $this->assertSame('active', $activation['lifecycle_state']);
         $proof = Enrollment::query()->findOrFail($setup['enrollment_id'])->financial_gate_evidence;
-        $this->assertSame('0.00', $proof['remaining']);
+        $this->assertSame('0.00', $proof['remaining'] ?? null);
         $this->assertSame('1000.00', $proof['coverage']['credit']);
     }
 
@@ -249,7 +249,7 @@ final class EnrollmentFinancialGateFeatureTest extends TestCase
         );
         $this->assertSame('active', $activation['lifecycle_state']);
         $proof = Enrollment::query()->findOrFail($setup['enrollment_id'])->financial_gate_evidence;
-        $this->assertSame('0.00', $proof['remaining']);
+        $this->assertSame('0.00', $proof['remaining'] ?? null);
         $this->assertSame('1000.00', $proof['coverage']['installment']);
     }
 
@@ -271,7 +271,7 @@ final class EnrollmentFinancialGateFeatureTest extends TestCase
         );
         $this->assertSame('active', $activation['lifecycle_state']);
         $proof = Enrollment::query()->findOrFail($setup['enrollment_id'])->financial_gate_evidence;
-        $this->assertSame('0.00', $proof['remaining']);
+        $this->assertSame('0.00', $proof['remaining'] ?? null);
         $this->assertSame('1000.00', $proof['coverage']['exception']);
     }
 
@@ -325,7 +325,9 @@ final class EnrollmentFinancialGateFeatureTest extends TestCase
             $this->fail('an approved credit cannot be mutated');
         } catch (QueryException) {
         }
-        $this->assertSame('1000.00', trim((string) $creditModel->fresh()->amount));
+        $refreshedCredit = $creditModel->fresh();
+        $this->assertNotNull($refreshedCredit);
+        $this->assertSame('1000.00', trim((string) $refreshedCredit->amount));
 
         $installment = app(MaintainInstallmentPlan::class)->propose($proposer, $setup['student_id'], null, '1000.00', 2, '2026-09-15', 'gate-immutable-installment', 'gate-immutable-installment-propose');
         app(MaintainInstallmentPlan::class)->approve($approver, EnrollmentInstallmentPlan::query()->findOrFail($installment['plan_id']), 'gate-immutable-installment-approve');
@@ -335,7 +337,9 @@ final class EnrollmentFinancialGateFeatureTest extends TestCase
             $this->fail('an approved installment plan cannot be mutated');
         } catch (QueryException) {
         }
-        $this->assertSame(2, (int) $planModel->fresh()->installments_count);
+        $refreshedPlan = $planModel->fresh();
+        $this->assertNotNull($refreshedPlan);
+        $this->assertSame(2, (int) $refreshedPlan->installments_count);
 
         $exception = app(MaintainFinancialGateException::class)->propose($proposer, $setup['student_id'], null, null, '1000.00', 'exception', '2026-09-01', null, 'gate-immutable-exception-propose');
         app(MaintainFinancialGateException::class)->approve($approver, FinancialGateException::query()->findOrFail($exception['exception_id']), 'gate-immutable-exception-approve');
@@ -345,7 +349,9 @@ final class EnrollmentFinancialGateFeatureTest extends TestCase
             $this->fail('an approved gate exception cannot be mutated');
         } catch (QueryException) {
         }
-        $this->assertSame('exception', trim((string) $exceptionModel->fresh()->reason));
+        $refreshedException = $exceptionModel->fresh();
+        $this->assertNotNull($refreshedException);
+        $this->assertSame('exception', trim((string) $refreshedException->reason));
     }
 
     public function test_signed_evidence_rejects_tampering(): void

@@ -81,14 +81,15 @@ final class ActorBranches
     /** @return list<array{0: string, 1: string}> */
     private function activeGrantScopes(string $personId, string $today): array
     {
-        $scopes = ScopeGrant::query()
+        $scopes = array_values(ScopeGrant::query()
             ->where('person_id', $personId)
             ->where('lifecycle_state', AccessLifecycle::STATE_ACTIVE)
             ->where('effective_from', '<=', $today)
             ->where(fn ($query) => $query->whereNull('effective_to')->orWhere('effective_to', '>', $today))
             ->get(['scope_type', 'scope_id'])
             ->map(static fn ($grant): array => [trim((string) $grant->scope_type), trim((string) $grant->scope_id)])
-            ->all();
+            ->values()
+            ->all());
 
         $delegations = Delegation::query()
             ->where('delegate_person_id', $personId)
@@ -118,19 +119,20 @@ final class ActorBranches
             ->where(fn ($query) => $query->whereNull('effective_to')->orWhere('effective_to', '>', $today))
             ->pluck('position_id')
             ->map(static fn ($value): string => trim((string) $value))
+            ->values()
             ->all();
 
         if ($positionIds === []) {
             return [];
         }
 
-        return Position::query()
+        return array_values(Position::query()
             ->whereIn('id', $positionIds)
             ->pluck('organization_id')
             ->map(static fn ($value): string => trim((string) $value))
             ->filter(static fn (string $value): bool => $value !== '')
             ->values()
-            ->all();
+            ->all());
     }
 
     /** @return list<string> */
@@ -152,7 +154,7 @@ final class ActorBranches
     /** @return list<string> */
     private function branchesForCampus(string $campusId, string $day): array
     {
-        return CampusAssignment::query()
+        return array_values(CampusAssignment::query()
             ->where('campus_id', $campusId)
             ->where('effective_from', '<=', $day)
             ->where(fn ($query) => $query->whereNull('effective_to')->orWhere('effective_to', '>', $day))
@@ -160,7 +162,7 @@ final class ActorBranches
             ->map(static fn ($value): string => trim((string) $value))
             ->filter(static fn (string $value): bool => $value !== '')
             ->values()
-            ->all();
+            ->all());
     }
 
     /** @return list<string> */
@@ -190,12 +192,13 @@ final class ActorBranches
             ->where('organization_id', $organizationId)
             ->pluck('id')
             ->map(static fn ($value): string => trim((string) $value))
+            ->values()
             ->all();
         if ($campusIds === []) {
             return [];
         }
 
-        return CampusAssignment::query()
+        return array_values(CampusAssignment::query()
             ->whereIn('campus_id', $campusIds)
             ->where('effective_from', '<=', $day)
             ->where(fn ($query) => $query->whereNull('effective_to')->orWhere('effective_to', '>', $day))
@@ -203,7 +206,7 @@ final class ActorBranches
             ->map(static fn ($value): string => trim((string) $value))
             ->filter(static fn (string $value): bool => $value !== '')
             ->values()
-            ->all();
+            ->all());
     }
 
     private function employmentEligible(string $personId): bool
@@ -232,7 +235,7 @@ final class ActorBranches
             return [];
         }
 
-        return Branch::query()
+        return array_values(Branch::query()
             ->join('campus_assignments as visible_ca', function ($join) use ($day): void {
                 $join->on('visible_ca.branch_id', '=', 'branches.id')
                     ->where('visible_ca.effective_from', '<=', $day)
@@ -251,6 +254,6 @@ final class ActorBranches
             ->filter(static fn (string $value): bool => $value !== '')
             ->unique()
             ->values()
-            ->all();
+            ->all());
     }
 }

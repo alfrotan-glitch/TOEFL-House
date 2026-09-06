@@ -73,7 +73,7 @@ final class MaintainEnrollment
                     $this->assertStudentActive($studentId);
                     $this->assertClassActive($classId);
                     $this->assertPrerequisitesForClass($studentId, $classId);
-                    if ($offeringId !== null && $offeringId !== '') {
+                    if ($offeringId !== '') {
                         $this->assertOfferingOpenAndMatchesClass($offeringId, $classId);
                     }
                     // Scope follows the seat: offering branch, else the
@@ -89,7 +89,7 @@ final class MaintainEnrollment
                     // finite seat. The class lock is the serialization point
                     // shared with activation, transfer, and waitlist promotion.
                     $this->assertCapacity($classId);
-                    if ($offeringId !== null && $offeringId !== '') {
+                    if ($offeringId !== '') {
                         $this->assertOfferingCapacity($offeringId);
                     }
                     $eligibilitySnapshotId = $this->currentEligibilitySnapshotId($studentId);
@@ -98,7 +98,7 @@ final class MaintainEnrollment
                         'id' => RandomIdentifier::new(),
                         'student_id' => $studentId,
                         'class_id' => $classId,
-                        'offering_id' => $offeringId !== null && $offeringId !== '' ? $offeringId : null,
+                        'offering_id' => $offeringId !== '' ? $offeringId : null,
                         'originating_branch_id' => $branchId,
                         'academic_eligibility_snapshot_id' => $eligibilitySnapshotId,
                         'lifecycle_state' => EnrollmentLifecycle::STATE_REQUESTED,

@@ -26,6 +26,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string|null $current_home_branch_id
  * @property string|null $placement_profile_id
  * @property string|null $academic_eligibility_snapshot_id
+ * @property-read string|null $current_status
  */
 final class Student extends Model
 {

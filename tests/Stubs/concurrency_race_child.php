@@ -11,6 +11,7 @@ use Tests\Support\PgWire\PgWirePdo;
  *
  * argv: db host port user password row_id approver ready_file result_file
  */
+/** @var array<int, string> $argv */
 [
     , $db, $host, $port, $user, $password, $rowId, $approver, $readyFile, $resultFile,
 ] = $argv;

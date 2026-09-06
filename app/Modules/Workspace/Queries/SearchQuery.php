@@ -58,10 +58,12 @@ final class SearchQuery
                 ->orderBy('student_code')
                 ->limit($limit)
                 ->get(['id', 'person_id', 'student_code', 'current_home_branch_id', 'originating_branch_id']) as $student) {
+                /** @var \App\Modules\Identity\Models\Person|null $studentPerson */
+                $studentPerson = $student->person;
                 $results[] = [
                     'type' => 'student',
                     'id' => (string) $student->id,
-                    'label' => (string) ($student->person?->legal_name ?? $student->student_code),
+                    'label' => $studentPerson !== null ? (string) $studentPerson->legal_name : (string) $student->student_code,
                     'secondary' => (string) $student->student_code,
                     'provenance_branch_id' => (string) ($student->current_home_branch_id ?? $student->originating_branch_id),
                     'route' => '/students/'.(string) $student->id,
@@ -100,7 +102,11 @@ final class SearchQuery
         ];
     }
 
-    /** @param list<string> $candidateBranchIds @return list<string> */
+    /**
+     * @param list<string> $candidateBranchIds
+     *
+     * @return list<string>
+     */
     private function authorizedBranches(Actor $actor, array $candidateBranchIds, string $capability): array
     {
         $decision = app(AccessDecision::class);

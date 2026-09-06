@@ -40,8 +40,10 @@ final class PlacementProfileQuery
         ];
     }
 
-    /** @return Collection<int, PlacementProfile> */
-    /** @param list<string>|null $branchIds */
+    /**
+     * @param list<string>|null $branchIds
+     * @return Collection<int, PlacementProfile>
+     */
     public function search(?string $term, ?string $lifecycleState, ?string $programVersionId, ?array $branchIds = null): Collection
     {
         $query = PlacementProfile::query()->with(['person', 'recommendedLevel', 'recommendedClass'])->orderByDesc('updated_at')->limit(200);

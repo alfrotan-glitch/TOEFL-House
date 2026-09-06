@@ -15,7 +15,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $period_id
  * @property string $employment_id
  * @property string $originating_branch_id
- * @property string $amount
+ * @property numeric-string $amount
  * @property string $lifecycle_state
  */
 final class PayrollResult extends Model

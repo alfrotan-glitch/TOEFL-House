@@ -35,7 +35,7 @@ final class AcademicHistoryQuery
             $query->where('program_version_id', $programVersionId);
         }
 
-        return $query->get()
+        return array_values($query->get()
             ->map(fn (LevelProgressFact $fact): array => [
                 'fact_id' => $fact->id,
                 'program_version_id' => (string) $fact->program_version_id,
@@ -50,7 +50,7 @@ final class AcademicHistoryQuery
                 'repeat_count' => (int) $fact->repeat_count,
                 'achieved_at' => $fact->achieved_at?->toIso8601String(),
             ])
-            ->all();
+            ->values()->all());
     }
 
     public function currentLevel(string $studentId, ?string $programVersionId = null): ?ProgramVersionLevel
@@ -103,7 +103,7 @@ final class AcademicHistoryQuery
         /** @var Student|null $student */
         $student = Student::query()->find($studentId);
         if ($student === null) {
-            return $prerequisites->map(fn (LevelPrerequisite $p): array => $this->violation($p, 'unknown_student'))->all();
+            return array_values($prerequisites->map(fn (LevelPrerequisite $p): array => $this->violation($p, 'unknown_student'))->values()->all());
         }
 
         $snapshot = AcademicEligibilitySnapshot::query()

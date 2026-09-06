@@ -12,7 +12,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $id
  * @property string $obligation_id
  * @property string $category
- * @property string $amount
+ * @property numeric-string $amount
  * @property string $source_ref
  */
 final class ObligationLine extends Model

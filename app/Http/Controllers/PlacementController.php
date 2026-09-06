@@ -65,7 +65,7 @@ final class PlacementController extends Controller
 
     public function show(string $profileId): View
     {
-        $profile = PlacementProfile::query()->findOrFail($profileId);
+        $profile = PlacementProfile::query()->findOrFail((string) $profileId);
         $profileBranch = RecordBranch::placementProfileBranch($profile);
         $this->requireBranchCapability('placement.conduct', $profileBranch, 'placement.show', 'placement_profile', $profile->id);
         $catalogVisible = $this->authorizedBranches('placement.catalog');
@@ -131,7 +131,7 @@ final class PlacementController extends Controller
 
         $result = app(ManagePlacementProfile::class)->startAttempt(
             $this->actor(),
-            PlacementProfile::query()->findOrFail($input['profile_id']),
+            PlacementProfile::query()->findOrFail((string) $input['profile_id']),
             $input['test_version_id'],
             $input['delivery_mode'],
             $this->idempotencyKey('placement.attempt.start'),
@@ -148,7 +148,7 @@ final class PlacementController extends Controller
             'answers.*' => ['string'],
         ]);
 
-        $attempt = PlacementAttempt::query()->findOrFail($attemptId);
+        $attempt = PlacementAttempt::query()->findOrFail((string) $attemptId);
         $result = app(ManagePlacementProfile::class)->submitDigital(
             $this->actor(),
             $attempt,
@@ -168,7 +168,7 @@ final class PlacementController extends Controller
             'evidence_ref' => ['required', 'string', 'max:500'],
         ]);
 
-        $attempt = PlacementAttempt::query()->findOrFail($attemptId);
+        $attempt = PlacementAttempt::query()->findOrFail((string) $attemptId);
         app(ManagePlacementProfile::class)->submitPhysical(
             $this->actor(),
             $attempt,
@@ -190,7 +190,7 @@ final class PlacementController extends Controller
             'rationale' => ['nullable', 'string'],
         ]);
 
-        $attempt = PlacementAttempt::query()->findOrFail($input['attempt_id']);
+        $attempt = PlacementAttempt::query()->findOrFail((string) $input['attempt_id']);
         app(ScorePlacement::class)->scoreSection(
             $this->actor(),
             $attempt,
@@ -207,58 +207,60 @@ final class PlacementController extends Controller
 
     public function moderateSection(Request $request, string $sectionResultId): RedirectResponse
     {
-        $result = PlacementSectionResult::query()->findOrFail($sectionResultId);
+        $result = PlacementSectionResult::query()->findOrFail((string) $sectionResultId);
         app(ScorePlacement::class)->moderateSection($this->actor(), $result, $this->idempotencyKey('placement.section.moderate'));
+        $attempt = PlacementAttempt::query()->findOrFail((string) $result->attempt_id);
 
-        return redirect()->route('placement.show', $result->attempt->profile_id)->with('success', 'Section moderated.');
+        return redirect()->route('placement.show', $attempt->profile_id)->with('success', 'Section moderated.');
     }
 
     public function approveSection(Request $request, string $sectionResultId): RedirectResponse
     {
-        $result = PlacementSectionResult::query()->findOrFail($sectionResultId);
+        $result = PlacementSectionResult::query()->findOrFail((string) $sectionResultId);
         app(ScorePlacement::class)->approveSection($this->actor(), $result, $this->idempotencyKey('placement.section.approve'));
+        $attempt = PlacementAttempt::query()->findOrFail((string) $result->attempt_id);
 
-        return redirect()->route('placement.show', $result->attempt->profile_id)->with('success', 'Section approved.');
+        return redirect()->route('placement.show', $attempt->profile_id)->with('success', 'Section approved.');
     }
 
     public function markScored(Request $request, string $profileId): RedirectResponse
     {
-        app(ManagePlacementProfile::class)->markScored($this->actor(), PlacementProfile::query()->findOrFail($profileId), $this->idempotencyKey('placement.profile.mark-scored'));
+        app(ManagePlacementProfile::class)->markScored($this->actor(), PlacementProfile::query()->findOrFail((string) $profileId), $this->idempotencyKey('placement.profile.mark-scored'));
 
         return redirect()->route('placement.show', $profileId)->with('success', 'Placement marked scored.');
     }
 
     public function recommend(Request $request, string $profileId): RedirectResponse
     {
-        app(RecommendPlacement::class)->recommend($this->actor(), PlacementProfile::query()->findOrFail($profileId), $this->idempotencyKey('placement.recommend'));
+        app(RecommendPlacement::class)->recommend($this->actor(), PlacementProfile::query()->findOrFail((string) $profileId), $this->idempotencyKey('placement.recommend'));
 
         return redirect()->route('placement.show', $profileId)->with('success', 'Recommendation generated.');
     }
 
     public function review(Request $request, string $profileId): RedirectResponse
     {
-        app(DecidePlacement::class)->review($this->actor(), PlacementProfile::query()->findOrFail($profileId), $this->idempotencyKey('placement.review'));
+        app(DecidePlacement::class)->review($this->actor(), PlacementProfile::query()->findOrFail((string) $profileId), $this->idempotencyKey('placement.review'));
 
         return redirect()->route('placement.show', $profileId)->with('success', 'Placement reviewed.');
     }
 
     public function approveProfile(Request $request, string $profileId): RedirectResponse
     {
-        app(DecidePlacement::class)->approve($this->actor(), PlacementProfile::query()->findOrFail($profileId), $this->idempotencyKey('placement.approve'));
+        app(DecidePlacement::class)->approve($this->actor(), PlacementProfile::query()->findOrFail((string) $profileId), $this->idempotencyKey('placement.approve'));
 
         return redirect()->route('placement.show', $profileId)->with('success', 'Placement approved.');
     }
 
     public function releaseProfile(Request $request, string $profileId): RedirectResponse
     {
-        app(DecidePlacement::class)->release($this->actor(), PlacementProfile::query()->findOrFail($profileId), $this->idempotencyKey('placement.release'));
+        app(DecidePlacement::class)->release($this->actor(), PlacementProfile::query()->findOrFail((string) $profileId), $this->idempotencyKey('placement.release'));
 
         return redirect()->route('placement.show', $profileId)->with('success', 'Placement released.');
     }
 
     public function supersedeProfile(Request $request, string $profileId): RedirectResponse
     {
-        app(DecidePlacement::class)->supersede($this->actor(), PlacementProfile::query()->findOrFail($profileId), $this->idempotencyKey('placement.supersede'));
+        app(DecidePlacement::class)->supersede($this->actor(), PlacementProfile::query()->findOrFail((string) $profileId), $this->idempotencyKey('placement.supersede'));
 
         return redirect()->route('placement.show', $profileId)->with('success', 'Placement profile superseded; a retake may be opened.');
     }
@@ -272,7 +274,7 @@ final class PlacementController extends Controller
             'storage_ref' => ['required', 'string', 'max:500'],
         ]);
 
-        $profile = PlacementProfile::query()->findOrFail($profileId);
+        $profile = PlacementProfile::query()->findOrFail((string) $profileId);
         app(RegisterDocument::class)->register(
             $this->actor(),
             $profile->person_id,
@@ -337,7 +339,7 @@ final class PlacementController extends Controller
             'summary' => ['required', 'string', 'max:1000'],
         ]);
 
-        app(MaintainPlacementCatalog::class)->createVersion($this->actor(), PlacementTest::query()->findOrFail($input['test_id']), $input['summary'], $this->idempotencyKey('placement.version.create'));
+        app(MaintainPlacementCatalog::class)->createVersion($this->actor(), PlacementTest::query()->findOrFail((string) $input['test_id']), $input['summary'], $this->idempotencyKey('placement.version.create'));
 
         return redirect()->route('placement.index')->with('success', 'Placement version draft created.');
     }
@@ -364,7 +366,7 @@ final class PlacementController extends Controller
 
         app(MaintainPlacementCatalog::class)->defineSection(
             $this->actor(),
-            PlacementTestVersion::query()->findOrFail($input['version_id']),
+            PlacementTestVersion::query()->findOrFail((string) $input['version_id']),
             $input['code'],
             $input['name'],
             $input['component'],
@@ -392,7 +394,7 @@ final class PlacementController extends Controller
 
         app(MaintainPlacementCatalog::class)->defineQuestion(
             $this->actor(),
-            PlacementSection::query()->findOrFail($input['section_id']),
+            PlacementSection::query()->findOrFail((string) $input['section_id']),
             $input['code'],
             $input['stem'],
             $input['question_type'],
@@ -420,7 +422,7 @@ final class PlacementController extends Controller
 
         app(MaintainPlacementCatalog::class)->defineRubric(
             $this->actor(),
-            PlacementTestVersion::query()->findOrFail($input['version_id']),
+            PlacementTestVersion::query()->findOrFail((string) $input['version_id']),
             $input['component'],
             $input['band'],
             (float) $input['min_score'],

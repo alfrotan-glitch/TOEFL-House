@@ -221,8 +221,9 @@ final class DecideAdmission
     {
         $branchId = trim((string) ($applicant->current_home_branch_id ?? $applicant->originating_branch_id ?? ''));
         if ($branchId === '' && $applicant->placement_profile_id !== null) {
+            /** @var \App\Modules\Academic\Placement\Models\PlacementProfile|null $profile */
             $profile = $applicant->placementProfile;
-            $branchId = trim((string) ($profile?->current_home_branch_id ?? $profile?->originating_branch_id ?? ''));
+            $branchId = $profile !== null ? trim((string) ($profile->current_home_branch_id ?? $profile->originating_branch_id ?? '')) : '';
         }
         $branch = $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
         if ($branch === null || $branch->lifecycle_state !== 'active' || $branch->structureScope()->organizationId === '') {

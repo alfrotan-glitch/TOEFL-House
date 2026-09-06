@@ -71,12 +71,12 @@ final class ManageClassWaitlist
                         throw BusinessRejection::forCode('academic.enrollment_seat_exists', 'this student already holds a seat in the class');
                     }
 
-                    if ($offeringId !== null && $offeringId !== '') {
+                    if ($offeringId !== '') {
                         $this->assertOfferingMatchesClass($offeringId, $classId);
                     }
                     $this->access->require($requester, self::CAPABILITY_REQUEST, $this->queueBranch($offeringId, $studentId), 'academic.waitlist_denied');
                     $classFull = $this->classFull($class);
-                    $offeringFull = $offeringId !== null && $offeringId !== '' && $this->offeringFull($offeringId);
+                    $offeringFull = $offeringId !== '' && $this->offeringFull($offeringId);
                     if (! $classFull && ! $offeringFull) {
                         throw BusinessRejection::forCode('academic.waitlist_not_full', 'a waitlist is available only when the class or offering capacity is exhausted');
                     }
@@ -86,7 +86,7 @@ final class ManageClassWaitlist
                         'id' => RandomIdentifier::new(),
                         'class_id' => $classId,
                         'student_id' => $studentId,
-                        'offering_id' => $offeringId !== null && $offeringId !== '' ? $offeringId : null,
+                        'offering_id' => $offeringId !== '' ? $offeringId : null,
                         'position' => $position,
                         'lifecycle_state' => WaitlistLifecycle::STATE_WAITING,
                         'joined_by' => $requester->actorId,

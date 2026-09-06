@@ -102,7 +102,7 @@ final class CaptureVisitor
                         $resolvedSource = $this->resolveSource($resolvedCampaign->source_id);
                     }
 
-                    if ($personId !== null && $personId !== '' && Visitor::query()
+                    if ($personId !== null && Visitor::query()
                         ->where('person_id', $personId)
                         ->whereIn('status', Visitor::openStatuses())
                         ->exists()) {
@@ -118,7 +118,7 @@ final class CaptureVisitor
                     $visitor = Visitor::query()->create([
                         'id' => RandomIdentifier::new(),
                         'visitor_code' => self::visitorCode(),
-                        'person_id' => $personId !== '' ? $personId : null,
+                        'person_id' => $personId,
                         'source_id' => $resolvedSource?->id,
                         'campaign_id' => $resolvedCampaign?->id,
                         'full_name' => $resolvedName,

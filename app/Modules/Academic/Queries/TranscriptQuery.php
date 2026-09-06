@@ -32,12 +32,12 @@ final class TranscriptQuery
     /** @return list<Transcript> */
     public function issuedForStudent(string $studentId, ?string $programVersionId = null): array
     {
-        return Transcript::query()
+        return array_values(Transcript::query()
             ->where('student_id', $studentId)
             ->when($programVersionId !== null && $programVersionId !== '', fn ($query) => $query->where('program_version_id', $programVersionId))
             ->orderByDesc('issued_at')
             ->get()
-            ->all();
+            ->all());
     }
 
     /**

@@ -83,23 +83,43 @@ final class PlacementWebFeatureTest extends TestCase
 
         $reviewer = $this->grantedActor('plc-appeal-reviewer', ['academic.appeal_manage']);
         app(ManageAcademicAppeal::class)->assign($appealManager, $appeal, $reviewer->actorId, 'plc-appeal-assign');
-        app(ManageAcademicAppeal::class)->investigate($reviewer, $appeal->fresh(), 'plc-appeal-investigate');
+        $assignedAppeal = $appeal->fresh();
+        if ($assignedAppeal === null) {
+            $this->fail('placement appeal disappeared after assignment');
+        }
+        app(ManageAcademicAppeal::class)->investigate($reviewer, $assignedAppeal, 'plc-appeal-investigate');
 
         // Resolved means upheld AND redressed: the owning placement workflow
         // records the remediation (retake path supersedes the profile) before
         // the reviewer may resolve; the resolve itself mutates nothing.
         try {
-            app(ManageAcademicAppeal::class)->resolve($reviewer, $appeal->fresh(), 'adjusted', 'placement/appeal/evidence/'.$appeal->id, 'plc-appeal-resolve-early');
+            $appealBefore = $appeal->fresh();
+            if ($appealBefore === null) {
+                $this->fail('placement appeal disappeared before early resolve probe');
+            }
+            app(ManageAcademicAppeal::class)->resolve($reviewer, $appealBefore, 'adjusted', 'placement/appeal/evidence/'.$appeal->id, 'plc-appeal-resolve-early');
             $this->fail('a still-open profile must not resolve');
         } catch (BusinessRejection $rejection) {
             $this->assertSame('academic.appeal_subject_untouched', $rejection->errorCode());
         }
         app(DecidePlacement::class)->supersede($this->placementReleaser('plc-appeal-releaser'), PlacementProfile::query()->findOrFail($profile->id), 'plc-appeal-supersede');
-        app(ManageAcademicAppeal::class)->resolve($reviewer, $appeal->fresh(), 'adjusted', 'placement/appeal/evidence/'.$appeal->id, 'plc-appeal-resolve');
-        app(ManageAcademicAppeal::class)->close($appealManager, $appeal->fresh(), 'plc-appeal-close');
+        $appealForResolve = $appeal->fresh();
+        if ($appealForResolve === null) {
+            $this->fail('placement appeal disappeared before resolve');
+        }
+        app(ManageAcademicAppeal::class)->resolve($reviewer, $appealForResolve, 'adjusted', 'placement/appeal/evidence/'.$appeal->id, 'plc-appeal-resolve');
+        $appealForClose = $appeal->fresh();
+        if ($appealForClose === null) {
+            $this->fail('placement appeal disappeared before close');
+        }
+        app(ManageAcademicAppeal::class)->close($appealManager, $appealForClose, 'plc-appeal-close');
 
-        $this->assertSame('closed', $appeal->fresh()->lifecycle_state);
-        $this->assertSame('adjusted', $appeal->fresh()->outcome);
-        $this->assertSame('superseded', $profile->fresh()->lifecycle_state);
+        $refreshedAppeal = $appeal->fresh();
+        $this->assertNotNull($refreshedAppeal);
+        $this->assertSame('closed', $refreshedAppeal->lifecycle_state);
+        $this->assertSame('adjusted', $refreshedAppeal->outcome);
+        $refreshedProfile = $profile->fresh();
+        $this->assertNotNull($refreshedProfile);
+        $this->assertSame('superseded', $refreshedProfile->lifecycle_state);
     }
 }

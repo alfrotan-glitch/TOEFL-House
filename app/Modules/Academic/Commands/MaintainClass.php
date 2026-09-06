@@ -48,6 +48,7 @@ final class MaintainClass
         private readonly AttemptedOperation $attemptedOperation,
         private readonly SchedulingConstraints $scheduling,
         private readonly MaintainTeacherAssignment $teacherAssignments,
+        private readonly ActorBranches $branches,
     ) {}
 
     /** @return array{class_id: string, correlation_id: string} */
@@ -72,7 +73,6 @@ final class MaintainClass
                         throw BusinessRejection::forCode('academic.class_capacity_invalid', 'class capacity must be positive');
                     }
 
-                    /** @var Offering|null $offering */
                     $offeringQuery = Offering::query()->where('branch_id', $resolvedBranchId)
                         ->where('academic_period_id', $periodId)
                         ->where('lifecycle_state', Offering::STATE_OPEN);
@@ -84,6 +84,7 @@ final class MaintainClass
                     } else {
                         $offeringQuery->whereHas('level', static fn ($query) => $query->where('program_version_id', $programVersionId));
                     }
+                    /** @var Offering|null $offering */
                     $offering = $offeringQuery->lockForUpdate()->first();
                     if ($offering === null) {
                         throw BusinessRejection::forCode('academic.class_offering_required', 'a new class must reference an open offering for its branch, level, and period');
@@ -147,6 +148,52 @@ final class MaintainClass
         if ($programVersionId !== $level->program_version_id) {
             throw BusinessRejection::forCode('academic.class_level_version_mismatch', 'a class level must belong to the class program version');
         }
+    }
+
+    /**
+     * Class delivery is branch-homed: the capability is checked against the
+     * class's own branch id. Legacy rows without branch provenance fail
+     * closed through BranchScopedAccess (empty id is never a grant).
+     */
+    private function requireCapability(Actor $actor, ?string $branchId): void
+    {
+        $this->access->require($actor, self::CAPABILITY, $branchId, 'academic.schedule_denied');
+    }
+
+    /**
+     * Resolves the target branch for a new class. Explicit callers (the HTTP
+     * boundary) always supply one; programmatic callers may omit it, in which
+     * case a single unambiguous visible branch is used and every other case is
+     * rejected rather than guessed.
+     */
+    private function resolveClassBranch(Actor $actor, ?string $branchId): string
+    {
+        if ($branchId !== null && trim($branchId) !== '') {
+            return trim($branchId);
+        }
+        $visible = $this->branches->visibleBranchIds($actor);
+        if (count($visible) !== 1) {
+            throw BusinessRejection::forCode('academic.class_branch_ambiguous', 'a new class requires an explicit branch unless the actor has exactly one visible branch');
+        }
+
+        return $visible[0];
+    }
+
+    /** @return array{branch_id: string, campus_id: string, organization_id: string} */
+    private function classProvenance(string $classId): array
+    {
+        $class = ClassModel::query()->whereKey($classId)->first();
+        $branchId = $class !== null ? trim((string) ($class->branch_id ?? '')) : '';
+        $branch = $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
+        if ($branch === null || $branch->lifecycle_state !== 'active') {
+            throw BusinessRejection::forCode('academic.class_provenance_required', 'a class-linked event requires active branch provenance');
+        }
+        $scope = $branch->structureScope();
+        if ($scope->organizationId === '' || $scope->campusId === null) {
+            throw BusinessRejection::forCode('academic.class_provenance_required', 'a class-linked event requires active campus organization provenance');
+        }
+
+        return ['branch_id' => (string) $branch->id, 'campus_id' => (string) $scope->campusId, 'organization_id' => $scope->organizationId];
     }
 
     /** @return array{class_id: string, lifecycle_state: string, correlation_id: string} */
@@ -326,31 +373,46 @@ final class MaintainClass
         }
     }
 
-    /** Compatibility façade; Teacher assignment authority owns this write. */
+    /** Compatibility façade; Teacher assignment authority owns this write.
+
+     * @return array{assignment_skill_id: string, correlation_id: string}
+     */
     public function assignSkill(Actor $actor, TeacherAssignment $assignment, string $skillId, string $idempotencyKey): array
     {
         return $this->teacherAssignments->assignSkill($actor, $assignment, $skillId, $idempotencyKey);
     }
 
-    /** Compatibility façade; Teacher assignment authority owns this write. */
+    /** Compatibility façade; Teacher assignment authority owns this write.
+
+     * @return array{assignment_id: string, correlation_id: string}
+     */
     public function assignTeacher(Actor $actor, ClassModel $class, string $teacherPersonId, CarbonImmutable $effectiveFrom, ?CarbonImmutable $effectiveTo, string $idempotencyKey): array
     {
         return $this->teacherAssignments->assignTeacher($actor, $class, $teacherPersonId, $effectiveFrom, $effectiveTo, $idempotencyKey);
     }
 
-    /** Compatibility façade; Teacher assignment authority owns this write. */
+    /** Compatibility façade; Teacher assignment authority owns this write.
+
+     * @return array{assignment_id: string, effective_to: string, correlation_id: string}
+     */
     public function endAssignment(Actor $actor, TeacherAssignment $assignment, CarbonImmutable $effectiveTo, string $reason, string $idempotencyKey): array
     {
         return $this->teacherAssignments->endAssignment($actor, $assignment, $effectiveTo, $reason, $idempotencyKey);
     }
 
-    /** Compatibility façade; Teacher assignment authority owns this write. */
+    /** Compatibility façade; Teacher assignment authority owns this write.
+
+     * @return array{assignment_id: string, effective_to: string, correlation_id: string}
+     */
     public function extendAssignment(Actor $actor, TeacherAssignment $assignment, CarbonImmutable $newEffectiveTo, string $reason, string $idempotencyKey): array
     {
         return $this->teacherAssignments->extendAssignment($actor, $assignment, $newEffectiveTo, $reason, $idempotencyKey);
     }
 
-    /** Compatibility façade; Teacher assignment authority owns this write. */
+    /** Compatibility façade; Teacher assignment authority owns this write.
+
+     * @return array{outgoing_assignment_id: string, incoming_assignment_id: string, correlation_id: string}
+     */
     public function handoverAssignment(Actor $actor, TeacherAssignment $assignment, string $successorTeacherPersonId, CarbonImmutable $handoverOn, string $reason, string $idempotencyKey): array
     {
         return $this->teacherAssignments->handoverAssignment($actor, $assignment, $successorTeacherPersonId, $handoverOn, $reason, $idempotencyKey);

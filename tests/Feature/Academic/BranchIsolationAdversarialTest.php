@@ -75,7 +75,6 @@ final class BranchIsolationAdversarialTest extends TestCase
 
     private string $programVersionId;
 
-    private string $availabilityA;
 
     private string $availabilityB;
 
@@ -123,7 +122,7 @@ final class BranchIsolationAdversarialTest extends TestCase
         $this->periodId = $structure->definePeriod($org, 'Isolation Term', new CarbonImmutable('2026-10-01'), new CarbonImmutable('2026-12-30'), 'iso-period')['period_id'];
         $structure->transitionPeriod($org, AcademicPeriod::query()->findOrFail($this->periodId), 'published', 'iso-period-pub');
 
-        $this->availabilityA = $structure->declareBranchAvailability($org, $this->branchA, $this->levelId, $this->periodId, 'iso-avail-a')['availability_id'];
+        $structure->declareBranchAvailability($org, $this->branchA, $this->levelId, $this->periodId, 'iso-avail-a');
         $this->availabilityB = $structure->declareBranchAvailability($org, $this->branchB, $this->levelId, $this->periodId, 'iso-avail-b')['availability_id'];
         $this->offeringA = $structure->openOffering($org, $this->branchA, $this->levelId, $this->periodId, 4, 'iso-off-a')['offering_id'];
         $this->offeringB = $structure->openOffering($org, $this->branchB, $this->levelId, $this->periodId, 4, 'iso-off-b')['offering_id'];

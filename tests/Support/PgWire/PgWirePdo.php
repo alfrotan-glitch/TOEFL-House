@@ -38,8 +38,6 @@ class PgWirePdo extends PDO
 
     private const TYPE_FLOAT8 = 701;
 
-    private const TYPE_NUMERIC = 1700;
-
     /** @var resource|null */
     private $socket = null;
 
@@ -59,8 +57,9 @@ class PgWirePdo extends PDO
 
     private bool $stringifyFetches = false;
 
-    private ?string $errCode = '00000';
+    private string $errCode = '00000';
 
+    /** @var array{0: string, 1: string, 2: string} */
     private array $errInfo = ['00000', '', ''];
 
     /**
@@ -89,6 +88,7 @@ class PgWirePdo extends PDO
     // PDO surface
     // ------------------------------------------------------------------
 
+    /** @param array<int, mixed> $options */
     public function prepare(string $query, array $options = []): PDOStatement|false
     {
         $rewritten = $this->rewritePlaceholders($query);
@@ -169,6 +169,7 @@ class PgWirePdo extends PDO
         return $this->errCode;
     }
 
+    /** @return array{0: string, 1: string, 2: string} */
     public function errorInfo(): array
     {
         return $this->errInfo;
@@ -554,6 +555,7 @@ class PgWirePdo extends PDO
     // Connection plumbing
     // ------------------------------------------------------------------
 
+    /** @return array<string, string> */
     private function parseDsn(string $dsn): array
     {
         $config = [];
@@ -651,9 +653,31 @@ class PgWirePdo extends PDO
     /**
      * @throws PgWireException
      */
+    /** @return int<0, 4294967295> */
+    private function unpackU32(string $bytes): int
+    {
+        $parts = unpack('N', $bytes);
+        if ($parts === false || ! isset($parts[1])) {
+            throw new PgWireException('08006', 'malformed 32-bit integer from the server');
+        }
+
+        return $parts[1];
+    }
+
+    /** @return int<0, 65535> */
+    private function unpackU16(string $bytes): int
+    {
+        $parts = unpack('n', $bytes);
+        if ($parts === false || ! isset($parts[1])) {
+            throw new PgWireException('08006', 'malformed 16-bit integer from the server');
+        }
+
+        return $parts[1];
+    }
+
     private function authenticate(string $body, string $user, string $password): void
     {
-        $kind = unpack('N', substr($body, 0, 4))[1];
+        $kind = $this->unpackU32(substr($body, 0, 4));
         if ($kind === 0) {
             return;
         }
@@ -727,7 +751,7 @@ class PgWirePdo extends PDO
     {
         $header = $this->readBytes(5);
         $type = $header[0];
-        $length = unpack('N', substr($header, 1, 4))[1];
+        $length = $this->unpackU32(substr($header, 1, 4));
         if ($length < 4) {
             $this->poison('received a malformed message from the server');
         }
@@ -746,10 +770,10 @@ class PgWirePdo extends PDO
         }
         $buffer = '';
         while (strlen($buffer) < $count) {
-            $chunk = @fread($this->socket, $count - strlen($buffer));
+            $chunk = @fread($this->socket, max(1, $count - strlen($buffer)));
             if ($chunk === false || $chunk === '') {
                 $meta = stream_get_meta_data($this->socket);
-                if (($meta['timed_out'] ?? false) === true) {
+                if ($meta['timed_out'] === true) {
                     $this->poison('timed out waiting for the server');
                 }
                 $this->poison('server closed the connection unexpectedly');
@@ -766,17 +790,17 @@ class PgWirePdo extends PDO
     private function parseRowDescription(string $body): array
     {
         $offset = 0;
-        $count = unpack('n', substr($body, 0, 2))[1];
+        $count = $this->unpackU16(substr($body, 0, 2));
         $offset = 2;
         $fields = [];
         for ($i = 0; $i < $count; $i++) {
             $end = strpos($body, "\x00", $offset);
             $name = substr($body, $offset, $end - $offset);
             $offset = $end + 1;
-            $tableOid = unpack('N', substr($body, $offset, 4))[1];
+            $tableOid = $this->unpackU32(substr($body, $offset, 4));
             $offset += 4;
             $offset += 2; // column attribute number
-            $oid = unpack('N', substr($body, $offset, 4))[1];
+            $oid = $this->unpackU32(substr($body, $offset, 4));
             $offset += 4;
             $offset += 2; // data type size
             $offset += 4; // type modifier
@@ -795,9 +819,9 @@ class PgWirePdo extends PDO
     {
         $offset = 2;
         $row = [];
-        $count = unpack('n', substr($body, 0, 2))[1];
+        $count = $this->unpackU16(substr($body, 0, 2));
         for ($i = 0; $i < $count; $i++) {
-            $length = unpack('N', substr($body, $offset, 4))[1];
+            $length = $this->unpackU32(substr($body, $offset, 4));
             $offset += 4;
             if ($length === 0xFFFFFFFF) {
                 $row[] = null;
@@ -869,6 +893,9 @@ class PgWirePdo extends PDO
     private function decodeBytea(string $value)
     {
         $stream = fopen('php://memory', 'r+');
+        if ($stream === false) {
+            throw new PgWireException('08006', 'cannot allocate a memory stream for the bytea payload');
+        }
         if (str_starts_with($value, '\x')) {
             fwrite($stream, (string) hex2bin(substr($value, 2)));
         } else {

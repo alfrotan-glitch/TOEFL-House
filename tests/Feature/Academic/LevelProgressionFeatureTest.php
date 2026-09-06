@@ -130,7 +130,7 @@ final class LevelProgressionFeatureTest extends TestCase
 
         $a1EnrollmentId = $this->activate($studentId, $this->classA1, $this->offeringA1, 'lp-a1');
 
-        /** @var ProgressionDecision $proposed */
+        /** @var ProgressionDecision $decision */
         $decision = app(DecideProgression::class)->propose(
             $this->grantedActor('lp-proposer-adv', ['academic.progression_propose']),
             $studentId,
@@ -142,8 +142,10 @@ final class LevelProgressionFeatureTest extends TestCase
             'completed A1 curriculum and passed assessment evidence',
         );
         $decisionId = $decision['decision_id'];
-        app(DecideProgression::class)->review($this->grantedActor('lp-reviewer-adv', ['academic.progression_review']), ProgressionDecision::query()->findOrFail($decisionId), 'lp-review-adv');
-        app(DecideProgression::class)->approve($this->grantedActor('lp-approver-adv', ['academic.progression_approve']), ProgressionDecision::query()->findOrFail($decisionId), 'lp-approve-adv');
+        /** @var ProgressionDecision $decisionRow */
+        $decisionRow = ProgressionDecision::query()->findOrFail($decisionId);
+        app(DecideProgression::class)->review($this->grantedActor('lp-reviewer-adv', ['academic.progression_review']), $decisionRow, 'lp-review-adv');
+        app(DecideProgression::class)->approve($this->grantedActor('lp-approver-adv', ['academic.progression_approve']), $decisionRow, 'lp-approve-adv');
 
         $this->assertDatabaseHas('progression_decisions', [
             'id' => $decisionId,
@@ -172,7 +174,7 @@ final class LevelProgressionFeatureTest extends TestCase
 
         // The prerequisite gate is now satisfied by the immutable advance fact.
         $a2EnrollmentId = $this->activate($studentId, $this->classA2, $this->offeringA2, 'lp-a2');
-        $this->assertNotNull($a2EnrollmentId);
+        $this->assertNotSame('', $a2EnrollmentId);
 
         $financeOfficer = $this->grantedActor('lp-finance-officer', ['finance.period', 'finance.obligation']);
         $financialPeriodId = app(MaintainFinancialPeriod::class)->open($financeOfficer, '2026-09', '2026-09-01', '2026-09-30', 'lp-fin-period')['period_id'];

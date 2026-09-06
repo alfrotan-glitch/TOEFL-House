@@ -64,12 +64,10 @@ final class SchedulingConstraints
         if ($skillId === null || $skillId === '') {
             throw BusinessRejection::forCode('scheduling.skill_required', 'new sessions require explicit subject or skill authority');
         }
-        if ($skillId !== null && $skillId !== '') {
-            /** @var Skill|null $skill */
-            $skill = Skill::query()->find($skillId);
-            if ($skill === null || $skill->lifecycle_state !== Skill::STATE_ACTIVE) {
-                throw BusinessRejection::forCode('scheduling.skill_unknown', 'a session may deliver only an active skill');
-            }
+        /** @var Skill|null $skill */
+        $skill = Skill::query()->find($skillId);
+        if ($skill === null || $skill->lifecycle_state !== Skill::STATE_ACTIVE) {
+            throw BusinessRejection::forCode('scheduling.skill_unknown', 'a session may deliver only an active skill');
         }
         if ($sectionId !== null && $sectionId !== '') {
             /** @var ClassSection|null $section */

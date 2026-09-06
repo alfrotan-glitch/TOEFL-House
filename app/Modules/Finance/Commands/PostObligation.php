@@ -81,10 +81,11 @@ final class PostObligation
                         if ($line['category'] === '' || $line['source_ref'] === '') {
                             throw BusinessRejection::forCode('finance.obligation_line_terms', 'every obligation line requires a category and source reference');
                         }
-                        if (! MoneyAmount::positive((string) $line['amount'])) {
+                        $lineAmount = MoneyAmount::decimal($line['amount']);
+                        if (! MoneyAmount::positive($lineAmount)) {
                             throw BusinessRejection::forCode('finance.obligation_line_amount', 'every line amount must be a positive number');
                         }
-                        $total = bcadd($total, (string) $line['amount'], 2);
+                        $total = bcadd($total, $lineAmount, 2);
                     }
 
                     if ($offeringId !== null && $offeringId !== '') {

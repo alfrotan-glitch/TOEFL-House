@@ -127,7 +127,7 @@ final class MaintainDiscount
                     }
                     $this->require($approver, self::CAPABILITY_APPROVE, $branch->structureScope());
                     $remaining = $this->allocations->obligationRemaining($obligation);
-                    if (bccomp((string) $locked->amount, $remaining, 2) === 1) {
+                    if (bccomp($locked->amount, $remaining, 2) === 1) {
                         throw BusinessRejection::forCode('finance.discount_exceeds_obligation', sprintf('the discount exceeds the uncovered obligation remainder %s', $remaining));
                     }
 

@@ -37,7 +37,7 @@ final class WorkItemQuery
             return [];
         }
 
-        $candidateBranches = app(ActorBranches::class)->visibleBranchIds($actor);
+        $candidateBranches = array_values(app(ActorBranches::class)->visibleBranchIds($actor));
         $branches = $this->authorizedBranches($actor, $candidateBranches);
         $branchOrganizations = $this->branchOrganizations($branches);
         $organizationIds = $this->authorizedOrganizations($actor);
@@ -117,7 +117,7 @@ final class WorkItemQuery
             }
         });
 
-        return $query->limit(100)->get([
+        return array_values($query->limit(100)->get([
             'id', 'kind', 'title', 'source_type', 'source_id', 'action_key',
             'organization_id', 'branch_id', 'priority', 'due_at', 'lifecycle_state',
         ])->map(static fn (WorkItem $item): array => [
@@ -132,10 +132,14 @@ final class WorkItemQuery
             'due_at' => $item->due_at?->toIso8601String(),
             'route' => '/workspace?work_item_id='.(string) $item->id,
             'action_key' => (string) $item->action_key,
-        ])->all();
+        ])->values()->all());
     }
 
-    /** @param list<string> $branchIds @return array<string, string> */
+    /**
+     * @param list<string> $branchIds
+     *
+     * @return array<string, string>
+     */
     private function branchOrganizations(array $branchIds): array
     {
         if ($branchIds === []) {
@@ -173,7 +177,11 @@ final class WorkItemQuery
         return $authorized;
     }
 
-    /** @param list<string> $candidateBranchIds @return list<string> */
+    /**
+     * @param list<string> $candidateBranchIds
+     *
+     * @return list<string>
+     */
     private function authorizedBranches(Actor $actor, array $candidateBranchIds): array
     {
         $decision = app(AccessDecision::class);

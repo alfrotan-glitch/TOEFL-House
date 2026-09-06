@@ -98,7 +98,7 @@ final class EnrollmentCompletionLifecycleFeatureTest extends TestCase
             ->where('operation', 'academic.enrollment.frozen')
             ->where('target_id', $seatId)
             ->firstOrFail();
-        $this->assertSame('medical leave verified by clinic note', $event->after_state['state_reason']);
+        $this->assertSame('medical leave verified by clinic note', $event->after_state['state_reason'] ?? null);
         $this->assertTrue((bool) $event->after_state['finance_gate_exit']['satisfied']);
         $this->assertSame('0.00', $event->after_state['finance_gate_exit']['remaining']);
     }
@@ -169,7 +169,7 @@ final class EnrollmentCompletionLifecycleFeatureTest extends TestCase
         $enrollment = Enrollment::query()->findOrFail($seatId);
         $this->assertNull($enrollment->state_reason);
         $this->assertTrue((bool) $enrollment->financial_gate_satisfied);
-        $this->assertSame('0.00', $enrollment->financial_gate_evidence['remaining']);
+        $this->assertSame('0.00', $enrollment->financial_gate_evidence['remaining'] ?? null);
     }
 
     public function test_unfreeze_requires_a_frozen_seat(): void
@@ -209,7 +209,7 @@ final class EnrollmentCompletionLifecycleFeatureTest extends TestCase
             ->where('operation', 'academic.enrollment.withdrawn')
             ->where('target_id', $seatId)
             ->firstOrFail();
-        $this->assertSame('family relocation verified', $event->after_state['state_reason']);
+        $this->assertSame('family relocation verified', $event->after_state['state_reason'] ?? null);
         $this->assertArrayHasKey('finance_gate_exit', $event->after_state);
 
         try {
@@ -272,7 +272,7 @@ final class EnrollmentCompletionLifecycleFeatureTest extends TestCase
             ->where('operation', 'academic.enrollment.completed')
             ->where('target_id', $seatId)
             ->firstOrFail();
-        $this->assertSame('completed all L1 requirements', $event->after_state['completion_basis']);
+        $this->assertSame('completed all L1 requirements', $event->after_state['completion_basis'] ?? null);
         $this->assertSame('assessment_result', $event->after_state['completion_evidence_kind']);
         $this->assertArrayHasKey('finance_gate_exit', $event->after_state);
     }

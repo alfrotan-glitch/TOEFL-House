@@ -13,7 +13,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $journal_id
  * @property string $account_id
  * @property string $direction
- * @property string $amount
+ * @property numeric-string $amount
  */
 final class JournalLine extends Model
 {

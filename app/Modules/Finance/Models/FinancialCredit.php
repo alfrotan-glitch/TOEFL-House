@@ -12,7 +12,7 @@ use Illuminate\Database\Eloquent\Model;
  *
  * @property string $id
  * @property string $student_id
- * @property string $amount
+ * @property numeric-string $amount
  * @property string $reason
  * @property string $source_ref
  * @property string $lifecycle_state

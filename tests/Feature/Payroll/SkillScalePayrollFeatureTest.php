@@ -157,6 +157,7 @@ final class SkillScalePayrollFeatureTest extends TestCase
         return $session['session_id'];
     }
 
+    /** @return array{calculation_id: string, lifecycle_state: string} */
     private function calculate(string $idempotencyKey): array
     {
         return app(CalculatePayroll::class)->prepare($this->payrollPreparer(), PayrollPeriod::query()->findOrFail($this->periodId), Employment::query()->findOrFail($this->employmentId), $idempotencyKey);
@@ -187,8 +188,10 @@ final class SkillScalePayrollFeatureTest extends TestCase
         // lines pay in full — 31/31 calendar days, no proration loss.
         $this->assertSame(31, $row->snapshot['proration']['period_days']);
         $this->assertSame(31, $row->snapshot['proration']['active_days']);
-        $fixedLine = collect($row->snapshot['additive'])->firstWhere('method', 'fixed_monthly');
-        $this->assertSame('20000.00', $fixedLine['contract_amount']);
+        /** @var list<array<string, mixed>> $additiveLines */
+        $additiveLines = $row->snapshot['additive'] ?? [];
+        $fixedLine = collect($additiveLines)->firstWhere('method', 'fixed_monthly');
+        $this->assertSame('20000.00', $fixedLine['contract_amount'] ?? null);
         $this->assertSame('20000.00', $fixedLine['amount']);
         $this->assertSame(31, $fixedLine['active_days']);
         $this->assertSame(31, $fixedLine['period_days']);
@@ -219,8 +222,10 @@ final class SkillScalePayrollFeatureTest extends TestCase
         // exact skill x scale (550) wins over skill-only (500) and scale-only (400);
         // skill-only (600) wins over scale-only (400) for writing.
         $this->assertSame('1150.00', $row->base_amount);
-        $perSkill = collect($row->snapshot['per_skill'])->keyBy('skill_id');
-        $this->assertSame($exact['rule_id'], $perSkill[$this->skillIds['speaking_listening']]['rule_id']);
+        /** @var list<array<string, mixed>> $perSkillRows */
+        $perSkillRows = $row->snapshot['per_skill'] ?? [];
+        $perSkill = collect($perSkillRows)->keyBy('skill_id');
+        $this->assertSame($exact['rule_id'], $perSkill[$this->skillIds['speaking_listening']]['rule_id'] ?? null);
         $this->assertSame($this->scaleS3Id, $row->snapshot['scale_id']);
     }
 
@@ -297,13 +302,15 @@ final class SkillScalePayrollFeatureTest extends TestCase
         $this->assertSame('1860.00', $row->base_amount);
         $this->assertSame(16, $row->snapshot['proration']['active_days']);
         $this->assertSame(31, $row->snapshot['proration']['period_days']);
-        $fixedLine = collect($row->snapshot['additive'])->firstWhere('method', 'fixed_monthly');
-        $this->assertSame('3100.00', $fixedLine['contract_amount']);
+        /** @var list<array<string, mixed>> $additiveLines */
+        $additiveLines = $row->snapshot['additive'] ?? [];
+        $fixedLine = collect($additiveLines)->firstWhere('method', 'fixed_monthly');
+        $this->assertSame('3100.00', $fixedLine['contract_amount'] ?? null);
         $this->assertSame(16, $fixedLine['active_days']);
         $this->assertSame(31, $fixedLine['period_days']);
         $this->assertSame('1600.00', $fixedLine['amount']);
-        $allowanceLine = collect($row->snapshot['additive'])->firstWhere('method', 'allowance');
-        $this->assertSame('310.00', $allowanceLine['contract_amount']);
+        $allowanceLine = collect($additiveLines)->firstWhere('method', 'allowance');
+        $this->assertSame('310.00', $allowanceLine['contract_amount'] ?? null);
         $this->assertSame('160.00', $allowanceLine['amount']);
         $this->assertSame('100.00', $row->snapshot['per_skill'][0]['amount']);
     }
@@ -470,7 +477,9 @@ final class SkillScalePayrollFeatureTest extends TestCase
     {
         $this->deliveredSession('2026-08-05', 'speaking_listening', 'p16-t8-s1');
         $august = $this->calculate('p16-t8-calc-1');
-        app(ApprovePayrollResult::class)->approve($this->grantedActor('p16-pay-appr-1', ['payroll.approve']), PayrollCalculation::query()->findOrFail($august['calculation_id']), 'p16-t8-appr');
+        /** @var PayrollCalculation $august */
+        $august = PayrollCalculation::query()->findOrFail($august['calculation_id']);
+        app(ApprovePayrollResult::class)->approve($this->grantedActor('p16-pay-appr-1', ['payroll.approve']), $august, 'p16-t8-appr');
         /** @var PayrollCalculation $augustRow */
         $augustRow = PayrollCalculation::query()->findOrFail($august['calculation_id']);
         $augustSnapshot = $augustRow->snapshot;

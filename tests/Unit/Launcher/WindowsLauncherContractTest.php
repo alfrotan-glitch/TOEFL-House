@@ -50,7 +50,7 @@ final class WindowsLauncherContractTest extends TestCase
         $this->assertFileExists($path, 'START-TOEFL-HOUSE.bat must ship at the repository root for the Windows one-click deploy.');
         $this->bat = (string) file_get_contents($path);
 
-        foreach (preg_split('/\r\n|\r|\n/', $this->bat) as $line) {
+        foreach (preg_split('/\r\n|\r|\n/', $this->bat) ?: [] as $line) {
             if (preg_match('/^\s*set\s+"([A-Za-z_][A-Za-z0-9_]*)=(.*)"\s*$/', $line, $m) === 1) {
                 $this->vars[$m[1]] = $m[2];
             }
@@ -940,7 +940,7 @@ final class WindowsLauncherContractTest extends TestCase
             // non-empty token. The |-- proxy lines do not contain "https://" so
             // findstr filters them out; these lines all contain it.
             $trimmed = ltrim($line);
-            $first = preg_split('/\s+/', $trimmed, 2)[0];
+            $first = (preg_split('/\s+/', $trimmed, 2) ?: [''])[0];
             $this->assertMatchesRegularExpression('#^https://\S+$#', $first, "first token must be a bare URL: [$first]");
             $this->assertStringNotContainsString('(', $first, "the captured URL must contain no parens: [$first]");
             $this->assertStringNotContainsString('tailnet only', $first, "the captured URL must drop the '(tailnet only)' label: [$first]");

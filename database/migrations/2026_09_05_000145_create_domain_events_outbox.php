@@ -50,7 +50,7 @@ return new class extends Migration
                 audit_before jsonb;
                 audit_after jsonb;
             BEGIN
-                IF NOT (NEW.payload ? 'operation' AND NEW.payload ? 'before' AND NEW.payload ? 'after')
+                IF NOT (jsonb_exists(NEW.payload, 'operation') AND jsonb_exists(NEW.payload, 'before') AND jsonb_exists(NEW.payload, 'after'))
                    OR NEW.payload->>'operation' IS DISTINCT FROM NEW.event_type THEN
                     RAISE EXCEPTION 'domain event payload does not contain the recorder envelope'
                         USING ERRCODE = 'check_violation';

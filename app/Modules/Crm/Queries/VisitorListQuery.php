@@ -70,9 +70,9 @@ final class VisitorListQuery
             ->limit(max(1, min($limit, 500)))
             ->get();
 
-        return $visitors
+        return array_values($visitors
             ->map(fn (Visitor $visitor): array => $this->present($visitor))
-            ->all();
+            ->all());
     }
 
     /** @return array<string, mixed> */

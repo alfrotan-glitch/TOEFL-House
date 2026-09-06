@@ -126,7 +126,7 @@ final class ResolveHeldPayrollCalculation
     {
         /** @var Person|null $person */
         $person = Person::query()->whereKey($employment->person_id)->first();
-        $branchId = trim((string) ($person?->home_branch_id ?? ''));
+        $branchId = $person !== null ? trim((string) ($person->home_branch_id ?? '')) : '';
         $branch = $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
         if ($branch === null || $branch->lifecycle_state !== 'active' || $branch->structureScope()->organizationId === '') {
             throw BusinessRejection::forCode('payroll.branch_provenance_missing', 'held Payroll resolution requires an active employee home branch with organization provenance');

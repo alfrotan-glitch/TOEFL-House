@@ -144,7 +144,7 @@ final class PlacementApiController extends Controller
 
         $result = app(ManagePlacementProfile::class)->startAttempt(
             $this->actor(),
-            PlacementProfile::query()->findOrFail($input['profile_id']),
+            PlacementProfile::query()->findOrFail((string) $input['profile_id']),
             $input['test_version_id'],
             $input['delivery_mode'],
             $this->idempotencyKey('placement.attempt.start'),
@@ -219,7 +219,7 @@ final class PlacementApiController extends Controller
 
         $result = app(ScorePlacement::class)->scoreSection(
             $this->actor(),
-            PlacementAttempt::query()->findOrFail($input['attempt_id']),
+            PlacementAttempt::query()->findOrFail((string) $input['attempt_id']),
             $input['section_id'],
             (float) $input['raw_score'],
             $input['rubric_id'] ?? null,
@@ -368,7 +368,7 @@ final class PlacementApiController extends Controller
     public function createVersion(Request $request): JsonResponse
     {
         $input = $request->validate(['test_id' => ['required', 'string'], 'summary' => ['required', 'string', 'max:1000']]);
-        $result = app(MaintainPlacementCatalog::class)->createVersion($this->actor(), PlacementTest::query()->findOrFail($input['test_id']), $input['summary'], $this->idempotencyKey('placement.version.create'));
+        $result = app(MaintainPlacementCatalog::class)->createVersion($this->actor(), PlacementTest::query()->findOrFail((string) $input['test_id']), $input['summary'], $this->idempotencyKey('placement.version.create'));
 
         return response()->json(['status' => 'created', ...$result], 201);
     }
@@ -396,7 +396,7 @@ final class PlacementApiController extends Controller
             'time_minutes' => ['required', 'integer', 'min:1'], 'delivery_mode' => ['required', 'in:digital,physical'], 'can_auto_score' => ['nullable', 'boolean'],
         ]);
         $result = app(MaintainPlacementCatalog::class)->defineSection(
-            $this->actor(), PlacementTestVersion::query()->findOrFail($input['version_id']), $input['code'], $input['name'], $input['component'],
+            $this->actor(), PlacementTestVersion::query()->findOrFail((string) $input['version_id']), $input['code'], $input['name'], $input['component'],
             (int) $input['section_order'], (int) $input['time_minutes'], $input['delivery_mode'], (bool) ($input['can_auto_score'] ?? false),
             $this->idempotencyKey('placement.section.define'),
         );
@@ -420,7 +420,7 @@ final class PlacementApiController extends Controller
             'options' => ['nullable', 'array'], 'correct_answer' => ['nullable', 'string', 'max:500'], 'media_ref' => ['nullable', 'string', 'max:500'],
         ]);
         $result = app(MaintainPlacementCatalog::class)->defineQuestion(
-            $this->actor(), PlacementSection::query()->findOrFail($input['section_id']), $input['code'], $input['stem'], $input['question_type'],
+            $this->actor(), PlacementSection::query()->findOrFail((string) $input['section_id']), $input['code'], $input['stem'], $input['question_type'],
             (float) $input['points'], $input['options'] ?? null, $this->optional($input['correct_answer'] ?? null), $this->optional($input['media_ref'] ?? null),
             $this->idempotencyKey('placement.question.define'),
         );
@@ -459,7 +459,7 @@ final class PlacementApiController extends Controller
             'description' => ['required', 'string', 'max:2000'],
         ]);
         $result = app(MaintainPlacementCatalog::class)->defineRubric(
-            $this->actor(), PlacementTestVersion::query()->findOrFail($input['version_id']), $input['component'], $input['band'],
+            $this->actor(), PlacementTestVersion::query()->findOrFail((string) $input['version_id']), $input['component'], $input['band'],
             (float) $input['min_score'], (float) $input['max_score'], $input['cefr_ref'], $input['description'], $this->idempotencyKey('placement.rubric.define'),
         );
 

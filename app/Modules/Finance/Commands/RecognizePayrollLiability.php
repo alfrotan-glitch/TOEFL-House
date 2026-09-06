@@ -15,6 +15,7 @@ use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
+use App\Support\MoneyAmount;
 use App\Support\Identifiers\RandomIdentifier;
 use Illuminate\Support\Facades\DB;
 
@@ -49,11 +50,8 @@ final class RecognizePayrollLiability
                     $source = $sourceType === 'payroll_result'
                         ? PayrollResult::query()->whereKey($sourceId)->lockForUpdate()->first()
                         : PayrollAdjustment::query()->whereKey($sourceId)->lockForUpdate()->first();
-                    if ($source === null) {
-                        throw BusinessRejection::forCode('finance.payroll_liability_unknown_source', 'the Payroll source does not exist');
-                    }
 
-                    if ($sourceType === 'payroll_result') {
+                    if ($source instanceof PayrollResult) {
                         if ($source->lifecycle_state !== 'approved') {
                             throw BusinessRejection::forCode('finance.payroll_liability_unapproved', 'only an approved Payroll result may be recognized');
                         }
@@ -61,7 +59,7 @@ final class RecognizePayrollLiability
                         $employmentId = (string) $source->employment_id;
                         $expectedAmount = (string) $source->amount;
                         $sourceBranchId = trim((string) ($source->originating_branch_id ?? ''));
-                    } else {
+                    } elseif ($source instanceof PayrollAdjustment) {
                         /** @var PayrollResult|null $result */
                         $result = PayrollResult::query()->whereKey($source->result_id)->lockForUpdate()->first();
                         if ($result === null || $result->lifecycle_state !== 'approved') {
@@ -71,6 +69,8 @@ final class RecognizePayrollLiability
                         $employmentId = (string) $result->employment_id;
                         $expectedAmount = (string) $source->amount;
                         $sourceBranchId = trim((string) ($result->originating_branch_id ?? ''));
+                    } else {
+                        throw BusinessRejection::forCode('finance.payroll_liability_unknown_source', 'the Payroll source does not exist');
                     }
 
                     /**
@@ -93,7 +93,7 @@ final class RecognizePayrollLiability
                     if (bccomp($expectedAmount, '0', 2) === 0) {
                         throw BusinessRejection::forCode('finance.payroll_liability_zero', 'a zero Payroll source does not create a Finance liability fact');
                     }
-                    if (bccomp($expectedAmount, $amount, 2) !== 0) {
+                    if (bccomp($expectedAmount, MoneyAmount::decimal($amount), 2) !== 0) {
                         throw BusinessRejection::forCode('finance.payroll_liability_amount_mismatch', 'Finance recognition must match the immutable Payroll source amount');
                     }
 

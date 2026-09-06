@@ -41,7 +41,7 @@ final class OfferingCatalogQuery
 
             /** @var ProgramVersionLevel|null $level */
             $level = ProgramVersionLevel::query()->find($availability->program_version_level_id);
-            $prerequisites = LevelPrerequisite::query()
+            $prerequisites = array_values(LevelPrerequisite::query()
                 ->where('target_level_id', $availability->program_version_level_id)
                 ->where('lifecycle_state', LevelPrerequisite::STATE_ACTIVE)
                 ->orderBy('defined_by')
@@ -50,7 +50,7 @@ final class OfferingCatalogQuery
                     'required_level_id' => trim((string) $p->required_level_id),
                     'lifecycle_state' => $p->lifecycle_state,
                 ])
-                ->all();
+                ->all());
             /** @var LevelProgressionRule|null $rule */
             $rule = LevelProgressionRule::query()
                 ->where('program_version_level_id', $availability->program_version_level_id)
@@ -86,6 +86,6 @@ final class OfferingCatalogQuery
             ];
         })->all();
 
-        return ['availabilities' => $rows];
+        return ['availabilities' => array_values($rows)];
     }
 }

@@ -126,16 +126,19 @@ final class AllocatePayment
         }
     }
 
+    /** @return numeric-string */
     public function paymentRemaining(Payment $payment): string
     {
         return ($this->balances ?? new FinancialBalanceQuery())->paymentRemaining($payment);
     }
 
+    /** @return numeric-string */
     public function obligationRemaining(Obligation $obligation): string
     {
         return ($this->balances ?? new FinancialBalanceQuery())->obligationRemaining($obligation);
     }
 
+    /** @return numeric-string */
     public function studentUncovered(string $studentId): string
     {
         return ($this->balances ?? new FinancialBalanceQuery())->studentUncovered($studentId);

@@ -87,7 +87,7 @@ final class HrController extends Controller
 
         app(MaintainContractVersion::class)->prepare(
             $this->actor(),
-            Employment::query()->findOrFail($input['employment_id']),
+            Employment::query()->findOrFail((string) $input['employment_id']),
             $input['terms_ref'],
             ($input['scale_id'] ?? '') !== '' ? $input['scale_id'] : null,
             $input['effective_from'],
@@ -169,7 +169,7 @@ final class HrController extends Controller
 
         app(MaintainContract::class)->draft(
             $this->actor(),
-            Employment::query()->findOrFail($input['employment_id']),
+            Employment::query()->findOrFail((string) $input['employment_id']),
             $input['terms_summary'],
             $input['effective_from'],
             $this->idempotencyKey('hr.contract.draft'),
@@ -219,7 +219,7 @@ final class HrController extends Controller
 
         app(MaintainEmployment::class)->hire(
             $this->actor(),
-            Employment::query()->findOrFail($input['employment_id']),
+            Employment::query()->findOrFail((string) $input['employment_id']),
             $input['effective_from'],
             $this->idempotencyKey('hr.employment.hire'),
         );
@@ -236,7 +236,7 @@ final class HrController extends Controller
 
         app(MaintainEmployment::class)->placeOnLeave(
             $this->actor(),
-            Employment::query()->findOrFail($input['employment_id']),
+            Employment::query()->findOrFail((string) $input['employment_id']),
             $input['effective_from'],
             $this->idempotencyKey('hr.employment.leave'),
         );
@@ -253,7 +253,7 @@ final class HrController extends Controller
 
         app(MaintainEmployment::class)->suspend(
             $this->actor(),
-            Employment::query()->findOrFail($input['employment_id']),
+            Employment::query()->findOrFail((string) $input['employment_id']),
             $input['effective_from'],
             $this->idempotencyKey('hr.employment.suspend'),
         );
@@ -270,7 +270,7 @@ final class HrController extends Controller
 
         app(MaintainEmployment::class)->reinstate(
             $this->actor(),
-            Employment::query()->findOrFail($input['employment_id']),
+            Employment::query()->findOrFail((string) $input['employment_id']),
             $input['effective_from'],
             $this->idempotencyKey('hr.employment.reinstate'),
         );
@@ -288,7 +288,7 @@ final class HrController extends Controller
 
         app(MaintainEmployment::class)->terminate(
             $this->actor(),
-            Employment::query()->findOrFail($input['employment_id']),
+            Employment::query()->findOrFail((string) $input['employment_id']),
             $input['effective_from'],
             $input['reason'],
             $this->idempotencyKey('hr.employment.terminate'),

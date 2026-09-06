@@ -66,12 +66,12 @@ final class AcademicEligibilitySnapshotQuery
     /** @return list<array<string, mixed>> */
     public function forPerson(string $personId): array
     {
-        return AcademicEligibilitySnapshot::query()
+        return array_values(AcademicEligibilitySnapshot::query()
             ->where('person_id', $personId)
             ->orderByDesc('signed_at')
             ->get()
             ->map(fn (AcademicEligibilitySnapshot $snapshot): array => $this->present($snapshot))
-            ->all();
+            ->all());
     }
 
     /** @return list<array<string, mixed>> */

@@ -65,7 +65,7 @@ final class StudentLifecycleQuery
         return [
             'student_id' => trim((string) $student->id),
             'student_code' => $student->student_code,
-            'person' => [
+            'person' => $student->person === null ? null : [
                 'person_id' => trim((string) $student->person_id),
                 'legal_name' => $student->person->legal_name,
                 'verified' => ($student->person->verification_state ?? null) === 'verified',
@@ -184,7 +184,7 @@ final class StudentLifecycleQuery
     /** @return list<array<string, mixed>> */
     private function enrollments(string $studentId): array
     {
-        return DB::table('enrollments as e')
+        return array_values(DB::table('enrollments as e')
             ->leftJoin('classes as c', 'c.id', '=', 'e.class_id')
             ->leftJoin('academic_periods as ap', 'ap.id', '=', 'c.period_id')
             ->leftJoin('offerings as o', 'o.id', '=', 'e.offering_id')
@@ -205,7 +205,7 @@ final class StudentLifecycleQuery
                 'period_id' => trim((string) ($row->period_id ?? '')),
                 'period_name' => $row->period_name,
             ])
-            ->all();
+            ->all());
     }
 
     /** @return array{present: int, absent: int, late: int, excused: int} */
@@ -229,7 +229,7 @@ final class StudentLifecycleQuery
     /** @return list<array<string, mixed>> */
     private function assessmentResults(string $studentId): array
     {
-        return DB::table('assessment_results as ar')
+        return array_values(DB::table('assessment_results as ar')
             ->join('assessment_attempts as aa', 'aa.id', '=', 'ar.attempt_id')
             ->join('enrollments as e', 'e.id', '=', 'aa.enrollment_id')
             ->where('e.student_id', $studentId)
@@ -250,39 +250,47 @@ final class StudentLifecycleQuery
                 'scored_by' => trim((string) $row->scored_by),
                 'released_by' => trim((string) ($row->released_by ?? '')),
             ])
-            ->all();
+            ->all());
     }
 
-    /** @return list<array<string, mixed>> */
+    /**
+     * @param list<string>|null $visibleBranches
+     * @return list<array<string, mixed>>
+     */
     private function obligations(string $studentId, ?array $visibleBranches = null): array
     {
         $query = DB::table('obligations')->where('student_id', $studentId);
         $this->scopeFinanceRows($query, $visibleBranches);
 
-        return $query
-            ->orderByDesc('created_at')
-            ->limit(50)
-            ->get(['id', 'period_id', 'source', 'original_amount', 'reason', 'originating_branch_id', 'current_home_branch_id', 'created_at'])
-            ->map(static fn ($row): array => [
-                'id' => trim((string) $row->id),
-                'period_id' => trim((string) $row->period_id),
-                'source' => $row->source,
-                'original_amount' => $row->original_amount,
-                'reason' => $row->reason,
-                'originating_branch_id' => trim((string) ($row->originating_branch_id ?? '')),
-                'current_home_branch_id' => trim((string) ($row->current_home_branch_id ?? '')),
-                'created_at' => $row->created_at,
-            ])
-            ->all();
+return array_values(
+            $query
+                ->orderByDesc('created_at')
+                ->limit(50)
+                ->get(['id', 'period_id', 'source', 'original_amount', 'reason', 'originating_branch_id', 'current_home_branch_id', 'created_at'])
+                ->map(static fn ($row): array => [
+                    'id' => trim((string) $row->id),
+                    'period_id' => trim((string) $row->period_id),
+                    'source' => $row->source,
+                    'original_amount' => $row->original_amount,
+                    'reason' => $row->reason,
+                    'originating_branch_id' => trim((string) ($row->originating_branch_id ?? '')),
+                    'current_home_branch_id' => trim((string) ($row->current_home_branch_id ?? '')),
+                    'created_at' => $row->created_at,
+                ])
+                ->all()
+        );
     }
 
-    /** @return list<array<string, mixed>> */
+    /**
+     * @param list<string>|null $visibleBranches
+     * @return list<array<string, mixed>>
+     */
     private function payments(string $studentId, ?array $visibleBranches = null): array
     {
         $query = DB::table('payments')->where('student_id', $studentId);
         $this->scopeFinanceRows($query, $visibleBranches);
 
-        return $query
+        return array_values($query
             ->orderByDesc('created_at')
             ->limit(50)
             ->get(['id', 'period_id', 'amount', 'method', 'payer_ref', 'received_on', 'originating_branch_id', 'current_home_branch_id', 'created_at'])
@@ -296,9 +304,13 @@ final class StudentLifecycleQuery
                 'originating_branch_id' => trim((string) ($row->originating_branch_id ?? '')),
                 'current_home_branch_id' => trim((string) ($row->current_home_branch_id ?? '')),
             ])
-            ->all();
+            ->all());
     }
 
+    /**
+     * @param \Illuminate\Database\Query\Builder $query
+     * @param list<string>|null $visibleBranches
+     */
     private function scopeFinanceRows($query, ?array $visibleBranches): void
     {
         if ($visibleBranches === null) {
@@ -317,7 +329,7 @@ final class StudentLifecycleQuery
     /** @return list<array<string, mixed>> */
     private function documents(string $personId): array
     {
-        return DB::table('documents as d')
+        return array_values(DB::table('documents as d')
             ->leftJoin('document_versions as dv', function ($join): void {
                 $join->on('dv.document_id', '=', 'd.id')
                     ->whereRaw('dv.version_no = (select max(dv2.version_no) from document_versions dv2 where dv2.document_id = d.id)');
@@ -333,13 +345,13 @@ final class StudentLifecycleQuery
                 'version_no' => $row->version_no,
                 'content_hash' => $row->content_hash,
             ])
-            ->all();
+            ->all());
     }
 
     /** @return list<array<string, mixed>> */
     private function messages(string $personId): array
     {
-        return DB::table('messages')
+        return array_values(DB::table('messages')
             ->where('subject_person_id', $personId)
             ->orderByDesc('created_at')
             ->limit(50)
@@ -351,7 +363,7 @@ final class StudentLifecycleQuery
                 'lifecycle_state' => $row->lifecycle_state,
                 'delivery_ref' => trim((string) ($row->delivery_ref ?? '')),
             ])
-            ->all();
+            ->all());
     }
 
     private function openHold(string $studentId, string $day): bool

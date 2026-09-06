@@ -18,7 +18,7 @@ final class SchemaInvariantFeatureTest extends TestCase
     /** @return list<string> */
     private function indexNames(string $table): array
     {
-        return DB::table('pg_indexes')->where('tablename', $table)->pluck('indexname')->all();
+        return array_values(DB::table('pg_indexes')->where('tablename', $table)->pluck('indexname')->all());
     }
 
     public function test_partial_unique_indexes_protect_the_core_invariants(): void
@@ -94,11 +94,11 @@ final class SchemaInvariantFeatureTest extends TestCase
     /** @return list<string> */
     private function triggerNames(string $table): array
     {
-        return DB::table('pg_trigger')
+        return array_values(DB::table('pg_trigger')
             ->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')
             ->where('pg_class.relname', $table)
             ->where('pg_trigger.tgisinternal', false)
-            ->pluck('pg_trigger.tgname')->all();
+            ->pluck('pg_trigger.tgname')->all());
     }
 
     public function test_skill_scale_contract_and_delivery_guards_exist_at_schema_level(): void

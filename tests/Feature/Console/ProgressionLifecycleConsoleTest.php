@@ -57,7 +57,10 @@ final class ProgressionLifecycleConsoleTest extends TestCase
         app(MaintainClass::class)->transition($officer, ClassModel::query()->findOrFail($this->classId), 'active', 'plc-cls-act');
     }
 
-    /** @return array{0: Person, 1: UserAccount} */
+    /**
+     * @param list<string> $capabilities
+     * @return array{0: Person, 1: UserAccount}
+     */
     private function makeEmployee(string $personId, array $capabilities, string $username): array
     {
         $person = $this->personWithAuthority($personId, $capabilities);

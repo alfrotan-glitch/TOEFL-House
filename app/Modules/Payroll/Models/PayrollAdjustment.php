@@ -13,7 +13,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $id
  * @property string $result_id
  * @property string $kind
- * @property string $amount
+ * @property numeric-string $amount
  * @property string $reason
  */
 final class PayrollAdjustment extends Model

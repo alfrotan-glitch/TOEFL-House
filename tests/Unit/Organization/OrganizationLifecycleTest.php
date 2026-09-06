@@ -11,6 +11,7 @@ use PHPUnit\Framework\TestCase;
 
 final class OrganizationLifecycleTest extends TestCase
 {
+    /** @return array<string, array{0: string, 1: string}> */
     public static function allowedTransitions(): array
     {
         return [
@@ -31,6 +32,7 @@ final class OrganizationLifecycleTest extends TestCase
         $this->addToAssertionCount(1);
     }
 
+    /** @return array<string, array{0: string, 1: string}> */
     public static function forbiddenTransitions(): array
     {
         return [

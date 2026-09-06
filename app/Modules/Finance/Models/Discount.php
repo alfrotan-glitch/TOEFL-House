@@ -13,7 +13,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $id
  * @property string $obligation_id
  * @property string $period_id
- * @property string $amount
+ * @property numeric-string $amount
  * @property string $eligibility
  * @property string $effective_from
  * @property string|null $effective_to

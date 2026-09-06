@@ -50,7 +50,10 @@ final class ResourcesWorkflowFeatureTest extends TestCase
         $this->personWithAuthority($this->custodianTwo, []);
     }
 
-    /** @return array{0: Person, 1: UserAccount} */
+    /**
+     * @param list<string> $capabilities
+     * @return array{0: Person, 1: UserAccount}
+     */
     private function makeEmployee(string $personId, array $capabilities, string $username): array
     {
         $person = $this->personWithAuthority($personId, $capabilities);
@@ -286,7 +289,7 @@ final class ResourcesWorkflowFeatureTest extends TestCase
         $manager = $this->grantedActor('resw-mgr-4', ['resources.asset']);
         $nobody = $this->makeEmployee('resw-nobody-1', [], 'nobody-1');
 
-        $asset = app(MaintainAsset::class)->register($manager, 'RESW-N-1', 'Probe bench', 'furniture', 'Campus A', '2026-01-01', $this->resourceBranchId);
+        $asset = app(MaintainAsset::class)->register($manager, 'RESW-N-1', 'Probe bench', 'furniture', 'Campus A', '2026-01-01', $this->resourceBranchId, 'resw-register-n-1');
         $assetId = $asset['asset_id'];
 
         $this->signIn('nobody-1');

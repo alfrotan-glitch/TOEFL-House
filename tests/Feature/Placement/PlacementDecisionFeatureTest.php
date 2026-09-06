@@ -72,8 +72,12 @@ final class PlacementDecisionFeatureTest extends TestCase
         // Give the productive components their manual scores after submission.
         $submit = app(ManagePlacementProfile::class)->submitDigital($this->placementOfficer('plc-submit-1'), $attempt, $answers, 'plc-submit');
         $this->assertFalse($submit['tamper_flagged']);
-        $this->assertNotNull($attempt->fresh()->anti_tamper_hmac);
-        $this->assertSame('submitted', $attempt->fresh()->status);
+        $submitted = $attempt->fresh();
+        if ($submitted === null) {
+            $this->fail('placement attempt disappeared after submission');
+        }
+        $this->assertNotNull($submitted->anti_tamper_hmac);
+        $this->assertSame('submitted', $submitted->status);
 
         foreach (['writing', 'speaking'] as $component) {
             $sectionId = $this->sectionIds[$component];
@@ -83,15 +87,21 @@ final class PlacementDecisionFeatureTest extends TestCase
         }
 
         app(ManagePlacementProfile::class)->markScored($this->placementOfficer('plc-scored-1'), $profile, 'plc-scored');
-        $this->assertSame('scored', $profile->fresh()->lifecycle_state);
+        $refreshed = $profile->fresh();
+        $this->assertNotNull($refreshed);
+        $this->assertSame('scored', $refreshed->lifecycle_state);
 
         // A recommendation is generated after scoring, before section review.
         $recommendation = app(RecommendPlacement::class)->recommend($this->placementRecommender('plc-rec-1'), $profile, 'plc-rec');
-        $this->assertSame('recommended', $profile->fresh()->lifecycle_state);
+        $refreshed = $profile->fresh();
+        $this->assertNotNull($refreshed);
+        $this->assertSame('recommended', $refreshed->lifecycle_state);
         $rec = PlacementRecommendation::query()->findOrFail($recommendation['recommendation_id']);
         $this->assertNotEmpty($rec->rationale);
         $this->assertNotEmpty($rec->score_snapshot['overall_cefr']);
-        $this->assertSame((string) $rec->recommended_level_id, (string) $profile->fresh()->recommended_level_id);
+        $refreshed = $profile->fresh();
+        $this->assertNotNull($refreshed);
+        $this->assertSame((string) $rec->recommended_level_id, (string) $refreshed->recommended_level_id);
 
         // Review/decision is refused while any section is unapproved.
         try {
@@ -105,14 +115,20 @@ final class PlacementDecisionFeatureTest extends TestCase
             $moderator = $this->placementModerator($this->actorId('plc-mod'));
             $approver = $this->placementApprover($this->actorId('plc-appr'));
             app(ScorePlacement::class)->moderateSection($moderator, $sectionResult, 'plc-mod-'.$sectionResult->id);
-            app(ScorePlacement::class)->approveSection($approver, $sectionResult->fresh(), 'plc-appr-'.$sectionResult->id);
+            $approved = $sectionResult->fresh();
+            if ($approved === null) {
+                $this->fail('placement section result disappeared before approval');
+            }
+            app(ScorePlacement::class)->approveSection($approver, $approved, 'plc-appr-'.$sectionResult->id);
         }
 
         // The decision chain proceeds after recommendation and section approval.
         app(DecidePlacement::class)->review($this->placementModerator('plc-review-2'), $profile, 'plc-review2');
         app(DecidePlacement::class)->approve($this->placementApprover('plc-app-1'), $profile, 'plc-app');
         app(DecidePlacement::class)->release($this->placementReleaser('plc-rel-1'), $profile, 'plc-rel');
-        $this->assertSame('released', $profile->fresh()->lifecycle_state);
+        $refreshed = $profile->fresh();
+        $this->assertNotNull($refreshed);
+        $this->assertSame('released', $refreshed->lifecycle_state);
         $this->assertSame(1, PlacementRecommendation::query()->where('profile_id', $profile->id)->count());
     }
 
@@ -155,7 +171,11 @@ final class PlacementDecisionFeatureTest extends TestCase
             $moderator = $this->placementModerator($this->actorId('plc-mod3'));
             $approver = $this->placementApprover($this->actorId('plc-appr3'));
             app(ScorePlacement::class)->moderateSection($moderator, $r, 'plc-mod3-'.$r->id);
-            app(ScorePlacement::class)->approveSection($approver, $r->fresh(), 'plc-appr3-'.$r->id);
+            $approved = $r->fresh();
+            if ($approved === null) {
+                $this->fail('placement section result disappeared before approval');
+            }
+            app(ScorePlacement::class)->approveSection($approver, $approved, 'plc-appr3-'.$r->id);
         }
         app(RecommendPlacement::class)->recommend($this->placementRecommender('plc-rec-3'), $profile, 'plc-rec-3');
         app(DecidePlacement::class)->review($this->placementModerator('plc-review-3'), $profile, 'plc-review-3');
@@ -171,7 +191,9 @@ final class PlacementDecisionFeatureTest extends TestCase
         }
 
         app(DecidePlacement::class)->supersede($this->placementReleaser('plc-super-3'), $profile, 'plc-super-3');
-        $this->assertSame('superseded', $profile->fresh()->lifecycle_state);
+        $refreshed = $profile->fresh();
+        $this->assertNotNull($refreshed);
+        $this->assertSame('superseded', $refreshed->lifecycle_state);
         $retake = PlacementProfile::query()->findOrFail(app(ManagePlacementProfile::class)->openProfile($this->placementOfficer('plc-open-3c'), $person->id, $this->programVersionId, 'plc-open-3c')['profile_id']);
         $this->assertNotSame($profile->id, $retake->id);
     }
@@ -359,8 +381,12 @@ final class PlacementDecisionFeatureTest extends TestCase
             'plc-phys-ingest',
         );
         $this->assertFalse($result['tamper_flagged']);
-        $this->assertSame('submitted', $attempt->fresh()->status);
-        $this->assertNotNull($attempt->fresh()->anti_tamper_hmac);
+        $physical = $attempt->fresh();
+        if ($physical === null) {
+            $this->fail('placement attempt disappeared after physical ingestion');
+        }
+        $this->assertSame('submitted', $physical->status);
+        $this->assertNotNull($physical->anti_tamper_hmac);
         $this->assertDatabaseHas('placement_responses', ['attempt_id' => $attempt->id]);
         $this->assertSame(3, PlacementSectionResult::query()->where('attempt_id', $attempt->id)->whereNotNull('raw_score')->count());
     }

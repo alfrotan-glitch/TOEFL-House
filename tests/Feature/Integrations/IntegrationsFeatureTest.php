@@ -33,8 +33,6 @@ final class IntegrationsFeatureTest extends TestCase
 
     private ScriptedTransport $transport;
 
-    private string $endpointId;
-
     protected function setUp(): void
     {
         parent::setUp();
@@ -44,7 +42,7 @@ final class IntegrationsFeatureTest extends TestCase
         config(['integrations.secrets' => ['payment-hook' => 's3cret']]);
 
         $admin = $this->grantedActor('int-admin', ['integrations.endpoint', 'integrations.dispatch', 'integrations.process', 'integrations.inbound', 'integrations.jobs', 'integrations.review']);
-        $this->endpointId = app(RegisterEndpoint::class)->register($admin, 'sms-gateway', 'SMS Gateway', 'sms', 'v1', 'vault://sms/gateway', 'https://sms.example/api', 'int-ep-1')['endpoint_id'];
+        app(RegisterEndpoint::class)->register($admin, 'sms-gateway', 'SMS Gateway', 'sms', 'v1', 'vault://sms/gateway', 'https://sms.example/api', 'int-ep-1');
         app(RegisterEndpoint::class)->register($admin, 'payment-hook', 'Payment Webhook', 'payment', 'v1', 'vault://payments/hook', 'https://pay.example/hook', 'int-ep-2');
         app(RegisterJob::class)->register($admin, 'integrations.retry_sweep', 'Integration Retry Sweep', 'every-5-minutes', 'int-job-1');
     }
@@ -77,7 +75,11 @@ final class IntegrationsFeatureTest extends TestCase
         // replayed processing never sends twice
         app(ProcessDeliveries::class)->processDue($admin, 'int-proc-2');
         $this->assertSame(1, $this->transport->sendCount());
-        $this->assertSame(1, (int) IntegrationDelivery::query()->find($dispatch['delivery_id'])->attempts);
+        $delivered = IntegrationDelivery::query()->find($dispatch['delivery_id']);
+        if ($delivered === null) {
+            $this->fail('delivery row disappeared after idempotent replay');
+        }
+        $this->assertSame(1, (int) $delivered->attempts);
 
         // delivered rows are final: no raw rewrite, no delete
         $this->expectException(QueryException::class);
@@ -108,7 +110,11 @@ final class IntegrationsFeatureTest extends TestCase
         $this->makeDue($delivery->id);
         $second = app(ProcessDeliveries::class)->processDue($admin, 'int-proc-5');
         $this->assertSame('retry_scheduled', $second['results'][0]['outcome']);
-        $this->assertSame(2, (int) IntegrationDelivery::query()->find($delivery->id)->attempts);
+        $secondDelivery = IntegrationDelivery::query()->find($delivery->id);
+        if ($secondDelivery === null) {
+            $this->fail('delivery row disappeared after second attempt');
+        }
+        $this->assertSame(2, (int) $secondDelivery->attempts);
 
         // attempt 3 delivers
         $this->makeDue($delivery->id);
@@ -176,7 +182,7 @@ final class IntegrationsFeatureTest extends TestCase
     {
         $admin = $this->admin();
         $payload = ['event' => 'payment.captured', 'amount' => '150.00'];
-        $digest = hash('sha256', json_encode($payload));
+        $digest = hash('sha256', json_encode($payload, JSON_THROW_ON_ERROR));
         $signature = hash_hmac('sha256', $digest, 's3cret');
 
         $received = app(ReceiveInbound::class)->receive($admin, 'payment-hook', 'ext-9001', 'payment.captured', $payload, $signature, 'int-in-1');
@@ -237,10 +243,14 @@ final class IntegrationsFeatureTest extends TestCase
         // clean sweep succeeds; replaying a succeeded run answers without executing
         $done = app(ProcessJobRun::class)->process($admin, JobRun::query()->findOrFail($enqueued['run_id']), 'int-run-1');
         $this->assertSame('succeeded', $done['status']);
-        $this->assertSame(0, $done['outcome']['considered']);
+        $this->assertSame(0, $done['outcome']['considered'] ?? null);
         $replay = app(ProcessJobRun::class)->process($admin, JobRun::query()->findOrFail($enqueued['run_id']), 'int-run-2');
         $this->assertSame('succeeded', $replay['status']);
-        $this->assertSame(1, (int) JobRun::query()->find($enqueued['run_id'])->attempts);
+        $replayedRun = JobRun::query()->find($enqueued['run_id']);
+        if ($replayedRun === null) {
+            $this->fail('job run disappeared after replay');
+        }
+        $this->assertSame(1, (int) $replayedRun->attempts);
 
         // a throwing handler fails the run with backoff; bounded attempts dead-letter
         // (every one of the three attempts meets the same blowup)
@@ -253,7 +263,7 @@ final class IntegrationsFeatureTest extends TestCase
         /** @var JobRun $run */
         $run = JobRun::query()->find($unlucky['run_id']);
         $this->assertSame(1, $run->attempts);
-        $this->assertTrue($run->next_retry_at->isFuture());
+        $this->assertTrue($run->next_retry_at?->isFuture() === true);
 
         // inside the backoff window the run waits; not executed
         $waiting = app(ProcessJobRun::class)->process($admin, $run, 'int-run-4');

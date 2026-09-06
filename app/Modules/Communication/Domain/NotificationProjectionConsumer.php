@@ -66,10 +66,10 @@ final class NotificationProjectionConsumer implements EventConsumer
             || ($scopeType === 'branch' && ($eventBranch === '' || $eventOrganization === ''))) {
             throw \App\Support\Errors\BusinessRejection::forCode('communication.notification_branch_invalid', 'notification scope must match the event envelope provenance');
         }
-        if ($eventOrganization !== '' && ! Organization::query()->whereKey($eventOrganization)->where('lifecycle_state', 'active')->exists()) {
+        if (! Organization::query()->whereKey($eventOrganization)->where('lifecycle_state', 'active')->exists()) {
             throw \App\Support\Errors\BusinessRejection::forCode('communication.notification_organization_unknown', 'a notification requires an existing organization provenance');
         }
-        if ($eventOrganization !== '' && $eventBranch !== '' && ! $this->branchBelongsToOrganization($eventBranch, $eventOrganization)) {
+        if ($eventBranch !== '' && ! $this->branchBelongsToOrganization($eventBranch, $eventOrganization)) {
             throw \App\Support\Errors\BusinessRejection::forCode('communication.notification_scope_invalid', 'branch and organization notification provenance must agree');
         }
         $branchId = $eventBranch !== '' ? $eventBranch : ($intentBranch !== '' ? $intentBranch : null);
@@ -94,7 +94,7 @@ final class NotificationProjectionConsumer implements EventConsumer
                 'body_ref' => isset($intent['body_ref']) ? trim((string) $intent['body_ref']) : null,
                 'severity' => $severity,
                 'scope_type' => $scopeType,
-                'organization_id' => $eventOrganization !== '' ? $eventOrganization : null,
+                'organization_id' => $eventOrganization,
                 'branch_id' => $branchId,
                 'lifecycle_state' => 'unread',
                 'expires_at' => isset($intent['expires_at']) ? $intent['expires_at'] : null,

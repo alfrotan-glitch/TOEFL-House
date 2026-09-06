@@ -31,9 +31,6 @@ return new class extends Migration
     /** The canonical five placement components. */
     private const COMPONENTS = ['grammar', 'reading', 'listening', 'writing', 'speaking'];
 
-    /** Components that can be machine-scored when the section says so. */
-    private const AUTOSCORE_TYPES = ['mcq', 'short_answer'];
-
     public function up(): void
     {
         $this->createTestBank();

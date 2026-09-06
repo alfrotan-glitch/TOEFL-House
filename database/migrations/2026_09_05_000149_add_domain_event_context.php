@@ -18,10 +18,10 @@ return new class extends Migration
         DB::statement(<<<'SQL'
             ALTER TABLE domain_events ADD CONSTRAINT domain_events_context_check CHECK (
                 jsonb_typeof(context) = 'object'
-                AND context ? 'scope_type'
+                AND jsonb_exists(context, 'scope_type')
                 AND COALESCE(jsonb_typeof(context->'scope_type') = 'string', false)
                 AND btrim(context->>'scope_type') IN ('branch', 'organization', 'unknown')
-                AND context ? 'scope_provenance'
+                AND jsonb_exists(context, 'scope_provenance')
                 AND COALESCE(jsonb_typeof(context->'scope_provenance') = 'string', false)
                 AND btrim(context->>'scope_provenance') IN ('declared_on_audited_change', 'not_available')
                 AND (
@@ -40,7 +40,7 @@ return new class extends Migration
             )
             SQL);
 
-        DB::statement("CREATE INDEX domain_events_context_branch_idx ON domain_events ((context->>'branch_id')) WHERE context ? 'branch_id'");
+        DB::statement("CREATE INDEX domain_events_context_branch_idx ON domain_events ((context->>'branch_id')) WHERE jsonb_exists(context, 'branch_id')");
         DB::statement(<<<'SQL'
             CREATE OR REPLACE FUNCTION domain_events_context_provenance_guard() RETURNS trigger AS $fn$
             BEGIN

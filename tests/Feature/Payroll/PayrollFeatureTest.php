@@ -106,14 +106,16 @@ final class PayrollFeatureTest extends TestCase
         $this->assertSame([], $row->snapshot['delivery']);
         $this->assertSame(30, $row->snapshot['proration']['period_days']);
         $this->assertSame(30, $row->snapshot['proration']['active_days']);
-        $fixed = collect($row->snapshot['additive'])->firstWhere('method', 'fixed_monthly');
-        $this->assertSame('40000.00', $fixed['contract_amount']);
+        /** @var list<array<string, mixed>> $additiveLines */
+        $additiveLines = $row->snapshot['additive'] ?? [];
+        $fixed = collect($additiveLines)->firstWhere('method', 'fixed_monthly');
+        $this->assertSame('40000.00', $fixed['contract_amount'] ?? null);
         $this->assertSame('40000.00', $fixed['amount']);
         $this->assertSame(30, $fixed['active_days']);
         $this->assertSame(30, $fixed['period_days']);
-        $allowance = collect($row->snapshot['additive'])->firstWhere('method', 'allowance');
-        $this->assertSame('housing', $allowance['label']);
-        $this->assertSame('2000.00', $allowance['amount']);
+        $allowance = collect($additiveLines)->firstWhere('method', 'allowance');
+        $this->assertSame('housing', $allowance['label'] ?? null);
+        $this->assertSame('2000.00', $allowance['amount'] ?? null);
     }
 
     public function test_contract_silent_period_holds_the_calculation_and_blocks_closure(): void

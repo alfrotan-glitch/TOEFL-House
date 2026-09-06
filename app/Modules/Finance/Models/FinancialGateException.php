@@ -15,7 +15,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $student_id
  * @property string|null $offering_id
  * @property string|null $class_id
- * @property string $amount
+ * @property numeric-string $amount
  * @property string $reason
  * @property string $effective_from
  * @property string|null $effective_to

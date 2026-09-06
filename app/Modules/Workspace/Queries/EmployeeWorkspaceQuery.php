@@ -65,6 +65,7 @@ final class EmployeeWorkspaceQuery
             ->values()
             ->all() : [];
 
+        /** @var list<array{kind: string, source_type: string, source_id: string, title: string, status: string, due_at: string|null, route: string, reason?: string|null}> $items */
         $items = [];
         foreach ($this->assignedFollowups($actor, $followupBranches, $followupOrganizationScope) as $followup) {
             $items[] = [
@@ -166,7 +167,7 @@ final class EmployeeWorkspaceQuery
             'positions' => $assignments->map(fn ($assignment): array => [
                 'id' => (string) $assignment->id,
                 'position_id' => (string) $assignment->position_id,
-                'position_name' => (string) ($positions->get($assignment->position_id)?->name ?? 'Unlabelled position'),
+                'position_name' => (string) ($positions->get($assignment->position_id)->name ?? 'Unlabelled position'),
                 'effective_from' => (string) $assignment->effective_from,
                 'effective_to' => $assignment->effective_to,
             ])->values()->all(),
@@ -184,7 +185,11 @@ final class EmployeeWorkspaceQuery
         ];
     }
 
-    /** @return iterable<int, VisitorFollowup> */
+    /**
+     * @param list<string> $branches
+     *
+     * @return iterable<int, VisitorFollowup>
+     */
     private function assignedFollowups(Actor $actor, array $branches, bool $organizationScope): iterable
     {
         if ($branches === [] && ! $organizationScope) {
@@ -208,7 +213,11 @@ final class EmployeeWorkspaceQuery
             ->get(['id', 'visitor_id', 'title', 'scheduled_for', 'status']);
     }
 
-    /** @param list<string> $reviewBranches @param list<string> $approveBranches @return iterable<int, AdmissionDecision> */
+    /**
+     * @param  list<string>  $reviewBranches
+     * @param  list<string>  $approveBranches
+     * @return iterable<int, AdmissionDecision>
+     */
     private function assignedAdmissionReviews(Actor $actor, array $reviewBranches, array $approveBranches): iterable
     {
         if ($reviewBranches === [] && $approveBranches === []) {
@@ -286,7 +295,10 @@ final class EmployeeWorkspaceQuery
         return $authorized;
     }
 
-    /** @param list<string> $candidateBranchIds @return list<string> */
+    /**
+     * @param  list<string>  $candidateBranchIds
+     * @return list<string>
+     */
     private function authorizedBranches(Actor $actor, array $candidateBranchIds, string $capability): array
     {
         $decision = app(AccessDecision::class);

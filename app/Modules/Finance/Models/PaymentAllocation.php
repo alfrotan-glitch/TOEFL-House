@@ -13,7 +13,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $id
  * @property string $payment_id
  * @property string $obligation_id
- * @property string $amount
+ * @property numeric-string $amount
  */
 final class PaymentAllocation extends Model
 {

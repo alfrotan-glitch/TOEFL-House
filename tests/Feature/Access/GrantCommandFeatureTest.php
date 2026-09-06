@@ -194,7 +194,11 @@ final class GrantCommandFeatureTest extends TestCase
             'approver_two_id' => null,
         ]);
         // A distinct eligible approver CAN still sign slot one.
-        $this->assertSame('requested', $command->approve($approverOne, $orgRequest->fresh(), 'org-self-a2')['lifecycle_state']);
+        $approvable = $orgRequest->fresh();
+        if ($approvable === null) {
+            $this->fail('org-wide grant request disappeared before slot-one approval');
+        }
+        $this->assertSame('requested', $command->approve($approverOne, $approvable, 'org-self-a2')['lifecycle_state']);
     }
 
     public function test_emergency_grant_requires_expiry_within_the_limit_and_is_flagged_for_review(): void

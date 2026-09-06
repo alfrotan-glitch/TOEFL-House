@@ -26,15 +26,19 @@ trait SeedsAuthority
 {
     private string $bootstrapOrganizationId = '00000000-0000-4000-8000-00000000b005';
 
+    /** @var array<string, string> */
     private array $seededRoleSets = [];
 
+    /** @var array<string, bool> */
     private array $seededAssignments = [];
 
+    /** @var array<string, bool> */
     private array $seededScopeGrants = [];
 
     /** @var array<string, list<string>> */
     private array $authorityCapabilities = [];
 
+    /** @var array<string, Person> */
     private array $authorityPeople = [];
 
     private function ensureBootstrapAuthority(): void
@@ -54,6 +58,7 @@ trait SeedsAuthority
      * Person with role-derived authority for the given capabilities inside
      * the bootstrap organization.
      */
+    /** @param list<string> $capabilities */
     private function personWithAuthority(string $personId, array $capabilities): Person
     {
         $this->ensureBootstrapAuthority();
@@ -138,6 +143,7 @@ trait SeedsAuthority
     /**
      * Direct named-scope grant of capabilities to a person.
      */
+    /** @param list<string> $capabilities */
     private function grantScopeAuthority(string $personId, array $capabilities, string $scopeType, string $scopeId, ?string $effectiveTo = null): void
     {
         $this->ensureBootstrapAuthority();

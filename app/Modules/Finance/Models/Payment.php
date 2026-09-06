@@ -14,7 +14,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $id
  * @property string $period_id
  * @property string $student_id
- * @property string $amount
+ * @property numeric-string $amount
  * @property string $method
  * @property string $payer_ref
  * @property string $received_on

@@ -14,7 +14,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $id
  * @property string $name
  * @property string $agreement_ref
- * @property string $committed_amount
+ * @property numeric-string $committed_amount
  * @property string|null $restricted_category
  */
 final class FundingSource extends Model

@@ -54,6 +54,7 @@ final class ProgressionRulesConsoleTest extends TestCase
         $this->makeEmployee('pr-stranger-1', [], 'rules-stranger');
     }
 
+    /** @param list<string> $capabilities */
     private function makeEmployee(string $personId, array $capabilities, string $username): void
     {
         $person = $this->personWithAuthority($personId, $capabilities);

@@ -62,7 +62,7 @@ final class QueueMembershipQuery
             $query->where('organization_id', trim($organizationId));
         }
 
-        return $query->pluck('queue_key')->map(static fn ($key): string => trim((string) $key))->filter()->unique()->values()->all();
+        return array_values($query->pluck('queue_key')->map(static fn ($key): string => trim((string) $key))->filter()->unique()->values()->all());
     }
 
     public function canClaim(Actor $actor, string $queueKey, ?string $branchId, ?string $organizationId): bool

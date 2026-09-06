@@ -7,7 +7,12 @@ namespace App\Modules\Resources\Models;
 use Illuminate\Database\Eloquent\Model;
 
 /**
- * Custodial period of one asset to one custodian; one open custody per asset, history retained. @property string $id @property string $asset_id @property string $custodian_person_id @property string|null $released_on
+ * Custodial period of one asset to one custodian; one open custody per asset, history retained.
+ * @property string $id
+ * @property string $asset_id
+ * @property string $custodian_person_id
+ * @property string|null $released_on
+ * @property string $assigned_on
  */
 final class Custody extends Model
 {

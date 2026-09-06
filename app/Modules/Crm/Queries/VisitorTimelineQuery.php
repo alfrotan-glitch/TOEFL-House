@@ -157,10 +157,10 @@ final class VisitorTimelineQuery
             ]);
         }
 
-        return $rows
+        return array_values($rows
             ->sortByDesc('at')
             ->take(max(1, min($limit, 500)))
             ->values()
-            ->all();
+            ->all());
     }
 }

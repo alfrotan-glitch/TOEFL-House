@@ -88,7 +88,7 @@ final class PayrollController extends Controller
         app(CalculatePayroll::class)->prepare(
             $this->actor(),
             PayrollPeriod::query()->findOrFail($periodId),
-            Employment::query()->findOrFail($input['employment_id']),
+            Employment::query()->findOrFail((string) $input['employment_id']),
             $this->idempotencyKey('payroll.calculate'),
         );
 

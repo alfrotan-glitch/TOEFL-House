@@ -185,7 +185,7 @@ final class MaintainFinancialCorrection
         }
     }
 
-    /** @return array{0: string|null, 1: string|null, 2: string|null, 3: string} */
+    /** @return array{0: string|null, 1: string|null, 2: string|null, 3: numeric-string} */
     private function resolveSource(string $type, string $sourceId, string $periodId): array
     {
         if ($type === FinancialCorrection::TYPE_OBLIGATION_ADJUSTMENT) {
@@ -195,7 +195,7 @@ final class MaintainFinancialCorrection
                 throw BusinessRejection::forCode('finance.correction_source_unknown', 'the correction obligation source is unknown or belongs to another period');
             }
 
-            return [$obligation->id, null, null, (string) $obligation->original_amount];
+            return [$obligation->id, null, null, $obligation->original_amount];
         }
 
         if ($type === FinancialCorrection::TYPE_ALLOCATION_REVERSAL) {
@@ -209,7 +209,7 @@ final class MaintainFinancialCorrection
                 throw BusinessRejection::forCode('finance.correction_source_unknown', 'the correction allocation belongs to another period');
             }
 
-            return [null, $allocation->id, null, (string) $allocation->amount];
+            return [null, $allocation->id, null, $allocation->amount];
         }
 
         /** @var FundAllocation|null $allocation */
@@ -225,7 +225,7 @@ final class MaintainFinancialCorrection
             throw BusinessRejection::forCode('finance.correction_source_unknown', 'the fund allocation belongs to another period');
         }
 
-        return [null, null, $allocation->id, (string) $allocation->amount];
+        return [null, null, $allocation->id, $allocation->amount];
     }
 
     private function lockSource(FinancialCorrection $correction): void
@@ -250,29 +250,29 @@ final class MaintainFinancialCorrection
     private function assertCorrectionAvailable(FinancialCorrection $correction): void
     {
         if ($correction->obligation_id !== null) {
-            $sourceAmount = (string) Obligation::query()->whereKey($correction->obligation_id)->value('original_amount');
-            $prior = (string) FinancialCorrection::query()
+            $sourceAmount = MoneyAmount::decimal(Obligation::query()->whereKey($correction->obligation_id)->value('original_amount'));
+            $prior = MoneyAmount::decimal(FinancialCorrection::query()
                 ->where('obligation_id', $correction->obligation_id)
                 ->where('correction_type', FinancialCorrection::TYPE_OBLIGATION_ADJUSTMENT)
                 ->where('direction', $correction->direction)
                 ->where('lifecycle_state', FinancialCorrection::STATE_RECORDED)
-                ->sum('amount');
+                ->sum('amount'));
         } elseif ($correction->payment_allocation_id !== null) {
-            $sourceAmount = (string) PaymentAllocation::query()->whereKey($correction->payment_allocation_id)->value('amount');
-            $prior = (string) FinancialCorrection::query()
+            $sourceAmount = MoneyAmount::decimal(PaymentAllocation::query()->whereKey($correction->payment_allocation_id)->value('amount'));
+            $prior = MoneyAmount::decimal(FinancialCorrection::query()
                 ->where('payment_allocation_id', $correction->payment_allocation_id)
                 ->where('correction_type', FinancialCorrection::TYPE_ALLOCATION_REVERSAL)
                 ->where('lifecycle_state', FinancialCorrection::STATE_RECORDED)
-                ->sum('amount');
+                ->sum('amount'));
         } else {
-            $sourceAmount = (string) FundAllocation::query()->whereKey($correction->fund_allocation_id)->value('amount');
-            $prior = (string) FinancialCorrection::query()
+            $sourceAmount = MoneyAmount::decimal(FundAllocation::query()->whereKey($correction->fund_allocation_id)->value('amount'));
+            $prior = MoneyAmount::decimal(FinancialCorrection::query()
                 ->where('fund_allocation_id', $correction->fund_allocation_id)
                 ->where('correction_type', FinancialCorrection::TYPE_FUND_ALLOCATION_REVERSAL)
                 ->where('lifecycle_state', FinancialCorrection::STATE_RECORDED)
-                ->sum('amount');
+                ->sum('amount'));
         }
-        if (bccomp(bcadd($prior, (string) $correction->amount, 2), $sourceAmount, 2) === 1) {
+        if (bccomp(bcadd($prior, MoneyAmount::decimal($correction->amount), 2), $sourceAmount, 2) === 1) {
             throw BusinessRejection::forCode('finance.correction_exceeds_source', 'the recorded corrections exceed their immutable source amount');
         }
     }

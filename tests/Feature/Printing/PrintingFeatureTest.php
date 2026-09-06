@@ -109,7 +109,7 @@ final class PrintingFeatureTest extends TestCase
         $this->get('/print/invoice/some-id')->assertRedirect('/login');
     }
 
-    /** @return array{0: Payment} */
+    /** @param list<string> $branchNames */
     private function makeReceipt(string $orgName, array $branchNames, ?string $secondOrgName = null): Payment
     {
         Organization::query()->updateOrCreate(

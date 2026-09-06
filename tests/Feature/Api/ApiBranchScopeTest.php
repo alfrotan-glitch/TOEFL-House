@@ -87,8 +87,13 @@ final class ApiBranchScopeTest extends TestCase
     private function listedStudentIds(): array
     {
         $payload = $this->getJson('/api/v1/students')->assertOk()->json();
+        $students = $payload['students'] ?? [];
+        $this->assertIsArray($students);
 
-        return collect($payload['students'] ?? [])->pluck('id')->all();
+        return array_values(array_map(
+            static fn (mixed $student): string => (string) ($student['id'] ?? ''),
+            $students,
+        ));
     }
 
     public function test_student_list_confines_rows_to_visible_branches(): void

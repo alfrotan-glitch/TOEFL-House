@@ -42,6 +42,7 @@ final class HrFeatureTest extends TestCase
         app(MaintainEmployment::class)->hire($manager, Employment::query()->findOrFail($this->employmentId), '2026-09-01', 'hr-emp-2');
     }
 
+    /** @param list<string> $extra */
     private function manager(array $extra = []): Actor
     {
         return $this->grantedActor('hr-manager-1', array_merge(['hr.employ', 'hr.contract', 'hr.terminate', 'access.assign_position', 'hr.leave_approve'], $extra));

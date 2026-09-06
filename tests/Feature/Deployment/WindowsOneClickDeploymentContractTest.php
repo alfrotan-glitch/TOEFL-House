@@ -71,7 +71,7 @@ final class WindowsOneClickDeploymentContractTest extends TestCase
         // The documentation may state that Funnel is not used, but the
         // command itself must never be invoked: no line that starts a
         // tailscale invocation may carry a funnel subcommand.
-        foreach (preg_split('/\\R/', $start) as $line) {
+        foreach (preg_split('/\\R/', $start) ?: [] as $line) {
             $trimmed = ltrim($line);
             if (preg_match('/^(tailscale(\.exe)?|where\s+tailscale)/i', $trimmed) && stripos($trimmed, 'funnel') !== false) {
                 $this->fail('the launcher must never invoke Tailscale Funnel: '.$line);

@@ -48,7 +48,7 @@ final class PersonDirectoryQuery
      */
     public function verifiedPersons(): array
     {
-        return Person::query()
+        return array_values(Person::query()
             ->where('verification_state', Person::VERIFICATION_VERIFIED)
             ->orderBy('legal_name')
             ->get(['id', 'legal_name', 'identity_key'])
@@ -57,6 +57,6 @@ final class PersonDirectoryQuery
                 'legal_name' => $person->legal_name,
                 'identity_key' => $person->identity_key,
             ])
-            ->all();
+            ->all());
     }
 }

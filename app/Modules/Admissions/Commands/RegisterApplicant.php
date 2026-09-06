@@ -95,8 +95,8 @@ final class RegisterApplicant
                         'recorded_by' => $registrar->actorId,
                         'placement_profile_id' => ($placementProfileId !== null && $placementProfileId !== '') ? $placementProfileId : null,
                         'academic_eligibility_snapshot_id' => $snapshotId,
-                        'originating_branch_id' => $originatingBranchId !== '' ? $originatingBranchId : null,
-                        'current_home_branch_id' => $originatingBranchId !== '' ? $originatingBranchId : null,
+                        'originating_branch_id' => $originatingBranchId,
+                        'current_home_branch_id' => $originatingBranchId,
                     ]);
 
                     $event = $this->audit->record($registrar->actorId, 'admissions.register', 'applicant', $applicant->id, null, [

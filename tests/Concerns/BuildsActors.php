@@ -69,6 +69,7 @@ trait BuildsActors
         return new Actor($actorId, 'Access Administrator');
     }
 
+    /** @param list<string> $capabilities */
     private function actorWithStructureCapabilities(string $actorId, array $capabilities): Actor
     {
         $this->personWithAuthority($actorId, $capabilities);
@@ -178,6 +179,7 @@ trait BuildsActors
         return new Actor($actorId, 'Enrollment Clerk');
     }
 
+    /** @param list<string> $capabilities */
     private function grantedActor(string $actorId, array $capabilities): Actor
     {
         $this->personWithAuthority($actorId, $capabilities);

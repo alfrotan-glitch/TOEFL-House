@@ -22,7 +22,7 @@ final class SubjectPrivacyQuery
     {
         $day = ($asOf ?? CarbonImmutable::now())->startOfDay()->toDateString();
 
-        $consents = Consent::query()
+        $consents = array_values(Consent::query()
             ->where('subject_person_id', $subjectPersonId)
             ->where('lifecycle_state', 'active')
             ->where('effective_from', '<=', $day)
@@ -35,9 +35,9 @@ final class SubjectPrivacyQuery
                 'effective_from' => $consent->effective_from,
                 'effective_to' => $consent->effective_to,
             ])
-            ->all();
+            ->all());
 
-        $disclosures = Disclosure::query()
+        $disclosures = array_values(Disclosure::query()
             ->where('subject_person_id', $subjectPersonId)
             ->orderBy('created_at')
             ->get(['id', 'recipient', 'purpose', 'disclosed_category', 'created_at'])
@@ -48,7 +48,7 @@ final class SubjectPrivacyQuery
                 'disclosed_category' => $disclosure->disclosed_category,
                 'at' => $disclosure->created_at?->toDateTimeString(),
             ])
-            ->all();
+            ->all());
 
         return [
             'subject_person_id' => $subjectPersonId,
