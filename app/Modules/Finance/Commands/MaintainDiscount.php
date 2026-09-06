@@ -7,16 +7,19 @@ namespace App\Modules\Finance\Commands;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Finance\Domain\FinanceLifecycle;
+use App\Modules\Finance\Domain\FinancialCoverageLock;
 use App\Modules\Finance\Domain\PaymentLifecycle;
 use App\Modules\Finance\Models\Discount;
 use App\Modules\Finance\Models\FinancialPeriod;
 use App\Modules\Finance\Models\Obligation;
+use App\Modules\Organization\Models\Branch;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
 use App\Support\Identifiers\RandomIdentifier;
+use App\Support\MoneyAmount;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -47,16 +50,24 @@ final class MaintainDiscount
         try {
             return $this->idempotency->execute('finance.discount.propose', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($proposer, $obligation, $period, $amount, $eligibility, $effectiveFrom, $effectiveTo, $reason): array {
-                    $this->require($proposer, self::CAPABILITY_PROPOSE);
                     $this->validate($amount, $eligibility, $effectiveFrom, $effectiveTo, $reason);
 
                     /** @var Obligation $lockedObligation */
                     $lockedObligation = Obligation::query()->whereKey($obligation->id)->lockForUpdate()->firstOrFail();
 
+                    $branch = $this->branchForObligation($lockedObligation);
+                    if ($branch === null) {
+                        throw BusinessRejection::forCode('finance.discount_provenance_required', 'a discount requires known obligation branch provenance');
+                    }
+                    $this->require($proposer, self::CAPABILITY_PROPOSE, $branch->structureScope());
+
                     /** @var FinancialPeriod $lockedPeriod */
                     $lockedPeriod = FinancialPeriod::query()->whereKey($period->id)->lockForUpdate()->firstOrFail();
                     if ($lockedPeriod->lifecycle_state !== FinanceLifecycle::PERIOD_OPEN) {
                         throw BusinessRejection::forCode('finance.period_not_open', 'discounts attach only to an open financial period');
+                    }
+                    if (trim((string) $lockedObligation->period_id) !== trim((string) $lockedPeriod->id)) {
+                        throw BusinessRejection::forCode('finance.discount_period_mismatch', 'a discount must be recorded in the obligation financial period');
                     }
 
                     $discount = Discount::query()->create([
@@ -72,7 +83,7 @@ final class MaintainDiscount
                         'proposed_by' => $proposer->actorId,
                     ]);
                     $event = $this->audit->record($proposer->actorId, 'finance.discount.propose', 'discount', $discount->id, null, [
-                        'obligation_id' => $lockedObligation->id, 'amount' => $amount, 'eligibility' => $eligibility,
+                        'obligation_id' => $lockedObligation->id, 'branch_id' => $branch->id, 'organization_id' => $branch->structureScope()->organizationId, 'amount' => $amount, 'eligibility' => $eligibility,
                     ]);
 
                     return ['discount_id' => $discount->id, 'correlation_id' => $event->correlation_id];
@@ -91,7 +102,8 @@ final class MaintainDiscount
         try {
             return $this->idempotency->execute('finance.discount.approve', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($approver, $discount): array {
-                    $this->require($approver, self::CAPABILITY_APPROVE);
+                    $studentId = (string) Obligation::query()->whereKey($discount->obligation_id)->value('student_id');
+                    FinancialCoverageLock::acquire($studentId);
 
                     /** @var Discount $locked */
                     $locked = Discount::query()->whereKey($discount->id)->lockForUpdate()->firstOrFail();
@@ -102,6 +114,18 @@ final class MaintainDiscount
 
                     /** @var Obligation $obligation */
                     $obligation = Obligation::query()->whereKey($locked->obligation_id)->lockForUpdate()->firstOrFail();
+                    if (trim((string) $obligation->student_id) !== trim($studentId)) {
+                        throw BusinessRejection::forCode('finance.discount_student_mismatch', 'the discount obligation student changed while the coverage lock was acquired');
+                    }
+                    $period = FinancialPeriod::query()->whereKey($locked->period_id)->lockForUpdate()->firstOrFail();
+                    if ($period->lifecycle_state !== FinanceLifecycle::PERIOD_OPEN || trim((string) $period->id) !== trim((string) $obligation->period_id)) {
+                        throw BusinessRejection::forCode('finance.discount_period_mismatch', 'a discount can be approved only in its open obligation financial period');
+                    }
+                    $branch = $this->branchForObligation($obligation);
+                    if ($branch === null) {
+                        throw BusinessRejection::forCode('finance.discount_provenance_required', 'a discount requires known obligation branch provenance');
+                    }
+                    $this->require($approver, self::CAPABILITY_APPROVE, $branch->structureScope());
                     $remaining = $this->allocations->obligationRemaining($obligation);
                     if (bccomp((string) $locked->amount, $remaining, 2) === 1) {
                         throw BusinessRejection::forCode('finance.discount_exceeds_obligation', sprintf('the discount exceeds the uncovered obligation remainder %s', $remaining));
@@ -110,7 +134,7 @@ final class MaintainDiscount
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
                     $locked->forceFill(['lifecycle_state' => PaymentLifecycle::DISCOUNT_APPROVED, 'approved_by' => $approver->actorId]);
                     $locked->save();
-                    $event = $this->audit->record($approver->actorId, 'finance.discount.approve', 'discount', $locked->id, $before, ['lifecycle_state' => PaymentLifecycle::DISCOUNT_APPROVED]);
+                    $event = $this->audit->record($approver->actorId, 'finance.discount.approve', 'discount', $locked->id, $before, ['lifecycle_state' => PaymentLifecycle::DISCOUNT_APPROVED, 'branch_id' => $branch->id, 'organization_id' => $branch->structureScope()->organizationId]);
 
                     return ['discount_id' => $locked->id, 'lifecycle_state' => PaymentLifecycle::DISCOUNT_APPROVED, 'correlation_id' => $event->correlation_id];
                 }),
@@ -125,7 +149,7 @@ final class MaintainDiscount
         if ($eligibility === '' || $reason === '') {
             throw BusinessRejection::forCode('finance.discount_terms', 'a discount requires its eligibility basis and reason');
         }
-        if (! is_numeric($amount) || (float) $amount <= 0) {
+        if (! MoneyAmount::positive($amount)) {
             throw BusinessRejection::forCode('finance.discount_amount', 'the discount amount must be a positive number');
         }
         if ($effectiveTo !== null && $effectiveTo < $effectiveFrom) {
@@ -133,9 +157,16 @@ final class MaintainDiscount
         }
     }
 
-    private function require(Actor $actor, string $capability): void
+    private function branchForObligation(Obligation $obligation): ?Branch
     {
-        $outcome = $this->access->decide($actor, $capability, null);
+        $branchId = trim((string) ($obligation->current_home_branch_id ?? $obligation->originating_branch_id ?? ''));
+
+        return $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
+    }
+
+    private function require(Actor $actor, string $capability, \App\Support\Authorization\StructureScope $scope): void
+    {
+        $outcome = $this->access->decide($actor, $capability, $scope);
         if (! $outcome->allowed) {
             throw AuthorizationDenied::forCode('finance.discount_denied', $outcome->reason);
         }

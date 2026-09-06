@@ -13,9 +13,9 @@ use App\Modules\Crm\Commands\LinkVisitorPerson;
 use App\Modules\Crm\Commands\MaintainVisitor;
 use App\Modules\Crm\Commands\MaintainVisitorCatalog;
 use App\Modules\Crm\Commands\ManageVisitorFollowup;
-use App\Modules\Crm\Commands\RecordVisitorConversion;
 use App\Modules\Crm\Models\Visitor;
 use App\Modules\Crm\Models\VisitorAutomationRule;
+use App\Modules\Organization\Models\Branch;
 use App\Modules\Crm\Models\VisitorCampaign;
 use App\Modules\Crm\Models\VisitorFollowup;
 use App\Modules\Crm\Models\VisitorSource;
@@ -28,18 +28,52 @@ use Illuminate\Http\Request;
 /** JSON interface for the Visitor/Lead/CRM domain (delegates to module commands). */
 final class CrmApiController extends Controller
 {
-    public function sources(): JsonResponse
+    public function sources(Request $request): JsonResponse
     {
-        $sources = VisitorSource::query()->orderBy('key')->get(['id', 'key', 'name', 'category', 'lifecycle_state']);
+        $this->requireOrganizationRead('crm.catalog', 'api.crm.sources');
+        $sourcesQuery = VisitorSource::query()->orderBy('key');
+        if (! $request->boolean('include_retired')) {
+            $sourcesQuery->where('lifecycle_state', 'active');
+        }
+        $sources = $sourcesQuery->get(['id', 'key', 'name', 'category', 'lifecycle_state', 'created_by']);
 
         return response()->json(['sources' => $sources]);
     }
 
-    public function campaigns(): JsonResponse
+    public function campaigns(Request $request): JsonResponse
     {
-        $campaigns = VisitorCampaign::query()->orderBy('key')->get(['id', 'key', 'name', 'source_id', 'channel', 'starts_on', 'ends_on', 'lifecycle_state']);
+        $this->requireOrganizationRead('crm.catalog', 'api.crm.campaigns');
+        $campaignsQuery = VisitorCampaign::query()->orderBy('key');
+        if (! $request->boolean('include_retired')) {
+            $campaignsQuery->where('lifecycle_state', 'active');
+        }
+        $campaigns = $campaignsQuery->get(['id', 'key', 'name', 'source_id', 'channel', 'starts_on', 'ends_on', 'lifecycle_state', 'created_by']);
 
         return response()->json(['campaigns' => $campaigns]);
+    }
+
+    public function branches(): JsonResponse
+    {
+        $actor = $this->actor();
+        $organizationScope = app(\App\Support\Authorization\AccessDecision::class)->decide($actor, 'crm.visitor', null)->allowed;
+        $branchIds = $this->authorizedBranches('crm.visitor');
+        if (! $organizationScope && $branchIds === []) {
+            $this->requireOrganizationRead('crm.visitor', 'api.crm.branches');
+        }
+        // An organization-rooted grant is not a wildcard across every
+        // organization. `authorizedBranches()` resolves the concrete active
+        // branches covered by this actor's grants; return only that set.
+        $branchesQuery = Branch::query()->where('lifecycle_state', 'active')->whereIn('id', $branchIds);
+        $branches = $branchesQuery
+            ->orderBy('name')
+            ->get(['id', 'name', 'lifecycle_state']);
+
+        return response()->json([
+            'branches' => $branches,
+            // This is an explicit organization-scoped read/capture affordance;
+            // the client must never infer it from an empty branch list.
+            'allow_unassigned' => $organizationScope,
+        ]);
     }
 
     public function defineSource(Request $request): JsonResponse
@@ -59,6 +93,17 @@ final class CrmApiController extends Controller
         );
 
         return response()->json(['status' => 'defined', 'source_id' => $result['source_id']], 201);
+    }
+
+    public function retireSource(string $sourceId): JsonResponse
+    {
+        $result = app(MaintainVisitorCatalog::class)->retireSource(
+            $this->actor(),
+            VisitorSource::query()->findOrFail($sourceId),
+            $this->idempotencyKey('crm.source.retire'),
+        );
+
+        return response()->json(['status' => 'retired', ...$result]);
     }
 
     public function defineCampaign(Request $request): JsonResponse
@@ -87,6 +132,17 @@ final class CrmApiController extends Controller
         );
 
         return response()->json(['status' => 'defined', 'campaign_id' => $result['campaign_id']], 201);
+    }
+
+    public function retireCampaign(string $campaignId): JsonResponse
+    {
+        $result = app(MaintainVisitorCatalog::class)->retireCampaign(
+            $this->actor(),
+            VisitorCampaign::query()->findOrFail($campaignId),
+            $this->idempotencyKey('crm.campaign.retire'),
+        );
+
+        return response()->json(['status' => 'retired', ...$result]);
     }
 
     public function captures(Request $request): JsonResponse
@@ -126,6 +182,13 @@ final class CrmApiController extends Controller
 
     public function index(Request $request): JsonResponse
     {
+        $actor = $this->actor();
+        $organizationScope = app(\App\Support\Authorization\AccessDecision::class)->decide($actor, 'crm.visitor', null)->allowed;
+        $authorizedBranches = $this->authorizedBranches('crm.visitor');
+        if (! $organizationScope && $authorizedBranches === []) {
+            $this->requireOrganizationRead('crm.visitor', 'api.crm.visitors');
+        }
+
         $input = $request->validate([
             'statuses' => ['nullable', 'array'],
             'statuses.*' => ['string'],
@@ -134,12 +197,21 @@ final class CrmApiController extends Controller
             'source_id' => ['nullable', 'string'],
             'campaign_id' => ['nullable', 'string'],
             'branch_id' => ['nullable', 'string'],
+            'include_unassigned' => ['nullable', 'boolean'],
             'assigned_to' => ['nullable', 'string'],
             'rating' => ['nullable', 'string', 'max:20'],
             'visitor_type' => ['nullable', 'string', 'max:40'],
             'limit' => ['nullable', 'integer', 'max:500'],
         ]);
 
+        if (($input['branch_id'] ?? '') !== '') {
+            $this->requireBranchCapability('crm.visitor', $input['branch_id'], 'api.crm.visitors', 'visitor_directory', 'branch:'.$input['branch_id']);
+        }
+        if (($input['include_unassigned'] ?? false) === true) {
+            $this->requireOrganizationRead('crm.visitor', 'api.crm.visitors.unassigned', 'visitor_directory', 'unassigned');
+        }
+        $input['include_unassigned'] = (bool) ($input['include_unassigned'] ?? false);
+        $input['branch_ids'] = $authorizedBranches;
         $visitors = app(VisitorListQuery::class)->search($input['statuses'] ?? null, $input, (int) ($input['limit'] ?? 100));
 
         return response()->json(['visitors' => $visitors]);
@@ -148,6 +220,7 @@ final class CrmApiController extends Controller
     public function show(string $visitorId): JsonResponse
     {
         $visitor = Visitor::query()->findOrFail($visitorId);
+        $this->requireVisitorRead($visitor, 'api.crm.visitor.show');
         $detail = app(VisitorListQuery::class)->detail($visitor);
 
         return response()->json(['visitor' => $detail]);
@@ -156,6 +229,7 @@ final class CrmApiController extends Controller
     public function timeline(string $visitorId): JsonResponse
     {
         $visitor = Visitor::query()->findOrFail($visitorId);
+        $this->requireVisitorRead($visitor, 'api.crm.visitor.timeline');
 
         return response()->json(['timeline' => app(VisitorTimelineQuery::class)->for($visitor)]);
     }
@@ -236,6 +310,7 @@ final class CrmApiController extends Controller
             'document_id' => ['nullable', 'string'],
             'assessment_attempt_id' => ['nullable', 'string'],
             'payment_id' => ['nullable', 'string'],
+            'placement_attempt_id' => ['nullable', 'string'],
         ]);
 
         $occurred = CarbonImmutable::parse($input['occurred_on']);
@@ -252,6 +327,7 @@ final class CrmApiController extends Controller
             $input['assessment_attempt_id'] ?? null,
             $input['payment_id'] ?? null,
             $this->idempotencyKey('crm.interaction.capture'),
+            $input['placement_attempt_id'] ?? null,
         );
 
         return response()->json(['status' => 'captured', ...$result], 201);
@@ -301,31 +377,33 @@ final class CrmApiController extends Controller
         return response()->json(['status' => 'cancelled', ...$result]);
     }
 
-    public function convert(Request $request, string $visitorId): JsonResponse
-    {
-        $input = $request->validate([
-            'conversion_type' => ['required', 'string', 'max:40'],
-            'downstream_entity' => ['required', 'string', 'max:40'],
-            'downstream_id' => ['required', 'string'],
-        ]);
-
-        $result = app(RecordVisitorConversion::class)->record(
-            $this->actor(),
-            Visitor::query()->findOrFail($visitorId),
-            $input['conversion_type'],
-            $input['downstream_entity'],
-            $input['downstream_id'],
-            $this->idempotencyKey('crm.conversion.record'),
-        );
-
-        return response()->json(['status' => 'recorded', ...$result], 201);
-    }
-
     public function automationRules(): JsonResponse
     {
+        $this->requireOrganizationRead('crm.automation', 'api.crm.automation.rules');
         $rules = VisitorAutomationRule::query()->orderBy('key')->get();
 
         return response()->json(['rules' => $rules]);
+    }
+
+    public function retireAutomationRule(string $ruleId): JsonResponse
+    {
+        $result = app(DefineVisitorAutomationRule::class)->retire(
+            $this->actor(),
+            VisitorAutomationRule::query()->findOrFail($ruleId),
+            $this->idempotencyKey('crm.automation.retire'),
+        );
+
+        return response()->json(['status' => 'retired', ...$result]);
+    }
+
+    private function requireVisitorRead(Visitor $visitor, string $operation): void
+    {
+        if ($visitor->origin_branch_id === null) {
+            $this->requireOrganizationRead('crm.visitor', $operation, 'visitor', $visitor->id);
+
+            return;
+        }
+        $this->requireBranchCapability('crm.visitor', $visitor->origin_branch_id, $operation, 'visitor', $visitor->id);
     }
 
     public function defineAutomationRule(Request $request): JsonResponse

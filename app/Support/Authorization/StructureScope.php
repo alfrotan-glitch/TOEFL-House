@@ -8,6 +8,10 @@ namespace App\Support\Authorization;
  * Organizational scope of a target or grant. Resolution order is
  * organization -> campus -> branch -> department; a grant on an ancestor
  * covers all descendants.
+ *
+ * A scope with unknown provenance is deliberately different from a null
+ * scope. Null is reserved for explicitly branchless governance operations;
+ * unknown is a fail-closed operational target.
  */
 final class StructureScope
 {
@@ -16,7 +20,36 @@ final class StructureScope
         public readonly ?string $campusId = null,
         public readonly ?string $branchId = null,
         public readonly ?string $departmentId = null,
+        public readonly bool $unknownProvenance = false,
+        public readonly bool $allowInactiveLifecycle = false,
     ) {}
+
+    public static function organization(string $organizationId): self
+    {
+        return new self($organizationId);
+    }
+
+    public static function unknown(): self
+    {
+        return new self('', null, null, null, true, false);
+    }
+
+    public function withInactiveLifecycleAccess(): self
+    {
+        return new self(
+            $this->organizationId,
+            $this->campusId,
+            $this->branchId,
+            $this->departmentId,
+            $this->unknownProvenance,
+            true,
+        );
+    }
+
+    public function isUnknown(): bool
+    {
+        return $this->unknownProvenance;
+    }
 
     /**
      * Scope keys from the most specific to the organization root. A grant on
@@ -26,6 +59,10 @@ final class StructureScope
      */
     public function coveringScopeKeys(): array
     {
+        if ($this->unknownProvenance) {
+            return [];
+        }
+
         $keys = [];
         if ($this->departmentId !== null) {
             $keys[] = 'department:'.$this->departmentId;
@@ -36,7 +73,9 @@ final class StructureScope
         if ($this->campusId !== null) {
             $keys[] = 'campus:'.$this->campusId;
         }
-        $keys[] = 'organization:'.$this->organizationId;
+        if ($this->organizationId !== '') {
+            $keys[] = 'organization:'.$this->organizationId;
+        }
 
         return $keys;
     }

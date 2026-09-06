@@ -7,6 +7,7 @@ namespace Tests\Feature\Academic;
 use App\Modules\Academic\Commands\MaintainAcademicStructure;
 use App\Modules\Academic\Models\Program;
 use App\Modules\Academic\Models\ProgramVersionLevel;
+use App\Modules\Organization\Models\Branch;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Identifiers\RandomIdentifier;
 use Carbon\CarbonImmutable;
@@ -122,6 +123,7 @@ final class ProgramVersionLevelFoundationTest extends TestCase
             'id' => RandomIdentifier::new(),
             'program_version_id' => $programVersionId,
             'period_id' => $periodId,
+            'branch_id' => Branch::query()->value('id'),
             'capacity' => 20,
             'lifecycle_state' => 'planned',
             'created_at' => now()->toDateTimeString(),

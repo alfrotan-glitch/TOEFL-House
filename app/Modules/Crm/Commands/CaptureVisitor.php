@@ -12,11 +12,14 @@ use App\Modules\Crm\Models\Visitor;
 use App\Modules\Crm\Models\VisitorCampaign;
 use App\Modules\Crm\Models\VisitorSource;
 use App\Modules\Identity\Models\Person;
+use App\Modules\Organization\Models\Branch;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
 use App\Support\Identifiers\RandomIdentifier;
+use Carbon\CarbonImmutable;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -69,7 +72,23 @@ final class CaptureVisitor
                         throw BusinessRejection::forCode('crm.visitor_type_unknown', 'unknown visitor type');
                     }
 
+                    $normalizedPersonId = trim((string) ($personId ?? ''));
+                    if ($normalizedPersonId !== '') {
+                        /** @var Person|null $person */
+                        $person = Person::query()->whereKey($normalizedPersonId)->first();
+                        if ($person === null) {
+                            throw BusinessRejection::forCode('crm.person_unknown', 'the supplied person does not exist');
+                        }
+                        if (! $person->isVerified()) {
+                            throw BusinessRejection::forCode('crm.person_unverified', 'a supplied visitor identity must be verified');
+                        }
+                    }
+                    $personId = $normalizedPersonId === '' ? null : $normalizedPersonId;
                     $resolvedName = $this->resolveName($personId, $fullName);
+                    if (mb_strlen($resolvedName) > 255 || ($phone !== null && mb_strlen($phone) > 255) || ($email !== null && mb_strlen($email) > 255)
+                        || ($interest !== null && mb_strlen($interest) > 255) || ($notes !== null && mb_strlen($notes) > 2000)) {
+                        throw BusinessRejection::forCode('crm.visitor_field_length', 'visitor fields exceed their permitted lengths');
+                    }
                     $contactKey = VisitorContactKey::of($email, $phone);
                     if ($contactKey === '' && $personId === null) {
                         throw BusinessRejection::forCode('crm.visitor_contact_required', 'a visitor needs at least a phone, email, or verified identity');
@@ -116,10 +135,12 @@ final class CaptureVisitor
                         'created_by' => $actor->actorId,
                     ]);
 
+                    $provenance = $this->visitorProvenance($visitor->origin_branch_id);
                     $event = $this->audit->record($actor->actorId, 'crm.visitor.capture', 'visitor', $visitor->id, null, [
                         'visitor_code' => $visitor->visitor_code, 'person_id' => $visitor->person_id, 'source_id' => $visitor->source_id,
                         'campaign_id' => $visitor->campaign_id, 'full_name' => $visitor->full_name, 'status' => Visitor::STATUS_NEW,
                         'origin_branch_id' => $visitor->origin_branch_id, 'contact_key' => $visitor->contact_key,
+                        ...$provenance,
                     ]);
 
                     return ['visitor_id' => $visitor->id, 'visitor_code' => $visitor->visitor_code, 'status' => Visitor::STATUS_NEW, 'correlation_id' => $event->correlation_id];
@@ -127,7 +148,44 @@ final class CaptureVisitor
             );
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $actor, 'crm.visitor.capture', 'visitor', substr((string) ($personId ?? 'anonymous'), 0, 36));
+        } catch (QueryException $exception) {
+            if (str_contains($exception->getMessage(), 'visitors_one_active_per_person')) {
+                throw BusinessRejection::forCode('crm.duplicate_person', 'this person already has an open visitor record');
+            }
+            if (str_contains($exception->getMessage(), 'visitors_one_active_per_contact')) {
+                throw BusinessRejection::forCode('crm.duplicate_contact', 'an open visitor already exists for this primary contact');
+            }
+            throw $exception;
         }
+    }
+
+    /** @return array{branch_id?: string, organization_id?: string} */
+    private function visitorProvenance(?string $originBranchId): array
+    {
+        $branchId = trim((string) ($originBranchId ?? ''));
+        if ($branchId === '') {
+            return [];
+        }
+        $branch = Branch::query()->whereKey($branchId)->first();
+        if ($branch === null || $branch->lifecycle_state !== 'active') {
+            throw BusinessRejection::forCode('crm.visitor_branch_inactive', 'visitor branch provenance must reference an active branch');
+        }
+        $topology = DB::table('branches as b')
+            ->join('campus_assignments as ca', 'ca.branch_id', '=', 'b.id')
+            ->join('campuses as c', 'c.id', '=', 'ca.campus_id')
+            ->join('organizations as o', 'o.id', '=', 'c.organization_id')
+            ->where('b.id', $branch->id)
+            ->where('b.lifecycle_state', 'active')
+            ->where('c.lifecycle_state', 'active')
+            ->where('o.lifecycle_state', 'active')
+            ->where('ca.effective_from', '<=', now()->toDateString())
+            ->where(fn ($query) => $query->whereNull('ca.effective_to')->orWhere('ca.effective_to', '>', now()->toDateString()))
+            ->first(['b.id as branch_id', 'c.organization_id']);
+        if ($topology === null) {
+            throw BusinessRejection::forCode('crm.visitor_organization_missing', 'visitor branch provenance requires an active campus organization');
+        }
+
+        return ['branch_id' => (string) $topology->branch_id, 'organization_id' => (string) $topology->organization_id];
     }
 
     private function resolveName(?string $personId, string $fullName): string
@@ -170,6 +228,10 @@ final class CaptureVisitor
         }
         if ($sourceId !== null && $campaign->source_id !== null && $campaign->source_id !== $sourceId) {
             throw BusinessRejection::forCode('crm.campaign_source_mismatch', 'the campaign belongs to a different source');
+        }
+        $today = CarbonImmutable::today()->toDateString();
+        if ($campaign->starts_on > $today || ($campaign->ends_on !== null && $campaign->ends_on < $today)) {
+            throw BusinessRejection::forCode('crm.campaign_window_inactive', 'a visitor can only reference a campaign active on the capture date');
         }
 
         return $campaign;

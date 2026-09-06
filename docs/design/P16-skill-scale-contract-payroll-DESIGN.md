@@ -3,11 +3,13 @@
 Baseline: P02–P15 certified (`4df01f7`); audit report of the HR/Payroll chain accepted as evidence base.
 This file is a design artifact. It modifies no certified implementation record.
 
+> **Current-authority notice (2026-09-05):** The historical statement that `payroll_total` remains untouched is superseded by `docs/architecture/decisions/2026-09-05-finance-payroll-liability-reporting.md`. Payroll results and adjustments remain source evidence; Finance-recognized `payroll_liability_facts` are now the sole monetary reporting source. This design remains historical and does not establish current implementation or production readiness.
+
 ---
 
 ## A. Executive decision
 
-Skill (what is taught) becomes an **Academic-owned** closed catalog; Scale (compensation rank) becomes an **HR-owned** closed catalog — independent of Skill and of academic Level. Contracts gain **immutable versions** with the lifecycle `draft → submitted → approved → active → superseded|expired`, prepared/submitted by the **Finance Manager**, approved by the **General Manager** (preparer ≠ approver ≠ beneficiary, DB-enforced), carrying **normalized compensation rules keyed by (method, skill?, scale?)** with a deterministic precedence ladder. Payroll volume moves from manual `work_bases` to **evidence-derived delivery facts**: one payable unit = one **delivered session attributed to (teacher assignment, skill)** — a session pays at most once, ever, enforced by a database unique index. Every calculation snapshots the full rule set, version, scale, skill breakdown and evidence ids, so later Skill/Scale/contract changes can never rewrite approved payroll. The existing per-kind overlap rule and rate-by-kind resolution are formally retired as a **proven conflict**. Finance (journals) and P13 `payroll_total` remain untouched.
+Skill (what is taught) becomes an **Academic-owned** closed catalog; Scale (compensation rank) becomes an **HR-owned** closed catalog — independent of Skill and of academic Level. Contracts gain **immutable versions** with the lifecycle `draft → submitted → approved → active → superseded|expired`, prepared/submitted by the **Finance Manager**, approved by the **General Manager** (preparer ≠ approver ≠ beneficiary, DB-enforced), carrying **normalized compensation rules keyed by (method, skill?, scale?)** with a deterministic precedence ladder. Payroll volume moves from manual `work_bases` to **evidence-derived delivery facts**: one payable unit = one **delivered session attributed to (teacher assignment, skill)** — a session pays at most once, ever, enforced by a database unique index. Every calculation snapshots the full rule set, version, scale, skill breakdown and evidence ids, so later Skill/Scale/contract changes can never rewrite approved payroll. The existing per-kind overlap rule and rate-by-kind resolution are formally retired as a **proven conflict**. Finance remains the monetary authority; the later payroll-recognition ADR governs `payroll_total` through Finance-recognized liability facts.
 
 ## B. Current architecture (audit-verified)
 
@@ -137,7 +139,7 @@ All new commands (`RegisterSkill`, `RegisterScale`, `PrepareContractVersion`, `S
 - Payroll becomes financially authoritative at **result approval** (unchanged). Journal: manual `PostJournal(source_type='payroll_result')` stays the certified posting input; a future auto-post is out of scope. Corrections = adjustments/reversal (existing, immutable); opening payables (P15) are untouched — no fake payroll results, no reinterpretation; their settlement remains journal-based (`source_type='other'`).
 
 ## R. Reporting impact — DEFERRED as governed change
-- `payroll_total` (P13) reads approved results + adjustments — **unchanged** by this design.
+- `payroll_total` is governed by the later Finance payroll-liability recognition ADR; approved Payroll results and adjustments remain source evidence rather than direct monetary reporting authority.
 - Skill-level / scale-level / contract-version payroll metrics and dashboard slices would be **new catalog entries** → separate governed change (P13 catalog is code-owned; adding metrics = new package decision), explicitly out of P16 scope.
 
 ## S. Database entities and invariants (design only)
@@ -214,7 +216,7 @@ All new commands (`RegisterSkill`, `RegisterScale`, `PrepareContractVersion`, `S
 - **Risk (MEDIUM)**: unique(session_id) makes accidental co-teaching unpayable — operational reassignment discipline required.
 
 ## Y. Acceptance criteria (for the implementation phase)
-1. All 27 challenge cases pass as specified (feature/adversarial tests). 2. Approved contract versions/rules immutable at SQL level. 3. FM→GM SoD enforced (command + DB), denial audits present. 4. Rate resolution deterministic; no-match → HELD. 5. unique(session_id) double-count defense proven. 6. Historical reproducibility: amend scale/skill rate/contract after approval → approved payroll byte-identical snapshot. 7. P15 opening payables untouched. 8. `payroll_total` metric unchanged. 9. Full cumulative suite + phpstan L6 + pint + fresh migrations + schema invariants green. 10. Checkpoint + certification per protocol.
+1. All 27 challenge cases pass as specified (feature/adversarial tests). 2. Approved contract versions/rules immutable at SQL level. 3. FM→GM SoD enforced (command + DB), denial audits present. 4. Rate resolution deterministic; no-match → HELD. 5. unique(session_id) double-count defense proven. 6. Historical reproducibility: amend scale/skill rate/contract after approval → approved payroll byte-identical snapshot. 7. P15 opening payables untouched. 8. Finance payroll-liability recognition and `payroll_total` source lineage are governed by the later ADR. 9. Full cumulative suite + phpstan L6 + pint + fresh migrations + schema invariants green. 10. Checkpoint + certification per protocol.
 
 ---
 

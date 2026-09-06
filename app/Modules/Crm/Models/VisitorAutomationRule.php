@@ -9,7 +9,8 @@ use Illuminate\Database\Eloquent\Model;
 /**
  * Deterministic CRM automation: when an interaction outcome matches the rule,
  * the domain schedules the configured follow-up in the same transaction.
- * Rules are additive and may be activated/deactivated — never silent.
+ * Rules are additive; retirement is terminal and never silently reactivates a
+ * historical definition.
  *
  * @property string $id
  * @property string $key

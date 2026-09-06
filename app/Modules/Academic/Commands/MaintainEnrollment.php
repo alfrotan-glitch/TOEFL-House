@@ -6,7 +6,6 @@ namespace App\Modules\Academic\Commands;
 
 use App\Modules\Academic\Domain\AcademicAccess;
 use App\Modules\Academic\Domain\AssessmentResultLifecycle;
-use App\Modules\Academic\Domain\ClassLifecycle;
 use App\Modules\Academic\Domain\EnrollmentLifecycle;
 use App\Modules\Academic\Domain\ProgressionLifecycle;
 use App\Modules\Academic\Domain\RecordBranch;
@@ -14,18 +13,17 @@ use App\Modules\Academic\Errors\EnrollmentFinancialGateDenied;
 use App\Modules\Academic\Models\AssessmentResult;
 use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\Enrollment;
-use App\Modules\Academic\Models\Offering;
-use App\Modules\Academic\Models\ProgramVersionLevel;
 use App\Modules\Academic\Models\ProgressionDecision;
+use App\Modules\Organization\Models\Branch;
 use App\Modules\Academic\Placement\Models\AcademicEligibilitySnapshot;
 use App\Modules\Academic\Placement\Queries\AcademicEligibilitySnapshotQuery;
-use App\Modules\Academic\Queries\AcademicHistoryQuery;
+use App\Modules\Enrollment\Domain\EnrollmentConstraints;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Audit\RejectedOperation;
+use App\Modules\Finance\Domain\FinancialCoverageLock;
 use App\Modules\Finance\Queries\FinancialGateQuery;
 use App\Modules\Students\Models\Student;
-use App\Modules\Students\Models\StudentStatus;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
@@ -35,8 +33,8 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * Enrollment control: request (student must be currently active, class
- * active, seat free), activation under the enrollment-approval capability
- * with the capacity invariant and the Finance gate, a reasoned completion
+ * active, and a live seat claim available), activation under the
+ * enrollment-approval capability with the capacity invariant and the Finance gate, a reasoned completion
  * lifecycle (freeze with reason, unfreeze with financial re-gate, withdraw
  * with reason, evidenced completion), and transfer that closes the old
  * enrollment and opens a new one in the target class under the same capacity
@@ -56,7 +54,7 @@ final class MaintainEnrollment
         private readonly AcademicEligibilitySnapshotQuery $eligibilitySnapshots,
         private readonly FinancialGateQuery $financialGates,
         private readonly RejectedOperation $rejectedOperation,
-        private readonly AcademicHistoryQuery $history,
+        private readonly EnrollmentConstraints $constraints,
     ) {}
 
     /** @return array{enrollment_id: string, correlation_id: string} */
@@ -67,6 +65,11 @@ final class MaintainEnrollment
         try {
             return $this->idempotency->execute('academic.enrollment.request', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($requester, $studentId, $classId, $offeringId): array {
+                    $classOfferingId = ClassModel::query()->whereKey($classId)->value('offering_id');
+                    if ($classOfferingId === null || $classOfferingId === '') {
+                        throw BusinessRejection::forCode('academic.enrollment_offering_required', 'new enrollment seats require a class offering; historical classes need governed remediation');
+                    }
+                    $offeringId = $offeringId !== null && $offeringId !== '' ? $offeringId : (string) $classOfferingId;
                     $this->assertStudentActive($studentId);
                     $this->assertClassActive($classId);
                     $this->assertPrerequisitesForClass($studentId, $classId);
@@ -82,6 +85,13 @@ final class MaintainEnrollment
                     if (Enrollment::query()->where('student_id', $studentId)->where('class_id', $classId)->whereIn('lifecycle_state', ['requested', 'active', 'frozen'])->exists()) {
                         throw BusinessRejection::forCode('academic.enrollment_seat_exists', 'this student already holds a seat in this class');
                     }
+                    // Requested, active, and frozen rows all claim the same
+                    // finite seat. The class lock is the serialization point
+                    // shared with activation, transfer, and waitlist promotion.
+                    $this->assertCapacity($classId);
+                    if ($offeringId !== null && $offeringId !== '') {
+                        $this->assertOfferingCapacity($offeringId);
+                    }
                     $eligibilitySnapshotId = $this->currentEligibilitySnapshotId($studentId);
 
                     $enrollment = Enrollment::query()->create([
@@ -93,10 +103,12 @@ final class MaintainEnrollment
                         'academic_eligibility_snapshot_id' => $eligibilitySnapshotId,
                         'lifecycle_state' => EnrollmentLifecycle::STATE_REQUESTED,
                     ]);
+                    $provenance = $this->enrollmentProvenance($enrollment);
                     $event = $this->audit->record($requester->actorId, 'academic.enrollment.request', 'enrollment', $enrollment->id, null, [
                         'student_id' => $studentId, 'class_id' => $classId, 'offering_id' => $enrollment->offering_id,
                         'originating_branch_id' => $enrollment->originating_branch_id,
                         'academic_eligibility_snapshot_id' => $enrollment->academic_eligibility_snapshot_id,
+                        ...$provenance,
                     ]);
 
                     return ['enrollment_id' => $enrollment->id, 'correlation_id' => $event->correlation_id];
@@ -141,10 +153,12 @@ final class MaintainEnrollment
                         'state_reason' => $reason,
                     ]);
                     $locked->save();
+                    $provenance = $this->enrollmentProvenance($locked);
                     $event = $this->audit->record($actor->actorId, 'academic.enrollment.frozen', 'enrollment', $locked->id, $before, [
                         'lifecycle_state' => EnrollmentLifecycle::STATE_FROZEN,
                         'state_reason' => $reason,
                         'finance_gate_exit' => $exit,
+                        ...$provenance,
                     ]);
 
                     return ['enrollment_id' => $locked->id, 'lifecycle_state' => EnrollmentLifecycle::STATE_FROZEN, 'correlation_id' => $event->correlation_id];
@@ -156,8 +170,8 @@ final class MaintainEnrollment
     }
 
     /**
-     * Unfreeze returns a frozen seat to active. A frozen seat holds no
-     * capacity claim, so class/offering capacity is re-checked, and the
+     * Unfreeze returns a frozen seat to active. A frozen seat remains a
+     * live seat claim, so class/offering capacity is re-checked, and the
      * Finance gate is re-run exactly like activation: fresh signed evidence
      * is frozen on the row and an unsatisfied gate refuses the return.
      *
@@ -188,7 +202,11 @@ final class MaintainEnrollment
                         'state_reason' => null,
                     ]);
                     $locked->save();
-                    $event = $this->audit->record($actor->actorId, 'academic.enrollment.active', 'enrollment', $locked->id, $before, ['lifecycle_state' => EnrollmentLifecycle::STATE_ACTIVE]);
+                    $provenance = $this->enrollmentProvenance($locked);
+                    $event = $this->audit->record($actor->actorId, 'academic.enrollment.active', 'enrollment', $locked->id, $before, [
+                        'lifecycle_state' => EnrollmentLifecycle::STATE_ACTIVE,
+                        ...$provenance,
+                    ]);
 
                     return ['enrollment_id' => $locked->id, 'lifecycle_state' => EnrollmentLifecycle::STATE_ACTIVE, 'correlation_id' => $event->correlation_id];
                 }),
@@ -228,10 +246,12 @@ final class MaintainEnrollment
                         'state_reason' => $reason,
                     ]);
                     $locked->save();
+                    $provenance = $this->enrollmentProvenance($locked);
                     $event = $this->audit->record($actor->actorId, 'academic.enrollment.withdrawn', 'enrollment', $locked->id, $before, [
                         'lifecycle_state' => EnrollmentLifecycle::STATE_WITHDRAWN,
                         'state_reason' => $reason,
                         'finance_gate_exit' => $exit,
+                        ...$provenance,
                     ]);
 
                     return ['enrollment_id' => $locked->id, 'lifecycle_state' => EnrollmentLifecycle::STATE_WITHDRAWN, 'correlation_id' => $event->correlation_id];
@@ -246,7 +266,7 @@ final class MaintainEnrollment
      * Complete terminally marks assessed delivery with a mandatory basis and
      * verified evidence pinned on the row. A level-aware class requires
      * evidence (a released result of this seat or an approved progression
-     * decision for this student and class); a legacy class keeps the
+     * decision for this student and class); a class without a configured level keeps the
      * certified basis-only path, with optional evidence verified the same
      * way when supplied. No seat completes automatically.
      *
@@ -281,12 +301,14 @@ final class MaintainEnrollment
                         'completion_evidence_id' => $evidence['id'] ?? null,
                     ]);
                     $locked->save();
+                    $provenance = $this->enrollmentProvenance($locked);
                     $event = $this->audit->record($actor->actorId, 'academic.enrollment.completed', 'enrollment', $locked->id, $before, [
                         'lifecycle_state' => EnrollmentLifecycle::STATE_COMPLETED,
                         'completion_basis' => $basis,
                         'completion_evidence_kind' => $evidence['kind'] ?? null,
                         'completion_evidence_id' => $evidence['id'] ?? null,
                         'finance_gate_exit' => $exit,
+                        ...$provenance,
                     ]);
 
                     return ['enrollment_id' => $locked->id, 'lifecycle_state' => EnrollmentLifecycle::STATE_COMPLETED, 'correlation_id' => $event->correlation_id];
@@ -310,6 +332,16 @@ final class MaintainEnrollment
         try {
             return $this->idempotency->execute('academic.enrollment.transfer', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $enrollment, $targetClassId, $offeringId): array {
+                    // Transfers touch two class capacity counters and one
+                    // seat row. Lock both classes in stable id order before
+                    // the enrollment so concurrent class closure, activation,
+                    // and transfers cannot form a lock cycle.
+                    $sourceClassId = Enrollment::query()->whereKey($enrollment->id)->value('class_id');
+                    $classIds = array_values(array_unique(array_filter([(string) $sourceClassId, trim($targetClassId)])));
+                    sort($classIds, SORT_STRING);
+                    foreach ($classIds as $classId) {
+                        ClassModel::query()->whereKey($classId)->lockForUpdate()->firstOrFail();
+                    }
                     /** @var Enrollment $locked */
                     $locked = Enrollment::query()->whereKey($enrollment->id)->lockForUpdate()->firstOrFail();
                     $this->access->require($actor, self::CAPABILITY_APPROVE, RecordBranch::enrollmentBranch($locked), 'academic.enrollment_denied');
@@ -317,7 +349,7 @@ final class MaintainEnrollment
                     // receiving branch: the actor must hold the capability
                     // there too, not just on the source seat.
                     if ($offeringId !== null && $offeringId !== '') {
-                        $this->access->require($actor, self::CAPABILITY_APPROVE, $this->offeringBranch($offeringId), 'academic.enrollment_denied');
+                        $this->access->require($actor, self::CAPABILITY_APPROVE, $this->constraints->offeringBranch($offeringId), 'academic.enrollment_denied');
                     }
                     EnrollmentLifecycle::requireTransition($locked->lifecycle_state, EnrollmentLifecycle::STATE_TRANSFERRED);
                     if ($targetClassId === $locked->class_id) {
@@ -349,6 +381,7 @@ final class MaintainEnrollment
                         'academic_eligibility_snapshot_id' => $eligibilitySnapshotId,
                         'lifecycle_state' => EnrollmentLifecycle::STATE_REQUESTED,
                     ]);
+                    $provenance = $this->enrollmentProvenance($next);
                     $event = $this->audit->record($actor->actorId, 'academic.enrollment.transfer', 'enrollment', $next->id, $before, [
                         'previous_enrollment_id' => $locked->id,
                         'student_id' => $locked->student_id,
@@ -357,6 +390,7 @@ final class MaintainEnrollment
                         'offering_id' => $next->offering_id,
                         'academic_eligibility_snapshot_id' => $next->academic_eligibility_snapshot_id,
                         'lifecycle_state' => EnrollmentLifecycle::STATE_REQUESTED,
+                        ...$provenance,
                     ]);
 
                     return ['enrollment_id' => $next->id, 'previous_enrollment_id' => $locked->id, 'correlation_id' => $event->correlation_id];
@@ -375,11 +409,23 @@ final class MaintainEnrollment
         try {
             return $this->idempotency->execute('academic.enrollment.transition.'.$toState, $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $enrollment, $toState, $capability): array {
+                    if ($toState === EnrollmentLifecycle::STATE_ACTIVE) {
+                        FinancialCoverageLock::acquire((string) $enrollment->student_id);
+                        // Class capacity is the shared serialization point.
+                        // Lock it before the enrollment row so class terminal
+                        // transitions and seat activation use one order:
+                        // class, then enrollment (never the reverse).
+                        $classId = Enrollment::query()->whereKey($enrollment->id)->value('class_id');
+                        ClassModel::query()->whereKey($classId)->lockForUpdate()->firstOrFail();
+                    }
                     /** @var Enrollment $locked */
                     $locked = Enrollment::query()->whereKey($enrollment->id)->lockForUpdate()->firstOrFail();
                     $this->access->require($actor, $capability, RecordBranch::enrollmentBranch($locked), 'academic.enrollment_denied');
                     EnrollmentLifecycle::requireTransition($locked->lifecycle_state, $toState);
                     if ($toState === EnrollmentLifecycle::STATE_ACTIVE) {
+                        if (trim((string) $locked->student_id) !== trim((string) $enrollment->student_id)) {
+                            throw BusinessRejection::forCode('academic.enrollment_student_changed', 'the enrollment student changed while the financial coverage lock was acquired');
+                        }
                         $this->assertClassActive($locked->class_id);
                         $this->assertCapacity($locked->class_id);
                         if ($locked->offering_id !== null) {
@@ -391,7 +437,11 @@ final class MaintainEnrollment
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
                     $locked->forceFill(['lifecycle_state' => $toState]);
                     $locked->save();
-                    $event = $this->audit->record($actor->actorId, 'academic.enrollment.'.$toState, 'enrollment', $locked->id, $before, ['lifecycle_state' => $toState]);
+                    $provenance = $this->enrollmentProvenance($locked);
+                    $event = $this->audit->record($actor->actorId, 'academic.enrollment.'.$toState, 'enrollment', $locked->id, $before, [
+                        'lifecycle_state' => $toState,
+                        ...$provenance,
+                    ]);
 
                     return ['enrollment_id' => $locked->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
                 }),
@@ -414,12 +464,14 @@ final class MaintainEnrollment
         $this->applyGateEvidence($enrollment, $assessment);
         $enrollment->save();
 
+        $provenance = $this->enrollmentProvenance($enrollment);
         $this->audit->record($actor->actorId, 'academic.enrollment.financial_gate.satisfied', 'enrollment', $enrollment->id, null, [
             'financial_gate_satisfied' => $assessment['satisfied'],
             'financial_gate_uncovered' => $assessment['uncovered'],
             'financial_gate_remaining' => $assessment['remaining'],
             'financial_gate_evidence_sha256' => $assessment['digest'],
             'financial_gate_signature' => $assessment['signature'],
+            ...$provenance,
         ]);
 
         if (! $assessment['satisfied']) {
@@ -464,19 +516,7 @@ final class MaintainEnrollment
      */
     private function seatBranch(?string $offeringId, string $studentId): ?string
     {
-        return $this->offeringBranch($offeringId) ?? RecordBranch::studentBranchForId($studentId);
-    }
-
-    private function offeringBranch(?string $offeringId): ?string
-    {
-        $offeringId = trim((string) ($offeringId ?? ''));
-        if ($offeringId === '') {
-            return null;
-        }
-        /** @var Offering|null $offering */
-        $offering = Offering::query()->find($offeringId);
-
-        return $offering === null ? null : trim((string) $offering->branch_id);
+        return $this->constraints->seatBranch($offeringId, $studentId);
     }
 
     private function assertReason(string $reason): void
@@ -509,8 +549,8 @@ final class MaintainEnrollment
 
     /**
      * Verifies the assessed-delivery evidence pinned at completion. A
-     * level-aware class requires evidence; a legacy class accepts a
-     * basis-only completion but verifies supplied evidence the same way.
+     * level-aware class requires evidence; a class without a configured
+     * level accepts a basis-only completion but verifies supplied evidence the same way.
      *
      * @return array{kind: string, id: string}|null
      */
@@ -585,76 +625,49 @@ final class MaintainEnrollment
         return $snapshot->id;
     }
 
+    /** @return array{branch_id: string, campus_id: string, organization_id: string} */
+    private function enrollmentProvenance(Enrollment $enrollment): array
+    {
+        $branchId = RecordBranch::enrollmentBranch($enrollment);
+        $branch = $branchId === null ? null : Branch::query()->whereKey($branchId)->first();
+        if ($branch === null || $branch->lifecycle_state !== 'active') {
+            throw BusinessRejection::forCode('academic.enrollment_provenance_required', 'an enrollment event requires active branch provenance');
+        }
+        $scope = $branch->structureScope();
+        if ($scope->organizationId === '' || $scope->campusId === null) {
+            throw BusinessRejection::forCode('academic.enrollment_provenance_required', 'an enrollment event requires active campus organization provenance');
+        }
+
+        return ['branch_id' => (string) $branch->id, 'campus_id' => (string) $scope->campusId, 'organization_id' => $scope->organizationId];
+    }
+
     private function assertStudentActive(string $studentId): void
     {
-        /** @var Student|null $student */
-        $student = Student::query()->find($studentId);
-        if ($student === null) {
-            throw BusinessRejection::forCode('academic.student_unknown', 'enrollment requires a known student');
-        }
-        /** @var StudentStatus|null $status */
-        $status = StudentStatus::query()->where('student_id', $studentId)->orderByDesc('seq')->first();
-        if ($status === null || $status->status !== 'active') {
-            throw BusinessRejection::forCode('academic.student_not_active', 'enrollment requires a currently active student');
-        }
+        $this->constraints->assertStudentActive($studentId);
     }
 
     private function assertClassActive(string $classId): void
     {
-        /** @var ClassModel|null $class */
-        $class = ClassModel::query()->find($classId);
-        if ($class === null || $class->lifecycle_state !== ClassLifecycle::STATE_ACTIVE) {
-            throw BusinessRejection::forCode('academic.class_not_active', 'the class is not active');
-        }
+        $this->constraints->assertClassActive($classId);
     }
 
     private function assertPrerequisitesForClass(string $studentId, string $classId): void
     {
-        /** @var ClassModel $class */
-        $class = ClassModel::query()->whereKey($classId)->firstOrFail();
-        if ($class->program_version_level_id === null || $class->program_version_level_id === '') {
-            return;
-        }
-        /** @var ProgramVersionLevel $target */
-        $target = ProgramVersionLevel::query()->whereKey($class->program_version_level_id)->firstOrFail();
-        $violations = $this->history->prerequisiteViolations($studentId, $target);
-        if ($violations !== []) {
-            $keys = implode(', ', array_column($violations, 'level_key'));
-            throw BusinessRejection::forCode('academic.enrollment_prerequisite_unsatisfied', 'level prerequisites are unsatisfied: '.$keys);
-        }
+        $this->constraints->assertPrerequisitesForClass($studentId, $classId);
     }
 
     private function assertOfferingOpenAndMatchesClass(string $offeringId, string $classId): void
     {
-        /** @var Offering|null $offering */
-        $offering = Offering::query()->find($offeringId);
-        if ($offering === null || $offering->lifecycle_state !== Offering::STATE_OPEN) {
-            throw BusinessRejection::forCode('academic.offering_not_open', 'a new enrollment may target only an open offering');
-        }
-        /** @var ClassModel $class */
-        $class = ClassModel::query()->whereKey($classId)->firstOrFail();
-        if ($offering->academic_period_id !== $class->period_id || $offering->program_version_level_id !== $class->program_version_level_id) {
-            throw BusinessRejection::forCode('academic.enrollment_offering_mismatch', 'the enrollment offering must match the class period and level');
-        }
+        $this->constraints->assertOfferingOpenAndMatchesClass($offeringId, $classId);
     }
 
     private function assertOfferingCapacity(string $offeringId): void
     {
-        /** @var Offering $offering */
-        $offering = Offering::query()->whereKey($offeringId)->lockForUpdate()->firstOrFail();
-        $activeSeats = Enrollment::query()->where('offering_id', $offeringId)->where('lifecycle_state', 'active')->count();
-        if ($activeSeats >= $offering->capacity) {
-            throw BusinessRejection::forCode('academic.offering_full', sprintf('offering capacity of %d is exhausted', $offering->capacity));
-        }
+        $this->constraints->assertOfferingCapacity($offeringId);
     }
 
     private function assertCapacity(string $classId): void
     {
-        /** @var ClassModel $class */
-        $class = ClassModel::query()->whereKey($classId)->lockForUpdate()->firstOrFail();
-        $activeSeats = Enrollment::query()->where('class_id', $classId)->where('lifecycle_state', 'active')->count();
-        if ($activeSeats >= $class->capacity) {
-            throw BusinessRejection::forCode('academic.class_full', sprintf('class capacity of %d is exhausted', $class->capacity));
-        }
+        $this->constraints->assertCapacity($classId);
     }
 }

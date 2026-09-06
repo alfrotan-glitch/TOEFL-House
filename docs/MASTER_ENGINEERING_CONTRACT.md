@@ -3250,4 +3250,27 @@ NO KNOWN MATERIAL GAP MAY REMAIN.
 
 
 
+
+APPROVED ADDENDUM — EMPLOYEE WORKSPACE PRINCIPLE
+
+The Employee Workspace Principle is an approved permanent product and architecture addendum to this contract. The complete normative text is maintained at:
+
+docs/governance/employee-workspace-principle.md
+
+The TOEFL House platform must provide dynamically composed, role-aware but not role-locked operational workspaces for employees and distinct management workspaces. Workspaces are presentation and workflow layers over canonical domain authorities; aggregation, personalization, tasks, notifications, and workspace state must never create competing business truth or authorization. Every sensitive action remains server-authoritative, lifecycle-aware, scope-aware, and fail-closed. The addendum applies to authorization, employee lifecycle, tasks, approvals, search, reporting, workflow, APIs, frontend architecture, event/outbox architecture, personalization, auditability, and product quality.
+
+
+APPROVED GOVERNING ARCHITECTURE GRAPH — MANDATORY AND NON-NEGOTIABLE
+
+The integrated enterprise architecture graph at:
+
+docs/architecture/review/2026-09-05-integrated-system-architecture-graph.md
+
+is incorporated as the governing target architecture specification for TOEFL House. It is mandatory and non-negotiable for subsequent repository audit, architecture decisions, implementation contracts, schema/API design, workflow design, authorization design, frontend/workspace design, event/outbox design, reporting, documentation, and acceptance review.
+
+The graph establishes one enterprise organism with one authoritative owner per major fact, typed cross-domain relationships, explicit command/query/event paths, server-enforced authority, immutable historical provenance, Finance monetary ownership, distinct workflow/task/approval/work-item/exception/notification concepts, transactional outbox behavior, idempotent consumers, and defined duplicate/concurrent/stale/unauthorized/retry failure behavior. A repository artifact that conflicts with the graph is a conformance defect and must be corrected or explicitly rejected by a superseding ADR; no implementation convenience, existing route, UI, report, search index, workflow artifact, document, event, or notification may silently override it.
+
+The graph is a target architecture specification, not a production-conformance claim. Conformance must be established by the subsequent static code/schema/API audit and deferred runtime validation.
+
+
 END OF CANONICAL MASTER ENGINEERING CONTRACT

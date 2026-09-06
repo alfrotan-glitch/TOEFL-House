@@ -9,8 +9,9 @@ use App\Support\Errors\BusinessRejection;
 
 /**
  * Visitor pipeline state machine. A lead can move forward/back within the
- * pipeline while it stays open; converted/lost/archived are terminal (lost may
- * be revived to contacted as a deliberate re-engagement, which is audited).
+ * pipeline while it stays open; converted and archived are terminal, while
+ * lost is a closed state that may be deliberately re-engaged to contacted and
+ * audited.
  */
 final class VisitorStatus
 {
@@ -56,6 +57,18 @@ final class VisitorStatus
             Visitor::STATUS_LOST => [Visitor::STATUS_CONTACTED, Visitor::STATUS_ARCHIVED],
             Visitor::STATUS_ARCHIVED => [],
         ];
+    }
+
+    /** @return list<string> */
+    public static function nextStatuses(string $from): array
+    {
+        return self::transitions()[$from] ?? [];
+    }
+
+    /** @return list<string> */
+    public static function nextPipelineStatuses(string $from): array
+    {
+        return array_values(array_filter(self::nextStatuses($from), static fn (string $status): bool => $status !== Visitor::STATUS_CONVERTED));
     }
 
     public static function allowsTransition(string $from, string $to): bool

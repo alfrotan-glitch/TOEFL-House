@@ -45,6 +45,12 @@ final class StudentStatusRegistry
         return [self::STATUS_SUSPENDED, self::STATUS_WITHDRAWN];
     }
 
+    /** @return list<string> */
+    public static function nextStatuses(string $from): array
+    {
+        return self::TRANSITIONS[$from] ?? [];
+    }
+
     public static function allowsTransition(string $from, string $to): bool
     {
         return in_array($to, self::TRANSITIONS[$from] ?? [], true);

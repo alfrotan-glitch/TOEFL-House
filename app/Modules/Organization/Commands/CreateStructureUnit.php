@@ -104,7 +104,12 @@ final class CreateStructureUnit
                         'branch',
                         $outcome['id'],
                         null,
-                        ['campus_id' => $campus->id, 'effective_from' => $effectiveFrom->startOfDay()->toDateString()],
+                        [
+                            'campus_id' => $campus->id,
+                            'effective_from' => $effectiveFrom->startOfDay()->toDateString(),
+                            'branch_id' => $outcome['id'],
+                            'organization_id' => $campus->organization_id,
+                        ],
                         $outcome['correlation_id'],
                     );
 

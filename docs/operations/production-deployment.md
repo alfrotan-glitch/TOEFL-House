@@ -15,9 +15,12 @@ the exact value to supply is called out as a `TODO`.
 | Web server | nginx (TLS termination) + PHP-FPM | nginx 1.x / php8.2-fpm |
 | OS | Any Linux that ships the above (Debian/Ubuntu reference) | — |
 
-There is **no** Node.js/frontend build (the interface is server-rendered
-Blade), **no** Redis, **no** message broker, and **no** separate worker or
-scheduler process — see §9/§10.
+The employee console is a React/TypeScript application bundled by Vite; the
+module pages remain transitional Blade screens. Production therefore requires
+Node.js/npm during release build, but no Node process remains at runtime. There
+is **no** Redis or message broker. The core request path uses PHP-FPM; the
+Integrations job/relay path is not enabled by this synchronous deployment and
+requires an explicit operator/scheduler deployment before use — see §9/§10.
 
 ## 2. Required environment variables
 
@@ -85,9 +88,20 @@ repository's `docs/environment` recovery procedure for a from-scratch build).
 
 ## 6. Frontend build
 
-**None.** The employee console is server-rendered Blade; there is no
-`package.json`, no Vite, and no build step. `artisan view:cache` compiles the
-Blade templates (see §8) — that is the entire "frontend build".
+The selected interactive root is the standalone React/TypeScript workspace in
+`resources/js/app.tsx`. The release host needs Node.js/npm and must build the
+Vite asset before the release goes live:
+
+```
+npm install --no-audit --no-fund
+npm run build
+```
+
+This writes the release's `public/build` manifest/assets. The Blade module
+pages are transitional transport/rendering surfaces, not a second interactive
+workspace architecture. `artisan view:cache` still compiles those Blade
+templates (see §8). The repository currently has no npm lockfile, so adding a
+lockfile and verifying the supply-chain policy remain pre-production work.
 
 ## 7. Deploying migrations
 
@@ -113,18 +127,23 @@ a cached config is a snapshot and must not be stale.)
 
 ## 9. Workers
 
-**Not required.** `QUEUE_CONNECTION=sync`; the application dispatches no
-queued jobs. There is no `queue:work` process to start or supervise. The
-Integrations module (self-contained, not exposed on the production HTTP
-surface) has its own command-driven job model; if an operator later enables
-integrations they would add an explicit trigger — that is out of scope for the
-current deployment and is intentionally not invented here.
+**Not required for the core request path.** `QUEUE_CONNECTION=sync`; the
+application dispatches no Laravel queue jobs. There is no `queue:work` process
+to start or supervise. The Integrations module has a separate durable
+`JobRun`/`ProcessJobRun` model and the outbox relay has explicit leases and
+idempotent consumers, but those paths are not enabled by this deployment.
 
-## 10. Scheduler
+## 10. Scheduler and integration relay
 
-**Not required.** `routes/console.php` registers no scheduled tasks. The core
-business workflows are request-driven. There is no `schedule:work`/cron to
-configure for the current system.
+The current checkout has no registered `routes/console.php` command,
+framework scheduler entry, cron unit, or process supervisor for
+`EnqueueJobRun`, `ProcessJobRun`, `ProcessDeliveries`, or `outbox.relay`.
+This is an explicit pre-production/runtime gap, not a claim that the relay is
+operational. Before enabling it, provision a durable verified employee actor
+with the required integration capabilities, add an explicit command/schedule
+entry, supervise retries, and verify the lease/consumer behavior. Do not use a
+synthetic actor or silently infer a scheduler identity. Runtime verification
+is deferred by the architecture review restriction.
 
 ## 11. HTTPS / web server
 
@@ -204,16 +223,18 @@ green health check):
 
 1. Fresh checkout of `<git-ref>` into `releases/<timestamp>`.
 2. `composer install --no-dev --optimize-autoloader`.
-3. Copy the persistent `.env`; enforce `APP_ENV=production`, `APP_DEBUG=false`,
+3. `npm install --no-audit --no-fund && npm run build` to produce the React/Vite
+   `public/build` assets.
+4. Copy the persistent `.env`; enforce `APP_ENV=production`, `APP_DEBUG=false`,
    non-empty `APP_KEY`.
-4. **Pre-deploy backup** via `deploy/backup.sh` (fresh dump of the live
+5. **Pre-deploy backup** via `deploy/backup.sh` (fresh dump of the live
    database, taken moments before it is migrated). Without the PostgreSQL
    client tools the deploy is refused — migrations never run without a backup.
-5. `php artisan migrate --force` (forward-only).
-6. Ensure runtime dirs exist and are owned by the web user.
-7. `config:cache` + `route:cache` + `view:cache`.
-8. Switch `current` → new release; reload FPM + nginx.
-9. Poll `GET /health` until 200 (or auto-rollback).
+6. `php artisan migrate --force` (forward-only).
+7. Ensure runtime dirs exist and are owned by the web user.
+8. `config:cache` + `route:cache` + `view:cache`.
+9. Switch `current` → new release; reload FPM + nginx.
+10. Poll `GET /health` until 200 (or auto-rollback).
 
 Older releases are pruned to the last three.
 
@@ -236,7 +257,8 @@ Older releases are pruned to the last three.
 Before declaring a deployment healthy, the full gate must be green:
 
 ```
-php artisan migrate:fresh --seed:off   # clean 100-migration build
+php artisan migrate:fresh --seed:off   # disposable clean-schema verification
+npm install --no-audit --no-fund && npm run build
 vendor/bin/phpunit                     # full feature suite
 vendor/bin/phpstan analyse             # static analysis
 vendor/bin/pint --test                 # formatting

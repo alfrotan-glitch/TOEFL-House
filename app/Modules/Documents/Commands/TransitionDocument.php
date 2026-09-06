@@ -12,6 +12,8 @@ use App\Modules\Documents\Models\DocumentVerification;
 use App\Modules\Documents\Models\DocumentVersion;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
+use App\Support\Authorization\PersonBranchScope;
+use App\Support\Authorization\StructureScope;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
@@ -44,13 +46,13 @@ final class TransitionDocument
         try {
             return $this->idempotency->execute('documents.submit', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $document, $contentHash, $storageRef): array {
-                    $outcome = $this->access->decide($actor, RegisterDocument::CAPABILITY, null);
+                    /** @var Document $locked */
+                    $locked = Document::query()->whereKey($document->id)->lockForUpdate()->firstOrFail();
+                    $scope = PersonBranchScope::resolve($locked->subject_person_id);
+                    $outcome = $this->access->decide($actor, RegisterDocument::CAPABILITY, $scope);
                     if (! $outcome->allowed) {
                         throw AuthorizationDenied::forCode('documents.submit_denied', $outcome->reason);
                     }
-
-                    /** @var Document $locked */
-                    $locked = Document::query()->whereKey($document->id)->lockForUpdate()->firstOrFail();
                     DocumentLifecycle::requireTransition($locked->lifecycle_state, DocumentLifecycle::STATE_SUBMITTED);
 
                     /** @var int $maxVersion */
@@ -71,6 +73,7 @@ final class TransitionDocument
 
                     $event = $this->audit->record($actor->actorId, 'documents.submit', 'document', $locked->id, $before, [
                         'lifecycle_state' => DocumentLifecycle::STATE_SUBMITTED, 'version_no' => $versionNo,
+                        'branch_id' => $scope->branchId, 'organization_id' => $scope->organizationId,
                     ]);
 
                     return ['document_id' => $locked->id, 'version_no' => $versionNo, 'lifecycle_state' => DocumentLifecycle::STATE_SUBMITTED, 'correlation_id' => $event->correlation_id];
@@ -89,13 +92,13 @@ final class TransitionDocument
         try {
             return $this->idempotency->execute('documents.verify', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($verifier, $document, $passes, $reason): array {
-                    $outcome = $this->access->decide($verifier, self::CAPABILITY, null);
+                    /** @var Document $locked */
+                    $locked = Document::query()->whereKey($document->id)->lockForUpdate()->firstOrFail();
+                    $scope = PersonBranchScope::resolve($locked->subject_person_id);
+                    $outcome = $this->access->decide($verifier, self::CAPABILITY, $scope);
                     if (! $outcome->allowed) {
                         throw AuthorizationDenied::forCode('documents.verify_denied', $outcome->reason);
                     }
-
-                    /** @var Document $locked */
-                    $locked = Document::query()->whereKey($document->id)->lockForUpdate()->firstOrFail();
                     if ($locked->lifecycle_state !== DocumentLifecycle::STATE_SUBMITTED) {
                         throw BusinessRejection::forCode('documents.verify_wrong_state', sprintf('only a submitted document can be verified, state is %s', $locked->lifecycle_state));
                     }
@@ -129,6 +132,7 @@ final class TransitionDocument
                         'version_no' => (int) $currentVersion->version_no,
                         'result' => $passes ? 'pass' : 'fail',
                         'reason' => $reason,
+                        'branch_id' => $scope->branchId, 'organization_id' => $scope->organizationId,
                     ]);
 
                     return ['document_id' => $locked->id, 'version_no' => (int) $currentVersion->version_no, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
@@ -165,20 +169,20 @@ final class TransitionDocument
         try {
             return $this->idempotency->execute('documents.'.$verb, $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $document, $toState, $verb): array {
-                    $outcome = $this->access->decide($actor, self::CAPABILITY, null);
+                    /** @var Document $locked */
+                    $locked = Document::query()->whereKey($document->id)->lockForUpdate()->firstOrFail();
+                    $scope = PersonBranchScope::resolve($locked->subject_person_id);
+                    $outcome = $this->access->decide($actor, self::CAPABILITY, $scope);
                     if (! $outcome->allowed) {
                         throw AuthorizationDenied::forCode('documents.transition_denied', $outcome->reason);
                     }
-
-                    /** @var Document $locked */
-                    $locked = Document::query()->whereKey($document->id)->lockForUpdate()->firstOrFail();
                     DocumentLifecycle::requireTransition($locked->lifecycle_state, $toState);
 
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
                     $locked->forceFill(['lifecycle_state' => $toState]);
                     $locked->save();
 
-                    $event = $this->audit->record($actor->actorId, 'documents.'.$verb, 'document', $locked->id, $before, ['lifecycle_state' => $toState]);
+                    $event = $this->audit->record($actor->actorId, 'documents.'.$verb, 'document', $locked->id, $before, ['lifecycle_state' => $toState, 'branch_id' => $scope->branchId, 'organization_id' => $scope->organizationId]);
 
                     return ['document_id' => $locked->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
                 }),

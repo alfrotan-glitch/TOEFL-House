@@ -24,15 +24,17 @@ return new class extends Migration
             $table->integer('max_attempts');
             $table->integer('requeues')->default(0);
             $table->timestampTz('next_run_at')->nullable();
+            $table->timestampTz('lease_until')->nullable();
             $table->string('last_error')->nullable();
             $table->string('delivered_ref')->nullable();
             $table->timestampTz('delivered_at')->nullable();
             $table->char('created_by', 36);
             $table->timestamps();
             $table->foreign('endpoint_id')->references('id')->on('integration_endpoints');
+            $table->foreign('created_by')->references('id')->on('people');
         });
-        DB::statement("ALTER TABLE integration_deliveries ADD CONSTRAINT integration_deliveries_status_check CHECK (status IN ('queued','failed','delivered','dead_letter'))");
-        DB::statement('ALTER TABLE integration_deliveries ADD CONSTRAINT integration_deliveries_attempts_check CHECK (attempts >= 0 AND max_attempts BETWEEN 1 AND 10 AND requeues >= 0)');
+        DB::statement("ALTER TABLE integration_deliveries ADD CONSTRAINT integration_deliveries_status_check CHECK (status IN ('queued','processing','failed','delivered','dead_letter'))");
+        DB::statement("ALTER TABLE integration_deliveries ADD CONSTRAINT integration_deliveries_attempts_check CHECK (attempts >= 0 AND max_attempts BETWEEN 1 AND 10 AND requeues >= 0 AND ((status = 'processing') = (lease_until IS NOT NULL)))");
         DB::statement('ALTER TABLE integration_deliveries ADD CONSTRAINT integration_deliveries_evidence_check CHECK ((status = \'delivered\') = (delivered_ref IS NOT NULL AND delivered_at IS NOT NULL))');
         DB::statement('CREATE UNIQUE INDEX integration_deliveries_one_per_key ON integration_deliveries (endpoint_id, idempotency_key)');
         DB::statement(<<<'SQL'

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Modules\Finance\Queries;
 
 use App\Modules\Academic\Models\Enrollment;
-use App\Modules\Finance\Commands\AllocatePayment;
 use App\Modules\Finance\Domain\FinancialGateEvidence;
 use App\Modules\Finance\Models\EnrollmentInstallmentPlan;
 use App\Modules\Finance\Models\FinancialCredit;
@@ -25,7 +24,9 @@ use Illuminate\Support\Carbon;
  */
 final class FinancialGateQuery
 {
-    public function __construct(private readonly AllocatePayment $allocations) {}
+    public function __construct(
+        private readonly FinancialBalanceQuery $balances,
+    ) {}
 
     /** @return array<string, mixed> */
     public function assess(Enrollment $enrollment): array
@@ -40,7 +41,7 @@ final class FinancialGateQuery
         $originalTotal = '0.00';
         $uncovered = '0.00';
         foreach ($obligations as $obligation) {
-            $remaining = $this->allocations->obligationRemaining($obligation);
+            $remaining = $this->balances->obligationRemaining($obligation);
             $originalTotal = bcadd($originalTotal, (string) $obligation->original_amount, 2);
             $uncovered = bcadd($uncovered, $remaining, 2);
             $obligationEvidence[] = [
@@ -57,6 +58,9 @@ final class FinancialGateQuery
         $installments = EnrollmentInstallmentPlan::query()
             ->where('student_id', $studentId)
             ->where('lifecycle_state', EnrollmentInstallmentPlan::STATE_APPROVED)
+            ->where(function ($query) use ($enrollment): void {
+                $query->whereNull('offering_id')->orWhere('offering_id', $enrollment->offering_id ?? '');
+            })
             ->get();
         $today = Carbon::today()->toDateString();
         $exceptions = FinancialGateException::query()
@@ -145,7 +149,7 @@ final class FinancialGateQuery
         $originalTotal = '0.00';
         $uncovered = '0.00';
         foreach ($obligations as $obligation) {
-            $remaining = $this->allocations->obligationRemaining($obligation);
+            $remaining = $this->balances->obligationRemaining($obligation);
             $originalTotal = bcadd($originalTotal, (string) $obligation->original_amount, 2);
             $uncovered = bcadd($uncovered, $remaining, 2);
             $obligationEvidence[] = [

@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Model;
  *
  * @property string $id
  * @property string $name
+ * @property string $organization_id
  */
 final class Dashboard extends Model
 {
@@ -19,5 +20,5 @@ final class Dashboard extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'name', 'created_by'];
+    protected $fillable = ['id', 'name', 'organization_id', 'created_by'];
 }

@@ -20,6 +20,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string $lifecycle_state
  * @property string|null $placement_profile_id
  * @property string|null $academic_eligibility_snapshot_id
+ * @property string|null $originating_branch_id
+ * @property string|null $current_home_branch_id
  */
 final class Applicant extends Model
 {
@@ -27,7 +29,7 @@ final class Applicant extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'person_id', 'program_interest', 'lifecycle_state', 'recorded_by', 'placement_profile_id', 'academic_eligibility_snapshot_id'];
+    protected $fillable = ['id', 'person_id', 'program_interest', 'lifecycle_state', 'recorded_by', 'placement_profile_id', 'academic_eligibility_snapshot_id', 'originating_branch_id', 'current_home_branch_id'];
 
     /** @return BelongsTo<Person, $this> */
     public function person(): BelongsTo

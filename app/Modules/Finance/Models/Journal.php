@@ -22,5 +22,5 @@ final class Journal extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'period_id', 'source_type', 'source_id', 'reason', 'posted_by'];
+    protected $fillable = ['id', 'period_id', 'source_type', 'source_id', 'reason', 'posted_by', 'reversal_of_id'];
 }

@@ -18,6 +18,9 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $base_amount
  * @property array<string, mixed> $snapshot
  * @property string $lifecycle_state
+ * @property string|null $resolution_ref
+ * @property string|null $resolved_by
+ * @property string|null $replacement_calculation_id
  */
 final class PayrollCalculation extends Model
 {
@@ -25,7 +28,7 @@ final class PayrollCalculation extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'period_id', 'employment_id', 'base_amount', 'snapshot', 'lifecycle_state', 'held_reason', 'prepared_by'];
+    protected $fillable = ['id', 'period_id', 'employment_id', 'base_amount', 'snapshot', 'lifecycle_state', 'held_reason', 'prepared_by', 'resolution_ref', 'resolved_by', 'replacement_calculation_id'];
 
     protected $casts = ['snapshot' => 'array'];
 }

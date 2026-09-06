@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Modules\Academic\Domain\RecordBranch;
 use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Admissions\Commands\DecideAdmission;
 use App\Modules\Admissions\Commands\EnrollAdmittedApplicant;
@@ -37,32 +38,70 @@ final class StudentsController extends Controller
 {
     public function index(): View
     {
+        $visible = $this->authorizedBranches('students.manage');
+
         return view('students.index', [
-            'students' => $this->studentsWithStatus()->limit(200)->get(),
-            'activeCount' => $this->activeStudentCount(),
+            'students' => $this->studentsWithStatus($visible)->limit(200)->get(),
+            'activeCount' => $this->activeStudentCount($visible),
         ]);
     }
 
     /** Count of students whose latest status row is active. */
-    private function activeStudentCount(): int
+    private function activeStudentCount(array $visible): int
     {
+
         return Student::query()
+            ->where(function ($query) use ($visible): void {
+                $query->whereIn('students.current_home_branch_id', $visible)
+                    ->orWhere(function ($query) use ($visible): void {
+                        $query->whereNull('students.current_home_branch_id')
+                            ->whereIn('students.originating_branch_id', $visible);
+                    });
+            })
             ->whereExists(function ($query): void {
                 $query->selectRaw('1')
                     ->from('student_statuses as latest')
                     ->whereColumn('latest.student_id', 'students.id')
                     ->where('latest.status', 'active')
-                    ->whereRaw('latest.id = (select ss.id from student_statuses ss where ss.student_id = students.id order by ss.effective_from desc, ss.id desc limit 1)');
+                    ->whereRaw('latest.id = (select ss.id from student_statuses ss where ss.student_id = students.id order by ss.seq desc limit 1)');
             })
             ->count();
     }
 
     public function applicants(): View
     {
+        $visible = $this->authorizedBranches('admissions.review');
+        $applicantIds = Applicant::query()
+            ->leftJoin('placement_profiles as profile', 'profile.id', '=', 'applicants.placement_profile_id')
+            ->where(function ($query) use ($visible): void {
+                $query->whereIn('applicants.current_home_branch_id', $visible)
+                    ->orWhere(function ($query) use ($visible): void {
+                        $query->whereNull('applicants.current_home_branch_id')
+                            ->whereIn('applicants.originating_branch_id', $visible);
+                    })
+                    ->orWhere(function ($query) use ($visible): void {
+                        $query->whereNull('applicants.current_home_branch_id')
+                            ->whereNull('applicants.originating_branch_id')
+                            ->whereIn('profile.current_home_branch_id', $visible);
+                    })
+                    ->orWhere(function ($query) use ($visible): void {
+                        $query->whereNull('applicants.current_home_branch_id')
+                            ->whereNull('applicants.originating_branch_id')
+                            ->whereNull('profile.current_home_branch_id')
+                            ->whereIn('profile.originating_branch_id', $visible);
+                    });
+            })->select('applicants.id');
+
+        $registrationBranches = $this->authorizedBranches('admissions.register');
+
         return view('students.applicants', [
-            'applicants' => Applicant::query()->orderByDesc('created_at')->limit(200)->get(),
-            'people' => Person::query()->where('verification_state', 'verified')->orderBy('legal_name')->limit(300)->get(),
+            'applicants' => Applicant::query()->whereIn('id', $applicantIds)->orderByDesc('created_at')->limit(200)->get(),
+            'people' => $registrationBranches !== []
+                ? Person::query()->where('verification_state', 'verified')->whereIn('home_branch_id', $registrationBranches)->orderBy('legal_name')->limit(300)->get()
+                : collect(),
+            'branches' => Branch::query()->whereIn('id', $visible)->where('lifecycle_state', 'active')->orderBy('name')->get(),
             'pendingDecisions' => AdmissionDecision::query()
+                ->whereIn('applicant_id', $applicantIds)
                 ->whereIn('lifecycle_state', ['proposed', 'reviewed'])
                 ->orderByDesc('created_at')->limit(200)->get(),
         ]);
@@ -73,6 +112,7 @@ final class StudentsController extends Controller
         $input = $request->validate([
             'person_id' => ['required', 'string'],
             'program_interest' => ['required', 'string', 'max:255'],
+            'branch_id' => ['required', 'string'],
         ]);
 
         app(RegisterApplicant::class)->register(
@@ -80,6 +120,8 @@ final class StudentsController extends Controller
             $input['person_id'],
             $input['program_interest'],
             $this->idempotencyKey('admissions.register'),
+            null,
+            $input['branch_id'] ?? null,
         );
 
         return redirect()->route('students.applicants')->with('success', 'Applicant registered.');
@@ -151,22 +193,29 @@ final class StudentsController extends Controller
     public function show(string $studentId): View
     {
         $student = Student::query()->findOrFail($studentId);
+        $branchId = RecordBranch::studentBranchForId($student->id);
+        $this->requireBranchCapability('students.manage', $branchId, 'students.show', 'student', $student->id);
+        $financeObligationBranches = $this->authorizedBranches('finance.obligation');
+        $financePaymentBranches = $this->authorizedBranches('finance.payment');
+        $includeFinance = $financeObligationBranches !== [] && $financePaymentBranches !== [];
         $statuses = StudentStatus::query()
             ->where('student_id', $student->id)
             ->orderBy('effective_from')->orderBy('id')->get();
 
         return view('students.show', [
             'student' => $student,
-            'lifecycle' => (new StudentLifecycleQuery)->for($student),
+            'lifecycle' => (new StudentLifecycleQuery)->for($student, null, $includeFinance, false, $financeObligationBranches, $financePaymentBranches),
             'statuses' => $statuses,
             'guardians' => GuardianRelationship::query()
                 ->where('student_id', $student->id)
                 ->orderBy('id')->limit(100)->get(),
-            'people' => Person::query()->where('verification_state', 'verified')->orderBy('legal_name')->limit(300)->get(),
+            'people' => $this->branchCapabilityAllowed('students.guardian', $branchId)
+                ? Person::query()->where('verification_state', 'verified')->whereIn('home_branch_id', $this->authorizedBranches('students.guardian'))->orderBy('legal_name')->limit(300)->get()
+                : collect(),
             'enrollments' => Enrollment::query()
                 ->where('student_id', $student->id)
                 ->orderByDesc('created_at')->limit(50)->get(),
-            'branches' => Branch::query()->where('lifecycle_state', 'active')->orderBy('name')->get(),
+            'branches' => Branch::query()->whereIn('id', $this->authorizedBranches('students.transfer'))->where('lifecycle_state', 'active')->orderBy('name')->get(),
         ]);
     }
 
@@ -281,10 +330,12 @@ final class StudentsController extends Controller
 
     public function verifyGuardian(Request $request, string $relationshipId): RedirectResponse
     {
+        $input = $request->validate(['evidence_ref' => ['required', 'string', 'max:255']]);
         app(MaintainGuardianRelationship::class)->verify(
             $this->actor(),
             GuardianRelationship::query()->findOrFail($relationshipId),
             $this->idempotencyKey('students.guardian.verify'),
+            $input['evidence_ref'],
         );
 
         return redirect()->back()->with('success', 'Guardian relationship verified.');
@@ -302,13 +353,21 @@ final class StudentsController extends Controller
     }
 
     /** @return Builder<Student> */
-    private function studentsWithStatus(): Builder
+    private function studentsWithStatus(array $visible): Builder
     {
+
         return Student::query()
             ->select('students.*')
+            ->where(function ($query) use ($visible): void {
+                $query->whereIn('students.current_home_branch_id', $visible)
+                    ->orWhere(function ($query) use ($visible): void {
+                        $query->whereNull('students.current_home_branch_id')
+                            ->whereIn('students.originating_branch_id', $visible);
+                    });
+            })
             ->leftJoin('student_statuses as current_status_row', function ($join): void {
                 $join->on('current_status_row.student_id', '=', 'students.id')
-                    ->whereRaw('current_status_row.id = (select ss.id from student_statuses ss where ss.student_id = students.id order by ss.effective_from desc, ss.id desc limit 1)');
+                    ->whereRaw('current_status_row.id = (select ss.id from student_statuses ss where ss.student_id = students.id order by ss.seq desc limit 1)');
             })
             ->selectRaw('current_status_row.status as current_status')
             ->orderBy('students.student_code');

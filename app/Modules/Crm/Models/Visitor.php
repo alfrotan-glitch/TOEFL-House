@@ -16,6 +16,11 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * us, from where, what they want, who owns the follow-up, and where in the
  * pipeline they sit. Anonymous leads are first-class (person_id NULL) and are
  * never fabricated to a person. Branch provenance is immutable once assigned.
+ * CRM does not merge records in place: duplicate captures are rejected and
+ * historical records remain immutable evidence; any governed merge would need
+ * an explicit, separately audited data-governance operation. Conversion is a
+ * terminal handoff: open follow-ups are cancelled and separately audited in
+ * the same transaction.
  *
  * @property string $id
  * @property string $visitor_code
@@ -35,6 +40,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * @property string|null $origin_branch_id
  * @property string $contact_key
  * @property string $created_by
+ * @property string|null $updated_by
  */
 final class Visitor extends Model
 {
@@ -128,6 +134,12 @@ final class Visitor extends Model
     public function conversion(): HasOne
     {
         return $this->hasOne(VisitorConversion::class);
+    }
+
+    /** @return HasMany<VisitorConversionHandoff, $this> */
+    public function conversionHandoffs(): HasMany
+    {
+        return $this->hasMany(VisitorConversionHandoff::class);
     }
 
     public function isOpen(): bool

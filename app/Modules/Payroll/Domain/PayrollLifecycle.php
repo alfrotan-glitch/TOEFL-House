@@ -10,7 +10,8 @@ use App\Support\Errors\BusinessRejection;
  * Registry rules (foundation 32/36 and the concurrency contract):
  * payroll periods close under control and never reopen; calculations are
  * prepared, held for review when the contract is silent, consumed by an
- * approved result, or superseded by a recalculation — history retained.
+ * approved result, or superseded by a prepared replacement through an
+ * explicit evidenced resolution — history retained.
  */
 final class PayrollLifecycle
 {

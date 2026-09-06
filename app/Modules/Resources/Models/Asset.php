@@ -15,5 +15,5 @@ final class Asset extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'code', 'name', 'category', 'location', 'acquired_on', 'lifecycle_state'];
+    protected $fillable = ['id', 'organization_id', 'originating_branch_id', 'code', 'name', 'category', 'location', 'acquired_on', 'lifecycle_state'];
 }

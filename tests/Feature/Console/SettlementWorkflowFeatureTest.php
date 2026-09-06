@@ -10,7 +10,8 @@ use App\Modules\Hr\Models\ContractVersion;
 use App\Modules\Hr\Models\Employment;
 use App\Modules\Identity\Models\Person;
 use App\Modules\Identity\Models\UserAccount;
-use App\Modules\Payroll\Models\FinalSettlement;
+use App\Modules\Organization\Models\Branch;
+use App\Modules\Finance\Models\EmploymentSettlement;
 use App\Modules\Payroll\Models\SettlementProposal;
 use App\Support\Identifiers\RandomIdentifier;
 use Illuminate\Support\Facades\DB;
@@ -38,6 +39,9 @@ final class SettlementWorkflowFeatureTest extends TestCase
     {
         parent::setUp();
         $this->personWithAuthority($this->personId, []);
+        $branch = Branch::query()->create(['id' => RandomIdentifier::new(), 'name' => 'Settlement Workflow Branch', 'lifecycle_state' => 'active']);
+        $this->attachBranchToBootstrapOrganization($branch->id);
+        Person::query()->whereKey($this->personId)->update(['home_branch_id' => $branch->id]);
 
         $manager = $this->grantedActor('swf-manager-1', ['hr.employ', 'hr.terminate', 'access.assign_position']);
         $employment = app(MaintainEmployment::class)->employ($manager, $this->personId, 'swf-emp-1');
@@ -89,7 +93,7 @@ final class SettlementWorkflowFeatureTest extends TestCase
         $this->makeEmployee('swf-hr-1', ['payroll.clear_hr'], 'hr-clearer');
         $this->makeEmployee('swf-fin-1', ['payroll.clear_finance'], 'finance-clearer');
         $this->makeEmployee('swf-prep-1', ['payroll.settle'], 'settlement-preparer');
-        $this->makeEmployee('swf-appr-1', ['payroll.settle_approve'], 'settlement-approver');
+        $this->makeEmployee('swf-appr-1', ['finance.employment_settlement'], 'settlement-approver');
 
         // A proposal before both clearances exist is rejected by the domain.
         $this->signIn('settlement-preparer');
@@ -130,18 +134,18 @@ final class SettlementWorkflowFeatureTest extends TestCase
 
         // The preparer cannot approve her own proposal.
         $proposalId = DB::table(DB::connection()->getTablePrefix().'settlement_proposals')->where('employment_id', $this->employmentId)->value('id');
-        $this->post('/payroll/settlements/'.$proposalId.'/approve', [], ['referer' => 'http://localhost/payroll'])
-            ->assertRedirect('/payroll')
-            ->assertSessionHas('error_code', 'payroll.settle_denied');
+        $this->post('/finance/employment-settlements/'.$proposalId.'/approve', [], ['referer' => 'http://localhost/finance'])
+            ->assertRedirect('/finance')
+            ->assertSessionHas('error_code', 'finance.employment_settlement_denied');
 
-        // A different session signed in as the approver records the settlement.
+        // A different session signed in as the Finance approver records the settlement.
         $this->signOut();
         $this->signIn('settlement-approver');
-        $this->post('/payroll/settlements/'.$proposalId.'/approve')->assertRedirect('/payroll');
+        $this->post('/finance/employment-settlements/'.$proposalId.'/approve')->assertRedirect('/finance');
         $this->assertDatabaseHas(DB::connection()->getTablePrefix().'settlement_proposals', [
             'id' => $proposalId, 'lifecycle_state' => 'approved',
         ]);
-        $this->assertSame(1, FinalSettlement::query()->where('employment_id', $this->employmentId)->count());
+        $this->assertSame(1, EmploymentSettlement::query()->where('employment_id', $this->employmentId)->count());
         $this->assertSame(1, SettlementProposal::query()->where('employment_id', $this->employmentId)->where('lifecycle_state', 'approved')->count());
     }
 

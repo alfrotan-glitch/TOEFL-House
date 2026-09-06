@@ -6,6 +6,7 @@ namespace App\Modules\Hr\Commands;
 
 use App\Modules\Access\Commands\TransitionPositionAssignment;
 use App\Modules\Access\Models\PositionAssignment;
+use App\Modules\Academic\Commands\MaintainTeacherAssignment;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Hr\Domain\EmploymentLifecycle;
@@ -14,12 +15,15 @@ use App\Modules\Hr\Models\Employment;
 use App\Modules\Hr\Models\EmploymentStatus;
 use App\Modules\Hr\Models\Leave;
 use App\Modules\Identity\Models\Person;
+use App\Modules\Organization\Models\Branch;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
+use App\Support\Authorization\StructureScope;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
 use App\Support\Identifiers\RandomIdentifier;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -41,6 +45,7 @@ final class MaintainEmployment
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
         private readonly TransitionPositionAssignment $assignments,
+        private readonly MaintainTeacherAssignment $teacherAssignments,
     ) {}
 
     /** @return array{employment_id: string, correlation_id: string} */
@@ -51,13 +56,14 @@ final class MaintainEmployment
         try {
             return $this->idempotency->execute('hr.employment.employ', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $personId): array {
-                    $this->require($actor, self::CAPABILITY);
-
                     /** @var Person|null $person */
                     $person = Person::query()->find($personId);
                     if ($person === null || ! $person->isVerified()) {
                         throw BusinessRejection::forCode('hr.person_not_verified', 'employment requires a verified person identity');
                     }
+                    $branch = $this->personBranch($person);
+                    $scope = $branch->structureScope();
+                    $this->require($actor, self::CAPABILITY, $scope);
                     if (Employment::query()->where('person_id', $person->id)->where('lifecycle_state', '!=', EmploymentLifecycle::STATE_TERMINATED)->exists()) {
                         throw BusinessRejection::forCode('hr.employment_open_exists', 'this person already has an open employment');
                     }
@@ -67,8 +73,8 @@ final class MaintainEmployment
                         'person_id' => $person->id,
                         'lifecycle_state' => EmploymentLifecycle::STATE_CANDIDATE,
                     ]);
-                    $this->appendStatus($employment, EmploymentLifecycle::STATE_CANDIDATE, 'employment opened', $actor);
-                    $event = $this->audit->record($actor->actorId, 'hr.employment.employ', 'employment', $employment->id, null, ['person_id' => $person->id]);
+                    $this->appendStatus($employment, EmploymentLifecycle::STATE_CANDIDATE, 'employment opened', now()->toDateString(), $actor);
+                    $event = $this->audit->record($actor->actorId, 'hr.employment.employ', 'employment', $employment->id, null, ['person_id' => $person->id, 'branch_id' => $branch->id, 'organization_id' => $scope->organizationId]);
 
                     return ['employment_id' => $employment->id, 'correlation_id' => $event->correlation_id];
                 }),
@@ -111,13 +117,16 @@ final class MaintainEmployment
         try {
             return $this->idempotency->execute('hr.employment.terminate', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $employment, $effectiveFrom, $reason): array {
-                    $this->require($actor, self::CAPABILITY_TERMINATE);
+                    $this->validateEffectiveFrom($effectiveFrom);
                     if ($reason === '') {
                         throw BusinessRejection::forCode('hr.termination_reason', 'a termination requires a reason');
                     }
 
                     /** @var Employment $locked */
                     $locked = Employment::query()->whereKey($employment->id)->lockForUpdate()->firstOrFail();
+                    $branch = $this->personBranch($locked->person_id);
+                    $scope = $branch->structureScope();
+                    $this->require($actor, self::CAPABILITY_TERMINATE, $scope);
                     EmploymentLifecycle::requireTransition($locked->lifecycle_state, EmploymentLifecycle::STATE_TERMINATED);
 
                     Contract::query()->where('employment_id', $locked->id)->where('lifecycle_state', 'active')->update(['lifecycle_state' => 'closed', 'effective_to' => $effectiveFrom]);
@@ -125,12 +134,13 @@ final class MaintainEmployment
                     foreach (PositionAssignment::query()->where('person_id', $locked->person_id)->where('lifecycle_state', 'active')->get() as $assignment) {
                         $this->assignments->revoke($actor, $assignment, 'hr-terminate-'.$assignment->id);
                     }
+                    $this->teacherAssignments->closeForEmployment($actor, $locked, CarbonImmutable::parse($effectiveFrom), $reason);
 
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
                     $locked->forceFill(['lifecycle_state' => EmploymentLifecycle::STATE_TERMINATED]);
                     $locked->save();
-                    $this->appendStatus($locked, EmploymentLifecycle::STATE_TERMINATED, $reason, $actor);
-                    $event = $this->audit->record($actor->actorId, 'hr.employment.terminate', 'employment', $locked->id, $before, ['lifecycle_state' => EmploymentLifecycle::STATE_TERMINATED, 'reason' => $reason]);
+                    $this->appendStatus($locked, EmploymentLifecycle::STATE_TERMINATED, $reason, $effectiveFrom, $actor);
+                    $event = $this->audit->record($actor->actorId, 'hr.employment.terminate', 'employment', $locked->id, $before, ['lifecycle_state' => EmploymentLifecycle::STATE_TERMINATED, 'reason' => $reason, 'branch_id' => $branch->id, 'organization_id' => $scope->organizationId]);
 
                     return ['employment_id' => $locked->id, 'lifecycle_state' => EmploymentLifecycle::STATE_TERMINATED, 'correlation_id' => $event->correlation_id];
                 }),
@@ -149,10 +159,13 @@ final class MaintainEmployment
         try {
             return $this->idempotency->execute('hr.employment.'.$verb, $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $employment, $toState, $verb, $effectiveFrom, $guard): array {
-                    $this->require($actor, self::CAPABILITY);
+                    $this->validateEffectiveFrom($effectiveFrom);
 
                     /** @var Employment $locked */
                     $locked = Employment::query()->whereKey($employment->id)->lockForUpdate()->firstOrFail();
+                    $branch = $this->personBranch($locked->person_id);
+                    $scope = $branch->structureScope();
+                    $this->require($actor, self::CAPABILITY, $scope);
                     EmploymentLifecycle::requireTransition($locked->lifecycle_state, $toState);
                     if ($guard !== null) {
                         $errorCode = $guard($locked);
@@ -164,8 +177,8 @@ final class MaintainEmployment
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
                     $locked->forceFill(['lifecycle_state' => $toState]);
                     $locked->save();
-                    $this->appendStatus($locked, $toState, $verb, $actor);
-                    $event = $this->audit->record($actor->actorId, 'hr.employment.'.$verb, 'employment', $locked->id, $before, ['lifecycle_state' => $toState, 'effective_from' => $effectiveFrom]);
+                    $this->appendStatus($locked, $toState, $verb, $effectiveFrom, $actor);
+                    $event = $this->audit->record($actor->actorId, 'hr.employment.'.$verb, 'employment', $locked->id, $before, ['lifecycle_state' => $toState, 'effective_from' => $effectiveFrom, 'branch_id' => $branch->id, 'organization_id' => $scope->organizationId]);
 
                     return ['employment_id' => $locked->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
                 }),
@@ -175,14 +188,14 @@ final class MaintainEmployment
         }
     }
 
-    private function appendStatus(Employment $employment, string $status, string $reason, Actor $actor): EmploymentStatus
+    private function appendStatus(Employment $employment, string $status, string $reason, string $effectiveFrom, Actor $actor): EmploymentStatus
     {
         /** @var EmploymentStatus $fact */
         $fact = EmploymentStatus::query()->create([
             'id' => RandomIdentifier::new(),
             'employment_id' => $employment->id,
             'status' => $status,
-            'effective_from' => now()->toDateString(),
+            'effective_from' => $effectiveFrom,
             'reason' => $reason,
             'actor_id' => $actor->actorId,
         ]);
@@ -190,9 +203,30 @@ final class MaintainEmployment
         return $fact;
     }
 
-    private function require(Actor $actor, string $capability): void
+    private function validateEffectiveFrom(string $effectiveFrom): void
     {
-        $outcome = $this->access->decide($actor, $capability, null);
+        $parsed = CarbonImmutable::createFromFormat('Y-m-d', $effectiveFrom);
+        if ($parsed === false || $parsed->format('Y-m-d') !== $effectiveFrom) {
+            throw BusinessRejection::forCode('hr.effective_from_invalid', 'employment transitions require an ISO calendar date');
+        }
+    }
+
+    private function personBranch(string|Person $person): Branch
+    {
+        $personId = $person instanceof Person ? $person->id : $person;
+        $authoritative = Person::query()->whereKey($personId)->first();
+        $branchId = trim((string) ($authoritative?->home_branch_id ?? ''));
+        $branch = $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
+        if ($authoritative === null || $branch === null || $branch->lifecycle_state !== 'active' || $branch->structureScope()->organizationId === '') {
+            throw BusinessRejection::forCode('hr.employee_provenance_required', 'HR employment operations require active employee branch and organization provenance');
+        }
+
+        return $branch;
+    }
+
+    private function require(Actor $actor, string $capability, ?StructureScope $scope = null): void
+    {
+        $outcome = $this->access->decide($actor, $capability, $scope);
         if (! $outcome->allowed) {
             throw AuthorizationDenied::forCode('hr.employment_denied', $outcome->reason);
         }

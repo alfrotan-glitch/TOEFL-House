@@ -14,6 +14,7 @@ use App\Modules\Academic\Placement\Models\PlacementRecommendation;
 use App\Modules\Academic\Placement\Models\PlacementSectionResult;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
+use App\Modules\Organization\Models\Branch;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
@@ -108,6 +109,7 @@ final class DecidePlacement
                         $snapshot = $this->materializeEligibilitySnapshot($locked, $actor);
                         $after['academic_eligibility_snapshot_id'] = $snapshot->id;
                     }
+                    $after = array_merge($after, $this->branchProvenance($locked->originating_branch_id));
                     $event = $this->audit->record($actor->actorId, 'placement.'.$verb, 'placement_profile', $locked->id, $before, $after);
 
                     return ['profile_id' => $locked->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
@@ -185,9 +187,29 @@ final class DecidePlacement
             'payload_sha256' => $snapshot->payload_sha256,
             'signature_algorithm' => $snapshot->signature_algorithm,
             'signing_key_version' => $snapshot->signing_key_version,
+            ...$this->branchProvenance($profile->originating_branch_id),
         ]);
 
         return $snapshot;
+    }
+
+    /** @return array{branch_id: ?string, campus_id: ?string, organization_id: ?string} */
+    private function branchProvenance(?string $branchId): array
+    {
+        $id = trim((string) ($branchId ?? ''));
+        if ($id === '') {
+            return ['branch_id' => null, 'campus_id' => null, 'organization_id' => null];
+        }
+        $branch = Branch::query()->whereKey($id)->first();
+        if ($branch === null || $branch->lifecycle_state !== 'active') {
+            throw BusinessRejection::forCode('placement.decision_provenance_required', 'a placement decision requires an active branch provenance');
+        }
+        $scope = $branch->structureScope();
+        if ($scope->organizationId === '' || $scope->campusId === null) {
+            throw BusinessRejection::forCode('placement.decision_provenance_required', 'a placement decision requires active campus organization provenance');
+        }
+
+        return ['branch_id' => (string) $branch->id, 'campus_id' => (string) $scope->campusId, 'organization_id' => $scope->organizationId];
     }
 
     private function allSectionsApproved(string $profileId): bool

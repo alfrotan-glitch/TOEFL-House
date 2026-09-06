@@ -19,6 +19,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $reason
  * @property string $lifecycle_state
  * @property string|null $superseded_by_id
+ * @property string|null $appeal_reviewed_by
  * @property string|null $from_level_id
  * @property string|null $to_level_id
  * @property string|null $assessment_result_id
@@ -31,7 +32,7 @@ final class ProgressionDecision extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'student_id', 'class_id', 'outcome', 'reason', 'lifecycle_state', 'superseded_by_id', 'proposed_by', 'reviewed_by', 'approved_by', 'from_level_id', 'to_level_id', 'assessment_result_id', 'basis', 'repeat_count'];
+    protected $fillable = ['id', 'student_id', 'class_id', 'outcome', 'reason', 'lifecycle_state', 'superseded_by_id', 'proposed_by', 'reviewed_by', 'approved_by', 'appeal_reviewed_by', 'from_level_id', 'to_level_id', 'assessment_result_id', 'basis', 'repeat_count'];
 
     protected $casts = [
         'repeat_count' => 'integer',

@@ -261,13 +261,13 @@ final class IncrementBWorkflowFeatureTest extends TestCase
 
         $relationshipId = DB::table(DB::connection()->getTablePrefix().'guardian_relationships')->where('student_id', $this->studentId)->value('id');
 
-        $this->post('/students/guardians/'.$relationshipId.'/verify', [], ['referer' => $show])
+        $this->post('/students/guardians/'.$relationshipId.'/verify', ['evidence_ref' => 'guardian-evidence/incb-1'], ['referer' => $show])
             ->assertRedirect($show);
         $this->assertDatabaseHas(DB::connection()->getTablePrefix().'guardian_relationships', [
             'id' => $relationshipId, 'verification_state' => 'verified',
         ]);
 
-        $this->post('/students/guardians/'.$relationshipId.'/verify', [], ['referer' => $show])
+        $this->post('/students/guardians/'.$relationshipId.'/verify', ['evidence_ref' => 'guardian-evidence/incb-2'], ['referer' => $show])
             ->assertRedirect($show)
             ->assertSessionHas('error_code', 'students.guardian_already_verified');
 

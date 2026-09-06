@@ -11,10 +11,14 @@ use App\Modules\Hr\Models\Employment;
 use App\Modules\Payroll\Commands\ApprovePayrollResult;
 use App\Modules\Payroll\Commands\CalculatePayroll;
 use App\Modules\Payroll\Commands\MaintainPayrollPeriod;
+use App\Modules\Finance\Commands\MaintainEmploymentSettlement;
 use App\Modules\Payroll\Commands\SettleEmployment;
 use App\Modules\Payroll\Models\PayrollCalculation;
 use App\Modules\Payroll\Models\PayrollPeriod;
 use App\Modules\Payroll\Models\SettlementProposal;
+use App\Modules\Identity\Models\Person;
+use App\Modules\Organization\Models\Branch;
+use App\Support\Identifiers\RandomIdentifier;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Tests\Concerns\BuildsActors;
@@ -40,6 +44,9 @@ final class PayrollDirectSqlAttackTest extends TestCase
     {
         parent::setUp();
         $this->personWithAuthority($this->personId, []);
+        $branch = Branch::query()->create(['id' => RandomIdentifier::new(), 'name' => 'Payroll Attack Branch', 'lifecycle_state' => 'active']);
+        $this->attachBranchToBootstrapOrganization($branch->id);
+        Person::query()->whereKey($this->personId)->update(['home_branch_id' => $branch->id]);
 
         $manager = $this->grantedActor('atk-manager-1', ['hr.employ', 'hr.terminate', 'access.assign_position']);
         $employment = app(MaintainEmployment::class)->employ($manager, $this->personId, 'atk-emp-1');
@@ -171,7 +178,7 @@ final class PayrollDirectSqlAttackTest extends TestCase
 
         // Terminated but no clearances: a raw settlement INSERT must fail.
         $this->expectException(QueryException::class);
-        DB::table('final_settlements')->insert([
+        DB::table('employment_settlements')->insert([
             'id' => 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeee07',
             'employment_id' => $this->employmentId,
             'amount' => '5000.00',
@@ -179,6 +186,28 @@ final class PayrollDirectSqlAttackTest extends TestCase
             'prepared_by' => 'atk-settle-prep',
             'approved_by' => 'atk-settle-appr',
             'created_at' => now(), 'updated_at' => now(),
+        ]);
+    }
+
+    public function test_direct_sql_cannot_approve_a_proposal_without_a_finance_fact(): void
+    {
+        $manager = $this->grantedActor('atk-manager-approval-only', ['hr.employ', 'hr.terminate', 'access.assign_position']);
+        app(MaintainEmployment::class)->terminate($manager, Employment::query()->findOrFail($this->employmentId), '2026-10-01', 'contract ended', 'atk-emp-approval-only');
+        app(SettleEmployment::class)->clear($this->grantedActor('atk-hr-approval-only', ['payroll.clear_hr']), Employment::query()->findOrFail($this->employmentId), 'hr', 'no outstanding HR items', 'atk-cl-approval-only-hr');
+        app(SettleEmployment::class)->clear($this->grantedActor('atk-fin-approval-only', ['payroll.clear_finance']), Employment::query()->findOrFail($this->employmentId), 'finance', 'accounts reconciled', 'atk-cl-approval-only-finance');
+        $proposal = app(SettleEmployment::class)->propose(
+            $this->grantedActor('atk-prep-approval-only', ['payroll.settle']),
+            Employment::query()->findOrFail($this->employmentId),
+            '5000.00',
+            'direct proposal approval attack',
+            'atk-proposal-approval-only',
+        );
+
+        $this->expectException(QueryException::class);
+        DB::table('settlement_proposals')->where('id', $proposal['proposal_id'])->update([
+            'lifecycle_state' => 'approved',
+            'approved_by' => 'atk-fin-approval-only',
+            'updated_at' => now(),
         ]);
     }
 
@@ -190,19 +219,29 @@ final class PayrollDirectSqlAttackTest extends TestCase
         app(SettleEmployment::class)->clear($this->grantedActor('atk-fin-clear-1', ['payroll.clear_finance']), Employment::query()->findOrFail($this->employmentId), 'finance', 'accounts reconciled', 'atk-cl-2');
 
         $settler = $this->grantedActor('atk-settle-1', ['payroll.settle']);
-        $settleApprover = $this->grantedActor('atk-settle-2', ['payroll.settle_approve']);
+        $settleApprover = $this->grantedActor('atk-settle-2', ['finance.employment_settlement']);
         $proposal = app(SettleEmployment::class)->propose($settler, Employment::query()->findOrFail($this->employmentId), '5000.00', 'final dues per ledger review', 'atk-set-1');
-        app(SettleEmployment::class)->approve($settleApprover, SettlementProposal::query()->findOrFail($proposal['proposal_id']), 'atk-set-2');
+        $proposalModel = SettlementProposal::query()->findOrFail($proposal['proposal_id']);
+        app(MaintainEmploymentSettlement::class)->record(
+            $settleApprover,
+            Employment::query()->findOrFail($this->employmentId),
+            (string) $proposalModel->id,
+            (string) $proposalModel->amount,
+            (string) $proposalModel->basis,
+            (string) $proposalModel->prepared_by,
+            'atk-set-2',
+        );
 
         // Two distinct, non-beneficiary actors: a second settlement must be impossible.
         $this->expectException(QueryException::class);
-        DB::table('final_settlements')->insert([
+        DB::table('employment_settlements')->insert([
             'id' => 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeee08',
             'employment_id' => $this->employmentId,
+            'proposal_id' => $proposal['proposal_id'],
             'amount' => '1.00',
             'basis' => 'forged second settlement via raw sql',
-            'prepared_by' => 'atk-settle-prep',
-            'approved_by' => 'atk-settle-appr',
+            'prepared_by' => 'atk-settle-1',
+            'approved_by' => 'atk-settle-2',
             'created_at' => now(), 'updated_at' => now(),
         ]);
     }
@@ -216,10 +255,13 @@ final class PayrollDirectSqlAttackTest extends TestCase
 
         // No settlement exists yet, so this isolates the beneficiary check:
         // the beneficiary may never approve their own settlement.
+        $settler = $this->grantedActor('atk-settle-prep', ['payroll.settle']);
+        $proposal = app(SettleEmployment::class)->propose($settler, Employment::query()->findOrFail($this->employmentId), '5000.00', 'self-approved settlement via raw sql', 'atk-set-5');
         $this->expectException(QueryException::class);
-        DB::table('final_settlements')->insert([
+        DB::table('employment_settlements')->insert([
             'id' => 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeee09',
             'employment_id' => $this->employmentId,
+            'proposal_id' => $proposal['proposal_id'],
             'amount' => '5000.00',
             'basis' => 'self-approved settlement via raw sql',
             'prepared_by' => 'atk-settle-prep',

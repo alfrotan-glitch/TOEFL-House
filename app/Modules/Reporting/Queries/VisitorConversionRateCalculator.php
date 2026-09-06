@@ -30,14 +30,29 @@ final class VisitorConversionRateCalculator implements MetricCalculator
             ->whereBetween('created_at', [$period->starts_on.' 00:00:00', $period->ends_on.' 23:59:59'])
             ->count();
 
-        $converted = (int) DB::table('visitor_conversions')
+        $convertedQuery = DB::table('visitor_conversions')
             ->join('visitors', 'visitors.id', '=', 'visitor_conversions.visitor_id')
-            ->whereBetween('visitor_conversions.converted_at', [$period->starts_on.' 00:00:00', $period->ends_on.' 23:59:59'])
-            ->when($scopeId !== null, fn ($q) => $q->where('visitors.origin_branch_id', $scopeId))
-            ->count();
+            ->whereBetween('visitor_conversions.converted_at', [$period->starts_on.' 00:00:00', $period->ends_on.' 23:59:59']);
+        if ($scopeId !== null) {
+            $convertedQuery->where('visitors.origin_branch_id', $scopeId);
+        }
+        $converted = (int) $convertedQuery->count();
+        $unassignedCaptured = $scopeId === null
+            ? (int) DB::table('visitors')->whereNull('origin_branch_id')->whereBetween('created_at', [$period->starts_on.' 00:00:00', $period->ends_on.' 23:59:59'])->count()
+            : 0;
+        $unassignedConverted = $scopeId === null
+            ? (int) DB::table('visitor_conversions')->join('visitors', 'visitors.id', '=', 'visitor_conversions.visitor_id')->whereNull('visitors.origin_branch_id')->whereBetween('visitor_conversions.converted_at', [$period->starts_on.' 00:00:00', $period->ends_on.' 23:59:59'])->count()
+            : 0;
 
         $rate = $captured > 0 ? round($converted / $captured, 4) : 0.0;
 
-        return ['value' => number_format($rate, 4, '.', ''), 'meta' => ['conversion_rate' => $rate, 'converted' => $converted, 'captured' => $captured]];
+        return ['value' => number_format($rate, 4, '.', ''), 'meta' => [
+            'conversion_rate' => $rate,
+            'converted' => $converted,
+            'captured' => $captured,
+            'unassigned_provenance_captured' => $unassignedCaptured,
+            'unassigned_provenance_converted' => $unassignedConverted,
+            'unassigned_provenance_excluded' => $scopeId !== null,
+        ]];
     }
 }

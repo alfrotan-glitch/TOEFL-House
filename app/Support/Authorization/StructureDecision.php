@@ -26,8 +26,9 @@ final class StructureDecision
         public readonly array $owners,
     ) {}
 
-    public function authorize(AccessDecision $accessDecision, ?StructureScope $scope): void
+    public function authorize(AccessDecision $accessDecision, ?StructureScope $scope, bool $allowInactiveLifecycle = false): void
     {
+        $scope = $allowInactiveLifecycle && $scope !== null ? $scope->withInactiveLifecycleAccess() : $scope;
         self::requireCapability($accessDecision, $this->initiator, self::CAPABILITY_INITIATE, $scope, 'organization.structure.initiator_denied');
 
         if ($this->reviewer->actorId === $this->initiator->actorId) {

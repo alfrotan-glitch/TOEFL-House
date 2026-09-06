@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace App\Modules\Finance\Commands;
 
+use App\Modules\Academic\Domain\RecordBranch;
+use App\Modules\Organization\Models\Branch;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
+use App\Modules\Finance\Domain\FinancialCoverageLock;
 use App\Modules\Finance\Models\FinancialCredit;
 use App\Modules\Students\Models\Student;
 use App\Support\Authorization\AccessDecision;
@@ -14,6 +17,7 @@ use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
 use App\Support\Identifiers\RandomIdentifier;
+use App\Support\MoneyAmount;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -43,8 +47,12 @@ final class MaintainFinancialCredit
         try {
             return $this->idempotency->execute('finance.credit.propose', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($proposer, $studentId, $amount, $reason, $sourceRef): array {
-                    $this->require($proposer, self::CAPABILITY_PROPOSE);
                     $this->validate($amount, $reason, $sourceRef, $studentId);
+                    $branch = $this->branchForStudent($studentId);
+                    if ($branch === null) {
+                        throw BusinessRejection::forCode('finance.credit_provenance_required', 'a credit requires known student branch provenance');
+                    }
+                    $this->require($proposer, self::CAPABILITY_PROPOSE, $branch->structureScope());
                     if (FinancialCredit::query()->where('source_ref', $sourceRef)->exists()) {
                         throw BusinessRejection::forCode('finance.credit_source_exists', 'this credit source reference already exists');
                     }
@@ -59,7 +67,7 @@ final class MaintainFinancialCredit
                         'requested_by' => $proposer->actorId,
                     ]);
                     $event = $this->audit->record($proposer->actorId, 'finance.credit.propose', 'financial_credit', $credit->id, null, [
-                        'student_id' => $studentId, 'amount' => $amount, 'source_ref' => $sourceRef,
+                        'student_id' => $studentId, 'branch_id' => $branch->id, 'organization_id' => $branch->structureScope()->organizationId, 'amount' => $amount, 'source_ref' => $sourceRef,
                     ]);
 
                     return ['credit_id' => $credit->id, 'correlation_id' => $event->correlation_id];
@@ -78,10 +86,15 @@ final class MaintainFinancialCredit
         try {
             return $this->idempotency->execute('finance.credit.approve', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($approver, $credit): array {
-                    $this->require($approver, self::CAPABILITY_APPROVE);
+                    FinancialCoverageLock::acquire((string) $credit->student_id);
 
                     /** @var FinancialCredit $locked */
                     $locked = FinancialCredit::query()->whereKey($credit->id)->lockForUpdate()->firstOrFail();
+                    $branch = $this->branchForStudent($locked->student_id);
+                    if ($branch === null) {
+                        throw BusinessRejection::forCode('finance.credit_provenance_required', 'a credit requires known student branch provenance');
+                    }
+                    $this->require($approver, self::CAPABILITY_APPROVE, $branch->structureScope());
                     if ($locked->lifecycle_state !== FinancialCredit::STATE_PROPOSED) {
                         throw BusinessRejection::forCode('finance.credit_not_proposed', 'only a proposed credit can be approved');
                     }
@@ -96,7 +109,7 @@ final class MaintainFinancialCredit
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
                     $locked->forceFill(['lifecycle_state' => FinancialCredit::STATE_APPROVED, 'approved_by' => $approver->actorId, 'approved_at' => now()]);
                     $locked->save();
-                    $event = $this->audit->record($approver->actorId, 'finance.credit.approve', 'financial_credit', $locked->id, $before, ['lifecycle_state' => FinancialCredit::STATE_APPROVED]);
+                    $event = $this->audit->record($approver->actorId, 'finance.credit.approve', 'financial_credit', $locked->id, $before, ['lifecycle_state' => FinancialCredit::STATE_APPROVED, 'branch_id' => $branch->id, 'organization_id' => $branch->structureScope()->organizationId]);
 
                     return ['credit_id' => $locked->id, 'lifecycle_state' => FinancialCredit::STATE_APPROVED, 'correlation_id' => $event->correlation_id];
                 }),
@@ -111,7 +124,7 @@ final class MaintainFinancialCredit
         if ($reason === '' || $sourceRef === '') {
             throw BusinessRejection::forCode('finance.credit_terms', 'a credit requires its reason and source reference');
         }
-        if (! is_numeric($amount) || (float) $amount <= 0) {
+        if (! MoneyAmount::positive($amount)) {
             throw BusinessRejection::forCode('finance.credit_amount', 'the credit amount must be a positive number');
         }
         if (Student::query()->whereKey($studentId)->doesntExist()) {
@@ -119,9 +132,16 @@ final class MaintainFinancialCredit
         }
     }
 
-    private function require(Actor $actor, string $capability): void
+    private function branchForStudent(string $studentId): ?Branch
     {
-        $outcome = $this->access->decide($actor, $capability, null);
+        $branchId = RecordBranch::studentBranchForId($studentId);
+
+        return $branchId === null ? null : Branch::query()->whereKey($branchId)->first();
+    }
+
+    private function require(Actor $actor, string $capability, \App\Support\Authorization\StructureScope $scope): void
+    {
+        $outcome = $this->access->decide($actor, $capability, $scope);
         if (! $outcome->allowed) {
             throw AuthorizationDenied::forCode('finance.credit_denied', $outcome->reason);
         }

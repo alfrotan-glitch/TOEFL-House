@@ -23,6 +23,15 @@
                 <label>Date of birth</label>
                 <input name="date_of_birth" type="date" required>
             </div>
+            <div>
+                <label>Home branch</label>
+                <select name="home_branch_id" required>
+                    <option value="">Select branch</option>
+                    @foreach ($branches as $branch)
+                        <option value="{{ $branch->id }}">{{ $branch->name }}</option>
+                    @endforeach
+                </select>
+            </div>
         </div>
         <div class="actions"><button type="submit" class="btn">Register person</button></div>
     </form>

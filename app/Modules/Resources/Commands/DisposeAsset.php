@@ -6,12 +6,14 @@ namespace App\Modules\Resources\Commands;
 
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
+use App\Modules\Resources\Domain\ResourceScope;
 use App\Modules\Resources\Models\Asset;
 use App\Modules\Resources\Models\AssetDisposal;
 use App\Modules\Resources\Models\AssetDisposalRequest;
 use App\Modules\Resources\Models\Custody;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
+use App\Support\Authorization\StructureScope;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
@@ -51,7 +53,6 @@ final class DisposeAsset
         try {
             return $this->idempotency->execute('resources.disposal.request', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($requester, $asset, $method, $reason): array {
-                    $this->require($requester, self::CAPABILITY_REQUEST);
                     if (! in_array($method, self::METHODS, true)) {
                         throw BusinessRejection::forCode('resources.disposal_method', sprintf('unknown disposal method %s', $method));
                     }
@@ -61,6 +62,8 @@ final class DisposeAsset
 
                     /** @var Asset $locked */
                     $locked = Asset::query()->whereKey($asset->id)->lockForUpdate()->firstOrFail();
+                    $scope = ResourceScope::fromStored($locked->originating_branch_id, $locked->organization_id);
+                    $this->require($requester, self::CAPABILITY_REQUEST, $scope);
                     if ($locked->lifecycle_state !== 'in_service') {
                         throw BusinessRejection::forCode('resources.asset_not_in_service', 'only an in-service asset can be disposed');
                     }
@@ -82,6 +85,7 @@ final class DisposeAsset
                     ]);
                     $event = $this->audit->record($requester->actorId, 'resources.disposal.request', 'asset_disposal_request', $request->id, null, [
                         'asset_id' => $locked->id, 'method' => $method,
+                        'branch_id' => $scope->branchId, 'organization_id' => $scope->organizationId,
                     ]);
 
                     return ['request_id' => $request->id, 'correlation_id' => $event->correlation_id];
@@ -100,10 +104,12 @@ final class DisposeAsset
         try {
             return $this->idempotency->execute('resources.disposal.approve', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($approver, $request): array {
-                    $this->require($approver, self::CAPABILITY_APPROVE);
-
                     /** @var AssetDisposalRequest $locked */
                     $locked = AssetDisposalRequest::query()->whereKey($request->id)->lockForUpdate()->firstOrFail();
+                    /** @var Asset $asset */
+                    $asset = Asset::query()->whereKey($locked->asset_id)->lockForUpdate()->firstOrFail();
+                    $scope = ResourceScope::fromStored($asset->originating_branch_id, $asset->organization_id);
+                    $this->require($approver, self::CAPABILITY_APPROVE, $scope);
                     if ($locked->lifecycle_state !== 'requested') {
                         throw BusinessRejection::forCode('resources.disposal_request_state', sprintf('the request is already %s; approvals only count while it is requested', $locked->lifecycle_state));
                     }
@@ -128,6 +134,7 @@ final class DisposeAsset
                         'lifecycle_state' => $state,
                         'approver_one_id' => $locked->approver_one_id,
                         'approver_two_id' => $locked->approver_two_id,
+                        'branch_id' => $scope->branchId, 'organization_id' => $scope->organizationId,
                     ]);
 
                     return ['request_id' => $locked->id, 'lifecycle_state' => $state, 'correlation_id' => $event->correlation_id];
@@ -146,8 +153,6 @@ final class DisposeAsset
         try {
             return $this->idempotency->execute('resources.asset.dispose', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($executor, $request, $disposedOn): array {
-                    $this->require($executor, self::CAPABILITY_REQUEST);
-
                     /** @var AssetDisposalRequest $locked */
                     $locked = AssetDisposalRequest::query()->whereKey($request->id)->lockForUpdate()->firstOrFail();
                     if ($locked->lifecycle_state !== 'approved') {
@@ -159,6 +164,8 @@ final class DisposeAsset
 
                     /** @var Asset $asset */
                     $asset = Asset::query()->whereKey($locked->asset_id)->lockForUpdate()->firstOrFail();
+                    $scope = ResourceScope::fromStored($asset->originating_branch_id, $asset->organization_id);
+                    $this->require($executor, self::CAPABILITY_REQUEST, $scope);
                     if ($asset->lifecycle_state !== 'in_service') {
                         throw BusinessRejection::forCode('resources.asset_not_in_service', 'only an in-service asset can be disposed');
                     }
@@ -194,6 +201,7 @@ final class DisposeAsset
 
                     $event = $this->audit->record($executor->actorId, 'resources.asset.dispose', 'asset_disposal', $disposal->id, null, [
                         'asset_id' => $asset->id, 'method' => $locked->method, 'request_id' => $locked->id,
+                        'branch_id' => $scope->branchId, 'organization_id' => $scope->organizationId,
                     ]);
 
                     return ['disposal_id' => $disposal->id, 'asset_id' => $asset->id, 'correlation_id' => $event->correlation_id];
@@ -204,9 +212,9 @@ final class DisposeAsset
         }
     }
 
-    private function require(Actor $actor, string $capability): void
+    private function require(Actor $actor, string $capability, StructureScope $scope): void
     {
-        $outcome = $this->access->decide($actor, $capability, null);
+        $outcome = $this->access->decide($actor, $capability, $scope);
         if (! $outcome->allowed) {
             throw AuthorizationDenied::forCode('resources.disposal_denied', $outcome->reason);
         }

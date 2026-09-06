@@ -8,6 +8,7 @@ use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Identity\Models\Person;
 use App\Support\Authorization\AccessDecision;
+use App\Support\Authorization\PersonBranchScope;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
@@ -40,13 +41,13 @@ final class VerifyPerson
         try {
             return $this->idempotency->execute('identity.verify', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($administrator, $person, $identityKey, $evidenceRef): array {
-                    $outcome = $this->access->decide($administrator, self::CAPABILITY, null);
+                    /** @var Person $locked */
+                    $locked = Person::query()->whereKey($person->id)->lockForUpdate()->firstOrFail();
+                    $scope = PersonBranchScope::resolve($locked->id);
+                    $outcome = $this->access->decide($administrator, self::CAPABILITY, $scope);
                     if (! $outcome->allowed) {
                         throw AuthorizationDenied::forCode('identity.verify_denied', $outcome->reason);
                     }
-
-                    /** @var Person $locked */
-                    $locked = Person::query()->whereKey($person->id)->lockForUpdate()->firstOrFail();
                     if ($locked->isVerified()) {
                         throw BusinessRejection::forCode('identity.already_verified', 'person identity is already verified');
                     }
@@ -77,7 +78,7 @@ final class VerifyPerson
                         'person',
                         $locked->id,
                         ['verification_state' => Person::VERIFICATION_UNVERIFIED],
-                        ['verification_state' => Person::VERIFICATION_VERIFIED, 'identity_key' => $identityKey, 'identity_evidence_ref' => $evidenceRef],
+                        ['verification_state' => Person::VERIFICATION_VERIFIED, 'identity_key' => $identityKey, 'identity_evidence_ref' => $evidenceRef, 'branch_id' => $scope->branchId, 'organization_id' => $scope->organizationId],
                         $correlationId,
                     );
 

@@ -116,12 +116,12 @@ final class AuthenticationFeatureTest extends TestCase
 
     public function test_api_me_requires_authentication_and_returns_the_actor(): void
     {
-        $this->getJson('/api/me')->assertUnauthorized();
+        $this->getJson('/api/v1/me')->assertUnauthorized();
 
         $this->makeEmployee();
         $this->post('/login', ['username' => 'login.employee', 'password' => 'correct-horse-99']);
 
-        $this->getJson('/api/me')
+        $this->getJson('/api/v1/me')
             ->assertOk()
             ->assertJsonPath('username', 'login.employee');
     }

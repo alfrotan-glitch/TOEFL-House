@@ -74,7 +74,7 @@ final class AcademicScheduleApiTest extends TestCase
 
     public function test_api_schedules_a_session_with_skill_on_the_authoritative_path(): void
     {
-        $this->postJson('/api/academic/sessions', [
+        $this->postJson('/api/v1/academic/sessions', [
             'class_id' => $this->classId,
             'scheduled_on' => '2026-09-08',
             'starts_at' => '09:00',
@@ -94,7 +94,7 @@ final class AcademicScheduleApiTest extends TestCase
 
     public function test_api_schedules_a_session_without_skill(): void
     {
-        $this->postJson('/api/academic/sessions', [
+        $this->postJson('/api/v1/academic/sessions', [
             'class_id' => $this->classId,
             'scheduled_on' => '2026-09-09',
             'starts_at' => '11:00',
@@ -113,7 +113,7 @@ final class AcademicScheduleApiTest extends TestCase
     {
         // Transport parity with the console: an empty skill is normalized to
         // null rather than reaching the command as a skill lookup.
-        $this->postJson('/api/academic/sessions', [
+        $this->postJson('/api/v1/academic/sessions', [
             'class_id' => $this->classId,
             'scheduled_on' => '2026-09-09',
             'starts_at' => '13:00',
@@ -134,7 +134,7 @@ final class AcademicScheduleApiTest extends TestCase
         // Under the swapped order the generated idempotency key landed here;
         // the unknown-skill refusal proves the skill argument now reaches the
         // skill slot of the authoritative command.
-        $this->postJson('/api/academic/sessions', [
+        $this->postJson('/api/v1/academic/sessions', [
             'class_id' => $this->classId,
             'scheduled_on' => '2026-09-10',
             'starts_at' => '09:00',
@@ -156,7 +156,7 @@ final class AcademicScheduleApiTest extends TestCase
         $periodId = ClassModel::query()->findOrFail($this->classId)->period_id;
         $planned = app(MaintainClass::class)->defineClass($officer, $versionId, $periodId, 4, 'api-sched-planned')['class_id'];
 
-        $this->postJson('/api/academic/sessions', [
+        $this->postJson('/api/v1/academic/sessions', [
             'class_id' => $planned,
             'scheduled_on' => '2026-09-11',
             'starts_at' => '09:00',
@@ -167,7 +167,7 @@ final class AcademicScheduleApiTest extends TestCase
 
     public function test_api_rejects_an_inverted_time_window_and_malformed_input(): void
     {
-        $this->postJson('/api/academic/sessions', [
+        $this->postJson('/api/v1/academic/sessions', [
             'class_id' => $this->classId,
             'scheduled_on' => '2026-09-12',
             'starts_at' => '10:00',
@@ -175,7 +175,7 @@ final class AcademicScheduleApiTest extends TestCase
         ])->assertStatus(409)
             ->assertJsonPath('error', 'academic.session_window');
 
-        $this->postJson('/api/academic/sessions', [
+        $this->postJson('/api/v1/academic/sessions', [
             'class_id' => $this->classId,
             'scheduled_on' => '2026-09-12',
             'starts_at' => '9am',
@@ -195,7 +195,7 @@ final class AcademicScheduleApiTest extends TestCase
         ]);
         $this->post('/login', ['username' => 'api.scheduler.nobody', 'password' => 'api-scheduler-pw-2'])->assertRedirect('/');
 
-        $this->postJson('/api/academic/sessions', [
+        $this->postJson('/api/v1/academic/sessions', [
             'class_id' => $this->classId,
             'scheduled_on' => '2026-09-13',
             'starts_at' => '09:00',

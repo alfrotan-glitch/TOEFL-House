@@ -15,6 +15,7 @@ use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
 use App\Support\Identifiers\RandomIdentifier;
+use App\Support\MoneyAmount;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -44,10 +45,10 @@ final class RecordReconciliation
             return $this->idempotency->execute('finance.reconciliation.observe', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($observer, $period, $subject, $expected, $observed, $explanation): array {
                     $this->require($observer, self::CAPABILITY_OBSERVE);
-                    if (! is_numeric($expected) || ! is_numeric($observed)) {
-                        throw BusinessRejection::forCode('finance.reconciliation_amounts', 'expected and observed values must be numeric');
+                    if (! MoneyAmount::valid($expected) || ! MoneyAmount::valid($observed)) {
+                        throw BusinessRejection::forCode('finance.reconciliation_amounts', 'expected and observed values must be ordinary non-negative money');
                     }
-                    if (((float) $observed - (float) $expected) != 0.0 && ($explanation === null || $explanation === '')) {
+                    if (bccomp($observed, $expected, 2) !== 0 && ($explanation === null || $explanation === '')) {
                         throw BusinessRejection::forCode('finance.reconciliation_explanation', 'a variance requires an explanation');
                     }
 

@@ -17,6 +17,7 @@ return new class extends Migration
             $table->boolean('enabled')->default(true);
             $table->char('created_by', 36);
             $table->timestamps();
+            $table->foreign('created_by')->references('id')->on('people');
         });
         DB::statement('CREATE UNIQUE INDEX job_schedules_key_unique ON job_schedules (job_key)');
         DB::statement(<<<'SQL'

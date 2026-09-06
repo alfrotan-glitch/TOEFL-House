@@ -11,6 +11,7 @@ use App\Modules\Identity\Commands\SetAccountPassword;
 use App\Modules\Identity\Commands\VerifyPerson;
 use App\Modules\Identity\Models\Person;
 use App\Modules\Identity\Models\UserAccount;
+use App\Modules\Organization\Models\Branch;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -25,9 +26,13 @@ final class IdentityController extends Controller
 {
     public function index(): View
     {
+        $this->requireOrganizationRead('identity.admin', 'identity.console.index');
+        $visibleBranchIds = $this->authorizedBranches('identity.admin');
+
         return view('identity.index', [
-            'people' => Person::query()->orderBy('legal_name')->limit(200)->get(),
-            'accounts' => UserAccount::query()->orderBy('username')->limit(200)->get(),
+            'people' => Person::query()->whereIn('home_branch_id', $visibleBranchIds)->orderBy('legal_name')->limit(200)->get(),
+            'accounts' => UserAccount::query()->whereHas('person', fn ($query) => $query->whereIn('home_branch_id', $visibleBranchIds))->orderBy('username')->limit(200)->get(),
+            'branches' => Branch::query()->whereIn('id', $visibleBranchIds)->where('lifecycle_state', 'active')->orderBy('name')->get(),
         ]);
     }
 
@@ -42,12 +47,14 @@ final class IdentityController extends Controller
         $input = $request->validate([
             'legal_name' => ['required', 'string', 'max:160'],
             'date_of_birth' => ['required', 'date', 'before:today'],
+            'home_branch_id' => ['required', 'string'],
         ]);
 
         app(RegisterPerson::class)->register(
             $this->actor(),
             $input['legal_name'],
             $input['date_of_birth'],
+            $input['home_branch_id'],
             $this->idempotencyKey('identity.person.register'),
         );
 

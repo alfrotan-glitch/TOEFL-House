@@ -5,15 +5,20 @@ declare(strict_types=1);
 namespace App\Modules\Audit;
 
 use App\Modules\Audit\Models\AuditEvent;
+use App\Modules\Outbox\Domain\TransactionalEventRecorder;
 use App\Support\Errors\DomainError;
 use App\Support\Identifiers\RandomIdentifier;
 
 /**
  * Records material evidence inside the caller's owning transaction: a fact
- * without audit evidence is not complete per the boundary contract.
+ * without audit evidence is not complete per the boundary contract. A
+ * successful operation also receives one immutable domain event through the
+ * transactional outbox boundary; denied attempts remain audit evidence only.
  */
 final class AuditRecorder
 {
+    public function __construct(private readonly TransactionalEventRecorder $events) {}
+
     /**
      * @param  array<string, mixed>|null  $beforeState
      * @param  array<string, mixed>|null  $afterState
@@ -27,7 +32,7 @@ final class AuditRecorder
         ?array $afterState,
         ?string $correlationId = null,
     ): AuditEvent {
-        return AuditEvent::query()->create([
+        $auditEvent = AuditEvent::query()->create([
             'id' => RandomIdentifier::new(),
             'actor_id' => $actorId,
             'operation' => $operation,
@@ -38,5 +43,15 @@ final class AuditRecorder
             'after_state' => $afterState,
             'occurred_at' => now(),
         ]);
+
+        if (! str_ends_with($operation, '.denied')) {
+            $this->events->record($auditEvent, [
+                'operation' => $operation,
+                'before' => $beforeState,
+                'after' => $afterState,
+            ]);
+        }
+
+        return $auditEvent;
     }
 }

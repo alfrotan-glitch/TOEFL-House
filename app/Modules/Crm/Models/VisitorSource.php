@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string $name
  * @property string|null $category
  * @property string $lifecycle_state
+ * @property string $created_by
  */
 final class VisitorSource extends Model
 {
@@ -26,7 +27,7 @@ final class VisitorSource extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'key', 'name', 'category', 'lifecycle_state'];
+    protected $fillable = ['id', 'key', 'name', 'category', 'lifecycle_state', 'created_by'];
 
     /** @return HasMany<VisitorCampaign, $this> */
     public function campaigns(): HasMany

@@ -34,7 +34,7 @@ final class MetricCatalog
             'calculator' => OutstandingBalanceCalculator::class,
         ],
         'payroll_total' => [
-            'owner' => 'payroll', 'authority' => 'payroll_period', 'scopes' => ['global'],
+            'owner' => 'finance', 'authority' => 'payroll_period', 'scopes' => ['global'],
             'calculator' => PayrollTotalCalculator::class,
         ],
         'active_enrollment_count' => [

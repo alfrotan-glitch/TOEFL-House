@@ -13,6 +13,7 @@ use App\Modules\Documents\Models\RetentionDecision;
 use App\Modules\Documents\Models\RetentionRule;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
+use App\Support\Authorization\PersonBranchScope;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
@@ -44,13 +45,13 @@ final class DecideRetention
         try {
             return $this->idempotency->execute('documents.retention.decide', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($decider, $document): array {
-                    $outcome = $this->access->decide($decider, self::CAPABILITY, null);
+                    /** @var Document $locked */
+                    $locked = Document::query()->whereKey($document->id)->lockForUpdate()->firstOrFail();
+                    $scope = PersonBranchScope::resolve($locked->subject_person_id);
+                    $outcome = $this->access->decide($decider, self::CAPABILITY, $scope);
                     if (! $outcome->allowed) {
                         throw AuthorizationDenied::forCode('documents.retention_denied', $outcome->reason);
                     }
-
-                    /** @var Document $locked */
-                    $locked = Document::query()->whereKey($document->id)->lockForUpdate()->firstOrFail();
                     /** @var DocumentClassification $classification */
                     $classification = DocumentClassification::query()->findOrFail($locked->classification_id);
                     /** @var RetentionRule|null $rule */
@@ -83,6 +84,7 @@ final class DecideRetention
                         'rule_id' => $rule->id,
                         'action' => $action,
                         'basis' => $rule->legal_basis,
+                        'branch_id' => $scope->branchId, 'organization_id' => $scope->organizationId,
                     ]);
 
                     return ['decision_id' => $decision->id, 'action' => $action, 'correlation_id' => $event->correlation_id];

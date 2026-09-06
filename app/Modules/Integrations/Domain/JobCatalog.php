@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Modules\Integrations\Domain;
 
 use App\Modules\Integrations\Jobs\IntegrationRetrySweepJob;
+use App\Modules\Outbox\Jobs\DomainEventRelayJob;
 use App\Support\Errors\BusinessRejection;
 
 /**
@@ -16,6 +17,7 @@ final class JobCatalog
     /** @var array<string, class-string<JobHandler>> */
     public const HANDLERS = [
         'integrations.retry_sweep' => IntegrationRetrySweepJob::class,
+        'outbox.relay' => DomainEventRelayJob::class,
     ];
 
     /** @return list<string> */

@@ -16,7 +16,7 @@ final class MetricCatalogTest extends TestCase
     {
         $expected = [
             'student_outstanding_balance' => ['finance', 'financial_period', ['global', 'student']],
-            'payroll_total' => ['payroll', 'payroll_period', ['global']],
+            'payroll_total' => ['finance', 'payroll_period', ['global']],
             'active_enrollment_count' => ['academic_delivery', 'academic_period', ['global', 'class']],
             'attendance_rate' => ['academic', 'academic_period', ['global', 'class']],
             'fund_utilization' => ['funding', 'financial_period', ['fund']],

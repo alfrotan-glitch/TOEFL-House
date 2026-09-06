@@ -13,8 +13,10 @@ use App\Modules\Resources\Models\AssetDisposalRequest;
 use App\Modules\Resources\Models\BookCopy;
 use App\Modules\Resources\Models\BookIssuance;
 use App\Modules\Resources\Models\WorkOrder;
+use App\Modules\Organization\Models\Branch;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
+use App\Support\Identifiers\RandomIdentifier;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Tests\Concerns\BuildsActors;
@@ -24,6 +26,20 @@ final class ResourcesFeatureTest extends TestCase
 {
     use BuildsActors;
 
+    private string $resourceBranchId;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->resourceBranchId = RandomIdentifier::new();
+        Branch::query()->create([
+            'id' => $this->resourceBranchId,
+            'name' => 'Resources Fixture Branch',
+            'lifecycle_state' => 'active',
+        ]);
+        $this->attachBranchToBootstrapOrganization($this->resourceBranchId);
+    }
+
     public function test_custody_transfers_close_the_prior_row_and_disposal_needs_two_approvers(): void
     {
         $this->personWithAuthority('res-custodian-1', []);
@@ -32,9 +48,9 @@ final class ResourcesFeatureTest extends TestCase
         $approverOne = $this->grantedActor('res-approver-1', ['resources.dispose_approve']);
         $approverTwo = $this->grantedActor('res-approver-2', ['resources.dispose_approve']);
 
-        $asset = app(MaintainAsset::class)->register($manager, 'PROJ-001', 'Classroom projector', 'electronics', 'Campus A / Room 4', '2026-01-15', 'res-a-1');
+        $asset = app(MaintainAsset::class)->register($manager, 'PROJ-001', 'Classroom projector', 'electronics', 'Campus A / Room 4', '2026-01-15', $this->resourceBranchId);
         try {
-            app(MaintainAsset::class)->register($manager, 'PROJ-001', 'Duplicate', 'electronics', 'x', '2026-01-15', 'res-a-2');
+            app(MaintainAsset::class)->register($manager, 'PROJ-001', 'Duplicate', 'electronics', 'x', '2026-01-15', $this->resourceBranchId);
             $this->fail('duplicate asset codes must be rejected');
         } catch (BusinessRejection $rejection) {
             $this->assertSame('resources.asset_code_exists', $rejection->errorCode());
@@ -110,7 +126,7 @@ final class ResourcesFeatureTest extends TestCase
         $requester = $this->grantedActor('res-worker', ['facilities.work', 'facilities.work_approve']);
         $approver = $this->grantedActor('res-approver-w', ['facilities.work_approve']);
 
-        $order = app(MaintainWorkOrder::class)->request($requester, 'Campus B / Lab 2', 'air conditioning failure', 'res-w-1');
+        $order = app(MaintainWorkOrder::class)->request($requester, 'Campus B / Lab 2', 'air conditioning failure', $this->resourceBranchId);
 
         try {
             app(MaintainWorkOrder::class)->start($requester, WorkOrder::query()->findOrFail($order['work_order_id']), 'res-w-2');
@@ -148,7 +164,7 @@ final class ResourcesFeatureTest extends TestCase
         $librarian = $this->grantedActor('res-librarian', ['resources.books']);
         $this->personWithAuthority('res-borrower', []);
 
-        $copy = app(CirculateBooks::class)->addCopy($librarian, 'BK-0001', 'Academic Writing', '2026-01-10', 'res-b-1');
+        $copy = app(CirculateBooks::class)->addCopy($librarian, 'BK-0001', 'Academic Writing', '2026-01-10', $this->resourceBranchId);
         $issuance = app(CirculateBooks::class)->issue($librarian, BookCopy::query()->findOrFail($copy['copy_id']), 'res-borrower', '2026-11-01', '2026-11-15', 'res-b-2');
 
         try {
@@ -185,7 +201,7 @@ final class ResourcesFeatureTest extends TestCase
         $nobody = $this->actorWithoutAnyCapability('res-nobody');
 
         $this->expectException(AuthorizationDenied::class);
-        app(MaintainAsset::class)->register($nobody, 'DENIED-1', 'Probe', 'x', 'y', '2026-01-01', 'res-neg-1');
+        app(MaintainAsset::class)->register($nobody, 'DENIED-1', 'Probe', 'x', 'y', '2026-01-01', $this->resourceBranchId);
 
         $this->assertDatabaseHas('audit_events', ['operation' => 'resources.asset.register.denied', 'actor_id' => 'res-nobody']);
         $this->assertDatabaseMissing('assets', ['code' => 'DENIED-1']);

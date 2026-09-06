@@ -7,10 +7,13 @@ namespace App\Modules\Resources\Commands;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Resources\Domain\ResourceLifecycle;
+use App\Modules\Resources\Domain\ResourceScope;
 use App\Modules\Resources\Models\BookCopy;
 use App\Modules\Resources\Models\BookIssuance;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
+use App\Support\Authorization\PersonBranchScope;
+use App\Support\Authorization\StructureScope;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
@@ -34,25 +37,30 @@ final class CirculateBooks
     ) {}
 
     /** @return array{copy_id: string, correlation_id: string} */
-    public function addCopy(Actor $actor, string $code, string $title, string $acquiredOn, string $idempotencyKey): array
+    public function addCopy(Actor $actor, string $code, string $title, string $acquiredOn, string $branchId, string $idempotencyKey): array
     {
-        $payload = hash('sha256', implode('|', ['resources.books.add', $code, $title, $acquiredOn, $actor->actorId]));
+        $payload = hash('sha256', implode('|', ['resources.books.add', $code, $title, $acquiredOn, $branchId, $actor->actorId]));
 
         try {
             return $this->idempotency->execute('resources.books.add', $idempotencyKey, $payload,
-                fn (): array => DB::transaction(function () use ($actor, $code, $title, $acquiredOn): array {
-                    $this->require($actor);
+                fn (): array => DB::transaction(function () use ($actor, $code, $title, $acquiredOn, $branchId): array {
+                    $scope = ResourceScope::fromBranch($branchId);
+                    $this->require($actor, $scope);
                     if (BookCopy::query()->where('code', $code)->exists()) {
                         throw BusinessRejection::forCode('resources.copy_code_exists', 'this copy code already exists');
                     }
 
                     $copy = BookCopy::query()->create([
                         'id' => RandomIdentifier::new(),
+                        'organization_id' => $scope->organizationId,
+                        'originating_branch_id' => $scope->branchId,
                         'code' => $code,
                         'title' => $title,
                         'acquired_on' => $acquiredOn,
                     ]);
-                    $event = $this->audit->record($actor->actorId, 'resources.books.add', 'book_copy', $copy->id, null, ['code' => $code]);
+                    $event = $this->audit->record($actor->actorId, 'resources.books.add', 'book_copy', $copy->id, null, [
+                        'code' => $code, 'branch_id' => $scope->branchId, 'organization_id' => $scope->organizationId,
+                    ]);
 
                     return ['copy_id' => $copy->id, 'correlation_id' => $event->correlation_id];
                 }),
@@ -70,13 +78,18 @@ final class CirculateBooks
         try {
             return $this->idempotency->execute('resources.books.issue', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $copy, $borrowerPersonId, $issuedOn, $dueOn): array {
-                    $this->require($actor);
+                    /** @var BookCopy $lockedCopy */
+                    $lockedCopy = BookCopy::query()->whereKey($copy->id)->lockForUpdate()->firstOrFail();
+                    $scope = ResourceScope::fromStored($lockedCopy->originating_branch_id, $lockedCopy->organization_id);
+                    $borrowerScope = PersonBranchScope::resolve($borrowerPersonId);
+                    $this->require($actor, $scope);
+                    if ($borrowerScope->organizationId !== $scope->organizationId) {
+                        throw BusinessRejection::forCode('resources.borrower_organization_mismatch', 'a book borrower must belong to the copy organization');
+                    }
                     if ($dueOn < $issuedOn) {
                         throw BusinessRejection::forCode('resources.issuance_due', 'the due date precedes the issue date');
                     }
 
-                    /** @var BookCopy $lockedCopy */
-                    $lockedCopy = BookCopy::query()->whereKey($copy->id)->lockForUpdate()->firstOrFail();
                     if (BookIssuance::query()->where('copy_id', $lockedCopy->id)->where('lifecycle_state', ResourceLifecycle::ISSUANCE_ISSUED)->exists()) {
                         throw BusinessRejection::forCode('resources.copy_already_issued', 'this copy has an open issuance');
                     }
@@ -95,6 +108,8 @@ final class CirculateBooks
                     ]);
                     $event = $this->audit->record($actor->actorId, 'resources.books.issue', 'book_issuance', $issuance->id, null, [
                         'copy_id' => $lockedCopy->id, 'borrower' => $borrowerPersonId,
+                        'branch_id' => $scope->branchId, 'organization_id' => $scope->organizationId,
+                        'borrower_branch_id' => $borrowerScope->branchId,
                     ]);
 
                     return ['issuance_id' => $issuance->id, 'correlation_id' => $event->correlation_id];
@@ -130,10 +145,15 @@ final class CirculateBooks
         try {
             return $this->idempotency->execute('resources.books.'.$verb, $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $issuance, $toState, $returnedOn, $lossEvidence): array {
-                    $this->require($actor);
-
                     /** @var BookIssuance $locked */
                     $locked = BookIssuance::query()->whereKey($issuance->id)->lockForUpdate()->firstOrFail();
+                    $lockedCopy = BookCopy::query()->whereKey($locked->copy_id)->firstOrFail();
+                    $scope = ResourceScope::fromStored($lockedCopy->originating_branch_id, $lockedCopy->organization_id);
+                    $borrowerScope = PersonBranchScope::resolve($locked->borrower_person_id);
+                    $this->require($actor, $scope);
+                    if ($borrowerScope->organizationId !== $scope->organizationId) {
+                        throw BusinessRejection::forCode('resources.borrower_organization_mismatch', 'a book borrower must remain inside the copy organization');
+                    }
                     ResourceLifecycle::requireIssuanceTransition($locked->lifecycle_state, $toState);
 
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
@@ -145,7 +165,12 @@ final class CirculateBooks
                         $locked->loss_evidence = $lossEvidence;
                     }
                     $locked->save();
-                    $event = $this->audit->record($actor->actorId, 'resources.books.close', 'book_issuance', $locked->id, $before, ['lifecycle_state' => $toState]);
+                    $event = $this->audit->record($actor->actorId, 'resources.books.close', 'book_issuance', $locked->id, $before, [
+                        'lifecycle_state' => $toState,
+                        'branch_id' => $scope->branchId,
+                        'organization_id' => $scope->organizationId,
+                        'borrower_branch_id' => $borrowerScope->branchId,
+                    ]);
 
                     return ['issuance_id' => $locked->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
                 }),
@@ -155,9 +180,9 @@ final class CirculateBooks
         }
     }
 
-    private function require(Actor $actor): void
+    private function require(Actor $actor, StructureScope $scope): void
     {
-        $outcome = $this->access->decide($actor, self::CAPABILITY, null);
+        $outcome = $this->access->decide($actor, self::CAPABILITY, $scope);
         if (! $outcome->allowed) {
             throw AuthorizationDenied::forCode('resources.books_denied', $outcome->reason);
         }

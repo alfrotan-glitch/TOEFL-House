@@ -5,12 +5,15 @@ declare(strict_types=1);
 namespace App\Modules\Access\Commands;
 
 use App\Modules\Access\Domain\AccessLifecycle;
+use App\Modules\Access\Models\Position;
 use App\Modules\Access\Models\PositionAssignment;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
+use App\Support\Authorization\PersonBranchScope;
 use App\Support\Errors\AuthorizationDenied;
+use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
 use Illuminate\Support\Facades\DB;
 
@@ -49,20 +52,24 @@ final class TransitionPositionAssignment
         try {
             return $this->idempotency->execute('access.position.'.$verb, $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $assignment, $toState, $verb): array {
-                    $outcome = $this->access->decide($actor, self::CAPABILITY, null);
+                    /** @var PositionAssignment $locked */
+                    $locked = PositionAssignment::query()->whereKey($assignment->id)->lockForUpdate()->firstOrFail();
+                    $scope = PersonBranchScope::resolve($locked->person_id);
+                    $position = Position::query()->whereKey($locked->position_id)->first();
+                    if ($position === null || trim((string) $position->organization_id) !== trim($scope->organizationId)) {
+                        throw BusinessRejection::forCode('access.position_scope_mismatch', 'a position assignment must remain inside the person home organization');
+                    }
+                    $outcome = $this->access->decide($actor, self::CAPABILITY, $scope);
                     if (! $outcome->allowed) {
                         throw AuthorizationDenied::forCode('access.position_transition_denied', $outcome->reason);
                     }
-
-                    /** @var PositionAssignment $locked */
-                    $locked = PositionAssignment::query()->whereKey($assignment->id)->lockForUpdate()->firstOrFail();
                     AccessLifecycle::requireTransition($locked->lifecycle_state, $toState);
 
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
                     $locked->forceFill(['lifecycle_state' => $toState]);
                     $locked->save();
 
-                    $event = $this->audit->record($actor->actorId, 'access.position.'.$verb, 'position_assignment', $locked->id, $before, ['lifecycle_state' => $toState]);
+                    $event = $this->audit->record($actor->actorId, 'access.position.'.$verb, 'position_assignment', $locked->id, $before, ['lifecycle_state' => $toState, 'branch_id' => $scope->branchId, 'organization_id' => $scope->organizationId]);
 
                     return ['assignment_id' => $locked->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
                 }),

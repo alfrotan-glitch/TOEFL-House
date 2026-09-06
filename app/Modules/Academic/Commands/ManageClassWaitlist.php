@@ -12,9 +12,9 @@ use App\Modules\Academic\Models\ClassWaitlistEntry;
 use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Academic\Models\Offering;
 use App\Modules\Audit\AttemptedOperation;
+use App\Modules\Organization\Models\Branch;
 use App\Modules\Audit\AuditRecorder;
-use App\Modules\Students\Models\Student;
-use App\Modules\Students\Models\StudentStatus;
+use App\Modules\Students\Domain\StudentOperationalEligibility;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
@@ -39,6 +39,7 @@ final class ManageClassWaitlist
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
+        private readonly StudentOperationalEligibility $studentEligibility,
     ) {}
 
     /** @return array{entry_id: string, position: int, correlation_id: string} */
@@ -56,6 +57,13 @@ final class ManageClassWaitlist
                     if ($class->lifecycle_state !== 'active') {
                         throw BusinessRejection::forCode('academic.class_not_active', 'a waitlist requires an active class');
                     }
+                    if (trim((string) ($class->branch_id ?? '')) === '') {
+                        throw BusinessRejection::forCode('academic.class_branch_missing', 'a waitlist class requires branch provenance');
+                    }
+                    if ($class->offering_id === null || $class->offering_id === '') {
+                        throw BusinessRejection::forCode('academic.waitlist_offering_required', 'new waitlist entries require a class offering; historical classes need governed remediation');
+                    }
+                    $offeringId = $offeringId !== null && $offeringId !== '' ? $offeringId : (string) $class->offering_id;
                     if (ClassWaitlistEntry::query()->where('class_id', $classId)->where('student_id', $studentId)->whereIn('lifecycle_state', ['waiting', 'offered'])->exists()) {
                         throw BusinessRejection::forCode('academic.waitlist_entry_exists', 'this student already has an open waitlist entry for the class');
                     }
@@ -83,8 +91,10 @@ final class ManageClassWaitlist
                         'lifecycle_state' => WaitlistLifecycle::STATE_WAITING,
                         'joined_by' => $requester->actorId,
                     ]);
+                    $provenance = $this->waitlistProvenance($entry);
                     $event = $this->audit->record($requester->actorId, 'academic.waitlist.join', 'class_waitlist_entry', $entry->id, null, [
                         'class_id' => $classId, 'student_id' => $studentId, 'offering_id' => $entry->offering_id, 'position' => $position,
+                        ...$provenance,
                     ]);
 
                     return ['entry_id' => $entry->id, 'position' => $position, 'correlation_id' => $event->correlation_id];
@@ -109,6 +119,11 @@ final class ManageClassWaitlist
         try {
             return $this->idempotency->execute('academic.waitlist.promote', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $entry, $idempotencyKey): array {
+                    // Promotion creates a seat through MaintainEnrollment;
+                    // lock the class before the waitlist row to match the
+                    // canonical class -> enrollment order.
+                    $classId = ClassWaitlistEntry::query()->whereKey($entry->id)->value('class_id');
+                    ClassModel::query()->whereKey($classId)->lockForUpdate()->firstOrFail();
                     /** @var ClassWaitlistEntry $locked */
                     $locked = ClassWaitlistEntry::query()->whereKey($entry->id)->lockForUpdate()->firstOrFail();
                     $this->access->require($actor, self::CAPABILITY_APPROVE, RecordBranch::waitlistBranch($locked), 'academic.waitlist_denied');
@@ -125,9 +140,11 @@ final class ManageClassWaitlist
 
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
                     $locked->forceFill(['lifecycle_state' => WaitlistLifecycle::STATE_ENROLLED])->save();
+                    $provenance = $this->waitlistProvenance($locked);
                     $event = $this->audit->record($actor->actorId, 'academic.waitlist.promote', 'class_waitlist_entry', $locked->id, $before, [
                         'lifecycle_state' => WaitlistLifecycle::STATE_ENROLLED,
                         'enrollment_id' => $requested['enrollment_id'],
+                        ...$provenance,
                     ]);
 
                     return [
@@ -162,6 +179,10 @@ final class ManageClassWaitlist
         try {
             return $this->idempotency->execute('academic.waitlist.transition.'.$toState, $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $entry, $toState, $capability): array {
+                    // Keep class capacity and waitlist state in the same
+                    // lock order for offer, withdrawal, and expiry.
+                    $classId = ClassWaitlistEntry::query()->whereKey($entry->id)->value('class_id');
+                    ClassModel::query()->whereKey($classId)->lockForUpdate()->firstOrFail();
                     /** @var ClassWaitlistEntry $locked */
                     $locked = ClassWaitlistEntry::query()->whereKey($entry->id)->lockForUpdate()->firstOrFail();
                     $this->access->require($actor, $capability, RecordBranch::waitlistBranch($locked), 'academic.waitlist_denied');
@@ -172,7 +193,11 @@ final class ManageClassWaitlist
 
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
                     $locked->forceFill(['lifecycle_state' => $toState])->save();
-                    $event = $this->audit->record($actor->actorId, 'academic.waitlist.transition.'.$toState, 'class_waitlist_entry', $locked->id, $before, ['lifecycle_state' => $toState]);
+                    $provenance = $this->waitlistProvenance($locked);
+                    $event = $this->audit->record($actor->actorId, 'academic.waitlist.transition.'.$toState, 'class_waitlist_entry', $locked->id, $before, [
+                        'lifecycle_state' => $toState,
+                        ...$provenance,
+                    ]);
 
                     return ['entry_id' => $locked->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
                 }),
@@ -186,6 +211,22 @@ final class ManageClassWaitlist
      * Branch of a waitlist queueing: the named offering's branch, else the
      * student's home branch (WP-ACAD-SCOPE).
      */
+    /** @return array{branch_id: string, campus_id: string, organization_id: string} */
+    private function waitlistProvenance(ClassWaitlistEntry $entry): array
+    {
+        $branchId = RecordBranch::waitlistBranch($entry);
+        $branch = $branchId === null ? null : Branch::query()->whereKey($branchId)->first();
+        if ($branch === null || $branch->lifecycle_state !== 'active') {
+            throw BusinessRejection::forCode('academic.waitlist_provenance_required', 'a waitlist event requires active branch provenance');
+        }
+        $scope = $branch->structureScope();
+        if ($scope->organizationId === '' || $scope->campusId === null) {
+            throw BusinessRejection::forCode('academic.waitlist_provenance_required', 'a waitlist event requires active campus organization provenance');
+        }
+
+        return ['branch_id' => (string) $branch->id, 'campus_id' => (string) $scope->campusId, 'organization_id' => $scope->organizationId];
+    }
+
     private function queueBranch(?string $offeringId, string $studentId): ?string
     {
         $offeringId = trim((string) ($offeringId ?? ''));
@@ -202,15 +243,7 @@ final class ManageClassWaitlist
 
     private function assertStudentActive(string $studentId): void
     {
-        /** @var Student|null $student */
-        $student = Student::query()->find($studentId);
-        if ($student === null) {
-            throw BusinessRejection::forCode('academic.student_unknown', 'a waitlist requires a known student');
-        }
-        $status = StudentStatus::query()->where('student_id', $studentId)->orderByDesc('seq')->first();
-        if ($status === null || $status->status !== 'active') {
-            throw BusinessRejection::forCode('academic.student_not_active', 'a waitlist requires a currently active student');
-        }
+        $this->studentEligibility->assertActive($studentId, 'academic.student_not_active');
     }
 
     private function assertOfferingMatchesClass(string $offeringId, string $classId): void
@@ -222,25 +255,32 @@ final class ManageClassWaitlist
         }
         /** @var ClassModel $class */
         $class = ClassModel::query()->whereKey($classId)->firstOrFail();
-        if ($offering->academic_period_id !== $class->period_id || $offering->program_version_level_id !== $class->program_version_level_id) {
-            throw BusinessRejection::forCode('academic.waitlist_offering_mismatch', 'the waitlist offering must match the class period and level');
+        if (trim((string) ($class->branch_id ?? '')) === '') {
+            throw BusinessRejection::forCode('academic.class_branch_missing', 'a waitlist class requires branch provenance');
+        }
+        if ($offering->academic_period_id !== $class->period_id
+            || $offering->program_version_level_id !== $class->program_version_level_id
+            || trim((string) $offering->branch_id) !== trim((string) $class->branch_id)) {
+            throw BusinessRejection::forCode('academic.waitlist_offering_mismatch', 'the waitlist offering must match the class branch, period, and level');
         }
     }
 
     private function classFull(ClassModel $class): bool
     {
-        $activeSeats = Enrollment::query()->where('class_id', $class->id)->where('lifecycle_state', 'active')->count();
+        /** @var ClassModel $locked */
+        $locked = ClassModel::query()->whereKey($class->id)->lockForUpdate()->firstOrFail();
+        $claimedSeats = Enrollment::query()->where('class_id', $locked->id)->whereIn('lifecycle_state', ['requested', 'active', 'frozen'])->count();
 
-        return $activeSeats >= $class->capacity;
+        return $claimedSeats >= $locked->capacity;
     }
 
     private function offeringFull(string $offeringId): bool
     {
         /** @var Offering $offering */
-        $offering = Offering::query()->whereKey($offeringId)->firstOrFail();
-        $activeSeats = Enrollment::query()->where('offering_id', $offeringId)->where('lifecycle_state', 'active')->count();
+        $offering = Offering::query()->whereKey($offeringId)->lockForUpdate()->firstOrFail();
+        $claimedSeats = Enrollment::query()->where('offering_id', $offeringId)->whereIn('lifecycle_state', ['requested', 'active', 'frozen'])->count();
 
-        return $activeSeats >= $offering->capacity;
+        return $claimedSeats >= $offering->capacity;
     }
 
     private function assertCapacityAvailable(ClassWaitlistEntry $entry): void

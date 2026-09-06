@@ -62,7 +62,7 @@ final class TransitionStructureUnit
                 $this->transitionPayload($unit, 'reopen', $decision),
                 function () use ($unit, $decision): array {
                     return DB::transaction(function () use ($unit, $decision): array {
-                        $decision->authorize($this->access, $unit->structureScope());
+                        $decision->authorize($this->access, $unit->structureScope(), true);
                         $locked = $this->lockedUnit($unit);
 
                         OrganizationLifecycle::requireTransition($locked->lifecycleState(), OrganizationLifecycle::STATE_REOPENED);
@@ -89,7 +89,7 @@ final class TransitionStructureUnit
                 $this->transitionPayload($unit, $verb, $decision),
                 function () use ($unit, $toState, $verb, $decision): array {
                     return DB::transaction(function () use ($unit, $toState, $verb, $decision): array {
-                        $decision->authorize($this->access, $unit->structureScope());
+                        $decision->authorize($this->access, $unit->structureScope(), true);
                         $locked = $this->lockedUnit($unit);
                         OrganizationLifecycle::requireTransition($locked->lifecycleState(), $toState);
 

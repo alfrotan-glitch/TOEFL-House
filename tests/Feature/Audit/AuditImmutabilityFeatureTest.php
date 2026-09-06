@@ -15,6 +15,7 @@ final class AuditImmutabilityFeatureTest extends TestCase
     public function test_recorded_evidence_cannot_be_resaved(): void
     {
         $event = app(AuditRecorder::class)->record('actor-1', 'probe.operation', 'person', '00000000-0000-4000-8000-000000000000', null, ['state' => 'recorded']);
+        $this->assertDatabaseHas('domain_events', ['audit_event_id' => $event->id, 'event_type' => 'probe.operation']);
 
         $event->after_state = ['state' => 'rewritten'];
         $this->expectException(BusinessRejection::class);

@@ -9,10 +9,13 @@ use App\Modules\Audit\AuditRecorder;
 use App\Modules\Communication\Domain\MessageLifecycle;
 use App\Modules\Communication\Models\Message;
 use App\Modules\Crm\Domain\CrmInteractionTraceRecorder;
+use App\Modules\Identity\Models\Person;
 use App\Modules\Privacy\Models\Consent;
 use App\Modules\Privacy\Models\ConsentPurpose;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
+use App\Support\Authorization\PersonBranchScope;
+use App\Support\Authorization\StructureScope;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
@@ -46,7 +49,12 @@ final class SendMessage
         try {
             return $this->idempotency->execute('communication.message.queue', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $subjectPersonId, $purposeId, $channel, $contentRef): array {
-                    $this->require($actor);
+                    $subject = Person::query()->whereKey($subjectPersonId)->first();
+                    if ($subject === null) {
+                        throw BusinessRejection::forCode('communication.subject_unknown', 'a message requires a known subject');
+                    }
+                    $scope = PersonBranchScope::resolve($subject->id);
+                    $this->require($actor, $scope);
                     if ($contentRef === '') {
                         throw BusinessRejection::forCode('communication.content', 'a message requires its content reference');
                     }
@@ -83,8 +91,9 @@ final class SendMessage
                     ]);
                     $event = $this->audit->record($actor->actorId, 'communication.message.queue', 'message', $message->id, null, [
                         'subject' => $subjectPersonId, 'purpose' => $purpose->id, 'channel' => $channel,
+                        'branch_id' => $scope->branchId, 'organization_id' => $scope->organizationId,
                     ]);
-                    $this->traceVisitor($actor, $subjectPersonId, $message->id, $channel, $purpose->name);
+                    $this->traceVisitor($actor, $subjectPersonId, $message->id, $channel, $purpose->name, $event->id);
 
                     return ['message_id' => $message->id, 'correlation_id' => $event->correlation_id];
                 }),
@@ -114,19 +123,20 @@ final class SendMessage
         try {
             return $this->idempotency->execute('communication.message.deliver', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $message, $toState, $deliveryRef): array {
-                    $this->require($actor);
                     if ($deliveryRef === '') {
                         throw BusinessRejection::forCode('communication.delivery_evidence', 'a delivery result requires its provider reference');
                     }
 
                     /** @var Message $locked */
                     $locked = Message::query()->whereKey($message->id)->lockForUpdate()->firstOrFail();
+                    $scope = PersonBranchScope::resolve($locked->subject_person_id);
+                    $this->require($actor, $scope);
                     MessageLifecycle::requireTransition($locked->lifecycle_state, $toState);
 
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
                     $locked->forceFill(['lifecycle_state' => $toState, 'delivery_ref' => $deliveryRef]);
                     $locked->save();
-                    $event = $this->audit->record($actor->actorId, 'communication.message.deliver', 'message', $locked->id, $before, ['lifecycle_state' => $toState]);
+                    $event = $this->audit->record($actor->actorId, 'communication.message.deliver', 'message', $locked->id, $before, ['lifecycle_state' => $toState, 'branch_id' => $scope->branchId, 'organization_id' => $scope->organizationId]);
 
                     return ['message_id' => $locked->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
                 }),
@@ -136,15 +146,15 @@ final class SendMessage
         }
     }
 
-    private function require(Actor $actor): void
+    private function require(Actor $actor, StructureScope $scope): void
     {
-        $outcome = $this->access->decide($actor, self::CAPABILITY, null);
+        $outcome = $this->access->decide($actor, self::CAPABILITY, $scope);
         if (! $outcome->allowed) {
             throw AuthorizationDenied::forCode('communication.denied', $outcome->reason);
         }
     }
 
-    private function traceVisitor(Actor $actor, string $subjectPersonId, string $messageId, string $channel, string $purposeName): void
+    private function traceVisitor(Actor $actor, string $subjectPersonId, string $messageId, string $channel, string $purposeName, string $authorityAuditEventId): void
     {
         $visitorId = $this->crmTrace->visitorIdForPerson($subjectPersonId);
         if ($visitorId === null) {
@@ -159,6 +169,7 @@ final class SendMessage
             sprintf('Message queued through the %s purpose channel (consent-gated).', $purposeName),
             CarbonImmutable::now(),
             messageId: $messageId,
+            authorityAuditEventId: $authorityAuditEventId,
         );
     }
 }

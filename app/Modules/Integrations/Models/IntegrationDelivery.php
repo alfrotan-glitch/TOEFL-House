@@ -22,7 +22,7 @@ final class IntegrationDelivery extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'endpoint_id', 'idempotency_key', 'correlation_id', 'source_type', 'source_id', 'contract_action', 'payload', 'payload_digest', 'status', 'attempts', 'max_attempts', 'requeues', 'next_run_at', 'last_error', 'delivered_ref', 'delivered_at', 'created_by'];
+    protected $fillable = ['id', 'endpoint_id', 'idempotency_key', 'correlation_id', 'source_type', 'source_id', 'contract_action', 'payload', 'payload_digest', 'status', 'attempts', 'max_attempts', 'requeues', 'next_run_at', 'lease_until', 'last_error', 'delivered_ref', 'delivered_at', 'created_by'];
 
-    protected $casts = ['payload' => 'array', 'next_run_at' => 'datetime', 'delivered_at' => 'datetime'];
+    protected $casts = ['payload' => 'array', 'next_run_at' => 'datetime', 'lease_until' => 'datetime', 'delivered_at' => 'datetime'];
 }

@@ -75,7 +75,7 @@
                 <a href="{{ route('crm.index') }}">CRM</a>
                 <a href="{{ route('placement.index') }}">Placement</a>
                 <a href="{{ route('academic.index') }}">Academic</a>
-                <a href="{{ route('hr.index') }}">Teachers &amp; HR</a>
+                <a href="{{ route('teachers.index') }}">Teachers &amp; Faculty</a>
                 <a href="{{ route('library.index') }}">Library</a>
                 <a href="{{ route('finance.index') }}">Finance</a>
                 <a href="{{ route('documents.index') }}">Documents</a>

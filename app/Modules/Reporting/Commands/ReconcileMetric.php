@@ -8,6 +8,7 @@ use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Reporting\Domain\MetricCalculator;
 use App\Modules\Reporting\Domain\MetricCatalog;
+use App\Modules\Reporting\Domain\ReportingScope;
 use App\Modules\Reporting\Models\MetricDefinition;
 use App\Modules\Reporting\Models\MetricProjection;
 use App\Modules\Reporting\Models\MetricReconciliation;
@@ -32,6 +33,7 @@ final class ReconcileMetric
 
     public function __construct(
         private readonly AccessDecision $access,
+        private readonly ReportingScope $scopes,
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
@@ -45,13 +47,28 @@ final class ReconcileMetric
         try {
             return $this->idempotency->execute('reporting.reconcile', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $metricKey, $periodKey, $scopeType, $scopeId): array {
-                    $this->require($actor);
-
                     $entry = MetricCatalog::entry($metricKey);
+                    if (! in_array($scopeType, $entry['scopes'], true)) {
+                        throw BusinessRejection::forCode('reporting.scope_not_allowed', sprintf('metric %s allows scopes %s', $metricKey, implode(', ', $entry['scopes'])));
+                    }
+                    if (($scopeType === 'global') !== ($scopeId === null)) {
+                        throw BusinessRejection::forCode('reporting.scope_shape', 'global scope takes no scope id; every other scope requires one');
+                    }
+                    if ($scopeId === '') {
+                        throw BusinessRejection::forCode('reporting.scope_shape', 'the scope id may not be empty');
+                    }
+                    if (in_array($scopeType, ['global', 'fund'], true)) {
+                        // Organization-wide scopes require organization-rooted
+                        // authority; branch/campus grants are not wildcards.
+                        $this->require($actor);
+                    }
+                    $organizationId = $this->scopes->authorize($actor, self::CAPABILITY, $scopeType, $scopeId);
 
                     /** @var MetricDefinition $metric */
                     $metric = MetricDefinition::query()->where('key', $metricKey)->firstOrFail();
                     $periodId = MetricCatalog::resolvePeriod($entry['authority'], $periodKey);
+                    /** @var MetricVersion $version */
+                    $version = MetricVersion::query()->where('metric_id', $metric->id)->where('version_no', $metric->current_version)->firstOrFail();
 
                     /** @var MetricCalculator $calculator */
                     $calculator = app($entry['calculator']);
@@ -59,14 +76,19 @@ final class ReconcileMetric
 
                     /** @var MetricProjection|null $reported */
                     $reported = MetricProjection::query()
-                        ->whereIn('metric_version_id', MetricVersion::query()->where('metric_id', $metric->id)->pluck('id'))
+                        ->where('metric_version_id', $version->id)
                         ->where('period_key', $periodKey)
                         ->where('scope_type', $scopeType)
                         ->where(fn ($query) => $scopeId === null ? $query->whereNull('scope_id') : $query->where('scope_id', $scopeId))
                         ->orderByDesc('computed_at')
+                        ->lockForUpdate()
                         ->first();
                     if ($reported === null) {
                         throw BusinessRejection::forCode('reporting.nothing_reported', 'no projection exists to reconcile');
+                    }
+                    $reportedOrganizationId = trim((string) $reported->organization_id);
+                    if (($organizationId === null && $reportedOrganizationId !== '') || ($organizationId !== null && $reportedOrganizationId !== $organizationId)) {
+                        throw BusinessRejection::forCode('reporting.projection_scope_conflict', 'the reported projection has stale organization provenance for its current scope');
                     }
 
                     $variance = bcsub((string) $reported->value, $authoritative['value'], 4);

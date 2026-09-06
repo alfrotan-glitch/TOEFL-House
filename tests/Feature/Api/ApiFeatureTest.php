@@ -39,7 +39,7 @@ final class ApiFeatureTest extends TestCase
 
     public function test_api_me_requires_authentication(): void
     {
-        $this->getJson('/api/me')
+        $this->getJson('/api/v1/me')
             ->assertUnauthorized()
             ->assertJsonPath('error', 'authentication_required');
     }
@@ -51,7 +51,7 @@ final class ApiFeatureTest extends TestCase
         $this->personWithAuthority($personId, []);
         $this->signInAs($personId, 'api.me');
 
-        $this->getJson('/api/me')
+        $this->getJson('/api/v1/me')
             ->assertOk()
             ->assertJsonPath('username', 'api.me')
             ->assertJsonPath('person_id', $personId);
@@ -73,7 +73,7 @@ final class ApiFeatureTest extends TestCase
             'verified_at' => now()->toDateTimeString(),
         ]);
 
-        $this->postJson('/api/students/applicants', [
+        $this->postJson('/api/v1/students/applicants', [
             'person_id' => $prospect->id,
             'program_interest' => 'TOEFL Sprint',
         ])->assertCreated();
@@ -95,7 +95,7 @@ final class ApiFeatureTest extends TestCase
             'lifecycle_state' => 'open',
         ]);
 
-        $this->postJson('/api/finance/payments', [
+        $this->postJson('/api/v1/finance/payments', [
             'period_id' => $period->id,
             'student_id' => $student->id,
             'amount' => '125.50',
@@ -122,7 +122,7 @@ final class ApiFeatureTest extends TestCase
             'lifecycle_state' => 'open',
         ]);
 
-        $this->postJson('/api/finance/payments', [
+        $this->postJson('/api/v1/finance/payments', [
             'period_id' => $period->id,
             'student_id' => $student->id,
             'amount' => '10.00',
@@ -158,17 +158,17 @@ final class ApiFeatureTest extends TestCase
         ];
 
         $key = 'api.replay.key.0001';
-        $first = $this->postJson('/api/finance/payments', $payload, ['Idempotency-Key' => $key]);
+        $first = $this->postJson('/api/v1/finance/payments', $payload, ['Idempotency-Key' => $key]);
         $first->assertCreated();
 
         // A replay carrying the SAME key and payload must not create a second payment.
-        $this->postJson('/api/finance/payments', $payload, ['Idempotency-Key' => $key])->assertSuccessful();
+        $this->postJson('/api/v1/finance/payments', $payload, ['Idempotency-Key' => $key])->assertSuccessful();
         $this->assertSame(1, Payment::query()->where('payer_ref', 'API-IDEM-1')->count());
         $this->assertSame(1, DB::table('idempotency_keys')
             ->where('idempotency_key', $key)->where('operation', 'finance.payment.record')->count());
 
         // The same key reused with a DIFFERENT payload is a conflict, never a double spend.
-        $this->postJson('/api/finance/payments', array_merge($payload, ['amount' => '999.00']), ['Idempotency-Key' => $key])
+        $this->postJson('/api/v1/finance/payments', array_merge($payload, ['amount' => '999.00']), ['Idempotency-Key' => $key])
             ->assertStatus(409)
             ->assertJsonPath('error', 'idempotency.conflicting_payload');
         $this->assertSame(1, Payment::query()->where('payer_ref', 'API-IDEM-1')->count());
@@ -189,7 +189,7 @@ final class ApiFeatureTest extends TestCase
             'lifecycle_state' => 'open',
         ]);
 
-        $this->postJson('/api/finance/payments', [
+        $this->postJson('/api/v1/finance/payments', [
             'period_id' => $period->id,
             'student_id' => $student->id,
             'amount' => $invalidAmount,

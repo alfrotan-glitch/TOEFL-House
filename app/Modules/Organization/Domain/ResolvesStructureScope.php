@@ -25,15 +25,15 @@ final class ResolvesStructureScope
         return new StructureScope($activeCampus->organization_id, $activeCampus->id, $branch->id);
     }
 
-    public function forDepartment(string $scopeType, string $scopeId): StructureScope
+    public function forDepartment(string $scopeType, string $scopeId, ?string $departmentId = null): StructureScope
     {
         if ($scopeType === 'organization') {
-            return new StructureScope($scopeId);
+            return new StructureScope($scopeId, null, null, $departmentId);
         }
         if ($scopeType === 'campus') {
             $campus = Campus::query()->findOrFail($scopeId);
 
-            return $this->forCampus($campus);
+            return new StructureScope($campus->organization_id, $campus->id, null, $departmentId);
         }
         if ($scopeType === 'branch') {
             $branch = Branch::query()->findOrFail($scopeId);
@@ -41,8 +41,9 @@ final class ResolvesStructureScope
             if ($assignment === null) {
                 throw ValidationError::forCode('department.branch_without_campus', 'branch has no effective campus attribution');
             }
+            $campus = Campus::query()->findOrFail($assignment->campus_id);
 
-            return $this->forBranch($branch, Campus::query()->findOrFail($assignment->campus_id));
+            return new StructureScope($campus->organization_id, $campus->id, $branch->id, $departmentId);
         }
 
         throw ValidationError::forCode('department.scope_type_unknown', sprintf('unknown department scope type %s', $scopeType));

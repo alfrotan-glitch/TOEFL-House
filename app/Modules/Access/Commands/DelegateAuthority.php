@@ -6,6 +6,9 @@ namespace App\Modules\Access\Commands;
 
 use App\Modules\Access\Domain\AccessLifecycle;
 use App\Modules\Access\Models\Delegation;
+use App\Modules\Organization\Models\Branch;
+use App\Modules\Organization\Models\Campus;
+use App\Modules\Organization\Models\Department;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Support\Authorization\AccessDecision;
@@ -63,16 +66,26 @@ final class DelegateAuthority
                     if ($reason === '') {
                         throw ValidationError::forCode('access.delegation_reason', 'delegation requires a reason');
                     }
+                    if ($permission === null || trim($permission) === '') {
+                        throw ValidationError::forCode('access.delegation_permission_required', 'delegation must name one capability');
+                    }
+                    if ($scopeType === null || trim($scopeType) === '' || $scopeId === null || trim($scopeId) === '') {
+                        throw ValidationError::forCode('access.delegation_scope_required', 'delegation must name an explicit organization structure scope');
+                    }
 
+                    $scope = $this->scopeForDelegation($scopeType, $scopeId);
+                    $delegatorOutcome = $this->access->decide(
+                        new Actor($delegatorPersonId, 'Delegation authority holder'),
+                        $permission,
+                        $scope,
+                    );
+                    if (! $delegatorOutcome->allowed) {
+                        throw AuthorizationDenied::forCode('access.delegate_beyond_authority', 'a delegator may not delegate authority they do not hold');
+                    }
                     if ($creator->actorId !== $delegatorPersonId) {
-                        $outcome = $this->access->decide($creator, self::CAPABILITY, null);
+                        $outcome = $this->access->decide($creator, self::CAPABILITY, $scope);
                         if (! $outcome->allowed) {
                             throw AuthorizationDenied::forCode('access.delegate_denied', $outcome->reason);
-                        }
-                    } else {
-                        $scopedOutcome = $this->access->decide($creator, $permission ?? '', null);
-                        if ($permission !== null && ! $scopedOutcome->allowed) {
-                            throw AuthorizationDenied::forCode('access.delegate_beyond_authority', 'a delegator may not delegate authority they do not hold');
                         }
                     }
 
@@ -106,5 +119,21 @@ final class DelegateAuthority
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $creator, 'access.delegate', 'delegation', $delegatePersonId);
         }
+    }
+
+    private function scopeForDelegation(?string $scopeType, ?string $scopeId): ?\App\Support\Authorization\StructureScope
+    {
+        if ($scopeType === null || trim((string) $scopeId) === '') {
+            return null;
+        }
+
+        return match ($scopeType) {
+            'organization' => new \App\Support\Authorization\StructureScope((string) $scopeId),
+            'campus' => new \App\Support\Authorization\StructureScope((string) (Campus::query()->whereKey($scopeId)->value('organization_id')
+                ?? throw BusinessRejection::forCode('access.scope_unavailable', 'delegation campus scope does not resolve')), (string) $scopeId),
+            'branch' => Branch::query()->whereKey($scopeId)->firstOrFail()->structureScope(),
+            'department' => Department::query()->whereKey($scopeId)->firstOrFail()->structureScope(),
+            default => throw BusinessRejection::forCode('access.scope_type_unknown', 'delegation scope type is unknown'),
+        };
     }
 }

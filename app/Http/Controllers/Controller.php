@@ -5,8 +5,12 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Modules\Audit\AttemptedOperation;
+use App\Support\Authorization\AccessDecision;
+use App\Modules\Organization\Models\Branch;
+use App\Modules\Organization\Models\Organization;
 use App\Support\Authorization\Actor;
 use App\Support\Authorization\ActorBranches;
+use App\Support\Authorization\StructureScope;
 use App\Support\Errors\AuthorizationDenied;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Foundation\Validation\ValidatesRequests;
@@ -51,6 +55,29 @@ abstract class Controller extends BaseController
         );
     }
 
+    protected function requireBranchCapability(string $capability, ?string $branchId, string $operation, string $targetType, string $targetId): void
+    {
+        if ($this->branchCapabilityAllowed($capability, $branchId)) {
+            return;
+        }
+
+        app(AttemptedOperation::class)->deniedByActor(
+            AuthorizationDenied::forCode('api.read_denied', 'this record is outside your authorized capability scope'),
+            $this->actor(),
+            $operation,
+            $targetType,
+            $targetId,
+        );
+    }
+
+    protected function branchCapabilityAllowed(string $capability, ?string $branchId): bool
+    {
+        $branch = $branchId === null ? null : Branch::query()->find($branchId);
+
+        return $branch !== null
+            && app(AccessDecision::class)->decide($this->actor(), $capability, $branch->structureScope())->allowed;
+    }
+
     /** @return list<string> */
     protected function visibleBranches(): array
     {
@@ -60,6 +87,66 @@ abstract class Controller extends BaseController
     protected function hasReadAuthority(): bool
     {
         return app(ActorBranches::class)->hasAnyAuthority($this->actor());
+    }
+
+    /** @return list<string> */
+    protected function authorizedBranches(string $capability): array
+    {
+        $actor = $this->actor();
+        $decision = app(AccessDecision::class);
+        $authorized = [];
+
+        // Resolve every active branch through the canonical decision point.
+        // ActorBranches is a useful navigation hint, but it is not complete
+        // authorization input: an organization-root grant may legitimately
+        // have no branch rows in that hint set. A branch with missing or
+        // inactive temporal provenance is rejected by AccessResolution, so
+        // this remains fail-closed for unknown topology.
+        foreach (Branch::query()->where('lifecycle_state', 'active')->get() as $branch) {
+            if ($decision->decide($actor, $capability, $branch->structureScope())->allowed) {
+                $authorized[] = (string) $branch->id;
+            }
+        }
+        sort($authorized);
+
+        return $authorized;
+    }
+
+    /** @return list<string> */
+    protected function authorizedOrganizations(string $capability): array
+    {
+        $actor = $this->actor();
+        $decision = app(AccessDecision::class);
+        $authorized = [];
+        foreach (Organization::query()->where('lifecycle_state', 'active')->get(['id']) as $organization) {
+            if ($decision->decide($actor, $capability, StructureScope::organization((string) $organization->id))->allowed) {
+                $authorized[] = (string) $organization->id;
+            }
+        }
+        sort($authorized);
+
+        return $authorized;
+    }
+
+    /**
+     * A console that intentionally returns organization-wide records must
+     * prove organization-rooted authority; branch visibility is not a
+     * wildcard and cannot authorize an unscoped result set.
+     */
+    protected function requireOrganizationRead(string $capability, string $operation, string $targetType = 'console', string $targetId = 'index'): void
+    {
+        $outcome = app(AccessDecision::class)->decide($this->actor(), $capability, null);
+        if ($outcome->allowed) {
+            return;
+        }
+
+        app(AttemptedOperation::class)->deniedByActor(
+            AuthorizationDenied::forCode('api.organization_read_denied', $outcome->reason),
+            $this->actor(),
+            $operation,
+            $targetType,
+            $targetId,
+        );
     }
 
     protected function idempotencyKey(string $operation): string

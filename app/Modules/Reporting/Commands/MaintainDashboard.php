@@ -6,6 +6,9 @@ namespace App\Modules\Reporting\Commands;
 
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
+use App\Modules\Organization\Models\Branch;
+use App\Modules\Organization\Models\Organization;
+use App\Modules\Reporting\Domain\MetricCatalog;
 use App\Modules\Reporting\Models\Dashboard;
 use App\Modules\Reporting\Models\DashboardPin;
 use App\Modules\Reporting\Models\MetricDefinition;
@@ -13,10 +16,12 @@ use App\Modules\Reporting\Models\MetricProjection;
 use App\Modules\Reporting\Models\MetricVersion;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
+use App\Support\Authorization\StructureScope;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
 use App\Support\Identifiers\RandomIdentifier;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -37,24 +42,28 @@ final class MaintainDashboard
     ) {}
 
     /** @return array{dashboard_id: string, correlation_id: string} */
-    public function create(Actor $actor, string $name, string $idempotencyKey): array
+    public function create(Actor $actor, string $name, string $idempotencyKey, ?string $organizationId = null): array
     {
-        $payload = hash('sha256', implode('|', ['reporting.dashboard.create', $name, $actor->actorId]));
+        $payload = hash('sha256', implode('|', ['reporting.dashboard.create', $name, $organizationId ?? '', $actor->actorId]));
 
         try {
             return $this->idempotency->execute('reporting.dashboard.create', $idempotencyKey, $payload,
-                fn (): array => DB::transaction(function () use ($actor, $name): array {
-                    $this->require($actor);
-                    if (Dashboard::query()->where('name', $name)->exists()) {
+                fn (): array => DB::transaction(function () use ($actor, $name, $organizationId): array {
+                    $resolvedOrganizationId = $this->resolveOrganization($actor, $organizationId);
+                    if (trim($name) === '') {
+                        throw BusinessRejection::forCode('reporting.dashboard_name_required', 'a dashboard requires a name');
+                    }
+                    if (Dashboard::query()->where('organization_id', $resolvedOrganizationId)->where('name', $name)->exists()) {
                         throw BusinessRejection::forCode('reporting.dashboard_exists', 'this dashboard name already exists');
                     }
 
                     $dashboard = Dashboard::query()->create([
                         'id' => RandomIdentifier::new(),
                         'name' => $name,
+                        'organization_id' => $resolvedOrganizationId,
                         'created_by' => $actor->actorId,
                     ]);
-                    $event = $this->audit->record($actor->actorId, 'reporting.dashboard.create', 'dashboard', $dashboard->id, null, ['name' => $name]);
+                    $event = $this->audit->record($actor->actorId, 'reporting.dashboard.create', 'dashboard', $dashboard->id, null, ['name' => $name, 'organization_id' => $resolvedOrganizationId]);
 
                     return ['dashboard_id' => $dashboard->id, 'correlation_id' => $event->correlation_id];
                 }),
@@ -72,7 +81,31 @@ final class MaintainDashboard
         try {
             return $this->idempotency->execute('reporting.dashboard.pin', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $dashboard, $metricKey, $periodKey, $scopeType, $scopeId): array {
-                    $this->require($actor);
+                    /** @var Dashboard $lockedDashboard */
+                    $lockedDashboard = Dashboard::query()->whereKey($dashboard->id)->lockForUpdate()->firstOrFail();
+                    $this->require($actor, (string) $lockedDashboard->organization_id);
+                    $entry = MetricCatalog::entry($metricKey);
+                    if (! in_array($scopeType, $entry['scopes'], true)) {
+                        throw BusinessRejection::forCode('reporting.pin_scope_not_allowed', 'the dashboard pin scope is not allowed for this metric');
+                    }
+                    if (($scopeType === 'global') !== ($scopeId === null) || ($scopeId !== null && trim($scopeId) === '')) {
+                        throw BusinessRejection::forCode('reporting.pin_scope_shape', 'global pins take no scope id; every other pin requires one');
+                    }
+                    if ($scopeType === 'branch') {
+                        /** @var Branch|null $branch */
+                        $branch = Branch::query()->whereKey($scopeId)->first();
+                        if ($branch === null || $branch->lifecycle_state !== 'active') {
+                            throw BusinessRejection::forCode('reporting.pin_branch_scope_unknown', 'a branch pin requires an active branch scope');
+                        }
+                        try {
+                            $branchScope = $branch->structureScope();
+                        } catch (ModelNotFoundException) {
+                            throw BusinessRejection::forCode('reporting.pin_branch_scope_unknown', 'a branch pin requires current active campus provenance');
+                        }
+                        if (trim((string) $branchScope->organizationId) !== trim((string) $lockedDashboard->organization_id)) {
+                            throw BusinessRejection::forCode('reporting.pin_scope_conflict', 'the branch pin and dashboard organization provenance no longer agree');
+                        }
+                    }
 
                     /** @var MetricDefinition $metric */
                     $metric = MetricDefinition::query()->where('key', $metricKey)->firstOrFail();
@@ -106,7 +139,7 @@ final class MaintainDashboard
                         'pinned_by' => $actor->actorId,
                     ]);
                     $event = $this->audit->record($actor->actorId, 'reporting.dashboard.pin', 'dashboard_pin', $pin->id, null, [
-                        'dashboard' => $dashboard->id, 'metric' => $metricKey, 'period' => $periodKey,
+                        'dashboard' => $lockedDashboard->id, 'organization_id' => $lockedDashboard->organization_id, 'metric' => $metricKey, 'period' => $periodKey,
                     ]);
 
                     return ['pin_id' => $pin->id, 'correlation_id' => $event->correlation_id];
@@ -117,11 +150,37 @@ final class MaintainDashboard
         }
     }
 
-    private function require(Actor $actor): void
+    private function require(Actor $actor, ?string $organizationId = null): void
     {
-        $outcome = $this->access->decide($actor, self::CAPABILITY, null);
+        $scope = $organizationId === null ? null : StructureScope::organization($organizationId);
+        $outcome = $this->access->decide($actor, self::CAPABILITY, $scope);
         if (! $outcome->allowed) {
             throw AuthorizationDenied::forCode('reporting.dashboard_denied', $outcome->reason);
         }
+    }
+
+    private function resolveOrganization(Actor $actor, ?string $organizationId): string
+    {
+        $organizationId = trim((string) ($organizationId ?? ''));
+        if ($organizationId !== '') {
+            $this->require($actor, $organizationId);
+            if (! Organization::query()->whereKey($organizationId)->where('lifecycle_state', 'active')->exists()) {
+                throw BusinessRejection::forCode('reporting.dashboard_organization_unknown', 'dashboard organization must be active');
+            }
+
+            return $organizationId;
+        }
+
+        $authorized = [];
+        foreach (Organization::query()->where('lifecycle_state', 'active')->get(['id']) as $organization) {
+            if ($this->access->decide($actor, self::CAPABILITY, StructureScope::organization((string) $organization->id))->allowed) {
+                $authorized[] = (string) $organization->id;
+            }
+        }
+        if (count($authorized) !== 1) {
+            throw BusinessRejection::forCode('reporting.dashboard_organization_required', 'dashboard creation requires one explicit organization when the actor governs multiple organizations');
+        }
+
+        return $authorized[0];
     }
 }

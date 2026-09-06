@@ -9,7 +9,9 @@ use App\Modules\Access\Models\OrgWideGrantRequest;
 use App\Modules\Access\Models\ScopeGrant;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
+use App\Modules\Organization\Models\Branch;
 use App\Modules\Organization\Models\Campus;
+use App\Modules\Organization\Models\Department;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
 use App\Support\Authorization\StructureScope;
@@ -305,8 +307,8 @@ final class GrantScopePermission
     {
         return match ($scopeType) {
             'campus' => new StructureScope($this->campusOrganization($scopeId), $scopeId),
-            'branch' => new StructureScope('', null, $scopeId),
-            'department' => new StructureScope('', null, null, $scopeId),
+            'branch' => Branch::query()->whereKey($scopeId)->firstOrFail()->structureScope(),
+            'department' => Department::query()->whereKey($scopeId)->firstOrFail()->structureScope(),
             default => throw BusinessRejection::forCode('access.scope_type_unknown', sprintf('unknown scope type %s', $scopeType)),
         };
     }

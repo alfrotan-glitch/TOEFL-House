@@ -27,7 +27,14 @@ final class VisitorConversionCountCalculator implements MetricCalculator
             $query->where('visitors.origin_branch_id', $scopeId);
         }
         $count = (int) $query->count();
+        $unassigned = $scopeId === null
+            ? (int) DB::table('visitor_conversions')->join('visitors', 'visitors.id', '=', 'visitor_conversions.visitor_id')->whereNull('visitors.origin_branch_id')->whereBetween('visitor_conversions.converted_at', [$period->starts_on.' 00:00:00', $period->ends_on.' 23:59:59'])->count()
+            : 0;
 
-        return ['value' => (string) $count, 'meta' => ['visitor_conversions' => $count]];
+        return ['value' => (string) $count, 'meta' => [
+            'visitor_conversions' => $count,
+            'unassigned_provenance_count' => $unassigned,
+            'unassigned_provenance_excluded' => $scopeId !== null,
+        ]];
     }
 }

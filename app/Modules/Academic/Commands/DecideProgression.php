@@ -16,6 +16,8 @@ use App\Modules\Academic\Models\LevelProgressionRule;
 use App\Modules\Academic\Models\ProgramVersionLevel;
 use App\Modules\Academic\Models\ProgressionDecision;
 use App\Modules\Academic\Queries\AcademicHistoryQuery;
+use App\Modules\Organization\Models\Branch;
+use App\Modules\Students\Domain\StudentOperationalEligibility;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Support\Authorization\Actor;
@@ -46,6 +48,7 @@ final class DecideProgression
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
         private readonly AcademicHistoryQuery $history,
+        private readonly StudentOperationalEligibility $studentEligibility,
     ) {}
 
     /**
@@ -58,7 +61,10 @@ final class DecideProgression
         try {
             return $this->idempotency->execute('academic.progression.propose', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($proposer, $studentId, $classId, $outcome, $reason, $assessmentResultId, $basis, $repeatCount): array {
-                    $this->require($proposer, self::CAPABILITY_PROPOSE, RecordBranch::studentBranchForId($studentId), 'academic.progression_denied');
+                    /** @var ClassModel $class */
+                    $class = ClassModel::query()->whereKey($classId)->lockForUpdate()->firstOrFail();
+                    $this->require($proposer, self::CAPABILITY_PROPOSE, RecordBranch::classBranch($class), 'academic.progression_denied');
+                    $this->studentEligibility->assertActive($studentId, 'academic.progression_student_not_active');
                     if (! in_array($outcome, ['advance', 'repeat'], true)) {
                         throw BusinessRejection::forCode('academic.progression_outcome_unknown', sprintf('unknown progression outcome %s', $outcome));
                     }
@@ -69,8 +75,6 @@ final class DecideProgression
                         throw BusinessRejection::forCode('academic.progression_open_decision', 'this student and class already have an open progression decision');
                     }
 
-                    /** @var ClassModel $class */
-                    $class = ClassModel::query()->whereKey($classId)->firstOrFail();
                     $levels = $this->resolveLevelFields($class, $studentId, $outcome, $assessmentResultId, $basis, $repeatCount);
 
                     $decision = ProgressionDecision::query()->create([
@@ -87,9 +91,11 @@ final class DecideProgression
                         'basis' => $levels['basis'],
                         'repeat_count' => $levels['repeat_count'],
                     ]);
+                    $provenance = $this->progressionProvenance($decision);
                     $event = $this->audit->record($proposer->actorId, 'academic.progression.propose', 'progression_decision', $decision->id, null, [
                         'student_id' => $studentId, 'class_id' => $classId, 'outcome' => $outcome,
                         'from_level_id' => $levels['from_level_id'], 'to_level_id' => $levels['to_level_id'], 'basis' => $levels['basis'],
+                        ...$provenance,
                     ]);
 
                     return ['decision_id' => $decision->id, 'correlation_id' => $event->correlation_id];
@@ -125,6 +131,35 @@ final class DecideProgression
     }
 
     /**
+     * Completes an appeal using the reviewer already recorded when the
+     * decision entered the appealed state. The authenticated approver is the
+     * only actor supplied by this request; the prior reviewer is not
+     * impersonated or accepted from client input.
+     *
+     * @return array{decision_id: string, superseded_id: string, correlation_id: string}
+     */
+    public function supersedeByApprover(Actor $approver, ProgressionDecision $original, string $outcome, string $reason, string $idempotencyKey, ?string $assessmentResultId = null, ?string $basis = null, ?int $repeatCount = null): array
+    {
+        $reviewerId = trim((string) $original->appeal_reviewed_by);
+        if ($reviewerId === '') {
+            $denial = AuthorizationDenied::forCode('academic.appeal_reviewer_required', 'an appealed progression decision requires a recorded independent reviewer');
+            $this->attemptedOperation->deniedByActor($denial, $approver, 'academic.progression.supersede', 'progression_decision', $original->id);
+        }
+
+        return $this->supersede(
+            new Actor($reviewerId, $reviewerId),
+            $approver,
+            $original,
+            $outcome,
+            $reason,
+            $idempotencyKey,
+            $assessmentResultId,
+            $basis,
+            $repeatCount,
+        );
+    }
+
+    /**
      * Appeal resolution supersedes the original decision with a new
      * proposal; the original row stays in history pointing at its
      * successor.
@@ -138,18 +173,20 @@ final class DecideProgression
         try {
             return $this->idempotency->execute('academic.progression.supersede', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($reviewer, $approver, $original, $outcome, $reason, $assessmentResultId, $basis, $repeatCount): array {
-                    $subjectBranch = RecordBranch::studentBranchForId((string) $original->student_id);
+                    /** @var ProgressionDecision $locked */
+                    $locked = ProgressionDecision::query()->whereKey($original->id)->lockForUpdate()->firstOrFail();
+                    $subjectBranch = RecordBranch::progressionBranch($locked);
                     $this->require($reviewer, self::CAPABILITY_REVIEW, $subjectBranch, 'academic.progression_denied');
                     $this->require($approver, self::CAPABILITY_APPROVE, $subjectBranch, 'academic.progression_denied');
-                    if (trim((string) $original->proposed_by) === $reviewer->actorId || trim((string) $original->proposed_by) === $approver->actorId) {
+                    if ($reviewer->actorId === $approver->actorId) {
+                        throw AuthorizationDenied::forCode('academic.appeal_signers_not_distinct', 'the appeal reviewer and approver must be distinct actors');
+                    }
+                    if (trim((string) $locked->proposed_by) === $reviewer->actorId || trim((string) $locked->proposed_by) === $approver->actorId) {
                         throw AuthorizationDenied::forCode('academic.appeal_not_independent', 'the original decision-maker may not review or approve the appeal outcome');
                     }
                     if (! in_array($outcome, ['advance', 'repeat'], true) || $reason === '') {
                         throw BusinessRejection::forCode('academic.progression_reason', 'a superseding decision requires outcome and reason');
                     }
-
-                    /** @var ProgressionDecision $locked */
-                    $locked = ProgressionDecision::query()->whereKey($original->id)->lockForUpdate()->firstOrFail();
                     ProgressionLifecycle::requireTransition($locked->lifecycle_state, ProgressionLifecycle::STATE_SUPERSEDED);
 
                     /** @var ClassModel $class */
@@ -178,15 +215,17 @@ final class DecideProgression
                     ]);
                     $this->writeFact($successor);
 
-                    $event = $this->audit->record($reviewer->actorId, 'academic.progression.supersede', 'progression_decision', $successor->id, ['outcome' => $locked->outcome], [
+                    $provenance = $this->progressionProvenance($successor);
+                    $event = $this->audit->record($approver->actorId, 'academic.progression.supersede', 'progression_decision', $successor->id, ['outcome' => $locked->outcome], [
                         'supersedes_id' => $locked->id, 'outcome' => $outcome, 'reason' => $reason,
+                        ...$provenance,
                     ]);
 
                     return ['decision_id' => $successor->id, 'superseded_id' => $locked->id, 'correlation_id' => $event->correlation_id];
                 }),
             );
         } catch (AuthorizationDenied $denial) {
-            $this->attemptedOperation->deniedByActor($denial, $reviewer, 'academic.progression.supersede', 'progression_decision', $original->id);
+            $this->attemptedOperation->deniedByActor($denial, $approver, 'academic.progression.supersede', 'progression_decision', $original->id);
         }
     }
 
@@ -202,8 +241,8 @@ final class DecideProgression
                     $locked = ProgressionDecision::query()->whereKey($decision->id)->lockForUpdate()->firstOrFail();
                     $this->require($actor, $capability, RecordBranch::progressionBranch($locked), 'academic.progression_denied');
                     ProgressionLifecycle::requireTransition($locked->lifecycle_state, $toState);
-                    if (in_array($toState, [ProgressionLifecycle::STATE_REVIEWED], true) && trim((string) $locked->proposed_by) === $actor->actorId) {
-                        throw AuthorizationDenied::forCode('academic.review_not_independent', 'the reviewer may not be the proposer of the decision under review');
+                    if (in_array($toState, [ProgressionLifecycle::STATE_REVIEWED, ProgressionLifecycle::STATE_APPEALED], true) && (trim((string) $locked->proposed_by) === $actor->actorId || trim((string) $locked->approved_by) === $actor->actorId)) {
+                        throw AuthorizationDenied::forCode('academic.review_not_independent', 'the reviewer may not be the proposer or approver of the decision under review');
                     }
                     if ($toState === ProgressionLifecycle::STATE_APPROVED && (trim((string) $locked->proposed_by) === $actor->actorId || trim((string) $locked->reviewed_by) === $actor->actorId)) {
                         throw AuthorizationDenied::forCode('academic.approval_not_independent', 'the approver must differ from the proposer and the reviewer');
@@ -218,6 +257,9 @@ final class DecideProgression
                     if ($toState === ProgressionLifecycle::STATE_REVIEWED) {
                         $locked->reviewed_by = $actor->actorId;
                     }
+                    if ($toState === ProgressionLifecycle::STATE_APPEALED) {
+                        $locked->appeal_reviewed_by = $actor->actorId;
+                    }
                     if ($toState === ProgressionLifecycle::STATE_APPROVED || $toState === ProgressionLifecycle::STATE_REJECTED) {
                         $locked->approved_by = $actor->actorId;
                     }
@@ -225,7 +267,11 @@ final class DecideProgression
                     if ($toState === ProgressionLifecycle::STATE_APPROVED) {
                         $this->writeFact($locked->fresh() ?? $locked);
                     }
-                    $event = $this->audit->record($actor->actorId, 'academic.progression.'.$verb, 'progression_decision', $locked->id, $before, ['lifecycle_state' => $toState]);
+                    $provenance = $this->progressionProvenance($locked);
+                    $event = $this->audit->record($actor->actorId, 'academic.progression.'.$verb, 'progression_decision', $locked->id, $before, [
+                        'lifecycle_state' => $toState,
+                        ...$provenance,
+                    ]);
 
                     return ['decision_id' => $locked->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
                 }),
@@ -236,8 +282,8 @@ final class DecideProgression
     }
 
     /**
-     * Level-aware fields for a decision. Null fields mean the legacy
-     * class-scoped path; a class that targets a level always produces
+     * Level-aware fields for a decision. Null fields mean the class has no
+     * configured level; a class that targets a level always produces
      * from/to level, a non-empty basis, and the applicable repeat count.
      *
      * @return array{from_level_id: string|null, to_level_id: string|null, assessment_result_id: string|null, basis: string|null, repeat_count: int|null}
@@ -246,7 +292,7 @@ final class DecideProgression
     {
         if ($class->program_version_level_id === null || $class->program_version_level_id === '') {
             if ($assessmentResultId !== null || $basis !== null || $repeatCount !== null) {
-                throw BusinessRejection::forCode('academic.progression_level_unexpected', 'level-aware fields cannot be used on a legacy non-level class');
+                throw BusinessRejection::forCode('academic.progression_level_unexpected', 'level-aware fields cannot be used on a class without a configured level');
             }
 
             return ['from_level_id' => null, 'to_level_id' => null, 'assessment_result_id' => null, 'basis' => null, 'repeat_count' => null];
@@ -438,6 +484,22 @@ final class DecideProgression
             ->where('level_id', $levelId)
             ->where('outcome', LevelProgressFact::OUTCOME_REPEAT)
             ->count() + 1;
+    }
+
+    /** @return array{branch_id: string, campus_id: string, organization_id: string} */
+    private function progressionProvenance(ProgressionDecision $decision): array
+    {
+        $branchId = RecordBranch::progressionBranch($decision);
+        $branch = $branchId === null ? null : Branch::query()->whereKey($branchId)->first();
+        if ($branch === null || $branch->lifecycle_state !== 'active') {
+            throw BusinessRejection::forCode('academic.progression_provenance_required', 'a progression event requires active branch provenance');
+        }
+        $scope = $branch->structureScope();
+        if ($scope->organizationId === '' || $scope->campusId === null) {
+            throw BusinessRejection::forCode('academic.progression_provenance_required', 'a progression event requires active campus organization provenance');
+        }
+
+        return ['branch_id' => (string) $branch->id, 'campus_id' => (string) $scope->campusId, 'organization_id' => $scope->organizationId];
     }
 
     private function require(Actor $actor, string $capability, ?string $branchId, string $errorCode): void

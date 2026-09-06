@@ -10,7 +10,11 @@ use App\Modules\Academic\Domain\RecordBranch;
 use App\Modules\Academic\Models\AssessmentAttempt;
 use App\Modules\Academic\Models\AssessmentResult;
 use App\Modules\Academic\Models\Enrollment;
+use App\Modules\Academic\Models\ClassModel;
+use App\Modules\Academic\Domain\TeacherAuthority;
 use App\Modules\Academic\Models\ResultCorrection;
+use App\Modules\Organization\Models\Branch;
+use App\Modules\Students\Domain\StudentOperationalEligibility;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Crm\Domain\CrmInteractionTraceRecorder;
@@ -45,6 +49,8 @@ final class ManageAssessmentResult
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
         private readonly CrmInteractionTraceRecorder $crmTrace,
+        private readonly StudentOperationalEligibility $studentEligibility,
+        private readonly TeacherAuthority $teacherAuthority,
     ) {}
 
     /** @return array{attempt_id: string, correlation_id: string} */
@@ -58,6 +64,12 @@ final class ManageAssessmentResult
                     /** @var Enrollment $locked */
                     $locked = Enrollment::query()->whereKey($enrollment->id)->lockForUpdate()->firstOrFail();
                     $this->require($assessor, self::CAPABILITY_ASSESS, RecordBranch::enrollmentBranch($locked), 'academic.assess_denied');
+                    /** @var ClassModel|null $class */
+                    $class = ClassModel::query()->find($locked->class_id);
+                    if ($class === null) {
+                        throw BusinessRejection::forCode('academic.assessment_class_missing', 'assessment evidence requires an authoritative class');
+                    }
+                    $this->teacherAuthority->requireActorDeliveryAuthority($assessor, $class, CarbonImmutable::today(), null, self::CAPABILITY_ASSESS, 'academic.assess_denied');
                     if (! in_array($kind, ['placement', 'assessment'], true)) {
                         throw BusinessRejection::forCode('academic.attempt_kind_unknown', sprintf('unknown attempt kind %s', $kind));
                     }
@@ -67,19 +79,23 @@ final class ManageAssessmentResult
                     if ($locked->lifecycle_state !== 'active') {
                         throw BusinessRejection::forCode('academic.attempt_enrollment_not_active', 'attempts attach only to an active enrollment');
                     }
+                    $this->studentEligibility->assertActive((string) $locked->student_id, 'academic.attempt_student_not_active');
 
                     $attempt = AssessmentAttempt::query()->create([
                         'id' => RandomIdentifier::new(),
                         'enrollment_id' => $locked->id,
+                        'assessed_on' => CarbonImmutable::today()->toDateString(),
                         'kind' => $kind,
                         'evidence_ref' => $evidenceRef,
                         'lifecycle_state' => 'submitted',
                         'recorded_by' => $assessor->actorId,
                     ]);
+                    $provenance = $this->branchProvenance(RecordBranch::enrollmentBranch($locked));
                     $event = $this->audit->record($assessor->actorId, 'academic.attempt.submit', 'assessment_attempt', $attempt->id, null, [
                         'enrollment_id' => $locked->id, 'kind' => $kind,
+                        ...$provenance,
                     ]);
-                    $this->traceVisitor($assessor, $locked, $attempt->id, $kind);
+                    $this->traceVisitor($assessor, $locked, $attempt->id, $kind, $event->id);
 
                     return ['attempt_id' => $attempt->id, 'correlation_id' => $event->correlation_id];
                 }),
@@ -100,12 +116,17 @@ final class ManageAssessmentResult
                     /** @var AssessmentAttempt $locked */
                     $locked = AssessmentAttempt::query()->whereKey($attempt->id)->lockForUpdate()->firstOrFail();
                     $this->require($scorer, self::CAPABILITY_ASSESS, RecordBranch::attemptBranch($locked), 'academic.assess_denied');
+                    /** @var Enrollment|null $enrollment */
+                    $enrollment = Enrollment::query()->find($locked->enrollment_id);
+                    $class = $enrollment === null ? null : ClassModel::query()->find($enrollment->class_id);
+                    if ($class === null) {
+                        throw BusinessRejection::forCode('academic.assessment_class_missing', 'assessment scoring requires an authoritative class');
+                    }
+                    $this->teacherAuthority->requireActorDeliveryAuthority($scorer, $class, $locked->assessed_on !== null ? CarbonImmutable::parse((string) $locked->assessed_on) : CarbonImmutable::today(), null, self::CAPABILITY_ASSESS, 'academic.assess_denied');
                     if ($locked->lifecycle_state !== 'submitted') {
                         throw BusinessRejection::forCode('academic.attempt_not_submitted', 'only a submitted attempt can be scored');
                     }
-                    if (! is_numeric($score) || (float) $score < 0) {
-                        throw BusinessRejection::forCode('academic.result_score_invalid', 'a score must be a non-negative number');
-                    }
+                    $this->assertScore($score);
                     if (AssessmentResult::query()->where('attempt_id', $locked->id)->where('lifecycle_state', '!=', 'corrected')->exists()) {
                         throw BusinessRejection::forCode('academic.result_exists', 'this attempt already has a live result');
                     }
@@ -117,8 +138,10 @@ final class ManageAssessmentResult
                         'lifecycle_state' => AssessmentResultLifecycle::STATE_SCORED,
                         'scored_by' => $scorer->actorId,
                     ]);
+                    $provenance = $this->branchProvenance(RecordBranch::attemptBranch($locked));
                     $event = $this->audit->record($scorer->actorId, 'academic.result.score', 'assessment_result', $result->id, null, [
                         'attempt_id' => $locked->id, 'score' => $score,
+                        ...$provenance,
                     ]);
 
                     return ['result_id' => $result->id, 'correlation_id' => $event->correlation_id];
@@ -188,9 +211,7 @@ final class ManageAssessmentResult
                     if ($reason === '') {
                         throw BusinessRejection::forCode('academic.correction_reason', 'a correction requires a reason');
                     }
-                    if (! is_numeric($score) || (float) $score < 0) {
-                        throw BusinessRejection::forCode('academic.result_score_invalid', 'a score must be a non-negative number');
-                    }
+                    $this->assertScore($score);
 
                     AssessmentResultLifecycle::requireTransition($locked->lifecycle_state, AssessmentResultLifecycle::STATE_CORRECTED);
                     if (ResultCorrection::query()->where('result_id', $locked->id)->where('lifecycle_state', ResultCorrection::STATE_PROPOSED)->exists()) {
@@ -205,8 +226,10 @@ final class ManageAssessmentResult
                         'lifecycle_state' => ResultCorrection::STATE_PROPOSED,
                         'proposed_by' => $moderator->actorId,
                     ]);
+                    $provenance = $this->branchProvenance(RecordBranch::resultBranch($locked));
                     $event = $this->audit->record($moderator->actorId, 'academic.result.correction.propose', 'result_correction', $correction->id, null, [
                         'result_id' => $locked->id, 'score' => $score,
+                        ...$provenance,
                     ]);
 
                     return ['correction_id' => $correction->id, 'correlation_id' => $event->correlation_id];
@@ -225,10 +248,14 @@ final class ManageAssessmentResult
         try {
             return $this->idempotency->execute('academic.result.correction.approve', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($approver, $correction): array {
+                    // Corrections and their result form one aggregate. Lock
+                    // the result first, matching correction proposal and all
+                    // result transitions; never correction then result.
+                    $resultId = ResultCorrection::query()->whereKey($correction->id)->value('result_id');
+                    /** @var AssessmentResult $locked */
+                    $locked = AssessmentResult::query()->whereKey($resultId)->lockForUpdate()->firstOrFail();
                     /** @var ResultCorrection $lockedCorrection */
                     $lockedCorrection = ResultCorrection::query()->whereKey($correction->id)->lockForUpdate()->firstOrFail();
-                    /** @var AssessmentResult $locked */
-                    $locked = AssessmentResult::query()->whereKey($lockedCorrection->result_id)->lockForUpdate()->firstOrFail();
                     $this->require($approver, self::CAPABILITY_APPROVE, RecordBranch::resultBranch($locked), 'academic.approve_result_denied');
 
                     if ($lockedCorrection->lifecycle_state !== ResultCorrection::STATE_PROPOSED) {
@@ -259,6 +286,7 @@ final class ManageAssessmentResult
                     ])->save();
                     $event = $this->audit->record($approver->actorId, 'academic.result.correction.approve', 'assessment_result', $corrected->id, ['score' => $locked->score], [
                         'corrects_id' => $locked->id, 'score' => $lockedCorrection->score, 'correction_id' => $lockedCorrection->id,
+                        ...$this->branchProvenance(RecordBranch::resultBranch($corrected)),
                     ]);
 
                     return ['result_id' => $corrected->id, 'corrects_id' => $locked->id, 'correlation_id' => $event->correlation_id];
@@ -295,7 +323,10 @@ final class ManageAssessmentResult
                         default => [],
                     });
                     $locked->save();
-                    $event = $this->audit->record($actor->actorId, 'academic.result.'.$verb, 'assessment_result', $locked->id, $before, ['lifecycle_state' => $toState]);
+                    $event = $this->audit->record($actor->actorId, 'academic.result.'.$verb, 'assessment_result', $locked->id, $before, [
+                        'lifecycle_state' => $toState,
+                        ...$this->branchProvenance(RecordBranch::resultBranch($locked)),
+                    ]);
 
                     return ['result_id' => $locked->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
                 }),
@@ -305,6 +336,30 @@ final class ManageAssessmentResult
         }
     }
 
+    private function assertScore(string $score): void
+    {
+        $score = trim($score);
+        if (preg_match('/^(?:0|[1-9]\d{0,3})(?:\.\d{1,2})?$/', $score) !== 1) {
+            throw BusinessRejection::forCode('academic.result_score_invalid', 'a score must be a non-negative number with at most two decimal places and a maximum of 9999.99');
+        }
+    }
+
+    /** @return array{branch_id: string, campus_id: string, organization_id: string} */
+    private function branchProvenance(?string $branchId): array
+    {
+        $branchId = trim((string) ($branchId ?? ''));
+        $branch = $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
+        if ($branch === null || $branch->lifecycle_state !== 'active') {
+            throw BusinessRejection::forCode('academic.assessment_provenance_required', 'an assessment event requires active branch provenance');
+        }
+        $scope = $branch->structureScope();
+        if ($scope->organizationId === '' || $scope->campusId === null) {
+            throw BusinessRejection::forCode('academic.assessment_provenance_required', 'an assessment event requires active campus organization provenance');
+        }
+
+        return ['branch_id' => (string) $branch->id, 'campus_id' => (string) $scope->campusId, 'organization_id' => $scope->organizationId];
+    }
+
     private function assertIndependent(AssessmentResult $result, Actor $actor, string $role): void
     {
         if (trim((string) $result->scored_by) === $actor->actorId) {
@@ -312,7 +367,7 @@ final class ManageAssessmentResult
         }
     }
 
-    private function traceVisitor(Actor $actor, Enrollment $enrollment, string $attemptId, string $kind): void
+    private function traceVisitor(Actor $actor, Enrollment $enrollment, string $attemptId, string $kind, string $authorityAuditEventId): void
     {
         $visitorId = $this->crmTrace->visitorIdForStudent($enrollment->student_id);
         if ($visitorId === null) {
@@ -327,6 +382,7 @@ final class ManageAssessmentResult
             sprintf('%s attempt submitted for the student linked to this lead.', ucfirst($kind)),
             CarbonImmutable::now(),
             assessmentAttemptId: $attemptId,
+            authorityAuditEventId: $authorityAuditEventId,
         );
     }
 

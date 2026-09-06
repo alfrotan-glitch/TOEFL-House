@@ -10,8 +10,11 @@ use App\Modules\Hr\Domain\ContractLifecycle;
 use App\Modules\Hr\Domain\EmploymentLifecycle;
 use App\Modules\Hr\Models\Contract;
 use App\Modules\Hr\Models\Employment;
+use App\Modules\Identity\Models\Person;
+use App\Modules\Organization\Models\Branch;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
+use App\Support\Authorization\StructureScope;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
@@ -44,13 +47,15 @@ final class MaintainContract
         try {
             return $this->idempotency->execute('hr.contract.draft', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $employment, $termsSummary, $effectiveFrom): array {
-                    $this->require($actor, self::CAPABILITY);
                     if ($termsSummary === '') {
                         throw BusinessRejection::forCode('hr.contract_terms', 'a contract requires its terms summary');
                     }
 
                     /** @var Employment $locked */
                     $locked = Employment::query()->whereKey($employment->id)->lockForUpdate()->firstOrFail();
+                    $branch = $this->employmentBranch($locked);
+                    $scope = $branch->structureScope();
+                    $this->require($actor, self::CAPABILITY, $scope);
                     if ($locked->lifecycle_state === EmploymentLifecycle::STATE_TERMINATED) {
                         throw BusinessRejection::forCode('hr.contract_employment_terminated', 'a terminated employment cannot receive contracts');
                     }
@@ -64,8 +69,10 @@ final class MaintainContract
                         'terms_summary' => $termsSummary,
                         'lifecycle_state' => ContractLifecycle::STATE_DRAFT,
                         'effective_from' => $effectiveFrom,
+                        'originating_branch_id' => $branch->id,
+                        'current_home_branch_id' => $branch->id,
                     ]);
-                    $event = $this->audit->record($actor->actorId, 'hr.contract.draft', 'contract', $contract->id, null, ['employment_id' => $locked->id, 'effective_from' => $effectiveFrom]);
+                    $event = $this->audit->record($actor->actorId, 'hr.contract.draft', 'contract', $contract->id, null, ['employment_id' => $locked->id, 'effective_from' => $effectiveFrom, 'branch_id' => $branch->id, 'organization_id' => $scope->organizationId]);
 
                     return ['contract_id' => $contract->id, 'correlation_id' => $event->correlation_id];
                 }),
@@ -83,19 +90,21 @@ final class MaintainContract
         try {
             return $this->idempotency->execute('hr.contract.sign', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $contract, $signedRef): array {
-                    $this->require($actor, self::CAPABILITY);
                     if ($signedRef === '') {
                         throw BusinessRejection::forCode('hr.contract_signature', 'signing requires the signed-document evidence reference');
                     }
 
                     /** @var Contract $locked */
                     $locked = Contract::query()->whereKey($contract->id)->lockForUpdate()->firstOrFail();
+                    $branch = $this->employmentBranch((string) $locked->employment_id);
+                    $scope = $branch->structureScope();
+                    $this->require($actor, self::CAPABILITY, $scope);
                     ContractLifecycle::requireTransition($locked->lifecycle_state, ContractLifecycle::STATE_ACTIVE);
 
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
                     $locked->forceFill(['lifecycle_state' => ContractLifecycle::STATE_ACTIVE, 'signed_ref' => $signedRef, 'signed_by' => $actor->actorId]);
                     $locked->save();
-                    $event = $this->audit->record($actor->actorId, 'hr.contract.sign', 'contract', $locked->id, $before, ['lifecycle_state' => ContractLifecycle::STATE_ACTIVE, 'signed_ref' => $signedRef]);
+                    $event = $this->audit->record($actor->actorId, 'hr.contract.sign', 'contract', $locked->id, $before, ['lifecycle_state' => ContractLifecycle::STATE_ACTIVE, 'signed_ref' => $signedRef, 'branch_id' => $branch->id, 'organization_id' => $scope->organizationId]);
 
                     return ['contract_id' => $locked->id, 'lifecycle_state' => ContractLifecycle::STATE_ACTIVE, 'correlation_id' => $event->correlation_id];
                 }),
@@ -113,10 +122,11 @@ final class MaintainContract
         try {
             return $this->idempotency->execute('hr.contract.close', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $contract, $effectiveTo): array {
-                    $this->require($actor, self::CAPABILITY);
-
                     /** @var Contract $locked */
                     $locked = Contract::query()->whereKey($contract->id)->lockForUpdate()->firstOrFail();
+                    $branch = $this->employmentBranch((string) $locked->employment_id);
+                    $scope = $branch->structureScope();
+                    $this->require($actor, self::CAPABILITY, $scope);
                     ContractLifecycle::requireTransition($locked->lifecycle_state, ContractLifecycle::STATE_CLOSED);
                     if ($effectiveTo <= $locked->effective_from) {
                         throw BusinessRejection::forCode('hr.contract_period', 'the closure date must be after the effective start');
@@ -125,7 +135,7 @@ final class MaintainContract
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
                     $locked->forceFill(['lifecycle_state' => ContractLifecycle::STATE_CLOSED, 'effective_to' => $effectiveTo]);
                     $locked->save();
-                    $event = $this->audit->record($actor->actorId, 'hr.contract.close', 'contract', $locked->id, $before, ['lifecycle_state' => ContractLifecycle::STATE_CLOSED, 'effective_to' => $effectiveTo]);
+                    $event = $this->audit->record($actor->actorId, 'hr.contract.close', 'contract', $locked->id, $before, ['lifecycle_state' => ContractLifecycle::STATE_CLOSED, 'effective_to' => $effectiveTo, 'branch_id' => $branch->id, 'organization_id' => $scope->organizationId]);
 
                     return ['contract_id' => $locked->id, 'lifecycle_state' => ContractLifecycle::STATE_CLOSED, 'correlation_id' => $event->correlation_id];
                 }),
@@ -135,9 +145,22 @@ final class MaintainContract
         }
     }
 
-    private function require(Actor $actor, string $capability): void
+    private function employmentBranch(string $employmentId): Branch
     {
-        $outcome = $this->access->decide($actor, $capability, null);
+        $employment = Employment::query()->whereKey($employmentId)->first();
+        $person = $employment === null ? null : Person::query()->whereKey($employment->person_id)->first();
+        $branchId = trim((string) ($person?->home_branch_id ?? ''));
+        $branch = $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
+        if ($employment === null || $person === null || $branch === null || $branch->lifecycle_state !== 'active' || $branch->structureScope()->organizationId === '') {
+            throw BusinessRejection::forCode('hr.employee_provenance_required', 'contract operations require active employee branch and organization provenance');
+        }
+
+        return $branch;
+    }
+
+    private function require(Actor $actor, string $capability, ?StructureScope $scope = null): void
+    {
+        $outcome = $this->access->decide($actor, $capability, $scope);
         if (! $outcome->allowed) {
             throw AuthorizationDenied::forCode('hr.contract_denied', $outcome->reason);
         }

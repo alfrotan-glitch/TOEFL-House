@@ -15,6 +15,7 @@ use App\Modules\Academic\Models\ProgressionDecision;
 use App\Modules\Academic\Placement\Models\PlacementProfile;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
+use App\Modules\Organization\Models\Branch;
 use App\Modules\Students\Models\Student;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
@@ -79,8 +80,17 @@ final class ManageAcademicAppeal
                         'reason' => $reason,
                         'lifecycle_state' => AppealLifecycle::STATE_OPEN,
                     ]);
+                    $provenance = $this->appealProvenance($appeal);
                     $event = $this->audit->record($filer->actorId, 'academic.appeal.file', 'academic_appeal', $appeal->id, null, [
                         'student_id' => $studentId, 'subject' => $subjectType.':'.trim($subjectId),
+                        ...$provenance,
+                        'workflow' => [
+                            'definition_key' => 'academic.appeal_review',
+                            'source_type' => 'academic_appeal',
+                            'source_id' => $appeal->id,
+                            'queue_key' => 'academic.appeal',
+                            'source_version' => 1,
+                        ],
                     ]);
 
                     return ['appeal_id' => $appeal->id, 'correlation_id' => $event->correlation_id];
@@ -125,7 +135,10 @@ final class ManageAcademicAppeal
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
                     $locked->forceFill(['lifecycle_state' => AppealLifecycle::STATE_ASSIGNED, 'assigned_reviewer_id' => $reviewerPersonId]);
                     $locked->save();
-                    $event = $this->audit->record($actor->actorId, 'academic.appeal.assign', 'academic_appeal', $locked->id, $before, ['lifecycle_state' => AppealLifecycle::STATE_ASSIGNED, 'reviewer' => $reviewerPersonId]);
+                    $event = $this->audit->record($actor->actorId, 'academic.appeal.assign', 'academic_appeal', $locked->id, $before, [
+                        'lifecycle_state' => AppealLifecycle::STATE_ASSIGNED, 'reviewer' => $reviewerPersonId,
+                        ...$this->appealProvenance($locked),
+                    ]);
 
                     return ['appeal_id' => $locked->id, 'lifecycle_state' => AppealLifecycle::STATE_ASSIGNED, 'correlation_id' => $event->correlation_id];
                 }),
@@ -198,7 +211,10 @@ final class ManageAcademicAppeal
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
                     $locked->forceFill(['lifecycle_state' => $toState]);
                     $locked->save();
-                    $event = $this->audit->record($actor->actorId, 'academic.appeal.'.$verb, 'academic_appeal', $locked->id, $before, ['lifecycle_state' => $toState]);
+                    $event = $this->audit->record($actor->actorId, 'academic.appeal.'.$verb, 'academic_appeal', $locked->id, $before, [
+                        'lifecycle_state' => $toState,
+                        ...$this->appealProvenance($locked),
+                    ]);
 
                     return ['appeal_id' => $locked->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
                 }),
@@ -341,6 +357,22 @@ final class ManageAcademicAppeal
         }
 
         return null;
+    }
+
+    /** @return array{branch_id: string, campus_id: string, organization_id: string} */
+    private function appealProvenance(AcademicAppeal $appeal): array
+    {
+        $branchId = RecordBranch::appealBranch($appeal);
+        $branch = $branchId === null ? null : Branch::query()->whereKey($branchId)->first();
+        if ($branch === null || $branch->lifecycle_state !== 'active') {
+            throw BusinessRejection::forCode('academic.appeal_provenance_required', 'an appeal event requires active branch provenance');
+        }
+        $scope = $branch->structureScope();
+        if ($scope->organizationId === '' || $scope->campusId === null) {
+            throw BusinessRejection::forCode('academic.appeal_provenance_required', 'an appeal event requires active campus organization provenance');
+        }
+
+        return ['branch_id' => (string) $branch->id, 'campus_id' => (string) $scope->campusId, 'organization_id' => $scope->organizationId];
     }
 
     private function requireCapability(Actor $actor, ?string $branchId): void

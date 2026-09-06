@@ -30,13 +30,22 @@ final class DocumentsController extends Controller
 {
     public function index(): View
     {
+        $this->requireOrganizationRead('documents.register', 'documents.console.index');
+        $visibleBranchIds = $this->authorizedBranches('documents.register');
+        $people = Person::query()
+            ->where('verification_state', 'verified')
+            ->whereIn('home_branch_id', $visibleBranchIds)
+            ->orderBy('legal_name')->limit(300)->get();
+        $personIds = $people->pluck('id')->all();
+        $documentIds = Document::query()->whereIn('subject_person_id', $personIds)->pluck('id')->all();
+
         return view('documents.index', [
             'classifications' => DocumentClassification::query()->orderBy('category')->get(),
             'retentionRules' => RetentionRule::query()->orderBy('category')->get(),
-            'documents' => Document::query()->orderByDesc('id')->limit(200)->get(),
-            'versions' => DocumentVersion::query()->orderByDesc('created_at')->limit(300)->get(),
-            'retentionDecisions' => RetentionDecision::query()->orderByDesc('created_at')->limit(200)->get(),
-            'people' => Person::query()->where('verification_state', 'verified')->orderBy('legal_name')->limit(300)->get(),
+            'documents' => Document::query()->whereIn('id', $documentIds)->orderByDesc('id')->limit(200)->get(),
+            'versions' => DocumentVersion::query()->whereIn('document_id', $documentIds)->orderByDesc('created_at')->limit(300)->get(),
+            'retentionDecisions' => RetentionDecision::query()->whereIn('document_id', $documentIds)->orderByDesc('created_at')->limit(200)->get(),
+            'people' => $people,
         ]);
     }
 

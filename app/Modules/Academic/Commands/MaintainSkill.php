@@ -99,6 +99,6 @@ final class MaintainSkill
      */
     private function require(Actor $actor): void
     {
-        $this->access->require($actor, self::CAPABILITY, null, 'academic.skill_denied');
+        $this->access->requireGlobal($actor, self::CAPABILITY, 'academic.skill_denied');
     }
 }

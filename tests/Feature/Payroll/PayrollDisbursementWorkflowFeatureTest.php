@@ -142,7 +142,7 @@ final class PayrollDisbursementWorkflowFeatureTest extends TestCase
     {
         // Regression (F-P3): the JSON calculate endpoint reads period from the body.
         $this->signIn('calculator');
-        $this->postJson('/api/payroll/calculations', [
+        $this->postJson('/api/v1/payroll/calculations', [
             'period_id' => $this->payrollPeriodId,
             'employment_id' => $this->employmentId,
         ])->assertCreated()->assertJsonPath('status', 'prepared');
@@ -153,7 +153,7 @@ final class PayrollDisbursementWorkflowFeatureTest extends TestCase
             ->where('lifecycle_state', 'prepared')->orderByDesc('id')->firstOrFail();
 
         $this->signIn('approver');
-        $this->postJson('/api/payroll/calculations/'.$calculation->id.'/approve')
+        $this->postJson('/api/v1/payroll/calculations/'.$calculation->id.'/approve')
             ->assertOk()->assertJsonPath('status', 'approved');
         $this->post('/logout');
 
@@ -190,7 +190,7 @@ final class PayrollDisbursementWorkflowFeatureTest extends TestCase
         $this->prepareInForceSalaryContract();
 
         $this->signIn('calculator');
-        $this->postJson('/api/payroll/calculations', [
+        $this->postJson('/api/v1/payroll/calculations', [
             'period_id' => $this->payrollPeriodId,
             'employment_id' => $this->employmentId,
         ])->assertCreated();
@@ -280,7 +280,7 @@ final class PayrollDisbursementWorkflowFeatureTest extends TestCase
 
         $this->signIn('nobody');
         // Cannot calculate.
-        $this->postJson('/api/payroll/calculations', [
+        $this->postJson('/api/v1/payroll/calculations', [
             'period_id' => $this->payrollPeriodId,
             'employment_id' => $this->employmentId,
         ])->assertForbidden();

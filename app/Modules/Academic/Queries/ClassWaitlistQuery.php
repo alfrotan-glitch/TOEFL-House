@@ -10,17 +10,17 @@ use App\Modules\Academic\Models\Enrollment;
 use Illuminate\Support\Collection;
 
 /**
- * Read-only class waitlist: open entries in position order, capacity state,
- * and whether the class currently has room to promote.
+ * Read-only class waitlist: open entries in position order and the shared
+ * live-seat capacity state. Waitlist rows never claim a seat.
  */
 final class ClassWaitlistQuery
 {
-    /** @return array{class_id: string, capacity: int, active_seats: int, waitlist: list<array<string, mixed>>} */
+    /** @return array{class_id: string, capacity: int, claimed_seats: int, waitlist: list<array<string, mixed>>} */
     public function forClass(string $classId): array
     {
         /** @var ClassModel $class */
         $class = ClassModel::query()->findOrFail($classId);
-        $activeSeats = Enrollment::query()->where('class_id', $classId)->where('lifecycle_state', 'active')->count();
+        $claimedSeats = Enrollment::query()->where('class_id', $classId)->whereIn('lifecycle_state', ['requested', 'active', 'frozen'])->count();
 
         /** @var Collection<int, ClassWaitlistEntry> $entries */
         $entries = ClassWaitlistEntry::query()
@@ -32,7 +32,7 @@ final class ClassWaitlistQuery
         return [
             'class_id' => trim($classId),
             'capacity' => (int) $class->capacity,
-            'active_seats' => $activeSeats,
+            'claimed_seats' => $claimedSeats,
             'waitlist' => $entries->map(static fn (ClassWaitlistEntry $entry): array => [
                 'entry_id' => trim((string) $entry->id),
                 'student_id' => trim((string) $entry->student_id),

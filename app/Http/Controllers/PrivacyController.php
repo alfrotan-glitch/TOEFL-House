@@ -34,14 +34,30 @@ final class PrivacyController extends Controller
 {
     public function index(): View
     {
+        $this->requireOrganizationRead('privacy.disclose', 'privacy.console.index');
+        $visibleBranchIds = $this->authorizedBranches('privacy.disclose');
+        $today = CarbonImmutable::today()->toDateString();
+        $people = Person::query()
+            ->where('verification_state', 'verified')
+            ->whereIn('home_branch_id', $visibleBranchIds)
+            ->orderBy('legal_name')->limit(300)->get();
+        $personIds = $people->pluck('id')->all();
+
         return view('privacy.index', [
             'purposes' => ConsentPurpose::query()->orderBy('name')->get(),
-            'consents' => Consent::query()->orderByDesc('id')->limit(200)->get(),
-            'revocations' => ConsentRevocation::query()->orderByDesc('id')->limit(200)->get(),
-            'disclosures' => Disclosure::query()->orderByDesc('id')->limit(200)->get(),
-            'exportRequests' => PrivacyExportRequest::query()->orderByDesc('id')->limit(200)->get(),
-            'people' => Person::query()->where('verification_state', 'verified')->orderBy('legal_name')->limit(300)->get(),
-            'organizations' => Organization::query()->orderBy('name')->limit(100)->get(),
+            'consents' => Consent::query()->whereIn('subject_person_id', $personIds)->orderByDesc('id')->limit(200)->get(),
+            'revocations' => ConsentRevocation::query()->whereIn('consent_id', Consent::query()->whereIn('subject_person_id', $personIds)->select('id'))->orderByDesc('id')->limit(200)->get(),
+            'disclosures' => Disclosure::query()->whereIn('subject_person_id', $personIds)->orderByDesc('id')->limit(200)->get(),
+            'exportRequests' => PrivacyExportRequest::query()->whereIn('subject_person_id', $personIds)->orderByDesc('id')->limit(200)->get(),
+            'people' => $people,
+            'organizations' => Organization::query()
+                ->where('lifecycle_state', 'active')
+                ->whereHas('campuses.branchAssignments', function ($query) use ($visibleBranchIds, $today): void {
+                    $query->whereIn('branch_id', $visibleBranchIds)
+                        ->where('effective_from', '<=', $today)
+                        ->where(fn ($active) => $active->whereNull('effective_to')->orWhere('effective_to', '>', $today));
+                })
+                ->orderBy('name')->limit(100)->get(),
         ]);
     }
 

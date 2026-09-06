@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 /**
  * Staged termination settlement: a proposal is born 'proposed' (a
  * preparer session) and only an approver session closes it — approval
- * records the immutable FinalSettlement fact (guarded by 000103).
+ * records the immutable Finance EmploymentSettlement fact (guarded by 000142).
  *
  * @property string $id
  * @property string $employment_id

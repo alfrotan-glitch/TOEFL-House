@@ -8,6 +8,7 @@ use App\Modules\Hr\Commands\MaintainContractVersion;
 use App\Modules\Hr\Commands\MaintainEmployment;
 use App\Modules\Hr\Models\ContractVersion;
 use App\Modules\Hr\Models\Employment;
+use App\Modules\Finance\Commands\MaintainEmploymentSettlement;
 use App\Modules\Payroll\Commands\ApprovePayrollResult;
 use App\Modules\Payroll\Commands\CalculatePayroll;
 use App\Modules\Payroll\Commands\MaintainPayrollPeriod;
@@ -16,11 +17,14 @@ use App\Modules\Payroll\Models\PayrollCalculation;
 use App\Modules\Payroll\Models\PayrollPeriod;
 use App\Modules\Payroll\Models\PayrollResult;
 use App\Modules\Payroll\Models\SettlementProposal;
+use App\Modules\Identity\Models\Person;
+use App\Modules\Organization\Models\Branch;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use App\Support\Identifiers\RandomIdentifier;
 use Tests\Concerns\BuildsActors;
 use Tests\TestCase;
 
@@ -45,6 +49,9 @@ final class PayrollFeatureTest extends TestCase
     {
         parent::setUp();
         $this->personWithAuthority($this->personId, []);
+        $branch = Branch::query()->create(['id' => RandomIdentifier::new(), 'name' => 'Payroll Settlement Branch', 'lifecycle_state' => 'active']);
+        $this->attachBranchToBootstrapOrganization($branch->id);
+        Person::query()->whereKey($this->personId)->update(['home_branch_id' => $branch->id]);
 
         $manager = $this->grantedActor('pay-manager-1', ['hr.employ', 'hr.terminate', 'access.assign_position']);
         $employment = app(MaintainEmployment::class)->employ($manager, $this->personId, 'pay-emp-1');
@@ -239,8 +246,8 @@ final class PayrollFeatureTest extends TestCase
         $hrManager = $this->grantedActor('pay-manager-1', ['hr.employ', 'hr.terminate', 'access.assign_position']);
         $financeClearer = $this->grantedActor('pay-finance-1', ['payroll.clear_finance']);
         $hrClearer = $this->grantedActor('pay-hr-clear-1', ['payroll.clear_hr']);
-        $preparer = $this->grantedActor('pay-settle-1', ['payroll.settle', 'payroll.settle_approve']);
-        $settleApprover = $this->grantedActor('pay-settle-2', ['payroll.settle_approve']);
+        $preparer = $this->grantedActor('pay-settle-1', ['payroll.settle']);
+        $settleApprover = $this->grantedActor('pay-settle-2', ['finance.employment_settlement']);
         $employment = fn (): Employment => Employment::query()->findOrFail($this->employmentId);
 
         try {
@@ -273,21 +280,45 @@ final class PayrollFeatureTest extends TestCase
         }
 
         try {
-            app(SettleEmployment::class)->approve($preparer, $proposalModel, 'pay-set-4');
+            app(MaintainEmploymentSettlement::class)->record(
+                $preparer,
+                $employment(),
+                (string) $proposalModel->id,
+                (string) $proposalModel->amount,
+                (string) $proposalModel->basis,
+                (string) $proposalModel->prepared_by,
+                'pay-set-4',
+            );
             $this->fail('the preparer cannot approve their own proposal');
         } catch (AuthorizationDenied $denial) {
-            $this->assertSame('payroll.settlement_not_independent', $denial->errorCode());
+            $this->assertSame('finance.employment_settlement_denied', $denial->errorCode());
         }
 
-        $settlement = app(SettleEmployment::class)->approve($settleApprover, $proposalModel, 'pay-set-5');
-        $this->assertDatabaseHas('final_settlements', ['id' => $settlement['settlement_id'], 'amount' => '5000.00', 'approved_by' => $settleApprover->actorId]);
+        $settlement = app(MaintainEmploymentSettlement::class)->record(
+            $settleApprover,
+            $employment(),
+            (string) $proposalModel->id,
+            (string) $proposalModel->amount,
+            (string) $proposalModel->basis,
+            (string) $proposalModel->prepared_by,
+            'pay-set-5',
+        );
+        $this->assertDatabaseHas('employment_settlements', ['id' => $settlement['settlement_id'], 'amount' => '5000.00', 'approved_by' => $settleApprover->actorId]);
         $this->assertDatabaseHas('settlement_proposals', ['id' => $proposalModel->id, 'lifecycle_state' => 'approved', 'approved_by' => $settleApprover->actorId]);
 
         try {
-            app(SettleEmployment::class)->approve($settleApprover, $proposalModel, 'pay-set-6');
+            app(MaintainEmploymentSettlement::class)->record(
+                $settleApprover,
+                $employment(),
+                (string) $proposalModel->id,
+                (string) $proposalModel->amount,
+                (string) $proposalModel->basis,
+                (string) $proposalModel->prepared_by,
+                'pay-set-6',
+            );
             $this->fail('an approved proposal cannot be approved again');
         } catch (BusinessRejection $rejection) {
-            $this->assertSame('payroll.settlement_proposal_state', $rejection->errorCode());
+            $this->assertSame('finance.employment_settlement_proposal_invalid', $rejection->errorCode());
         }
 
         try {
@@ -298,7 +329,7 @@ final class PayrollFeatureTest extends TestCase
         }
 
         $this->expectException(QueryException::class);
-        DB::statement('UPDATE final_settlements SET amount = 999999 WHERE id = ?', [$settlement['settlement_id']]);
+        DB::statement('UPDATE employment_settlements SET amount = 999999 WHERE id = ?', [$settlement['settlement_id']]);
     }
 
     public function test_unprivileged_calculation_is_denied_and_audited(): void

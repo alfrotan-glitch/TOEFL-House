@@ -8,6 +8,8 @@ use App\Modules\Admissions\Commands\EnrollAdmittedApplicant;
 use App\Modules\Admissions\Commands\RegisterApplicant;
 use App\Modules\Admissions\Models\Applicant;
 use App\Modules\Identity\Models\Person;
+use App\Modules\Organization\Models\Branch;
+use App\Support\Identifiers\RandomIdentifier;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Tests\Concerns\BuildsActors;
@@ -34,12 +36,22 @@ final class StudentsDirectSqlAttackTest extends TestCase
     /** @var array{applicant_id: string, decision_id: string} */
     private array $applicantB;
 
+    private string $admissionBranchId;
+
     protected function setUp(): void
     {
         parent::setUp();
 
         $this->personA = $this->personWithAuthority('statk-person-a', []);
         $this->personB = $this->personWithAuthority('statk-person-b', []);
+        $this->admissionBranchId = RandomIdentifier::new();
+        Branch::query()->create([
+            'id' => $this->admissionBranchId,
+            'name' => 'Student authority attack branch',
+            'lifecycle_state' => 'active',
+        ]);
+        $this->attachBranchToBootstrapOrganization($this->admissionBranchId);
+        $this->grantKnownAuthorityOn('branch', $this->admissionBranchId);
         $this->applicantA = $this->admittedApplicant($this->personA, 'statk-a');
         $this->applicantB = $this->admittedApplicant($this->personB, 'statk-b');
 
@@ -49,7 +61,7 @@ final class StudentsDirectSqlAttackTest extends TestCase
 
     private function admittedApplicant(Person $person, string $prefix): array
     {
-        $registered = app(RegisterApplicant::class)->register($this->admissionsClerk(), $person->id, 'TOEFL Intensive', $prefix.'-reg');
+        $registered = app(RegisterApplicant::class)->register($this->admissionsClerk(), $person->id, 'TOEFL Intensive', $prefix.'-reg', null, $this->admissionBranchId);
         $applicant = Applicant::query()->findOrFail($registered['applicant_id']);
         $decision = $this->runAdmissionDecision($this->admissionsClerk(), $this->admissionsReviewer(), $this->admissionsApprover(), $applicant, true, 'meets entry policy', 'interview-notes/'.$prefix, $prefix.'-dec');
 
@@ -66,6 +78,8 @@ final class StudentsDirectSqlAttackTest extends TestCase
             'person_id' => $this->personA->id,
             'admission_decision_id' => $this->applicantB['decision_id'],
             'student_code' => 'ST-9999',
+            'originating_branch_id' => $this->admissionBranchId,
+            'current_home_branch_id' => $this->admissionBranchId,
             'created_at' => now(), 'updated_at' => now(),
         ]);
     }
@@ -80,6 +94,8 @@ final class StudentsDirectSqlAttackTest extends TestCase
             'person_id' => $this->personB->id,
             'admission_decision_id' => $this->applicantA['decision_id'],
             'student_code' => 'ST-9998',
+            'originating_branch_id' => $this->admissionBranchId,
+            'current_home_branch_id' => $this->admissionBranchId,
             'created_at' => now(), 'updated_at' => now(),
         ]);
     }
@@ -93,6 +109,8 @@ final class StudentsDirectSqlAttackTest extends TestCase
             'person_id' => $this->personB->id,
             'admission_decision_id' => $this->applicantB['decision_id'],
             'student_code' => 'ST-9997',
+            'originating_branch_id' => $this->admissionBranchId,
+            'current_home_branch_id' => $this->admissionBranchId,
             'created_at' => now(), 'updated_at' => now(),
         ]);
         $forgedStudentId = 'eeeeeeee-ffff-4000-8000-00000000000c';
@@ -103,7 +121,7 @@ final class StudentsDirectSqlAttackTest extends TestCase
             'id' => 'eeeeeeee-ffff-4000-8000-00000000000d',
             'student_id' => $forgedStudentId,
             'status' => 'suspended',
-            'effective_from' => '2026-08-01',
+            'effective_from' => now()->toDateString(),
             'reason' => 'forged suspension with no history',
             'actor_id' => 'statk-forger-1',
             'created_at' => now(), 'updated_at' => now(),
@@ -121,7 +139,7 @@ final class StudentsDirectSqlAttackTest extends TestCase
             'id' => 'eeeeeeee-ffff-4000-8000-00000000000e',
             'student_id' => $studentId,
             'status' => 'alumni',
-            'effective_from' => '2026-08-01',
+            'effective_from' => now()->toDateString(),
             'reason' => 'forged alumni status skipping completion',
             'actor_id' => 'statk-forger-1',
             'created_at' => now(), 'updated_at' => now(),

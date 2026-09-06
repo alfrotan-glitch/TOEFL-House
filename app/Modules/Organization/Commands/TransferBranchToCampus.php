@@ -63,7 +63,13 @@ final class TransferBranchToCampus
                         throw BusinessRejection::forCode('organization.transfer_requires_active_campus', 'destination campus must be active');
                     }
 
+                    // A cross-organization transfer changes the branch's
+                    // future provenance. The same authority chain must hold
+                    // on both the current source and destination structures;
+                    // source authority alone cannot move a branch into an
+                    // organization the participants cannot govern.
                     $decision->authorize($this->access, $lockedBranch->structureScope());
+                    $decision->authorize($this->access, $lockedCampus->structureScope());
 
                     /** @var CampusAssignment|null $current */
                     $current = CampusAssignment::query()
@@ -106,7 +112,12 @@ final class TransferBranchToCampus
                         'branch',
                         $lockedBranch->id,
                         ['campus_id' => $current->campus_id, 'effective_to' => $current->effective_to],
-                        ['campus_id' => $lockedCampus->id, 'effective_from' => $from->toDateString()],
+                        [
+                            'campus_id' => $lockedCampus->id,
+                            'effective_from' => $from->toDateString(),
+                            'branch_id' => $lockedBranch->id,
+                            'organization_id' => $lockedCampus->organization_id,
+                        ],
                         $correlationId,
                     );
 

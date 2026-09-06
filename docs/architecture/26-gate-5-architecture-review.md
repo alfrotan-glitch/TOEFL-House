@@ -63,3 +63,7 @@ RPO/RTO/retention values, detailed report catalog and acceptance examples, and w
 **GATE 5: PASS WITH NON-BLOCKING OPEN ITEMS.**
 
 **Next authorized gate:** none automatically. Gate 6 requires separate explicit authorization.
+
+## Subsequent governing addendum — Employee Workspace
+
+The approved `docs/governance/employee-workspace-principle.md` is incorporated after this dated Gate 5 review as a permanent product and architecture requirement. It does not convert this historical gate into a production-readiness claim. Before any later gate or implementation approval, the architecture must demonstrate first-class, dynamically composed, role-aware but not role-locked employee and management workspaces; canonical-authority orchestration; work-first and exception-first flows; lifecycle- and scope-aware server authorization; API/web parity; rebuildable task and notification projections; personalization isolation; and measurable employee efficiency. Runtime, security, concurrency, freshness, and usability evidence remain required.

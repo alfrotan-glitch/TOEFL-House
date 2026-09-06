@@ -8,6 +8,7 @@ use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Reporting\Domain\MetricCalculator;
 use App\Modules\Reporting\Domain\MetricCatalog;
+use App\Modules\Reporting\Domain\ReportingScope;
 use App\Modules\Reporting\Models\MetricDefinition;
 use App\Modules\Reporting\Models\MetricProjection;
 use App\Modules\Reporting\Models\MetricVersion;
@@ -31,6 +32,7 @@ final class ComputeProjection
 
     public function __construct(
         private readonly AccessDecision $access,
+        private readonly ReportingScope $scopes,
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
@@ -44,8 +46,6 @@ final class ComputeProjection
         try {
             return $this->idempotency->execute('reporting.projection.compute', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $metricKey, $periodKey, $scopeType, $scopeId): array {
-                    $this->require($actor);
-
                     $entry = MetricCatalog::entry($metricKey);
                     if (! in_array($scopeType, $entry['scopes'], true)) {
                         throw BusinessRejection::forCode('reporting.scope_not_allowed', sprintf('metric %s allows scopes %s', $metricKey, implode(', ', $entry['scopes'])));
@@ -56,6 +56,12 @@ final class ComputeProjection
                     if ($scopeId === '') {
                         throw BusinessRejection::forCode('reporting.scope_shape', 'the scope id may not be empty');
                     }
+                    if (in_array($scopeType, ['global', 'fund'], true)) {
+                        // Organization-wide scopes require organization-rooted
+                        // authority; branch/campus grants are not wildcards.
+                        $this->require($actor);
+                    }
+                    $organizationId = $this->scopes->authorize($actor, self::CAPABILITY, $scopeType, $scopeId);
 
                     /** @var MetricDefinition $metric */
                     $metric = MetricDefinition::query()->where('key', $metricKey)->firstOrFail();
@@ -76,6 +82,9 @@ final class ComputeProjection
                         ->where(fn ($query) => $scopeId === null ? $query->whereNull('scope_id') : $query->where('scope_id', $scopeId))
                         ->lockForUpdate()
                         ->first();
+                    if ($projection !== null && $scopeType === 'branch' && (string) $projection->organization_id !== $organizationId) {
+                        throw BusinessRejection::forCode('reporting.projection_scope_conflict', 'the existing metric projection has different organization provenance');
+                    }
                     if ($projection === null) {
                         $projection = MetricProjection::query()->create([
                             'id' => RandomIdentifier::new(),
@@ -83,6 +92,7 @@ final class ComputeProjection
                             'period_key' => $periodKey,
                             'scope_type' => $scopeType,
                             'scope_id' => $scopeId,
+                            'organization_id' => $organizationId,
                             'value' => $computed['value'],
                             'completeness' => 'complete',
                             'meta' => $computed['meta'],
@@ -91,6 +101,7 @@ final class ComputeProjection
                         ]);
                     } else {
                         $projection->forceFill([
+                            'organization_id' => $organizationId,
                             'value' => $computed['value'],
                             'completeness' => 'complete',
                             'meta' => $computed['meta'],
@@ -100,7 +111,7 @@ final class ComputeProjection
                         $projection->save();
                     }
                     $event = $this->audit->record($actor->actorId, 'reporting.projection.compute', 'metric_projection', $projection->id, null, [
-                        'metric' => $metricKey, 'period' => $periodKey, 'value' => $computed['value'],
+                        'metric' => $metricKey, 'period' => $periodKey, 'scope_type' => $scopeType, 'scope_id' => $scopeId, 'organization_id' => $organizationId, 'value' => $computed['value'],
                     ]);
 
                     return ['projection_id' => $projection->id, 'value' => $computed['value'], 'correlation_id' => $event->correlation_id];

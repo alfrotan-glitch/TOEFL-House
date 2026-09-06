@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Modules\Academic\Domain\RecordBranch;
 use App\Modules\Academic\Models\Program;
 use App\Modules\Academic\Models\ProgramVersion;
 use App\Modules\Academic\Models\ProgramVersionLevel;
@@ -22,6 +23,7 @@ use App\Modules\Academic\Placement\Models\PlacementTestVersion;
 use App\Modules\Academic\Placement\Queries\PlacementFinanceLinkQuery;
 use App\Modules\Academic\Placement\Queries\PlacementProfileQuery;
 use App\Modules\Documents\Commands\RegisterDocument;
+use App\Support\Authorization\AccessDecision;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -37,15 +39,24 @@ final class PlacementController extends Controller
     public function index(Request $request): View
     {
         $query = app(PlacementProfileQuery::class);
+        $visible = $this->authorizedBranches('placement.conduct');
+        $organizationScope = app(AccessDecision::class)->decide($this->actor(), 'placement.conduct', null)->allowed;
+        if (! $organizationScope && $visible === []) {
+            $this->requireOrganizationRead('placement.conduct', 'placement.console.index');
+        }
+        $catalogVisible = $this->authorizedBranches('placement.catalog');
+        $catalogTests = PlacementTest::query()->whereIn('originating_branch_id', $catalogVisible)->orderBy('name')->get();
+        $catalogTestIds = $catalogTests->pluck('id')->values()->all();
 
         return view('placement.index', [
             'profiles' => $query->search(
                 (string) $request->query('term', ''),
                 (string) $request->query('lifecycle_state', ''),
                 (string) $request->query('program_version_id', ''),
+                $visible,
             ),
-            'tests' => PlacementTest::query()->orderBy('name')->get(),
-            'versions' => PlacementTestVersion::query()->orderByDesc('id')->limit(100)->get(),
+            'tests' => $catalogTests,
+            'versions' => PlacementTestVersion::query()->whereIn('placement_test_id', $catalogTestIds)->orderByDesc('id')->limit(100)->get(),
             'programs' => Program::query()->orderBy('name')->get(),
             'programVersions' => ProgramVersion::query()->orderByDesc('id')->limit(100)->get(),
             'levels' => ProgramVersionLevel::query()->orderBy('ordinal')->limit(200)->get(),
@@ -55,6 +66,15 @@ final class PlacementController extends Controller
     public function show(string $profileId): View
     {
         $profile = PlacementProfile::query()->findOrFail($profileId);
+        $profileBranch = RecordBranch::placementProfileBranch($profile);
+        $this->requireBranchCapability('placement.conduct', $profileBranch, 'placement.show', 'placement_profile', $profile->id);
+        $catalogVisible = $this->authorizedBranches('placement.catalog');
+        $catalogTests = PlacementTest::query()->whereIn('originating_branch_id', $catalogVisible)->orderBy('name')->get();
+        $catalogTestIds = $catalogTests->pluck('id')->values()->all();
+        $financeLink = ($this->branchCapabilityAllowed('finance.obligation', $profileBranch)
+            && $this->branchCapabilityAllowed('finance.payment', $profileBranch))
+            ? app(PlacementFinanceLinkQuery::class)->for($profile)
+            : ['person_id' => $profile->person_id, 'student_id' => null, 'obligations' => [], 'payments' => [], 'eligibility_snapshot' => null];
         $data = app(PlacementProfileQuery::class)->for($profile);
         $inProgress = PlacementAttempt::query()
             ->where('profile_id', $profile->id)
@@ -70,12 +90,12 @@ final class PlacementController extends Controller
             : collect();
 
         return view('placement.show', $data + [
-            'tests' => PlacementTest::query()->orderBy('name')->get(),
-            'versions' => PlacementTestVersion::query()->orderByDesc('id')->limit(100)->get(),
+            'tests' => $catalogTests,
+            'versions' => PlacementTestVersion::query()->whereIn('placement_test_id', $catalogTestIds)->orderByDesc('id')->limit(100)->get(),
             'levels' => ProgramVersionLevel::query()->orderBy('ordinal')->limit(200)->get(),
             'inProgressAttempt' => $inProgress,
             'questions' => $questions,
-            'financeLink' => app(PlacementFinanceLinkQuery::class)->for($profile),
+            'financeLink' => $financeLink,
         ]);
     }
 

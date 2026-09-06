@@ -10,12 +10,15 @@ use App\Modules\Crm\Domain\CrmInteractionTraceRecorder;
 use App\Modules\Finance\Domain\FinanceLifecycle;
 use App\Modules\Finance\Models\FinancialPeriod;
 use App\Modules\Finance\Models\Payment;
+use App\Modules\Organization\Models\Branch;
+use App\Modules\Students\Models\Student;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
 use App\Support\Identifiers\RandomIdentifier;
+use App\Support\MoneyAmount;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 
@@ -44,11 +47,10 @@ final class RecordPayment
         try {
             return $this->idempotency->execute('finance.payment.record', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $period, $studentId, $amount, $method, $payerRef, $receivedOn): array {
-                    $this->require($actor);
-                    if ($payerRef === '') {
-                        throw BusinessRejection::forCode('finance.payment_payer_ref', 'a payment requires its external receipt reference');
+                    if ($payerRef === '' || $method === '') {
+                        throw BusinessRejection::forCode('finance.payment_terms', 'a payment requires an external receipt reference and method');
                     }
-                    if (! is_numeric($amount) || (float) $amount <= 0) {
+                    if (! MoneyAmount::positive($amount)) {
                         throw BusinessRejection::forCode('finance.payment_amount', 'the payment amount must be a positive number');
                     }
 
@@ -60,6 +62,15 @@ final class RecordPayment
                     if (Payment::query()->where('payer_ref', $payerRef)->exists()) {
                         throw BusinessRejection::forCode('finance.payment_duplicate', 'this external receipt reference has already been posted');
                     }
+                    $originatingBranchId = $this->studentBranch($studentId);
+                    if ($originatingBranchId === null) {
+                        throw BusinessRejection::forCode('finance.payment_provenance_required', 'a new payment requires verified branch provenance');
+                    }
+                    $branch = Branch::query()->whereKey($originatingBranchId)->first();
+                    if ($branch === null) {
+                        throw BusinessRejection::forCode('finance.payment_provenance_required', 'the payment branch provenance is unknown');
+                    }
+                    $this->require($actor, $branch->structureScope());
 
                     $payment = Payment::query()->create([
                         'id' => RandomIdentifier::new(),
@@ -70,11 +81,13 @@ final class RecordPayment
                         'payer_ref' => $payerRef,
                         'received_on' => $receivedOn,
                         'recorded_by' => $actor->actorId,
+                        'originating_branch_id' => $originatingBranchId,
+                        'current_home_branch_id' => $originatingBranchId,
                     ]);
                     $event = $this->audit->record($actor->actorId, 'finance.payment.record', 'payment', $payment->id, null, [
-                        'student_id' => $studentId, 'amount' => $amount, 'payer_ref' => $payerRef,
+                        'student_id' => $studentId, 'branch_id' => $originatingBranchId, 'organization_id' => $branch->structureScope()->organizationId, 'amount' => $amount, 'payer_ref' => $payerRef,
                     ]);
-                    $this->traceVisitor($actor, $studentId, $payment->id, $payerRef, $receivedOn);
+                    $this->traceVisitor($actor, $studentId, $payment->id, $payerRef, $receivedOn, $event->id);
 
                     return ['payment_id' => $payment->id, 'correlation_id' => $event->correlation_id];
                 }),
@@ -84,15 +97,28 @@ final class RecordPayment
         }
     }
 
-    private function require(Actor $actor): void
+    private function require(Actor $actor, \App\Support\Authorization\StructureScope $scope): void
     {
-        $outcome = $this->access->decide($actor, self::CAPABILITY, null);
+        $outcome = $this->access->decide($actor, self::CAPABILITY, $scope);
         if (! $outcome->allowed) {
             throw AuthorizationDenied::forCode('finance.payment_denied', $outcome->reason);
         }
     }
 
-    private function traceVisitor(Actor $actor, string $studentId, string $paymentId, string $payerRef, string $receivedOn): void
+    private function studentBranch(string $studentId): ?string
+    {
+        /** @var Student|null $student */
+        $student = Student::query()->find($studentId);
+        if ($student === null) {
+            throw BusinessRejection::forCode('finance.payment_student_unknown', 'a payment requires a known student');
+        }
+
+        $branchId = trim((string) ($student->current_home_branch_id ?? $student->originating_branch_id ?? ''));
+
+        return $branchId === '' ? null : $branchId;
+    }
+
+    private function traceVisitor(Actor $actor, string $studentId, string $paymentId, string $payerRef, string $receivedOn, string $authorityAuditEventId): void
     {
         $visitorId = $this->crmTrace->visitorIdForStudent($studentId);
         if ($visitorId === null) {
@@ -107,6 +133,7 @@ final class RecordPayment
             sprintf('Payment %s received for the student linked to this lead.', $payerRef),
             CarbonImmutable::parse($receivedOn),
             paymentId: $paymentId,
+            authorityAuditEventId: $authorityAuditEventId,
         );
     }
 }

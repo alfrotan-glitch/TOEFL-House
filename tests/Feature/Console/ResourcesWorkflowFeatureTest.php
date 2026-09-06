@@ -6,6 +6,7 @@ namespace Tests\Feature\Console;
 
 use App\Modules\Identity\Models\Person;
 use App\Modules\Identity\Models\UserAccount;
+use App\Modules\Organization\Models\Branch;
 use App\Modules\Resources\Commands\MaintainAsset;
 use App\Support\Identifiers\RandomIdentifier;
 use Illuminate\Support\Facades\DB;
@@ -29,9 +30,19 @@ final class ResourcesWorkflowFeatureTest extends TestCase
 
     private string $custodianTwo;
 
+    private string $resourceBranchId;
+
     protected function setUp(): void
     {
         parent::setUp();
+
+        $this->resourceBranchId = RandomIdentifier::new();
+        Branch::query()->create([
+            'id' => $this->resourceBranchId,
+            'name' => 'Resources Console Fixture Branch',
+            'lifecycle_state' => 'active',
+        ]);
+        $this->attachBranchToBootstrapOrganization($this->resourceBranchId);
 
         $this->custodianOne = 'resw-cust-1';
         $this->custodianTwo = 'resw-cust-2';
@@ -78,7 +89,7 @@ final class ResourcesWorkflowFeatureTest extends TestCase
         $this->signIn('plain-1');
         $this->post('/library/assets', [
             'code' => 'RESW-X-1', 'name' => 'Probe', 'category' => 'electronics',
-            'location' => 'Campus A', 'acquired_on' => '2026-01-01',
+            'location' => 'Campus A', 'acquired_on' => '2026-01-01', 'branch_id' => $this->resourceBranchId,
         ], ['referer' => 'http://localhost/library'])
             ->assertRedirect('/library')
             ->assertSessionHas('error_code', 'resources.asset_denied');
@@ -88,13 +99,13 @@ final class ResourcesWorkflowFeatureTest extends TestCase
         $this->signIn('mgr-1');
         $this->post('/library/assets', [
             'code' => 'RESW-P-1', 'name' => 'Classroom projector', 'category' => 'electronics',
-            'location' => 'Campus A / Room 4', 'acquired_on' => '2026-01-15',
+            'location' => 'Campus A / Room 4', 'acquired_on' => '2026-01-15', 'branch_id' => $this->resourceBranchId,
         ])->assertRedirect('/library');
         $assetId = DB::table($assets)->where('code', 'RESW-P-1')->value('id');
 
         $this->post('/library/assets', [
             'code' => 'RESW-P-1', 'name' => 'Duplicate', 'category' => 'electronics',
-            'location' => 'Campus A', 'acquired_on' => '2026-01-15',
+            'location' => 'Campus A', 'acquired_on' => '2026-01-15', 'branch_id' => $this->resourceBranchId,
         ], ['referer' => 'http://localhost/library'])
             ->assertRedirect('/library')
             ->assertSessionHas('error_code', 'resources.asset_code_exists');
@@ -131,7 +142,7 @@ final class ResourcesWorkflowFeatureTest extends TestCase
         $this->signIn('mgr-2');
         $this->post('/library/assets', [
             'code' => 'RESW-D-1', 'name' => 'Old server', 'category' => 'electronics',
-            'location' => 'Campus A / Server room', 'acquired_on' => '2024-06-01',
+            'location' => 'Campus A / Server room', 'acquired_on' => '2024-06-01', 'branch_id' => $this->resourceBranchId,
         ])->assertRedirect('/library');
         $assetId = DB::table($assets)->where('code', 'RESW-D-1')->value('id');
         $this->post('/library/assets/'.$assetId.'/custody', [
@@ -228,7 +239,7 @@ final class ResourcesWorkflowFeatureTest extends TestCase
 
         $this->signIn('worker-1');
         $this->post('/library/work-orders', [
-            'facility_note' => 'Campus B / Lab 2', 'description' => 'Air conditioning failure',
+            'facility_note' => 'Campus B / Lab 2', 'description' => 'Air conditioning failure', 'branch_id' => $this->resourceBranchId,
         ])->assertRedirect('/library');
         $orderId = DB::table($orders)->value('id');
 
@@ -275,21 +286,21 @@ final class ResourcesWorkflowFeatureTest extends TestCase
         $manager = $this->grantedActor('resw-mgr-4', ['resources.asset']);
         $nobody = $this->makeEmployee('resw-nobody-1', [], 'nobody-1');
 
-        $asset = app(MaintainAsset::class)->register($manager, 'RESW-N-1', 'Probe bench', 'furniture', 'Campus A', '2026-01-01', 'resw-dom-1');
+        $asset = app(MaintainAsset::class)->register($manager, 'RESW-N-1', 'Probe bench', 'furniture', 'Campus A', '2026-01-01', $this->resourceBranchId);
         $assetId = $asset['asset_id'];
 
         $this->signIn('nobody-1');
 
         $this->post('/library/assets', [
             'code' => 'RESW-N-2', 'name' => 'Probe', 'category' => 'furniture',
-            'location' => 'Campus A', 'acquired_on' => '2026-01-01',
+            'location' => 'Campus A', 'acquired_on' => '2026-01-01', 'branch_id' => $this->resourceBranchId,
         ], ['referer' => 'http://localhost/library'])
             ->assertRedirect('/library')
             ->assertSessionHas('error_code', 'resources.asset_denied');
         $this->assertDatabaseHas('audit_events', ['operation' => 'resources.asset.register.denied', 'actor_id' => 'resw-nobody-1']);
 
         $this->post('/library/work-orders', [
-            'facility_note' => 'Campus B', 'description' => 'Probe work',
+            'facility_note' => 'Campus B', 'description' => 'Probe work', 'branch_id' => $this->resourceBranchId,
         ], ['referer' => 'http://localhost/library'])
             ->assertRedirect('/library')
             ->assertSessionHas('error_code', 'resources.work_denied');

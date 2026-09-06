@@ -13,6 +13,7 @@ use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Academic\Models\Offering;
 use App\Modules\Academic\Models\ProgramVersionLevel;
 use App\Modules\Audit\AttemptedOperation;
+use App\Modules\Organization\Models\Branch;
 use App\Modules\Audit\AuditRecorder;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
@@ -23,8 +24,9 @@ use Illuminate\Support\Facades\DB;
 /**
  * Offering and branch-availability lifecycle: close/reopen an availability or
  * offering, cancel/complete an offering once its open seats are gone, and
- * resize an offering capacity without ever dropping below the active seat
- * count. All transitions are authorized, audited, and idempotent.
+ * resize an offering capacity without ever dropping below its live seat
+ * claims (requested, active, or frozen). All transitions are authorized,
+ * audited, and idempotent.
  */
 final class ManageAcademicOffering
 {
@@ -57,6 +59,7 @@ final class ManageAcademicOffering
         try {
             return $this->idempotency->execute('academic.availability.transition.'.$toState, $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $availability, $toState): array {
+                    AcademicPeriod::query()->whereKey($availability->academic_period_id)->lockForUpdate()->firstOrFail();
                     /** @var BranchAvailability $locked */
                     $locked = BranchAvailability::query()->whereKey($availability->id)->lockForUpdate()->firstOrFail();
                     $this->requireCapability($actor, (string) $locked->branch_id);
@@ -79,7 +82,10 @@ final class ManageAcademicOffering
                     }
 
                     $locked->forceFill(['lifecycle_state' => $toState])->save();
-                    $event = $this->audit->record($actor->actorId, 'academic.availability.transition.'.$toState, 'branch_availability', $locked->id, ['lifecycle_state' => $from], ['lifecycle_state' => $toState]);
+                    $event = $this->audit->record($actor->actorId, 'academic.availability.transition.'.$toState, 'branch_availability', $locked->id, ['lifecycle_state' => $from], [
+                        'lifecycle_state' => $toState,
+                        ...$this->branchProvenance((string) $locked->branch_id),
+                    ]);
 
                     return ['availability_id' => $locked->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
                 }),
@@ -121,6 +127,7 @@ final class ManageAcademicOffering
         try {
             return $this->idempotency->execute('academic.offering.transition.'.$toState, $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $offering, $toState): array {
+                    AcademicPeriod::query()->whereKey($offering->academic_period_id)->lockForUpdate()->firstOrFail();
                     /** @var Offering $locked */
                     $locked = Offering::query()->whereKey($offering->id)->lockForUpdate()->firstOrFail();
                     $this->requireCapability($actor, (string) $locked->branch_id);
@@ -140,7 +147,10 @@ final class ManageAcademicOffering
                     }
 
                     $locked->forceFill(['lifecycle_state' => $toState])->save();
-                    $event = $this->audit->record($actor->actorId, 'academic.offering.transition.'.$toState, 'offering', $locked->id, ['lifecycle_state' => $from], ['lifecycle_state' => $toState]);
+                    $event = $this->audit->record($actor->actorId, 'academic.offering.transition.'.$toState, 'offering', $locked->id, ['lifecycle_state' => $from], [
+                        'lifecycle_state' => $toState,
+                        ...$this->branchProvenance((string) $locked->branch_id),
+                    ]);
 
                     return ['offering_id' => $locked->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
                 }),
@@ -158,6 +168,7 @@ final class ManageAcademicOffering
         try {
             return $this->idempotency->execute('academic.offering.resize', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $offering, $capacity): array {
+                    AcademicPeriod::query()->whereKey($offering->academic_period_id)->lockForUpdate()->firstOrFail();
                     /** @var Offering $locked */
                     $locked = Offering::query()->whereKey($offering->id)->lockForUpdate()->firstOrFail();
                     $this->requireCapability($actor, (string) $locked->branch_id);
@@ -165,9 +176,9 @@ final class ManageAcademicOffering
                         throw BusinessRejection::forCode('academic.offering_capacity_positive', 'an offering requires a positive capacity');
                     }
 
-                    $activeSeats = Enrollment::query()->where('offering_id', $locked->id)->where('lifecycle_state', 'active')->count();
-                    if ($capacity < $activeSeats) {
-                        throw BusinessRejection::forCode('academic.offering_capacity_below_active', "offering capacity cannot fall below its {$activeSeats} active seat(s)");
+                    $claimedSeats = Enrollment::query()->where('offering_id', $locked->id)->whereIn('lifecycle_state', ['requested', 'active', 'frozen'])->count();
+                    if ($capacity < $claimedSeats) {
+                        throw BusinessRejection::forCode('academic.offering_capacity_below_claims', "offering capacity cannot fall below its {$claimedSeats} live seat claim(s)");
                     }
                     if ($locked->capacity === $capacity) {
                         throw BusinessRejection::forCode('academic.offering_capacity_unchanged', 'offering capacity is already set to this value');
@@ -175,7 +186,10 @@ final class ManageAcademicOffering
 
                     $before = ['capacity' => $locked->capacity];
                     $locked->forceFill(['capacity' => $capacity])->save();
-                    $event = $this->audit->record($actor->actorId, 'academic.offering.resize', 'offering', $locked->id, $before, ['capacity' => $capacity]);
+                    $event = $this->audit->record($actor->actorId, 'academic.offering.resize', 'offering', $locked->id, $before, [
+                        'capacity' => $capacity,
+                        ...$this->branchProvenance((string) $locked->branch_id),
+                    ]);
 
                     return ['offering_id' => $locked->id, 'capacity' => $capacity, 'correlation_id' => $event->correlation_id];
                 }),
@@ -183,6 +197,21 @@ final class ManageAcademicOffering
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.offering.resize', 'offering', $offering->id);
         }
+    }
+
+    /** @return array{branch_id: string, campus_id: string, organization_id: string} */
+    private function branchProvenance(string $branchId): array
+    {
+        $branch = Branch::query()->whereKey(trim($branchId))->first();
+        if ($branch === null || $branch->lifecycle_state !== 'active') {
+            throw BusinessRejection::forCode('academic.offering_provenance_required', 'an offering event requires an active branch');
+        }
+        $scope = $branch->structureScope();
+        if ($scope->organizationId === '' || $scope->campusId === null) {
+            throw BusinessRejection::forCode('academic.offering_provenance_required', 'an offering event requires active campus organization provenance');
+        }
+
+        return ['branch_id' => (string) $branch->id, 'campus_id' => (string) $scope->campusId, 'organization_id' => $scope->organizationId];
     }
 
     private function assertAvailabilityReopenContext(BranchAvailability $availability): void

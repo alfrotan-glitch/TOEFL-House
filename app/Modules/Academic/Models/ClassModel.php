@@ -5,15 +5,20 @@ declare(strict_types=1);
 namespace App\Modules\Academic\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
- * A class delivering one published program version inside one published
- * period with a fixed capacity.
+ * A class delivering one published program-version level inside one published
+ * period and one branch offering with a fixed capacity. A nullable offering_id
+ * is retained only for historical remediation rows; new classes are anchored
+ * to an Offering by the command and database authority guards.
  *
  * @property string $id
  * @property string $program_version_id
  * @property string $period_id
+ * @property string|null $branch_id
+ * @property string|null $offering_id
  * @property int $capacity
  * @property string $lifecycle_state
  * @property string|null $program_version_level_id
@@ -26,12 +31,24 @@ final class ClassModel extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'program_version_id', 'period_id', 'capacity', 'lifecycle_state', 'program_version_level_id'];
+    protected $fillable = ['id', 'program_version_id', 'period_id', 'branch_id', 'offering_id', 'capacity', 'lifecycle_state', 'program_version_level_id'];
+
+    /** @return BelongsTo<Offering, $this> */
+    public function offering(): BelongsTo
+    {
+        return $this->belongsTo(Offering::class, 'offering_id');
+    }
 
     /** @return HasMany<Enrollment, $this> */
     public function enrollments(): HasMany
     {
         return $this->hasMany(Enrollment::class, 'class_id');
+    }
+
+    /** @return HasMany<TeacherAssignment, $this> */
+    public function teacherAssignments(): HasMany
+    {
+        return $this->hasMany(TeacherAssignment::class, 'class_id');
     }
 
     /** @return HasMany<ClassWaitlistEntry, $this> */

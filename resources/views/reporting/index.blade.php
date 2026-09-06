@@ -29,10 +29,11 @@
                     <div>
                         <label>Scope type</label>
                         <select name="scope_type" required>
-                            <option value="all">All</option>
+                            <option value="global">Global</option>
                             <option value="branch">Branch</option>
-                            <option value="campus">Campus</option>
-                            <option value="program">Program</option>
+                            <option value="student">Student</option>
+                            <option value="class">Class</option>
+                            <option value="fund">Fund</option>
                         </select>
                     </div>
                     <div>
@@ -85,10 +86,20 @@
     <form method="POST" action="{{ route('reporting.dashboard.create') }}">
         @csrf
         <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
-        <div class="row">
+                <div class="row">
             <div>
                 <label>Name</label>
                 <input name="name" type="text" required>
+                @if (count($dashboard_organizations) > 1)
+                    <label>Organization</label>
+                    <select name="organization_id" required>
+                        @foreach ($dashboard_organizations as $organizationId)
+                            <option value="{{ $organizationId }}">{{ $organizationId }}</option>
+                        @endforeach
+                    </select>
+                @elseif (count($dashboard_organizations) === 1)
+                    <input type="hidden" name="organization_id" value="{{ $dashboard_organizations[0] }}">
+                @endif
             </div>
             <div style="flex:0 0 auto">
                 <button type="submit" class="btn">Create dashboard</button>
@@ -122,9 +133,14 @@
                                     <input name="period_key" type="text" required>
                                     <label>Scope type</label>
                                     <select name="scope_type" required>
-                                        <option value="all">All</option>
+                                        <option value="global">Global</option>
                                         <option value="branch">Branch</option>
+                                        <option value="student">Student</option>
+                                        <option value="class">Class</option>
+                                        <option value="fund">Fund</option>
                                     </select>
+                                    <label>Scope id (required except global)</label>
+                                    <input name="scope_id" type="text">
                                     <div class="actions"><button type="submit" class="btn small">Pin</button></div>
                                 </form>
                             @endif

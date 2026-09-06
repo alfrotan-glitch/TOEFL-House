@@ -6,10 +6,13 @@ namespace App\Modules\Resources\Commands;
 
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
+use App\Modules\Resources\Domain\ResourceScope;
 use App\Modules\Resources\Models\Asset;
 use App\Modules\Resources\Models\Custody;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
+use App\Support\Authorization\PersonBranchScope;
+use App\Support\Authorization\StructureScope;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
@@ -33,20 +36,23 @@ final class MaintainAsset
     ) {}
 
     /** @return array{asset_id: string, correlation_id: string} */
-    public function register(Actor $actor, string $code, string $name, string $category, string $location, string $acquiredOn, string $idempotencyKey): array
+    public function register(Actor $actor, string $code, string $name, string $category, string $location, string $acquiredOn, string $branchId, string $idempotencyKey): array
     {
-        $payload = hash('sha256', implode('|', ['resources.asset.register', $code, $name, $category, $location, $acquiredOn, $actor->actorId]));
+        $payload = hash('sha256', implode('|', ['resources.asset.register', $code, $name, $category, $location, $acquiredOn, $branchId, $actor->actorId]));
 
         try {
             return $this->idempotency->execute('resources.asset.register', $idempotencyKey, $payload,
-                fn (): array => DB::transaction(function () use ($actor, $code, $name, $category, $location, $acquiredOn): array {
-                    $this->require($actor);
+                fn (): array => DB::transaction(function () use ($actor, $code, $name, $category, $location, $acquiredOn, $branchId): array {
+                    $scope = ResourceScope::fromBranch($branchId);
+                    $this->require($actor, self::CAPABILITY, $scope);
                     if (Asset::query()->where('code', $code)->exists()) {
                         throw BusinessRejection::forCode('resources.asset_code_exists', 'this asset code already exists');
                     }
 
                     $asset = Asset::query()->create([
                         'id' => RandomIdentifier::new(),
+                        'organization_id' => $scope->organizationId,
+                        'originating_branch_id' => $scope->branchId,
                         'code' => $code,
                         'name' => $name,
                         'category' => $category,
@@ -54,7 +60,9 @@ final class MaintainAsset
                         'acquired_on' => $acquiredOn,
                         'lifecycle_state' => 'in_service',
                     ]);
-                    $event = $this->audit->record($actor->actorId, 'resources.asset.register', 'asset', $asset->id, null, ['code' => $code]);
+                    $event = $this->audit->record($actor->actorId, 'resources.asset.register', 'asset', $asset->id, null, [
+                        'code' => $code, 'branch_id' => $scope->branchId, 'organization_id' => $scope->organizationId,
+                    ]);
 
                     return ['asset_id' => $asset->id, 'correlation_id' => $event->correlation_id];
                 }),
@@ -72,10 +80,14 @@ final class MaintainAsset
         try {
             return $this->idempotency->execute('resources.custody.assign', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $asset, $custodianPersonId, $assignedOn): array {
-                    $this->require($actor);
-
                     /** @var Asset $locked */
                     $locked = Asset::query()->whereKey($asset->id)->lockForUpdate()->firstOrFail();
+                    $scope = ResourceScope::fromStored($locked->originating_branch_id, $locked->organization_id);
+                    $this->require($actor, self::CAPABILITY, $scope);
+                    $custodianScope = PersonBranchScope::resolve($custodianPersonId);
+                    if ($custodianScope->organizationId !== $scope->organizationId) {
+                        throw BusinessRejection::forCode('resources.custodian_organization_mismatch', 'custody must remain inside the asset organization');
+                    }
                     if ($locked->lifecycle_state !== 'in_service') {
                         throw BusinessRejection::forCode('resources.asset_not_in_service', 'custody attaches only to an in-service asset');
                     }
@@ -99,6 +111,7 @@ final class MaintainAsset
                     ]);
                     $event = $this->audit->record($actor->actorId, 'resources.custody.assign', 'custody', $custody->id, null, [
                         'asset_id' => $locked->id, 'custodian' => $custodianPersonId,
+                        'branch_id' => $scope->branchId, 'organization_id' => $scope->organizationId,
                     ]);
 
                     return ['custody_id' => $custody->id, 'correlation_id' => $event->correlation_id];
@@ -117,13 +130,18 @@ final class MaintainAsset
         try {
             return $this->idempotency->execute('resources.custody.release', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $asset, $releasedOn): array {
-                    $this->require($actor);
+                    /** @var Asset $locked */
+                    $locked = Asset::query()->whereKey($asset->id)->lockForUpdate()->firstOrFail();
+                    $scope = ResourceScope::fromStored($locked->originating_branch_id, $locked->organization_id);
+                    $this->require($actor, self::CAPABILITY, $scope);
 
                     /** @var Custody $open */
-                    $open = Custody::query()->where('asset_id', $asset->id)->whereNull('released_on')->lockForUpdate()->firstOrFail();
+                    $open = Custody::query()->where('asset_id', $locked->id)->whereNull('released_on')->lockForUpdate()->firstOrFail();
                     $open->forceFill(['released_on' => $releasedOn]);
                     $open->save();
-                    $event = $this->audit->record($actor->actorId, 'resources.custody.release', 'custody', $open->id, null, ['asset_id' => $asset->id]);
+                    $event = $this->audit->record($actor->actorId, 'resources.custody.release', 'custody', $open->id, null, [
+                        'asset_id' => $locked->id, 'branch_id' => $scope->branchId, 'organization_id' => $scope->organizationId,
+                    ]);
 
                     return ['custody_id' => $open->id, 'correlation_id' => $event->correlation_id];
                 }),
@@ -133,9 +151,9 @@ final class MaintainAsset
         }
     }
 
-    private function require(Actor $actor): void
+    private function require(Actor $actor, string $capability, StructureScope $scope): void
     {
-        $outcome = $this->access->decide($actor, self::CAPABILITY, null);
+        $outcome = $this->access->decide($actor, $capability, $scope);
         if (! $outcome->allowed) {
             throw AuthorizationDenied::forCode('resources.asset_denied', $outcome->reason);
         }

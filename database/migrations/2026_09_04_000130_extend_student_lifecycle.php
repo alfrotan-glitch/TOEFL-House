@@ -140,10 +140,20 @@ return new class extends Migration
 
     public function down(): void
     {
+        // Remove every trigger before dropping the tables it protects, and
+        // remove the helper functions as well. Leaving orphaned trigger
+        // functions behind makes a later migration name collision silently
+        // inherit obsolete lifecycle semantics.
+        DB::statement('DROP TRIGGER IF EXISTS student_hold_events_consistency_trigger ON student_hold_events');
+        DB::statement('DROP TRIGGER IF EXISTS student_hold_events_append_only_trigger ON student_hold_events');
+        DB::statement('DROP TRIGGER IF EXISTS student_branch_transfers_consistency_trigger ON student_branch_transfers');
+        DB::statement('DROP TRIGGER IF EXISTS student_branch_transfers_append_only_trigger ON student_branch_transfers');
+        DB::statement('DROP FUNCTION IF EXISTS student_hold_events_consistency()');
+        DB::statement('DROP FUNCTION IF EXISTS student_hold_events_append_only()');
+        DB::statement('DROP FUNCTION IF EXISTS student_branch_transfers_consistency()');
+        DB::statement('DROP FUNCTION IF EXISTS student_branch_transfers_append_only()');
         Schema::dropIfExists('student_communication_preferences');
         Schema::dropIfExists('student_hold_events');
-        DB::statement('DROP TRIGGER IF EXISTS student_branch_transfers_append_only_trigger ON student_branch_transfers');
-        DB::statement('DROP FUNCTION IF EXISTS student_branch_transfers_append_only()');
         Schema::dropIfExists('student_branch_transfers');
     }
 };

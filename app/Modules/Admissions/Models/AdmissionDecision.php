@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Modules\Admissions\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
  * Recorded admission outcome with reason, evidence, and the staged
@@ -29,4 +30,10 @@ final class AdmissionDecision extends Model
     protected $keyType = 'string';
 
     protected $fillable = ['id', 'applicant_id', 'outcome', 'reason', 'evidence_ref', 'initiator_id', 'reviewer_id', 'approver_id', 'lifecycle_state'];
+
+    /** @return BelongsTo<Applicant, $this> */
+    public function applicant(): BelongsTo
+    {
+        return $this->belongsTo(Applicant::class);
+    }
 }

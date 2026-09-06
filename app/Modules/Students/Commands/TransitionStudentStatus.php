@@ -10,7 +10,9 @@ use App\Modules\Audit\AuditRecorder;
 use App\Modules\Students\Domain\StudentStatusRegistry;
 use App\Modules\Students\Models\Student;
 use App\Modules\Students\Models\StudentStatus;
-use App\Support\Authorization\AccessDecision;
+use App\Modules\Academic\Domain\RecordBranch;
+use App\Modules\Organization\Models\Branch;
+use App\Support\Authorization\BranchScopedAccess;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
@@ -35,7 +37,7 @@ final class TransitionStudentStatus
     public const CAPABILITY_REACTIVATE = 'students.reactivate';
 
     public function __construct(
-        private readonly AccessDecision $access,
+        private readonly BranchScopedAccess $access,
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
@@ -75,24 +77,24 @@ final class TransitionStudentStatus
     /** @return array{student_id: string, status: string, correlation_id: string} */
     private function transition(Actor $actor, Student $student, string $toStatus, string $capability, string $reason, string $idempotencyKey): array
     {
+        $reason = trim($reason);
         $payload = hash('sha256', implode('|', ['students.status', $student->id, $toStatus, $reason, $actor->actorId]));
 
         try {
             return $this->idempotency->execute('students.status.'.$toStatus, $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $student, $toStatus, $capability, $reason): array {
-                    $outcome = $this->access->decide($actor, $capability, null);
-                    if (! $outcome->allowed) {
-                        throw AuthorizationDenied::forCode('students.status_denied', $outcome->reason);
-                    }
+                    /** @var Student $lockedStudent */
+                    $lockedStudent = Student::query()->whereKey($student->id)->lockForUpdate()->firstOrFail();
+                    $this->access->require($actor, $capability, RecordBranch::studentBranch($lockedStudent), 'students.status_denied');
                     if ($reason === '') {
                         throw BusinessRejection::forCode('students.status_reason', 'a status transition requires a reason');
                     }
                     if ($toStatus === StudentStatusRegistry::STATUS_ALUMNI) {
-                        $this->assertGraduationCertified($student->id);
+                        $this->assertGraduationCertified($lockedStudent->id);
                     }
 
                     /** @var StudentStatus|null $latest */
-                    $latest = StudentStatus::query()->where('student_id', $student->id)->orderByDesc('seq')->lockForUpdate()->first();
+                    $latest = StudentStatus::query()->where('student_id', $lockedStudent->id)->orderByDesc('seq')->lockForUpdate()->first();
                     $from = $latest?->status;
                     if ($from === null) {
                         throw BusinessRejection::forCode('students.no_status_history', 'the student has no status history');
@@ -102,18 +104,24 @@ final class TransitionStudentStatus
                     $today = (new CarbonImmutable)->startOfDay()->toDateString();
                     $status = StudentStatus::query()->create([
                         'id' => RandomIdentifier::new(),
-                        'student_id' => $student->id,
+                        'student_id' => $lockedStudent->id,
                         'status' => $toStatus,
                         'effective_from' => $today,
                         'reason' => $reason,
                         'actor_id' => $actor->actorId,
                     ]);
 
+                    $branchId = RecordBranch::studentBranch($lockedStudent);
+                    $branch = $branchId === null ? null : Branch::query()->whereKey($branchId)->first();
+                    if ($branch === null || $branch->lifecycle_state !== 'active' || $branch->structureScope()->organizationId === '') {
+                        throw BusinessRejection::forCode('students.status_provenance_required', 'a student status event requires active branch and organization provenance');
+                    }
                     $event = $this->audit->record($actor->actorId, 'students.status.'.$toStatus, 'student_status', $status->id, ['status' => $from], [
-                        'status' => $toStatus, 'reason' => $reason,
+                        'status' => $toStatus, 'reason' => $reason, 'branch_id' => $branch->id,
+                        'organization_id' => $branch->structureScope()->organizationId,
                     ]);
 
-                    return ['student_id' => $student->id, 'status' => $toStatus, 'correlation_id' => $event->correlation_id];
+                    return ['student_id' => $lockedStudent->id, 'status' => $toStatus, 'correlation_id' => $event->correlation_id];
                 }),
             );
         } catch (AuthorizationDenied $denial) {

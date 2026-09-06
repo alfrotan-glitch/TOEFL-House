@@ -113,7 +113,7 @@ final class StudentStatusFeatureTest extends TestCase
         $unverifiedView = (new StudentRecordQuery)->studentRecord($this->student->id);
         $this->assertSame([], $unverifiedView['guardians'], 'an unverified relationship carries no permissions');
 
-        app(MaintainGuardianRelationship::class)->verify($manager, $relationship, 'guard-key-2');
+        app(MaintainGuardianRelationship::class)->verify($manager, $relationship, 'guard-key-2', 'guardian-evidence/guard-key-2');
         $verifiedView = (new StudentRecordQuery)->studentRecord($this->student->id);
         $this->assertCount(1, $verifiedView['guardians']);
         $this->assertSame(['view-academic', 'receive-communication'], $verifiedView['guardians'][0]['permissions']);

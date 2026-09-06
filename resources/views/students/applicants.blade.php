@@ -63,6 +63,15 @@
                 <label>Program interest</label>
                 <input name="program_interest" type="text" required>
             </div>
+            <div>
+                <label>Operational branch</label>
+                <select name="branch_id" required>
+                    <option value="">Select a branch…</option>
+                    @foreach ($branches as $branch)
+                        <option value="{{ $branch->id }}">{{ $branch->name }}</option>
+                    @endforeach
+                </select>
+            </div>
         </div>
         <div class="actions"><button type="submit" class="btn">Register applicant</button></div>
     </form>

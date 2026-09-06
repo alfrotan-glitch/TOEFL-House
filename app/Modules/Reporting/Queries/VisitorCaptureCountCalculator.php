@@ -27,7 +27,14 @@ final class VisitorCaptureCountCalculator implements MetricCalculator
             $query->where('origin_branch_id', $scopeId);
         }
         $count = (int) $query->count();
+        $unassigned = $scopeId === null
+            ? (int) DB::table('visitors')->whereNull('origin_branch_id')->whereBetween('created_at', [$period->starts_on.' 00:00:00', $period->ends_on.' 23:59:59'])->count()
+            : 0;
 
-        return ['value' => (string) $count, 'meta' => ['visitors_captured' => $count]];
+        return ['value' => (string) $count, 'meta' => [
+            'visitors_captured' => $count,
+            'unassigned_provenance_count' => $unassigned,
+            'unassigned_provenance_excluded' => $scopeId !== null,
+        ]];
     }
 }

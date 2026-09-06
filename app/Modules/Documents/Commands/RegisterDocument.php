@@ -13,6 +13,8 @@ use App\Modules\Documents\Models\DocumentVersion;
 use App\Modules\Identity\Models\Person;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
+use App\Support\Authorization\PersonBranchScope;
+use App\Support\Authorization\StructureScope;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
@@ -48,12 +50,14 @@ final class RegisterDocument
         try {
             return $this->idempotency->execute('documents.register', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($registrar, $subjectPersonId, $classificationId, $title, $contentHash, $storageRef): array {
-                    $outcome = $this->access->decide($registrar, self::CAPABILITY, null);
+                    $subject = Person::query()->whereKey($subjectPersonId)->first();
+                    if ($subject === null) {
+                        throw BusinessRejection::forCode('documents.subject_unknown', 'a document requires a known subject');
+                    }
+                    $scope = PersonBranchScope::resolve($subject->id);
+                    $outcome = $this->access->decide($registrar, self::CAPABILITY, $scope);
                     if (! $outcome->allowed) {
                         throw AuthorizationDenied::forCode('documents.register_denied', $outcome->reason);
-                    }
-                    if (! Person::query()->whereKey($subjectPersonId)->exists()) {
-                        throw BusinessRejection::forCode('documents.subject_unknown', 'a document requires a known subject');
                     }
                     if (! DocumentClassification::query()->whereKey($classificationId)->exists()) {
                         throw BusinessRejection::forCode('documents.classification_unknown', 'a document requires a defined classification');
@@ -83,8 +87,10 @@ final class RegisterDocument
                         'classification_id' => $classificationId,
                         'lifecycle_state' => 'draft',
                         'version_no' => 1,
+                        'branch_id' => $scope->branchId,
+                        'organization_id' => $scope->organizationId,
                     ]);
-                    $this->traceVisitor($registrar, $subjectPersonId, $document->id, $title);
+                    $this->traceVisitor($registrar, $subjectPersonId, $document->id, $title, $event->id);
 
                     return ['document_id' => $document->id, 'version_no' => 1, 'correlation_id' => $event->correlation_id];
                 }),
@@ -94,7 +100,7 @@ final class RegisterDocument
         }
     }
 
-    private function traceVisitor(Actor $actor, string $subjectPersonId, string $documentId, string $title): void
+    private function traceVisitor(Actor $actor, string $subjectPersonId, string $documentId, string $title, string $authorityAuditEventId): void
     {
         $visitorId = $this->crmTrace->visitorIdForPerson($subjectPersonId);
         if ($visitorId === null) {
@@ -109,6 +115,7 @@ final class RegisterDocument
             sprintf('Document "%s" registered for the lead subject.', $title),
             CarbonImmutable::now(),
             documentId: $documentId,
+            authorityAuditEventId: $authorityAuditEventId,
         );
     }
 }

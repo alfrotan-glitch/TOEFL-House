@@ -6,6 +6,7 @@ namespace App\Modules\Organization\Models;
 
 use App\Modules\Organization\Domain\StructureUnit;
 use App\Support\Authorization\StructureScope;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
@@ -30,10 +31,15 @@ final class Branch extends Model implements StructureUnit
         return $this->hasMany(CampusAssignment::class)->orderBy('effective_from');
     }
 
-    public function activeCampusAssignment(): ?CampusAssignment
+    public function activeCampusAssignment(?CarbonImmutable $asOf = null): ?CampusAssignment
     {
+        $day = ($asOf ?? CarbonImmutable::now())->startOfDay()->toDateString();
         /** @var CampusAssignment|null $assignment */
-        $assignment = $this->campusAssignments()->whereNull('effective_to')->first();
+        $assignment = $this->campusAssignments()
+            ->where('effective_from', '<=', $day)
+            ->where(fn ($query) => $query->whereNull('effective_to')->orWhere('effective_to', '>', $day))
+            ->reorder('effective_from', 'desc')
+            ->first();
 
         return $assignment;
     }

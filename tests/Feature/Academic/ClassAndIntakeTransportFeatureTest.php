@@ -52,7 +52,7 @@ final class ClassAndIntakeTransportFeatureTest extends TestCase
         $admin = $this->personWithAuthority('intake-admin', ['identity.admin']);
         $this->signInAs($admin->id, 'intake.admin');
 
-        $this->postJson('/api/identity/people', [
+        $this->postJson('/api/v1/identity/people', [
             'legal_name' => 'New Prospect',
             'date_of_birth' => '2005-06-15',
         ])->assertCreated()->assertJsonPath('status', 'registered');
@@ -67,7 +67,7 @@ final class ClassAndIntakeTransportFeatureTest extends TestCase
         $nobody = $this->personWithAuthority('intake-nobody', []);
         $this->signInAs($nobody->id, 'intake.nobody');
 
-        $this->postJson('/api/identity/people', [
+        $this->postJson('/api/v1/identity/people', [
             'legal_name' => 'Blocked Prospect',
             'date_of_birth' => '2005-06-15',
         ])->assertForbidden();

@@ -7,6 +7,7 @@ namespace App\Modules\Finance\Domain;
 use App\Modules\Finance\Models\OpeningEntry;
 use App\Modules\Finance\Models\OpeningState;
 use App\Support\Errors\BusinessRejection;
+use App\Support\MoneyAmount;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -27,7 +28,7 @@ final class OpeningEntryContract
         if (! in_array($category, OpeningEntry::CATEGORIES, true)) {
             throw BusinessRejection::forCode('finance.opening_category_unknown', sprintf('unknown opening category %s', $category));
         }
-        if (! is_numeric($amount) || bccomp($amount, '0.00', 2) !== 1) {
+        if (! MoneyAmount::positive($amount)) {
             throw BusinessRejection::forCode('finance.opening_amount', 'an opening amount must be a positive number');
         }
         if (in_array($category, self::RECEIVABLE_CATEGORIES, true) && $studentId === null) {

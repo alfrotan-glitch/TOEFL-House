@@ -11,7 +11,7 @@
 #   ./deploy/deploy.sh --rollback         # roll back to the previous release
 #
 # Prerequisites (see docs/operations/production-deployment.md):
-#   * php + composer + curl on PATH
+#   * php + composer + node/npm + curl on PATH
 #   * PostgreSQL client tools pg_dump + pg_restore (postgresql-client, version >=
 #     the server) — required by deploy/backup.sh and deploy/restore.sh
 #   * nginx (deploy/nginx) and php-fpm (deploy/php-fpm.conf) installed
@@ -29,6 +29,7 @@ ENV_FILE="$DEPLOY_ROOT/.env"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1/health}"
 PHP_BIN="${PHP_BIN:-php}"
 COMPOSER_BIN="${COMPOSER_BIN:-composer}"
+NPM_BIN="${NPM_BIN:-npm}"
 
 log()  { printf '[deploy] %s\n' "$*"; }
 die()  { printf '[deploy][ERROR] %s\n' "$*" >&2; exit 1; }
@@ -63,7 +64,14 @@ log "source: commit $COMMIT"
 # 2. Dependencies (production only; lock file is authoritative).
 ( cd "$RELEASE_DIR" && "$COMPOSER_BIN" install --no-dev --no-interaction --prefer-dist --no-progress --optimize-autoloader )
 
-# 3. Environment: the persistent .env is the single source of deployment env.
+# 3. Build the selected React/TypeScript console root. The build runs in the
+# release directory so public/build is part of the atomic release; no Node
+# process is needed after go-live. A lockfile is currently not committed, so
+# npm install is intentional until the supply-chain lockfile is added.
+command -v "$NPM_BIN" >/dev/null 2>&1 || die "npm not found on PATH: refusing to deploy the React console without its Vite asset build"
+( cd "$RELEASE_DIR" && "$NPM_BIN" install --no-audit --no-fund && "$NPM_BIN" run build )
+
+# 4. Environment: the persistent .env is the single source of deployment env.
 cp "$ENV_FILE" "$RELEASE_DIR/.env"
 ( cd "$RELEASE_DIR" && grep -q '^APP_ENV=production' .env ) || die ".env must set APP_ENV=production"
 ( cd "$RELEASE_DIR" && grep -q '^APP_DEBUG=false' .env ) || die ".env must set APP_DEBUG=false"
@@ -73,7 +81,7 @@ cp "$ENV_FILE" "$RELEASE_DIR/.env"
 # deploy that could have been refused up front).
 ( cd "$RELEASE_DIR" && grep -q '^APP_KEY=..' .env ) || die ".env must set a non-empty APP_KEY (php artisan key:generate)"
 
-# 4. Pre-deploy backup: migrations are forward-only and run against the live
+# 5. Pre-deploy backup: migrations are forward-only and run against the live
 #    database, so a backup is taken immediately before they run. The backup
 #    uses the persistent .env's DB settings; without the client tools this
 #    deploy is refused (a migration without a fresh backup is not a deploy
@@ -93,11 +101,11 @@ else
     die "pg_dump not found on PATH: refusing to deploy (migrations run against the live database and require a pre-deploy backup; install postgresql-client, version >= the server)"
 fi
 
-# 5. Schema: forward-only migrations. Never destructive; a failing migration
+# 6. Schema: forward-only migrations. Never destructive; a failing migration
 #    aborts the deployment before the release goes live.
 ( cd "$RELEASE_DIR" && "$PHP_BIN" artisan migrate --force --no-interaction )
 
-# 6. Runtime directories exist and are owned by the web user (the repo now
+# 7. Runtime directories exist and are owned by the web user (the repo now
 #    tracks them, but ensure ownership/permissions for the FPM user).
 WEB_USER="$(grep -m1 '^user' /etc/php/*/fpm/pool.d/toefl-house.conf 2>/dev/null | awk '{print $3}' || echo www-data)"
 for d in storage/app storage/framework/cache storage/framework/sessions storage/framework/views storage/logs bootstrap/cache; do
@@ -105,10 +113,10 @@ for d in storage/app storage/framework/cache storage/framework/sessions storage/
 done
 chown -R "$WEB_USER":"$WEB_USER" "$RELEASE_DIR/storage" "$RELEASE_DIR/bootstrap/cache"
 
-# 7. Production optimization (Laravel-recommended: cached config/routes/views).
+# 8. Production optimization (Laravel-recommended: cached config/routes/views).
 ( cd "$RELEASE_DIR" && "$PHP_BIN" artisan config:cache && "$PHP_BIN" artisan route:cache && "$PHP_BIN" artisan view:cache )
 
-# 8. Go live: switch the symlink, then verify the release over HTTP.
+# 9. Go live: switch the symlink, then verify the release over HTTP.
 PREV_RELEASE="$(readlink "$CURRENT_LINK" 2>/dev/null || true)"
 ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
 ( systemctl reload php*-fpm 2>/dev/null || service php*-fpm reload 2>/dev/null || true )
@@ -125,7 +133,7 @@ for i in 1 2 3 4 5; do
     sleep 2
 done
 
-# 9. Unhealthy: automatic rollback to the previous release; fail loudly.
+# 10. Unhealthy: automatic rollback to the previous release; fail loudly.
 log "release FAILED health check — rolling back"
 [ -n "$PREV_RELEASE" ] && ln -sfn "$PREV_RELEASE" "$CURRENT_LINK" || rm -f "$CURRENT_LINK"
 nginx -t >/dev/null 2>&1 && systemctl reload nginx 2>/dev/null || true

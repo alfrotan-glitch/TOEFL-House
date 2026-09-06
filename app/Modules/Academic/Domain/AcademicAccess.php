@@ -4,47 +4,32 @@ declare(strict_types=1);
 
 namespace App\Modules\Academic\Domain;
 
-use App\Modules\Organization\Models\Branch;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
-use App\Support\Authorization\StructureScope;
-use App\Support\Errors\AuthorizationDenied;
-use App\Support\Errors\BusinessRejection;
+use App\Support\Authorization\BranchScopedAccess;
 
 /**
- * Academic authorization: every protected operation resolves through the
- * single AccessDecision authority, and — when the target carries branch
- * provenance — against that branch's structure scope (WP-ACAD-SCOPE).
- *
- * Scope is always derived server-side from locked rows or verified inputs.
- * A null/empty branch means the target is genuinely branchless (governance
- * tier) or of unknown provenance (legacy rows): the global check applies.
- * An unknown branch id fails closed.
+ * Academic authorization adapter. Delivery targets use a server-derived
+ * branch scope; governance records explicitly use the global path. Both paths
+ * delegate to the single AccessDecision authority.
  */
 final class AcademicAccess
 {
-    public function __construct(private readonly AccessDecision $access) {}
+    private readonly BranchScopedAccess $scoped;
+
+    public function __construct(AccessDecision $access)
+    {
+        $this->scoped = new BranchScopedAccess($access);
+    }
 
     public function require(Actor $actor, string $capability, ?string $branchId, string $errorCode): void
     {
-        $outcome = $this->access->decide($actor, $capability, $this->scopeFor($branchId));
-        if (! $outcome->allowed) {
-            throw AuthorizationDenied::forCode($errorCode, $outcome->reason);
-        }
+        $this->scoped->require($actor, $capability, $branchId, $errorCode);
     }
 
-    private function scopeFor(?string $branchId): ?StructureScope
+    /** Branchless curriculum/governance records only. */
+    public function requireGlobal(Actor $actor, string $capability, string $errorCode): void
     {
-        $branchId = trim((string) ($branchId ?? ''));
-        if ($branchId === '') {
-            return null;
-        }
-        /** @var Branch|null $branch */
-        $branch = Branch::query()->find($branchId);
-        if ($branch === null) {
-            throw BusinessRejection::forCode('academic.branch_unknown', 'the referenced branch does not exist');
-        }
-
-        return $branch->structureScope();
+        $this->scoped->requireGlobal($actor, $capability, $errorCode);
     }
 }

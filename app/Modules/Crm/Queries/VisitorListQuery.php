@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Modules\Crm\Queries;
 
+use App\Modules\Crm\Domain\VisitorStatus;
 use App\Modules\Crm\Models\Visitor;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -21,7 +22,7 @@ final class VisitorListQuery
      */
     public function search(?array $statuses, array $filters, int $limit = 100): array
     {
-        $query = Visitor::query()->with(['source:id,key,name,lifecycle_state', 'campaign:id,key,name,channel,lifecycle_state', 'assignee:id,legal_name', 'conversion:id,visitor_id,conversion_type,converted_at']);
+        $query = Visitor::query()->with(['source:id,key,name,lifecycle_state', 'campaign:id,key,name,channel,lifecycle_state', 'assignee:id,legal_name', 'originBranch:id,name', 'conversion:id,visitor_id,conversion_type,authority,converted_by,authority_audit_event_id,converted_at', 'conversionHandoffs:id,visitor_id,student_id,authority_audit_event_id,converted_at']);
 
         if ($statuses !== null && $statuses !== []) {
             $query->whereIn('status', $statuses);
@@ -35,8 +36,22 @@ final class VisitorListQuery
         if (isset($filters['campaign_id']) && $filters['campaign_id'] !== '') {
             $query->where('campaign_id', $filters['campaign_id']);
         }
+        // Null provenance is intentionally never a wildcard. The caller must
+        // provide a concrete authorized branch set; an explicit organization
+        // read may opt into the reportable unassigned queue, and an explicit
+        // branch filter always narrows the result rather than being ignored.
         if (isset($filters['branch_id']) && $filters['branch_id'] !== '') {
             $query->where('origin_branch_id', $filters['branch_id']);
+        } elseif (isset($filters['branch_ids']) && is_array($filters['branch_ids'])) {
+            if (($filters['include_unassigned'] ?? false) === true) {
+                $query->where(fn (Builder $q): Builder => $q
+                    ->whereIn('origin_branch_id', $filters['branch_ids'])
+                    ->orWhereNull('origin_branch_id'));
+            } else {
+                $query->whereIn('origin_branch_id', $filters['branch_ids']);
+            }
+        } else {
+            $query->whereNotNull('origin_branch_id');
         }
         if (isset($filters['assigned_to']) && $filters['assigned_to'] !== '') {
             $query->where('assigned_to', $filters['assigned_to']);
@@ -63,7 +78,7 @@ final class VisitorListQuery
     /** @return array<string, mixed> */
     public function detail(Visitor $visitor): array
     {
-        $visitor->loadMissing(['source', 'campaign', 'assignee', 'originBranch:id,name', 'conversion']);
+        $visitor->loadMissing(['source', 'campaign', 'assignee', 'originBranch:id,name', 'conversion', 'conversionHandoffs']);
 
         return $this->present($visitor);
     }
@@ -100,12 +115,16 @@ final class VisitorListQuery
             'preferred_channel' => $visitor->preferred_channel,
             'visitor_type' => $visitor->visitor_type,
             'status' => $visitor->status,
+            'available_transitions' => VisitorStatus::nextPipelineStatuses($visitor->status),
             'rating' => $visitor->rating,
             'interest' => $visitor->interest,
             'notes' => $visitor->notes,
             'assigned_to' => $visitor->assigned_to,
             'assignee_name' => $visitor->relationLoaded('assignee') && $visitor->assignee !== null ? $visitor->assignee->legal_name : null,
             'origin_branch_id' => $visitor->origin_branch_id,
+            'origin_branch' => $visitor->relationLoaded('originBranch') && $visitor->originBranch !== null ? [
+                'id' => $visitor->originBranch->id, 'name' => $visitor->originBranch->name,
+            ] : null,
             'source' => $visitor->relationLoaded('source') && $visitor->source !== null ? [
                 'id' => $visitor->source->id, 'key' => $visitor->source->key, 'name' => $visitor->source->name, 'lifecycle_state' => $visitor->source->lifecycle_state,
             ] : null,
@@ -113,8 +132,16 @@ final class VisitorListQuery
                 'id' => $visitor->campaign->id, 'key' => $visitor->campaign->key, 'name' => $visitor->campaign->name, 'channel' => $visitor->campaign->channel, 'lifecycle_state' => $visitor->campaign->lifecycle_state,
             ] : null,
             'conversion' => $visitor->relationLoaded('conversion') && $visitor->conversion !== null ? [
-                'id' => $visitor->conversion->id, 'conversion_type' => $visitor->conversion->conversion_type, 'converted_at' => $visitor->conversion->converted_at,
+                'id' => $visitor->conversion->id, 'conversion_type' => $visitor->conversion->conversion_type, 'authority' => $visitor->conversion->authority, 'converted_by' => $visitor->conversion->converted_by, 'authority_audit_event_id' => $visitor->conversion->authority_audit_event_id, 'converted_at' => $visitor->conversion->converted_at,
             ] : null,
+            'conversion_handoffs' => $visitor->relationLoaded('conversionHandoffs')
+                ? $visitor->conversionHandoffs->map(fn ($handoff): array => [
+                    'id' => $handoff->id,
+                    'student_id' => $handoff->student_id,
+                    'authority_audit_event_id' => $handoff->authority_audit_event_id,
+                    'converted_at' => $handoff->converted_at,
+                ])->values()->all()
+                : [],
             'created_at' => $visitor->created_at?->toISOString(),
             'updated_at' => $visitor->updated_at?->toISOString(),
         ];

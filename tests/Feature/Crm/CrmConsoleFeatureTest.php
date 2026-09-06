@@ -33,7 +33,8 @@ final class CrmConsoleFeatureTest extends TestCase
 
         $this->get('/crm')
             ->assertOk()
-            ->assertSee('Visitor / Lead CRM');
+            ->assertSee('data-view="crm"')
+            ->assertSee('react-console');
     }
 
     public function test_employee_console_captures_a_visitor_through_the_command_surface(): void
@@ -41,12 +42,12 @@ final class CrmConsoleFeatureTest extends TestCase
         $staff = $this->personWithAuthority('crm-console-2', ['crm.visitor']);
         $this->signInAs($staff->id, 'crm.console.capture');
 
-        $this->post('/crm/visitors', [
+        $this->postJson('/api/v1/crm/visitors', [
             'full_name' => 'Console Visitor',
             'phone' => '+93 799 111 222',
             'preferred_channel' => 'phone',
             'visitor_type' => 'walk_in',
-        ])->assertRedirect('/crm');
+        ])->assertCreated();
 
         $this->assertDatabaseHas('visitors', ['full_name' => 'Console Visitor']);
     }

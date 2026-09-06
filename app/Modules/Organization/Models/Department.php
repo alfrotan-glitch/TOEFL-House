@@ -34,7 +34,7 @@ final class Department extends Model implements StructureUnit
 
     public function structureScope(): StructureScope
     {
-        return (new ResolvesStructureScope)->forDepartment($this->scope_type, $this->scope_id);
+        return (new ResolvesStructureScope)->forDepartment($this->scope_type, $this->scope_id, $this->id);
     }
 
     public function unitId(): string

@@ -6,7 +6,7 @@
 | Outstanding obligation | obligation lines minus valid allocations/credits | Finance | as-of period |
 | Branch revenue | posted income journals scoped to branch | Finance | period/as-of |
 | Cash balance | posted cash movements and reconciliations | Finance | observed variance retained |
-| Payroll total | approved payroll results | Payroll/Finance | period/as-of |
+| Payroll total | Finance-recognized payroll liability facts; approved Payroll results and adjustments are source evidence | Finance (Payroll source recognition) | period/as-of/source lineage |
 | Attendance percentage | attendance records and period definition | Academic | correction history retained |
 | Progression status | approved progression decisions | Academic | never infer from score alone |
 | Enrollment counts | active membership facts | Academic Delivery | as-of period |

@@ -21,7 +21,7 @@ final class JobRun extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'job_key', 'run_key', 'status', 'attempts', 'max_attempts', 'run_by', 'last_error', 'outcome', 'next_retry_at', 'started_at', 'finished_at'];
+    protected $fillable = ['id', 'job_key', 'run_key', 'status', 'attempts', 'max_attempts', 'run_by', 'last_error', 'outcome', 'next_retry_at', 'lease_until', 'started_at', 'finished_at'];
 
-    protected $casts = ['outcome' => 'array', 'next_retry_at' => 'datetime', 'started_at' => 'datetime', 'finished_at' => 'datetime'];
+    protected $casts = ['outcome' => 'array', 'next_retry_at' => 'datetime', 'lease_until' => 'datetime', 'started_at' => 'datetime', 'finished_at' => 'datetime'];
 }

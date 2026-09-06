@@ -79,7 +79,7 @@ final class TimetableQuery
     {
         $day = $this->day($day);
         $sessions = ClassSession::query()
-            ->whereHas('room', fn ($query) => $query->where('branch_id', $branchId))
+            ->whereHas('class', fn ($query) => $query->where('branch_id', $branchId))
             ->where('scheduled_on', $day->toDateString())
             ->with(['room', 'class', 'section'])
             ->orderBy('starts_at')

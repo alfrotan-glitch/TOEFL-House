@@ -22,6 +22,12 @@
             <input type="text" name="category" required maxlength="64">
             <label>Location</label>
             <input type="text" name="location" required maxlength="255">
+            <label>Owning branch</label>
+            <select name="branch_id" required>
+                @foreach ($assetBranches as $branch)
+                    <option value="{{ $branch->id }}">{{ $branch->name }}</option>
+                @endforeach
+            </select>
             <label>Acquired on</label>
             <input type="date" name="acquired_on" required>
             <div class="actions"><button type="submit" class="btn">Register asset</button></div>
@@ -33,6 +39,12 @@
         <form method="POST" action="{{ route('library.work.request') }}">
             @csrf
             <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+            <label>Owning branch</label>
+            <select name="branch_id" required>
+                @foreach ($workBranches as $branch)
+                    <option value="{{ $branch->id }}">{{ $branch->name }}</option>
+                @endforeach
+            </select>
             <label>Facility</label>
             <input type="text" name="facility_note" required maxlength="255" placeholder="Campus A / Room 4">
             <label>Description</label>
@@ -70,8 +82,8 @@
                                     <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
                                     <label>Custodian</label>
                                     <select name="custodian_id" required>
-                                        @foreach ($borrowers as $borrower)
-                                            <option value="{{ $borrower->id }}">{{ $borrower->legal_name }}</option>
+                                        @foreach ($custodians as $custodian)
+                                            <option value="{{ $custodian->id }}">{{ $custodian->legal_name }}</option>
                                         @endforeach
                                     </select>
                                     <label>Assigned on</label>
@@ -170,6 +182,30 @@
             @endforeach
         </table>
     @endif
+</div>
+
+<div class="card">
+    <h2>Register a book copy</h2>
+    <p class="sub">A copy receives immutable organization and originating-branch provenance at registration. Branch scope is never inferred from its later borrower or location.</p>
+    <form method="POST" action="{{ route('library.book.add') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="row">
+            <div><label>Copy code</label><input name="code" type="text" maxlength="64" required></div>
+            <div><label>Title</label><input name="title" type="text" maxlength="255" required></div>
+            <div><label>Acquired on</label><input name="acquired_on" type="date" required></div>
+            <div>
+                <label>Owning branch</label>
+                <select name="branch_id" required>
+                    <option value="">Select a branch</option>
+                    @foreach ($bookBranches as $branch)
+                        <option value="{{ $branch->id }}">{{ $branch->name }}</option>
+                    @endforeach
+                </select>
+            </div>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Register book copy</button></div>
+    </form>
 </div>
 
 <div class="row">

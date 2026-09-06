@@ -8,16 +8,21 @@ use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Finance\Models\Discount;
 use App\Modules\Finance\Models\FundAllocation;
+use App\Modules\Finance\Models\FinancialCorrection;
 use App\Modules\Finance\Models\Obligation;
 use App\Modules\Finance\Models\ObligationLine;
 use App\Modules\Finance\Models\Payment;
+use App\Modules\Finance\Domain\FinancialCoverageLock;
 use App\Modules\Finance\Models\PaymentAllocation;
+use App\Modules\Finance\Queries\FinancialBalanceQuery;
+use App\Modules\Organization\Models\Branch;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
 use App\Support\Identifiers\RandomIdentifier;
+use App\Support\MoneyAmount;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -36,6 +41,7 @@ final class AllocatePayment
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
+        private readonly ?FinancialBalanceQuery $balances = null,
     ) {}
 
     /** @return array{allocation_id: string, correlation_id: string} */
@@ -46,18 +52,44 @@ final class AllocatePayment
         try {
             return $this->idempotency->execute('finance.payment.allocate', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $payment, $obligation, $amount): array {
-                    $this->require($actor);
-                    if (! is_numeric($amount) || (float) $amount <= 0) {
+                    if (! MoneyAmount::positive($amount)) {
                         throw BusinessRejection::forCode('finance.allocation_amount', 'the allocation amount must be a positive number');
                     }
                     if (trim((string) $payment->student_id) !== trim((string) $obligation->student_id)) {
                         throw BusinessRejection::forCode('finance.allocation_payer_mismatch', 'the payment and the obligation belong to different students');
                     }
+                    $studentId = (string) Obligation::query()->whereKey($obligation->id)->value('student_id');
+                    FinancialCoverageLock::acquire($studentId);
 
                     /** @var Payment $lockedPayment */
                     $lockedPayment = Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
                     /** @var Obligation $lockedObligation */
                     $lockedObligation = Obligation::query()->whereKey($obligation->id)->lockForUpdate()->firstOrFail();
+                    if (trim((string) $lockedPayment->student_id) !== trim((string) $lockedObligation->student_id)
+                        || trim((string) $lockedObligation->student_id) !== trim($studentId)) {
+                        throw BusinessRejection::forCode('finance.allocation_payer_mismatch', 'the payment and the obligation belong to different students');
+                    }
+
+                    $paymentBranchId = trim((string) ($lockedPayment->current_home_branch_id ?? $lockedPayment->originating_branch_id ?? ''));
+                    $obligationBranchId = trim((string) ($lockedObligation->current_home_branch_id ?? $lockedObligation->originating_branch_id ?? ''));
+                    foreach (array_values(array_unique([$paymentBranchId, $obligationBranchId])) as $branchId) {
+                        $branch = $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
+                        if ($branch === null) {
+                            throw BusinessRejection::forCode('finance.allocation_provenance_required', 'payment allocation requires known source branch provenance');
+                        }
+                        $this->require($actor, $branch->structureScope());
+                    }
+                    $allocationProvenance = ['branch_id' => null, 'organization_id' => null];
+                    if ($paymentBranchId !== '' && $paymentBranchId === $obligationBranchId) {
+                        $allocationBranch = Branch::query()->whereKey($paymentBranchId)->first();
+                        if ($allocationBranch === null || $allocationBranch->lifecycle_state !== 'active' || $allocationBranch->structureScope()->organizationId === '') {
+                            throw BusinessRejection::forCode('finance.allocation_provenance_required', 'a same-branch allocation requires active organization provenance');
+                        }
+                        $allocationProvenance = [
+                            'branch_id' => $allocationBranch->id,
+                            'organization_id' => $allocationBranch->structureScope()->organizationId,
+                        ];
+                    }
 
                     if (PaymentAllocation::query()->where('payment_id', $lockedPayment->id)->where('obligation_id', $lockedObligation->id)->exists()) {
                         throw BusinessRejection::forCode('finance.allocation_pair_exists', 'this payment is already allocated to this obligation');
@@ -81,7 +113,9 @@ final class AllocatePayment
                         'allocated_by' => $actor->actorId,
                     ]);
                     $event = $this->audit->record($actor->actorId, 'finance.payment.allocate', 'payment_allocation', $allocation->id, null, [
-                        'payment_id' => $lockedPayment->id, 'obligation_id' => $lockedObligation->id, 'amount' => $amount,
+                        'payment_id' => $lockedPayment->id, 'obligation_id' => $lockedObligation->id,
+                        ...$allocationProvenance,
+                        'amount' => $amount,
                     ]);
 
                     return ['allocation_id' => $allocation->id, 'correlation_id' => $event->correlation_id];
@@ -94,34 +128,22 @@ final class AllocatePayment
 
     public function paymentRemaining(Payment $payment): string
     {
-        $allocated = PaymentAllocation::query()->where('payment_id', $payment->id)->sum('amount');
-
-        return bcsub((string) $payment->amount, (string) $allocated, 2);
+        return ($this->balances ?? new FinancialBalanceQuery())->paymentRemaining($payment);
     }
 
     public function obligationRemaining(Obligation $obligation): string
     {
-        $lineIds = ObligationLine::query()->where('obligation_id', $obligation->id)->pluck('id');
-        $funded = FundAllocation::query()->whereIn('obligation_line_id', $lineIds)->sum('amount');
-        $allocated = PaymentAllocation::query()->where('obligation_id', $obligation->id)->sum('amount');
-        $discounted = Discount::query()->where('obligation_id', $obligation->id)->where('lifecycle_state', 'approved')->sum('amount');
-
-        return bcsub(bcsub(bcsub((string) $obligation->original_amount, (string) $funded, 2), (string) $allocated, 2), (string) $discounted, 2);
+        return ($this->balances ?? new FinancialBalanceQuery())->obligationRemaining($obligation);
     }
 
     public function studentUncovered(string $studentId): string
     {
-        $uncovered = '0.00';
-        foreach (Obligation::query()->where('student_id', $studentId)->get() as $obligation) {
-            $uncovered = bcadd($uncovered, $this->obligationRemaining($obligation), 2);
-        }
-
-        return $uncovered;
+        return ($this->balances ?? new FinancialBalanceQuery())->studentUncovered($studentId);
     }
 
-    private function require(Actor $actor): void
+    private function require(Actor $actor, \App\Support\Authorization\StructureScope $scope): void
     {
-        $outcome = $this->access->decide($actor, self::CAPABILITY, null);
+        $outcome = $this->access->decide($actor, self::CAPABILITY, $scope);
         if (! $outcome->allowed) {
             throw AuthorizationDenied::forCode('finance.payment_denied', $outcome->reason);
         }

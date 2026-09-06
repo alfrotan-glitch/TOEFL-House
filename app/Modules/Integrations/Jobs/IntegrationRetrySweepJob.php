@@ -8,6 +8,7 @@ use App\Modules\Integrations\Domain\DeliveryProcessor;
 use App\Modules\Integrations\Domain\JobHandler;
 use App\Modules\Integrations\Models\IntegrationDelivery;
 use App\Support\Authorization\Actor;
+use App\Support\Errors\BusinessRejection;
 
 /**
  * Scheduled integration retry sweep (architecture 16): consumes committed
@@ -22,9 +23,19 @@ final class IntegrationRetrySweepJob implements JobHandler
     /** @param  array<string, mixed>  $context @return array<string, int> */
     public function handle(array $context): array
     {
-        $operator = new Actor((string) ($context['run_by'] ?? 'system'), 'Integration Sweep');
+        $runBy = trim((string) ($context['run_by'] ?? ''));
+        if ($runBy === '') {
+            throw BusinessRejection::forCode('integrations.retry_operator_required', 'a scheduled retry sweep requires a durable authenticated run_by actor');
+        }
+        $operator = new Actor($runBy, 'Integration Sweep');
         $due = IntegrationDelivery::query()
-            ->whereIn('status', ['queued', 'failed'])
+            ->where(function ($state): void {
+                $state->whereIn('status', ['queued', 'failed'])
+                    ->orWhere(function ($lease): void {
+                        $lease->where('status', 'processing')
+                            ->where(fn ($expired) => $expired->whereNull('lease_until')->orWhere('lease_until', '<=', now()));
+                    });
+            })
             ->where(fn ($query) => $query->whereNull('next_run_at')->orWhere('next_run_at', '<=', now()))
             ->orderBy('created_at')
             ->pluck('id');

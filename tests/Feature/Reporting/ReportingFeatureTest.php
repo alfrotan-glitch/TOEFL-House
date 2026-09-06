@@ -168,7 +168,7 @@ final class ReportingFeatureTest extends TestCase
         $this->seedAcademicChain();
         $analyst = $this->grantedActor('rep-analyst', ['reporting.catalog', 'reporting.compute', 'reporting.run', 'reporting.reconcile', 'reporting.dashboard']);
 
-        // payroll: 50000 approved + 1500 adjustment - 50000 reversal = 1500
+        // Payroll source evidence is not monetary reporting until Finance recognition.
         $payrollPeriod = app(MaintainPayrollPeriod::class)->open($this->grantedActor('rep-payroll-opener', ['payroll.period']), '2026-12-P', '2026-12-01', '2026-12-31', 'rep-pay-1');
         app(DefineMetric::class)->define($analyst, 'payroll_total', 'Approved payroll total', 'approved results plus adjustments', '2026-01-01', 'rep-def-7');
         $this->assertSame('0.00', app(ComputeProjection::class)->compute($analyst, 'payroll_total', '2026-12-P', 'global', null, 'rep-pr-6')['value'], 'empty payroll reconciles to zero');

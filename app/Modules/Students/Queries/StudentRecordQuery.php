@@ -61,6 +61,7 @@ final class StudentRecordQuery
             ->all();
 
         $transfers = $student->branchTransfers()
+            ->where('effective_from', '<=', $day)
             ->get()
             ->map(static fn ($transfer): array => [
                 'id' => trim((string) $transfer->id),
@@ -73,9 +74,14 @@ final class StudentRecordQuery
             ->all() ?? [];
 
         /** @var StudentHoldEvent|null $latestHold */
-        $latestHold = StudentHoldEvent::query()->where('student_id', $studentId)->orderByDesc('seq')->first();
+        $latestHold = StudentHoldEvent::query()
+            ->where('student_id', $studentId)
+            ->where('effective_from', '<=', $day)
+            ->orderByDesc('seq')
+            ->first();
         $holdHistory = StudentHoldEvent::query()
             ->where('student_id', $studentId)
+            ->where('effective_from', '<=', $day)
             ->orderBy('seq')
             ->get()
             ->map(static fn (StudentHoldEvent $event): array => [

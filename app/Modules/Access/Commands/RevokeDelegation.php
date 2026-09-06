@@ -6,6 +6,9 @@ namespace App\Modules\Access\Commands;
 
 use App\Modules\Access\Domain\AccessLifecycle;
 use App\Modules\Access\Models\Delegation;
+use App\Modules\Organization\Models\Branch;
+use App\Modules\Organization\Models\Campus;
+use App\Modules\Organization\Models\Department;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Support\Authorization\AccessDecision;
@@ -36,15 +39,16 @@ final class RevokeDelegation
         try {
             return $this->idempotency->execute('access.delegate.revoke', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $delegation): array {
-                    if (trim((string) $delegation->delegator_person_id) !== $actor->actorId) {
-                        $outcome = $this->access->decide($actor, self::CAPABILITY, null);
+                    /** @var Delegation $locked */
+                    $locked = Delegation::query()->whereKey($delegation->id)->lockForUpdate()->firstOrFail();
+                    if (trim((string) $locked->delegator_person_id) !== $actor->actorId) {
+                        $scope = $this->scopeForDelegation($locked->scope_type, $locked->scope_id);
+                        $outcome = $this->access->decide($actor, self::CAPABILITY, $scope?->withInactiveLifecycleAccess());
                         if (! $outcome->allowed) {
                             throw AuthorizationDenied::forCode('access.delegate_revoke_denied', $outcome->reason);
                         }
                     }
 
-                    /** @var Delegation $locked */
-                    $locked = Delegation::query()->whereKey($delegation->id)->lockForUpdate()->firstOrFail();
                     AccessLifecycle::requireTransition($locked->lifecycle_state, AccessLifecycle::STATE_REVOKED);
 
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
@@ -59,5 +63,21 @@ final class RevokeDelegation
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $actor, 'access.delegate.revoke', 'delegation', $delegation->id);
         }
+    }
+
+    private function scopeForDelegation(?string $scopeType, ?string $scopeId): ?\App\Support\Authorization\StructureScope
+    {
+        if ($scopeType === null || trim((string) $scopeId) === '') {
+            return null;
+        }
+
+        return match ($scopeType) {
+            'organization' => new \App\Support\Authorization\StructureScope((string) $scopeId),
+            'campus' => new \App\Support\Authorization\StructureScope((string) (Campus::query()->whereKey($scopeId)->value('organization_id')
+                ?? throw \App\Support\Errors\BusinessRejection::forCode('access.scope_unavailable', 'delegation campus scope does not resolve')), (string) $scopeId),
+            'branch' => Branch::query()->whereKey($scopeId)->firstOrFail()->structureScope(),
+            'department' => Department::query()->whereKey($scopeId)->firstOrFail()->structureScope(),
+            default => throw \App\Support\Errors\BusinessRejection::forCode('access.scope_type_unknown', 'delegation scope type is unknown'),
+        };
     }
 }

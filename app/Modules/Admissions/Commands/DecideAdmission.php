@@ -7,6 +7,7 @@ namespace App\Modules\Admissions\Commands;
 use App\Modules\Admissions\Domain\ApplicantLifecycle;
 use App\Modules\Admissions\Models\AdmissionDecision;
 use App\Modules\Admissions\Models\Applicant;
+use App\Modules\Organization\Models\Branch;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Support\Authorization\AccessDecision;
@@ -60,13 +61,13 @@ final class DecideAdmission
         try {
             return $this->idempotency->execute('admissions.initiate', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($initiator, $applicant, $admit, $reason, $evidenceRef): array {
-                    $this->requireCapability($initiator, self::CAPABILITY_INITIATE, 'admissions.initiator_denied');
+                    /** @var Applicant $locked */
+                    $locked = Applicant::query()->whereKey($applicant->id)->lockForUpdate()->firstOrFail();
+                    $this->requireCapability($initiator, self::CAPABILITY_INITIATE, 'admissions.initiator_denied', $locked);
                     if ($reason === '' || $evidenceRef === '') {
                         throw BusinessRejection::forCode('admissions.decision_evidence', 'a decision requires reason and evidence');
                     }
 
-                    /** @var Applicant $locked */
-                    $locked = Applicant::query()->whereKey($applicant->id)->lockForUpdate()->firstOrFail();
                     $toState = $admit ? ApplicantLifecycle::STATE_ADMITTED : ApplicantLifecycle::STATE_REJECTED;
                     ApplicantLifecycle::requireTransition($locked->lifecycle_state, $toState);
 
@@ -80,11 +81,21 @@ final class DecideAdmission
                         'lifecycle_state' => self::STATE_PROPOSED,
                     ]);
 
+                    $branch = $this->branchForApplicant($locked);
                     $event = $this->audit->record($initiator->actorId, 'admissions.initiate', 'admission_decision', $decision->id, null, [
                         'applicant_id' => $locked->id,
                         'outcome' => $decision->outcome,
                         'reason' => $reason,
                         'initiator' => $initiator->actorId,
+                        'branch_id' => $branch->id,
+                        'organization_id' => $branch->structureScope()->organizationId,
+                        'workflow' => [
+                            'definition_key' => 'admissions.decision_review',
+                            'source_type' => 'admission_decision',
+                            'source_id' => $decision->id,
+                            'queue_key' => 'admissions.review',
+                            'source_version' => 1,
+                        ],
                     ]);
 
                     return ['decision_id' => $decision->id, 'outcome' => $decision->outcome, 'lifecycle_state' => self::STATE_PROPOSED, 'correlation_id' => $event->correlation_id];
@@ -103,8 +114,6 @@ final class DecideAdmission
         try {
             return $this->idempotency->execute('admissions.review', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($reviewer, $decision): array {
-                    $this->requireCapability($reviewer, self::CAPABILITY_REVIEW, 'admissions.reviewer_denied');
-
                     /** @var AdmissionDecision $locked */
                     $locked = AdmissionDecision::query()->whereKey($decision->id)->lockForUpdate()->firstOrFail();
                     if ($locked->lifecycle_state !== self::STATE_PROPOSED) {
@@ -120,13 +129,24 @@ final class DecideAdmission
                     if ($lockedApplicant->lifecycle_state !== ApplicantLifecycle::STATE_APPLICANT) {
                         throw BusinessRejection::forCode('admissions.applicant_not_decidable', sprintf('the applicant is no longer in the decidable state (currently %s)', $lockedApplicant->lifecycle_state));
                     }
+                    $this->requireCapability($reviewer, self::CAPABILITY_REVIEW, 'admissions.reviewer_denied', $lockedApplicant);
 
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
                     $locked->forceFill(['lifecycle_state' => self::STATE_REVIEWED, 'reviewer_id' => $reviewer->actorId]);
                     $locked->save();
+                    $branch = $this->branchForApplicant($lockedApplicant);
                     $event = $this->audit->record($reviewer->actorId, 'admissions.review', 'admission_decision', $locked->id, $before, [
                         'lifecycle_state' => self::STATE_REVIEWED,
                         'reviewer' => $reviewer->actorId,
+                        'branch_id' => $branch->id,
+                        'organization_id' => $branch->structureScope()->organizationId,
+                        'workflow' => [
+                            'definition_key' => 'admissions.decision_approval',
+                            'source_type' => 'admission_decision',
+                            'source_id' => $locked->id,
+                            'queue_key' => 'admissions.approval',
+                            'source_version' => 1,
+                        ],
                     ]);
 
                     return ['decision_id' => $locked->id, 'lifecycle_state' => self::STATE_REVIEWED, 'correlation_id' => $event->correlation_id];
@@ -145,8 +165,6 @@ final class DecideAdmission
         try {
             return $this->idempotency->execute('admissions.approve', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($approver, $decision): array {
-                    $this->requireCapability($approver, self::CAPABILITY_APPROVE, 'admissions.approver_denied');
-
                     /** @var AdmissionDecision $locked */
                     $locked = AdmissionDecision::query()->whereKey($decision->id)->lockForUpdate()->firstOrFail();
                     if ($locked->lifecycle_state !== self::STATE_REVIEWED) {
@@ -160,6 +178,7 @@ final class DecideAdmission
 
                     /** @var Applicant $lockedApplicant */
                     $lockedApplicant = Applicant::query()->whereKey($locked->applicant_id)->lockForUpdate()->firstOrFail();
+                    $this->requireCapability($approver, self::CAPABILITY_APPROVE, 'admissions.approver_denied', $lockedApplicant);
                     $toState = $locked->outcome === 'admit' ? ApplicantLifecycle::STATE_ADMITTED : ApplicantLifecycle::STATE_REJECTED;
                     ApplicantLifecycle::requireTransition($lockedApplicant->lifecycle_state, $toState);
 
@@ -171,11 +190,14 @@ final class DecideAdmission
                     $locked->forceFill(['lifecycle_state' => self::STATE_FINAL, 'approver_id' => $approver->actorId]);
                     $locked->save();
                     $lockedApplicant->refresh();
+                    $branch = $this->branchForApplicant($lockedApplicant);
                     $event = $this->audit->record($approver->actorId, 'admissions.approve', 'admission_decision', $locked->id, $before, [
                         'lifecycle_state' => self::STATE_FINAL,
                         'outcome' => $locked->outcome,
                         'approver' => $approver->actorId,
                         'applicant_state' => $lockedApplicant->lifecycle_state,
+                        'branch_id' => $branch->id,
+                        'organization_id' => $branch->structureScope()->organizationId,
                     ]);
 
                     return ['decision_id' => $locked->id, 'outcome' => $locked->outcome, 'lifecycle_state' => self::STATE_FINAL, 'correlation_id' => $event->correlation_id];
@@ -186,11 +208,27 @@ final class DecideAdmission
         }
     }
 
-    private function requireCapability(Actor $actor, string $capability, string $errorCode): void
+    private function requireCapability(Actor $actor, string $capability, string $errorCode, Applicant $applicant): void
     {
-        $outcome = $this->access->decide($actor, $capability, null);
+        $branch = $this->branchForApplicant($applicant, $errorCode);
+        $outcome = $this->access->decide($actor, $capability, $branch->structureScope());
         if (! $outcome->allowed) {
             throw AuthorizationDenied::forCode($errorCode, $outcome->reason);
         }
+    }
+
+    private function branchForApplicant(Applicant $applicant, string $errorCode = 'admissions.provenance_unknown'): Branch
+    {
+        $branchId = trim((string) ($applicant->current_home_branch_id ?? $applicant->originating_branch_id ?? ''));
+        if ($branchId === '' && $applicant->placement_profile_id !== null) {
+            $profile = $applicant->placementProfile;
+            $branchId = trim((string) ($profile?->current_home_branch_id ?? $profile?->originating_branch_id ?? ''));
+        }
+        $branch = $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
+        if ($branch === null || $branch->lifecycle_state !== 'active' || $branch->structureScope()->organizationId === '') {
+            throw AuthorizationDenied::forCode($errorCode, 'applicant branch provenance is unknown, inactive, or organizationless');
+        }
+
+        return $branch;
     }
 }

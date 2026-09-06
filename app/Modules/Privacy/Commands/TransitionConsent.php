@@ -11,6 +11,7 @@ use App\Modules\Privacy\Models\Consent;
 use App\Modules\Privacy\Models\ConsentRevocation;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
+use App\Support\Authorization\PersonBranchScope;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Idempotency\IdempotentExecution;
 use App\Support\Identifiers\RandomIdentifier;
@@ -74,15 +75,15 @@ final class TransitionConsent
         try {
             return $this->idempotency->execute('privacy.consent.'.$verb, $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $consent, $toState, $verb, $capability, $revocation): array {
-                    if ($capability !== null || trim((string) $consent->subject_person_id) !== $actor->actorId) {
-                        $outcome = $this->access->decide($actor, $capability ?? self::CAPABILITY, null);
+                    /** @var Consent $locked */
+                    $locked = Consent::query()->whereKey($consent->id)->lockForUpdate()->firstOrFail();
+                    $scope = PersonBranchScope::resolve($locked->subject_person_id);
+                    if ($capability !== null || trim((string) $locked->subject_person_id) !== $actor->actorId) {
+                        $outcome = $this->access->decide($actor, $capability ?? self::CAPABILITY, $scope);
                         if (! $outcome->allowed) {
                             throw AuthorizationDenied::forCode('privacy.consent_transition_denied', $outcome->reason);
                         }
                     }
-
-                    /** @var Consent $locked */
-                    $locked = Consent::query()->whereKey($consent->id)->lockForUpdate()->firstOrFail();
                     ConsentLifecycle::requireTransition($locked->lifecycle_state, $toState);
 
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
@@ -99,7 +100,7 @@ final class TransitionConsent
                         ]);
                     }
 
-                    $event = $this->audit->record($actor->actorId, 'privacy.consent.'.$verb, 'consent', $locked->id, $before, ['lifecycle_state' => $toState]);
+                    $event = $this->audit->record($actor->actorId, 'privacy.consent.'.$verb, 'consent', $locked->id, $before, ['lifecycle_state' => $toState, 'branch_id' => $scope->branchId, 'organization_id' => $scope->organizationId]);
 
                     return ['consent_id' => $locked->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
                 }),

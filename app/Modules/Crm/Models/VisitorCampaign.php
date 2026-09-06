@@ -20,6 +20,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string $starts_on
  * @property string|null $ends_on
  * @property string $lifecycle_state
+ * @property string $created_by
  */
 final class VisitorCampaign extends Model
 {
@@ -31,7 +32,7 @@ final class VisitorCampaign extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'key', 'name', 'source_id', 'channel', 'starts_on', 'ends_on', 'lifecycle_state'];
+    protected $fillable = ['id', 'key', 'name', 'source_id', 'channel', 'starts_on', 'ends_on', 'lifecycle_state', 'created_by'];
 
     /** @return BelongsTo<VisitorSource, $this> */
     public function source(): BelongsTo

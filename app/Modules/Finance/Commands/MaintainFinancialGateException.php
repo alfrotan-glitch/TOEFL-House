@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace App\Modules\Finance\Commands;
 
+use App\Modules\Academic\Domain\RecordBranch;
+use App\Modules\Organization\Models\Branch;
 use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\Offering;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
+use App\Modules\Finance\Domain\FinancialCoverageLock;
 use App\Modules\Finance\Models\FinancialGateException;
 use App\Modules\Students\Models\Student;
 use App\Support\Authorization\AccessDecision;
@@ -16,6 +19,7 @@ use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
 use App\Support\Identifiers\RandomIdentifier;
+use App\Support\MoneyAmount;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -45,8 +49,12 @@ final class MaintainFinancialGateException
         try {
             return $this->idempotency->execute('finance.gate_exception.propose', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($proposer, $studentId, $offeringId, $classId, $amount, $reason, $effectiveFrom, $effectiveTo): array {
-                    $this->require($proposer, self::CAPABILITY_PROPOSE);
                     $this->validate($studentId, $offeringId, $classId, $amount, $reason, $effectiveFrom, $effectiveTo);
+                    $targetBranches = $this->branchesForTarget($studentId, $offeringId, $classId);
+                    foreach ($targetBranches as $branch) {
+                        $this->require($proposer, self::CAPABILITY_PROPOSE, $branch->structureScope());
+                    }
+                    $provenance = $this->provenanceForBranches($targetBranches);
 
                     $exception = FinancialGateException::query()->create([
                         'id' => RandomIdentifier::new(),
@@ -62,6 +70,7 @@ final class MaintainFinancialGateException
                     ]);
                     $event = $this->audit->record($proposer->actorId, 'finance.gate_exception.propose', 'financial_gate_exception', $exception->id, null, [
                         'student_id' => $studentId, 'amount' => $amount, 'reason' => $reason,
+                        'branch_id' => $provenance['branch_id'], 'organization_id' => $provenance['organization_id'],
                     ]);
 
                     return ['exception_id' => $exception->id, 'correlation_id' => $event->correlation_id];
@@ -80,10 +89,15 @@ final class MaintainFinancialGateException
         try {
             return $this->idempotency->execute('finance.gate_exception.approve', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($approver, $exception): array {
-                    $this->require($approver, self::CAPABILITY_APPROVE);
+                    FinancialCoverageLock::acquire((string) $exception->student_id);
 
                     /** @var FinancialGateException $locked */
                     $locked = FinancialGateException::query()->whereKey($exception->id)->lockForUpdate()->firstOrFail();
+                    $targetBranches = $this->branchesForTarget($locked->student_id, $locked->offering_id, $locked->class_id);
+                    foreach ($targetBranches as $branch) {
+                        $this->require($approver, self::CAPABILITY_APPROVE, $branch->structureScope());
+                    }
+                    $provenance = $this->provenanceForBranches($targetBranches);
                     if ($locked->lifecycle_state !== FinancialGateException::STATE_PROPOSED) {
                         throw BusinessRejection::forCode('finance.gate_exception_not_proposed', 'only a proposed gate exception can be approved');
                     }
@@ -98,7 +112,10 @@ final class MaintainFinancialGateException
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
                     $locked->forceFill(['lifecycle_state' => FinancialGateException::STATE_APPROVED, 'approved_by' => $approver->actorId, 'approved_at' => now()]);
                     $locked->save();
-                    $event = $this->audit->record($approver->actorId, 'finance.gate_exception.approve', 'financial_gate_exception', $locked->id, $before, ['lifecycle_state' => FinancialGateException::STATE_APPROVED]);
+                    $event = $this->audit->record($approver->actorId, 'finance.gate_exception.approve', 'financial_gate_exception', $locked->id, $before, [
+                        'lifecycle_state' => FinancialGateException::STATE_APPROVED,
+                        'branch_id' => $provenance['branch_id'], 'organization_id' => $provenance['organization_id'],
+                    ]);
 
                     return ['exception_id' => $locked->id, 'lifecycle_state' => FinancialGateException::STATE_APPROVED, 'correlation_id' => $event->correlation_id];
                 }),
@@ -113,7 +130,7 @@ final class MaintainFinancialGateException
         if ($reason === '') {
             throw BusinessRejection::forCode('finance.gate_exception_reason', 'a gate exception requires its explicit reason');
         }
-        if (! is_numeric($amount) || (float) $amount <= 0) {
+        if (! MoneyAmount::positive($amount)) {
             throw BusinessRejection::forCode('finance.gate_exception_amount', 'the gate exception amount must be a positive number');
         }
         if ($effectiveTo !== null && $effectiveTo !== '' && $effectiveTo < $effectiveFrom) {
@@ -128,11 +145,75 @@ final class MaintainFinancialGateException
         if ($classId !== null && $classId !== '' && ClassModel::query()->whereKey($classId)->doesntExist()) {
             throw BusinessRejection::forCode('finance.gate_exception_class_unknown', 'a gate exception class must exist');
         }
+        if ($classId !== null && $classId !== '' && ($offeringId === null || $offeringId === '')) {
+            throw BusinessRejection::forCode('finance.gate_exception_scope', 'a class-scoped gate exception must identify its offering');
+        }
     }
 
-    private function require(Actor $actor, string $capability): void
+    /** @return list<Branch> */
+    private function branchesForTarget(string $studentId, ?string $offeringId, ?string $classId): array
     {
-        $outcome = $this->access->decide($actor, $capability, null);
+        $branches = [];
+        $studentBranch = $this->branchForStudent($studentId);
+        if ($studentBranch === null) {
+            throw BusinessRejection::forCode('finance.gate_exception_provenance_required', 'a gate exception requires known student branch provenance');
+        }
+        $branches[$studentBranch->id] = $studentBranch;
+        if ($offeringId !== null && $offeringId !== '') {
+            $branchId = trim((string) Offering::query()->whereKey($offeringId)->value('branch_id'));
+            $offeringBranch = $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
+            if ($offeringBranch === null) {
+                throw BusinessRejection::forCode('finance.gate_exception_provenance_required', 'a gate exception offering requires known branch provenance');
+            }
+            $branches[$offeringBranch->id] = $offeringBranch;
+        }
+        if ($classId !== null && $classId !== '') {
+            $branchId = trim((string) ClassModel::query()->whereKey($classId)->value('branch_id'));
+            $classBranch = $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
+            if ($classBranch === null) {
+                throw BusinessRejection::forCode('finance.gate_exception_provenance_required', 'a gate exception class requires known branch provenance');
+            }
+            $branches[$classBranch->id] = $classBranch;
+        }
+
+        return array_values($branches);
+    }
+
+    private function branchForStudent(string $studentId): ?Branch
+    {
+        $branchId = RecordBranch::studentBranchForId($studentId);
+
+        return $branchId === null ? null : Branch::query()->whereKey($branchId)->first();
+    }
+
+    /** @param list<Branch> $branches @return array{branch_id: string|null, organization_id: string|null} */
+    private function provenanceForBranches(array $branches): array
+    {
+        $branchIds = [];
+        $organizationIds = [];
+        foreach ($branches as $branch) {
+            if ($branch->lifecycle_state !== 'active') {
+                throw BusinessRejection::forCode('finance.gate_exception_provenance_required', 'a gate exception target requires active branch provenance');
+            }
+            $scope = $branch->structureScope();
+            if ($scope->organizationId === '') {
+                throw BusinessRejection::forCode('finance.gate_exception_provenance_required', 'a gate exception target requires active campus organization provenance');
+            }
+            $branchIds[] = (string) $branch->id;
+            $organizationIds[] = $scope->organizationId;
+        }
+        $branchIds = array_values(array_unique($branchIds));
+        $organizationIds = array_values(array_unique($organizationIds));
+
+        return [
+            'branch_id' => count($branchIds) === 1 ? $branchIds[0] : null,
+            'organization_id' => count($organizationIds) === 1 ? $organizationIds[0] : null,
+        ];
+    }
+
+    private function require(Actor $actor, string $capability, \App\Support\Authorization\StructureScope $scope): void
+    {
+        $outcome = $this->access->decide($actor, $capability, $scope);
         if (! $outcome->allowed) {
             throw AuthorizationDenied::forCode('finance.gate_exception_denied', $outcome->reason);
         }

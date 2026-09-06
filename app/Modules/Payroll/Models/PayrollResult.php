@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $calculation_id
  * @property string $period_id
  * @property string $employment_id
+ * @property string $originating_branch_id
  * @property string $amount
  * @property string $lifecycle_state
  */
@@ -23,5 +24,5 @@ final class PayrollResult extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'calculation_id', 'period_id', 'employment_id', 'amount', 'lifecycle_state', 'approved_by'];
+    protected $fillable = ['id', 'calculation_id', 'period_id', 'employment_id', 'originating_branch_id', 'amount', 'lifecycle_state', 'approved_by'];
 }

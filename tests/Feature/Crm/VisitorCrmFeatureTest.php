@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Tests\Feature\Crm;
 
 use App\Modules\Admissions\Commands\RegisterApplicant;
+use App\Modules\Audit\Models\AuditEvent;
 use App\Modules\Communication\Commands\SendMessage;
+use App\Modules\Communication\Models\Message;
 use App\Modules\Crm\Commands\CaptureVisitor;
 use App\Modules\Crm\Commands\CaptureVisitorInteraction;
 use App\Modules\Crm\Commands\CreateVisitorFollowup;
@@ -15,6 +17,7 @@ use App\Modules\Crm\Commands\MaintainVisitor;
 use App\Modules\Crm\Commands\MaintainVisitorCatalog;
 use App\Modules\Crm\Commands\ManageVisitorFollowup;
 use App\Modules\Crm\Commands\RecordVisitorConversion;
+use App\Modules\Crm\Domain\VisitorConversionRecorder;
 use App\Modules\Crm\Models\Visitor;
 use App\Modules\Crm\Models\VisitorFollowup;
 use App\Modules\Crm\Models\VisitorSource;
@@ -22,6 +25,7 @@ use App\Modules\Documents\Commands\RegisterDocument;
 use App\Modules\Documents\Models\DocumentClassification;
 use App\Modules\Finance\Commands\RecordPayment;
 use App\Modules\Finance\Models\FinancialPeriod;
+use App\Modules\Identity\Models\Person;
 use App\Modules\Organization\Models\Branch;
 use App\Modules\Privacy\Models\Consent;
 use App\Modules\Privacy\Models\ConsentPurpose;
@@ -91,6 +95,83 @@ final class VisitorCrmFeatureTest extends TestCase
             $this->fail('one open visitor per person must be enforced');
         } catch (BusinessRejection $rejection) {
             $this->assertSame('crm.duplicate_person', $rejection->errorCode());
+        }
+    }
+
+    public function test_capture_rejects_unknown_people_and_link_requires_verified_identity(): void
+    {
+        $reception = $this->actorWithStructureCapabilities('crm-identity-guards', ['crm.visitor']);
+
+        try {
+            app(CaptureVisitor::class)->capture($reception, 'person-does-not-exist', 'Unknown', null, 'unknown@example.com', 'email', 'online', null, null, null, null, null, 'capture-unknown-person');
+            $this->fail('capture must reject a supplied unknown person');
+        } catch (BusinessRejection $rejection) {
+            $this->assertSame('crm.person_unknown', $rejection->errorCode());
+        }
+
+        $capture = app(CaptureVisitor::class)->capture($reception, null, 'Pending Identity', null, 'pending@example.com', 'email', 'online', null, null, null, null, null, 'capture-pending');
+        $unverified = Person::query()->create([
+            'id' => 'pending-person-1',
+            'legal_name' => 'Pending Identity',
+            'date_of_birth' => '2000-01-01',
+            'verification_state' => Person::VERIFICATION_UNVERIFIED,
+        ]);
+
+        try {
+            app(CaptureVisitor::class)->capture($reception, $unverified->id, 'Pending Identity', null, 'pending-direct@example.com', 'email', 'online', null, null, null, null, null, 'capture-unverified-person');
+            $this->fail('capture must reject an unverified supplied identity');
+        } catch (BusinessRejection $rejection) {
+            $this->assertSame('crm.person_unverified', $rejection->errorCode());
+        }
+
+        try {
+            app(LinkVisitorPerson::class)->link($reception, Visitor::query()->findOrFail($capture['visitor_id']), $unverified->id, 'link-unverified');
+            $this->fail('linking must require a verified identity');
+        } catch (BusinessRejection $rejection) {
+            $this->assertSame('crm.person_unverified', $rejection->errorCode());
+        }
+    }
+
+    public function test_linked_interaction_must_belong_to_the_visitor_person(): void
+    {
+        $staff = $this->actorWithStructureCapabilities('crm-lineage-guard', ['crm.visitor']);
+        $visitorPerson = $this->personWithAuthority('crm-lineage-visitor', []);
+        $otherPerson = $this->personWithAuthority('crm-lineage-other', []);
+        $capture = app(CaptureVisitor::class)->capture($staff, $visitorPerson->id, '', null, 'lineage@example.com', 'email', 'online', null, null, null, null, null, 'capture-lineage');
+        $purpose = ConsentPurpose::query()->create([
+            'id' => RandomIdentifier::new(),
+            'name' => 'CRM lineage test',
+            'channel' => 'email',
+            'category' => 'communication',
+        ]);
+        $message = Message::query()->create([
+            'id' => RandomIdentifier::new(),
+            'subject_person_id' => $otherPerson->id,
+            'purpose_id' => $purpose->id,
+            'channel' => 'email',
+            'content_ref' => 'test/lineage',
+            'lifecycle_state' => 'queued',
+            'created_by' => $otherPerson->id,
+        ]);
+
+        try {
+            app(CaptureVisitorInteraction::class)->capture(
+                $staff,
+                Visitor::query()->findOrFail($capture['visitor_id']),
+                'outbound',
+                'email',
+                'connected',
+                'message belongs to a different person',
+                CarbonImmutable::now(),
+                $message->id,
+                null,
+                null,
+                null,
+                'interaction-lineage-mismatch',
+            );
+            $this->fail('an unrelated message must not be attached to a visitor timeline');
+        } catch (BusinessRejection $rejection) {
+            $this->assertSame('crm.interaction_lineage_mismatch', $rejection->errorCode());
         }
     }
 
@@ -216,7 +297,7 @@ final class VisitorCrmFeatureTest extends TestCase
         ]);
     }
 
-    public function test_manual_conversion_requires_capability_and_is_single_shot(): void
+    public function test_manual_conversion_is_not_a_crm_write_authority(): void
     {
         $crmStaff = $this->actorWithStructureCapabilities('crm-convert-1', ['crm.visitor']);
         $capture = app(CaptureVisitor::class)->capture($crmStaff, null, 'Convert Lead', null, 'convert@example.com', 'email', 'online', null, null, null, null, null, 'capture-convert');
@@ -226,9 +307,9 @@ final class VisitorCrmFeatureTest extends TestCase
             app(RecordVisitorConversion::class)->record(
                 $this->actorWithoutAnyCapability('crm-nobody-1'),
                 $visitor,
-                'enquiry',
-                'enquiry',
-                'ENQ-1',
+                'student',
+                'student',
+                'student-denied',
                 'convert-denied',
             );
             $this->fail('conversion without CRM capability must be denied');
@@ -236,17 +317,15 @@ final class VisitorCrmFeatureTest extends TestCase
             $this->assertSame('crm.conversion_denied', $denial->errorCode());
         }
 
-        $converter = $this->actorWithStructureCapabilities('crm-converter-1', ['crm.visitor.convert']);
-        app(RecordVisitorConversion::class)->record($converter, $visitor, 'enquiry', 'enquiry', 'ENQ-2', 'convert-1');
-        $this->assertDatabaseHas('visitor_conversions', ['visitor_id' => $visitor->id, 'conversion_type' => 'enquiry']);
-        $this->assertSame(Visitor::STATUS_CONVERTED, $visitor->fresh()->status);
-
+        $converter = $this->actorWithStructureCapabilities('crm-converter-1', ['crm.visitor']);
         try {
-            app(RecordVisitorConversion::class)->record($converter, $visitor, 'enquiry', 'enquiry', 'ENQ-3', 'convert-2');
-            $this->fail('a visitor cannot be converted twice');
+            app(RecordVisitorConversion::class)->record($converter, $visitor, 'student', 'student', 'student-id', 'convert-1');
+            $this->fail('CRM must not assert a downstream conversion');
         } catch (BusinessRejection $rejection) {
-            $this->assertSame('crm.conversion_exists', $rejection->errorCode());
+            $this->assertSame('crm.conversion_authority_required', $rejection->errorCode());
         }
+        $this->assertSame(Visitor::STATUS_NEW, $visitor->fresh()->status);
+        $this->assertDatabaseMissing('visitor_conversions', ['visitor_id' => $visitor->id]);
     }
 
     public function test_catalog_lifecycle_and_campaign_window(): void
@@ -270,8 +349,8 @@ final class VisitorCrmFeatureTest extends TestCase
                 'Bad Window',
                 $source['source_id'],
                 'social',
-                CarbonImmutable::parse('2026-09-10'),
-                CarbonImmutable::parse('2026-09-01'),
+                CarbonImmutable::today()->addDays(4),
+                CarbonImmutable::today()->subDay(),
                 'campaign-bad',
             );
             $this->fail('a campaign cannot end before it starts');
@@ -285,14 +364,15 @@ final class VisitorCrmFeatureTest extends TestCase
             'Spring Launch',
             $source['source_id'],
             'social',
-            CarbonImmutable::parse('2026-09-01'),
-            CarbonImmutable::parse('2026-09-30'),
+            CarbonImmutable::today()->subDay(),
+            CarbonImmutable::today()->addDays(30),
             'campaign-1',
         );
         $this->assertDatabaseHas('visitor_campaigns', ['id' => $campaign['campaign_id'], 'key' => 'spring-launch']);
 
         app(MaintainVisitorCatalog::class)->retireSource($admin, VisitorSource::query()->findOrFail($source['source_id']), 'source-retire-1');
         $this->assertDatabaseHas('visitor_sources', ['id' => $source['source_id'], 'lifecycle_state' => 'retired']);
+        $this->assertDatabaseHas('visitor_campaigns', ['id' => $campaign['campaign_id'], 'lifecycle_state' => 'retired']);
     }
 
     public function test_branch_provenance_scopes_access_and_is_immutable(): void
@@ -345,8 +425,21 @@ final class VisitorCrmFeatureTest extends TestCase
         $crmStaff = $this->actorWithStructureCapabilities('crm-int-staff', ['crm.visitor']);
         $capture = app(CaptureVisitor::class)->capture($crmStaff, $person->id, '', null, 'integration@example.com', 'email', 'online', null, null, null, null, null, 'capture-integration');
 
-        $converter = $this->actorWithStructureCapabilities('crm-int-convert', ['crm.visitor.convert']);
-        app(RecordVisitorConversion::class)->record($converter, Visitor::query()->findOrFail($capture['visitor_id']), 'student', 'student', $student->id, 'convert-integration');
+        $studentAuthorityEvent = AuditEvent::query()
+            ->where('operation', 'admissions.convert')
+            ->where('target_type', 'student')
+            ->where('target_id', $student->id)
+            ->firstOrFail();
+        app(VisitorConversionRecorder::class)->record(
+            new Actor($studentAuthorityEvent->actor_id, 'Students authority'),
+            Visitor::query()->findOrFail($capture['visitor_id']),
+            'student',
+            'student',
+            $student->id,
+            'convert-integration',
+            authority: 'students',
+            authorityAuditEventId: $studentAuthorityEvent->id,
+        );
         $this->assertDatabaseHas('visitor_conversions', ['visitor_id' => $capture['visitor_id'], 'student_id' => $student->id]);
 
         // Finance: a payment against the student appends a payment interaction.

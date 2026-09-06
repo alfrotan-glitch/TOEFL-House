@@ -20,6 +20,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property string $academic_period_id
  * @property int $capacity
  * @property string $lifecycle_state
+ *
+ * Classes may deliver an offering, but the offering remains the packaging and
+ * capacity authority; class delivery never rewrites its identity.
  */
 final class Offering extends Model
 {
@@ -55,6 +58,12 @@ final class Offering extends Model
     public function period(): BelongsTo
     {
         return $this->belongsTo(AcademicPeriod::class, 'academic_period_id');
+    }
+
+    /** @return HasMany<ClassModel, $this> */
+    public function classes(): HasMany
+    {
+        return $this->hasMany(ClassModel::class, 'offering_id');
     }
 
     /** @return HasMany<ClassWaitlistEntry, $this> */

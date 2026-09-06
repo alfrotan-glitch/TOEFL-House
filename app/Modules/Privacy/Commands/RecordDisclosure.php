@@ -10,6 +10,7 @@ use App\Modules\Identity\Models\Person;
 use App\Modules\Privacy\Models\Disclosure;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
+use App\Support\Authorization\PersonBranchScope;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
@@ -43,12 +44,14 @@ final class RecordDisclosure
         try {
             return $this->idempotency->execute('privacy.disclose', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($discloser, $subjectPersonId, $recipient, $purpose, $authority, $scopeType, $scopeId, $disclosedCategory): array {
-                    $outcome = $this->access->decide($discloser, self::CAPABILITY, null);
+                    $subject = Person::query()->whereKey($subjectPersonId)->first();
+                    if ($subject === null) {
+                        throw BusinessRejection::forCode('privacy.disclose_subject_unknown', 'disclosure requires a known subject');
+                    }
+                    $scope = PersonBranchScope::resolve($subject->id);
+                    $outcome = $this->access->decide($discloser, self::CAPABILITY, $scope);
                     if (! $outcome->allowed) {
                         throw AuthorizationDenied::forCode('privacy.disclose_denied', $outcome->reason);
-                    }
-                    if (! Person::query()->whereKey($subjectPersonId)->exists()) {
-                        throw BusinessRejection::forCode('privacy.disclose_subject_unknown', 'disclosure requires a known subject');
                     }
                     if ($recipient === '' || $purpose === '' || $disclosedCategory === '') {
                         throw BusinessRejection::forCode('privacy.disclose_minimum_fields', 'disclosure requires recipient, purpose, and disclosed category');
@@ -72,6 +75,7 @@ final class RecordDisclosure
                         'purpose' => $purpose,
                         'scope' => $scopeType.':'.$scopeId,
                         'disclosed_category' => $disclosedCategory,
+                        'branch_id' => $scope->branchId, 'organization_id' => $scope->organizationId,
                     ]);
 
                     return ['disclosure_id' => $disclosure->id, 'correlation_id' => $event->correlation_id];

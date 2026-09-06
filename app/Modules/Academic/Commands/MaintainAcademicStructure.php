@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Modules\Academic\Commands;
 
 use App\Modules\Academic\Domain\AcademicAccess;
+use App\Modules\Academic\Domain\AcademicPeriodLifecycle;
 use App\Modules\Academic\Domain\ClassLifecycle;
 use App\Modules\Academic\Domain\EnrollmentLifecycle;
 use App\Modules\Academic\Models\AcademicPeriod;
@@ -186,6 +187,7 @@ final class MaintainAcademicStructure
             return $this->idempotency->execute('academic.branch_availability.declare', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $branchId, $programVersionLevelId, $academicPeriodId): array {
                     $this->requireCapability($actor, $branchId);
+                    AcademicPeriod::query()->whereKey($academicPeriodId)->lockForUpdate()->firstOrFail();
                     $this->requireOpenTerm($academicPeriodId);
                     $this->requireActiveLevel($programVersionLevelId);
                     /** @var Branch $branch */
@@ -210,6 +212,7 @@ final class MaintainAcademicStructure
                     ]);
                     $event = $this->audit->record($actor->actorId, 'academic.branch_availability.declare', 'branch_availability', $availability->id, null, [
                         'branch_id' => $branchId, 'program_version_level_id' => $programVersionLevelId, 'academic_period_id' => $academicPeriodId,
+                        ...$this->branchProvenance($branchId),
                     ]);
 
                     return ['availability_id' => $availability->id, 'correlation_id' => $event->correlation_id];
@@ -231,6 +234,7 @@ final class MaintainAcademicStructure
             return $this->idempotency->execute('academic.offering.open', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $branchId, $programVersionLevelId, $academicPeriodId, $capacity): array {
                     $this->requireCapability($actor, $branchId);
+                    AcademicPeriod::query()->whereKey($academicPeriodId)->lockForUpdate()->firstOrFail();
                     if ($capacity < 1) {
                         throw BusinessRejection::forCode('academic.offering_capacity_positive', 'an offering requires a positive capacity');
                     }
@@ -262,6 +266,7 @@ final class MaintainAcademicStructure
                     ]);
                     $event = $this->audit->record($actor->actorId, 'academic.offering.open', 'offering', $offering->id, null, [
                         'branch_id' => $branchId, 'program_version_level_id' => $programVersionLevelId, 'academic_period_id' => $academicPeriodId, 'capacity' => $capacity,
+                        ...$this->branchProvenance($branchId),
                     ]);
 
                     return ['offering_id' => $offering->id, 'correlation_id' => $event->correlation_id];
@@ -516,10 +521,7 @@ final class MaintainAcademicStructure
                     /** @var AcademicPeriod $locked */
                     $locked = AcademicPeriod::query()->whereKey($period->id)->lockForUpdate()->firstOrFail();
                     $from = $locked->lifecycle_state;
-                    $allowed = ['draft' => ['published'], 'published' => ['closed'], 'closed' => []][$from] ?? null;
-                    if ($allowed === null || ! in_array($toState, $allowed, true)) {
-                        throw BusinessRejection::forCode('academic.period_transition_forbidden', sprintf('transition %s -> %s is not allowed', $from, $toState));
-                    }
+                    AcademicPeriodLifecycle::requireTransition($from, $toState);
                     if ($toState === 'closed') {
                         $this->assertPeriodCarriesNoLiveDelivery($locked->id);
                     }
@@ -557,6 +559,20 @@ final class MaintainAcademicStructure
         if ($openClasses > 0) {
             throw BusinessRejection::forCode('academic.period_open_classes', sprintf('period cannot close while %d non-terminal class(es) reference it', $openClasses));
         }
+        $openOfferings = Offering::query()->where('academic_period_id', $periodId)
+            ->whereIn('lifecycle_state', [Offering::STATE_OPEN, Offering::STATE_CLOSED])
+            ->lockForUpdate()
+            ->count();
+        if ($openOfferings > 0) {
+            throw BusinessRejection::forCode('academic.period_open_offerings', sprintf('period cannot close while %d non-terminal offering(s) reference it', $openOfferings));
+        }
+        $activeAvailabilities = BranchAvailability::query()->where('academic_period_id', $periodId)
+            ->where('lifecycle_state', BranchAvailability::STATE_ACTIVE)
+            ->lockForUpdate()
+            ->count();
+        if ($activeAvailabilities > 0) {
+            throw BusinessRejection::forCode('academic.period_active_availability', sprintf('period cannot close while %d active branch availability record(s) remain', $activeAvailabilities));
+        }
 
         $openSeats = Enrollment::query()
             ->whereIn('class_id', ClassModel::query()->where('period_id', $periodId)->select('id'))
@@ -566,6 +582,21 @@ final class MaintainAcademicStructure
         if ($openSeats->isNotEmpty()) {
             throw BusinessRejection::forCode('academic.period_open_seats', sprintf('period cannot close while %d open enrollment seat(s) reference it', $openSeats->count()));
         }
+    }
+
+    /** @return array{branch_id: string, campus_id: string, organization_id: string} */
+    private function branchProvenance(string $branchId): array
+    {
+        $branch = Branch::query()->whereKey(trim($branchId))->first();
+        if ($branch === null || $branch->lifecycle_state !== 'active') {
+            throw BusinessRejection::forCode('academic.structure_provenance_required', 'an academic branch event requires an active branch');
+        }
+        $scope = $branch->structureScope();
+        if ($scope->organizationId === '' || $scope->campusId === null) {
+            throw BusinessRejection::forCode('academic.structure_provenance_required', 'an academic branch event requires active campus organization provenance');
+        }
+
+        return ['branch_id' => (string) $branch->id, 'campus_id' => (string) $scope->campusId, 'organization_id' => $scope->organizationId];
     }
 
     /**

@@ -40,7 +40,13 @@ final class ProcessDeliveries
                     $this->require($actor);
                     $results = [];
                     $due = IntegrationDelivery::query()
-                        ->whereIn('status', ['queued', 'failed'])
+                        ->where(function ($state): void {
+                            $state->whereIn('status', ['queued', 'failed'])
+                                ->orWhere(function ($lease): void {
+                                    $lease->where('status', 'processing')
+                                        ->where(fn ($expired) => $expired->whereNull('lease_until')->orWhere('lease_until', '<=', now()));
+                                });
+                        })
                         ->where(fn ($query) => $query->whereNull('next_run_at')->orWhere('next_run_at', '<=', now()))
                         ->orderBy('created_at')
                         ->pluck('id');

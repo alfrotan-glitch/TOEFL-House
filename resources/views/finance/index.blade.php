@@ -9,6 +9,37 @@
 </div>
 
 <div class="card">
+    <h2>Recognize approved Payroll liability</h2>
+    <p class="sub">Payroll supplies immutable calculation evidence; Finance recognition is required before the amount enters monetary reporting.</p>
+    <form method="POST" action="{{ route('finance.payroll-liability.recognize') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="row">
+            <div>
+                <label>Source type</label>
+                <select name="source_type" required>
+                    <option value="payroll_result">Payroll result</option>
+                    <option value="payroll_adjustment">Payroll adjustment</option>
+                </select>
+            </div>
+            <div>
+                <label>Payroll source ID</label>
+                <input name="source_id" type="text" required>
+            </div>
+            <div>
+                <label>Exact source amount (use a negative reversal amount)</label>
+                <input name="amount" type="text" inputmode="decimal" required>
+            </div>
+            <div>
+                <label>Evidence reference</label>
+                <input name="evidence_ref" type="text" required>
+            </div>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Recognize liability</button></div>
+    </form>
+</div>
+
+<div class="card">
     <h2>Financial periods</h2>
     <p class="sub">Payments, obligations and refunds post only to an open period; closure is terminal (an overlapping open payroll period blocks it).</p>
     <form method="POST" action="{{ route('finance.period.open') }}">
@@ -337,7 +368,6 @@
                     <option value="other">Other</option>
                     <option value="obligation">Obligation</option>
                     <option value="payroll_result">Payroll result</option>
-                    <option value="journal">Journal (reversal)</option>
                 </select>
             </div>
             <div>
@@ -624,6 +654,32 @@
                     <td>{{ $allocation->amount }}</td>
                     <td class="muted">{{ \Illuminate\Support\Str::limit($allocation->reason, 24) }}</td>
                     <td>{{ \Illuminate\Support\Str::limit($allocation->allocated_by, 16) }}</td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+    @if ($financialCorrections->isNotEmpty())
+        <h2 style="margin-top:16px">Financial corrections (newest first)</h2>
+        <table class="grid">
+            <tr><th>Source</th><th>Amount</th><th>Direction</th><th>State</th><th>Reason</th><th>Action</th></tr>
+            @foreach ($financialCorrections as $correction)
+                <tr>
+                    <td class="muted">{{ $correction->correction_type }} / {{ \Illuminate\Support\Str::limit($correction->obligation_id ?? $correction->payment_allocation_id ?? $correction->fund_allocation_id ?? '', 16) }}</td>
+                    <td>{{ $correction->amount }}</td>
+                    <td>{{ $correction->direction }}</td>
+                    <td>{{ $correction->lifecycle_state }}</td>
+                    <td class="muted">{{ \Illuminate\Support\Str::limit($correction->reason, 28) }}</td>
+                    <td>
+                        @if ($correction->lifecycle_state === 'proposed')
+                            <form method="POST" action="{{ route('finance.correction.approve', $correction->id) }}">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Approve</button>
+                            </form>
+                        @else
+                            <span class="muted">Recorded</span>
+                        @endif
+                    </td>
                 </tr>
             @endforeach
         </table>

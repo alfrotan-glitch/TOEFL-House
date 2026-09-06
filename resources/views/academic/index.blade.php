@@ -134,6 +134,12 @@
                     <option value="{{ $version->id }}">{{ \Illuminate\Support\Str::limit($version->id, 18) }}</option>
                 @endforeach
             </select>
+            <select name="branch_id" required>
+                <option value="">Select an operational branch…</option>
+                @foreach ($branches as $branch)
+                    <option value="{{ $branch->id }}">{{ $branch->name }}</option>
+                @endforeach
+            </select>
             <select name="period_id" required>
                 <option value="">Select a published period…</option>
                 @foreach ($periods as $period)
@@ -143,7 +149,7 @@
                 @endforeach
             </select>
             <select name="program_version_level_id">
-                <option value="">No level (legacy class)…</option>
+                <option value="">No level selected…</option>
                 @foreach ($levels as $level)
                     <option value="{{ $level->id }}">{{ $level->title }} ({{ $level->cefr_ref ?? 'no CEFR' }})</option>
                 @endforeach

@@ -10,6 +10,7 @@ use App\Modules\Academic\Commands\IssueTranscript;
 use App\Modules\Academic\Commands\MaintainAcademicStructure;
 use App\Modules\Academic\Commands\MaintainClass;
 use App\Modules\Academic\Commands\MaintainEnrollment;
+use App\Modules\Academic\Commands\MaintainTeacherAssignment;
 use App\Modules\Academic\Commands\MaintainRoom;
 use App\Modules\Academic\Commands\MaintainSkill;
 use App\Modules\Academic\Commands\ManageAcademicAppeal;
@@ -61,35 +62,57 @@ final class AcademicController extends Controller
 {
     public function index(): View
     {
+        $this->requireOrganizationRead('academic.structure', 'academic.console.index');
+        $visibleBranches = array_values(array_unique(array_merge(
+            $this->authorizedBranches('academic.structure'),
+            $this->authorizedBranches('academic.schedule'),
+            $this->authorizedBranches('academic.attendance'),
+            $this->authorizedBranches('academic.assess'),
+        ), SORT_STRING));
+        $peopleBranches = $visibleBranches;
+        $people = Person::query()->where('verification_state', 'verified')->whereIn('home_branch_id', $peopleBranches)->orderBy('legal_name')->limit(300)->get();
+        $classIds = ClassModel::query()->whereIn('branch_id', $visibleBranches)->select('id');
+        $enrollmentIds = Enrollment::query()->whereIn('class_id', $classIds)->select('id');
+        $attemptIds = AssessmentAttempt::query()->whereIn('enrollment_id', $enrollmentIds)->select('id');
+        $resultIds = AssessmentResult::query()->whereIn('attempt_id', $attemptIds)->select('id');
+        $studentIds = Student::query()->where(function ($scope) use ($visibleBranches): void {
+            $scope->whereIn('current_home_branch_id', $visibleBranches)
+                ->orWhere(function ($fallback) use ($visibleBranches): void {
+                    $fallback->whereNull('current_home_branch_id')->whereIn('originating_branch_id', $visibleBranches);
+                });
+        })->select('id');
+
         return view('academic.index', [
+            // Institution-wide academic definitions are safe here because the
+            // console itself requires organization-rooted structure authority.
             'programs' => Program::query()->orderBy('name')->limit(100)->get(),
             'periods' => AcademicPeriod::query()->orderBy('starts_on')->limit(100)->get(),
             'skills' => Skill::query()->orderBy('key')->limit(100)->get(),
-            'classes' => ClassModel::query()->orderBy('id')->limit(100)->get(),
-            'assignments' => TeacherAssignment::query()->orderBy('id')->limit(100)->get(),
-            'students' => Student::query()->orderBy('student_code')->limit(300)->get(),
-            'activeEnrollments' => Enrollment::query()->where('lifecycle_state', 'active')->orderBy('id')->limit(300)->get(),
-            'attempts' => AssessmentAttempt::query()->where('lifecycle_state', 'submitted')->orderByDesc('id')->limit(200)->get(),
-            'results' => AssessmentResult::query()->whereIn('lifecycle_state', ['scored', 'moderated', 'approved'])->orderByDesc('id')->limit(200)->get(),
-            'corrections' => ResultCorrection::query()->where('lifecycle_state', ResultCorrection::STATE_PROPOSED)->orderByDesc('id')->limit(200)->get(),
             'programVersions' => ProgramVersion::query()->orderBy('id')->limit(200)->get(),
-            'graduations' => GraduationDecision::query()->whereIn('lifecycle_state', ['proposed', 'reviewed', 'approved'])->orderByDesc('id')->limit(200)->get(),
-            'requestedEnrollments' => Enrollment::query()->where('lifecycle_state', 'requested')->orderBy('id')->limit(200)->get(),
-            'frozenEnrollments' => Enrollment::query()->where('lifecycle_state', 'frozen')->orderBy('id')->limit(200)->get(),
-            'progressions' => ProgressionDecision::query()->whereIn('lifecycle_state', ['proposed', 'reviewed'])->orderBy('id')->limit(200)->get(),
-            'decidedProgressions' => ProgressionDecision::query()->whereIn('lifecycle_state', ['approved', 'rejected', 'appealed', 'superseded'])->orderByDesc('id')->limit(200)->get(),
-            'appeals' => AcademicAppeal::query()->whereIn('lifecycle_state', ['open', 'assigned', 'investigating', 'escalated', 'resolved', 'rejected'])->orderByDesc('id')->limit(200)->get(),
-            'releasedResults' => AssessmentResult::query()->where('lifecycle_state', 'released')->orderByDesc('id')->limit(200)->get(),
-            'approvedProgressions' => ProgressionDecision::query()->where('lifecycle_state', 'approved')->orderBy('id')->limit(200)->get(),
-            'people' => Person::query()->where('verification_state', 'verified')->orderBy('legal_name')->limit(300)->get(),
-            'transcripts' => Transcript::query()->orderByDesc('issued_at')->limit(100)->get(),
-            'branches' => Branch::query()->orderBy('name')->limit(100)->get(),
             'levels' => ProgramVersionLevel::query()->orderBy('program_version_id')->orderBy('ordinal')->limit(300)->get(),
             'levelRules' => LevelProgressionRule::query()->orderBy('program_version_level_id')->limit(300)->get(),
             'levelPrerequisites' => LevelPrerequisite::query()->orderBy('target_level_id')->limit(300)->get(),
-            'availabilities' => BranchAvailability::query()->orderBy('id')->limit(200)->get(),
-            'offerings' => Offering::query()->orderBy('id')->limit(200)->get(),
-            'waitlistEntries' => ClassWaitlistEntry::query()->whereIn('lifecycle_state', ['waiting', 'offered'])->orderBy('class_id')->orderBy('position')->limit(300)->get(),
+            'classes' => ClassModel::query()->whereIn('branch_id', $visibleBranches)->orderBy('id')->limit(100)->get(),
+            'assignments' => TeacherAssignment::query()->whereIn('class_id', $classIds)->orderBy('id')->limit(100)->get(),
+            'students' => Student::query()->whereIn('id', $studentIds)->orderBy('student_code')->limit(300)->get(),
+            'activeEnrollments' => Enrollment::query()->where('lifecycle_state', 'active')->whereIn('class_id', $classIds)->orderBy('id')->limit(300)->get(),
+            'attempts' => AssessmentAttempt::query()->where('lifecycle_state', 'submitted')->whereIn('enrollment_id', $enrollmentIds)->orderByDesc('id')->limit(200)->get(),
+            'results' => AssessmentResult::query()->whereIn('lifecycle_state', ['scored', 'moderated', 'approved'])->whereIn('attempt_id', $attemptIds)->orderByDesc('id')->limit(200)->get(),
+            'corrections' => ResultCorrection::query()->where('lifecycle_state', ResultCorrection::STATE_PROPOSED)->whereIn('result_id', $resultIds)->orderByDesc('id')->limit(200)->get(),
+            'graduations' => GraduationDecision::query()->whereIn('lifecycle_state', ['proposed', 'reviewed', 'approved'])->whereIn('student_id', $studentIds)->orderByDesc('id')->limit(200)->get(),
+            'requestedEnrollments' => Enrollment::query()->where('lifecycle_state', 'requested')->whereIn('class_id', $classIds)->orderBy('id')->limit(200)->get(),
+            'frozenEnrollments' => Enrollment::query()->where('lifecycle_state', 'frozen')->whereIn('class_id', $classIds)->orderBy('id')->limit(200)->get(),
+            'progressions' => ProgressionDecision::query()->whereIn('lifecycle_state', ['proposed', 'reviewed'])->whereIn('class_id', $classIds)->orderBy('id')->limit(200)->get(),
+            'decidedProgressions' => ProgressionDecision::query()->whereIn('lifecycle_state', ['approved', 'rejected', 'appealed', 'superseded'])->whereIn('class_id', $classIds)->orderByDesc('id')->limit(200)->get(),
+            'appeals' => AcademicAppeal::query()->whereIn('lifecycle_state', ['open', 'assigned', 'investigating', 'escalated', 'resolved', 'rejected'])->whereIn('student_id', $studentIds)->orderByDesc('id')->limit(200)->get(),
+            'releasedResults' => AssessmentResult::query()->where('lifecycle_state', 'released')->whereIn('attempt_id', $attemptIds)->orderByDesc('id')->limit(200)->get(),
+            'approvedProgressions' => ProgressionDecision::query()->where('lifecycle_state', 'approved')->whereIn('class_id', $classIds)->orderBy('id')->limit(200)->get(),
+            'people' => $people,
+            'transcripts' => Transcript::query()->whereIn('student_id', $studentIds)->orderByDesc('issued_at')->limit(100)->get(),
+            'branches' => Branch::query()->whereIn('id', $visibleBranches)->orderBy('name')->limit(100)->get(),
+            'availabilities' => BranchAvailability::query()->whereIn('branch_id', $visibleBranches)->orderBy('id')->limit(200)->get(),
+            'offerings' => Offering::query()->whereIn('branch_id', $visibleBranches)->orderBy('id')->limit(200)->get(),
+            'waitlistEntries' => ClassWaitlistEntry::query()->whereIn('lifecycle_state', ['waiting', 'offered'])->whereIn('class_id', $classIds)->orderBy('class_id')->orderBy('position')->limit(300)->get(),
             'gradeableClasses' => app(GradesheetQuery::class)->accessibleClasses($this->actor()),
         ]);
     }
@@ -100,24 +123,31 @@ final class AcademicController extends Controller
             'timetable_branch_id' => ['nullable', 'string'],
             'timetable_day' => ['nullable', 'date'],
         ]);
+        $visible = array_values(array_unique(array_merge(
+            $this->authorizedBranches('academic.attendance'),
+            $this->authorizedBranches('academic.schedule'),
+        ), SORT_STRING));
 
         $timetable = null;
         if (! empty($filter['timetable_branch_id'])) {
+            $this->requireBranchCapability('academic.schedule', $filter['timetable_branch_id'], 'academic.timetable.view', 'branch', $filter['timetable_branch_id']);
             $day = ! empty($filter['timetable_day']) ? CarbonImmutable::parse($filter['timetable_day']) : null;
             $timetable = app(TimetableQuery::class)->forBranch($filter['timetable_branch_id'], $day);
         }
 
+        $classScope = static fn ($query) => $query->whereIn('branch_id', $visible);
+
         return view('academic.sessions', [
-            'sessions' => ClassSession::query()->with(['room', 'section'])->orderByDesc('scheduled_on')->limit(200)->get(),
-            'classes' => ClassModel::query()->where('lifecycle_state', 'active')->orderBy('id')->get(),
-            'sectionClasses' => ClassModel::query()->orderBy('id')->limit(200)->get(),
+            'sessions' => ClassSession::query()->with(['room', 'section'])->whereHas('class', $classScope)->orderByDesc('scheduled_on')->limit(200)->get(),
+            'classes' => ClassModel::query()->whereIn('branch_id', $visible)->where('lifecycle_state', 'active')->orderBy('id')->get(),
+            'sectionClasses' => ClassModel::query()->whereIn('branch_id', $visible)->orderBy('id')->limit(200)->get(),
             'skills' => Skill::query()->where('lifecycle_state', 'active')->orderBy('key')->get(),
-            'enrollments' => Enrollment::query()->where('lifecycle_state', 'active')->orderBy('class_id')->limit(1000)->get(),
-            'rooms' => AcademicRoom::query()->orderBy('branch_id')->orderBy('code')->limit(200)->get(),
-            'sections' => ClassSection::query()->orderBy('class_id')->orderBy('name')->limit(300)->get(),
-            'branches' => Branch::query()->orderBy('name')->limit(100)->get(),
+            'enrollments' => Enrollment::query()->where('lifecycle_state', 'active')->whereHas('class', $classScope)->orderBy('class_id')->limit(1000)->get(),
+            'rooms' => AcademicRoom::query()->whereIn('branch_id', $visible)->orderBy('branch_id')->orderBy('code')->limit(200)->get(),
+            'sections' => ClassSection::query()->whereHas('class', $classScope)->orderBy('class_id')->orderBy('name')->limit(300)->get(),
+            'branches' => Branch::query()->whereIn('id', $visible)->orderBy('name')->limit(100)->get(),
             'timetable' => $timetable,
-            'attendanceFacts' => AttendanceFact::query()->orderByDesc('created_at')->limit(200)->get(),
+            'attendanceFacts' => AttendanceFact::query()->whereIn('session_id', ClassSession::query()->whereHas('class', $classScope)->select('id'))->orderByDesc('created_at')->limit(200)->get(),
         ]);
     }
 
@@ -484,8 +514,7 @@ final class AcademicController extends Controller
         ]);
 
         $actor = $this->actor();
-        $result = app(DecideProgression::class)->supersede(
-            $actor,
+        $result = app(DecideProgression::class)->supersedeByApprover(
             $actor,
             ProgressionDecision::query()->findOrFail($decisionId),
             $input['outcome'],
@@ -683,6 +712,8 @@ final class AcademicController extends Controller
             'period_id' => ['required', 'string'],
             'capacity' => ['required', 'integer', 'min:1', 'max:10000'],
             'program_version_level_id' => ['nullable', 'string'],
+            'branch_id' => ['required', 'string'],
+            'offering_id' => ['nullable', 'string'],
         ]);
 
         $levelId = ($input['program_version_level_id'] ?? '') !== '' ? (string) $input['program_version_level_id'] : null;
@@ -694,6 +725,8 @@ final class AcademicController extends Controller
             (int) $input['capacity'],
             $this->idempotencyKey('academic.class.define'),
             $levelId,
+            $input['branch_id'],
+            (($input['offering_id'] ?? '') !== '' ? (string) $input['offering_id'] : null),
         );
 
         return redirect()->route('academic.index')->with('success', 'Class defined (planned). Assign a teacher and publish it to open seats.');
@@ -727,7 +760,7 @@ final class AcademicController extends Controller
 
         $effectiveTo = $input['effective_to'] ?? null;
 
-        $result = app(MaintainClass::class)->assignTeacher(
+        $result = app(MaintainTeacherAssignment::class)->assignTeacher(
             $this->actor(),
             ClassModel::query()->findOrFail($input['class_id']),
             $input['teacher_person_id'],
@@ -737,7 +770,7 @@ final class AcademicController extends Controller
         );
 
         if (! empty($input['skill_id'])) {
-            app(MaintainClass::class)->assignSkill(
+            app(MaintainTeacherAssignment::class)->assignSkill(
                 $this->actor(),
                 TeacherAssignment::query()->findOrFail($result['assignment_id']),
                 $input['skill_id'],
@@ -755,7 +788,7 @@ final class AcademicController extends Controller
             'reason' => ['required', 'string', 'max:1000'],
         ]);
 
-        $result = app(MaintainClass::class)->endAssignment(
+        $result = app(MaintainTeacherAssignment::class)->endAssignment(
             $this->actor(),
             TeacherAssignment::query()->findOrFail($assignmentId),
             CarbonImmutable::parse($input['effective_to']),
@@ -773,7 +806,7 @@ final class AcademicController extends Controller
             'reason' => ['required', 'string', 'max:1000'],
         ]);
 
-        $result = app(MaintainClass::class)->extendAssignment(
+        $result = app(MaintainTeacherAssignment::class)->extendAssignment(
             $this->actor(),
             TeacherAssignment::query()->findOrFail($assignmentId),
             CarbonImmutable::parse($input['effective_to']),
@@ -792,7 +825,7 @@ final class AcademicController extends Controller
             'reason' => ['required', 'string', 'max:1000'],
         ]);
 
-        $result = app(MaintainClass::class)->handoverAssignment(
+        $result = app(MaintainTeacherAssignment::class)->handoverAssignment(
             $this->actor(),
             TeacherAssignment::query()->findOrFail($assignmentId),
             $input['successor_teacher_person_id'],

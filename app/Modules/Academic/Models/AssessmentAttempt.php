@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Model;
  *
  * @property string $id
  * @property string $enrollment_id
+ * @property string|null $assessed_on
  * @property string $kind
  * @property string $evidence_ref
  * @property string $lifecycle_state
@@ -22,5 +23,5 @@ final class AssessmentAttempt extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'enrollment_id', 'kind', 'evidence_ref', 'lifecycle_state', 'recorded_by'];
+    protected $fillable = ['id', 'enrollment_id', 'assessed_on', 'kind', 'evidence_ref', 'lifecycle_state', 'recorded_by'];
 }

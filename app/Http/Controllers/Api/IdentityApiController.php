@@ -19,7 +19,9 @@ final class IdentityApiController extends Controller
 {
     public function people(): JsonResponse
     {
-        $people = Person::query()->orderBy('legal_name')->limit(300)->get(['id', 'legal_name', 'verification_state']);
+        $this->requireOrganizationRead('identity.admin', 'api.identity.people');
+        $visibleBranchIds = $this->authorizedBranches('identity.admin');
+        $people = Person::query()->whereIn('home_branch_id', $visibleBranchIds)->orderBy('legal_name')->limit(300)->get(['id', 'legal_name', 'verification_state', 'home_branch_id']);
 
         return response()->json(['people' => $people]);
     }
@@ -30,12 +32,14 @@ final class IdentityApiController extends Controller
         $input = $request->validate([
             'legal_name' => ['required', 'string', 'max:160'],
             'date_of_birth' => ['required', 'date', 'before:today'],
+            'home_branch_id' => ['required', 'string'],
         ]);
 
         $result = app(RegisterPerson::class)->register(
             $this->actor(),
             $input['legal_name'],
             $input['date_of_birth'],
+            $input['home_branch_id'],
             $this->idempotencyKey('identity.person.register'),
         );
 

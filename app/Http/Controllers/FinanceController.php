@@ -7,19 +7,23 @@ namespace App\Http\Controllers;
 use App\Modules\Finance\Commands\AllocateFunds;
 use App\Modules\Finance\Commands\AllocatePayment;
 use App\Modules\Finance\Commands\MaintainChartOfAccounts;
+use App\Modules\Finance\Commands\MaintainEmploymentSettlement;
 use App\Modules\Finance\Commands\MaintainDiscount;
+use App\Modules\Finance\Commands\MaintainFinancialCorrection;
 use App\Modules\Finance\Commands\MaintainFinancialCredit;
 use App\Modules\Finance\Commands\MaintainFinancialGateException;
 use App\Modules\Finance\Commands\MaintainFinancialPeriod;
 use App\Modules\Finance\Commands\MaintainInstallmentPlan;
 use App\Modules\Finance\Commands\PostJournal;
 use App\Modules\Finance\Commands\PostObligation;
+use App\Modules\Finance\Commands\RecognizePayrollLiability;
 use App\Modules\Finance\Commands\RecordPayment;
 use App\Modules\Finance\Commands\RecordReconciliation;
 use App\Modules\Finance\Commands\RefundPayment;
 use App\Modules\Finance\Models\Account;
 use App\Modules\Finance\Models\Discount;
 use App\Modules\Finance\Models\EnrollmentInstallmentPlan;
+use App\Modules\Finance\Models\FinancialCorrection;
 use App\Modules\Finance\Models\FinancialCredit;
 use App\Modules\Finance\Models\FinancialGateException;
 use App\Modules\Finance\Models\FinancialPeriod;
@@ -30,9 +34,14 @@ use App\Modules\Finance\Models\JournalLine;
 use App\Modules\Finance\Models\Obligation;
 use App\Modules\Finance\Models\ObligationLine;
 use App\Modules\Finance\Models\Payment;
+use App\Modules\Finance\Models\PaymentAllocation;
 use App\Modules\Finance\Models\Reconciliation;
 use App\Modules\Finance\Models\Refund;
+use App\Modules\Hr\Models\Employment;
+use App\Modules\Identity\Models\Person;
+use App\Modules\Payroll\Models\SettlementProposal;
 use App\Modules\Students\Models\Student;
+use App\Support\Authorization\AccessDecision;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -48,25 +57,94 @@ final class FinanceController extends Controller
 {
     public function index(): View
     {
+        $visible = [];
+        foreach (['finance.obligation', 'finance.payment', 'finance.refund', 'finance.discount', 'finance.credit', 'finance.period', 'finance.chart'] as $capability) {
+            $visible = array_merge($visible, $this->authorizedBranches($capability));
+        }
+        $visible = array_values(array_unique($visible, SORT_STRING));
+        $globalFinanceAuthority = app(AccessDecision::class)->decide($this->actor(), 'finance.period', null)->allowed
+            || app(AccessDecision::class)->decide($this->actor(), 'finance.chart', null)->allowed;
+        $branchScoped = static function ($query) use ($visible): void {
+            $query->whereIn('current_home_branch_id', $visible)
+                ->orWhere(function ($query) use ($visible): void {
+                    $query->whereNull('current_home_branch_id')->whereIn('originating_branch_id', $visible);
+                });
+        };
+        $studentIds = Student::query()->where($branchScoped)->select('id');
+        $obligationIds = Obligation::query()->where($branchScoped)->select('id');
+        $paymentIds = Payment::query()->where($branchScoped)->select('id');
+        $obligationLineIds = ObligationLine::query()->whereIn('obligation_id', $obligationIds)->select('id');
+        $paymentAllocationIds = PaymentAllocation::query()->whereIn('payment_id', $paymentIds)->select('id');
+        $financialCorrectionIds = FinancialCorrection::query()
+            ->whereIn('obligation_id', $obligationIds)
+            ->orWhereIn('payment_allocation_id', $paymentAllocationIds)
+            ->orWhereIn('fund_allocation_id', FundAllocation::query()->whereIn('obligation_line_id', $obligationLineIds)->select('id'))
+            ->select('id');
+        $branchJournalIds = Journal::query()->where('source_type', 'obligation')->whereIn('source_id', $obligationIds)->select('id');
+        $visibleJournalIds = Journal::query()->whereIn('id', $branchJournalIds)->orWhereIn('reversal_of_id', $branchJournalIds)->select('id');
+        $globalFundingSources = $globalFinanceAuthority ? FundingSource::query()->orderBy('name')->get() : collect();
+        $globalPeriods = $globalFinanceAuthority ? FinancialPeriod::query()->orderBy('period_key')->get() : collect();
+        $globalAccounts = $globalFinanceAuthority ? Account::query()->orderBy('code')->get() : collect();
+        $globalReconciliations = $globalFinanceAuthority ? Reconciliation::query()->orderByDesc('id')->limit(100)->get() : collect();
+        $journalQuery = $globalFinanceAuthority ? Journal::query() : Journal::query()->whereIn('id', $visibleJournalIds);
+        $journalIds = $globalFinanceAuthority ? Journal::query()->select('id') : $visibleJournalIds;
+
         return view('finance.index', [
-            'obligations' => Obligation::query()->orderByDesc('id')->limit(200)->get(),
-            'payments' => Payment::query()->orderByDesc('received_on')->limit(200)->get(),
-            'refunds' => Refund::query()->where('lifecycle_state', 'recorded')->orderByDesc('id')->limit(200)->get(),
-            'proposedRefunds' => Refund::query()->where('lifecycle_state', 'proposed')->orderByDesc('id')->limit(200)->get(),
-            'discounts' => Discount::query()->orderByDesc('id')->limit(100)->get(),
-            'credits' => FinancialCredit::query()->orderByDesc('id')->limit(100)->get(),
-            'installmentPlans' => EnrollmentInstallmentPlan::query()->orderByDesc('id')->limit(100)->get(),
-            'gateExceptions' => FinancialGateException::query()->orderByDesc('id')->limit(100)->get(),
-            'fundingSources' => FundingSource::query()->orderBy('name')->get(),
-            'fundAllocations' => FundAllocation::query()->orderByDesc('id')->limit(200)->get(),
-            'periods' => FinancialPeriod::query()->orderBy('period_key')->get(),
-            'students' => Student::query()->orderBy('student_code')->limit(300)->get(),
-            'accounts' => Account::query()->orderBy('code')->get(),
-            'journals' => Journal::query()->orderByDesc('id')->limit(100)->get(),
-            'journalLines' => JournalLine::query()->orderByDesc('id')->limit(500)->get(),
-            'reconciliations' => Reconciliation::query()->orderByDesc('id')->limit(100)->get(),
-            'obligationLines' => ObligationLine::query()->orderByDesc('id')->limit(500)->get(),
+            'obligations' => Obligation::query()->whereIn('id', $obligationIds)->orderByDesc('id')->limit(200)->get(),
+            'payments' => Payment::query()->where($branchScoped)->orderByDesc('received_on')->limit(200)->get(),
+            'refunds' => Refund::query()->where($branchScoped)->where('lifecycle_state', 'recorded')->orderByDesc('id')->limit(200)->get(),
+            'proposedRefunds' => Refund::query()->where($branchScoped)->where('lifecycle_state', 'proposed')->orderByDesc('id')->limit(200)->get(),
+            'discounts' => Discount::query()->whereIn('obligation_id', $obligationIds)->orderByDesc('id')->limit(100)->get(),
+            'credits' => FinancialCredit::query()->whereIn('student_id', $studentIds)->orderByDesc('id')->limit(100)->get(),
+            'installmentPlans' => EnrollmentInstallmentPlan::query()->whereIn('student_id', $studentIds)->orderByDesc('id')->limit(100)->get(),
+            'gateExceptions' => FinancialGateException::query()->whereIn('student_id', $studentIds)->orderByDesc('id')->limit(100)->get(),
+            'fundingSources' => $globalFundingSources,
+            'fundAllocations' => FundAllocation::query()->whereIn('obligation_line_id', $obligationLineIds)->orderByDesc('id')->limit(200)->get(),
+            'financialCorrections' => FinancialCorrection::query()->whereIn('id', $financialCorrectionIds)->orderByDesc('id')->limit(200)->get(),
+            'periods' => $globalPeriods,
+            'students' => Student::query()->whereIn('id', $studentIds)->orderBy('student_code')->limit(300)->get(),
+            'accounts' => $globalAccounts,
+            'journals' => $journalQuery->orderByDesc('id')->limit(100)->get(),
+            'journalLines' => JournalLine::query()->whereIn('journal_id', $journalIds)->orderByDesc('id')->limit(500)->get(),
+            'reconciliations' => $globalReconciliations,
+            'obligationLines' => ObligationLine::query()->whereIn('id', $obligationLineIds)->orderByDesc('id')->limit(500)->get(),
         ]);
+    }
+
+    public function approveEmploymentSettlement(Request $request, string $proposalId): RedirectResponse
+    {
+        $employmentIds = Employment::query()
+            ->whereIn('person_id', Person::query()->whereIn('home_branch_id', $this->authorizedBranches('finance.employment_settlement'))->select('id'))
+            ->select('id');
+        $proposal = SettlementProposal::query()->whereKey($proposalId)->whereIn('employment_id', $employmentIds)->firstOrFail();
+        $employment = Employment::query()->whereIn('id', $employmentIds)->findOrFail($proposal->employment_id);
+        app(MaintainEmploymentSettlement::class)->record(
+            $this->actor(),
+            $employment,
+            (string) $proposal->id,
+            (string) $proposal->amount,
+            (string) $proposal->basis,
+            (string) $proposal->prepared_by,
+            $this->idempotencyKey('finance.employment-settlement.record'),
+        );
+
+        return redirect()->route('finance.index')->with('success', 'Employment settlement recorded by Finance.');
+    }
+
+    public function recognizePayrollLiability(Request $request): RedirectResponse
+    {
+        $input = $request->validate([
+            'source_type' => ['required', 'in:payroll_result,payroll_adjustment'],
+            'source_id' => ['required', 'string'],
+            'amount' => ['required', 'numeric', 'signed_money'],
+            'evidence_ref' => ['required', 'string', 'max:255'],
+        ]);
+        app(RecognizePayrollLiability::class)->recognize(
+            $this->actor(), $input['source_type'], $input['source_id'], $input['amount'], $input['evidence_ref'],
+            $this->idempotencyKey('finance.payroll-liability.recognize'),
+        );
+
+        return redirect()->route('finance.index')->with('success', 'Payroll source recognized as a Finance liability fact.');
     }
 
     public function recordPayment(Request $request): RedirectResponse
@@ -229,7 +307,7 @@ final class FinanceController extends Controller
         // the command sees the lines. A partially filled slot is invalid.
         $input = $request->validate([
             'period_id' => ['required', 'string'],
-            'source_type' => ['required', 'in:obligation,payroll_result,journal,other'],
+            'source_type' => ['required', 'in:obligation,payroll_result,other'],
             'source_id' => ['nullable', 'string'],
             'reason' => ['required', 'string', 'max:1000'],
             'lines' => ['required', 'array', 'min:1', 'max:4'],
@@ -284,6 +362,62 @@ final class FinanceController extends Controller
         );
 
         return redirect()->route('finance.index')->with('success', 'Reversal journal posted, linked to its original.');
+    }
+
+    public function proposeObligationCorrection(Request $request, string $obligationId): RedirectResponse
+    {
+        $input = $request->validate([
+            'amount' => ['required', 'numeric', 'money', 'gt:0'],
+            'direction' => ['required', 'in:decrease,increase'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        app(MaintainFinancialCorrection::class)->proposeObligationAdjustment(
+            $this->actor(), Obligation::query()->findOrFail($obligationId), $input['amount'],
+            $input['direction'], $input['reason'], $this->idempotencyKey('finance.correction.propose'),
+        );
+
+        return redirect()->route('finance.index')->with('success', 'Financial correction proposed; a distinct Finance approver must record it.');
+    }
+
+    public function proposeAllocationReversal(Request $request, string $allocationId): RedirectResponse
+    {
+        $input = $request->validate([
+            'amount' => ['required', 'numeric', 'money', 'gt:0'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        app(MaintainFinancialCorrection::class)->proposeAllocationReversal(
+            $this->actor(), PaymentAllocation::query()->findOrFail($allocationId), $input['amount'],
+            $input['reason'], $this->idempotencyKey('finance.correction.propose'),
+        );
+
+        return redirect()->route('finance.index')->with('success', 'Allocation reversal proposed; a distinct Finance approver must record it.');
+    }
+
+    public function approveFinancialCorrection(Request $request, string $correctionId): RedirectResponse
+    {
+        app(MaintainFinancialCorrection::class)->approve(
+            $this->actor(), FinancialCorrection::query()->findOrFail($correctionId),
+            $this->idempotencyKey('finance.correction.approve'),
+        );
+
+        return redirect()->route('finance.index')->with('success', 'Financial correction recorded as a compensating fact.');
+    }
+
+    public function proposeFundAllocationReversal(Request $request, string $allocationId): RedirectResponse
+    {
+        $input = $request->validate([
+            'amount' => ['required', 'numeric', 'money', 'gt:0'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        app(MaintainFinancialCorrection::class)->proposeFundAllocationReversal(
+            $this->actor(), FundAllocation::query()->findOrFail($allocationId), $input['amount'],
+            $input['reason'], $this->idempotencyKey('finance.correction.propose'),
+        );
+
+        return redirect()->route('finance.index')->with('success', 'Fund allocation reversal proposed; a distinct Finance approver must record it.');
     }
 
     public function proposeDiscount(Request $request): RedirectResponse

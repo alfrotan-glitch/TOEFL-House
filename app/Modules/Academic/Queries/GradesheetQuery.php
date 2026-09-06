@@ -13,6 +13,7 @@ use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Academic\Models\ResultCorrection;
 use App\Modules\Academic\Models\TeacherAssignment;
+use App\Modules\Academic\Models\TeacherProfile;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Students\Models\Student;
 use App\Support\Authorization\AccessDecision;
@@ -72,8 +73,14 @@ final class GradesheetQuery
             return $classes;
         }
 
+        $profileId = TeacherProfile::query()->where('person_id', $actor->actorId)->value('id');
+        if ($profileId === null) {
+            return new Collection;
+        }
         $classIds = TeacherAssignment::query()
-            ->where('teacher_person_id', $actor->actorId)
+            ->where('teacher_profile_id', $profileId)
+            ->whereHas('teacherProfile', fn ($profile) => $profile->whereColumn('teacher_profiles.person_id', 'teacher_assignments.teacher_person_id'))
+            ->where(fn ($state) => $state->whereNull('lifecycle_state')->orWhere('lifecycle_state', '!=', 'cancelled'))
             ->distinct()
             ->pluck('class_id')
             ->all();
@@ -99,11 +106,16 @@ final class GradesheetQuery
 
         $teachers = TeacherAssignment::query()
             ->where('class_id', $class->id)
+            ->where('branch_id', $class->branch_id)
+            ->whereHas('teacherProfile', fn ($profile) => $profile->whereColumn('teacher_profiles.person_id', 'teacher_assignments.teacher_person_id'))
+            ->where(fn ($state) => $state->whereNull('lifecycle_state')->orWhere('lifecycle_state', '!=', 'cancelled'))
             ->orderBy('effective_from')
             ->get()
             ->map(fn (TeacherAssignment $assignment): array => [
                 'assignment_id' => (string) $assignment->id,
                 'teacher_person_id' => (string) $assignment->teacher_person_id,
+                'teacher_profile_id' => $assignment->teacher_profile_id !== null ? (string) $assignment->teacher_profile_id : null,
+                'lifecycle_state' => $assignment->lifecycle_state,
                 'effective_from' => (string) $assignment->effective_from,
                 'effective_to' => $assignment->effective_to !== null ? (string) $assignment->effective_to : null,
             ])
@@ -171,6 +183,7 @@ final class GradesheetQuery
                 'capacity' => (int) $class->capacity,
                 'program_version_id' => (string) $class->program_version_id,
                 'period_id' => (string) $class->period_id,
+                'branch_id' => $class->branch_id !== null ? (string) $class->branch_id : null,
                 'program_version_level_id' => $class->program_version_level_id !== null ? (string) $class->program_version_level_id : null,
             ],
             'teachers' => $teachers,
@@ -201,10 +214,21 @@ final class GradesheetQuery
      */
     private function mayView(Actor $actor, ClassModel $class): bool
     {
+        $profileId = TeacherProfile::query()->where('person_id', $actor->actorId)->value('id');
+        if ($profileId === null) {
+            return false;
+        }
+        $today = CarbonImmutable::today()->toDateString();
         $open = TeacherAssignment::query()
             ->where('class_id', $class->id)
-            ->where('teacher_person_id', $actor->actorId)
-            ->whereNull('effective_to')
+            ->where('branch_id', $class->branch_id)
+            ->where('teacher_profile_id', $profileId)
+            ->whereHas('teacherProfile', fn ($profile) => $profile->whereColumn('teacher_profiles.person_id', 'teacher_assignments.teacher_person_id')->where('teacher_profiles.lifecycle_state', 'active'))
+            ->where(fn ($state) => $state->whereNull('lifecycle_state')->orWhere('lifecycle_state', '!=', 'cancelled'))
+            ->where('effective_from', '<=', $today)
+            ->where(function ($query) use ($today): void {
+                $query->whereNull('effective_to')->orWhere('effective_to', '>', $today);
+            })
             ->exists();
         if ($open) {
             return true;
@@ -212,13 +236,12 @@ final class GradesheetQuery
 
         $everAssigned = TeacherAssignment::query()
             ->where('class_id', $class->id)
-            ->where('teacher_person_id', $actor->actorId)
+            ->where('branch_id', $class->branch_id)
+            ->where('teacher_profile_id', $profileId)
+            ->whereHas('teacherProfile', fn ($profile) => $profile->whereColumn('teacher_profiles.person_id', 'teacher_assignments.teacher_person_id')->where('teacher_profiles.lifecycle_state', 'active'))
+            ->where(fn ($state) => $state->whereNull('lifecycle_state')->orWhere('lifecycle_state', '!=', 'cancelled'))
             ->exists();
-        if (! $everAssigned) {
-            return false;
-        }
-
-        return ! $this->termEnded($class);
+        return $everAssigned && ! $this->termEnded($class);
     }
 
     private function termEnded(ClassModel $class): bool

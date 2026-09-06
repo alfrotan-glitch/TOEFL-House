@@ -1,5 +1,7 @@
 # Environment / dependency artifacts
 /vendor/
+/node_modules/
+/public/build/
 /.env
 /.env.backup
 /.env.*.local

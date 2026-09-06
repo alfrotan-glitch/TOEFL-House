@@ -15,6 +15,7 @@ use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
 use App\Support\Identifiers\RandomIdentifier;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -49,6 +50,9 @@ final class MaintainVisitorCatalog
                     if ($normalizedKey === '' || trim($name) === '') {
                         throw BusinessRejection::forCode('crm.catalog_required', 'a source requires a key and a name');
                     }
+                    if (mb_strlen($normalizedKey) > 80 || mb_strlen(trim($name)) > 160 || ($category !== null && mb_strlen(trim($category)) > 80)) {
+                        throw BusinessRejection::forCode('crm.catalog_length', 'source key, name, or category exceeds its permitted length');
+                    }
                     if (VisitorSource::query()->where('key', $normalizedKey)->exists()) {
                         throw BusinessRejection::forCode('crm.source_key_exists', 'a source with this key already exists');
                     }
@@ -58,10 +62,12 @@ final class MaintainVisitorCatalog
                         'key' => $normalizedKey,
                         'name' => trim($name),
                         'category' => $category !== null && $category !== '' ? trim($category) : null,
+                        'created_by' => $actor->actorId,
                         'lifecycle_state' => VisitorSource::STATE_ACTIVE,
                     ]);
                     $event = $this->audit->record($actor->actorId, 'crm.source.define', 'visitor_source', $source->id, null, [
                         'key' => $normalizedKey, 'name' => $source->name, 'category' => $source->category,
+                        'created_by' => $source->created_by,
                     ]);
 
                     return ['source_id' => $source->id, 'correlation_id' => $event->correlation_id];
@@ -69,6 +75,11 @@ final class MaintainVisitorCatalog
             );
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $actor, 'crm.source.define', 'visitor_source', $key);
+        } catch (QueryException $exception) {
+            if (str_contains($exception->getMessage(), 'visitor_sources_key_unique')) {
+                throw BusinessRejection::forCode('crm.source_key_exists', 'a source with this key already exists');
+            }
+            throw $exception;
         }
     }
 
@@ -94,6 +105,22 @@ final class MaintainVisitorCatalog
                     }
 
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
+                    if ($toState === VisitorSource::STATE_RETIRED) {
+                        $campaigns = VisitorCampaign::query()
+                            ->where('source_id', $locked->id)
+                            ->where('lifecycle_state', VisitorCampaign::STATE_ACTIVE)
+                            ->lockForUpdate()
+                            ->get();
+                        foreach ($campaigns as $campaign) {
+                            $campaignBefore = ['lifecycle_state' => $campaign->lifecycle_state];
+                            $campaign->forceFill(['lifecycle_state' => VisitorCampaign::STATE_RETIRED]);
+                            $campaign->save();
+                            $this->audit->record($actor->actorId, 'crm.campaign.transition', 'visitor_campaign', $campaign->id, $campaignBefore, [
+                                'lifecycle_state' => VisitorCampaign::STATE_RETIRED,
+                                'reason' => 'source_retired',
+                            ]);
+                        }
+                    }
                     $locked->forceFill(['lifecycle_state' => $toState]);
                     $locked->save();
                     $event = $this->audit->record($actor->actorId, 'crm.source.transition', 'visitor_source', $locked->id, $before, [
@@ -105,6 +132,11 @@ final class MaintainVisitorCatalog
             );
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $actor, 'crm.source.transition', 'visitor_source', $source->id);
+        } catch (QueryException $exception) {
+            if (str_contains($exception->getMessage(), 'visitor source cannot retire while an active campaign references it')) {
+                throw BusinessRejection::forCode('crm.source_active_campaigns', 'retire active campaigns before retiring their source');
+            }
+            throw $exception;
         }
     }
 
@@ -132,6 +164,9 @@ final class MaintainVisitorCatalog
                     if ($normalizedKey === '' || trim($name) === '') {
                         throw BusinessRejection::forCode('crm.catalog_required', 'a campaign requires a key and a name');
                     }
+                    if (mb_strlen($normalizedKey) > 80 || mb_strlen(trim($name)) > 160 || mb_strlen($channel) > 40) {
+                        throw BusinessRejection::forCode('crm.catalog_length', 'campaign key, name, or channel exceeds its permitted length');
+                    }
                     if (in_array($channel, ['walk_in', 'phone', 'whatsapp', 'email', 'social', 'website', 'referral', 'event', 'other'], true) === false) {
                         throw BusinessRejection::forCode('crm.campaign_channel_unknown', 'unknown campaign channel');
                     }
@@ -153,11 +188,13 @@ final class MaintainVisitorCatalog
                         'channel' => $channel,
                         'starts_on' => $startsOn->toDateString(),
                         'ends_on' => $endsOn?->toDateString(),
+                        'created_by' => $actor->actorId,
                         'lifecycle_state' => VisitorCampaign::STATE_ACTIVE,
                     ]);
                     $event = $this->audit->record($actor->actorId, 'crm.campaign.define', 'visitor_campaign', $campaign->id, null, [
                         'key' => $normalizedKey, 'name' => $campaign->name, 'source_id' => $campaign->source_id, 'channel' => $channel,
                         'starts_on' => $campaign->starts_on, 'ends_on' => $campaign->ends_on,
+                        'created_by' => $campaign->created_by,
                     ]);
 
                     return ['campaign_id' => $campaign->id, 'correlation_id' => $event->correlation_id];
@@ -165,6 +202,11 @@ final class MaintainVisitorCatalog
             );
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $actor, 'crm.campaign.define', 'visitor_campaign', $key);
+        } catch (QueryException $exception) {
+            if (str_contains($exception->getMessage(), 'visitor_campaigns_key_unique')) {
+                throw BusinessRejection::forCode('crm.campaign_key_exists', 'a campaign with this key already exists');
+            }
+            throw $exception;
         }
     }
 

@@ -61,7 +61,7 @@ final class SecurityHardeningFeatureTest extends TestCase
 
     public function test_api_responses_carry_security_headers_too(): void
     {
-        $this->getJson('/api/me')
+        $this->getJson('/api/v1/me')
             ->assertUnauthorized()
             ->assertHeader('X-Content-Type-Options', 'nosniff');
     }

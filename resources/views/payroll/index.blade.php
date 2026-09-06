@@ -91,6 +91,7 @@
                                 <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
                                 <button type="submit" class="btn small">Approve &amp; produce result</button>
                             </form>
+
                         @endif
                     </td>
                 </tr>
@@ -173,7 +174,7 @@
                     <td>{{ \Illuminate\Support\Str::limit($proposal->basis, 30) }}</td>
                     <td>{{ \Illuminate\Support\Str::limit($proposal->prepared_by, 16) }}</td>
                     <td>
-                        <form method="POST" action="{{ route('payroll.settlement.approve', $proposal->id) }}" style="display:inline">
+                        <form method="POST" action="{{ route('finance.employment-settlement.approve', $proposal->id) }}" style="display:inline">
                             @csrf
                             <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
                             <button type="submit" class="btn">Approve</button>

@@ -8,7 +8,9 @@ use App\Modules\Access\Domain\AccessLifecycle;
 use App\Modules\Access\Models\ScopeGrant;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
+use App\Modules\Organization\Models\Branch;
 use App\Modules\Organization\Models\Campus;
+use App\Modules\Organization\Models\Department;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
 use App\Support\Authorization\StructureScope;
@@ -42,12 +44,10 @@ final class RevokeScopePermission
                 fn (): array => DB::transaction(function () use ($revoker, $grant): array {
                     /** @var ScopeGrant $locked */
                     $locked = ScopeGrant::query()->whereKey($grant->id)->lockForUpdate()->firstOrFail();
-                    $scope = new StructureScope(
-                        $locked->scope_type === 'organization' ? $locked->scope_id : $this->parentOrganization($locked),
-                        $locked->scope_type === 'campus' ? $locked->scope_id : null,
-                        $locked->scope_type === 'branch' ? $locked->scope_id : null,
-                        $locked->scope_type === 'department' ? $locked->scope_id : null,
-                    );
+                    // Revocation is lifecycle maintenance: a closed or
+                    // suspended structure must still be able to shed stale
+                    // authority without reopening operations.
+                    $scope = $this->scopeForGrant($locked)->withInactiveLifecycleAccess();
                     $outcome = $this->access->decide($revoker, self::CAPABILITY, $scope);
                     if (! $outcome->allowed) {
                         throw AuthorizationDenied::forCode('access.revoke_denied', $outcome->reason);
@@ -69,12 +69,15 @@ final class RevokeScopePermission
         }
     }
 
-    private function parentOrganization(ScopeGrant $grant): string
+    private function scopeForGrant(ScopeGrant $grant): StructureScope
     {
         return match ($grant->scope_type) {
-            'campus' => (string) (Campus::query()->whereKey($grant->scope_id)->value('organization_id')
-                ?? throw BusinessRejection::forCode('access.scope_unavailable', 'campus scope does not resolve')),
-            default => '',
+            'organization' => new StructureScope($grant->scope_id),
+            'campus' => new StructureScope((string) (Campus::query()->whereKey($grant->scope_id)->value('organization_id')
+                ?? throw BusinessRejection::forCode('access.scope_unavailable', 'campus scope does not resolve')), $grant->scope_id),
+            'branch' => Branch::query()->whereKey($grant->scope_id)->firstOrFail()->structureScope(),
+            'department' => Department::query()->whereKey($grant->scope_id)->firstOrFail()->structureScope(),
+            default => throw BusinessRejection::forCode('access.scope_unavailable', 'scope type does not resolve to an operational structure'),
         };
     }
 }

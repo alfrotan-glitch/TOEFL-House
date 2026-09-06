@@ -6,6 +6,7 @@ namespace App\Modules\Students\Models;
 
 use App\Modules\Academic\Placement\Models\AcademicEligibilitySnapshot;
 use App\Modules\Academic\Placement\Models\PlacementProfile;
+use App\Modules\Admissions\Models\AdmissionDecision;
 use App\Modules\Identity\Models\Person;
 use App\Modules\Organization\Models\Branch;
 use Illuminate\Database\Eloquent\Model;
@@ -44,6 +45,12 @@ final class Student extends Model
     public function person(): BelongsTo
     {
         return $this->belongsTo(Person::class);
+    }
+
+    /** @return BelongsTo<AdmissionDecision, $this> */
+    public function admissionDecision(): BelongsTo
+    {
+        return $this->belongsTo(AdmissionDecision::class, 'admission_decision_id');
     }
 
     /** @return BelongsTo<Branch, $this> */

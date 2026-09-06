@@ -14,7 +14,9 @@ return new class extends Migration
             $table->char('actor_id', 36);
             $table->string('operation');
             $table->string('target_type');
-            $table->char('target_id', 36);
+            // Target identifiers include UUIDs and governed natural keys
+            // (metric keys, job keys, schedule names, and intake tokens).
+            $table->string('target_id');
             $table->string('correlation_id');
             $table->jsonb('before_state')->nullable();
             $table->jsonb('after_state')->nullable();

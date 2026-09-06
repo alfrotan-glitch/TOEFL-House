@@ -15,3 +15,5 @@ Every command has: authenticate, authorize, validate current state/configuration
 | approval/authority change | immutable approval or effective assignment | authorization cache refresh |
 
 Cross-context operations use a coordinator with explicit outcomes, never a distributed hidden transaction. Partial outcomes are held, retried, or reversed using domain rules.
+
+Workspace composition is not a business transaction boundary. A workspace request may read effective authority and owner projections; a workspace-originated mutation re-enters the owning command boundary and repeats authentication, authorization, current-state, invariant, SoD, and scope checks. Saving a workspace preference is isolated presentation state and cannot commit domain facts.

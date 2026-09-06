@@ -11,6 +11,7 @@ use App\Modules\Privacy\Models\Consent;
 use App\Modules\Privacy\Models\ConsentPurpose;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
+use App\Support\Authorization\PersonBranchScope;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
@@ -44,16 +45,16 @@ final class RecordConsent
         try {
             return $this->idempotency->execute('privacy.consent.record', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($recorder, $subjectPersonId, $purposeId, $evidenceRef, $effectiveFrom, $effectiveTo): array {
-                    if ($recorder->actorId !== $subjectPersonId) {
-                        $outcome = $this->access->decide($recorder, self::CAPABILITY, null);
-                        if (! $outcome->allowed) {
-                            throw AuthorizationDenied::forCode('privacy.consent_denied', $outcome->reason);
-                        }
-                    }
-
                     $subject = Person::query()->find($subjectPersonId);
                     if ($subject === null || $subject->verification_state !== Person::VERIFICATION_VERIFIED) {
                         throw BusinessRejection::forCode('privacy.consent_subject_unverified', 'consent requires a verified subject identity');
+                    }
+                    $scope = PersonBranchScope::resolve($subject->id);
+                    if ($recorder->actorId !== $subjectPersonId) {
+                        $outcome = $this->access->decide($recorder, self::CAPABILITY, $scope);
+                        if (! $outcome->allowed) {
+                            throw AuthorizationDenied::forCode('privacy.consent_denied', $outcome->reason);
+                        }
                     }
                     if (! ConsentPurpose::query()->whereKey($purposeId)->exists()) {
                         throw BusinessRejection::forCode('privacy.consent_purpose_unknown', 'consent requires a defined purpose');
@@ -81,6 +82,7 @@ final class RecordConsent
                         'purpose_id' => $purposeId,
                         'lifecycle_state' => 'draft',
                         'effective_from' => $consent->effective_from,
+                        'branch_id' => $scope->branchId, 'organization_id' => $scope->organizationId,
                     ]);
 
                     return ['consent_id' => $consent->id, 'correlation_id' => $event->correlation_id];

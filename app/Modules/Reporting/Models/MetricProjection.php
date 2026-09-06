@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property string $metric_version_id
  * @property string $period_key
  * @property string $scope_type
+ * @property string|null $organization_id
  * @property string $value
  * @property string $completeness
  * @property array<string, mixed> $meta
@@ -24,7 +25,7 @@ final class MetricProjection extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'metric_version_id', 'period_key', 'scope_type', 'scope_id', 'value', 'completeness', 'meta', 'computed_at', 'computed_by'];
+    protected $fillable = ['id', 'metric_version_id', 'period_key', 'scope_type', 'scope_id', 'organization_id', 'value', 'completeness', 'meta', 'computed_at', 'computed_by'];
 
     protected $casts = ['meta' => 'array', 'computed_at' => 'datetime'];
 }

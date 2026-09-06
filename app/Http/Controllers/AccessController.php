@@ -20,6 +20,7 @@ use App\Modules\Access\Models\Role;
 use App\Modules\Access\Models\ScopeGrant;
 use App\Modules\Identity\Models\Person;
 use App\Modules\Organization\Models\Campus;
+use App\Modules\Organization\Models\Department;
 use App\Modules\Organization\Models\Organization;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
@@ -39,17 +40,49 @@ final class AccessController extends Controller
 {
     public function index(): View
     {
+        $this->requireOrganizationRead('access.define_policy', 'access.console.index');
+        $authorizedOrganizationIds = $this->authorizedOrganizations('access.define_policy');
+        $visibleBranches = $this->authorizedBranches('access.assign_position');
+        $people = Person::query()->where('verification_state', 'verified')->whereIn('home_branch_id', $visibleBranches)->orderBy('legal_name')->limit(300)->get();
+        $personIds = $people->pluck('id')->all();
+        $campusIds = Campus::query()->whereIn('organization_id', $authorizedOrganizationIds)->pluck('id');
+        $departmentIds = Department::query()->where(function ($scope) use ($visibleBranches, $campusIds): void {
+            $scope->where(function ($branch) use ($visibleBranches): void {
+                $branch->where('scope_type', 'branch')->whereIn('scope_id', $visibleBranches);
+            })->orWhere(function ($campus) use ($campusIds): void {
+                $campus->where('scope_type', 'campus')->whereIn('scope_id', $campusIds);
+            });
+        })->pluck('id');
+        $positionIds = Position::query()->whereIn('organization_id', $authorizedOrganizationIds)->pluck('id');
+
         return view('access.index', [
-            'people' => Person::query()->where('verification_state', 'verified')->orderBy('legal_name')->limit(300)->get(),
-            'organizations' => Organization::query()->where('lifecycle_state', 'active')->orderBy('name')->limit(100)->get(),
-            'campuses' => Campus::query()->limit(100)->get(),
-            'positions' => Position::query()->orderBy('name')->limit(200)->get(),
+            'people' => $people,
+            'organizations' => Organization::query()->whereIn('id', $authorizedOrganizationIds)->where('lifecycle_state', 'active')->orderBy('name')->limit(100)->get(),
+            'campuses' => Campus::query()->whereIn('id', $campusIds)->where('lifecycle_state', 'active')->limit(100)->get(),
+            'positions' => Position::query()->whereIn('id', $positionIds)->orderBy('name')->limit(200)->get(),
             'roles' => Role::query()->orderBy('name')->limit(200)->get(),
-            'assignments' => PositionAssignment::query()->orderByDesc('effective_from')->orderBy('id')->limit(200)->get(),
-            'policies' => AccessPolicy::query()->orderByDesc('effective_from')->orderBy('id')->limit(200)->get(),
-            'grants' => ScopeGrant::query()->orderByDesc('id')->limit(200)->get(),
-            'grantRequests' => OrgWideGrantRequest::query()->orderByDesc('id')->limit(200)->get(),
-            'delegations' => Delegation::query()->orderByDesc('id')->limit(200)->get(),
+            'assignments' => PositionAssignment::query()->whereIn('person_id', $personIds)->whereIn('position_id', $positionIds)->orderByDesc('effective_from')->orderBy('id')->limit(200)->get(),
+            'policies' => AccessPolicy::query()->where(function ($scope) use ($positionIds): void {
+                $scope->where('binding_type', 'role')
+                    ->orWhere(function ($position) use ($positionIds): void {
+                        $position->where('binding_type', 'position')->whereIn('binding_id', $positionIds);
+                    });
+            })->orderByDesc('effective_from')->orderBy('id')->limit(200)->get(),
+            'grants' => ScopeGrant::query()->where(function ($scope) use ($authorizedOrganizationIds, $visibleBranches, $campusIds, $departmentIds): void {
+                $scope->where(function ($organization) use ($authorizedOrganizationIds): void {
+                    $organization->where('scope_type', 'organization')->whereIn('scope_id', $authorizedOrganizationIds);
+                })->orWhere(function ($branch) use ($visibleBranches): void {
+                    $branch->where('scope_type', 'branch')->whereIn('scope_id', $visibleBranches);
+                })->orWhere(function ($campus) use ($campusIds): void {
+                    $campus->where('scope_type', 'campus')->whereIn('scope_id', $campusIds);
+                })->orWhere(function ($department) use ($departmentIds): void {
+                    $department->where('scope_type', 'department')->whereIn('scope_id', $departmentIds);
+                });
+            })->orderByDesc('id')->limit(200)->get(),
+            'grantRequests' => OrgWideGrantRequest::query()->whereIn('organization_id', $authorizedOrganizationIds)->orderByDesc('id')->limit(200)->get(),
+            'delegations' => Delegation::query()->where(function ($scope) use ($personIds): void {
+                $scope->whereIn('delegator_person_id', $personIds)->orWhereIn('delegate_person_id', $personIds);
+            })->orderByDesc('id')->limit(200)->get(),
         ]);
     }
 
@@ -226,9 +259,9 @@ final class AccessController extends Controller
         $input = $request->validate([
             'delegator_person_id' => ['required', 'string'],
             'delegate_person_id' => ['required', 'string'],
-            'permission' => ['nullable', 'string', 'max:120'],
-            'scope_type' => ['nullable', 'string', 'in:campus,branch,department,organization'],
-            'scope_id' => ['nullable', 'string'],
+            'permission' => ['required', 'string', 'max:120'],
+            'scope_type' => ['required', 'string', 'in:campus,branch,department,organization'],
+            'scope_id' => ['required', 'string'],
             'effective_from' => ['required', 'date'],
             'effective_to' => ['required', 'date', 'after:effective_from'],
             'reason' => ['required', 'string', 'max:1000'],

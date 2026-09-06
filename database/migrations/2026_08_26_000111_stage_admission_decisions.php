@@ -158,14 +158,11 @@ return new class extends Migration
                             USING ERRCODE = 'check_violation';
                     END IF;
 
-                    -- Finalizing a decision IS what transitions the
-                    -- applicant; no statement can declare a decision final
-                    -- while the applicant stays in the decidable state.
-                    UPDATE applicants
-                       SET lifecycle_state = CASE WHEN NEW.outcome = 'admit' THEN 'admitted' ELSE 'rejected' END,
-                           updated_at = now()
-                     WHERE id = NEW.applicant_id;
-
+                    -- Applicant projection is applied by the AFTER trigger
+                    -- below, once the final decision row itself is durable.
+                    -- Keeping this boundary separate lets the applicant
+                    -- lifecycle guard prove that every state change is
+                    -- backed by an immutable final decision row.
                     RETURN NEW;
                 END IF;
 
@@ -174,12 +171,29 @@ return new class extends Migration
             END;
             $fn$ LANGUAGE plpgsql;
             SQL);
+        DB::statement(<<<'SQL'
+            CREATE OR REPLACE FUNCTION admission_decisions_finalize_applicant() RETURNS trigger AS $fn$
+            BEGIN
+                IF OLD.lifecycle_state = 'reviewed' AND NEW.lifecycle_state = 'final' THEN
+                    UPDATE applicants
+                       SET lifecycle_state = CASE WHEN NEW.outcome = 'admit' THEN 'admitted' ELSE 'rejected' END,
+                           updated_at = now()
+                     WHERE id = NEW.applicant_id;
+                END IF;
+                RETURN NEW;
+            END;
+            $fn$ LANGUAGE plpgsql;
+            SQL);
         DB::statement('DROP TRIGGER IF EXISTS admission_decisions_lifecycle_guard_trigger ON admission_decisions');
         DB::statement('CREATE TRIGGER admission_decisions_lifecycle_guard_trigger BEFORE INSERT OR UPDATE ON admission_decisions FOR EACH ROW EXECUTE FUNCTION admission_decisions_lifecycle_guard()');
+        DB::statement('DROP TRIGGER IF EXISTS admission_decisions_finalize_applicant_trigger ON admission_decisions');
+        DB::statement('CREATE TRIGGER admission_decisions_finalize_applicant_trigger AFTER UPDATE OF lifecycle_state ON admission_decisions FOR EACH ROW EXECUTE FUNCTION admission_decisions_finalize_applicant()');
     }
 
     public function down(): void
     {
+        DB::statement('DROP TRIGGER IF EXISTS admission_decisions_finalize_applicant_trigger ON admission_decisions');
+        DB::statement('DROP FUNCTION IF EXISTS admission_decisions_finalize_applicant()');
         DB::statement('DROP TRIGGER IF EXISTS admission_decisions_lifecycle_guard_trigger ON admission_decisions');
         DB::statement('DROP FUNCTION IF EXISTS admission_decisions_lifecycle_guard()');
 

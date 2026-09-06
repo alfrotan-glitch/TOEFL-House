@@ -12,6 +12,7 @@ use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Academic\Models\GraduationDecision;
 use App\Modules\Audit\AttemptedOperation;
+use App\Modules\Organization\Models\Branch;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Documents\Commands\RegisterDocument;
 use App\Modules\Documents\Commands\TransitionDocument;
@@ -90,8 +91,10 @@ final class DecideGraduation
                         'lifecycle_state' => ProgressionLifecycle::STATE_PROPOSED,
                         'proposed_by' => $proposer->actorId,
                     ]);
+                    $provenance = $this->graduationProvenance($decision);
                     $event = $this->audit->record($proposer->actorId, 'academic.graduation.propose', 'graduation_decision', $decision->id, null, [
                         'student_id' => $studentId, 'program_version_id' => $programVersionId, 'outcome' => $outcome,
+                        ...$provenance,
                     ]);
 
                     return ['decision_id' => $decision->id, 'correlation_id' => $event->correlation_id];
@@ -186,10 +189,12 @@ final class DecideGraduation
                         'document_id' => $registered['document_id'],
                         'originating_branch_id' => RecordBranch::studentBranchForId((string) $locked->student_id),
                     ]);
+                    $provenance = $this->graduationProvenance($locked);
                     $event = $this->audit->record($issuer->actorId, 'academic.certificate.issue', 'certificate', $certificate->id, null, [
                         'graduation_decision_id' => $locked->id,
                         'serial' => $certificate->serial,
                         'document_id' => $registered['document_id'],
+                        ...$provenance,
                         'finance_clearance' => [
                             'satisfied' => $clearance['satisfied'],
                             'remaining' => $clearance['remaining'],
@@ -259,7 +264,11 @@ final class DecideGraduation
                         $locked->approved_by = $actor->actorId;
                     }
                     $locked->save();
-                    $event = $this->audit->record($actor->actorId, 'academic.graduation.'.$verb, 'graduation_decision', $locked->id, $before, ['lifecycle_state' => $toState]);
+                    $provenance = $this->graduationProvenance($locked);
+                    $event = $this->audit->record($actor->actorId, 'academic.graduation.'.$verb, 'graduation_decision', $locked->id, $before, [
+                        'lifecycle_state' => $toState,
+                        ...$provenance,
+                    ]);
 
                     return ['decision_id' => $locked->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
                 }),
@@ -267,6 +276,22 @@ final class DecideGraduation
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.graduation.'.$verb, 'graduation_decision', $decision->id);
         }
+    }
+
+    /** @return array{branch_id: string, campus_id: string, organization_id: string} */
+    private function graduationProvenance(GraduationDecision $decision): array
+    {
+        $branchId = RecordBranch::graduationBranch($decision);
+        $branch = $branchId === null ? null : Branch::query()->whereKey($branchId)->first();
+        if ($branch === null || $branch->lifecycle_state !== 'active') {
+            throw BusinessRejection::forCode('academic.graduation_provenance_required', 'a graduation event requires active branch provenance');
+        }
+        $scope = $branch->structureScope();
+        if ($scope->organizationId === '' || $scope->campusId === null) {
+            throw BusinessRejection::forCode('academic.graduation_provenance_required', 'a graduation event requires active campus organization provenance');
+        }
+
+        return ['branch_id' => (string) $branch->id, 'campus_id' => (string) $scope->campusId, 'organization_id' => $scope->organizationId];
     }
 
     private function require(Actor $actor, string $capability, ?string $branchId, string $errorCode): void

@@ -11,8 +11,6 @@ use App\Modules\Academic\Queries\TranscriptQuery;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Finance\Models\Obligation;
 use App\Modules\Finance\Models\Payment;
-use App\Modules\Hr\Models\Employment;
-use App\Modules\Identity\Models\Person;
 use App\Modules\Payroll\Models\PayrollPeriod;
 use App\Modules\Payroll\Models\PayrollResult;
 use App\Modules\Students\Models\Student;
@@ -38,8 +36,9 @@ final class PrintingController extends Controller
     public function paymentReceipt(string $paymentId): View
     {
         $payment = Payment::query()->findOrFail($paymentId);
-        $branchId = $this->present($payment->originating_branch_id)
-            ?? RecordBranch::studentBranchForId((string) $payment->student_id);
+        // Finance payment facts are immutable; a missing snapshot is not
+        // repaired from the student's mutable home designation.
+        $branchId = $this->present($payment->originating_branch_id);
         $documentNo = $this->docNo('RCPT', $payment->id);
         $this->requireBranchVisible($branchId, 'print.receipt', 'payment', $payment->id, 'print.denied');
         $this->recordProduction('print.receipt', 'payment', $payment->id, $documentNo);
@@ -47,7 +46,7 @@ final class PrintingController extends Controller
         return view('print.receipt', [
             'documentNo' => $documentNo,
             'payment' => $payment,
-            'student' => Student::query()->whereKey($payment->student_id)->first(),
+            'student' => $this->studentForBranch((string) $payment->student_id, $branchId),
             'issuedOn' => now()->toDateString(),
         ]);
     }
@@ -55,8 +54,9 @@ final class PrintingController extends Controller
     public function invoice(string $obligationId): View
     {
         $obligation = Obligation::query()->findOrFail($obligationId);
-        $branchId = $this->present($obligation->originating_branch_id)
-            ?? RecordBranch::studentBranchForId((string) $obligation->student_id);
+        // Finance obligation facts are immutable; a missing snapshot is not
+        // reconstructed from the student's mutable home designation.
+        $branchId = $this->present($obligation->originating_branch_id);
         $documentNo = $this->docNo('INV', $obligation->id);
         $this->requireBranchVisible($branchId, 'print.invoice', 'obligation', $obligation->id, 'print.denied');
         $this->recordProduction('print.invoice', 'obligation', $obligation->id, $documentNo);
@@ -64,7 +64,7 @@ final class PrintingController extends Controller
         return view('print.invoice', [
             'documentNo' => $documentNo,
             'obligation' => $obligation,
-            'student' => Student::query()->whereKey($obligation->student_id)->first(),
+            'student' => $this->studentForBranch((string) $obligation->student_id, $branchId),
             'issuedOn' => now()->toDateString(),
         ]);
     }
@@ -72,14 +72,15 @@ final class PrintingController extends Controller
     public function certificate(string $certificateId): View
     {
         $certificate = Certificate::query()->findOrFail($certificateId);
+        $branchId = RecordBranch::certificateBranch($certificate);
         $documentNo = $this->docNo('CERT', $certificate->id);
-        $this->requireBranchVisible(RecordBranch::certificateBranch($certificate), 'print.certificate', 'certificate', $certificate->id, 'print.denied');
+        $this->requireBranchVisible($branchId, 'print.certificate', 'certificate', $certificate->id, 'print.denied');
         $this->recordProduction('print.certificate', 'certificate', $certificate->id, $documentNo);
 
         return view('print.certificate', [
             'documentNo' => $documentNo,
             'certificate' => $certificate,
-            'student' => Student::query()->whereKey($certificate->student_id)->first(),
+            'student' => $this->studentForBranch((string) $certificate->student_id, $branchId),
             'issuedOn' => now()->toDateString(),
         ]);
     }
@@ -126,14 +127,15 @@ final class PrintingController extends Controller
     public function enrollment(string $enrollmentId): View
     {
         $enrollment = Enrollment::query()->findOrFail($enrollmentId);
+        $branchId = RecordBranch::enrollmentBranch($enrollment);
         $documentNo = $this->docNo('ENR', $enrollment->id);
-        $this->requireBranchVisible(RecordBranch::enrollmentBranch($enrollment), 'print.enrollment', 'enrollment', $enrollment->id, 'print.denied');
+        $this->requireBranchVisible($branchId, 'print.enrollment', 'enrollment', $enrollment->id, 'print.denied');
         $this->recordProduction('print.enrollment', 'enrollment', $enrollment->id, $documentNo);
 
         return view('print.enrollment', [
             'documentNo' => $documentNo,
             'enrollment' => $enrollment,
-            'student' => Student::query()->whereKey($enrollment->student_id)->first(),
+            'student' => $this->studentForBranch((string) $enrollment->student_id, $branchId),
             'issuedOn' => now()->toDateString(),
         ]);
     }
@@ -165,17 +167,26 @@ final class PrintingController extends Controller
         ]);
     }
 
-    private function payrollBranch(PayrollResult $result): ?string
+    private function studentForBranch(string $studentId, ?string $branchId): ?Student
     {
-        /** @var Employment|null $employment */
-        $employment = Employment::query()->find($result->employment_id);
-        if ($employment === null) {
+        if ($branchId === null) {
             return null;
         }
-        /** @var Person|null $person */
-        $person = Person::query()->find($employment->person_id);
 
-        return $person === null ? null : $this->present($person->home_branch_id);
+        return Student::query()
+            ->whereKey($studentId)
+            ->where(function ($scope) use ($branchId): void {
+                $scope->where('current_home_branch_id', $branchId)
+                    ->orWhere(function ($origin) use ($branchId): void {
+                        $origin->whereNull('current_home_branch_id')->where('originating_branch_id', $branchId);
+                    });
+            })
+            ->first();
+    }
+
+    private function payrollBranch(PayrollResult $result): ?string
+    {
+        return $this->present($result->originating_branch_id ?? null);
     }
 
     private function present(mixed $value): ?string

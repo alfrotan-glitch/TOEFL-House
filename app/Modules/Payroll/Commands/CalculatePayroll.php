@@ -13,12 +13,15 @@ use App\Modules\Hr\Models\Contract;
 use App\Modules\Hr\Models\ContractVersion;
 use App\Modules\Hr\Models\Employment;
 use App\Modules\Hr\Models\EmploymentStatus;
+use App\Modules\Identity\Models\Person;
+use App\Modules\Organization\Models\Branch;
 use App\Modules\Payroll\Domain\PayrollLifecycle;
 use App\Modules\Payroll\Models\PayrollCalculation;
 use App\Modules\Payroll\Models\PayrollPeriod;
 use App\Modules\Payroll\Models\TeachingDeliveryFact;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
+use App\Support\Authorization\StructureScope;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
@@ -49,10 +52,11 @@ use Illuminate\Support\Facades\DB;
  * double payment is impossible.
  *
  * No in-force version, rule-missing, unattributed or conflicting
- * evidence cases are HELD for HR/Finance review — there is no legacy
+ * evidence cases are HELD for HR/Finance review — there is no
  * fallback, no silent zero, and no invented charge. A recalculation
- * supersedes the prior calculation; history is retained, and the
- * complete immutable snapshot (version, scale, rules and rates, skill
+ * supersedes a prior prepared calculation; a held predecessor remains
+ * unresolved until an explicit evidenced resolution names its replacement.
+ * History is retained, and the complete immutable snapshot (version, scale, rules and rates, skill
  * breakdown, volume, evidence references, proration, final amount)
  * reproduces the approved payroll regardless of later contract, scale,
  * skill, attendance correction, or rate changes.
@@ -79,8 +83,6 @@ final class CalculatePayroll
         try {
             return $this->idempotency->execute('payroll.calculation.prepare', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($preparer, $period, $employment): array {
-                    $this->require($preparer);
-
                     /** @var PayrollPeriod $lockedPeriod */
                     $lockedPeriod = PayrollPeriod::query()->where('id', $period->id)->lockForUpdate()->firstOrFail();
                     if (! in_array($lockedPeriod->lifecycle_state, [PayrollLifecycle::PERIOD_OPEN, PayrollLifecycle::PERIOD_CALCULATING], true)) {
@@ -89,6 +91,9 @@ final class CalculatePayroll
 
                     /** @var Employment $lockedEmployment */
                     $lockedEmployment = Employment::query()->where('id', $employment->id)->lockForUpdate()->firstOrFail();
+                    $branch = $this->employeeBranch($lockedEmployment);
+                    $scope = $branch->structureScope();
+                    $this->require($preparer, $scope);
                     $terminatedOn = EmploymentStatus::query()
                         ->where('employment_id', $lockedEmployment->id)
                         ->where('status', EmploymentLifecycle::STATE_TERMINATED)
@@ -98,7 +103,7 @@ final class CalculatePayroll
                     }
 
                     PayrollCalculation::query()->where('period_id', $lockedPeriod->id)->where('employment_id', $lockedEmployment->id)
-                        ->whereIn('lifecycle_state', [PayrollLifecycle::CALC_PREPARED, PayrollLifecycle::CALC_HELD])
+                        ->where('lifecycle_state', PayrollLifecycle::CALC_PREPARED)
                         ->update(['lifecycle_state' => PayrollLifecycle::CALC_SUPERSEDED]);
 
                     [$amount, $snapshot, $heldReason, $claims] = $this->compute($lockedPeriod, $lockedEmployment);
@@ -116,10 +121,22 @@ final class CalculatePayroll
                     if ($heldReason === null) {
                         $this->claimDelivery($claims, $calculation->id);
                     }
-                    $event = $this->audit->record($preparer->actorId, 'payroll.calculation.prepare', 'payroll_calculation', $calculation->id, null, [
+                    $after = [
                         'period_id' => $lockedPeriod->id, 'employment_id' => $lockedEmployment->id, 'base_amount' => $amount,
                         'lifecycle_state' => $calculation->lifecycle_state,
-                    ]);
+                        'branch_id' => $branch->id,
+                        'organization_id' => $scope->organizationId,
+                    ];
+                    if ($heldReason !== null) {
+                        $after['workflow'] = [
+                            'definition_key' => 'payroll.held_exception',
+                            'source_type' => 'payroll_calculation',
+                            'source_id' => $calculation->id,
+                            'queue_key' => 'payroll.exception',
+                            'source_version' => 1,
+                        ];
+                    }
+                    $event = $this->audit->record($preparer->actorId, 'payroll.calculation.prepare', 'payroll_calculation', $calculation->id, null, $after);
 
                     return ['calculation_id' => $calculation->id, 'lifecycle_state' => $calculation->lifecycle_state, 'correlation_id' => $event->correlation_id];
                 }),
@@ -356,15 +373,65 @@ final class CalculatePayroll
     private function deliveredSkillSessions(PayrollPeriod $period, Employment $employment): array
     {
         return DB::table('class_sessions')
+            ->join('classes as delivery_class', 'delivery_class.id', '=', 'class_sessions.class_id')
             ->join('teacher_assignments as ta', function (JoinClause $join) use ($employment): void {
                 $join->on('ta.class_id', '=', 'class_sessions.class_id')
                     ->where('ta.teacher_person_id', '=', $employment->person_id)
+                    ->whereNotNull('ta.teacher_profile_id')
+                    ->where(fn ($state) => $state->whereNull('ta.lifecycle_state')->orWhere('ta.lifecycle_state', '!=', 'cancelled'))
                     ->where('ta.effective_from', '<=', DB::raw('class_sessions.scheduled_on'))
-                    ->where(fn ($query) => $query->whereNull('ta.effective_to')->orWhere('ta.effective_to', '>=', DB::raw('class_sessions.scheduled_on')));
+                    ->where(fn ($query) => $query->whereNull('ta.effective_to')->orWhere('ta.effective_to', '>', DB::raw('class_sessions.scheduled_on')));
+            })
+            ->whereColumn('ta.branch_id', 'delivery_class.branch_id')
+            ->join('teacher_profiles as tp', function (JoinClause $join): void {
+                $join->on('tp.id', '=', 'ta.teacher_profile_id')
+                    ->on('tp.person_id', '=', 'ta.teacher_person_id');
             })
             ->join('teacher_assignment_skills as tas', function (JoinClause $join): void {
                 $join->on('tas.teacher_assignment_id', '=', 'ta.id')
                     ->on('tas.skill_id', '=', 'class_sessions.skill_id');
+            })
+            ->where('tp.lifecycle_state', 'active')
+            ->whereRaw("COALESCE((SELECT es.status FROM employment_statuses es WHERE es.employment_id = tp.employment_id AND es.effective_from <= class_sessions.scheduled_on ORDER BY es.effective_from DESC, es.created_at DESC, es.id DESC LIMIT 1), (SELECT e2.lifecycle_state FROM employments e2 WHERE e2.id = tp.employment_id)) = 'active'")
+            ->whereExists(function ($query): void {
+                $query->selectRaw('1')->from('teacher_profile_branches as tpb')
+                    ->whereColumn('tpb.teacher_profile_id', 'tp.id')
+                    ->whereColumn('tpb.branch_id', 'ta.branch_id')
+                    ->where('tpb.lifecycle_state', 'active')
+                    ->whereColumn('tpb.effective_from', '<=', 'class_sessions.scheduled_on')
+                    ->where(function ($valid): void {
+                        $valid->whereNull('tpb.effective_to')->orWhereColumn('tpb.effective_to', '>', 'class_sessions.scheduled_on');
+                    });
+            })
+            ->whereExists(function ($query): void {
+                $query->selectRaw('1')->from('teacher_qualifications as tq')
+                    ->whereColumn('tq.teacher_profile_id', 'tp.id')
+                    ->where('tq.lifecycle_state', 'verified')
+                    ->where(function ($valid): void {
+                        $valid->whereNull('tq.valid_from')->orWhereColumn('tq.valid_from', '<=', 'class_sessions.scheduled_on');
+                    })
+                    ->where(function ($valid): void {
+                        $valid->whereNull('tq.valid_to')->orWhereColumn('tq.valid_to', '>=', 'class_sessions.scheduled_on');
+                    });
+            })
+            ->whereNotExists(function ($query): void {
+                $query->selectRaw('1')->from('leaves as l')
+                    ->whereColumn('l.employment_id', 'tp.employment_id')
+                    ->where('l.lifecycle_state', 'approved')
+                    ->whereColumn('l.date_from', '<=', 'class_sessions.scheduled_on')
+                    ->whereColumn('l.date_to', '>=', 'class_sessions.scheduled_on');
+            })
+            ->whereExists(function ($query): void {
+                $query->selectRaw('1')->from('teacher_skill_authorities as tsa')
+                    ->whereColumn('tsa.teacher_profile_id', 'ta.teacher_profile_id')
+                    ->whereColumn('tsa.branch_id', 'ta.branch_id')
+                    ->whereColumn('tsa.skill_id', 'class_sessions.skill_id')
+                    ->where('tsa.authority_kind', 'teach')
+                    ->where('tsa.lifecycle_state', 'active')
+                    ->whereColumn('tsa.effective_from', '<=', 'class_sessions.scheduled_on')
+                    ->where(function ($valid): void {
+                        $valid->whereNull('tsa.effective_to')->orWhereColumn('tsa.effective_to', '>', 'class_sessions.scheduled_on');
+                    });
             })
             ->whereBetween('class_sessions.scheduled_on', [$period->date_from, $period->date_to])
             ->whereExists($this->qualifyingAttendanceExists())
@@ -397,11 +464,49 @@ final class CalculatePayroll
     private function deliveredSessionsWithoutSkill(PayrollPeriod $period, Employment $employment): bool
     {
         return DB::table('class_sessions')
+            ->join('classes as delivery_class', 'delivery_class.id', '=', 'class_sessions.class_id')
             ->join('teacher_assignments as ta', function (JoinClause $join) use ($employment): void {
                 $join->on('ta.class_id', '=', 'class_sessions.class_id')
                     ->where('ta.teacher_person_id', '=', $employment->person_id)
+                    ->whereNotNull('ta.teacher_profile_id')
+                    ->where(fn ($state) => $state->whereNull('ta.lifecycle_state')->orWhere('ta.lifecycle_state', '!=', 'cancelled'))
                     ->where('ta.effective_from', '<=', DB::raw('class_sessions.scheduled_on'))
-                    ->where(fn ($query) => $query->whereNull('ta.effective_to')->orWhere('ta.effective_to', '>=', DB::raw('class_sessions.scheduled_on')));
+                    ->where(fn ($query) => $query->whereNull('ta.effective_to')->orWhere('ta.effective_to', '>', DB::raw('class_sessions.scheduled_on')));
+            })
+            ->whereColumn('ta.branch_id', 'delivery_class.branch_id')
+            ->join('teacher_profiles as tp', function (JoinClause $join): void {
+                $join->on('tp.id', '=', 'ta.teacher_profile_id')
+                    ->on('tp.person_id', '=', 'ta.teacher_person_id');
+            })
+            ->where('tp.lifecycle_state', 'active')
+            ->whereRaw("COALESCE((SELECT es.status FROM employment_statuses es WHERE es.employment_id = tp.employment_id AND es.effective_from <= class_sessions.scheduled_on ORDER BY es.effective_from DESC, es.created_at DESC, es.id DESC LIMIT 1), (SELECT e2.lifecycle_state FROM employments e2 WHERE e2.id = tp.employment_id)) = 'active'")
+            ->whereExists(function ($query): void {
+                $query->selectRaw('1')->from('teacher_profile_branches as tpb')
+                    ->whereColumn('tpb.teacher_profile_id', 'tp.id')
+                    ->whereColumn('tpb.branch_id', 'ta.branch_id')
+                    ->where('tpb.lifecycle_state', 'active')
+                    ->whereColumn('tpb.effective_from', '<=', 'class_sessions.scheduled_on')
+                    ->where(function ($valid): void {
+                        $valid->whereNull('tpb.effective_to')->orWhereColumn('tpb.effective_to', '>', 'class_sessions.scheduled_on');
+                    });
+            })
+            ->whereExists(function ($query): void {
+                $query->selectRaw('1')->from('teacher_qualifications as tq')
+                    ->whereColumn('tq.teacher_profile_id', 'tp.id')
+                    ->where('tq.lifecycle_state', 'verified')
+                    ->where(function ($valid): void {
+                        $valid->whereNull('tq.valid_from')->orWhereColumn('tq.valid_from', '<=', 'class_sessions.scheduled_on');
+                    })
+                    ->where(function ($valid): void {
+                        $valid->whereNull('tq.valid_to')->orWhereColumn('tq.valid_to', '>=', 'class_sessions.scheduled_on');
+                    });
+            })
+            ->whereNotExists(function ($query): void {
+                $query->selectRaw('1')->from('leaves as l')
+                    ->whereColumn('l.employment_id', 'tp.employment_id')
+                    ->where('l.lifecycle_state', 'approved')
+                    ->whereColumn('l.date_from', '<=', 'class_sessions.scheduled_on')
+                    ->whereColumn('l.date_to', '>=', 'class_sessions.scheduled_on');
             })
             ->whereBetween('class_sessions.scheduled_on', [$period->date_from, $period->date_to])
             ->whereNull('class_sessions.skill_id')
@@ -451,9 +556,21 @@ final class CalculatePayroll
         return null;
     }
 
-    private function require(Actor $actor): void
+    private function employeeBranch(Employment $employment): Branch
     {
-        $outcome = $this->access->decide($actor, self::CAPABILITY, null);
+        $person = Person::query()->whereKey($employment->person_id)->first();
+        $branchId = trim((string) ($person?->home_branch_id ?? ''));
+        $branch = $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
+        if ($branch === null || $branch->lifecycle_state !== 'active' || $branch->structureScope()->organizationId === '') {
+            throw BusinessRejection::forCode('payroll.employee_provenance_required', 'Payroll calculation requires active employee branch and organization provenance');
+        }
+
+        return $branch;
+    }
+
+    private function require(Actor $actor, ?StructureScope $scope = null): void
+    {
+        $outcome = $this->access->decide($actor, self::CAPABILITY, $scope);
         if (! $outcome->allowed) {
             throw AuthorizationDenied::forCode('payroll.calculate_denied', $outcome->reason);
         }

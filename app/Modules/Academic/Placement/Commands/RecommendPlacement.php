@@ -20,6 +20,7 @@ use App\Modules\Academic\Placement\Models\PlacementTest;
 use App\Modules\Academic\Placement\Models\PlacementTestVersion;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
+use App\Modules\Organization\Models\Branch;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
@@ -121,6 +122,7 @@ final class RecommendPlacement
                     ])->save();
                     $event = $this->audit->record($actor->actorId, 'placement.recommend', 'placement_recommendation', $recommendation->id, null, [
                         'profile_id' => $locked->id, 'level_id' => $level->id, 'cefr' => $overallCefr, 'overall_percentage' => round($overall, 2),
+                        ...$this->branchProvenance($locked->originating_branch_id),
                     ]);
 
                     return ['recommendation_id' => $recommendation->id, 'recommended_level_id' => $level->id, 'correlation_id' => $event->correlation_id];
@@ -171,6 +173,25 @@ final class RecommendPlacement
         }
 
         return $levels->first();
+    }
+
+    /** @return array{branch_id: ?string, campus_id: ?string, organization_id: ?string} */
+    private function branchProvenance(?string $branchId): array
+    {
+        $id = trim((string) ($branchId ?? ''));
+        if ($id === '') {
+            return ['branch_id' => null, 'campus_id' => null, 'organization_id' => null];
+        }
+        $branch = Branch::query()->whereKey($id)->first();
+        if ($branch === null || $branch->lifecycle_state !== 'active') {
+            throw BusinessRejection::forCode('placement.recommendation_provenance_required', 'a placement recommendation requires an active branch provenance');
+        }
+        $scope = $branch->structureScope();
+        if ($scope->organizationId === '' || $scope->campusId === null) {
+            throw BusinessRejection::forCode('placement.recommendation_provenance_required', 'a placement recommendation requires active campus organization provenance');
+        }
+
+        return ['branch_id' => (string) $branch->id, 'campus_id' => (string) $scope->campusId, 'organization_id' => $scope->organizationId];
     }
 
     /**

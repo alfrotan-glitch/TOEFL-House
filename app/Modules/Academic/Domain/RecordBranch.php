@@ -8,6 +8,7 @@ use App\Modules\Academic\Models\AcademicAppeal;
 use App\Modules\Academic\Models\AssessmentAttempt;
 use App\Modules\Academic\Models\AssessmentResult;
 use App\Modules\Academic\Models\Certificate;
+use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\ClassWaitlistEntry;
 use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Academic\Models\GraduationDecision;
@@ -20,19 +21,26 @@ use App\Modules\Students\Models\Student;
 /**
  * Branch derivation for Academic targets (WP-ACAD-SCOPE). First hit wins;
  * stored provenance beats live derivation; nothing is fabricated — every
- * step reads a linked row, and unknown provenance resolves to null (global
- * check) rather than a guessed branch. All identifiers are trimmed: branch
- * columns are fixed-width char.
+ * step reads a linked row, and unknown provenance resolves to null for the
+ * fail-closed branch adapter rather than a guessed branch. All identifiers
+ * are trimmed: branch columns are fixed-width char.
  */
 final class RecordBranch
 {
     public static function studentBranch(?Student $student): ?string
     {
-        if ($student === null) {
+        if ($student === null || trim((string) $student->getKey()) === '') {
+            return null;
+        }
+        // Callers may hold a stale or client-constructed model. Re-read the
+        // authoritative Student row; provenance is never taken from an actor
+        // or an untrusted object instance.
+        $authoritative = Student::query()->find((string) $student->getKey());
+        if ($authoritative === null) {
             return null;
         }
 
-        return self::present($student->current_home_branch_id) ?? self::present($student->originating_branch_id);
+        return self::present($authoritative->current_home_branch_id) ?? self::present($authoritative->originating_branch_id);
     }
 
     public static function studentBranchForId(?string $studentId): ?string
@@ -41,16 +49,25 @@ final class RecordBranch
         if ($studentId === '') {
             return null;
         }
+        $student = Student::query()->find($studentId);
+        if ($student === null) {
+            return null;
+        }
 
-        return self::studentBranch(Student::query()->find($studentId));
+        return self::present($student->current_home_branch_id) ?? self::present($student->originating_branch_id);
     }
 
     public static function enrollmentBranch(Enrollment $enrollment): ?string
     {
-        return self::present($enrollment->current_home_branch_id)
-            ?? self::present($enrollment->originating_branch_id)
-            ?? self::offeringBranch($enrollment->offering_id)
-            ?? self::studentBranchForId((string) $enrollment->student_id);
+        $authoritative = Enrollment::query()->find($enrollment->getKey());
+        if ($authoritative === null) {
+            return null;
+        }
+
+        return self::offeringBranch($authoritative->offering_id)
+            ?? self::present($authoritative->originating_branch_id)
+            ?? self::present($authoritative->current_home_branch_id)
+            ?? self::studentBranchForId((string) $authoritative->student_id);
     }
 
     public static function attemptBranch(AssessmentAttempt $attempt): ?string
@@ -75,9 +92,22 @@ final class RecordBranch
             ?? self::studentBranchForId((string) $entry->student_id);
     }
 
+    public static function classBranch(ClassModel $class): ?string
+    {
+        $authoritative = ClassModel::query()->find($class->getKey());
+
+        return $authoritative === null ? null : self::present($authoritative->branch_id);
+    }
+
     public static function progressionBranch(ProgressionDecision $decision): ?string
     {
-        return self::studentBranchForId((string) $decision->student_id);
+        $authoritative = ProgressionDecision::query()->find($decision->getKey());
+        if ($authoritative === null) {
+            return null;
+        }
+        $class = ClassModel::query()->find($authoritative->class_id);
+
+        return $class !== null ? self::present($class->branch_id) : self::studentBranchForId((string) $authoritative->student_id);
     }
 
     public static function graduationBranch(GraduationDecision $decision): ?string
@@ -92,9 +122,14 @@ final class RecordBranch
 
     public static function certificateBranch(Certificate $certificate): ?string
     {
-        return self::present($certificate->current_home_branch_id)
-            ?? self::present($certificate->originating_branch_id)
-            ?? self::studentBranchForId((string) $certificate->student_id);
+        $authoritative = Certificate::query()->find($certificate->getKey());
+        if ($authoritative === null) {
+            return null;
+        }
+
+        return self::present($authoritative->current_home_branch_id)
+            ?? self::present($authoritative->originating_branch_id)
+            ?? self::studentBranchForId((string) $authoritative->student_id);
     }
 
     public static function placementProfileBranch(?PlacementProfile $profile): ?string
@@ -102,9 +137,13 @@ final class RecordBranch
         if ($profile === null) {
             return null;
         }
+        $authoritative = PlacementProfile::query()->find($profile->getKey());
+        if ($authoritative === null) {
+            return null;
+        }
 
-        return self::present($profile->current_home_branch_id)
-            ?? self::present($profile->originating_branch_id);
+        return self::present($authoritative->current_home_branch_id)
+            ?? self::present($authoritative->originating_branch_id);
     }
 
     /**

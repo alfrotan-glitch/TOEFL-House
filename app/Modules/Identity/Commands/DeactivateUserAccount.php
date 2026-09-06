@@ -9,6 +9,7 @@ use App\Modules\Audit\AuditRecorder;
 use App\Modules\Identity\Models\UserAccount;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
+use App\Support\Authorization\PersonBranchScope;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Errors\DomainError;
@@ -38,13 +39,13 @@ final class DeactivateUserAccount
         try {
             return $this->idempotency->execute('identity.deactivate_account', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($administrator, $account, $reason): array {
-                    $outcome = $this->access->decide($administrator, self::CAPABILITY, null);
+                    /** @var UserAccount $locked */
+                    $locked = UserAccount::query()->whereKey($account->id)->lockForUpdate()->firstOrFail();
+                    $scope = PersonBranchScope::resolve($locked->person_id);
+                    $outcome = $this->access->decide($administrator, self::CAPABILITY, $scope);
                     if (! $outcome->allowed) {
                         throw AuthorizationDenied::forCode('identity.deactivate_denied', $outcome->reason);
                     }
-
-                    /** @var UserAccount $locked */
-                    $locked = UserAccount::query()->whereKey($account->id)->lockForUpdate()->firstOrFail();
                     if (! $locked->isActive()) {
                         throw BusinessRejection::forCode('identity.account_not_active', 'only an active account can be deactivated');
                     }
@@ -61,7 +62,7 @@ final class DeactivateUserAccount
                         'user_account',
                         $locked->id,
                         ['account_state' => UserAccount::STATE_ACTIVE],
-                        ['account_state' => UserAccount::STATE_DEACTIVATED, 'reason' => $reason],
+                        ['account_state' => UserAccount::STATE_DEACTIVATED, 'reason' => $reason, 'branch_id' => $scope->branchId, 'organization_id' => $scope->organizationId],
                         $correlationId,
                     );
 

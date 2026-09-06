@@ -39,9 +39,10 @@ return new class extends Migration
             DECLARE
                 period_state text;
             BEGIN
-                IF TG_OP = 'INSERT' OR NEW.branch_id IS DISTINCT FROM OLD.branch_id
+                IF TG_OP = 'INSERT' OR (TG_OP = 'UPDATE'
+                   AND (NEW.branch_id IS DISTINCT FROM OLD.branch_id
                    OR NEW.program_version_level_id IS DISTINCT FROM OLD.program_version_level_id
-                   OR NEW.academic_period_id IS DISTINCT FROM OLD.academic_period_id THEN
+                   OR NEW.academic_period_id IS DISTINCT FROM OLD.academic_period_id)) THEN
                     SELECT lifecycle_state INTO period_state
                       FROM academic_periods WHERE id = NEW.academic_period_id;
                     IF period_state IS NULL OR period_state <> 'published' THEN
@@ -145,12 +146,14 @@ return new class extends Migration
                 offering_state text;
                 offering_period char(36);
                 offering_level char(36);
+                offering_branch char(36);
                 class_period char(36);
                 class_level char(36);
+                class_branch char(36);
                 offering_capacity integer;
                 offering_active integer;
             BEGIN
-                IF OLD.offering_id IS NOT NULL AND NEW.offering_id IS DISTINCT FROM OLD.offering_id THEN
+                IF TG_OP = 'UPDATE' AND OLD.offering_id IS NOT NULL AND NEW.offering_id IS DISTINCT FROM OLD.offering_id THEN
                     RAISE EXCEPTION 'the offering on an enrollment seat is immutable (a transfer opens a new seat)'
                         USING ERRCODE = 'check_violation';
                 END IF;
@@ -159,8 +162,8 @@ return new class extends Migration
                     RETURN NEW;
                 END IF;
 
-                SELECT lifecycle_state, academic_period_id, program_version_level_id, capacity
-                  INTO offering_state, offering_period, offering_level, offering_capacity
+                SELECT lifecycle_state, academic_period_id, program_version_level_id, branch_id, capacity
+                  INTO offering_state, offering_period, offering_level, offering_branch, offering_capacity
                   FROM offerings WHERE id = NEW.offering_id;
                 IF offering_state IS NULL THEN
                     RAISE EXCEPTION 'enrollment references an unknown offering'
@@ -171,15 +174,16 @@ return new class extends Migration
                         USING ERRCODE = 'check_violation';
                 END IF;
 
-                SELECT period_id, program_version_level_id INTO class_period, class_level
+                SELECT period_id, program_version_level_id, branch_id INTO class_period, class_level, class_branch
                   FROM classes WHERE id = NEW.class_id;
                 IF offering_period IS DISTINCT FROM class_period
-                   OR offering_level IS DISTINCT FROM class_level THEN
-                    RAISE EXCEPTION 'the enrollment offering must match the class period and level'
+                   OR offering_level IS DISTINCT FROM class_level
+                   OR offering_branch IS DISTINCT FROM class_branch THEN
+                    RAISE EXCEPTION 'the enrollment offering must match the class branch, period, and level'
                         USING ERRCODE = 'check_violation';
                 END IF;
 
-                IF NEW.lifecycle_state = 'active' AND OLD.lifecycle_state <> 'active' THEN
+                IF TG_OP = 'UPDATE' AND NEW.lifecycle_state = 'active' AND OLD.lifecycle_state <> 'active' THEN
                     SELECT count(*) INTO offering_active
                       FROM enrollments e
                      WHERE e.offering_id = NEW.offering_id
@@ -223,8 +227,10 @@ return new class extends Migration
                 offering_state text;
                 class_period char(36);
                 class_level char(36);
+                class_branch char(36);
                 offering_period char(36);
                 offering_level char(36);
+                offering_branch char(36);
             BEGIN
                 IF NEW.position < 1 THEN
                     RAISE EXCEPTION 'a waitlist position must be at least 1'
@@ -242,7 +248,7 @@ return new class extends Migration
                         USING ERRCODE = 'check_violation';
                 END IF;
 
-                SELECT lifecycle_state, period_id, program_version_level_id INTO class_state, class_period, class_level
+                SELECT lifecycle_state, period_id, program_version_level_id, branch_id INTO class_state, class_period, class_level, class_branch
                   FROM classes c WHERE c.id = NEW.class_id FOR UPDATE;
                 IF class_state IS NULL THEN
                     RAISE EXCEPTION 'a waitlist requires an existing class'
@@ -254,16 +260,17 @@ return new class extends Migration
                 END IF;
 
                 IF NEW.offering_id IS NOT NULL THEN
-                    SELECT lifecycle_state, academic_period_id, program_version_level_id
-                      INTO offering_state, offering_period, offering_level
+                    SELECT lifecycle_state, academic_period_id, program_version_level_id, branch_id
+                      INTO offering_state, offering_period, offering_level, offering_branch
                       FROM offerings WHERE id = NEW.offering_id;
                     IF offering_state IS DISTINCT FROM 'open' THEN
                         RAISE EXCEPTION 'a waitlist may target only an open offering (offering state: %)', offering_state
                             USING ERRCODE = 'check_violation';
                     END IF;
                     IF offering_period IS DISTINCT FROM class_period
-                       OR offering_level IS DISTINCT FROM class_level THEN
-                        RAISE EXCEPTION 'the waitlist offering must match the class period and level'
+                       OR offering_level IS DISTINCT FROM class_level
+                       OR offering_branch IS DISTINCT FROM class_branch THEN
+                        RAISE EXCEPTION 'the waitlist offering must match the class branch, period, and level'
                             USING ERRCODE = 'check_violation';
                     END IF;
                 END IF;

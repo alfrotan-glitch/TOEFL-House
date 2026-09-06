@@ -9,14 +9,16 @@ use App\Modules\Audit\AuditRecorder;
 use App\Modules\Finance\Domain\FinanceLifecycle;
 use App\Modules\Finance\Models\FinancialPeriod;
 use App\Modules\Finance\Models\Payment;
-use App\Modules\Finance\Models\PaymentAllocation;
+use App\Modules\Finance\Queries\FinancialBalanceQuery;
 use App\Modules\Finance\Models\Refund;
+use App\Modules\Organization\Models\Branch;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
 use App\Support\Identifiers\RandomIdentifier;
+use App\Support\MoneyAmount;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -47,6 +49,7 @@ final class RefundPayment
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
+        private readonly FinancialBalanceQuery $balances,
     ) {}
 
     /** @return array{refund_id: string, correlation_id: string} */
@@ -57,11 +60,10 @@ final class RefundPayment
         try {
             return $this->idempotency->execute('finance.refund.propose', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($requester, $payment, $period, $amount, $reason): array {
-                    $this->require($requester, self::CAPABILITY_REQUEST);
                     if ($reason === '') {
                         throw BusinessRejection::forCode('finance.refund_reason', 'a refund requires its documented conditions');
                     }
-                    if (! is_numeric($amount) || (float) $amount <= 0) {
+                    if (! MoneyAmount::positive($amount)) {
                         throw BusinessRejection::forCode('finance.refund_amount', 'the refund amount must be a positive number');
                     }
 
@@ -73,6 +75,15 @@ final class RefundPayment
 
                     /** @var Payment $lockedPayment */
                     $lockedPayment = Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
+                    if (trim((string) $lockedPayment->period_id) !== trim((string) $lockedPeriod->id)) {
+                        throw BusinessRejection::forCode('finance.refund_period_mismatch', 'a refund must remain in the payment financial period');
+                    }
+                    $branchId = trim((string) ($lockedPayment->current_home_branch_id ?? $lockedPayment->originating_branch_id ?? ''));
+                    $branch = $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
+                    if ($branch === null) {
+                        throw BusinessRejection::forCode('finance.refund_provenance_required', 'a refund requires known payment branch provenance');
+                    }
+                    $this->require($requester, self::CAPABILITY_REQUEST, $branch->structureScope());
                     $this->assertWithinRefundableRemainder($lockedPayment, $amount);
 
                     $refund = Refund::query()->create([
@@ -83,9 +94,11 @@ final class RefundPayment
                         'reason' => $reason,
                         'requested_by' => $requester->actorId,
                         'lifecycle_state' => self::STATE_PROPOSED,
+                        'originating_branch_id' => $lockedPayment->originating_branch_id,
+                        'current_home_branch_id' => $lockedPayment->current_home_branch_id,
                     ]);
                     $event = $this->audit->record($requester->actorId, 'finance.refund.propose', 'refund', $refund->id, null, [
-                        'payment_id' => $lockedPayment->id, 'amount' => $amount,
+                        'payment_id' => $lockedPayment->id, 'branch_id' => $branch->id, 'organization_id' => $branch->structureScope()->organizationId, 'amount' => $amount,
                     ]);
 
                     return ['refund_id' => $refund->id, 'correlation_id' => $event->correlation_id];
@@ -104,8 +117,6 @@ final class RefundPayment
         try {
             return $this->idempotency->execute('finance.refund.approve', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($approver, $refund): array {
-                    $this->require($approver, self::CAPABILITY_APPROVE);
-
                     /** @var Refund $locked */
                     $locked = Refund::query()->whereKey($refund->id)->lockForUpdate()->firstOrFail();
                     if ($locked->lifecycle_state !== self::STATE_PROPOSED) {
@@ -116,8 +127,23 @@ final class RefundPayment
                         throw AuthorizationDenied::forCode('finance.refund_not_independent', 'the refund requester and approver must differ');
                     }
 
+                    /** @var FinancialPeriod $lockedPeriod */
+                    $lockedPeriod = FinancialPeriod::query()->whereKey($locked->period_id)->lockForUpdate()->firstOrFail();
+                    if ($lockedPeriod->lifecycle_state !== FinanceLifecycle::PERIOD_OPEN) {
+                        throw BusinessRejection::forCode('finance.period_not_open', 'refunds record only into an open financial period');
+                    }
+
                     /** @var Payment $lockedPayment */
                     $lockedPayment = Payment::query()->whereKey($locked->payment_id)->lockForUpdate()->firstOrFail();
+                    if (trim((string) $lockedPayment->period_id) !== trim((string) $lockedPeriod->id)) {
+                        throw BusinessRejection::forCode('finance.refund_period_mismatch', 'a refund must remain in the payment financial period');
+                    }
+                    $branchId = trim((string) ($lockedPayment->current_home_branch_id ?? $lockedPayment->originating_branch_id ?? ''));
+                    $branch = $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
+                    if ($branch === null) {
+                        throw BusinessRejection::forCode('finance.refund_provenance_required', 'a refund requires known payment branch provenance');
+                    }
+                    $this->require($approver, self::CAPABILITY_APPROVE, $branch->structureScope());
                     $this->assertWithinRefundableRemainder($lockedPayment, (string) $locked->amount);
 
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
@@ -125,6 +151,8 @@ final class RefundPayment
                     $locked->save();
                     $event = $this->audit->record($approver->actorId, 'finance.refund.approve', 'refund', $locked->id, $before, [
                         'lifecycle_state' => self::STATE_RECORDED,
+                        'branch_id' => $branch->id,
+                        'organization_id' => $branch->structureScope()->organizationId,
                     ]);
 
                     return ['refund_id' => $locked->id, 'lifecycle_state' => self::STATE_RECORDED, 'correlation_id' => $event->correlation_id];
@@ -137,17 +165,15 @@ final class RefundPayment
 
     private function assertWithinRefundableRemainder(Payment $payment, string $amount): void
     {
-        $allocated = PaymentAllocation::query()->where('payment_id', $payment->id)->sum('amount');
-        $refunded = Refund::query()->where('payment_id', $payment->id)->where('lifecycle_state', self::STATE_RECORDED)->sum('amount');
-        $refundable = bcsub(bcsub((string) $payment->amount, (string) $allocated, 2), (string) $refunded, 2);
+        $refundable = $this->balances->paymentRemaining($payment);
         if (bccomp($amount, $refundable, 2) === 1) {
             throw BusinessRejection::forCode('finance.refund_exceeds_source', sprintf('the refund exceeds the refundable remainder %s', $refundable));
         }
     }
 
-    private function require(Actor $actor, string $capability): void
+    private function require(Actor $actor, string $capability, \App\Support\Authorization\StructureScope $scope): void
     {
-        $outcome = $this->access->decide($actor, $capability, null);
+        $outcome = $this->access->decide($actor, $capability, $scope);
         if (! $outcome->allowed) {
             throw AuthorizationDenied::forCode('finance.refund_denied', $outcome->reason);
         }

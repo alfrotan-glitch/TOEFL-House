@@ -16,6 +16,7 @@ use App\Modules\Academic\Placement\Models\PlacementTest;
 use App\Modules\Academic\Placement\Models\PlacementTestVersion;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
+use App\Modules\Organization\Models\Branch;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
@@ -79,6 +80,7 @@ final class MaintainPlacementCatalog
                     ]);
                     $event = $this->audit->record($actor->actorId, 'placement.test.define', 'placement_test', $test->id, null, [
                         'key' => $key, 'program_version_id' => $programVersionId, 'branch' => $branchId,
+                        ...$this->branchProvenance($branchId),
                     ]);
 
                     return ['test_id' => $test->id, 'correlation_id' => $event->correlation_id];
@@ -102,7 +104,10 @@ final class MaintainPlacementCatalog
                     $this->require($actor, $locked->originating_branch_id);
                     self::assertTestTransition($locked->lifecycle_state, $toState);
                     $locked->forceFill(['lifecycle_state' => $toState])->save();
-                    $event = $this->audit->record($actor->actorId, 'placement.test.transition', 'placement_test', $locked->id, ['lifecycle_state' => $locked->getOriginal('lifecycle_state')], ['lifecycle_state' => $toState]);
+                    $event = $this->audit->record($actor->actorId, 'placement.test.transition', 'placement_test', $locked->id, ['lifecycle_state' => $locked->getOriginal('lifecycle_state')], [
+                        'lifecycle_state' => $toState,
+                        ...$this->branchProvenance((string) $locked->originating_branch_id),
+                    ]);
 
                     return ['test_id' => $locked->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
                 }),
@@ -136,6 +141,7 @@ final class MaintainPlacementCatalog
                     ]);
                     $event = $this->audit->record($actor->actorId, 'placement.version.create', 'placement_test_version', $version->id, null, [
                         'test_id' => $locked->id, 'version_no' => $next,
+                        ...$this->branchProvenance((string) $locked->originating_branch_id),
                     ]);
 
                     return ['version_id' => $version->id, 'correlation_id' => $event->correlation_id];
@@ -173,7 +179,10 @@ final class MaintainPlacementCatalog
                         'lifecycle_state' => $toState,
                         'published_at' => $toState === 'published' ? now() : $locked->published_at,
                     ])->save();
-                    $event = $this->audit->record($actor->actorId, 'placement.version.transition', 'placement_test_version', $locked->id, ['lifecycle_state' => $locked->getOriginal('lifecycle_state')], ['lifecycle_state' => $toState]);
+                    $event = $this->audit->record($actor->actorId, 'placement.version.transition', 'placement_test_version', $locked->id, ['lifecycle_state' => $locked->getOriginal('lifecycle_state')], [
+                        'lifecycle_state' => $toState,
+                        ...$this->branchProvenance((string) $test->originating_branch_id),
+                    ]);
 
                     return ['version_id' => $locked->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
                 }),
@@ -224,6 +233,7 @@ final class MaintainPlacementCatalog
                     ]);
                     $event = $this->audit->record($actor->actorId, 'placement.section.define', 'placement_section', $section->id, null, [
                         'version_id' => $version->id, 'component' => $component,
+                        ...$this->versionProvenance($version),
                     ]);
 
                     return ['section_id' => $section->id, 'correlation_id' => $event->correlation_id];
@@ -276,6 +286,7 @@ final class MaintainPlacementCatalog
                     ]);
                     $event = $this->audit->record($actor->actorId, 'placement.question.define', 'placement_question', $question->id, null, [
                         'section_id' => $section->id, 'question_type' => $questionType,
+                        ...$this->sectionProvenance($section),
                     ]);
 
                     return ['question_id' => $question->id, 'correlation_id' => $event->correlation_id];
@@ -312,6 +323,7 @@ final class MaintainPlacementCatalog
                     ]);
                     $event = $this->audit->record($actor->actorId, 'placement.media.attach', 'placement_question_media', $media->id, null, [
                         'question_id' => $question->id, 'sha256' => $sha256,
+                        ...$this->questionProvenance($question),
                     ]);
 
                     return ['media_id' => $media->id, 'correlation_id' => $event->correlation_id];
@@ -354,6 +366,7 @@ final class MaintainPlacementCatalog
                     ]);
                     $event = $this->audit->record($actor->actorId, 'placement.rubric.define', 'placement_rubric', $rubric->id, null, [
                         'version_id' => $version->id, 'component' => $component, 'cefr' => $cefrRef,
+                        ...$this->versionProvenance($version),
                     ]);
 
                     return ['rubric_id' => $rubric->id, 'correlation_id' => $event->correlation_id];
@@ -383,7 +396,10 @@ final class MaintainPlacementCatalog
                     $this->requireVersionBranch($actor, PlacementTestVersion::query()->findOrFail($locked->test_version_id));
                     self::assertObjectTransition($locked->lifecycle_state, $toState);
                     $locked->forceFill(['lifecycle_state' => $toState])->save();
-                    $event = $this->audit->record($actor->actorId, 'placement.rubric.transition', 'placement_rubric', $locked->id, ['lifecycle_state' => $locked->getOriginal('lifecycle_state')], ['lifecycle_state' => $toState]);
+                    $event = $this->audit->record($actor->actorId, 'placement.rubric.transition', 'placement_rubric', $locked->id, ['lifecycle_state' => $locked->getOriginal('lifecycle_state')], [
+                        'lifecycle_state' => $toState,
+                        ...$this->versionProvenance(PlacementTestVersion::query()->findOrFail($locked->test_version_id)),
+                    ]);
 
                     return ['rubric_id' => $locked->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
                 }),
@@ -406,7 +422,10 @@ final class MaintainPlacementCatalog
                     $this->requireQuestionBranch($actor, $locked);
                     self::assertObjectTransition($locked->lifecycle_state, $toState);
                     $locked->forceFill(['lifecycle_state' => $toState])->save();
-                    $event = $this->audit->record($actor->actorId, 'placement.question.transition', 'placement_question', $locked->id, ['lifecycle_state' => $locked->getOriginal('lifecycle_state')], ['lifecycle_state' => $toState]);
+                    $event = $this->audit->record($actor->actorId, 'placement.question.transition', 'placement_question', $locked->id, ['lifecycle_state' => $locked->getOriginal('lifecycle_state')], [
+                        'lifecycle_state' => $toState,
+                        ...$this->questionProvenance($locked),
+                    ]);
 
                     return ['question_id' => $locked->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
                 }),
@@ -429,7 +448,10 @@ final class MaintainPlacementCatalog
                     $this->requireSectionBranch($actor, $locked);
                     self::assertObjectTransition($locked->lifecycle_state, $toState);
                     $locked->forceFill(['lifecycle_state' => $toState])->save();
-                    $event = $this->audit->record($actor->actorId, 'placement.section.transition', 'placement_section', $locked->id, ['lifecycle_state' => $locked->getOriginal('lifecycle_state')], ['lifecycle_state' => $toState]);
+                    $event = $this->audit->record($actor->actorId, 'placement.section.transition', 'placement_section', $locked->id, ['lifecycle_state' => $locked->getOriginal('lifecycle_state')], [
+                        'lifecycle_state' => $toState,
+                        ...$this->sectionProvenance($locked),
+                    ]);
 
                     return ['section_id' => $locked->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
                 }),
@@ -475,6 +497,52 @@ final class MaintainPlacementCatalog
         if (! in_array($to, $allowed[$from] ?? [], true)) {
             throw BusinessRejection::forCode('placement.catalog_transition_forbidden', sprintf('catalog transition %s -> %s is not allowed', $from, $to));
         }
+    }
+
+    /** @return array{branch_id: string, campus_id: string, organization_id: string} */
+    private function branchProvenance(?string $branchId): array
+    {
+        $id = trim((string) ($branchId ?? ''));
+        $branch = $id === '' ? null : Branch::query()->whereKey($id)->first();
+        if ($branch === null || $branch->lifecycle_state !== 'active') {
+            throw BusinessRejection::forCode('placement.provenance_required', 'a placement event requires an active branch provenance');
+        }
+        $scope = $branch->structureScope();
+        if ($scope->organizationId === '' || $scope->campusId === null) {
+            throw BusinessRejection::forCode('placement.provenance_required', 'a placement event requires active campus organization provenance');
+        }
+
+        return ['branch_id' => (string) $branch->id, 'campus_id' => (string) $scope->campusId, 'organization_id' => $scope->organizationId];
+    }
+
+    /** @return array{branch_id: string, campus_id: string, organization_id: string} */
+    private function versionProvenance(PlacementTestVersion $version): array
+    {
+        $testId = trim((string) $version->placement_test_id);
+
+        return $this->branchProvenance(PlacementTest::query()->whereKey($testId)->value('originating_branch_id'));
+    }
+
+    /** @return array{branch_id: string, campus_id: string, organization_id: string} */
+    private function sectionProvenance(PlacementSection $section): array
+    {
+        $version = PlacementTestVersion::query()->whereKey($section->test_version_id)->first();
+        if ($version === null) {
+            throw BusinessRejection::forCode('placement.provenance_required', 'a placement section requires a source version');
+        }
+
+        return $this->versionProvenance($version);
+    }
+
+    /** @return array{branch_id: string, campus_id: string, organization_id: string} */
+    private function questionProvenance(PlacementQuestion $question): array
+    {
+        $section = PlacementSection::query()->whereKey($question->section_id)->first();
+        if ($section === null) {
+            throw BusinessRejection::forCode('placement.provenance_required', 'a placement question requires a source section');
+        }
+
+        return $this->sectionProvenance($section);
     }
 
     private function requireVersionBranch(Actor $actor, PlacementTestVersion $version): void

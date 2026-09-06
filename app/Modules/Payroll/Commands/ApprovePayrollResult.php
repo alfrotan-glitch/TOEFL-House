@@ -7,6 +7,8 @@ namespace App\Modules\Payroll\Commands;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Hr\Models\Employment;
+use App\Modules\Identity\Models\Person;
+use App\Modules\Organization\Models\Branch;
 use App\Modules\Payroll\Domain\PayrollLifecycle;
 use App\Modules\Payroll\Models\PayrollAdjustment;
 use App\Modules\Payroll\Models\PayrollCalculation;
@@ -14,6 +16,7 @@ use App\Modules\Payroll\Models\PayrollPeriod;
 use App\Modules\Payroll\Models\PayrollResult;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
+use App\Support\Authorization\StructureScope;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
@@ -47,8 +50,6 @@ final class ApprovePayrollResult
         try {
             return $this->idempotency->execute('payroll.result.approve', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($approver, $calculation): array {
-                    $this->require($approver, self::CAPABILITY_APPROVE);
-
                     /** @var PayrollCalculation $locked */
                     $locked = PayrollCalculation::query()->whereKey($calculation->id)->lockForUpdate()->firstOrFail();
                     if ($locked->lifecycle_state !== PayrollLifecycle::CALC_PREPARED) {
@@ -62,12 +63,22 @@ final class ApprovePayrollResult
                     if (trim((string) $employment->person_id) === $approver->actorId) {
                         throw AuthorizationDenied::forCode('payroll.beneficiary', 'the beneficiary may never approve their own payroll');
                     }
+                    /** @var Person|null $person */
+                    $person = Person::query()->whereKey($employment->person_id)->first();
+                    $originatingBranchId = trim((string) ($person?->home_branch_id ?? ''));
+                    $branch = $originatingBranchId === '' ? null : Branch::query()->whereKey($originatingBranchId)->first();
+                    if ($branch === null || $branch->lifecycle_state !== 'active' || $branch->structureScope()->organizationId === '') {
+                        throw BusinessRejection::forCode('payroll.branch_provenance_missing', 'an approved Payroll result requires an active employee home branch snapshot with organization provenance');
+                    }
+                    $scope = $branch->structureScope();
+                    $this->require($approver, self::CAPABILITY_APPROVE, $scope);
 
                     $result = PayrollResult::query()->create([
                         'id' => RandomIdentifier::new(),
                         'calculation_id' => $locked->id,
                         'period_id' => $locked->period_id,
                         'employment_id' => $locked->employment_id,
+                        'originating_branch_id' => $branch->id,
                         'amount' => $locked->base_amount,
                         'lifecycle_state' => 'approved',
                         'approved_by' => $approver->actorId,
@@ -75,7 +86,8 @@ final class ApprovePayrollResult
                     $locked->forceFill(['lifecycle_state' => PayrollLifecycle::CALC_RESULTED]);
                     $locked->save();
                     $event = $this->audit->record($approver->actorId, 'payroll.result.approve', 'payroll_result', $result->id, null, [
-                        'calculation_id' => $locked->id, 'amount' => $result->amount,
+                        'calculation_id' => $locked->id, 'amount' => $result->amount, 'originating_branch_id' => $branch->id,
+                        'branch_id' => $branch->id, 'organization_id' => $scope->organizationId,
                     ]);
 
                     return ['result_id' => $result->id, 'correlation_id' => $event->correlation_id];
@@ -94,7 +106,6 @@ final class ApprovePayrollResult
         try {
             return $this->idempotency->execute('payroll.result.adjust', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($approver, $result, $kind, $amount, $reason): array {
-                    $this->require($approver, self::CAPABILITY_ADJUST);
                     if ($reason === '') {
                         throw BusinessRejection::forCode('payroll.adjustment_reason', 'an adjustment requires a reason');
                     }
@@ -117,6 +128,13 @@ final class ApprovePayrollResult
                         throw BusinessRejection::forCode('payroll.reversal_exists', 'this result is already reversed');
                     }
 
+                    $adjustmentBranchId = trim((string) $lockedResult->originating_branch_id);
+                    $adjustmentBranch = $adjustmentBranchId === '' ? null : Branch::query()->whereKey($adjustmentBranchId)->first();
+                    if ($adjustmentBranch === null || $adjustmentBranch->lifecycle_state !== 'active' || $adjustmentBranch->structureScope()->organizationId === '') {
+                        throw BusinessRejection::forCode('payroll.branch_provenance_missing', 'a Payroll adjustment requires active branch and organization provenance');
+                    }
+                    $adjustmentScope = $adjustmentBranch->structureScope();
+                    $this->require($approver, self::CAPABILITY_ADJUST, $adjustmentScope);
                     $adjustment = PayrollAdjustment::query()->create([
                         'id' => RandomIdentifier::new(),
                         'result_id' => $lockedResult->id,
@@ -127,6 +145,7 @@ final class ApprovePayrollResult
                     ]);
                     $event = $this->audit->record($approver->actorId, 'payroll.result.adjust', 'payroll_adjustment', $adjustment->id, null, [
                         'result_id' => $lockedResult->id, 'kind' => $kind, 'amount' => $adjustment->amount,
+                        'branch_id' => $adjustmentBranch->id, 'organization_id' => $adjustmentScope->organizationId,
                     ]);
 
                     return ['adjustment_id' => $adjustment->id, 'correlation_id' => $event->correlation_id];
@@ -137,9 +156,9 @@ final class ApprovePayrollResult
         }
     }
 
-    private function require(Actor $actor, string $capability): void
+    private function require(Actor $actor, string $capability, ?StructureScope $scope = null): void
     {
-        $outcome = $this->access->decide($actor, $capability, null);
+        $outcome = $this->access->decide($actor, $capability, $scope);
         if (! $outcome->allowed) {
             throw AuthorizationDenied::forCode('payroll.approve_denied', $outcome->reason);
         }

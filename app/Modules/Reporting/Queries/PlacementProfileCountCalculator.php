@@ -23,7 +23,12 @@ final class PlacementProfileCountCalculator implements MetricCalculator
         $query = DB::table('placement_profiles')
             ->whereBetween('created_at', [$period->starts_on.' 00:00:00', $period->ends_on.' 23:59:59']);
         if ($scopeId !== null) {
-            $query->where('originating_branch_id', $scopeId);
+            $query->where(function ($scope) use ($scopeId): void {
+                $scope->where('current_home_branch_id', $scopeId)
+                    ->orWhere(function ($fallback) use ($scopeId): void {
+                        $fallback->whereNull('current_home_branch_id')->where('originating_branch_id', $scopeId);
+                    });
+            });
         }
         $count = (int) $query->count();
 

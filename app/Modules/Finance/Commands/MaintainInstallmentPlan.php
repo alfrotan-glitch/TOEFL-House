@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace App\Modules\Finance\Commands;
 
+use App\Modules\Academic\Domain\RecordBranch;
+use App\Modules\Organization\Models\Branch;
 use App\Modules\Academic\Models\Offering;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
+use App\Modules\Finance\Domain\FinancialCoverageLock;
 use App\Modules\Finance\Models\EnrollmentInstallmentPlan;
 use App\Modules\Students\Models\Student;
 use App\Support\Authorization\AccessDecision;
@@ -15,6 +18,7 @@ use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
 use App\Support\Identifiers\RandomIdentifier;
+use App\Support\MoneyAmount;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -45,8 +49,12 @@ final class MaintainInstallmentPlan
         try {
             return $this->idempotency->execute('finance.installment.propose', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($proposer, $studentId, $offeringId, $amount, $installmentsCount, $firstDueOn, $scheduleRef): array {
-                    $this->require($proposer, self::CAPABILITY_PROPOSE);
                     $this->validate($studentId, $offeringId, $amount, $installmentsCount, $firstDueOn, $scheduleRef);
+                    $targetBranches = $this->branchesForTarget($studentId, $offeringId);
+                    foreach ($targetBranches as $branch) {
+                        $this->require($proposer, self::CAPABILITY_PROPOSE, $branch->structureScope());
+                    }
+                    $provenance = $this->provenanceForBranches($targetBranches);
                     if (EnrollmentInstallmentPlan::query()->where('schedule_ref', $scheduleRef)->exists()) {
                         throw BusinessRejection::forCode('finance.installment_schedule_exists', 'this installment schedule reference already exists');
                     }
@@ -64,6 +72,7 @@ final class MaintainInstallmentPlan
                     ]);
                     $event = $this->audit->record($proposer->actorId, 'finance.installment.propose', 'enrollment_installment_plan', $plan->id, null, [
                         'student_id' => $studentId, 'amount' => $amount, 'schedule_ref' => $scheduleRef,
+                        'branch_id' => $provenance['branch_id'], 'organization_id' => $provenance['organization_id'],
                     ]);
 
                     return ['plan_id' => $plan->id, 'correlation_id' => $event->correlation_id];
@@ -82,10 +91,15 @@ final class MaintainInstallmentPlan
         try {
             return $this->idempotency->execute('finance.installment.approve', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($approver, $plan): array {
-                    $this->require($approver, self::CAPABILITY_APPROVE);
+                    FinancialCoverageLock::acquire((string) $plan->student_id);
 
                     /** @var EnrollmentInstallmentPlan $locked */
                     $locked = EnrollmentInstallmentPlan::query()->whereKey($plan->id)->lockForUpdate()->firstOrFail();
+                    $targetBranches = $this->branchesForTarget($locked->student_id, $locked->offering_id);
+                    foreach ($targetBranches as $branch) {
+                        $this->require($approver, self::CAPABILITY_APPROVE, $branch->structureScope());
+                    }
+                    $provenance = $this->provenanceForBranches($targetBranches);
                     if ($locked->lifecycle_state !== EnrollmentInstallmentPlan::STATE_PROPOSED) {
                         throw BusinessRejection::forCode('finance.installment_not_proposed', 'only a proposed installment plan can be approved');
                     }
@@ -100,7 +114,10 @@ final class MaintainInstallmentPlan
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
                     $locked->forceFill(['lifecycle_state' => EnrollmentInstallmentPlan::STATE_APPROVED, 'approved_by' => $approver->actorId, 'approved_at' => now()]);
                     $locked->save();
-                    $event = $this->audit->record($approver->actorId, 'finance.installment.approve', 'enrollment_installment_plan', $locked->id, $before, ['lifecycle_state' => EnrollmentInstallmentPlan::STATE_APPROVED]);
+                    $event = $this->audit->record($approver->actorId, 'finance.installment.approve', 'enrollment_installment_plan', $locked->id, $before, [
+                        'lifecycle_state' => EnrollmentInstallmentPlan::STATE_APPROVED,
+                        'branch_id' => $provenance['branch_id'], 'organization_id' => $provenance['organization_id'],
+                    ]);
 
                     return ['plan_id' => $locked->id, 'lifecycle_state' => EnrollmentInstallmentPlan::STATE_APPROVED, 'correlation_id' => $event->correlation_id];
                 }),
@@ -115,7 +132,7 @@ final class MaintainInstallmentPlan
         if ($scheduleRef === '') {
             throw BusinessRejection::forCode('finance.installment_schedule_ref', 'an installment plan requires its schedule reference');
         }
-        if (! is_numeric($amount) || (float) $amount <= 0) {
+        if (! MoneyAmount::positive($amount)) {
             throw BusinessRejection::forCode('finance.installment_amount', 'the installment plan amount must be a positive number');
         }
         if ($installmentsCount <= 0) {
@@ -129,9 +146,61 @@ final class MaintainInstallmentPlan
         }
     }
 
-    private function require(Actor $actor, string $capability): void
+    /** @return list<Branch> */
+    private function branchesForTarget(string $studentId, ?string $offeringId): array
     {
-        $outcome = $this->access->decide($actor, $capability, null);
+        $studentBranch = $this->branchForStudent($studentId);
+        if ($studentBranch === null) {
+            throw BusinessRejection::forCode('finance.installment_provenance_required', 'an installment plan requires known student branch provenance');
+        }
+        $branches = [$studentBranch->id => $studentBranch];
+        if ($offeringId !== null && $offeringId !== '') {
+            $branchId = trim((string) Offering::query()->whereKey($offeringId)->value('branch_id'));
+            $offeringBranch = $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
+            if ($offeringBranch === null) {
+                throw BusinessRejection::forCode('finance.installment_provenance_required', 'an installment plan offering requires known branch provenance');
+            }
+            $branches[$offeringBranch->id] = $offeringBranch;
+        }
+
+        return array_values($branches);
+    }
+
+    private function branchForStudent(string $studentId): ?Branch
+    {
+        $branchId = RecordBranch::studentBranchForId($studentId);
+
+        return $branchId === null ? null : Branch::query()->whereKey($branchId)->first();
+    }
+
+    /** @param list<Branch> $branches @return array{branch_id: string|null, organization_id: string|null} */
+    private function provenanceForBranches(array $branches): array
+    {
+        $branchIds = [];
+        $organizationIds = [];
+        foreach ($branches as $branch) {
+            if ($branch->lifecycle_state !== 'active') {
+                throw BusinessRejection::forCode('finance.installment_provenance_required', 'an installment target requires active branch provenance');
+            }
+            $scope = $branch->structureScope();
+            if ($scope->organizationId === '') {
+                throw BusinessRejection::forCode('finance.installment_provenance_required', 'an installment target requires active campus organization provenance');
+            }
+            $branchIds[] = (string) $branch->id;
+            $organizationIds[] = $scope->organizationId;
+        }
+        $branchIds = array_values(array_unique($branchIds));
+        $organizationIds = array_values(array_unique($organizationIds));
+
+        return [
+            'branch_id' => count($branchIds) === 1 ? $branchIds[0] : null,
+            'organization_id' => count($organizationIds) === 1 ? $organizationIds[0] : null,
+        ];
+    }
+
+    private function require(Actor $actor, string $capability, \App\Support\Authorization\StructureScope $scope): void
+    {
+        $outcome = $this->access->decide($actor, $capability, $scope);
         if (! $outcome->allowed) {
             throw AuthorizationDenied::forCode('finance.installment_denied', $outcome->reason);
         }

@@ -21,7 +21,9 @@ use App\Modules\Academic\Placement\Models\PlacementTestVersion;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Crm\Domain\CrmInteractionTraceRecorder;
+use App\Modules\Crm\Models\Visitor;
 use App\Modules\Identity\Models\Person;
+use App\Modules\Organization\Models\Branch;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
@@ -65,6 +67,21 @@ final class ManagePlacementProfile
                     if (Person::query()->whereKey($personId)->doesntExist()) {
                         throw BusinessRejection::forCode('placement.person_unknown', 'a placement profile requires a known person');
                     }
+                    $visitorId = $visitorId === null ? null : trim($visitorId);
+                    $branchId = $branchId === null ? null : trim($branchId);
+                    if ($visitorId !== null && $visitorId !== '') {
+                        /** @var Visitor|null $visitor */
+                        $visitor = Visitor::query()->whereKey($visitorId)->first();
+                        if ($visitor === null) {
+                            throw BusinessRejection::forCode('placement.visitor_unknown', 'the referenced CRM visitor does not exist');
+                        }
+                        if ($visitor->person_id === null || $visitor->person_id !== $personId) {
+                            throw BusinessRejection::forCode('placement.visitor_person_mismatch', 'the placement profile visitor must belong to the profile person');
+                        }
+                        if ($visitor->origin_branch_id !== null && $visitor->origin_branch_id !== $branchId) {
+                            throw BusinessRejection::forCode('placement.visitor_branch_mismatch', 'the placement profile branch must match the visitor provenance');
+                        }
+                    }
                     if ($programVersionId !== null && ProgramVersion::query()->whereKey($programVersionId)->doesntExist()) {
                         throw BusinessRejection::forCode('placement.program_version_unknown', 'referenced program version does not exist');
                     }
@@ -84,6 +101,7 @@ final class ManagePlacementProfile
                     ]);
                     $event = $this->audit->record($actor->actorId, 'placement.profile.open', 'placement_profile', $profile->id, null, [
                         'person_id' => $personId, 'visitor_id' => $visitorId,
+                        ...$this->branchProvenance($profile->originating_branch_id),
                     ]);
 
                     return ['profile_id' => $profile->id, 'correlation_id' => $event->correlation_id];
@@ -144,6 +162,7 @@ final class ManagePlacementProfile
                     ]);
                     $event = $this->audit->record($actor->actorId, 'placement.attempt.start', 'placement_attempt', $attempt->id, null, [
                         'profile_id' => $profile->id, 'test_version_id' => $version->id, 'delivery' => $deliveryMode,
+                        ...$this->branchProvenance($attempt->originating_branch_id),
                     ]);
 
                     return ['attempt_id' => $attempt->id, 'correlation_id' => $event->correlation_id];
@@ -235,8 +254,9 @@ final class ManagePlacementProfile
                     $this->markScoredIfComplete($actor, $locked->profile_id);
                     $event = $this->audit->record($actor->actorId, 'placement.attempt.submit', 'placement_attempt', $locked->id, null, [
                         'delivery' => 'digital', 'duration' => $duration, 'tamper' => $tamper,
+                        ...$this->branchProvenance($locked->originating_branch_id),
                     ]);
-                    $this->traceVisitor($actor, $locked->id, $locked->profile_id);
+                    $this->traceVisitor($actor, $locked->id, $locked->profile_id, $event->id);
 
                     return ['attempt_id' => $locked->id, 'tamper_flagged' => $tamper, 'correlation_id' => $event->correlation_id];
                 }),
@@ -276,8 +296,9 @@ final class ManagePlacementProfile
                     ])->save();
                     $event = $this->audit->record($actor->actorId, 'placement.attempt.submit', 'placement_attempt', $locked->id, null, [
                         'delivery' => 'physical', 'duration' => $duration,
+                        ...$this->branchProvenance($locked->originating_branch_id),
                     ]);
-                    $this->traceVisitor($actor, $locked->id, $locked->profile_id);
+                    $this->traceVisitor($actor, $locked->id, $locked->profile_id, $event->id);
 
                     return ['attempt_id' => $locked->id, 'correlation_id' => $event->correlation_id];
                 }),
@@ -375,8 +396,9 @@ final class ManagePlacementProfile
                     $this->markScoredIfComplete($actor, $locked->profile_id);
                     $event = $this->audit->record($actor->actorId, 'placement.attempt.submit.physical.answers', 'placement_attempt', $locked->id, null, [
                         'delivery' => 'physical', 'duration' => $duration, 'tamper' => $tamper,
+                        ...$this->branchProvenance($locked->originating_branch_id),
                     ]);
-                    $this->traceVisitor($actor, $locked->id, $locked->profile_id);
+                    $this->traceVisitor($actor, $locked->id, $locked->profile_id, $event->id);
 
                     return ['attempt_id' => $locked->id, 'tamper_flagged' => $tamper, 'correlation_id' => $event->correlation_id];
                 }),
@@ -401,7 +423,10 @@ final class ManagePlacementProfile
                         throw BusinessRejection::forCode('placement.attempt_not_open', 'only an unsent attempt can be cancelled');
                     }
                     $locked->forceFill(['status' => PlacementAttempt::STATUS_CANCELLED])->save();
-                    $event = $this->audit->record($actor->actorId, 'placement.attempt.cancel', 'placement_attempt', $locked->id, ['status' => $locked->getOriginal('status')], ['status' => PlacementAttempt::STATUS_CANCELLED]);
+                    $event = $this->audit->record($actor->actorId, 'placement.attempt.cancel', 'placement_attempt', $locked->id, ['status' => $locked->getOriginal('status')], [
+                        'status' => PlacementAttempt::STATUS_CANCELLED,
+                        ...$this->branchProvenance($locked->originating_branch_id),
+                    ]);
 
                     return ['attempt_id' => $locked->id, 'lifecycle_state' => PlacementAttempt::STATUS_CANCELLED, 'correlation_id' => $event->correlation_id];
                 }),
@@ -436,6 +461,7 @@ final class ManagePlacementProfile
                     $locked->forceFill(['lifecycle_state' => $toState])->save();
                     $event = $this->audit->record($actor->actorId, 'placement.profile.transition', 'placement_profile', $locked->id, $before, [
                         'lifecycle_state' => $toState,
+                        ...$this->branchProvenance($locked->originating_branch_id),
                     ]);
 
                     return ['profile_id' => $locked->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
@@ -452,7 +478,11 @@ final class ManagePlacementProfile
         $profile = PlacementProfile::query()->findOrFail($profileId);
         if ($profile->lifecycle_state === PlacementProfile::STATE_DRAFT && $this->hasCompleteScoring($profileId)) {
             $profile->forceFill(['lifecycle_state' => PlacementProfile::STATE_SCORED])->save();
-            $this->audit->record($actor->actorId, 'placement.profile.transition', 'placement_profile', $profileId, ['lifecycle_state' => PlacementProfile::STATE_DRAFT], ['lifecycle_state' => PlacementProfile::STATE_SCORED]);
+            $profile = PlacementProfile::query()->whereKey($profileId)->first();
+            $this->audit->record($actor->actorId, 'placement.profile.transition', 'placement_profile', $profileId, ['lifecycle_state' => PlacementProfile::STATE_DRAFT], [
+                'lifecycle_state' => PlacementProfile::STATE_SCORED,
+                ...$this->branchProvenance($profile?->originating_branch_id),
+            ]);
         }
     }
 
@@ -497,6 +527,25 @@ final class ManagePlacementProfile
         }
     }
 
+    /** @return array{branch_id: ?string, campus_id: ?string, organization_id: ?string} */
+    private function branchProvenance(?string $branchId): array
+    {
+        $id = trim((string) ($branchId ?? ''));
+        if ($id === '') {
+            return ['branch_id' => null, 'campus_id' => null, 'organization_id' => null];
+        }
+        $branch = Branch::query()->whereKey($id)->first();
+        if ($branch === null || $branch->lifecycle_state !== 'active') {
+            throw BusinessRejection::forCode('placement.profile_provenance_required', 'a placement event requires an active branch provenance');
+        }
+        $scope = $branch->structureScope();
+        if ($scope->organizationId === '' || $scope->campusId === null) {
+            throw BusinessRejection::forCode('placement.profile_provenance_required', 'a placement event requires active campus organization provenance');
+        }
+
+        return ['branch_id' => (string) $branch->id, 'campus_id' => (string) $scope->campusId, 'organization_id' => $scope->organizationId];
+    }
+
     private function requireVersionPublished(PlacementTestVersion $version): void
     {
         if ($version->lifecycle_state !== 'published') {
@@ -519,7 +568,7 @@ final class ManagePlacementProfile
         $this->access->require($actor, self::CAPABILITY, $attempt->originating_branch_id);
     }
 
-    private function traceVisitor(Actor $actor, string $attemptId, string $profileId): void
+    private function traceVisitor(Actor $actor, string $attemptId, string $profileId, string $authorityAuditEventId): void
     {
         $profile = PlacementProfile::query()->find($profileId);
         if ($profile === null || $profile->person_id === null) {
@@ -529,6 +578,6 @@ final class ManagePlacementProfile
         if ($visitorId === null) {
             return;
         }
-        $this->crmTrace->record($actor, $visitorId, 'outbound', 'placement', 'other', 'placement attempt submitted for the person linked to this lead.', CarbonImmutable::now(), placementAttemptId: $attemptId);
+        $this->crmTrace->record($actor, $visitorId, 'outbound', 'placement', 'other', 'placement attempt submitted for the person linked to this lead.', CarbonImmutable::now(), placementAttemptId: $attemptId, authorityAuditEventId: $authorityAuditEventId);
     }
 }

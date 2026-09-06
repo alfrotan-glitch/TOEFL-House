@@ -194,6 +194,7 @@
                             <form method="POST" action="{{ route('students.guardian.verify', $guardian->id) }}" style="display:inline">
                                 @csrf
                                 <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <input name="evidence_ref" type="text" placeholder="Evidence reference" required>
                                 <button type="submit" class="btn small">Verify</button>
                             </form>
                         @endif

@@ -52,6 +52,7 @@ final class RequeueDelivery
                         'attempts' => 0,
                         'requeues' => $locked->requeues + 1,
                         'next_run_at' => null,
+                        'lease_until' => null,
                         'last_error' => null,
                     ]);
                     $locked->save();

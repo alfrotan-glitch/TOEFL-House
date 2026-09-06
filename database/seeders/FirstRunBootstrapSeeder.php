@@ -11,6 +11,8 @@ use App\Modules\Access\Models\PositionAssignment;
 use App\Modules\Access\Models\Role;
 use App\Modules\Identity\Models\Person;
 use App\Modules\Identity\Models\UserAccount;
+use App\Modules\Integrations\Domain\JobCatalog;
+use App\Modules\Integrations\Models\JobSchedule;
 use App\Modules\Organization\Models\Organization;
 use App\Support\Identifiers\RandomIdentifier;
 use Carbon\CarbonImmutable;
@@ -54,24 +56,25 @@ final class FirstRunBootstrapSeeder extends Seeder
      * @var list<string>
      */
     public const OWNER_CAPABILITIES = [
-        'academic.appeal_manage', 'academic.approve_result', 'academic.assess', 'academic.attendance', 'academic.certify', 'academic.completion', 'academic.completion_approve', 'academic.enroll', 'academic.enroll_approve', 'academic.moderate', 'academic.progression_approve', 'academic.progression_propose', 'academic.progression_review', 'academic.release', 'academic.schedule', 'academic.skill', 'academic.structure', 'academic.transcript_issue',
+        'academic.appeal_manage', 'academic.approve_result', 'academic.assess', 'academic.attendance', 'academic.teacher_manage', 'academic.teacher_approve', 'academic.certify', 'academic.completion', 'academic.completion_approve', 'academic.enroll', 'academic.enroll_approve', 'academic.moderate', 'academic.progression_approve', 'academic.progression_propose', 'academic.progression_review', 'academic.release', 'academic.schedule', 'academic.skill', 'academic.structure', 'academic.transcript_issue',
         'access.approve_org_wide', 'access.assign_position', 'access.define_policy', 'access.delegate', 'access.grant', 'access.revoke',
         'admissions.approve', 'admissions.initiate', 'admissions.register', 'admissions.review',
-        'communication.send',
-        'crm.automation', 'crm.catalog', 'crm.followup', 'crm.visitor', 'crm.visitor.convert',
+        'communication.notification.read', 'communication.send',
+        'crm.automation', 'crm.catalog', 'crm.followup', 'crm.visitor',
         'documents.classify', 'documents.register', 'documents.retention', 'documents.verify',
         'facilities.work', 'facilities.work_approve',
-        'finance.chart', 'finance.credit', 'finance.credit_approve', 'finance.discount', 'finance.discount_approve', 'finance.fund', 'finance.fund_allocate', 'finance.gate_exception', 'finance.gate_exception_approve', 'finance.installment', 'finance.installment_approve', 'finance.journal', 'finance.obligation', 'finance.opening.approve', 'finance.opening.prepare', 'finance.payment', 'finance.period', 'finance.reconcile', 'finance.reconcile_approve', 'finance.refund', 'finance.refund_approve',
+        'finance.chart', 'finance.correct', 'finance.correct_approve', 'finance.credit', 'finance.credit_approve', 'finance.discount', 'finance.discount_approve', 'finance.employment_settlement', 'finance.fund', 'finance.fund_allocate', 'finance.gate_exception', 'finance.gate_exception_approve', 'finance.installment', 'finance.installment_approve', 'finance.journal', 'finance.obligation', 'finance.payroll_liability', 'finance.opening.approve', 'finance.opening.prepare', 'finance.payment', 'finance.period', 'finance.reconcile', 'finance.reconcile_approve', 'finance.refund', 'finance.refund_approve',
         'governance.config',
         'hr.contract', 'hr.contract.approve', 'hr.contract.prepare', 'hr.employ', 'hr.leave_approve', 'hr.leave_request', 'hr.scale', 'hr.terminate',
         'identity.admin', 'identity.verify',
+        'organization.structure.approve', 'organization.structure.initiate', 'organization.structure.review',
         'integrations.dispatch', 'integrations.endpoint', 'integrations.inbound', 'integrations.jobs', 'integrations.process', 'integrations.review',
-        'payroll.adjust', 'payroll.approve', 'payroll.calculate', 'payroll.clear_finance', 'payroll.clear_hr', 'payroll.period', 'payroll.settle', 'payroll.settle_approve',
+        'payroll.adjust', 'payroll.approve', 'payroll.calculate', 'payroll.clear_finance', 'payroll.clear_hr', 'payroll.period', 'payroll.resolve_held', 'payroll.settle',
         'placement.approve', 'placement.catalog', 'placement.conduct', 'placement.moderate', 'placement.recommend', 'placement.release', 'placement.score',
         'privacy.approve_bulk_export', 'privacy.consent', 'privacy.define_purpose', 'privacy.disclose', 'privacy.export',
         'reporting.catalog', 'reporting.compute', 'reporting.dashboard', 'reporting.reconcile', 'reporting.run',
         'resources.asset', 'resources.books', 'resources.dispose_approve', 'resources.dispose_request',
-        'students.communication', 'students.guardian', 'students.hold', 'students.manage', 'students.reactivate', 'students.transfer',
+        'students.communication', 'students.guardian', 'students.hold', 'students.manage', 'students.reactivate', 'students.transfer', 'workflow.queue.manage', 'workflow.start', 'workflow.work',
     ];
 
     public function run(): void
@@ -100,12 +103,23 @@ final class FirstRunBootstrapSeeder extends Seeder
                 'id' => RandomIdentifier::new(),
                 'legal_name' => $name,
                 'date_of_birth' => $birthdate,
+                'verification_state' => Person::VERIFICATION_UNVERIFIED,
+                'identity_key' => null,
+                'identity_evidence_ref' => null,
+                'verified_by' => null,
+                'verified_at' => null,
+            ]);
+            // The bootstrap owner is self-verifying, but the self-reference
+            // cannot be inserted before the person row exists. Complete the
+            // governed verification as a second statement so the identity
+            // trigger sees an existing durable verifier.
+            $ownerPerson->forceFill([
                 'verification_state' => Person::VERIFICATION_VERIFIED,
                 'identity_key' => 'owner-'.$username,
                 'identity_evidence_ref' => 'first-run-bootstrap/'.$username,
-                'verified_by' => 'first-run-bootstrap',
+                'verified_by' => $ownerPerson->id,
                 'verified_at' => now()->toDateTimeString(),
-            ]);
+            ])->save();
 
             $organization = Organization::query()->create([
                 'id' => RandomIdentifier::new(),
@@ -165,6 +179,21 @@ final class FirstRunBootstrapSeeder extends Seeder
                 'password_hash' => Hash::make($password),
                 'account_state' => UserAccount::STATE_ACTIVE,
             ]);
+
+            // Core scheduled jobs are durable module configuration, not only
+            // Laravel scheduler definitions. They are created by the
+            // bootstrap owner so the explicit scheduler entrypoint has a
+            // registered occurrence to enqueue on a fresh deployment.
+            foreach (JobCatalog::keys() as $jobKey) {
+                JobSchedule::query()->create([
+                    'id' => RandomIdentifier::new(),
+                    'job_key' => $jobKey,
+                    'name' => $jobKey,
+                    'schedule_expr' => '* * * * *',
+                    'enabled' => true,
+                    'created_by' => $ownerPerson->id,
+                ]);
+            }
         });
 
         $this->command?->info('First-run bootstrap complete: organization "The TOEFL House", Owner role ('.count(self::OWNER_CAPABILITIES).' capabilities) and account "'.$username.'" created.');

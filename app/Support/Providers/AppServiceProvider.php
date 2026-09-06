@@ -11,6 +11,7 @@ use App\Modules\Integrations\Domain\Transport;
 use App\Modules\Organization\Models\Branch;
 use App\Modules\Organization\Models\Organization;
 use App\Support\Authorization\AccessDecision;
+use App\Support\MoneyAmount;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
@@ -44,11 +45,18 @@ final class AppServiceProvider extends ServiceProvider
         // not a money format — it admits '1e2', ' 1.5', and third-decimal
         // values like '0.001' (which the DB then rounds to 0.00 and its
         // CHECK rejects with a raw SQL error — a 500, not a 422). One
-        // authoritative format rule for every money field: digits, optional
-        // 1–2 decimals, at most 12 integer digits (decimal(14,2) capacity).
+        // authoritative format rule for ordinary money fields: digits,
+        // optional 1–2 decimals, at most 12 integer digits (decimal(14,2)
+        // capacity). Signed Payroll adjustment evidence uses the explicit
+        // signed_money rule below; it is not a general negative-money escape.
         Validator::extend('money', static function (string $attribute, mixed $value): bool {
-            return preg_match('/^\d{1,12}(\.\d{1,2})?$/', (string) $value) === 1;
+            return MoneyAmount::valid((string) $value);
         }, 'The :attribute must be an amount with at most two decimal places (for example 12.50).');
+        Validator::extend('signed_money', static function (string $attribute, mixed $value): bool {
+            $text = (string) $value;
+
+            return MoneyAmount::signed($text);
+        }, 'The :attribute must be a signed amount with at most two decimal places.');
 
         // Print documents carry the organization/branch identity in a shared
         // header, resolved once per render from the authoritative structure.

@@ -24,10 +24,17 @@ final class CommunicationController extends Controller
 {
     public function index(): View
     {
+        $this->requireOrganizationRead('communication.send', 'communication.console.index');
+        $visibleBranchIds = $this->authorizedBranches('communication.send');
+        $people = Person::query()
+            ->where('verification_state', 'verified')
+            ->whereIn('home_branch_id', $visibleBranchIds)
+            ->orderBy('legal_name')->limit(300)->get();
+
         return view('communication.index', [
             'purposes' => ConsentPurpose::query()->orderBy('name')->limit(200)->get(),
-            'people' => Person::query()->where('verification_state', 'verified')->orderBy('legal_name')->limit(300)->get(),
-            'messages' => Message::query()->orderByDesc('id')->limit(200)->get(),
+            'people' => $people,
+            'messages' => Message::query()->whereIn('subject_person_id', $people->pluck('id')->all())->orderByDesc('id')->limit(200)->get(),
         ]);
     }
 

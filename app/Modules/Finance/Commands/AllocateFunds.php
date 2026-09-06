@@ -6,16 +6,20 @@ namespace App\Modules\Finance\Commands;
 
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
+use App\Modules\Finance\Domain\FinancialCoverageLock;
 use App\Modules\Finance\Models\FundAllocation;
+use App\Modules\Finance\Models\FinancialCorrection;
 use App\Modules\Finance\Models\FundingSource;
 use App\Modules\Finance\Models\Obligation;
 use App\Modules\Finance\Models\ObligationLine;
+use App\Modules\Organization\Models\Branch;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
 use App\Support\Identifiers\RandomIdentifier;
+use App\Support\MoneyAmount;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -51,7 +55,7 @@ final class AllocateFunds
                     if ($name === '' || $agreementRef === '') {
                         throw BusinessRejection::forCode('finance.fund_terms', 'a funding source requires a name and its agreement reference');
                     }
-                    if (! is_numeric($committedAmount) || (float) $committedAmount <= 0) {
+                    if (! MoneyAmount::positive($committedAmount)) {
                         throw BusinessRejection::forCode('finance.fund_committed', 'the committed pool must be a positive number');
                     }
                     if ($restrictedCategory !== null && $restrictedCategory !== '' && ($restrictionNote === null || $restrictionNote === '')) {
@@ -87,30 +91,58 @@ final class AllocateFunds
         try {
             return $this->idempotency->execute('finance.fund.allocate', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $fund, $line, $amount, $reason): array {
-                    $this->require($actor, self::CAPABILITY_ALLOCATE);
                     if ($reason === '') {
                         throw BusinessRejection::forCode('finance.fund_allocation_reason', 'a fund allocation requires a reason');
                     }
-                    if (! is_numeric($amount) || (float) $amount <= 0) {
+                    if (! MoneyAmount::positive($amount)) {
                         throw BusinessRejection::forCode('finance.fund_allocation_amount', 'the fund allocation amount must be a positive number');
                     }
+                    $studentId = (string) ObligationLine::query()
+                        ->join('obligations', 'obligations.id', '=', 'obligation_lines.obligation_id')
+                        ->where('obligation_lines.id', $line->id)
+                        ->value('obligations.student_id');
+                    FinancialCoverageLock::acquire($studentId);
 
                     /** @var FundingSource $lockedFund */
                     $lockedFund = FundingSource::query()->whereKey($fund->id)->lockForUpdate()->firstOrFail();
+                    /** @var ObligationLine $lockedLine */
+                    $lockedLine = ObligationLine::query()->whereKey($line->id)->lockForUpdate()->firstOrFail();
                     $restriction = trim((string) $lockedFund->restricted_category);
-                    if ($restriction !== '' && $restriction !== trim((string) $line->category)) {
-                        throw BusinessRejection::forCode('finance.fund_restriction', sprintf('the fund is restricted to %s; the obligation line is %s', $restriction, $line->category));
+                    if ($restriction !== '' && $restriction !== trim((string) $lockedLine->category)) {
+                        throw BusinessRejection::forCode('finance.fund_restriction', sprintf('the fund is restricted to %s; the obligation line is %s', $restriction, $lockedLine->category));
                     }
 
-                    $utilized = FundAllocation::query()->where('fund_id', $lockedFund->id)->sum('amount');
-                    $available = bcsub((string) $lockedFund->committed_amount, (string) $utilized, 2);
+                    $fundAllocationIds = FundAllocation::query()->where('fund_id', $lockedFund->id)->pluck('id');
+                    $utilized = (string) FundAllocation::query()->whereIn('id', $fundAllocationIds)->sum('amount');
+                    $reversed = (string) FinancialCorrection::query()
+                        ->whereIn('fund_allocation_id', $fundAllocationIds)
+                        ->where('correction_type', FinancialCorrection::TYPE_FUND_ALLOCATION_REVERSAL)
+                        ->where('lifecycle_state', FinancialCorrection::STATE_RECORDED)
+                        ->sum('amount');
+                    $available = bcsub((string) $lockedFund->committed_amount, bcsub($utilized, $reversed, 2), 2);
                     if (bccomp($amount, $available, 2) === 1) {
                         throw BusinessRejection::forCode('finance.fund_exhausted', sprintf('the allocation exceeds the unutilized pool remainder %s', $available));
                     }
 
                     /** @var Obligation $obligation */
-                    $obligation = Obligation::query()->whereKey($line->obligation_id)->lockForUpdate()->firstOrFail();
-                    $lineRemaining = bcsub((string) $line->amount, (string) FundAllocation::query()->where('obligation_line_id', $line->id)->sum('amount'), 2);
+                    $obligation = Obligation::query()->whereKey($lockedLine->obligation_id)->lockForUpdate()->firstOrFail();
+                    if (trim((string) $obligation->student_id) !== trim($studentId)) {
+                        throw BusinessRejection::forCode('finance.fund_allocation_student_mismatch', 'the fund allocation line student changed while the coverage lock was acquired');
+                    }
+                    $branchId = trim((string) ($obligation->current_home_branch_id ?? $obligation->originating_branch_id ?? ''));
+                    $branch = $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
+                    if ($branch === null) {
+                        throw BusinessRejection::forCode('finance.fund_allocation_provenance_required', 'a fund allocation requires known obligation branch provenance');
+                    }
+                    $this->require($actor, self::CAPABILITY_ALLOCATE, $branch->structureScope());
+                    $lineAllocationIds = FundAllocation::query()->where('obligation_line_id', $lockedLine->id)->pluck('id');
+                    $lineFunded = (string) FundAllocation::query()->whereIn('id', $lineAllocationIds)->sum('amount');
+                    $lineReversed = (string) FinancialCorrection::query()
+                        ->whereIn('fund_allocation_id', $lineAllocationIds)
+                        ->where('correction_type', FinancialCorrection::TYPE_FUND_ALLOCATION_REVERSAL)
+                        ->where('lifecycle_state', FinancialCorrection::STATE_RECORDED)
+                        ->sum('amount');
+                    $lineRemaining = bcsub((string) $lockedLine->amount, bcsub($lineFunded, $lineReversed, 2), 2);
                     if (bccomp($amount, $lineRemaining, 2) === 1) {
                         throw BusinessRejection::forCode('finance.fund_exceeds_line', sprintf('the allocation exceeds the uncovered line remainder %s', $lineRemaining));
                     }
@@ -121,13 +153,15 @@ final class AllocateFunds
                     $allocation = FundAllocation::query()->create([
                         'id' => RandomIdentifier::new(),
                         'fund_id' => $lockedFund->id,
-                        'obligation_line_id' => $line->id,
+                        'obligation_line_id' => $lockedLine->id,
                         'amount' => $amount,
                         'reason' => $reason,
                         'allocated_by' => $actor->actorId,
+                        'originating_branch_id' => $obligation->originating_branch_id,
+                        'current_home_branch_id' => $obligation->current_home_branch_id,
                     ]);
                     $event = $this->audit->record($actor->actorId, 'finance.fund.allocate', 'fund_allocation', $allocation->id, null, [
-                        'fund_id' => $lockedFund->id, 'obligation_line_id' => $line->id, 'amount' => $amount,
+                        'fund_id' => $lockedFund->id, 'obligation_line_id' => $line->id, 'branch_id' => $branch->id, 'organization_id' => $branch->structureScope()->organizationId, 'amount' => $amount,
                     ]);
 
                     return ['allocation_id' => $allocation->id, 'correlation_id' => $event->correlation_id];
@@ -138,9 +172,9 @@ final class AllocateFunds
         }
     }
 
-    private function require(Actor $actor, string $capability): void
+    private function require(Actor $actor, string $capability, ?\App\Support\Authorization\StructureScope $scope = null): void
     {
-        $outcome = $this->access->decide($actor, $capability, null);
+        $outcome = $this->access->decide($actor, $capability, $scope);
         if (! $outcome->allowed) {
             throw AuthorizationDenied::forCode('finance.fund_denied', $outcome->reason);
         }

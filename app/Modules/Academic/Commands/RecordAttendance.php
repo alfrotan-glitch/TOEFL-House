@@ -6,10 +6,13 @@ namespace App\Modules\Academic\Commands;
 
 use App\Modules\Academic\Domain\AcademicAccess;
 use App\Modules\Academic\Domain\RecordBranch;
+use App\Modules\Academic\Domain\TeacherAuthority;
 use App\Modules\Academic\Models\AttendanceFact;
 use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\ClassSession;
 use App\Modules\Academic\Models\Enrollment;
+use App\Modules\Organization\Models\Branch;
+use App\Modules\Students\Domain\StudentOperationalEligibility;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Support\Authorization\Actor;
@@ -17,6 +20,7 @@ use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
 use App\Support\Identifiers\RandomIdentifier;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -33,6 +37,8 @@ final class RecordAttendance
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
+        private readonly StudentOperationalEligibility $studentEligibility,
+        private readonly TeacherAuthority $teacherAuthority,
     ) {}
 
     /** @return array{fact_id: string, correlation_id: string} */
@@ -70,14 +76,28 @@ final class RecordAttendance
                     }
                     /** @var ClassModel|null $class */
                     $class = ClassModel::query()->find($session->class_id);
-                    if ($class === null || $class->lifecycle_state !== 'active') {
+                    if ($class === null) {
+                        throw BusinessRejection::forCode('academic.attendance_class_missing', 'attendance requires an authoritative session class');
+                    }
+                    if ($class->lifecycle_state !== 'active' && $correctsId === null) {
                         throw BusinessRejection::forCode('academic.attendance_class_not_active', 'attendance is taken only on sessions of an active class');
                     }
+                    $this->teacherAuthority->requireActorDeliveryAuthority(
+                        $recorder,
+                        $class,
+                        CarbonImmutable::parse((string) $session->scheduled_on),
+                        $session->skill_id !== null ? (string) $session->skill_id : null,
+                        self::CAPABILITY,
+                        'academic.attendance_denied',
+                    );
                     if ($lockedEnrollment->class_id !== $session->class_id) {
                         throw BusinessRejection::forCode('academic.attendance_wrong_class', 'the enrollment does not belong to the session class');
                     }
-                    if ($lockedEnrollment->lifecycle_state !== 'active') {
+                    if ($lockedEnrollment->lifecycle_state !== 'active' && $correctsId === null) {
                         throw BusinessRejection::forCode('academic.attendance_enrollment_not_active', 'attendance attaches only to an active enrollment');
+                    }
+                    if ($correctsId === null) {
+                        $this->studentEligibility->assertActive((string) $lockedEnrollment->student_id, 'academic.attendance_student_not_active');
                     }
                     if ($correctsId !== null) {
                         if ($reason === null || $reason === '') {
@@ -85,8 +105,8 @@ final class RecordAttendance
                         }
                         /** @var AttendanceFact|null $original */
                         $original = AttendanceFact::query()->find($correctsId);
-                        if ($original === null || $original->enrollment_id !== $lockedEnrollment->id) {
-                            throw BusinessRejection::forCode('academic.attendance_correction_target', 'a correction must target a fact of the same enrollment');
+                        if ($original === null || $original->enrollment_id !== $lockedEnrollment->id || $original->session_id !== $session->id) {
+                            throw BusinessRejection::forCode('academic.attendance_correction_target', 'a correction must target a fact of the same enrollment and session');
                         }
                     }
 
@@ -99,12 +119,14 @@ final class RecordAttendance
                         'reason' => $reason,
                         'recorded_by' => $recorder->actorId,
                     ]);
+                    $provenance = $this->attendanceProvenance($lockedEnrollment);
                     $event = $this->audit->record($recorder->actorId, $operation, 'attendance_fact', $fact->id, null, [
                         'session_id' => $session->id,
                         'enrollment_id' => $lockedEnrollment->id,
                         'status' => $status,
                         'corrects_id' => $correctsId,
                         'reason' => $reason,
+                        ...$provenance,
                     ]);
 
                     return $correctsId !== null
@@ -115,5 +137,21 @@ final class RecordAttendance
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $recorder, $operation, 'attendance_fact', $session->id);
         }
+    }
+
+    /** @return array{branch_id: string, campus_id: string, organization_id: string} */
+    private function attendanceProvenance(Enrollment $enrollment): array
+    {
+        $branchId = RecordBranch::enrollmentBranch($enrollment);
+        $branch = $branchId === null ? null : Branch::query()->whereKey($branchId)->first();
+        if ($branch === null || $branch->lifecycle_state !== 'active') {
+            throw BusinessRejection::forCode('academic.attendance_provenance_required', 'an attendance event requires active branch provenance');
+        }
+        $scope = $branch->structureScope();
+        if ($scope->organizationId === '' || $scope->campusId === null) {
+            throw BusinessRejection::forCode('academic.attendance_provenance_required', 'an attendance event requires active campus organization provenance');
+        }
+
+        return ['branch_id' => (string) $branch->id, 'campus_id' => (string) $scope->campusId, 'organization_id' => $scope->organizationId];
     }
 }

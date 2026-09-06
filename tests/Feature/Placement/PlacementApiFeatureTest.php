@@ -65,16 +65,16 @@ final class PlacementApiFeatureTest extends TestCase
         $this->signInAs($officer->actorId, 'placement.api');
         $this->setUpPlacementCatalog();
 
-        $this->getJson('/api/placement/tests')
+        $this->getJson('/api/v1/placement/tests')
             ->assertOk()
             ->assertJsonCount(1, 'tests')
             ->assertJsonPath('tests.0.key', 'placement-standard');
 
-        $this->getJson('/api/placement/versions')
+        $this->getJson('/api/v1/placement/versions')
             ->assertOk()
             ->assertJsonCount(1, 'versions');
 
-        $opened = $this->postJson('/api/placement/profiles', [
+        $opened = $this->postJson('/api/v1/placement/profiles', [
             'person_id' => $officer->actorId,
             'program_version_id' => $this->programVersionId,
         ], ['Idempotency-Key' => 'placement-api-open-1'])
@@ -82,11 +82,11 @@ final class PlacementApiFeatureTest extends TestCase
             ->assertJsonPath('status', 'opened');
 
         $profileId = (string) $opened->json('profile_id');
-        $this->getJson('/api/placement/profiles/'.$profileId)
+        $this->getJson('/api/v1/placement/profiles/'.$profileId)
             ->assertOk()
             ->assertJsonPath('profile.id', $profileId);
 
-        $this->getJson('/api/placement/profiles/'.$profileId.'/finance-link')
+        $this->getJson('/api/v1/placement/profiles/'.$profileId.'/finance-link')
             ->assertOk()
             ->assertJsonPath('student_id', null);
     }
@@ -102,14 +102,14 @@ final class PlacementApiFeatureTest extends TestCase
         $this->signInAs($scorer->actorId, 'placement.api.scorer');
         $this->setUpPlacementCatalog();
 
-        $opened = $this->postJson('/api/placement/profiles', [
+        $opened = $this->postJson('/api/v1/placement/profiles', [
             'person_id' => $scorer->actorId,
             'program_version_id' => $this->programVersionId,
         ], ['Idempotency-Key' => 'placement-api-open-2'])
             ->assertCreated();
         $profileId = (string) $opened->json('profile_id');
 
-        $started = $this->postJson('/api/placement/attempts', [
+        $started = $this->postJson('/api/v1/placement/attempts', [
             'profile_id' => $profileId,
             'test_version_id' => $this->testVersionId,
             'delivery_mode' => 'digital',
@@ -122,7 +122,7 @@ final class PlacementApiFeatureTest extends TestCase
         foreach ($this->questions as $questionId => $component) {
             $answers[$questionId] = in_array($component, ['grammar', 'reading', 'listening'], true) ? 'A' : 'sample response';
         }
-        $this->postJson('/api/placement/attempts/'.$attemptId.'/submit', [
+        $this->postJson('/api/v1/placement/attempts/'.$attemptId.'/submit', [
             'answers' => $answers,
         ], ['Idempotency-Key' => 'placement-api-submit-2'])
             ->assertOk()
@@ -131,7 +131,7 @@ final class PlacementApiFeatureTest extends TestCase
 
         foreach (['writing', 'speaking'] as $component) {
             $rubric = PlacementRubric::query()->where('test_version_id', $this->testVersionId)->where('component', $component)->where('cefr_ref', 'B1')->firstOrFail();
-            $this->postJson('/api/placement/sections/score', [
+            $this->postJson('/api/v1/placement/sections/score', [
                 'attempt_id' => $attemptId,
                 'section_id' => $this->sectionIds[$component],
                 'raw_score' => '60.0',
@@ -143,37 +143,37 @@ final class PlacementApiFeatureTest extends TestCase
         }
 
         $attempt = PlacementAttempt::query()->findOrFail($attemptId);
-        $this->postJson('/api/placement/profiles/'.$profileId.'/mark-scored', [], ['Idempotency-Key' => 'placement-api-mark-scored-2'])
+        $this->postJson('/api/v1/placement/profiles/'.$profileId.'/mark-scored', [], ['Idempotency-Key' => 'placement-api-mark-scored-2'])
             ->assertOk()
             ->assertJsonPath('status', 'scored');
 
         $this->switchTo($moderator->actorId, 'placement.api.moderator');
         foreach (PlacementSectionResult::query()->where('attempt_id', $attempt->id)->get() as $sectionResult) {
-            $this->postJson('/api/placement/section-results/'.$sectionResult->id.'/moderate', [], ['Idempotency-Key' => 'placement-api-moderate-'.$sectionResult->id])->assertOk();
+            $this->postJson('/api/v1/placement/section-results/'.$sectionResult->id.'/moderate', [], ['Idempotency-Key' => 'placement-api-moderate-'.$sectionResult->id])->assertOk();
         }
 
         $this->switchTo($approver->actorId, 'placement.api.approver');
         foreach (PlacementSectionResult::query()->where('attempt_id', $attempt->id)->get() as $sectionResult) {
-            $this->postJson('/api/placement/section-results/'.$sectionResult->id.'/approve', [], ['Idempotency-Key' => 'placement-api-approve-'.$sectionResult->id])->assertOk();
+            $this->postJson('/api/v1/placement/section-results/'.$sectionResult->id.'/approve', [], ['Idempotency-Key' => 'placement-api-approve-'.$sectionResult->id])->assertOk();
         }
 
         $this->switchTo($recommender->actorId, 'placement.api.recommender');
-        $this->postJson('/api/placement/profiles/'.$profileId.'/recommend', [], ['Idempotency-Key' => 'placement-api-recommend-2'])->assertOk();
+        $this->postJson('/api/v1/placement/profiles/'.$profileId.'/recommend', [], ['Idempotency-Key' => 'placement-api-recommend-2'])->assertOk();
 
         $this->switchTo($reviewer->actorId, 'placement.api.reviewer');
-        $this->postJson('/api/placement/profiles/'.$profileId.'/review', [], ['Idempotency-Key' => 'placement-api-review-2'])->assertOk();
+        $this->postJson('/api/v1/placement/profiles/'.$profileId.'/review', [], ['Idempotency-Key' => 'placement-api-review-2'])->assertOk();
 
         $this->switchTo($approver->actorId, 'placement.api.approver');
-        $this->postJson('/api/placement/profiles/'.$profileId.'/approve', [], ['Idempotency-Key' => 'placement-api-approve-profile-2'])->assertOk();
+        $this->postJson('/api/v1/placement/profiles/'.$profileId.'/approve', [], ['Idempotency-Key' => 'placement-api-approve-profile-2'])->assertOk();
 
         $this->switchTo($releaser->actorId, 'placement.api.releaser');
-        $this->postJson('/api/placement/profiles/'.$profileId.'/release', [], ['Idempotency-Key' => 'placement-api-release-2'])->assertOk();
+        $this->postJson('/api/v1/placement/profiles/'.$profileId.'/release', [], ['Idempotency-Key' => 'placement-api-release-2'])->assertOk();
 
         $this->assertSame('released', PlacementProfile::query()->findOrFail($profileId)->lifecycle_state);
 
         $appealManager = $this->grantedActor('plc-api-appeal-manager', ['academic.appeal_manage']);
         $this->switchTo($appealManager->actorId, 'placement.api.appeal');
-        $this->postJson('/api/placement/profiles/'.$profileId.'/appeal', [
+        $this->postJson('/api/v1/placement/profiles/'.$profileId.'/appeal', [
             'reason' => 'The placement recommendation does not reflect my performance.',
         ], ['Idempotency-Key' => 'placement-api-appeal-2'])
             ->assertCreated()
@@ -192,14 +192,14 @@ final class PlacementApiFeatureTest extends TestCase
         $this->setUpPlacementCatalog();
         $this->setUpPhysicalAutoCatalog();
 
-        $opened = $this->postJson('/api/placement/profiles', [
+        $opened = $this->postJson('/api/v1/placement/profiles', [
             'person_id' => $officer->actorId,
             'program_version_id' => $this->programVersionId,
         ], ['Idempotency-Key' => 'placement-api-open-phys'])
             ->assertCreated();
         $profileId = (string) $opened->json('profile_id');
 
-        $started = $this->postJson('/api/placement/attempts', [
+        $started = $this->postJson('/api/v1/placement/attempts', [
             'profile_id' => $profileId,
             'test_version_id' => $this->physicalVersionId,
             'delivery_mode' => 'physical',
@@ -212,7 +212,7 @@ final class PlacementApiFeatureTest extends TestCase
             $answers[$questionId] = 'A';
         }
 
-        $this->postJson('/api/placement/attempts/'.$attemptId.'/ingest-answers', [
+        $this->postJson('/api/v1/placement/attempts/'.$attemptId.'/ingest-answers', [
             'evidence_ref' => 'papers/plc-api-phys/answer-sheet-1',
             'answers' => $answers,
         ], ['Idempotency-Key' => 'placement-api-ingest-phys'])

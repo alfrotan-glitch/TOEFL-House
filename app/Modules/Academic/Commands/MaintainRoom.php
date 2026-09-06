@@ -59,8 +59,10 @@ final class MaintainRoom
                         'room_type' => $roomType,
                         'lifecycle_state' => RoomLifecycle::STATE_AVAILABLE,
                     ]);
+                    $provenance = $this->branchProvenance($branchId);
                     $event = $this->audit->record($actor->actorId, 'academic.room.define', 'academic_room', $room->id, null, [
                         'branch_id' => $branchId, 'name' => $name, 'code' => $code, 'capacity' => $capacity, 'room_type' => $roomType,
+                        ...$provenance,
                     ]);
 
                     return ['room_id' => $room->id, 'correlation_id' => $event->correlation_id];
@@ -92,7 +94,10 @@ final class MaintainRoom
                     }
 
                     $locked->forceFill(['lifecycle_state' => $toState])->save();
-                    $event = $this->audit->record($actor->actorId, 'academic.room.transition.'.$toState, 'academic_room', $locked->id, ['lifecycle_state' => $from], ['lifecycle_state' => $toState]);
+                    $event = $this->audit->record($actor->actorId, 'academic.room.transition.'.$toState, 'academic_room', $locked->id, ['lifecycle_state' => $from], [
+                        'lifecycle_state' => $toState,
+                        ...$this->branchProvenance((string) $locked->branch_id),
+                    ]);
 
                     return ['room_id' => $locked->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
                 }),
@@ -123,7 +128,10 @@ final class MaintainRoom
 
                     $before = ['capacity' => $locked->capacity];
                     $locked->forceFill(['capacity' => $capacity])->save();
-                    $event = $this->audit->record($actor->actorId, 'academic.room.resize', 'academic_room', $locked->id, $before, ['capacity' => $capacity]);
+                    $event = $this->audit->record($actor->actorId, 'academic.room.resize', 'academic_room', $locked->id, $before, [
+                        'capacity' => $capacity,
+                        ...$this->branchProvenance((string) $locked->branch_id),
+                    ]);
 
                     return ['room_id' => $locked->id, 'capacity' => $capacity, 'correlation_id' => $event->correlation_id];
                 }),
@@ -131,6 +139,21 @@ final class MaintainRoom
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.room.resize', 'academic_room', $room->id);
         }
+    }
+
+    /** @return array{branch_id: string, campus_id: string, organization_id: string} */
+    private function branchProvenance(string $branchId): array
+    {
+        $branch = Branch::query()->whereKey(trim($branchId))->first();
+        if ($branch === null || $branch->lifecycle_state !== 'active') {
+            throw BusinessRejection::forCode('academic.room_provenance_required', 'a room event requires an active branch');
+        }
+        $scope = $branch->structureScope();
+        if ($scope->organizationId === '' || $scope->campusId === null) {
+            throw BusinessRejection::forCode('academic.room_provenance_required', 'a room event requires active campus organization provenance');
+        }
+
+        return ['branch_id' => (string) $branch->id, 'campus_id' => (string) $scope->campusId, 'organization_id' => $scope->organizationId];
     }
 
     private function assertRoomDefinition(string $branchId, string $name, string $code, int $capacity, string $roomType): void

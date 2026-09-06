@@ -10,6 +10,7 @@ use App\Modules\Identity\Models\Person;
 use App\Modules\Identity\Models\UserAccount;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
+use App\Support\Authorization\PersonBranchScope;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Errors\DomainError;
@@ -42,13 +43,13 @@ final class LinkUserAccount
         try {
             return $this->idempotency->execute('identity.link_account', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($administrator, $person, $username): array {
-                    $outcome = $this->access->decide($administrator, self::CAPABILITY, null);
+                    /** @var Person $locked */
+                    $locked = Person::query()->whereKey($person->id)->lockForUpdate()->firstOrFail();
+                    $scope = PersonBranchScope::resolve($locked->id);
+                    $outcome = $this->access->decide($administrator, self::CAPABILITY, $scope);
                     if (! $outcome->allowed) {
                         throw AuthorizationDenied::forCode('identity.link_denied', $outcome->reason);
                     }
-
-                    /** @var Person $locked */
-                    $locked = Person::query()->whereKey($person->id)->lockForUpdate()->firstOrFail();
                     if (! $locked->isVerified()) {
                         throw BusinessRejection::forCode('identity.person_unverified', 'user account requires a verified person');
                     }
@@ -74,7 +75,7 @@ final class LinkUserAccount
                         'person',
                         $locked->id,
                         null,
-                        ['username' => $username, 'account_state' => UserAccount::STATE_ACTIVE, 'account_id' => $accountId],
+                        ['username' => $username, 'account_state' => UserAccount::STATE_ACTIVE, 'account_id' => $accountId, 'branch_id' => $scope->branchId, 'organization_id' => $scope->organizationId],
                         $correlationId,
                     );
 

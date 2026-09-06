@@ -7,11 +7,14 @@ namespace App\Modules\Privacy\Commands;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Identity\Models\Person;
+use App\Modules\Organization\Models\Organization;
 use App\Modules\Privacy\Models\Consent;
 use App\Modules\Privacy\Models\Disclosure;
 use App\Modules\Privacy\Models\PrivacyExportRequest;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
+use App\Support\Authorization\PersonBranchScope;
+use App\Support\Authorization\StructureScope;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
@@ -50,7 +53,8 @@ final class ExportSubjectData
         try {
             return $this->idempotency->execute('privacy.export', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($exporter, $subjectPersonId, $purpose, $scopeType, $scopeId): array {
-                    $this->requireCapability($exporter, self::CAPABILITY, 'privacy.export_denied');
+                    $subjectScope = PersonBranchScope::resolve($subjectPersonId);
+                    $this->requireCapability($exporter, self::CAPABILITY, 'privacy.export_denied', $subjectScope);
                     if ($scopeType === 'organization') {
                         throw BusinessRejection::forCode('privacy.export_bulk_requires_request', 'organization-wide exports proceed only through the staged approval chain');
                     }
@@ -75,6 +79,7 @@ final class ExportSubjectData
                         'purpose' => $purpose,
                         'scope' => $scopeType.':'.$scopeId,
                         'as_of' => (new CarbonImmutable)->toDateString(),
+                        'branch_id' => $subjectScope->branchId, 'organization_id' => $subjectScope->organizationId,
                     ]);
 
                     return [
@@ -98,7 +103,11 @@ final class ExportSubjectData
         try {
             return $this->idempotency->execute('privacy.export.request', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($requester, $subjectPersonId, $purpose, $organizationId): array {
-                    $this->requireCapability($requester, self::CAPABILITY, 'privacy.export_denied');
+                    $subjectScope = PersonBranchScope::resolve($subjectPersonId);
+                    if (trim($subjectScope->organizationId) !== trim($organizationId)) {
+                        throw BusinessRejection::forCode('privacy.export_scope_mismatch', 'the export organization must match the subject home organization');
+                    }
+                    $this->requireCapability($requester, self::CAPABILITY, 'privacy.export_denied', $subjectScope);
                     $this->requireSubjectAndPurpose($subjectPersonId, $purpose);
 
                     $request = PrivacyExportRequest::query()->create([
@@ -113,6 +122,7 @@ final class ExportSubjectData
                         'subject_person_id' => $subjectPersonId,
                         'purpose' => $purpose,
                         'organization_id' => $organizationId,
+                        'branch_id' => $subjectScope->branchId,
                     ]);
 
                     return ['request_id' => $request->id, 'correlation_id' => $event->correlation_id];
@@ -131,10 +141,14 @@ final class ExportSubjectData
         try {
             return $this->idempotency->execute('privacy.export.approve', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($approver, $request): array {
-                    $this->requireCapability($approver, self::CAPABILITY_BULK_APPROVE, 'privacy.bulk_export_approver_denied');
-
                     /** @var PrivacyExportRequest $locked */
                     $locked = PrivacyExportRequest::query()->whereKey($request->id)->lockForUpdate()->firstOrFail();
+                    $organizationScope = $this->organizationScope($locked->organization_id);
+                    $subjectScope = PersonBranchScope::resolve($locked->subject_person_id);
+                    if (trim($subjectScope->organizationId) !== trim($organizationScope->organizationId)) {
+                        throw BusinessRejection::forCode('privacy.export_scope_mismatch', 'the export subject provenance no longer matches its organization request');
+                    }
+                    $this->requireCapability($approver, self::CAPABILITY_BULK_APPROVE, 'privacy.bulk_export_approver_denied', $organizationScope);
                     if ($locked->lifecycle_state !== 'requested') {
                         throw BusinessRejection::forCode('privacy.export_request_state', sprintf('the request is already %s; approvals only count while it is requested', $locked->lifecycle_state));
                     }
@@ -155,6 +169,7 @@ final class ExportSubjectData
                         'lifecycle_state' => $state,
                         'approver_one_id' => $locked->approver_one_id,
                         'approver_two_id' => $locked->approver_two_id,
+                        'branch_id' => $subjectScope->branchId, 'organization_id' => $organizationScope->organizationId,
                     ]);
 
                     return ['request_id' => $locked->id, 'lifecycle_state' => $state, 'correlation_id' => $event->correlation_id];
@@ -173,10 +188,14 @@ final class ExportSubjectData
         try {
             return $this->idempotency->execute('privacy.export.execute', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($exporter, $request): array {
-                    $this->requireCapability($exporter, self::CAPABILITY, 'privacy.export_denied');
-
                     /** @var PrivacyExportRequest $locked */
                     $locked = PrivacyExportRequest::query()->whereKey($request->id)->lockForUpdate()->firstOrFail();
+                    $organizationScope = $this->organizationScope($locked->organization_id);
+                    $subjectScope = PersonBranchScope::resolve($locked->subject_person_id);
+                    if (trim($subjectScope->organizationId) !== trim($organizationScope->organizationId)) {
+                        throw BusinessRejection::forCode('privacy.export_scope_mismatch', 'the export subject provenance no longer matches its organization request');
+                    }
+                    $this->requireCapability($exporter, self::CAPABILITY, 'privacy.export_denied', $organizationScope);
                     if ($locked->lifecycle_state !== 'approved') {
                         throw BusinessRejection::forCode('privacy.export_request_state', sprintf('the request must be approved before execution; it is %s', $locked->lifecycle_state));
                     }
@@ -208,6 +227,7 @@ final class ExportSubjectData
                         'scope' => 'organization:'.$locked->organization_id,
                         'request_id' => $locked->id,
                         'as_of' => (new CarbonImmutable)->toDateString(),
+                        'branch_id' => $subjectScope->branchId, 'organization_id' => $organizationScope->organizationId,
                     ]);
 
                     return [
@@ -262,9 +282,19 @@ final class ExportSubjectData
         }
     }
 
-    private function requireCapability(Actor $actor, string $capability, string $denialCode): void
+    private function organizationScope(string $organizationId): StructureScope
     {
-        $outcome = $this->access->decide($actor, $capability, null);
+        $organization = Organization::query()->whereKey(trim($organizationId))->first();
+        if ($organization === null || $organization->lifecycle_state !== 'active') {
+            throw BusinessRejection::forCode('privacy.export_organization_unknown', 'the export organization must be active');
+        }
+
+        return StructureScope::organization($organization->id);
+    }
+
+    private function requireCapability(Actor $actor, string $capability, string $denialCode, ?StructureScope $scope = null): void
+    {
+        $outcome = $this->access->decide($actor, $capability, $scope);
         if (! $outcome->allowed) {
             throw AuthorizationDenied::forCode($denialCode, $outcome->reason);
         }

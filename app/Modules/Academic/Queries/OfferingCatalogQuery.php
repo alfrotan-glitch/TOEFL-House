@@ -14,8 +14,8 @@ use Illuminate\Support\Collection;
 
 /**
  * Read-only branch × level × term catalogue: active/closed availabilities
- * with their open offerings and seat utilisation. No result is an authority
- * to mutate.
+ * with their open offerings and server-derived live seat-claim utilisation.
+ * No result is an authority to mutate.
  */
 final class OfferingCatalogQuery
 {
@@ -78,8 +78,10 @@ final class OfferingCatalogQuery
                     'offering_id' => trim((string) $offering->id),
                     'capacity' => (int) $offering->capacity,
                     'lifecycle_state' => $offering->lifecycle_state,
-                    'active_seats' => Enrollment::query()->where('offering_id', $offering->id)->where('lifecycle_state', 'active')->count(),
                     'requested_seats' => Enrollment::query()->where('offering_id', $offering->id)->where('lifecycle_state', 'requested')->count(),
+                    'active_seats' => Enrollment::query()->where('offering_id', $offering->id)->where('lifecycle_state', 'active')->count(),
+                    'frozen_seats' => Enrollment::query()->where('offering_id', $offering->id)->where('lifecycle_state', 'frozen')->count(),
+                    'claimed_seats' => Enrollment::query()->where('offering_id', $offering->id)->whereIn('lifecycle_state', ['requested', 'active', 'frozen'])->count(),
                 ])->all(),
             ];
         })->all();

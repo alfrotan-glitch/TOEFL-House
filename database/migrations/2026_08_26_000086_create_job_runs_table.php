@@ -20,12 +20,14 @@ return new class extends Migration
             $table->string('last_error')->nullable();
             $table->jsonb('outcome')->nullable();
             $table->timestampTz('next_retry_at')->nullable();
+            $table->timestampTz('lease_until')->nullable();
             $table->timestampTz('started_at')->nullable();
             $table->timestampTz('finished_at')->nullable();
             $table->timestamps();
+            $table->foreign('run_by')->references('id')->on('people');
         });
-        DB::statement("ALTER TABLE job_runs ADD CONSTRAINT job_runs_status_check CHECK (status IN ('queued','failed','succeeded','dead_letter'))");
-        DB::statement('ALTER TABLE job_runs ADD CONSTRAINT job_runs_attempts_check CHECK (attempts >= 0 AND max_attempts BETWEEN 1 AND 10)');
+        DB::statement("ALTER TABLE job_runs ADD CONSTRAINT job_runs_status_check CHECK (status IN ('queued','processing','failed','succeeded','dead_letter'))");
+        DB::statement("ALTER TABLE job_runs ADD CONSTRAINT job_runs_attempts_check CHECK (attempts >= 0 AND max_attempts BETWEEN 1 AND 10 AND ((status = 'processing') = (lease_until IS NOT NULL)))");
         DB::statement('CREATE UNIQUE INDEX job_runs_one_per_occurrence ON job_runs (job_key, run_key)');
         DB::statement(<<<'SQL'
             CREATE OR REPLACE FUNCTION job_runs_identity_retained() RETURNS trigger AS $fn$
@@ -33,7 +35,7 @@ return new class extends Migration
                 IF TG_OP = 'DELETE' THEN
                     RAISE EXCEPTION 'job run history cannot be deleted';
                 END IF;
-                IF NEW.job_key <> OLD.job_key OR NEW.run_key <> OLD.run_key OR NEW.max_attempts <> OLD.max_attempts THEN
+                IF NEW.job_key <> OLD.job_key OR NEW.run_key <> OLD.run_key OR NEW.max_attempts <> OLD.max_attempts OR NEW.run_by <> OLD.run_by THEN
                     RAISE EXCEPTION 'a job run keeps its identity; only execution progress may change';
                 END IF;
                 IF OLD.status IN ('succeeded','dead_letter') AND NEW.status <> OLD.status THEN

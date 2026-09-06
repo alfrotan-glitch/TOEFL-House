@@ -1,5 +1,8 @@
 # PHASE_3 Checkpoint (in progress) — Employee Coverage Matrix: Module × Capability × Workflow
 
+> **Historical checkpoint notice (2026-09-05):** This matrix records prior branch evidence. It is not a current completeness or production-readiness verdict; use the unified architecture reconciliation for current authorities and deferred validation.
+>
+> **Employee Workspace addendum:** This capability-transport matrix does not establish the first-class Employee Workspace requirement. A workspace must dynamically compose effective employee context and legitimate work across these capabilities, support multiple positions and management-specific work, prioritize tasks/deadlines/approvals/exceptions, and remain an orchestration layer over canonical authorities. Workspace freshness, rebuildability, lifecycle revocation, command-time authorization, API/web parity, accessibility, and employee-efficiency evidence remain open.
 **Purpose:** prove — not assert — that every employee-facing business capability is reachable through the production HTTP surface (web console and JSON API), delegated to exactly one authoritative command, with authorization, validation, state transitions, error taxonomy, idempotency and audit owned by the domain.
 
 **Method (all machine-derived, no hand-waving):**
@@ -13,7 +16,7 @@
 
 | Module | Capability | Command | Transport (web/API) |
 |---|---|---|---|
-| Admissions | admissions.register / initiate / review / approve | RegisterApplicant, DecideAdmission (staged, 000111), EnrollAdmittedApplicant | web `/students/*` + api `/api/students/*` |
+| Admissions | admissions.register / initiate / review / approve | RegisterApplicant, DecideAdmission (staged, 000111), EnrollAdmittedApplicant | web `/students/*` + api `/api/v1/students/*` |
 | Academic | academic.schedule | MaintainClass | web `/academic/*` |
 | Academic | academic.enroll / enroll_approve | MaintainEnrollment | web `/academic/enrollments*` |
 | Academic | academic.progression_propose / review / approve | DecideProgression (staged) | web `/academic/progressions*` |
@@ -25,7 +28,7 @@
 | HR | hr.contract.prepare / hr.contract.approve | MaintainContractVersion | web `/hr/versions/*` |
 | Payroll | payroll.period | MaintainPayrollPeriod | web `/payroll/periods*` |
 | Payroll | payroll.calculate / payroll.approve | CalculatePayroll, ApprovePayrollResult | web `/payroll/*` |
-| Payroll | payroll.clear_hr / clear_finance / settle / settle_approve | SettleEmployment (staged, 000112) | web `/payroll/employments/*`, `/payroll/settlements/*` |
+| Payroll | payroll.clear_hr / clear_finance / settle / settle_approve | SettleEmployment (staged, 000112) | web `/payroll/employments/*`, `/finance/employment-settlements/*` |
 | Finance | finance.period | MaintainFinancialPeriod | web `/finance/periods*` |
 | Finance | finance.obligation | PostObligation | web `/finance/obligations` |
 | Finance | finance.payment | RecordPayment | web `/finance/payments` + api |

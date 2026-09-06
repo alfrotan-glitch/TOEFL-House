@@ -67,7 +67,7 @@ final class ApiSessionStackFeatureTest extends TestCase
         $this->post('/login', ['username' => 'api.session', 'password' => 'api-session-pw-1'])
             ->assertRedirect('/');
 
-        $this->getJson('/api/me')
+        $this->getJson('/api/v1/me')
             ->assertOk()
             ->assertJsonPath('username', 'api.session')
             ->assertJsonPath('person_id', $person->id);

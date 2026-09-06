@@ -1,3 +1,5 @@
 # Testing Implementation Contract
 
 Pyramid: fast domain/invariant/lifecycle tests; application authorization, scope, transaction, audit, privacy, and concurrency tests; contract/integration tests; reporting reconciliation and failure/recovery tests; a small end-to-end set for enrollment, academic decision, payroll, payment/refund, and disclosure. Required adversarial suites include double allocation, over-refund, expired delegation, branch leakage, SoD, history, duplicate identity, webhook retry, and configuration versioning. Migration tests verify mapping, FK/uniqueness, audit/financial reconciliation, rollback, and preservation. No tests are written in Gate 6.
+
+Employee Workspace specifications must cover multi-position composition, effective employment and lifecycle changes, task/deadline/approval/exception prioritization, management-specific work, canonical workflow links, personalization isolation, API/web parity, projection rebuild/freshness, command-time reauthorization, accessibility, recovery, and employee-efficiency outcomes. These are intended-behavior specifications only in the current pre-runtime phase.

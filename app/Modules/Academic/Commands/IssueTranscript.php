@@ -10,6 +10,7 @@ use App\Modules\Academic\Domain\TranscriptComposer;
 use App\Modules\Academic\Models\ProgramVersion;
 use App\Modules\Academic\Models\Transcript;
 use App\Modules\Audit\AttemptedOperation;
+use App\Modules\Organization\Models\Branch;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Documents\Commands\RegisterDocument;
 use App\Modules\Documents\Commands\TransitionDocument;
@@ -113,11 +114,13 @@ final class IssueTranscript
                         'issued_by' => $issuer->actorId,
                         'issued_at' => $issuedAt,
                     ]);
+                    $provenance = $this->transcriptProvenance($transcript);
                     $event = $this->audit->record($issuer->actorId, 'academic.transcript.issue', 'transcript', $transcript->id, null, [
                         'student_id' => $student->id,
                         'program_version_id' => $programVersionId,
                         'document_id' => $registered['document_id'],
                         'content_hash' => $contentHash,
+                        ...$provenance,
                     ]);
 
                     return [
@@ -131,5 +134,21 @@ final class IssueTranscript
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $issuer, 'academic.transcript.issue', 'transcript', $studentId);
         }
+    }
+
+    /** @return array{branch_id: string, campus_id: string, organization_id: string} */
+    private function transcriptProvenance(Transcript $transcript): array
+    {
+        $branchId = RecordBranch::transcriptBranch($transcript);
+        $branch = $branchId === null ? null : Branch::query()->whereKey($branchId)->first();
+        if ($branch === null || $branch->lifecycle_state !== 'active') {
+            throw BusinessRejection::forCode('academic.transcript_provenance_required', 'a transcript event requires active branch provenance');
+        }
+        $scope = $branch->structureScope();
+        if ($scope->organizationId === '' || $scope->campusId === null) {
+            throw BusinessRejection::forCode('academic.transcript_provenance_required', 'a transcript event requires active campus organization provenance');
+        }
+
+        return ['branch_id' => (string) $branch->id, 'campus_id' => (string) $scope->campusId, 'organization_id' => $scope->organizationId];
     }
 }

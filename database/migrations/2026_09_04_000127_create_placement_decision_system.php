@@ -243,6 +243,30 @@ return new class extends Migration
             $fn$ LANGUAGE plpgsql
         SQL);
         DB::statement('CREATE TRIGGER placement_profiles_origin_immutable BEFORE UPDATE OF originating_branch_id ON placement_profiles FOR EACH ROW EXECUTE FUNCTION placement_profiles_origin_immutable()');
+        DB::statement(<<<'SQL'
+            CREATE OR REPLACE FUNCTION placement_profile_visitor_guard() RETURNS trigger AS $fn$
+            DECLARE
+                visitor_person char(36);
+                visitor_branch char(36);
+            BEGIN
+                IF NEW.visitor_id IS NOT NULL THEN
+                    SELECT person_id, origin_branch_id INTO visitor_person, visitor_branch
+                      FROM visitors WHERE id = NEW.visitor_id;
+                    IF visitor_person IS NULL OR visitor_person IS DISTINCT FROM NEW.person_id THEN
+                        RAISE EXCEPTION 'placement profile visitor must belong to the profile person'
+                            USING ERRCODE = 'check_violation';
+                    END IF;
+                    IF visitor_branch IS NOT NULL
+                       AND NEW.originating_branch_id IS DISTINCT FROM visitor_branch THEN
+                        RAISE EXCEPTION 'placement profile branch provenance must match its visitor when known'
+                            USING ERRCODE = 'check_violation';
+                    END IF;
+                END IF;
+                RETURN NEW;
+            END;
+            $fn$ LANGUAGE plpgsql
+        SQL);
+        DB::statement('CREATE TRIGGER placement_profile_visitor_guard BEFORE INSERT OR UPDATE OF visitor_id, person_id, originating_branch_id ON placement_profiles FOR EACH ROW EXECUTE FUNCTION placement_profile_visitor_guard()');
 
         Schema::create('placement_attempts', function (Blueprint $table): void {
             $table->char('id', 36)->primary();
@@ -407,7 +431,147 @@ return new class extends Migration
         DB::statement('ALTER TABLE visitor_interactions ADD COLUMN placement_attempt_id CHAR(36) NULL');
         DB::statement('ALTER TABLE visitor_interactions ADD CONSTRAINT visitor_interactions_placement_attempt_foreign FOREIGN KEY (placement_attempt_id) REFERENCES placement_attempts (id)');
         DB::statement('ALTER TABLE visitor_interactions DROP CONSTRAINT IF EXISTS visitor_interactions_type_check');
-        DB::statement("ALTER TABLE visitor_interactions ADD CONSTRAINT visitor_interactions_type_check CHECK (type IN ('call','whatsapp','email','sms','visit','meeting','form_submission','document','note','other','payment','assessment','placement'))");
+        DB::statement("ALTER TABLE visitor_interactions ADD CONSTRAINT visitor_interactions_type_check CHECK (type IN ('".implode("','", \App\Modules\Crm\Domain\VisitorInteractionCatalog::types())."'))");
+        DB::statement(<<<'SQL'
+            CREATE OR REPLACE FUNCTION visitor_interaction_reference_guard() RETURNS trigger AS $fn$
+            DECLARE
+                reference_count integer;
+                visitor_status text;
+                visitor_branch char(36);
+                visitor_person char(36);
+                subject_person char(36);
+                subject_branch char(36);
+                branch_provenance_required boolean := false;
+                agent_state text;
+                authority_actor char(36);
+                authority_operation text;
+                authority_target_type text;
+                authority_target_id char(36);
+                authority_after_state jsonb;
+                authority_branch char(36);
+            BEGIN
+                SELECT status, origin_branch_id INTO visitor_status, visitor_branch FROM visitors WHERE id = NEW.visitor_id;
+                IF visitor_status IS NULL THEN
+                    RAISE EXCEPTION 'visitor interaction requires an existing visitor' USING ERRCODE = 'check_violation';
+                END IF;
+                IF NEW.trace_origin = 'crm' AND visitor_status NOT IN ('new','contacted','engaged','qualified','unqualified') THEN
+                    RAISE EXCEPTION 'CRM interactions require an open visitor' USING ERRCODE = 'check_violation';
+                END IF;
+                IF btrim(COALESCE(NEW.summary, '')) = '' OR btrim(COALESCE(NEW.correlation_id, '')) = '' THEN
+                    RAISE EXCEPTION 'visitor interaction requires summary and correlation id' USING ERRCODE = 'check_violation';
+                END IF;
+                IF NEW.occurred_on > CURRENT_DATE THEN
+                    RAISE EXCEPTION 'visitor interaction cannot be dated in the future' USING ERRCODE = 'check_violation';
+                END IF;
+                SELECT verification_state INTO agent_state FROM people WHERE id = NEW.agent_id;
+                IF agent_state IS DISTINCT FROM 'verified' THEN
+                    RAISE EXCEPTION 'visitor interaction agent must be a verified Person' USING ERRCODE = 'check_violation';
+                END IF;
+                IF NEW.trace_origin = 'downstream' AND NEW.authority_audit_event_id IS NULL THEN
+                    RAISE EXCEPTION 'downstream CRM traces require an immutable authority event' USING ERRCODE = 'check_violation';
+                END IF;
+                IF NEW.trace_origin = 'crm' AND NEW.authority_audit_event_id IS NOT NULL THEN
+                    RAISE EXCEPTION 'CRM-originated interactions cannot claim a downstream authority event' USING ERRCODE = 'check_violation';
+                END IF;
+                IF NEW.trace_origin = 'downstream' THEN
+                    SELECT actor_id, operation, target_type, target_id, after_state
+                      INTO authority_actor, authority_operation, authority_target_type, authority_target_id, authority_after_state
+                      FROM audit_events
+                     WHERE id = NEW.authority_audit_event_id;
+                    IF authority_actor IS DISTINCT FROM NEW.agent_id THEN
+                        RAISE EXCEPTION 'downstream CRM trace actor must match its authority event actor' USING ERRCODE = 'check_violation';
+                    END IF;
+                    authority_branch := COALESCE(authority_after_state->>'branch_id', authority_after_state->>'originating_branch_id');
+                    IF visitor_branch IS NOT NULL AND authority_branch IS NOT NULL AND visitor_branch IS DISTINCT FROM authority_branch THEN
+                        RAISE EXCEPTION 'downstream CRM trace authority event must carry compatible branch provenance' USING ERRCODE = 'check_violation';
+                    END IF;
+                END IF;
+                reference_count := (CASE WHEN NEW.message_id IS NOT NULL THEN 1 ELSE 0 END)
+                    + (CASE WHEN NEW.document_id IS NOT NULL THEN 1 ELSE 0 END)
+                    + (CASE WHEN NEW.assessment_attempt_id IS NOT NULL THEN 1 ELSE 0 END)
+                    + (CASE WHEN NEW.payment_id IS NOT NULL THEN 1 ELSE 0 END)
+                    + (CASE WHEN NEW.placement_attempt_id IS NOT NULL THEN 1 ELSE 0 END);
+                IF NEW.trace_origin = 'downstream' AND reference_count = 0 THEN
+                    RAISE EXCEPTION 'downstream CRM traces require an authoritative reference' USING ERRCODE = 'check_violation';
+                END IF;
+                IF reference_count > 1 THEN
+                    RAISE EXCEPTION 'visitor interaction may reference only one authoritative record' USING ERRCODE = 'check_violation';
+                END IF;
+                IF reference_count = 0 AND NEW.type IN ('document','payment','assessment','placement') THEN
+                    RAISE EXCEPTION 'specialized visitor interaction requires an authoritative reference' USING ERRCODE = 'check_violation';
+                END IF;
+                IF NEW.trace_origin = 'downstream' AND NEW.message_id IS NOT NULL
+                   AND (authority_target_type IS DISTINCT FROM 'message'
+                        OR authority_target_id IS DISTINCT FROM NEW.message_id
+                        OR authority_operation IS DISTINCT FROM 'communication.message.queue') THEN
+                    RAISE EXCEPTION 'message CRM trace must bind to the message authority event' USING ERRCODE = 'check_violation';
+                ELSIF NEW.trace_origin = 'downstream' AND NEW.document_id IS NOT NULL
+                   AND (authority_target_type IS DISTINCT FROM 'document'
+                        OR authority_target_id IS DISTINCT FROM NEW.document_id
+                        OR authority_operation IS DISTINCT FROM 'documents.register') THEN
+                    RAISE EXCEPTION 'document CRM trace must bind to the document authority event' USING ERRCODE = 'check_violation';
+                ELSIF NEW.trace_origin = 'downstream' AND NEW.assessment_attempt_id IS NOT NULL
+                   AND (authority_target_type IS DISTINCT FROM 'assessment_attempt'
+                        OR authority_target_id IS DISTINCT FROM NEW.assessment_attempt_id
+                        OR authority_operation IS DISTINCT FROM 'academic.attempt.submit') THEN
+                    RAISE EXCEPTION 'assessment CRM trace must bind to the assessment authority event' USING ERRCODE = 'check_violation';
+                ELSIF NEW.trace_origin = 'downstream' AND NEW.payment_id IS NOT NULL
+                   AND (authority_target_type IS DISTINCT FROM 'payment'
+                        OR authority_target_id IS DISTINCT FROM NEW.payment_id
+                        OR authority_operation IS DISTINCT FROM 'finance.payment.record') THEN
+                    RAISE EXCEPTION 'payment CRM trace must bind to the payment authority event' USING ERRCODE = 'check_violation';
+                ELSIF NEW.trace_origin = 'downstream' AND NEW.placement_attempt_id IS NOT NULL
+                   AND (authority_target_type IS DISTINCT FROM 'placement_attempt'
+                        OR authority_target_id IS DISTINCT FROM NEW.placement_attempt_id
+                        OR authority_operation IS NULL
+                        OR authority_operation NOT IN ('placement.attempt.submit', 'placement.attempt.submit.physical.answers')) THEN
+                    RAISE EXCEPTION 'placement CRM trace must bind to the placement authority event' USING ERRCODE = 'check_violation';
+                END IF;
+                IF NEW.message_id IS NOT NULL THEN
+                    IF NEW.type NOT IN ('call','whatsapp','email','sms','other') THEN
+                        RAISE EXCEPTION 'message reference requires a compatible interaction type' USING ERRCODE = 'check_violation';
+                    END IF;
+                    SELECT subject_person_id INTO subject_person FROM messages WHERE id = NEW.message_id;
+                ELSIF NEW.document_id IS NOT NULL THEN
+                    IF NEW.type <> 'document' THEN
+                        RAISE EXCEPTION 'document reference requires document interaction type' USING ERRCODE = 'check_violation';
+                    END IF;
+                    SELECT subject_person_id INTO subject_person FROM documents WHERE id = NEW.document_id;
+                ELSIF NEW.assessment_attempt_id IS NOT NULL THEN
+                    branch_provenance_required := true;
+                    IF NEW.type <> 'assessment' THEN
+                        RAISE EXCEPTION 'assessment reference requires assessment interaction type' USING ERRCODE = 'check_violation';
+                    END IF;
+                    SELECT s.person_id, e.originating_branch_id INTO subject_person, subject_branch FROM assessment_attempts aa JOIN enrollments e ON e.id = aa.enrollment_id JOIN students s ON s.id = e.student_id WHERE aa.id = NEW.assessment_attempt_id;
+                ELSIF NEW.payment_id IS NOT NULL THEN
+                    branch_provenance_required := true;
+                    IF NEW.type <> 'payment' THEN
+                        RAISE EXCEPTION 'payment reference requires payment interaction type' USING ERRCODE = 'check_violation';
+                    END IF;
+                    SELECT s.person_id, p.originating_branch_id INTO subject_person, subject_branch FROM payments p JOIN students s ON s.id = p.student_id WHERE p.id = NEW.payment_id;
+                ELSIF NEW.placement_attempt_id IS NOT NULL THEN
+                    branch_provenance_required := true;
+                    IF NEW.type <> 'placement' THEN
+                        RAISE EXCEPTION 'placement reference requires placement interaction type' USING ERRCODE = 'check_violation';
+                    END IF;
+                    SELECT pp.person_id, pa.originating_branch_id INTO subject_person, subject_branch FROM placement_attempts pa JOIN placement_profiles pp ON pp.id = pa.profile_id WHERE pa.id = NEW.placement_attempt_id;
+                END IF;
+                IF reference_count > 0 THEN
+                    SELECT v.person_id INTO visitor_person FROM visitors v WHERE v.id = NEW.visitor_id;
+                    IF visitor_person IS NULL OR subject_person IS NULL OR visitor_person IS DISTINCT FROM subject_person THEN
+                        RAISE EXCEPTION 'visitor interaction reference must belong to the visitor person' USING ERRCODE = 'check_violation';
+                    END IF;
+                    IF branch_provenance_required AND visitor_branch IS NOT NULL AND (subject_branch IS NULL OR visitor_branch IS DISTINCT FROM subject_branch) THEN
+                        RAISE EXCEPTION 'visitor interaction reference must carry compatible originating branch provenance' USING ERRCODE = 'check_violation';
+                    END IF;
+                    IF NOT EXISTS (SELECT 1 FROM people WHERE id = visitor_person AND verification_state = 'verified') THEN
+                        RAISE EXCEPTION 'linked visitor interaction requires a verified visitor identity' USING ERRCODE = 'check_violation';
+                    END IF;
+                END IF;
+                RETURN NEW;
+            END;
+            $fn$ LANGUAGE plpgsql
+        SQL);
     }
 
     public function down(): void
@@ -420,6 +584,8 @@ return new class extends Migration
         DB::statement('DROP FUNCTION IF EXISTS placement_responses_append_only()');
         DB::statement('DROP TRIGGER IF EXISTS placement_attempts_evidence_immutable ON placement_attempts');
         DB::statement('DROP FUNCTION IF EXISTS placement_attempts_evidence_immutable()');
+        DB::statement('DROP TRIGGER IF EXISTS placement_profile_visitor_guard ON placement_profiles');
+        DB::statement('DROP FUNCTION IF EXISTS placement_profile_visitor_guard()');
         DB::statement('DROP TRIGGER IF EXISTS placement_profiles_origin_immutable ON placement_profiles');
         DB::statement('DROP FUNCTION IF EXISTS placement_profiles_origin_immutable()');
         DB::statement('DROP TRIGGER IF EXISTS placement_tests_origin_immutable ON placement_tests');
@@ -427,9 +593,134 @@ return new class extends Migration
         DB::statement('DROP TRIGGER IF EXISTS placement_test_versions_guard ON placement_test_versions');
         DB::statement('DROP FUNCTION IF EXISTS placement_test_versions_publish_guard()');
 
+        // Restore the CRM-only interaction guard before removing the placement
+        // column. Leaving the placement-aware function behind would make a
+        // partial rollback fail on the next CRM interaction insert.
+        DB::statement('DROP TRIGGER IF EXISTS visitor_interaction_reference_guard ON visitor_interactions');
+        DB::statement('DROP FUNCTION IF EXISTS visitor_interaction_reference_guard()');
         DB::statement('ALTER TABLE visitor_interactions DROP CONSTRAINT IF EXISTS visitor_interactions_type_check');
         DB::statement('ALTER TABLE visitor_interactions DROP CONSTRAINT IF EXISTS visitor_interactions_placement_attempt_foreign');
         DB::statement('ALTER TABLE visitor_interactions DROP COLUMN IF EXISTS placement_attempt_id');
+        DB::statement("ALTER TABLE visitor_interactions ADD CONSTRAINT visitor_interactions_type_check CHECK (type IN ('".implode("','", \App\Modules\Crm\Domain\VisitorInteractionCatalog::types())."'))");
+        DB::statement(<<<'SQL'
+            CREATE OR REPLACE FUNCTION visitor_interaction_reference_guard() RETURNS trigger AS $fn$
+            DECLARE
+                reference_count integer;
+                visitor_status text;
+                visitor_branch char(36);
+                visitor_person char(36);
+                subject_person char(36);
+                subject_branch char(36);
+                branch_provenance_required boolean := false;
+                agent_state text;
+                authority_actor char(36);
+                authority_operation text;
+                authority_target_type text;
+                authority_target_id char(36);
+                authority_after_state jsonb;
+                authority_branch char(36);
+            BEGIN
+                SELECT status, origin_branch_id INTO visitor_status, visitor_branch FROM visitors WHERE id = NEW.visitor_id;
+                IF visitor_status IS NULL THEN
+                    RAISE EXCEPTION 'visitor interaction requires an existing visitor' USING ERRCODE = 'check_violation';
+                END IF;
+                IF NEW.trace_origin = 'crm' AND visitor_status NOT IN ('new','contacted','engaged','qualified','unqualified') THEN
+                    RAISE EXCEPTION 'CRM interactions require an open visitor' USING ERRCODE = 'check_violation';
+                END IF;
+                IF btrim(COALESCE(NEW.summary, '')) = '' OR btrim(COALESCE(NEW.correlation_id, '')) = '' THEN
+                    RAISE EXCEPTION 'visitor interaction requires summary and correlation id' USING ERRCODE = 'check_violation';
+                END IF;
+                IF NEW.occurred_on > CURRENT_DATE THEN
+                    RAISE EXCEPTION 'visitor interaction cannot be dated in the future' USING ERRCODE = 'check_violation';
+                END IF;
+                SELECT verification_state INTO agent_state FROM people WHERE id = NEW.agent_id;
+                IF agent_state IS DISTINCT FROM 'verified' THEN
+                    RAISE EXCEPTION 'visitor interaction agent must be a verified Person' USING ERRCODE = 'check_violation';
+                END IF;
+                IF NEW.trace_origin = 'downstream' AND NEW.authority_audit_event_id IS NULL THEN
+                    RAISE EXCEPTION 'downstream CRM traces require an immutable authority event' USING ERRCODE = 'check_violation';
+                END IF;
+                IF NEW.trace_origin = 'crm' AND NEW.authority_audit_event_id IS NOT NULL THEN
+                    RAISE EXCEPTION 'CRM-originated interactions cannot claim a downstream authority event' USING ERRCODE = 'check_violation';
+                END IF;
+                IF NEW.trace_origin = 'downstream' THEN
+                    SELECT actor_id, operation, target_type, target_id, after_state
+                      INTO authority_actor, authority_operation, authority_target_type, authority_target_id, authority_after_state
+                      FROM audit_events WHERE id = NEW.authority_audit_event_id;
+                    IF authority_actor IS DISTINCT FROM NEW.agent_id THEN
+                        RAISE EXCEPTION 'downstream CRM trace actor must match its authority event actor' USING ERRCODE = 'check_violation';
+                    END IF;
+                    authority_branch := COALESCE(authority_after_state->>'branch_id', authority_after_state->>'originating_branch_id');
+                    IF visitor_branch IS NOT NULL AND authority_branch IS NOT NULL AND visitor_branch IS DISTINCT FROM authority_branch THEN
+                        RAISE EXCEPTION 'downstream CRM trace authority event must carry compatible branch provenance' USING ERRCODE = 'check_violation';
+                    END IF;
+                END IF;
+                reference_count := (CASE WHEN NEW.message_id IS NOT NULL THEN 1 ELSE 0 END)
+                    + (CASE WHEN NEW.document_id IS NOT NULL THEN 1 ELSE 0 END)
+                    + (CASE WHEN NEW.assessment_attempt_id IS NOT NULL THEN 1 ELSE 0 END)
+                    + (CASE WHEN NEW.payment_id IS NOT NULL THEN 1 ELSE 0 END);
+                IF NEW.trace_origin = 'downstream' AND reference_count = 0 THEN
+                    RAISE EXCEPTION 'downstream CRM traces require an authoritative reference' USING ERRCODE = 'check_violation';
+                END IF;
+                IF reference_count > 1 THEN
+                    RAISE EXCEPTION 'visitor interaction may reference only one authoritative record' USING ERRCODE = 'check_violation';
+                END IF;
+                IF reference_count = 0 AND NEW.type IN ('document','payment','assessment','placement') THEN
+                    RAISE EXCEPTION 'specialized visitor interaction requires an authoritative reference' USING ERRCODE = 'check_violation';
+                END IF;
+                IF NEW.trace_origin = 'downstream' AND NEW.message_id IS NOT NULL
+                   AND (authority_target_type IS DISTINCT FROM 'message' OR authority_target_id IS DISTINCT FROM NEW.message_id OR authority_operation IS DISTINCT FROM 'communication.message.queue') THEN
+                    RAISE EXCEPTION 'message CRM trace must bind to the message authority event' USING ERRCODE = 'check_violation';
+                ELSIF NEW.trace_origin = 'downstream' AND NEW.document_id IS NOT NULL
+                   AND (authority_target_type IS DISTINCT FROM 'document' OR authority_target_id IS DISTINCT FROM NEW.document_id OR authority_operation IS DISTINCT FROM 'documents.register') THEN
+                    RAISE EXCEPTION 'document CRM trace must bind to the document authority event' USING ERRCODE = 'check_violation';
+                ELSIF NEW.trace_origin = 'downstream' AND NEW.assessment_attempt_id IS NOT NULL
+                   AND (authority_target_type IS DISTINCT FROM 'assessment_attempt' OR authority_target_id IS DISTINCT FROM NEW.assessment_attempt_id OR authority_operation IS DISTINCT FROM 'academic.attempt.submit') THEN
+                    RAISE EXCEPTION 'assessment CRM trace must bind to the assessment authority event' USING ERRCODE = 'check_violation';
+                ELSIF NEW.trace_origin = 'downstream' AND NEW.payment_id IS NOT NULL
+                   AND (authority_target_type IS DISTINCT FROM 'payment' OR authority_target_id IS DISTINCT FROM NEW.payment_id OR authority_operation IS DISTINCT FROM 'finance.payment.record') THEN
+                    RAISE EXCEPTION 'payment CRM trace must bind to the payment authority event' USING ERRCODE = 'check_violation';
+                END IF;
+                IF NEW.message_id IS NOT NULL THEN
+                    IF NEW.type NOT IN ('call','whatsapp','email','sms','other') THEN
+                        RAISE EXCEPTION 'message reference requires a compatible interaction type' USING ERRCODE = 'check_violation';
+                    END IF;
+                    SELECT subject_person_id INTO subject_person FROM messages WHERE id = NEW.message_id;
+                ELSIF NEW.document_id IS NOT NULL THEN
+                    IF NEW.type <> 'document' THEN
+                        RAISE EXCEPTION 'document reference requires document interaction type' USING ERRCODE = 'check_violation';
+                    END IF;
+                    SELECT subject_person_id INTO subject_person FROM documents WHERE id = NEW.document_id;
+                ELSIF NEW.assessment_attempt_id IS NOT NULL THEN
+                    branch_provenance_required := true;
+                    IF NEW.type <> 'assessment' THEN
+                        RAISE EXCEPTION 'assessment reference requires assessment interaction type' USING ERRCODE = 'check_violation';
+                    END IF;
+                    SELECT s.person_id, e.originating_branch_id INTO subject_person, subject_branch FROM assessment_attempts aa JOIN enrollments e ON e.id = aa.enrollment_id JOIN students s ON s.id = e.student_id WHERE aa.id = NEW.assessment_attempt_id;
+                ELSIF NEW.payment_id IS NOT NULL THEN
+                    branch_provenance_required := true;
+                    IF NEW.type <> 'payment' THEN
+                        RAISE EXCEPTION 'payment reference requires payment interaction type' USING ERRCODE = 'check_violation';
+                    END IF;
+                    SELECT s.person_id, p.originating_branch_id INTO subject_person, subject_branch FROM payments p JOIN students s ON s.id = p.student_id WHERE p.id = NEW.payment_id;
+                END IF;
+                IF reference_count > 0 THEN
+                    SELECT v.person_id INTO visitor_person FROM visitors v WHERE v.id = NEW.visitor_id;
+                    IF visitor_person IS NULL OR subject_person IS NULL OR visitor_person IS DISTINCT FROM subject_person THEN
+                        RAISE EXCEPTION 'visitor interaction reference must belong to the visitor person' USING ERRCODE = 'check_violation';
+                    END IF;
+                    IF branch_provenance_required AND visitor_branch IS NOT NULL AND (subject_branch IS NULL OR visitor_branch IS DISTINCT FROM subject_branch) THEN
+                        RAISE EXCEPTION 'visitor interaction reference must carry compatible originating branch provenance' USING ERRCODE = 'check_violation';
+                    END IF;
+                    IF NOT EXISTS (SELECT 1 FROM people WHERE id = visitor_person AND verification_state = 'verified') THEN
+                        RAISE EXCEPTION 'linked visitor interaction requires a verified visitor identity' USING ERRCODE = 'check_violation';
+                    END IF;
+                END IF;
+                RETURN NEW;
+            END;
+            $fn$ LANGUAGE plpgsql
+        SQL);
+        DB::statement('CREATE TRIGGER visitor_interaction_reference_guard BEFORE INSERT ON visitor_interactions FOR EACH ROW EXECUTE FUNCTION visitor_interaction_reference_guard()');
 
         Schema::dropIfExists('placement_recommendations');
         Schema::dropIfExists('placement_section_results');

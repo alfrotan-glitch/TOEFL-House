@@ -6,18 +6,23 @@ namespace App\Modules\Finance\Commands;
 
 use App\Modules\Academic\Models\Enrollment;
 use App\Modules\Academic\Models\Offering;
+use App\Modules\Academic\Domain\RecordBranch;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Finance\Domain\FinanceLifecycle;
+use App\Modules\Finance\Domain\FinancialCoverageLock;
 use App\Modules\Finance\Models\FinancialPeriod;
 use App\Modules\Finance\Models\Obligation;
 use App\Modules\Finance\Models\ObligationLine;
+use App\Modules\Organization\Models\Branch;
+use App\Modules\Students\Domain\StudentOperationalEligibility;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
 use App\Support\Identifiers\RandomIdentifier;
+use App\Support\MoneyAmount;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -35,6 +40,7 @@ final class PostObligation
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
+        private readonly StudentOperationalEligibility $studentEligibility,
     ) {}
 
     /**
@@ -48,10 +54,21 @@ final class PostObligation
         try {
             return $this->idempotency->execute('finance.obligation.post', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $period, $studentId, $source, $reason, $lines, $offeringId): array {
-                    $this->require($actor);
-                    if ($lines === [] || $reason === '') {
-                        throw BusinessRejection::forCode('finance.obligation_lines', 'an obligation requires lines and a reason');
+                    if ($lines === [] || $reason === '' || $source === '') {
+                        throw BusinessRejection::forCode('finance.obligation_terms', 'an obligation requires a source, lines, and a reason');
                     }
+                    $this->studentEligibility->assertActive($studentId, 'finance.obligation_student_not_active');
+                    $originatingBranchId = $this->obligationBranch($offeringId, $studentId);
+                    if ($originatingBranchId === null) {
+                        throw BusinessRejection::forCode('finance.obligation_provenance_required', 'a new obligation requires verified branch provenance');
+                    }
+                    $currentHomeBranchId = RecordBranch::studentBranchForId($studentId);
+                    $authorizationBranch = Branch::query()->whereKey($originatingBranchId)->first();
+                    if ($authorizationBranch === null) {
+                        throw BusinessRejection::forCode('finance.obligation_provenance_required', 'the obligation branch provenance is unknown');
+                    }
+                    $this->require($actor, $authorizationBranch->structureScope());
+                    FinancialCoverageLock::acquire($studentId);
 
                     /** @var FinancialPeriod $lockedPeriod */
                     $lockedPeriod = FinancialPeriod::query()->whereKey($period->id)->lockForUpdate()->firstOrFail();
@@ -61,7 +78,10 @@ final class PostObligation
 
                     $total = '0.00';
                     foreach ($lines as $line) {
-                        if (! is_numeric($line['amount']) || (float) $line['amount'] <= 0) {
+                        if ($line['category'] === '' || $line['source_ref'] === '') {
+                            throw BusinessRejection::forCode('finance.obligation_line_terms', 'every obligation line requires a category and source reference');
+                        }
+                        if (! MoneyAmount::positive((string) $line['amount'])) {
                             throw BusinessRejection::forCode('finance.obligation_line_amount', 'every line amount must be a positive number');
                         }
                         $total = bcadd($total, (string) $line['amount'], 2);
@@ -79,6 +99,8 @@ final class PostObligation
                         'original_amount' => $total,
                         'reason' => $reason,
                         'posted_by' => $actor->actorId,
+                        'originating_branch_id' => $originatingBranchId,
+                        'current_home_branch_id' => $currentHomeBranchId,
                         'offering_id' => $offeringId !== null && $offeringId !== '' ? $offeringId : null,
                     ]);
                     foreach ($lines as $line) {
@@ -91,7 +113,7 @@ final class PostObligation
                         ]);
                     }
                     $event = $this->audit->record($actor->actorId, 'finance.obligation.post', 'obligation', $obligation->id, null, [
-                        'student_id' => $studentId, 'original_amount' => $total, 'lines' => count($lines), 'offering_id' => $obligation->offering_id,
+                        'student_id' => $studentId, 'branch_id' => $originatingBranchId, 'organization_id' => $authorizationBranch->structureScope()->organizationId, 'original_amount' => $total, 'lines' => count($lines), 'offering_id' => $obligation->offering_id,
                     ]);
 
                     return ['obligation_id' => $obligation->id, 'correlation_id' => $event->correlation_id];
@@ -100,6 +122,20 @@ final class PostObligation
         } catch (AuthorizationDenied $denial) {
             $this->attemptedOperation->deniedByActor($denial, $actor, 'finance.obligation.post', 'obligation', $studentId);
         }
+    }
+
+    private function obligationBranch(?string $offeringId, string $studentId): ?string
+    {
+        $offeringId = trim((string) ($offeringId ?? ''));
+        if ($offeringId !== '') {
+            $branchId = Offering::query()->whereKey($offeringId)->value('branch_id');
+            $branchId = trim((string) ($branchId ?? ''));
+            if ($branchId !== '') {
+                return $branchId;
+            }
+        }
+
+        return RecordBranch::studentBranchForId($studentId);
     }
 
     private function assertOfferingLinkedToActiveEnrollment(string $offeringId, string $studentId): void
@@ -118,9 +154,9 @@ final class PostObligation
         }
     }
 
-    private function require(Actor $actor): void
+    private function require(Actor $actor, \App\Support\Authorization\StructureScope $scope): void
     {
-        $outcome = $this->access->decide($actor, self::CAPABILITY, null);
+        $outcome = $this->access->decide($actor, self::CAPABILITY, $scope);
         if (! $outcome->allowed) {
             throw AuthorizationDenied::forCode('finance.obligation_denied', $outcome->reason);
         }

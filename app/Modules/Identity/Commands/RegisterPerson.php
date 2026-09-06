@@ -7,8 +7,10 @@ namespace App\Modules\Identity\Commands;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Identity\Models\Person;
+use App\Modules\Organization\Models\Branch;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
+use App\Support\Authorization\StructureScope;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Errors\DomainError;
@@ -22,9 +24,9 @@ use Illuminate\Support\Facades\DB;
  * starts from. Until a person row exists there is nothing for Identity to
  * verify, for HR to employ, or for Admissions to register as an applicant —
  * the E2E business journey cannot leave the gate on a fresh system. The
- * intake deliberately records only the natural identity facts (legal name
- * and date of birth); it never asserts a verified identity key. The person
- * is created UNVERIFIED and must pass the governed VerifyPerson workflow
+ * intake records the natural identity facts (legal name and date of birth)
+ * plus a selected home-branch designation; it never asserts a verified
+ * identity key. The person is created UNVERIFIED and must pass the governed VerifyPerson workflow
  * before Admissions/HR accept it, preserving the Identity boundary rule that
  * a verification is a separate, evidenced, authority-gated decision.
  */
@@ -40,16 +42,18 @@ final class RegisterPerson
     ) {}
 
     /** @return array{person_id: string, correlation_id: string} */
-    public function register(Actor $administrator, string $legalName, string $dateOfBirth, string $idempotencyKey): array
+    public function register(Actor $administrator, string $legalName, string $dateOfBirth, string $homeBranchId, string $idempotencyKey): array
     {
         $legalName = trim($legalName);
         $dateOfBirth = trim($dateOfBirth);
-        $payload = hash('sha256', implode('|', ['identity.person.register', $legalName, $dateOfBirth, $administrator->actorId]));
+        $homeBranchId = trim($homeBranchId);
+        $payload = hash('sha256', implode('|', ['identity.person.register', $legalName, $dateOfBirth, $homeBranchId, $administrator->actorId]));
 
         try {
             return $this->idempotency->execute('identity.person.register', $idempotencyKey, $payload,
-                fn (): array => DB::transaction(function () use ($administrator, $legalName, $dateOfBirth): array {
-                    $outcome = $this->access->decide($administrator, self::CAPABILITY, null);
+                fn (): array => DB::transaction(function () use ($administrator, $legalName, $dateOfBirth, $homeBranchId): array {
+                    $scope = $this->branchScope($homeBranchId);
+                    $outcome = $this->access->decide($administrator, self::CAPABILITY, $scope);
                     if (! $outcome->allowed) {
                         throw AuthorizationDenied::forCode('identity.person_register_denied', $outcome->reason);
                     }
@@ -75,6 +79,7 @@ final class RegisterPerson
                         'identity_evidence_ref' => null,
                         'verified_at' => null,
                         'verified_by' => null,
+                        'home_branch_id' => $homeBranchId,
                     ]);
 
                     $this->audit->record(
@@ -83,7 +88,7 @@ final class RegisterPerson
                         'person',
                         $person->id,
                         null,
-                        ['legal_name' => $legalName, 'date_of_birth' => $born->toDateString(), 'verification_state' => Person::VERIFICATION_UNVERIFIED],
+                        ['legal_name' => $legalName, 'date_of_birth' => $born->toDateString(), 'verification_state' => Person::VERIFICATION_UNVERIFIED, 'branch_id' => $scope->branchId, 'organization_id' => $scope->organizationId],
                         $correlationId,
                     );
 
@@ -92,9 +97,23 @@ final class RegisterPerson
             );
         } catch (AuthorizationDenied $denial) {
             // No person row exists on an authorization denial, so there is no
-            // target id to attribute the attempt to; the correlation id keeps
-            // the denied attempt uniquely traceable in the audit trail.
-            $this->attemptedOperation->deniedByActor($denial, $administrator, 'identity.person.register', 'person', 'intake:'.$denial->correlationId());
+            // target id to attribute the attempt to; the correlation id is
+            // itself the bounded audit target and remains uniquely traceable.
+            $this->attemptedOperation->deniedByActor($denial, $administrator, 'identity.person.register', 'person_intake', $denial->correlationId());
         }
+    }
+
+    private function branchScope(string $branchId): StructureScope
+    {
+        $branch = Branch::query()->whereKey($branchId)->first();
+        if ($branch === null || $branch->lifecycle_state !== 'active') {
+            throw BusinessRejection::forCode('identity.person_branch_required', 'person intake requires an active home branch');
+        }
+        $scope = $branch->structureScope();
+        if ($scope->organizationId === '' || $scope->branchId === null) {
+            throw BusinessRejection::forCode('identity.person_branch_required', 'person intake requires active organization provenance');
+        }
+
+        return $scope;
     }
 }

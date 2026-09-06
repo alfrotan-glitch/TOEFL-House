@@ -9,7 +9,9 @@ use App\Modules\Audit\AuditRecorder;
 use App\Modules\Students\Models\Student;
 use App\Modules\Students\Models\StudentHoldEvent;
 use App\Modules\Students\Models\StudentStatus;
-use App\Support\Authorization\AccessDecision;
+use App\Modules\Academic\Domain\RecordBranch;
+use App\Modules\Organization\Models\Branch;
+use App\Support\Authorization\BranchScopedAccess;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
@@ -29,7 +31,7 @@ final class ManageStudentHold
     public const CAPABILITY = 'students.hold';
 
     public function __construct(
-        private readonly AccessDecision $access,
+        private readonly BranchScopedAccess $access,
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
@@ -50,21 +52,19 @@ final class ManageStudentHold
     /** @return array{student_id: string, action: string, hold_event_id: string, correlation_id: string} */
     private function appendAction(Actor $actor, Student $student, string $action, string $reason, string $idempotencyKey): array
     {
+        $reason = trim($reason);
         $payload = hash('sha256', implode('|', ['students.hold.'.$action, $student->id, $reason, $actor->actorId]));
 
         try {
             return $this->idempotency->execute('students.hold.'.$action, $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $student, $action, $reason): array {
-                    $outcome = $this->access->decide($actor, self::CAPABILITY, null);
-                    if (! $outcome->allowed) {
-                        throw AuthorizationDenied::forCode('students.hold_denied', $outcome->reason);
-                    }
                     if ($reason === '') {
                         throw BusinessRejection::forCode('students.hold_reason', 'a student hold transition requires a reason');
                     }
 
                     /** @var Student $locked */
                     $locked = Student::query()->whereKey($student->id)->lockForUpdate()->firstOrFail();
+                    $this->access->require($actor, self::CAPABILITY, RecordBranch::studentBranch($locked), 'students.hold_denied');
                     /** @var StudentStatus|null $status */
                     $status = StudentStatus::query()->where('student_id', $locked->id)->lockForUpdate()->orderByDesc('seq')->first();
                     if ($status === null || $status->status !== 'active') {
@@ -90,9 +90,17 @@ final class ManageStudentHold
                         'actor_id' => $actor->actorId,
                     ]);
 
+                    $branchId = RecordBranch::studentBranch($locked);
+                    $branch = $branchId === null ? null : Branch::query()->whereKey($branchId)->first();
+                    if ($branch === null || $branch->lifecycle_state !== 'active' || $branch->structureScope()->organizationId === '') {
+                        throw BusinessRejection::forCode('students.hold_provenance_required', 'a student hold event requires active branch and organization provenance');
+                    }
                     $audit = $this->audit->record($actor->actorId, 'students.hold.'.$action, 'student_hold_event', $event->id, [
                         'action' => $latest?->action,
-                    ], ['action' => $action, 'reason' => $reason]);
+                    ], [
+                        'action' => $action, 'reason' => $reason, 'branch_id' => $branch->id,
+                        'organization_id' => $branch->structureScope()->organizationId,
+                    ]);
 
                     return [
                         'student_id' => $locked->id,

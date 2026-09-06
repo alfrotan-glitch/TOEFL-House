@@ -13,5 +13,8 @@
 | Communication/Documents/Privacy | delivery, metadata/content, consent, disclosure, verification | all facts, Authorization; post-commit delivery | source facts; privacy/access |
 | Audit | append-only material evidence | all modules; audit-recorded | business state; immutability |
 | Reporting | metric definitions, projections, runs | all source owners; refresh | source facts; reconciliation |
+| Employee Workspace | effective work context composition, tasks/approvals/deadlines/exceptions, presentation preferences | Identity, Access, Organization, HR, all relevant owner queries and post-commit events | business facts, permissions, lifecycle, financial truth, approval truth, independent shadow tasks |
+
+Employee Workspace is an orchestration and presentation capability rather than a source-owning bounded context. It may link to owner commands but never writes another module's persistence or changes policy.
 
 Each row is a bounded context, persistence owner, and transaction boundary. Commands are synchronous at decision points; notifications and projections are asynchronous after commit. Failure is deny/hold/retry according to error category and never cross-context direct mutation.

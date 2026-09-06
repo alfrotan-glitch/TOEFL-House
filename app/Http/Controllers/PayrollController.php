@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Modules\Hr\Models\Employment;
+use App\Modules\Identity\Models\Person;
 use App\Modules\Payroll\Commands\ApprovePayrollResult;
 use App\Modules\Payroll\Commands\CalculatePayroll;
 use App\Modules\Payroll\Commands\MaintainPayrollPeriod;
@@ -29,14 +30,22 @@ final class PayrollController extends Controller
 {
     public function index(): View
     {
+        $this->requireOrganizationRead('payroll.period', 'payroll.console.index');
+        $payrollBranches = $this->authorizedBranches('payroll.calculate');
+        $employmentIds = Employment::query()
+            ->whereIn('person_id', Person::query()->whereIn('home_branch_id', $payrollBranches)->select('id'))
+            ->select('id');
+
         return view('payroll.index', [
             'periods' => PayrollPeriod::query()->orderByDesc('period_key')->limit(100)->get(),
-            'calculations' => PayrollCalculation::query()->orderByDesc('id')->limit(200)->get(),
-            'results' => PayrollResult::query()->orderByDesc('id')->limit(200)->get(),
-            'employments' => Employment::query()->where('lifecycle_state', 'active')->orderBy('id')->get(),
-            'terminatedEmployments' => Employment::query()->where('lifecycle_state', 'terminated')->orderBy('id')->limit(200)->get(),
-            'clearances' => PayrollClearance::query()->orderBy('id')->limit(500)->get(),
-            'settlementProposals' => SettlementProposal::query()->where('lifecycle_state', SettlementProposal::STATE_PROPOSED)->orderBy('id')->limit(200)->get(),
+            // Calculations and clearances carry no branch snapshot; resolve
+            // their employee scope through the current authorized home branch.
+            'calculations' => PayrollCalculation::query()->whereIn('employment_id', $employmentIds)->orderByDesc('id')->limit(200)->get(),
+            'results' => PayrollResult::query()->whereIn('originating_branch_id', $payrollBranches)->orderByDesc('id')->limit(200)->get(),
+            'employments' => Employment::query()->where('lifecycle_state', 'active')->whereIn('id', $employmentIds)->orderBy('id')->get(),
+            'terminatedEmployments' => Employment::query()->where('lifecycle_state', 'terminated')->whereIn('id', $employmentIds)->orderBy('id')->limit(200)->get(),
+            'clearances' => PayrollClearance::query()->whereIn('employment_id', $employmentIds)->orderBy('id')->limit(500)->get(),
+            'settlementProposals' => SettlementProposal::query()->where('lifecycle_state', SettlementProposal::STATE_PROPOSED)->whereIn('employment_id', $employmentIds)->orderBy('id')->limit(200)->get(),
         ]);
     }
 
@@ -133,14 +142,5 @@ final class PayrollController extends Controller
         return redirect()->route('payroll.index')->with('success', 'Settlement proposed; it is recorded only when a distinct approver approves it.');
     }
 
-    public function approveSettlement(Request $request, string $proposalId): RedirectResponse
-    {
-        app(SettleEmployment::class)->approve(
-            $this->actor(),
-            SettlementProposal::query()->findOrFail($proposalId),
-            $this->idempotencyKey('payroll.settlement.approve'),
-        );
 
-        return redirect()->route('payroll.index')->with('success', 'Settlement approved and recorded.');
-    }
 }

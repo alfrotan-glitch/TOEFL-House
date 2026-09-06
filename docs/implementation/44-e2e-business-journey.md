@@ -84,7 +84,7 @@ activation, default-deny for an account with no authority).
 - **API session stack.** The `api` middleware group now runs the same stateful
   cookies+session+CSRF stack as the web group; previously the token-only default
   meant every `/api` call 401'd after a valid console login. Proven: console login
-  then `GET /api/me` → 200 `username=owner`. Regression: `ApiSessionStackFeatureTest`.
+  then `GET /api/v1/me` → 200 `username=owner`. Regression: `ApiSessionStackFeatureTest`.
 - **Person intake.** `RegisterPerson` command + `POST /identity/people` (+ API)
   open the unverified person record every boundary starts from. Regression:
   `ClassAndIntakeTransportFeatureTest` and journey STAGE 2/3.

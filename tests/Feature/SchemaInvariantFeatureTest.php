@@ -82,6 +82,10 @@ final class SchemaInvariantFeatureTest extends TestCase
         $this->assertContains('visitors_one_active_per_person', $this->indexNames('visitors'));
         $this->assertContains('visitors_one_active_per_contact', $this->indexNames('visitors'));
         $this->assertContains('visitor_conversions_visitor_id_unique', $this->indexNames('visitor_conversions'));
+        $this->assertContains('visitor_conversion_handoffs_visitor_index', $this->indexNames('visitor_conversion_handoffs'));
+        $this->assertContains('visitor_conversion_handoffs_source_unique', $this->indexNames('visitor_conversion_handoffs'));
+        $this->assertContains('visitor_conversion_handoffs_student_unique', $this->indexNames('visitor_conversion_handoffs'));
+        $this->assertContains('visitor_conversion_handoffs_authority_event_unique', $this->indexNames('visitor_conversion_handoffs'));
         $this->assertContains('visitor_sources_key_unique', $this->indexNames('visitor_sources'));
         $this->assertContains('visitor_campaigns_key_unique', $this->indexNames('visitor_campaigns'));
         $this->assertContains('visitor_automation_rules_key_unique', $this->indexNames('visitor_automation_rules'));
@@ -110,6 +114,8 @@ final class SchemaInvariantFeatureTest extends TestCase
         $this->assertContains('visitors_contact_key_guard', $this->triggerNames('visitors'));
         $this->assertContains('visitors_originating_immutable', $this->triggerNames('visitors'));
         $this->assertContains('visitor_interactions_append_only', $this->triggerNames('visitor_interactions'));
+        $this->assertContains('visitor_conversion_handoff_guard', $this->triggerNames('visitor_conversion_handoffs'));
+        $this->assertContains('visitor_conversion_handoffs_append_only', $this->triggerNames('visitor_conversion_handoffs'));
     }
 
     public function test_retired_legacy_compensation_tables_are_absent_from_the_schema(): void
@@ -718,9 +724,39 @@ final class SchemaInvariantFeatureTest extends TestCase
 
     public function test_work_order_states_are_constrained_by_the_schema(): void
     {
+        // Resource-root provenance is an earlier guard than the lifecycle
+        // check. Establish a valid active topology first so this probe tests
+        // only the intended invalid state rather than a missing branch.
+        DB::table('organizations')->insert([
+            'id' => '00000000-0000-4000-8000-00000000036c',
+            'name' => 'Schema Probe Organization',
+            'lifecycle_state' => 'active',
+        ]);
+        DB::table('campuses')->insert([
+            'id' => '00000000-0000-4000-8000-00000000036d',
+            'organization_id' => '00000000-0000-4000-8000-00000000036c',
+            'name' => 'Schema Probe Campus',
+            'lifecycle_state' => 'active',
+        ]);
+        DB::table('branches')->insert([
+            'id' => '00000000-0000-4000-8000-00000000036e',
+            'name' => 'Schema Probe Branch',
+            'lifecycle_state' => 'active',
+        ]);
+        DB::table('campus_assignments')->insert([
+            'id' => '00000000-0000-4000-8000-00000000036f',
+            'branch_id' => '00000000-0000-4000-8000-00000000036e',
+            'campus_id' => '00000000-0000-4000-8000-00000000036d',
+            'effective_from' => '2026-01-01',
+            'effective_to' => null,
+            'transfer_correlation_id' => 'schema-probe',
+        ]);
+
         $this->expectException(QueryException::class);
         DB::table('work_orders')->insert([
             'id' => '00000000-0000-4000-8000-00000000036a',
+            'organization_id' => '00000000-0000-4000-8000-00000000036c',
+            'originating_branch_id' => '00000000-0000-4000-8000-00000000036e',
             'facility_note' => 'probe',
             'description' => 'probe',
             'lifecycle_state' => 'daydreaming',
@@ -766,8 +802,8 @@ final class SchemaInvariantFeatureTest extends TestCase
         $payrollAdjustmentTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'payroll_adjustments')->pluck('tgname')->all();
         $this->assertContains('payroll_adjustments_append_only_trigger', $payrollAdjustmentTriggers, 'payroll adjustments must be append-only at the schema level');
 
-        $settlementTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'final_settlements')->pluck('tgname')->all();
-        $this->assertContains('final_settlements_immutable_trigger', $settlementTriggers, 'final settlements must be immutable at the schema level');
+        $settlementTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'employment_settlements')->pluck('tgname')->all();
+        $this->assertContains('employment_settlements_immutable_trigger', $settlementTriggers, 'final settlements must be immutable at the schema level');
 
         $accountTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'accounts')->pluck('tgname')->all();
         $this->assertContains('accounts_immutable_trigger', $accountTriggers, 'chart-of-accounts entries must be immutable at the schema level');
@@ -900,8 +936,8 @@ final class SchemaInvariantFeatureTest extends TestCase
         $adjustmentTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'payroll_adjustments')->pluck('tgname')->all();
         $this->assertContains('payroll_adjustments_guard_trigger', $adjustmentTriggers, 'payroll adjustments must respect period closure and reversal rules at the schema level');
 
-        $settlementTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'final_settlements')->pluck('tgname')->all();
-        $this->assertContains('final_settlements_guard_trigger', $settlementTriggers, 'final settlements must respect clearance, SoD and uniqueness at the schema level');
+        $settlementTriggers = DB::table('pg_trigger')->join('pg_class', 'pg_class.oid', '=', 'pg_trigger.tgrelid')->where('pg_class.relname', 'employment_settlements')->pluck('tgname')->all();
+        $this->assertContains('employment_settlements_guard_trigger', $settlementTriggers, 'final settlements must respect clearance, SoD and uniqueness at the schema level');
     }
 
     public function test_finance_accounting_guards_exist_at_schema_level(): void

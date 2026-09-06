@@ -1,5 +1,9 @@
 # Package 17 Checkpoint — Production Readiness: Employee Interface, API, Printing, Identity Credentials & Final Certification
 
+> **Historical checkpoint notice (2026-09-05):** This package records evidence from its original branch/runtime and is not a current production-readiness verdict. The unified platform reconciliation supersedes its authority claims, removes duplicate settlement paths, and defers runtime validation.
+>
+> **Employee Workspace addendum:** The historical employee interface and API coverage in this checkpoint must not be treated as proof of the first-class Employee Workspace requirement. The current target requires dynamically composed, work-first and exception-first employee and management work environments derived from effective identity, positions, assignments, capabilities, lifecycle, scope, tasks, approvals, deadlines, notifications, context, and exceptions. Workspaces remain orchestration over canonical authorities; command-time authorization, API/web parity, lifecycle revocation, projection freshness/rebuildability, accessibility, and employee-efficiency validation are still open.
+
 **Package:** 17 — Bring The TOEFL House to a complete, production-ready system (user directive 2026-08-26: "audit and improve simultaneously"; deliver the finished system, not a progress report)
 **Status:** CERTIFIED — PASS
 **Date:** 2026-08-26
@@ -89,7 +93,7 @@ Covered across the suite (normal / validation / authorization / failure / correc
 | DB invariants | PASS | `SchemaInvariantFeatureTest`: PK/FK/unique/check/state/monetary/effective-date invariants; dropped legacy tables absent from `pg_tables` |
 | fresh DB rebuild | PASS | `migrate:fresh` green from **99 migrations** (main DB `toefl_house`) |
 | read-only queries | PASS | `QueryReadOnlyFeatureTest`: query surface performs no writes |
-| live HTTP smoke test | PASS | real server on `0.0.0.0:8000` through `public/index.php`: `/up` 200 "Application up"; `/login` 200 "Sign in — The TOEFL House"; `/` and protected pages (`/students`, print routes) 302 → `/login`; API unauth 401 structured JSON (`/api/me`, `POST /api/finance/payments`); CSRF active (419 without token); login failure path (token + bad credentials) 302 → `/login` with no account created; database session driver persisted 11 session rows to `sessions` |
+| live HTTP smoke test | DEFERRED | A historical smoke-test note referenced `/api/me` and `POST /api/finance/payments`; it is not treated as current evidence. Runtime execution remains intentionally prohibited; the intended current contract is `/api/v1/me` and `/api/v1/finance/payments`. |
 | environment verification | PASS | `P02-environment-recovery.sh --verify` → ENVIRONMENT VALID (PHP 8.2.27, Composer 2.10.2, vendor in sync, PostgreSQL 18.4, Laravel 12.67.0 boot, phpunit/phpstan/pint) |
 
 ## Attack (adversarial verification)
@@ -142,8 +146,8 @@ The certification above stands for what it covered; this amendment corrects one 
 
 As of 2026-08-29 (commit `097946c` and the PHASE_3 part-three increment on `arena/01a03d22-toefl-house`), the correction is verified end-to-end over the real HTTP surface:
 
-- all four workflows are exposed as thin transports over their authoritative commands — `POST /academic/enrollments` + `…/{id}/activate`, `POST /finance/obligations`, `POST /academic/progressions` + `…/{id}/review` + `…/{id}/approve`, `POST /payroll/employments/{id}/clearance` + `POST /payroll/employments/{id}/settlements` + `POST /payroll/settlements/{proposalId}/approve` — with each two-signature stage signed in its **own** authenticated session;
-- `SettleEmployment` is staged to the house pattern by migration **`000112`** (`settlement_proposals` `proposed`|`approved`, one open proposal per employment; consolidated `settlement_proposals_guard` — born proposed only for a terminated, doubly-cleared, unsettled employment; only proposed→approved with state+approver change, approver ≠ preparer ≠ beneficiary; no delete). `SettleEmployment::settle` is replaced by `propose` + `approve`; `final_settlements` keeps its 000056/000103 guards and remains the single recorded fact;
+- all four workflows are exposed as thin transports over their authoritative commands — `POST /academic/enrollments` + `…/{id}/activate`, `POST /finance/obligations`, `POST /academic/progressions` + `…/{id}/review` + `…/{id}/approve`, `POST /payroll/employments/{id}/clearance` + `POST /payroll/employments/{id}/settlements` + `POST /finance/employment-settlements/{proposalId}/approve` — with each two-signature stage signed in its **own** authenticated session;
+- `SettleEmployment` was staged to the house pattern by migration **`000112`** (`settlement_proposals` `proposed`|`approved`, one open proposal per employment; consolidated `settlement_proposals_guard` — born proposed only for a terminated, doubly-cleared, unsettled employment; only proposed→approved with state+approver change, approver ≠ preparer ≠ beneficiary; no delete). `SettleEmployment::settle` was replaced by `propose` + `approve`; that historical checkpoint's `final_settlements` claim is superseded by Finance `employment_settlements` and one-way consolidation migration `000143`;
 - `MaintainFinancialPeriod` open/close (the obligation workflow's prerequisite, found unexposed by the same audit) is exposed as `POST /finance/periods` + `POST /finance/periods/{id}/close`;
 - evidence: 8 new HTTP workflow tests (seat lifecycle + activation denial; obligation open-period rule; staged progression incl. both independence denials; four-session settlement end-to-end; period lifecycle) and 6 new direct-SQL settlement-proposal attacks, each proven over real sessions against the schema's final authority.
 

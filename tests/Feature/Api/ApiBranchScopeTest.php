@@ -86,7 +86,7 @@ final class ApiBranchScopeTest extends TestCase
     /** @return list<string> */
     private function listedStudentIds(): array
     {
-        $payload = $this->getJson('/api/students')->assertOk()->json();
+        $payload = $this->getJson('/api/v1/students')->assertOk()->json();
 
         return collect($payload['students'] ?? [])->pluck('id')->all();
     }
@@ -104,7 +104,7 @@ final class ApiBranchScopeTest extends TestCase
     public function test_student_list_is_empty_without_read_authority(): void
     {
         $this->signIn('api.bare');
-        $payload = $this->getJson('/api/students')->assertOk()->json();
+        $payload = $this->getJson('/api/v1/students')->assertOk()->json();
 
         $this->assertSame([], $payload['students']);
         $this->assertSame([], $payload['applicants']);
@@ -114,7 +114,7 @@ final class ApiBranchScopeTest extends TestCase
     {
         $this->signIn('api.a');
 
-        $this->getJson('/api/students/'.$this->studentB)
+        $this->getJson('/api/v1/students/'.$this->studentB)
             ->assertForbidden()
             ->assertJsonPath('error', 'api.read_denied');
         $this->assertDatabaseHas('audit_events', [
@@ -122,7 +122,7 @@ final class ApiBranchScopeTest extends TestCase
             'actor_id' => 'api-officer-a',
         ]);
 
-        $this->getJson('/api/students/'.$this->studentA)->assertOk();
-        $this->getJson('/api/students/'.$this->studentNull)->assertOk();
+        $this->getJson('/api/v1/students/'.$this->studentA)->assertOk();
+        $this->getJson('/api/v1/students/'.$this->studentNull)->assertOk();
     }
 }

@@ -5,11 +5,9 @@ use App\Http\Controllers\AccessController;
 use App\Http\Controllers\AuditController;
 use App\Http\Controllers\AuthenticationController;
 use App\Http\Controllers\CommunicationController;
-use App\Http\Controllers\CrmController;
 use App\Http\Controllers\DocumentsController;
 use App\Http\Controllers\FinanceController;
 use App\Http\Controllers\HealthController;
-use App\Http\Controllers\HomeController;
 use App\Http\Controllers\HrController;
 use App\Http\Controllers\IdentityController;
 use App\Http\Controllers\LibraryController;
@@ -27,10 +25,11 @@ use Illuminate\Support\Facades\Route;
 | Employee Console (The TOEFL House)
 |--------------------------------------------------------------------------
 |
-| Server-rendered employee interface. Routes are a thin transport boundary:
-| they authenticate the employee session, then delegate to the module
-| command/query surface. Business rules, authorization, idempotency, and
-| audit are owned by the domain commands, never by routes or views.
+| Employee interface routes. The workspace is a standalone React boundary;
+| legacy module pages remain transitional screens. Routes are a thin transport
+| boundary: they authenticate the employee session, then delegate to module
+| command/query surfaces. Business rules, authorization, idempotency, and
+| audit are owned by domain commands, never by routes or views.
 |
 */
 
@@ -45,7 +44,11 @@ Route::get('/health', HealthController::class)->name('health');
 
 Route::middleware('employee')->group(function (): void {
     Route::post('/logout', [AuthenticationController::class, 'logout'])->name('logout');
-    Route::get('/', [HomeController::class, 'index'])->name('home');
+    // The work-first React boundary is the sole interactive console home;
+    // the former live-count Blade home is no longer an authority or UI root.
+    Route::get('/', fn () => redirect()->route('workspace'))->name('home');
+    Route::view('/workspace', 'workspace')->name('workspace');
+    Route::view('/management', 'workspace', ['view' => 'management'])->name('management');
 
     // Organization & Configuration
     Route::prefix('organization')->name('organization.')->group(function (): void {
@@ -64,43 +67,41 @@ Route::middleware('employee')->group(function (): void {
 
     // Students & Admissions
     Route::prefix('students')->name('students.')->group(function (): void {
-        Route::get('/', [StudentsController::class, 'index'])->name('index');
-        Route::get('applicants', [StudentsController::class, 'applicants'])->name('applicants');
+        // Students/Admissions now render in the shared React boundary.
+        // Existing POST adapters remain a temporary compatibility bridge;
+        // React writes through the versioned API below.
+        Route::view('/', 'workspace', ['view' => 'students', 'students_view' => 'directory'])->name('index');
+        Route::view('applicants', 'workspace', ['view' => 'students', 'students_view' => 'applicants'])->name('applicants');
         Route::post('applicants', [StudentsController::class, 'registerApplicant'])->name('register');
         Route::post('applicants/{applicantId}/initiate', [StudentsController::class, 'initiateAdmission'])->name('initiate');
         Route::post('decisions/{decisionId}/review', [StudentsController::class, 'reviewAdmission'])->name('decision.review');
         Route::post('decisions/{decisionId}/approve', [StudentsController::class, 'approveAdmission'])->name('decision.approve');
         Route::post('applicants/{applicantId}/enroll', [StudentsController::class, 'enroll'])->name('enroll');
-        Route::get('students/{studentId}', [StudentsController::class, 'show'])->name('show');
-        Route::post('students/{studentId}/status/{action}', [StudentsController::class, 'transitionStatus'])->where('action', 'suspend|withdraw|reactivate|complete|graduate')->name('status');
-        Route::post('students/{studentId}/guardians', [StudentsController::class, 'recordGuardian'])->name('guardian.record');
+        Route::get('{studentId}', fn (string $studentId) => view('workspace', ['view' => 'students', 'students_view' => 'detail', 'student_id' => $studentId]))->name('show');
+        Route::post('{studentId}/status/{action}', [StudentsController::class, 'transitionStatus'])->where('action', 'suspend|withdraw|reactivate|complete|graduate')->name('status');
+        Route::post('{studentId}/guardians', [StudentsController::class, 'recordGuardian'])->name('guardian.record');
         Route::post('guardians/{relationshipId}/verify', [StudentsController::class, 'verifyGuardian'])->name('guardian.verify');
         Route::post('guardians/{relationshipId}/revoke', [StudentsController::class, 'revokeGuardian'])->name('guardian.revoke');
-        Route::post('students/{studentId}/transfer', [StudentsController::class, 'transferBranch'])->name('transfer');
-        Route::post('students/{studentId}/hold/freeze', [StudentsController::class, 'freezeStudent'])->name('hold.freeze');
-        Route::post('students/{studentId}/hold/resume', [StudentsController::class, 'resumeStudent'])->name('hold.resume');
-        Route::post('students/{studentId}/communication', [StudentsController::class, 'setCommunicationPreference'])->name('communication');
+        Route::post('{studentId}/transfer', [StudentsController::class, 'transferBranch'])->name('transfer');
+        Route::post('{studentId}/hold/freeze', [StudentsController::class, 'freezeStudent'])->name('hold.freeze');
+        Route::post('{studentId}/hold/resume', [StudentsController::class, 'resumeStudent'])->name('hold.resume');
+        Route::post('{studentId}/communication', [StudentsController::class, 'setCommunicationPreference'])->name('communication');
     });
 
-    // Visitor / Lead / CRM
-    Route::prefix('crm')->name('crm.')->group(function (): void {
-        Route::get('/', [CrmController::class, 'index'])->name('index');
-        Route::post('visitors', [CrmController::class, 'capture'])->name('capture');
-        Route::post('visitors/{visitorId}/transition', [CrmController::class, 'transition'])->name('transition');
-        Route::post('visitors/{visitorId}/interactions', [CrmController::class, 'interaction'])->name('interaction');
-        Route::post('visitors/{visitorId}/link-person', [CrmController::class, 'linkPerson'])->name('link-person');
-        Route::post('visitors/{visitorId}/followups', [CrmController::class, 'followup'])->name('followup');
-        Route::post('visitors/{visitorId}/convert', [CrmController::class, 'convert'])->name('convert');
-        Route::post('followups/{followupId}/complete', [CrmController::class, 'completeFollowup'])->name('followup.complete');
-        Route::post('followups/{followupId}/cancel', [CrmController::class, 'cancelFollowup'])->name('followup.cancel');
-        Route::post('sources', [CrmController::class, 'defineSource'])->name('source.define');
-        Route::post('campaigns', [CrmController::class, 'defineCampaign'])->name('campaign.define');
-        Route::post('automation-rules', [CrmController::class, 'defineAutomationRule'])->name('automation.define');
-    });
+    // CRM is the same React console boundary as the employee workspace. Its
+    // reads and writes use only the versioned API; no interactive Blade
+    // transport remains.
+    Route::view('/crm', 'workspace', ['view' => 'crm'])->name('crm.index');
+    // Teacher/Faculty is a server-derived React authority surface; legacy HR
+    // remains the employment authority, never a duplicate teacher profile UI.
+    Route::view('/teachers', 'workspace', ['view' => 'teachers'])->name('teachers.index');
 
-    // Academic
+    // Academic Classes is the canonical React workspace. The POST adapters
+    // below remain thin compatibility transports to the same module commands;
+    // no Blade page owns academic state.
+    Route::view('/academic', 'workspace', ['view' => 'academic'])->name('academic.index');
     Route::prefix('academic')->name('academic.')->group(function (): void {
-        Route::get('/', [AcademicController::class, 'index'])->name('index');
+        Route::post('/', fn () => redirect()->route('academic.index'))->name('legacy.index');
         Route::post('programs', [AcademicController::class, 'defineProgram'])->name('program.define');
         Route::post('programs/{programId}/versions', [AcademicController::class, 'publishProgramVersion'])->name('version.publish');
         Route::post('periods', [AcademicController::class, 'definePeriod'])->name('period.define');
@@ -118,7 +119,9 @@ Route::middleware('employee')->group(function (): void {
         Route::post('teacher-assignments/{assignmentId}/end', [AcademicController::class, 'endAssignment'])->name('teacher.end');
         Route::post('teacher-assignments/{assignmentId}/extend', [AcademicController::class, 'extendAssignment'])->name('teacher.extend');
         Route::post('teacher-assignments/{assignmentId}/handover', [AcademicController::class, 'handoverAssignment'])->name('teacher.handover');
-        Route::get('sessions', [AcademicController::class, 'sessions'])->name('sessions');
+        // Timetable, attendance and outcomes are tabs of the React Classes
+        // workspace; no second Blade read model is exposed.
+        Route::get('sessions', fn () => redirect()->route('academic.index'))->name('sessions');
         Route::post('sessions', [AcademicController::class, 'scheduleSession'])->name('schedule');
         Route::post('sessions/{sessionId}/attendance', [AcademicController::class, 'recordAttendance'])->name('attendance');
         Route::post('sessions/facts/{factId}/correct', [AcademicController::class, 'correctAttendance'])->name('attendance.correct');
@@ -153,7 +156,7 @@ Route::middleware('employee')->group(function (): void {
         Route::post('waitlist/{entryId}/promote', [AcademicController::class, 'promoteWaitlistEntry'])->name('waitlist.promote');
         Route::post('waitlist/{entryId}/withdraw', [AcademicController::class, 'withdrawWaitlistEntry'])->name('waitlist.withdraw');
         Route::post('waitlist/{entryId}/expire', [AcademicController::class, 'expireWaitlistEntry'])->name('waitlist.expire');
-        Route::get('gradesheets/{classId}', [AcademicController::class, 'gradesheet'])->name('gradesheet');
+        Route::get('gradesheets/{classId}', fn () => redirect()->route('academic.index'))->name('gradesheet');
         Route::post('graduations', [AcademicController::class, 'proposeGraduation'])->name('graduation.propose');
         Route::post('graduations/{decisionId}/review', [AcademicController::class, 'reviewGraduation'])->name('graduation.review');
         Route::post('graduations/{decisionId}/approve', [AcademicController::class, 'approveGraduation'])->name('graduation.approve');
@@ -235,6 +238,7 @@ Route::middleware('employee')->group(function (): void {
     Route::prefix('library')->name('library.')->group(function (): void {
         Route::get('/', [LibraryController::class, 'index'])->name('index');
         Route::post('assets', [LibraryController::class, 'registerAsset'])->name('asset.register');
+        Route::post('books', [LibraryController::class, 'addBookCopy'])->name('book.add');
         Route::post('assets/{assetId}/custody', [LibraryController::class, 'assignCustody'])->name('custody.assign');
         Route::post('assets/{assetId}/custody/release', [LibraryController::class, 'releaseCustody'])->name('custody.release');
         Route::post('assets/{assetId}/disposal', [LibraryController::class, 'requestDisposal'])->name('disposal.request');
@@ -263,12 +267,18 @@ Route::middleware('employee')->group(function (): void {
         Route::post('accounts', [FinanceController::class, 'defineAccount'])->name('account.define');
         Route::post('journals', [FinanceController::class, 'postJournal'])->name('journal.post');
         Route::post('journals/{journalId}/reverse', [FinanceController::class, 'reverseJournal'])->name('journal.reverse');
+        Route::post('obligations/{obligationId}/correction', [FinanceController::class, 'proposeObligationCorrection'])->name('correction.obligation.propose');
+        Route::post('allocations/{allocationId}/reversal', [FinanceController::class, 'proposeAllocationReversal'])->name('correction.allocation.propose');
+        Route::post('fund-allocations/{allocationId}/reversal', [FinanceController::class, 'proposeFundAllocationReversal'])->name('correction.fund-allocation.propose');
+        Route::post('corrections/{correctionId}/approve', [FinanceController::class, 'approveFinancialCorrection'])->name('correction.approve');
         Route::post('discounts', [FinanceController::class, 'proposeDiscount'])->name('discount.propose');
         Route::post('discounts/{discountId}/approve', [FinanceController::class, 'approveDiscount'])->name('discount.approve');
         Route::post('reconciliations', [FinanceController::class, 'observeReconciliation'])->name('reconciliation.observe');
         Route::post('reconciliations/{reconciliationId}/approve', [FinanceController::class, 'approveReconciliation'])->name('reconciliation.approve');
         Route::post('funds', [FinanceController::class, 'establishFund'])->name('fund.establish');
         Route::post('funds/{fundId}/allocations', [FinanceController::class, 'allocateFund'])->name('fund.allocate');
+        Route::post('employment-settlements/{proposalId}/approve', [FinanceController::class, 'approveEmploymentSettlement'])->name('employment-settlement.approve');
+        Route::post('payroll-liabilities/recognize', [FinanceController::class, 'recognizePayrollLiability'])->name('payroll-liability.recognize');
         Route::post('credits', [FinanceController::class, 'proposeCredit'])->name('credit.propose');
         Route::post('credits/{creditId}/approve', [FinanceController::class, 'approveCredit'])->name('credit.approve');
         Route::post('installments', [FinanceController::class, 'proposeInstallment'])->name('installment.propose');
@@ -294,7 +304,6 @@ Route::middleware('employee')->group(function (): void {
         Route::post('calculations/{calculationId}/approve', [PayrollController::class, 'approve'])->name('approve');
         Route::post('employments/{employmentId}/clearance', [PayrollController::class, 'clear'])->name('clearance');
         Route::post('employments/{employmentId}/settlements', [PayrollController::class, 'proposeSettlement'])->name('settlement.propose');
-        Route::post('settlements/{proposalId}/approve', [PayrollController::class, 'approveSettlement'])->name('settlement.approve');
     });
 
     // Reporting & Dashboards

@@ -5,12 +5,15 @@ declare(strict_types=1);
 namespace App\Modules\Access\Commands;
 
 use App\Modules\Access\Domain\AccessLifecycle;
+use App\Modules\Access\Models\Position;
 use App\Modules\Access\Models\PositionAssignment;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
+use App\Support\Authorization\PersonBranchScope;
 use App\Support\Errors\AuthorizationDenied;
+use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
 use App\Support\Identifiers\RandomIdentifier;
 use Carbon\CarbonImmutable;
@@ -40,7 +43,12 @@ final class AssignPosition
         try {
             return $this->idempotency->execute('access.position.assign', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($assigner, $personId, $positionId, $effectiveFrom): array {
-                    $this->requireAssigner($assigner);
+                    $scope = PersonBranchScope::resolve($personId);
+                    $position = Position::query()->whereKey($positionId)->first();
+                    if ($position === null || trim((string) $position->organization_id) !== trim($scope->organizationId)) {
+                        throw BusinessRejection::forCode('access.position_scope_mismatch', 'a position assignment must remain inside the person home organization');
+                    }
+                    $this->requireAssigner($assigner, $scope);
 
                     $prior = PositionAssignment::query()
                         ->where('person_id', $personId)
@@ -69,6 +77,7 @@ final class AssignPosition
                         'position_id' => $positionId,
                         'lifecycle_state' => AccessLifecycle::STATE_PROPOSED,
                         'effective_from' => $assignment->effective_from,
+                        'branch_id' => $scope->branchId, 'organization_id' => $scope->organizationId,
                     ]);
 
                     return ['assignment_id' => $assignment->id, 'correlation_id' => $event->correlation_id];
@@ -79,9 +88,9 @@ final class AssignPosition
         }
     }
 
-    private function requireAssigner(Actor $assigner): void
+    private function requireAssigner(Actor $assigner, \App\Support\Authorization\StructureScope $scope): void
     {
-        $outcome = $this->access->decide($assigner, self::CAPABILITY, null);
+        $outcome = $this->access->decide($assigner, self::CAPABILITY, $scope);
         if (! $outcome->allowed) {
             throw AuthorizationDenied::forCode('access.assign_position_denied', $outcome->reason);
         }

@@ -15,8 +15,11 @@ use App\Modules\Hr\Models\Contract;
 use App\Modules\Hr\Models\ContractVersion;
 use App\Modules\Hr\Models\Employment;
 use App\Modules\Hr\Models\Scale;
+use App\Modules\Identity\Models\Person;
+use App\Modules\Organization\Models\Branch;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
+use App\Support\Authorization\StructureScope;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
@@ -62,7 +65,6 @@ final class MaintainContractVersion
         try {
             return $this->idempotency->execute('hr.contract_version.prepare', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($preparer, $employment, $termsRef, $scaleId, $effectiveFrom, $effectiveTo): array {
-                    $this->require($preparer, self::CAPABILITY_PREPARE);
                     if ($termsRef === '') {
                         throw BusinessRejection::forCode('hr.contract_version_terms', 'a contract version requires its terms evidence reference');
                     }
@@ -72,6 +74,9 @@ final class MaintainContractVersion
 
                     /** @var Employment $lockedEmployment */
                     $lockedEmployment = Employment::query()->where('id', $employment->id)->lockForUpdate()->firstOrFail();
+                    $branch = $this->employmentBranch($lockedEmployment);
+                    $scope = $branch->structureScope();
+                    $this->require($preparer, self::CAPABILITY_PREPARE, $scope);
                     if ($lockedEmployment->lifecycle_state === EmploymentLifecycle::STATE_TERMINATED) {
                         throw BusinessRejection::forCode('hr.contract_version_employment_terminated', 'a terminated employment cannot receive contract versions');
                     }
@@ -96,6 +101,8 @@ final class MaintainContractVersion
                             'terms_summary' => $termsRef,
                             'lifecycle_state' => ContractLifecycle::STATE_DRAFT,
                             'effective_from' => $effectiveFrom,
+                            'originating_branch_id' => $branch->id,
+                            'current_home_branch_id' => $branch->id,
                         ]);
                     }
                     if ($effectiveFrom < $contract->effective_from) {
@@ -116,6 +123,7 @@ final class MaintainContractVersion
                     ]);
                     $event = $this->audit->record($preparer->actorId, 'hr.contract_version.prepare', 'contract_version', $version->id, null, [
                         'contract_id' => $contract->id, 'version_no' => $versionNo, 'effective_from' => $effectiveFrom, 'scale_id' => $scaleId,
+                        'branch_id' => $branch->id, 'organization_id' => $scope->organizationId,
                     ]);
 
                     return ['version_id' => $version->id, 'contract_id' => $contract->id, 'version_no' => $versionNo, 'correlation_id' => $event->correlation_id];
@@ -136,7 +144,6 @@ final class MaintainContractVersion
         try {
             return $this->idempotency->execute('hr.compensation_rule.add', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($preparer, $version, $method, $rate, $skillId, $scaleId, $label): array {
-                    $this->require($preparer, self::CAPABILITY_PREPARE);
                     if (! in_array($method, self::METHODS, true)) {
                         throw BusinessRejection::forCode('hr.compensation_rule_method', sprintf('unknown compensation method %s', $method));
                     }
@@ -146,6 +153,9 @@ final class MaintainContractVersion
 
                     /** @var ContractVersion $locked */
                     $locked = ContractVersion::query()->where('id', $version->id)->lockForUpdate()->firstOrFail();
+                    $branch = $this->versionBranch($locked);
+                    $scope = $branch->structureScope();
+                    $this->require($preparer, self::CAPABILITY_PREPARE, $scope);
                     if ($locked->lifecycle_state !== ContractVersionLifecycle::STATE_DRAFT) {
                         throw BusinessRejection::forCode('hr.compensation_rule_version_frozen', 'compensation rules attach only to a draft version');
                     }
@@ -206,6 +216,7 @@ final class MaintainContractVersion
                     ]);
                     $event = $this->audit->record($preparer->actorId, 'hr.compensation_rule.add', 'compensation_rule', $rule->id, null, [
                         'contract_version_id' => $locked->id, 'method' => $method, 'skill_id' => $skillId, 'scale_id' => $scaleId, 'rate' => $rate,
+                        'branch_id' => $branch->id, 'organization_id' => $scope->organizationId,
                     ]);
 
                     return ['rule_id' => $rule->id, 'correlation_id' => $event->correlation_id];
@@ -226,18 +237,19 @@ final class MaintainContractVersion
         try {
             return $this->idempotency->execute('hr.compensation_rule.discard', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($preparer, $rule): array {
-                    $this->require($preparer, self::CAPABILITY_PREPARE);
-
                     /** @var CompensationRule $locked */
                     $locked = CompensationRule::query()->where('id', $rule->id)->lockForUpdate()->firstOrFail();
                     /** @var ContractVersion $version */
                     $version = ContractVersion::query()->where('id', $locked->contract_version_id)->lockForUpdate()->firstOrFail();
+                    $branch = $this->versionBranch($version);
+                    $scope = $branch->structureScope();
+                    $this->require($preparer, self::CAPABILITY_PREPARE, $scope);
                     if ($version->lifecycle_state !== ContractVersionLifecycle::STATE_DRAFT) {
                         throw BusinessRejection::forCode('hr.compensation_rule_version_frozen', 'compensation rules attach only to a draft version');
                     }
 
                     $locked->delete();
-                    $event = $this->audit->record($preparer->actorId, 'hr.compensation_rule.discard', 'compensation_rule', $locked->id, ['method' => $locked->method, 'rate' => $locked->rate], null);
+                    $event = $this->audit->record($preparer->actorId, 'hr.compensation_rule.discard', 'compensation_rule', $locked->id, ['method' => $locked->method, 'rate' => $locked->rate, 'branch_id' => $branch->id, 'organization_id' => $scope->organizationId], null);
 
                     return ['correlation_id' => $event->correlation_id];
                 }),
@@ -257,17 +269,18 @@ final class MaintainContractVersion
         try {
             return $this->idempotency->execute('hr.contract_version.submit', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($preparer, $version): array {
-                    $this->require($preparer, self::CAPABILITY_PREPARE);
-
                     /** @var ContractVersion $locked */
                     $locked = ContractVersion::query()->where('id', $version->id)->lockForUpdate()->firstOrFail();
+                    $branch = $this->versionBranch($locked);
+                    $scope = $branch->structureScope();
+                    $this->require($preparer, self::CAPABILITY_PREPARE, $scope);
                     ContractVersionLifecycle::requireTransition($locked->lifecycle_state, ContractVersionLifecycle::STATE_SUBMITTED);
                     $this->requireRules($locked);
 
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
                     $locked->forceFill(['lifecycle_state' => ContractVersionLifecycle::STATE_SUBMITTED, 'submitted_at' => now()]);
                     $locked->save();
-                    $event = $this->audit->record($preparer->actorId, 'hr.contract_version.submit', 'contract_version', $locked->id, $before, ['lifecycle_state' => ContractVersionLifecycle::STATE_SUBMITTED]);
+                    $event = $this->audit->record($preparer->actorId, 'hr.contract_version.submit', 'contract_version', $locked->id, $before, ['lifecycle_state' => ContractVersionLifecycle::STATE_SUBMITTED, 'branch_id' => $branch->id, 'organization_id' => $scope->organizationId]);
 
                     return ['version_id' => $locked->id, 'lifecycle_state' => ContractVersionLifecycle::STATE_SUBMITTED, 'correlation_id' => $event->correlation_id];
                 }),
@@ -287,16 +300,17 @@ final class MaintainContractVersion
         try {
             return $this->idempotency->execute('hr.contract_version.withdraw', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($preparer, $version): array {
-                    $this->require($preparer, self::CAPABILITY_PREPARE);
-
                     /** @var ContractVersion $locked */
                     $locked = ContractVersion::query()->where('id', $version->id)->lockForUpdate()->firstOrFail();
+                    $branch = $this->versionBranch($locked);
+                    $scope = $branch->structureScope();
+                    $this->require($preparer, self::CAPABILITY_PREPARE, $scope);
                     ContractVersionLifecycle::requireTransition($locked->lifecycle_state, ContractVersionLifecycle::STATE_WITHDRAWN);
 
                     $before = ['lifecycle_state' => $locked->lifecycle_state];
                     $locked->forceFill(['lifecycle_state' => ContractVersionLifecycle::STATE_WITHDRAWN]);
                     $locked->save();
-                    $event = $this->audit->record($preparer->actorId, 'hr.contract_version.withdraw', 'contract_version', $locked->id, $before, ['lifecycle_state' => ContractVersionLifecycle::STATE_WITHDRAWN]);
+                    $event = $this->audit->record($preparer->actorId, 'hr.contract_version.withdraw', 'contract_version', $locked->id, $before, ['lifecycle_state' => ContractVersionLifecycle::STATE_WITHDRAWN, 'branch_id' => $branch->id, 'organization_id' => $scope->organizationId]);
 
                     return ['version_id' => $locked->id, 'lifecycle_state' => ContractVersionLifecycle::STATE_WITHDRAWN, 'correlation_id' => $event->correlation_id];
                 }),
@@ -316,8 +330,6 @@ final class MaintainContractVersion
         try {
             return $this->idempotency->execute('hr.contract_version.approve', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($approver, $version): array {
-                    $this->require($approver, self::CAPABILITY_APPROVE);
-
                     /** @var ContractVersion $locked */
                     $locked = ContractVersion::query()->where('id', $version->id)->lockForUpdate()->firstOrFail();
                     if ($locked->lifecycle_state !== ContractVersionLifecycle::STATE_SUBMITTED) {
@@ -330,6 +342,9 @@ final class MaintainContractVersion
                     $contract = Contract::query()->where('id', $locked->contract_id)->lockForUpdate()->firstOrFail();
                     /** @var Employment $employment */
                     $employment = Employment::query()->where('id', $contract->employment_id)->firstOrFail();
+                    $branch = $this->employmentBranch($employment);
+                    $scope = $branch->structureScope();
+                    $this->require($approver, self::CAPABILITY_APPROVE, $scope);
                     if (trim((string) $employment->person_id) === $approver->actorId) {
                         throw AuthorizationDenied::forCode('hr.contract_version_beneficiary', 'the beneficiary may never approve their own contract');
                     }
@@ -392,7 +407,7 @@ final class MaintainContractVersion
                         if ($prior->effective_to === null || $prior->effective_to > $cutoff) {
                             $prior->forceFill(['lifecycle_state' => ContractVersionLifecycle::STATE_SUPERSEDED, 'effective_to' => $cutoff]);
                             $prior->save();
-                            $this->audit->record($approver->actorId, 'hr.contract_version.supersede', 'contract_version', $prior->id, ['lifecycle_state' => ContractVersionLifecycle::STATE_ACTIVE], ['lifecycle_state' => ContractVersionLifecycle::STATE_SUPERSEDED, 'effective_to' => $cutoff]);
+                            $this->audit->record($approver->actorId, 'hr.contract_version.supersede', 'contract_version', $prior->id, ['lifecycle_state' => ContractVersionLifecycle::STATE_ACTIVE, 'branch_id' => $branch->id, 'organization_id' => $scope->organizationId], ['lifecycle_state' => ContractVersionLifecycle::STATE_SUPERSEDED, 'effective_to' => $cutoff, 'branch_id' => $branch->id, 'organization_id' => $scope->organizationId]);
                         }
                     }
 
@@ -407,6 +422,7 @@ final class MaintainContractVersion
 
                     $event = $this->audit->record($approver->actorId, 'hr.contract_version.approve', 'contract_version', $locked->id, $before, [
                         'lifecycle_state' => $finalState, 'approved_by' => $approver->actorId, 'approval_digest' => $digest,
+                        'branch_id' => $branch->id, 'organization_id' => $scope->organizationId,
                     ]);
 
                     return ['version_id' => $locked->id, 'lifecycle_state' => $finalState, 'approval_digest' => $digest, 'correlation_id' => $event->correlation_id];
@@ -424,9 +440,32 @@ final class MaintainContractVersion
         }
     }
 
-    private function require(Actor $actor, string $capability): void
+    private function employmentBranch(Employment $employment): Branch
     {
-        $outcome = $this->access->decide($actor, $capability, null);
+        $person = Person::query()->whereKey($employment->person_id)->first();
+        $branchId = trim((string) ($person?->home_branch_id ?? ''));
+        $branch = $branchId === '' ? null : Branch::query()->whereKey($branchId)->first();
+        if ($branch === null || $branch->lifecycle_state !== 'active' || $branch->structureScope()->organizationId === '') {
+            throw BusinessRejection::forCode('hr.employee_provenance_required', 'contract version operations require active employee branch and organization provenance');
+        }
+
+        return $branch;
+    }
+
+    private function versionBranch(ContractVersion $version): Branch
+    {
+        $contract = Contract::query()->whereKey($version->contract_id)->first();
+        $employment = $contract === null ? null : Employment::query()->whereKey($contract->employment_id)->first();
+        if ($employment === null) {
+            throw BusinessRejection::forCode('hr.employee_provenance_required', 'contract version requires an existing employment provenance chain');
+        }
+
+        return $this->employmentBranch($employment);
+    }
+
+    private function require(Actor $actor, string $capability, ?StructureScope $scope = null): void
+    {
+        $outcome = $this->access->decide($actor, $capability, $scope);
         if (! $outcome->allowed) {
             throw AuthorizationDenied::forCode('hr.contract_version_denied', $outcome->reason);
         }

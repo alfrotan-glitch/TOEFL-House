@@ -9,20 +9,20 @@ use App\Modules\Academic\Domain\ClassLifecycle;
 use App\Modules\Academic\Domain\ClassSectionLifecycle;
 use App\Modules\Academic\Domain\EnrollmentLifecycle;
 use App\Modules\Academic\Models\AcademicPeriod;
-use App\Modules\Academic\Models\AcademicRoom;
 use App\Modules\Academic\Models\ClassModel;
 use App\Modules\Academic\Models\ClassSection;
 use App\Modules\Academic\Models\ClassSession;
 use App\Modules\Academic\Models\Enrollment;
+use App\Modules\Academic\Models\Offering;
 use App\Modules\Academic\Models\ProgramVersion;
 use App\Modules\Academic\Models\ProgramVersionLevel;
-use App\Modules\Academic\Models\Skill;
 use App\Modules\Academic\Models\TeacherAssignment;
-use App\Modules\Academic\Models\TeacherAssignmentSkill;
 use App\Modules\Audit\AttemptedOperation;
+use App\Modules\Organization\Models\Branch;
+use App\Modules\Scheduling\Domain\SchedulingConstraints;
 use App\Modules\Audit\AuditRecorder;
-use App\Modules\Identity\Models\Person;
 use App\Support\Authorization\Actor;
+use App\Support\Authorization\ActorBranches;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
@@ -33,8 +33,9 @@ use Illuminate\Support\Facades\DB;
 /**
  * Class and session control: a class delivers a published program version
  * in a published period with fixed capacity; sessions are scheduled on
- * active classes; teachers are assigned effective-dated, one open
- * assignment per teacher per class; cancellation preserves the record.
+ * active classes; Teacher assignment lifecycle is delegated to the
+ * canonical MaintainTeacherAssignment command; cancellation preserves the
+ * academic record.
  */
 final class MaintainClass
 {
@@ -45,42 +46,68 @@ final class MaintainClass
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
+        private readonly SchedulingConstraints $scheduling,
+        private readonly MaintainTeacherAssignment $teacherAssignments,
     ) {}
 
     /** @return array{class_id: string, correlation_id: string} */
-    public function defineClass(Actor $actor, string $programVersionId, string $periodId, int $capacity, string $idempotencyKey, ?string $programVersionLevelId = null): array
+    public function defineClass(Actor $actor, string $programVersionId, string $periodId, int $capacity, string $idempotencyKey, ?string $programVersionLevelId = null, ?string $branchId = null, ?string $offeringId = null): array
     {
-        $payload = hash('sha256', implode('|', ['academic.class.define', $programVersionId, $periodId, $capacity, $programVersionLevelId ?? '', $actor->actorId]));
+        $payload = hash('sha256', implode('|', ['academic.class.define', $programVersionId, $periodId, $capacity, $programVersionLevelId ?? '', $branchId ?? '', $offeringId ?? '', $actor->actorId]));
 
         try {
             return $this->idempotency->execute('academic.class.define', $idempotencyKey, $payload,
-                fn (): array => DB::transaction(function () use ($actor, $programVersionId, $periodId, $capacity, $programVersionLevelId): array {
-                    $this->requireCapability($actor, null);
-                    if (ProgramVersion::query()->whereKey($programVersionId)->doesntExist()) {
+                fn (): array => DB::transaction(function () use ($actor, $programVersionId, $periodId, $capacity, $programVersionLevelId, $branchId, $offeringId): array {
+                    $resolvedBranchId = $this->resolveClassBranch($actor, $branchId);
+                    $this->requireCapability($actor, $resolvedBranchId);
+                    if (! ProgramVersion::query()->whereKey($programVersionId)->whereHas('program', static fn ($query) => $query->where('lifecycle_state', 'published'))->exists()) {
                         throw BusinessRejection::forCode('academic.class_version_unknown', 'a class requires a published program version');
                     }
                     /** @var AcademicPeriod|null $period */
-                    $period = AcademicPeriod::query()->find($periodId);
+                    $period = AcademicPeriod::query()->whereKey($periodId)->lockForUpdate()->first();
                     if ($period === null || $period->lifecycle_state !== 'published') {
                         throw BusinessRejection::forCode('academic.class_period_unavailable', 'a class requires a published academic period');
                     }
                     if ($capacity <= 0) {
                         throw BusinessRejection::forCode('academic.class_capacity_invalid', 'class capacity must be positive');
                     }
-                    if ($programVersionLevelId !== null && $programVersionLevelId !== '') {
-                        $this->assertLevelBelongsToVersion($programVersionLevelId, $programVersionId);
+
+                    /** @var Offering|null $offering */
+                    $offeringQuery = Offering::query()->where('branch_id', $resolvedBranchId)
+                        ->where('academic_period_id', $periodId)
+                        ->where('lifecycle_state', Offering::STATE_OPEN);
+                    if ($offeringId !== null && $offeringId !== '') {
+                        $offeringQuery->whereKey($offeringId);
                     }
+                    if ($programVersionLevelId !== null && $programVersionLevelId !== '') {
+                        $offeringQuery->where('program_version_level_id', $programVersionLevelId);
+                    } else {
+                        $offeringQuery->whereHas('level', static fn ($query) => $query->where('program_version_id', $programVersionId));
+                    }
+                    $offering = $offeringQuery->lockForUpdate()->first();
+                    if ($offering === null) {
+                        throw BusinessRejection::forCode('academic.class_offering_required', 'a new class must reference an open offering for its branch, level, and period');
+                    }
+                    if ($offering->capacity < $capacity) {
+                        throw BusinessRejection::forCode('academic.class_capacity_exceeds_offering', 'class capacity cannot exceed its offering capacity');
+                    }
+                    $levelId = (string) $offering->program_version_level_id;
+                    $this->assertLevelBelongsToVersion($levelId, $programVersionId);
 
                     $class = ClassModel::query()->create([
                         'id' => RandomIdentifier::new(),
                         'program_version_id' => $programVersionId,
                         'period_id' => $periodId,
-                        'program_version_level_id' => $programVersionLevelId !== null && $programVersionLevelId !== '' ? $programVersionLevelId : null,
+                        'branch_id' => $resolvedBranchId,
+                        'program_version_level_id' => $levelId,
+                        'offering_id' => $offering->id,
                         'capacity' => $capacity,
                         'lifecycle_state' => ClassLifecycle::STATE_PLANNED,
                     ]);
+                    $provenance = $this->classProvenance($class->id);
                     $event = $this->audit->record($actor->actorId, 'academic.class.define', 'class', $class->id, null, [
-                        'program_version_id' => $programVersionId, 'period_id' => $periodId, 'program_version_level_id' => $class->program_version_level_id, 'capacity' => $capacity,
+                        'program_version_id' => $programVersionId, 'period_id' => $periodId, 'branch_id' => $resolvedBranchId, 'program_version_level_id' => $class->program_version_level_id, 'offering_id' => $class->offering_id, 'capacity' => $capacity,
+                        ...$provenance,
                     ]);
 
                     return ['class_id' => $class->id, 'correlation_id' => $event->correlation_id];
@@ -130,22 +157,39 @@ final class MaintainClass
         try {
             return $this->idempotency->execute('academic.class.transition', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $class, $toState): array {
-                    $this->requireCapability($actor, null);
-
                     /** @var ClassModel $locked */
                     $locked = ClassModel::query()->whereKey($class->id)->lockForUpdate()->firstOrFail();
+                    $this->requireCapability($actor, $locked->branch_id);
                     $from = $locked->lifecycle_state;
                     ClassLifecycle::requireTransition($from, $toState);
-                    if ($toState === ClassLifecycle::STATE_ACTIVE && TeacherAssignment::query()->where('class_id', $locked->id)->whereNull('effective_to')->doesntExist()) {
-                        throw BusinessRejection::forCode('academic.class_needs_teacher', 'a class needs at least one open teacher assignment to activate');
+                    if ($toState === ClassLifecycle::STATE_ACTIVE && TeacherAssignment::query()
+                        ->where('class_id', $locked->id)
+                        ->where('branch_id', $locked->branch_id)
+                        ->whereNotNull('teacher_profile_id')
+                        ->where(fn ($state) => $state->whereNull('lifecycle_state')->orWhereIn('lifecycle_state', ['planned', 'active']))
+                        ->where('effective_from', '<=', CarbonImmutable::today()->toDateString())
+                        ->where(fn ($window) => $window->whereNull('effective_to')->orWhere('effective_to', '>', CarbonImmutable::today()->toDateString()))
+                        ->whereHas('teacherProfile', static fn ($profile) => $profile->whereColumn('teacher_profiles.person_id', 'teacher_assignments.teacher_person_id')->where('teacher_profiles.lifecycle_state', 'active'))
+                        ->doesntExist()) {
+                        throw BusinessRejection::forCode('academic.class_needs_teacher', 'a class needs at least one current canonical teacher assignment to activate');
                     }
                     if (in_array($toState, [ClassLifecycle::STATE_CANCELLED, ClassLifecycle::STATE_COMPLETED], true)) {
                         $this->assertNoOpenSeats($locked->id, $toState);
+                        $futureSessions = ClassSession::query()->where('class_id', $locked->id)
+                            ->where('scheduled_on', '>=', CarbonImmutable::today()->toDateString())
+                            ->count();
+                        if ($futureSessions > 0) {
+                            throw BusinessRejection::forCode('academic.class_future_sessions', "class cannot move to {$toState} while {$futureSessions} future session(s) remain");
+                        }
                     }
 
                     $locked->forceFill(['lifecycle_state' => $toState]);
                     $locked->save();
-                    $event = $this->audit->record($actor->actorId, 'academic.class.transition', 'class', $locked->id, ['lifecycle_state' => $from], ['lifecycle_state' => $toState]);
+                    $provenance = $this->classProvenance($locked->id);
+                    $event = $this->audit->record($actor->actorId, 'academic.class.transition', 'class', $locked->id, ['lifecycle_state' => $from], [
+                        'lifecycle_state' => $toState,
+                        ...$provenance,
+                    ]);
 
                     return ['class_id' => $locked->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
                 }),
@@ -163,30 +207,15 @@ final class MaintainClass
         try {
             return $this->idempotency->execute('academic.session.schedule', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $class, $scheduledOn, $startsAt, $endsAt, $skillId, $roomId, $sectionId): array {
-                    $this->requireCapability($actor, $this->roomBranch($roomId));
-                    if ($class->lifecycle_state !== ClassLifecycle::STATE_ACTIVE) {
-                        throw BusinessRejection::forCode('academic.session_class_not_active', 'sessions are scheduled only on active classes');
-                    }
-                    if ($endsAt <= $startsAt) {
-                        throw BusinessRejection::forCode('academic.session_window', 'a session must end after it starts');
-                    }
-                    if ($skillId !== null) {
-                        /** @var Skill|null $skill */
-                        $skill = Skill::query()->find($skillId);
-                        if ($skill === null || $skill->lifecycle_state !== Skill::STATE_ACTIVE) {
-                            throw BusinessRejection::forCode('academic.session_skill_unknown', 'a session may deliver only an active skill');
-                        }
-                    }
-                    if ($sectionId !== null) {
-                        $this->assertSectionOpen($sectionId, $class->id);
-                    }
-                    if ($roomId !== null) {
-                        $this->assertRoomAvailable($roomId);
-                    }
+                    /** @var ClassModel $lockedClass */
+                    $lockedClass = ClassModel::query()->whereKey($class->id)->lockForUpdate()->firstOrFail();
+                    $classBranchId = trim((string) ($lockedClass->branch_id ?? ''));
+                    $this->requireCapability($actor, $classBranchId);
+                    $this->scheduling->assertSessionCanBeScheduled($lockedClass, $scheduledOn, $startsAt, $endsAt, $skillId, $roomId, $sectionId);
 
                     $session = ClassSession::query()->create([
                         'id' => RandomIdentifier::new(),
-                        'class_id' => $class->id,
+                        'class_id' => $lockedClass->id,
                         'skill_id' => $skillId,
                         'room_id' => $roomId,
                         'section_id' => $sectionId,
@@ -194,8 +223,10 @@ final class MaintainClass
                         'starts_at' => $startsAt,
                         'ends_at' => $endsAt,
                     ]);
+                    $provenance = $this->classProvenance($lockedClass->id);
                     $event = $this->audit->record($actor->actorId, 'academic.session.schedule', 'class_session', $session->id, null, [
-                        'class_id' => $class->id, 'scheduled_on' => $session->scheduled_on, 'skill_id' => $skillId, 'room_id' => $roomId, 'section_id' => $sectionId,
+                        'class_id' => $lockedClass->id, 'offering_id' => $lockedClass->offering_id, 'scheduled_on' => $session->scheduled_on, 'skill_id' => $skillId, 'room_id' => $roomId, 'section_id' => $sectionId,
+                        ...$provenance,
                     ]);
 
                     return ['session_id' => $session->id, 'correlation_id' => $event->correlation_id];
@@ -214,26 +245,30 @@ final class MaintainClass
         try {
             return $this->idempotency->execute('academic.section.define', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $class, $name, $capacity): array {
-                    $this->requireCapability($actor, null);
+                    /** @var ClassModel $lockedClass */
+                    $lockedClass = ClassModel::query()->whereKey($class->id)->lockForUpdate()->firstOrFail();
+                    $this->requireCapability($actor, $lockedClass->branch_id);
                     if ($name === '') {
                         throw BusinessRejection::forCode('academic.section_name_required', 'a section requires a name');
                     }
                     if ($capacity < 1) {
                         throw BusinessRejection::forCode('academic.section_capacity_positive', 'a section requires a positive capacity');
                     }
-                    if (ClassSection::query()->where('class_id', $class->id)->where('name', $name)->exists()) {
+                    if (ClassSection::query()->where('class_id', $lockedClass->id)->where('name', $name)->exists()) {
                         throw BusinessRejection::forCode('academic.section_name_exists', 'a section name must be unique within its class');
                     }
 
                     $section = ClassSection::query()->create([
                         'id' => RandomIdentifier::new(),
-                        'class_id' => $class->id,
+                        'class_id' => $lockedClass->id,
                         'name' => $name,
                         'capacity' => $capacity,
                         'lifecycle_state' => ClassSectionLifecycle::STATE_PLANNED,
                     ]);
+                    $provenance = $this->classProvenance($lockedClass->id);
                     $event = $this->audit->record($actor->actorId, 'academic.section.define', 'class_section', $section->id, null, [
-                        'class_id' => $class->id, 'name' => $name, 'capacity' => $capacity,
+                        'class_id' => $lockedClass->id, 'name' => $name, 'capacity' => $capacity,
+                        ...$provenance,
                     ]);
 
                     return ['section_id' => $section->id, 'correlation_id' => $event->correlation_id];
@@ -252,10 +287,15 @@ final class MaintainClass
         try {
             return $this->idempotency->execute('academic.section.transition.'.$toState, $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $section, $toState): array {
-                    $this->requireCapability($actor, null);
+                    /** @var ClassModel $sectionClass */
+                    $sectionClass = ClassModel::query()->whereKey($section->class_id)->lockForUpdate()->firstOrFail();
+                    $this->requireCapability($actor, $sectionClass->branch_id);
 
                     /** @var ClassSection $locked */
                     $locked = ClassSection::query()->whereKey($section->id)->lockForUpdate()->firstOrFail();
+                    if ($locked->class_id !== $sectionClass->id) {
+                        throw BusinessRejection::forCode('academic.section_class_changed', 'the section class changed while the transition was being authorized');
+                    }
                     $from = $locked->lifecycle_state;
                     ClassSectionLifecycle::requireTransition($from, $toState);
                     if ($toState === ClassSectionLifecycle::STATE_OPEN) {
@@ -272,7 +312,11 @@ final class MaintainClass
                     }
 
                     $locked->forceFill(['lifecycle_state' => $toState])->save();
-                    $event = $this->audit->record($actor->actorId, 'academic.section.transition.'.$toState, 'class_section', $locked->id, ['lifecycle_state' => $from], ['lifecycle_state' => $toState]);
+                    $provenance = $this->classProvenance($locked->class_id);
+                    $event = $this->audit->record($actor->actorId, 'academic.section.transition.'.$toState, 'class_section', $locked->id, ['lifecycle_state' => $from], [
+                        'lifecycle_state' => $toState,
+                        ...$provenance,
+                    ]);
 
                     return ['section_id' => $locked->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
                 }),
@@ -282,273 +326,34 @@ final class MaintainClass
         }
     }
 
-    private function assertSectionOpen(string $sectionId, string $classId): void
-    {
-        /** @var ClassSection $section */
-        $section = ClassSection::query()->whereKey($sectionId)->firstOrFail();
-        if ($classId !== $section->class_id) {
-            throw BusinessRejection::forCode('academic.session_section_class_mismatch', 'a session section must belong to the session class');
-        }
-        if ($section->lifecycle_state !== ClassSectionLifecycle::STATE_OPEN) {
-            throw BusinessRejection::forCode('academic.session_section_not_open', 'a session may be scheduled only in an open section');
-        }
-    }
-
-    private function assertRoomAvailable(string $roomId): void
-    {
-        /** @var AcademicRoom $room */
-        $room = AcademicRoom::query()->whereKey($roomId)->firstOrFail();
-        if ($room->lifecycle_state !== 'available') {
-            throw BusinessRejection::forCode('academic.session_room_not_available', 'a session may be scheduled only in an available room');
-        }
-    }
-
-    /**
-     * Skill dimension of a teaching assignment: which skill the teacher
-     * delivers in this class. Rows are append-only evidence; a change is a
-     * new effective-dated assignment.
-     *
-     * @return array{assignment_skill_id: string, correlation_id: string}
-     */
+    /** Compatibility façade; Teacher assignment authority owns this write. */
     public function assignSkill(Actor $actor, TeacherAssignment $assignment, string $skillId, string $idempotencyKey): array
     {
-        $payload = hash('sha256', implode('|', ['academic.teacher.assign_skill', $assignment->id, $skillId, $actor->actorId]));
-
-        try {
-            return $this->idempotency->execute('academic.teacher.assign_skill', $idempotencyKey, $payload,
-                fn (): array => DB::transaction(function () use ($actor, $assignment, $skillId): array {
-                    $this->requireCapability($actor, null);
-
-                    /** @var TeacherAssignment $locked */
-                    $locked = TeacherAssignment::query()->where('id', $assignment->id)->lockForUpdate()->firstOrFail();
-                    /** @var Skill|null $skill */
-                    $skill = Skill::query()->find($skillId);
-                    if ($skill === null || $skill->lifecycle_state !== Skill::STATE_ACTIVE) {
-                        throw BusinessRejection::forCode('academic.assignment_skill_unknown', 'an assignment skill must be an active catalog skill');
-                    }
-                    if (TeacherAssignmentSkill::query()->where('teacher_assignment_id', $locked->id)->where('skill_id', $skillId)->exists()) {
-                        throw BusinessRejection::forCode('academic.assignment_skill_duplicate', 'this assignment already carries this skill');
-                    }
-
-                    $row = TeacherAssignmentSkill::query()->create([
-                        'id' => RandomIdentifier::new(),
-                        'teacher_assignment_id' => $locked->id,
-                        'skill_id' => $skillId,
-                    ]);
-                    $event = $this->audit->record($actor->actorId, 'academic.teacher.assign_skill', 'teacher_assignment_skill', $row->id, null, [
-                        'teacher_assignment_id' => $locked->id, 'skill_id' => $skillId,
-                    ]);
-
-                    return ['assignment_skill_id' => $row->id, 'correlation_id' => $event->correlation_id];
-                }),
-            );
-        } catch (AuthorizationDenied $denial) {
-            $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.teacher.assign_skill', 'teacher_assignment_skill', $assignment->id);
-        }
+        return $this->teacherAssignments->assignSkill($actor, $assignment, $skillId, $idempotencyKey);
     }
 
-    /** @return array{assignment_id: string, correlation_id: string} */
+    /** Compatibility façade; Teacher assignment authority owns this write. */
     public function assignTeacher(Actor $actor, ClassModel $class, string $teacherPersonId, CarbonImmutable $effectiveFrom, ?CarbonImmutable $effectiveTo, string $idempotencyKey): array
     {
-        $payload = hash('sha256', implode('|', ['academic.teacher.assign', $class->id, $teacherPersonId, $effectiveFrom->toDateString(), $effectiveTo?->toDateString() ?? '', $actor->actorId]));
-
-        try {
-            return $this->idempotency->execute('academic.teacher.assign', $idempotencyKey, $payload,
-                fn (): array => DB::transaction(function () use ($actor, $class, $teacherPersonId, $effectiveFrom, $effectiveTo): array {
-                    $this->requireCapability($actor, null);
-                    if (! Person::query()->whereKey($teacherPersonId)->exists()) {
-                        throw BusinessRejection::forCode('academic.teacher_unknown', 'a teacher assignment requires a known person');
-                    }
-                    if ($effectiveTo !== null && $effectiveTo->startOfDay()->lessThanOrEqualTo($effectiveFrom->startOfDay())) {
-                        throw BusinessRejection::forCode('academic.teacher_period', 'a teacher assignment must end after it starts');
-                    }
-                    if (TeacherAssignment::query()->where('class_id', $class->id)->where('teacher_person_id', $teacherPersonId)->whereNull('effective_to')->exists()) {
-                        throw BusinessRejection::forCode('academic.teacher_duplicate', 'this teacher already has an open assignment on the class');
-                    }
-
-                    $assignment = TeacherAssignment::query()->create([
-                        'id' => RandomIdentifier::new(),
-                        'class_id' => $class->id,
-                        'teacher_person_id' => $teacherPersonId,
-                        'effective_from' => $effectiveFrom->startOfDay()->toDateString(),
-                        'effective_to' => $effectiveTo?->startOfDay()->toDateString(),
-                    ]);
-                    $event = $this->audit->record($actor->actorId, 'academic.teacher.assign', 'teacher_assignment', $assignment->id, null, [
-                        'class_id' => $class->id, 'teacher_person_id' => $teacherPersonId,
-                    ]);
-
-                    return ['assignment_id' => $assignment->id, 'correlation_id' => $event->correlation_id];
-                }),
-            );
-        } catch (AuthorizationDenied $denial) {
-            $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.teacher.assign', 'teacher_assignment', $class->id);
-        }
+        return $this->teacherAssignments->assignTeacher($actor, $class, $teacherPersonId, $effectiveFrom, $effectiveTo, $idempotencyKey);
     }
 
-    private function requireCapability(Actor $actor, ?string $branchId): void
-    {
-        $this->access->require($actor, self::CAPABILITY, $branchId, 'academic.schedule_denied');
-    }
-
-    /**
-     * Booking a room consumes a branch-owned resource, so a roomed session
-     * is checked in the room's branch scope. Room-less scheduling stays a
-     * governance act (explicit null).
-     */
-    private function roomBranch(?string $roomId): ?string
-    {
-        if ($roomId === null || trim($roomId) === '') {
-            return null;
-        }
-
-        return trim((string) (AcademicRoom::query()->whereKey($roomId)->value('branch_id') ?? ''));
-    }
-
-    /**
-     * End an open assignment on an explicit date with a mandatory
-     * reason. History is retained: the row is dated, never deleted.
-     * Ending the last open assignment of an active class is allowed;
-     * continuance is an Academic Management decision (D-F-062), not an
-     * automatic transition.
-     *
-     * @return array{assignment_id: string, effective_to: string, correlation_id: string}
-     */
+    /** Compatibility façade; Teacher assignment authority owns this write. */
     public function endAssignment(Actor $actor, TeacherAssignment $assignment, CarbonImmutable $effectiveTo, string $reason, string $idempotencyKey): array
     {
-        $payload = hash('sha256', implode('|', ['academic.teacher.end', $assignment->id, $effectiveTo->toDateString(), $reason, $actor->actorId]));
-
-        try {
-            return $this->idempotency->execute('academic.teacher.end', $idempotencyKey, $payload,
-                fn (): array => DB::transaction(function () use ($actor, $assignment, $effectiveTo, $reason): array {
-                    $this->requireCapability($actor, null);
-                    if ($reason === '') {
-                        throw BusinessRejection::forCode('academic.assignment_reason', 'ending an assignment requires a reason');
-                    }
-
-                    /** @var TeacherAssignment $locked */
-                    $locked = TeacherAssignment::query()->whereKey($assignment->id)->lockForUpdate()->firstOrFail();
-                    if ($locked->effective_to !== null) {
-                        throw BusinessRejection::forCode('academic.assignment_not_open', 'only an open assignment can be ended');
-                    }
-                    if ($effectiveTo->startOfDay()->lessThanOrEqualTo(CarbonImmutable::parse($locked->effective_from)->startOfDay())) {
-                        throw BusinessRejection::forCode('academic.assignment_period', 'an assignment must end after it starts');
-                    }
-
-                    $locked->forceFill(['effective_to' => $effectiveTo->startOfDay()->toDateString()]);
-                    $locked->save();
-                    $event = $this->audit->record($actor->actorId, 'academic.teacher.end', 'teacher_assignment', $locked->id, ['effective_to' => null], [
-                        'effective_to' => $locked->effective_to, 'reason' => $reason,
-                    ]);
-
-                    return ['assignment_id' => $locked->id, 'effective_to' => (string) $locked->effective_to, 'correlation_id' => $event->correlation_id];
-                }),
-            );
-        } catch (AuthorizationDenied $denial) {
-            $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.teacher.end', 'teacher_assignment', $assignment->id);
-        }
+        return $this->teacherAssignments->endAssignment($actor, $assignment, $effectiveTo, $reason, $idempotencyKey);
     }
 
-    /**
-     * Move the end date of a dated assignment later, with a mandatory
-     * reason (D-F-065). Open-ended assignments are not extended; they
-     * have no end date to move.
-     *
-     * @return array{assignment_id: string, effective_to: string, correlation_id: string}
-     */
+    /** Compatibility façade; Teacher assignment authority owns this write. */
     public function extendAssignment(Actor $actor, TeacherAssignment $assignment, CarbonImmutable $newEffectiveTo, string $reason, string $idempotencyKey): array
     {
-        $payload = hash('sha256', implode('|', ['academic.teacher.extend', $assignment->id, $newEffectiveTo->toDateString(), $reason, $actor->actorId]));
-
-        try {
-            return $this->idempotency->execute('academic.teacher.extend', $idempotencyKey, $payload,
-                fn (): array => DB::transaction(function () use ($actor, $assignment, $newEffectiveTo, $reason): array {
-                    $this->requireCapability($actor, null);
-                    if ($reason === '') {
-                        throw BusinessRejection::forCode('academic.assignment_reason', 'extending an assignment requires a reason');
-                    }
-
-                    /** @var TeacherAssignment $locked */
-                    $locked = TeacherAssignment::query()->whereKey($assignment->id)->lockForUpdate()->firstOrFail();
-                    if ($locked->effective_to === null) {
-                        throw BusinessRejection::forCode('academic.assignment_not_dated', 'only a dated assignment can be extended');
-                    }
-                    if ($newEffectiveTo->startOfDay()->lessThanOrEqualTo(CarbonImmutable::parse($locked->effective_to)->startOfDay())) {
-                        throw BusinessRejection::forCode('academic.assignment_period', 'an extension must move the end date later');
-                    }
-
-                    $before = ['effective_to' => $locked->effective_to];
-                    $locked->forceFill(['effective_to' => $newEffectiveTo->startOfDay()->toDateString()]);
-                    $locked->save();
-                    $event = $this->audit->record($actor->actorId, 'academic.teacher.extend', 'teacher_assignment', $locked->id, $before, [
-                        'effective_to' => $locked->effective_to, 'reason' => $reason,
-                    ]);
-
-                    return ['assignment_id' => $locked->id, 'effective_to' => (string) $locked->effective_to, 'correlation_id' => $event->correlation_id];
-                }),
-            );
-        } catch (AuthorizationDenied $denial) {
-            $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.teacher.extend', 'teacher_assignment', $assignment->id);
-        }
+        return $this->teacherAssignments->extendAssignment($actor, $assignment, $newEffectiveTo, $reason, $idempotencyKey);
     }
 
-    /**
-     * Hand over one open assignment to a successor in a single
-     * transaction (D-F-061): the outgoing row ends on the handover
-     * date and the successor row opens from that date. Substitution
-     * stays a separate assignment row; the audit links both.
-     *
-     * @return array{outgoing_assignment_id: string, incoming_assignment_id: string, correlation_id: string}
-     */
+    /** Compatibility façade; Teacher assignment authority owns this write. */
     public function handoverAssignment(Actor $actor, TeacherAssignment $assignment, string $successorTeacherPersonId, CarbonImmutable $handoverOn, string $reason, string $idempotencyKey): array
     {
-        $payload = hash('sha256', implode('|', ['academic.teacher.handover', $assignment->id, $successorTeacherPersonId, $handoverOn->toDateString(), $reason, $actor->actorId]));
-
-        try {
-            return $this->idempotency->execute('academic.teacher.handover', $idempotencyKey, $payload,
-                fn (): array => DB::transaction(function () use ($actor, $assignment, $successorTeacherPersonId, $handoverOn, $reason): array {
-                    $this->requireCapability($actor, null);
-                    if ($reason === '') {
-                        throw BusinessRejection::forCode('academic.assignment_reason', 'handing over an assignment requires a reason');
-                    }
-                    if (! Person::query()->whereKey($successorTeacherPersonId)->exists()) {
-                        throw BusinessRejection::forCode('academic.teacher_unknown', 'a handover requires a known successor person');
-                    }
-
-                    /** @var TeacherAssignment $locked */
-                    $locked = TeacherAssignment::query()->whereKey($assignment->id)->lockForUpdate()->firstOrFail();
-                    if ($locked->effective_to !== null) {
-                        throw BusinessRejection::forCode('academic.assignment_not_open', 'only an open assignment can be handed over');
-                    }
-                    if ($handoverOn->startOfDay()->lessThanOrEqualTo(CarbonImmutable::parse($locked->effective_from)->startOfDay())) {
-                        throw BusinessRejection::forCode('academic.assignment_period', 'a handover must take effect after the assignment starts');
-                    }
-                    if (TeacherAssignment::query()->where('class_id', $locked->class_id)->where('teacher_person_id', $successorTeacherPersonId)->whereNull('effective_to')->exists()) {
-                        throw BusinessRejection::forCode('academic.teacher_duplicate', 'the successor already has an open assignment on the class');
-                    }
-
-                    $day = $handoverOn->startOfDay()->toDateString();
-                    $locked->forceFill(['effective_to' => $day]);
-                    $locked->save();
-
-                    $incoming = TeacherAssignment::query()->create([
-                        'id' => RandomIdentifier::new(),
-                        'class_id' => $locked->class_id,
-                        'teacher_person_id' => $successorTeacherPersonId,
-                        'effective_from' => $day,
-                        'effective_to' => null,
-                    ]);
-                    $event = $this->audit->record($actor->actorId, 'academic.teacher.handover', 'teacher_assignment', $incoming->id, ['outgoing_assignment_id' => $locked->id], [
-                        'outgoing_assignment_id' => $locked->id,
-                        'successor_teacher_person_id' => $successorTeacherPersonId,
-                        'handover_on' => $day,
-                        'reason' => $reason,
-                    ]);
-
-                    return ['outgoing_assignment_id' => $locked->id, 'incoming_assignment_id' => $incoming->id, 'correlation_id' => $event->correlation_id];
-                }),
-            );
-        } catch (AuthorizationDenied $denial) {
-            $this->attemptedOperation->deniedByActor($denial, $actor, 'academic.teacher.handover', 'teacher_assignment', $assignment->id);
-        }
+        return $this->teacherAssignments->handoverAssignment($actor, $assignment, $successorTeacherPersonId, $handoverOn, $reason, $idempotencyKey);
     }
+
 }

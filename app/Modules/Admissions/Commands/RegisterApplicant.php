@@ -13,6 +13,8 @@ use App\Modules\Audit\AuditRecorder;
 use App\Modules\Crm\Domain\VisitorConversionRecorder;
 use App\Modules\Crm\Models\Visitor;
 use App\Modules\Identity\Models\Person;
+use App\Modules\Organization\Models\Branch;
+use App\Modules\Students\Models\Student;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
 use App\Support\Errors\AuthorizationDenied;
@@ -40,26 +42,45 @@ final class RegisterApplicant
     ) {}
 
     /** @return array{applicant_id: string, correlation_id: string} */
-    public function register(Actor $registrar, string $personId, string $programInterest, string $idempotencyKey, ?string $placementProfileId = null): array
+    public function register(Actor $registrar, string $personId, string $programInterest, string $idempotencyKey, ?string $placementProfileId = null, ?string $originatingBranchId = null): array
     {
-        $payload = hash('sha256', implode('|', ['admissions.register', $personId, $programInterest, $placementProfileId ?? '', $registrar->actorId]));
+        $personId = trim($personId);
+        $programInterest = trim($programInterest);
+        $placementProfileId = $placementProfileId === null ? null : trim($placementProfileId);
+        $originatingBranchId = $originatingBranchId === null ? null : trim($originatingBranchId);
+        $payload = hash('sha256', implode('|', ['admissions.register', $personId, $programInterest, $placementProfileId ?? '', $originatingBranchId ?? '', $registrar->actorId]));
 
         try {
             return $this->idempotency->execute('admissions.register', $idempotencyKey, $payload,
-                fn (): array => DB::transaction(function () use ($registrar, $personId, $programInterest, $placementProfileId): array {
-                    $outcome = $this->access->decide($registrar, self::CAPABILITY, null);
+                fn (): array => DB::transaction(function () use ($registrar, $personId, $programInterest, $placementProfileId, $originatingBranchId): array {
+                    if ($originatingBranchId === null || $originatingBranchId === '') {
+                        throw BusinessRejection::forCode('admissions.branch_required', 'new applicant registration requires an operational branch');
+                    }
+                    /** @var Branch|null $branch */
+                    $branch = Branch::query()->whereKey($originatingBranchId)->first();
+                    if ($branch === null || $branch->lifecycle_state !== 'active' || $branch->structureScope()->organizationId === '') {
+                        throw BusinessRejection::forCode('admissions.branch_inactive', 'an applicant branch must exist, be active, and have organization provenance');
+                    }
+                    $outcome = $this->access->decide($registrar, self::CAPABILITY, $branch->structureScope());
                     if (! $outcome->allowed) {
                         throw AuthorizationDenied::forCode('admissions.register_denied', $outcome->reason);
                     }
-                    $person = Person::query()->find($personId);
+                    /** @var Person|null $person */
+                    $person = Person::query()->whereKey($personId)->lockForUpdate()->first();
                     if ($person === null || $person->verification_state !== Person::VERIFICATION_VERIFIED) {
                         throw BusinessRejection::forCode('admissions.person_unverified', 'an applicant requires a verified person identity');
                     }
                     if ($programInterest === '') {
                         throw BusinessRejection::forCode('admissions.program_missing', 'an applicant requires a program interest');
                     }
+                    if (Student::query()->where('person_id', $personId)->exists()) {
+                        throw BusinessRejection::forCode('admissions.student_exists', 'a verified person who is already a student cannot open a second admission file');
+                    }
                     if (Applicant::query()->whereIn('lifecycle_state', ['prospect', 'applicant', 'admitted'])->where('person_id', $personId)->exists()) {
                         throw BusinessRejection::forCode('admissions.open_file_exists', 'this person already has an open admission file');
+                    }
+                    if (Applicant::query()->where('lifecycle_state', ApplicantLifecycle::STATE_REJECTED)->where('person_id', $personId)->exists()) {
+                        throw BusinessRejection::forCode('admissions.reopen_required', 'a rejected admission file must be explicitly reopened for re-application');
                     }
                     $snapshotId = null;
                     if ($placementProfileId !== null && $placementProfileId !== '') {
@@ -74,14 +95,20 @@ final class RegisterApplicant
                         'recorded_by' => $registrar->actorId,
                         'placement_profile_id' => ($placementProfileId !== null && $placementProfileId !== '') ? $placementProfileId : null,
                         'academic_eligibility_snapshot_id' => $snapshotId,
+                        'originating_branch_id' => $originatingBranchId !== '' ? $originatingBranchId : null,
+                        'current_home_branch_id' => $originatingBranchId !== '' ? $originatingBranchId : null,
                     ]);
 
                     $event = $this->audit->record($registrar->actorId, 'admissions.register', 'applicant', $applicant->id, null, [
                         'person_id' => $personId, 'program_interest' => $programInterest, 'lifecycle_state' => ApplicantLifecycle::STATE_APPLICANT,
                         'placement_profile_id' => $applicant->placement_profile_id,
                         'academic_eligibility_snapshot_id' => $applicant->academic_eligibility_snapshot_id,
+                        'originating_branch_id' => $applicant->originating_branch_id,
+                        'current_home_branch_id' => $applicant->current_home_branch_id,
+                        'branch_id' => $branch->id,
+                        'organization_id' => $branch->structureScope()->organizationId,
                     ]);
-                    $this->recordVisitorConversion($registrar, $personId, 'applicant', $applicant->id);
+                    $this->recordVisitorConversion($registrar, $personId, 'applicant', $applicant->id, $event->id);
 
                     return ['applicant_id' => $applicant->id, 'correlation_id' => $event->correlation_id];
                 }),
@@ -113,7 +140,7 @@ final class RegisterApplicant
         return (string) $snapshot['snapshot']['id'];
     }
 
-    private function recordVisitorConversion(Actor $actor, string $personId, string $conversionType, string $downstreamId): void
+    private function recordVisitorConversion(Actor $actor, string $personId, string $conversionType, string $downstreamId, string $authorityAuditEventId): void
     {
         /** @var Visitor|null $visitor */
         $visitor = Visitor::query()
@@ -131,6 +158,8 @@ final class RegisterApplicant
             $conversionType,
             $downstreamId,
             'admissions.register.conversion.'.$visitor->id,
+            authority: 'admissions',
+            authorityAuditEventId: $authorityAuditEventId,
         );
     }
 }

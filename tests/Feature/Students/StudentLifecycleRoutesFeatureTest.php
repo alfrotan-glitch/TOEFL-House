@@ -114,7 +114,7 @@ final class StudentLifecycleRoutesFeatureTest extends TestCase
         $this->personWithAuthority($personId, ['students.transfer']);
         $this->signInAs($personId, 'route.api.transfer');
 
-        $this->postJson('/api/students/'.$student->id.'/transfer', [
+        $this->postJson('/api/v1/students/'.$student->id.'/transfer', [
             'branch_id' => $branch->id,
             'reason' => 'API transfer',
         ], ['Idempotency-Key' => 'api-transfer-key-1'])
@@ -122,7 +122,7 @@ final class StudentLifecycleRoutesFeatureTest extends TestCase
             ->assertJsonPath('status', 'transferred')
             ->assertJsonPath('to_branch_id', $branch->id);
 
-        $this->getJson('/api/students/'.$student->id)
+        $this->getJson('/api/v1/students/'.$student->id)
             ->assertOk()
             ->assertJsonPath('current_home_branch_id', $branch->id)
             ->assertJsonPath('branch_transfers.0.to_branch_id', $branch->id);
@@ -131,7 +131,7 @@ final class StudentLifecycleRoutesFeatureTest extends TestCase
         $this->personWithAuthority($nobodyId, []);
         $this->signInAs($nobodyId, 'route.api.nobody');
 
-        $this->postJson('/api/students/'.$student->id.'/transfer', [
+        $this->postJson('/api/v1/students/'.$student->id.'/transfer', [
             'branch_id' => $branch->id,
             'reason' => 'denied',
         ], ['Idempotency-Key' => 'api-transfer-key-2'])
@@ -147,7 +147,7 @@ final class StudentLifecycleRoutesFeatureTest extends TestCase
         $this->personWithAuthority($personId, ['students.hold', 'students.communication']);
         $this->signInAs($personId, 'route.api.life');
 
-        $this->postJson('/api/students/'.$student->id.'/communication-preference', [
+        $this->postJson('/api/v1/students/'.$student->id.'/communication-preference', [
             'channel' => 'sms',
             'enabled' => true,
         ], ['Idempotency-Key' => 'api-comm-key-1'])
@@ -155,21 +155,21 @@ final class StudentLifecycleRoutesFeatureTest extends TestCase
             ->assertJsonPath('channel', 'sms')
             ->assertJsonPath('enabled', true);
 
-        $this->postJson('/api/students/'.$student->id.'/hold', [
+        $this->postJson('/api/v1/students/'.$student->id.'/hold', [
             'action' => 'freeze',
             'reason' => 'travel hold',
         ], ['Idempotency-Key' => 'api-hold-key-1'])
             ->assertOk()
             ->assertJsonPath('action', 'freeze');
 
-        $this->postJson('/api/students/'.$student->id.'/hold', [
+        $this->postJson('/api/v1/students/'.$student->id.'/hold', [
             'action' => 'resume',
             'reason' => 'returned',
         ], ['Idempotency-Key' => 'api-hold-key-2'])
             ->assertOk()
             ->assertJsonPath('action', 'resume');
 
-        $this->postJson('/api/students/'.$student->id.'/communication-preference', [
+        $this->postJson('/api/v1/students/'.$student->id.'/communication-preference', [
             'channel' => 'fax',
             'enabled' => true,
         ], ['Idempotency-Key' => 'api-comm-key-2'])

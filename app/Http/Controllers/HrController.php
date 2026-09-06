@@ -29,22 +29,33 @@ final class HrController extends Controller
 {
     public function index(): View
     {
+        $this->requireOrganizationRead('hr.employ', 'hr.console.index');
+        $visibleBranches = $this->authorizedBranches('hr.employ');
+        $people = Person::query()->where('verification_state', 'verified')->whereIn('home_branch_id', $visibleBranches)->orderBy('legal_name')->limit(300)->get();
+        $peopleIds = $people->pluck('id')->all();
+        $employmentIds = Employment::query()->whereIn('person_id', $peopleIds)->pluck('id')->all();
+
         return view('hr.index', [
-            'employments' => Employment::query()->orderBy('id')->limit(200)->get(),
+            'employments' => Employment::query()->whereIn('id', $employmentIds)->orderBy('id')->limit(200)->get(),
             'scales' => Scale::query()->orderBy('rank_order')->get(),
-            'leaves' => Leave::query()->orderBy('date_from')->limit(200)->get(),
-            'people' => Person::query()->where('verification_state', 'verified')->orderBy('legal_name')->limit(300)->get(),
+            'leaves' => Leave::query()->whereIn('employment_id', $employmentIds)->orderBy('date_from')->limit(200)->get(),
+            'people' => $people,
         ]);
     }
 
     public function contracts(): View
     {
-        $contracts = Contract::query()->orderBy('id')->get()->keyBy('id');
+        $this->requireOrganizationRead('hr.contract', 'hr.contracts.index');
+        $visibleBranches = $this->authorizedBranches('hr.contract');
+        $peopleIds = Person::query()->where('verification_state', 'verified')->whereIn('home_branch_id', $visibleBranches)->pluck('id')->all();
+        $employmentIds = Employment::query()->whereIn('person_id', $peopleIds)->pluck('id')->all();
+        $contracts = Contract::query()->whereIn('employment_id', $employmentIds)->orderBy('id')->get()->keyBy('id');
+        $contractIds = $contracts->keys()->all();
 
         return view('hr.contracts', [
-            'versions' => ContractVersion::query()->orderByDesc('effective_from')->limit(200)->get(),
+            'versions' => ContractVersion::query()->whereIn('contract_id', $contractIds)->orderByDesc('effective_from')->limit(200)->get(),
             'contracts' => $contracts,
-            'employments' => Employment::query()->orderBy('id')->get(),
+            'employments' => Employment::query()->whereIn('id', $employmentIds)->orderBy('id')->get(),
             'scales' => Scale::query()->where('lifecycle_state', 'active')->orderBy('rank_order')->get(),
         ]);
     }

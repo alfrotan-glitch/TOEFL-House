@@ -136,7 +136,7 @@ final class MoneyInputAdversarialTest extends TestCase
     {
         $this->post('/login', ['username' => 'mia-teller', 'password' => 'mia-password-1'])->assertRedirect('/');
 
-        $this->postJson('/api/finance/payments', [
+        $this->postJson('/api/v1/finance/payments', [
             'period_id' => $this->openPeriod(),
             'student_id' => $this->student->id,
             'amount' => '0.001',

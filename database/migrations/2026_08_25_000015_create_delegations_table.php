@@ -26,6 +26,7 @@ return new class extends Migration
             $table->foreign('delegate_person_id')->references('id')->on('people');
         });
         DB::statement("ALTER TABLE delegations ADD CONSTRAINT delegations_lifecycle_state_check CHECK (lifecycle_state IN ('proposed','active','expired','revoked'))");
+        DB::statement("ALTER TABLE delegations ADD CONSTRAINT delegations_explicit_scope_check CHECK (btrim(coalesce(permission, '')) <> '' AND scope_type IN ('organization','campus','branch','department') AND btrim(coalesce(scope_id, '')) <> '')");
         DB::statement('ALTER TABLE delegations ADD CONSTRAINT delegations_period_check CHECK (effective_to > effective_from)');
         DB::statement('ALTER TABLE delegations ADD CONSTRAINT delegations_not_self_check CHECK (delegator_person_id <> delegate_person_id)');
         DB::statement('CREATE UNIQUE INDEX delegations_one_open_authority ON delegations (delegator_person_id, delegate_person_id, permission, scope_type, scope_id) WHERE lifecycle_state = \'active\'');

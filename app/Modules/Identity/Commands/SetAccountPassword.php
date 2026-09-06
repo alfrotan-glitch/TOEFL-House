@@ -9,6 +9,7 @@ use App\Modules\Audit\AuditRecorder;
 use App\Modules\Identity\Models\UserAccount;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
+use App\Support\Authorization\PersonBranchScope;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Errors\ValidationError;
@@ -44,7 +45,10 @@ final class SetAccountPassword
         try {
             return $this->idempotency->execute('identity.set_account_password', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($administrator, $account, $password): array {
-                    $outcome = $this->access->decide($administrator, self::CAPABILITY, null);
+                    /** @var UserAccount $locked */
+                    $locked = UserAccount::query()->whereKey($account->id)->lockForUpdate()->firstOrFail();
+                    $scope = PersonBranchScope::resolve($locked->person_id);
+                    $outcome = $this->access->decide($administrator, self::CAPABILITY, $scope);
                     if (! $outcome->allowed) {
                         throw AuthorizationDenied::forCode('identity.set_password_denied', $outcome->reason);
                     }
@@ -52,8 +56,6 @@ final class SetAccountPassword
                         throw ValidationError::forCode('identity.password_length', sprintf('a password requires at least %d characters', self::MIN_PASSWORD_LENGTH));
                     }
 
-                    /** @var UserAccount $locked */
-                    $locked = UserAccount::query()->whereKey($account->id)->lockForUpdate()->firstOrFail();
                     if (! $locked->isActive()) {
                         throw BusinessRejection::forCode('identity.account_deactivated', 'a deactivated account cannot receive credentials');
                     }
@@ -69,7 +71,7 @@ final class SetAccountPassword
                         'user_account',
                         $locked->id,
                         null,
-                        ['person_id' => $locked->person_id, 'username' => $locked->username],
+                        ['person_id' => $locked->person_id, 'username' => $locked->username, 'branch_id' => $scope->branchId, 'organization_id' => $scope->organizationId],
                     );
 
                     return ['account_id' => $locked->id, 'correlation_id' => $event->correlation_id];

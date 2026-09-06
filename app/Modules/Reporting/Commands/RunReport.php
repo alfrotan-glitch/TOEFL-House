@@ -8,6 +8,7 @@ use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Reporting\Domain\MetricCalculator;
 use App\Modules\Reporting\Domain\MetricCatalog;
+use App\Modules\Reporting\Domain\ReportingScope;
 use App\Modules\Reporting\Models\MetricDefinition;
 use App\Modules\Reporting\Models\MetricVersion;
 use App\Modules\Reporting\Models\ReportRun;
@@ -31,6 +32,7 @@ final class RunReport
 
     public function __construct(
         private readonly AccessDecision $access,
+        private readonly ReportingScope $scopes,
         private readonly IdempotentExecution $idempotency,
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
@@ -45,8 +47,6 @@ final class RunReport
         try {
             return $this->idempotency->execute('reporting.report.run', $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $metricKey, $periodKey, $scopeType, $scopeId, $filters): array {
-                    $this->require($actor);
-
                     $entry = MetricCatalog::entry($metricKey);
                     if (! in_array($scopeType, $entry['scopes'], true)) {
                         throw BusinessRejection::forCode('reporting.scope_not_allowed', sprintf('metric %s allows scopes %s', $metricKey, implode(', ', $entry['scopes'])));
@@ -54,6 +54,12 @@ final class RunReport
                     if (($scopeType === 'global') !== ($scopeId === null)) {
                         throw BusinessRejection::forCode('reporting.scope_shape', 'global scope takes no scope id; every other scope requires one');
                     }
+                    if (in_array($scopeType, ['global', 'fund'], true)) {
+                        // Organization-wide scopes require organization-rooted
+                        // authority; branch/campus grants are not wildcards.
+                        $this->require($actor);
+                    }
+                    $organizationId = $this->scopes->authorize($actor, self::CAPABILITY, $scopeType, $scopeId);
 
                     /** @var MetricDefinition $metric */
                     $metric = MetricDefinition::query()->where('key', $metricKey)->firstOrFail();
@@ -73,13 +79,14 @@ final class RunReport
                         'period_key' => $periodKey,
                         'scope_type' => $scopeType,
                         'scope_id' => $scopeId,
+                        'organization_id' => $organizationId,
                         'filters' => $filters,
                         'result' => $computed['value'],
                         'reproducibility_hash' => $hash,
                         'executed_by' => $actor->actorId,
                     ]);
                     $event = $this->audit->record($actor->actorId, 'reporting.report.run', 'report_run', $run->id, null, [
-                        'metric' => $metricKey, 'period' => $periodKey, 'result' => $computed['value'],
+                        'metric' => $metricKey, 'period' => $periodKey, 'scope_type' => $scopeType, 'scope_id' => $scopeId, 'organization_id' => $organizationId, 'result' => $computed['value'],
                     ]);
 
                     return ['run_id' => $run->id, 'result' => $computed['value'], 'reproducibility_hash' => $hash, 'correlation_id' => $event->correlation_id];

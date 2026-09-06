@@ -7,9 +7,11 @@ namespace App\Modules\Resources\Commands;
 use App\Modules\Audit\AttemptedOperation;
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Resources\Domain\ResourceLifecycle;
+use App\Modules\Resources\Domain\ResourceScope;
 use App\Modules\Resources\Models\WorkOrder;
 use App\Support\Authorization\AccessDecision;
 use App\Support\Authorization\Actor;
+use App\Support\Authorization\StructureScope;
 use App\Support\Errors\AuthorizationDenied;
 use App\Support\Errors\BusinessRejection;
 use App\Support\Idempotency\IdempotentExecution;
@@ -34,26 +36,31 @@ final class MaintainWorkOrder
     ) {}
 
     /** @return array{work_order_id: string, correlation_id: string} */
-    public function request(Actor $requester, string $facilityNote, string $description, string $idempotencyKey): array
+    public function request(Actor $requester, string $facilityNote, string $description, string $branchId, string $idempotencyKey): array
     {
-        $payload = hash('sha256', implode('|', ['resources.work.request', $facilityNote, $description, $requester->actorId]));
+        $payload = hash('sha256', implode('|', ['resources.work.request', $facilityNote, $description, $branchId, $requester->actorId]));
 
         try {
             return $this->idempotency->execute('resources.work.request', $idempotencyKey, $payload,
-                fn (): array => DB::transaction(function () use ($requester, $facilityNote, $description): array {
-                    $this->require($requester, self::CAPABILITY_REQUEST);
+                fn (): array => DB::transaction(function () use ($requester, $facilityNote, $description, $branchId): array {
+                    $scope = ResourceScope::fromBranch($branchId);
+                    $this->require($requester, self::CAPABILITY_REQUEST, $scope);
                     if ($facilityNote === '' || $description === '') {
                         throw BusinessRejection::forCode('resources.work_terms', 'a work order requires its facility and description');
                     }
 
                     $order = WorkOrder::query()->create([
                         'id' => RandomIdentifier::new(),
+                        'organization_id' => $scope->organizationId,
+                        'originating_branch_id' => $scope->branchId,
                         'facility_note' => $facilityNote,
                         'description' => $description,
                         'lifecycle_state' => ResourceLifecycle::WORK_REQUESTED,
                         'requested_by' => $requester->actorId,
                     ]);
-                    $event = $this->audit->record($requester->actorId, 'resources.work.request', 'work_order', $order->id, null, ['facility' => $facilityNote]);
+                    $event = $this->audit->record($requester->actorId, 'resources.work.request', 'work_order', $order->id, null, [
+                        'facility' => $facilityNote, 'branch_id' => $scope->branchId, 'organization_id' => $scope->organizationId,
+                    ]);
 
                     return ['work_order_id' => $order->id, 'correlation_id' => $event->correlation_id];
                 }),
@@ -99,10 +106,10 @@ final class MaintainWorkOrder
         try {
             return $this->idempotency->execute('resources.work.'.$verb, $idempotencyKey, $payload,
                 fn (): array => DB::transaction(function () use ($actor, $order, $toState, $verb, $capability, $evidenceRef): array {
-                    $this->require($actor, $capability);
-
                     /** @var WorkOrder $locked */
                     $locked = WorkOrder::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
+                    $scope = ResourceScope::fromStored($locked->originating_branch_id, $locked->organization_id);
+                    $this->require($actor, $capability, $scope);
                     ResourceLifecycle::requireWorkTransition($locked->lifecycle_state, $toState);
                     if ($toState === ResourceLifecycle::WORK_APPROVED && trim((string) $locked->requested_by) === $actor->actorId) {
                         throw AuthorizationDenied::forCode('resources.work_not_independent', 'the approver must differ from the requester');
@@ -117,7 +124,10 @@ final class MaintainWorkOrder
                         $locked->evidence_ref = $evidenceRef;
                     }
                     $locked->save();
-                    $event = $this->audit->record($actor->actorId, 'resources.work.'.$verb, 'work_order', $locked->id, $before, ['lifecycle_state' => $toState]);
+                    $event = $this->audit->record($actor->actorId, 'resources.work.'.$verb, 'work_order', $locked->id, $before, [
+                        'lifecycle_state' => $toState,
+                        'branch_id' => $scope->branchId, 'organization_id' => $scope->organizationId,
+                    ]);
 
                     return ['work_order_id' => $locked->id, 'lifecycle_state' => $toState, 'correlation_id' => $event->correlation_id];
                 }),
@@ -127,9 +137,9 @@ final class MaintainWorkOrder
         }
     }
 
-    private function require(Actor $actor, string $capability): void
+    private function require(Actor $actor, string $capability, StructureScope $scope): void
     {
-        $outcome = $this->access->decide($actor, $capability, null);
+        $outcome = $this->access->decide($actor, $capability, $scope);
         if (! $outcome->allowed) {
             throw AuthorizationDenied::forCode('resources.work_denied', $outcome->reason);
         }
