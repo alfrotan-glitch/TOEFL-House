@@ -1,0 +1,1229 @@
+@extends('layouts.app')
+
+@section('title', 'Academic')
+
+@section('content')
+<div class="card">
+    <h1>Academic</h1>
+    <p class="sub">Structure (programs, periods, classes, skills, teacher assignments) and delivery (session calendar, attendance). One coherent multi-skill model across reading, vocabulary, listening, speaking, writing, and grammar.</p>
+    <div class="actions">
+        <a class="btn" href="{{ route('academic.sessions') }}">Session calendar &amp; attendance</a>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Structure</h2>
+    <p class="sub">Programs publish immutable versions; versions carry append-only ordered levels (key + ordinal unique per version, optional CEFR); periods move draft → published → closed; skills drive delivery and payroll evidence.</p>
+    <form method="POST" action="{{ route('academic.program.define') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <input name="name" type="text" placeholder="Program name" required>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Define program</button></div>
+    </form>
+    <form method="POST" action="{{ route('academic.level.define') }}" style="margin-top:8px">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <select name="program_version_id" required>
+                <option value="">Select a program version…</option>
+                @foreach ($programVersions as $version)
+                    <option value="{{ $version->id }}">{{ \Illuminate\Support\Str::limit($version->id, 18) }}</option>
+                @endforeach
+            </select>
+            <input name="level_key" type="text" placeholder="Level key (e.g. starter)" required maxlength="120">
+            <input name="ordinal" type="number" min="1" max="1000" placeholder="Order" required style="width:90px">
+            <input name="title" type="text" placeholder="Level title" required maxlength="200">
+            <input name="cefr_ref" type="text" placeholder="CEFR (optional)" maxlength="20" style="width:130px">
+        </div>
+        <div class="actions"><button type="submit" class="btn">Define level</button></div>
+    </form>
+    @if ($programs->isEmpty())
+        <p class="empty">No programs recorded.</p>
+    @else
+        <table class="grid" style="margin-top:8px">
+            <tr><th>Program</th><th>Publish an immutable version</th></tr>
+            @foreach ($programs as $program)
+                <tr>
+                    <td>{{ $program->name }}</td>
+                    <td>
+                        <form method="POST" action="{{ route('academic.version.publish', $program->id) }}" style="display:inline">
+                            @csrf
+                            <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                            <input name="summary" type="text" placeholder="Version summary" required>
+                            <button type="submit" class="btn small">Publish version</button>
+                        </form>
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+    <form method="POST" action="{{ route('academic.period.define') }}" style="margin-top:8px">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <input name="name" type="text" placeholder="Period name" required>
+            <input type="date" name="starts_on" required>
+            <input type="date" name="ends_on" required>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Define period</button></div>
+    </form>
+    @if ($periods->isEmpty())
+        <p class="empty">No periods recorded.</p>
+    @else
+        <table class="grid" style="margin-top:8px">
+            <tr><th>Period</th><th>Window</th><th>Transition</th></tr>
+            @foreach ($periods as $period)
+                <tr>
+                    <td>{{ $period->name }}</td>
+                    <td>{{ $period->starts_on }} → {{ $period->ends_on }}</td>
+                    <td><span class="pill">{{ $period->lifecycle_state }}</span>
+                        @if ($period->lifecycle_state === 'draft')
+                            <form method="POST" action="{{ route('academic.period.transition', $period->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <input type="hidden" name="to_state" value="published">
+                                <button type="submit" class="btn small">Publish</button>
+                            </form>
+                        @endif
+                        @if ($period->lifecycle_state === 'published')
+                            <form method="POST" action="{{ route('academic.period.transition', $period->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <input type="hidden" name="to_state" value="closed">
+                                <button type="submit" class="btn small">Close</button>
+                            </form>
+                        @endif
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+    <form method="POST" action="{{ route('academic.skill.register') }}" style="margin-top:8px">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <input name="key" type="text" placeholder="Skill key (e.g. reading)" required>
+            <input name="name" type="text" placeholder="Skill name" required>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Register skill</button></div>
+    </form>
+    @foreach ($skills as $skill)
+        <form method="POST" action="{{ route('academic.skill.retire', $skill->id) }}" style="display:inline;margin-top:8px">
+            @csrf
+            <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+            <span class="pill">{{ $skill->name }} ({{ $skill->key }})</span>
+            @if ($skill->lifecycle_state !== 'retired')
+                <button type="submit" class="btn small">Retire</button>
+            @endif
+        </form>
+    @endforeach
+</div>
+
+<div class="card">
+    <h2>Classes</h2>
+    <p class="sub">A class delivers a published program version inside a published period, optionally targeting one of the version's levels for level-aware progression. It opens <strong>planned → published → active</strong>; an active class needs at least one open teacher assignment before it can be activated, and seats can only be taken in active classes.</p>
+    <form method="POST" action="{{ route('academic.class.define') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <select name="program_version_id" required>
+                <option value="">Select a published program version…</option>
+                @foreach ($programVersions as $version)
+                    <option value="{{ $version->id }}">{{ \Illuminate\Support\Str::limit($version->id, 18) }}</option>
+                @endforeach
+            </select>
+            <select name="period_id" required>
+                <option value="">Select a published period…</option>
+                @foreach ($periods as $period)
+                    @if ($period->lifecycle_state === 'published')
+                        <option value="{{ $period->id }}">{{ $period->name }}</option>
+                    @endif
+                @endforeach
+            </select>
+            <select name="program_version_level_id">
+                <option value="">No level (legacy class)…</option>
+                @foreach ($levels as $level)
+                    <option value="{{ $level->id }}">{{ $level->title }} ({{ $level->cefr_ref ?? 'no CEFR' }})</option>
+                @endforeach
+            </select>
+            <input name="capacity" type="number" min="1" max="10000" placeholder="Capacity" required>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Define class</button></div>
+    </form>
+    @if ($classes->isEmpty())
+        <p class="empty">No classes recorded.</p>
+    @else
+        <table class="grid" style="margin-top:8px">
+            <tr><th>Class</th><th>Capacity</th><th>State</th><th>Transition</th></tr>
+            @foreach ($classes as $class)
+                <tr>
+                    <td>{{ \Illuminate\Support\Str::limit($class->id, 18) }}</td>
+                    <td>{{ $class->capacity }}</td>
+                    <td><span class="pill {{ $class->lifecycle_state === 'active' ? 'ok' : '' }}">{{ $class->lifecycle_state }}</span></td>
+                    <td>
+                        @if ($class->lifecycle_state === 'planned')
+                            <form method="POST" action="{{ route('academic.class.transition', $class->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <input type="hidden" name="to_state" value="published">
+                                <button type="submit" class="btn small">Publish</button>
+                            </form>
+                        @endif
+                        @if ($class->lifecycle_state === 'published')
+                            <form method="POST" action="{{ route('academic.class.transition', $class->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <input type="hidden" name="to_state" value="active">
+                                <button type="submit" class="btn small">Activate (needs a teacher)</button>
+                            </form>
+                        @endif
+                        @if ($class->lifecycle_state === 'active')
+                            <form method="POST" action="{{ route('academic.class.transition', $class->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <input type="hidden" name="to_state" value="completed">
+                                <button type="submit" class="btn small secondary">Complete</button>
+                            </form>
+                        @endif
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
+
+<div class="card">
+    <h2>Teacher assignments</h2>
+    <p class="sub">A class must carry at least one open (undated end) teacher assignment before it can be activated. Optionally attribute a catalog skill to the assignment. Assignments end on an explicit date with a reason and stay as history; dated assignments can be extended, and an open assignment can be handed to a successor in one audited step. Ended teachers keep gradesheet read access until the class term ends.</p>
+    <form method="POST" action="{{ route('academic.teacher.assign') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <select name="class_id" required>
+                <option value="">Select a class…</option>
+                @foreach ($classes as $class)
+                    <option value="{{ $class->id }}">{{ \Illuminate\Support\Str::limit($class->id, 18) }} ({{ $class->lifecycle_state }})</option>
+                @endforeach
+            </select>
+            <select name="teacher_person_id" required>
+                <option value="">Select a verified person…</option>
+                @foreach ($people as $person)
+                    <option value="{{ $person->id }}">{{ $person->legal_name }}</option>
+                @endforeach
+            </select>
+            <input name="effective_from" type="date" required>
+            <select name="skill_id">
+                <option value="">Skill (optional)…</option>
+                @foreach ($skills as $skill)
+                    @if ($skill->lifecycle_state === 'active')
+                        <option value="{{ $skill->id }}">{{ $skill->name }}</option>
+                    @endif
+                @endforeach
+            </select>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Assign teacher</button></div>
+    </form>
+    @if ($assignments->isEmpty())
+        <p class="empty">No teacher assignments recorded.</p>
+    @else
+        <table class="grid" style="margin-top:8px">
+            <tr><th>Class</th><th>Teacher</th><th>From</th><th>To</th><th>End</th><th>Extend</th><th>Handover</th></tr>
+            @foreach ($assignments as $assignment)
+                <tr>
+                    <td>{{ \Illuminate\Support\Str::limit($assignment->class_id, 18) }}</td>
+                    <td>{{ \Illuminate\Support\Str::limit($assignment->teacher_person_id, 18) }}</td>
+                    <td>{{ $assignment->effective_from }}</td>
+                    <td>{{ $assignment->effective_to ?? 'open' }}</td>
+                    <td>
+                        @if ($assignment->effective_to === null)
+                            <form method="POST" action="{{ route('academic.teacher.end', $assignment->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <input name="effective_to" type="date" required style="width:130px">
+                                <input name="reason" type="text" placeholder="Reason…" required maxlength="1000" style="width:110px">
+                                <button type="submit" class="btn small secondary">End</button>
+                            </form>
+                        @else
+                            —
+                        @endif
+                    </td>
+                    <td>
+                        @if ($assignment->effective_to !== null)
+                            <form method="POST" action="{{ route('academic.teacher.extend', $assignment->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <input name="effective_to" type="date" required style="width:130px">
+                                <input name="reason" type="text" placeholder="Reason…" required maxlength="1000" style="width:110px">
+                                <button type="submit" class="btn small">Extend</button>
+                            </form>
+                        @else
+                            —
+                        @endif
+                    </td>
+                    <td>
+                        @if ($assignment->effective_to === null)
+                            <form method="POST" action="{{ route('academic.teacher.handover', $assignment->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <select name="successor_teacher_person_id" required style="width:130px">
+                                    <option value="">Successor…</option>
+                                    @foreach ($people as $person)
+                                        @if ($person->id !== $assignment->teacher_person_id)
+                                            <option value="{{ $person->id }}">{{ $person->legal_name }}</option>
+                                        @endif
+                                    @endforeach
+                                </select>
+                                <input name="handover_on" type="date" required style="width:130px">
+                                <input name="reason" type="text" placeholder="Reason…" required maxlength="1000" style="width:110px">
+                                <button type="submit" class="btn small">Hand over</button>
+                            </form>
+                        @else
+                            —
+                        @endif
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
+
+<div class="card">
+    <h2>Seats</h2>
+    <p class="sub">A seat is requested by the clerk and activated by an approver; capacity and the active student/class state are owned by the academic module.</p>
+    <form method="POST" action="{{ route('academic.enrollment.request') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <select name="student_id" required>
+                <option value="">Select a student…</option>
+                @foreach ($students as $student)
+                    <option value="{{ $student->id }}">{{ $student->student_code }}</option>
+                @endforeach
+            </select>
+            <select name="class_id" required>
+                <option value="">Select an active class…</option>
+                @foreach ($classes as $class)
+                    @if ($class->lifecycle_state === 'active')
+                        <option value="{{ $class->id }}">{{ \Illuminate\Support\Str::limit($class->id, 14) }} (cap {{ $class->capacity }})</option>
+                    @endif
+                @endforeach
+            </select>
+            <select name="offering_id">
+                <option value="">No offering…</option>
+                @foreach ($offerings as $offering)
+                    @if ($offering->lifecycle_state === 'open')
+                        <option value="{{ $offering->id }}">{{ \Illuminate\Support\Str::limit($offering->id, 14) }} (cap {{ $offering->capacity }})</option>
+                    @endif
+                @endforeach
+            </select>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Request seat</button></div>
+    </form>
+    @if ($requestedEnrollments->isEmpty())
+        <p class="empty">No seats awaiting activation.</p>
+    @else
+        <table class="grid">
+            <tr><th>Student</th><th>Class</th><th>Activate</th></tr>
+            @foreach ($requestedEnrollments as $seat)
+                <tr>
+                    <td>{{ \Illuminate\Support\Str::limit($seat->student_id, 18) }}</td>
+                    <td>{{ \Illuminate\Support\Str::limit($seat->class_id, 18) }}</td>
+                    <td>
+                        <form method="POST" action="{{ route('academic.enrollment.activate', $seat->id) }}" style="display:inline">
+                            @csrf
+                            <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                            <button type="submit" class="btn">Activate</button>
+                        </form>
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+    <h3 style="margin-top:12px">Active and frozen seats</h3>
+    <p class="sub">Freeze parks a seat with a reason; unfreeze returns it under a fresh financial gate; withdraw ends it with a reason; complete pins its basis and assessed evidence. Transfer closes an active seat as transferred and opens a requested seat in another active class, which reactivates under a fresh financial gate; history is never mutated.</p>
+    @if ($activeEnrollments->isEmpty() && $frozenEnrollments->isEmpty())
+        <p class="empty">No active or frozen seats.</p>
+    @else
+        <table class="grid">
+            <tr><th>Seat</th><th>State</th><th>Reason</th><th>Freeze</th><th>Unfreeze</th><th>Withdraw</th><th>Complete</th><th>Transfer</th></tr>
+            @foreach ($activeEnrollments->concat($frozenEnrollments) as $seat)
+                <tr>
+                    <td>{{ \Illuminate\Support\Str::limit($seat->student_id, 10) }} / {{ \Illuminate\Support\Str::limit($seat->class_id, 10) }}</td>
+                    <td><span class="pill">{{ $seat->lifecycle_state }}</span></td>
+                    <td>{{ $seat->state_reason !== null ? \Illuminate\Support\Str::limit($seat->state_reason, 24) : '—' }}</td>
+                    <td>
+                        @if ($seat->lifecycle_state === 'active')
+                            <form method="POST" action="{{ route('academic.enrollment.freeze', $seat->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <input name="reason" type="text" placeholder="Reason…" required maxlength="1000" style="width:110px">
+                                <button type="submit" class="btn small">Freeze</button>
+                            </form>
+                        @else
+                            —
+                        @endif
+                    </td>
+                    <td>
+                        @if ($seat->lifecycle_state === 'frozen')
+                            <form method="POST" action="{{ route('academic.enrollment.unfreeze', $seat->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Unfreeze</button>
+                            </form>
+                        @else
+                            —
+                        @endif
+                    </td>
+                    <td>
+                        <form method="POST" action="{{ route('academic.enrollment.withdraw', $seat->id) }}" style="display:inline">
+                            @csrf
+                            <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                            <input name="reason" type="text" placeholder="Reason…" required maxlength="1000" style="width:110px">
+                            <button type="submit" class="btn small secondary">Withdraw</button>
+                        </form>
+                    </td>
+                    <td>
+                        @if ($seat->lifecycle_state === 'active')
+                            <form method="POST" action="{{ route('academic.enrollment.complete', $seat->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <input name="basis" type="text" placeholder="Basis…" required maxlength="1000" style="width:110px">
+                                <select name="evidence_kind" style="width:130px">
+                                    <option value="">No evidence…</option>
+                                    <option value="assessment_result">Released result</option>
+                                    <option value="progression_decision">Progression decision</option>
+                                </select>
+                                <input name="evidence_id" type="text" placeholder="Evidence id…" maxlength="36" style="width:130px">
+                                <button type="submit" class="btn small">Complete</button>
+                            </form>
+                        @else
+                            —
+                        @endif
+                    </td>
+                    <td>
+                        @if ($seat->lifecycle_state === 'active')
+                            <form method="POST" action="{{ route('academic.enrollment.transfer', $seat->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <select name="target_class_id" required style="width:130px">
+                                    <option value="">Target class…</option>
+                                    @foreach ($classes as $class)
+                                        @if ($class->lifecycle_state === 'active' && $class->id !== $seat->class_id)
+                                            <option value="{{ $class->id }}">{{ \Illuminate\Support\Str::limit($class->id, 14) }}</option>
+                                        @endif
+                                    @endforeach
+                                </select>
+                                <select name="offering_id" style="width:120px">
+                                    <option value="">No offering…</option>
+                                    @foreach ($offerings as $offering)
+                                        @if ($offering->lifecycle_state === 'open')
+                                            <option value="{{ $offering->id }}">{{ \Illuminate\Support\Str::limit($offering->id, 14) }}</option>
+                                        @endif
+                                    @endforeach
+                                </select>
+                                <button type="submit" class="btn small secondary">Transfer</button>
+                            </form>
+                        @else
+                            —
+                        @endif
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
+
+<div class="card">
+    <h2>Class waitlist</h2>
+    <p class="sub">Students queue only when a class or offering is full, in position order. A freed seat is offered to an entry; accepting creates a normal seat request for approval, declining withdraws or expires the entry.</p>
+    <form method="POST" action="{{ route('academic.waitlist.join') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <select name="student_id" required>
+                <option value="">Select a student…</option>
+                @foreach ($students as $student)
+                    <option value="{{ $student->id }}">{{ $student->student_code }}</option>
+                @endforeach
+            </select>
+            <select name="class_id" required>
+                <option value="">Select an active class…</option>
+                @foreach ($classes as $class)
+                    @if ($class->lifecycle_state === 'active')
+                        <option value="{{ $class->id }}">{{ \Illuminate\Support\Str::limit($class->id, 14) }} (cap {{ $class->capacity }})</option>
+                    @endif
+                @endforeach
+            </select>
+            <select name="offering_id">
+                <option value="">No offering…</option>
+                @foreach ($offerings as $offering)
+                    @if ($offering->lifecycle_state === 'open')
+                        <option value="{{ $offering->id }}">{{ \Illuminate\Support\Str::limit($offering->id, 14) }} (cap {{ $offering->capacity }})</option>
+                    @endif
+                @endforeach
+            </select>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Join waitlist</button></div>
+    </form>
+    @if ($waitlistEntries->isEmpty())
+        <p class="empty">No students waiting for a seat.</p>
+    @else
+        <table class="grid" style="margin-top:8px">
+            <tr><th>Student</th><th>Class</th><th>Offering</th><th>Pos</th><th>State</th><th>Actions</th></tr>
+            @foreach ($waitlistEntries as $entry)
+                <tr>
+                    <td>{{ $students->firstWhere('id', $entry->student_id)?->student_code ?? \Illuminate\Support\Str::limit($entry->student_id, 14) }}</td>
+                    <td>{{ \Illuminate\Support\Str::limit($entry->class_id, 14) }}</td>
+                    <td>{{ $entry->offering_id !== null ? \Illuminate\Support\Str::limit($entry->offering_id, 14) : '—' }}</td>
+                    <td>{{ $entry->position }}</td>
+                    <td><span class="pill {{ $entry->lifecycle_state === 'offered' ? 'ok' : '' }}">{{ $entry->lifecycle_state }}</span></td>
+                    <td>
+                        @if ($entry->lifecycle_state === 'waiting')
+                            <form method="POST" action="{{ route('academic.waitlist.offer', $entry->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Offer</button>
+                            </form>
+                            <form method="POST" action="{{ route('academic.waitlist.promote', $entry->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Accept</button>
+                            </form>
+                            <form method="POST" action="{{ route('academic.waitlist.withdraw', $entry->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small secondary">Withdraw</button>
+                            </form>
+                        @endif
+                        @if (in_array($entry->lifecycle_state, ['waiting', 'offered'], true))
+                            <form method="POST" action="{{ route('academic.waitlist.expire', $entry->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small secondary">Expire</button>
+                            </form>
+                        @endif
+                        @if ($entry->lifecycle_state === 'offered')
+                            <form method="POST" action="{{ route('academic.waitlist.promote', $entry->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Accept</button>
+                            </form>
+                        @endif
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
+
+<div class="card">
+    <h2>Level progression rules &amp; prerequisites</h2>
+    <p class="sub">Governance for level-aware progression: a rule sets the pass mark and repeat cap of one level (a level holds at most one active rule); a prerequisite declares that a level requires completing another level of the same program version, and cycles are refused. Retired rows stay as history.</p>
+    <form method="POST" action="{{ route('academic.level.rule.define') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <select name="program_version_level_id" required>
+                <option value="">Select a level…</option>
+                @foreach ($levels as $level)
+                    <option value="{{ $level->id }}">{{ $level->title }} ({{ $level->cefr_ref }})</option>
+                @endforeach
+            </select>
+            <input name="minimum_passing_score" type="text" inputmode="decimal" placeholder="Pass mark 0–100 (optional)" style="width:190px">
+            <input name="max_repeats" type="number" min="1" max="100" placeholder="Max repeats (optional)" style="width:180px">
+        </div>
+        <div class="actions"><button type="submit" class="btn">Define rule</button></div>
+    </form>
+    @if ($levelRules->isEmpty())
+        <p class="empty">No progression rules defined.</p>
+    @else
+        <table class="grid" style="margin-top:8px">
+            <tr><th>Level</th><th>Pass mark</th><th>Max repeats</th><th>State</th><th></th></tr>
+            @foreach ($levelRules as $rule)
+                <tr>
+                    <td>{{ $levels->firstWhere('id', $rule->program_version_level_id)?->title ?? \Illuminate\Support\Str::limit($rule->program_version_level_id, 14) }}</td>
+                    <td>{{ $rule->minimum_passing_score ?? '—' }}</td>
+                    <td>{{ $rule->max_repeats ?? '—' }}</td>
+                    <td><span class="pill {{ $rule->lifecycle_state === 'active' ? 'ok' : '' }}">{{ $rule->lifecycle_state }}</span></td>
+                    <td>
+                        @if ($rule->lifecycle_state === 'active')
+                            <form method="POST" action="{{ route('academic.level.rule.retire', $rule->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small secondary">Retire</button>
+                            </form>
+                        @else
+                            —
+                        @endif
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+    <form method="POST" action="{{ route('academic.level.prerequisite.define') }}" style="margin-top:12px">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <select name="target_level_id" required>
+                <option value="">Target level…</option>
+                @foreach ($levels as $level)
+                    <option value="{{ $level->id }}">{{ $level->title }} ({{ $level->cefr_ref }})</option>
+                @endforeach
+            </select>
+            <select name="required_level_id" required>
+                <option value="">Requires level…</option>
+                @foreach ($levels as $level)
+                    <option value="{{ $level->id }}">{{ $level->title }} ({{ $level->cefr_ref }})</option>
+                @endforeach
+            </select>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Define prerequisite</button></div>
+    </form>
+    @if ($levelPrerequisites->isEmpty())
+        <p class="empty">No prerequisites defined.</p>
+    @else
+        <table class="grid" style="margin-top:8px">
+            <tr><th>Level</th><th>Requires</th><th>State</th><th></th></tr>
+            @foreach ($levelPrerequisites as $prerequisite)
+                <tr>
+                    <td>{{ $levels->firstWhere('id', $prerequisite->target_level_id)?->title ?? \Illuminate\Support\Str::limit($prerequisite->target_level_id, 14) }}</td>
+                    <td>{{ $levels->firstWhere('id', $prerequisite->required_level_id)?->title ?? \Illuminate\Support\Str::limit($prerequisite->required_level_id, 14) }}</td>
+                    <td><span class="pill {{ $prerequisite->lifecycle_state === 'active' ? 'ok' : '' }}">{{ $prerequisite->lifecycle_state }}</span></td>
+                    <td>
+                        @if ($prerequisite->lifecycle_state === 'active')
+                            <form method="POST" action="{{ route('academic.level.prerequisite.retire', $prerequisite->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small secondary">Retire</button>
+                            </form>
+                        @else
+                            —
+                        @endif
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
+
+<div class="card">
+    <h2>Progression decisions</h2>
+    <p class="sub">Propose, review and approve are signed by three distinct employees in their own sessions; the approver may reject a reviewed decision instead. An approved or rejected decision can be marked appealed (contest is recorded on the record by an employee with the review capability who was not the proposer) or corrected by supersession, which writes an approved successor decision, links the original to it, and keeps the original row as immutable history — the superseding employee signs both roles and must differ from the original proposer. A completed seat accepts an approved progression decision as assessed evidence. Optional evidence travels on the proposal; the successor correction always carries its own outcome and reason.</p>
+    <form method="POST" action="{{ route('academic.progression.propose') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <select name="student_id" required>
+                <option value="">Select a student…</option>
+                @foreach ($students as $student)
+                    <option value="{{ $student->id }}">{{ $student->student_code }}</option>
+                @endforeach
+            </select>
+            <select name="class_id" required>
+                <option value="">Select a class…</option>
+                @foreach ($classes as $class)
+                    <option value="{{ $class->id }}">{{ \Illuminate\Support\Str::limit($class->id, 14) }}</option>
+                @endforeach
+            </select>
+            <select name="outcome" required>
+                <option value="advance">Advance</option>
+                <option value="repeat">Repeat</option>
+            </select>
+            <input name="reason" type="text" placeholder="Reason" required>
+            <input name="assessment_result_id" type="text" placeholder="Result id (optional)" maxlength="36">
+            <input name="basis" type="text" placeholder="Decision basis (optional)" maxlength="1000">
+            <input name="repeat_count" type="number" min="1" placeholder="Repeat count (optional)">
+        </div>
+        <div class="actions"><button type="submit" class="btn">Propose progression</button></div>
+    </form>
+    @if ($progressions->isEmpty())
+        <p class="empty">No progression decisions awaiting review or approval.</p>
+    @else
+        <table class="grid">
+            <tr><th>Student</th><th>Class</th><th>Outcome</th><th>State</th><th>Signatures</th></tr>
+            @foreach ($progressions as $decision)
+                <tr>
+                    <td>{{ \Illuminate\Support\Str::limit($decision->student_id, 18) }}</td>
+                    <td>{{ \Illuminate\Support\Str::limit($decision->class_id, 18) }}</td>
+                    <td>{{ $decision->outcome }}</td>
+                    <td><span class="pill">{{ $decision->lifecycle_state }}</span></td>
+                    <td>
+                        @if ($decision->lifecycle_state === 'proposed')
+                            <form method="POST" action="{{ route('academic.progression.review', $decision->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn">Review</button>
+                            </form>
+                        @endif
+                        @if ($decision->lifecycle_state === 'reviewed')
+                            <form method="POST" action="{{ route('academic.progression.approve', $decision->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn">Approve</button>
+                            </form>
+                            <form method="POST" action="{{ route('academic.progression.reject', $decision->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small secondary">Reject</button>
+                            </form>
+                        @endif
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+    <h3 style="margin-top:12px">Decided progressions</h3>
+    <p class="sub">Decided rows are read-only history: appealed marks contest on the record, supersession links the original to its successor decision.</p>
+    @if ($decidedProgressions->isEmpty())
+        <p class="empty">No decided progression history.</p>
+    @else
+        <table class="grid">
+            <tr><th>Student</th><th>Class</th><th>Outcome</th><th>State</th><th>Successor</th><th>Appeal / correct</th></tr>
+            @foreach ($decidedProgressions as $decision)
+                <tr>
+                    <td>{{ \Illuminate\Support\Str::limit($decision->student_id, 18) }}</td>
+                    <td>{{ \Illuminate\Support\Str::limit($decision->class_id, 18) }}</td>
+                    <td>{{ $decision->outcome }}</td>
+                    <td><span class="pill">{{ $decision->lifecycle_state }}</span></td>
+                    <td>{{ $decision->superseded_by_id !== null ? \Illuminate\Support\Str::limit($decision->superseded_by_id, 14) : '—' }}</td>
+                    <td>
+                        @if (in_array($decision->lifecycle_state, ['approved', 'rejected'], true))
+                            <form method="POST" action="{{ route('academic.progression.mark-appealed', $decision->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Mark appealed</button>
+                            </form>
+                            <form method="POST" action="{{ route('academic.progression.supersede', $decision->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <select name="outcome" required style="width:95px">
+                                    <option value="advance">Advance</option>
+                                    <option value="repeat">Repeat</option>
+                                </select>
+                                <input name="reason" type="text" placeholder="Correction reason…" required maxlength="1000" style="width:130px">
+                                <button type="submit" class="btn small">Supersede</button>
+                            </form>
+                        @endif
+                        @if ($decision->lifecycle_state === 'appealed')
+                            <form method="POST" action="{{ route('academic.progression.supersede', $decision->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <select name="outcome" required style="width:95px">
+                                    <option value="advance">Advance</option>
+                                    <option value="repeat">Repeat</option>
+                                </select>
+                                <input name="reason" type="text" placeholder="Correction reason…" required maxlength="1000" style="width:130px">
+                                <button type="submit" class="btn small">Supersede</button>
+                            </form>
+                        @endif
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
+
+<div class="card">
+    <h2>Assessment &amp; results</h2>
+    <p class="sub">Attempt → scored → moderated → approved → released; a released result is corrected by a proposed new score that a distinct approver approves. A score never becomes a decision automatically.</p>
+    <form method="POST" action="{{ route('academic.attempt.submit') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <select name="enrollment_id" required>
+                <option value="">Select an active enrollment…</option>
+                @foreach ($activeEnrollments as $enrollment)
+                    <option value="{{ $enrollment->id }}">{{ \Illuminate\Support\Str::limit($enrollment->student_id, 14) }} / {{ \Illuminate\Support\Str::limit($enrollment->class_id, 14) }}</option>
+                @endforeach
+            </select>
+            <select name="kind" required>
+                <option value="placement">Placement</option>
+                <option value="assessment">Assessment</option>
+            </select>
+            <input name="evidence_ref" type="text" placeholder="Evidence reference" required>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Submit attempt</button></div>
+    </form>
+</div>
+
+<div class="card">
+    <h2>Class gradesheets</h2>
+    <p class="sub">A gradesheet compiles one class: roster × attempts × live result × correction lineage. Only an assigned teacher of the class or academic oversight may open it; released results are the official lines.</p>
+    @if ($gradeableClasses->isEmpty())
+        <p class="empty">No classes are open to you for grading review.</p>
+    @else
+        <table class="grid">
+            <tr><th>Class</th><th>State</th><th></th></tr>
+            @foreach ($gradeableClasses as $gradeableClass)
+                <tr>
+                    <td>{{ \Illuminate\Support\Str::limit($gradeableClass->id, 18) }}</td>
+                    <td><span class="pill {{ $gradeableClass->lifecycle_state === 'active' ? 'ok' : '' }}">{{ $gradeableClass->lifecycle_state }}</span></td>
+                    <td><a class="btn small" href="{{ route('academic.gradesheet', $gradeableClass->id) }}">Open gradesheet</a></td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
+
+<div class="card">
+    <h2>Attempts awaiting a score</h2>
+    @if ($attempts->isEmpty())
+        <p class="empty">No submitted attempts awaiting a score.</p>
+    @else
+        <table class="grid">
+            <tr><th>Enrollment</th><th>Kind</th><th>Evidence</th><th>Score</th></tr>
+            @foreach ($attempts as $attempt)
+                <tr>
+                    <td>{{ \Illuminate\Support\Str::limit($attempt->enrollment_id, 18) }}</td>
+                    <td>{{ $attempt->kind }}</td>
+                    <td>{{ \Illuminate\Support\Str::limit($attempt->evidence_ref, 24) }}</td>
+                    <td>
+                        <form method="POST" action="{{ route('academic.attempt.score', $attempt->id) }}" style="display:inline">
+                            @csrf
+                            <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                            <input name="score" type="text" inputmode="decimal" placeholder="Score" required>
+                            <button type="submit" class="btn small">Score</button>
+                        </form>
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
+
+<div class="card">
+    <h2>Results in flight</h2>
+    @if ($results->isEmpty())
+        <p class="empty">No results awaiting moderation, approval or release.</p>
+    @else
+        <table class="grid">
+            <tr><th>Attempt</th><th>Score</th><th>State</th><th>Next stage</th></tr>
+            @foreach ($results as $result)
+                <tr>
+                    <td>{{ \Illuminate\Support\Str::limit($result->attempt_id, 18) }}</td>
+                    <td>{{ $result->score }}</td>
+                    <td><span class="pill">{{ $result->lifecycle_state }}</span></td>
+                    <td>
+                        @if ($result->lifecycle_state === 'scored')
+                            <form method="POST" action="{{ route('academic.result.moderate', $result->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Moderate</button>
+                            </form>
+                        @endif
+                        @if ($result->lifecycle_state === 'moderated')
+                            <form method="POST" action="{{ route('academic.result.approve', $result->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Approve</button>
+                            </form>
+                        @endif
+                        @if ($result->lifecycle_state === 'approved')
+                            <form method="POST" action="{{ route('academic.result.release', $result->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Release</button>
+                            </form>
+                        @endif
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
+
+<div class="card">
+    <h2>Corrections awaiting approval</h2>
+    @if ($corrections->isEmpty())
+        <p class="empty">No correction proposals awaiting approval.</p>
+    @else
+        <table class="grid">
+            <tr><th>Result</th><th>New score</th><th>Reason</th><th>Proposed by</th><th>Approve</th></tr>
+            @foreach ($corrections as $correction)
+                <tr>
+                    <td>{{ \Illuminate\Support\Str::limit($correction->result_id, 18) }}</td>
+                    <td>{{ $correction->score }}</td>
+                    <td>{{ \Illuminate\Support\Str::limit($correction->reason, 30) }}</td>
+                    <td>{{ \Illuminate\Support\Str::limit($correction->proposed_by, 16) }}</td>
+                    <td>
+                        <form method="POST" action="{{ route('academic.correction.approve', $correction->id) }}" style="display:inline">
+                            @csrf
+                            <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                            <button type="submit" class="btn">Approve</button>
+                        </form>
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
+
+<div class="card">
+    <h2>Graduation decisions &amp; certificates</h2>
+    <p class="sub">Propose (with the requirements basis), review and approve with distinct signers; a certificate is issued only from an approved eligible decision, with a unique serial.</p>
+    <form method="POST" action="{{ route('academic.graduation.propose') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <select name="student_id" required>
+                <option value="">Select a student…</option>
+                @foreach ($students as $student)
+                    <option value="{{ $student->id }}">{{ $student->student_code }}</option>
+                @endforeach
+            </select>
+            <select name="program_version_id" required>
+                <option value="">Select a program version…</option>
+                @foreach ($programVersions as $version)
+                    <option value="{{ $version->id }}">{{ \Illuminate\Support\Str::limit($version->id, 14) }}</option>
+                @endforeach
+            </select>
+            <select name="outcome" required>
+                <option value="eligible">Eligible</option>
+                <option value="not_eligible">Not eligible</option>
+            </select>
+            <input name="basis" type="text" placeholder="Requirements basis" required>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Propose graduation</button></div>
+    </form>
+    @if ($graduations->isEmpty())
+        <p class="empty">No graduation decisions in flight.</p>
+    @else
+        <table class="grid" style="margin-top:8px">
+            <tr><th>Student</th><th>Outcome</th><th>State</th><th>Actions</th></tr>
+            @foreach ($graduations as $decision)
+                <tr>
+                    <td>{{ \Illuminate\Support\Str::limit($decision->student_id, 18) }}</td>
+                    <td>{{ $decision->outcome }}</td>
+                    <td><span class="pill">{{ $decision->lifecycle_state }}</span></td>
+                    <td>
+                        @if ($decision->lifecycle_state === 'proposed')
+                            <form method="POST" action="{{ route('academic.graduation.review', $decision->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Review</button>
+                            </form>
+                        @endif
+                        @if ($decision->lifecycle_state === 'reviewed')
+                            <form method="POST" action="{{ route('academic.graduation.approve', $decision->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Approve</button>
+                            </form>
+                            <form method="POST" action="{{ route('academic.graduation.reject', $decision->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small secondary">Reject</button>
+                            </form>
+                        @endif
+                        @if ($decision->lifecycle_state === 'approved' && $decision->outcome === 'eligible')
+                            <form method="POST" action="{{ route('academic.graduation.certificate', $decision->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Issue certificate</button>
+                            </form>
+                        @endif
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
+
+<div class="card">
+    <h2>Branch availability &amp; offerings</h2>
+    <p class="sub">Declare which branch × level × term combinations run, then open offerings against them. Seats and Finance packaging consume open offerings; closing, cancelling, and resizing are guarded by open seats.</p>
+    <form method="POST" action="{{ route('academic.availability.declare') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <select name="branch_id" required>
+                <option value="">Select a branch…</option>
+                @foreach ($branches as $branch)
+                    <option value="{{ $branch->id }}">{{ $branch->name }}</option>
+                @endforeach
+            </select>
+            <select name="program_version_level_id" required>
+                <option value="">Select a level…</option>
+                @foreach ($levels as $level)
+                    <option value="{{ $level->id }}">{{ $level->title }} ({{ $level->cefr_ref }})</option>
+                @endforeach
+            </select>
+            <select name="academic_period_id" required>
+                <option value="">Select a term…</option>
+                @foreach ($periods as $period)
+                    <option value="{{ $period->id }}">{{ $period->name }}</option>
+                @endforeach
+            </select>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Declare availability</button></div>
+    </form>
+    <form method="POST" action="{{ route('academic.offering.open') }}" style="margin-top:8px">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <select name="branch_id" required>
+                <option value="">Select a branch…</option>
+                @foreach ($branches as $branch)
+                    <option value="{{ $branch->id }}">{{ $branch->name }}</option>
+                @endforeach
+            </select>
+            <select name="program_version_level_id" required>
+                <option value="">Select a level…</option>
+                @foreach ($levels as $level)
+                    <option value="{{ $level->id }}">{{ $level->title }} ({{ $level->cefr_ref }})</option>
+                @endforeach
+            </select>
+            <select name="academic_period_id" required>
+                <option value="">Select a term…</option>
+                @foreach ($periods as $period)
+                    <option value="{{ $period->id }}">{{ $period->name }}</option>
+                @endforeach
+            </select>
+            <input name="capacity" type="number" min="1" max="10000" placeholder="Capacity" required style="width:110px">
+        </div>
+        <div class="actions"><button type="submit" class="btn">Open offering</button></div>
+    </form>
+    @if ($availabilities->isEmpty() && $offerings->isEmpty())
+        <p class="empty">No availability declared and no offerings opened.</p>
+    @else
+        @if (!$availabilities->isEmpty())
+            <table class="grid" style="margin-top:8px">
+                <tr><th>Availability</th><th>State</th><th>Actions</th></tr>
+                @foreach ($availabilities as $availability)
+                    <tr>
+                        <td>{{ \Illuminate\Support\Str::limit($availability->id, 14) }}</td>
+                        <td><span class="pill">{{ $availability->lifecycle_state }}</span></td>
+                        <td>
+                            @if ($availability->lifecycle_state === 'active')
+                                <form method="POST" action="{{ route('academic.availability.close', $availability->id) }}" style="display:inline">
+                                    @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                    <button type="submit" class="btn small secondary">Close</button>
+                                </form>
+                            @endif
+                            @if ($availability->lifecycle_state === 'closed')
+                                <form method="POST" action="{{ route('academic.availability.reopen', $availability->id) }}" style="display:inline">
+                                    @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                    <button type="submit" class="btn small">Reopen</button>
+                                </form>
+                            @endif
+                        </td>
+                    </tr>
+                @endforeach
+            </table>
+        @endif
+        @if (!$offerings->isEmpty())
+            <table class="grid" style="margin-top:8px">
+                <tr><th>Offering</th><th>State</th><th>Capacity</th><th>Actions</th></tr>
+                @foreach ($offerings as $offering)
+                    <tr>
+                        <td>{{ \Illuminate\Support\Str::limit($offering->id, 14) }}</td>
+                        <td><span class="pill">{{ $offering->lifecycle_state }}</span></td>
+                        <td>{{ $offering->capacity }}</td>
+                        <td>
+                            @if ($offering->lifecycle_state === 'open')
+                                <form method="POST" action="{{ route('academic.offering.close', $offering->id) }}" style="display:inline">
+                                    @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                    <button type="submit" class="btn small secondary">Close</button>
+                                </form>
+                            @endif
+                            @if (in_array($offering->lifecycle_state, ['open', 'closed'], true))
+                                <form method="POST" action="{{ route('academic.offering.cancel', $offering->id) }}" style="display:inline">
+                                    @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                    <button type="submit" class="btn small secondary">Cancel</button>
+                                </form>
+                                <form method="POST" action="{{ route('academic.offering.complete', $offering->id) }}" style="display:inline">
+                                    @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                    <button type="submit" class="btn small secondary">Complete</button>
+                                </form>
+                            @endif
+                            @if ($offering->lifecycle_state === 'closed')
+                                <form method="POST" action="{{ route('academic.offering.reopen', $offering->id) }}" style="display:inline">
+                                    @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                    <button type="submit" class="btn small">Reopen</button>
+                                </form>
+                            @endif
+                            @if (in_array($offering->lifecycle_state, ['open', 'closed'], true))
+                                <form method="POST" action="{{ route('academic.offering.resize', $offering->id) }}" style="display:inline">
+                                    @csrf
+                                    <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                    <input name="capacity" type="number" min="1" max="10000" placeholder="New cap…" required style="width:90px">
+                                    <button type="submit" class="btn small">Resize</button>
+                                </form>
+                            @endif
+                        </td>
+                    </tr>
+                @endforeach
+            </table>
+        @endif
+    @endif
+</div>
+
+<div class="card">
+    <h2>Official transcripts</h2>
+    <p class="sub">Issue a frozen, hashed official transcript per student and program version. Prints render the stored payload, so later achievements never leak into earlier records; every issuance is registered as a managed transcript document.</p>
+    <form method="POST" action="{{ route('academic.transcript.issue') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <div class="fields">
+            <select name="student_id" required>
+                <option value="">Select a student…</option>
+                @foreach ($students as $student)
+                    <option value="{{ $student->id }}">{{ $student->student_code }}</option>
+                @endforeach
+            </select>
+            <select name="program_version_id" required>
+                <option value="">Select a program version…</option>
+                @foreach ($programVersions as $version)
+                    <option value="{{ $version->id }}">{{ \Illuminate\Support\Str::limit($version->id, 14) }}</option>
+                @endforeach
+            </select>
+        </div>
+        <div class="actions"><button type="submit" class="btn">Issue transcript</button></div>
+    </form>
+    @if ($transcripts->isEmpty())
+        <p class="empty">No transcripts issued.</p>
+    @else
+        <table class="grid" style="margin-top:8px">
+            <tr><th>Issued</th><th>Hash</th><th>Actions</th></tr>
+            @foreach ($transcripts as $transcript)
+                <tr>
+                    <td>{{ $transcript->issued_at }}</td>
+                    <td><code>{{ \Illuminate\Support\Str::limit($transcript->content_hash, 16) }}</code></td>
+                    <td><a class="btn small" href="{{ route('print.transcript', $transcript->id) }}">Print</a></td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
+
+<div class="card">
+    <h2>Appeals</h2>
+    <p class="sub">Independent review of a released result or an approved progression decision: open → assigned → investigating → resolved / rejected / escalated → closed. The original decision-maker can never review their own decision; only the assigned reviewer can decide; a decided appeal is closed only with outcome and evidence.</p>
+    <form method="POST" action="{{ route('academic.appeal.file') }}">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <input type="hidden" name="subject_type" value="assessment_result">
+        <div class="fields">
+            <select name="student_id" required>
+                <option value="">Select a student…</option>
+                @foreach ($students as $student)
+                    <option value="{{ $student->id }}">{{ $student->student_code }}</option>
+                @endforeach
+            </select>
+            <select name="subject_id" required>
+                <option value="">Select a released result…</option>
+                @foreach ($releasedResults as $result)
+                    <option value="{{ $result->id }}">{{ \Illuminate\Support\Str::limit($result->id, 14) }} (score {{ $result->score }})</option>
+                @endforeach
+            </select>
+            <input name="reason" type="text" placeholder="Why this result is contested" required>
+        </div>
+        <div class="actions"><button type="submit" class="btn">File appeal (result)</button></div>
+    </form>
+    <form method="POST" action="{{ route('academic.appeal.file') }}" style="margin-top:8px">
+        @csrf
+        <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+        <input type="hidden" name="subject_type" value="progression_decision">
+        <div class="fields">
+            <select name="student_id" required>
+                <option value="">Select a student…</option>
+                @foreach ($students as $student)
+                    <option value="{{ $student->id }}">{{ $student->student_code }}</option>
+                @endforeach
+            </select>
+            <select name="subject_id" required>
+                <option value="">Select an approved progression decision…</option>
+                @foreach ($approvedProgressions as $decision)
+                    <option value="{{ $decision->id }}">{{ \Illuminate\Support\Str::limit($decision->student_id, 14) }} / {{ $decision->outcome }}</option>
+                @endforeach
+            </select>
+            <input name="reason" type="text" placeholder="Why this decision is contested" required>
+        </div>
+        <div class="actions"><button type="submit" class="btn">File appeal (progression)</button></div>
+    </form>
+    @if ($appeals->isEmpty())
+        <p class="empty">No appeals in flight.</p>
+    @else
+        <table class="grid" style="margin-top:8px">
+            <tr><th>Student</th><th>Subject</th><th>Reason</th><th>State</th><th>Reviewer</th><th>Actions</th></tr>
+            @foreach ($appeals as $appeal)
+                <tr>
+                    <td>{{ \Illuminate\Support\Str::limit($appeal->student_id, 18) }}</td>
+                    <td>{{ $appeal->subject_type }}: {{ \Illuminate\Support\Str::limit($appeal->subject_id, 14) }}</td>
+                    <td>{{ \Illuminate\Support\Str::limit($appeal->reason, 30) }}</td>
+                    <td>
+                        <span class="pill">{{ $appeal->lifecycle_state }}</span>
+                        @if ($appeal->outcome !== null)
+                            <div class="sub">{{ $appeal->outcome }}</div>
+                        @endif
+                    </td>
+                    <td>{{ $appeal->assigned_reviewer_id !== null ? \Illuminate\Support\Str::limit($appeal->assigned_reviewer_id, 14) : '—' }}</td>
+                    <td>
+                        @if ($appeal->lifecycle_state === 'open' || $appeal->lifecycle_state === 'escalated')
+                            <form method="POST" action="{{ route('academic.appeal.assign', $appeal->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <select name="reviewer_person_id" required>
+                                    <option value="">Assign reviewer…</option>
+                                    @foreach ($people as $person)
+                                        <option value="{{ $person->id }}">{{ $person->legal_name }}</option>
+                                    @endforeach
+                                </select>
+                                <button type="submit" class="btn small">Assign</button>
+                            </form>
+                        @endif
+                        @if ($appeal->lifecycle_state === 'assigned')
+                            <form method="POST" action="{{ route('academic.appeal.investigate', $appeal->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Investigate</button>
+                            </form>
+                            <form method="POST" action="{{ route('academic.appeal.escalate', $appeal->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small secondary">Escalate</button>
+                            </form>
+                        @endif
+                        @if ($appeal->lifecycle_state === 'investigating')
+                            <form method="POST" action="{{ route('academic.appeal.resolve', $appeal->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <input name="outcome" type="text" placeholder="Outcome" required>
+                                <input name="outcome_evidence" type="text" placeholder="Evidence reference" required>
+                                <button type="submit" class="btn small">Resolve</button>
+                            </form>
+                            <form method="POST" action="{{ route('academic.appeal.reject', $appeal->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <input name="outcome" type="text" placeholder="Outcome" required>
+                                <input name="outcome_evidence" type="text" placeholder="Evidence reference" required>
+                                <button type="submit" class="btn small secondary">Reject</button>
+                            </form>
+                            <form method="POST" action="{{ route('academic.appeal.escalate', $appeal->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small secondary">Escalate</button>
+                            </form>
+                        @endif
+                        @if ($appeal->lifecycle_state === 'resolved' || $appeal->lifecycle_state === 'rejected')
+                            <form method="POST" action="{{ route('academic.appeal.close', $appeal->id) }}" style="display:inline">
+                                @csrf
+                                <input type="hidden" name="idempotency_key" value="{{ \Illuminate\Support\Str::uuid() }}">
+                                <button type="submit" class="btn small">Close</button>
+                            </form>
+                        @endif
+                    </td>
+                </tr>
+            @endforeach
+        </table>
+    @endif
+</div>
+@endsection

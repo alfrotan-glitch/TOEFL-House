@@ -1,0 +1,27 @@
+# Environment / dependency artifacts
+/vendor/
+/.env
+/.env.backup
+/.env.*.local
+composer.phar
+
+# Laravel runtime artifacts — each runtime directory is kept in the repo via
+# a .gitignore file inside it (matching the Laravel skeleton) so a fresh
+# clone/deploy always has the directory present; only runtime contents are
+# ignored. Without storage/framework/views tracked, Blade fails at boot with
+# "Please provide a valid cache path".
+/storage/*.key
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Test runner cache
+/.phpunit.cache
+
+# Windows one-click deployment (see SETUP.md): local runtimes, database
+# cluster and data backups live outside version control by design.
+/.runtime/
+/backup/
+.sandbox/
