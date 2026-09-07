@@ -6,6 +6,7 @@ namespace App\Modules\Finance\Commands;
 
 use App\Modules\Audit\AuditRecorder;
 use App\Modules\Finance\Domain\LedgerAccountResolver;
+use App\Modules\Finance\Models\FinancialCorrection;
 use App\Modules\Finance\Models\Journal;
 use App\Modules\Finance\Models\JournalLine;
 use App\Support\Authorization\Actor;
@@ -98,6 +99,37 @@ final class LedgerPoster
             'debit_account_id' => $resolved['debit_account_id'],
             'credit_account_id' => $resolved['credit_account_id'],
             'amount' => $amount,
+        ];
+    }
+
+    /**
+     * @return array{journal_id: string|null, correlation_id: string, debit_account_id: string, credit_account_id: string, amount: numeric-string, posted: bool}
+     */
+    public function postCorrection(Actor $actor, FinancialCorrection $correction): array
+    {
+        if ($correction->correction_type === FinancialCorrection::TYPE_ALLOCATION_REVERSAL) {
+            // A payment allocation reversal only reclassifies the receivable
+            // between obligations; the payment journal already moved cash
+            // against AR as a whole, so there is no distinct ledger entry.
+            return [
+                'journal_id' => null,
+                'correlation_id' => '',
+                'debit_account_id' => '',
+                'credit_account_id' => '',
+                'amount' => (string) $correction->amount,
+                'posted' => false,
+            ];
+        }
+
+        $journal = $this->post($actor, 'correction', (string) $correction->id);
+
+        return [
+            'journal_id' => $journal['journal_id'],
+            'correlation_id' => $journal['correlation_id'],
+            'debit_account_id' => $journal['debit_account_id'],
+            'credit_account_id' => $journal['credit_account_id'],
+            'amount' => $journal['amount'],
+            'posted' => true,
         ];
     }
 

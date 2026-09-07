@@ -7,6 +7,7 @@ namespace App\Modules\Finance\Domain;
 use App\Modules\Finance\Models\Account;
 use App\Modules\Finance\Models\Discount;
 use App\Modules\Finance\Models\Expense;
+use App\Modules\Finance\Models\FinancialCorrection;
 use App\Modules\Finance\Models\FundAllocation;
 use App\Modules\Finance\Models\Obligation;
 use App\Modules\Finance\Models\Payment;
@@ -59,6 +60,7 @@ final class LedgerAccountResolver
             'fund_allocation' => $this->resolveFundAllocation($sourceId),
             'payroll_liability' => $this->resolvePayrollLiability($sourceId),
             'expense' => $this->resolveExpense($sourceId),
+            'correction' => $this->resolveCorrection($sourceId),
             default => throw BusinessRejection::forCode('finance.ledger_source_unsupported', sprintf('there is no ledger mapping for journal source %s', $sourceType)),
         };
     }
@@ -198,6 +200,69 @@ final class LedgerAccountResolver
             'period_id' => (string) $expense->period_id,
             'organization_id' => $this->organizationForBranch($expense->current_home_branch_id ?? $expense->originating_branch_id),
         ];
+    }
+
+    /**
+     * Compensating correction mapping. An obligation adjustment re-states the
+     * charge (and therefore AR and revenue) in the source period; a fund
+     * allocation reversal undoes the financial-aid recognition. An allocation
+     * reversal is a pure accounts-receivable reclassification (the payment
+     * journal already moved cash against AR as a whole) and has no GL entry.
+     *
+     * @return array{debit_account_id: string, credit_account_id: string, amount: numeric-string, period_id: string, organization_id: string}
+     */
+    private function resolveCorrection(string $sourceId): array
+    {
+        /** @var FinancialCorrection|null $correction */
+        $correction = FinancialCorrection::query()->whereKey($sourceId)->first();
+        if ($correction === null) {
+            throw BusinessRejection::forCode('finance.ledger_source_unknown', 'the ledger correction source is unknown');
+        }
+
+        if ($correction->correction_type === FinancialCorrection::TYPE_OBLIGATION_ADJUSTMENT) {
+            /** @var Obligation|null $obligation */
+            $obligation = Obligation::query()->whereKey($correction->obligation_id)->first();
+            if ($obligation === null) {
+                throw BusinessRejection::forCode('finance.ledger_source_unknown', 'the correction obligation source is unknown');
+            }
+            $revenueCode = in_array(strtolower(trim((string) $obligation->source)), self::FEES_REVENUE_SOURCES, true)
+                ? self::ACCOUNT_FEES_REVENUE
+                : self::ACCOUNT_TUITION_REVENUE;
+            if ($correction->direction === FinancialCorrection::DIRECTION_DECREASE) {
+                $debit = $this->accountId($revenueCode);
+                $credit = $this->accountId(self::ACCOUNT_RECEIVABLE);
+            } else {
+                $debit = $this->accountId(self::ACCOUNT_RECEIVABLE);
+                $credit = $this->accountId($revenueCode);
+            }
+
+            return [
+                'debit_account_id' => $debit,
+                'credit_account_id' => $credit,
+                'amount' => (string) $correction->amount,
+                'period_id' => (string) $correction->period_id,
+                'organization_id' => $this->organizationForBranch($obligation->current_home_branch_id ?? $obligation->originating_branch_id),
+            ];
+        }
+
+        if ($correction->correction_type === FinancialCorrection::TYPE_FUND_ALLOCATION_REVERSAL) {
+            $lineId = (string) (FundAllocation::query()->whereKey($correction->fund_allocation_id)->value('obligation_line_id') ?? '');
+            $obligation = $lineId === '' ? null : Obligation::query()
+                ->join('obligation_lines', 'obligation_lines.obligation_id', '=', 'obligations.id')
+                ->where('obligation_lines.id', $lineId)
+                ->select('obligations.*')
+                ->first();
+
+            return [
+                'debit_account_id' => $this->accountId(self::ACCOUNT_RECEIVABLE),
+                'credit_account_id' => $this->accountId(self::ACCOUNT_FINANCIAL_AID_EXPENSE),
+                'amount' => (string) $correction->amount,
+                'period_id' => (string) $correction->period_id,
+                'organization_id' => $this->organizationForBranch($obligation?->current_home_branch_id ?? $obligation?->originating_branch_id),
+            ];
+        }
+
+        throw BusinessRejection::forCode('finance.ledger_correction_no_posting', 'an allocation reversal is a receivable reclassification and carries no general-ledger entry');
     }
 
     private function accountId(string $code): string

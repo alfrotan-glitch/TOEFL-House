@@ -44,6 +44,7 @@ final class MaintainFinancialCorrection
         private readonly AuditRecorder $audit,
         private readonly AttemptedOperation $attemptedOperation,
         private readonly FinancialBalanceQuery $balances,
+        private readonly LedgerPoster $ledger,
     ) {}
 
     /** @return array{correction_id: string, correlation_id: string} */
@@ -117,8 +118,9 @@ final class MaintainFinancialCorrection
                         'amount' => $locked->amount,
                         'direction' => $locked->direction,
                     ]);
+                    $ledger = $this->ledger->postCorrection($approver, $locked);
 
-                    return ['correction_id' => $locked->id, 'lifecycle_state' => $locked->lifecycle_state, 'correlation_id' => $event->correlation_id];
+                    return ['correction_id' => $locked->id, 'lifecycle_state' => $locked->lifecycle_state, 'correlation_id' => $event->correlation_id, 'journal_id' => $ledger['journal_id'], 'posted_to_ledger' => $ledger['posted']];
                 }),
             );
         } catch (AuthorizationDenied $denial) {

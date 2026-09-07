@@ -7,6 +7,7 @@ namespace App\Modules\Finance\Queries;
 use App\Modules\Finance\Models\Journal;
 use App\Modules\Finance\Models\Discount;
 use App\Modules\Finance\Models\Expense;
+use App\Modules\Finance\Models\FinancialCorrection;
 use App\Modules\Finance\Models\FundAllocation;
 use App\Modules\Finance\Models\Obligation;
 use App\Modules\Finance\Models\Payment;
@@ -126,6 +127,12 @@ final class GeneralLedgerQuery
             )->pluck('fund_allocations.id'),
             'payroll_liability' => fn (): \Illuminate\Support\Collection => $scoped(PayrollLiabilityFact::query())->pluck('id'),
             'expense' => fn (): \Illuminate\Support\Collection => $scoped(Expense::query()->where('lifecycle_state', 'approved'))->pluck('id'),
+            'correction' => fn (): \Illuminate\Support\Collection => $scoped(
+                FinancialCorrection::query()->where('lifecycle_state', 'recorded')->whereIn('correction_type', [
+                    FinancialCorrection::TYPE_OBLIGATION_ADJUSTMENT,
+                    FinancialCorrection::TYPE_FUND_ALLOCATION_REVERSAL,
+                ]),
+            )->pluck('id'),
         ];
 
         // Key journalized facts by (source_type, source_id) so a ledger entry is
@@ -179,6 +186,7 @@ final class GeneralLedgerQuery
             'fund_allocation' => (string) (FundAllocation::query()->whereKey($sourceId)->value('amount') ?? '0.00'),
             'payroll_liability' => $this->absolute((string) (PayrollLiabilityFact::query()->whereKey($sourceId)->value('amount') ?? '0.00')),
             'expense' => (string) (Expense::query()->whereKey($sourceId)->value('amount') ?? '0.00'),
+            'correction' => (string) (FinancialCorrection::query()->whereKey($sourceId)->value('amount') ?? '0.00'),
             default => '0.00',
         };
     }
@@ -193,6 +201,7 @@ final class GeneralLedgerQuery
             'fund_allocation' => (string) (Obligation::query()->join('obligation_lines', 'obligation_lines.obligation_id', '=', 'obligations.id')->where('obligation_lines.id', FundAllocation::query()->whereKey($sourceId)->value('obligation_line_id'))->value('obligations.period_id') ?? ''),
             'payroll_liability' => (string) (PayrollLiabilityFact::query()->whereKey($sourceId)->value('period_id') ?? ''),
             'expense' => (string) (Expense::query()->whereKey($sourceId)->value('period_id') ?? ''),
+            'correction' => (string) (FinancialCorrection::query()->whereKey($sourceId)->value('period_id') ?? ''),
             default => '',
         };
     }
